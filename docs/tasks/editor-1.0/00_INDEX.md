@@ -6,6 +6,7 @@
 > 更新日期：2026-08-19  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
 > 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。  
+> 12.10：流式讲义「先能读、再近 Word」走车道 G（G0–G3）。计划见 [G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。不要重做 F1–F3 / P1–P8 / Q1–Q8。  
 > 12.9：流式讲义作者界面走车道 F（F1–F3）。计划见 [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入 `main`）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
@@ -70,6 +71,23 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 
 车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 
+**进行中 — 车道 G（不要重做 F1–F3）**
+
+计划与切分：[G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。F 已合入的稿纸 runs / 块类型 / 稿纸公式必须保留，并把当时降级砍掉的入口接回来。
+
+| 任务 | 要点 | 波次 |
+|---|---|---|
+| [G0A](G0A_SLOT_POINTER.md) | 活动槽 `pointer-events: auto` | 1 |
+| [G0B](G0B_PAPER_SCROLL.md) | 试运行稿纸滚/拖；三档宽度 | 1 |
+| [G0C](G0C_VIEWPORT_CSS.md) | 试运行/导出 CSS 命中 | 1 |
+| [G1A](G1A_BLOCK_DRAG.md) | 稿纸块拖拽排序；编辑态三档宽度 | 1 |
+| [G1B](G1B_BLOCK_OVERLAY_CHROME.md) | 上移下移/转浮层/真引用/浮层公式 | 1 |
+| [G1C](G1C_LAYER_BODY_ROW.md) | 图层虚拟「正文」行 | 1 |
+| [G2A](G2A_ADDITIVE_SCHEMA.md) | G2+G3 additive 合同 | 1 |
+| [G1E](G1E_TEXT_EDIT_SYNC.md) | 就地编辑同步属性栏 draft | 2 |
+| [G2B](G2B_FLOW_FONT_UI.md) | FontFamilyPicker 接 Flow | 2 |
+| [G3B](G3B_WRAP_PAPERSPACE.md) | wrap + paperSpace 跟滚 | 2 |
+
 **已合入 `main` — 禁止重做 F1–F3**
 
 计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。合同不变。相关单测 15 项通过。同批还清了 `main` 上 typecheck 洞与 Q1 遗留单测（控制器仅 global 可命中）。
@@ -101,6 +119,8 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 ```text
 已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8，F1–F3
 
+车道 G：先 G0 阅读（可单独合 main），G1 流内关系与 F 遗留接线，G2A 合同与 G2B/G3B UI 分提交。
+
 然后：
   教师视觉复核与 accepted；不要由自动化打发布 tag
 ```
@@ -118,7 +138,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 **红项优先。** T6 工程门禁已合入 `main`。绿过的 `check:contracts` 不要重跑（除非本卡改了 `scripts/generate-contracts.ts` 或 `artifacts/contracts/**`）。不要每次修改后跑 T6 五条命令。
 
 禁止在中间任务运行：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。  
-本轮例外：只有 [T1-A](T1_A_MOVE.md) 与 [T6-tc-tests](T6_TC_TESTS.md) 允许 `npm run typecheck`（因为那就是当前红项）。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
+本轮例外：只有 [T1-A](T1_A_MOVE.md)、[T6-tc-tests](T6_TC_TESTS.md) 与 [G2A](G2A_ADDITIVE_SCHEMA.md) 允许 `npm run typecheck`。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
 
 **全量验证只在 T6，且整轮五条只在红项清完后跑一次。**
 
@@ -126,7 +146,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 1. 读 [02_WORKER.md](02_WORKER.md)。
 2. 看本页「合入状态」：已合入的不要做；等待中的不要抢。
-3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。F1–F3 与 Q/T/P 均不要重做。
-4. 新卡按任务卡写明的基线建 `cursor/<slug>-44bf`。历史 T/P/Q/F 不要重做。
+3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。F1–F3 与 Q/T/P 均不要重做。领取 G 卡时读 [G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。
+4. 新卡按任务卡写明的基线建 `cursor/<task-slug>-0ab9`。历史 T/P/Q/F 不要重做。
 5. 只改「允许修改」列表。热点冲突则停。
 6. 写 `<TASK>_HANDOFF.md`，push，不要开 PR。

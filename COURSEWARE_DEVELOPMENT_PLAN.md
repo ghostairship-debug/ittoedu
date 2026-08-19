@@ -1,7 +1,8 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.8  
+> 计划版本：12.10  
 > 更新日期：2026-08-19  
+> 12.10 变更：流式讲义「先能读、再近 Word，不要解冻 V9」走车道 G。G0 修试运行/预览滚动（无合同）；G1 接线流内顺序与 F 遗留作者入口；G2/G3 只做一小包 additive（字体/段级/wrap/paperSpace），合同与 UI 分提交。不要重做 F1–F3。  
 > 12.8 变更：编排改为先确认中等策划再写带表面的呈现脚本；构建先盘资产再拆任务；局部复杂互动走组件（可新建），场景 Runtime 管整页动态。澄清 P8 宿主已合入、空 catalog ≠ 不能挂组件。无限画布运行态同时支持自由逛与镜头巡游（会话相机，交互占用时让路）。  
 > 12.7 变更：教师回归缺陷 Q1–Q8 已合入 `main`。不要重做 P1–P8 或 Q1–Q8。  
 > 12.6 变更：T6 Windows e2e 27/27 已合入 `main`。自动化仍只是 `engineering candidate`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
@@ -40,6 +41,7 @@
 
 | 缺口 | 说明 |
 |---|---|
+| 车道 G：流式讲义先能读、再近 Word | G0 试运行滚动；G1 流内顺序与 F 遗留作者入口；G2/G3 additive 字体/绕排/paperSpace。不解冻 V9 |
 | 教师 `accepted` 与真实课例视觉/互动复核 | 自动化最多 `engineering candidate` |
 | 外部组件目录 | 快照指向 `../courseware-components`，当前 `unavailable`；工程仍可导入或新建 `.h5component` |
 | 无限画布运行态逛世界 | 产品要求自由逛 + 镜头巡游；会话手势在 `SpatialSurfaceHost`，不写回工程相机 |
