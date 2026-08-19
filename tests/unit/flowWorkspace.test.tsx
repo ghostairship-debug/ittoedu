@@ -439,15 +439,25 @@ describe('FlowWorkspace paper', () => {
       {
         id: 'media-wrap',
         type: 'media',
-        assetId: 'audio-1',
+        assetId: 'asset-image',
         mediaKind: 'image',
         layout: 'content-width',
         wrap: 'left',
       },
+      {
+        id: 'comp-wrap',
+        type: 'component',
+        component: { packageId: 'test-comp', version: '1.0.0' },
+        props: {},
+        wrap: 'right',
+      },
       ...surface.blocks,
     ]
     renderPaper(project)
-    const figure = screen.getByTestId('flow-block-media-wrap').querySelector('figure')
-    expect(figure).toHaveStyle({ float: 'left', margin: '0px 16px 8px 0px' })
+    const blockEl = screen.getByTestId('flow-block-media-wrap')
+    expect(blockEl).toHaveStyle({ float: 'left', width: '48%', margin: '0px 16px 8px 0px' })
+
+    const compEl = screen.getByTestId('flow-block-comp-wrap')
+    expect(compEl).toHaveStyle({ float: 'right', width: '48%', margin: '0px 0px 8px 16px' })
   })
 })

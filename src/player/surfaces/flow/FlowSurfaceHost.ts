@@ -774,6 +774,12 @@ function renderFlowArticle(
       wideContentWidth: surface.layout.wideContentWidth,
     })
   }
+
+  const clearEnd = dom.createElement('div')
+  clearEnd.style.clear = 'both'
+  clearEnd.setAttribute('aria-hidden', 'true')
+  reading.appendChild(clearEnd)
+
   return article
 }
 
@@ -849,24 +855,26 @@ function renderBlockDom(
       figure.dataset.flowMediaLayout = block.layout
       const readingWidth = options.readingWidth ?? 760
       const wideContentWidth = options.wideContentWidth ?? 1120
-      figure.style.width = '100%'
-      figure.style.margin = '0 auto'
-      if (block.layout === 'wide') {
-        figure.style.maxWidth = `${wideContentWidth}px`
-      } else if (block.layout === 'full-width') {
-        figure.style.maxWidth = '100%'
-      } else {
-        figure.style.maxWidth = `${readingWidth}px`
-      }
 
       if (block.wrap === 'left') {
+        figure.style.width = '48%'
         figure.style.float = 'left'
         figure.style.margin = '0 16px 8px 0'
       } else if (block.wrap === 'right') {
+        figure.style.width = '48%'
         figure.style.float = 'right'
         figure.style.margin = '0 0 8px 16px'
       } else {
+        figure.style.width = '100%'
         figure.style.float = 'none'
+        figure.style.margin = '0 auto'
+        if (block.layout === 'wide') {
+          figure.style.maxWidth = `${wideContentWidth}px`
+        } else if (block.layout === 'full-width') {
+          figure.style.maxWidth = '100%'
+        } else {
+          figure.style.maxWidth = `${readingWidth}px`
+        }
       }
 
       const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)
@@ -992,15 +1000,17 @@ function renderBlockDom(
       const figure = assignBlock(dom.createElement('figure'))
       figure.className = 'flow-block-component'
       figure.style.position = 'relative'
-      figure.style.width = '100%'
       figure.style.minHeight = '240px'
       if (block.wrap === 'left') {
+        figure.style.width = '48%'
         figure.style.float = 'left'
         figure.style.margin = '0 16px 8px 0'
       } else if (block.wrap === 'right') {
+        figure.style.width = '48%'
         figure.style.float = 'right'
         figure.style.margin = '0 0 8px 16px'
       } else {
+        figure.style.width = '100%'
         figure.style.float = 'none'
       }
       const handle = mountPublishedComponent(figure, {

@@ -2467,79 +2467,98 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
           </>
         ) : null}
         {block.type === 'component' ? (
-          <div className="property-button-row" style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-block-move-up"
-              onClick={() => {
-                const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
-                const found = findFlowBlockRecursive(surface.blocks, block.id)
-                if (!found) return
-                applyFlowCommand(
-                  executeFlowEditorCommand(
-                    session.history.present,
-                    session.selection,
-                    {
-                      name: 'move',
-                      destination: {
-                        parentId: found.parentId,
-                        index: Math.max(0, found.index - 1),
-                        surfaceId: session.selection.surfaceId,
+          <>
+            <div className="property-button-row" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="secondary-button"
+                data-testid="flow-block-move-up"
+                onClick={() => {
+                  const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
+                  const found = findFlowBlockRecursive(surface.blocks, block.id)
+                  if (!found) return
+                  applyFlowCommand(
+                    executeFlowEditorCommand(
+                      session.history.present,
+                      session.selection,
+                      {
+                        name: 'move',
+                        destination: {
+                          parentId: found.parentId,
+                          index: Math.max(0, found.index - 1),
+                          surfaceId: session.selection.surfaceId,
+                        },
                       },
-                    },
-                    { expectedRevision: session.history.present.revision },
-                  ),
-                )
-              }}
-            >
-              上移
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-block-move-down"
-              onClick={() => {
-                const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
-                const found = findFlowBlockRecursive(surface.blocks, block.id)
-                if (!found) return
-                const maxIndex = found.parentId
-                  ? (findFlowBlockRecursive(surface.blocks, found.parentId)?.block as { blocks?: FlowBlock[] })?.blocks?.length ?? found.index + 1
-                  : surface.blocks.length
-                applyFlowCommand(
-                  executeFlowEditorCommand(
-                    session.history.present,
-                    session.selection,
-                    {
-                      name: 'move',
-                      destination: {
-                        parentId: found.parentId,
-                        index: Math.min(maxIndex, found.index + 1),
-                        surfaceId: session.selection.surfaceId,
+                      { expectedRevision: session.history.present.revision },
+                    ),
+                  )
+                }}
+              >
+                上移
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                data-testid="flow-block-move-down"
+                onClick={() => {
+                  const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
+                  const found = findFlowBlockRecursive(surface.blocks, block.id)
+                  if (!found) return
+                  const maxIndex = found.parentId
+                    ? (findFlowBlockRecursive(surface.blocks, found.parentId)?.block as { blocks?: FlowBlock[] })?.blocks?.length ?? found.index + 1
+                    : surface.blocks.length
+                  applyFlowCommand(
+                    executeFlowEditorCommand(
+                      session.history.present,
+                      session.selection,
+                      {
+                        name: 'move',
+                        destination: {
+                          parentId: found.parentId,
+                          index: Math.min(maxIndex, found.index + 1),
+                          surfaceId: session.selection.surfaceId,
+                        },
                       },
-                    },
-                    { expectedRevision: session.history.present.revision },
-                  ),
-                )
-              }}
-            >
-              下移
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-block-to-overlay"
-              onClick={() => {
-                applyFlowCommand(
-                  convertFlowComponentBlockToOverlay(session.history.present, session.selection, {
-                    expectedRevision: session.history.present.revision,
-                  }),
-                )
-              }}
-            >
-              转为浮层
-            </button>
-          </div>
+                      { expectedRevision: session.history.present.revision },
+                    ),
+                  )
+                }}
+              >
+                下移
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                data-testid="flow-block-to-overlay"
+                onClick={() => {
+                  applyFlowCommand(
+                    convertFlowComponentBlockToOverlay(session.history.present, session.selection, {
+                      expectedRevision: session.history.present.revision,
+                    }),
+                  )
+                }}
+              >
+                转为浮层
+              </button>
+            </div>
+            <div data-testid="flow-component-wrap">
+              <SelectField<'none' | 'left' | 'right'>
+                label="文字环绕"
+                value={block.wrap ?? 'none'}
+                options={[
+                  { value: 'none', label: '不环绕（独占一行）' },
+                  { value: 'left', label: '居左环绕' },
+                  { value: 'right', label: '居右环绕' },
+                ]}
+                onChange={(wrap) => {
+                  const target = flowBlockTargetFromSelection(document, session.selection)
+                  applyFlowCommand(updateFlowEditorBlock(document, target, { wrap }, {
+                    expectedRevision: document.revision,
+                  }))
+                }}
+              />
+            </div>
+          </>
         ) : null}
         {block.type === 'list' ? (
           <ToggleRow
