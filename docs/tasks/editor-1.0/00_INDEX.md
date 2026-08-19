@@ -87,6 +87,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [G1E](G1E_TEXT_EDIT_SYNC.md) | 就地编辑同步属性栏 draft | 2 |
 | [G2B](G2B_FLOW_FONT_UI.md) | FontFamilyPicker 接 Flow | 2 |
 | [G3B](G3B_WRAP_PAPERSPACE.md) | wrap + paperSpace 跟滚 | 2 |
+| [G3C](G3C_WRAP_ACTUALLY_FLOAT.md) | wrap 真绕排（48% 列 + 去掉通栏 wrapper） | 3 |
 
 **已合入 `main` — 禁止重做 F1–F3**
 
@@ -119,7 +120,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 ```text
 已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8，F1–F3
 
-车道 G：先 G0 阅读（可单独合 main），G1 流内关系与 F 遗留接线，G2A 合同与 G2B/G3B UI 分提交。
+车道 G：先 G0 阅读（可单独合 main），G1 流内关系与 F 遗留作者入口，G2A 合同与 G2B/G3B UI 分提交；G3C 修 G3B 绕排无效。
 
 然后：
   教师视觉复核与 accepted；不要由自动化打发布 tag
