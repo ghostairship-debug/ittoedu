@@ -1167,6 +1167,47 @@ export function commitFlowOverlayFormulaAst(
   }
 }
 
+export function patchFlowOverlayPaperSpace(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  paperSpace: 'viewport' | 'paper',
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return fail('请先选择一个浮层或全局层项目')
+  const located = locateCourseLayer(document, overlayId)
+  if (!located) return fail(`找不到浮层：${overlayId}`)
+  if (located.item.kind === 'native' && located.item.content.nativeType === 'teacher-controller') {
+    return fail('教师控制器始终钉在视口')
+  }
+  const locked = teacherLocked(located.item)
+  if (locked) return locked
+  const current = located.item.paperSpace ?? 'viewport'
+  if (current === paperSpace) {
+    return {
+      ok: true,
+      reason: '未变化',
+      nextDocument: document,
+      historyEntry: false,
+      selection,
+      ownership: 'viewport-overlay',
+    }
+  }
+  const mutated = runOverlayMutation(document, options, (draft) => {
+    const next = locateCourseLayer(draft, overlayId)
+    if (!next) throw new Error(`找不到浮层：${overlayId}`)
+    if (paperSpace === 'viewport') delete next.item.paperSpace
+    else next.item.paperSpace = 'paper'
+    return []
+  }, paperSpace === 'paper' ? '已改为跟随稿纸滚动' : '已改为钉在视口')
+  if (!mutated.ok) return mutated
+  return {
+    ...mutated,
+    selection,
+    ownership: 'viewport-overlay',
+  }
+}
+
 export {
   enterFlowGlobalAuthoringScope,
   resolveFlowOverlayAuthoringTarget,

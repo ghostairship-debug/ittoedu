@@ -693,40 +693,20 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     ]
     surf.surfaceLayerItems.push({
       item: {
+        ...overlayVideo(),
         layerItemId: 'overlay-paper-item',
-        label: '跟滚浮层',
-        kind: 'native',
         frame: { mode: 'absolute', x: 50, y: 300, width: 200, height: 100 },
         order: 10,
-        visible: true,
-        locked: false,
-        rotation: 0,
-        opacity: 1,
-        hitPolicy: 'auto',
         paperSpace: 'paper',
-        content: {
-          nativeType: 'image',
-          data: { assetId: 'clip' },
-        },
       },
       visibility: { mode: 'all', locationIds: [] },
     })
     surf.surfaceLayerItems.push({
       item: {
+        ...overlayVideo(),
         layerItemId: 'overlay-viewport-item',
-        label: '固定浮层',
-        kind: 'native',
         frame: { mode: 'absolute', x: 50, y: 300, width: 200, height: 100 },
         order: 11,
-        visible: true,
-        locked: false,
-        rotation: 0,
-        opacity: 1,
-        hitPolicy: 'auto',
-        content: {
-          nativeType: 'image',
-          data: { assetId: 'clip' },
-        },
       },
       visibility: { mode: 'all', locationIds: [] },
     })

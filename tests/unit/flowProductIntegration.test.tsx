@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { readFlowSharedOwnership } from '@/renderer/course/flowSharedAuthoringAdapters'
 import { listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
@@ -318,6 +319,14 @@ describe('Flow product shell wiring', () => {
     const overlayId = updatedFlow.selection.selectedOverlayIds[0]
     expect(overlayId).toBeDefined()
     expect(readFlowSharedOwnership(updatedFlow.history.present, overlayId!)).toBe('viewport-overlay')
+    expect(locateCourseLayer(updatedFlow.history.present, overlayId!)?.item.paperSpace).toBe('paper')
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const paperSpace = screen.getByTestId('flow-overlay-paper-space').querySelector('select')
+    if (!paperSpace) throw new Error('expected paperSpace select')
+    fireEvent.change(paperSpace, { target: { value: 'viewport' } })
+    expect(locateCourseLayer(useEditorStore.getState().flowSession!.history.present, overlayId!)?.item.paperSpace).toBeUndefined()
   })
 
   it('updates paragraph fontFamily via FontFamilyPicker and fontSize via input', () => {

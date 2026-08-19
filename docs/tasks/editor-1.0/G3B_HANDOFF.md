@@ -9,3 +9,5 @@
 - 未验证：全套桌面/e2e
 - 停下来的原因（若有）：无
 - 下游：Lane G / 集成测试 (T6)
+
+父代理补：浮层 `paperSpace` 下拉（`flow-overlay-paper-space`）与 `patchFlowOverlayPaperSpace`；转浮层断言默认 `paper`；paper 浮层单测改为完整 video overlay 夹具以通过 typecheck。

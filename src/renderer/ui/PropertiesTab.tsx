@@ -180,6 +180,7 @@ import {
   convertFlowMediaBlockToOverlay,
   convertFlowOverlayComponentToDocument,
   convertFlowOverlayMediaToDocument,
+  patchFlowOverlayPaperSpace,
 } from '../course/flowSharedAuthoringAdapters'
 
 interface BufferedInputProps {
@@ -2615,6 +2616,27 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
   const located = locateCourseLayer(document, overlayId)
   if (!located) return null
   const item = located.item
+  const paperSpaceField = item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+    ? null
+    : (
+      <div data-testid="flow-overlay-paper-space">
+        <SelectField<'viewport' | 'paper'>
+          label="定位空间"
+          value={item.paperSpace === 'paper' ? 'paper' : 'viewport'}
+          options={[
+            { value: 'viewport', label: '钉在视口' },
+            { value: 'paper', label: '跟随稿纸滚动' },
+          ]}
+          onChange={(paperSpace) => {
+            applyFlowCommand(
+              patchFlowOverlayPaperSpace(document, session.selection, paperSpace, {
+                expectedRevision: document.revision,
+              }),
+            )
+          }}
+        />
+      </div>
+    )
 
   if (item.kind === 'native' && item.content.nativeType === 'formula') {
     const ast = item.content.data.ast
@@ -2655,6 +2677,7 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
               )
             }}
           />
+          {paperSpaceField}
         </section>
       </div>
     )
@@ -2665,6 +2688,7 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
       <div className="properties-scroll" data-testid="properties-tab">
         <section className="property-section" data-testid="flow-overlay-media-properties">
           <h3 className="property-title">浮层媒体</h3>
+          {paperSpaceField}
           <button
             type="button"
             className="secondary-button"
@@ -2689,6 +2713,7 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
       <div className="properties-scroll" data-testid="properties-tab">
         <section className="property-section" data-testid="flow-overlay-component-properties">
           <h3 className="property-title">浮层组件</h3>
+          {paperSpaceField}
           <button
             type="button"
             className="secondary-button"
