@@ -1118,6 +1118,8 @@ export function FlowWorkspace({
       'data-testid': `flow-block-${blockView.blockId}`,
       'data-flow-block-id': blockView.blockId,
       'data-flow-parent-id': blockView.parentId ?? '',
+      'data-flow-block-index': blockView.index,
+      'data-flow-block-parent': blockView.parentId ?? '',
       'data-flow-authoring-address': blockView.authoringAddress,
       'data-flow-layer-kind': 'document-block',
       className: `flow-block flow-block-${block.type}${selected ? ' flow-block--selected' : ''}`,
@@ -1150,6 +1152,18 @@ export function FlowWorkspace({
       },
       onKeyDown: readOnly ? undefined : (event: ReactKeyboardEvent<HTMLElement>) => {
         handleBlockKeyDown(blockView.blockId, event)
+      },
+      onDragOver: readOnly ? undefined : (event: React.DragEvent<HTMLElement>) => {
+        event.preventDefault()
+      },
+      onDrop: readOnly ? undefined : (event: React.DragEvent<HTMLElement>) => {
+        event.preventDefault()
+        const sourceId = event.dataTransfer.getData('text/flow-block-id')
+        if (!sourceId || sourceId === blockView.blockId) return
+        emitProject(executeFlowEditorCommand(project, selectFlowEditorBlocks(project, locationId, [sourceId]), {
+          name: 'move',
+          destination: { parentId: blockView.parentId, index: blockView.index, surfaceId: view.surfaceId },
+        }))
       },
       style: {
         position: 'relative' as const,
@@ -1269,17 +1283,30 @@ export function FlowWorkspace({
       case 'divider':
         body = <hr />
         break
-      case 'media':
+      case 'media': {
+        const surface = project.surfaces.find((entry) => entry.id === view.surfaceId)
+        const wide = surface?.type === 'flow' ? surface.layout.wideContentWidth : view.layout.readingWidth
+        const maxWidth = block.layout === 'wide'
+          ? wide
+          : block.layout === 'full-width'
+            ? '100%'
+            : view.layout.readingWidth
         body = (
           <figure
             data-flow-media-layout={block.layout}
             {...(selected ? { 'data-flow-media-selected': 'true' } : {})}
+            style={{
+              width: '100%',
+              maxWidth,
+              marginInline: 'auto',
+            }}
           >
             {renderFlowPaperMedia(block, assetUrls)}
             {block.caption ? <figcaption>{block.caption}</figcaption> : null}
           </figure>
         )
         break
+      }
       case 'table':
         body = (
           <table>
@@ -1445,6 +1472,31 @@ export function FlowWorkspace({
 
     return (
       <div {...frameProps}>
+        {!readOnly && !editingThis ? (
+          <button
+            type="button"
+            className="flow-block-drag-handle"
+            data-testid={`flow-block-drag-${blockView.blockId}`}
+            draggable
+            aria-label="拖动排序"
+            style={{
+              position: 'absolute',
+              left: 2,
+              top: 12,
+              width: 12,
+              height: 20,
+              cursor: 'grab',
+              opacity: 0.4,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+            }}
+            onDragStart={(event) => {
+              event.dataTransfer.setData('text/flow-block-id', blockView.blockId)
+              event.dataTransfer.effectAllowed = 'move'
+            }}
+          />
+        ) : null}
         {showToolbar ? (
           <FlowBlockContextToolbar
             block={block}
