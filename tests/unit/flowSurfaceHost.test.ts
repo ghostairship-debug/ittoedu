@@ -645,4 +645,122 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(span?.style.fontSize).toBe('20px')
     await host.destroy()
   })
+
+  it('renders media block with wrap left/right styling', async () => {
+    const course = publishedCourse()
+    const surf = course.surfaces[0] as PublishedFlowSurface
+    surf.blocks.push({
+      id: 'media-wrap-left',
+      type: 'media',
+      assetId: 'clip',
+      mediaKind: 'image',
+      layout: 'content-width',
+      wrap: 'left',
+    })
+    surf.blocks.push({
+      id: 'media-wrap-right',
+      type: 'media',
+      assetId: 'clip',
+      mediaKind: 'image',
+      layout: 'content-width',
+      wrap: 'right',
+    })
+
+    const { host, container } = await mountHost(course)
+    const figLeft = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-left"]')!
+    expect(figLeft).not.toBeNull()
+    expect(figLeft.style.float).toBe('left')
+    expect(figLeft.style.margin).toBe('0px 16px 8px 0px')
+
+    const figRight = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-right"]')!
+    expect(figRight).not.toBeNull()
+    expect(figRight.style.float).toBe('right')
+    expect(figRight.style.margin).toBe('0px 0px 8px 16px')
+
+    await host.destroy()
+  })
+
+  it('follows paper scroll for paperSpace overlays while keeping controllers and viewport overlays fixed', async () => {
+    const course = publishedCourse()
+    const surf = course.surfaces[0] as PublishedFlowSurface
+    surf.blocks = [
+      { id: 'h-top', type: 'heading', level: 1, text: '长文标题' },
+      ...Array.from({ length: 40 }, (_, i) => ({
+        id: `p-${i + 1}`,
+        type: 'paragraph' as const,
+        text: `段落内容 ${i + 1}`,
+      })),
+    ]
+    surf.surfaceLayerItems.push({
+      item: {
+        layerItemId: 'overlay-paper-item',
+        label: '跟滚浮层',
+        kind: 'native',
+        frame: { mode: 'absolute', x: 50, y: 300, width: 200, height: 100 },
+        order: 10,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        paperSpace: 'paper',
+        content: {
+          nativeType: 'image',
+          data: { assetId: 'clip' },
+        },
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    surf.surfaceLayerItems.push({
+      item: {
+        layerItemId: 'overlay-viewport-item',
+        label: '固定浮层',
+        kind: 'native',
+        frame: { mode: 'absolute', x: 50, y: 300, width: 200, height: 100 },
+        order: 11,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        content: {
+          nativeType: 'image',
+          data: { assetId: 'clip' },
+        },
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+
+    const { host, container } = await mountHost(course)
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const paperOverlay = container.querySelector<HTMLElement>('[data-flow-overlay-item="overlay-paper-item"]')!
+    const viewportOverlay = container.querySelector<HTMLElement>('[data-flow-overlay-item="overlay-viewport-item"]')!
+    const controller = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
+
+    expect(paperOverlay).not.toBeNull()
+    expect(paperOverlay.dataset.flowPaperSpace).toBe('paper')
+    expect(paperOverlay.style.top).toBe('300px')
+    expect(viewportOverlay.style.top).toBe('300px')
+    expect(controller.style.top).toBe('640px')
+
+    let currentScrollTop = 0
+    Object.defineProperty(article, 'clientHeight', { value: 720, configurable: true })
+    Object.defineProperty(article, 'scrollHeight', { value: 4000, configurable: true })
+    Object.defineProperty(article, 'scrollTop', {
+      get: () => currentScrollTop,
+      set: (val: number) => {
+        currentScrollTop = val
+      },
+      configurable: true,
+    })
+
+    currentScrollTop = 100
+    article.dispatchEvent(new Event('scroll'))
+
+    expect(paperOverlay.style.top).toBe('200px')
+    expect(viewportOverlay.style.top).toBe('300px')
+    expect(controller.style.top).toBe('640px')
+
+    await host.destroy()
+  })
 })

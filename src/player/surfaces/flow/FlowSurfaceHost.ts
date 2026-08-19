@@ -292,11 +292,30 @@ export class FlowSurfaceHost {
         this.#componentHandles.push(handle)
       },
     })
+    article.addEventListener('scroll', () => {
+      this.#syncPaperOverlayPositions(surface)
+    })
     this.#article?.remove()
     this.#root.insertBefore(article, this.#overlay)
     this.#article = article
     this.#toc?.sync()
     this.#renderOverlay(surface)
+  }
+
+  #syncPaperOverlayPositions(surface: PublishedFlowSurface): void {
+    const overlay = this.#overlay
+    const article = this.#article
+    if (!overlay || !article) return
+    const entries = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const scrollTop = article.scrollTop
+    for (const entry of entries) {
+      if (isPublishedTeacherController(entry.item)) continue
+      if (entry.item.paperSpace !== 'paper') continue
+      const wrap = overlay.querySelector<HTMLElement>(`[data-flow-overlay-item="${entry.item.layerItemId}"]`)
+      if (wrap) {
+        wrap.style.top = `${entry.item.frame.y - scrollTop}px`
+      }
+    }
   }
 
   #renderOverlay(surface: PublishedFlowSurface): void {
@@ -305,6 +324,7 @@ export class FlowSurfaceHost {
     this.#destroyController()
     overlay.replaceChildren()
     const entries = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const scrollTop = this.#article?.scrollTop ?? 0
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
         this.#mountTeacherController(entry.item)
@@ -317,6 +337,7 @@ export class FlowSurfaceHost {
         {
           components: this.#components,
           interactive: this.#active,
+          scrollTop,
           onMountComponent: (handle) => {
             this.#componentHandles.push(handle)
           },
@@ -553,14 +574,19 @@ function renderStaticOverlayItem(
     components?: Record<string, PublishedComponentPackageSource>
     interactive?: boolean
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    scrollTop?: number
   },
 ): HTMLElement {
   const wrap = dom.createElement('div')
   wrap.dataset.flowOverlayItem = entry.item.layerItemId
   wrap.dataset.flowOverlaySource = entry.source
+  if (entry.item.paperSpace === 'paper') {
+    wrap.dataset.flowPaperSpace = 'paper'
+  }
   wrap.style.position = 'absolute'
   wrap.style.left = `${entry.item.frame.x}px`
-  wrap.style.top = `${entry.item.frame.y}px`
+  const topOffset = entry.item.paperSpace === 'paper' ? (options?.scrollTop ?? 0) : 0
+  wrap.style.top = `${entry.item.frame.y - topOffset}px`
   wrap.style.width = `${entry.item.frame.width}px`
   wrap.style.height = `${entry.item.frame.height}px`
   wrap.style.opacity = String(entry.item.opacity)
@@ -833,6 +859,16 @@ function renderBlockDom(
         figure.style.maxWidth = `${readingWidth}px`
       }
 
+      if (block.wrap === 'left') {
+        figure.style.float = 'left'
+        figure.style.margin = '0 16px 8px 0'
+      } else if (block.wrap === 'right') {
+        figure.style.float = 'right'
+        figure.style.margin = '0 0 8px 16px'
+      } else {
+        figure.style.float = 'none'
+      }
+
       const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)
       if (block.mediaKind === 'image' && url) {
         const image = dom.createElement('img')
@@ -958,6 +994,15 @@ function renderBlockDom(
       figure.style.position = 'relative'
       figure.style.width = '100%'
       figure.style.minHeight = '240px'
+      if (block.wrap === 'left') {
+        figure.style.float = 'left'
+        figure.style.margin = '0 16px 8px 0'
+      } else if (block.wrap === 'right') {
+        figure.style.float = 'right'
+        figure.style.margin = '0 0 8px 16px'
+      } else {
+        figure.style.float = 'none'
+      }
       const handle = mountPublishedComponent(figure, {
         container: figure,
         componentId: block.component.packageId,
