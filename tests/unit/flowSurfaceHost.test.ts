@@ -682,6 +682,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
       type: 'component',
       component: { packageId: 'test-pkg', version: '1.0.0' },
       props: {},
+      staticFallbackAssetId: '',
       wrap: 'left',
     })
 

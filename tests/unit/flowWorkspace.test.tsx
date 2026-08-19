@@ -449,6 +449,7 @@ describe('FlowWorkspace paper', () => {
         type: 'component',
         component: { packageId: 'test-comp', version: '1.0.0' },
         props: {},
+        staticFallbackAssetId: '',
         wrap: 'right',
       },
       ...surface.blocks,
