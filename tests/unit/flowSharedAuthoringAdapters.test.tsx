@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { getEffectiveCourseLayerOrder } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -310,6 +311,15 @@ describe('Flow shared authoring adapters', () => {
     expect(flowOf(overlay.nextDocument!).blocks.some((block) => block.id === 'overlay-photo')).toBe(false)
     expect(engineIds(overlay.nextDocument!)).toContain('overlay-photo')
     expect(readFlowSharedOwnership(overlay.nextDocument!, 'overlay-photo')).toBe('viewport-overlay')
+    expect(locateCourseLayer(overlay.nextDocument!, 'overlay-photo')?.item.paperSpace).toBe('paper')
+
+    const videoOverlay = insertFlowSharedMedia(project, selection, {
+      assetId: 'asset-video',
+      placement: 'viewport-overlay',
+      id: 'overlay-video',
+    }, { now: NOW })
+    expect(videoOverlay.ok).toBe(true)
+    expect(locateCourseLayer(videoOverlay.nextDocument!, 'overlay-video')?.item.paperSpace).toBe('paper')
 
     const empty = insertFlowSharedMedia(project, selection, {}, { now: NOW })
     expect(empty.ok).toBe(false)
@@ -389,6 +399,7 @@ describe('Flow shared authoring adapters', () => {
     const overlayId = converted.createdLayerItemIds![0]!
     expect(engineIds(converted.nextDocument!)).toContain(overlayId)
     expect(readFlowSharedOwnership(converted.nextDocument!, overlayId)).toBe('viewport-overlay')
+    expect(locateCourseLayer(converted.nextDocument!, overlayId)?.item.paperSpace).toBe('paper')
 
     const back = convertFlowOverlayMediaToDocument(
       converted.nextDocument!,
@@ -429,6 +440,7 @@ describe('Flow shared authoring adapters', () => {
     expect(component.historyEntry).toBe(true)
     const componentOverlay = component.createdLayerItemIds![0]!
     expect(engineIds(component.nextDocument!)).toContain(componentOverlay)
+    expect(locateCourseLayer(component.nextDocument!, componentOverlay)?.item.paperSpace).toBe('paper')
     const reembedded = convertFlowOverlayComponentToDocument(
       component.nextDocument!,
       component.selection!,
@@ -492,6 +504,8 @@ describe('Flow shared authoring adapters', () => {
     if (controller.placement !== 'viewport-overlay') throw new Error('expected viewport overlay')
     expect(controller.documentFooter).toBe(false)
     expect(controller.reason).toBe(FLOW_CONTROLLER_NOT_FOOTER_REASON)
+    expect(project.globalLayerItems[0]!.item.paperSpace).toBeUndefined()
+    expect(locateCourseLayer(project, 'teacher-controller-main')?.item.paperSpace).not.toBe('paper')
 
     const hidden = setFlowOverlayVisibleAtLocation(
       project,
