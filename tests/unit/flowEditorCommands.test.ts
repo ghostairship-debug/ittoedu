@@ -69,7 +69,17 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         height: 360,
       },
     },
-    componentPackages: {},
+    componentPackages: {
+      'test.pkg': {
+        packageId: 'test.pkg',
+        version: '1.0.0',
+        name: '测试组件',
+        manifestPath: 'components/test.pkg@1.0.0/manifest.json',
+        runtimePath: 'components/test.pkg@1.0.0/runtime.js',
+        thumbnailPath: 'components/test.pkg@1.0.0/thumbnail.png',
+        contentSha256: 'a'.repeat(64),
+      },
+    },
     designTokens: {
       fonts: [{
         id: 'body',
@@ -561,5 +571,74 @@ describe('Flow editor commands', () => {
     }, { now: NOW })
     expect(result.ok).toBe(false)
     expect(result.reason).toContain('至少需要一个可导航标题')
+  })
+
+  it('updates block textAlign and lineSpacing on paragraph without polluting runs', () => {
+    const project = createFlowProject()
+    const result = updateFlowEditorBlock(project, target('p-runs'), {
+      textAlign: 'center',
+      lineSpacing: 8,
+    }, { now: NOW })
+    expectHistory(result)
+    const paragraph = flowOf(result.nextDocument!).blocks.find((block) => block.id === 'p-runs')
+    expect(paragraph).toMatchObject({
+      type: 'paragraph',
+      textAlign: 'center',
+      lineSpacing: 8,
+    })
+    expect(paragraph?.type === 'paragraph' ? paragraph.runs : undefined).toEqual([
+      { start: 0, end: 2, style: { bold: true } },
+    ])
+    if (paragraph?.type === 'paragraph' && paragraph.runs) {
+      for (const run of paragraph.runs) {
+        expect((run as unknown as Record<string, unknown>).textAlign).toBeUndefined()
+        expect((run.style as unknown as Record<string, unknown>).textAlign).toBeUndefined()
+        expect((run as unknown as Record<string, unknown>).lineSpacing).toBeUndefined()
+        expect((run.style as unknown as Record<string, unknown>).lineSpacing).toBeUndefined()
+      }
+    }
+  })
+
+  it('updates wrap left on media block', () => {
+    const project = createFlowProject()
+    const result = updateFlowEditorBlock(project, target('media-1'), {
+      wrap: 'left',
+    }, { now: NOW })
+    expectHistory(result)
+    const media = flowOf(result.nextDocument!).blocks.find((block) => block.id === 'media-1')
+    expect(media).toMatchObject({
+      type: 'media',
+      wrap: 'left',
+    })
+  })
+
+  it('inserts component block and updates wrap right on component block', () => {
+    const project = createFlowProject()
+    const inserted = insertFlowEditorBlock(project, {
+      surfaceId: 'flow',
+      parentId: null,
+      index: 2,
+      block: {
+        id: 'comp-1',
+        type: 'component',
+        component: {
+          packageId: 'test.pkg',
+          version: '1.0.0',
+        },
+        props: {},
+        staticFallbackAssetId: 'asset-image',
+      },
+    }, { now: NOW })
+    expectHistory(inserted)
+
+    const updated = updateFlowEditorBlock(inserted.nextDocument!, target('comp-1'), {
+      wrap: 'right',
+    }, { now: NOW, expectedRevision: inserted.nextDocument!.revision })
+    expectHistory(updated)
+    const component = flowOf(updated.nextDocument!).blocks.find((block) => block.id === 'comp-1')
+    expect(component).toMatchObject({
+      type: 'component',
+      wrap: 'right',
+    })
   })
 })
