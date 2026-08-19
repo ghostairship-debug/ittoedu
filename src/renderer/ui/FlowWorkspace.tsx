@@ -681,6 +681,7 @@ export function FlowWorkspace({
   })
   const storeAssetFiles = useEditorStore(selectMediaAssetFiles)
   const storeComponentPackages = useEditorStore((state) => state.componentPackages)
+  const storeEdit = useEditorStore((state) => state.flowTextEdit)
   const componentPackages = propComponentPackages ?? storeComponentPackages
   const sidecarFiles = assetFiles ?? storeAssetFiles
   const assetUrls = useMemo(
@@ -723,6 +724,46 @@ export function FlowWorkspace({
     setEdit(next)
     onTextEditChange?.(next)
   }
+
+  useEffect(() => {
+    if (!storeEdit) return
+    const local = editRef.current
+    if (!local) return
+    if (storeEdit.blockId !== local.blockId) return
+    if (local.composing || storeEdit.composing) return
+
+    const rangeEqual =
+      local.range.start === storeEdit.range.start &&
+      local.range.end === storeEdit.range.end
+
+    const draftEqual = (() => {
+      const ld = local.draft as any
+      const sd = storeEdit.draft as any
+      if (local.kind !== storeEdit.kind) return false
+      if (local.kind === 'rich-text') {
+        if (ld?.text !== sd?.text) return false
+        const lRuns = ld?.runs ?? []
+        const sRuns = sd?.runs ?? []
+        if (lRuns.length !== sRuns.length) return false
+        return JSON.stringify(lRuns) === JSON.stringify(sRuns)
+      }
+      if (local.kind === 'plain-string') {
+        return ld?.text === sd?.text
+      }
+      if (local.kind === 'formula') {
+        return (
+          ld?.accessibleText === sd?.accessibleText &&
+          JSON.stringify(ld?.ast) === JSON.stringify(sd?.ast)
+        )
+      }
+      return false
+    })()
+
+    if (rangeEqual && draftEqual) return
+
+    setEditState(storeEdit)
+    setRestyleToken((n) => n + 1)
+  }, [storeEdit])
 
   useEffect(() => {
     if (readOnly) return
