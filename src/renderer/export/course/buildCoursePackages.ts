@@ -76,6 +76,8 @@ body{overflow:hidden;background:#f8fafc}
 .flow-surface table{width:100%;border-collapse:collapse}
 .flow-surface th,.flow-surface td{padding:.5rem;border:1px solid #cbd5e1;text-align:left}
 .flow-surface aside{padding:.75rem 1rem;border-left:4px solid #3b82f6;background:#eff6ff}
+.flow-runtime-article{pointer-events:auto;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.flow-runtime-overlay{pointer-events:none}
 .spatial-surface{position:relative;display:grid;min-width:100%;min-height:100%;place-items:center;overflow:hidden;outline:none;touch-action:none;background:#f8fafc}
 .spatial-surface>svg:not(.spatial-minimap){display:block;max-width:100%;max-height:100%}
 .spatial-controls{position:absolute;z-index:2;left:12px;top:12px;display:flex;max-width:calc(100% - 24px);gap:6px;overflow-x:auto;padding:6px;border:1px solid #cbd5e1;border-radius:10px;background:rgba(255,255,255,.94);box-shadow:0 4px 14px rgba(15,23,42,.12)}
