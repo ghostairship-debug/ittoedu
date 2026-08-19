@@ -777,18 +777,21 @@ function renderBlockDom(
       const heading = assignBlock(dom.createElement(`h${block.level}`))
       heading.id = flowRuntimeTocAnchorId(block.id)
       heading.dataset.flowTocAnchor = block.id
+      applyFlowBlockTypography(heading, block)
       appendRichText(heading, block.text, block.runs)
       parent.appendChild(heading)
       return
     }
     case 'paragraph': {
       const paragraph = assignBlock(dom.createElement('p'))
+      applyFlowBlockTypography(paragraph, block)
       appendRichText(paragraph, block.text, block.runs)
       parent.appendChild(paragraph)
       return
     }
     case 'quote': {
       const quote = assignBlock(dom.createElement('blockquote'))
+      applyFlowBlockTypography(quote, block)
       const paragraph = dom.createElement('p')
       appendRichText(paragraph, block.text, block.runs)
       quote.appendChild(paragraph)
@@ -975,6 +978,14 @@ function renderBlockDom(
   }
 }
 
+function applyFlowBlockTypography(
+  element: HTMLElement,
+  block: { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number },
+): void {
+  if (block.textAlign) element.style.textAlign = block.textAlign
+  element.style.lineHeight = block.lineSpacing === undefined ? '' : String(1.6 + block.lineSpacing / 16)
+}
+
 function appendRichText(
   element: HTMLElement,
   text: string,
@@ -989,6 +1000,8 @@ function appendRichText(
   for (const segment of segments) {
     const span = dom.createElement('span')
     span.textContent = segment.text
+    if (segment.style.fontFamily) span.style.fontFamily = segment.style.fontFamily
+    if (segment.style.fontSize !== undefined) span.style.fontSize = `${segment.style.fontSize}px`
     if (segment.style.bold) span.style.fontWeight = '700'
     if (segment.style.italic) span.style.fontStyle = 'italic'
     if (segment.style.underline) span.style.textDecoration = 'underline'

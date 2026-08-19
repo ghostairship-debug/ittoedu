@@ -623,4 +623,26 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
 
     await host.destroy()
   })
+
+  it('applies paragraph textAlign, lineHeight, and run fontFamily in try-run', async () => {
+    const course = publishedCourse()
+    const surf = course.surfaces[0] as PublishedFlowSurface
+    surf.blocks = [{
+      id: 'p-typed',
+      type: 'paragraph',
+      text: 'A',
+      textAlign: 'center',
+      lineSpacing: 8,
+      runs: [{ start: 0, end: 1, style: { fontFamily: 'serif', fontSize: 20 } }],
+    }]
+
+    const { host, container } = await mountHost(course)
+    const paragraph = container.querySelector<HTMLElement>('[data-flow-block-id="p-typed"]')!
+    expect(paragraph.style.textAlign).toBe('center')
+    expect(paragraph.style.lineHeight).toBe('2.1')
+    const span = paragraph.querySelector('span')
+    expect(span?.style.fontFamily).toBe('serif')
+    expect(span?.style.fontSize).toBe('20px')
+    await host.destroy()
+  })
 })

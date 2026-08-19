@@ -416,4 +416,18 @@ describe('FlowWorkspace paper', () => {
 
     expect(screen.getByTestId('flow-inline-editor').innerHTML).toMatch(/font-style:\s*italic/)
   })
+
+  it('paints idle paragraph textAlign and lineSpacing on the paper block', () => {
+    const project = createFlowProject()
+    const surface = project.surfaces.find((entry) => entry.type === 'flow')
+    if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
+    surface.blocks = surface.blocks.map((block) => (
+      block.id === 'p-body' && block.type === 'paragraph'
+        ? { ...block, textAlign: 'center', lineSpacing: 8 }
+        : block
+    ))
+    renderPaper(project)
+    const paragraph = screen.getByTestId('flow-block-p-body').querySelector('p')
+    expect(paragraph).toHaveStyle({ textAlign: 'center', lineHeight: '2.1' })
+  })
 })

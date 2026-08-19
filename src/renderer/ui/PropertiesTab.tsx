@@ -445,7 +445,7 @@ export function detectFontAvailability(fontFamily: string): FontAvailability {
   }
 }
 
-function FontFamilyPicker({ value, onCommit }: {
+export function FontFamilyPicker({ value, onCommit }: {
   value: string
   onCommit(value: string): void
 }) {
@@ -2344,6 +2344,7 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
   const formatFlowTextStyle = useEditorStore((state) => state.formatFlowTextStyle)
+  const project = useEditorStore((state) => state.project)
   if (!block) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
@@ -2360,11 +2361,43 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
     return '#1f2937'
   }
 
+  function flowRichTextFontFamily(target: FlowBlock): string {
+    if ('runs' in target && Array.isArray(target.runs)) {
+      for (const run of target.runs) {
+        if (typeof run.style?.fontFamily === 'string' && run.style.fontFamily.length > 0) {
+          return run.style.fontFamily
+        }
+      }
+    }
+    return session.history.present.designTokens?.fonts?.[0]?.fontFamily
+      ?? project.designTokens?.fonts?.[0]?.fontFamily
+      ?? ''
+  }
+
+  function flowRichTextFontSize(target: FlowBlock): string | number {
+    if ('runs' in target && Array.isArray(target.runs)) {
+      for (const run of target.runs) {
+        if (typeof run.style?.fontSize === 'number') return run.style.fontSize
+      }
+    }
+    return ''
+  }
+
+  const document = session.history.present
+
+  const patchBlockLayout = (patch: { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number }) => {
+    const target = flowBlockTargetFromSelection(document, session.selection)
+    applyFlowCommand(updateFlowEditorBlock(document, target, patch, {
+      expectedRevision: document.revision,
+    }))
+  }
+
   return (
     <div className="properties-scroll" data-testid="properties-tab">
       <section className="property-section" data-testid="flow-block-properties">
         <h3 className="property-title"><Type size={14} />块结构</h3>
         {block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' ? (
+          <>
           <div data-testid="flow-block-type">
             <SelectField
               label="块类型"
@@ -2393,6 +2426,32 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
               }}
             />
           </div>
+            <div data-testid="flow-block-align">
+              <SelectField<'left' | 'center' | 'right'>
+                label="对齐方式"
+                value={('textAlign' in block && block.textAlign) ? block.textAlign : 'left'}
+                options={[
+                  { value: 'left', label: '左对齐' },
+                  { value: 'center', label: '居中' },
+                  { value: 'right', label: '右对齐' },
+                ]}
+                onChange={(textAlign) => patchBlockLayout({ textAlign })}
+              />
+            </div>
+            <div data-testid="flow-block-line-spacing">
+              <BufferedInput
+                label="行距"
+                type="number"
+                min={0}
+                max={200}
+                value={('lineSpacing' in block && typeof block.lineSpacing === 'number') ? block.lineSpacing : ''}
+                onCommit={(value) => {
+                  const lineSpacing = value === '' ? undefined : Number(value)
+                  patchBlockLayout({ lineSpacing })
+                }}
+              />
+            </div>
+          </>
         ) : null}
         {block.type === 'component' ? (
           <div className="property-button-row" style={{ marginTop: 8 }}>
@@ -2489,6 +2548,23 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
       {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
         <section className="property-section">
           <h3 className="property-title"><Type size={14} />选区格式</h3>
+          <FontFamilyPicker
+            value={flowRichTextFontFamily(block)}
+            onCommit={(fontFamily) => formatFlowTextStyle({ fontFamily })}
+          />
+          <div data-testid="flow-font-size">
+            <BufferedInput
+              label="字号"
+              type="number"
+              min={8}
+              max={400}
+              value={flowRichTextFontSize(block)}
+              onCommit={(value) => {
+                const fontSize = value === '' ? undefined : Number(value)
+                formatFlowTextStyle({ fontSize })
+              }}
+            />
+          </div>
           <div className="property-button-row">
             <button
               type="button"

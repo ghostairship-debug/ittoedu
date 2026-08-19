@@ -641,6 +641,14 @@ function headingTag(level: 1 | 2 | 3 | 4 | 5 | 6): 'h1' | 'h2' | 'h3' | 'h4' | '
   return (`h${level}`) as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
 }
 
+function flowPaperBlockTypographyStyle(block: FlowBlock): CSSProperties | undefined {
+  if (block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') return undefined
+  const style: CSSProperties = {}
+  if (block.textAlign) style.textAlign = block.textAlign
+  if (block.lineSpacing !== undefined) style.lineHeight = String(1.6 + block.lineSpacing / 16)
+  return Object.keys(style).length > 0 ? style : undefined
+}
+
 function blockLabel(block: FlowBlock): string {
   if (block.type === 'heading') return '编辑标题文本'
   if (block.type === 'quote') return '编辑引用文本'
@@ -1272,7 +1280,7 @@ export function FlowWorkspace({
       case 'heading': {
         const Tag = headingTag(block.level)
         body = (
-          <Tag data-flow-rich-text="true">
+          <Tag data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
               : idleRichText(block.text, block.runs ?? [])}
@@ -1282,7 +1290,7 @@ export function FlowWorkspace({
       }
       case 'paragraph':
         body = (
-          <p data-flow-rich-text="true">
+          <p data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
               : idleRichText(block.text, block.runs ?? [])}
@@ -1291,7 +1299,7 @@ export function FlowWorkspace({
         break
       case 'quote':
         body = (
-          <blockquote data-flow-rich-text="true">
+          <blockquote data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
               : <p>{idleRichText(block.text, block.runs ?? [])}</p>}

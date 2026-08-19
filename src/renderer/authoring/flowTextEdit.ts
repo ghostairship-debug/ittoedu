@@ -846,6 +846,8 @@ export function buildFlowRichTextHtml(text: string, runs: readonly TextRun[] = [
     ].filter(Boolean).join(' ')
     const css = [
       style.color !== undefined ? `color:${style.color}` : '',
+      style.fontFamily !== undefined ? `font-family:${style.fontFamily}` : '',
+      style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
       style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
       style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
       decorations ? 'display:inline-block' : '',
