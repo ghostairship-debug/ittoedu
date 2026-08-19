@@ -663,76 +663,12 @@ function renderFlowArticle(
   const article = dom.createElement('article')
   article.className = 'flow-runtime-article'
   article.dataset.testid = 'flow-runtime-article'
-  article.dataset.flowPaperScroll = 'true'
   article.id = flowRuntimeTocPageAnchorId(surface.id)
   article.style.boxSizing = 'border-box'
   article.style.height = '100%'
   article.style.overflow = 'auto'
-  article.style.pointerEvents = 'auto'
-  article.style.overscrollBehavior = 'contain'
   article.style.background = resolveCourseSurfaceBackgroundColor(surface.backgroundColor)
   article.style.color = '#172033'
-
-  article.addEventListener('wheel', (event: WheelEvent) => {
-    const maxScroll = Math.max(0, article.scrollHeight - article.clientHeight)
-    if (maxScroll <= 0) return
-    const prevScroll = article.scrollTop
-    const nextScroll = Math.min(Math.max(0, prevScroll + event.deltaY), maxScroll)
-    if (nextScroll !== prevScroll) {
-      article.scrollTop = nextScroll
-      event.preventDefault()
-    }
-  }, { passive: false })
-
-  let isDragging = false
-  let dragStartY = 0
-  let dragStartScroll = 0
-  let activePointerId = -1
-
-  article.addEventListener('pointerdown', (event: PointerEvent) => {
-    if (event.button !== 0) return
-    const target = event.target as HTMLElement | null
-    if (target && typeof target.closest === 'function') {
-      if (target.closest('video, audio, button, a, input, textarea, [data-flow-interactive]')) {
-        return
-      }
-    }
-    isDragging = true
-    dragStartY = event.clientY
-    dragStartScroll = article.scrollTop
-    activePointerId = event.pointerId
-    try {
-      if (typeof article.setPointerCapture === 'function') {
-        article.setPointerCapture(event.pointerId)
-      }
-    } catch {
-      // ignore
-    }
-  })
-
-  article.addEventListener('pointermove', (event: PointerEvent) => {
-    if (!isDragging || event.pointerId !== activePointerId) return
-    const maxScroll = Math.max(0, article.scrollHeight - article.clientHeight)
-    const targetScroll = Math.min(Math.max(0, dragStartScroll - (event.clientY - dragStartY)), maxScroll)
-    article.scrollTop = targetScroll
-  })
-
-  const endDrag = (event: PointerEvent) => {
-    if (isDragging && event.pointerId === activePointerId) {
-      isDragging = false
-      activePointerId = -1
-      try {
-        if (typeof article.releasePointerCapture === 'function') {
-          article.releasePointerCapture(event.pointerId)
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  article.addEventListener('pointerup', endDrag)
-  article.addEventListener('pointercancel', endDrag)
 
   const reading = dom.createElement('div')
   reading.className = 'flow-runtime-reading'
@@ -745,7 +681,6 @@ function renderFlowArticle(
     renderBlockDom(block, reading, {
       ...options,
       readingWidth: surface.layout.readingWidth,
-      wideContentWidth: surface.layout.wideContentWidth,
     })
   }
   return article
@@ -760,7 +695,6 @@ function renderBlockDom(
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
     readingWidth?: number
-    wideContentWidth?: number
     interactive?: boolean
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
   },
@@ -777,18 +711,24 @@ function renderBlockDom(
       const heading = assignBlock(dom.createElement(`h${block.level}`))
       heading.id = flowRuntimeTocAnchorId(block.id)
       heading.dataset.flowTocAnchor = block.id
+      if (block.textAlign) heading.style.textAlign = block.textAlign
+      heading.style.lineHeight = block.lineSpacing === undefined ? '' : String(1.6 + block.lineSpacing / 16)
       appendRichText(heading, block.text, block.runs)
       parent.appendChild(heading)
       return
     }
     case 'paragraph': {
       const paragraph = assignBlock(dom.createElement('p'))
+      if (block.textAlign) paragraph.style.textAlign = block.textAlign
+      paragraph.style.lineHeight = block.lineSpacing === undefined ? '' : String(1.6 + block.lineSpacing / 16)
       appendRichText(paragraph, block.text, block.runs)
       parent.appendChild(paragraph)
       return
     }
     case 'quote': {
       const quote = assignBlock(dom.createElement('blockquote'))
+      if (block.textAlign) quote.style.textAlign = block.textAlign
+      quote.style.lineHeight = block.lineSpacing === undefined ? '' : String(1.6 + block.lineSpacing / 16)
       const paragraph = dom.createElement('p')
       appendRichText(paragraph, block.text, block.runs)
       quote.appendChild(paragraph)
@@ -817,25 +757,11 @@ function renderBlockDom(
     case 'media': {
       const figure = assignBlock(dom.createElement('figure'))
       figure.className = 'flow-block-media'
-      figure.dataset.flowMediaLayout = block.layout
-      const readingWidth = options.readingWidth ?? 760
-      const wideContentWidth = options.wideContentWidth ?? 1120
-      figure.style.width = '100%'
-      figure.style.margin = '0 auto'
-      if (block.layout === 'wide') {
-        figure.style.maxWidth = `${wideContentWidth}px`
-      } else if (block.layout === 'full-width') {
-        figure.style.maxWidth = '100%'
-      } else {
-        figure.style.maxWidth = `${readingWidth}px`
-      }
-
       const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)
       if (block.mediaKind === 'image' && url) {
         const image = dom.createElement('img')
         image.src = url
         image.alt = block.altText ?? ''
-        image.style.maxWidth = '100%'
         figure.appendChild(image)
       } else if (block.mediaKind === 'audio' && url) {
         const audio = dom.createElement('audio')
@@ -846,7 +772,6 @@ function renderBlockDom(
         const video = dom.createElement('video')
         video.controls = true
         video.src = url
-        video.style.maxWidth = '100%'
         figure.appendChild(video)
       } else {
         const fallback = dom.createElement('p')
@@ -989,6 +914,8 @@ function appendRichText(
   for (const segment of segments) {
     const span = dom.createElement('span')
     span.textContent = segment.text
+    if (segment.style.fontFamily) span.style.fontFamily = segment.style.fontFamily
+    if (segment.style.fontSize !== undefined) span.style.fontSize = `${segment.style.fontSize}px`
     if (segment.style.bold) span.style.fontWeight = '700'
     if (segment.style.italic) span.style.fontStyle = 'italic'
     if (segment.style.underline) span.style.textDecoration = 'underline'

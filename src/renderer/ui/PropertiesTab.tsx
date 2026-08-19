@@ -173,14 +173,6 @@ import {
 import type { SpatialGraphSelection } from '../store/editorStore'
 import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
-import { locateCourseLayer } from '../course/effectiveLayerCommands'
-import {
-  commitFlowOverlayFormulaAst,
-  convertFlowComponentBlockToOverlay,
-  convertFlowMediaBlockToOverlay,
-  convertFlowOverlayComponentToDocument,
-  convertFlowOverlayMediaToDocument,
-} from '../course/flowSharedAuthoringAdapters'
 
 interface BufferedInputProps {
   label: string
@@ -445,7 +437,7 @@ export function detectFontAvailability(fontFamily: string): FontAvailability {
   }
 }
 
-function FontFamilyPicker({ value, onCommit }: {
+export function FontFamilyPicker({ value, onCommit }: {
   value: string
   onCommit(value: string): void
 }) {
@@ -2250,79 +2242,6 @@ function FlowMediaBlockProperties({
       <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>
         从文件替换…
       </button>
-      <div className="property-button-row">
-        <button
-          type="button"
-          className="secondary-button"
-          data-testid="flow-block-move-up"
-          onClick={() => {
-            const surface = flowSurfaceIn(document, session.selection.surfaceId)
-            const found = findFlowBlockRecursive(surface.blocks, block.id)
-            if (!found) return
-            applyFlowCommand(
-              executeFlowEditorCommand(
-                document,
-                session.selection,
-                {
-                  name: 'move',
-                  destination: {
-                    parentId: found.parentId,
-                    index: Math.max(0, found.index - 1),
-                    surfaceId: session.selection.surfaceId,
-                  },
-                },
-                { expectedRevision: document.revision },
-              ),
-            )
-          }}
-        >
-          上移
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          data-testid="flow-block-move-down"
-          onClick={() => {
-            const surface = flowSurfaceIn(document, session.selection.surfaceId)
-            const found = findFlowBlockRecursive(surface.blocks, block.id)
-            if (!found) return
-            const maxIndex = found.parentId
-              ? (findFlowBlockRecursive(surface.blocks, found.parentId)?.block as { blocks?: FlowBlock[] })?.blocks?.length ?? found.index + 1
-              : surface.blocks.length
-            applyFlowCommand(
-              executeFlowEditorCommand(
-                document,
-                session.selection,
-                {
-                  name: 'move',
-                  destination: {
-                    parentId: found.parentId,
-                    index: Math.min(maxIndex, found.index + 1),
-                    surfaceId: session.selection.surfaceId,
-                  },
-                },
-                { expectedRevision: document.revision },
-              ),
-            )
-          }}
-        >
-          下移
-        </button>
-      </div>
-      <button
-        type="button"
-        className="secondary-button"
-        data-testid="flow-block-to-overlay"
-        onClick={() => {
-          applyFlowCommand(
-            convertFlowMediaBlockToOverlay(document, session.selection, {
-              expectedRevision: document.revision,
-            }),
-          )
-        }}
-      >
-        转为浮层
-      </button>
       <button
         type="button"
         className="secondary-button"
@@ -2341,9 +2260,10 @@ function FlowMediaBlockProperties({
 
 function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   const block = selectedFlowBlock(session)
-  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
   const formatFlowTextStyle = useEditorStore((state) => state.formatFlowTextStyle)
+  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
+  const project = useEditorStore((state) => state.project)
   if (!block) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
@@ -2360,114 +2280,97 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
     return '#1f2937'
   }
 
+  function flowRichTextFontFamily(target: FlowBlock): string {
+    if ('runs' in target && Array.isArray(target.runs)) {
+      for (const run of target.runs) {
+        if (typeof run.style?.fontFamily === 'string' && run.style.fontFamily.length > 0) {
+          return run.style.fontFamily
+        }
+      }
+    }
+    return session.history.present.designTokens?.fonts?.[0]?.fontFamily ??
+      project.designTokens?.fonts?.[0]?.fontFamily ??
+      ''
+  }
+
+  function flowRichTextFontSize(target: FlowBlock): string | number {
+    if ('runs' in target && Array.isArray(target.runs)) {
+      for (const run of target.runs) {
+        if (typeof run.style?.fontSize === 'number') {
+          return run.style.fontSize
+        }
+      }
+    }
+    return ''
+  }
+
+  const document = session.history.present
+
+  const patchBlockLayout = (patch: { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number }) => {
+    const target = flowBlockTargetFromSelection(document, session.selection)
+    applyFlowCommand(updateFlowEditorBlock(document, target, patch, {
+      expectedRevision: document.revision,
+    }))
+  }
+
   return (
     <div className="properties-scroll" data-testid="properties-tab">
       <section className="property-section" data-testid="flow-block-properties">
         <h3 className="property-title"><Type size={14} />块结构</h3>
         {block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' ? (
-          <div data-testid="flow-block-type">
-            <SelectField
-              label="块类型"
-              value={block.type === 'heading' ? `${block.level}` : block.type === 'paragraph' ? 'paragraph' : 'quote'}
-              options={[
-                { value: 'paragraph', label: '段落' },
-                { value: 'quote', label: '引用' },
-                { value: '1', label: '一级标题' },
-                { value: '2', label: '二级标题' },
-                { value: '3', label: '三级标题' },
-                { value: '4', label: '四级标题' },
-                { value: '5', label: '五级标题' },
-                { value: '6', label: '六级标题' },
-              ]}
-              onChange={(value) => {
-                if (value === 'paragraph') {
-                  formatFlowBlock({ kind: 'convert-paragraph' })
-                } else if (value === 'quote') {
-                  formatFlowBlock({ kind: 'convert-quote' })
-                } else if (value === '1' || value === '2' || value === '3' || value === '4' || value === '5' || value === '6') {
-                  formatFlowBlock({
-                    kind: 'convert-heading',
-                    level: Number(value) as 1 | 2 | 3 | 4 | 5 | 6,
-                  })
-                }
-              }}
-            />
-          </div>
-        ) : null}
-        {block.type === 'component' ? (
-          <div className="property-button-row" style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-block-move-up"
-              onClick={() => {
-                const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
-                const found = findFlowBlockRecursive(surface.blocks, block.id)
-                if (!found) return
-                applyFlowCommand(
-                  executeFlowEditorCommand(
-                    session.history.present,
-                    session.selection,
-                    {
-                      name: 'move',
-                      destination: {
-                        parentId: found.parentId,
-                        index: Math.max(0, found.index - 1),
-                        surfaceId: session.selection.surfaceId,
-                      },
-                    },
-                    { expectedRevision: session.history.present.revision },
-                  ),
-                )
-              }}
-            >
-              上移
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-block-move-down"
-              onClick={() => {
-                const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
-                const found = findFlowBlockRecursive(surface.blocks, block.id)
-                if (!found) return
-                const maxIndex = found.parentId
-                  ? (findFlowBlockRecursive(surface.blocks, found.parentId)?.block as { blocks?: FlowBlock[] })?.blocks?.length ?? found.index + 1
-                  : surface.blocks.length
-                applyFlowCommand(
-                  executeFlowEditorCommand(
-                    session.history.present,
-                    session.selection,
-                    {
-                      name: 'move',
-                      destination: {
-                        parentId: found.parentId,
-                        index: Math.min(maxIndex, found.index + 1),
-                        surfaceId: session.selection.surfaceId,
-                      },
-                    },
-                    { expectedRevision: session.history.present.revision },
-                  ),
-                )
-              }}
-            >
-              下移
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-block-to-overlay"
-              onClick={() => {
-                applyFlowCommand(
-                  convertFlowComponentBlockToOverlay(session.history.present, session.selection, {
-                    expectedRevision: session.history.present.revision,
-                  }),
-                )
-              }}
-            >
-              转为浮层
-            </button>
-          </div>
+          <>
+            <div data-testid="flow-block-type">
+              <SelectField
+                label="块类型"
+                value={block.type === 'heading' ? `${block.level}` : block.type === 'paragraph' ? 'paragraph' : 'quote'}
+                options={[
+                  { value: 'paragraph', label: '段落' },
+                  ...(block.type === 'quote' ? [{ value: 'quote', label: '引用' }] : []),
+                  { value: '1', label: '一级标题' },
+                  { value: '2', label: '二级标题' },
+                  { value: '3', label: '三级标题' },
+                  { value: '4', label: '四级标题' },
+                  { value: '5', label: '五级标题' },
+                  { value: '6', label: '六级标题' },
+                ]}
+                onChange={(value) => {
+                  if (value === 'paragraph') {
+                    formatFlowBlock({ kind: 'convert-paragraph' })
+                  } else if (value === '1' || value === '2' || value === '3' || value === '4' || value === '5' || value === '6') {
+                    formatFlowBlock({
+                      kind: 'convert-heading',
+                      level: Number(value) as 1 | 2 | 3 | 4 | 5 | 6,
+                    })
+                  }
+                }}
+              />
+            </div>
+            <div data-testid="flow-block-align">
+              <SelectField<'left' | 'center' | 'right'>
+                label="对齐方式"
+                value={('textAlign' in block && block.textAlign) ? block.textAlign : 'left'}
+                options={[
+                  { value: 'left', label: '左对齐' },
+                  { value: 'center', label: '居中' },
+                  { value: 'right', label: '右对齐' },
+                ]}
+                onChange={(textAlign) => patchBlockLayout({ textAlign })}
+              />
+            </div>
+            <div data-testid="flow-block-line-spacing">
+              <BufferedInput
+                label="行距"
+                type="number"
+                min={0}
+                max={200}
+                value={('lineSpacing' in block && typeof block.lineSpacing === 'number') ? block.lineSpacing : ''}
+                onCommit={(value) => {
+                  const lineSpacing = value === '' ? undefined : Number(value)
+                  patchBlockLayout({ lineSpacing })
+                }}
+              />
+            </div>
+          </>
         ) : null}
         {block.type === 'list' ? (
           <ToggleRow
@@ -2489,6 +2392,23 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
       {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
         <section className="property-section">
           <h3 className="property-title"><Type size={14} />选区格式</h3>
+          <FontFamilyPicker
+            value={flowRichTextFontFamily(block)}
+            onCommit={(fontFamily) => formatFlowTextStyle({ fontFamily })}
+          />
+          <div data-testid="flow-font-size">
+            <BufferedInput
+              label="字号"
+              type="number"
+              min={8}
+              max={400}
+              value={flowRichTextFontSize(block)}
+              onCommit={(value) => {
+                const fontSize = value === '' ? undefined : Number(value)
+                formatFlowTextStyle({ fontSize })
+              }}
+            />
+          </div>
           <div className="property-button-row">
             <button
               type="button"
@@ -2519,118 +2439,7 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   )
 }
 
-function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
-  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
-  const document = session.history.present
-  const overlayId = session.selection.selectedOverlayIds[0]
-  if (!overlayId) return null
-  const located = locateCourseLayer(document, overlayId)
-  if (!located) return null
-  const item = located.item
-
-  if (item.kind === 'native' && item.content.nativeType === 'formula') {
-    const ast = item.content.data.ast
-    const accessibleText = item.content.data.accessibleText ?? formulaAstToAccessibleText(ast)
-    const node: FormulaNode = {
-      id: overlayId,
-      name: item.label || '公式',
-      type: 'formula',
-      x: item.frame.x,
-      y: item.frame.y,
-      width: item.frame.width,
-      height: item.frame.height,
-      rotation: item.rotation,
-      opacity: item.opacity,
-      visible: item.visible,
-      locked: item.locked,
-      playbackInitialVisibility: item.playbackInitialVisibility,
-      ast,
-      accessibleText,
-      formulaId: item.content.data.formulaId,
-      style: item.content.data.style,
-    }
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
-        <section className="property-section" data-testid="flow-formula-properties">
-          <h3 className="property-title">公式</h3>
-          <FormulaAuthoringEditor
-            node={node}
-            onCommit={(committedAst, committedAccessibleText) => {
-              applyFlowCommand(
-                commitFlowOverlayFormulaAst(
-                  document,
-                  session.selection,
-                  committedAst,
-                  committedAccessibleText,
-                  { expectedRevision: document.revision },
-                ),
-              )
-            }}
-          />
-        </section>
-      </div>
-    )
-  }
-
-  if (item.kind === 'native' && (item.content.nativeType === 'image' || item.content.nativeType === 'video')) {
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
-        <section className="property-section" data-testid="flow-overlay-media-properties">
-          <h3 className="property-title">浮层媒体</h3>
-          <button
-            type="button"
-            className="secondary-button"
-            data-testid="flow-overlay-to-document"
-            onClick={() => {
-              applyFlowCommand(
-                convertFlowOverlayMediaToDocument(document, session.selection, {
-                  expectedRevision: document.revision,
-                }),
-              )
-            }}
-          >
-            转回正文
-          </button>
-        </section>
-      </div>
-    )
-  }
-
-  if (item.kind === 'component') {
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
-        <section className="property-section" data-testid="flow-overlay-component-properties">
-          <h3 className="property-title">浮层组件</h3>
-          <button
-            type="button"
-            className="secondary-button"
-            data-testid="flow-overlay-to-document"
-            onClick={() => {
-              applyFlowCommand(
-                convertFlowOverlayComponentToDocument(document, session.selection, {
-                  expectedRevision: document.revision,
-                }),
-              )
-            }}
-          >
-            转回正文
-          </button>
-        </section>
-      </div>
-    )
-  }
-
-  return null
-}
-
 export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
-  const flowSession = useEditorStore((state) => state.flowSession)
-  if (flowSession && flowSession.selection.focus !== 'overlay' && flowSession.selection.selectedBlockId) {
-    return <FlowBlockProperties session={flowSession} />
-  }
-  if (flowSession && flowSession.selection.focus === 'overlay' && flowSession.selection.selectedOverlayIds.length > 0) {
-    return <FlowOverlayProperties session={flowSession} />
-  }
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
@@ -2640,6 +2449,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const editingNodes = useEditorStore(selectEditingNodes)
   const node = useEditorStore(selectSelectedNode)
   const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
   const spatialGraphSelection = useEditorStore((state) => state.spatialGraphSelection)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedNodes = editingNodes.filter((item) => selectedNodeIds.includes(item.id))
@@ -2694,6 +2504,9 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         />
       </div>
     )
+  }
+  if (flowSession && flowSession.selection.focus !== 'overlay' && flowSession.selection.selectedBlockId) {
+    return <FlowBlockProperties session={flowSession} />
   }
   if (!node) {
     return (

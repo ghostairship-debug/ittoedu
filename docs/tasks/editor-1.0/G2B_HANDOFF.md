@@ -1,0 +1,13 @@
+# G2B HANDOFF
+- 范围：
+  - 导出 `FontFamilyPicker` 供 Flow 与 Slide 复用（同组件、同外观）
+  - `FlowBlockProperties` 选区格式接入 `FontFamilyPicker` 与字号（`data-testid="flow-font-size"`），支持清空回退；段级对齐（`data-testid="flow-block-align"`）与行距（`data-testid="flow-block-line-spacing"`）通过 `updateFlowEditorBlock` 持久化在 block 上
+  - `buildFlowRichTextHtml` 生成 run style 的 `font-family` 与 `font-size:${fontSize}px`
+  - `FlowSurfaceHost` `appendRichText` 渲染 `fontFamily` 与 `fontSize`；`heading` / `paragraph` / `quote` DOM 设置 `style.textAlign` 与 `style.lineHeight`
+- 合同是否变化：否
+- 分支 / SHA：`cursor/g2b-flow-font-ui-0ab9`
+- 允许列表外改动（必须空）：
+- 最小验证命令与结果：`npx vitest run tests/unit/flowProductIntegration.test.tsx` (9 passed) & `git diff --check` (0 issues)
+- 未验证（交给 T6 / 父代理）：FlowWorkspace idle 段级对齐（G1E 独占该文件）
+- 停下来的原因（若有）：无
+- 下游：G3B wrap/paperSpace；父代理把段级对齐补到 FlowWorkspace idle 容器
