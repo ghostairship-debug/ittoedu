@@ -11,6 +11,8 @@ function normalizeStyle(style: TextRunStyle): TextRunStyle {
     ...(style.highlightColor !== undefined
       ? { highlightColor: style.highlightColor }
       : {}),
+    ...(style.fontFamily !== undefined ? { fontFamily: style.fontFamily } : {}),
+    ...(style.fontSize !== undefined ? { fontSize: style.fontSize } : {}),
   }
 }
 

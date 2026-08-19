@@ -218,6 +218,8 @@ export interface TextRunStyle {
   /** East Asian emphasis marks rendered per authored Unicode character. */
   emphasis?: boolean
   highlightColor?: string | null
+  fontFamily?: string
+  fontSize?: number
 }
 
 export interface TextRun {

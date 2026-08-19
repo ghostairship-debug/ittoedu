@@ -74,6 +74,7 @@ const publishedLayerBaseFields = {
   opacity: unitInterval,
   hitPolicy: z.enum(['auto', 'surface', 'pass-through']),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']),
+  paperSpace: z.enum(['viewport', 'paper']).optional(),
 } as const
 
 const publishedRuntimeSchema = z.object({

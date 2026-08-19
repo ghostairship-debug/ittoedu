@@ -553,4 +553,181 @@ describe('Course Project V9 core contract', () => {
     } as unknown as CourseRuntimeDefinition)
     expect(courseProjectDocumentSchema.safeParse(legacySurfaceRuntime).success).toBe(false)
   })
+
+  it('keeps additive G2A optional fields undefined on blank Flow project', () => {
+    const flow = createBlankFlowCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const parsed = courseProjectDocumentSchema.parse(flow)
+    const surface = parsed.surfaces[0]
+    if (surface?.type !== 'flow') throw new Error('expected flow surface')
+
+    surface.blocks.forEach((block) => {
+      if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') {
+        expect(block.textAlign).toBeUndefined()
+        expect(block.lineSpacing).toBeUndefined()
+        block.runs?.forEach((run) => {
+          expect(run.style.fontFamily).toBeUndefined()
+          expect(run.style.fontSize).toBeUndefined()
+        })
+      }
+      if (block.type === 'media' || block.type === 'component') {
+        expect(block.wrap).toBeUndefined()
+      }
+    })
+
+    parsed.globalLayerItems.forEach((entry) => {
+      expect(entry.item.paperSpace).toBeUndefined()
+    })
+    surface.surfaceLayerItems.forEach((entry) => {
+      expect(entry.item.paperSpace).toBeUndefined()
+    })
+  })
+
+  it('round-trips additive G2A optional fields (wrap, paperSpace, textAlign, lineSpacing, fontFamily, fontSize)', () => {
+    const project = flowProject([
+      {
+        id: 'heading-additive',
+        type: 'heading',
+        level: 2,
+        text: '标题与自定义字体',
+        textAlign: 'center',
+        lineSpacing: 24,
+        runs: [
+          {
+            start: 0,
+            end: 2,
+            style: {
+              fontFamily: 'CustomFont, sans-serif',
+              fontSize: 32,
+            },
+          },
+        ],
+      },
+      {
+        id: 'paragraph-additive',
+        type: 'paragraph',
+        text: '段落右对齐',
+        textAlign: 'right',
+        lineSpacing: 18,
+      },
+      {
+        id: 'quote-additive',
+        type: 'quote',
+        text: '引用文本',
+        citation: '出处',
+        textAlign: 'left',
+        lineSpacing: 16,
+      },
+      {
+        id: 'media-wrap',
+        type: 'media',
+        assetId: 'asset-image-1',
+        mediaKind: 'image',
+        layout: 'content-width',
+        wrap: 'left',
+      },
+      {
+        id: 'comp-wrap',
+        type: 'component',
+        component: {
+          packageId: 'pkg-interactive-1',
+          version: '1.0.0',
+        },
+        props: { count: 1 },
+        staticFallbackAssetId: 'asset-image-1',
+        wrap: 'right',
+      },
+    ])
+
+    project.assets = {
+      'asset-image-1': {
+        id: 'asset-image-1',
+        filename: 'img.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        path: 'assets/img.png',
+        byteLength: 1024,
+      },
+    }
+    project.componentPackages = {
+      'pkg-interactive-1': {
+        packageId: 'pkg-interactive-1',
+        version: '1.0.0',
+        name: '交互组件',
+        manifestPath: 'components/pkg-interactive-1/manifest.json',
+        runtimePath: 'components/pkg-interactive-1/runtime.js',
+        contentSha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      },
+    }
+
+    const surface = project.surfaces[0] as Extract<CourseProjectDocument['surfaces'][0], { type: 'flow' }>
+    surface.surfaceLayerItems = [
+      {
+        visibility: { mode: 'all', locationIds: [] },
+        item: {
+          layerItemId: 'surface-layer-1',
+          label: '纸张图层',
+          frame: {
+            mode: 'absolute',
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 100,
+          },
+          order: 0,
+          visible: true,
+          locked: false,
+          rotation: 0,
+          opacity: 1,
+          hitPolicy: 'auto',
+          playbackInitialVisibility: 'inherit',
+          paperSpace: 'paper',
+          kind: 'native',
+          content: {
+            nativeType: 'shape',
+            data: {
+              shapeType: 'rectangle',
+              style: {
+                fillColor: '#ffffff',
+                fillOpacity: 1,
+                borderColor: '#000000',
+                borderOpacity: 1,
+                borderWidth: 1,
+                lineStyle: 'solid',
+                cornerRadius: 0,
+                startArrow: 'none',
+                endArrow: 'none',
+              },
+            },
+          },
+        },
+      },
+    ]
+
+    const parsed = courseProjectDocumentSchema.parse(project)
+    expect(courseProjectDocumentSchema.parse(
+      JSON.parse(JSON.stringify(parsed)) as unknown,
+    )).toEqual(parsed)
+
+    const parsedSurface = parsed.surfaces[0] as Extract<CourseProjectDocument['surfaces'][0], { type: 'flow' }>
+    expect(parsedSurface.surfaceLayerItems[0]?.item.paperSpace).toBe('paper')
+
+    const mediaBlock = parsedSurface.blocks[3]
+    if (mediaBlock?.type !== 'media') throw new Error('expected media block')
+    expect(mediaBlock.wrap).toBe('left')
+
+    const compBlock = parsedSurface.blocks[4]
+    if (compBlock?.type !== 'component') throw new Error('expected component block')
+    expect(compBlock.wrap).toBe('right')
+
+    const headingBlock = parsedSurface.blocks[0]
+    if (headingBlock?.type !== 'heading') throw new Error('expected heading block')
+    expect(headingBlock.textAlign).toBe('center')
+    expect(headingBlock.lineSpacing).toBe(24)
+    expect(headingBlock.runs?.[0]?.style.fontFamily).toBe('CustomFont, sans-serif')
+    expect(headingBlock.runs?.[0]?.style.fontSize).toBe(32)
+  })
 })

@@ -926,6 +926,13 @@
                       "hidden"
                     ]
                   },
+                  "paperSpace": {
+                    "type": "string",
+                    "enum": [
+                      "viewport",
+                      "paper"
+                    ]
+                  },
                   "kind": {
                     "type": "string",
                     "const": "native"
@@ -1121,6 +1128,13 @@
                       "hidden"
                     ]
                   },
+                  "paperSpace": {
+                    "type": "string",
+                    "enum": [
+                      "viewport",
+                      "paper"
+                    ]
+                  },
                   "kind": {
                     "type": "string",
                     "const": "component"
@@ -1253,6 +1267,13 @@
                     "enum": [
                       "inherit",
                       "hidden"
+                    ]
+                  },
+                  "paperSpace": {
+                    "type": "string",
+                    "enum": [
+                      "viewport",
+                      "paper"
                     ]
                   },
                   "kind": {
@@ -1569,6 +1590,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "native"
@@ -1764,6 +1792,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "component"
@@ -1896,6 +1931,13 @@
                               "enum": [
                                 "inherit",
                                 "hidden"
+                              ]
+                            },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
                               ]
                             },
                             "kind": {
@@ -2244,6 +2286,13 @@
                                   "hidden"
                                 ]
                               },
+                              "paperSpace": {
+                                "type": "string",
+                                "enum": [
+                                  "viewport",
+                                  "paper"
+                                ]
+                              },
                               "kind": {
                                 "type": "string",
                                 "const": "native"
@@ -2439,6 +2488,13 @@
                                   "hidden"
                                 ]
                               },
+                              "paperSpace": {
+                                "type": "string",
+                                "enum": [
+                                  "viewport",
+                                  "paper"
+                                ]
+                              },
                               "kind": {
                                 "type": "string",
                                 "const": "component"
@@ -2571,6 +2627,13 @@
                                 "enum": [
                                   "inherit",
                                   "hidden"
+                                ]
+                              },
+                              "paperSpace": {
+                                "type": "string",
+                                "enum": [
+                                  "viewport",
+                                  "paper"
                                 ]
                               },
                               "kind": {
@@ -3035,6 +3098,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "native"
@@ -3230,6 +3300,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "component"
@@ -3362,6 +3439,13 @@
                               "enum": [
                                 "inherit",
                                 "hidden"
+                              ]
+                            },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
                               ]
                             },
                             "kind": {
@@ -3717,6 +3801,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "native"
@@ -3912,6 +4003,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "component"
@@ -4044,6 +4142,13 @@
                               "enum": [
                                 "inherit",
                                 "hidden"
+                              ]
+                            },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
                               ]
                             },
                             "kind": {
@@ -4396,6 +4501,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "native"
@@ -4591,6 +4703,13 @@
                                 "hidden"
                               ]
                             },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
+                              ]
+                            },
                             "kind": {
                               "type": "string",
                               "const": "component"
@@ -4723,6 +4842,13 @@
                               "enum": [
                                 "inherit",
                                 "hidden"
+                              ]
+                            },
+                            "paperSpace": {
+                              "type": "string",
+                              "enum": [
+                                "viewport",
+                                "paper"
                               ]
                             },
                             "kind": {
@@ -5336,6 +5462,19 @@
                 }
               ]
             },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "lineSpacing": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 200
+            },
             "text": {
               "type": "string"
             },
@@ -5387,6 +5526,16 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "fontFamily": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      },
+                      "fontSize": {
+                        "type": "number",
+                        "minimum": 8,
+                        "maximum": 400
                       }
                     },
                     "additionalProperties": false
@@ -5421,6 +5570,19 @@
               "type": "string",
               "const": "paragraph"
             },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "lineSpacing": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 200
+            },
             "text": {
               "type": "string"
             },
@@ -5472,6 +5634,16 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "fontFamily": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      },
+                      "fontSize": {
+                        "type": "number",
+                        "minimum": 8,
+                        "maximum": 400
                       }
                     },
                     "additionalProperties": false
@@ -5571,6 +5743,16 @@
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "fontFamily": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "fontSize": {
+                              "type": "number",
+                              "minimum": 8,
+                              "maximum": 400
                             }
                           },
                           "additionalProperties": false
@@ -5612,6 +5794,19 @@
             "type": {
               "type": "string",
               "const": "quote"
+            },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "lineSpacing": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 200
             },
             "text": {
               "type": "string"
@@ -5664,6 +5859,16 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "fontFamily": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      },
+                      "fontSize": {
+                        "type": "number",
+                        "minimum": 8,
+                        "maximum": 400
                       }
                     },
                     "additionalProperties": false
@@ -5747,6 +5952,14 @@
                 "content-width",
                 "wide",
                 "full-width"
+              ]
+            },
+            "wrap": {
+              "type": "string",
+              "enum": [
+                "none",
+                "left",
+                "right"
               ]
             }
           },
@@ -5873,6 +6086,16 @@
                                             "type": "null"
                                           }
                                         ]
+                                      },
+                                      "fontFamily": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 300
+                                      },
+                                      "fontSize": {
+                                        "type": "number",
+                                        "minimum": 8,
+                                        "maximum": 400
                                       }
                                     },
                                     "additionalProperties": false
@@ -6093,6 +6316,14 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 240
+            },
+            "wrap": {
+              "type": "string",
+              "enum": [
+                "none",
+                "left",
+                "right"
+              ]
             }
           },
           "required": [
