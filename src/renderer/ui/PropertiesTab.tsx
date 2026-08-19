@@ -2144,7 +2144,7 @@ function FlowMediaBlockProperties({
   const document = session.history.present
   const asset = document.assets[block.assetId]
   const sameKindAssets = Object.values(document.assets).filter((candidate) => candidate.kind === block.mediaKind)
-  const patchMedia = (patch: Partial<Pick<FlowMediaBlock, 'altText' | 'caption' | 'layout'>>) => {
+  const patchMedia = (patch: Partial<Pick<FlowMediaBlock, 'altText' | 'caption' | 'layout' | 'wrap'>>) => {
     const target = flowBlockTargetFromSelection(document, session.selection)
     applyFlowCommand(updateFlowEditorBlock(document, target, patch, {
       expectedRevision: document.revision,
@@ -2179,6 +2179,18 @@ function FlowMediaBlockProperties({
         ]}
         onChange={(layout) => patchMedia({ layout })}
       />
+      <div data-testid="flow-media-wrap">
+        <SelectField<'none' | 'left' | 'right'>
+          label="文字环绕"
+          value={block.wrap ?? 'none'}
+          options={[
+            { value: 'none', label: '不环绕（独占一行）' },
+            { value: 'left', label: '居左环绕' },
+            { value: 'right', label: '居右环绕' },
+          ]}
+          onChange={(wrap) => patchMedia({ wrap })}
+        />
+      </div>
       <div data-testid="flow-replace-media">
         <SelectField
           label="替换素材"

@@ -324,7 +324,9 @@ function nativeMediaOverlay(
       x: (CANVAS_WIDTH - (asset.width ?? 320)) / 2,
       y: (CANVAS_HEIGHT - (asset.height ?? 180)) / 2,
     })
-    return sceneNodeToCourseLayerItem(node) as NativeLayerItem
+    const item = sceneNodeToCourseLayerItem(node) as NativeLayerItem
+    item.paperSpace = 'paper'
+    return item
   }
   const node = createVideoNode({
     id: stableFlowId('video', input.id),
@@ -333,7 +335,9 @@ function nativeMediaOverlay(
     width: asset.width ?? 640,
     height: asset.height ?? 360,
   })
-  return sceneNodeToCourseLayerItem(node) as NativeLayerItem
+  const item = sceneNodeToCourseLayerItem(node) as NativeLayerItem
+  item.paperSpace = 'paper'
+  return item
 }
 
 function runOverlayMutation(
@@ -765,6 +769,7 @@ export function convertFlowComponentBlockToOverlay(
       props: structuredClone(found.block.props),
     })
     const item = sceneNodeToCourseLayerItem(node) as ComponentLayerItem
+    item.paperSpace = 'paper'
     item.staticFallbackAssetId = found.block.staticFallbackAssetId
     surface.blocks = removeBlocksById(surface.blocks, new Set([block.id]))
     syncFlowCourseLocations(draft, page.surfaceId)
