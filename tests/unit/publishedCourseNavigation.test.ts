@@ -438,4 +438,39 @@ describe('published course Mixed navigation', () => {
     vi.restoreAllMocks()
     container.remove()
   })
+
+  it('enables pointer events only on the active published surface slot', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    const slots = () => [...container.querySelectorAll<HTMLElement>('[data-course-surface-slot]')]
+    const activeSurfaceId = () => session.navigator.current?.surfaceId
+
+    expect(slots().length).toBeGreaterThan(0)
+    for (const slot of slots()) {
+      const active = slot.dataset.courseSurfaceSlot === activeSurfaceId()
+      expect(slot.style.pointerEvents).toBe(active ? 'auto' : 'none')
+    }
+
+    const flowLocation = payload.locations.find((location) => location.kind === 'flow-block')
+    expect(flowLocation).toBeTruthy()
+    await session.goToLocation(flowLocation!.id)
+    expect(session.navigator.current?.kind).toBe('flow')
+
+    for (const slot of slots()) {
+      const active = slot.dataset.courseSurfaceSlot === activeSurfaceId()
+      expect(slot.style.pointerEvents).toBe(active ? 'auto' : 'none')
+    }
+
+    container.remove()
+  })
 })
