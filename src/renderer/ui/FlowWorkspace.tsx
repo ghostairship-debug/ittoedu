@@ -279,12 +279,19 @@ function FlowPlainStringEditor({
   return <input {...shared} />
 }
 
-function overlayCardStyle(layer: FlowEditorLayerView, preview?: StageRect | null): CSSProperties {
+function overlayCardStyle(
+  layer: FlowEditorLayerView,
+  preview?: StageRect | null,
+  paperScrollTop = 0,
+): CSSProperties {
   const frame = preview ?? layer.item.frame
+  const isController = isTeacherControllerLayerItem(layer.item)
+  const isPaper = !isController && layer.item.paperSpace === 'paper'
+  const top = isPaper ? frame.y - paperScrollTop : frame.y
   return {
     position: 'absolute',
     left: frame.x,
-    top: frame.y,
+    top,
     width: frame.width,
     height: frame.height,
     boxSizing: 'border-box',
@@ -683,6 +690,7 @@ export function FlowWorkspace({
   const overlayRef = useRef<HTMLDivElement>(null)
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
+  const [paperScrollTop, setPaperScrollTop] = useState(0)
   const [overlayViewportSize, setOverlayViewportSize] = useState({
     width: STAGE_VIEWPORT_WIDTH,
     height: STAGE_VIEWPORT_HEIGHT,
@@ -1340,6 +1348,11 @@ export function FlowWorkspace({
           : block.layout === 'full-width'
             ? '100%'
             : view.layout.readingWidth
+        const wrapStyle: CSSProperties = block.wrap === 'left'
+          ? { float: 'left', margin: '0 16px 8px 0' }
+          : block.wrap === 'right'
+            ? { float: 'right', margin: '0 0 8px 16px' }
+            : { float: 'none', marginInline: 'auto' }
         body = (
           <figure
             data-flow-media-layout={block.layout}
@@ -1347,7 +1360,7 @@ export function FlowWorkspace({
             style={{
               width: '100%',
               maxWidth,
-              marginInline: 'auto',
+              ...wrapStyle,
             }}
           >
             {renderFlowPaperMedia(block, assetUrls)}
@@ -1507,16 +1520,24 @@ export function FlowWorkspace({
           </details>
         )
         break
-      case 'component':
+      case 'component': {
+        const wrapStyle: CSSProperties = block.wrap === 'left'
+          ? { float: 'left', margin: '0 16px 8px 0' }
+          : block.wrap === 'right'
+            ? { float: 'right', margin: '0 0 8px 16px' }
+            : { float: 'none' }
         body = (
-          <FlowComponentBlockView
-            block={block}
-            readingWidth={view.layout.readingWidth}
-            componentPackages={componentPackages}
-            assetUrls={assetUrls}
-          />
+          <div style={wrapStyle}>
+            <FlowComponentBlockView
+              block={block}
+              readingWidth={view.layout.readingWidth}
+              componentPackages={componentPackages}
+              assetUrls={assetUrls}
+            />
+          </div>
         )
         break
+      }
     }
 
     return (
@@ -1706,6 +1727,9 @@ export function FlowWorkspace({
         ref={scrollRef}
         className="flow-workspace__scroll"
         data-testid="flow-workspace-scroll"
+        onScroll={(e) => {
+          setPaperScrollTop(e.currentTarget.scrollTop)
+        }}
         style={{
           flex: 1,
           overflow: 'auto',
@@ -1771,7 +1795,7 @@ export function FlowWorkspace({
                 data-layer-item-id={layer.selectionId}
                 data-testid={`flow-layer-card-${layer.selectionId}`}
                 aria-label={layer.item.label || '浮层'}
-                style={overlayCardStyle(layer, preview)}
+                style={overlayCardStyle(layer, preview, paperScrollTop)}
                 onPointerDown={(event) => beginOverlayGesture(event, layer)}
                 onPointerMove={moveOverlayGesture}
                 onPointerUp={endOverlayGesture}

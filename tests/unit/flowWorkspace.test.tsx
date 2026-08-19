@@ -430,4 +430,24 @@ describe('FlowWorkspace paper', () => {
     const paragraph = screen.getByTestId('flow-block-p-body').querySelector('p')
     expect(paragraph).toHaveStyle({ textAlign: 'center', lineHeight: '2.1' })
   })
+
+  it('renders media block with wrap left/right styling in edit paper', () => {
+    const project = createFlowProject()
+    const surface = project.surfaces.find((entry) => entry.type === 'flow')
+    if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
+    surface.blocks = [
+      {
+        id: 'media-wrap',
+        type: 'media',
+        assetId: 'audio-1',
+        mediaKind: 'image',
+        layout: 'content-width',
+        wrap: 'left',
+      },
+      ...surface.blocks,
+    ]
+    renderPaper(project)
+    const figure = screen.getByTestId('flow-block-media-wrap').querySelector('figure')
+    expect(figure).toHaveStyle({ float: 'left', margin: '0px 16px 8px 0px' })
+  })
 })
