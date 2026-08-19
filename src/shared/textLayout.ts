@@ -53,6 +53,8 @@ const DEFAULT_RUN_STYLE: Required<TextRunStyle> = {
   strike: false,
   emphasis: false,
   highlightColor: null,
+  fontFamily: '',
+  fontSize: 0,
 }
 
 function runStyle(node: TextNode, index: number): Required<TextRunStyle> {
@@ -65,6 +67,8 @@ function runStyle(node: TextNode, index: number): Required<TextRunStyle> {
     strike: node.style.strike,
     emphasis: node.style.emphasis,
     highlightColor: node.style.highlightColor,
+    fontFamily: '',
+    fontSize: 0,
   }
   for (const run of node.runs) {
     if (index >= run.start && index < run.end) Object.assign(base, run.style)

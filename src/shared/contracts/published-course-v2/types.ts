@@ -57,6 +57,7 @@ export interface PublishedLayerItemBase {
   opacity: number
   hitPolicy: LayerHitPolicy
   playbackInitialVisibility: 'inherit' | 'hidden'
+  paperSpace?: 'viewport' | 'paper'
 }
 
 export interface PublishedNativeLayerItem extends PublishedLayerItemBase {

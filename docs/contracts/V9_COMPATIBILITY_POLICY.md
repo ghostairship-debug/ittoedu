@@ -44,6 +44,10 @@
 4. **允许增量可选字段（Additive）**：
    - 允许新增非破坏性可选字段。
    - 例如：`SpatialSurfaceDocument.backgroundColor?` 与 `FlowSurfaceDocument.backgroundColor?`，缺省时一律由引擎与编辑器视作白底（`#ffffff`）。
+   - 例如：`TextRunStyle.fontFamily?` 与 `TextRunStyle.fontSize?`，缺省时不覆盖宿主文字样式。
+   - 例如：Flow heading / paragraph / quote 块的 `textAlign?` 与 `lineSpacing?`，缺省时沿用默认段落对齐与行距。
+   - 例如：`FlowMediaBlock.wrap?` 与 `FlowComponentBlock.wrap?`，缺省时表示不绕排（`none`）。
+   - 例如：`LayerItemBase.paperSpace?` 与 `PublishedLayerItemBase.paperSpace?`，缺省时为视口坐标定位（`viewport`）。
 5. **合同严格性**：核心 Schema 禁止使用 `.passthrough()` 或 `z.unknown()` 弱化类型校验。
 
 ---

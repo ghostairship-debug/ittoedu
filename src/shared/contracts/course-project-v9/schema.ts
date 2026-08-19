@@ -131,6 +131,7 @@ const layerItemBaseFields = {
   opacity: unitInterval,
   hitPolicy: z.enum(['auto', 'surface', 'pass-through']),
   playbackInitialVisibility: z.enum(['inherit', 'hidden']),
+  paperSpace: z.enum(['viewport', 'paper']).optional(),
 } as const
 
 const nativeBaseKeys = new Set([
@@ -561,6 +562,8 @@ const flowTextRunStyleSchema = z.object({
   strike: z.boolean().optional(),
   emphasis: z.boolean().optional(),
   highlightColor: colorSchema.nullable().optional(),
+  fontFamily: z.string().trim().min(1).max(300).optional(),
+  fontSize: finiteNumber.min(8).max(400).optional(),
 })
 
 const flowTextRunSchema = z.object({
@@ -608,6 +611,8 @@ const flowHeadingBlockSchema = z.object({
   level: z.union([
     z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6),
   ]),
+  textAlign: z.enum(['left', 'center', 'right']).optional(),
+  lineSpacing: finiteNumber.min(0).max(200).optional(),
   ...flowRichTextFields,
 }).strict().superRefine((block, context) => {
   addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
@@ -616,6 +621,8 @@ const flowHeadingBlockSchema = z.object({
 const flowParagraphBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('paragraph'),
+  textAlign: z.enum(['left', 'center', 'right']).optional(),
+  lineSpacing: finiteNumber.min(0).max(200).optional(),
   ...flowRichTextFields,
 }).strict().superRefine((block, context) => {
   addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
@@ -643,6 +650,8 @@ const flowListBlockSchema = z.object({
 const flowQuoteBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('quote'),
+  textAlign: z.enum(['left', 'center', 'right']).optional(),
+  lineSpacing: finiteNumber.min(0).max(200).optional(),
   ...flowRichTextFields,
   citation: z.string().max(1_000).optional(),
 }).strict().superRefine((block, context) => {
@@ -662,6 +671,7 @@ const flowMediaBlockSchema = z.object({
   altText: z.string().max(4_000).optional(),
   caption: z.string().max(4_000).optional(),
   layout: z.enum(['content-width', 'wide', 'full-width']),
+  wrap: z.enum(['none', 'left', 'right']).optional(),
 }).strict()
 
 const flowTableBlockSchema = z.object({
@@ -736,6 +746,7 @@ const flowComponentBlockSchema = z.object({
   component: componentReferenceSchema,
   props: z.record(z.string(), z.unknown()),
   staticFallbackAssetId: stableIdSchema,
+  wrap: z.enum(['none', 'left', 'right']).optional(),
 }).strict()
 
 export const flowBlockSchema: z.ZodType<FlowBlock> = z.lazy(() =>
