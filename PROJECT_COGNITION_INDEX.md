@@ -3,7 +3,7 @@
 > CURRENT_PRODUCT: 仓库根目录 / `main`（V9 重建已合入；已提交 HEAD 见 `git rev-parse HEAD`）
 > HISTORICAL_V8_BASELINE: `f27275658c6dfaa12f2ce35cd9368dcdebe99451`（只作历史对照，禁止再从此重建）
 > HISTORICAL_V9_DONOR: `475503498323`（只作供体与失败取证）
-> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.11
+> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
 > TASK_PACK: [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)
 > WORKER_PROTOCOL: [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)
 > UPDATED: 2026-08-19
@@ -16,7 +16,7 @@
 ## 1. 新 Agent 的最短启动顺序
 
 1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.11。领取实现任务的第三方工人先读 [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)。稳定性方法见 [`docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md`](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)；S0 阶段禁止改产品代码。
+2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.12。领取实现任务的第三方工人先读 [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)。稳定性：方法 [S0](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)，探索产物 [HANDOFF](docs/tasks/editor-1.0/S0_HANDOFF.md)，改代码方案 [S1](docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md)；确认 S1 前禁止改产品代码。
 3. 领取任务只看 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)。旧 `v8-to-v9-rebuild` 任务包已删除。
 4. 当前产品就是仓库根目录。历史 worktree 与 `codex/v9-editor-v8-base` 只作供体，不得再当第二套当前版。
 5. `docs/reviews/**`、`docs/INTERNAL_1_0_MILESTONE_0.md` 与旧评估稿只作历史取证，不是当前执行入口。
@@ -132,7 +132,7 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前阶段是 **稳定性内核（车道 S）**：T0–T6、P1–P8、Q1–Q8、F1–F3、G0–G3 已合入 `main`。不是 `accepted`。第一方案见 [`docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md`](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)。禁止在 S0 阶段改产品代码。
+当前阶段是 **稳定性内核（车道 S）**：S0 方法与 S1 改代码方案已写出，**尚未改产品代码**。T0–T6、P1–P8、Q1–Q8、F1–F3、G0–G3 已合入 `main`。不是 `accepted`。
 
 - 产品：仓库根目录 / `main`
 - V8 导入已删除（T2），不是长期兼容面

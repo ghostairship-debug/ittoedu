@@ -1,7 +1,8 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.11
+> 计划版本：12.12
 > 更新日期：2026-08-19
+> 12.12 变更：S0 探索产物见 [S0_HANDOFF](docs/tasks/editor-1.0/S0_HANDOFF.md)；改代码方案见 [S1](docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md)。**仍禁止未开实现卡就改 `src/**`。** 实现按 S1 波次 A–F；禁止跳过生命线测试拆 Store/Workspace。
 > 12.11 变更：**暂停新的功能补丁车道。** 当前最高优先级是高可用性（崩溃、内容加载不出、无法编辑），不是再补功能。先执行 [S0 探索/架构/解耦方法](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)；**本轮禁止按 S0 改 `src/**`。** 改代码方案是后续 S1，必须等 S0 探索产物齐备。12.10 及更早「不为时好时坏单开稳定性史诗 / 1.0 之后再拆 Store」的推迟条款，对本阶段让路；仍禁止未做探索就物理拆分 Store/Workspace。
 > 12.10 变更：流式讲义「先能读、再近 Word，不要解冻 V9」走车道 G，已合入 `main`。G0 修试运行/预览滚动（无合同）；G1 接线流内顺序与 F 遗留作者入口；G2/G3 只做一小包 additive（字体/段级/wrap/paperSpace）。不要重做 F1–F3 或 G0–G3。  
 > 12.9 变更：Course Project V9 作者工程 Schema **软冻结**。已有字段、判别器和语义不得改；允许 additive 可选字段。不承诺旧编辑器打开含新键的课（内部分发、持续更新）。不等于 Editor 1.0 已发布。Published V2 / Runtime / Component 本次未冻。
@@ -112,8 +113,9 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 
 | ID | 内容 | 验证 |
 |---|---|---|
-| [S0](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md) | 探索方法、架构设计方法、解耦方法 | 文档；**禁止改 `src/**`** |
-| S1 | 基于 S0 探索产物的改代码方案 | 尚未开始；无探索产物不得写 |
+| [S0](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md) | 探索方法、架构设计方法、解耦方法 | 文档已交 |
+| [S0 HANDOFF](docs/tasks/editor-1.0/S0_HANDOFF.md) | E1–E5 探索产物（Gemini 并行 + 父代理复核） | 文档已交 |
+| [S1](docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md) | 改代码方案：波次 A–F（档 1–2） | 文档；**确认前禁止改 `src/**`** |
 | S 实现卡 | 按 S1 切卡 | 尚未开始 |
 
 内核文件默认冻结，清单在 S0 第 6.5 节。不要重做 P/Q/F/G 来「顺便」修稳定性。

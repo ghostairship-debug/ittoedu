@@ -1,8 +1,7 @@
 # S0 稳定性第一方案：如何探索代码、设计架构、解耦模块
 
-> 状态：**第一方案**。只规定探索方法、架构设计方法和解耦方法。
-> **禁止**按本文件改 `src/**`、测试或 Schema。改代码方案是后续 **S1**，必须等本方案被确认、并完成第 5 节规定的探索产物之后才能写。
-> 总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.11
+> 状态：**第一方案（方法）**。探索产物见 [S0_HANDOFF.md](S0_HANDOFF.md)。改代码方案见 [S1_STABILITY_CODE_PLAN.md](S1_STABILITY_CODE_PLAN.md)。本文件仍不授权改 `src/**`。
+> 总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
 > 日期：2026-08-19
 
 本文件回答三件事：
