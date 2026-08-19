@@ -6,6 +6,7 @@ import type {
   FlowHeadingBlock,
   FlowListBlock,
   FlowParagraphBlock,
+  FlowQuoteBlock,
   FlowRichText,
 } from '../../shared/courseProjectTypes'
 import {

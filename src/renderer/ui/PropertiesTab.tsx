@@ -2341,6 +2341,7 @@ function FlowMediaBlockProperties({
 
 function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   const block = selectedFlowBlock(session)
+  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
   const formatFlowTextStyle = useEditorStore((state) => state.formatFlowTextStyle)
   if (!block) {
@@ -2532,18 +2533,21 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
     const accessibleText = item.content.data.accessibleText ?? formulaAstToAccessibleText(ast)
     const node: FormulaNode = {
       id: overlayId,
+      name: item.label || '公式',
       type: 'formula',
       x: item.frame.x,
       y: item.frame.y,
       width: item.frame.width,
       height: item.frame.height,
       rotation: item.rotation,
+      opacity: item.opacity,
+      visible: item.visible,
+      locked: item.locked,
+      playbackInitialVisibility: item.playbackInitialVisibility,
       ast,
       accessibleText,
       formulaId: item.content.data.formulaId,
-      color: item.content.data.color,
-      fontSize: item.content.data.fontSize,
-      layer: 'overlay',
+      style: item.content.data.style,
     }
     return (
       <div className="properties-scroll" data-testid="properties-tab">

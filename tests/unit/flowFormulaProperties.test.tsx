@@ -105,7 +105,6 @@ describe('FlowFormulaBlockProperties', () => {
       ast: { type: 'token', value: 'x' },
       accessibleText: 'x',
       formulaId: 'f-overlay-1',
-      layer: 'overlay',
     })
     const layerItem = sceneNodeToCourseLayerItem(formulaNode)
 

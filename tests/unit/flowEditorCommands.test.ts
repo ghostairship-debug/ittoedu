@@ -547,10 +547,11 @@ describe('Flow editor commands', () => {
     // Remove sec-1 and sec-2 so h1 is the only anchor
     const singleAnchorProject: CourseProjectDocument = {
       ...project,
-      surfaces: project.surfaces.map((s) => ({
-        ...s,
-        blocks: s.blocks.filter((b) => b.type !== 'section'),
-      })),
+      surfaces: project.surfaces.map((surface) => (
+        surface.type === 'flow'
+          ? { ...surface, blocks: surface.blocks.filter((block) => block.type !== 'section') }
+          : surface
+      )),
     }
 
     const h1Selection = selectFlowEditorBlocks(singleAnchorProject, 'h1', ['h1'])
