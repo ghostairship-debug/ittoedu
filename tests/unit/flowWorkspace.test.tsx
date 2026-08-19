@@ -12,6 +12,7 @@ import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { useEditorStore } from '@/renderer/store/editorStore'
 import type { FlowCommandResult } from '@/renderer/course/flowEditorCommands'
 import type { FlowEditorSelection } from '@/renderer/course/flowEditorSlice'
 
@@ -376,5 +377,43 @@ describe('FlowWorkspace paper', () => {
     const wideFigure = screen.getByTestId('flow-block-media-wide').querySelector('figure')
     expect(wideFigure).toHaveAttribute('data-flow-media-layout', 'wide')
     expect(wideFigure).toHaveStyle({ maxWidth: '1120px', width: '100%' })
+  })
+
+  it('syncs store flowTextEdit updates to local inline editor during in-place editing', async () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 4 },
+    })
+    const { onSelectionChange } = renderPaper(project, selection)
+    const editor = screen.getByTestId('flow-inline-editor')
+    expect(editor).toBeTruthy()
+
+    useEditorStore.setState({
+      flowTextEdit: {
+        kind: 'rich-text',
+        source: 'properties',
+        blockId: 'p-body',
+        surfaceId: 'flow',
+        parentId: null,
+        field: 'text',
+        composing: false,
+        pendingAction: null,
+        revision: 1,
+        original: { text: '阅读任务', runs: [{ start: 0, end: 2, style: { bold: true } }] },
+        draft: {
+          text: '阅读任务',
+          runs: [
+            { start: 0, end: 2, style: { bold: true } },
+            { start: 0, end: 4, style: { italic: true } },
+          ],
+        },
+        range: { start: 0, end: 4 },
+      },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(screen.getByTestId('flow-inline-editor').innerHTML).toMatch(/font-style:\s*italic/)
   })
 })
