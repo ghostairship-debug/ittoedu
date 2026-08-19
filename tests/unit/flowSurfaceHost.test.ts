@@ -658,6 +658,11 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
       wrap: 'left',
     })
     surf.blocks.push({
+      id: 'p-after-left',
+      type: 'paragraph',
+      text: '绕排后续段落',
+    })
+    surf.blocks.push({
       id: 'media-wrap-right',
       type: 'media',
       assetId: 'clip',
@@ -665,17 +670,49 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
       layout: 'content-width',
       wrap: 'right',
     })
+    surf.blocks.push({
+      id: 'media-wrap-none',
+      type: 'media',
+      assetId: 'clip',
+      mediaKind: 'image',
+      layout: 'content-width',
+    })
+    surf.blocks.push({
+      id: 'comp-wrap-left',
+      type: 'component',
+      component: { packageId: 'test-pkg', version: '1.0.0' },
+      props: {},
+      wrap: 'left',
+    })
 
     const { host, container } = await mountHost(course)
     const figLeft = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-left"]')!
     expect(figLeft).not.toBeNull()
     expect(figLeft.style.float).toBe('left')
+    expect(figLeft.style.width).toBe('48%')
     expect(figLeft.style.margin).toBe('0px 16px 8px 0px')
+
+    const pAfter = container.querySelector<HTMLElement>('[data-flow-block-id="p-after-left"]')!
+    expect(pAfter).not.toBeNull()
+    expect(figLeft.parentElement).toBe(pAfter.parentElement)
+    expect(figLeft.nextElementSibling).toBe(pAfter)
 
     const figRight = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-right"]')!
     expect(figRight).not.toBeNull()
     expect(figRight.style.float).toBe('right')
+    expect(figRight.style.width).toBe('48%')
     expect(figRight.style.margin).toBe('0px 0px 8px 16px')
+
+    const figNone = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-none"]')!
+    expect(figNone).not.toBeNull()
+    expect(figNone.style.float).toBe('none')
+    expect(figNone.style.width).toBe('100%')
+
+    const compLeft = container.querySelector<HTMLElement>('[data-flow-block-id="comp-wrap-left"]')!
+    expect(compLeft).not.toBeNull()
+    expect(compLeft.style.float).toBe('left')
+    expect(compLeft.style.width).toBe('48%')
+    expect(compLeft.style.margin).toBe('0px 16px 8px 0px')
 
     await host.destroy()
   })

@@ -1171,7 +1171,24 @@ export function FlowWorkspace({
       ? (edit.draft as { text: string }).text
       : null
 
+    const isWrapLeft = (block.type === 'media' || block.type === 'component') && block.wrap === 'left'
+    const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
+
+    const frameStyle: CSSProperties = {
+      position: 'relative' as const,
+      outline: selected ? '2px solid #5b9cff' : undefined,
+      boxShadow: selected ? 'inset 4px 0 0 #5b9cff' : undefined,
+      padding: '12px 16px',
+      margin: '0 0 12px',
+      ...(isWrapLeft
+        ? { float: 'left', width: '48%', margin: '0 16px 8px 0' }
+        : isWrapRight
+          ? { float: 'right', width: '48%', margin: '0 0 8px 16px' }
+          : {}),
+    }
+
     const frameProps = {
+      key: blockView.blockId,
       'data-testid': `flow-block-${blockView.blockId}`,
       'data-flow-block-id': blockView.blockId,
       'data-flow-parent-id': blockView.parentId ?? '',
@@ -1222,13 +1239,7 @@ export function FlowWorkspace({
           destination: { parentId: blockView.parentId, index: blockView.index, surfaceId: view.surfaceId },
         }))
       },
-      style: {
-        position: 'relative' as const,
-        outline: selected ? '2px solid #5b9cff' : undefined,
-        boxShadow: selected ? 'inset 4px 0 0 #5b9cff' : undefined,
-        padding: '12px 16px',
-        margin: '0 0 12px',
-      },
+      style: frameStyle,
     }
 
     const richEditor = (label: string, text: string, runs: import('../../shared/projectTypes').TextRun[]) => (
@@ -1348,11 +1359,6 @@ export function FlowWorkspace({
           : block.layout === 'full-width'
             ? '100%'
             : view.layout.readingWidth
-        const wrapStyle: CSSProperties = block.wrap === 'left'
-          ? { float: 'left', margin: '0 16px 8px 0' }
-          : block.wrap === 'right'
-            ? { float: 'right', margin: '0 0 8px 16px' }
-            : { float: 'none', marginInline: 'auto' }
         body = (
           <figure
             data-flow-media-layout={block.layout}
@@ -1360,7 +1366,7 @@ export function FlowWorkspace({
             style={{
               width: '100%',
               maxWidth,
-              ...wrapStyle,
+              marginInline: 'auto',
             }}
           >
             {renderFlowPaperMedia(block, assetUrls)}
@@ -1513,21 +1519,14 @@ export function FlowWorkspace({
                 : block.title}
             </summary>
             <div className="flow-section-content">
-              {(childrenByParent.get(block.id) ?? []).map((child) => (
-                <div key={child.blockId}>{renderBlock(child)}</div>
-              ))}
+              {(childrenByParent.get(block.id) ?? []).map((child) => renderBlock(child))}
             </div>
           </details>
         )
         break
       case 'component': {
-        const wrapStyle: CSSProperties = block.wrap === 'left'
-          ? { float: 'left', margin: '0 16px 8px 0' }
-          : block.wrap === 'right'
-            ? { float: 'right', margin: '0 0 8px 16px' }
-            : { float: 'none' }
         body = (
-          <div style={wrapStyle}>
+          <div>
             <FlowComponentBlockView
               block={block}
               readingWidth={view.layout.readingWidth}
@@ -1759,9 +1758,8 @@ export function FlowWorkspace({
             boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
           }}
         >
-          {rootBlocks.map((blockView) => (
-            <div key={blockView.blockId}>{renderBlock(blockView)}</div>
-          ))}
+          {rootBlocks.map((blockView) => renderBlock(blockView))}
+          <div style={{ clear: 'both' }} aria-hidden="true" />
         </article>
       </div>
       {overlayLayers.length > 0 ? (
