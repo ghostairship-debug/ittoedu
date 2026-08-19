@@ -534,3 +534,93 @@ describe('FlowSurfaceHost playback controller and video', () => {
     await host.destroy()
   })
 })
+
+describe('FlowSurfaceHost paper scroll and media layout', () => {
+  it('supports wheel scrolling on long papers with pointerEvents auto and overflow auto', async () => {
+    const course = publishedCourse()
+    const surf = course.surfaces[0] as PublishedFlowSurface
+    surf.blocks = [
+      { id: 'h-top', type: 'heading', level: 1, text: '长文标题' },
+      ...Array.from({ length: 40 }, (_, i) => ({
+        id: `p-${i + 1}`,
+        type: 'paragraph' as const,
+        text: `段落内容 ${i + 1}`,
+      })),
+    ]
+
+    const { host, container } = await mountHost(course)
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    expect(article).not.toBeNull()
+    expect(article.dataset.flowPaperScroll).toBe('true')
+    expect(article.style.pointerEvents).toBe('auto')
+    expect(article.style.overflow).toBe('auto')
+    expect(article.style.overscrollBehavior).toBe('contain')
+
+    let currentScrollTop = 0
+    Object.defineProperty(article, 'clientHeight', { value: 720, configurable: true })
+    Object.defineProperty(article, 'scrollHeight', { value: 4000, configurable: true })
+    Object.defineProperty(article, 'scrollTop', {
+      get: () => currentScrollTop,
+      set: (val: number) => {
+        currentScrollTop = val
+      },
+      configurable: true,
+    })
+
+    const wheelEvt = new WheelEvent('wheel', { deltaY: 120, cancelable: true, bubbles: true })
+    article.dispatchEvent(wheelEvt)
+    expect(article.scrollTop).toBeGreaterThan(0)
+    expect(article.scrollTop).toBe(120)
+
+    await host.destroy()
+  })
+
+  it('preserves teacher controller pointerEvents auto and forwards scene.next click', async () => {
+    const actions: TeacherControllerAction[] = []
+    const { host, container } = await mountHost(publishedCourse(), {
+      executeTeacherControllerAction: (action) => {
+        actions.push(action)
+        return true
+      },
+    })
+    const overlay = container.querySelector<HTMLElement>('[data-testid="flow-runtime-overlay"]')!
+    expect(overlay.style.pointerEvents).toBe('none')
+
+    const frame = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
+    expect(frame.style.pointerEvents).toBe('auto')
+
+    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    next.click()
+    await vi.waitFor(() => {
+      expect(actions).toEqual([{ type: 'scene.next' }])
+    })
+
+    await host.destroy()
+  })
+
+  it('renders media block with wide layout matching wideContentWidth', async () => {
+    const course = publishedCourse()
+    const surf = course.surfaces[0] as PublishedFlowSurface
+    surf.layout = { readingWidth: 760, wideContentWidth: 1120 }
+    surf.blocks.push({
+      id: 'media-wide',
+      type: 'media',
+      assetId: 'clip',
+      mediaKind: 'video',
+      layout: 'wide',
+      altText: '宽幅视频',
+    })
+
+    const { host, container } = await mountHost(course)
+    const figure = container.querySelector<HTMLElement>('[data-flow-block-id="media-wide"]')!
+    expect(figure).not.toBeNull()
+    expect(figure.dataset.flowMediaLayout).toBe('wide')
+    expect(figure.style.maxWidth).toBe(`${surf.layout.wideContentWidth}px`)
+
+    const video = figure.querySelector('video')
+    expect(video).not.toBeNull()
+    expect(video?.style.maxWidth).toBe('100%')
+
+    await host.destroy()
+  })
+})
