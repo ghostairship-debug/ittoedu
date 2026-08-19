@@ -43,6 +43,7 @@ import {
   visualFrontToBackRows,
   type EffectiveLayerProjectionRow,
 } from '../course/read-model'
+import { selectFlowEditorBlocks } from '../course/flowEditorSlice'
 import {
   selectActiveScene,
   selectEditingNodes,
@@ -449,6 +450,32 @@ export function NodesTab() {
         </span>
         {selectedNodeIds.length > 0 && <span className="tree-selection-count">已选 {selectedNodeIds.length}</span>}
       </div>
+      {flowSession && editingScope !== 'global' ? (
+        <button
+          type="button"
+          data-testid="flow-paper-body-row"
+          className="node-item flow-paper-body-row"
+          onClick={() => {
+            const flow = useEditorStore.getState().flowSession
+            if (!flow) return
+            const surface = flow.history.present.surfaces.find((s) => s.id === flow.selection.surfaceId)
+            const first = surface && surface.type === 'flow'
+              ? surface.blocks.find((b) => b.type === 'heading') ?? surface.blocks[0]
+              : null
+            if (!first) return
+            useEditorStore.getState().applyFlowSelection(
+              selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [first.id]),
+            )
+          }}
+        >
+          <span className="node-type-icon" title="text">
+            <Type size={15} />
+          </span>
+          <div className="node-label">
+            <span className="node-name">正文</span>
+          </div>
+        </button>
+      ) : null}
       {nodes.length === 0 ? (
         <div className="empty-state">
           {flowSession

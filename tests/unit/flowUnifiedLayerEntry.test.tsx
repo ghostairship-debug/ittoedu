@@ -79,7 +79,7 @@ afterEach(() => {
 })
 
 describe('Flow unified layer entry', () => {
-  it('lists only overlays in NodesTab and uses the A10 empty copy when none remain visible as rows besides heading/paragraph', () => {
+  it('lists only overlays in NodesTab and renders the virtual paper body row', () => {
     useEditorStore.getState().createNewFlowProject()
     render(<NodesTab />)
     expect(screen.queryByText('无标题')).toBeNull()
@@ -97,7 +97,15 @@ describe('Flow unified layer entry', () => {
     if (controller) {
       expect(screen.queryByTestId(`node-item-${controller.item.layerItemId}`)).toBeNull()
     }
-    expect(screen.getByText('本页没有浮层。标题和段落在稿纸里编辑，不出现在图层。')).toBeTruthy()
+
+    const bodyRow = screen.getByTestId('flow-paper-body-row')
+    expect(bodyRow).toBeTruthy()
+    expect(screen.getByText('正文')).toBeTruthy()
+
+    fireEvent.click(bodyRow)
+    const flow = useEditorStore.getState().flowSession
+    expect(flow?.selection.focus === 'block' || flow?.selection.focus === 'blocks').toBe(true)
+    expect(flow?.selection.selectedBlockId ?? flow?.selection.selectedBlockIds?.[0]).toBe(heading!.id)
   })
 
   it('enters global authoring without writing history and keeps the controller as a viewport overlay', () => {
