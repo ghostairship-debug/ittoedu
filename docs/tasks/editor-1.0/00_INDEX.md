@@ -1,10 +1,11 @@
 # Editor 1.0 收尾任务包
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.10  
-> 共享约束：[01_SHARED.md](01_SHARED.md)  
-> 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
-> 更新日期：2026-08-19  
-> 已锁定：删除 V8 导入，不保留密封导入器。Course Project V9 Schema **软冻结**。  
+> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.11
+> 共享约束：[01_SHARED.md](01_SHARED.md)
+> 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)
+> 更新日期：2026-08-19
+> 已锁定：删除 V8 导入，不保留密封导入器。Course Project V9 Schema **软冻结**。
+> **12.11：暂停新的功能补丁。当前只领取稳定性车道 S。** 第一方案（只出方法、不改代码）：[S0_STABILITY_EXPLORATION_PLAN.md](S0_STABILITY_EXPLORATION_PLAN.md)。不要写 S1，不要改 `src/**`。
 > 12.10：流式讲义「先能读、再近 Word」走车道 G（G0–G3）已合入 `main`。计划见 [G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。不要重做 F1–F3 / G0–G3 / P1–P8 / Q1–Q8。  
 > 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。流式讲义作者界面走车道 F（F1–F3）。计划见 [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。  
@@ -18,6 +19,14 @@
 ## 当前产品
 
 Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。未获教师 `accepted` 前，不得宣称 Editor 1.0 已发布。
+
+## 当前领取（12.11）
+
+| 任务 | 要点 |
+|---|---|
+| [S0](S0_STABILITY_EXPLORATION_PLAN.md) | 稳定性第一方案：如何探索代码、设计架构、解耦模块。**禁止改产品代码。** 不要写 S1 任务卡。 |
+
+内核文件（Store / App / Workspace / 挂载链 / 恢复 / 宿主 destroy）默认冻结。新功能卡碰到它们必须停。
 
 ## 合入状态（对照 `origin/main`）
 
@@ -124,7 +133,11 @@ Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。
 ```text
 已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8，F1–F3，G0–G3
 
-然后：
+当前：
+  S0 稳定性方法（文档）。禁止改 src。禁止新开功能卡碰内核文件。
+
+然后（须确认 S0，并完成其探索产物之后）：
+  S1 改代码方案 → S 实现卡
   教师视觉复核与 accepted；不要由自动化打发布 tag
 ```
 
@@ -149,7 +162,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 1. 读 [02_WORKER.md](02_WORKER.md)。
 2. 看本页「合入状态」：已合入的不要做；等待中的不要抢。
-3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。T/P/Q/F/G 均不要重做。
+3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。T/P/Q/F/G 均不要重做。当前可领取的新工作只有 [S0](S0_STABILITY_EXPLORATION_PLAN.md)（文档，禁止改 `src/**`）。
 4. 新卡从 `origin/main` 建 `cursor/<task-slug>-0ab9`。历史 T/P/Q/F/G 不要重做。
 5. 只改「允许修改」列表。热点冲突则停。
 6. 写 `<TASK>_HANDOFF.md`，push，不要开 PR。

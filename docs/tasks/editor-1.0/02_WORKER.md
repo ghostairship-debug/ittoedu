@@ -60,7 +60,7 @@ T6 是唯一允许跑 `npm test` / e2e / desktop 的任务，且必须遵守 [T6
 - 试运行 / 整课预览走 CoursePlayer + Published V2 宿主。禁止把 Phaser `PlayerApp` 接回 Mixed / Flow / Spatial 试运行。
 - Phaser 只服务 Slide **编辑**命中。
 - 不新增 `projectMode`、四模式字段、Hash/审批/Evidence、可见 AI。
-- 不启动 V10。不拆整个 `editorStore.ts` / `Workspace.tsx`。
+- 不启动 V10。**S0 未完成探索产物前，不拆整个 `editorStore.ts` / `Workspace.tsx`。** 功能卡不得改 S0 第 6.5 节内核文件。
 - 教师控制器仍是 **一份全局图层**。不要复制到 scene `layerItems`。
 - Vite `chunks larger than 500 kB` 不当 bug。
 - 自动化最多 `engineering candidate`。不要写 `accepted` / `art candidate`。
