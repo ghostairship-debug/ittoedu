@@ -320,4 +320,61 @@ describe('FlowWorkspace paper', () => {
       expect(paragraph).toMatchObject({ type: 'paragraph', text: '阅读任务' })
     }
   })
+
+  it('reorders a paragraph by dropping it on another block handle', () => {
+    const { onProjectChange } = renderPaper()
+    const dragHandle = screen.getByTestId('flow-block-drag-p-body')
+    const targetBlock = screen.getByTestId('flow-block-h1')
+    expect(targetBlock.getAttribute('data-flow-block-index')).toBe('0')
+    expect(screen.getByTestId('flow-block-p-body').getAttribute('data-flow-block-index')).toBe('1')
+
+    const dataStore: Record<string, string> = {}
+    const dataTransfer = {
+      setData: (key: string, value: string) => {
+        dataStore[key] = value
+      },
+      getData: (key: string) => dataStore[key] || '',
+      effectAllowed: 'none',
+      dropEffect: 'none',
+    }
+
+    fireEvent.dragStart(dragHandle, { dataTransfer })
+    expect(dataStore['text/flow-block-id']).toBe('p-body')
+
+    fireEvent.dragOver(targetBlock, { dataTransfer })
+    fireEvent.drop(targetBlock, { dataTransfer })
+
+    expect(onProjectChange).toHaveBeenCalled()
+    const result = onProjectChange.mock.calls[0]?.[0]
+    expect(result?.ok).toBe(true)
+    const surface = result?.nextDocument?.surfaces.find((entry) => entry.id === 'flow')
+    if (surface && surface.type === 'flow') {
+      const blockIds = surface.blocks.map((block) => block.id)
+      expect(blockIds.indexOf('p-body')).toBe(0)
+    }
+  })
+
+  it('applies wide and content-width maxWidth to media figure', () => {
+    const project = createFlowProject()
+    const flowSurface = project.surfaces.find((entry) => entry.id === 'flow')
+    if (flowSurface && flowSurface.type === 'flow') {
+      flowSurface.blocks.push({
+        id: 'media-wide',
+        type: 'media',
+        assetId: 'asset-image',
+        mediaKind: 'image',
+        altText: '示意图',
+        caption: '宽版图',
+        layout: 'wide',
+      })
+    }
+    renderPaper(project)
+    const contentFigure = screen.getByTestId('flow-block-media-1').querySelector('figure')
+    expect(contentFigure).toHaveAttribute('data-flow-media-layout', 'content-width')
+    expect(contentFigure).toHaveStyle({ maxWidth: '760px', width: '100%' })
+
+    const wideFigure = screen.getByTestId('flow-block-media-wide').querySelector('figure')
+    expect(wideFigure).toHaveAttribute('data-flow-media-layout', 'wide')
+    expect(wideFigure).toHaveStyle({ maxWidth: '1120px', width: '100%' })
+  })
 })
