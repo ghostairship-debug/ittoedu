@@ -1,8 +1,9 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.9  
+> 计划版本：12.10  
 > 更新日期：2026-08-19  
-> 12.9 变更：Course Project V9 作者工程 Schema **软冻结**。已有字段、判别器和语义不得改；允许 additive 可选字段。不承诺旧编辑器打开含新键的课（内部分发、持续更新）。不等于 Editor 1.0 已发布。Published V2 / Runtime / Component 本次未冻。  
+> 12.10 变更：流式讲义「先能读、再近 Word，不要解冻 V9」走车道 G，已合入 `main`。G0 修试运行/预览滚动（无合同）；G1 接线流内顺序与 F 遗留作者入口；G2/G3 只做一小包 additive（字体/段级/wrap/paperSpace）。不要重做 F1–F3 或 G0–G3。  
+> 12.9 变更：Course Project V9 作者工程 Schema **软冻结**。已有字段、判别器和语义不得改；允许 additive 可选字段。不承诺旧编辑器打开含新键的课（内部分发、持续更新）。不等于 Editor 1.0 已发布。Published V2 / Runtime / Component 本次未冻。
 > 12.8 变更：编排改为先确认中等策划再写带表面的呈现脚本；构建先盘资产再拆任务；局部复杂互动走组件（可新建），场景 Runtime 管整页动态。澄清 P8 宿主已合入、空 catalog ≠ 不能挂组件。无限画布运行态同时支持自由逛与镜头巡游（会话相机，交互占用时让路）。  
 > 12.7 变更：教师回归缺陷 Q1–Q8 已合入 `main`。不要重做 P1–P8 或 Q1–Q8。  
 > 12.6 变更：T6 Windows e2e 27/27 已合入 `main`。自动化仍只是 `engineering candidate`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
@@ -112,7 +113,7 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | **工程门禁已合入 `main`**（合同哈希、CI、禁止项、Windows e2e 27/27）。教师 `accepted` 仍缺 | 视觉/真人清单后才能发布 |
 
-T0–T6 与 P1–P8、Q1–Q8 已合入 `main`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
+T0–T6、P1–P8、Q1–Q8、F1–F3、G0–G3 已合入 `main`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
@@ -271,9 +272,9 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
 
 ## 9. 最终判断
 
-当前缺口只剩教师课例复核与 `accepted`，不要把已合入的 C/P/Q 再当成待做：
+当前缺口只剩教师课例复核与 `accepted`，不要把已合入的 C/P/Q/F/G 再当成待做：
 
-1. **车道 C / P / Q**：合同（含 V9 Schema 软冻结）、教师可见宿主与回归缺陷的源码已在 `main`。
+1. **车道 C / P / Q / F / G**：合同（含 V9 Schema 软冻结）、教师可见宿主、回归缺陷、流式讲义作者界面与近 Word 接线的源码已在 `main`。
 2. **验收**：真实课例视觉/互动复核之后，才能教师 `accepted` 并发布 Editor 1.0。
 
 > **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。不要重做 T0–T6、P1–P8 或 Q1–Q8。V9 已软冻结：不要改已有字段与判别器；additive 走单独合同提交。内部实现再逐步解耦。**

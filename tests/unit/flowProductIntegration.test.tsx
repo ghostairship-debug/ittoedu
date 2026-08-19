@@ -2,8 +2,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
+import { readFlowSharedOwnership } from '@/renderer/course/flowSharedAuthoringAdapters'
 import { listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
+import { buildFlowRichTextHtml } from '@/renderer/authoring/flowTextEdit'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
@@ -258,5 +261,164 @@ describe('Flow product shell wiring', () => {
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const colorInput = screen.getByLabelText('文字颜色') as HTMLInputElement
     expect(colorInput.value).toBe('#dc2626')
+  })
+
+  it('converts paragraph to quote block via block type dropdown in properties tab', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
+    expect(paragraph && paragraph.type === 'paragraph').toBe(true)
+    const flow = useEditorStore.getState().flowSession
+    if (!flow || !paragraph) throw new Error('expected flow paragraph')
+    useEditorStore.setState({
+      flowSession: {
+        ...flow,
+        selection: selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [paragraph.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const blockTypeContainer = screen.getByTestId('flow-block-type')
+    const select = blockTypeContainer.querySelector('select')
+    if (!select) throw new Error('expected select inside flow-block-type')
+    fireEvent.change(select, { target: { value: 'quote' } })
+
+    const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
+    expect(updated?.block.type).toBe('quote')
+  })
+
+  it('converts media block to viewport-overlay when clicking to-overlay button', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const asset = imageAsset()
+    useEditorStore.getState().importAsset(asset, PNG)
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected flow session')
+    useEditorStore.getState().applyFlowCommand(insertFlowEditorBlock(flow.history.present, {
+      surfaceId: flow.selection.surfaceId,
+      parentId: null,
+      index: flowSurfaceIn(flow.history.present, flow.selection.surfaceId).blocks.length,
+      block: { type: 'media', mediaKind: 'image', assetId: asset.id, layout: 'content-width' },
+    }, { expectedRevision: flow.history.present.revision }))
+
+    const mediaBlock = flowSurface().blocks.find((block) => block.type === 'media')
+    if (!mediaBlock) throw new Error('expected media block')
+    const activeFlow = useEditorStore.getState().flowSession!
+    useEditorStore.setState({
+      flowSession: {
+        ...activeFlow,
+        selection: selectFlowEditorBlocks(activeFlow.history.present, activeFlow.selection.locationId, [mediaBlock.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const toOverlayButton = screen.getByTestId('flow-block-to-overlay')
+    fireEvent.click(toOverlayButton)
+
+    const updatedFlow = useEditorStore.getState().flowSession!
+    const overlayId = updatedFlow.selection.selectedOverlayIds[0]
+    expect(overlayId).toBeDefined()
+    expect(readFlowSharedOwnership(updatedFlow.history.present, overlayId!)).toBe('viewport-overlay')
+    expect(locateCourseLayer(updatedFlow.history.present, overlayId!)?.item.paperSpace).toBe('paper')
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const paperSpace = screen.getByTestId('flow-overlay-paper-space').querySelector('select')
+    if (!paperSpace) throw new Error('expected paperSpace select')
+    fireEvent.change(paperSpace, { target: { value: 'viewport' } })
+    expect(locateCourseLayer(useEditorStore.getState().flowSession!.history.present, overlayId!)?.item.paperSpace).toBeUndefined()
+  })
+
+  it('updates paragraph fontFamily via FontFamilyPicker and fontSize via input', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const surface = flowSurface()
+    const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected flow session')
+
+    useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(flow.history.present, {
+      surfaceId: surface.id,
+      blockId: paragraph.id,
+      parentId: null,
+    }, { text: '测试段落内容' }, { expectedRevision: flow.history.present.revision }))
+
+    useEditorStore.setState({
+      flowSession: {
+        ...useEditorStore.getState().flowSession!,
+        selection: selectFlowEditorBlocks(useEditorStore.getState().flowSession!.history.present, flow.selection.locationId, [paragraph.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    const fontPickerInput = screen.getByRole('combobox', { name: '字体' }) as HTMLInputElement
+    fireEvent.focus(fontPickerInput)
+    fireEvent.change(fontPickerInput, { target: { value: 'KaiTi' } })
+    fireEvent.blur(fontPickerInput)
+
+    const fontSizeContainer = screen.getByTestId('flow-font-size')
+    const fontSizeInput = fontSizeContainer.querySelector('input')
+    if (!fontSizeInput) throw new Error('expected font size input')
+    fireEvent.change(fontSizeInput, { target: { value: '24' } })
+    fireEvent.blur(fontSizeInput)
+
+    const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
+    expect(updated?.block.type).toBe('paragraph')
+    const pBlock = updated?.block as typeof paragraph
+    expect(pBlock.runs?.some((run) => run.style.fontFamily === 'KaiTi' && run.style.fontSize === 24)).toBe(true)
+  })
+
+  it('stores textAlign and lineSpacing on paragraph block (not on runs)', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const surface = flowSurface()
+    const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected flow session')
+
+    useEditorStore.setState({
+      flowSession: {
+        ...flow,
+        selection: selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [paragraph.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    const alignContainer = screen.getByTestId('flow-block-align')
+    const alignSelect = alignContainer.querySelector('select')
+    if (!alignSelect) throw new Error('expected align select')
+    fireEvent.change(alignSelect, { target: { value: 'center' } })
+
+    const lineSpacingContainer = screen.getByTestId('flow-block-line-spacing')
+    const lineSpacingInput = lineSpacingContainer.querySelector('input')
+    if (!lineSpacingInput) throw new Error('expected line spacing input')
+    fireEvent.change(lineSpacingInput, { target: { value: '16' } })
+    fireEvent.blur(lineSpacingInput)
+
+    const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
+    expect(updated?.block.type).toBe('paragraph')
+    const pBlock = updated?.block as typeof paragraph & { textAlign?: string; lineSpacing?: number }
+    expect(pBlock.textAlign).toBe('center')
+    expect(pBlock.lineSpacing).toBe(16)
+    if (pBlock.runs) {
+      for (const run of pBlock.runs) {
+        expect((run.style as Record<string, unknown>).textAlign).toBeUndefined()
+        expect((run.style as Record<string, unknown>).lineSpacing).toBeUndefined()
+      }
+    }
+  })
+
+  it('buildFlowRichTextHtml renders font-family and font-size correctly', () => {
+    const html = buildFlowRichTextHtml('A', [{
+      start: 0,
+      end: 1,
+      style: { fontFamily: 'serif', fontSize: 20 },
+    }])
+    expect(html).toContain('font-family:serif')
+    expect(html).toContain('font-size:20px')
   })
 })

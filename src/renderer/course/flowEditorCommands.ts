@@ -6,6 +6,7 @@ import type {
   FlowHeadingBlock,
   FlowListBlock,
   FlowParagraphBlock,
+  FlowQuoteBlock,
   FlowRichText,
 } from '../../shared/courseProjectTypes'
 import {
@@ -95,6 +96,7 @@ export type FlowBlockFormatSpec =
   | { kind: 'heading-level'; level: FlowHeadingBlock['level'] }
   | { kind: 'convert-heading'; level: FlowHeadingBlock['level'] }
   | { kind: 'convert-paragraph' }
+  | { kind: 'convert-quote' }
   | { kind: 'list-ordered'; ordered: boolean }
   | { kind: 'text-style'; style: TextRunStyle; range?: 'all' | { start: number; end: number } }
 
@@ -693,6 +695,30 @@ export function formatFlowEditorBlock(
         found.blocks[found.index] = next
       } else if (block.type !== 'paragraph') {
         throw new Error('当前块不能转为段落')
+      }
+    } else if (spec.kind === 'convert-quote') {
+      if (block.type === 'heading') {
+        const remaining = listFlowCourseAnchors(
+          removeBlocksById(flowSurfaceIn(draft, target.surfaceId).blocks, new Set([block.id])),
+        )
+        if (remaining.length === 0) throw new Error(FLOW_LAST_HEADING_REASON)
+        const next: FlowQuoteBlock = {
+          id: block.id,
+          type: 'quote',
+          text: block.text,
+          ...(block.runs ? { runs: block.runs } : {}),
+        }
+        found.blocks[found.index] = next
+      } else if (block.type === 'paragraph') {
+        const next: FlowQuoteBlock = {
+          id: block.id,
+          type: 'quote',
+          text: block.text,
+          ...(block.runs ? { runs: block.runs } : {}),
+        }
+        found.blocks[found.index] = next
+      } else if (block.type !== 'quote') {
+        throw new Error('当前块不能转为引用')
       }
     } else if (spec.kind === 'list-ordered') {
       if (block.type !== 'list') throw new Error('只有列表可以改有序/无序')

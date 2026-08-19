@@ -19,6 +19,7 @@ import {
   FLOW_PAPER_TEXT_COLOR,
   type FlowTextEditSession,
 } from '../authoring/flowTextEdit'
+import { COMMON_FONT_FAMILIES } from './PropertiesTab'
 
 export type FlowBlockContextCommand =
   | { type: 'range-style'; style: TextRunStyle }
@@ -88,6 +89,51 @@ export function FlowBlockContextToolbar({
           data-testid="flow-range-toolbar"
           style={{ display: 'flex', alignItems: 'center', gap: 2 }}
         >
+          <select
+            data-testid="flow-toolbar-font-family"
+            aria-label="字体"
+            defaultValue=""
+            onMouseDown={preserveFocus}
+            onChange={(event) => {
+              const value = event.target.value
+              if (value) {
+                onCommand({ type: 'range-style', style: { fontFamily: value } })
+              }
+            }}
+          >
+            <option value="" disabled>字体</option>
+            {COMMON_FONT_FAMILIES.map((family) => (
+              <option key={family} value={family}>
+                {family}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            data-testid="flow-toolbar-font-size"
+            aria-label="字号"
+            placeholder="字号"
+            min={8}
+            max={400}
+            style={{ width: 48 }}
+            onMouseDown={preserveFocus}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                const target = event.currentTarget
+                const n = Number(target.value)
+                if (target.value.trim() !== '' && !Number.isNaN(n) && n > 0) {
+                  onCommand({ type: 'range-style', style: { fontSize: n } })
+                }
+              }
+            }}
+            onBlur={(event) => {
+              const target = event.currentTarget
+              const n = Number(target.value)
+              if (target.value.trim() !== '' && !Number.isNaN(n) && n > 0) {
+                onCommand({ type: 'range-style', style: { fontSize: n } })
+              }
+            }}
+          />
           <button type="button" title="局部加粗" aria-label="局部加粗" onClick={() => onCommand({ type: 'range-style', style: { bold: true } })}>
             <Bold size={14} />
           </button>

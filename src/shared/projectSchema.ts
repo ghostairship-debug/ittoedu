@@ -164,6 +164,8 @@ const textRunStyleSchema = z.object({
   strike: z.boolean().optional(),
   emphasis: z.boolean().optional(),
   highlightColor: colorSchema.nullable().optional(),
+  fontFamily: z.string().trim().min(1).max(300).optional(),
+  fontSize: finiteNumber.min(8).max(400).optional(),
 })
 
 const textNodeCoreSchema = baseNodeSchema.extend({

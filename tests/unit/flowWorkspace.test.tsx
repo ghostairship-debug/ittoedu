@@ -12,6 +12,7 @@ import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { useEditorStore } from '@/renderer/store/editorStore'
 import type { FlowCommandResult } from '@/renderer/course/flowEditorCommands'
 import type { FlowEditorSelection } from '@/renderer/course/flowEditorSlice'
 
@@ -319,5 +320,145 @@ describe('FlowWorkspace paper', () => {
         : undefined
       expect(paragraph).toMatchObject({ type: 'paragraph', text: '阅读任务' })
     }
+  })
+
+  it('reorders a paragraph by dropping it on another block handle', () => {
+    const { onProjectChange } = renderPaper()
+    const dragHandle = screen.getByTestId('flow-block-drag-p-body')
+    const targetBlock = screen.getByTestId('flow-block-h1')
+    expect(targetBlock.getAttribute('data-flow-block-index')).toBe('0')
+    expect(screen.getByTestId('flow-block-p-body').getAttribute('data-flow-block-index')).toBe('1')
+
+    const dataStore: Record<string, string> = {}
+    const dataTransfer = {
+      setData: (key: string, value: string) => {
+        dataStore[key] = value
+      },
+      getData: (key: string) => dataStore[key] || '',
+      effectAllowed: 'none',
+      dropEffect: 'none',
+    }
+
+    fireEvent.dragStart(dragHandle, { dataTransfer })
+    expect(dataStore['text/flow-block-id']).toBe('p-body')
+
+    fireEvent.dragOver(targetBlock, { dataTransfer })
+    fireEvent.drop(targetBlock, { dataTransfer })
+
+    expect(onProjectChange).toHaveBeenCalled()
+    const result = onProjectChange.mock.calls[0]?.[0]
+    expect(result?.ok).toBe(true)
+    const surface = result?.nextDocument?.surfaces.find((entry) => entry.id === 'flow')
+    if (surface && surface.type === 'flow') {
+      const blockIds = surface.blocks.map((block) => block.id)
+      expect(blockIds.indexOf('p-body')).toBe(0)
+    }
+  })
+
+  it('applies wide and content-width maxWidth to media figure', () => {
+    const project = createFlowProject()
+    const flowSurface = project.surfaces.find((entry) => entry.id === 'flow')
+    if (flowSurface && flowSurface.type === 'flow') {
+      flowSurface.blocks.push({
+        id: 'media-wide',
+        type: 'media',
+        assetId: 'asset-image',
+        mediaKind: 'image',
+        altText: '示意图',
+        caption: '宽版图',
+        layout: 'wide',
+      })
+    }
+    renderPaper(project)
+    const contentFigure = screen.getByTestId('flow-block-media-1').querySelector('figure')
+    expect(contentFigure).toHaveAttribute('data-flow-media-layout', 'content-width')
+    expect(contentFigure).toHaveStyle({ maxWidth: '760px', width: '100%' })
+
+    const wideFigure = screen.getByTestId('flow-block-media-wide').querySelector('figure')
+    expect(wideFigure).toHaveAttribute('data-flow-media-layout', 'wide')
+    expect(wideFigure).toHaveStyle({ maxWidth: '1120px', width: '100%' })
+  })
+
+  it('syncs store flowTextEdit updates to local inline editor during in-place editing', async () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 4 },
+    })
+    const { onSelectionChange } = renderPaper(project, selection)
+    const editor = screen.getByTestId('flow-inline-editor')
+    expect(editor).toBeTruthy()
+
+    useEditorStore.setState({
+      flowTextEdit: {
+        kind: 'rich-text',
+        source: 'properties',
+        blockId: 'p-body',
+        surfaceId: 'flow',
+        parentId: null,
+        field: 'text',
+        composing: false,
+        pendingAction: null,
+        revision: 1,
+        original: { text: '阅读任务', runs: [{ start: 0, end: 2, style: { bold: true } }] },
+        draft: {
+          text: '阅读任务',
+          runs: [
+            { start: 0, end: 2, style: { bold: true } },
+            { start: 0, end: 4, style: { italic: true } },
+          ],
+        },
+        range: { start: 0, end: 4 },
+      },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(screen.getByTestId('flow-inline-editor').innerHTML).toMatch(/font-style:\s*italic/)
+  })
+
+  it('paints idle paragraph textAlign and lineSpacing on the paper block', () => {
+    const project = createFlowProject()
+    const surface = project.surfaces.find((entry) => entry.type === 'flow')
+    if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
+    surface.blocks = surface.blocks.map((block) => (
+      block.id === 'p-body' && block.type === 'paragraph'
+        ? { ...block, textAlign: 'center', lineSpacing: 8 }
+        : block
+    ))
+    renderPaper(project)
+    const paragraph = screen.getByTestId('flow-block-p-body').querySelector('p')
+    expect(paragraph).toHaveStyle({ textAlign: 'center', lineHeight: '2.1' })
+  })
+
+  it('renders media block with wrap left/right styling in edit paper', () => {
+    const project = createFlowProject()
+    const surface = project.surfaces.find((entry) => entry.type === 'flow')
+    if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
+    surface.blocks = [
+      {
+        id: 'media-wrap',
+        type: 'media',
+        assetId: 'asset-image',
+        mediaKind: 'image',
+        layout: 'content-width',
+        wrap: 'left',
+      },
+      {
+        id: 'comp-wrap',
+        type: 'component',
+        component: { packageId: 'test-comp', version: '1.0.0' },
+        props: {},
+        staticFallbackAssetId: '',
+        wrap: 'right',
+      },
+      ...surface.blocks,
+    ]
+    renderPaper(project)
+    const blockEl = screen.getByTestId('flow-block-media-wrap')
+    expect(blockEl).toHaveStyle({ float: 'left', width: '48%', margin: '0px 16px 8px 0px' })
+
+    const compEl = screen.getByTestId('flow-block-comp-wrap')
+    expect(compEl).toHaveStyle({ float: 'right', width: '48%', margin: '0px 0px 8px 16px' })
   })
 })

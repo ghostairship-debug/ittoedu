@@ -5787,6 +5787,7 @@ button:disabled {
 .workspace--flow .canvas-viewport {
   overflow: hidden;
   background: #eef1f6;
+  pointer-events: auto;
 }
 
 .workspace--flow .flow-workspace {
@@ -5805,6 +5806,7 @@ button:disabled {
   z-index: 4;
   overflow: hidden;
   background: #111318;
+  pointer-events: auto;
 }
 
 .flow-page-tree {

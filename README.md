@@ -2,7 +2,7 @@
 
 面向教师的可编辑互动课件桌面编辑器。**当前产品就是本仓库根目录 / `main`**：成熟 V8 `App` 表面，默认工程真相为 Course Project V9、Published Course V2、Runtime API 2/3、Component API 4。
 
-V9 重建已合入 `main`。日常启动、构建和验证都在根目录进行，不要再把独立 worktree 或 `codex/v9-editor-v8-base` 当成当前版。长期计划看 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)（12.9：Course Project V9 Schema 软冻结；T/P/Q 已合入）；可执行任务看 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)；第三方工人先读 [docs/tasks/editor-1.0/02_WORKER.md](docs/tasks/editor-1.0/02_WORKER.md)。
+V9 重建已合入 `main`。日常启动、构建和验证都在根目录进行，不要再把独立 worktree 或 `codex/v9-editor-v8-base` 当成当前版。长期计划看 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)（12.10：Course Project V9 Schema 软冻结；T/P/Q/F/G 已合入）；可执行任务看 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)；第三方工人先读 [docs/tasks/editor-1.0/02_WORKER.md](docs/tasks/editor-1.0/02_WORKER.md)。
 
 当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 必须来自教师明确验收。
 

@@ -8,7 +8,7 @@
 
 权威看板：[00_INDEX.md](00_INDEX.md)「合入状态」。状态为 **已合入** 的任务禁止再实现。
 
-已合入的 T/P/Q/F 以 `origin/main` 为祖先。不要再领取 F1–F3。
+已合入的 T/P/Q/F/G 以 `origin/main` 为祖先。不要再领取 F1–F3 或 G0–G3。
 
 ## 1. Git（必须按序）
 
@@ -18,7 +18,8 @@
    - 历史 T/P 卡：不要再领取。  
    - 历史车道 Q（Q1–Q8）：不要再领取。  
    - 历史车道 F（F1–F3）：不要再领取。  
-   - 新卡：从 `origin/main` 建 `cursor/<task-slug>-44bf`（全小写，前缀 `cursor/`，后缀 `-44bf`）。
+   - 历史车道 G（G0–G3）：不要再领取。  
+   - 其它新卡：从 `origin/main` 建 `cursor/<task-slug>-0ab9`。
 4. 不属于本任务的脏文件一律不要 add。
 5. 每个逻辑步骤一次 commit。任务卡若要求「重命名 / 行为」分开，就两次 commit。
 6. `git diff --check` 必须干净。

@@ -176,7 +176,7 @@ export class PublishedCourseSession {
     for (const slot of this.#slots) {
       const active = slot.dataset.courseSurfaceSlot === surfaceId
       slot.style.visibility = active ? 'visible' : 'hidden'
-      slot.style.pointerEvents = 'none'
+      slot.style.pointerEvents = active ? 'auto' : 'none'
       slot.style.zIndex = active ? '1' : '0'
       if (active) slot.removeAttribute('aria-hidden')
       else slot.setAttribute('aria-hidden', 'true')

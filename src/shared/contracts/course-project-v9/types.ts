@@ -53,6 +53,7 @@ export interface LayerItemBase {
   opacity: number
   hitPolicy: LayerHitPolicy
   playbackInitialVisibility: 'inherit' | 'hidden'
+  paperSpace?: 'viewport' | 'paper'
 }
 
 type NativeNodeData<T extends SceneNode> = Omit<T, keyof BaseNode>
@@ -204,10 +205,14 @@ export interface FlowListItem extends FlowRichText {
 export interface FlowHeadingBlock extends FlowBlockBase, FlowRichText {
   type: 'heading'
   level: 1 | 2 | 3 | 4 | 5 | 6
+  textAlign?: 'left' | 'center' | 'right'
+  lineSpacing?: number
 }
 
 export interface FlowParagraphBlock extends FlowBlockBase, FlowRichText {
   type: 'paragraph'
+  textAlign?: 'left' | 'center' | 'right'
+  lineSpacing?: number
 }
 
 export interface FlowListBlock extends FlowBlockBase {
@@ -219,6 +224,8 @@ export interface FlowListBlock extends FlowBlockBase {
 export interface FlowQuoteBlock extends FlowBlockBase, FlowRichText {
   type: 'quote'
   citation?: string
+  textAlign?: 'left' | 'center' | 'right'
+  lineSpacing?: number
 }
 
 export interface FlowDividerBlock extends FlowBlockBase {
@@ -232,6 +239,7 @@ export interface FlowMediaBlock extends FlowBlockBase {
   altText?: string
   caption?: string
   layout: 'content-width' | 'wide' | 'full-width'
+  wrap?: 'none' | 'left' | 'right'
 }
 
 export interface FlowTableBlock extends FlowBlockBase {
@@ -276,6 +284,7 @@ export interface FlowComponentBlock extends FlowBlockBase {
   }
   props: Record<string, unknown>
   staticFallbackAssetId: string
+  wrap?: 'none' | 'left' | 'right'
 }
 
 export type FlowBlock =

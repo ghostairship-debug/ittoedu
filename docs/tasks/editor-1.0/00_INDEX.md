@@ -1,13 +1,13 @@
 # Editor 1.0 收尾任务包
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.9  
+> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.10  
 > 共享约束：[01_SHARED.md](01_SHARED.md)  
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-19  
 > 已锁定：删除 V8 导入，不保留密封导入器。Course Project V9 Schema **软冻结**。  
-> 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。  
+> 12.10：流式讲义「先能读、再近 Word」走车道 G（G0–G3）已合入 `main`。计划见 [G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。不要重做 F1–F3 / G0–G3 / P1–P8 / Q1–Q8。  
+> 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。流式讲义作者界面走车道 F（F1–F3）。计划见 [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。  
-> 12.9：流式讲义作者界面走车道 F（F1–F3）。计划见 [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入 `main`）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
@@ -71,6 +71,28 @@ Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。
 
 车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 
+**已合入 `main` — 禁止重做 G0–G3**
+
+计划与切分：[G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。F 已合入的稿纸 runs / 块类型 / 稿纸公式必须保留。本车道把当时降级砍掉的入口接了回来。
+
+| 任务 | 要点 |
+|---|---|
+| [G0A](G0A_SLOT_POINTER.md) | 活动槽 `pointer-events: auto` |
+| [G0B](G0B_PAPER_SCROLL.md) | 试运行稿纸滚/拖；三档宽度 |
+| [G0C](G0C_VIEWPORT_CSS.md) | 试运行/导出 CSS 命中 |
+| [G1A](G1A_BLOCK_DRAG.md) | 稿纸块拖拽排序；编辑态三档宽度 |
+| [G1B](G1B_BLOCK_OVERLAY_CHROME.md) | 上移下移/转浮层/真引用/浮层公式 |
+| [G1C](G1C_LAYER_BODY_ROW.md) | 图层虚拟「正文」行 |
+| [G2A](G2A_ADDITIVE_SCHEMA.md) | G2+G3 additive 合同 |
+| [G1E](G1E_TEXT_EDIT_SYNC.md) | 就地编辑同步属性栏 draft |
+| [G2B](G2B_FLOW_FONT_UI.md) | FontFamilyPicker 接 Flow |
+| [G3B](G3B_WRAP_PAPERSPACE.md) | wrap + paperSpace 跟滚 |
+| [G3C](G3C_WRAP_ACTUALLY_FLOAT.md) | wrap 真绕排（48% 列 + 去掉通栏 wrapper） |
+| [G2C](G2C_TOOLBAR_FONT.md) | 稿纸工具条字体字号 |
+| [G3D](G3D_PAPERSPACE_TESTS.md) | 转浮层 paperSpace 锁测 |
+| [G1H](G1H_BLOCK_STYLE_COMMANDS.md) | wrap/textAlign 命令锁测 |
+| [G2C-TC](G2C_TC_FIXTURES.md) | 工具条单测补全 `FlowTextEditSession` 字段 |
+
 **已合入 `main` — 禁止重做 F1–F3**
 
 计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。合同不变。相关单测 15 项通过。同批还清了 `main` 上 typecheck 洞与 Q1 遗留单测（控制器仅 global 可命中）。
@@ -100,7 +122,7 @@ Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。
 两条车道。**不要**把 P 的 UI 修进行 T1/T6 的合同提交。
 
 ```text
-已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8，F1–F3
+已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8，F1–F3，G0–G3
 
 然后：
   教师视觉复核与 accepted；不要由自动化打发布 tag
@@ -119,7 +141,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 **红项优先。** T6 工程门禁已合入 `main`。绿过的 `check:contracts` 不要重跑（除非本卡改了 `scripts/generate-contracts.ts` 或 `artifacts/contracts/**`）。不要每次修改后跑 T6 五条命令。
 
 禁止在中间任务运行：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。  
-本轮例外：只有 [T1-A](T1_A_MOVE.md) 与 [T6-tc-tests](T6_TC_TESTS.md) 允许 `npm run typecheck`（因为那就是当前红项）。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
+本轮例外：只有 [T1-A](T1_A_MOVE.md)、[T6-tc-tests](T6_TC_TESTS.md) 与 [G2A](G2A_ADDITIVE_SCHEMA.md) 允许 `npm run typecheck`。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
 
 **全量验证只在 T6，且整轮五条只在红项清完后跑一次。**
 
@@ -127,7 +149,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 1. 读 [02_WORKER.md](02_WORKER.md)。
 2. 看本页「合入状态」：已合入的不要做；等待中的不要抢。
-3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。F1–F3 与 Q/T/P 均不要重做。
-4. 新卡按任务卡写明的基线建 `cursor/<slug>-44bf`。历史 T/P/Q/F 不要重做。
+3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。T/P/Q/F/G 均不要重做。
+4. 新卡从 `origin/main` 建 `cursor/<task-slug>-0ab9`。历史 T/P/Q/F/G 不要重做。
 5. 只改「允许修改」列表。热点冲突则停。
 6. 写 `<TASK>_HANDOFF.md`，push，不要开 PR。

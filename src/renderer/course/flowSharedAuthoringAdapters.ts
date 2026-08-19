@@ -1,4 +1,5 @@
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES, MIN_NODE_SIZE } from '../../shared/constants'
+import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import {
   applyComponentVariant,
   resolveComponentPresetProps,
@@ -7,7 +8,7 @@ import {
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { ComponentManifest } from '../../shared/componentTypes'
-import type { ShapeType } from '../../shared/projectTypes'
+import type { FormulaAstNode, ShapeType } from '../../shared/projectTypes'
 import type {
   ComponentLayerItem,
   CourseProjectDocument,
@@ -324,7 +325,9 @@ function nativeMediaOverlay(
       x: (CANVAS_WIDTH - (asset.width ?? 320)) / 2,
       y: (CANVAS_HEIGHT - (asset.height ?? 180)) / 2,
     })
-    return sceneNodeToCourseLayerItem(node) as NativeLayerItem
+    const item = sceneNodeToCourseLayerItem(node) as NativeLayerItem
+    item.paperSpace = 'paper'
+    return item
   }
   const node = createVideoNode({
     id: stableFlowId('video', input.id),
@@ -333,7 +336,9 @@ function nativeMediaOverlay(
     width: asset.width ?? 640,
     height: asset.height ?? 360,
   })
-  return sceneNodeToCourseLayerItem(node) as NativeLayerItem
+  const item = sceneNodeToCourseLayerItem(node) as NativeLayerItem
+  item.paperSpace = 'paper'
+  return item
 }
 
 function runOverlayMutation(
@@ -765,6 +770,7 @@ export function convertFlowComponentBlockToOverlay(
       props: structuredClone(found.block.props),
     })
     const item = sceneNodeToCourseLayerItem(node) as ComponentLayerItem
+    item.paperSpace = 'paper'
     item.staticFallbackAssetId = found.block.staticFallbackAssetId
     surface.blocks = removeBlocksById(surface.blocks, new Set([block.id]))
     syncFlowCourseLocations(draft, page.surfaceId)
@@ -1064,12 +1070,18 @@ export function updateFlowOverlayComponentProps(
   if (!located || located.item.kind !== 'component') return fail('请先选择一个组件浮层')
   const locked = teacherLocked(located.item)
   if (locked) return locked
-  return runOverlayMutation(document, options, (draft) => {
+  const mutated = runOverlayMutation(document, options, (draft) => {
     const current = locateCourseLayer(draft, overlayId)
     if (!current || current.item.kind !== 'component') throw new Error('请先选择一个组件浮层')
     current.item.props = structuredClone(props)
     return []
   }, '已更新组件属性')
+  if (!mutated.ok) return mutated
+  return {
+    ...mutated,
+    selection,
+    ownership: 'viewport-overlay',
+  }
 }
 
 export function updateFlowDocumentComponentBlock(
@@ -1121,6 +1133,79 @@ export function flowNodesTabOverlayIds(
   locationId: string,
 ): readonly string[] {
   return projectFlowUnifiedOverlays(document, locationId).nodesTabIds
+}
+
+export function commitFlowOverlayFormulaAst(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  ast: FormulaAstNode,
+  accessibleText?: string,
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return fail('请先选择一个公式浮层')
+  const located = locateCourseLayer(document, overlayId)
+  if (!located || located.item.kind !== 'native' || located.item.content.nativeType !== 'formula') {
+    return fail('请先选择一个公式浮层')
+  }
+  const locked = teacherLocked(located.item)
+  if (locked) return locked
+  const mutated = runOverlayMutation(document, options, (draft) => {
+    const current = locateCourseLayer(draft, overlayId)
+    if (!current || current.item.kind !== 'native' || current.item.content.nativeType !== 'formula') {
+      throw new Error('请先选择一个公式浮层')
+    }
+    current.item.content.data.ast = structuredClone(ast)
+    current.item.content.data.accessibleText = accessibleText ?? formulaAstToAccessibleText(ast)
+    return []
+  }, '已更新公式内容')
+  if (!mutated.ok) return mutated
+  return {
+    ...mutated,
+    selection,
+    ownership: 'viewport-overlay',
+  }
+}
+
+export function patchFlowOverlayPaperSpace(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  paperSpace: 'viewport' | 'paper',
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return fail('请先选择一个浮层或全局层项目')
+  const located = locateCourseLayer(document, overlayId)
+  if (!located) return fail(`找不到浮层：${overlayId}`)
+  if (located.item.kind === 'native' && located.item.content.nativeType === 'teacher-controller') {
+    return fail('教师控制器始终钉在视口')
+  }
+  const locked = teacherLocked(located.item)
+  if (locked) return locked
+  const current = located.item.paperSpace ?? 'viewport'
+  if (current === paperSpace) {
+    return {
+      ok: true,
+      reason: '未变化',
+      nextDocument: document,
+      historyEntry: false,
+      selection,
+      ownership: 'viewport-overlay',
+    }
+  }
+  const mutated = runOverlayMutation(document, options, (draft) => {
+    const next = locateCourseLayer(draft, overlayId)
+    if (!next) throw new Error(`找不到浮层：${overlayId}`)
+    if (paperSpace === 'viewport') delete next.item.paperSpace
+    else next.item.paperSpace = 'paper'
+    return []
+  }, paperSpace === 'paper' ? '已改为跟随稿纸滚动' : '已改为钉在视口')
+  if (!mutated.ok) return mutated
+  return {
+    ...mutated,
+    selection,
+    ownership: 'viewport-overlay',
+  }
 }
 
 export {

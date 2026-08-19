@@ -279,12 +279,19 @@ function FlowPlainStringEditor({
   return <input {...shared} />
 }
 
-function overlayCardStyle(layer: FlowEditorLayerView, preview?: StageRect | null): CSSProperties {
+function overlayCardStyle(
+  layer: FlowEditorLayerView,
+  preview?: StageRect | null,
+  paperScrollTop = 0,
+): CSSProperties {
   const frame = preview ?? layer.item.frame
+  const isController = isTeacherControllerLayerItem(layer.item)
+  const isPaper = !isController && layer.item.paperSpace === 'paper'
+  const top = isPaper ? frame.y - paperScrollTop : frame.y
   return {
     position: 'absolute',
     left: frame.x,
-    top: frame.y,
+    top,
     width: frame.width,
     height: frame.height,
     boxSizing: 'border-box',
@@ -641,6 +648,14 @@ function headingTag(level: 1 | 2 | 3 | 4 | 5 | 6): 'h1' | 'h2' | 'h3' | 'h4' | '
   return (`h${level}`) as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
 }
 
+function flowPaperBlockTypographyStyle(block: FlowBlock): CSSProperties | undefined {
+  if (block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') return undefined
+  const style: CSSProperties = {}
+  if (block.textAlign) style.textAlign = block.textAlign
+  if (block.lineSpacing !== undefined) style.lineHeight = String(1.6 + block.lineSpacing / 16)
+  return Object.keys(style).length > 0 ? style : undefined
+}
+
 function blockLabel(block: FlowBlock): string {
   if (block.type === 'heading') return '编辑标题文本'
   if (block.type === 'quote') return '编辑引用文本'
@@ -675,12 +690,14 @@ export function FlowWorkspace({
   const overlayRef = useRef<HTMLDivElement>(null)
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
+  const [paperScrollTop, setPaperScrollTop] = useState(0)
   const [overlayViewportSize, setOverlayViewportSize] = useState({
     width: STAGE_VIEWPORT_WIDTH,
     height: STAGE_VIEWPORT_HEIGHT,
   })
   const storeAssetFiles = useEditorStore(selectMediaAssetFiles)
   const storeComponentPackages = useEditorStore((state) => state.componentPackages)
+  const storeEdit = useEditorStore((state) => state.flowTextEdit)
   const componentPackages = propComponentPackages ?? storeComponentPackages
   const sidecarFiles = assetFiles ?? storeAssetFiles
   const assetUrls = useMemo(
@@ -723,6 +740,46 @@ export function FlowWorkspace({
     setEdit(next)
     onTextEditChange?.(next)
   }
+
+  useEffect(() => {
+    if (!storeEdit) return
+    const local = editRef.current
+    if (!local) return
+    if (storeEdit.blockId !== local.blockId) return
+    if (local.composing || storeEdit.composing) return
+
+    const rangeEqual =
+      local.range.start === storeEdit.range.start &&
+      local.range.end === storeEdit.range.end
+
+    const draftEqual = (() => {
+      const ld = local.draft as any
+      const sd = storeEdit.draft as any
+      if (local.kind !== storeEdit.kind) return false
+      if (local.kind === 'rich-text') {
+        if (ld?.text !== sd?.text) return false
+        const lRuns = ld?.runs ?? []
+        const sRuns = sd?.runs ?? []
+        if (lRuns.length !== sRuns.length) return false
+        return JSON.stringify(lRuns) === JSON.stringify(sRuns)
+      }
+      if (local.kind === 'plain-string') {
+        return ld?.text === sd?.text
+      }
+      if (local.kind === 'formula') {
+        return (
+          ld?.accessibleText === sd?.accessibleText &&
+          JSON.stringify(ld?.ast) === JSON.stringify(sd?.ast)
+        )
+      }
+      return false
+    })()
+
+    if (rangeEqual && draftEqual) return
+
+    setEditState(storeEdit)
+    setRestyleToken((n) => n + 1)
+  }, [storeEdit])
 
   useEffect(() => {
     if (readOnly) return
@@ -1114,10 +1171,29 @@ export function FlowWorkspace({
       ? (edit.draft as { text: string }).text
       : null
 
+    const isWrapLeft = (block.type === 'media' || block.type === 'component') && block.wrap === 'left'
+    const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
+
+    const frameStyle: CSSProperties = {
+      position: 'relative' as const,
+      outline: selected ? '2px solid #5b9cff' : undefined,
+      boxShadow: selected ? 'inset 4px 0 0 #5b9cff' : undefined,
+      padding: '12px 16px',
+      margin: '0 0 12px',
+      ...(isWrapLeft
+        ? { float: 'left', width: '48%', margin: '0 16px 8px 0' }
+        : isWrapRight
+          ? { float: 'right', width: '48%', margin: '0 0 8px 16px' }
+          : {}),
+    }
+
     const frameProps = {
+      key: blockView.blockId,
       'data-testid': `flow-block-${blockView.blockId}`,
       'data-flow-block-id': blockView.blockId,
       'data-flow-parent-id': blockView.parentId ?? '',
+      'data-flow-block-index': blockView.index,
+      'data-flow-block-parent': blockView.parentId ?? '',
       'data-flow-authoring-address': blockView.authoringAddress,
       'data-flow-layer-kind': 'document-block',
       className: `flow-block flow-block-${block.type}${selected ? ' flow-block--selected' : ''}`,
@@ -1151,13 +1227,19 @@ export function FlowWorkspace({
       onKeyDown: readOnly ? undefined : (event: ReactKeyboardEvent<HTMLElement>) => {
         handleBlockKeyDown(blockView.blockId, event)
       },
-      style: {
-        position: 'relative' as const,
-        outline: selected ? '2px solid #5b9cff' : undefined,
-        boxShadow: selected ? 'inset 4px 0 0 #5b9cff' : undefined,
-        padding: '12px 16px',
-        margin: '0 0 12px',
+      onDragOver: readOnly ? undefined : (event: React.DragEvent<HTMLElement>) => {
+        event.preventDefault()
       },
+      onDrop: readOnly ? undefined : (event: React.DragEvent<HTMLElement>) => {
+        event.preventDefault()
+        const sourceId = event.dataTransfer.getData('text/flow-block-id')
+        if (!sourceId || sourceId === blockView.blockId) return
+        emitProject(executeFlowEditorCommand(project, selectFlowEditorBlocks(project, locationId, [sourceId]), {
+          name: 'move',
+          destination: { parentId: blockView.parentId, index: blockView.index, surfaceId: view.surfaceId },
+        }))
+      },
+      style: frameStyle,
     }
 
     const richEditor = (label: string, text: string, runs: import('../../shared/projectTypes').TextRun[]) => (
@@ -1217,7 +1299,7 @@ export function FlowWorkspace({
       case 'heading': {
         const Tag = headingTag(block.level)
         body = (
-          <Tag data-flow-rich-text="true">
+          <Tag data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
               : idleRichText(block.text, block.runs ?? [])}
@@ -1227,7 +1309,7 @@ export function FlowWorkspace({
       }
       case 'paragraph':
         body = (
-          <p data-flow-rich-text="true">
+          <p data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
               : idleRichText(block.text, block.runs ?? [])}
@@ -1236,7 +1318,7 @@ export function FlowWorkspace({
         break
       case 'quote':
         body = (
-          <blockquote data-flow-rich-text="true">
+          <blockquote data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
               : <p>{idleRichText(block.text, block.runs ?? [])}</p>}
@@ -1269,17 +1351,30 @@ export function FlowWorkspace({
       case 'divider':
         body = <hr />
         break
-      case 'media':
+      case 'media': {
+        const surface = project.surfaces.find((entry) => entry.id === view.surfaceId)
+        const wide = surface?.type === 'flow' ? surface.layout.wideContentWidth : view.layout.readingWidth
+        const maxWidth = block.layout === 'wide'
+          ? wide
+          : block.layout === 'full-width'
+            ? '100%'
+            : view.layout.readingWidth
         body = (
           <figure
             data-flow-media-layout={block.layout}
             {...(selected ? { 'data-flow-media-selected': 'true' } : {})}
+            style={{
+              width: '100%',
+              maxWidth,
+              marginInline: 'auto',
+            }}
           >
             {renderFlowPaperMedia(block, assetUrls)}
             {block.caption ? <figcaption>{block.caption}</figcaption> : null}
           </figure>
         )
         break
+      }
       case 'table':
         body = (
           <table>
@@ -1424,27 +1519,53 @@ export function FlowWorkspace({
                 : block.title}
             </summary>
             <div className="flow-section-content">
-              {(childrenByParent.get(block.id) ?? []).map((child) => (
-                <div key={child.blockId}>{renderBlock(child)}</div>
-              ))}
+              {(childrenByParent.get(block.id) ?? []).map((child) => renderBlock(child))}
             </div>
           </details>
         )
         break
-      case 'component':
+      case 'component': {
         body = (
-          <FlowComponentBlockView
-            block={block}
-            readingWidth={view.layout.readingWidth}
-            componentPackages={componentPackages}
-            assetUrls={assetUrls}
-          />
+          <div>
+            <FlowComponentBlockView
+              block={block}
+              readingWidth={view.layout.readingWidth}
+              componentPackages={componentPackages}
+              assetUrls={assetUrls}
+            />
+          </div>
         )
         break
+      }
     }
 
     return (
       <div {...frameProps}>
+        {!readOnly && !editingThis ? (
+          <button
+            type="button"
+            className="flow-block-drag-handle"
+            data-testid={`flow-block-drag-${blockView.blockId}`}
+            draggable
+            aria-label="拖动排序"
+            style={{
+              position: 'absolute',
+              left: 2,
+              top: 12,
+              width: 12,
+              height: 20,
+              cursor: 'grab',
+              opacity: 0.4,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+            }}
+            onDragStart={(event) => {
+              event.dataTransfer.setData('text/flow-block-id', blockView.blockId)
+              event.dataTransfer.effectAllowed = 'move'
+            }}
+          />
+        ) : null}
         {showToolbar ? (
           <FlowBlockContextToolbar
             block={block}
@@ -1605,6 +1726,9 @@ export function FlowWorkspace({
         ref={scrollRef}
         className="flow-workspace__scroll"
         data-testid="flow-workspace-scroll"
+        onScroll={(e) => {
+          setPaperScrollTop(e.currentTarget.scrollTop)
+        }}
         style={{
           flex: 1,
           overflow: 'auto',
@@ -1634,9 +1758,8 @@ export function FlowWorkspace({
             boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
           }}
         >
-          {rootBlocks.map((blockView) => (
-            <div key={blockView.blockId}>{renderBlock(blockView)}</div>
-          ))}
+          {rootBlocks.map((blockView) => renderBlock(blockView))}
+          <div style={{ clear: 'both' }} aria-hidden="true" />
         </article>
       </div>
       {overlayLayers.length > 0 ? (
@@ -1670,7 +1793,7 @@ export function FlowWorkspace({
                 data-layer-item-id={layer.selectionId}
                 data-testid={`flow-layer-card-${layer.selectionId}`}
                 aria-label={layer.item.label || '浮层'}
-                style={overlayCardStyle(layer, preview)}
+                style={overlayCardStyle(layer, preview, paperScrollTop)}
                 onPointerDown={(event) => beginOverlayGesture(event, layer)}
                 onPointerMove={moveOverlayGesture}
                 onPointerUp={endOverlayGesture}
