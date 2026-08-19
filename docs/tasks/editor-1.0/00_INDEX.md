@@ -1,10 +1,11 @@
 # Editor 1.0 收尾任务包
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.8  
+> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.9  
 > 共享约束：[01_SHARED.md](01_SHARED.md)  
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-19  
-> 已锁定：删除 V8 导入，不保留密封导入器。  
+> 已锁定：删除 V8 导入，不保留密封导入器。Course Project V9 Schema **软冻结**。  
+> 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。  
 > 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。  
 > 12.9：流式讲义作者界面走车道 F（F1–F3）。计划见 [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入 `main`）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
@@ -16,7 +17,7 @@
 
 ## 当前产品
 
-Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复核与教师 `accepted` 前，不得宣称 Editor 1.0 已发布。
+Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。未获教师 `accepted` 前，不得宣称 Editor 1.0 已发布。
 
 ## 合入状态（对照 `origin/main`）
 

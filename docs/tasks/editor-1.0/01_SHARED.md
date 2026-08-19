@@ -21,12 +21,12 @@
 
 ```text
 车道 P  产品事实与教师可感知收尾     可改 UI，不改 V9 判别器
-车道 C  合同冻结与协议去 V8         可改 Schema，不改教师手感
+车道 C  合同冻结与协议去 V8         已完成；此后 Schema 仅 additive，且单独提交
 ```
 
 同一提交不得同时改 Schema 判别器和教师可感知交互。
 
-12.2 的 P1–P7 与 12.3/12.4 的 P8 全部属于车道 P，**均已合入**。不要再领取。T1 允许的唯一教师相关合同变化是 **additive 可选 `backgroundColor`**（缺省白，E 已合入），由 P5-persist 接线。
+12.2 的 P1–P7 与 12.3/12.4 的 P8 全部属于车道 P，**均已合入**。不要再领取。T1 的 additive `backgroundColor` 已合入。V9 已软冻结：不要改已有字段/判别器；新可选字段须单独合同提交。
 
 ## 禁止
 
@@ -46,10 +46,12 @@
 
 统一 Command 层、拆分 `editorStore`、删光 `SceneNode`、拆 Workspace、Player Authoring 改语义 Patch、Editor 2.0 聊天/模型。为「时好时坏」做的大规模会话重挂治理也放到 1.0 之后；本包只修 P1–P4 列明的竞态。
 
-## 兼容承诺（T1 冻结后）
+## 兼容承诺（V9 软冻结）
 
 - 能读取所有合法 V9 工程。
 - 不改变已有字段和判别器含义。
 - 不重新解释统一图层顺序、owner、location、presentation state、稳定 ID。
-- 不允许旧 V9 工程被静默丢字段。缺省 `backgroundColor` 的旧 Spatial/Flow 工程视为白底。
-- 不要求 Editor 1.0 读取 V10+。
+- 不允许旧 V9 工程被静默丢字段。缺 `backgroundColor` 的旧 Spatial/Flow 工程视为白底。
+- 允许 additive 可选字段（须写入 Schema、写明缺省、单独合同提交、保持 `.strict()`）。
+- 不承诺旧编辑器打开含新键的课。
+- 不要求当前编辑器读取 V10+。

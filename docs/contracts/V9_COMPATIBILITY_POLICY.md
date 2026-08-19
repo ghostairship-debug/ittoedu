@@ -2,6 +2,8 @@
 
 > 本文档规范 Course Project V9 的版本演进规则、格式兼容边界与向后兼容承诺。
 > 权威类型定义以 `src/shared/contracts/course-project-v9/` 与 `src/shared/contracts/published-course-v2/`（旧路径保留 re-export 桩）为准。
+>
+> **软冻结（2026-08-19）**：Course Project V9 作者工程合同已软冻结。已有字段、判别器和语义不得改；允许声明过的可选增量字段。不承诺旧编辑器打开含新键的课。本冻结不等于 Editor 1.0 已发布。Published Course V2、Runtime、Component 不在本次冻结范围内。
 
 ---
 
@@ -11,14 +13,14 @@
 
 | 协议域 | 当前版本 | 权威常量 / 判别器 | 演进规则 |
 |---|---|---|---|
-| **Course Project** | Schema 9 | `COURSE_PROJECT_SCHEMA_VERSION = 9` | 1.0 之后仅允许增量添加（additive） |
-| **Published Course** | Version 2 | `PUBLISHED_COURSE_VERSION = 2` | 独立升级发布格式 |
+| **Course Project** | Schema 9 | `COURSE_PROJECT_SCHEMA_VERSION = 9` | **已软冻结**：已有字段锁死；仅允许 additive 可选字段 |
+| **Published Course** | Version 2 | `PUBLISHED_COURSE_VERSION = 2` | 独立升级发布格式（本次未冻） |
 | **Runtime Protocol** | API 2 / 3 | `runtimeApiVersion: 2 \| 3` | 支持 canvas-runtime 2 与 surface-runtime 3 |
 | **Component Protocol** | API 4 | `apiVersion: 4` | 独立升级组件规范 |
 
 ### 关于历史常量说明
 - `src/shared/constants.ts` 中的 `PROJECT_SCHEMA_VERSION = 8` 是历史 V8 遗留形状常量，**不是当前工程版本**。当前工程格式唯一真相为 `COURSE_PROJECT_SCHEMA_VERSION = 9`。
-- 产品 `package.json` 版本为 `1.0.0`；在完成合同冻结与教师验收前，**不得宣称 Editor 1.0 已发布**。
+- 产品 `package.json` 版本为 `1.0.0`；V9 Schema 软冻结不等于产品发布。教师 `accepted` 前，**不得宣称 Editor 1.0 已发布**。
 
 ---
 
@@ -34,17 +36,21 @@
 
 ---
 
-## 3. V9 增量演进承诺（Additive Policy）
+## 3. V9 软冻结承诺（Additive Policy）
 
-在 Editor 1.0 冻结及后续 1.x / 2.x 生命周期中，对 Course Project V9 做出以下兼容承诺：
+本产品对内使用；即使日后对外，也按联网、持续更新分发，不要求用户长期停留在旧安装上。因此 **不承诺旧编辑器打开含更新可选键的新课**。顶层仍是 `.strict()`：新键必须先写进 Schema 再落文件，禁止用 `.passthrough()` / `z.unknown()` 偷加。
 
-1. **完全向后兼容**：必须能够读取所有合法生成的 V9 工程。
-2. **禁止破坏性变更**：不得修改已有字段的命名、类型与判别器语义。
-3. **不得静默丢弃字段**：工程读写、序列化与反序列化过程必须完整保留已有合法字段。
+当前编辑器对 Course Project V9 的承诺：
+
+1. **向后兼容（硬要求）**：必须读取所有在软冻结时点及之后仍合法的 V9 工程。缺可选字段时用已文档化的缺省（例如 Spatial/Flow 缺 `backgroundColor` 视为 `#ffffff`）。
+2. **已有合同锁死**：不得修改已有字段的命名、类型、判别器和语义；不得重新解释 location、图层 owner、统一图层顺序、presentation state、稳定 ID。
+3. **不得静默丢弃字段**：读写与序列化必须完整保留已有合法字段。
 4. **允许增量可选字段（Additive）**：
-   - 允许新增非破坏性可选字段。
-   - 例如：`SpatialSurfaceDocument.backgroundColor?` 与 `FlowSurfaceDocument.backgroundColor?`，缺省时一律由引擎与编辑器视作白底（`#ffffff`）。
-5. **合同严格性**：核心 Schema 禁止使用 `.passthrough()` 或 `z.unknown()` 弱化类型校验。
+   - 仅允许新增非破坏性可选字段，并写明缺省。
+   - 已落地的例子：`SpatialSurfaceDocument.backgroundColor?` 与 `FlowSurfaceDocument.backgroundColor?`。
+   - additive 仍是合同变更：单独提交、更新 `artifacts/contracts/`，不得混进教师手感/UI 提交。
+5. **不承诺旧二进制前向兼容**：含新可选键的课，未更新的编辑器可以因 `.strict()` 拒收。用户应更新到当前版本。
+6. **产品约定不是 Schema 收紧**：例如编辑器把 `startLocationId` 同步为大纲第一页，不得改成 Schema 新不变量去卡旧课。
 
 ---
 

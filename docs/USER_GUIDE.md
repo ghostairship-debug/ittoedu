@@ -1,6 +1,6 @@
 # 用户指南
 
-本指南适用于 **互动课件编辑器（Windows x64）**，当前工程格式为 Course Project V9（`schemaVersion: 9`）。详细合同见 [docs/contracts/](contracts/)。产品由 **ittoedu** 开发，英文名为 **ittoedu Courseware Editor**。Course Project V9 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；简单点击/切场/播媒体用原生节点与声明式交互；稍复杂的局部互动用组件（可复用或为本课新建）；整页动画、特效与连续机制用场景/世界运行时。包版本号已是 `1.0.0`，在合同冻结与教师验收完成前不宣称 Editor 1.0 已发布。
+本指南适用于 **互动课件编辑器（Windows x64）**，当前工程格式为 Course Project V9（`schemaVersion: 9`）。详细合同见 [docs/contracts/](contracts/)。产品由 **ittoedu** 开发，英文名为 **ittoedu Courseware Editor**。Course Project V9 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；简单点击/切场/播媒体用原生节点与声明式交互；稍复杂的局部互动用组件（可复用或为本课新建）；整页动画、特效与连续机制用场景/世界运行时。包版本号已是 `1.0.0`，V9 Schema 已软冻结；未获教师验收前不宣称 Editor 1.0 已发布。
 
 文档同步基线：**2026-08-18**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
 

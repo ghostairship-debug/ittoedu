@@ -71,4 +71,4 @@ Course Project V9 (唯一工程真相)
 - **自动化测试**：自动化测试通过最多证明为 `engineering candidate`（工程候选）。
 - **视觉与互动复核**：必须在真实课例中完成跨表面试运行、视频播放、控制器拖拽与图层行为复核，方可视为 `art candidate`。
 - **最终验收（`accepted`）**：必须来自教师真实试用与明确验收确认。
-- **发布状态**：在合同冻结与教师验收完成前，不得宣称 Editor 1.0 已正式发布。
+- **发布状态**：Course Project V9 Schema 已软冻结。未获教师 `accepted` 前，不得宣称 Editor 1.0 已正式发布。

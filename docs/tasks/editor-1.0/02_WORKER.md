@@ -55,6 +55,7 @@ T6 是唯一允许跑 `npm test` / e2e / desktop 的任务，且必须遵守 [T6
 ## 4. 产品硬边界（执行中不得违反）
 
 - 工程真相只有 Course Project V9。不要恢复 V8 导入 UI 或密封导入器。
+- V9 已软冻结：不要改已有字段、判别器或语义。additive 可选字段须单独合同提交，保持 `.strict()`，不要用 passthrough 偷加键。
 - 试运行 / 整课预览走 CoursePlayer + Published V2 宿主。禁止把 Phaser `PlayerApp` 接回 Mixed / Flow / Spatial 试运行。
 - Phaser 只服务 Slide **编辑**命中。
 - 不新增 `projectMode`、四模式字段、Hash/审批/Evidence、可见 AI。

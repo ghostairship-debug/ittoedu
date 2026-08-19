@@ -8,7 +8,7 @@
 |---|---|
 | 产品概览、启动、架构与命令 | [根目录 README](../README.md) |
 | 教师和课件作者操作 | [用户指南](USER_GUIDE.md) |
-| 当前软件路线与 Editor 1.0 收尾 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)（12.8：T/P/Q 已合入；待教师 `accepted`） |
+| 当前软件路线与 Editor 1.0 收尾 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)（12.9：V9 Schema 软冻结；T/P/Q 已合入；待教师 `accepted`） |
 | Course Project V9 合同、兼容政策与架构边界 | [COURSE_PROJECT_V9.md](contracts/COURSE_PROJECT_V9.md)、[V9_COMPATIBILITY_POLICY.md](contracts/V9_COMPATIBILITY_POLICY.md)、[EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md) |
 | 可并行执行任务（T0–T6、P1–P8、Q1–Q8 均已合入；不要重做） | [docs/tasks/editor-1.0/00_INDEX.md](tasks/editor-1.0/00_INDEX.md) |
 | 第三方工人协议 | [docs/tasks/editor-1.0/02_WORKER.md](tasks/editor-1.0/02_WORKER.md) |

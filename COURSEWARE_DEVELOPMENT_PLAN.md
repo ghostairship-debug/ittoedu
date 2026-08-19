@@ -1,7 +1,8 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.8  
+> 计划版本：12.9  
 > 更新日期：2026-08-19  
+> 12.9 变更：Course Project V9 作者工程 Schema **软冻结**。已有字段、判别器和语义不得改；允许 additive 可选字段。不承诺旧编辑器打开含新键的课（内部分发、持续更新）。不等于 Editor 1.0 已发布。Published V2 / Runtime / Component 本次未冻。  
 > 12.8 变更：编排改为先确认中等策划再写带表面的呈现脚本；构建先盘资产再拆任务；局部复杂互动走组件（可新建），场景 Runtime 管整页动态。澄清 P8 宿主已合入、空 catalog ≠ 不能挂组件。无限画布运行态同时支持自由逛与镜头巡游（会话相机，交互占用时让路）。  
 > 12.7 变更：教师回归缺陷 Q1–Q8 已合入 `main`。不要重做 P1–P8 或 Q1–Q8。  
 > 12.6 变更：T6 Windows e2e 27/27 已合入 `main`。自动化仍只是 `engineering candidate`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
@@ -15,7 +16,7 @@
 > 发布格式：Published Course V2  
 > 运行时：Runtime API 2 / Surface Runtime API 3  
 > 组件：Component API 4  
-> 产品版本号：`package.json` 已是 `1.0.0`；**未完成合同冻结与教师验收前，不得宣称 Editor 1.0 已发布。**
+> 产品版本号：`package.json` 已是 `1.0.0`；V9 Schema 已软冻结。**未获教师 `accepted` 前，不得宣称 Editor 1.0 已发布。**
 
 本文件是唯一长期总纲。可执行任务卡在 `docs/tasks/editor-1.0/`。若与 README、USER_GUIDE 或能力索引冲突，以源码、Schema 和本文件为准，并在同一变更中修正过时文档。
 
@@ -35,6 +36,7 @@
 - 无可见 AI；无 Hash/审批/Evidence 教师流程。
 - Vite `chunks larger than 500 kB` 不当缺陷修。
 - T0–T6、P1–P8、Q1–Q8 源码已合入 `main`。P8 是三种表面挂载 Component API 4，不是「Flow/Spatial 永远没有组件」。
+- Course Project V9 Schema 已于 2026-08-19 **软冻结**（见决策 4 与 [docs/contracts/V9_COMPATIBILITY_POLICY.md](docs/contracts/V9_COMPATIBILITY_POLICY.md)）。
 
 当前剩余（不要把已合入项再列成待领取）：
 
@@ -53,12 +55,12 @@
 1. Course Project V9 是唯一作者工程真相。
 2. **删除 V8 导入。** Archive 只接受 `schemaVersion === 9`。
 3. 空白工程直接构造 V9。
-4. 发布 1.0 前做最后一次 V9 Schema 收口；此后 1.x / 2.x 不改变 V9 字段、判别器和语义。
-5. 1.0 之后的 Store / Workspace / Player / UI 重构不得改 V9 Schema。
+4. **Course Project V9 已软冻结。** 已有字段、判别器和语义不得改；允许 additive 可选字段（须单独合同提交，保持 `.strict()`）。新编辑器必须读所有合法 V9。不承诺旧编辑器打开含新键的课。破坏性变化进 V10。
+5. Store / Workspace / Player / UI 重构不得改已有 V9 字段、判别器和语义；需要新持久化数据时只能 additive 或 V10，不得把会话态写进工程。
 6. Editor 2.0 的 AI 走独立 Authoring Protocol，不修改 V9；当前 `courseAiHandoff` / `courseAiPatch` 仍是未挂载 reserved 接口。
 7. 破坏性工程模型才进 V10。
 8. **教师可见播放/编辑缺陷走车道 P，不塞进合同提交。** 控制器仍是一份全局图层，不每表面复制。编辑态 inert，运行态可拖、可点、只改会话。
-9. **所有画布默认白色、可改颜色。** Slide 已有场景 `backgroundColor`。Spatial 在冻结前增加可选 `backgroundColor`（缺省 `#ffffff`）；Flow 稿纸保持白，若要改页铬颜色用同一可选字段，不新造第四类 surface。
+9. **所有画布默认白色、可改颜色。** Slide 场景已有 `backgroundColor`。Spatial/Flow 使用 T1 已合入的可选 `backgroundColor?`（缺省 `#ffffff`），不新造第四类 surface。
 10. 课程结构必须能删除整组（演示 / 流式讲义 / 无限画布），且同类型位置可跨组调整；不得只靠「组内排序」。
 
 目标架构：
@@ -88,7 +90,7 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 
 ```text
 车道 P  产品事实与教师可感知收尾     可改 UI，不改 V9 判别器
-车道 C  合同冻结与协议去 V8         可改 Schema，不改教师手感
+车道 C  合同冻结与协议去 V8         已完成；此后 Schema 仅 additive，且单独提交
 ```
 
 同一提交不得同时改 Schema 判别器和教师可感知交互。P 与 C 分 worktree；抢同一热点时停下来，不要互相 rebase 进对方的合同/手感提交。
@@ -133,21 +135,21 @@ T0–T6 与 P1–P8、Q1–Q8 已合入 `main`。未获教师 `accepted` 不得�
 
 ## 4. 版本策略
 
-| 对象 | 1.0 冻结结果 | 后续 |
+| 对象 | 当前冻结 | 后续 |
 |---|---|---|
-| Editor | 发布 `1.0.0`（缺的是冻结 Gate 与教师可见缺陷收口） | SemVer |
-| Course Project | `schemaVersion: 9` | 破坏性变化进 V10 |
-| Published Course | V2 | 独立升级 |
+| Editor | 未发布；待教师 `accepted` | SemVer |
+| Course Project | `schemaVersion: 9` **软冻结** | additive 可选字段可进 V9；破坏性进 V10 |
+| Published Course | V2（本次未冻） | 独立升级 |
 | Runtime | canvas-runtime API 2；surface-runtime API 3 | 新能力走独立 API 版本 |
 | Component | API 4 | 独立升级 |
 | Interaction | Interaction Protocol V1 | 破坏性判别器进 V2 |
-| AI Authoring | 1.0 不发布 | 2.0 发 Protocol V1，不改 V9 |
+| AI Authoring | 1.0 不发布 | 2.0 发 Protocol V1，不改已有 V9 字段 |
 
-1.0 之后必须能读取所有合法 V9 工程，不改变已有字段含义，不允许静默丢字段。
+软冻结后必须能读取所有合法 V9 工程，不改变已有字段含义，不允许静默丢字段。允许再加可选字段并写明缺省；不承诺旧编辑器打开含新键的课。
 
 必须进 V10 的变化：新 Surface 无法由现有三类表达；改变 Location / Layer owner / 统一图层顺序 / Presentation 合并 / 稳定 ID；必须写入工程的完整时间轴或协作模型；删除或重解释现有必填字段。
 
-冻结前允许的 **additive** 字段（T1，非判别器）：`SpatialSurfaceDocument.backgroundColor?`，缺省视为 `#ffffff`；可选同样加在 `FlowSurfaceDocument` 作为页铬/稿纸底，缺省白。Slide 场景 `backgroundColor` 语义不变。
+T1 已合入的 additive：`SpatialSurfaceDocument.backgroundColor?` 与 `FlowSurfaceDocument.backgroundColor?`，缺省 `#ffffff`。Slide 场景 `backgroundColor` 语义不变。
 
 ---
 
@@ -271,7 +273,7 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
 
 当前缺口只剩教师课例复核与 `accepted`，不要把已合入的 C/P/Q 再当成待做：
 
-1. **车道 C / P / Q**：合同冻结、教师可见宿主与回归缺陷的源码已在 `main`。
+1. **车道 C / P / Q**：合同（含 V9 Schema 软冻结）、教师可见宿主与回归缺陷的源码已在 `main`。
 2. **验收**：真实课例视觉/互动复核之后，才能教师 `accepted` 并发布 Editor 1.0。
 
-> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。不要重做 T0–T6、P1–P8 或 Q1–Q8。此后 V9 合同不变，内部实现再逐步解耦。**
+> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。不要重做 T0–T6、P1–P8 或 Q1–Q8。V9 已软冻结：不要改已有字段与判别器；additive 走单独合同提交。内部实现再逐步解耦。**
