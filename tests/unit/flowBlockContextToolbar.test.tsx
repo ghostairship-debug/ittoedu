@@ -4,7 +4,6 @@ import {
   FlowBlockContextToolbar,
   type FlowBlockContextToolbarProps,
 } from '../../src/renderer/ui/FlowBlockContextToolbar'
-import type { FlowTextEditSession } from '../../src/renderer/authoring/flowTextEdit'
 
 describe('FlowBlockContextToolbar', () => {
   afterEach(() => {
@@ -23,13 +22,18 @@ describe('FlowBlockContextToolbar', () => {
       },
       edit: {
         kind: 'rich-text',
+        source: 'paper',
         blockId: 'p-1',
+        surfaceId: 'flow',
+        parentId: null,
+        field: 'text',
+        composing: false,
+        pendingAction: null,
+        revision: 1,
         original: { text: 'Hello World', runs: [] },
         draft: { text: 'Hello World', runs: [] },
         range: { start: 0, end: 5 },
-        cursor: 5,
-        composing: false,
-      } as FlowTextEditSession,
+      },
       placement: 'below',
       onCommand,
       onPreserveSelection,
