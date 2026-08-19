@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { readFlowSharedOwnership } from '@/renderer/course/flowSharedAuthoringAdapters'
 import { listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
@@ -258,5 +259,63 @@ describe('Flow product shell wiring', () => {
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const colorInput = screen.getByLabelText('文字颜色') as HTMLInputElement
     expect(colorInput.value).toBe('#dc2626')
+  })
+
+  it('converts paragraph to quote block via block type dropdown in properties tab', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
+    expect(paragraph && paragraph.type === 'paragraph').toBe(true)
+    const flow = useEditorStore.getState().flowSession
+    if (!flow || !paragraph) throw new Error('expected flow paragraph')
+    useEditorStore.setState({
+      flowSession: {
+        ...flow,
+        selection: selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [paragraph.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const blockTypeContainer = screen.getByTestId('flow-block-type')
+    const select = blockTypeContainer.querySelector('select')
+    if (!select) throw new Error('expected select inside flow-block-type')
+    fireEvent.change(select, { target: { value: 'quote' } })
+
+    const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
+    expect(updated?.block.type).toBe('quote')
+  })
+
+  it('converts media block to viewport-overlay when clicking to-overlay button', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const asset = imageAsset()
+    useEditorStore.getState().importAsset(asset, PNG)
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected flow session')
+    useEditorStore.getState().applyFlowCommand(insertFlowEditorBlock(flow.history.present, {
+      surfaceId: flow.selection.surfaceId,
+      parentId: null,
+      index: flowSurfaceIn(flow.history.present, flow.selection.surfaceId).blocks.length,
+      block: { type: 'media', mediaKind: 'image', assetId: asset.id, layout: 'content-width' },
+    }, { expectedRevision: flow.history.present.revision }))
+
+    const mediaBlock = flowSurface().blocks.find((block) => block.type === 'media')
+    if (!mediaBlock) throw new Error('expected media block')
+    const activeFlow = useEditorStore.getState().flowSession!
+    useEditorStore.setState({
+      flowSession: {
+        ...activeFlow,
+        selection: selectFlowEditorBlocks(activeFlow.history.present, activeFlow.selection.locationId, [mediaBlock.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const toOverlayButton = screen.getByTestId('flow-block-to-overlay')
+    fireEvent.click(toOverlayButton)
+
+    const updatedFlow = useEditorStore.getState().flowSession!
+    const overlayId = updatedFlow.selection.selectedOverlayIds[0]
+    expect(overlayId).toBeDefined()
+    expect(readFlowSharedOwnership(updatedFlow.history.present, overlayId!)).toBe('viewport-overlay')
   })
 })

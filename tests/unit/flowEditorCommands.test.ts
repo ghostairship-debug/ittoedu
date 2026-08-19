@@ -523,4 +523,42 @@ describe('Flow editor commands', () => {
       })]),
     )
   })
+
+  it('converts paragraph to quote while preserving id, text, and runs', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-runs'])
+    const result = executeFlowEditorCommand(project, selection, {
+      name: 'format',
+      spec: { kind: 'convert-quote' },
+    }, { now: NOW })
+    expectHistory(result)
+    const converted = flowOf(result.nextDocument!).blocks.find((block) => block.id === 'p-runs')
+    expect(converted).toMatchObject({
+      id: 'p-runs',
+      type: 'quote',
+      text: '加粗段落',
+      runs: [{ start: 0, end: 2, style: { bold: true } }],
+    })
+  })
+
+  it('refuses converting last navigable heading to quote with FLOW_LAST_HEADING_REASON', () => {
+    const project = createFlowProject()
+    // createFlowProject has headings: h1 (level 1) and nested-h (inside sec-1) and sec-1/sec-2 sections
+    // Remove sec-1 and sec-2 so h1 is the only anchor
+    const singleAnchorProject: CourseProjectDocument = {
+      ...project,
+      surfaces: project.surfaces.map((s) => ({
+        ...s,
+        blocks: s.blocks.filter((b) => b.type !== 'section'),
+      })),
+    }
+
+    const h1Selection = selectFlowEditorBlocks(singleAnchorProject, 'h1', ['h1'])
+    const result = executeFlowEditorCommand(singleAnchorProject, h1Selection, {
+      name: 'format',
+      spec: { kind: 'convert-quote' },
+    }, { now: NOW })
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('至少需要一个可导航标题')
+  })
 })
