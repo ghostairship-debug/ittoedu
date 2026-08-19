@@ -104,7 +104,7 @@ describe('Flow unified layer entry', () => {
 
     fireEvent.click(bodyRow)
     const flow = useEditorStore.getState().flowSession
-    expect(flow?.selection.focus === 'block' || flow?.selection.focus === 'blocks').toBe(true)
+    expect(flow?.selection.focus).toBe('block')
     expect(flow?.selection.selectedBlockId ?? flow?.selection.selectedBlockIds?.[0]).toBe(heading!.id)
   })
 
