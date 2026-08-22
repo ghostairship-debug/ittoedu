@@ -1,7 +1,9 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.10  
-> 更新日期：2026-08-19  
+> 计划版本：12.12
+> 更新日期：2026-08-19
+> 12.12 变更：S0 探索产物见 [S0_HANDOFF](docs/tasks/editor-1.0/S0_HANDOFF.md)；改代码方案见 [S1](docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md)。**仍禁止未开实现卡就改 `src/**`。** 实现按 S1 波次 A–F；禁止跳过生命线测试拆 Store/Workspace。
+> 12.11 变更：**暂停新的功能补丁车道。** 当前最高优先级是高可用性（崩溃、内容加载不出、无法编辑），不是再补功能。先执行 [S0 探索/架构/解耦方法](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)；**本轮禁止按 S0 改 `src/**`。** 改代码方案是后续 S1，必须等 S0 探索产物齐备。12.10 及更早「不为时好时坏单开稳定性史诗 / 1.0 之后再拆 Store」的推迟条款，对本阶段让路；仍禁止未做探索就物理拆分 Store/Workspace。
 > 12.10 变更：流式讲义「先能读、再近 Word，不要解冻 V9」走车道 G，已合入 `main`。G0 修试运行/预览滚动（无合同）；G1 接线流内顺序与 F 遗留作者入口；G2/G3 只做一小包 additive（字体/段级/wrap/paperSpace）。不要重做 F1–F3 或 G0–G3。  
 > 12.9 变更：Course Project V9 作者工程 Schema **软冻结**。已有字段、判别器和语义不得改；允许 additive 可选字段。不承诺旧编辑器打开含新键的课（内部分发、持续更新）。不等于 Editor 1.0 已发布。Published V2 / Runtime / Component 本次未冻。
 > 12.8 变更：编排改为先确认中等策划再写带表面的呈现脚本；构建先盘资产再拆任务；局部复杂互动走组件（可新建），场景 Runtime 管整页动态。澄清 P8 宿主已合入、空 catalog ≠ 不能挂组件。无限画布运行态同时支持自由逛与镜头巡游（会话相机，交互占用时让路）。  
@@ -43,7 +45,8 @@
 
 | 缺口 | 说明 |
 |---|---|
-| 教师 `accepted` 与真实课例视觉/互动复核 | 自动化最多 `engineering candidate` |
+| **稳定性内核（12.11，进行中）** | 崩溃 / 空白 / 无法编辑。方法见 S0；未完成探索产物前不改产品代码、不拆 Store/Workspace |
+| 教师 `accepted` 与真实课例视觉/互动复核 | 自动化最多 `engineering candidate`。内核不稳时不把功能复核当最高优先 |
 | 外部组件目录 | 快照指向 `../courseware-components`，当前 `unavailable`；工程仍可导入或新建 `.h5component` |
 | 无限画布运行态逛世界 | 产品要求自由逛 + 镜头巡游；会话手势在 `SpatialSurfaceHost`，不写回工程相机 |
 
@@ -90,18 +93,34 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 ## 3. 车道与执行包
 
 ```text
-车道 P  产品事实与教师可感知收尾     可改 UI，不改 V9 判别器
-车道 C  合同冻结与协议去 V8         已完成；此后 Schema 仅 additive，且单独提交
+车道 S  稳定性内核（高可用、低错误率）   当前唯一可领取的新工作
+         S0 方法（本轮）→ 探索产物 → S1 改代码方案 → 以后才实现
+车道 P  产品事实与教师可感知收尾         已合入；冻结，勿新开补丁卡碰内核文件
+车道 C  合同冻结与协议去 V8             已完成；此后 Schema 仅 additive，且单独提交
+车道 F/G 流式讲义作者与近 Word           已合入；冻结
 ```
 
-同一提交不得同时改 Schema 判别器和教师可感知交互。P 与 C 分 worktree；抢同一热点时停下来，不要互相 rebase 进对方的合同/手感提交。
+同一提交不得同时改 Schema 判别器和教师可感知交互。在 S0/S1 确认前，禁止新开功能卡修改 S0 列出的内核文件。P 与 C 分 worktree 的旧规则仍有效；S 与任何功能卡抢同一热点时，功能卡停。
 
 执行拆分、并行边界、最小验证命令见：
 
 - [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)
 - [docs/tasks/editor-1.0/01_SHARED.md](docs/tasks/editor-1.0/01_SHARED.md)
 
-### 3.1 车道 C：合同冻结
+### 3.1 车道 S：稳定性内核（12.11）
+
+当前唯一新工作。教师可见的崩溃、内容加载不出、无法编辑，按故障域治理，不按功能点打补丁。
+
+| ID | 内容 | 验证 |
+|---|---|---|
+| [S0](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md) | 探索方法、架构设计方法、解耦方法 | 文档已交 |
+| [S0 HANDOFF](docs/tasks/editor-1.0/S0_HANDOFF.md) | E1–E5 探索产物（Gemini 并行 + 父代理复核） | 文档已交 |
+| [S1](docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md) | 改代码方案：波次 A–F（档 1–2） | 文档；**确认前禁止改 `src/**`** |
+| S 实现卡 | 按 S1 切卡 | 尚未开始 |
+
+内核文件默认冻结，清单在 S0 第 6.5 节。不要重做 P/Q/F/G 来「顺便」修稳定性。
+
+### 3.2 车道 C：合同冻结
 
 | ID | 内容 | 验证 |
 |---|---|---|
@@ -115,9 +134,9 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 
 T0–T6、P1–P8、Q1–Q8、F1–F3、G0–G3 已合入 `main`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
-### 3.2 车道 P：教师可见缺陷（12.2–12.3）
+### 3.3 车道 P：教师可见缺陷（12.2–12.3）
 
-按教师感知排序，不是按文件名排序。稳定性「时好时坏」不单开任务：P1–P4 先去掉双渲染器和跨表面重挂造成的明显竞态；Store/Workspace 大拆仍属 1.0 之后。
+按教师感知排序，不是按文件名排序。P1–P4 当时先去掉双渲染器和跨表面重挂造成的明显竞态。**12.11 起**：剩余的会话生命周期 / 双真相 / 错误舱壁改走车道 S（先 S0 方法，再 S1 改代码方案）。未完成 S0 探索产物前，禁止以「稳定性」为名物理拆分 `editorStore.ts` / `Workspace.tsx`。
 
 | ID | 内容 | 为何这个顺序 |
 |---|---|---|
@@ -156,17 +175,17 @@ T1 已合入的 additive：`SpatialSurfaceDocument.backgroundColor?` 与 `FlowSu
 
 ## 5. 非目标
 
-- 不全面重写 `editorStore.ts`、`Workspace.tsx`、属性栏。
+- **S0 不改产品代码**，也不物理拆分 `editorStore.ts` / `Workspace.tsx`。S1 若拆分，必须先有探索产物与生命线测试。
 - 不一次性移除所有 `SceneNode` 形状投影。
 - 不加入可见 AI、聊天、模型调用。
 - 不新增尚无产品需求的 Surface 或 Native 类型。
 - 不为数字整齐重置 Runtime / Component / Published 版本号。
 - 不把教师可感知交互缺陷塞进合同提交。
-- 不把 Phaser `PlayerApp` 重新接成 V9 Mixed 试运行主路径来「顺便」修视频。
+- 不把 Phaser `PlayerApp` 重新接成 V9 Mixed 试运行主路径来「顺便」修视频或减少双路径。
 - 不每表面复制一份教师控制器。
-- 不为「时好时坏」单开稳定性史诗；1.0 之后再拆 Store / Workspace。
+- 不把功能补全（属性栏、绕排、字体、导出格式）混进稳定性车道。
 
-1.0 之后再做：统一 Command 层、拆 Store、V9-native Read Model 替换投影、拆 Workspace、Player Authoring 语义 Patch。
+1.0 功能壳之后再做：统一 Command 框架、V9-native Read Model 替换全部 `derivedV8*` 投影、Player Authoring 语义 Patch。Store/Workspace **物理拆分**若出现在 S1，必须按 S0 的档 3 条件（生命线测试已存在、所有权入口已收口），不得作为 S0 的实现。
 
 ---
 
