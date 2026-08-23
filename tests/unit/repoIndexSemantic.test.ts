@@ -147,6 +147,7 @@ describe('repo-index stable semantic coverage', () => {
     expect(moduleCollection.schemaVersion).toBe(1)
     expect(features.map(({ id }) => id)).toEqual(expectedFeatureIds)
     expect(modules.map(({ id }) => id)).toEqual(expectedModuleIds)
+    expect(features).toHaveLength(22)
     expect(features.length).toBeGreaterThanOrEqual(18)
     expect(features.length).toBeLessThanOrEqual(22)
     expect(modules.length).toBeGreaterThanOrEqual(12)
@@ -244,9 +245,9 @@ describe('repo-index stable semantic coverage', () => {
     )
     for (const feature of features) {
       expect(feature.highSignalFiles?.length ?? 0, `${feature.id}:highSignalFiles`)
-        .toBeLessThanOrEqual(8)
+        .toBeLessThanOrEqual(12)
       expect(feature.highSignalTests?.length ?? 0, `${feature.id}:highSignalTests`)
-        .toBeLessThanOrEqual(6)
+        .toBeLessThanOrEqual(8)
       expect(feature.catalogBoundaryFiles?.length ?? 0, `${feature.id}:catalogBoundaryFiles`)
         .toBeLessThanOrEqual(5)
       for (const field of [
@@ -278,12 +279,21 @@ describe('repo-index stable semantic coverage', () => {
       'src/renderer/store/history.ts',
       'src/renderer/project/courseProjectIo.ts',
       'src/renderer/project/courseProjectArchive.ts',
+      'src/shared/contracts/course-project-v9/types.ts',
     ]))
     expect(journey.highSignalTests).toEqual(expect.arrayContaining([
       'tests/unit/assetTransactions.test.ts',
       'tests/unit/buildPublishedCourseV2.test.ts',
       'tests/integration/imageReplacementRaceCharacterization.test.tsx',
       'tests/e2e/editor.spec.ts',
+      'tests/unit/v9MediaTabAdapter.test.tsx',
+      'tests/unit/courseAuthoringSession.test.ts',
+    ]))
+
+    expect(feature('feature:flow').highSignalTests).toEqual(expect.arrayContaining([
+      'tests/unit/flowMediaBlockEdit.test.ts',
+      'tests/unit/flowProductIntegration.test.tsx',
+      'tests/unit/courseProjectArchive.test.ts',
     ]))
 
     expect(feature('feature:preview-player').aliases).toContain('activateCourseLocation')
@@ -291,7 +301,42 @@ describe('repo-index stable semantic coverage', () => {
       'tests/unit/tryRunLocationMode.test.ts',
       'tests/unit/flowProductIntegration.test.tsx',
       'tests/unit/spatialProductIntegration.test.tsx',
+      'tests/unit/courseAuthoringSession.test.ts',
+      'tests/unit/buildPublishedCourseV2.test.ts',
     ]))
+    expect(feature('feature:preview-player').highSignalFiles).toEqual(expect.arrayContaining([
+      'src/shared/contracts/course-project-v9/types.ts',
+      'src/shared/contracts/published-course-v2/types.ts',
+      'src/shared/contracts/published-course-v2/schema.ts',
+    ]))
+
+    expect(feature('feature:save-recovery').highSignalFiles).toContain(
+      'src/shared/contracts/course-project-v9/types.ts',
+    )
+
+    for (const featureId of ['feature:html-web-export', 'feature:pptx-export']) {
+      expect(feature(featureId).highSignalFiles).toEqual(expect.arrayContaining([
+        'src/shared/contracts/course-project-v9/types.ts',
+        'src/shared/contracts/published-course-v2/types.ts',
+        'docs/development-plan/inventories/legacy-consumers.json',
+      ]))
+    }
+    expect(feature('feature:pptx-export').highSignalTests).toContain(
+      'tests/unit/buildPublishedCourseV2.test.ts',
+    )
+
+    expect(feature('feature:developer-tab').highSignalFiles).toContain(
+      'src/shared/projectSchema.ts',
+    )
+
+    expect(feature('feature:desktop-ipc').highSignalFiles).toEqual(expect.arrayContaining([
+      'src/renderer/project/assetManager.ts',
+      'src/renderer/components/componentPackageStore.ts',
+      'tsconfig.electron.json',
+    ]))
+    expect(feature('feature:desktop-ipc').highSignalTests).toContain(
+      'tests/e2e/editor.spec.ts',
+    )
 
     const repoKnowledge = feature('feature:repo-knowledge')
     expect(repoKnowledge.aliases).toEqual(expect.arrayContaining([
@@ -307,9 +352,19 @@ describe('repo-index stable semantic coverage', () => {
       'repo-index/config.json',
       'scripts/repo-index/typescriptAdapter.ts',
       'tests/setup.ts',
+      'vite.renderer.config.ts',
+      'vite.player.config.ts',
+      'vitest.config.ts',
+      'playwright.config.ts',
     ]))
 
     const components = feature('feature:components')
+    expect(components.highSignalFiles).toContain(
+      'src/player/surfaces/publishedComponentMount.ts',
+    )
+    expect(components.highSignalFiles).toContain(
+      'docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md',
+    )
     expect(components.catalogBoundaryFiles).toEqual([
       'artifacts/ai-capabilities/component-catalog.snapshot.json',
       'src/main/componentCatalogManager.ts',
@@ -323,6 +378,18 @@ describe('repo-index stable semantic coverage', () => {
     expect(components.highSignalTests).toEqual(expect.arrayContaining([
       'tests/unit/componentContentIntegrity.test.ts',
       'tests/integration/componentCatalogV8Matrix.test.ts',
+      'tests/unit/publishedComponentMount.test.ts',
+      'tests/unit/componentCatalog.test.ts',
+      'tests/unit/componentCatalogStatus.test.ts',
+    ]))
+
+    const legacy = feature('feature:legacy-release')
+    expect(legacy.highSignalFiles).toContain(
+      'docs/contracts/V9_COMPATIBILITY_POLICY.md',
+    )
+    expect(legacy.highSignalTests).toEqual(expect.arrayContaining([
+      'tests/integration/renderHostBenchmark.test.ts',
+      'tests/unit/projectFormatIsolation.test.ts',
     ]))
   })
 

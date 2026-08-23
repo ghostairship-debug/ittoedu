@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0b-idx-03c-semantic-recall-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 2`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Semantic Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, semantic-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `531d8d589391613b17414bbb0ed4f1dbd6fe68f0`
-- Claim commit: `commit containing this wave claim`
+- Claim commit: `1d7027fa939b46059e7b4053273bf10096fc19f9`
 - Context: `unchanged corpus correctness signature fe47d786 + per-task required-recall gaps`
 - Freshness / relevant dirty inputs: ranking tuning is disjoint; corpus/expected/evaluator read-only
 - Depends on: `arch-0b-idx-03a done; corrected quality evaluator at 531d8d5`
@@ -67,11 +67,11 @@ After tuning wave 1, task Hit@5 is 100% but Recall@15 is 72.5%/66.15%. Remaining
 
 ## Acceptance
 
-- [ ] Feature count/alias uniqueness unchanged
-- [ ] Every added path exists and is justified by current module/consumer evidence
-- [ ] Signal budgets remain bounded
-- [ ] Image/Flow/Save/Preview/Delivery/Desktop/Repo/Legacy/Catalog recall classes covered
-- [ ] Corpus/expected/query/evaluator untouched
+- [x] Feature count/alias uniqueness unchanged
+- [x] Every added path exists and is justified by current module/consumer evidence
+- [x] Signal budgets remain bounded
+- [x] Image/Flow/Save/Preview/Delivery/Desktop/Repo/Legacy/Catalog recall classes covered
+- [x] Corpus/expected/query/evaluator untouched by this task
 
 ## Minimal validation
 
@@ -93,7 +93,14 @@ After tuning wave 1, task Hit@5 is 100% but Recall@15 is 72.5%/66.15%. Remaining
 
 ## Result evidence
 
-- Pending.
+- Preserved the exact 22-Feature ID order, every canonical-file order and all confidence/status semantics. No Feature, alias, module or external-source claim was added.
+- Added sparse current signals for the corrected gaps: the image replacement journey now recalls the V9 carrier plus Media/Session tests; Flow recalls media/product/archive tests; Components recalls Published mounting and local Catalog tests; Save/Preview/HTML/PPTX recall V9/Published contracts, build evidence and the Legacy ledger where applicable.
+- DeveloperTab now recalls the retained Legacy `projectSchema`; Desktop recalls renderer asset/component consumers, E2E and Electron compiler boundary; Repo Knowledge recalls renderer/player Vite, Vitest and Playwright configs; Legacy release recalls compatibility policy, render benchmark and format-isolation tests.
+- Kept the five-path Catalog boundary intact, including the ambiguous UI/status evidence required by the current query contract; added the canonical owner ledger as a separate Components high-signal file. No external component repository was invented.
+- Budget result: maximum `highSignalFiles=11/12`, `highSignalTests=7/8`, `catalogBoundaryFiles=5/5`; every signal list is duplicate-free and every path exists.
+- Validation: `npx vitest run tests/unit/repoIndexSemantic.test.ts` passed `1 file / 5 tests`, including exact Feature order/count, alias uniqueness, path existence, budgets, targeted signal locks and temporary-directory generator validation. `git diff --check` passed.
+- Scope: this task changed only `repo-index/semantic/features.json`, `tests/unit/repoIndexSemantic.test.ts` and this card. Concurrent query/context-pack/query-test writes are disjoint and were not modified. Corpus, expected, evaluator, modules, generated facts, package and product files remain untouched by this task.
+- indexImpact: `semantic-update + regenerate`; Coordinator owns the unchanged-corpus quality rerun and generated refresh.
 
 ## Ready checklist (Coordinator)
 

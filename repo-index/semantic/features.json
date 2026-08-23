@@ -169,7 +169,8 @@
         "src/renderer/project/v9AssetAdapter.ts",
         "src/renderer/store/history.ts",
         "src/renderer/project/courseProjectIo.ts",
-        "src/renderer/project/courseProjectArchive.ts"
+        "src/renderer/project/courseProjectArchive.ts",
+        "src/shared/contracts/course-project-v9/types.ts"
       ],
       "tests": [
         "tests/unit/courseAuthoringSession.test.ts",
@@ -180,7 +181,9 @@
         "tests/unit/courseProjectArchive.test.ts",
         "tests/unit/buildPublishedCourseV2.test.ts",
         "tests/integration/imageReplacementRaceCharacterization.test.tsx",
-        "tests/e2e/editor.spec.ts"
+        "tests/e2e/editor.spec.ts",
+        "tests/unit/v9MediaTabAdapter.test.tsx",
+        "tests/unit/courseAuthoringSession.test.ts"
       ],
       "evidence": [
         "COURSEWARE_DEVELOPMENT_PLAN.md",
@@ -260,7 +263,10 @@
         "tests/unit/flowWorkspaceMedia.test.tsx",
         "tests/unit/flowSurfaceHost.test.ts",
         "tests/unit/flowWorkspace.test.tsx",
-        "tests/unit/flowOverlayTransform.test.ts"
+        "tests/unit/flowOverlayTransform.test.ts",
+        "tests/unit/flowMediaBlockEdit.test.ts",
+        "tests/unit/flowProductIntegration.test.tsx",
+        "tests/unit/courseProjectArchive.test.ts"
       ],
       "carriers": {
         "paper": "FlowSurfaceDocument.blocks (FlowBlock[]; not LayerItem[])",
@@ -409,14 +415,19 @@
       "targetState": "Components owns packages and validation; Surfaces own correct carrier placement.",
       "highSignalFiles": [
         "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/player/surfaces/publishedComponentMount.ts",
         "src/player/surfaces/flow/FlowSurfaceHost.ts",
         "src/player/surfaces/spatial/SpatialSurfaceHost.ts",
-        "src/player/surfaces/slide/SlidePublishedAdapter.ts"
+        "src/player/surfaces/slide/SlidePublishedAdapter.ts",
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
       ],
       "highSignalTests": [
         "tests/unit/playerComponentV4Render.test.ts",
         "tests/integration/componentCatalogV8Matrix.test.ts",
-        "tests/unit/componentContentIntegrity.test.ts"
+        "tests/unit/componentContentIntegrity.test.ts",
+        "tests/unit/publishedComponentMount.test.ts",
+        "tests/unit/componentCatalog.test.ts",
+        "tests/unit/componentCatalogStatus.test.ts"
       ],
       "catalogBoundaryFiles": [
         "artifacts/ai-capabilities/component-catalog.snapshot.json",
@@ -627,7 +638,8 @@
         "src/preload/index.ts",
         "src/shared/ipcTypes.ts",
         "src/renderer/project/courseProjectLifecycle.ts",
-        "src/main/createWindow.ts"
+        "src/main/createWindow.ts",
+        "src/shared/contracts/course-project-v9/types.ts"
       ],
       "highSignalTests": [
         "tests/unit/asyncArchive.test.ts",
@@ -678,12 +690,17 @@
       "highSignalFiles": [
         "src/renderer/store/editorStore.ts",
         "src/renderer/course/courseEditorLayout.ts",
-        "src/renderer/export/course/buildPublishedCourse.ts"
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/published-course-v2/types.ts",
+        "src/shared/contracts/published-course-v2/schema.ts"
       ],
       "highSignalTests": [
         "tests/unit/tryRunLocationMode.test.ts",
         "tests/unit/flowProductIntegration.test.tsx",
-        "tests/unit/spatialProductIntegration.test.tsx"
+        "tests/unit/spatialProductIntegration.test.tsx",
+        "tests/unit/courseAuthoringSession.test.ts",
+        "tests/unit/buildPublishedCourseV2.test.ts"
       ],
       "canonicalFiles": [
         "src/renderer/ui/coursePlayerTryRun.ts",
@@ -728,7 +745,10 @@
       "highSignalFiles": [
         "src/renderer/App.tsx",
         "src/player/index.ts",
-        "src/player/surfaces/publishedDynamicHosts.ts"
+        "src/player/surfaces/publishedDynamicHosts.ts",
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/published-course-v2/types.ts",
+        "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "highSignalTests": [
         "tests/unit/buildPublishedCourseV2.test.ts",
@@ -772,10 +792,14 @@
       "targetState": "Route supported V9 content through one path with editable/staticization parity.",
       "highSignalFiles": [
         "src/renderer/export/course/buildPublishedCourse.ts",
-        "src/renderer/export/course/buildCoursePrintArtifacts.ts"
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/published-course-v2/types.ts",
+        "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "highSignalTests": [
-        "tests/unit/renderPptxComponentSnapshots.test.ts"
+        "tests/unit/renderPptxComponentSnapshots.test.ts",
+        "tests/unit/buildPublishedCourseV2.test.ts"
       ],
       "canonicalFiles": [
         "src/renderer/export/course/buildCoursePptx.ts",
@@ -915,7 +939,8 @@
         "src/shared/contracts/runtime/schema.ts",
         "src/shared/contracts/interaction-v1/schema.ts",
         "src/renderer/components/importComponentPackage.ts",
-        "src/renderer/authoring/runtimeTargetEditSession.ts"
+        "src/renderer/authoring/runtimeTargetEditSession.ts",
+        "src/shared/projectSchema.ts"
       ],
       "highSignalTests": [
         "tests/unit/componentPackage.test.ts"
@@ -960,7 +985,10 @@
       "highSignalFiles": [
         "src/main/createWindow.ts",
         "src/preload/desktop-api.d.ts",
-        "src/renderer/vite-env.d.ts"
+        "src/renderer/vite-env.d.ts",
+        "src/renderer/project/assetManager.ts",
+        "src/renderer/components/componentPackageStore.ts",
+        "tsconfig.electron.json"
       ],
       "highSignalTests": [
         "tests/e2e/editor.spec.ts"
@@ -1014,12 +1042,15 @@
         "src/renderer/project/courseProjectIo.ts",
         "src/renderer/project/validateProjectArchive.ts",
         "scripts/validate-project.ts",
-        "package.json"
+        "package.json",
+        "docs/contracts/V9_COMPATIBILITY_POLICY.md"
       ],
       "highSignalTests": [
         "tests/unit/projectArchive.test.ts",
         "tests/unit/aiCapabilities.test.ts",
-        "tests/unit/validateProject.test.ts"
+        "tests/unit/validateProject.test.ts",
+        "tests/integration/renderHostBenchmark.test.ts",
+        "tests/unit/projectFormatIsolation.test.ts"
       ],
       "canonicalFiles": [
         "src/renderer/project/projectArchive.ts",
@@ -1071,7 +1102,11 @@
         "package.json",
         "repo-index/config.json",
         "scripts/repo-index/typescriptAdapter.ts",
-        "tests/setup.ts"
+        "tests/setup.ts",
+        "vite.renderer.config.ts",
+        "vite.player.config.ts",
+        "vitest.config.ts",
+        "playwright.config.ts"
       ],
       "highSignalTests": [
         "tests/unit/repoIndexTypeScriptAdapter.test.ts",
