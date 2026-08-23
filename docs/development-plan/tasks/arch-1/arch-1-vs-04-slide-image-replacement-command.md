@@ -6,14 +6,14 @@
 
 - Task ID: `arch-1-vs-04-slide-image-replacement-command`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending isolated Media command worktree / codex/architecture-stabilization`
-- Baseline HEAD: `pending final ARCH-0B gate baseline`
-- Claim commit: `pending`
-- Context: `pending ARCH-0B gate; require fresh Media/Slide context and reviewed VS-02/VS-03 interfaces`
-- Freshness / relevant dirty inputs: refresh current `v9MediaAudioCommands` and Slide content helpers after VS-02/VS-03; no App/Store writer in this worktree
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Media / Slide Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, Media/Slide pure-command-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `1d7027fa939b46059e7b4053273bf10096fc19f9`
+- Claim commit: `commit containing this claim update`
+- Context: `bootstrap-manual approved for the single ARCH-1 pure command after VS-02/VS-03 done; broad gate still closed`
+- Freshness / relevant dirty inputs: Media/Slide command paths clean; concurrent repo-index semantic/query tuning is disjoint; App/Store remain locked and untouched
 - Depends on: `arch-1-vs-01-image-replacement-characterization (done); arch-1-vs-02-authoring-target-stale-guard (reviewed/target-green); arch-1-vs-03-editor-transaction-resource-delta (reviewed/target-green)`
 - Blocks: `arch-1-vs-05-image-replacement-app-store-integration`
 - Retry count: `0`
@@ -146,10 +146,10 @@ A pure Slide/Media command can replace exactly the captured native image in Cour
 
 ## Ready checklist（Coordinator）
 
-- [ ] dependsOn satisfied
-- [ ] context fresh or Bootstrap verified
-- [ ] evidence and paths valid
-- [ ] write locks available
-- [ ] budget/validation/rollback complete
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- [x] VS-01/VS-02/VS-03 dependencies satisfied
+- [x] manual Bootstrap verified
+- [x] evidence and paths valid
+- [x] Media/Slide command lock available
+- [x] budget/validation/rollback complete
+- [x] no related user dirty change
+- [x] no product escalation triggered
