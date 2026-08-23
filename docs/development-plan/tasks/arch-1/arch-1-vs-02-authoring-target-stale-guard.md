@@ -6,9 +6,9 @@
 
 - Task ID: `arch-1-vs-02-authoring-target-stale-guard`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Target Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, Session-target-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `f5a6cf9`
 - Claim commit: `90d8f6080bdaac5986e7c896de6eb7671c6e50f9`
@@ -117,7 +117,7 @@ An asynchronous image replacement can carry one immutable target captured before
 ## Rollback
 
 - Start point: `f5a6cf9`
-- Implementation commit: `pending Coordinator integration; Worker made no Git commit`
+- Implementation commit: `6420cb868e889711086cfdd7d06979bfa152a2df`
 - Old path remains: existing Session freshness functions remain recoverable; revert this additive identity commit without touching user data.
 
 ## Consumers and index
@@ -138,6 +138,7 @@ An asynchronous image replacement can carry one immutable target captured before
 ## Findings / next allowed task
 
 - The exact policy deliberately rejects any intervening document revision even when the captured item still exists. Same-owner selection B is absent from current identity, so it neither invalidates nor retargets captured A. VS-04 may proceed only after Coordinator review; do not broaden target policy beyond the image-replacement slice.
+- Coordinator review independently reran both target/Session suites (7/7), verified the real Slide fixture identity, rejection order/codes and absence of Store/Surface-selection imports, then integrated the additive seam.
 
 ## Ready checklist（Coordinator）
 
