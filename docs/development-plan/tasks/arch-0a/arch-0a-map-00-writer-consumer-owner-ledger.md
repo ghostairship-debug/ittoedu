@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0a-map-00-writer-consumer-owner-ledger`
 - Phase / wave: `ARCH-0A / wave 1`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Inventory Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, inventory-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Claim commit: `commit containing this card`
+- Claim commit: `3bb5c746dd46e6b2b4e7a2110c6fc6b2d67e44dd`
 - Context: `bootstrap-manual`
 - Freshness / relevant dirty inputs: clean baseline; other workers have non-overlapping fixture and index scopes
 - Depends on: `arch-0a-bsl-00-baseline-and-budgets (done)`
@@ -88,11 +88,11 @@ Plan prose identifies several debts, but no canonical current FACT/MAP ledger or
 
 ## Acceptance
 
-- [ ] All current module areas and first seven high-risk journeys have an evidence entry
-- [ ] Legacy ledger has stable IDs and all required fields
-- [ ] Starting counts are reproducible from the ledger
-- [ ] Current, target, and transitional facts are not mixed
-- [ ] No product/generated/contract changes
+- [x] All current module areas and first seven high-risk journeys have an evidence entry
+- [x] Legacy ledger has stable IDs and all required fields
+- [x] Starting counts are reproducible from the ledger
+- [x] Current, target, and transitional facts are not mixed
+- [x] No product/generated/contract changes
 
 ## Minimal validation
 
@@ -104,22 +104,29 @@ Plan prose identifies several debts, but no canonical current FACT/MAP ledger or
 ## Rollback
 
 - Start point: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Implementation commit: pending
+- Implementation commit: not created; Worker leaves a target-green uncommitted diff for Coordinator review
 - Old path remains: plan prose and manual Bootstrap remain available.
 
 ## Consumers and index
 
-- Consumer delta: `0`; establishes starting counts.
-- Legacy record IDs: created by this card.
+- Consumer delta: `0`; establishes a starting inventory of `10` Legacy records, `116` confirmed consumer relations, and `104` unique confirmed `path#symbol` endpoints.
+- Legacy record IDs: `LEG-001` through `LEG-010`.
 - indexImpact: `semantic-update`
 
 ## Result evidence
 
-- Pending Worker result.
+- Added canonical Feature/writer/consumer/owner ledger at `docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md`: 19 current module areas and first seven high-risk journeys, with exact evidence paths and explicit current/target/unknown separation.
+- Added canonical machine-readable Legacy ledger at `docs/development-plan/inventories/legacy-consumers.json`: stable unique IDs, all seven deletion-proof consumer categories on every record, replacement/removal/zero-reference/persisted-compatibility/tests/stable-since/rollback/indexImpact fields, and reproducible starting counts.
+- Baseline split: `5 active-debt`, `2 reachability-unproven`, `2 retained-compatibility`, `1 dead-candidate`. No retained V8 fixture is represented as product V8-open support.
+- Validation: JSON parse; required-field/category/unique-ID/count assertions; all JSON and Markdown evidence paths; textual `path#symbol` resolution; all recorded zero-reference observed counts; new-file and tracked `git diff --check` hygiene.
+- Scope check: only the two canonical inventory files and this task card are changed by this task; no source, test, script, package, contract, generated-index, baseline, or other task-card write.
 
 ## Findings / next allowed task
 
 - Only confirmed records may seed migration/delete cards; unknown reachability becomes characterization work.
+- `LEG-003` App no-source Preview/HTML/Web and `LEG-005` PDF raster fallback retain `reachability-unproven`; do not create a sessionless V9 state to keep them alive.
+- `LEG-008` V8 archive/example/release toolchain and `LEG-009` V8 test helper are retained compatibility records, not deletion approvals and not product import support.
+- `LEG-010` has definition-only static evidence, but deletion still waits for generated index, dynamic/config/package, and release inspection proof.
 
 ## Ready checklist (Coordinator)
 

@@ -1,0 +1,1853 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "baselineCommit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+    "claimCommit": "3bb5c746dd46e6b2b4e7a2110c6fc6b2d67e44dd",
+    "scope": "Confirmed tracked source, script, fixture, release, and test consumer relations for the initial ARCH-0A Legacy inventory.",
+    "limitations": [
+      "This is an evidence-backed starting inventory, not a claim that future static indexing cannot discover more consumers.",
+      "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
+      "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
+    ]
+  },
+  "consumerCategoryDefinitions": {
+    "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
+    "dynamicStringIpcOrConfig": "Dynamic import, string lookup, IPC channel, package script, or configuration reference.",
+    "playerPreviewOrExport": "Player, try-run, full preview, HTML/Web, PPTX, PDF, DOCX, or export-preflight consumer.",
+    "buildFixtureOrRelease": "Build script, fixture generator, benchmark, portability check, packaging, or release verifier.",
+    "persistedRecoveryOrCrossVersion": "Persisted archive/export/report, Recovery, or explicit cross-version compatibility relation.",
+    "testConsumers": "Tests that directly import, construct, call, or assert the Legacy target.",
+    "cacheAsyncGeneratedOrPackaging": "Cache, delayed callback, async flush, generated artifact, embedded bundle, or packaged artifact relation."
+  },
+  "startingCounts": {
+    "recordCount": 10,
+    "byStatus": {
+      "active-debt": 5,
+      "reachability-unproven": 2,
+      "retained-compatibility": 2,
+      "dead-candidate": 1
+    },
+    "confirmedConsumerRelationsByCategory": {
+      "staticImportsOrReferences": 25,
+      "dynamicStringIpcOrConfig": 8,
+      "playerPreviewOrExport": 20,
+      "buildFixtureOrRelease": 13,
+      "persistedRecoveryOrCrossVersion": 7,
+      "testConsumers": 32,
+      "cacheAsyncGeneratedOrPackaging": 11
+    },
+    "confirmedConsumerRelationCount": 116,
+    "uniqueConfirmedConsumerEndpointCount": 104,
+    "countDefinition": "A relation is one object in consumerCategories.<category>.confirmed. Unique endpoints are path#symbol pairs across those relations.",
+    "reproduce": "node -e \"const x=require('./docs/development-plan/inventories/legacy-consumers.json');const cats=Object.keys(x.consumerCategoryDefinitions);const rel=Object.fromEntries(cats.map(c=>[c,x.records.flatMap(r=>r.consumerCategories[c].confirmed).length]));const status={};const ep=new Set();for(const r of x.records){status[r.status]=(status[r.status]||0)+1;for(const c of cats)for(const e of r.consumerCategories[c].confirmed)ep.add(e.path+'#'+e.symbol)}console.log(JSON.stringify({recordCount:x.records.length,byStatus:status,confirmedConsumerRelationsByCategory:rel,confirmedConsumerRelationCount:Object.values(rel).reduce((a,b)=>a+b,0),uniqueConfirmedConsumerEndpointCount:ep.size},null,2))\""
+  },
+  "records": [
+    {
+      "id": "LEG-001",
+      "legacyTarget": {
+        "kind": "read-only-projection-and-duplicate-state",
+        "path": "src/renderer/store/editorStore.ts",
+        "symbols": [
+          "EditorState.project",
+          "projectCandidatePreviewDocument",
+          "derivedV8ProjectFromBackend",
+          "slideCandidateUi",
+          "v9HistoryToStoreHistory"
+        ]
+      },
+      "owner": "Editor Store / History",
+      "status": "active-debt",
+      "currentFact": "The active V9 session is canonical for save/publish, while editorStore also rebuilds and exposes a schemaVersion 8 ProjectDocument projection for UI and Legacy consumers.",
+      "evidence": [
+        {
+          "path": "src/renderer/store/editorStore.ts",
+          "symbol": "selectActiveCourseProjectDocument",
+          "note": "Selects exactly one active V9 session document."
+        },
+        {
+          "path": "src/renderer/store/editorStore.ts",
+          "symbol": "projectCandidatePreviewDocument",
+          "note": "Constructs a schemaVersion 8 ProjectDocument."
+        },
+        {
+          "path": "src/renderer/App.tsx",
+          "symbol": "currentCourseArchiveData",
+          "note": "V9 save path bypasses the projection and reads the active V9 document."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/store/editorStore.ts",
+              "symbol": "applyV9Backend",
+              "use": "Writes the derived V8 project into EditorState.project."
+            },
+            {
+              "path": "src/renderer/store/editorStore.ts",
+              "symbol": "persistCandidateResult",
+              "use": "Refreshes EditorState.project and synthetic UI history after Slide V9 commands."
+            },
+            {
+              "path": "src/renderer/ui/Workspace.tsx",
+              "symbol": "globalLayer",
+              "use": "Reads projected V8 globalLayer for Slide authoring composition."
+            },
+            {
+              "path": "src/renderer/ui/PropertiesTab.tsx",
+              "symbol": "PropertiesTab",
+              "use": "Reads EditorState.project assets, diagnostics, and V8 fallbacks."
+            }
+          ],
+          "unknowns": [
+            "Raw state.project reads beyond the high-risk paths remain candidates for generated repo-index enumeration."
+          ]
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": [
+            "No dynamic or IPC lookup of projectCandidatePreviewDocument was found by exact tracked-text search."
+          ]
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "buildHtml",
+              "use": "Uses the projection in the no-source standalone HTML path."
+            },
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExportWebPackage",
+              "use": "Uses the projection in the no-source Web package path."
+            },
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExportPptx",
+              "use": "Uses the projection for the Slide-only Legacy PPTX branch."
+            },
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExportPdf",
+              "use": "Uses the projection for raster/no-source PDF branches."
+            },
+            {
+              "path": "src/renderer/ui/Workspace.tsx",
+              "symbol": "syncCompleteAuthoringSnapshot",
+              "use": "Projects global nodes for the legacy Player authoring snapshot."
+            },
+            {
+              "path": "src/renderer/ui/Workspace.tsx",
+              "symbol": "Workspace",
+              "use": "Builds the legacy runtime-authoring preview from the projection."
+            }
+          ],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [],
+          "unknowns": [
+            "Build/release consumers use the V8 archive/export pipeline recorded in LEG-002 and LEG-008 rather than importing this Store projection."
+          ]
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [],
+          "unknowns": [
+            "The projection is not serialized by currentCourseArchiveData; no persisted compatibility obligation for this in-memory field is confirmed."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/v9SlideBackendSelection.test.ts",
+              "symbol": "selectActiveCourseProjectDocument",
+              "use": "Characterizes V9 selection while Store projection remains present."
+            },
+            {
+              "path": "tests/unit/v9GlobalLayerUiAdapter.test.tsx",
+              "symbol": "project",
+              "use": "Asserts projected global-layer UI behavior."
+            },
+            {
+              "path": "tests/unit/assetTransactions.test.ts",
+              "symbol": "project",
+              "use": "Asserts media results through EditorState.project and assetFiles."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "src/renderer/store/editorStore.ts",
+              "symbol": "slideCandidateUi",
+              "use": "Cached projection used to keep React snapshots stable."
+            },
+            {
+              "path": "src/renderer/store/editorStore.ts",
+              "symbol": "slideCandidateSidecarPast",
+              "use": "Parallel resource snapshot stack synchronized with Slide history."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "partial-existing",
+        "paths": [
+          {
+            "path": "src/renderer/store/editorStore.ts",
+            "symbol": "selectActiveCourseProjectDocument"
+          },
+          {
+            "path": "src/renderer/course/read-model/index.ts",
+            "symbol": "projectV9EditingNodes"
+          },
+          {
+            "path": "src/renderer/export/course/buildPublishedCourse.ts",
+            "symbol": "buildPublishedCourseV2Payload"
+          }
+        ],
+        "notes": "Save and V2 publish already read V9. UI/history/legacy delivery consumers still require migration."
+      },
+      "targetRemovalPhase": "ARCH-5",
+      "zeroReferenceEvidence": {
+        "state": "nonzero",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'projectCandidatePreviewDocument' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 13
+          }
+        ],
+        "requiredForRemoval": "All projection consumers and EditorState.project reads must use V9 selectors/view models; exact target references must be zero."
+      },
+      "persistedCompatibility": {
+        "status": "none-confirmed",
+        "evidence": [
+          {
+            "path": "src/renderer/App.tsx",
+            "symbol": "currentCourseArchiveData",
+            "note": "Serializes the active V9 document, not EditorState.project."
+          }
+        ],
+        "unknowns": []
+      },
+      "tests": [
+        "tests/unit/v9SlideBackendSelection.test.ts",
+        "tests/unit/readModelBoundary.test.ts",
+        "tests/unit/courseProjectRoundTrip.test.ts"
+      ],
+      "stableSince": {
+        "status": "not-established",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Revert only the future consumer migration; do not restore a deleted projection until the replacement failure is reproduced."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "Generated repo-index has not yet enumerated every raw Store consumer."
+      ]
+    },
+    {
+      "id": "LEG-002",
+      "legacyTarget": {
+        "kind": "legacy-export-payload-and-player-pipeline",
+        "path": "src/renderer/export/buildExportPayload.ts",
+        "symbols": [
+          "buildExportPayload",
+          "ExportPayload",
+          "buildStandaloneHtml",
+          "PlayerApp"
+        ]
+      },
+      "owner": "Preview / Export / Player",
+      "status": "active-debt",
+      "currentFact": "Published Course V2 is the course product path, but Runtime authoring preview and several build/release scripts still construct the older ExportPayload and PlayerApp pipeline.",
+      "evidence": [
+        {
+          "path": "src/renderer/ui/Workspace.tsx",
+          "symbol": "Workspace",
+          "note": "Creates runtime authoring preview resources from ExportPayload."
+        },
+        {
+          "path": "src/player/index.ts",
+          "symbol": "startPlayer",
+          "note": "Accepts ExportPayload or PublishedLessonPayload and creates PlayerApp."
+        },
+        {
+          "path": "src/renderer/export/course/buildPublishedCourse.ts",
+          "symbol": "buildPublishedCourseV2Payload",
+          "note": "Existing one-way V2 replacement for course delivery."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "buildExportPayload",
+              "use": "Imported for no-source and static-export Legacy branches."
+            },
+            {
+              "path": "src/renderer/ui/Workspace.tsx",
+              "symbol": "buildStandaloneHtml",
+              "use": "Builds the isolated Runtime authoring iframe document."
+            },
+            {
+              "path": "src/player/index.ts",
+              "symbol": "startPlayer",
+              "use": "Normalizes and mounts the Legacy payload into PlayerApp."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [
+            {
+              "path": "package.json",
+              "symbol": "build:lesson-demo:fixture",
+              "use": "Runs a script that builds the Legacy ExportPayload standalone lesson."
+            },
+            {
+              "path": "package.json",
+              "symbol": "build:render-benchmark:fixture",
+              "use": "Runs the Legacy render-host payload builder."
+            }
+          ],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/ui/Workspace.tsx",
+              "symbol": "createRuntimePreviewPayloadResources",
+              "use": "Transfers ExportPayload assets/components into the authoring iframe."
+            },
+            {
+              "path": "src/renderer/export/buildStandaloneHtml.ts",
+              "symbol": "buildStandaloneHtml",
+              "use": "Embeds the Legacy payload and player bundle."
+            },
+            {
+              "path": "src/player/PlayerApp.ts",
+              "symbol": "PlayerApp",
+              "use": "Legacy player host used by exported payloads and authoring preview."
+            }
+          ],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [
+            {
+              "path": "scripts/build-incline-motion-lesson.ts",
+              "symbol": "buildExportPayload",
+              "use": "Builds a Legacy standalone lesson artifact."
+            },
+            {
+              "path": "scripts/build-interactive-lesson.ts",
+              "symbol": "buildExportPayload",
+              "use": "Builds the lesson-demo fixture."
+            },
+            {
+              "path": "scripts/build-render-host-benchmark.ts",
+              "symbol": "buildExportPayload",
+              "use": "Builds the render-host benchmark HTML."
+            },
+            {
+              "path": "scripts/verify-w3-windows-portability.ts",
+              "symbol": "buildExportPayload",
+              "use": "Builds and verifies a portable Legacy web artifact."
+            }
+          ],
+          "unknowns": []
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [
+            {
+              "path": "examples/render-host-benchmark/render-host-benchmark.html",
+              "symbol": "committed generated artifact",
+              "use": "Persisted Legacy standalone benchmark consumed by release verification."
+            }
+          ],
+          "unknowns": [
+            "No explicit promise to keep loading arbitrary historical ExportPayload files was found; committed artifacts and tests are the confirmed obligation."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/export.test.ts",
+              "symbol": "buildExportPayload",
+              "use": "Direct Legacy export contract tests."
+            },
+            {
+              "path": "tests/unit/runtimeExport.test.ts",
+              "symbol": "buildExportPayload",
+              "use": "Runtime export and standalone HTML tests."
+            },
+            {
+              "path": "tests/integration/player-payload.test.ts",
+              "symbol": "ExportPayload",
+              "use": "Legacy payload parsing/loading tests."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "src/renderer/preview/runtimePreviewPayload.ts",
+              "symbol": "createRuntimePreviewPayloadResources",
+              "use": "Creates transferable asset state for an asynchronous iframe preview."
+            },
+            {
+              "path": "src/renderer/preview/runtimePreviewLifecycle.ts",
+              "symbol": "releaseRuntimePreviewResources",
+              "use": "Owns asynchronous cleanup of generated preview resources."
+            },
+            {
+              "path": "vite.renderer.config.ts",
+              "symbol": "playerBundlePlugin",
+              "use": "Embeds the separately built Player IIFE into renderer/export flows."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "partial-existing",
+        "paths": [
+          {
+            "path": "src/renderer/export/course/buildPublishedCourse.ts",
+            "symbol": "buildPublishedCourseV2Payload"
+          },
+          {
+            "path": "src/player/surfaces/publishedDynamicHosts.ts",
+            "symbol": "createPublishedCourseSession"
+          }
+        ],
+        "notes": "Course delivery and try-run have V2 replacements. Runtime authoring preview and legacy fixtures have not been migrated or approved for deletion."
+      },
+      "targetRemovalPhase": "ARCH-5",
+      "zeroReferenceEvidence": {
+        "state": "nonzero",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'buildExportPayload' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 23
+          }
+        ],
+        "requiredForRemoval": "Migrate or explicitly retain every authoring-preview, build, fixture, portability, test, generated artifact, and PlayerApp consumer."
+      },
+      "persistedCompatibility": {
+        "status": "retained-artifacts-confirmed",
+        "evidence": [
+          {
+            "path": "examples/render-host-benchmark/render-host-benchmark.html",
+            "symbol": "embedded Legacy payload"
+          },
+          {
+            "path": "scripts/verify-release.ts",
+            "symbol": "renderHostBenchmarkHtml"
+          }
+        ],
+        "unknowns": [
+          "Broader cross-version compatibility policy for already exported Legacy HTML is not documented."
+        ]
+      },
+      "tests": [
+        "tests/unit/buildPublishedCourseV2.test.ts",
+        "tests/unit/coursePlayerTryRunFit.test.ts",
+        "tests/integration/player-payload.test.ts"
+      ],
+      "stableSince": {
+        "status": "not-established-for-all-consumers",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore the last migrated consumer adapter only; keep the V2 producer unchanged."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "Whether Runtime authoring can consume Published V2 without losing patch/snapshot semantics requires characterization."
+      ]
+    },
+    {
+      "id": "LEG-003",
+      "legacyTarget": {
+        "kind": "reachability-unproven-no-source-fallback",
+        "path": "src/renderer/App.tsx",
+        "symbols": [
+          "activeCoursePublishSources",
+          "buildHtml",
+          "handlePreview",
+          "handleExportWebPackage"
+        ]
+      },
+      "owner": "App / Preview / Export",
+      "status": "reachability-unproven",
+      "currentFact": "App retains preview and HTML/Web branches for a state with no active V9 publish sources, while normal new/open/location transitions establish exactly one active V9 session.",
+      "evidence": [
+        {
+          "path": "src/renderer/App.tsx",
+          "symbol": "activeCoursePublishSources",
+          "note": "Returns null only if selectActiveCourseProjectDocument returns null."
+        },
+        {
+          "path": "src/renderer/store/editorStore.ts",
+          "symbol": "selectActiveCourseProjectDocument",
+          "note": "Falls through the three mutually exclusive active V9 backends."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "buildHtml",
+              "use": "Branches to projectCandidatePreviewDocument + buildExportPayload when sources are null."
+            },
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handlePreview",
+              "use": "Opens the Legacy preview window when sources are null."
+            },
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExportWebPackage",
+              "use": "Builds a Legacy Web package when sources are null."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [
+            {
+              "path": "src/preload/index.ts",
+              "symbol": "preview:open",
+              "use": "IPC route used only by the App Legacy preview branch."
+            }
+          ],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/export/buildStandaloneHtml.ts",
+              "symbol": "buildStandaloneHtml",
+              "use": "Legacy standalone HTML fallback."
+            },
+            {
+              "path": "src/renderer/export/buildWebPackage.ts",
+              "symbol": "buildWebPackageFromProjectAsync",
+              "use": "Legacy Web package fallback."
+            },
+            {
+              "path": "src/main/previewWindow.ts",
+              "symbol": "openPreviewWindow",
+              "use": "Desktop preview window invoked by App when V9 sources are absent."
+            }
+          ],
+          "unknowns": [
+            "No current user journey proving the source-null state is reachable was found."
+          ]
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [],
+          "unknowns": [
+            "No build/release script calls the App branch directly."
+          ]
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [],
+          "unknowns": [
+            "No authoring archive compatibility obligation for a sessionless V9 state is documented."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/exportMenuUi.test.tsx",
+              "symbol": "selectActiveCourseProjectDocument",
+              "use": "Characterizes export UI with an active V9 document, not the null-source fallback."
+            },
+            {
+              "path": "tests/unit/webPackageExport.test.ts",
+              "symbol": "buildWebPackage",
+              "use": "Tests the Legacy Web package builder independently of App reachability."
+            }
+          ],
+          "unknowns": [
+            "No test invokes the App fallback from a legal normal-lifecycle V9 state."
+          ]
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "src/main/previewWindow.ts",
+              "symbol": "cleanupPreviewFiles",
+              "use": "Owns temporary preview-file lifecycle for the Legacy preview window."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "existing-for-normal-v9",
+        "paths": [
+          {
+            "path": "src/renderer/export/course/buildCoursePackages.ts",
+            "symbol": "buildPublishedCourseStandaloneHtml"
+          },
+          {
+            "path": "src/renderer/export/course/buildCoursePackages.ts",
+            "symbol": "buildPublishedCourseWebPackageAsync"
+          },
+          {
+            "path": "src/renderer/ui/coursePlayerTryRun.ts",
+            "symbol": "mountPublishedCourseTryRun"
+          }
+        ],
+        "notes": "Do not invent a sessionless V9 state. First prove the fallback unreachable in normal product lifecycle."
+      },
+      "targetRemovalPhase": "ARCH-4",
+      "zeroReferenceEvidence": {
+        "state": "nonzero-reachability-unproven",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'activeCoursePublishSources' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 9
+          }
+        ],
+        "requiredForRemoval": "A normal-lifecycle characterization must show source-null is unreachable; then App fallback references, preview IPC-only consumers, and related temp-file behavior must be removed or retained for another proven caller."
+      },
+      "persistedCompatibility": {
+        "status": "none-confirmed",
+        "evidence": [],
+        "unknowns": [
+          "No persisted sessionless V9 format exists in the V9 contract."
+        ]
+      },
+      "tests": [
+        "tests/unit/v9SlideBackendSelection.test.ts",
+        "tests/unit/flowProductIntegration.test.tsx",
+        "tests/unit/spatialProductIntegration.test.tsx"
+      ],
+      "stableSince": {
+        "status": "normal-v9-replacement-not-wave-validated",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore the App branch only if a legal V9 source-null journey is reproduced; do not add a second Store/session truth."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "Source-null reachability through dev injection or an abnormal partially initialized renderer has not been characterized."
+      ]
+    },
+    {
+      "id": "LEG-004",
+      "legacyTarget": {
+        "kind": "legacy-slide-pptx-branch",
+        "path": "src/renderer/App.tsx",
+        "symbols": [
+          "handleExportPptx",
+          "isSlideOnlyCourseProject",
+          "buildExportPayload",
+          "buildPptx"
+        ]
+      },
+      "owner": "Export",
+      "status": "active-debt",
+      "currentFact": "Mixed/non-Slide-only V9 uses buildCoursePptx, but a Slide-only V9 with a V8 projection is routed through buildExportPayload + buildPptx.",
+      "evidence": [
+        {
+          "path": "src/renderer/App.tsx",
+          "symbol": "handleExportPptx",
+          "note": "The slideOnlyCourse condition bypasses buildCoursePptx."
+        },
+        {
+          "path": "src/renderer/export/course/buildCoursePptx.ts",
+          "symbol": "buildCoursePptx",
+          "note": "Existing Published V2 PPTX path."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "buildPptx",
+              "use": "Direct Legacy PPTX builder call for Slide-only."
+            },
+            {
+              "path": "src/renderer/export/buildPptx.ts",
+              "symbol": "buildPptx",
+              "use": "Consumes ExportPayload/ProjectDocument scene nodes."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [
+            {
+              "path": "src/preload/index.ts",
+              "symbol": "export:write-binary",
+              "use": "Writes the generated PPTX bytes."
+            }
+          ],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExportPptx",
+              "use": "User-visible PPTX export branch."
+            }
+          ],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [
+            {
+              "path": "scripts/verify-release.ts",
+              "symbol": "exportedPptx",
+              "use": "Release workflow checks a generated PPTX, but the current fixture is V8 and does not prove V9 Slide replacement parity."
+            }
+          ],
+          "unknowns": []
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [
+            {
+              "path": "src/main/ipc.ts",
+              "symbol": "export:write-binary",
+              "use": "Persists PPTX bytes selected by the renderer branch."
+            }
+          ],
+          "unknowns": [
+            "No reader for previously generated PPTX is part of the editor; output-semantic parity still must be preserved."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/export.test.ts",
+              "symbol": "buildPptx",
+              "use": "Legacy PPTX builder behavior."
+            },
+            {
+              "path": "tests/unit/runtimeExport.test.ts",
+              "symbol": "buildPptx",
+              "use": "Legacy Runtime/component staticization behavior."
+            },
+            {
+              "path": "tests/unit/coursePptxExport.test.ts",
+              "symbol": "buildCoursePptx",
+              "use": "Published V2 replacement behavior."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [],
+          "unknowns": [
+            "No PPTX-specific cache was confirmed; output generation remains asynchronous."
+          ]
+        }
+      },
+      "replacement": {
+        "status": "existing-not-routed-for-slide-only",
+        "paths": [
+          {
+            "path": "src/renderer/export/course/buildCoursePptx.ts",
+            "symbol": "buildCoursePptx"
+          }
+        ],
+        "notes": "Characterize editable-object and warning parity before routing Slide-only V9 through the V2 path."
+      },
+      "targetRemovalPhase": "ARCH-4",
+      "zeroReferenceEvidence": {
+        "state": "nonzero",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'buildPptx' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 12
+          }
+        ],
+        "requiredForRemoval": "The App Slide-only branch and Legacy builder consumers must reach zero or be split into an explicitly retained non-product tool record."
+      },
+      "persistedCompatibility": {
+        "status": "output-semantics-required",
+        "evidence": [
+          {
+            "path": "src/renderer/App.tsx",
+            "symbol": "handleExportPptx",
+            "note": "User-visible export promises editable objects and explicit staticization notes."
+          }
+        ],
+        "unknowns": []
+      },
+      "tests": [
+        "tests/unit/coursePptxExport.test.ts",
+        "tests/unit/renderPptxComponentSnapshots.test.ts",
+        "tests/unit/renderPptxRuntimeSnapshots.test.ts"
+      ],
+      "stableSince": {
+        "status": "not-established-for-slide-only",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore only the Slide-only adapter branch if V2 PPTX output parity regresses."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "The precise user-visible parity delta between the two PPTX builders has not been characterized in a representative Slide-heavy fixture."
+      ]
+    },
+    {
+      "id": "LEG-005",
+      "legacyTarget": {
+        "kind": "legacy-pdf-raster-and-no-source-branches",
+        "path": "src/renderer/App.tsx",
+        "symbols": [
+          "handleExportPdf",
+          "renderProjectSceneImages",
+          "renderProjectSceneImagesWithRuntime"
+        ]
+      },
+      "owner": "Export",
+      "status": "reachability-unproven",
+      "currentFact": "PDF first builds Published V2 print artifacts, but falls back to V8-projected raster scenes when no pdf-html file exists; a separate source-null branch also uses the Legacy runtime raster path.",
+      "evidence": [
+        {
+          "path": "src/renderer/App.tsx",
+          "symbol": "handleExportPdf",
+          "note": "Contains both V2-first and V8 raster fallback branches."
+        },
+        {
+          "path": "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+          "symbol": "buildCoursePrintArtifacts",
+          "note": "Existing V2-first print artifact path."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "V8 raster fallback for V9 sources when print artifacts lack pdf-html."
+            },
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "renderProjectSceneImagesWithRuntime",
+              "use": "Source-null Legacy PDF path."
+            },
+            {
+              "path": "src/renderer/export/renderSceneImages.ts",
+              "symbol": "renderProjectSceneImages",
+              "use": "Renders ProjectDocument scenes."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [
+            {
+              "path": "src/preload/index.ts",
+              "symbol": "export:write-pdf",
+              "use": "Sends print HTML to main-process PDF export."
+            }
+          ],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExportPdf",
+              "use": "User-visible PDF export."
+            },
+            {
+              "path": "src/main/pdfExport.ts",
+              "symbol": "exportPdf",
+              "use": "Consumes renderer print HTML."
+            }
+          ],
+          "unknowns": [
+            "Reachability of the V2-source inner fallback when buildCoursePrintArtifacts returns no pdf-html has not been proven."
+          ]
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [
+            {
+              "path": "scripts/verify-release.ts",
+              "symbol": "exportedPdf",
+              "use": "Release workflow checks a PDF produced from retained V8 fixtures."
+            }
+          ],
+          "unknowns": []
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [
+            {
+              "path": "src/main/pdfExport.ts",
+              "symbol": "exportPdf",
+              "use": "Persists PDF output; no editor read-back path is present."
+            }
+          ],
+          "unknowns": []
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/playerCapture.test.ts",
+              "symbol": "capture",
+              "use": "Legacy scene/runtime capture behavior."
+            },
+            {
+              "path": "tests/unit/runtimeExport.test.ts",
+              "symbol": "buildPptx",
+              "use": "Shares Legacy staticization inputs used by raster exports."
+            },
+            {
+              "path": "tests/unit/coursePrintArtifacts.test.ts",
+              "symbol": "buildCoursePrintArtifacts",
+              "use": "Published V2 replacement behavior."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "src/main/pdfExport.ts",
+              "symbol": "exportPdf",
+              "use": "Creates and closes an asynchronous print window."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "partial-existing",
+        "paths": [
+          {
+            "path": "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+            "symbol": "buildCoursePrintArtifacts"
+          }
+        ],
+        "notes": "Characterize missing-pdf-html reachability and staticization/warning parity before removing raster fallbacks."
+      },
+      "targetRemovalPhase": "ARCH-4",
+      "zeroReferenceEvidence": {
+        "state": "nonzero-reachability-unproven",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'renderProjectSceneImages' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 6
+          }
+        ],
+        "requiredForRemoval": "Both App fallback branches and direct ProjectDocument raster consumers must be zero, with V2 print behavior verified."
+      },
+      "persistedCompatibility": {
+        "status": "output-semantics-required",
+        "evidence": [
+          {
+            "path": "src/renderer/App.tsx",
+            "symbol": "handleExportPdf",
+            "note": "User-visible warnings describe how unsupported content was handled."
+          }
+        ],
+        "unknowns": []
+      },
+      "tests": [
+        "tests/unit/coursePrintArtifacts.test.ts",
+        "tests/unit/exportPreflight.test.ts",
+        "tests/unit/playerCapture.test.ts"
+      ],
+      "stableSince": {
+        "status": "not-established-for-all-pdf-branches",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore only the characterized raster adapter if V2 print output fails; keep the V2-first path."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "The exact condition under which a legal V9 print artifact set lacks pdf-html is not characterized."
+      ]
+    },
+    {
+      "id": "LEG-006",
+      "legacyTarget": {
+        "kind": "legacy-export-preflight",
+        "path": "src/renderer/export/exportPreflight.ts",
+        "symbols": [
+          "ExportPreflightReport",
+          "collectExportPreflight"
+        ]
+      },
+      "owner": "Diagnostics / Export",
+      "status": "active-debt",
+      "currentFact": "ExportPreflightReport is schemaVersion 8 and analyzes ProjectDocument; App always computes this base report before merging the V9 HTML/Web package preflight.",
+      "evidence": [
+        {
+          "path": "src/renderer/export/exportPreflight.ts",
+          "symbol": "ExportPreflightReport",
+          "note": "Declares schemaVersion: 8."
+        },
+        {
+          "path": "src/renderer/App.tsx",
+          "symbol": "handleExport",
+          "note": "Calls collectExportPreflight(state.project, ...) before optional V9 merge."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "handleExport",
+              "use": "Always computes the V8 base report."
+            },
+            {
+              "path": "src/renderer/project/validateProjectArchive.ts",
+              "symbol": "validateProjectArchiveBytes",
+              "use": "Computes four V8 export preflight reports."
+            },
+            {
+              "path": "src/renderer/ui/ExportPreflightDialog.tsx",
+              "symbol": "ExportPreflightDialog",
+              "use": "Renders the Legacy report shape."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": [
+            "No IPC channel reads the report; App may export it as generic binary JSON."
+          ]
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/export/exportPreflight.ts",
+              "symbol": "collectExportPreflight",
+              "use": "Analyzes single-html, web-package, pdf, and pptx targets."
+            },
+            {
+              "path": "src/renderer/export/course/buildCoursePackages.ts",
+              "symbol": "collectCoursePackageExportPreflight",
+              "use": "V9 HTML/Web report merged into the V8 base report."
+            }
+          ],
+          "unknowns": [
+            "A V9-native PPTX/PDF preflight replacement is not yet identified."
+          ]
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [],
+          "unknowns": [
+            "No release verifier directly imports collectExportPreflight."
+          ]
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "saveExportPreflightReport",
+              "use": "Allows users to persist the report as JSON."
+            }
+          ],
+          "unknowns": [
+            "No reader or compatibility policy for previously exported preflight JSON was found."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/exportPreflight.test.ts",
+              "symbol": "collectExportPreflight",
+              "use": "Direct Legacy preflight tests."
+            },
+            {
+              "path": "tests/unit/exportPreflightUi.test.tsx",
+              "symbol": "ExportPreflightDialog",
+              "use": "Legacy report UI tests."
+            },
+            {
+              "path": "tests/unit/formulaNode.test.ts",
+              "symbol": "collectExportPreflight",
+              "use": "Formula export diagnostics through the Legacy report."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [],
+          "unknowns": [
+            "No cache or generated artifact directly owns this report."
+          ]
+        }
+      },
+      "replacement": {
+        "status": "partial-existing",
+        "paths": [
+          {
+            "path": "src/renderer/export/course/buildCoursePackages.ts",
+            "symbol": "collectCoursePackageExportPreflight"
+          }
+        ],
+        "notes": "HTML/Web V9 preflight exists. PPTX/PDF and location navigation need V9-native reports before removal."
+      },
+      "targetRemovalPhase": "ARCH-4",
+      "zeroReferenceEvidence": {
+        "state": "nonzero",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'collectExportPreflight' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 21
+          }
+        ],
+        "requiredForRemoval": "App, validator, UI, tests, exported-report semantics, and every target adapter must migrate; exact references must be zero."
+      },
+      "persistedCompatibility": {
+        "status": "report-export-confirmed-reader-unknown",
+        "evidence": [
+          {
+            "path": "src/renderer/App.tsx",
+            "symbol": "saveExportPreflightReport"
+          }
+        ],
+        "unknowns": [
+          "Whether reportVersion/schemaVersion must remain readable outside the app is not documented."
+        ]
+      },
+      "tests": [
+        "tests/unit/exportPreflight.test.ts",
+        "tests/unit/coursePackageExport.test.ts",
+        "tests/unit/exportPreflightUi.test.tsx"
+      ],
+      "stableSince": {
+        "status": "not-established",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore the previous target adapter and report mapping if V9 diagnostics lose a supported warning or navigation target."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "V9-native PPTX/PDF preflight carrier and report compatibility are not yet specified."
+      ]
+    },
+    {
+      "id": "LEG-007",
+      "legacyTarget": {
+        "kind": "legacy-project-health",
+        "path": "src/shared/projectHealth.ts",
+        "symbols": [
+          "collectProjectHealth",
+          "ProjectHealthDiagnostic"
+        ]
+      },
+      "owner": "Diagnostics",
+      "status": "active-debt",
+      "currentFact": "App and ProjectHealthPanel analyze the V8-shaped ProjectDocument projection; export preflight and a legacy validator also consume the same collector.",
+      "evidence": [
+        {
+          "path": "src/shared/projectHealth.ts",
+          "symbol": "collectProjectHealth",
+          "note": "Accepts ProjectDocument and component packages."
+        },
+        {
+          "path": "src/renderer/App.tsx",
+          "symbol": "projectHealthDiagnostics",
+          "note": "Runs on EditorState.project in a memo."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/App.tsx",
+              "symbol": "projectHealthDiagnostics",
+              "use": "Realtime health over the V8 projection."
+            },
+            {
+              "path": "src/renderer/ui/ProjectHealthPanel.tsx",
+              "symbol": "ProjectHealthPanel",
+              "use": "Recomputes and renders V8 health."
+            },
+            {
+              "path": "src/renderer/export/exportPreflight.ts",
+              "symbol": "collectExportPreflight",
+              "use": "Merges project-health findings into export preflight."
+            },
+            {
+              "path": "src/renderer/project/validateProjectArchive.ts",
+              "symbol": "validateProjectArchiveBytes",
+              "use": "Legacy archive health report."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": [
+            "No dynamic or IPC caller was found by exact tracked-text search."
+          ]
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/renderer/export/exportPreflight.ts",
+              "symbol": "collectExportPreflight",
+              "use": "Projects health codes into export-target diagnostics."
+            }
+          ],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [
+            {
+              "path": "scripts/build-incline-motion-lesson.ts",
+              "symbol": "collectProjectHealth",
+              "use": "Validates a Legacy build fixture before export."
+            }
+          ],
+          "unknowns": []
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [],
+          "unknowns": [
+            "The collector is read-only and no persisted health document is a V9 contract field."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/projectHealth.test.ts",
+              "symbol": "collectProjectHealth",
+              "use": "Direct Legacy health tests."
+            },
+            {
+              "path": "tests/unit/assetReferences.test.ts",
+              "symbol": "collectProjectHealth",
+              "use": "Asset-reference health tests."
+            },
+            {
+              "path": "tests/unit/teacherControllerConsistency.test.ts",
+              "symbol": "collectProjectHealth",
+              "use": "Controller consistency checks through Legacy health."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "artifacts/ai-capabilities/diagnostics.json",
+              "symbol": "projectHealth",
+              "use": "Generated product capability registry publishes the current health codes."
+            },
+            {
+              "path": "scripts/generate-ai-capabilities.ts",
+              "symbol": "PROJECT_HEALTH_CODES",
+              "use": "Generates diagnostics capability output from the current registry."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "missing-v9-structural-report",
+        "paths": [
+          {
+            "path": "src/renderer/export/course/buildCoursePackages.ts",
+            "symbol": "collectCoursePackageExportPreflight"
+          },
+          {
+            "path": "scripts/validate-project.ts",
+            "symbol": "runValidateProjectCli"
+          }
+        ],
+        "notes": "These are partial V9 diagnostics, not a complete replacement for realtime structural health/navigation."
+      },
+      "targetRemovalPhase": "ARCH-5",
+      "zeroReferenceEvidence": {
+        "state": "nonzero",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'collectProjectHealth' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 32
+          }
+        ],
+        "requiredForRemoval": "Migrate App, panel, export, fixture, tests, and generated diagnostic-code provenance to V9 rules; exact references must be zero or split into a retained primitive."
+      },
+      "persistedCompatibility": {
+        "status": "none-as-project-field",
+        "evidence": [
+          {
+            "path": "src/shared/contracts/course-project-v9/types.ts",
+            "symbol": "CourseProjectDocument",
+            "note": "No health report is persisted in the V9 document."
+          }
+        ],
+        "unknowns": [
+          "External consumers of generated diagnostic code names are not characterized."
+        ]
+      },
+      "tests": [
+        "tests/unit/projectHealth.test.ts",
+        "tests/unit/projectHealthNavigation.test.ts",
+        "tests/unit/validateProject.test.ts"
+      ],
+      "stableSince": {
+        "status": "not-established",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore the previous read-only collector adapter if a V9 rule loses a current actionable diagnostic; never write diagnostics into the project."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "The complete V9 structural diagnostic code mapping and performance budget are not yet established."
+      ]
+    },
+    {
+      "id": "LEG-008",
+      "legacyTarget": {
+        "kind": "retained-v8-archive-build-fixture-release-toolchain",
+        "path": "src/renderer/project/projectArchive.ts",
+        "symbols": [
+          "createProjectArchive",
+          "openProjectArchive",
+          "ProjectDocument"
+        ]
+      },
+      "owner": "Tooling / Release",
+      "status": "retained-compatibility",
+      "currentFact": "The product open path rejects V8, but committed examples, render-host benchmarks, portability checks, release verification, and focused tests still intentionally use the separate V8 archive/tooling path.",
+      "evidence": [
+        {
+          "path": "src/renderer/project/courseProjectIo.ts",
+          "symbol": "openDefaultCourseProject",
+          "note": "Current product open accepts only V9."
+        },
+        {
+          "path": "scripts/verify-release.ts",
+          "symbol": "main",
+          "note": "Explicitly asserts a five-scene Project V8 benchmark."
+        },
+        {
+          "path": "examples/render-host-benchmark/project.json",
+          "symbol": "schemaVersion",
+          "note": "Committed V8 benchmark source."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/project/openProject.ts",
+              "symbol": "openProjectArchive",
+              "use": "Legacy project-open adapter outside the V9 product path."
+            },
+            {
+              "path": "src/renderer/project/saveProject.ts",
+              "symbol": "createProjectArchive",
+              "use": "Legacy project-save adapter outside the V9 product path."
+            },
+            {
+              "path": "src/renderer/project/validateProjectArchive.ts",
+              "symbol": "openProjectArchive",
+              "use": "Legacy archive validator candidate."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [
+            {
+              "path": "package.json",
+              "symbol": "build:examples",
+              "use": "Runs V8 example generation."
+            },
+            {
+              "path": "package.json",
+              "symbol": "build:render-benchmark:fixture",
+              "use": "Runs the V8 benchmark builder."
+            },
+            {
+              "path": "package.json",
+              "symbol": "verify:release",
+              "use": "Runs the release verifier that asserts V8 fixtures."
+            }
+          ],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "scripts/build-render-host-benchmark.ts",
+              "symbol": "buildStandaloneHtml",
+              "use": "Exports the retained V8 benchmark through the legacy Player pipeline."
+            },
+            {
+              "path": "scripts/verify-w3-windows-portability.ts",
+              "symbol": "buildWebPackageFromProjectAsync",
+              "use": "Verifies a retained V8 Web package."
+            }
+          ],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [
+            {
+              "path": "scripts/build-examples.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds examples/sample-project.h5lesson."
+            },
+            {
+              "path": "scripts/build-incline-motion-lesson.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds a Legacy lesson fixture."
+            },
+            {
+              "path": "scripts/build-interactive-lesson.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds the lesson-demo fixture."
+            },
+            {
+              "path": "scripts/build-render-host-benchmark.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds the V8 render-host benchmark."
+            },
+            {
+              "path": "scripts/verify-w3-windows-portability.ts",
+              "symbol": "openProjectArchive",
+              "use": "Round-trips V8 archives across portable paths."
+            },
+            {
+              "path": "scripts/verify-release.ts",
+              "symbol": "openProjectArchive",
+              "use": "Verifies committed V8 sample and benchmark archives."
+            }
+          ],
+          "unknowns": []
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [
+            {
+              "path": "examples/sample-project.h5lesson",
+              "symbol": "committed V8 archive",
+              "use": "Release sample artifact."
+            },
+            {
+              "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
+              "symbol": "committed V8 archive",
+              "use": "Render-host benchmark artifact."
+            },
+            {
+              "path": "examples/render-host-benchmark/project.json",
+              "symbol": "schemaVersion",
+              "use": "Source for the committed V8 benchmark."
+            }
+          ],
+          "unknowns": [
+            "These are tooling fixtures, not an authoring-project compatibility promise."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/projectArchive.test.ts",
+              "symbol": "createProjectArchive",
+              "use": "Direct V8 archive security/round-trip tests."
+            },
+            {
+              "path": "tests/unit/asyncArchive.test.ts",
+              "symbol": "createProjectArchiveAsync",
+              "use": "Async V8 archive tests."
+            },
+            {
+              "path": "tests/integration/renderHostBenchmark.test.ts",
+              "symbol": "openProjectArchive",
+              "use": "Asserts the retained benchmark is Project V8."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "examples/render-host-benchmark/render-host-benchmark.html",
+              "symbol": "generated benchmark",
+              "use": "Committed output consumed by release verification."
+            },
+            {
+              "path": "scripts/verify-release.ts",
+              "symbol": "renderHostBenchmarkDirectory",
+              "use": "Packaged release verification expects benchmark artifacts."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "v9-fixtures-exist-release-migration-not-done",
+        "paths": [
+          {
+            "path": "tests/fixtures/course-project-v9/sources.ts",
+            "symbol": "listCourseProjectV9Fixtures"
+          },
+          {
+            "path": "src/renderer/project/courseProjectArchive.ts",
+            "symbol": "createCourseProjectArchive"
+          }
+        ],
+        "notes": "Do not delete retained tooling merely because V9 fixtures exist. Migrate each script/release assertion first or explicitly retain the benchmark."
+      },
+      "targetRemovalPhase": "ARCH-5",
+      "zeroReferenceEvidence": {
+        "state": "nonzero-retained",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'openProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 47
+          },
+          {
+            "command": "(git grep -n -I -F -- 'createProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 56
+          }
+        ],
+        "requiredForRemoval": "Every script, committed fixture, release assertion, portability check, and archive test must be migrated or split into an approved retained record; product V8 rejection must remain."
+      },
+      "persistedCompatibility": {
+        "status": "retained-tooling-artifacts",
+        "evidence": [
+          {
+            "path": "examples/sample-project.h5lesson",
+            "symbol": "committed artifact"
+          },
+          {
+            "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
+            "symbol": "committed artifact"
+          }
+        ],
+        "unknowns": [
+          "Owner decision is still required if the benchmark remains uniquely valuable after V9 release fixtures cover equivalent hosts."
+        ]
+      },
+      "tests": [
+        "tests/unit/projectArchive.test.ts",
+        "tests/integration/renderHostBenchmark.test.ts",
+        "tests/e2e/render-host-benchmark.spec.ts"
+      ],
+      "stableSince": {
+        "status": "not-applicable-retained-at-baseline",
+        "wave": "ARCH-0A",
+        "evidence": [
+          "scripts/verify-release.ts"
+        ]
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore a migrated tooling fixture independently; never reconnect openProjectArchive to the product V9 open route."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "Which V8 benchmark cases remain uniquely necessary after V9 representative fixtures are finalized."
+      ]
+    },
+    {
+      "id": "LEG-009",
+      "legacyTarget": {
+        "kind": "retained-v8-test-factory",
+        "path": "tests/helpers/projectV8.ts",
+        "symbols": [
+          "createProjectV8Fields"
+        ]
+      },
+      "owner": "Test Tooling",
+      "status": "retained-compatibility",
+      "currentFact": "A shared Project V8 field factory supports tests for the retained Legacy payload, player, archive, runtime, and Web package paths.",
+      "evidence": [
+        {
+          "path": "tests/helpers/projectV8.ts",
+          "symbol": "createProjectV8Fields",
+          "note": "Constructs the required V8 playback/media/design-token fields."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [],
+          "unknowns": [
+            "This helper is test-only; its direct consumers are recorded in testConsumers."
+          ]
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [],
+          "unknowns": [
+            "The helper itself is not shipped; tests exercise the Legacy player/export paths recorded in LEG-002."
+          ]
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [],
+          "unknowns": [
+            "No script outside tests imports this helper."
+          ]
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [],
+          "unknowns": [
+            "No product persistence obligation; it creates in-memory test values."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/integration/player-payload.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy payload parsing tests."
+            },
+            {
+              "path": "tests/unit/courseRuntimeKernel.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy runtime kernel fixture."
+            },
+            {
+              "path": "tests/unit/courseRuntimeKernelLifecycle.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy runtime lifecycle fixture."
+            },
+            {
+              "path": "tests/unit/export.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy export fixture."
+            },
+            {
+              "path": "tests/unit/projectArchive.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "V8 archive fixture."
+            },
+            {
+              "path": "tests/unit/publishedLesson.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy published lesson fixture."
+            },
+            {
+              "path": "tests/unit/runtimeExport.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy Runtime export fixture."
+            },
+            {
+              "path": "tests/unit/webPackageExport.test.ts",
+              "symbol": "createProjectV8Fields",
+              "use": "Legacy Web package fixture."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "not-applicable-until-parent-consumers-migrate",
+        "paths": [
+          {
+            "path": "tests/fixtures/course-project-v9/sources.ts",
+            "symbol": "listCourseProjectV9Fixtures"
+          }
+        ],
+        "notes": "V9 fixtures do not automatically replace tests intentionally characterizing retained V8 payload/archive behavior."
+      },
+      "targetRemovalPhase": "ARCH-5",
+      "zeroReferenceEvidence": {
+        "state": "nonzero-retained",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'createProjectV8Fields' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 17
+          }
+        ],
+        "requiredForRemoval": "All eight test files must migrate or be deleted with their parent Legacy behavior; helper references must then be zero."
+      },
+      "persistedCompatibility": {
+        "status": "none-test-only",
+        "evidence": [],
+        "unknowns": []
+      },
+      "tests": [
+        "tests/integration/player-payload.test.ts",
+        "tests/unit/projectArchive.test.ts",
+        "tests/unit/runtimeExport.test.ts"
+      ],
+      "stableSince": {
+        "status": "not-applicable-retained-at-baseline",
+        "wave": "ARCH-0A",
+        "evidence": [
+          "tests/helpers/projectV8.ts"
+        ]
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore the helper only with the retained parent test; never route it into product code."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": []
+    },
+    {
+      "id": "LEG-010",
+      "legacyTarget": {
+        "kind": "dead-candidate-v8-validator",
+        "path": "src/renderer/project/validateProjectArchive.ts",
+        "symbols": [
+          "validateProjectArchiveBytes"
+        ]
+      },
+      "owner": "Diagnostics / Tooling",
+      "status": "dead-candidate",
+      "currentFact": "The tracked function validates V8 archives and builds V8 health/preflight reports; exact symbol search finds only its declaration, while the current CLI uses scripts/validate-project.ts for V9.",
+      "evidence": [
+        {
+          "path": "src/renderer/project/validateProjectArchive.ts",
+          "symbol": "validateProjectArchiveBytes",
+          "note": "Only exact tracked occurrence is the exported declaration."
+        },
+        {
+          "path": "scripts/validate-project.ts",
+          "symbol": "runValidateProjectCli",
+          "note": "Current package validation command targets Course Project V9."
+        },
+        {
+          "path": "tests/unit/aiCapabilities.test.ts",
+          "symbol": "tracedSources",
+          "note": "Explicitly asserts the AI capability trace does not include validateProjectArchive.ts."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [],
+          "unknowns": [
+            "Exact symbol search found no caller/import beyond the declaration."
+          ]
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": [
+            "No package script, IPC channel, or exact string consumer was found; generated repo-index/package audit is still required before deletion."
+          ]
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [],
+          "unknowns": [
+            "No package script or release verifier imports this module."
+          ]
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [],
+          "unknowns": [
+            "The function accepts V8 archives, but no current caller establishes a persisted compatibility obligation."
+          ]
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "tracedSources",
+              "use": "Negative assertion that the module is not a current capability source."
+            }
+          ],
+          "unknowns": [
+            "No direct behavior test imports validateProjectArchiveBytes."
+          ]
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [],
+          "unknowns": [
+            "No generated artifact or packaged entrypoint is confirmed; final packaged-reference proof remains required."
+          ]
+        }
+      },
+      "replacement": {
+        "status": "existing-v9-cli",
+        "paths": [
+          {
+            "path": "scripts/validate-project.ts",
+            "symbol": "runValidateProjectCli"
+          },
+          {
+            "path": "package.json",
+            "symbol": "validate:course-project"
+          }
+        ],
+        "notes": "The CLI replacement exists, but no claim is made that it preserves an unknown private caller."
+      },
+      "targetRemovalPhase": "ARCH-5",
+      "zeroReferenceEvidence": {
+        "state": "definition-only-static-evidence",
+        "queries": [
+          {
+            "command": "(git grep -n -I -F -- 'validateProjectArchiveBytes' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 1
+          }
+        ],
+        "requiredForRemoval": "Generated repo-index, dynamic/config/package scan, and release-package inspection must confirm no caller; replacement CLI tests must remain green."
+      },
+      "persistedCompatibility": {
+        "status": "none-confirmed",
+        "evidence": [],
+        "unknowns": [
+          "No caller means no confirmed compatibility obligation, but deletion waits for generated/dynamic/package proof."
+        ]
+      },
+      "tests": [
+        "tests/unit/validateProject.test.ts",
+        "tests/unit/aiCapabilities.test.ts"
+      ],
+      "stableSince": {
+        "status": "v9-cli-existing-but-deletion-not-proven",
+        "wave": null,
+        "evidence": []
+      },
+      "rollback": {
+        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
+        "strategy": "Restore the isolated module if a previously unknown tooling caller is reproduced; do not expose V8 import in the product."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": [
+        "Dynamic and packaged reachability cannot be closed until ARCH-0B and final release inspection."
+      ]
+    }
+  ]
+}
