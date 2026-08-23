@@ -6,12 +6,12 @@
 
 - Task ID: `arch-1-vs-02-authoring-target-stale-guard`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Target Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, Session-target-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `f5a6cf9`
-- Claim commit: `commit containing this wave claim`
+- Claim commit: `90d8f6080bdaac5986e7c896de6eb7671c6e50f9`
 - Context: `bootstrap-manual explicitly approved for the single ARCH-1 pure target seam; repo-index broad gate remains closed`
 - Freshness / relevant dirty inputs: Session/scope/effective-layer/product tests clean; concurrent repo-index query tuning and VS-03 History scope are disjoint
 - Depends on: `arch-1-vs-01-image-replacement-characterization (done); ARCH-0A gate (done); ARCH-0B context-safety gate (done or explicitly approved fresh Bootstrap)`
@@ -100,12 +100,12 @@ An asynchronous image replacement can carry one immutable target captured before
 
 ## Acceptance
 
-- [ ] Target contains every required project/revision/generation/surface/location/owner/item identity field and exact revision policy.
-- [ ] Same-scene selection A→B does not retarget a captured A.
-- [ ] Project/location/surface/generation/owner/item/revision mismatches return stable, actionable rejection codes and never run the callback.
-- [ ] Core identity imports no Slide/Flow/Spatial selection or Media command.
-- [ ] No second Session/navigation truth, persisted field, raw Store dependency or unrelated behavior change.
-- [ ] Budget and authoring-identity lock respected.
+- [x] Target contains every required project/revision/generation/surface/location/owner/item identity field and exact revision policy.
+- [x] Same-scene selection A→B does not retarget a captured A.
+- [x] Project/location/surface/generation/owner/item/revision mismatches return stable, actionable rejection codes and never run the callback.
+- [x] Core identity imports no Slide/Flow/Spatial selection or Media command.
+- [x] No second Session/navigation truth, persisted field, raw Store dependency or unrelated behavior change.
+- [x] Budget and authoring-identity lock respected.
 
 ## Minimal validation
 
@@ -116,8 +116,8 @@ An asynchronous image replacement can carry one immutable target captured before
 
 ## Rollback
 
-- Start point: `pending final ARCH-0B gate baseline`
-- Implementation commit: `pending`
+- Start point: `f5a6cf9`
+- Implementation commit: `pending Coordinator integration; Worker made no Git commit`
 - Old path remains: existing Session freshness functions remain recoverable; revert this additive identity commit without touching user data.
 
 ## Consumers and index
@@ -128,16 +128,16 @@ An asynchronous image replacement can carry one immutable target captured before
 
 ## Result evidence
 
-- Behavior before/after: `pending`
-- Validation results: `pending`
-- Consumer delta: `pending`
-- Remaining risks: `pending`
-- Rollback commit: `pending`
+- Behavior before/after: `Before, CourseAuthoringSessionToken could reject only location/generation drift and carried no project, surface ID, state, owner, item or stable address. After, captureCourseAuthoringTarget freezes those scalar identities from the existing Session token plus one effective-row identity; validateCourseAuthoringTarget rejects project/session/surface-or-location/owner/item/revision drift in the documented order without reading current selection or running a rejected callback.`
+- Validation results: `npx vitest run tests/unit/courseAuthoringTarget.test.ts tests/unit/courseAuthoringSession.test.ts — 2 files / 7 tests passed; npx tsc --noEmit — passed; manual Slide-heavy inspection — target used arch-0-slide-heavy / slide-location-intro / scene:slide-scene-intro / slide-intro-hero and contained no document, item object or selectedIds.`
+- Consumer delta: `0; VS-04/VS-05 may consume the additive target/guard API after review. Existing Session exports and behavior remain compatible.`
+- Remaining risks: `The injected hasItem port is intentionally Surface-agnostic; VS-04 must resolve both itemId and authoringAddress against the canonical Slide image carrier, and VS-05 must pass canonical current document revision rather than a stale UI projection. No desktop behavior is claimed by this pure identity task.`
+- Rollback commit: `revert the eventual single additive VS-02 integration commit; no user data or persisted V9 field changed`
 - Next allowed task: `VS-04 only after VS-02 and VS-03 are reviewed/target-green`
 
 ## Findings / next allowed task
 
-- Pending implementation findings. Do not broaden target policy beyond the image-replacement slice in this card.
+- The exact policy deliberately rejects any intervening document revision even when the captured item still exists. Same-owner selection B is absent from current identity, so it neither invalidates nor retargets captured A. VS-04 may proceed only after Coordinator review; do not broaden target policy beyond the image-replacement slice.
 
 ## Ready checklist（Coordinator）
 
