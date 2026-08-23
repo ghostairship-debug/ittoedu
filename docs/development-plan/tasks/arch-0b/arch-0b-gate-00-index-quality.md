@@ -4,14 +4,14 @@
 
 - Task ID: `arch-0b-gate-00-index-quality`
 - Phase / wave: `ARCH-0B / phase gate`
-- Status: `draft`
+- Status: `implementing`
 - Owner / Reviewer / Integrator: `Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
+- Claimed at / released at: `2026-08-24 03:05 Asia/Shanghai / pending`
 - Worktree / branch: `primary workspace / codex/architecture-stabilization`
-- Baseline HEAD: `639aa11`
+- Baseline HEAD: `bae965274b3d88f70ef94b28d87ad7fd18007d78`
 - Claim commit: `pending`
 - Context: `fresh repo:index + golden-task evidence`
-- Freshness / relevant dirty inputs: wait for IDX-01B/02/03 completion and final generated refresh
+- Freshness / relevant dirty inputs: all IDX dependencies done; final generated refresh owned by this gate
 - Depends on: `arch-0b-idx-00, idx-01, idx-01b, idx-02, idx-03 all done`
 - Blocks: ARCH-1 context safety gate; ARCH-2 broad multi-agent gate
 - Retry count: `0`
@@ -105,8 +105,8 @@ Adapter and deterministic generator are implemented, but semantic/query/golden q
 
 ## Ready checklist (Coordinator)
 
-- [ ] all dependencies done
-- [ ] final source/semantic/config/tool inputs stable
-- [ ] generated lock available
-- [ ] no relevant user dirty changes
-- [ ] no product escalation
+- [x] all dependencies done
+- [x] final source/semantic/config/tool inputs stable
+- [x] generated lock available
+- [x] no relevant user dirty changes
+- [x] no product escalation
