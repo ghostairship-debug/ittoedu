@@ -45,17 +45,19 @@
 - Strict development index: `repo-index/`
 - Temporary Context Packs: `repo-index/contexts/` (ignored)
 
-No listed follow-on file is claimed to exist until its owning task creates and validates it.
+Follow-on files are authoritative only after their owning task reaches `done`; the current task board records that state.
 
 ## Legal V9 representative projects
 
-Pending `arch-0a-rep-00-v9-representative-projects`. Existing tiny V9 fixtures are legal seed inputs only and are not being relabeled as representative coverage.
+`arch-0a-rep-00-v9-representative-projects` is done. Existing tiny V9 fixtures were retained as seed inputs; the representative archives below were generated from contract-native V9 factories and independently revalidated.
 
 | Fixture | Surface mix | Required coverage | Build/source path | Hash | Status |
 |---|---|---|---|---|---|
-| Slide-heavy | Slide | states, layers, media, component, playback, static export | pending | pending | pending |
-| Flow-heavy | Flow | blocks, formula/table/code, IME behavior, FlowComponentBlock, DOCX/PDF | pending | pending | pending |
-| Mixed/Spatial | Slide + Flow + Spatial | global/shared, controller, camera/path, component, Runtime | pending | pending | pending |
+| Slide-heavy | Slide | states, layers, media, component, playback, static export | `tests/fixtures/architecture-baseline/slide-heavy.h5lesson` | `101b8e8186e1fbadbf9f083e5d3273eee9f1166fa3028478f290497537274a7b` | legal V9 / deterministic / focused coverage green |
+| Flow-heavy | Flow | blocks, formula/table/code, IME behavior, FlowComponentBlock, DOCX/PDF | `tests/fixtures/architecture-baseline/flow-heavy.h5lesson` | `326b1c29d72358d01373af26cbc6f97f396a34ce40e0e057079bbdcd76beeea0` | legal V9 / deterministic / focused coverage green |
+| Mixed/Spatial | Slide + Flow + Spatial | global/shared, controller, camera/path, component, Runtime | `tests/fixtures/architecture-baseline/mixed-spatial.h5lesson` | `939a0d5520fe21a6608a4cb11b8487f87d223a1da15286965803eb4e2aaa66df` | legal V9 / deterministic / focused coverage green |
+
+Build/check commands and the capability matrix are canonical in `ARCH_0_REPRESENTATIVE_PROJECTS.md` and `tests/fixtures/architecture-baseline/manifest.json`.
 
 ## Manual flows
 
@@ -76,7 +78,15 @@ Owned by `arch-0a-perf-00-test-and-performance-baseline`. The fixed environment 
 
 ## Writer/consumer/owner starting counts
 
-Owned by `arch-0a-map-00-writer-consumer-owner-ledger`. No count is inferred from plan prose.
+`arch-0a-map-00-writer-consumer-owner-ledger` is done. Canonical evidence is in `docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md` and `legacy-consumers.json`:
+
+- 19 current module areas and the first 7 high-risk journeys;
+- 10 Legacy records: 5 active debt, 2 reachability-unproven, 2 retained compatibility, 1 dead candidate;
+- 116 confirmed consumer relations across all seven deletion-proof categories;
+- 104 unique confirmed `path#symbol` endpoints;
+- 23 tracked renderer files importing the Store at this baseline.
+
+Counts are generated from the JSON relation arrays using the reproduction command stored in `startingCounts`; Markdown prose is not a second count authority.
 
 ## Phase and wave budgets
 
@@ -97,8 +107,7 @@ Budgets bound a wave and trigger re-planning; they never authorize scope reducti
 ## Blocking unknowns
 
 - Exact current E2E/desktop/package status remains intentionally unclaimed until the relevant stage evidence runs.
-- Representative V9 fixtures and performance numbers do not yet exist.
-- Writer/consumer counts do not yet exist.
+- Performance/manual-flow evidence is still owned by the active performance-baseline task.
 - `repo:index`, `repo:index:check`, and `repo:context` do not yet exist.
 
-These unknowns block broad product migration, not the three non-overlapping ARCH-0 work lines.
+These remaining unknowns block broad product migration, not the active non-overlapping ARCH-0 work lines.
