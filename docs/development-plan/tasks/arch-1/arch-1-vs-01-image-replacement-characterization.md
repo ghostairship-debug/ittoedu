@@ -4,9 +4,9 @@
 
 - Task ID: `arch-1-vs-01-image-replacement-characterization`
 - Phase / wave: `ARCH-1 / vertical slice preparation`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Characterization Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, characterization-test-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `805d04879122702ab17ad7043fe41da1de62ba53`
 - Claim commit: `d585e42656987dba767dc8749842ebd9b30f4334`
@@ -101,7 +101,7 @@ Existing evidence:
 ## Rollback
 
 - Start point: `805d04879122702ab17ad7043fe41da1de62ba53`
-- Implementation commit: not created; Worker was instructed not to commit
+- Implementation commit: `638b16cf30ffa2a2df3ebefbc164f69c7f2e4d93`
 - Old path remains: current bug remains reproducible until VS-05 integrates the fix.
 
 ## Consumers and index
@@ -128,6 +128,7 @@ Existing evidence:
 - VS-02 and VS-03 may proceed in parallel after Coordinator review: VS-02 owns stable target/stale codes; VS-03 owns the one-history resource-delta plan.
 - VS-05 must not preserve the current B-write as desired. It must flip the `it.fails` contract to a normal passing regression and remove full sidecar snapshot growth for this replacement action.
 - Desktop project-switch race should not be fabricated while App busy blocks New/Open; VS-05 direct integration must still enforce project identity, and VS-06 must recheck UI reachability.
+- Coordinator review independently reran the characterization, asset transaction and Session suites: 15 tests passed plus one explicit expected failure. The diagnostic reproduced mutation of selected B rather than captured A, with revision/history/sidecar snapshot each +1 and no stale error.
 
 ## Ready checklist (Coordinator)
 
