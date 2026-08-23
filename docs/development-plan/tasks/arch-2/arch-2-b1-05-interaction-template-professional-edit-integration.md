@@ -11,12 +11,12 @@
 - Claimed at / released at: `2026-08-24 07:24 Asia/Shanghai / active`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `81058f0`
-- Claim commit: `pending (this claim change)`
+- Claim commit: `e34c153`
 - Context Pack + manifest hash | bootstrap-manual: `feature:interactions; fresh/high/safe-for-S2; source a10a0576, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree at claim; Store Interaction actions, AutomationTab and Properties Interaction consumers exclusively locked by Coordinator`
 - Depends on: `arch-2-b1-02-interaction-authoring-plan done; ARCH-2 W2-A project-resource transaction gate done`
 - Blocks: `Published Interaction host integration; W2-B1 Interaction authoring validation`
-- Risk statement: `The visible reveal-sequence template currently changes target visibility and appends its rule through two Store writes, while Flow/Spatial local editors are backed by a synthetic V8 scene with no V9 local Interaction carrier.`
+- Risk statement: `The visible reveal-sequence template currently changes target visibility and appends its rule through two Store writes; Flow/Spatial local editors are backed by a synthetic V8 scene with no V9 local Interaction carrier; independent integration review also proved that the live Slide named-state selection is session state and is lost by the document-only B1-02 target/view seam.`
 - Retry count / last failure class: `0 / none`
 
 ## Product outcome
@@ -95,10 +95,12 @@ Existing add/delete/duplicate/move rules remain adapters for behaviors outside t
 ### Allowed write
 
 - `src/renderer/store/editorStore.ts` — narrow Interaction authoring actions/selectors and transaction integration only.
+- `src/renderer/interactions/interactionAuthoringView.ts` and `interactionAuthoringCommands.ts` — additive internal active-state target/view input required to preserve the live Slide session selection; no persisted contract change.
 - `src/renderer/ui/AutomationTab.tsx` — typed view, honest unavailable state, template/update callbacks only.
 - `src/renderer/ui/InteractionEditor.tsx` — replace the reveal template's split callback with one typed callback.
 - `src/renderer/ui/PropertiesTab.tsx` — gate local availability and route professional updates through the same command only if required by the stable-rule behavior.
 - `tests/integration/courseInteractionAuthoringVerticalSlice.test.ts` (new).
+- `tests/unit/interactionAuthoringView.test.ts` and `tests/unit/interactionAuthoringCommands.test.ts` — live named-state correction coverage only.
 - `tests/unit/interactionEditor.test.tsx` and at most one new focused Automation/Properties integration test.
 - This task card result fields.
 
@@ -127,7 +129,7 @@ Existing add/delete/duplicate/move rules remain adapters for behaviors outside t
 ## Change budget
 
 - Task timebox: `one S2 integration card; split Player host or Developer Runtime work into later cards`.
-- Main source files: `3 expected, 4 maximum`.
+- Main source files: `5 maximum after independent review required the two-file B1-02 live-state correction`.
 - New/moved files: `0 source; up to 2 focused tests; no moves`.
 - Public exports: `up to 2 Store actions plus typed result/input aliases; no broad Store re-export`.
 - Move/delete: `only remove the obsolete split template callback; no file deletion`.
@@ -201,7 +203,7 @@ Existing add/delete/duplicate/move rules remain adapters for behaviors outside t
 - Consumers migrated/remaining: `pending`.
 - Behavior before/after: `pending`.
 - Validation results: `pending`.
-- Known risks/findings: `pending`.
+- Known risks/findings: `Independent diff review found the live named-state selection was not represented by the document-only typed target/view; task scope was corrected before integration to carry that session state explicitly through the existing pure seam.`
 - indexImpact: `expected current-fact update after integration; no Schema impact`.
 - Next allowed task: `Published Interaction host integration or Runtime Developer transaction integration after independent review`.
 
