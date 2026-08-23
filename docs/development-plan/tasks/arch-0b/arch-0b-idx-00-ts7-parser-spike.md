@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0b-idx-00-ts7-parser-spike`
 - Phase / wave: `ARCH-0B / wave 1`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Tooling Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 01:10 Asia/Shanghai`
 - Worktree / branch: `shared workspace, repo-index tooling-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Claim commit: `commit containing this card`
+- Claim commit: `0d8c610d6ec0cf1c4b919b784adf3178ed968a4c`
 - Context: `bootstrap-manual`
 - Freshness / relevant dirty inputs: clean baseline; fixture and inventory workers have disjoint scopes
 - Depends on: `arch-0a-bsl-00-baseline-and-budgets (done)`
@@ -91,12 +91,12 @@ The repository pins TypeScript `7.0.2`. The package root does not expose the tra
 
 ## Acceptance
 
-- [ ] Three projects covered with shared-file de-duplication
-- [ ] Renderer/player/shared, main/preload, unit/integration/e2e coverage proven
-- [ ] Required import/export/symbol/test cases extracted
-- [ ] Windows path and repeated output stable
-- [ ] Unstable API imports isolated to one file
-- [ ] No product/dependency/generated change
+- [x] Three projects covered with shared-file de-duplication
+- [x] Renderer/player/shared, main/preload, unit/integration/e2e coverage proven
+- [x] Required import/export/symbol/test cases extracted
+- [x] Windows path and repeated output stable
+- [x] Unstable API imports isolated to one file
+- [x] No product/dependency/generated change
 
 ## Minimal validation
 
@@ -107,7 +107,7 @@ The repository pins TypeScript `7.0.2`. The package root does not expose the tra
 ## Rollback
 
 - Start point: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Implementation commit: pending
+- Implementation commit: `not created; Worker was instructed not to commit`
 - Old path remains: manual Bootstrap remains the only trusted development navigation.
 
 ## Consumers and index
@@ -118,11 +118,18 @@ The repository pins TypeScript `7.0.2`. The package root does not expose the tra
 
 ## Result evidence
 
-- Pending Worker result.
+- Technical verdict: `typescript/unstable/sync` plus `typescript/unstable/ast` satisfies the V1 spike. `API.updateSnapshot({ openProjects })` loads all three projects, and the official SourceFile AST/type guards provide the required imports, exports, top-level declarations, lines, JSDoc and literal test calls. No scanner fallback, second parser, dependency, or ADR is needed.
+- Stable boundary: only `scripts/repo-index/typescriptAdapter.ts` imports `typescript/unstable/*`; `model.ts` exposes plain DTOs and the stable adapter interface, so unstable AST objects do not escape.
+- Focused validation: `npx vitest run tests/unit/repoIndexTypeScriptAdapter.test.ts --reporter=verbose` passed `3/3` tests.
+- Real-project smoke: the current shared workspace produced `541` de-duplicated repository TypeScript files (`tsconfig.json=525`, `tsconfig.electron.json=90`, `tsconfig.e2e.json=115`; memberships overlap by design). Two independent full adapter loads/scans serialized identically; latest timings were `976.9 ms` and `926.3 ms`.
+- Coverage evidence: renderer/player/shared, main/preload, unit/integration/e2e prefixes were all present; `src/shared/projectTypes.ts` retained membership in all three projects.
+- Type validation: `npx tsc --noEmit --pretty false` passed.
+- Hygiene: recursive unstable-import isolation assertion passed; `git diff --check` and explicit trailing-whitespace scan produced no findings. Product source, package/lockfile, contracts, semantic/generated index, generator and query files were unchanged by this task.
+- Remaining review: Coordinator should review and integrate the uncommitted Allowed-write diff before advancing this card beyond `target-green`.
 
 ## Findings / next allowed task
 
-- IDX-01 may start only after the parser verdict and focused tests are target-green.
+- IDX-01 parser prerequisite is now target-green. It may consume the stable DTO/factory after Coordinator review; generated index ownership remains with the Coordinator.
 
 ## Ready checklist (Coordinator)
 
