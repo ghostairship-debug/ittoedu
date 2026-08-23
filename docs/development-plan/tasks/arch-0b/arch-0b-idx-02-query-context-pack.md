@@ -4,15 +4,15 @@
 
 - Task ID: `arch-0b-idx-02-query-context-pack`
 - Phase / wave: `ARCH-0B / wave 3`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / codex/architecture-stabilization`
-- Baseline HEAD: `1899deb33eb9b7cef13a3ad2ccbe1018d5eca171`
-- Claim commit: `pending`
-- Context: `bootstrap-manual until IDX-01 is done`
-- Freshness / relevant dirty inputs: refresh after deterministic facts integration
-- Depends on: `arch-0b-idx-01-deterministic-facts-check (done)`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, query-tool-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `305eb648141230471a9975bf3fa3facf97a0d0aa`
+- Claim commit: `commit containing this claim update`
+- Context: `fresh repo:index manifest + completed 21 Feature / 17 Module semantic`
+- Freshness / relevant dirty inputs: clean worktree; generated facts/check fresh; concurrent ARCH-0A gate writes are excluded task/report paths and disjoint
+- Depends on: `arch-0b-idx-01-deterministic-facts-check (done); arch-0b-idx-01b-semantic-coverage (done)`
 - Blocks: `arch-0b-idx-03-golden-task-gates`
 - Retry count: `0`
 
@@ -107,8 +107,8 @@ Manual Bootstrap is the only trusted navigation. The deterministic facts task wi
 
 ## Ready checklist (Coordinator)
 
-- [ ] IDX-01 done and index fresh
-- [ ] context and generated paths validated
-- [ ] write scope/locks/budget valid
-- [ ] no user dirty changes in relevant inputs
-- [ ] no product escalation
+- [x] IDX-01 done and index fresh
+- [x] context and generated paths validated
+- [x] write scope/locks/budget valid
+- [x] no user dirty changes in relevant inputs
+- [x] no product escalation
