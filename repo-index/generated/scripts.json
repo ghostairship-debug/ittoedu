@@ -53,8 +53,16 @@
       "role": "project-tool"
     },
     {
+      "path": "scripts/query-repo-index.ts",
+      "role": "project-tool"
+    },
+    {
       "path": "scripts/releaseArtifactEvidence.ts",
       "role": "project-tool"
+    },
+    {
+      "path": "scripts/repo-index/contextPack.ts",
+      "role": "repo-index-tool"
     },
     {
       "path": "scripts/repo-index/generator.ts",
@@ -66,6 +74,10 @@
     },
     {
       "path": "scripts/repo-index/model.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/repo-index/query.ts",
       "role": "repo-index-tool"
     },
     {
@@ -266,6 +278,11 @@
       "category": "test",
       "command": "npm run build:player && npm run build:examples && npm run build:lesson-demo:fixture && npm run build:render-benchmark:fixture && npm run build:component-catalog-matrix:fixture && npm run build:renderer && npm run build:electron",
       "name": "pretest:e2e"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/query-repo-index.ts",
+      "name": "repo:context"
     },
     {
       "category": "other",

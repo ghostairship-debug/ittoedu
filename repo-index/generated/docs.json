@@ -454,7 +454,7 @@
     {
       "links": [],
       "path": "docs/development-plan/PACKAGE_MANIFEST.md",
-      "title": "文档清单、角色与完整性说明"
+      "title": "静态计划包文档清单、角色与完整性说明"
     },
     {
       "links": [
@@ -474,6 +474,11 @@
       "links": [],
       "path": "docs/development-plan/VALIDATION_REPORT.md",
       "title": "最终计划整合验证报告"
+    },
+    {
+      "links": [],
+      "path": "docs/development-plan/baselines/ARCH_0A_GATE_REPORT.md",
+      "title": "ARCH-0A Phase Gate Report"
     },
     {
       "links": [],
