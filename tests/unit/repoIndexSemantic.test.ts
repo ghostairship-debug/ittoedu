@@ -37,6 +37,9 @@ interface SemanticFeature {
   currentFact: string
   targetState: string
   carriers?: Record<string, string>
+  highSignalFiles?: string[]
+  highSignalTests?: string[]
+  catalogBoundaryFiles?: string[]
   canonicalFiles: string[]
   entrypoints: string[]
   runtimeConsumers: string[]
@@ -88,6 +91,7 @@ const expectedFeatureIds = [
   'feature:course-project-v9',
   'feature:published-course-v2',
   'feature:editor-core',
+  'feature:image-replacement-journey',
   'feature:slide',
   'feature:flow',
   'feature:spatial',
@@ -189,7 +193,16 @@ describe('repo-index stable semantic coverage', () => {
       'target-acceptance',
       'transitional-allowance',
     ])
-    const pathFields = ['canonicalFiles', 'entrypoints', 'runtimeConsumers', 'tests', 'evidence'] as const
+    const pathFields = [
+      'canonicalFiles',
+      'entrypoints',
+      'runtimeConsumers',
+      'tests',
+      'evidence',
+      'highSignalFiles',
+      'highSignalTests',
+      'catalogBoundaryFiles',
+    ] as const
     for (const record of [...features, ...modules]) {
       expect(statusClasses.has(record.statusClass)).toBe(true)
       if (record.statusClass === 'transitional-allowance') {
@@ -229,6 +242,88 @@ describe('repo-index stable semantic coverage', () => {
     expect(components?.canonicalFiles).not.toContain(
       'artifacts/ai-capabilities/component-catalog.snapshot.json',
     )
+    for (const feature of features) {
+      expect(feature.highSignalFiles?.length ?? 0, `${feature.id}:highSignalFiles`)
+        .toBeLessThanOrEqual(8)
+      expect(feature.highSignalTests?.length ?? 0, `${feature.id}:highSignalTests`)
+        .toBeLessThanOrEqual(6)
+      expect(feature.catalogBoundaryFiles?.length ?? 0, `${feature.id}:catalogBoundaryFiles`)
+        .toBeLessThanOrEqual(5)
+      for (const field of [
+        feature.highSignalFiles ?? [],
+        feature.highSignalTests ?? [],
+        feature.catalogBoundaryFiles ?? [],
+      ]) {
+        expect(new Set(field).size).toBe(field.length)
+      }
+    }
+  })
+
+  it('keeps sparse journey, compiler, and local Catalog signals evidence-backed', () => {
+    const feature = (id: string) => {
+      const match = features.find((candidate) => candidate.id === id)
+      expect(match, id).toBeDefined()
+      return match!
+    }
+
+    const journey = feature('feature:image-replacement-journey')
+    expect(journey.canonicalFiles).toEqual([
+      'src/renderer/App.tsx',
+      'src/renderer/store/editorStore.ts',
+      'src/renderer/authoring/courseAuthoringSession.ts',
+    ])
+    expect(journey.highSignalFiles).toEqual(expect.arrayContaining([
+      'src/renderer/course/v9MediaAudioCommands.ts',
+      'src/renderer/project/v9AssetAdapter.ts',
+      'src/renderer/store/history.ts',
+      'src/renderer/project/courseProjectIo.ts',
+      'src/renderer/project/courseProjectArchive.ts',
+    ]))
+    expect(journey.highSignalTests).toEqual(expect.arrayContaining([
+      'tests/unit/assetTransactions.test.ts',
+      'tests/unit/buildPublishedCourseV2.test.ts',
+      'tests/integration/imageReplacementRaceCharacterization.test.tsx',
+      'tests/e2e/editor.spec.ts',
+    ]))
+
+    expect(feature('feature:preview-player').aliases).toContain('activateCourseLocation')
+    expect(feature('feature:preview-player').highSignalTests).toEqual(expect.arrayContaining([
+      'tests/unit/tryRunLocationMode.test.ts',
+      'tests/unit/flowProductIntegration.test.tsx',
+      'tests/unit/spatialProductIntegration.test.tsx',
+    ]))
+
+    const repoKnowledge = feature('feature:repo-knowledge')
+    expect(repoKnowledge.aliases).toEqual(expect.arrayContaining([
+      'typecheck',
+      'tsconfig',
+      'compiler boundary',
+    ]))
+    expect(repoKnowledge.highSignalFiles).toEqual(expect.arrayContaining([
+      'tsconfig.json',
+      'tsconfig.electron.json',
+      'tsconfig.e2e.json',
+      'package.json',
+      'repo-index/config.json',
+      'scripts/repo-index/typescriptAdapter.ts',
+      'tests/setup.ts',
+    ]))
+
+    const components = feature('feature:components')
+    expect(components.catalogBoundaryFiles).toEqual([
+      'artifacts/ai-capabilities/component-catalog.snapshot.json',
+      'src/main/componentCatalogManager.ts',
+      'src/shared/componentCatalog.ts',
+      'src/renderer/components/componentCatalogStatus.ts',
+      'src/renderer/ui/ComponentsTab.tsx',
+    ])
+    expect(components.catalogBoundaryFiles?.some((path) => (
+      path.startsWith('../') || path.includes('courseware-components')
+    ))).toBe(false)
+    expect(components.highSignalTests).toEqual(expect.arrayContaining([
+      'tests/unit/componentContentIntegrity.test.ts',
+      'tests/integration/componentCatalogV8Matrix.test.ts',
+    ]))
   })
 
   it('keeps Surface, component, and media carriers distinct', () => {

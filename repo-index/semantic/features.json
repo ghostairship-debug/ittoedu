@@ -131,6 +131,64 @@
     },
     {
       "schemaVersion": 1,
+      "id": "feature:image-replacement-journey",
+      "name": "Stable Image Replacement Journey",
+      "aliases": [
+        "image-replacement",
+        "replaceImageAsset",
+        "selectAndImportImage",
+        "图片替换稳定目标"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "ARCH-1 App / Editor Core / Media",
+      "moduleIds": [
+        "module:editor-core",
+        "module:app-persistence",
+        "module:feature-media",
+        "module:preview-player",
+        "module:export-delivery"
+      ],
+      "currentFact": "Slide image replacement reads the selected node after an asynchronous file dialog and does not carry one project/location/item target through save, preview and HTML delivery.",
+      "targetState": "One stable target and one document/resource history entry survive undo, save/reopen, Published preview and HTML export.",
+      "canonicalFiles": [
+        "src/renderer/App.tsx",
+        "src/renderer/store/editorStore.ts",
+        "src/renderer/authoring/courseAuthoringSession.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/App.tsx",
+        "src/renderer/store/editorStore.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/renderer/export/course/buildCoursePackages.ts"
+      ],
+      "highSignalFiles": [
+        "src/renderer/course/v9MediaAudioCommands.ts",
+        "src/renderer/project/v9AssetAdapter.ts",
+        "src/renderer/store/history.ts",
+        "src/renderer/project/courseProjectIo.ts",
+        "src/renderer/project/courseProjectArchive.ts"
+      ],
+      "tests": [
+        "tests/unit/courseAuthoringSession.test.ts",
+        "tests/unit/v9MediaTabAdapter.test.tsx"
+      ],
+      "highSignalTests": [
+        "tests/unit/assetTransactions.test.ts",
+        "tests/unit/courseProjectArchive.test.ts",
+        "tests/unit/buildPublishedCourseV2.test.ts",
+        "tests/integration/imageReplacementRaceCharacterization.test.tsx",
+        "tests/e2e/editor.spec.ts"
+      ],
+      "evidence": [
+        "COURSEWARE_DEVELOPMENT_PLAN.md",
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
       "id": "feature:slide",
       "name": "Slide Authoring",
       "aliases": [
@@ -190,6 +248,20 @@
       ],
       "currentFact": "FlowBlock body, overlay LayerItems, IME and formatting commands exist but remain coupled through Store/UI hotspots.",
       "targetState": "Preserve document order and keep body blocks distinct from overlay z-order.",
+      "highSignalFiles": [
+        "src/renderer/ui/PropertiesTab.tsx",
+        "src/renderer/course/flowSharedAuthoringAdapters.ts",
+        "src/renderer/project/assetManager.ts",
+        "src/renderer/project/v9AssetAdapter.ts",
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/course-project-v9/schema.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/flowWorkspaceMedia.test.tsx",
+        "tests/unit/flowSurfaceHost.test.ts",
+        "tests/unit/flowWorkspace.test.tsx",
+        "tests/unit/flowOverlayTransform.test.ts"
+      ],
       "carriers": {
         "paper": "FlowSurfaceDocument.blocks (FlowBlock[]; not LayerItem[])",
         "paper-component": "FlowComponentBlock",
@@ -234,6 +306,17 @@
       ],
       "currentFact": "World items, persisted camera/path/relation and non-persisted session camera exist.",
       "targetState": "Modularize Spatial commands without writing session camera into V9.",
+      "highSignalFiles": [
+        "src/renderer/ui/spatialLocationTryRun.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/published-course-v2/types.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/spatialLocationTryRun.test.ts",
+        "tests/unit/spatialAddVideoNode.test.ts",
+        "tests/unit/spatialSurfaceHost.test.ts"
+      ],
       "carriers": {
         "world": "SpatialSurfaceDocument.world.layerItems (LayerItem[])",
         "camera": "SpatialSurfaceDocument.camera.home + camera.frames",
@@ -324,6 +407,24 @@
       ],
       "currentFact": "Package lifecycle and three-Surface mounting exist; placement/public seams remain coupled.",
       "targetState": "Components owns packages and validation; Surfaces own correct carrier placement.",
+      "highSignalFiles": [
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/player/surfaces/flow/FlowSurfaceHost.ts",
+        "src/player/surfaces/spatial/SpatialSurfaceHost.ts",
+        "src/player/surfaces/slide/SlidePublishedAdapter.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/playerComponentV4Render.test.ts",
+        "tests/integration/componentCatalogV8Matrix.test.ts",
+        "tests/unit/componentContentIntegrity.test.ts"
+      ],
+      "catalogBoundaryFiles": [
+        "artifacts/ai-capabilities/component-catalog.snapshot.json",
+        "src/main/componentCatalogManager.ts",
+        "src/shared/componentCatalog.ts",
+        "src/renderer/components/componentCatalogStatus.ts",
+        "src/renderer/ui/ComponentsTab.tsx"
+      ],
       "carriers": {
         "project-packages": "CourseProjectDocument.componentPackages + component archive files/runtime bytes",
         "layer-instance": "ComponentLayerItem for Slide/Spatial/Flow overlay",
@@ -370,6 +471,14 @@
       ],
       "currentFact": "Runtime contracts, isolated hosts and DeveloperTab editing exist.",
       "targetState": "Narrow authoring/validation/host ports with no Player writeback.",
+      "highSignalFiles": [
+        "src/renderer/ui/DeveloperTab.tsx",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "highSignalTests": [
+        "tests/integration/runtimeRegistry.test.ts",
+        "tests/unit/developerMode.test.tsx"
+      ],
       "canonicalFiles": [
         "src/shared/contracts/runtime/schema.ts",
         "src/shared/contracts/runtime/types.ts",
@@ -409,6 +518,13 @@
       ],
       "currentFact": "Simple templates, professional rule UI and InteractionEngine share the V1 contract.",
       "targetState": "Typed view models and transaction-backed commands without a parallel rule format.",
+      "highSignalFiles": [
+        "src/player/InteractionEngine.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/interactionSchema.test.ts"
+      ],
       "canonicalFiles": [
         "src/shared/contracts/interaction-v1/schema.ts",
         "src/shared/contracts/interaction-v1/types.ts"
@@ -449,6 +565,16 @@
       ],
       "currentFact": "Global/surface ownership, effective order and one global controller are established.",
       "targetState": "Preserve ownership and stable authoringAddress while narrowing integration.",
+      "highSignalFiles": [
+        "src/renderer/authoring/courseAuthoringScope.ts",
+        "src/renderer/ui/NodesTab.tsx",
+        "src/shared/contracts/course-project-v9/types.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/effectiveLayerProjection.test.ts",
+        "tests/unit/v9GlobalLayerUiAdapter.test.tsx",
+        "tests/unit/globalLayerVisibility.test.ts"
+      ],
       "carriers": {
         "global": "CourseProjectDocument.globalLayerItems (ScopedLayerItem[])",
         "surface-shared": "CourseSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])",
@@ -495,6 +621,18 @@
       ],
       "currentFact": "V9-only open/save, edit-during-save detection, Recovery single-flight and atomic main writes exist.",
       "targetState": "Extract narrow lifecycle use cases without changing archive or IPC semantics.",
+      "highSignalFiles": [
+        "src/renderer/App.tsx",
+        "src/main/ipc.ts",
+        "src/preload/index.ts",
+        "src/shared/ipcTypes.ts",
+        "src/renderer/project/courseProjectLifecycle.ts",
+        "src/main/createWindow.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/asyncArchive.test.ts",
+        "tests/unit/v9MediaTabAdapter.test.tsx"
+      ],
       "canonicalFiles": [
         "src/renderer/project/courseProjectIo.ts",
         "src/renderer/project/courseProjectArchive.ts",
@@ -524,6 +662,7 @@
         "player",
         "try-run",
         "full-preview",
+        "activateCourseLocation",
         "试运行",
         "整课预览",
         "CoursePlayer"
@@ -536,6 +675,16 @@
       ],
       "currentFact": "Current-location try-run and full preview consume Published V2 through CoursePlayer hosts.",
       "targetState": "Preserve the V2 path and remove only characterized Legacy consumers.",
+      "highSignalFiles": [
+        "src/renderer/store/editorStore.ts",
+        "src/renderer/course/courseEditorLayout.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/tryRunLocationMode.test.ts",
+        "tests/unit/flowProductIntegration.test.tsx",
+        "tests/unit/spatialProductIntegration.test.tsx"
+      ],
       "canonicalFiles": [
         "src/renderer/ui/coursePlayerTryRun.ts",
         "src/player/surfaces/publishedDynamicHosts.ts",
@@ -576,6 +725,15 @@
       ],
       "currentFact": "Normal V9 standalone HTML and Web package paths use Published V2.",
       "targetState": "Preserve V2 delivery; no-source fallbacks are tracked only by the Legacy feature.",
+      "highSignalFiles": [
+        "src/renderer/App.tsx",
+        "src/player/index.ts",
+        "src/player/surfaces/publishedDynamicHosts.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/buildPublishedCourseV2.test.ts",
+        "tests/unit/webPackageExport.test.ts"
+      ],
       "canonicalFiles": [
         "src/renderer/export/course/buildCoursePackages.ts",
         "src/renderer/export/course/buildPublishedCourse.ts"
@@ -612,6 +770,13 @@
       ],
       "currentFact": "Published V2 PPTX exists, but Slide-only export still routes through the V8 projection builder.",
       "targetState": "Route supported V9 content through one path with editable/staticization parity.",
+      "highSignalFiles": [
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/renderPptxComponentSnapshots.test.ts"
+      ],
       "canonicalFiles": [
         "src/renderer/export/course/buildCoursePptx.ts",
         "src/renderer/export/buildPptx.ts"
@@ -649,6 +814,15 @@
       ],
       "currentFact": "Published print artifacts and Flow DOCX exist; PDF retains V8 raster fallbacks.",
       "targetState": "Format-specific V2/static plans with explicit unsupported-content reporting.",
+      "highSignalFiles": [
+        "src/renderer/export/exportPreflight.ts",
+        "src/shared/contracts/published-course-v2/types.ts",
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/ipcTypes.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/flowSurfaceHost.test.ts"
+      ],
       "canonicalFiles": [
         "src/renderer/export/course/buildCoursePrintArtifacts.ts",
         "src/renderer/export/course/flowDocx.ts",
@@ -686,6 +860,15 @@
       ],
       "currentFact": "Project Health and base export preflight still consume V8-shaped ProjectDocument.",
       "targetState": "Readonly V9 structural/export reports with actionable navigation and stable codes.",
+      "highSignalFiles": [
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/course-project-v9/schema.ts",
+        "src/renderer/export/course/buildCoursePackages.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/exportPreflight.test.ts",
+        "tests/unit/validateProject.test.ts"
+      ],
       "canonicalFiles": [
         "src/shared/projectHealth.ts",
         "src/renderer/export/exportPreflight.ts",
@@ -727,6 +910,16 @@
       ],
       "currentFact": "Runtime, object, rules and editable component views exist in professional mode and write through raw Store actions.",
       "targetState": "Retain the existing entry and attach stable targets/transactions; no third mode or Code Workspace.",
+      "highSignalFiles": [
+        "src/renderer/store/editorStore.ts",
+        "src/shared/contracts/runtime/schema.ts",
+        "src/shared/contracts/interaction-v1/schema.ts",
+        "src/renderer/components/importComponentPackage.ts",
+        "src/renderer/authoring/runtimeTargetEditSession.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/componentPackage.test.ts"
+      ],
       "canonicalFiles": [
         "src/renderer/ui/DeveloperTab.tsx",
         "src/shared/contracts/runtime/schema.ts",
@@ -764,6 +957,14 @@
       ],
       "currentFact": "Typed DesktopAPI, preload whitelist and main handlers define the desktop boundary.",
       "targetState": "Preserve channel parity, trust/path validation and close/save behavior.",
+      "highSignalFiles": [
+        "src/main/createWindow.ts",
+        "src/preload/desktop-api.d.ts",
+        "src/renderer/vite-env.d.ts"
+      ],
+      "highSignalTests": [
+        "tests/e2e/editor.spec.ts"
+      ],
       "canonicalFiles": [
         "src/shared/ipcTypes.ts",
         "src/main/ipc.ts",
@@ -807,6 +1008,19 @@
       "targetState": "Each consumer is migrated, explicitly retained, or removed only with zero-reference proof.",
       "removalPhase": "ARCH-4/ARCH-5",
       "reviewGate": "Canonical legacy-consumers.json record reaches exact zero or retained compatibility is approved.",
+      "highSignalFiles": [
+        "scripts/build-examples.ts",
+        "examples/render-host-benchmark/project.json",
+        "src/renderer/project/courseProjectIo.ts",
+        "src/renderer/project/validateProjectArchive.ts",
+        "scripts/validate-project.ts",
+        "package.json"
+      ],
+      "highSignalTests": [
+        "tests/unit/projectArchive.test.ts",
+        "tests/unit/aiCapabilities.test.ts",
+        "tests/unit/validateProject.test.ts"
+      ],
       "canonicalFiles": [
         "src/renderer/project/projectArchive.ts",
         "src/renderer/export/buildExportPayload.ts",
@@ -837,6 +1051,9 @@
       "aliases": [
         "repo-index",
         "Context Pack",
+        "typecheck",
+        "tsconfig",
+        "compiler boundary",
         "开发索引"
       ],
       "origin": "semantic",
@@ -847,6 +1064,19 @@
       ],
       "currentFact": "Deterministic fact generation exists but broad query use is gated by golden-task quality.",
       "targetState": "Fresh deterministic Context Packs with conservative low-confidence fallback.",
+      "highSignalFiles": [
+        "tsconfig.json",
+        "tsconfig.electron.json",
+        "tsconfig.e2e.json",
+        "package.json",
+        "repo-index/config.json",
+        "scripts/repo-index/typescriptAdapter.ts",
+        "tests/setup.ts"
+      ],
+      "highSignalTests": [
+        "tests/unit/repoIndexTypeScriptAdapter.test.ts",
+        "tests/unit/repoIndexGenerator.test.ts"
+      ],
       "canonicalFiles": [
         "repo-index/config.json",
         "scripts/repo-index/typescriptAdapter.ts",

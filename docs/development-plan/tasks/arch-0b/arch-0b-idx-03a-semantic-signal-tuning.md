@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0b-idx-03a-semantic-signal-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 1`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Semantic Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, semantic-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `8a0d223e8d668849d4c5db3f5c7bb84e42000687`
-- Claim commit: `commit containing this card`
+- Claim commit: `fb9f4a63dc68eba549f0de0b39fef5f14fb2b099`
 - Context: `fixed GT-001..025 baseline c22c6fd5 + FACT/MAP + current semantic`
 - Freshness / relevant dirty inputs: query tuning is disjoint; corpus/expected/evaluator are read-only
 - Depends on: `arch-0b-idx-03 golden baseline implementation at 8a0d223; IDX-01C done`
@@ -70,12 +70,12 @@ Quality baseline has no wrong-high result but misses cross-feature image replace
 
 ## Acceptance
 
-- [ ] Feature count remains ≤22 and alias normalization stays unique
-- [ ] New journey/aliases cite current plan/source evidence
-- [ ] `highSignalFiles`/`highSignalTests`/`catalogBoundaryFiles` paths all exist and remain small
-- [ ] Repo Knowledge identifies all three tsconfigs and adapter/config/test boundaries
-- [ ] Components distinguishes local Catalog metadata boundary from external source
-- [ ] Fixed corpus/expected/query/evaluator untouched
+- [x] Feature count remains ≤22 and alias normalization stays unique
+- [x] New journey/aliases cite current plan/source evidence
+- [x] `highSignalFiles`/`highSignalTests`/`catalogBoundaryFiles` paths all exist and remain small
+- [x] Repo Knowledge identifies all three tsconfigs and adapter/config/test boundaries
+- [x] Components distinguishes local Catalog metadata boundary from external source
+- [x] Fixed corpus/expected/query/evaluator untouched
 
 ## Minimal validation
 
@@ -86,7 +86,7 @@ Quality baseline has no wrong-high result but misses cross-feature image replace
 ## Rollback
 
 - Start point: `f46f48e3bdecf480be2abd0bedc82bc8e5196ffe`
-- Implementation commit: pending
+- Implementation commit: not created; Worker leaves a target-green uncommitted diff for Coordinator review
 - Old path remains: current 21 Feature semantic remains valid but lower recall.
 
 ## Consumers and index
@@ -97,7 +97,20 @@ Quality baseline has no wrong-high result but misses cross-feature image replace
 
 ## Result evidence
 
-- Pending.
+- Added the fixed optional fields `highSignalFiles`, `highSignalTests`, and `catalogBoundaryFiles` only in Feature semantic; tests enforce path existence, uniqueness, POSIX form, and budgets of `8 / 6 / 5` respectively.
+- Added one evidence-backed `feature:image-replacement-journey`, bringing the Feature total to exactly 22. It links the current App/Store/Session writer chain to Media/sidecar/history, V9 save, Published preview/HTML consumers and existing high-signal tests without referencing the parallel uncommitted race-characterization test.
+- Added evidenced `activateCourseLocation` terminology and Mixed location tests to `feature:preview-player`.
+- Added all three tsconfigs plus package/config/adapter/test-setup signals and `typecheck`/`tsconfig`/`compiler boundary` aliases to `feature:repo-knowledge`.
+- Added sparse contract, consumer and test signals to Flow, Spatial, Runtime, Interactions, Global Layers/Controller, Save/Recovery, Preview/HTML/Web/PPTX/Print, Diagnostics, DeveloperTab, Desktop IPC and Legacy Release. No Feature exceeds the signal budgets.
+- Added local Components Catalog boundary paths (snapshot, main manager, shared model, renderer status and UI) plus Catalog/integrity tests; the existing external-source exclusion remains authoritative and no external implementation path was added.
+- Validation: `npx vitest run tests/unit/repoIndexSemantic.test.ts` → 1 file / 5 tests passed, including temporary generator validation; JSON parse and diff hygiene passed.
+- Scope: only `repo-index/semantic/features.json`, carrier/signal assertions in `tests/unit/repoIndexSemantic.test.ts`, and this card changed by this Worker. Query/context/evaluator, golden corpus/expected, generated/config, Modules/invariants/exclusions, package/lockfile, product/contracts and other cards remain untouched.
+
+## Findings / next allowed task
+
+- Coordinator may regenerate after the disjoint query tuning lands, then rerun the unchanged GT-001..025 quality gate.
+- High-signal fields are navigation hints, not a replacement import graph and not a new dependency-policy source.
+- External Catalog queries must remain low-confidence even when local Catalog boundary files are recalled.
 
 ## Ready checklist (Coordinator)
 
