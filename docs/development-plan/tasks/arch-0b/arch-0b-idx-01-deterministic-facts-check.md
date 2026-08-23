@@ -4,15 +4,15 @@
 
 - Task ID: `arch-0b-idx-01-deterministic-facts-check`
 - Phase / wave: `ARCH-0B / wave 2`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / codex/architecture-stabilization`
-- Baseline HEAD: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Claim commit: `pending`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Tooling Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, repo-index-only write scope / codex/architecture-stabilization`
+- Baseline HEAD: `0b34638b19a1787d94c895797fac8eab475d6765`
+- Claim commit: `commit containing this claim update`
 - Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: re-evaluate after IDX-00 integration
-- Depends on: `arch-0b-idx-00-ts7-parser-spike (target-green then integrated)`
+- Freshness / relevant dirty inputs: IDX-00 integrated; concurrent representative and inventory paths are disjoint and must not be staged or modified
+- Depends on: `arch-0b-idx-00-ts7-parser-spike (done)`
 - Blocks: IDX-02 query/Context Pack and IDX-03 golden tasks
 - Retry count: `0`
 
@@ -109,9 +109,9 @@ No `repo-index/`, generator, check command, four-domain inventory/hash, or commi
 
 ## Ready checklist (Coordinator)
 
-- [ ] IDX-00 integrated
-- [ ] adapter verdict and context fresh
-- [ ] paths/locks/budget valid
-- [ ] generated owner available
-- [ ] no relevant user dirty changes
-- [ ] no product escalation
+- [x] IDX-00 integrated
+- [x] adapter verdict and context fresh
+- [x] paths/locks/budget valid
+- [x] generated owner available
+- [x] no relevant user dirty changes
+- [x] no product escalation
