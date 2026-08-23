@@ -2918,6 +2918,11 @@ function SlideLocationWorkspace({
       return
     }
     const session = started.session
+    const courseTarget = store.captureRuntimeAssetReplacementTarget(session)
+    if (!courseTarget) {
+      store.setStatus('运行时图片目标没有可提交的 V9 作者地址，请重新选择')
+      return
+    }
     setReplacingRuntimeAssetTargetId(session.targetId)
     try {
       const imported = await onSelectImageAsset()
@@ -2935,36 +2940,24 @@ function SlideLocationWorkspace({
         )
         return
       }
-      const liveTarget = result.target
-      const runtime = liveTarget.scope === 'global'
-        ? latestState.project.globalRuntime
-        : latestState.project.scenes.find(
-            (item) => item.id === liveTarget.sceneId,
-          )?.runtime
-      if (
-        liveTarget.kind !== 'asset' ||
-        !runtime ||
-        !Object.prototype.hasOwnProperty.call(runtime.assets, liveTarget.key)
-      ) {
-        latestState.setStatus('运行时图片目标已失效，请重新选择')
+      const committed = latestState.replaceRuntimeAssetAtTarget(
+        courseTarget,
+        imported.meta,
+        imported.bytes,
+      )
+      if (!committed.ok) {
+        latestState.setStatus(`${committed.reason} 未写入修改`)
         return
       }
-      const patch = {
-        assets: {
-          ...runtime.assets,
-          [liveTarget.key]: { assetId: imported.meta.id },
-        },
+      if (committed.status === 'unchanged') {
+        latestState.setStatus('运行时图片未改变')
+        return
       }
-      const activeTabBeforeImport = latestState.activeTab
-      latestState.importAsset(imported.meta, imported.bytes)
-      useEditorStore.setState({ activeTab: activeTabBeforeImport })
-      if (liveTarget.scope === 'global') {
-        latestState.updateGlobalRuntime(patch)
-        latestState.setStatus('已替换全局运行时图片；此素材由整课共享')
-      } else if (liveTarget.sceneId) {
-        latestState.updateSceneRuntime(liveTarget.sceneId, patch)
-        latestState.setStatus('已替换运行时图片；此素材由当前场景的所有状态共享')
-      }
+      latestState.setStatus(
+        courseTarget.courseTarget.owner === 'global'
+          ? '已替换全局运行时图片；此素材由整课共享'
+          : '已替换运行时图片；此素材由当前场景的所有状态共享',
+      )
     } finally {
       setReplacingRuntimeAssetTargetId(null)
     }

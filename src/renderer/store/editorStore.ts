@@ -133,6 +133,7 @@ import {
   type V9SlideTextContentDraft,
 } from '../authoring/v9SlideContentEdit'
 import { commitTeacherControllerAuthoringFrame } from '../authoring/v9TeacherControllerAuthoring'
+import type { RuntimeTargetEditSession } from '../authoring/runtimeTargetEditSession'
 import {
   commandTargetFromRow,
   projectEffectiveLayers,
@@ -175,6 +176,13 @@ import {
   type CourseMediaLibraryImportFeedback,
   type CourseMediaLibraryImportPlanFailureCode,
 } from '../media/courseMediaLibraryImport'
+import {
+  captureCourseRuntimeAssetReplacementTarget,
+  planCourseRuntimeAssetReplacement,
+  type CourseRuntimeAssetReplacementFeedback,
+  type CourseRuntimeAssetReplacementFailureCode,
+  type CourseRuntimeAssetReplacementTarget,
+} from '../runtime/courseRuntimeTransactions'
 import {
   addSlideComponentLayer,
   addSlideFormulaLayer,
@@ -1456,6 +1464,18 @@ export type ComponentPackageReplacementCommitResult =
       readonly reason: string
     }
 
+export type RuntimeAssetReplacementCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'replaced' | 'unchanged'
+      readonly feedback: CourseRuntimeAssetReplacementFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseRuntimeAssetReplacementFailureCode
+      readonly reason: string
+    }
+
 export interface EditorState {
   project: ProjectDocument
   activeSceneId: string
@@ -1573,6 +1593,14 @@ export interface EditorState {
   ): void
   setSceneRuntime(sceneId: string, runtime: RuntimeDocument | undefined): void
   setGlobalRuntime(runtime: RuntimeDocument | undefined): void
+  captureRuntimeAssetReplacementTarget(
+    session: Readonly<RuntimeTargetEditSession>,
+  ): CourseRuntimeAssetReplacementTarget | null
+  replaceRuntimeAssetAtTarget(
+    target: CourseRuntimeAssetReplacementTarget,
+    asset: AssetMeta,
+    bytes: Uint8Array,
+  ): RuntimeAssetReplacementCommitResult
   setActiveScene(sceneId: string): void
   setActivePresentationState(stateId: string | null): void
   addPresentationState(name?: string): void
@@ -3732,6 +3760,198 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     }
     set({ activeTab: 'components', errorMessage: null })
+    return {
+      ok: true,
+      status: 'replaced',
+      feedback: planned.plan.feedback!,
+    }
+  }
+
+  const captureRuntimeAssetTarget = (
+    session: Readonly<RuntimeTargetEditSession>,
+  ): CourseRuntimeAssetReplacementTarget | null => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    const projection = buildCandidateEffectiveLayers(state)
+    let authoringSession = state.courseAuthoringSession
+    if (
+      !document
+      || !projection
+      || !authoringSession
+      || session.kind !== 'asset'
+      || session.projectId !== document.id
+      || session.scope !== state.editingScope
+      || session.sceneId !== state.activeSceneId
+      || authoringSession.token.locationId !== projection.locationId
+      || authoringSession.token.surfaceType !== projection.surfaceType
+    ) {
+      return null
+    }
+    let expectedOwner: 'global' | 'scene'
+    let projectedItemId: string | undefined
+    if (session.scope === 'global') {
+      if (projection.surfaceType !== 'slide') return null
+      expectedOwner = 'global'
+      projectedItemId = document.globalLayerItems.find(
+        (entry) => entry.item.kind === 'runtime',
+      )?.item.layerItemId
+    } else {
+      const location = document.locations.find(
+        (candidate) => candidate.id === projection.locationId,
+      )
+      const surface = document.surfaces.find(
+        (candidate) => candidate.id === projection.surfaceId,
+      )
+      if (
+        !location
+        || location.kind !== 'slide-scene'
+        || !surface
+        || surface.type !== 'slide'
+        || session.sceneId !== location.sceneId
+      ) {
+        // The current authoring iframe only projects Slide scene/global Runtime.
+        return null
+      }
+      expectedOwner = 'scene'
+      projectedItemId = surface.scenes.find(
+        (scene) => scene.id === location.sceneId,
+      )?.layerItems.find((item) => item.kind === 'runtime')?.layerItemId
+    }
+    if (!projectedItemId) return null
+    const row = projection.unifiedRows.find((candidate) => (
+      candidate.owner === expectedOwner
+      && candidate.id === projectedItemId
+      && candidate.item.kind === 'runtime'
+    ))
+    if (
+      !row
+      || row.item.kind !== 'runtime'
+      || row.item.locked
+      || !Object.hasOwn(row.item.runtime.assets, session.key)
+    ) {
+      return null
+    }
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
+    try {
+      return captureCourseRuntimeAssetReplacementTarget({
+        sessionToken: authoringSession.token,
+        projectId: document.id,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: row.owner,
+        sceneId: row.scopeToken.sceneId,
+        itemId: row.id,
+        bindingKey: session.key,
+      })
+    } catch {
+      return null
+    }
+  }
+
+  const commitRuntimeAssetReplacementAtTarget = (
+    target: CourseRuntimeAssetReplacementTarget,
+    asset: AssetMeta,
+    bytes: Uint8Array,
+  ): RuntimeAssetReplacementCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    const projection = buildCandidateEffectiveLayers(state)
+    let authoringSession = state.courseAuthoringSession
+    if (!document || document.id !== target.courseTarget.projectId) {
+      return {
+        ok: false,
+        code: 'project-mismatch',
+        reason: 'Runtime 素材替换目标不属于当前 Course Project。',
+      }
+    }
+    if (!projection || !authoringSession) {
+      return {
+        ok: false,
+        code: 'session-stale',
+        reason: 'Runtime 素材替换会话已过期，请重新选择目标。',
+      }
+    }
+    if (
+      authoringSession.token.locationId !== projection.locationId
+      || authoringSession.token.surfaceType !== projection.surfaceType
+    ) {
+      return {
+        ok: false,
+        code: 'session-stale',
+        reason: 'Runtime 素材替换会话已过期，请重新选择目标。',
+      }
+    }
+    const targetRow = projection.unifiedRows.find((row) => (
+      row.id === target.courseTarget.itemId
+      && row.owner === target.courseTarget.owner
+      && row.item.kind === 'runtime'
+    ))
+    const scopeCompatible = target.courseTarget.owner === 'global'
+      ? state.editingScope === 'global'
+      : state.editingScope === 'scene'
+    if (!targetRow || !scopeCompatible) {
+      return {
+        ok: false,
+        code: targetRow ? 'owner-mismatch' : 'item-missing',
+        reason: targetRow
+          ? 'Runtime 素材替换目标的共享范围已改变。'
+          : '原 Runtime 图层已不存在，请重新选择目标。',
+      }
+    }
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
+    const planned = planCourseRuntimeAssetReplacement({
+      project: document,
+      sidecar: state.slideCandidateSidecar ?? emptyCourseAssetSidecar(),
+      currentIdentity: {
+        projectId: document.id,
+        documentRevision: document.revision,
+        sessionToken: authoringSession.token,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: targetRow.owner,
+        ownerKey: targetRow.scopeToken.ownerKey,
+      },
+      target,
+      asset,
+      bytes,
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) return planned
+    if (planned.status === 'no-op') {
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'invalid-document',
+        reason: error instanceof Error ? error.message : 'Runtime 素材替换计划无效。',
+      }
+    }
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      target.courseTarget.owner === 'global'
+        ? '已替换全局运行时图片；此素材由整课共享'
+        : '已替换运行时图片；此素材由当前场景的所有状态共享',
+    )) {
+      return {
+        ok: false,
+        code: 'invalid-document',
+        reason: '当前 Course Project 没有可用的作者会话。',
+      }
+    }
     return {
       ok: true,
       status: 'replaced',
@@ -6103,6 +6323,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({
         statusMessage: runtime ? '已创建全局运行时模板' : '已移除全局运行时',
       })
+    },
+
+    captureRuntimeAssetReplacementTarget(session) {
+      return captureRuntimeAssetTarget(session)
+    },
+
+    replaceRuntimeAssetAtTarget(target, asset, bytes) {
+      return commitRuntimeAssetReplacementAtTarget(target, asset, bytes)
     },
 
     setActiveScene(activeSceneId) {
