@@ -6,9 +6,9 @@
 
 - Task ID: `arch-1-vs-05-image-replacement-app-store-integration`
 - Phase / wave: `ARCH-1 / first vertical slice integration`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 03:09 Asia/Shanghai / target-green 2026-08-24 03:26 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 03:09 Asia/Shanghai / done at ARCH-1 gate 2026-08-24 04:38 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `6113d83e389d5c6e5e674ec183ef03b3045f4820`
 - Claim commit: `5b17e93f84ebff07633ab455a427e50b000cc694`
@@ -242,6 +242,7 @@ All three are held by this task's Coordinator. VS-02/03/04 and every other App/S
 - Known risks/findings: `LEG-001 derived V8 projection/history compatibility remains intentionally nonzero. App/Store/Slide history are still hotspots. The transaction frame is editor-memory state only and is not persisted; save/reopen correctly starts a fresh history. No Schema, IPC, Player, Published producer or export writer changed.`
 - indexImpact: `regenerate after this task-state integration; no semantic record change required`
 - Next allowed task: `VS-06 after deterministic repo-index refresh and a fresh Context Pack`
+- ARCH-1 gate integration: `VS-06 desktop evidence and the phase dependency ratchet passed; this hotspot integration is accepted and the rollback remains c85d6e0.`
 
 ## Ready checklist（Coordinator）
 
