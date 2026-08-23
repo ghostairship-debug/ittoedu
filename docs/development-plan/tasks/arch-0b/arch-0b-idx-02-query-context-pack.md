@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-02-query-context-pack`
 - Phase / wave: `ARCH-0B / wave 3`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / retry 1 target-green 2026-08-24 02:06 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, query-tool-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `305eb648141230471a9975bf3fa3facf97a0d0aa`
 - Claim commit: `8dd03b868c054af4a3723d84e0ac2e1dfefd7000`
@@ -92,7 +92,8 @@ Manual Bootstrap is the only trusted navigation. The deterministic facts task wi
 ## Rollback
 
 - Start point: IDX-01 completion commit
-- Implementation commit: `not created; Worker was instructed not to commit`
+- Implementation commit: `4539b37a3d793991e1bd32cadefaceda21236b49`
+- Generated integration commit: `e7ea38bc9722a28f9c156742d647194a27b25cf1`
 - Old path remains: manual Bootstrap remains mandatory until IDX-03 passes.
 
 ## Consumers and index
@@ -119,6 +120,7 @@ Manual Bootstrap is the only trusted navigation. The deterministic facts task wi
 - Retry 1 output repair: repository-local output remains restricted to ignored `repo-index/contexts/`. Absolute output is now accepted only beneath `node:os.tmpdir()`; paths elsewhere on the filesystem are rejected before directory creation or write. Focused tests cover safe OS-temporary output, illegal repository-root output and illegal absolute output outside both repository and OS temp, including no-file-created assertions.
 - Retry 1 validation: `npx vitest run tests/unit/repoIndexQuery.test.ts --reporter=verbose` passed `11/11` (the original `9` plus dedicated GT-024/025 and output-boundary cases); root/Electron/e2e TypeScript and diff hygiene passed. Current generated facts remain intentionally stale for query/config/package/tool changes and were not rebuilt. The derived task board is also stale at handoff and must be refreshed by the Coordinator; neither generated nor task-board files were written by this retry.
 - Retry 1 scope: no semantic/carrier, generated, lockfile, product, other task card or ARCH-0A gate change was made.
+- Coordinator integration: independently reran the final 11 query checks plus 4 semantic/carrier checks, all three TypeScript projects, regenerated strict facts, passed read-only freshness, and confirmed a real `--feature flow` Context Pack reports `fresh`, `safe-for-S2: yes`, `high`, and no Bootstrap requirement. Manual Bootstrap remains the required fallback and broad default until IDX-03 passes.
 
 ## Ready checklist (Coordinator)
 
