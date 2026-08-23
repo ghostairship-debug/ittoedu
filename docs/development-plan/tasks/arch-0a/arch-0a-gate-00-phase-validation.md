@@ -4,14 +4,14 @@
 
 - Task ID: `arch-0a-gate-00-phase-validation`
 - Phase / wave: `ARCH-0A / phase gate`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Validation Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `primary workspace / codex/architecture-stabilization`
-- Baseline HEAD: `2fcebf9`
-- Claim commit: `pending`
+- Baseline HEAD: `305eb648141230471a9975bf3fa3facf97a0d0aa`
+- Claim commit: `commit containing this claim update`
 - Context: `bootstrap-manual plus completed ARCH-0A evidence`
-- Freshness / relevant dirty inputs: refresh after performance task integration
+- Freshness / relevant dirty inputs: worktree clean; all ARCH-0A implementation cards done; strict repo-index and task board fresh
 - Depends on: `arch-0a-bsl-00, task-00, rep-00, map-00, perf-00 all done`
 - Blocks: ARCH-1 minimum baseline gate
 - Retry count: `0`
@@ -101,7 +101,7 @@ Baseline, task board, representative fixtures, and consumer inventory are integr
 
 ## Ready checklist (Coordinator)
 
-- [ ] all dependencies done
-- [ ] no related dirty task evidence
-- [ ] phase validation budget available
-- [ ] no product escalation triggered
+- [x] all dependencies done
+- [x] no related dirty task evidence
+- [x] phase validation budget available
+- [x] no product escalation triggered
