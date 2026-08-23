@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-b1-04-runtime-asset-replacement-integration`
 - Phase / wave: `ARCH-2 / W2-B1 Runtime authoring integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent Runtime reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `2ada909`
-- Claim commit: `pending`
+- Claim commit: `3c28435`
 - Context Pack + manifest hash | bootstrap-manual: `feature:runtime; fresh/high/safe-for-S2; source abcd102b, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree; Editor Store and Workspace locks exclusively held by Coordinator`
 - Depends on: `B1-01 done; W2-A project-resource transaction gate done`
@@ -56,7 +56,8 @@ Workspace validates transient host target
 
 - `src/renderer/store/editorStore.ts` Runtime target/actions only
 - `src/renderer/ui/Workspace.tsx` Runtime asset callback only
-- New Store/Workspace Runtime replacement integration tests
+- New `tests/integration/courseRuntimeAssetReplacementVerticalSlice.test.ts`
+- New `tests/integration/runtimeAssetReplacementRace.test.tsx`
 - Targeted `tests/unit/runtimeTargetEditSession.test.ts` only if signature evidence requires it
 - This task card result fields
 
@@ -104,4 +105,9 @@ Workspace validates transient host target
 
 ## Result evidence
 
-- Pending implementation, independent review and representative validation.
+- Product commit: `1e495cf feat(arch-2): atomically replace Runtime assets` (claim commit `3c28435`). The Store now captures a stable V9 Runtime asset target before the asynchronous picker and commits binding, `AssetMeta`, and bytes through the existing project-resource transaction as exactly one document/resource history frame.
+- Carrier/history matrix: `tests/integration/courseRuntimeAssetReplacementVerticalSlice.test.ts` passed `19/19`, covering Slide scene/surface/global, Flow surface/global, and Spatial surface/world/global. Undo/redo restores binding, metadata and bytes; the four compatibility snapshot stacks do not grow; save/reopen and Published V2 reads preserve the binding without mutation.
+- Race/no-orphan matrix: `tests/integration/runtimeAssetReplacementRace.test.tsx` passed `4/4`. Stable capture occurs before the deferred picker; location, revision and item-deletion races produce zero orphan metadata, bytes or history; the normal path calls only `replaceRuntimeAssetAtTarget` once and always clears the UI busy token.
+- Consumer reduction verified in the Workspace slice: replacement commits `2 → 1`; direct callback `importAsset` calls `1 → 0`; direct `updateSceneRuntime` / `updateGlobalRuntime` calls `1 / 1 → 0 / 0`; partial-failure orphan path `1 → 0`; product asset-delta behaviors `2 → 3`.
+- Broader Coordinator validation passed `9 files / 138 tests`, all root/Electron/e2e TypeScript checks, and diff hygiene. Independent review separately passed the target resource regression `7 files / 83 tests`, Runtime authoring regression `7 files / 47 tests`, all TypeScript checks, and `git diff --check`, with no blocker.
+- Boundary remains explicit: the current authoring iframe visually projects only Slide scene/global Runtime, so Flow/Spatial visual capture returns unavailable instead of claiming reachability. The stable Store `atTarget` path nevertheless supports every real V9 carrier listed above. Pipeline status: `engineering candidate`; no `art candidate` or product acceptance claim is made by this task.
