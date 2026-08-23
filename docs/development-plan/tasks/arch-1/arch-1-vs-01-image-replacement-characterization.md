@@ -4,17 +4,17 @@
 
 - Task ID: `arch-1-vs-01-image-replacement-characterization`
 - Phase / wave: `ARCH-1 / vertical slice preparation`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Characterization Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, characterization-test-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `805d04879122702ab17ad7043fe41da1de62ba53`
-- Claim commit: `commit containing this claim update`
+- Claim commit: `d585e42656987dba767dc8749842ebd9b30f4334`
 - Context: `bootstrap-manual explicitly approved for VS-01 only under ARCH-0B controlled-slice exception`
-- Freshness / relevant dirty inputs: product/App/Store/session/history paths clean; concurrent golden evaluator/task-card work is disjoint and may not be read or staged
+- Freshness / relevant dirty inputs: product/App/Store/session/history paths remained read-only; concurrent golden evaluator/package/index work was disjoint and was not read, modified, or staged
 - Depends on: `ARCH-0A gate (done); ARCH-0B broad quality gate may remain in tuning because plan permits VS-01 characterization under strict Bootstrap`
 - Blocks: `ARCH-1 VS-02 through VS-06`
-- Retry count: `0`
+- Retry count: `2` (test harness first needed the Player virtual-module stub, then needed Phaser-importing preview/export seams stubbed; product behavior was not changed)
 
 ## Product outcome
 
@@ -86,22 +86,22 @@ Existing evidence:
 
 ## Acceptance
 
-- [ ] Normal same-target path and one-history/resource behavior characterized
-- [ ] Cross-location and cross-project wrong-target path reproduced
-- [ ] Deleted item and revision-policy expectations explicit
-- [ ] Save/Preview/export expectations tied to existing V9/Published path
-- [ ] No product change or weakened assertion
+- [x] Normal same-target path and one-history/resource behavior characterized
+- [x] Cross-location wrong-target path reproduced; project New/Open UI reachability during pending dialog explicitly classified as busy-blocked rather than fabricated
+- [x] Deleted item, owner, project, location/generation and exact revision-policy expectations explicit
+- [x] Save/Published/HTML expectations tied to existing V9/Published path; Preview remains the existing read-only V2 endpoint for later VS-06 proof
+- [x] No product change or weakened assertion; future stale behavior is an expected-failure test, not a passing assertion for the bug
 
 ## Minimal validation
 
-- Focused characterization unit/integration command (to be named after context refresh)
-- Existing `assetTransactions` and `courseAuthoringSession` focused tests
+- `npx vitest run tests/integration/imageReplacementRaceCharacterization.test.tsx tests/unit/assetTransactions.test.ts tests/unit/courseAuthoringSession.test.ts`
+- `npm run typecheck`
 - `git diff --check`
 
 ## Rollback
 
-- Start point: final ARCH-0A/0B gate commit
-- Implementation commit: pending
+- Start point: `805d04879122702ab17ad7043fe41da1de62ba53`
+- Implementation commit: not created; Worker was instructed not to commit
 - Old path remains: current bug remains reproducible until VS-05 integrates the fix.
 
 ## Consumers and index
@@ -112,7 +112,22 @@ Existing evidence:
 
 ## Result evidence
 
-- Pre-characterization finding only; task remains draft until gates and fresh context are available.
+- Added `tests/integration/imageReplacementRaceCharacterization.test.tsx`; it renders the real App replace callback with a deferred `desktopAPI.selectImage`, real Store/V9 archive/Published/HTML paths, and only test-shell mocks for heavy UI/Player imports.
+- Normal same-target: revision and history each increase exactly once; image A changes while B stays unchanged; replacement metadata and bytes are present; undo removes/restores the original reference/metadata/bytes and redo restores the replacement.
+- Save/read endpoints: an in-memory V9 archive reopens with the replacement bytes; `buildPublishedCourseV2Payload` exposes the replacement data URL and the standalone HTML contains that same Published asset URL. No product save/export code was modified.
+- Cancel: document snapshot, revision, asset/file IDs, history depth, sidecar depth and error state remain byte/structurally unchanged.
+- Current cross-location diagnostic: dialog opens on `slide-intro-hero` A; location switches to summary and B is selected; dialog resolves; current implementation leaves A unchanged, writes the new asset to B, changes revision `1→2`, history `0→1`, full sidecar snapshot depth `0→1`, and reports no stale error.
+- The future-correct assertion is `it.fails`: stale completion must report an actionable error, leave A/B and asset/file IDs unchanged, and add no history. When VS-05 fixes the behavior, Vitest must report this expected-failure as an unexpected pass; the test must then be converted to a normal regression test.
+- Project-switch reachability: while `selectImage` is pending, the real App `busy` state disables New and Open; a user-visible project switch through those controls is currently unreachable. Project identity is still recorded as a required VS-02/VS-05 guard for non-UI/reentrant paths.
+- Future stale contract matrix is recorded without claiming current guards exist: `project-mismatch`, `session-stale`, `owner-mismatch`, `item-missing`, and `revision-conflict` under exact revision policy.
+- Validation: focused run passed `3 files / 15 tests`, plus `1 expected fail`; renderer/player, main/preload and e2e TypeScript projects all pass.
+- Scope: only this integration test and this card changed; no product, contract, package, index, fixture, inventory or other task-card write.
+
+## Findings / next allowed task
+
+- VS-02 and VS-03 may proceed in parallel after Coordinator review: VS-02 owns stable target/stale codes; VS-03 owns the one-history resource-delta plan.
+- VS-05 must not preserve the current B-write as desired. It must flip the `it.fails` contract to a normal passing regression and remove full sidecar snapshot growth for this replacement action.
+- Desktop project-switch race should not be fabricated while App busy blocks New/Open; VS-05 direct integration must still enforce project identity, and VS-06 must recheck UI reachability.
 
 ## Ready checklist (Coordinator)
 
