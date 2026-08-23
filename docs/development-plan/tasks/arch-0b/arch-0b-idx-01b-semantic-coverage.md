@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-01b-semantic-coverage`
 - Phase / wave: `ARCH-0B / wave 2 semantic`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Semantic Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, semantic-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `02490c6`
 - Claim commit: `e4285411122161e48a382f9616d2a077abc7e10c`
@@ -89,7 +89,7 @@ The initial semantic seed has only four Features and three Modules. It proves pr
 ## Rollback
 
 - Start point: `dd0ee77430891608961e083e1635042e84fe4bad`
-- Implementation commit: not created; Worker leaves a target-green uncommitted diff for Coordinator review
+- Implementation commit: `ca354119f609055e6839be1f0445102d9958c205`
 - Old path remains: four-feature seed and manual Bootstrap remain usable.
 
 ## Consumers and index
@@ -107,6 +107,7 @@ The initial semantic seed has only four Features and three Modules. It proves pr
 - Validation on the claimed generator baseline: `npx vitest run tests/unit/repoIndexSemantic.test.ts` → 1 file / 3 tests passed; generator completed in the test's OS temporary directory without writing committed generated facts.
 - Coordinator-review rerun after the DeveloperTab canonical-path correction: both semantic-only assertions passed; the temporary-generator assertion was blocked by concurrent out-of-scope dirty generator work (`shouldIndexSymbol` received the `Array.filter` index as `exportedLocalNames`, causing `exportedLocalNames.has is not a function`). No semantic path/alias/module assertion failed. Rerun the focused file after the IDX-01 generator worker settles; this Worker did not touch generator/tooling files.
 - Scope: this task changes only Features, Modules, the focused semantic test, and this task card. Generated facts, config, generator/query tooling, package files, product source/contracts, invariants, exclusions, and other task cards remain untouched by this Worker.
+- Coordinator review: corrected DeveloperTab canonical routing to the Runtime/Interaction contract schemas, then independently reran the complete semantic suite after the concurrent generator fix stabilized; all 3/3 checks, including temporary generation, passed.
 
 ## Findings / next allowed task
 
