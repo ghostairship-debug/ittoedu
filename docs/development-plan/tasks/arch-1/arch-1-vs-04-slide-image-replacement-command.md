@@ -6,9 +6,9 @@
 
 - Task ID: `arch-1-vs-04-slide-image-replacement-command`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Media / Slide Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, Media/Slide pure-command-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `1d7027fa939b46059e7b4053273bf10096fc19f9`
 - Claim commit: `745e701b514bb2a34d77dfe09f5c2c1c3adf6c4b`
@@ -122,7 +122,7 @@ A pure Slide/Media command can replace exactly the captured native image in Cour
 ## Rollback
 
 - Start point: `1d7027fa939b46059e7b4053273bf10096fc19f9`
-- Implementation commit: `pending Coordinator integration; Worker made no Git commit`
+- Implementation commit: `6a545ac267926f1bd53f992f50cc47c154af0ca4`
 - Old path remains: existing `replaceCourseLayerMedia` stays active and can be restored by reverting this pure planner commit.
 
 ## Consumers and index
@@ -143,6 +143,7 @@ A pure Slide/Media command can replace exactly the captured native image in Cour
 ## Findings / next allowed task
 
 - The canonical hasItem port requires owner=`scene`, Slide location/surface, exact ownerKey, stable authoringAddress, itemId and an effective native image carrier; locked state is rejected after identity validation. Old assets are deliberately retained. VS-05 may proceed only after Coordinator review; do not expand to video, Flow, Spatial or asset cleanup.
+- Coordinator review independently reran both focused suites (8/8), inspected base/named-state, no-op/reuse/conflict and VS-03 forward/inverse behavior, and integrated the pure planner without migrating the old Store consumer.
 
 ## Ready checklist（Coordinator）
 
