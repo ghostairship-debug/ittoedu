@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-03b-query-impact-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 1`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 02:35 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, query-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `8a0d223e8d668849d4c5db3f5c7bb84e42000687`
 - Claim commit: `fb9f4a63dc68eba549f0de0b39fef5f14fb2b099`
@@ -90,7 +90,7 @@ Quality baseline shows GT-001 multi-intent paths collapse to one weak Feature, G
 ## Rollback
 
 - Start point: `4539b37a3d793991e1bd32cadefaceda21236b49`
-- Implementation commit: `not created; Worker was instructed not to commit`
+- Implementation commit: `135a43fe08802c8fcbfc13ca7923a6092fc91d5d`
 - Old path remains: current conservative query remains safe but broad quality blocked.
 
 ## Consumers and index
@@ -111,6 +111,7 @@ Quality baseline shows GT-001 multi-intent paths collapse to one weak Feature, G
 - Focused validation: `npx vitest run tests/unit/repoIndexQuery.test.ts --reporter=verbose` passed `14/14`. Capability fixtures cover exact terminology without a Symbol, bounded multi-intent aggregation, compiler/tsconfig routing, dirty shared IPC project impact, exact one-hop relation expansion, four external-source phrasings, Legacy/normal-V9 ranking and all prior query safety behavior. Tests use real task-class wording but do not import corpus, expected data or task IDs.
 - Static validation: root, Electron and E2E TypeScript checks passed; diff hygiene passed. Only `query.ts`, `contextPack.ts`, focused query tests and this card changed. Semantic, corpus/expected/evaluator, generated, config/package, product/contracts/lockfile and other cards were not written.
 - Full quality gate was intentionally not run by this Worker; the Coordinator must rerun the unchanged corpus/evaluator after integrating both semantic and query tuning waves and rebuilding the strict index.
+- Coordinator quality review with the corrected mode-aware evaluator removed all zero-hit and confidence/Bootstrap mismatches: controlled/broad Hit@5 became 100%, wrong-high remained 0 and low-confidence remained 4/4. Recall@15 and one external forbidden relation remain separate second-wave evidence-order/semantic work; they do not invalidate this task's bounded impact capabilities.
 
 ## Ready checklist (Coordinator)
 
