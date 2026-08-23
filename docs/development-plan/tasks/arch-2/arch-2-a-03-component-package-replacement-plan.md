@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-a-03-component-package-replacement-plan`
 - Phase / wave: `ARCH-2 / W2-A pure Components command`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Components Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, new Components planner-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `d6b56a2`
-- Claim commit: `pending`
+- Claim commit: `1de9d64`
 - Context Pack + manifest hash | bootstrap-manual: `feature:components; fresh/high/safe-for-S2; source 35e2be08, semantic d9f5f3a2, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `new planner and test paths clean; Store/App/Surface histories locked out`
 - Depends on: `ARCH-1 VS-03 resource delta done; A-00 read-only audit complete`
@@ -72,5 +72,8 @@ Replacing one installed component package produces one immutable V9 document/pac
 
 ## Result evidence
 
-- Pending Worker implementation and independent review.
-
+- Pure implementation commit: `031c107`.
+- The planner validates exact project/revision/clock, package identity/version/content/provenance/scope, reparses current and replacement files through the existing Component API 4 parser, compares external manifest/runtime with package files, and schema-validates the final V9 document.
+- It preserves every instance value except version across global/surface/Slide/Spatial ComponentLayerItem and recursively nested FlowComponentBlock carriers, returning one detached component-package delta and one revision.
+- Independent review caught and closed runtime/manifest consistency bypass and optional-content-hash pseudo-commit. Final focused validation passed 5 files / 36 tests and TypeScript; reviewer recheck approved 5 files / 23 tests.
+- Consumers migrated: `0` by design. The next allowed task is the unique component Store/App integration; Published V2 remains read-only and unchanged.

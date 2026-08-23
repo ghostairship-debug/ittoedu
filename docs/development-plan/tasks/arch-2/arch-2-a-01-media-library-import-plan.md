@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-a-01-media-library-import-plan`
 - Phase / wave: `ARCH-2 / W2-A pure Media command`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Media Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, new Media planner-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `d6b56a2`
-- Claim commit: `pending`
+- Claim commit: `1de9d64`
 - Context Pack + manifest hash | bootstrap-manual: `feature:media; fresh/high/safe-for-S2; source 35e2be08, semantic d9f5f3a2, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `new planner and test paths clean; Store/App/Surface histories locked out`
 - Depends on: `ARCH-1 gate done; A-00 read-only audit complete`
@@ -76,5 +76,8 @@ One project-scoped command plans a whole media-library batch as one immutable Co
 
 ## Result evidence
 
-- Pending Worker implementation and independent review.
-
+- Pure implementation commit: `91ee19b`.
+- `planCourseMediaLibraryImport` validates exact project/revision/clock, plans any batch as one revision, emits only needed asset-file deltas, supports exact half-repair and returns stable no-op/conflict results without reading a Surface or Store.
+- Metadata and bytes are detached; Buffer/subclass bytes use `Uint8Array.from`. Own-key guards and safe record writes cover `toString`/`__proto__` asset IDs without mutating Object prototypes.
+- Independent review found and then approved the Buffer-alias fix. Final focused validation passed 3 files / 17 tests, root TypeScript and scoped diff hygiene.
+- Consumers migrated: `0` by design. The next allowed task is the unique Media Store/App integration; Core record application must preserve prototype-key safety.
