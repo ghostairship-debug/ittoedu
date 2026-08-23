@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-01-deterministic-facts-check`
 - Phase / wave: `ARCH-0B / wave 2`
-- Status: `target-green`
+- Status: `retrying`
 - Owner / Reviewer / Integrator: `Tooling Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 01:26 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / retry 1 opened 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, repo-index-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `0b34638b19a1787d94c895797fac8eab475d6765`
 - Claim commit: `97bfee276f1944deb4c783bb7fad10715ecbd7e3`
@@ -14,7 +14,7 @@
 - Freshness / relevant dirty inputs: IDX-00 integrated; concurrent representative and inventory paths are disjoint and must not be staged or modified
 - Depends on: `arch-0b-idx-00-ts7-parser-spike (done)`
 - Blocks: IDX-02 query/Context Pack and IDX-03 golden tasks
-- Retry count: `0`
+- Retry count: `1` (independent review found four P1 correctness gaps and four P2 robustness/test gaps before generated integration)
 
 ## Product outcome
 
@@ -117,6 +117,7 @@ No `repo-index/`, generator, check command, four-domain inventory/hash, or commi
 - Size: generated output is `9,742,492` bytes. It contains no copied source bodies. The size is dominated by `13,355` readable relationship records (`edges.jsonl` about `6.14 MB`), followed by symbol and test records; repetition is stable IDs plus required provenance/evidence/status fields rather than duplicated source text.
 - Validation: focused generator suite passed `3/3`; adapter regression passed `3/3`; `npm run typecheck` passed all three TypeScript configs; generate/check and diff hygiene passed. `package-lock.json`, dependencies, product source, contracts/Schema, query/context and other task cards were not modified.
 - Remaining review: Coordinator must review and integrate tooling/semantic/generated changes; manual Bootstrap remains authoritative until IDX-03 gates pass.
+- Independent review finding: the pure generator commit `dd0ee77430891608961e083e1635042e84fe4bad` is retained, but generated integration is blocked until CRLF/LF byte identity, contract artifact tamper detection, inline type-import classification, local export edges, query-suffix resolution, runnable test command metadata, Markdown reference/fence/anchor validation, and Windows existing-target atomic swap coverage are repaired and rerun.
 
 ## Ready checklist (Coordinator)
 
