@@ -4,7 +4,7 @@
 
 - Task ID: `arch-0a-rep-00-v9-representative-projects`
 - Phase / wave: `ARCH-0A / wave 1`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Fixture Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, fixture-only write scope / codex/architecture-stabilization`
@@ -106,7 +106,7 @@ Small legal V9 seed fixtures exist under `tests/fixtures/course-project-v9/`, bu
 ## Rollback
 
 - Start point: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Implementation commit: not created; Worker was instructed not to commit
+- Implementation commit: `135d4a2c74868612cceec73124c0365e3f641823`
 - Old path remains: existing V9 seed fixtures remain unchanged.
 
 ## Consumers and index
@@ -129,6 +129,7 @@ Small legal V9 seed fixtures exist under `tests/fixtures/course-project-v9/`, bu
 - Manual structural inspection is encoded by the focused test: every extracted root `project.json` is Schema 9, contains no V8 `scenes/globalRuntime/globalNodes`, and satisfies the carrier/capability matrix.
 - Detailed matrix and conclusion boundary: `docs/development-plan/baselines/ARCH_0_REPRESENTATIVE_PROJECTS.md`.
 - Scope evidence: no `src/**`, contract, package manifest, lockfile, existing fixture, or product consumer was changed.
+- Coordinator review: independently inspected all three contract-native builders and coverage assertions, reran the byte check, 4 focused tests, and all three archive validators; hashes and preflight results matched the recorded evidence.
 
 ## Findings / next allowed task
 
