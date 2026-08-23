@@ -78,8 +78,16 @@ describe('course package export', () => {
     assertRelativeManifest(standalone.manifest)
 
     const courseData = strFromU8(webPackage.files['course-data.js']!)
+    const webIndex = strFromU8(webPackage.files['index.html']!)
     expect(courseData).toContain('window.__H5_COURSE_PAYLOAD__=')
     expect(courseData).not.toContain('data:image/')
+    expect(webIndex).toContain("default-src 'none'")
+    expect(webIndex).toContain("script-src 'self' 'unsafe-eval'")
+    expect(webIndex).not.toMatch(/script-src[^;]*'unsafe-inline'/)
+    expect(webIndex).toContain("style-src 'self' 'unsafe-inline'")
+    expect(webIndex).toContain("connect-src 'self'")
+    expect(html).toContain("script-src 'unsafe-inline' 'unsafe-eval' blob:")
+    expect(html).toContain("style-src 'unsafe-inline'")
     expect(webPackage.manifest).toEqual(expect.arrayContaining([
       'index.html',
       'course-data.js',
