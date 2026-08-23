@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-03a-semantic-signal-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 1`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Semantic Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, semantic-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `8a0d223e8d668849d4c5db3f5c7bb84e42000687`
 - Claim commit: `fb9f4a63dc68eba549f0de0b39fef5f14fb2b099`
@@ -86,7 +86,7 @@ Quality baseline has no wrong-high result but misses cross-feature image replace
 ## Rollback
 
 - Start point: `f46f48e3bdecf480be2abd0bedc82bc8e5196ffe`
-- Implementation commit: not created; Worker leaves a target-green uncommitted diff for Coordinator review
+- Implementation commit: `68163868df08abb6aab647971429af513cfee87c`
 - Old path remains: current 21 Feature semantic remains valid but lower recall.
 
 ## Consumers and index
@@ -105,6 +105,7 @@ Quality baseline has no wrong-high result but misses cross-feature image replace
 - Added local Components Catalog boundary paths (snapshot, main manager, shared model, renderer status and UI) plus Catalog/integrity tests; the existing external-source exclusion remains authoritative and no external implementation path was added.
 - Validation: `npx vitest run tests/unit/repoIndexSemantic.test.ts` → 1 file / 5 tests passed, including temporary generator validation; JSON parse and diff hygiene passed.
 - Scope: only `repo-index/semantic/features.json`, carrier/signal assertions in `tests/unit/repoIndexSemantic.test.ts`, and this card changed by this Worker. Query/context/evaluator, golden corpus/expected, generated/config, Modules/invariants/exclusions, package/lockfile, product/contracts and other cards remain untouched.
+- Coordinator review: independently reran 5/5 semantic checks and added the now-committed VS-01 characterization test to the image-replacement journey's bounded high-signal test set without changing corpus/expected.
 
 ## Findings / next allowed task
 
