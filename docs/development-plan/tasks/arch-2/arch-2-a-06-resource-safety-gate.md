@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
 - Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
 - Baseline HEAD: `04c9949`
-- Claim commit: `pending`
+- Claim commit: `847972c`
 - Context Pack + manifest hash | bootstrap-manual: `feature:media, feature:components and feature:editor-core; generated fresh/high/safe-for-S2; source b1095500, semantic d9f5f3a2, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `only regenerated repo-index output pending integration; no product writer lock`
 - Depends on: `A-00 through A-05 done`
@@ -73,4 +73,3 @@ W2-A closes only when asset and component package deltas are real cross-Surface 
 ## Result evidence
 
 - Pending consumer audit, performance comparison, ratchet and final gate validation.
-

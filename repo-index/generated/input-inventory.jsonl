@@ -78,7 +78,8 @@
 {"bytes":9682,"contentHash":"sha256:6185b110757b6cdda7fc9608024b41c76dbee9d654aa85afa4b61f11d7ff7632","domain":"source","path":"docs/development-plan/baselines/ARCH_0_PERFORMANCE.md"}
 {"bytes":4410,"contentHash":"sha256:82756bb2a9bea0378c16a24d3de913b0e9cec70d947df39afbff3a80010b15c6","domain":"source","path":"docs/development-plan/baselines/ARCH_0_REPRESENTATIVE_PROJECTS.md"}
 {"bytes":9770,"contentHash":"sha256:391a6611376eaf90d8c5ad2d267ab170893539ce12730cb953281671f5bec2c4","domain":"source","path":"docs/development-plan/baselines/ARCH_1_GATE_REPORT.md"}
-{"bytes":6885,"contentHash":"sha256:3873854879dfb7b6332b65c7a8382cff710c7574954a8d87fbfa1ac30da187ce","domain":"source","path":"docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md"}
+{"bytes":7819,"contentHash":"sha256:4718ddbd6aa0224ac4291f8f0a081db9ad297a319872c74fb454aa9ea415df94","domain":"source","path":"docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md"}
+{"bytes":8904,"contentHash":"sha256:e39a9ff930380ec5f0711b302940218a39620920528fade1e7cd6fbafa40fa8b","domain":"source","path":"docs/development-plan/baselines/ARCH_2_W2A_GATE_REPORT.md"}
 {"bytes":29684,"contentHash":"sha256:b79fc496c2a0f1d97ea8fc472039301f53f9b3efd6f50d8bfd558b17272a26b2","domain":"source","path":"docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"}
 {"bytes":69594,"contentHash":"sha256:3bfdd1d6d16470983e68929c885ca570b01a57c71be1abc3d45242e33f115297","domain":"source","path":"docs/development-plan/inventories/legacy-consumers.json"}
 {"bytes":271015,"contentHash":"sha256:77e3786a27451e7007d9b423e950fa1e817c0bb5ce71b3db61095257bf8a76b2","domain":"tool","path":"package-lock.json"}
@@ -89,7 +90,7 @@
 {"bytes":22332,"contentHash":"sha256:8f7f9e220382589eb56b0d11bc481efe8b60df6457e52151121d4360a5b85ab8","domain":"source","path":"repo-index/golden-tasks/expected.json"}
 {"bytes":17670,"contentHash":"sha256:91f075a378399b7fcf15b90b2900b9d9dfab32e0883f41bd9c43beedd7c5235e","domain":"source","path":"repo-index/golden-tasks/tasks.json"}
 {"bytes":1313,"contentHash":"sha256:99564dbe8cb236079f0335935410430ef0f681c4c3136104e4c6f109417feaae","domain":"semantic","path":"repo-index/semantic/exclusions.json"}
-{"bytes":40579,"contentHash":"sha256:06e2189842a75235cfed7ed6e3caccf2ee2c6c40ab9792356d3dbeacd1e64b0d","domain":"semantic","path":"repo-index/semantic/features.json"}
+{"bytes":41302,"contentHash":"sha256:93c86dd9817162eb16341ae2f73da0b367961c47366a44e87c7bfd3b5a76d8ee","domain":"semantic","path":"repo-index/semantic/features.json"}
 {"bytes":1592,"contentHash":"sha256:bb66236d2ba1c474696ae6429b26b5b7b2a18e0f90db03bbd9f08302816f22f3","domain":"semantic","path":"repo-index/semantic/invariants.json"}
 {"bytes":18303,"contentHash":"sha256:a51154fee3282f9f04abb15a38cf73eaf443f982a6f353bf23c397820da57f7a","domain":"semantic","path":"repo-index/semantic/modules.json"}
 {"bytes":41461,"contentHash":"sha256:cdc220e10425b78259ad8aac0a53d0755446095acaa0425dbc9e270e328bfe8a","domain":"source","path":"scripts/build-architecture-baseline-fixtures.ts"}
@@ -196,7 +197,7 @@
 {"bytes":7806,"contentHash":"sha256:8e8487edcc57a6f2ab6eaaba68ad2208622a934b5486f02409de6122c415c233","domain":"source","path":"src/player/teacherControllerRuntimeSession.ts"}
 {"bytes":136,"contentHash":"sha256:57bd6f6f2e4340b0af78e8a186b0f859f24303c722980b1df1035ba796d01f1c","domain":"source","path":"src/preload/desktop-api.d.ts"}
 {"bytes":6789,"contentHash":"sha256:3c8b4dc8ecdd58d458a85fbe8d1f81363edb275b430af0a51d168a6cc5306f4d","domain":"source","path":"src/preload/index.ts"}
-{"bytes":76080,"contentHash":"sha256:0cc24952dc6cdc86f9655efd1457d6ac2cef8269fac0d3b2ba8f326cc6b1b9f0","domain":"source","path":"src/renderer/App.tsx"}
+{"bytes":77580,"contentHash":"sha256:2251bc2f5d253bfc2fface899e4a52cfb0f857e3fc5629873ed581688ea005b7","domain":"source","path":"src/renderer/App.tsx"}
 {"bytes":784,"contentHash":"sha256:a86cd17b51c8d2d5201086851f31530e398baacb40600eeccc20cb5960e03971","domain":"source","path":"src/renderer/authoring/authoringReadiness.ts"}
 {"bytes":8148,"contentHash":"sha256:1b6d3747b538c0de3ceab743af750c85ad524125383ddb5ae910c076e205a8a5","domain":"source","path":"src/renderer/authoring/componentTextEditSession.ts"}
 {"bytes":7049,"contentHash":"sha256:4d687adfdc18a0009e1a920a1a15cfb2a80b77efaadc1b65f857d98b0293a67c","domain":"source","path":"src/renderer/authoring/courseAuthoringScope.ts"}
@@ -309,7 +310,7 @@
 {"bytes":1323,"contentHash":"sha256:af8d89b50c00b4a7b65a77b8d29cfb96d08ddac4ee4064a1d0c8c77c237a80ef","domain":"source","path":"src/renderer/project/saveProject.ts"}
 {"bytes":6154,"contentHash":"sha256:12fcfcc8e684cac023848d83fb2995f8b80c267be74ebed930c7b1c1cdb2d978","domain":"source","path":"src/renderer/project/v9AssetAdapter.ts"}
 {"bytes":8412,"contentHash":"sha256:1d8b901e6009190821fbdf86b2b3b3c1689ca9d75fff8a82386daa05e47b8d40","domain":"source","path":"src/renderer/project/validateProjectArchive.ts"}
-{"bytes":370898,"contentHash":"sha256:513bc7c2f76564540dd0409f566cf12fd78e09214f7aa89fc1a861a0aa9bb6c7","domain":"source","path":"src/renderer/store/editorStore.ts"}
+{"bytes":371174,"contentHash":"sha256:c94d39dab86335258b9b809245f309655eecce45a715d9ed0d986fde39fdcd54","domain":"source","path":"src/renderer/store/editorStore.ts"}
 {"bytes":7144,"contentHash":"sha256:6fe6f145a12197d072dbf544eec1953a417f76372050667dc3ef761c48ed4f46","domain":"source","path":"src/renderer/store/history.ts"}
 {"bytes":1076,"contentHash":"sha256:1b7b0aa36e0ae694d9c4932495f66a8e8b73c43277e7cf6e8849c8d2fe5fd284","domain":"source","path":"src/renderer/store/slideBackendPort.ts"}
 {"bytes":6029,"contentHash":"sha256:4288aa341dcb0c89f0c305493e8d00588a3029bfd8eb9190264f3da9f502da4f","domain":"source","path":"src/renderer/store/slideEditorProjection.ts"}
@@ -449,7 +450,9 @@
 {"bytes":1248,"contentHash":"sha256:eedf04a71d8b18ff5630ac366155efd6a762e623427339e598a83a25400308f1","domain":"source","path":"tests/helpers/projectV8.ts"}
 {"bytes":10454,"contentHash":"sha256:e1e50e0765d8a92fa201dcd29140a56ceaf28c746378da2c4673f52fe8d24c39","domain":"source","path":"tests/integration/architectureBaselineFlows.test.tsx"}
 {"bytes":14190,"contentHash":"sha256:57ded4180529c8e4229c3cb8b5d3d353dbf760dc5ee6e1974d3ada85ada8189d","domain":"source","path":"tests/integration/componentCatalogV8Matrix.test.ts"}
+{"bytes":17351,"contentHash":"sha256:3f91b49d4f30babd5905b89dd76aba2e8c9e6bdb47898fa3edb983829d2e8a4f","domain":"source","path":"tests/integration/componentPackageReplacementRace.test.tsx"}
 {"bytes":6431,"contentHash":"sha256:8a5e950d76142b16e4f83f9dda55b56d30f84554f5b3238227cf069152ae5a1f","domain":"source","path":"tests/integration/componentTextEditSession.test.ts"}
+{"bytes":26239,"contentHash":"sha256:2be1dd279f385292530993024288a72abd56028129c54cb67600845495dc482f","domain":"source","path":"tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts"}
 {"bytes":19922,"contentHash":"sha256:21cf1bf8106a6a19ca59c4af8826ac5acc0dba4ec109fb5a2841999c1650b57f","domain":"source","path":"tests/integration/courseMediaLibraryImportVerticalSlice.test.ts"}
 {"bytes":16797,"contentHash":"sha256:32ed907211c52827a6d7f7c2933bf3ddd2db571a3f2de46d102e9cbd6d85490b","domain":"source","path":"tests/integration/imageReplacementRaceCharacterization.test.tsx"}
 {"bytes":17721,"contentHash":"sha256:b1b2a0916e00c69c3ecc1f750bad06c2a9b078005fe9e7c40891c6921ba0a5d0","domain":"source","path":"tests/integration/imageReplacementVerticalSlice.test.ts"}
@@ -464,7 +467,7 @@
 {"bytes":818,"contentHash":"sha256:e22ce8791dc7021806028e0aeb416e8eafa2559987a54eb4927b46377a56eb3d","domain":"source","path":"tests/unit/appErrorBoundary.test.tsx"}
 {"bytes":1547,"contentHash":"sha256:37c7b4722fb4b723c313dfd5f75629a06544a31b830b8600c7bb1efe8cfe7515","domain":"source","path":"tests/unit/applicationIdentity.test.ts"}
 {"bytes":9094,"contentHash":"sha256:9fda5eb4fd06481f7fcda5e0e97230911f51bb0bb4464ef02a7d1ab3c27ecafe","domain":"source","path":"tests/unit/architectureBaselineFixtures.test.ts"}
-{"bytes":3509,"contentHash":"sha256:c5abe56e321205f0bf54f20881dd0e70be0c03a001c99b9245743cea268d0356","domain":"source","path":"tests/unit/architectureDependencyRatchet.test.ts"}
+{"bytes":8294,"contentHash":"sha256:a8812942931a6966cab15c76d8e2c3ea647ef50206a446c3c68bea26a5394ba5","domain":"source","path":"tests/unit/architectureDependencyRatchet.test.ts"}
 {"bytes":2364,"contentHash":"sha256:39aaea67531abf08dff47660fd30c8badd9116a55c3ab0bc59fe337cc6de4b87","domain":"source","path":"tests/unit/assessmentEvaluators.test.ts"}
 {"bytes":9584,"contentHash":"sha256:13f4f96402d02cb61d55be9847f8ef62b19f0b7608191568e8dfb4a61c0805b7","domain":"source","path":"tests/unit/assetReferences.test.ts"}
 {"bytes":10771,"contentHash":"sha256:942cf2114c5226813d621436fe34a4bd5e9f471637717005036827afe542eb31","domain":"source","path":"tests/unit/assetTransactions.test.ts"}
@@ -478,7 +481,7 @@
 {"bytes":18444,"contentHash":"sha256:d7fb48ed7cc39ba1aa2674820ab36a160dad40311ba636203f2a9748569cc0de","domain":"source","path":"tests/unit/buildPublishedCourseV2.test.ts"}
 {"bytes":10981,"contentHash":"sha256:ff6cf2178b6a20192970c16617334545c7e2da3037758b1b235998553e798fc3","domain":"source","path":"tests/unit/componentAuthoringTargetRegistry.test.ts"}
 {"bytes":4491,"contentHash":"sha256:5833de6d69a1ac34ba8c1c620638d2175f438ed661465993dd9ee166fc098691","domain":"source","path":"tests/unit/componentCatalog.test.ts"}
-{"bytes":2408,"contentHash":"sha256:fff8d87b64e39bb02df7c2457a47e2ce534adc7a9d3e3a25d792aa47559c188a","domain":"source","path":"tests/unit/componentCatalogReplacement.test.ts"}
+{"bytes":2716,"contentHash":"sha256:b9090e6d96357fb48ffadd400529689441023c57ffb3cbfe1ca201eeff0e561c","domain":"source","path":"tests/unit/componentCatalogReplacement.test.ts"}
 {"bytes":2839,"contentHash":"sha256:9c8f031a550c316328dacec676f05f5a9fb4d7fb60b2291bf91dd2b6f3ba3c52","domain":"source","path":"tests/unit/componentCatalogStatus.test.ts"}
 {"bytes":6442,"contentHash":"sha256:6f5d36e039d7bcb9e8ac3f2f7675c0ae06f86f2db0473e0556e8f06129c96e7a","domain":"source","path":"tests/unit/componentCatalogUi.test.tsx"}
 {"bytes":3714,"contentHash":"sha256:58b115999089536f73647622cf1c50763afa70a6210b9d9c8f0deb810c65962e","domain":"source","path":"tests/unit/componentContentIntegrity.test.ts"}
@@ -487,7 +490,7 @@
 {"bytes":4287,"contentHash":"sha256:869cca74eae1752934c0d395a93be12930bbc463f55b5e85e8983a79e476c8ad","domain":"source","path":"tests/unit/componentLifecycleGuard.test.ts"}
 {"bytes":11622,"contentHash":"sha256:28b4271a5f040adee7b6b4792232ad5bcf15621cc0656448c6288b9d798c2046","domain":"source","path":"tests/unit/componentPackage.test.ts"}
 {"bytes":5434,"contentHash":"sha256:c48c9f40b8b75083e169d74dd74a68a87bc52289fe6023cb89dd8cdc6811b661","domain":"source","path":"tests/unit/componentPackageLifecycle.test.ts"}
-{"bytes":9632,"contentHash":"sha256:580fff729a8e18da59bbbbc55d656ccde4dfaff8ad8c3093cc8c9e6b914d2c68","domain":"source","path":"tests/unit/componentPackageManagement.test.tsx"}
+{"bytes":10126,"contentHash":"sha256:b9d3c660671ad668b622e0f8e9ac7b00eb0786683c70734237662d85b62257e3","domain":"source","path":"tests/unit/componentPackageManagement.test.tsx"}
 {"bytes":10877,"contentHash":"sha256:592ab20686b11ce3b82637d5fa1dcaee3ea4f9b86de1610f268cf278bf88aeaa","domain":"source","path":"tests/unit/componentPropertiesEditor.test.tsx"}
 {"bytes":5018,"contentHash":"sha256:9aca76a48ca78928b04846107473f0d8f4a1352dc0de53073b2904095a7b6aeb","domain":"source","path":"tests/unit/componentProtocolV4.test.ts"}
 {"bytes":6426,"contentHash":"sha256:8eb0747562c1ad41f4dd04e7a18079f31de23a8bad3963d4b4826bc639c5fb1c","domain":"source","path":"tests/unit/componentTextEditSession.test.ts"}

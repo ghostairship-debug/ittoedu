@@ -99,3 +99,17 @@ ARCH-1 已证明一个 Slide 图片替换可以把 V9 document 与素材 bytes �
 
 这些 green 测试只说明旧覆盖通过；它们没有覆盖上述 Flow/Spatial batch/import/replace 错位。因此当前 pipeline status=`engineering baseline`，outcome status=`known-debt`，不得称为可接受行为。
 
+## 8. W2-A after-state（2026-08-24）
+
+W2-A gate 的完整证据见 `ARCH_2_W2A_GATE_REPORT.md`。相对本文件 before-state：
+
+- resource-aware Surface histories：`1/3 → 3/3`；
+- 显式 media-library full-snapshot behavior：`3 → 0`；
+- Flow 两项导入：`2 revisions/2 histories/2 snapshots → 1/1/0`；
+- Spatial 两项导入：`0 effective revisions/0 histories/2 snapshots → 1/1/0`；
+- product asset-delta behaviors：`1 → 2`；
+- product component-package delta producers：`0 → 1`；
+- V8 replacement planner、Store retarget helper/caller、replacement empty fallback：均归零；
+- component replacement full-snapshot behavior：`1 → 0`。
+
+结构字段没有删除：sidecar 引用仍 41 行，component package 引用仍 19 行，三个 sidecar adapter 与一个 Slide package snapshot adapter 仍在。它们的剩余 consumer 和删除门由 W2-B/后续 stabilization cards 继续逐项处理。

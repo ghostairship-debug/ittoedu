@@ -517,6 +517,11 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_2_W2A_GATE_REPORT.md",
+      "title": "ARCH-2 W2-A 资源安全阶段门"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md",
       "title": "ARCH-0A Feature / Writer / Consumer / Owner Ledger"
     },

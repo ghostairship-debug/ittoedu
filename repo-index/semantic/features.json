@@ -103,12 +103,13 @@
       "moduleIds": [
         "module:editor-core"
       ],
-      "currentFact": "Exactly one V9 session is active, but three Surface histories and a V8-shaped projection coexist.",
+      "currentFact": "Exactly one V9 session is active; Slide, Flow and Spatial histories now carry the same resource-delta frame, while three Surface histories and a V8-shaped projection still coexist.",
       "targetState": "One canonical V9 transaction/history port evolved from the current authoring session.",
       "canonicalFiles": [
         "src/renderer/store/editorStore.ts",
         "src/renderer/authoring/courseAuthoringSession.ts",
         "src/renderer/authoring/courseAuthoringScope.ts",
+        "src/renderer/authoring/resourceAwareAuthoringHistory.ts",
         "src/renderer/store/history.ts"
       ],
       "entrypoints": [
@@ -122,7 +123,8 @@
       "tests": [
         "tests/unit/readModelBoundary.test.ts",
         "tests/unit/courseAuthoringSession.test.ts",
-        "tests/unit/v9SlideBackendSelection.test.ts"
+        "tests/unit/v9SlideBackendSelection.test.ts",
+        "tests/unit/crossSurfaceResourceHistory.test.ts"
       ],
       "evidence": [
         "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md",
@@ -367,7 +369,7 @@
       "moduleIds": [
         "module:feature-media"
       ],
-      "currentFact": "V9 AssetMeta and sidecar bytes exist, but cross-Surface transaction/history is not unified.",
+      "currentFact": "Target-stable Slide image replacement and project media-library import use resource deltas, and all three Surface histories can carry them; placement, audio, Runtime bindings and legacy full-snapshot consumers remain to migrate.",
       "targetState": "One stable-target logical commit for metadata, bytes and placement.",
       "carriers": {
         "metadata": "CourseProjectDocument.assets (Record<string, AssetMeta>)",
@@ -378,6 +380,7 @@
       },
       "canonicalFiles": [
         "src/renderer/course/v9MediaAudioCommands.ts",
+        "src/renderer/media/courseMediaLibraryImport.ts",
         "src/renderer/project/v9AssetAdapter.ts",
         "src/renderer/project/assetManager.ts"
       ],
@@ -390,7 +393,10 @@
       ],
       "tests": [
         "tests/unit/v9MediaTabAdapter.test.tsx",
-        "tests/unit/assetTransactions.test.ts"
+        "tests/unit/assetTransactions.test.ts",
+        "tests/unit/courseMediaLibraryImportPlan.test.ts",
+        "tests/integration/courseMediaLibraryImportVerticalSlice.test.ts",
+        "tests/integration/mediaLibraryImportRace.test.tsx"
       ],
       "evidence": [
         "docs/development-plan/20-modules/06_MEDIA_ASSETS_AND_SIDECARS.md"
@@ -412,7 +418,7 @@
       "moduleIds": [
         "module:feature-components"
       ],
-      "currentFact": "Package lifecycle and three-Surface mounting exist; placement/public seams remain coupled.",
+      "currentFact": "Target-stable package replacement now uses one cross-Surface package delta and recursively preserves FlowComponentBlock; package import/delete/editable-copy/editable-update and placement/public seams remain coupled.",
       "targetState": "Components owns packages and validation; Surfaces own correct carrier placement.",
       "highSignalFiles": [
         "src/renderer/export/course/buildPublishedCourse.ts",
