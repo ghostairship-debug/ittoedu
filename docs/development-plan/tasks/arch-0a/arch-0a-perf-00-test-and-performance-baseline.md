@@ -4,17 +4,17 @@
 
 - Task ID: `arch-0a-perf-00-test-and-performance-baseline`
 - Phase / wave: `ARCH-0A / wave 2`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Validation Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, baseline evidence-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `941ee9275fed73964558c7ff4f68eecb30d61ced`
-- Claim commit: `commit containing this claim update`
+- Claim commit: `1899deb33eb9b7cef13a3ad2ccbe1018d5eca171`
 - Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: representative fixtures integrated and independently revalidated; inventory/repo-index paths are disjoint
+- Freshness / relevant dirty inputs: representative fixtures integrated and independently revalidated; concurrent `repo-index/generated/**` work remained disjoint and untouched
 - Depends on: `arch-0a-rep-00-v9-representative-projects (done)`
 - Blocks: ARCH-0A performance/manual-flow gate; product-code migration comparison
-- Retry count: `0`
+- Retry count: `2` (Node PPTX needed a measurement-only formula canvas shim; evidence filenames needed portable sanitization)
 
 ## Product outcome
 
@@ -73,11 +73,11 @@ Static checks and 202/1263 Vitest baseline are recorded, but no current represen
 
 ## Acceptance
 
-- [ ] Environment/fixture/sample protocol fixed
-- [ ] Median/P95 or explicit qualitative metric recorded for every required operation
-- [ ] Functional red/green/unknown separated from performance
-- [ ] Repro commands and artifacts recorded
-- [ ] No product change or acceptance claim
+- [x] Environment/fixture/sample protocol fixed
+- [x] Median/P95 or explicit qualitative metric recorded for every required operation
+- [x] Functional red/green/unknown separated from performance
+- [x] Repro commands and artifacts recorded
+- [x] No product change or acceptance claim
 
 ## Minimal validation
 
@@ -89,7 +89,7 @@ Static checks and 202/1263 Vitest baseline are recorded, but no current represen
 ## Rollback
 
 - Start point: representative fixture integration commit
-- Implementation commit: pending
+- Implementation commit: not created; Worker was instructed not to commit
 - Old path remains: static/unit baseline remains valid.
 
 ## Consumers and index
@@ -100,7 +100,27 @@ Static checks and 202/1263 Vitest baseline are recorded, but no current represen
 
 ## Result evidence
 
-- Pending.
+- Protocol: Windows 11 x64 / Node 24; 21 measured samples after 5 warmups; `performance.now()`; three fixture hashes fixed. Machine/user identifiers and absolute paths are absent from reports and documentation.
+- Measurement helper: `scripts/measure-architecture-baseline.ts`.
+- Raw local report: `output/architecture-baseline/node-measurements.json` (Git ignored).
+- Focused integration: `npx vitest run tests/integration/architectureBaselineFlows.test.tsx` passed 5/5, covering archive save/reopen, Slide transform + undo/redo, Flow composition commit + history, Mixed Published navigation and Flow Player mount/destroy.
+- Three `validate:course-project` commands: all exit `0`, Schema 9, 0 errors, 0 warnings.
+- Node performance: archive-open median 0.454–1.594 ms / P95 1.361–2.176 ms; save-reopen median 2.111–5.677 ms / P95 2.678–6.515 ms; Published V2 median 0.669–2.998 ms / P95 0.875–4.142 ms; web package median 37.890–77.044 ms / P95 50.419–91.272 ms.
+- Cross-cutting: Slide transform+undo+redo 2.498/2.851 ms median/P95; Flow apply-text+undo+redo 0.408/0.569 ms; all four Mixed locations 2.131/2.949 ms; Flow DOCX 1.939/2.254 ms.
+- One-shot actual exports: Slide-heavy PPTX `green-with-fallback-warnings` (3 slides); Flow print HTML + DOCX `green`; Slide/Mixed print artifacts `green-partial`; Mixed/Spatial PPTX `red` because two Spatial SVG images produced PptxGenJS base64-header errors; OS `printToPDF` remains `unknown`.
+- Hidden Electron + agent-browser/CDP: 3/3 fixtures opened through real recent-project IPC; Mixed Slide→Flow→Spatial switched visibly; Slide/Flow/Spatial current-location previews mounted/destroyed; final renderer console/page errors were 0.
+- Screenshots prove mount/reachability/Flow IME edit state only: `output/architecture-baseline/electron-slide-heavy.png`, `electron-slide-preview.png`, `electron-flow-ime-editor.png`, `electron-mixed-slide.png`. Visual quality remains engineering-fixture evidence, not art/outcome acceptance.
+- Required-operation states: new `unknown`; open `green`; archive save/reopen `green`; native Save As `unknown`; undo/redo `green`; location switch `green`; transform command `green` but trusted pointer `unknown`; synthetic Flow composition `green` but real OS IME `unknown`; preview mount/destroy `green`; HTML/Web/DOCX `green` within provenance boundary; Mixed PPTX `red`; OS PDF `unknown`.
+- Mixed history observation: 50 commits retained depth 50; heap delta +25,675,952 bytes without forced GC, recorded as qualitative only.
+- Full protocol, metrics, thresholds, artifact list and conclusion boundary: `docs/development-plan/baselines/ARCH_0_PERFORMANCE.md`.
+- Scope evidence: no product source, contract, package/lockfile, existing test or other task card changed; no full verify/E2E/package run and no `accepted` claim.
+- Coordinator rerun: focused integration passed 5/5 and the 21/5 measurement helper completed; private-machine-field scan was clean. The Flow integration emitted the existing React key-prop spread warning, now recorded in the baseline instead of being suppressed or fixed outside the card's product-code firewall.
+
+## Findings / next allowed task
+
+- Mixed/Spatial PPTX is a reproducible red finding: Spatial SVG data URLs are rejected by PptxGenJS as lacking a base64 header. Create a later export-owner task; do not fix it in this baseline card.
+- Native new/save-as, trusted pointer drag, real OS IME and OS PDF remain explicit `unknown`; they require bounded product/manual evidence rather than synthetic claims.
+- Existing ignored Player/dist artifacts allowed visible evidence but do not prove current pipeline freshness.
 
 ## Ready checklist (Coordinator)
 
