@@ -1,5 +1,21 @@
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type { EditorTransactionStep } from '../authoring/editorTransaction'
+import {
+  authoringLegacyHistoryEntryCount,
+  authoringHistoryRedoResourceTransition,
+  authoringHistoryUndoResourceTransition,
+  commitEditorTransactionToAuthoringHistory,
+  commitResourceAwareAuthoringHistory,
+  createResourceAwareAuthoringHistory,
+  isAuthoringHistoryTransactionFrame,
+  redoResourceAwareAuthoringHistory,
+  RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT,
+  undoResourceAwareAuthoringHistory,
+  type AuthoringHistoryResourceTransition,
+  type AuthoringHistoryTransactionFrame,
+  type ResourceAwareAuthoringHistoryEntry,
+} from '../authoring/resourceAwareAuthoringHistory'
 import {
   copySpatialSessionCamera,
   type SpatialEditorLayerScope,
@@ -18,8 +34,25 @@ export interface SpatialAuthoringSelection {
 
 export interface SpatialAuthoringHistory {
   readonly present: CourseProjectDocument
-  readonly past: readonly CourseProjectDocument[]
-  readonly future: readonly CourseProjectDocument[]
+  readonly past: readonly SpatialAuthoringHistoryEntry[]
+  readonly future: readonly SpatialAuthoringHistoryEntry[]
+}
+
+export type SpatialAuthoringTransactionFrame = AuthoringHistoryTransactionFrame
+export type SpatialAuthoringHistoryEntry = ResourceAwareAuthoringHistoryEntry
+export type SpatialAuthoringResourceTransition = AuthoringHistoryResourceTransition
+export const SPATIAL_AUTHORING_HISTORY_LIMIT = RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT
+
+export function isSpatialAuthoringTransactionFrame(
+  entry: SpatialAuthoringHistoryEntry,
+): entry is SpatialAuthoringTransactionFrame {
+  return isAuthoringHistoryTransactionFrame(entry)
+}
+
+export function spatialAuthoringLegacyHistoryEntryCount(
+  entries: readonly SpatialAuthoringHistoryEntry[],
+): number {
+  return authoringLegacyHistoryEntryCount(entries)
 }
 
 export interface SpatialAuthoringTarget {
@@ -69,47 +102,56 @@ export class SpatialCommandError extends Error {
 export function createSpatialAuthoringHistory(
   project: CourseProjectDocument,
 ): SpatialAuthoringHistory {
-  return Object.freeze({
-    present: project,
-    past: Object.freeze([] as CourseProjectDocument[]),
-    future: Object.freeze([] as CourseProjectDocument[]),
-  })
+  return createResourceAwareAuthoringHistory(project)
 }
 
 export function commitSpatialAuthoringHistory(
   history: SpatialAuthoringHistory,
   next: CourseProjectDocument,
-  limit = 100,
+  limit = SPATIAL_AUTHORING_HISTORY_LIMIT,
 ): SpatialAuthoringHistory {
-  return Object.freeze({
-    present: next,
-    past: Object.freeze([...history.past, history.present].slice(-limit)),
-    future: Object.freeze([] as CourseProjectDocument[]),
-  })
+  return commitResourceAwareAuthoringHistory(history, next, limit)
+}
+
+export function commitSpatialEditorTransactionHistory(
+  history: SpatialAuthoringHistory,
+  step: EditorTransactionStep,
+  limit = SPATIAL_AUTHORING_HISTORY_LIMIT,
+): SpatialAuthoringHistory {
+  if (
+    history.present.id !== step.projectId ||
+    history.present.revision !== step.baseRevision
+  ) {
+    throw new SpatialCommandError(
+      SPATIAL_REJECT_STALE_REVISION,
+      '编辑事务与当前 Spatial 文档不一致',
+    )
+  }
+  return commitEditorTransactionToAuthoringHistory(history, step, limit)
+}
+
+export function spatialAuthoringUndoResourceTransition(
+  history: SpatialAuthoringHistory,
+): SpatialAuthoringResourceTransition | undefined {
+  return authoringHistoryUndoResourceTransition(history)
+}
+
+export function spatialAuthoringRedoResourceTransition(
+  history: SpatialAuthoringHistory,
+): SpatialAuthoringResourceTransition | undefined {
+  return authoringHistoryRedoResourceTransition(history)
 }
 
 export function undoSpatialAuthoringHistory(
   history: SpatialAuthoringHistory,
 ): SpatialAuthoringHistory {
-  const previous = history.past.at(-1)
-  if (!previous) return history
-  return Object.freeze({
-    present: previous,
-    past: Object.freeze(history.past.slice(0, -1)),
-    future: Object.freeze([history.present, ...history.future]),
-  })
+  return undoResourceAwareAuthoringHistory(history)
 }
 
 export function redoSpatialAuthoringHistory(
   history: SpatialAuthoringHistory,
 ): SpatialAuthoringHistory {
-  const next = history.future[0]
-  if (!next) return history
-  return Object.freeze({
-    present: next,
-    past: Object.freeze([...history.past, history.present]),
-    future: Object.freeze(history.future.slice(1)),
-  })
+  return redoResourceAwareAuthoringHistory(history)
 }
 
 export function commitSpatialProjectMutation(

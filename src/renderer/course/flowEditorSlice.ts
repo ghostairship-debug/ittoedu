@@ -12,6 +12,22 @@ import {
   flowSurfaceIn,
   makeFlowBlockAuthoringAddress,
 } from './flowDocumentModel'
+import type { EditorTransactionStep } from '../authoring/editorTransaction'
+import {
+  authoringLegacyHistoryEntryCount,
+  authoringHistoryRedoResourceTransition,
+  authoringHistoryUndoResourceTransition,
+  commitEditorTransactionToAuthoringHistory,
+  commitResourceAwareAuthoringHistory,
+  createResourceAwareAuthoringHistory,
+  isAuthoringHistoryTransactionFrame,
+  redoResourceAwareAuthoringHistory,
+  RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT,
+  undoResourceAwareAuthoringHistory,
+  type AuthoringHistoryResourceTransition,
+  type AuthoringHistoryTransactionFrame,
+  type ResourceAwareAuthoringHistoryEntry,
+} from '../authoring/resourceAwareAuthoringHistory'
 
 export type FlowAuthoringScope = 'page' | 'global'
 export type FlowEditorFocusKind = 'idle' | 'text' | 'block' | 'overlay'
@@ -50,49 +66,66 @@ export interface FlowEditorBlockTarget {
 
 export interface FlowEditorHistory {
   readonly present: CourseProjectDocument
-  readonly past: readonly CourseProjectDocument[]
-  readonly future: readonly CourseProjectDocument[]
+  readonly past: readonly FlowEditorHistoryEntry[]
+  readonly future: readonly FlowEditorHistoryEntry[]
+}
+
+export type FlowEditorTransactionFrame = AuthoringHistoryTransactionFrame
+export type FlowEditorHistoryEntry = ResourceAwareAuthoringHistoryEntry
+export type FlowEditorResourceTransition = AuthoringHistoryResourceTransition
+export const FLOW_EDITOR_HISTORY_LIMIT = RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT
+
+export function isFlowEditorTransactionFrame(
+  entry: FlowEditorHistoryEntry,
+): entry is FlowEditorTransactionFrame {
+  return isAuthoringHistoryTransactionFrame(entry)
+}
+
+export function flowEditorLegacyHistoryEntryCount(
+  entries: readonly FlowEditorHistoryEntry[],
+): number {
+  return authoringLegacyHistoryEntryCount(entries)
 }
 
 export function createFlowEditorHistory(project: CourseProjectDocument): FlowEditorHistory {
-  return Object.freeze({
-    present: project,
-    past: Object.freeze([] as CourseProjectDocument[]),
-    future: Object.freeze([] as CourseProjectDocument[]),
-  })
+  return createResourceAwareAuthoringHistory(project)
 }
 
 export function commitFlowEditorHistory(
   history: FlowEditorHistory,
   next: CourseProjectDocument,
-  limit = 100,
+  limit = FLOW_EDITOR_HISTORY_LIMIT,
 ): FlowEditorHistory {
   if (next === history.present) return history
-  return Object.freeze({
-    present: next,
-    past: Object.freeze([...history.past, history.present].slice(-limit)),
-    future: Object.freeze([] as CourseProjectDocument[]),
-  })
+  return commitResourceAwareAuthoringHistory(history, next, limit)
+}
+
+export function commitFlowEditorTransactionHistory(
+  history: FlowEditorHistory,
+  step: EditorTransactionStep,
+  limit = FLOW_EDITOR_HISTORY_LIMIT,
+): FlowEditorHistory {
+  return commitEditorTransactionToAuthoringHistory(history, step, limit)
+}
+
+export function flowEditorUndoResourceTransition(
+  history: FlowEditorHistory,
+): FlowEditorResourceTransition | undefined {
+  return authoringHistoryUndoResourceTransition(history)
+}
+
+export function flowEditorRedoResourceTransition(
+  history: FlowEditorHistory,
+): FlowEditorResourceTransition | undefined {
+  return authoringHistoryRedoResourceTransition(history)
 }
 
 export function undoFlowEditorHistory(history: FlowEditorHistory): FlowEditorHistory {
-  const previous = history.past.at(-1)
-  if (!previous) return history
-  return Object.freeze({
-    present: previous,
-    past: Object.freeze(history.past.slice(0, -1)),
-    future: Object.freeze([history.present, ...history.future]),
-  })
+  return undoResourceAwareAuthoringHistory(history)
 }
 
 export function redoFlowEditorHistory(history: FlowEditorHistory): FlowEditorHistory {
-  const next = history.future[0]
-  if (!next) return history
-  return Object.freeze({
-    present: next,
-    past: Object.freeze([...history.past, history.present]),
-    future: Object.freeze(history.future.slice(1)),
-  })
+  return redoResourceAwareAuthoringHistory(history)
 }
 
 function freezeSelection(selection: FlowEditorSelection): FlowEditorSelection {
