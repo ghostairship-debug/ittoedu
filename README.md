@@ -1,10 +1,10 @@
 # 互动课件编辑器
 
-面向教师的可编辑互动课件桌面编辑器。**当前产品就是本仓库根目录 / `main`**：成熟 V8 `App` 表面，默认工程真相为 Course Project V9、Published Course V2、Runtime API 2/3、Component API 4。
+面向教师的可编辑互动课件桌面编辑器。**当前产品就是本仓库根目录 / `main`**：默认工程真相为 Course Project V9，发布为 Published Course V2，兼容 Runtime API 2/3 与 Component API 4。
 
-V9 重建已合入 `main`。日常启动、构建和验证都在根目录进行，不要再把独立 worktree 或 `codex/v9-editor-v8-base` 当成当前版。长期计划看 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)（12.10：Course Project V9 Schema 软冻结；T/P/Q/F/G 已合入）；可执行任务看 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)；第三方工人先读 [docs/tasks/editor-1.0/02_WORKER.md](docs/tasks/editor-1.0/02_WORKER.md)。
+当前已激活 [稳定化与模块解耦总纲](COURSEWARE_DEVELOPMENT_PLAN.md) 13.0：先统一工程数据、编辑历史、保存和交付链，再渐进拆分公共能力与 Slide / Flow / Spatial。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史 `docs/tasks/editor-1.0/**`、T/P/Q/F/G 任务卡和旧评估不再作为当前派工入口。
 
-当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 必须来自教师明确验收。
+开发默认由一个 Integrator 协调三个 Worker 自动拆解、并行、验证、修复和回滚；完整验证只在阶段门或最终候选运行。当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 仍来自产品 Owner 的真实验收，但不再作为启动稳定化的前置。
 
 ## 快速开始
 
@@ -81,7 +81,7 @@ npm test
 
 ## 历史课例边界
 
-物理旗舰课例和数学“流程失败案例 0”已在 W1-0 原子迁入相邻本地 Git 仓库 [`courseware-cases`](../courseware-cases/README.md)，核心仓只保留转发命令。数学案例继续保持 `pipeline: passed / outcome: rejected`；物理旗舰保持 `pipeline: passed / outcome: pending`，二者都不计入 W2。178 个源文件 / 64,818,336 字节由逐文件 SHA-256 清单锁定；旧 `.h5lesson` 缺少当前必填 `contentSha256` 而被当前解析器明确拒绝，原脚本重建后的当前归档已在可丢弃克隆中复验。新课例必须从全新主题和干净课例档案启动。
+物理旗舰课例和数学“流程失败案例 0”已在 W1-0 原子迁入可选的相邻本地 Git 仓库 `../courseware-cases`；该仓库不属于当前核心仓，缺失时本段只作历史边界说明，核心仓只保留转发命令。数学案例继续保持 `pipeline: passed / outcome: rejected`；物理旗舰保持 `pipeline: passed / outcome: pending`，二者都不计入 W2。178 个源文件 / 64,818,336 字节由逐文件 SHA-256 清单锁定；旧 `.h5lesson` 缺少当前必填 `contentSha256` 而被当前解析器明确拒绝，原脚本重建后的当前归档已在可丢弃克隆中复验。新课例必须从全新主题和干净课例档案启动。
 
 ## 技术栈
 

@@ -1,205 +1,128 @@
-# 项目认知索引
+# IttoEdu 当前项目认知入口
 
-> CURRENT_PRODUCT: 仓库根目录 / `main`（V9 重建已合入；已提交 HEAD 见 `git rev-parse HEAD`）
-> HISTORICAL_V8_BASELINE: `f27275658c6dfaa12f2ce35cd9368dcdebe99451`（只作历史对照，禁止再从此重建）
-> HISTORICAL_V9_DONOR: `475503498323`（只作供体与失败取证）
-> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.8
-> TASK_PACK: [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)
-> WORKER_PROTOCOL: [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)
-> UPDATED: 2026-08-19
-> PURPOSE: 帮助新 Agent 用最少上下文进入真实代码
+> 状态：人工 Bootstrap 入口
+>
+> 更新日期：2026-08-24
+>
+> 唯一总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)
+>
+> 详细执行方案：[docs/development-plan/](docs/development-plan/README.md)
 
-本文件是导航，不是源码替代品。若索引与源码、Schema 或可复现证据冲突，以源码事实为准并在同一变更中修正索引。
+当前仓库尚未落地正式的 repo-index 生成器与查询命令。本文件只提供当前源码的短入口，不假装机器索引已经存在。ARCH-0B 完成后，本文件将由模块语义与生成索引自动重建；在此之前，高风险任务必须按本文的人工 Bootstrap 定位。
 
-结构化入口位于 [`repo-index/`](repo-index/README.md)。当前只维护 modules、features 和 tests，不建设全量符号图、依赖图、热点系统或知识图谱服务。
+## 1. 权威与当前路线
 
-## 1. 新 Agent 的最短启动顺序
+1. 用户当前决定、Schema、合同和源码高于任何索引。
+2. 当前开发主线是立即稳定化与模块解耦，不等待教师 accepted。
+3. docs/tasks/editor-1.0/**、T/P/Q/F/G 和旧评估只作历史证据，不再领取。
+4. Course Project V9 软冻结；不支持 V8 .h5lesson，不创建 V10。
+5. 产品能力索引 artifacts/ai-capabilities/ 回答“课件生成能做什么”；待建 repo-index 回答“开发修改应读什么”，二者不得混为一份真相。
 
-1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.8。领取实现任务的第三方工人先读 [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)。
-3. 领取任务只看 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)。旧 `v8-to-v9-rebuild` 任务包已删除。
-4. 当前产品就是仓库根目录。历史 worktree 与 `codex/v9-editor-v8-base` 只作供体，不得再当第二套当前版。
-5. `docs/reviews/**`、`docs/INTERNAL_1_0_MILESTONE_0.md` 与旧评估稿只作历史取证，不是当前执行入口。
-6. 运行 `git status --short`，保留所有不属于当前任务的修改和未跟踪文件。
-7. 从本文件“改什么看哪里”进入相关源码，不先遍历全仓库。
-8. 按任务卡跑最小验证。全量命令只属于 T6。
+## 2. 人工 Bootstrap
 
-## 2. 真相优先级
+repo-index 落地前，每个任务按以下顺序读取：
 
-1. 用户当前明确要求与最近的 `AGENTS.md`。
-2. `src/shared/*Schema.ts`、当前源码和可复现运行证据。
-3. [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品决策和执行路线。
-4. 本索引及 `repo-index/*.json`。
-5. 历史阶段计划、评估原稿、旧截图、示例构建脚本和 donor 代码。
+1. 当前任务卡和一个相关合同；
+2. 精确类型、函数、Store action 或 UI 文案；
+3. canonical writer；
+4. 一个直接运行/预览/导出 consumer；
+5. 1–3 个相关测试；
+6. 仍不足时才扩展到相邻模块。
 
-索引中的路径以仓库根目录为准。使用前先识别目录角色：
+默认不读取全部历史任务、全部评估、整个 editorStore.ts 或全部 E2E。合同默认只读，不得因文件防火墙禁止读取。
 
-```powershell
-git branch --show-current
-git rev-parse HEAD
-git status --short
-```
+任务 Context Note 至少记录：
 
-当前执行以仓库根目录源码为准。`f272756` 与 `3e41ec0..4755034` 只用于对照历史行为，不是开工基线。若任务需要的路径与实际源码不同，先修正索引，不按历史文件名猜实现。
+~~~
+产品行为
+Canonical carrier
+当前 writer
+运行 / 预览 / 导出 consumers
+必须保护
+最小验证
+未知项
+热点 owner
+~~~
 
-## 3. 正式入口链
+## 3. 当前模块入口
 
-### Electron 与 Renderer
-
-```text
-src/main/index.ts
-  → src/main/createWindow.ts
-  → src/preload/index.ts
-  → src/renderer/main.tsx
-  → src/renderer/App.tsx
-```
-
-任何 CourseStudioApp、V9EditorShell、controlled editor 或第二产品路由都违反根计划。
-
-### 编辑工程真相
-
-工程真相已经是 Course Project V9。Store 里仍有 `v9-slide-candidate` / `V8SlideBackend` 过渡命名，按 T3 收口，不得再引入可写 V8 backend。V8 `.h5lesson` 不再导入；打开非 9 的工程应为不受支持（T2 删除现有导入 UI）。
-
-### Slide 作者画布
-
-```text
-V9 Course session
-  → buildV9SlideWorkspaceSnapshot
-  → WorkspaceSlideAuthoringInput
-  → Workspace.tsx
-  → EditorPhaserBridge / EditorScene / ProxyNodeAdapter
-  → Phaser 负责命中和几何
-
-同一 V9 snapshot
-  → Published/authoring preview projection
-  → Player host
-  → Player 负责视觉真相
-```
-
-不要让 Phaser proxy 成为保存或视觉数据源，也不要从 Player DOM/Canvas 反建工程。
-
-### Published 运行与导出
-
-```text
-CourseProjectArchiveData
-  → buildPublishedCourseV2Payload
-  → 产品：当前位置试运行与整课预览走 CoursePlayer + FlowSurfaceHost / SpatialSurfaceHost / SlidePublishedAdapter
-  → Phaser PlayerApp 不是 V9 Mixed 试运行主路径（P1 按此修视频/控制器）
-
-同一 producer
-  → 优先接现有 buildWebPackage / buildStandaloneHtml / buildPptx
-  → Flow DOCX 调用已有 flowDocx.ts
-```
-
-## 4. 稳定模块地图
-
-| 模块 | 主要文件 | 负责什么 |
+| 产品区域 | 当前主要入口 | 必须保护 |
 |---|---|---|
-| V9 工程合同 | `src/shared/courseProjectTypes.ts`, `courseProjectSchema.ts`, `courseProjectModel.ts` | 工程类型、校验、纯模型与引用一致性 |
-| Published 合同 | `src/shared/publishedCourseTypes.ts`, `publishedCourseSchema.ts` | 发布 payload 的类型与校验 |
-| 编辑会话 | `src/renderer/store/editorStore.ts` | 当前 backend、V9 session、history、文件/UI session action |
-| Slide 模型 | `src/renderer/course/v9SlideVerticalSlice.ts`, `slideEditorView.ts`, `slideEditorCommands.ts` | location/scope/selection、只读投影与原子 command |
-| 原产品壳 | `src/renderer/App.tsx`, `src/renderer/ui/**`, `src/renderer/styles/globals.css` | 教师可见工作流和原 UI |
-| Phaser 作者链 | `src/renderer/ui/Workspace.tsx`, `workspaceSlideAuthoring.ts`, `src/renderer/phaser/**` | 命中、选择、变换、viewport 和作者代理 |
-| 文件生命周期 | `src/renderer/project/courseProjectArchive.ts`, `recoveryWriteCoordinator.ts`, `src/main/projectPersistence.ts`, `src/main/ipc.ts` | 打开、保存、sidecar、恢复、最近工程和关闭 |
-| Published Player | 产品 `PlayerApp.ts` + 已有 `surfaces/flow`、`surfaces/spatial` | 课程会话、表面 Host、导航 |
-| 互动与动态运行 | `src/player/InteractionEngine.ts`, `CourseEventBus.ts`, `DeclarativeCourseState.ts`, Runtime/Component hosts | 事件、条件、动作、运行时和组件会话 |
-| 发布导出 | `src/renderer/export/course/**` | producer、HTML/网页包、PPTX、PDF/DOCX |
-| Builder/能力卡 | `.agents/skills/orchestrate-courseware`, `.agents/skills/build-courseware-project`, `artifacts/ai-capabilities/index.json` | 课件策划、V9 构建、能力发现。仓库没有 `agent-kit/` CLI |
+| V9 合同 | src/shared/contracts/course-project-v9/ | Schema 9、revision、三 Surface carrier |
+| Published | src/shared/contracts/published-course-v2/、src/renderer/export/course/ | V2 主路径只读 |
+| 编辑状态 | src/renderer/store/editorStore.ts | exactly-one-active V9 session、dirty、选择和现有命令 |
+| 编辑身份 | src/renderer/authoring/courseAuthoringSession.ts、courseAuthoringScope.ts | location/generation stale guard、owner、authoringAddress |
+| 历史与资源 | src/renderer/store/history.ts | 文档和素材/组件资源同步撤销 |
+| Slide | src/renderer/course/、src/renderer/phaser/、src/renderer/ui/Workspace.tsx | 场景、状态、LayerItem、编辑命中 |
+| Flow | src/renderer/course/flow*、src/renderer/ui/FlowWorkspace.tsx | FlowBlock 顺序、FlowComponentBlock、IME、wrap/paperSpace |
+| Spatial | src/renderer/course/spatial*、Player spatial host | 世界 items、自由逛、路径、会话相机 |
+| Media | src/renderer/project/、Store media actions | AssetMeta、sidecar bytes、保存重开 |
+| Components | src/renderer/components/、src/shared/contracts/component-v4/ | package/instance 分离、API 4、三 Surface 正确载体 |
+| Runtime/互动 | src/shared/contracts/runtime/、interaction-v1/、src/player/ | API 2/3、规则合同、隔离运行 |
+| 全局层/控制器 | V9 合同、courseAuthoringScope.ts、effective-layer 相关实现 | global/surface owner、控制器不复制 |
+| 保存/恢复 | src/renderer/App.tsx、src/renderer/project/、src/main/ | V9 archive、single-flight、Recovery |
+| 预览/Player | src/renderer/preview/、src/player/surfaces/ | CoursePlayer、mount/destroy、三 Surface hosts |
+| 导出 | src/renderer/export/、src/main/pdfExport.ts | HTML/Web V2、PPTX/PDF/DOCX 适用语义 |
+| 诊断 | src/shared/projectHealth.ts、src/renderer/diagnostics/ | 诊断只读、错误可行动 |
+| UI 外壳 | src/renderer/App.tsx、Workspace.tsx、PropertiesTab.tsx | 最终只保留路由和组合 |
+| Main/Preload | src/main/、src/preload/ | IPC parity、文件和安全边界 |
+| 开发工具 | scripts/、tests/、artifacts/ | 确定生成、最小验证、release consumers |
 
-详细机器可读版本见 [`repo-index/modules.json`](repo-index/modules.json)。
+路径包含通配前缀时表示检索方向，不表示一个可直接打开的具体文件。
 
-## 5. 改什么看哪里
+## 4. 首批高风险用户旅程
 
-| 任务 | 首先查看 | 同时核对 | 不要做 |
-|---|---|---|---|
-| 新建/打开/保存/关闭/恢复 | `App.tsx`, `editorStore.ts`, `courseProjectArchive.ts` | main IPC、persistence、recent、sidecar | 回落 `saveProjectAsync`、恢复 V8 导入 |
-| Slide scene/state/scope command | `v9SlideVerticalSlice.ts` | `slideEditorView.ts`, Store wrapper, Schema | 从 V8 view 反建 V9 |
-| 画布选择/拖动/缩放 | `Workspace.tsx`, `workspaceSlideAuthoring.ts` | Phaser bridge、stage viewport transform | 新建 Slide Workspace |
-| 图层/属性/元素 UI | 对应原 `*Tab.tsx` | App documentControl、Store target token | 受控路径读取 hidden V8 project |
-| 教师控制器作者态 | V9 slice、Workspace、Nodes/Properties | teacher controller layout、preview projection | 编辑态执行导航 |
-| 教师控制器播放态 | Published 宿主 + `TeacherControllerDom` | `SlidePublishedAdapter`、Flow/Spatial host、`publishedDynamicHosts.ts` | 编辑态执行导航；每表面复制控制器 |
-| 试运行跨表面跳转 | `editorStore.activateCourseLocation`、`apply*Backend` | `Workspace` course-try-run `goToLocation` | 跨表面时写死 `canvasMode: 'edit'`（P2 修） |
-| 画布底色 | Spatial CSS、`SpatialSurfaceDocument`、Slide 场景字段 | `derivedV8ProjectFromSpatial`、Properties | 只改假 V8 投影；写死 `#111318` |
-| Slide 互动 | producer、`InteractionEngine.ts`, Published App/Slide Host | event bus、状态与 destroy | 用 Runtime 热点永久绕行 |
-| Runtime/Component | shared contracts、player hosts、Developer/Components/Properties | asset/package sidecar、authoringAddress；P8 已挂 Flow/Spatial/Slide 试运行 | 复制 CourseStudio 动态编辑器；把空 catalog 当成不能新建组件 |
-| Flow | V9 model/view、原壳适配、`FlowSurfaceHost.ts` | PDF/DOCX、统一课程状态 | 复制 FlowBlockEditor UI |
-| Spatial | viewport/relations model、`SpatialSurfaceHost.ts`、`spatialPlaybackGestures.ts` | world/viewport 坐标分离、会话相机自由逛与镜头巡游 | inverse-scale 补偿控制器；运行态禁止平移 |
-| 课程树删除/跨组 | `ScenePanel.tsx`、`courseLocationCommands.ts` | `planCourseTreeReorder`、`deleteCourseSurface` | 用删 Flow 标题块冒充删整页（P6） |
-| HTML/网页包 | `buildPublishedCourse.ts`, `buildCoursePackages.ts` | Player bundle、资源清单 | 恢复 `.course-nav` |
-| PPTX/PDF/DOCX | 对应 `buildCourse*.ts` | print plan、fallback、真实打开 | 只断言文件存在 |
-| 能力说明 | docs、Skill、Agent Kit capability index | 当前正式 UI 和 tests | 声明尚不可达能力 |
+1. 替换图片 → 撤销/重做 → 保存重开 → 预览 → HTML/Web。
+2. 文件对话框打开期间切页/切项目，旧操作不得写入新目标。
+3. Slide / Flow / Spatial / Mixed 往返，位置、选择和编辑/运行状态可预期。
+4. 导入媒体或组件后，元数据和文件字节同步保存与撤销。
+5. 当前页试运行与整课预览使用同一 Published V2 主路径。
+6. HTML/Web、PPTX、PDF、DOCX 对不支持内容给出明确说明，不静默丢失。
+7. 新建、打开、Recovery、保存期间继续编辑与关闭流程保持数据安全。
+8. 全局层、Surface 共享层和教师控制器保持正确 owner。
 
-## 6. 当前阶段与首要风险
+这些旅程将成为 repo-index 的 semantic journeys、任务 Context Pack 和阶段验证入口。
 
-当前阶段是 **Editor 1.0 收尾**：T0–T6、P1–P8、Q1–Q8 已合入 `main`。不是 `accepted`。
+## 5. 当前真实债务
 
-- 产品：仓库根目录 / `main`
-- V8 导入已删除（T2），不是长期兼容面
-- 首要风险：按已删除的 R0–R8 或过时「当前格式是 Project V8」文档施工；把空组件目录写成 Flow/Spatial 不能挂组件；重做 P1–P8 / Q1–Q8；把 Phaser 接回 V9 试运行主路径
+- 一个活动 V9 session 与可写/派生混合的 V8-shaped state.project 并存；
+- Slide、Flow、Spatial 有三套 session/history 实现，但正常运行时互斥，不是三份同时活动的工程真相；
+- Store、App、Workspace、Properties、FlowWorkspace、InteractionEditor 和全局 CSS 责任过多；
+- HTML/Web、纯 Slide PPTX、PDF raster/preflight、Project Health 和部分 fixtures/release 仍有 Legacy consumer；
+- PROJECT_COGNITION_INDEX.md 的旧版本引用过不存在的 repo-index 和历史路径；本版不再声明这些设施已经存在；
+- 外部组件 Catalog 当前可用，但属于外部输入，状态必须在每次基线时检查。
 
-## 7. 关键不变量
+## 6. 常用只读检查
 
-- 原 App、原 Workspace、原 UI 文件和 Phaser 链保持正式可达。
-- 一个当前工程、一个 Store 生命周期、一个 V9 写入真相。
-- 一次用户操作一次 command/history/revision。
-- 选择和异步提交使用 session/location/state/scope/layer 的稳定 target，拒绝陈旧回调。
-- editor view、authoring proxy、Player preview 各自是只读投影，不可互相反序列化。
-- global/surface 作者态可显示 base 对象；Player 必须遵守 effective visibility。
-- global/surface 继续作为 V9 存储、作者与运行能力；四态左栏固定提供“共享内容 → 全局层（全课）”，统一有效图层不能取代该可见入口。
-- 纯 Slide/Flow/Spatial 与 Mixed 从 `locations/surfaces` 推导，不新增 `projectMode` 或 V10 迁移；新建工程和课程结构必须有三类 surface 的直接创建入口。
-- “轻量”只控制默认信息密度和渐进披露，不得删除、禁用或隐藏到不可发现 V8 已有能力。
-- 编辑态控制器 inert；试运行控制器可执行但只改会话。
-- Spatial world 与 viewport 控件使用不同坐标空间。
-- HTML/网页包无画布外旧导航。
-- 普通教师 UI 不暴露内部协议词和 ID。
+~~~
+git status --short --branch
+npm run check:contracts
+npm run check:ai-capabilities
+npm run typecheck
+npm run test -- --run <target>
+~~~
 
-功能级不变量见 [`repo-index/features.json`](repo-index/features.json)。
+完整 verify、完整 E2E 和桌面打包只在计划规定的阶段门运行，不作为普通任务默认动作。
 
-## 8. 验证选择
+## 7. 课件创作入口
 
-优先查询 [`repo-index/tests.json`](repo-index/tests.json)。通用原则：
+- 教学编排：.agents/skills/orchestrate-courseware/
+- V9 课件构建：.agents/skills/build-courseware-project/
+- 产品能力发现：artifacts/ai-capabilities/index.json
 
-- docs/index：只查链接、JSON、diff。
-- 单函数/组件：只运行任务文档列出的 1–2 个最相关 Vitest 文件。
-- T0–T5：禁止全量 `npm test` / typecheck / e2e / desktop build。
-- 只有 [T6](docs/tasks/editor-1.0/T6_FREEZE.md) 可跑全量命令。不得在未获教师确认时写 `accepted`。
+仓库没有 agent-kit CLI。课件创作能力索引与开发 repo-index 是两个不同系统。
 
-不要因为存在 `npm run verify:full` 就在开发循环运行它；中间类型或构建风险记录到 HANDOFF，由 T6 一次性验证。
+## 8. repo-index 落地门禁
 
-## 9. 高风险文件提示
+正式开发索引必须：
 
-这些文件职责多、调用链长，修改前先找窄边界，但“高风险”不等于必须先重构：
+- 覆盖根 renderer/player、Electron main/preload 和 e2e 三套 TypeScript 配置；
+- 自动生成文件、顶层符号、import/export、合同、脚本和测试关系；
+- 人工只维护少量模块、用户旅程、不变量和 Legacy consumer；
+- 不把 HEAD、时间、用户名或绝对路径写入受提交的确定性产物；
+- 相同输入连续生成逐字节一致，提交后立即 check 仍为 fresh；
+- 所有人工路径和命令 100% 存在；
+- 历史真实任务的入口命中和合同/测试召回达到计划门槛；
+- 低置信或相关文件 dirty 时明确降级，不输出伪确定答案。
 
-- `src/renderer/App.tsx`
-- `src/renderer/store/editorStore.ts`
-- `src/renderer/ui/Workspace.tsx`
-- `src/renderer/course/v9SlideVerticalSlice.ts`
-- `src/player/PlayerApp.ts`
-- `src/player/surfaces/flow/FlowSurfaceHost.ts`
-- `src/player/surfaces/spatial/SpatialSurfaceHost.ts`
-- `src/shared/courseProjectModel.ts`
-- `src/renderer/export/course/buildPublishedCourse.ts`
-
-只做当前结果需要的最小改动。没有当前消费者时，不抽象 adapter、service、command framework 或插件层。
-
-## 10. Donor、旧协议与生成物
-
-不可作为正式前端母体：
-
-- `src/renderer/course/CourseStudioApp.tsx`
-- `CourseSurfaceCanvas.tsx`
-- `V9EditorShell.tsx`
-- `course-studio.css`
-- donor 的整套 Flow/Spatial/互动/播放 UI
-
-`src/shared/projectTypes.ts` / `projectSchema.ts` 在 T1 抽离共享合同前仍被 V9 引用；不要按文件名当成「当前工程格式是 V8」或批量删除。V8 导入相关源码由 T2 删除，不要提前拆掉仍被空白工厂调用的 migration 而不改工厂。
-
-不要手工修改 `dist-player/`、`dist-renderer/`、`dist-electron/`、`output/`、`test-results/` 或示例内生成的 `course.html`。只有对应源码变化且任务要求刷新时才运行生成脚本。
-
-## 11. 工作树卫生
-
-- `git status --short` 中已有修改默认属于用户或其他工作，不得覆盖、回退或顺手提交。
-- 若工作树出现评估材料，默认视为用户自有文件；除非用户明确要求，不读取、修改或纳入提交。
-- 不使用 `git reset --hard`、批量 checkout 或递归删除来清理工作树。
-- 提交前只暂存本任务明确修改的文件。
+通过门禁后，中高风险和多智能体任务必须先生成 Context Pack；单文件小修仍可使用人工 Bootstrap。

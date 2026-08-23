@@ -1,6 +1,11 @@
-# Editor 1.0 收尾任务包
+# Editor 1.0 历史任务包（冻结）
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.10  
+> **不得领取或重做本目录任务。** 当前唯一总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 13.0；当前详细执行入口：[docs/development-plan/](../../development-plan/README.md)。
+>
+> 本目录仅保留 T/P/Q/F/G 已合入工作的算法、验证和交接证据，不再维护当前阶段、当前 Worker 协议或实时状态。
+>
+> 历史总纲：Course Project V9 / Editor 1.0 12.10。
+>
 > 共享约束：[01_SHARED.md](01_SHARED.md)  
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-19  

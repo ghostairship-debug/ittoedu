@@ -25,7 +25,7 @@
 
 ## 2. P0：可恢复证据
 
-检查点位于 [`artifacts/worktree-checkpoints/20260812-implementation-start/`](../../artifacts/worktree-checkpoints/20260812-implementation-start/)，未改变 Git 暂存区、未提交、未清理用户工作树。
+检查点历史路径为 `artifacts/worktree-checkpoints/20260812-implementation-start/`；该临时目录不在当前工作树，证据由 Git 历史保留。当时未改变 Git 暂存区、未提交、未清理用户工作树。
 
 | 证据 | 当前记录 |
 |---|---|
@@ -37,7 +37,7 @@
 | 组件 catalog | SHA-256 `407aa7311f115c80df9f37ef284302531765ccfaee197fd248e2104975063a3e`；9 个包 |
 | 项目进程 | 建立检查点时无本项目 Electron/Playwright 残留 |
 
-[`component-release-status.json`](../../artifacts/worktree-checkpoints/20260812-implementation-start/component-release-status.json) 记录九个包全部为 `experimental`、维护人为 `unassigned`、许可状态为 `unknown`。两项语文标注保留许可/维护人阻断；七个视觉容器还保留素材许可与来源阻断。后续能力清单不会解除这些门禁。
+历史检查点中的 `component-release-status.json` 记录九个包全部为 `experimental`、维护人为 `unassigned`、许可状态为 `unknown`；该临时文件不在当前工作树，需从 Git 历史核查。两项语文标注保留许可/维护人阻断；七个视觉容器还保留素材许可与来源阻断。后续能力清单不会解除这些门禁。
 
 ## 3. P1：类型与 E2E 门禁
 

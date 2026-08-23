@@ -522,7 +522,7 @@ Rename-Item global-controls.zip global-controls.h5component
 
 ### 14.1 旗舰 V4 组件参考
 
-相邻课例仓中的 [`induction-lab-component`](../../courseware-cases/high-school/physics/induction-not-field-but-change/examples/induction-lab-component/) 是完整 V4 场景组件历史参考：它使用 `renderMode: "dom"` 和离线素材复用同一套磁体—闭合线圈—检流计装置，把全部文案放入 `props.content`，通过语义事件连接 Project V8 命名状态，并完整实现 `updateProps`、`resize`、显隐、暂停/恢复、确定帧捕获和销毁。同一课例目录的 `scripts/build-induction-lesson.ts` 展示组件嵌入工程与离线导出，`scripts/validate-induction-lesson.ts` 展示交付门禁。它是课例专属历史源码，不属于核心产品夹具或公共组件 catalog。
+可选相邻课例仓 `../courseware-cases/high-school/physics/induction-not-field-but-change/examples/induction-lab-component/` 中的 `induction-lab-component` 是完整 V4 场景组件历史参考；该仓不属于当前核心仓，缺失时本段只作历史说明。它使用 `renderMode: "dom"` 和离线素材复用同一套磁体—闭合线圈—检流计装置，把全部文案放入 `props.content`，通过语义事件连接 Project V8 命名状态，并完整实现 `updateProps`、`resize`、显隐、暂停/恢复、确定帧捕获和销毁。同一课例目录的 `scripts/build-induction-lesson.ts` 展示组件嵌入工程与离线导出，`scripts/validate-induction-lesson.ts` 展示交付门禁。它是课例专属历史源码，不属于核心产品夹具或公共组件 catalog。
 
 V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)，可用 `npm run build:render-benchmark` 重建。其 Playwright 压力段执行 25 轮、共 100 次定制场景切换和 25 次末页重播，并检查组件/运行时挂载、Canvas/WebGL、活动 RAF、控制台异常与外部请求。
 
