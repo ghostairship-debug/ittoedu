@@ -36,6 +36,7 @@ interface SemanticFeature {
   moduleIds: string[]
   currentFact: string
   targetState: string
+  carriers?: Record<string, string>
   canonicalFiles: string[]
   entrypoints: string[]
   runtimeConsumers: string[]
@@ -228,6 +229,65 @@ describe('repo-index stable semantic coverage', () => {
     expect(components?.canonicalFiles).not.toContain(
       'artifacts/ai-capabilities/component-catalog.snapshot.json',
     )
+  })
+
+  it('keeps Surface, component, and media carriers distinct', () => {
+    const feature = (id: string) => {
+      const match = features.find((candidate) => candidate.id === id)
+      expect(match, id).toBeDefined()
+      return match!
+    }
+
+    expect(feature('feature:course-project-v9').carriers).toMatchObject({
+      project: 'CourseProjectDocument',
+      'slide-scene': 'SlideSceneDocument.layerItems (LayerItem[])',
+      'flow-paper': 'FlowSurfaceDocument.blocks (FlowBlock[]; not LayerItem[])',
+      'spatial-world': 'SpatialSurfaceDocument.world.layerItems (LayerItem[])',
+    })
+
+    expect(feature('feature:slide').carriers?.scene).toBe(
+      'SlideSceneDocument.layerItems (LayerItem[])',
+    )
+    expect(feature('feature:spatial').carriers?.world).toBe(
+      'SpatialSurfaceDocument.world.layerItems (LayerItem[])',
+    )
+
+    const flow = feature('feature:flow').carriers
+    expect(flow).toMatchObject({
+      paper: 'FlowSurfaceDocument.blocks (FlowBlock[]; not LayerItem[])',
+      'paper-component': 'FlowComponentBlock',
+      'paper-media': 'FlowMediaBlock',
+      overlay: 'FlowSurfaceDocument.surfaceLayerItems (ScopedLayerItem[] -> LayerItem; LayerItem.paperSpace=viewport|paper)',
+    })
+    expect(flow?.paper).not.toBe(flow?.overlay)
+    expect(flow?.paper.startsWith('FlowSurfaceDocument.blocks')).toBe(true)
+
+    expect(feature('feature:components').carriers).toEqual({
+      'project-packages': 'CourseProjectDocument.componentPackages + component archive files/runtime bytes',
+      'layer-instance': 'ComponentLayerItem for Slide/Spatial/Flow overlay',
+      'flow-paper-instance': 'FlowComponentBlock in FlowSurfaceDocument.blocks',
+      'shared-instance': 'ScopedLayerItem.item as ComponentLayerItem for global/surface shared',
+    })
+
+    const media = feature('feature:media').carriers
+    expect(media).toMatchObject({
+      metadata: 'CourseProjectDocument.assets (Record<string, AssetMeta>)',
+      bytes: 'CourseAssetSidecar.files (Record<string, Uint8Array>)',
+      'layer-placement': 'NativeLayerItem.content.data.assetId for Slide/Spatial/Flow overlay',
+      'flow-paper-placement': 'FlowMediaBlock.assetId',
+    })
+    expect(new Set([
+      media?.metadata,
+      media?.bytes,
+      media?.['layer-placement'],
+      media?.['flow-paper-placement'],
+    ]).size).toBe(4)
+
+    expect(feature('feature:global-layers-controller').carriers).toMatchObject({
+      global: 'CourseProjectDocument.globalLayerItems (ScopedLayerItem[])',
+      'surface-shared': 'CourseSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])',
+      'teacher-controller': 'One global NativeLayerItem(nativeType=teacher-controller)',
+    })
   })
 
   it(

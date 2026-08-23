@@ -19,6 +19,14 @@
       ],
       "currentFact": "Schema 9 strict contract is the only supported authoring project.",
       "targetState": "Preserve all existing fields, discriminators and semantics.",
+      "carriers": {
+        "project": "CourseProjectDocument",
+        "global": "CourseProjectDocument.globalLayerItems (ScopedLayerItem[])",
+        "slide-scene": "SlideSceneDocument.layerItems (LayerItem[])",
+        "flow-paper": "FlowSurfaceDocument.blocks (FlowBlock[]; not LayerItem[])",
+        "flow-overlay": "FlowSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])",
+        "spatial-world": "SpatialSurfaceDocument.world.layerItems (LayerItem[])"
+      },
       "canonicalFiles": [
         "src/shared/contracts/course-project-v9/index.ts",
         "src/shared/contracts/course-project-v9/types.ts",
@@ -139,6 +147,12 @@
       ],
       "currentFact": "Slide LayerItem/state commands and Phaser edit hit-testing exist behind Store integration.",
       "targetState": "Expose narrow Slide commands/selectors while preserving Phaser edit-only responsibility.",
+      "carriers": {
+        "scene": "SlideSceneDocument.layerItems (LayerItem[])",
+        "presentation-state": "SlidePresentationState.layerItemOverrides + layerItemOrder",
+        "surface-shared": "SlideSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])",
+        "location": "CourseLocation(kind=slide-scene)"
+      },
       "canonicalFiles": [
         "src/renderer/course/slideAuthoringBackend.ts",
         "src/renderer/course/v9SlideContentCommands.ts"
@@ -176,6 +190,13 @@
       ],
       "currentFact": "FlowBlock body, overlay LayerItems, IME and formatting commands exist but remain coupled through Store/UI hotspots.",
       "targetState": "Preserve document order and keep body blocks distinct from overlay z-order.",
+      "carriers": {
+        "paper": "FlowSurfaceDocument.blocks (FlowBlock[]; not LayerItem[])",
+        "paper-component": "FlowComponentBlock",
+        "paper-media": "FlowMediaBlock",
+        "overlay": "FlowSurfaceDocument.surfaceLayerItems (ScopedLayerItem[] -> LayerItem; LayerItem.paperSpace=viewport|paper)",
+        "location": "CourseLocation(kind=flow-block)"
+      },
       "canonicalFiles": [
         "src/renderer/course/flowEditorCommands.ts",
         "src/renderer/course/flowEditorSlice.ts"
@@ -213,6 +234,13 @@
       ],
       "currentFact": "World items, persisted camera/path/relation and non-persisted session camera exist.",
       "targetState": "Modularize Spatial commands without writing session camera into V9.",
+      "carriers": {
+        "world": "SpatialSurfaceDocument.world.layerItems (LayerItem[])",
+        "camera": "SpatialSurfaceDocument.camera.home + camera.frames",
+        "path-relation": "SpatialSurfaceDocument.world.paths + world.relations",
+        "surface-shared": "SpatialSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])",
+        "location": "CourseLocation(kind=spatial-camera)"
+      },
       "canonicalFiles": [
         "src/renderer/course/spatialEditorCommands.ts",
         "src/renderer/course/spatialAuthoringHistory.ts",
@@ -251,6 +279,13 @@
       ],
       "currentFact": "V9 AssetMeta and sidecar bytes exist, but cross-Surface transaction/history is not unified.",
       "targetState": "One stable-target logical commit for metadata, bytes and placement.",
+      "carriers": {
+        "metadata": "CourseProjectDocument.assets (Record<string, AssetMeta>)",
+        "bytes": "CourseAssetSidecar.files (Record<string, Uint8Array>)",
+        "layer-placement": "NativeLayerItem.content.data.assetId for Slide/Spatial/Flow overlay",
+        "flow-paper-placement": "FlowMediaBlock.assetId",
+        "course-audio": "CourseProjectDocument.media.audio"
+      },
       "canonicalFiles": [
         "src/renderer/course/v9MediaAudioCommands.ts",
         "src/renderer/project/v9AssetAdapter.ts",
@@ -289,6 +324,12 @@
       ],
       "currentFact": "Package lifecycle and three-Surface mounting exist; placement/public seams remain coupled.",
       "targetState": "Components owns packages and validation; Surfaces own correct carrier placement.",
+      "carriers": {
+        "project-packages": "CourseProjectDocument.componentPackages + component archive files/runtime bytes",
+        "layer-instance": "ComponentLayerItem for Slide/Spatial/Flow overlay",
+        "flow-paper-instance": "FlowComponentBlock in FlowSurfaceDocument.blocks",
+        "shared-instance": "ScopedLayerItem.item as ComponentLayerItem for global/surface shared"
+      },
       "canonicalFiles": [
         "src/shared/contracts/component-v4/schema.ts",
         "src/renderer/components/componentPackageStore.ts",
@@ -408,6 +449,13 @@
       ],
       "currentFact": "Global/surface ownership, effective order and one global controller are established.",
       "targetState": "Preserve ownership and stable authoringAddress while narrowing integration.",
+      "carriers": {
+        "global": "CourseProjectDocument.globalLayerItems (ScopedLayerItem[])",
+        "surface-shared": "CourseSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])",
+        "local-layer": "SlideSceneDocument.layerItems or SpatialSurfaceDocument.world.layerItems (not Flow paper)",
+        "teacher-controller": "One global NativeLayerItem(nativeType=teacher-controller)",
+        "effective-order": "LayerItem.order across global/surface/local storage scopes"
+      },
       "canonicalFiles": [
         "src/renderer/course/effectiveLayerCommands.ts",
         "src/renderer/course/effectiveLayerProjection.ts",
