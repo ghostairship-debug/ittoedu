@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0a-map-00-writer-consumer-owner-ledger`
 - Phase / wave: `ARCH-0A / wave 1`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Inventory Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, inventory-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `6893d25449511ef281c9399d6dd740d126a25bb6`
 - Claim commit: `3bb5c746dd46e6b2b4e7a2110c6fc6b2d67e44dd`
@@ -104,7 +104,7 @@ Plan prose identifies several debts, but no canonical current FACT/MAP ledger or
 ## Rollback
 
 - Start point: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Implementation commit: not created; Worker leaves a target-green uncommitted diff for Coordinator review
+- Implementation commit: `58238d48cef99ca0806d6bfa3f2c300e53803c6c`
 - Old path remains: plan prose and manual Bootstrap remain available.
 
 ## Consumers and index
@@ -120,6 +120,7 @@ Plan prose identifies several debts, but no canonical current FACT/MAP ledger or
 - Baseline split: `5 active-debt`, `2 reachability-unproven`, `2 retained-compatibility`, `1 dead-candidate`. No retained V8 fixture is represented as product V8-open support.
 - Validation: JSON parse; required-field/category/unique-ID/count assertions; all JSON and Markdown evidence paths; textual `path#symbol` resolution; all recorded zero-reference observed counts; new-file and tracked `git diff --check` hygiene.
 - Scope check: only the two canonical inventory files and this task card are changed by this task; no source, test, script, package, contract, generated-index, baseline, or other task-card write.
+- Coordinator review: independently recalculated all 116 category relations and 104 unique endpoints, verified all JSON paths/tests exist, reran every zero-reference query with exact matching counts, and reviewed all ten status/replacement/removal/persisted-compatibility summaries.
 
 ## Findings / next allowed task
 
