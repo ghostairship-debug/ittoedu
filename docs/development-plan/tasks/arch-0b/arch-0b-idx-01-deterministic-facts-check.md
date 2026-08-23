@@ -36,7 +36,7 @@ No `repo-index/`, generator, check command, four-domain inventory/hash, or commi
 
 - `scripts/repo-index/**` except query/context modules reserved for IDX-02
 - `scripts/generate-repo-index.ts`
-- `repo-index/README.md`, `repo-index/semantic/**`, `repo-index/generated/**`, `repo-index/contexts/.gitignore`
+- `repo-index/README.md`, `repo-index/config.json`, `repo-index/semantic/**`, `repo-index/generated/**`, `repo-index/contexts/.gitignore`
 - `tests/unit/repoIndexGenerator.test.ts`
 - `package.json` scripts only (no dependency changes)
 - This task card; Coordinator exclusively integrates committed generated output.
