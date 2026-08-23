@@ -6,9 +6,9 @@
 
 - Task ID: `arch-1-vs-03-editor-transaction-resource-delta`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Core History Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, History/editorTransaction-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `f5a6cf9`
 - Claim commit: `90d8f6080bdaac5986e7c896de6eb7671c6e50f9`
@@ -193,7 +193,7 @@ Add one generic, resource-aware transaction-plan/history-step primitive around t
 ## Rollback
 
 - Start point: `f5a6cf9`
-- Pure implementation commit: `pending`
+- Pure implementation commit: `ef13fea35bfee0833c35a9e1092c29f587b35962`
 - Hotspot integration commit: `not applicable in this task`
 - Generated commit: `none`
 - Old path remains: all current V9 snapshot/sidecar history paths remain untouched and active.
@@ -207,6 +207,7 @@ Add one generic, resource-aware transaction-plan/history-step primitive around t
 - Known risks/findings: `The history step stores only resource deltas, but the pure apply helper currently returns a fully detached resource state and clones unchanged asset bytes/component packages as well as changed values. That avoids mutable Uint8Array/package aliases but its transient cost on a large sidecar must be measured when VS-05 becomes the first consumer; it must not be misreported as shallow sharing. Component package clone/apply is covered, but no component or Store consumer is migrated. Exact target/session rejection remains VS-02/VS-04/VS-05 responsibility; this seam enforces only project/base revision and one-revision transaction invariants.`
 - indexImpact: `regenerate`
 - Next allowed task: `VS-04 after VS-02 and VS-03 are reviewed/target-green`
+- Coordinator review: independently reran the two new suites plus existing asset transactions (14/14), required exact `revision + 1` for every non-no-op step, and corrected the performance-risk note to reflect full detached apply-state cloning rather than nonexistent shallow sharing.
 
 ## Ready checklist（Coordinator）
 
