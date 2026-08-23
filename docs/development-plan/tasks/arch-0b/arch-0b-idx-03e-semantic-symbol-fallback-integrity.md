@@ -9,7 +9,7 @@
 - Claimed at / released at: `2026-08-24 03:01 Asia/Shanghai / pending`
 - Worktree / branch: `shared workspace, query-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `75d914f1419c4c0fc108498331e5cb2cd0edbca9`
-- Claim commit: `pending`
+- Claim commit: `857e341df96d4cb0496769887d0c4197c80aa8f5`
 - Context: `unchanged-corpus signature 21e23085; broad Recall@15 108/130`
 - Freshness / relevant dirty inputs: `clean baseline; corpus/expected/evaluator/semantic immutable`
 - Depends on: `arch-0b-idx-03c and arch-0b-idx-03d target-green`

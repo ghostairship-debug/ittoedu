@@ -173,6 +173,7 @@ describe('repo-index query and Context Pack', () => {
       bootstrapRequired: false,
       matchedFeature: { id: 'feature:preview-player' },
       matchedSymbols: [],
+      matchedFiles: [],
     })
     expect(result.candidates[0]?.reasons.join(' ')).toMatch(/semantic terminology alias/)
     expect(result.relevantPaths).toEqual(expect.arrayContaining([

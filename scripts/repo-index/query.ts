@@ -1052,9 +1052,7 @@ export class RepoIndexQueryEngine {
         ...(feature ? { matchedFeature: feature } : {}),
         associatedFeatures: terminologyMatches,
         matchedSymbols: [],
-        matchedFiles: feature
-          ? this.index.files.filter((file) => featurePaths(feature).includes(file.path))
-          : [],
+        matchedFiles: [],
         candidates: terminologyMatches.map((candidate) =>
           featureCandidate(
             candidate,
