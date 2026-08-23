@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "invariants": [
+    {
+      "schemaVersion": 1,
+      "id": "invariant:v9-soft-freeze",
+      "name": "Course Project V9 existing fields and semantics stay soft-frozen",
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "evidence": [
+        "AGENTS.md",
+        "docs/contracts/V9_COMPATIBILITY_POLICY.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "invariant:surface-carrier-separation",
+      "name": "Flow blocks remain distinct from LayerItem carriers",
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "evidence": [
+        "src/shared/contracts/course-project-v9/types.ts",
+        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "invariant:player-readonly",
+      "name": "Player does not import or write the renderer Store",
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "evidence": [
+        "src/player/surfaces/CoursePlayer.ts",
+        "docs/development-plan/90-appendix/00_CURRENT_MUST_PRESERVE.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "invariant:repo-index-deterministic",
+      "name": "Strict repo-index output is byte-deterministic and independent of HEAD, time and machine identity",
+      "origin": "semantic",
+      "statusClass": "target-acceptance",
+      "evidence": [
+        "docs/development-plan/10-knowledge-system/03_DETERMINISM_FRESHNESS_AND_GIT.md",
+        "tests/unit/repoIndexGenerator.test.ts"
+      ]
+    }
+  ]
+}

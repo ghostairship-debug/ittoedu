@@ -50,6 +50,7 @@ export interface IndexedTestCase {
   kind: IndexedTestKind
   name: string
   line: number
+  suite: readonly string[]
 }
 
 export interface IndexedSourceFile {

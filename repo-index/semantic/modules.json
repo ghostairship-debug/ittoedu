@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "schemaVersion": 1,
+      "id": "module:shared-contracts",
+      "name": "Shared Contracts",
+      "origin": "semantic",
+      "status": "existing",
+      "statusClass": "current-must-preserve",
+      "owner": "Shared Contracts/Domain",
+      "entrypoints": ["src/shared/contracts/index.ts"],
+      "allowedDependencies": [],
+      "forbiddenDependencies": ["src/renderer"],
+      "evidence": ["docs/development-plan/20-modules/00_MODULE_MAP_AND_OWNERS.md"]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:editor-core",
+      "name": "Editor Core",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Editor Core",
+      "entrypoints": ["src/renderer/course/read-model/index.ts"],
+      "allowedDependencies": ["src/shared"],
+      "forbiddenDependencies": ["src/player", "src/renderer/ui"],
+      "ownerReviewPhase": "ARCH-1",
+      "evidence": [
+        "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:repo-knowledge",
+      "name": "Repo Knowledge",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "target-acceptance",
+      "owner": "Repo Knowledge",
+      "entrypoints": ["scripts/generate-repo-index.ts"],
+      "allowedDependencies": ["scripts/repo-index", "typescript/unstable/sync"],
+      "forbiddenDependencies": ["src/renderer/store", "src/player"],
+      "ownerReviewPhase": "ARCH-0B",
+      "evidence": ["docs/development-plan/30-execution/02_ARCH_0B_REPO_INDEX_MVP.md"]
+    }
+  ]
+}

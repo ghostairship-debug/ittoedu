@@ -367,20 +367,24 @@ function isTestKind(value: string | undefined): value is IndexedTestKind {
 function collectTests(sourceFile: SourceFile): IndexedTestCase[] {
   const tests: IndexedTestCase[] = []
 
-  const visit = (node: Node): void => {
+  const visit = (node: Node, suite: readonly string[]): void => {
+    let childSuite = suite
     if (isCallExpression(node)) {
       const kind = callBaseName(node.expression)
       const name = moduleText(node.arguments[0])
       if (isTestKind(kind) && name !== undefined) {
-        tests.push({ kind, name, line: lineOf(sourceFile, node) })
+        tests.push({ kind, name, line: lineOf(sourceFile, node), suite })
+        if (kind === 'describe') {
+          childSuite = [...suite, name]
+        }
       }
     }
     node.forEachChild((child) => {
-      visit(child)
+      visit(child, childSuite)
       return undefined
     })
   }
-  visit(sourceFile)
+  visit(sourceFile, [])
 
   return tests.sort((left, right) =>
     left.line - right.line ||

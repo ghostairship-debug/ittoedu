@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "features": [
+    {
+      "schemaVersion": 1,
+      "id": "feature:course-project-v9",
+      "name": "Course Project V9",
+      "aliases": ["作者工程", "V9 project"],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "canonicalFiles": [
+        "src/shared/contracts/course-project-v9/index.ts",
+        "src/shared/contracts/course-project-v9/types.ts"
+      ],
+      "entrypoints": ["src/shared/contracts/course-project-v9/index.ts"],
+      "tests": ["tests/unit/courseProjectCoreContract.test.ts"],
+      "evidence": [
+        "docs/contracts/COURSE_PROJECT_V9.md",
+        "docs/contracts/V9_COMPATIBILITY_POLICY.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:published-course-v2",
+      "name": "Published Course V2",
+      "aliases": ["V2 publish", "CoursePlayer payload"],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "canonicalFiles": [
+        "src/shared/contracts/published-course-v2/index.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "entrypoints": ["src/renderer/export/course/buildPublishedCourse.ts"],
+      "runtimeConsumers": ["src/player/surfaces/CoursePlayer.ts"],
+      "tests": ["tests/unit/buildPublishedCourseV2.test.ts"],
+      "evidence": ["docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:editor-core",
+      "name": "Editor Core",
+      "aliases": ["Store", "transaction", "history", "authoring target"],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "canonicalFiles": [
+        "src/renderer/store/editorStore.ts",
+        "src/renderer/authoring/courseAuthoringSession.ts"
+      ],
+      "entrypoints": ["src/renderer/course/read-model/index.ts"],
+      "tests": ["tests/unit/readModelBoundary.test.ts"],
+      "evidence": [
+        "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:repo-knowledge",
+      "name": "Repo Knowledge",
+      "aliases": ["repo-index", "Context Pack", "开发索引"],
+      "origin": "semantic",
+      "statusClass": "target-acceptance",
+      "canonicalFiles": [
+        "repo-index/config.json",
+        "scripts/repo-index/typescriptAdapter.ts",
+        "scripts/generate-repo-index.ts"
+      ],
+      "entrypoints": ["scripts/generate-repo-index.ts"],
+      "tests": [
+        "tests/unit/repoIndexTypeScriptAdapter.test.ts",
+        "tests/unit/repoIndexGenerator.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/10-knowledge-system/01_DATA_MODEL_PROVENANCE_AND_FILES.md",
+        "docs/development-plan/10-knowledge-system/03_DETERMINISM_FRESHNESS_AND_GIT.md"
+      ]
+    }
+  ]
+}
