@@ -6,14 +6,14 @@
 
 - Task ID: `arch-1-vs-03-editor-transaction-resource-delta`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending isolated History worktree / codex/architecture-stabilization`
-- Baseline HEAD: `pending final ARCH-0B gate baseline`
-- Claim commit: `pending`
-- Context Pack + manifest hash | bootstrap-manual: `pending ARCH-0B gate; require fresh Core History context or explicit Bootstrap`
-- Freshness / relevant dirty inputs: re-query `history.ts`, Slide history consumers and asset sidecar after VS-01; no concurrent History writer allowed
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Core History Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, History/editorTransaction-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `f5a6cf9`
+- Claim commit: `commit containing this wave claim`
+- Context Pack + manifest hash | bootstrap-manual: `bootstrap-manual explicitly approved for the single ARCH-1 pure History seam; repo-index broad gate remains closed`
+- Freshness / relevant dirty inputs: history.ts and new transaction/test paths clean; VS-02 Session and repo-index query writes are disjoint; no other History writer
 - Depends on: `arch-1-vs-01-image-replacement-characterization (done); ARCH-0A gate (done); ARCH-0B context-safety gate (done or explicitly approved fresh Bootstrap)`
 - Blocks: `arch-1-vs-04-slide-image-replacement-command; arch-1-vs-05-image-replacement-app-store-integration`
 - Risk statement: `History is a product hotspot. A second timeline, mutable byte alias, or misaligned undo delta could corrupt document/resource parity even if tests count one step.`
@@ -210,12 +210,12 @@ Add one generic, resource-aware transaction-plan/history-step primitive around t
 
 ## Ready checklist（Coordinator）
 
-- [ ] dependsOn done/wave-validated
-- [ ] context fresh or Bootstrap verified
-- [ ] current write path and all consumer categories evidenced
-- [ ] Allowed/Required/Forbidden paths valid
-- [ ] required hotspot locks available
-- [ ] budgets and validation named
-- [ ] rollback and old path state clear
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- [x] VS-01 done and Bootstrap exception recorded
+- [x] manual Bootstrap verified
+- [x] current write path and consumer categories evidenced
+- [x] Allowed/Required/Forbidden paths valid
+- [x] Core History lock available
+- [x] budgets and validation named
+- [x] rollback and old path state clear
+- [x] no related user dirty change
+- [x] no product escalation triggered

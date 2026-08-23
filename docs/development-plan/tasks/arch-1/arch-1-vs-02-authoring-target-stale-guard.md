@@ -6,14 +6,14 @@
 
 - Task ID: `arch-1-vs-02-authoring-target-stale-guard`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / codex/architecture-stabilization`
-- Baseline HEAD: `pending final ARCH-0B gate baseline`
-- Claim commit: `pending`
-- Context: `pending ARCH-0B gate; replace with fresh repo:context manifest hash or explicitly approved Bootstrap`
-- Freshness / relevant dirty inputs: refresh VS-01 characterization and current Session/scope/effective-layer consumers after ARCH-0B gate; do not inherit current concurrent index worktree
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Target Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, Session-target-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `f5a6cf9`
+- Claim commit: `commit containing this wave claim`
+- Context: `bootstrap-manual explicitly approved for the single ARCH-1 pure target seam; repo-index broad gate remains closed`
+- Freshness / relevant dirty inputs: Session/scope/effective-layer/product tests clean; concurrent repo-index query tuning and VS-03 History scope are disjoint
 - Depends on: `arch-1-vs-01-image-replacement-characterization (done); ARCH-0A gate (done); ARCH-0B context-safety gate (done or explicitly approved fresh Bootstrap)`
 - Blocks: `arch-1-vs-04-slide-image-replacement-command; arch-1-vs-05-image-replacement-app-store-integration`
 - Retry count: `0`
@@ -141,10 +141,10 @@ An asynchronous image replacement can carry one immutable target captured before
 
 ## Ready checklist（Coordinator）
 
-- [ ] dependsOn satisfied
-- [ ] context fresh or Bootstrap verified
-- [ ] evidence and paths valid
-- [ ] write locks available
-- [ ] budget/validation/rollback complete
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- [x] dependsOn satisfied via VS-01 done and explicit Bootstrap exception
+- [x] manual Bootstrap verified
+- [x] evidence and paths valid
+- [x] Session target write lock available
+- [x] budget/validation/rollback complete
+- [x] no related user dirty change
+- [x] no product escalation triggered
