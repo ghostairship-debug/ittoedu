@@ -6,15 +6,15 @@
 
 - Task ID: `arch-1-vs-06-image-replacement-desktop-regression`
 - Phase / wave: `ARCH-1 / first vertical slice validation`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending validation worktree / codex/architecture-stabilization`
-- Baseline HEAD: `pending reviewed VS-05 integration commit after ARCH-0B gate`
+- Status: `implementing`
+- Owner / Reviewer / Integrator: `Validation Coordinator / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 03:30 Asia/Shanghai / pending`
+- Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
+- Baseline HEAD: `45bd0ac4374e307b22b19c306341c0bc28f48e14`
 - Claim commit: `pending`
-- Context: `pending ARCH-0B gate; require fresh E2E/App/Store/fixture Context Pack`
-- Freshness / relevant dirty inputs: VS-05 must be reviewed/integrated, product build inputs clean, representative fixture hashes unchanged, and no concurrent Electron run active
-- Depends on: `arch-1-vs-05-image-replacement-app-store-integration (reviewed/integrated)`
+- Context: `fresh/high/safe-for-S2 image-replacement Context Pack; source 5f300412, semantic d084e338, config 103c4aa4, tool 0895bc33`
+- Freshness / relevant dirty inputs: `clean build inputs; representative sources unchanged; exclusive Electron/E2E runtime and output lock held`
+- Depends on: `arch-1-vs-05 target-green; arch-1-vs-05b semantic current fact done`
 - Blocks: `ARCH-1 first vertical-slice wave gate`
 - Retry count: `0`
 
@@ -150,10 +150,10 @@ In a real Electron run, stale dialog completion never writes the wrong image, wh
 
 ## Ready checklist（Coordinator）
 
-- [ ] dependsOn satisfied
-- [ ] context fresh or Bootstrap verified
-- [ ] evidence and paths valid
-- [ ] write locks available
-- [ ] budget/validation/rollback complete
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- [x] dependsOn satisfied
+- [x] context fresh or Bootstrap verified
+- [x] evidence and paths valid
+- [x] write locks available
+- [x] budget/validation/rollback complete
+- [x] no related user dirty change
+- [x] no product escalation triggered
