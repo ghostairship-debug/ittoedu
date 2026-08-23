@@ -4,15 +4,15 @@
 
 - Task ID: `arch-1-vs-01-image-replacement-characterization`
 - Phase / wave: `ARCH-1 / vertical slice preparation`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / codex/architecture-stabilization`
-- Baseline HEAD: `6dc493d5f8cc0ab4c7552c731546e19ada1c410b`
-- Claim commit: `pending`
-- Context: `bootstrap-manual; replace with fresh repo:context manifest after ARCH-0B gate`
-- Freshness / relevant dirty inputs: source evidence read-only at 6dc493d; recheck after ARCH-0A/0B integration
-- Depends on: `ARCH-0A representative/FACT minimum gate; ARCH-0B context safety minimum gate`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Characterization Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, characterization-test-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `805d04879122702ab17ad7043fe41da1de62ba53`
+- Claim commit: `commit containing this claim update`
+- Context: `bootstrap-manual explicitly approved for VS-01 only under ARCH-0B controlled-slice exception`
+- Freshness / relevant dirty inputs: product/App/Store/session/history paths clean; concurrent golden evaluator/task-card work is disjoint and may not be read or staged
+- Depends on: `ARCH-0A gate (done); ARCH-0B broad quality gate may remain in tuning because plan permits VS-01 characterization under strict Bootstrap`
 - Blocks: `ARCH-1 VS-02 through VS-06`
 - Retry count: `0`
 
@@ -40,7 +40,8 @@ Existing evidence:
 
 ### Allowed write
 
-- A dedicated focused unit/integration characterization test and test-only fixtures/helpers.
+- `tests/integration/imageReplacementRaceCharacterization.test.tsx`
+- A narrowly scoped test-only helper in the same file if needed.
 - This task card result fields.
 
 ### Required read
@@ -106,7 +107,7 @@ Existing evidence:
 ## Consumers and index
 
 - Consumer delta: `0`; test evidence only
-- Legacy record IDs: pending FACT/MAP reference
+- Legacy record IDs: `LEG-001` and `LEG-003` read-only reference
 - indexImpact: `regenerate`
 
 ## Result evidence
@@ -115,9 +116,9 @@ Existing evidence:
 
 ## Ready checklist (Coordinator)
 
-- [ ] ARCH-0A minimum gate satisfied
-- [ ] ARCH-0B minimum context gate satisfied or explicitly approved fresh Bootstrap
-- [ ] exact test harness paths named
-- [ ] write scope and validation rechecked
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- [x] ARCH-0A minimum gate satisfied
+- [x] ARCH-0B exception explicitly approved for VS-01 characterization under fresh manual Bootstrap
+- [x] exact test harness path named
+- [x] write scope and validation rechecked
+- [x] no related user dirty change
+- [x] no product escalation triggered
