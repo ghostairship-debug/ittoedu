@@ -482,6 +482,16 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_0B_GATE_REPORT.md",
+      "title": "ARCH-0B Project Knowledge Index Gate Report"
+    },
+    {
+      "links": [],
+      "path": "docs/development-plan/baselines/ARCH_0B_INDEX_QUALITY.md",
+      "title": "ARCH-0B Repo-index Golden Task Quality Baseline"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/baselines/ARCH_0_BASELINE.md",
       "title": "ARCH-0 Stabilization Baseline"
     },

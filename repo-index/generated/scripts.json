@@ -65,6 +65,10 @@
       "role": "repo-index-tool"
     },
     {
+      "path": "scripts/repo-index/evaluateGoldenTasks.ts",
+      "role": "repo-index-tool"
+    },
+    {
       "path": "scripts/repo-index/generator.ts",
       "role": "repo-index-tool"
     },
@@ -293,6 +297,11 @@
       "category": "check",
       "command": "tsx scripts/generate-repo-index.ts --check",
       "name": "repo:index:check"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/repo-index/evaluateGoldenTasks.ts",
+      "name": "repo:index:quality"
     },
     {
       "category": "other",
