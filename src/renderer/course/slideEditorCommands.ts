@@ -4,11 +4,18 @@ import type {
   LayerItem,
   LayerItemOverride,
 } from '../../shared/courseProjectTypes'
+import type { EditorTransactionStep } from '../authoring/editorTransaction'
+import {
+  cloneHistoryResourceChanges,
+  type HistoryResourceChanges,
+  type HistoryResourceDirection,
+} from '../store/history'
 import { buildSlideEditorView, type SlideEditorLayerScope } from './slideEditorView'
 
 export const SLIDE_REJECT_LOCKED = 'locked'
 export const SLIDE_REJECT_STALE_REVISION = 'stale-revision'
 export const SLIDE_REJECT_WRONG_OWNER = 'wrong-owner'
+export const SLIDE_AUTHORING_HISTORY_LIMIT = 100
 
 /** Stable editor-only identities; they are never persisted in the project or history. */
 export interface SlideAuthoringSelection {
@@ -22,8 +29,55 @@ export type SlideEditorSelection = SlideAuthoringSelection
 
 export interface SlideAuthoringHistory {
   readonly present: CourseProjectDocument
-  readonly past: readonly CourseProjectDocument[]
-  readonly future: readonly CourseProjectDocument[]
+  readonly past: readonly SlideAuthoringHistoryEntry[]
+  readonly future: readonly SlideAuthoringHistoryEntry[]
+}
+
+export interface SlideAuthoringTransactionFrame {
+  readonly kind: 'editor-transaction'
+  readonly document: CourseProjectDocument
+  readonly resourceChanges: HistoryResourceChanges
+}
+
+export type SlideAuthoringHistoryEntry =
+  | CourseProjectDocument
+  | SlideAuthoringTransactionFrame
+
+export interface SlideAuthoringResourceTransition {
+  readonly resourceChanges: HistoryResourceChanges
+  readonly resourceDirection: HistoryResourceDirection
+}
+
+export function isSlideAuthoringTransactionFrame(
+  entry: SlideAuthoringHistoryEntry,
+): entry is SlideAuthoringTransactionFrame {
+  return 'kind' in entry && entry.kind === 'editor-transaction'
+}
+
+export function slideAuthoringLegacyHistoryEntryCount(
+  entries: readonly SlideAuthoringHistoryEntry[],
+): number {
+  return entries.reduce(
+    (count, entry) => count + (isSlideAuthoringTransactionFrame(entry) ? 0 : 1),
+    0,
+  )
+}
+
+function slideAuthoringHistoryDocument(
+  entry: SlideAuthoringHistoryEntry,
+): CourseProjectDocument {
+  return isSlideAuthoringTransactionFrame(entry) ? entry.document : entry
+}
+
+function slideAuthoringTransactionFrame(
+  document: CourseProjectDocument,
+  resourceChanges: HistoryResourceChanges,
+): SlideAuthoringTransactionFrame {
+  return Object.freeze({
+    kind: 'editor-transaction' as const,
+    document,
+    resourceChanges: cloneHistoryResourceChanges(resourceChanges),
+  })
 }
 
 /**
@@ -50,6 +104,7 @@ export interface SlideCommandResult {
   readonly nextSession?: SlideAuthoringSessionRef
   readonly historyEntry?: boolean
   readonly selection?: SlideAuthoringSelection
+  readonly resourceTransition?: SlideAuthoringResourceTransition
 }
 
 /**
@@ -100,20 +155,68 @@ export function createSlideAuthoringHistory(
 ): SlideAuthoringHistory {
   return Object.freeze({
     present: project,
-    past: Object.freeze([] as CourseProjectDocument[]),
-    future: Object.freeze([] as CourseProjectDocument[]),
+    past: Object.freeze([] as SlideAuthoringHistoryEntry[]),
+    future: Object.freeze([] as SlideAuthoringHistoryEntry[]),
   })
 }
 
 export function commitSlideAuthoringHistory(
   history: SlideAuthoringHistory,
   next: CourseProjectDocument,
-  limit = 100,
+  limit = SLIDE_AUTHORING_HISTORY_LIMIT,
+  resourceChanges?: HistoryResourceChanges,
 ): SlideAuthoringHistory {
+  const previous = resourceChanges === undefined
+    ? history.present
+    : slideAuthoringTransactionFrame(history.present, resourceChanges)
   return Object.freeze({
     present: next,
-    past: Object.freeze([...history.past, history.present].slice(-limit)),
-    future: Object.freeze([] as CourseProjectDocument[]),
+    past: Object.freeze([...history.past, previous].slice(-limit)),
+    future: Object.freeze([] as SlideAuthoringHistoryEntry[]),
+  })
+}
+
+export function commitSlideEditorTransactionHistory(
+  history: SlideAuthoringHistory,
+  step: EditorTransactionStep,
+  limit = SLIDE_AUTHORING_HISTORY_LIMIT,
+): SlideAuthoringHistory {
+  if (
+    history.present.id !== step.projectId ||
+    history.present.revision !== step.baseRevision
+  ) {
+    throw new SlideCommandError(
+      SLIDE_REJECT_STALE_REVISION,
+      '编辑事务与当前 Slide 文档不一致',
+    )
+  }
+  return commitSlideAuthoringHistory(
+    history,
+    step.nextDocument,
+    limit,
+    step.resourceChanges,
+  )
+}
+
+export function slideAuthoringUndoResourceTransition(
+  history: SlideAuthoringHistory,
+): SlideAuthoringResourceTransition | undefined {
+  const previous = history.past.at(-1)
+  if (!previous || !isSlideAuthoringTransactionFrame(previous)) return undefined
+  return Object.freeze({
+    resourceChanges: previous.resourceChanges,
+    resourceDirection: 'inverse' as const,
+  })
+}
+
+export function slideAuthoringRedoResourceTransition(
+  history: SlideAuthoringHistory,
+): SlideAuthoringResourceTransition | undefined {
+  const next = history.future[0]
+  if (!next || !isSlideAuthoringTransactionFrame(next)) return undefined
+  return Object.freeze({
+    resourceChanges: next.resourceChanges,
+    resourceDirection: 'forward' as const,
   })
 }
 
@@ -122,10 +225,16 @@ export function undoSlideAuthoringHistory(
 ): SlideAuthoringHistory {
   const previous = history.past.at(-1)
   if (!previous) return history
+  const transaction = isSlideAuthoringTransactionFrame(previous)
   return Object.freeze({
-    present: previous,
+    present: slideAuthoringHistoryDocument(previous),
     past: Object.freeze(history.past.slice(0, -1)),
-    future: Object.freeze([history.present, ...history.future]),
+    future: Object.freeze([
+      transaction
+        ? slideAuthoringTransactionFrame(history.present, previous.resourceChanges)
+        : history.present,
+      ...history.future,
+    ]),
   })
 }
 
@@ -134,9 +243,15 @@ export function redoSlideAuthoringHistory(
 ): SlideAuthoringHistory {
   const next = history.future[0]
   if (!next) return history
+  const transaction = isSlideAuthoringTransactionFrame(next)
   return Object.freeze({
-    present: next,
-    past: Object.freeze([...history.past, history.present]),
+    present: slideAuthoringHistoryDocument(next),
+    past: Object.freeze([
+      ...history.past,
+      transaction
+        ? slideAuthoringTransactionFrame(history.present, next.resourceChanges)
+        : history.present,
+    ]),
     future: Object.freeze(history.future.slice(1)),
   })
 }

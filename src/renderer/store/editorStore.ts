@@ -99,6 +99,7 @@ import {
   createVideoNode,
 } from '../project/createProject'
 import {
+  applyHistoryResourceChanges,
   cloneProject,
   emptyHistory,
   pushHistory,
@@ -107,6 +108,11 @@ import {
   type HistoryEntry,
   type HistoryState,
 } from './history'
+import {
+  applyEditorTransactionStep,
+  createEditorTransactionStep,
+  type EditorTransactionStep,
+} from '../authoring/editorTransaction'
 import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
@@ -151,9 +157,12 @@ import {
   importAndPlaceCourseMedia,
   importCourseMediaAssets,
   importCourseSounds,
+  planCourseImageReplacement,
   replaceCourseLayerMedia,
   updateCourseAudioSettings,
   updateCourseSound,
+  type CourseImageReplacementFeedback,
+  type CourseImageReplacementPlanFailureCode,
   type CourseMediaCommandResult,
   type CourseMediaSession,
 } from '../course/v9MediaAudioCommands'
@@ -177,8 +186,10 @@ import {
 import type { V9SlideClipboardPayload } from '../course/v9SlideClipboard'
 import {
   commitSlideAuthoringHistory,
+  commitSlideEditorTransactionHistory,
   commitSlideProjectMutation,
   selectSlideEditorLayers,
+  slideAuthoringLegacyHistoryEntryCount,
   type SlideAuthoringHistory,
 } from '../course/slideEditorCommands'
 import {
@@ -258,14 +269,19 @@ import {
   type EditorSelectionSnapshot,
 } from '../course/editorActionRouting'
 import {
+  COURSE_AUTHORING_TARGET_REJECTION_REASONS,
   COURSE_AUTHORING_TEXT_COMPOSING_SWITCH_REASON,
+  captureCourseAuthoringTarget,
   createCourseAuthoringSession,
+  createSessionToken,
   selectionSnapshotFromSession,
   switchCourseAuthoringLocation,
   updateCourseAuthoringSessionItems,
   updateCourseAuthoringSessionRevision,
   type CourseAuthoringSession,
   type CourseAuthoringSurfaceType,
+  type CourseAuthoringTarget,
+  type CurrentCourseAuthoringTargetIdentity,
 } from '../authoring/courseAuthoringSession'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
@@ -1402,6 +1418,18 @@ export interface ImportedAssetBatchItem {
   bytes: Uint8Array
 }
 
+export type ImageReplacementCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'replaced' | 'unchanged'
+      readonly feedback: CourseImageReplacementFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseImageReplacementPlanFailureCode
+      readonly reason: string
+    }
+
 export interface EditorState {
   project: ProjectDocument
   activeSceneId: string
@@ -1550,7 +1578,12 @@ export interface EditorState {
   ): string[]
   importAsset(asset: AssetMeta, bytes: Uint8Array): void
   importAssets(items: ImportedAssetBatchItem[]): void
-  replaceImageAsset(nodeId: string, asset: AssetMeta, bytes: Uint8Array): void
+  captureImageReplacementTarget(): CourseAuthoringTarget | null
+  replaceImageAssetAtTarget(
+    target: CourseAuthoringTarget,
+    asset: AssetMeta,
+    bytes: Uint8Array,
+  ): ImageReplacementCommitResult
   importSound(asset: AssetMeta, bytes: Uint8Array, sound?: Partial<SoundDefinition>): string
   importSounds(items: ImportedAssetBatchItem[]): string[]
   updateAudioSettings(patch: ProjectAudioSettingsPatch): void
@@ -2887,6 +2920,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       sidecar?: CourseAssetSidecar
       sidecarDirection?: 'undo' | 'redo'
       componentPackages?: Record<string, ComponentPackageData>
+      transactionStep?: EditorTransactionStep
+      courseAuthoringSession?: CourseAuthoringSession
     } = {},
   ): SlideCommandResult => {
     const current = get()
@@ -2931,7 +2966,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
       ...current.componentPackages,
       ...(extra.componentPackages ?? {}),
     }
-    if (extra.sidecarDirection === 'undo') {
+    const resourceTransition = result.resourceTransition
+    const resourceAware = resourceTransition !== undefined
+    if (resourceAware) {
+      if (
+        extra.transactionStep &&
+        extra.transactionStep.resourceChanges !== resourceTransition.resourceChanges
+      ) {
+        throw new Error('Slide 历史资源增量与编辑事务不一致')
+      }
+      const resources = extra.transactionStep
+        ? applyEditorTransactionStep({
+            document: current.slideBackend.getSession().history.present,
+            resources: {
+              componentPackages: current.componentPackages,
+              assetFiles: presentSidecar.files,
+            },
+          }, extra.transactionStep, resourceTransition.resourceDirection).resources
+        : applyHistoryResourceChanges({
+            componentPackages: current.componentPackages,
+            assetFiles: presentSidecar.files,
+          }, resourceTransition.resourceChanges, resourceTransition.resourceDirection)
+      nextSidecar = freezeCourseAssetSidecar(resources.assetFiles)
+      nextPackages = { ...resources.componentPackages }
+      if (result.historyEntry) {
+        nextFuture = []
+        nextPackageFuture = []
+      }
+    } else if (extra.sidecarDirection === 'undo') {
       const previous = current.slideCandidateSidecarPast.at(-1)
       if (previous) {
         nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
@@ -2970,11 +3032,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
     } else if (extra.sidecar) {
       nextSidecar = cloneSidecar(extra.sidecar)
     }
+    const nextHistory = nextBackend.getSession().history
+    const legacyPastCount = slideAuthoringLegacyHistoryEntryCount(nextHistory.past)
+    const legacyFutureCount = slideAuthoringLegacyHistoryEntryCount(nextHistory.future)
+    nextPast = legacyPastCount === 0 ? [] : nextPast.slice(-legacyPastCount)
+    nextFuture = nextFuture.slice(0, legacyFutureCount)
+    nextPackagePast = legacyPastCount === 0
+      ? []
+      : nextPackagePast.slice(-legacyPastCount)
+    nextPackageFuture = nextPackageFuture.slice(0, legacyFutureCount)
     const presentPackageIds = new Set(
       Object.keys(nextBackend.getSession().history.present.componentPackages),
     )
     const nextComponentPackages = Object.fromEntries(
       Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
+    )
+    const nextCourseAuthoringSession = extra.courseAuthoringSession ?? (
+      extra.sidecarDirection && current.courseAuthoringSession
+        // Undo/redo can return to an earlier revision number; advance the
+        // existing Session lifecycle so pre-history async targets stay stale.
+        ? updateCourseAuthoringSessionItems({
+            token: createSessionToken({
+              locationId: snapshot.locationId,
+              surfaceType: 'slide',
+              revision: nextBackend.getSession().history.present.revision,
+            }, current.courseAuthoringSession.token.generation + 1),
+            itemIds: current.courseAuthoringSession.itemIds,
+          }, snapshot.selection.selectionIds)
+        : undefined
     )
     set({
       slideBackend: nextBackend,
@@ -2988,7 +3073,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateComponentPackagesFuture: nextPackageFuture,
       project: derivedV8ProjectFromBackend(nextBackend, nextSidecar, keepEdit),
       history: v9HistoryToStoreHistory(nextBackend.getSession().history),
-      dirty: extra.sidecarDirection || result.historyEntry ? true : current.dirty,
+      dirty: resourceAware || extra.sidecarDirection || result.historyEntry
+        ? true
+        : current.dirty,
       ...(extra.clipboard !== undefined
         ? { slideCandidateClipboard: extra.clipboard }
         : {}),
@@ -3004,6 +3091,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       errorMessage: null,
       ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
       assetFiles: projectedAssetFiles(nextSidecar),
+      ...(nextCourseAuthoringSession
+        ? { courseAuthoringSession: nextCourseAuthoringSession }
+        : {}),
     })
     return result
   }
@@ -6752,60 +6842,152 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commitAssetBatch(items, () => undefined, [], `已批量导入 ${items.length} 个媒体素材`)
     },
 
-    replaceImageAsset(nodeId, asset, bytes) {
-      const media = currentMediaSession()
-      if (media) {
-        const sidecar = freezeCourseAssetSidecar({
-          ...media.sidecar.files,
-          [asset.id]: bytes.slice(),
-        })
-        runV9DocumentMutation((draft) => {
-          draft.assets[asset.id] = structuredClone(asset)
-          const item = findMutableCourseLayerItem(draft, nodeId)
-          if (
-            item?.kind === 'native' &&
-            (item.content.nativeType === 'image' || item.content.nativeType === 'video')
-          ) {
-            item.content.data.assetId = asset.id
-          }
-        }, { sidecar, statusMessage: '图片已替换' })
-        return
-      }
+    captureImageReplacementTarget() {
       const state = get()
-      const effective = editingNodes(state).find(
-        (node) => node.id === nodeId && node.type === 'image',
+      const backend = selectSlideAuthoringBackend(state)
+      const selectedId = backend?.getSession().selection.selectionIds.at(-1)
+      if (!backend || state.flowSession || state.spatialSession || !selectedId) return null
+      const slideSession = backend.getSession()
+      const document = slideSession.history.present
+      const projection = buildCandidateEffectiveLayers(state)
+      const row = projection?.unifiedRows.find((candidate) => candidate.id === selectedId)
+      if (
+        !projection ||
+        projection.surfaceType !== 'slide' ||
+        projection.scope.owner !== 'scene' ||
+        !row ||
+        row.owner !== 'scene' ||
+        row.ownerKey !== projection.scope.ownerKey ||
+        row.item.kind !== 'native' ||
+        row.item.content.nativeType !== 'image'
+      ) {
+        return null
+      }
+      let authoringSession = state.courseAuthoringSession
+      if (!authoringSession) return null
+      if (
+        authoringSession.token.locationId !== projection.locationId ||
+        authoringSession.token.surfaceType !== 'slide'
+      ) {
+        return null
+      }
+      authoringSession = updateCourseAuthoringSessionRevision(
+        authoringSession,
+        document.revision,
       )
-      if (!effective || effective.type !== 'image') return
-      const sceneId = state.activeSceneId
-      const nextNode = { ...effective, assetId: asset.id }
-      commitAssetTransaction(
-        [{ assetId: asset.id, after: bytes, allowReplace: true }],
-        (draft) => {
-          draft.assets[asset.id] = structuredClone(asset)
-          if (state.editingScope === 'global') {
-            const item = draft.globalLayer.find(({ node }) => node.id === nodeId)
-            if (item?.node.type === 'image') item.node.assetId = asset.id
-            return
-          }
-          const scene = draft.scenes.find((item) => item.id === sceneId)
-          if (!scene) return
-          if (state.activePresentationStateId === null) {
-            const node = scene.nodes.find((item) => item.id === nodeId)
-            if (node?.type === 'image') node.assetId = asset.id
-            return
-          }
-          const baseNode = scene.nodes.find((item) => item.id === nodeId)
-          if (!baseNode) return
-          setPresentationNodeOverride(
-            scene as SceneDocument,
-            state.activePresentationStateId,
-            nodeId,
-            deriveSceneNodeOverride(baseNode, nextNode),
-          )
+      return captureCourseAuthoringTarget({
+        sessionToken: authoringSession.token,
+        projectId: projection.projectId,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: row.owner,
+        ownerKey: row.ownerKey,
+        itemId: row.id,
+        authoringAddress: row.authoringAddress,
+      })
+    },
+
+    replaceImageAssetAtTarget(target, asset, bytes) {
+      const state = get()
+      const backend = selectSlideAuthoringBackend(state)
+      const activeProject = selectActiveCourseProjectDocument(state)
+      const reject = (
+        code: CourseImageReplacementPlanFailureCode,
+        reason?: string,
+      ): ImageReplacementCommitResult => ({
+        ok: false,
+        code,
+        reason: reason ?? COURSE_AUTHORING_TARGET_REJECTION_REASONS[
+          code as keyof typeof COURSE_AUTHORING_TARGET_REJECTION_REASONS
+        ] ?? '图片替换目标已失效，请重新选择后再试',
+      })
+      if (!activeProject || activeProject.id !== target.projectId) {
+        return reject('project-mismatch')
+      }
+      if (!state.courseAuthoringSession) return reject('session-stale')
+      if (!backend) {
+        return reject(
+          state.courseAuthoringSession.token.generation === target.sessionGeneration
+            ? 'surface-or-location'
+            : 'session-stale',
+        )
+      }
+      const session = backend.getSession()
+      const document = session.history.present
+      const projection = buildCandidateEffectiveLayers(state)
+      if (!projection) return reject('surface-or-location')
+      let authoringSession = state.courseAuthoringSession
+      if (!authoringSession) return reject('session-stale')
+      authoringSession = updateCourseAuthoringSessionRevision(
+        authoringSession,
+        document.revision,
+      )
+      const currentIdentity: CurrentCourseAuthoringTargetIdentity = {
+        projectId: document.id,
+        documentRevision: document.revision,
+        sessionToken: authoringSession.token,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: projection.scope.owner,
+        ownerKey: projection.scope.ownerKey,
+      }
+      const planned = planCourseImageReplacement({
+        project: document,
+        sidecar: state.slideCandidateSidecar ?? emptyCourseAssetSidecar(),
+        currentIdentity,
+        target,
+        asset,
+        bytes,
+        now: new Date().toISOString(),
+      })
+      if (!planned.ok) return planned
+      if (planned.status === 'no-op') {
+        return {
+          ok: true,
+          status: 'unchanged',
+          feedback: planned.feedback,
+        }
+      }
+
+      let step: ReturnType<typeof createEditorTransactionStep>
+      try {
+        step = createEditorTransactionStep(document, planned.plan)
+        if (!step) return reject('invalid-asset', '图片替换没有产生可提交的变化')
+      } catch (error) {
+        return reject(
+          'invalid-asset',
+          error instanceof Error ? error.message : undefined,
+        )
+      }
+      const nextSession = {
+        ...session,
+        history: commitSlideEditorTransactionHistory(session.history, step),
+      }
+      persistCandidateResult({
+        ok: true,
+        nextSession,
+        historyEntry: true,
+        selection: session.selection,
+        resourceTransition: {
+          resourceChanges: step.resourceChanges,
+          resourceDirection: 'forward',
         },
-        undefined,
-        '图片已替换',
-      )
+      }, {
+        statusMessage: '图片已替换',
+        transactionStep: step,
+        courseAuthoringSession: updateCourseAuthoringSessionItems(
+          updateCourseAuthoringSessionRevision(
+            authoringSession,
+            step.nextDocument.revision,
+          ),
+          session.selection.selectionIds,
+        ),
+      })
+      return {
+        ok: true,
+        status: 'replaced',
+        feedback: planned.plan.feedback!,
+      }
     },
 
     importSound(asset, bytes, sound = {}) {

@@ -462,8 +462,11 @@ export default function App() {
     (state) => state.replaceComponentPackage,
   )
   const addImageNodes = useEditorStore((state) => state.addImageNodes)
-  const replaceImageAsset = useEditorStore(
-    (state) => state.replaceImageAsset,
+  const captureImageReplacementTarget = useEditorStore(
+    (state) => state.captureImageReplacementTarget,
+  )
+  const replaceImageAssetAtTarget = useEditorStore(
+    (state) => state.replaceImageAssetAtTarget,
   )
   const addVideoNodes = useEditorStore((state) => state.addVideoNodes)
   const importAssets = useEditorStore((state) => state.importAssets)
@@ -666,19 +669,30 @@ export default function App() {
     ) => {
       await run(async () => {
         if (mode === 'replace') {
+          const target = captureImageReplacementTarget()
+          if (!target) {
+            throw new UserFacingError(
+              '无法替换图片',
+              '当前没有可替换的 Slide 图片。',
+              '请先选择当前幻灯片中的图片，再点击“替换图片”。',
+            )
+          }
           const file = await desktopApi().selectImage()
           if (!file) return
           const dimensions = await readImageDimensions(file.bytes, file.mimeType)
           const imported = createImageAssetImport(file, { dimensions })
-          const node = selectSelectedNode(useEditorStore.getState())
-          if (!node || node.type !== 'image') {
+          const result = replaceImageAssetAtTarget(
+            target,
+            imported.meta,
+            imported.bytes,
+          )
+          if (!result.ok) {
             throw new UserFacingError(
               '无法替换图片',
-              '当前没有选中图片节点。',
-              '请先选择画布中的图片，再点击“替换图片”。',
+              result.reason,
+              '请重新选择目标图片，再次点击“替换图片”。',
             )
           }
-          replaceImageAsset(node.id, imported.meta, imported.bytes)
           return
         }
 
@@ -732,7 +746,14 @@ export default function App() {
         })
       }, '图片读取失败。请重新选择受支持的图片。')
     },
-    [addImageNodes, importAssets, replaceImageAsset, reportBatchOutcome, run],
+    [
+      addImageNodes,
+      captureImageReplacementTarget,
+      importAssets,
+      replaceImageAssetAtTarget,
+      reportBatchOutcome,
+      run,
+    ],
   )
 
   const selectImageAsset = useCallback(async (): Promise<ImportedImageAsset | null> => {

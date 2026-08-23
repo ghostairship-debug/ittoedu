@@ -418,10 +418,7 @@ describe('ARCH-1 VS-01 image replacement characterization', () => {
     console.info('VS-01 current cross-location diagnostic', JSON.stringify(observation))
   })
 
-  // This is the future contract, not the current desired behavior. VS-05 should
-  // make the body pass; Vitest will then report an unexpected pass so this must
-  // be converted from `it.fails` to a normal regression test.
-  it.fails('rejects a stale cross-location callback and leaves both A and B unchanged', async () => {
+  it('rejects a stale cross-location callback and leaves both A and B unchanged', async () => {
     const observation = await runCrossLocationRace()
     expect(observation.after.errorMessage).toMatch(/过期|重新选择/)
     expect(observation.after.imageAAssetId).toBe(observation.before.imageAAssetId)
