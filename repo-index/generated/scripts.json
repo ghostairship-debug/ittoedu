@@ -1,0 +1,368 @@
+{
+  "entrypoints": [
+    {
+      "path": "scripts/build-architecture-baseline-fixtures.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/build-component-catalog-matrix.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/build-examples.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/build-icons.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/build-incline-motion-lesson.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/build-interactive-lesson.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/build-render-host-benchmark.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/generate-ai-capabilities.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/generate-contracts.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/generate-repo-index.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/generate-task-board.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/install-courseware-skills.ps1",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/measure-architecture-baseline.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/releaseArtifactEvidence.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/repo-index/generator.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/repo-index/inputInventory.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/repo-index/model.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/repo-index/typescriptAdapter.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/repo-index/writeGenerated.ts",
+      "role": "repo-index-tool"
+    },
+    {
+      "path": "scripts/run-courseware-authoring.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/validate-project.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/verify-component-catalog.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/verify-release.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/verify-w3-windows-portability.ts",
+      "role": "project-tool"
+    },
+    {
+      "path": "scripts/windowsPortabilityEvidence.ts",
+      "role": "project-tool"
+    }
+  ],
+  "evidence": [
+    "package.json",
+    "scripts"
+  ],
+  "origin": "generated",
+  "packageScripts": [
+    {
+      "category": "build",
+      "command": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run build:desktop",
+      "name": "build"
+    },
+    {
+      "category": "build",
+      "command": "npm run build:player && npm run build:component-catalog-matrix:fixture",
+      "name": "build:component-catalog-matrix"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/build-component-catalog-matrix.ts",
+      "name": "build:component-catalog-matrix:fixture"
+    },
+    {
+      "category": "build",
+      "command": "npm run build:player && npm run build:renderer && npm run build:electron",
+      "name": "build:desktop"
+    },
+    {
+      "category": "build",
+      "command": "tsc -p tsconfig.electron.json",
+      "name": "build:electron"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/build-examples.ts",
+      "name": "build:examples"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/build-icons.ts",
+      "name": "build:icons"
+    },
+    {
+      "category": "build",
+      "command": "npm --prefix ../courseware-cases run build:induction",
+      "name": "build:induction"
+    },
+    {
+      "category": "build",
+      "command": "npm run build:player && npm run build:lesson-demo:fixture",
+      "name": "build:lesson-demo"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/build-interactive-lesson.ts",
+      "name": "build:lesson-demo:fixture"
+    },
+    {
+      "category": "build",
+      "command": "npm --prefix ../courseware-cases run build:math-motion-course",
+      "name": "build:math-motion-course"
+    },
+    {
+      "category": "build",
+      "command": "npm --prefix ../courseware-cases run build:math-motion-sample",
+      "name": "build:math-motion-sample"
+    },
+    {
+      "category": "build",
+      "command": "vite build --config vite.player.config.ts",
+      "name": "build:player"
+    },
+    {
+      "category": "build",
+      "command": "npm run build:player && npm run build:render-benchmark:fixture",
+      "name": "build:render-benchmark"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/build-render-host-benchmark.ts",
+      "name": "build:render-benchmark:fixture"
+    },
+    {
+      "category": "build",
+      "command": "vite build --config vite.renderer.config.ts",
+      "name": "build:renderer"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/generate-ai-capabilities.ts --check",
+      "name": "check:ai-capabilities"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/generate-contracts.ts --check",
+      "name": "check:contracts"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/generate-task-board.ts --check",
+      "name": "check:task-board"
+    },
+    {
+      "category": "run",
+      "command": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+      "name": "dev"
+    },
+    {
+      "category": "run",
+      "command": "wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+      "name": "dev:electron"
+    },
+    {
+      "category": "run",
+      "command": "vite --config vite.renderer.config.ts",
+      "name": "dev:renderer"
+    },
+    {
+      "category": "other",
+      "command": "npm run build && electron-builder --win portable dir --x64",
+      "name": "dist:win"
+    },
+    {
+      "category": "other",
+      "command": "npm --prefix ../courseware-cases run export:math-motion-course",
+      "name": "export:math-motion-course"
+    },
+    {
+      "category": "other",
+      "command": "npm --prefix ../courseware-cases run finalize:math-motion-course",
+      "name": "finalize:math-motion-course"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/generate-ai-capabilities.ts",
+      "name": "generate:ai-capabilities"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/generate-contracts.ts",
+      "name": "generate:contracts"
+    },
+    {
+      "category": "build",
+      "command": "tsx scripts/generate-task-board.ts",
+      "name": "generate:task-board"
+    },
+    {
+      "category": "other",
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-courseware-skills.ps1",
+      "name": "install:courseware-skills"
+    },
+    {
+      "category": "run",
+      "command": "npm run build:player && npm run build:electron",
+      "name": "predev"
+    },
+    {
+      "category": "other",
+      "command": "npm run install:courseware-skills",
+      "name": "prestart"
+    },
+    {
+      "category": "test",
+      "command": "npm run build:player && npm run build:examples && npm run build:lesson-demo:fixture && npm run build:render-benchmark:fixture && npm run build:component-catalog-matrix:fixture && npm run build:renderer && npm run build:electron",
+      "name": "pretest:e2e"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/generate-repo-index.ts",
+      "name": "repo:index"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/generate-repo-index.ts --check",
+      "name": "repo:index:check"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/run-courseware-authoring.ts",
+      "name": "run-courseware-authoring"
+    },
+    {
+      "category": "run",
+      "command": "npm run build:desktop && cross-env VITE_DEV_SERVER_URL= electron .",
+      "name": "start"
+    },
+    {
+      "category": "test",
+      "command": "vitest run",
+      "name": "test"
+    },
+    {
+      "category": "test",
+      "command": "npm run build:component-catalog-matrix && npm run build:renderer && npm run build:electron && vitest run tests/integration/componentCatalogV8Matrix.test.ts tests/unit/componentLifecycleGuard.test.ts tests/unit/exportPreflight.test.ts tests/unit/renderPptxComponentSnapshots.test.ts && cross-env COURSEWARE_E2E_BACKGROUND=1 playwright test tests/e2e/componentCatalogMatrix.spec.ts",
+      "name": "test:component-catalog-matrix"
+    },
+    {
+      "category": "test",
+      "command": "playwright test",
+      "name": "test:e2e"
+    },
+    {
+      "category": "test",
+      "command": "cross-env COURSEWARE_E2E_BACKGROUND=0 npm run test:e2e",
+      "name": "test:e2e:visible"
+    },
+    {
+      "category": "check",
+      "command": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
+      "name": "typecheck"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/validate-project.ts",
+      "name": "validate:course-project"
+    },
+    {
+      "category": "check",
+      "command": "npm --prefix ../courseware-cases run validate:induction",
+      "name": "validate:induction"
+    },
+    {
+      "category": "check",
+      "command": "npm --prefix ../courseware-cases run validate:math-motion-course",
+      "name": "validate:math-motion-course"
+    },
+    {
+      "category": "check",
+      "command": "npm --prefix ../courseware-cases run validate:math-motion-sample",
+      "name": "validate:math-motion-sample"
+    },
+    {
+      "category": "check",
+      "command": "npm --prefix ../courseware-cases run validate:math-motion-static",
+      "name": "validate:math-motion-static"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/validate-project.ts",
+      "name": "validate:project"
+    },
+    {
+      "category": "check",
+      "command": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run test:e2e && npm run build:desktop",
+      "name": "verify"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/verify-component-catalog.ts",
+      "name": "verify:component-catalog"
+    },
+    {
+      "category": "check",
+      "command": "npm run verify && tsx scripts/verify-release.ts",
+      "name": "verify:release"
+    },
+    {
+      "category": "check",
+      "command": "npm run build:player && tsx scripts/verify-w3-windows-portability.ts",
+      "name": "verify:w3-portability"
+    }
+  ],
+  "schemaVersion": 1,
+  "statusClass": "current-must-preserve"
+}
