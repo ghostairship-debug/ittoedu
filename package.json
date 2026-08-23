@@ -27,6 +27,8 @@
     "check:ai-capabilities": "tsx scripts/generate-ai-capabilities.ts --check",
     "generate:contracts": "tsx scripts/generate-contracts.ts",
     "check:contracts": "tsx scripts/generate-contracts.ts --check",
+    "generate:task-board": "tsx scripts/generate-task-board.ts",
+    "check:task-board": "tsx scripts/generate-task-board.ts --check",
     "validate:course-project": "tsx scripts/validate-project.ts",
     "validate:project": "tsx scripts/validate-project.ts",
     "run-courseware-authoring": "tsx scripts/run-courseware-authoring.ts",

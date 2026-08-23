@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0a-task-00-generated-task-board`
 - Phase / wave: `ARCH-0A / bootstrap tooling`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `primary workspace / codex/architecture-stabilization`
 - Baseline HEAD: `c3a2510`
-- Claim commit: `commit containing this card`
+- Claim commit: `68612648ada6330f270a4538bd62f95c44216318`
 - Context: `bootstrap-manual`
 - Freshness / relevant dirty inputs: three claimed cards may change only their own status/results; generator must tolerate current card set deterministically
 - Depends on: `arch-0a-bsl-00-baseline-and-budgets (done)`
@@ -71,11 +71,11 @@ Task-card location and board rules are active, and the first cards now exist, bu
 
 ## Acceptance
 
-- [ ] Generator discovers cards recursively and validates stable unique IDs/statuses
-- [ ] Board includes phase, status, owner, dependency, blockers, and outcome without becoming writable truth
-- [ ] Ordering and LF output are deterministic with no HEAD/time/absolute path
-- [ ] `--check` never writes and fails on stale/malformed board
-- [ ] Package scripts expose generate/check without lockfile change
+- [x] Generator discovers cards recursively and validates stable unique IDs/statuses
+- [x] Board includes phase, status, owner, dependency, blockers, and outcome without becoming writable truth
+- [x] Ordering and LF output are deterministic with no HEAD/time/absolute path
+- [x] `--check` never writes and fails on stale/malformed board
+- [x] Package scripts expose generate/check without lockfile change
 
 ## Minimal validation
 
@@ -86,7 +86,7 @@ Task-card location and board rules are active, and the first cards now exist, bu
 ## Rollback
 
 - Start point: `c3a2510`
-- Implementation commit: pending
+- Implementation commit: the commit containing the generator, focused tests, generated board, and this result update
 - Old path remains: task cards can still be read directly.
 
 ## Consumers and index
@@ -97,7 +97,12 @@ Task-card location and board rules are active, and the first cards now exist, bu
 
 ## Result evidence
 
-- Pending.
+- Behavior before/after: readers previously had to scan every task card and no stale-view check existed; the generated Markdown board now derives all writable state from cards and detects card changes.
+- Validation: `npx vitest run tests/unit/taskBoardGenerator.test.ts` — 3/3 pass; generate then check pass; all three TypeScript project checks pass; `git diff --check` passes.
+- Determinism/safety: stable sorting and LF output; committed board contains no HEAD, timestamp, absolute path, or machine identity; check mode only reads and compares.
+- Consumer delta: one development-only generated view and two package script entrypoints; no product consumer.
+- Remaining risk: task-card field names are intentionally a strict protocol; a future protocol change must update the generator and focused tests together.
+- Rollback: revert the implementation commit; task cards remain directly readable.
 
 ## Ready checklist (Coordinator)
 
