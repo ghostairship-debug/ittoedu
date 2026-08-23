@@ -6,12 +6,12 @@
 
 - Task ID: `arch-1-vs-03-editor-transaction-resource-delta`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Core History Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, History/editorTransaction-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `f5a6cf9`
-- Claim commit: `commit containing this wave claim`
+- Claim commit: `90d8f6080bdaac5986e7c896de6eb7671c6e50f9`
 - Context Pack + manifest hash | bootstrap-manual: `bootstrap-manual explicitly approved for the single ARCH-1 pure History seam; repo-index broad gate remains closed`
 - Freshness / relevant dirty inputs: history.ts and new transaction/test paths clean; VS-02 Session and repo-index query writes are disjoint; no other History writer
 - Depends on: `arch-1-vs-01-image-replacement-characterization (done); ARCH-0A gate (done); ARCH-0B context-safety gate (done or explicitly approved fresh Bootstrap)`
@@ -25,13 +25,13 @@ One pure transaction plan can describe a Course Project V9 document change and c
 
 ## Current status and evidence
 
-`partial`
+`target-green`
 
 - `src/renderer/store/history.ts` already defines `AssetFileHistoryChange`, `ComponentPackageHistoryChange`, `HistoryResourceChanges`, and `HistoryEntry`.
-- Asset-delta apply logic is duplicated privately in `editorStore.ts`; it is not a reusable Core History API.
+- Asset-delta apply logic remains duplicated privately in `editorStore.ts`; this task adds the reviewed pure Core History API without migrating that consumer.
 - Active V9 Slide history stores full document snapshots while Store keeps full `slideCandidateSidecarPast/Future` snapshots.
 - `v9HistoryToStoreHistory` currently projects V9 history length using dummy revision patches; it does not carry real resource deltas.
-- No focused test proves V9 document metadata/reference and sidecar bytes reverse through the same logical step.
+- Focused tests now prove a Slide-heavy V9 image reference/metadata change and its added sidecar bytes reverse through one immutable logical step, with no Store or timeline ownership.
 
 ## Canonical contract and carrier
 
@@ -192,7 +192,7 @@ Add one generic, resource-aware transaction-plan/history-step primitive around t
 
 ## Rollback
 
-- Start point: `pending final ARCH-0B gate baseline`
+- Start point: `f5a6cf9`
 - Pure implementation commit: `pending`
 - Hotspot integration commit: `not applicable in this task`
 - Generated commit: `none`
@@ -201,10 +201,10 @@ Add one generic, resource-aware transaction-plan/history-step primitive around t
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending; expected 0 migrated`
-- Behavior before/after: `pending`
-- Validation results: `pending`
-- Known risks/findings: `pending`
+- Consumers migrated/remaining: `0 migrated; all current Store, V9 Slide snapshot, full sidecar past/future and synthetic HistoryEntry paths remain active. VS-05 is the first allowed consumer migration.`
+- Behavior before/after: `Before, AssetFileHistoryChange cloning and forward/inverse application were not reusable outside the private Store path, and there was no Surface-agnostic value object coupling one next V9 document with resource changes. After, Core History exports detached add/remove/replace byte planning, clone and forward/inverse apply helpers; createEditorTransactionStep produces one immutable document+resource value step, returns null for a structural document/resource no-op, and requires every non-no-op (including resource-only) to advance revision exactly once. It owns no Store, Session, command bus, past or future timeline.`
+- Validation results: `npx vitest run tests/unit/editorTransaction.test.ts tests/unit/historyResourceChanges.test.ts — 2 files / 8 tests passed; npx vitest run tests/unit/assetTransactions.test.ts tests/unit/editorStore.test.ts — 2 files / 69 tests passed; npx tsc --noEmit — passed; git diff --check — passed. Manual Slide-heavy inspection used arch-0-slide-heavy / slide-intro-hero: mutating caller replacement bytes and the caller next document did not alter the step, forward added the new image bytes/reference, and inverse restored the exact source document and asset-file record.`
+- Known risks/findings: `The history step stores only resource deltas, but the pure apply helper currently returns a fully detached resource state and clones unchanged asset bytes/component packages as well as changed values. That avoids mutable Uint8Array/package aliases but its transient cost on a large sidecar must be measured when VS-05 becomes the first consumer; it must not be misreported as shallow sharing. Component package clone/apply is covered, but no component or Store consumer is migrated. Exact target/session rejection remains VS-02/VS-04/VS-05 responsibility; this seam enforces only project/base revision and one-revision transaction invariants.`
 - indexImpact: `regenerate`
 - Next allowed task: `VS-04 after VS-02 and VS-03 are reviewed/target-green`
 
