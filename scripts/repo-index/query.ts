@@ -56,6 +56,7 @@ export interface FeatureSemantic {
   highSignalFiles?: readonly string[]
   highSignalTests?: readonly string[]
   catalogBoundaryFiles?: readonly string[]
+  catalogIntent?: 'package-source' | 'catalog-ambiguous'
   terminology?: readonly string[]
   evidence?: readonly string[]
   moduleIds?: readonly string[]
@@ -422,10 +423,9 @@ function featurePaths(feature: FeatureSemantic): string[] {
     ...(feature.canonicalFiles ?? []),
     ...(feature.entrypoints ?? []),
     ...(feature.highSignalFiles ?? []),
-    ...(feature.catalogBoundaryFiles ?? []),
-    ...(feature.runtimeConsumers ?? []),
     ...(feature.highSignalTests ?? []),
     ...(feature.tests ?? []),
+    ...(feature.runtimeConsumers ?? []),
     ...(feature.evidence ?? []),
   ])]
 }
@@ -794,7 +794,9 @@ function confidenceForText(
   return 'low'
 }
 
-function externalCatalogIntent(value: string): boolean {
+type ExternalSourceIntent = 'package-source' | 'catalog-ambiguous'
+
+function externalSourceIntent(value: string): ExternalSourceIntent | undefined {
   const normalized = normalizeQueryTerm(value)
   const explicitTerms = [
     'courseware-components',
@@ -809,9 +811,12 @@ function externalCatalogIntent(value: string): boolean {
   const packageIdentity = /com\.ittoedu\.[\p{L}\p{N}_.@*+-]+@[^\s+]+/iu.test(normalized)
   const latestThirdPartyCatalog =
     /(?:catalog|组件目录|组件库).*?(?:最新|第三方|third[-\s]?party)/iu.test(normalized)
-  return explicitTerms ||
-    (sourceIntent && packageIdentity) ||
-    (sourceIntent && latestThirdPartyCatalog)
+  if (sourceIntent && packageIdentity) return 'package-source'
+  if (sourceIntent && latestThirdPartyCatalog) return 'catalog-ambiguous'
+  if (explicitTerms) {
+    return latestThirdPartyCatalog ? 'catalog-ambiguous' : 'package-source'
+  }
+  return undefined
 }
 
 function relatedTestsForPaths(index: LoadedIndex, paths: readonly string[]): TestFact[] {
@@ -819,6 +824,99 @@ function relatedTestsForPaths(index: LoadedIndex, paths: readonly string[]): Tes
   return index.tests.filter((test) =>
     relevant.has(test.file) || test.relatedFiles.some((path) => relevant.has(path)),
   ).sort((left, right) => compareText(left.id, right.id))
+}
+
+function catalogTestFiles(
+  index: LoadedIndex,
+  intent: ExternalSourceIntent,
+): string[] {
+  const pattern = intent === 'package-source'
+    ? /component(?:Catalog|ContentIntegrity)/i
+    : /component(?:Catalog|Package)/i
+  return [...new Set(index.tests
+    .map((test) => test.file)
+    .filter((path) => pattern.test(path)))]
+    .sort(compareText)
+}
+
+function catalogBoundaryScore(path: string, intent: ExternalSourceIntent): number {
+  if (intent === 'package-source') {
+    if (path.includes('component-catalog.snapshot')) return 100
+    if (path.includes('componentCatalogManager')) return 90
+    if (path.includes('src/shared/componentCatalog')) return 80
+    return 0
+  }
+  if (path.includes('componentCatalogStatus')) return 100
+  if (path.includes('componentCatalogManager')) return 90
+  if (path.includes('component-catalog.snapshot')) return 80
+  if (path.includes('/ui/ComponentsTab')) return 70
+  if (path.includes('src/shared/componentCatalog')) return 60
+  return 0
+}
+
+function buildExternalComponentsView(
+  index: LoadedIndex,
+  components: FeatureSemantic,
+  intent: ExternalSourceIntent,
+): FeatureSemantic {
+  const boundary = [...(components.catalogBoundaryFiles ?? [])]
+    .filter((path) => intent === 'catalog-ambiguous' || (
+      !path.includes('/ui/ComponentsTab') && !path.includes('componentCatalogStatus')
+    ))
+    .sort((left, right) =>
+      catalogBoundaryScore(right, intent) - catalogBoundaryScore(left, intent) ||
+      compareText(left, right),
+    )
+  const importEntrypoint = (components.entrypoints ?? []).filter((path) =>
+    path.includes('importComponentPackage'),
+  )
+  const contractBoundary = (components.canonicalFiles ?? []).filter((path) =>
+    path.includes('/contracts/'),
+  )
+  const ledger = intent === 'catalog-ambiguous'
+    ? index.files
+        .map((file) => file.path)
+        .filter((path) =>
+          path.includes('/inventories/') && /feature_consumer_owner_ledger/i.test(path),
+        )
+    : []
+  const tests = catalogTestFiles(index, intent)
+  const canonicalFiles = intent === 'package-source'
+    ? [...new Set([
+        ...boundary,
+        ...importEntrypoint,
+        ...contractBoundary,
+      ])]
+    : [...new Set([
+        ...boundary,
+        ...ledger,
+      ])]
+  return {
+    ...components,
+    catalogIntent: intent,
+    canonicalFiles,
+    entrypoints: intent === 'package-source'
+      ? importEntrypoint
+      : components.entrypoints,
+    highSignalFiles: [...new Set([
+      ...(intent === 'catalog-ambiguous' ? ledger : []),
+      ...(components.canonicalFiles ?? []),
+      ...(components.highSignalFiles ?? []),
+    ])],
+    highSignalTests: [...new Set([
+      ...tests,
+      ...(components.highSignalTests ?? []),
+    ])],
+    tests: [...new Set([
+      ...tests,
+      ...(components.tests ?? []),
+    ])],
+    catalogBoundaryFiles: boundary,
+    evidence: [...new Set([
+      ...(components.evidence ?? []),
+      ...ledger,
+    ])],
+  }
 }
 
 function relatedEdgesForPaths(index: LoadedIndex, paths: readonly string[]): EdgeFact[] {
@@ -1118,24 +1216,14 @@ export class RepoIndexQueryEngine {
   }
 
   private queryText(request: QueryRequest): QueryResult {
-    const external = externalCatalogIntent(request.value!)
+    const externalIntent = externalSourceIntent(request.value!)
+    const external = externalIntent !== undefined
     const candidates = textCandidates(this.index, request.value!)
     const components = external
       ? this.index.features.find((feature) => feature.id === 'feature:components')
       : undefined
-    const externalComponents = components
-      ? {
-          ...components,
-          canonicalFiles: [...new Set([
-            ...(components.catalogBoundaryFiles ?? []),
-            ...(components.highSignalFiles ?? []),
-            ...(components.canonicalFiles ?? []),
-          ])],
-          tests: [...new Set([
-            ...(components.highSignalTests ?? []),
-            ...(components.tests ?? []),
-          ])],
-        }
+    const externalComponents = components && externalIntent
+      ? buildExternalComponentsView(this.index, components, externalIntent)
       : undefined
     if (external) {
       const existingIndex = components
@@ -1148,7 +1236,9 @@ export class RepoIndexQueryEngine {
         candidates.unshift(featureCandidate(
           externalComponents,
           25,
-          ['local Components boundary only; external source graph is unavailable'],
+          [
+            `local Components ${externalIntent} boundary only; external source graph is unavailable`,
+          ],
           featurePaths(externalComponents),
         ))
       }

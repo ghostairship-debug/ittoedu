@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0b-idx-03d-evidence-ranking-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 2`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 02:52 Asia/Shanghai`
 - Worktree / branch: `shared workspace, query-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `531d8d589391613b17414bbb0ed4f1dbd6fe68f0`
-- Claim commit: `commit containing this wave claim`
+- Claim commit: `1d7027fa939b46059e7b4053273bf10096fc19f9`
 - Context: `corrected mode-aware quality signature fe47d786 + fixed GT-024 forbidden evidence`
 - Freshness / relevant dirty inputs: semantic recall tuning is disjoint; corpus/expected/evaluator immutable
 - Depends on: `arch-0b-idx-03b done; corrected quality evaluator at 531d8d5`
@@ -67,13 +67,13 @@ The corrected evaluator now shows Hit@5 100%, but generic `featurePaths` include
 
 ## Acceptance
 
-- [ ] Normal Components query does not rank Catalog boundary ahead of runtime consumers/tests
-- [ ] High-signal tests/contracts can enter Top 15 deterministically
-- [ ] GT-024 class excludes ComponentsTab Top 5 and keeps local snapshot/manager/shared/import/contract
-- [ ] GT-025 class retains local status/UI boundary
-- [ ] Both remain low/bootstrap/external-source-unavailable
-- [ ] No wrong-high/forbidden regression in focused tests
-- [ ] Corpus/expected/evaluator/semantic untouched
+- [x] Normal Components query does not rank Catalog boundary ahead of runtime consumers/tests
+- [x] High-signal tests/contracts can enter Top 15 deterministically
+- [x] GT-024 class excludes ComponentsTab Top 5 and keeps local snapshot/manager/shared/import/contract
+- [x] GT-025 class retains local status/UI boundary
+- [x] Both remain low/bootstrap/external-source-unavailable
+- [x] No wrong-high/forbidden regression in focused tests
+- [x] Corpus/expected/evaluator/semantic untouched
 
 ## Minimal validation
 
@@ -84,7 +84,7 @@ The corrected evaluator now shows Hit@5 100%, but generic `featurePaths` include
 ## Rollback
 
 - Start point: `135a43fe08802c8fcbfc13ca7923a6092fc91d5d`
-- Implementation commit: pending
+- Implementation commit: `not created; Worker was instructed not to commit`
 - Old path remains: safe wave-1 query with lower recall and one known forbidden relation.
 
 ## Consumers and index
@@ -95,7 +95,14 @@ The corrected evaluator now shows Hit@5 100%, but generic `featurePaths` include
 
 ## Result evidence
 
-- Pending.
+- Generic evidence order: normal Feature paths now exclude `catalogBoundaryFiles` entirely and preserve semantic order `canonical → entrypoint → highSignalFiles → highSignalTests → tests → runtimeConsumers → evidence`. Components runtime/verification paths remain available, but mutable Catalog snapshot/status/UI cannot displace them in ordinary Component authoring queries.
+- External intent classification: source requests are classified as `package-source` when they contain a package identity/runtime-source intent and as `catalog-ambiguous` for latest/third-party mutable Catalog intent. Both remain `low`, Bootstrap-required and carry `external-source-unavailable`; neither invents an external repository or runtime file path.
+- Package-source view: the query builds a local Components evidence view from semantic fields and generated Test facts. Its first five stable paths are Catalog snapshot, main Catalog manager, shared Catalog API, package import entrypoint and Component V4 contract. Component status/UI paths are excluded from this view and therefore cannot become a forbidden Top-5 result. Catalog/content-integrity tests follow before runtime consumers and documentation.
+- Ambiguous-latest view: the query preserves the full local mutable boundary, ordering Catalog status, manager, snapshot and Components UI first, followed by shared API and the current Feature/consumer/owner ledger. Related Catalog status/package tests are attached; this is local metadata/authoring evidence only, not a guessed external source.
+- Context Pack: Catalog boundary rows render only for the query-specific external view. Normal Components packs omit them; external packs label them as local Catalog boundary evidence. Associated high-signal tests remain ahead of runtime consumers/evidence under the same bounded budgets.
+- Focused validation: `npx vitest run tests/unit/repoIndexQuery.test.ts --reporter=verbose` passed `14/14`. Capability tests cover normal Components exclusion/order, two package-source phrasings, two ambiguous-latest phrasings, exact five/four path prefixes, ComponentsTab exclusion, ledger/Test association, low confidence, Bootstrap fallback and no external-looking relevant path. All prior exact/changed/multi-intent/Legacy/wrong-high protections remain green.
+- Static validation: root, Electron and E2E TypeScript checks passed; diff hygiene passed. Only `query.ts`, `contextPack.ts`, focused query tests and this card changed. Concurrent semantic recall work was read but not modified; corpus, expected, evaluator, generated, config/package, product/contracts/lockfile and other cards were untouched by this Worker.
+- Full unchanged quality gate was intentionally left to the Coordinator after both semantic and query evidence waves are integrated and strict generated facts are refreshed.
 
 ## Ready checklist (Coordinator)
 

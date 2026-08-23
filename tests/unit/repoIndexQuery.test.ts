@@ -91,6 +91,20 @@ describe('repo-index query and Context Pack', () => {
         freshness: { status: 'fresh', safeForS2: true },
       })
     }
+    const normalComponents = engine.query({
+      mode: 'feature',
+      value: 'components',
+      size: 'small',
+    })
+    const normalPaths = normalComponents.candidates[0]?.paths ?? []
+    expect(normalPaths).not.toContain(
+      'artifacts/ai-capabilities/component-catalog.snapshot.json',
+    )
+    expect(normalPaths).not.toContain('src/renderer/components/componentCatalogStatus.ts')
+    expect(normalPaths).not.toContain('src/renderer/ui/ComponentsTab.tsx')
+    expect(normalPaths.indexOf('tests/unit/playerComponentV4Render.test.ts')).toBeLessThan(
+      normalPaths.indexOf('docs/development-plan/20-modules/04_COMPONENTS.md'),
+    )
 
     const text = engine.query({
       mode: 'query',
@@ -273,15 +287,17 @@ describe('repo-index query and Context Pack', () => {
 
   it('forces GT-024/025 external package-source wording onto the local Components boundary', () => {
     const engine = createEngine()
-    const goldenExternalQueries = [
+    const packageSourceQueries = [
       // GT-024 original package-identity/source wording.
       'com.ittoedu.*@version + runtime.js/源码/修复',
       '修复 com.ittoedu.language.pinyin-annotation@1.2.0 的 runtime.js 渲染错误',
+    ]
+    const ambiguousCatalogQueries = [
       // GT-025 original latest third-party Catalog/source wording.
       'Catalog 里最新的第三方组件…源码',
       'Catalog 里最新的第三方组件坏了，直接修它的源码',
     ]
-    for (const value of goldenExternalQueries) {
+    for (const value of packageSourceQueries) {
       const external = engine.query({ mode: 'query', value, size: 'small' })
       expect(external).toMatchObject({
         confidence: 'low',
@@ -296,11 +312,40 @@ describe('repo-index query and Context Pack', () => {
       expect(external.relevantPaths.join(' ')).not.toMatch(
         /courseware-components|com\.ittoedu\.|runtime\.js/,
       )
-      expect(external.relevantPaths).toEqual(expect.arrayContaining([
+      expect(external.candidates[0]?.paths.slice(0, 5)).toEqual([
         'artifacts/ai-capabilities/component-catalog.snapshot.json',
         'src/main/componentCatalogManager.ts',
+        'src/shared/componentCatalog.ts',
+        'src/renderer/components/importComponentPackage.ts',
+        'src/shared/contracts/component-v4/schema.ts',
+      ])
+      expect(external.candidates[0]?.paths.slice(0, 15)).not.toContain(
+        'src/renderer/ui/ComponentsTab.tsx',
+      )
+    }
+    for (const value of ambiguousCatalogQueries) {
+      const external = engine.query({ mode: 'query', value, size: 'small' })
+      expect(external).toMatchObject({
+        confidence: 'low',
+        bootstrapRequired: true,
+        matchedFeature: { id: 'feature:components' },
+      })
+      expect(external.unknowns.join(' ')).toContain('external-source-unavailable')
+      expect(external.candidates[0]?.paths.slice(0, 4)).toEqual([
         'src/renderer/components/componentCatalogStatus.ts',
-      ]))
+        'src/main/componentCatalogManager.ts',
+        'artifacts/ai-capabilities/component-catalog.snapshot.json',
+        'src/renderer/ui/ComponentsTab.tsx',
+      ])
+      expect(external.relevantPaths).toContain(
+        'docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md',
+      )
+      expect(external.relatedTests.map((test) => test.file)).toEqual(
+        expect.arrayContaining([
+          'tests/unit/componentCatalogStatus.test.ts',
+          'tests/unit/componentCatalog.test.ts',
+        ]),
+      )
     }
   })
 

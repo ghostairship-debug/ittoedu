@@ -149,15 +149,14 @@ function canonicalLines(result: QueryResult, limit: number): string[] {
   return unique([
     ...features.flatMap((feature) => [
       ...(feature.canonicalFiles ?? []).map((path) =>
-        path.includes('/contracts/') || path.startsWith('docs/contracts/')
+        feature.catalogIntent && feature.catalogBoundaryFiles?.includes(path)
+          ? `${feature.id} local Catalog boundary: ${path}`
+          : path.includes('/contracts/') || path.startsWith('docs/contracts/')
           ? `${feature.id} contract: ${path}`
           : `${feature.id} canonical: ${path}`,
       ),
       ...(feature.highSignalFiles ?? []).map((path) =>
         `${feature.id} high-signal: ${path}`,
-      ),
-      ...(feature.catalogBoundaryFiles ?? []).map((path) =>
-        `${feature.id} local Catalog boundary: ${path}`,
       ),
     ]),
     ...carriers,
@@ -171,7 +170,7 @@ function startHerePaths(result: QueryResult, limit: number): string[] {
     ...(feature?.entrypoints ?? []),
     ...(result.associatedFeatures ?? []).flatMap((associated) => [
       ...(associated.highSignalFiles ?? []),
-      ...(associated.catalogBoundaryFiles ?? []),
+      ...(associated.catalogIntent ? associated.catalogBoundaryFiles ?? [] : []),
       ...(associated.canonicalFiles ?? []),
       ...(associated.entrypoints ?? []),
     ]),
