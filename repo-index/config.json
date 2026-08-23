@@ -71,6 +71,7 @@
   "toolFiles": [
     "package-lock.json",
     "package.json",
-    "scripts/generate-repo-index.ts"
+    "scripts/generate-repo-index.ts",
+    "scripts/query-repo-index.ts"
   ]
 }

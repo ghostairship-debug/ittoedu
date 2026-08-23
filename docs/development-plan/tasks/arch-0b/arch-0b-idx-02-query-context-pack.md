@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-02-query-context-pack`
 - Phase / wave: `ARCH-0B / wave 3`
-- Status: `retrying`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / retry 1 opened 2026-08-24 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / retry 1 target-green 2026-08-24 02:06 Asia/Shanghai`
 - Worktree / branch: `shared workspace, query-tool-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `305eb648141230471a9975bf3fa3facf97a0d0aa`
 - Claim commit: `8dd03b868c054af4a3723d84e0ac2e1dfefd7000`
@@ -114,6 +114,11 @@ Manual Bootstrap is the only trusted navigation. The deterministic facts task wi
 - Expected index impact: `package.json` adds only `repo:context`; `repo-index/config.json` assigns `scripts/query-repo-index.ts` to the tool domain; no lockfile/dependency change occurred. The current read-only `repo:index:check` correctly reports stale generated facts because the query/config/package/tool inputs and `bf768ac` static-plan input postdate the current manifest. Per scope, generated files were not rebuilt; Coordinator must regenerate after integration.
 - Remaining gate: manual Bootstrap remains authoritative until IDX-03 golden-task gates pass. Coordinator must review/integrate and refresh the derived task board after this card's status transition.
 - Coordinator review finding: package-identity/“latest third-party component source” queries were low-confidence but did not attach the local Components boundary/external-source unknown required by the planned golden tasks; absolute `--output` outside the repository was also accepted at any filesystem path rather than only under the OS temporary directory. Retry 1 must add realistic GT-024/025 fixtures and enforce the documented output boundary.
+- Retry 1 external-source repair: source intent now recognizes package-identity/runtime-source requests such as `com.ittoedu.*@version + runtime.js/源码/修复` and “Catalog 里最新的第三方组件…源码”, in addition to explicit external Catalog terms. Every such result is forced to `low`, `bootstrap-required`, and the local `feature:components` boundary; Components canonical files are present while no package/version/runtime.js or external-repository path is invented. Unknowns carry the stable `external-source-unavailable` diagnostic.
+- Retry 1 GT coverage: the focused suite contains the GT-024 and GT-025 original phrases as named regression inputs and requires local Components as the first candidate/matched Feature, all declared canonical paths, explicit external-source unavailability, and zero external-looking relevant paths. Two real CLI smoke commands reproduced the same result with exit `0`.
+- Retry 1 output repair: repository-local output remains restricted to ignored `repo-index/contexts/`. Absolute output is now accepted only beneath `node:os.tmpdir()`; paths elsewhere on the filesystem are rejected before directory creation or write. Focused tests cover safe OS-temporary output, illegal repository-root output and illegal absolute output outside both repository and OS temp, including no-file-created assertions.
+- Retry 1 validation: `npx vitest run tests/unit/repoIndexQuery.test.ts --reporter=verbose` passed `11/11` (the original `9` plus dedicated GT-024/025 and output-boundary cases); root/Electron/e2e TypeScript and diff hygiene passed. Current generated facts remain intentionally stale for query/config/package/tool changes and were not rebuilt. The derived task board is also stale at handoff and must be refreshed by the Coordinator; neither generated nor task-board files were written by this retry.
+- Retry 1 scope: no semantic/carrier, generated, lockfile, product, other task card or ARCH-0A gate change was made.
 
 ## Ready checklist (Coordinator)
 

@@ -31,6 +31,7 @@
     "check:task-board": "tsx scripts/generate-task-board.ts --check",
     "repo:index": "tsx scripts/generate-repo-index.ts",
     "repo:index:check": "tsx scripts/generate-repo-index.ts --check",
+    "repo:context": "tsx scripts/query-repo-index.ts",
     "validate:course-project": "tsx scripts/validate-project.ts",
     "validate:project": "tsx scripts/validate-project.ts",
     "run-courseware-authoring": "tsx scripts/run-courseware-authoring.ts",
