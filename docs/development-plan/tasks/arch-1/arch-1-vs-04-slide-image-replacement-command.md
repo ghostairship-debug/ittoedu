@@ -6,17 +6,17 @@
 
 - Task ID: `arch-1-vs-04-slide-image-replacement-command`
 - Phase / wave: `ARCH-1 / first vertical slice`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Media / Slide Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, Media/Slide pure-command-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `1d7027fa939b46059e7b4053273bf10096fc19f9`
-- Claim commit: `commit containing this claim update`
+- Claim commit: `745e701b514bb2a34d77dfe09f5c2c1c3adf6c4b`
 - Context: `bootstrap-manual approved for the single ARCH-1 pure command after VS-02/VS-03 done; broad gate still closed`
 - Freshness / relevant dirty inputs: Media/Slide command paths clean; concurrent repo-index semantic/query tuning is disjoint; App/Store remain locked and untouched
 - Depends on: `arch-1-vs-01-image-replacement-characterization (done); arch-1-vs-02-authoring-target-stale-guard (reviewed/target-green); arch-1-vs-03-editor-transaction-resource-delta (reviewed/target-green)`
 - Blocks: `arch-1-vs-05-image-replacement-app-store-integration`
-- Retry count: `0`
+- Retry count: `1` (first focused run exposed only a test expectation that treated an omitted `before` field as `before: undefined`; planner behavior was unchanged)
 
 ## Product outcome
 
@@ -103,13 +103,13 @@ A pure Slide/Media command can replace exactly the captured native image in Cour
 
 ## Acceptance
 
-- [ ] Planner updates only captured image A, never current selection B.
-- [ ] V9 document revision increases once; metadata/reference and sidecar delta describe one atomic action.
-- [ ] Base scene and named-state carrier behavior is explicit and tested.
-- [ ] Wrong owner, non-image, locked/deleted item and conflicting same-ID payload return failure with no document/resource plan.
-- [ ] Core transaction dependency is one-way: Media imports Core types; Core imports no Surface/Media implementation.
-- [ ] No history push, Store write, V8 double-write, new navigation truth or unrelated media behavior change.
-- [ ] Budget and Media lock respected.
+- [x] Planner updates only captured image A, never current selection B.
+- [x] V9 document revision increases once; metadata/reference and sidecar delta describe one atomic action.
+- [x] Base scene and named-state carrier behavior is explicit and tested.
+- [x] Wrong owner, non-image, locked/deleted item and conflicting same-ID payload return failure with no document/resource plan.
+- [x] Core transaction dependency is one-way: Media imports Core types; Core imports no Surface/Media implementation.
+- [x] No history push, Store write, V8 double-write, new navigation truth or unrelated media behavior change.
+- [x] Budget and Media lock respected.
 
 ## Minimal validation
 
@@ -121,8 +121,8 @@ A pure Slide/Media command can replace exactly the captured native image in Cour
 
 ## Rollback
 
-- Start point: `pending reviewed VS-02/VS-03 baseline`
-- Implementation commit: `pending`
+- Start point: `1d7027fa939b46059e7b4053273bf10096fc19f9`
+- Implementation commit: `pending Coordinator integration; Worker made no Git commit`
 - Old path remains: existing `replaceCourseLayerMedia` stays active and can be restored by reverting this pure planner commit.
 
 ## Consumers and index
@@ -133,16 +133,16 @@ A pure Slide/Media command can replace exactly the captured native image in Cour
 
 ## Result evidence
 
-- Behavior before/after: `pending`
-- Validation results: `pending`
-- Consumer delta: `pending`
-- Remaining risks: `pending`
-- Rollback commit: `pending`
+- Behavior before/after: `Before, replaceCourseLayerMedia reads the live Slide session/selection and commits Slide history plus a full sidecar. After, planCourseImageReplacement accepts one captured VS-02 target plus canonical V9 document/sidecar/current identity, validates project/session/location/surface/owner/item/address/exact revision, and emits one VS-03 EditorTransactionPlan without reading live selection or writing Store/history/dirty state. Base writes update only the captured scene image; named-state writes create the existing sparse nativeData assetId override while leaving the base image unchanged.`
+- Validation results: `npx vitest run tests/unit/courseImageReplacementPlan.test.ts tests/unit/v9MediaAudioCommands.test.ts — 2 files / 8 tests passed; npx tsc --noEmit — passed; slide-heavy, flow-heavy and mixed-spatial validate:course-project runs all returned status=valid and canExport=true. The focused test applies and inverses the plan through VS-03, restoring the exact source document and sidecar files.`
+- Consumer delta: `0; the existing replaceCourseLayerMedia path remains active. VS-05 is the sole allowed App/Store/history consumer migration.`
+- Remaining risks: `Same-ID candidates are intentionally reusable only when all AssetMeta fields and bytes are equal; an equal current reference is a no-op, while any metadata or byte difference is asset-conflict and cannot produce a replace delta. New IDs produce an add delta; missing metadata or bytes can be repaired without overwriting an existing different payload. VS-05 must create/apply the VS-03 step atomically and retain the exact stale failure. No desktop or visible product behavior is claimed here.`
+- Rollback commit: `revert the eventual additive VS-04 planner commit; the old synchronous path remains untouched and no user/fixture data changed`
 - Next allowed task: `VS-05 only after this planner is reviewed/target-green`
 
 ## Findings / next allowed task
 
-- Pending. Do not expand the command to video, Flow, Spatial or asset cleanup in this card.
+- The canonical hasItem port requires owner=`scene`, Slide location/surface, exact ownerKey, stable authoringAddress, itemId and an effective native image carrier; locked state is rejected after identity validation. Old assets are deliberately retained. VS-05 may proceed only after Coordinator review; do not expand to video, Flow, Spatial or asset cleanup.
 
 ## Ready checklist（Coordinator）
 

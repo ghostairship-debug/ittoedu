@@ -16,6 +16,15 @@ import type {
   ProjectAudioSettings,
   SoundDefinition,
 } from '../../shared/projectTypes'
+import type { EditorTransactionPlan } from '../authoring/editorTransaction'
+import {
+  COURSE_AUTHORING_TARGET_REJECTION_REASONS,
+  validateCourseAuthoringTarget,
+  type CourseAuthoringTarget,
+  type CourseAuthoringTargetRejectionCode,
+  type CurrentCourseAuthoringTargetIdentity,
+} from '../authoring/courseAuthoringSession'
+import { makeLayerItemAuthoringAddress } from '../authoring/courseAuthoringScope'
 import {
   createImageNode,
   createVideoNode,
@@ -65,6 +74,7 @@ import {
   openSlideAuthoringSession,
   type SlideAuthoringSession,
 } from './slideAuthoringBackend'
+import { planAssetFileHistoryChange } from '../store/history'
 
 /**
  * V9 MediaTab / sound-library commands. Not wired to the real MediaTab;
@@ -155,6 +165,63 @@ export interface CourseMediaFitCropPatch {
 export type ReplaceCourseLayerMediaInput =
   | { assetId: string }
   | { meta: AssetMeta; bytes: Uint8Array }
+
+export interface CourseImageReplacementSelectionHint {
+  readonly itemId: string
+  readonly authoringAddress: string
+  readonly locationId: string
+  readonly stateId: string | null
+}
+
+export interface CourseImageReplacementFeedback {
+  readonly kind: 'image-replaced' | 'image-unchanged'
+  readonly assetId: string
+  readonly assetDisposition: 'added' | 'reused' | 'repaired' | 'unchanged'
+}
+
+export type CourseImageReplacementTransactionPlan = EditorTransactionPlan<
+  CourseImageReplacementSelectionHint,
+  CourseImageReplacementFeedback
+>
+
+export type CourseImageReplacementPlanFailureCode =
+  | CourseAuthoringTargetRejectionCode
+  | 'wrong-owner'
+  | 'wrong-surface'
+  | 'invalid-target'
+  | 'target-locked'
+  | 'invalid-asset'
+  | 'asset-conflict'
+
+export type CourseImageReplacementPlanResult =
+  | {
+      readonly ok: true
+      readonly status: 'planned'
+      readonly plan: CourseImageReplacementTransactionPlan
+    }
+  | {
+      readonly ok: true
+      readonly status: 'no-op'
+      readonly plan: null
+      readonly selectionHint: CourseImageReplacementSelectionHint
+      readonly feedback: CourseImageReplacementFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseImageReplacementPlanFailureCode
+      readonly reason: string
+    }
+
+export interface PlanCourseImageReplacementInput {
+  readonly project: CourseProjectDocument
+  readonly sidecar: CourseAssetSidecar
+  readonly currentIdentity: CurrentCourseAuthoringTargetIdentity
+  readonly target: CourseAuthoringTarget
+  readonly asset: AssetMeta
+  readonly bytes: Uint8Array
+  /** Explicit clock input keeps the planner deterministic and side-effect free. */
+  readonly now: string
+}
 
 export interface ImportAndPlaceCourseMediaInput {
   items: ReadonlyArray<CourseImportedAsset>
@@ -362,6 +429,194 @@ function writeNativeAssetId(
     native.content.data as Record<string, unknown>,
     { assetId },
   ) as typeof native.content.data
+}
+
+type CourseImageTargetResolution =
+  | {
+      readonly ok: true
+      readonly scene: SlideSceneDocument
+      readonly currentAssetId: string
+      readonly locked: boolean
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseImageReplacementPlanFailureCode
+      readonly reason: string
+    }
+
+const COURSE_IMAGE_REPLACEMENT_FAILURE_REASONS: Readonly<Record<
+  Exclude<CourseImageReplacementPlanFailureCode, CourseAuthoringTargetRejectionCode>,
+  string
+>> = Object.freeze({
+  'wrong-owner': '图片替换只接受 Slide 场景中的原生图片',
+  'wrong-surface': '图片替换只接受 Slide 场景目标',
+  'invalid-target': '目标不是可替换的原生图片',
+  'target-locked': '目标图片已锁定，不能替换',
+  'invalid-asset': '替换图片的素材信息或二进制内容无效',
+  'asset-conflict': '素材 ID 已存在，但 metadata 或二进制内容不同',
+})
+
+function courseImageReplacementFailure(
+  code: CourseImageReplacementPlanFailureCode,
+  reason?: string,
+): Extract<CourseImageReplacementPlanResult, { readonly ok: false }> {
+  const targetReason = COURSE_AUTHORING_TARGET_REJECTION_REASONS[
+    code as CourseAuthoringTargetRejectionCode
+  ]
+  return Object.freeze({
+    ok: false as const,
+    code,
+    reason: reason ?? targetReason ?? COURSE_IMAGE_REPLACEMENT_FAILURE_REASONS[
+      code as Exclude<
+        CourseImageReplacementPlanFailureCode,
+        CourseAuthoringTargetRejectionCode
+      >
+    ],
+  })
+}
+
+function findCourseImageTargetScene(
+  project: CourseProjectDocument,
+  target: CourseAuthoringTarget,
+): {
+  readonly surface: SlideSurfaceDocument
+  readonly scene: SlideSceneDocument
+} | null {
+  const location = project.locations.find((candidate) => (
+    candidate.id === target.locationId
+  ))
+  if (
+    !location ||
+    location.kind !== 'slide-scene' ||
+    location.surfaceId !== target.surfaceId
+  ) {
+    return null
+  }
+  const surface = project.surfaces.find((candidate) => (
+    candidate.id === target.surfaceId
+  ))
+  if (!surface || surface.type !== 'slide') return null
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  return scene ? { surface, scene } : null
+}
+
+function resolveCourseImageTarget(
+  project: CourseProjectDocument,
+  target: CourseAuthoringTarget,
+): CourseImageTargetResolution {
+  if (project.id !== target.projectId) {
+    return courseImageReplacementFailure('project-mismatch')
+  }
+  if (target.surfaceType !== 'slide') {
+    return courseImageReplacementFailure('wrong-surface')
+  }
+  if (target.owner !== 'scene') {
+    return courseImageReplacementFailure('wrong-owner')
+  }
+  const resolved = findCourseImageTargetScene(project, target)
+  if (!resolved) return courseImageReplacementFailure('wrong-surface')
+  const { scene, surface } = resolved
+  if (target.ownerKey !== `scene:${scene.id}`) {
+    return courseImageReplacementFailure('wrong-owner')
+  }
+  const baseItem = scene.layerItems.find((candidate) => (
+    candidate.layerItemId === target.itemId
+  ))
+  if (!baseItem) return courseImageReplacementFailure('item-missing')
+  if (
+    baseItem.kind !== 'native' ||
+    baseItem.content.nativeType !== 'image'
+  ) {
+    return courseImageReplacementFailure('invalid-target')
+  }
+  const canonicalAddress = makeLayerItemAuthoringAddress({
+    projectId: project.id,
+    owner: 'scene',
+    surfaceId: surface.id,
+    sceneId: scene.id,
+    kind: baseItem.kind,
+    layerItemId: baseItem.layerItemId,
+  })
+  if (canonicalAddress !== target.authoringAddress) {
+    return courseImageReplacementFailure('item-missing')
+  }
+  try {
+    const view = buildSlideEditorView({
+      project,
+      locationId: target.locationId,
+      stateId: target.stateId,
+    })
+    const layer = view.layers.find((candidate) => (
+      candidate.source === 'scene' && candidate.selectionId === target.itemId
+    ))
+    if (!layer) return courseImageReplacementFailure('item-missing')
+    if (
+      layer.item.kind !== 'native' ||
+      layer.item.content.nativeType !== 'image'
+    ) {
+      return courseImageReplacementFailure('invalid-target')
+    }
+    return {
+      ok: true,
+      scene,
+      currentAssetId: layer.item.content.data.assetId,
+      locked: layer.item.locked,
+    }
+  } catch {
+    return courseImageReplacementFailure('item-missing')
+  }
+}
+
+function sameCourseAssetBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength &&
+    left.every((value, index) => value === right[index])
+}
+
+function sameCourseAssetMeta(left: AssetMeta, right: AssetMeta): boolean {
+  return left.id === right.id &&
+    left.filename === right.filename &&
+    left.mimeType === right.mimeType &&
+    left.kind === right.kind &&
+    left.path === right.path &&
+    left.byteLength === right.byteLength &&
+    left.width === right.width &&
+    left.height === right.height &&
+    left.duration === right.duration
+}
+
+function courseImageAssetInputIsValid(
+  asset: AssetMeta,
+  bytes: Uint8Array,
+): boolean {
+  const positiveOptional = (value: number | undefined): boolean => (
+    value === undefined || (Number.isFinite(value) && value > 0)
+  )
+  return Boolean(
+    asset.id.trim() &&
+    asset.filename.trim() &&
+    asset.mimeType.trim() &&
+    asset.path.trim() &&
+    !/^(?:[a-zA-Z]:[\\/]|[\\/]{2}|\/)/.test(asset.path) &&
+    asset.kind === 'image' &&
+    Number.isInteger(asset.byteLength) &&
+    asset.byteLength === bytes.byteLength &&
+    positiveOptional(asset.width) &&
+    positiveOptional(asset.height) &&
+    (asset.duration === undefined || (
+      Number.isFinite(asset.duration) && asset.duration >= 0
+    ))
+  )
+}
+
+function courseImageReplacementSelectionHint(
+  target: CourseAuthoringTarget,
+): CourseImageReplacementSelectionHint {
+  return Object.freeze({
+    itemId: target.itemId,
+    authoringAddress: target.authoringAddress,
+    locationId: target.locationId,
+    stateId: target.stateId,
+  })
 }
 
 function createMediaNode(
@@ -710,6 +965,127 @@ export function addCourseLibraryMediaToCanvas(
   return wrapSlide(media, result, media.sidecar, {
     placedLayerItemIds: result.ok ? result.selection?.selectionIds : [],
     destination: 'canvas',
+  })
+}
+
+/**
+ * Plans one captured Slide image replacement without reading live selection,
+ * writing a Store, committing history, or mutating either input value.
+ */
+export function planCourseImageReplacement(
+  input: PlanCourseImageReplacementInput,
+): CourseImageReplacementPlanResult {
+  let resolution: CourseImageTargetResolution | undefined
+  const validation = validateCourseAuthoringTarget({
+    target: input.target,
+    current: input.currentIdentity,
+    hasItem: (target) => {
+      resolution = resolveCourseImageTarget(input.project, target)
+      return resolution.ok
+    },
+  })
+  if (!validation.ok) {
+    if (resolution && !resolution.ok) return resolution
+    return courseImageReplacementFailure(validation.code, validation.reason)
+  }
+  if (!resolution || !resolution.ok) {
+    return resolution ?? courseImageReplacementFailure('item-missing')
+  }
+  if (input.project.id !== input.currentIdentity.projectId) {
+    return courseImageReplacementFailure('project-mismatch')
+  }
+  if (input.project.revision !== input.currentIdentity.documentRevision) {
+    return courseImageReplacementFailure('revision-conflict')
+  }
+  if (resolution.locked) {
+    return courseImageReplacementFailure('target-locked')
+  }
+  if (!courseImageAssetInputIsValid(input.asset, input.bytes)) {
+    return courseImageReplacementFailure('invalid-asset')
+  }
+
+  const existingMeta = input.project.assets[input.asset.id]
+  const existingBytes = input.sidecar.files[input.asset.id]
+  if (existingMeta && !sameCourseAssetMeta(existingMeta, input.asset)) {
+    return courseImageReplacementFailure('asset-conflict')
+  }
+  if (existingBytes && !sameCourseAssetBytes(existingBytes, input.bytes)) {
+    return courseImageReplacementFailure('asset-conflict')
+  }
+
+  const selectionHint = courseImageReplacementSelectionHint(input.target)
+  if (
+    resolution.currentAssetId === input.asset.id &&
+    existingMeta !== undefined &&
+    existingBytes !== undefined
+  ) {
+    return Object.freeze({
+      ok: true as const,
+      status: 'no-op' as const,
+      plan: null,
+      selectionHint,
+      feedback: Object.freeze({
+        kind: 'image-unchanged' as const,
+        assetId: input.asset.id,
+        assetDisposition: 'unchanged' as const,
+      }),
+    })
+  }
+
+  const resourceChange = planAssetFileHistoryChange(
+    input.asset.id,
+    existingBytes,
+    input.bytes,
+  )
+  const assetDisposition: CourseImageReplacementFeedback['assetDisposition'] =
+    existingMeta && existingBytes
+      ? 'reused'
+      : existingMeta || existingBytes
+        ? 'repaired'
+        : 'added'
+  let nextDocument: CourseProjectDocument
+  try {
+    nextDocument = commitSlideProjectMutation(input.project, (draft) => {
+      if (!draft.assets[input.asset.id]) {
+        draft.assets[input.asset.id] = structuredClone(input.asset)
+      }
+      const targetScene = findCourseImageTargetScene(draft, input.target)
+      if (!targetScene) {
+        throw new Error('目标 Slide 场景已失效')
+      }
+      writeNativeAssetId(
+        targetScene.scene,
+        input.target.stateId,
+        input.target.itemId,
+        input.asset.id,
+      )
+    }, input.now)
+  } catch (error) {
+    return courseImageReplacementFailure(
+      'invalid-asset',
+      error instanceof Error ? error.message : undefined,
+    )
+  }
+
+  const feedback = Object.freeze({
+    kind: 'image-replaced' as const,
+    assetId: input.asset.id,
+    assetDisposition,
+  })
+  const plan: CourseImageReplacementTransactionPlan = Object.freeze({
+    projectId: input.project.id,
+    baseRevision: input.project.revision,
+    nextDocument,
+    resourceChanges: resourceChange
+      ? { assetFileChanges: [resourceChange] }
+      : {},
+    selectionHint,
+    feedback,
+  })
+  return Object.freeze({
+    ok: true as const,
+    status: 'planned' as const,
+    plan,
   })
 }
 
