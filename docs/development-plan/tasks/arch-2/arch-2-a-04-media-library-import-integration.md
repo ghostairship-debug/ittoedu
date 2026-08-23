@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-a-04-media-library-import-integration`
 - Phase / wave: `ARCH-2 / W2-A Media Store integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent Store reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `9642d01`
-- Claim commit: `pending`
+- Claim commit: `b52c28a`
 - Context Pack + manifest hash | bootstrap-manual: `feature:media and feature:editor-core; fresh/high/safe-for-S2; source e3b0993c, semantic d9f5f3a2, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree; App, Editor Store and Core resource-apply locks exclusively held by Coordinator`
 - Depends on: `A-00, A-01 and A-02 done`
@@ -59,7 +59,9 @@ App captures project/revision before dialog
 - `src/renderer/store/editorStore.ts` import action, three persistence adapters and undo/redo resource routing
 - `src/renderer/store/history.ts` own-key/Buffer-safe resource application only
 - New `tests/integration/courseMediaLibraryImportVerticalSlice.test.ts`
+- New `tests/integration/mediaLibraryImportRace.test.tsx`
 - Targeted updates to `tests/unit/historyResourceChanges.test.ts` and `tests/unit/batchMediaAndInsertion.test.ts`
+- Test-data-only byte-length corrections in `tests/unit/mediaTab.test.tsx` and `tests/unit/flowUnifiedLayerEntry.test.tsx`
 - This task card result fields
 
 ### Required read
@@ -126,5 +128,12 @@ App captures project/revision before dialog
 
 ## Result evidence
 
-- Pending implementation, independent review and representative validation.
-
+- Hotspot integration commit: `59436aa` (App + Store + Core resource apply + focused tests as one amended atomic commit).
+- App captures explicit image/video library targets before the file dialog; stale revision produces actionable feedback and zero project/resource/history writes. Normal two-image App import creates one Slide transaction and no full snapshot.
+- Store sync compatibility and target actions now share A-01. Slide, Flow and Spatial each commit a two-item batch as one revision/history frame; one undo/redo removes/restores both metadata and bytes. Selection, topology, session item IDs and all four compatibility resource-stack depths stay unchanged.
+- Flow/Spatial resource undo/redo reads A-02 transitions before moving history; legacy stacks are trimmed by bare-entry counts. Course Session revision follows forward commits, history ABA advances generation, and Session/item arrays remain frozen.
+- Core byte planning/application now detaches Buffer subclasses and writes own data properties safely; Store forward/inverse/redo proves `__proto__` remains an own key without prototype mutation.
+- Consumers reduced: Store/App direct `importCourseMediaAssets` library consumer `1 → 0`; Flow/Spatial per-item import loop `1 → 0`; library-only full-snapshot Surface behavior `3 → 0`; production asset-delta behaviors `1 → 2`.
+- Final focused Coordinator run passed 14 files / 148 tests; independent Store review passed 13 files / 137 tests with no blocker. App race 2/2 and representative Store matrix 7/7 include archive reopen and Published V2 read-only evidence. Root/Electron/E2E typechecks, diff hygiene, three representative validators and deterministic fixture hashes passed.
+- Two old tests supplied metadata byte lengths that disagreed with their bytes; only test data was corrected, preserving strict invalid-asset rejection. No contract, carrier, fixture archive, Published producer or user file changed.
+- Pipeline status: `engineering candidate`. Outcome status: `art candidate unchanged` because the visible UI/workflow is preserved; no teacher/product acceptance or desktop E2E is claimed by this Store integration card. Placement, audio and Runtime resource behaviors remain separate tasks.
