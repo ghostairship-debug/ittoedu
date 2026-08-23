@@ -106,6 +106,8 @@ import {
   type AssetFileHistoryChange,
   type ComponentPackageHistoryChange,
   type HistoryEntry,
+  type HistoryResourceChanges,
+  type HistoryResourceDirection,
   type HistoryState,
 } from './history'
 import {
@@ -155,7 +157,6 @@ import {
   deleteCourseAsset,
   deleteCourseSound,
   importAndPlaceCourseMedia,
-  importCourseMediaAssets,
   importCourseSounds,
   planCourseImageReplacement,
   replaceCourseLayerMedia,
@@ -166,6 +167,11 @@ import {
   type CourseMediaCommandResult,
   type CourseMediaSession,
 } from '../course/v9MediaAudioCommands'
+import {
+  planCourseMediaLibraryImport,
+  type CourseMediaLibraryImportFeedback,
+  type CourseMediaLibraryImportPlanFailureCode,
+} from '../media/courseMediaLibraryImport'
 import {
   addSlideComponentLayer,
   addSlideFormulaLayer,
@@ -211,8 +217,12 @@ import {
 } from '../project/createFlowCourseProject'
 import {
   classifyFlowDeleteIntent,
+  commitFlowEditorTransactionHistory,
   commitFlowEditorHistory,
   createFlowEditorHistory,
+  flowEditorLegacyHistoryEntryCount,
+  flowEditorRedoResourceTransition,
+  flowEditorUndoResourceTransition,
   redoFlowEditorHistory,
   selectFlowEditorBlock,
   selectFlowEditorBlocks,
@@ -355,7 +365,16 @@ import {
   updateSpatialWorldContentTextDraft,
   type SpatialWorldContentEditSession,
 } from '../authoring/spatialWorldAuthoring'
-import { commitSpatialAuthoringHistory, commitSpatialProjectMutation, rejectSpatialCommand, succeedSpatialCommand } from '../course/spatialAuthoringHistory'
+import {
+  commitSpatialAuthoringHistory,
+  commitSpatialEditorTransactionHistory,
+  commitSpatialProjectMutation,
+  rejectSpatialCommand,
+  spatialAuthoringLegacyHistoryEntryCount,
+  spatialAuthoringRedoResourceTransition,
+  spatialAuthoringUndoResourceTransition,
+  succeedSpatialCommand,
+} from '../course/spatialAuthoringHistory'
 import { buildSpatialEditorView } from '../course/spatialEditorView'
 import {
   createSlideAuthoringBackend,
@@ -1430,6 +1449,23 @@ export type ImageReplacementCommitResult =
       readonly reason: string
     }
 
+export interface CourseProjectRevisionTarget {
+  readonly projectId: string
+  readonly documentRevision: number
+}
+
+export type MediaLibraryImportCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'imported' | 'unchanged'
+      readonly feedback: CourseMediaLibraryImportFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseMediaLibraryImportPlanFailureCode
+      readonly reason: string
+    }
+
 export interface EditorState {
   project: ProjectDocument
   activeSceneId: string
@@ -1578,6 +1614,11 @@ export interface EditorState {
   ): string[]
   importAsset(asset: AssetMeta, bytes: Uint8Array): void
   importAssets(items: ImportedAssetBatchItem[]): void
+  captureMediaLibraryImportTarget(): CourseProjectRevisionTarget | null
+  importAssetsAtTarget(
+    target: CourseProjectRevisionTarget,
+    items: ImportedAssetBatchItem[],
+  ): MediaLibraryImportCommitResult
   captureImageReplacementTarget(): CourseAuthoringTarget | null
   replaceImageAssetAtTarget(
     target: CourseAuthoringTarget,
@@ -3047,18 +3088,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const nextComponentPackages = Object.fromEntries(
       Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
     )
+    const historyDirection = extra.sidecarDirection ?? (
+      resourceTransition
+        ? resourceTransition.resourceDirection === 'inverse' ? 'undo' : 'redo'
+        : undefined
+    )
     const nextCourseAuthoringSession = extra.courseAuthoringSession ?? (
-      extra.sidecarDirection && current.courseAuthoringSession
+      historyDirection && current.courseAuthoringSession
         // Undo/redo can return to an earlier revision number; advance the
         // existing Session lifecycle so pre-history async targets stay stale.
-        ? updateCourseAuthoringSessionItems({
+          ? updateCourseAuthoringSessionItems({
             token: createSessionToken({
               locationId: snapshot.locationId,
               surfaceType: 'slide',
               revision: nextBackend.getSession().history.present.revision,
             }, current.courseAuthoringSession.token.generation + 1),
             itemIds: current.courseAuthoringSession.itemIds,
-          }, snapshot.selection.selectionIds)
+          }, resourceTransition
+            ? current.courseAuthoringSession.itemIds
+            : snapshot.selection.selectionIds)
         : undefined
     )
     set({
@@ -3098,6 +3146,70 @@ export const useEditorStore = create<EditorState>((set, get) => {
     return result
   }
 
+  type StoreResourceTransition = {
+    readonly resourceChanges: HistoryResourceChanges
+    readonly resourceDirection: HistoryResourceDirection
+  }
+
+  const applyPersistedResourceTransition = (
+    document: CourseProjectDocument,
+    sidecar: CourseAssetSidecar,
+    componentPackages: Readonly<Record<string, ComponentPackageData>>,
+    input: {
+      transactionStep?: EditorTransactionStep
+      resourceTransition?: StoreResourceTransition
+    },
+  ) => {
+    if (
+      input.transactionStep
+      && input.resourceTransition
+      && input.transactionStep.resourceChanges !== input.resourceTransition.resourceChanges
+    ) {
+      throw new Error('作者历史资源增量与编辑事务不一致')
+    }
+    if (input.transactionStep) {
+      return applyEditorTransactionStep({
+        document,
+        resources: {
+          componentPackages,
+          assetFiles: sidecar.files,
+        },
+      }, input.transactionStep, 'forward').resources
+    }
+    if (input.resourceTransition) {
+      return applyHistoryResourceChanges({
+        componentPackages,
+        assetFiles: sidecar.files,
+      }, input.resourceTransition.resourceChanges, input.resourceTransition.resourceDirection)
+    }
+    return null
+  }
+
+  const courseSessionAfterSurfaceHistory = (
+    current: CourseAuthoringSession | null,
+    project: CourseProjectDocument,
+    locationId: string,
+    input: {
+      transactionStep?: EditorTransactionStep
+      resourceTransition?: StoreResourceTransition
+      sidecarDirection?: 'undo' | 'redo'
+    },
+  ): CourseAuthoringSession | undefined => {
+    if (!current) return undefined
+    if (input.transactionStep) {
+      return updateCourseAuthoringSessionRevision(current, project.revision)
+    }
+    if (!input.resourceTransition && !input.sidecarDirection) return undefined
+    return updateCourseAuthoringSessionItems({
+      token: createSessionToken({
+        locationId,
+        surfaceType: surfaceTypeForLocation(project, locationId),
+        revision: project.revision,
+      }, current.token.generation + 1),
+      itemIds: current.itemIds,
+    }, current.itemIds)
+  }
+
   const persistSpatialResult = (
     result: SpatialCommandResult,
     extra: {
@@ -3106,6 +3218,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       sidecarDirection?: 'undo' | 'redo'
       componentPackages?: Record<string, ComponentPackageData>
       clearContentEdit?: boolean
+      transactionStep?: EditorTransactionStep
+      resourceTransition?: StoreResourceTransition
     } = {},
   ): SpatialCommandResult => {
     const current = get()
@@ -3120,11 +3234,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const keepEdit = extra.clearContentEdit
       ? null
       : current.spatialContentEdit
+    if (
+      (extra.transactionStep || extra.resourceTransition)
+      && (extra.sidecar || extra.sidecarDirection)
+    ) {
+      throw new Error('Spatial 资源事务不能同时使用完整 sidecar 快照')
+    }
     const presentSidecar = current.slideCandidateSidecar ?? emptyCourseAssetSidecar()
     let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
     let nextPast = current.slideCandidateSidecarPast
     let nextFuture = current.slideCandidateSidecarFuture
-    if (extra.sidecarDirection === 'undo') {
+    let nextPackages = extra.componentPackages ?? current.componentPackages
+    const resources = applyPersistedResourceTransition(
+      current.spatialSession?.history.present ?? session.history.present,
+      presentSidecar,
+      current.componentPackages,
+      extra,
+    )
+    const resourceAware = resources !== null
+    if (resources) {
+      nextSidecar = freezeCourseAssetSidecar(resources.assetFiles)
+      nextPackages = { ...resources.componentPackages }
+      if (result.historyEntry) nextFuture = []
+    } else if (extra.sidecarDirection === 'undo') {
       const previous = current.slideCandidateSidecarPast.at(-1)
       if (previous) {
         nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
@@ -3145,9 +3277,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
     } else if (extra.sidecar) {
       nextSidecar = cloneSidecar(extra.sidecar)
     }
+    const legacyPastCount = spatialAuthoringLegacyHistoryEntryCount(session.history.past)
+    const legacyFutureCount = spatialAuthoringLegacyHistoryEntryCount(session.history.future)
+    nextPast = legacyPastCount === 0 ? [] : nextPast.slice(-legacyPastCount)
+    nextFuture = nextFuture.slice(0, legacyFutureCount)
+    const presentPackageIds = new Set(Object.keys(session.history.present.componentPackages))
+    const nextComponentPackages = resourceAware || extra.componentPackages
+      ? Object.fromEntries(
+          Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
+        )
+      : current.componentPackages
     const snapshot = buildSpatialAuthoringSnapshot(session)
     const graphSelection = current.spatialGraphSelection
     const keep = extra.clearContentEdit ? null : keepEdit
+    const nextCourseAuthoringSession = courseSessionAfterSurfaceHistory(
+      current.courseAuthoringSession,
+      session.history.present,
+      session.selection.locationId,
+      extra,
+    )
     set({
       spatialSession: session,
       spatialContentEdit: extra.clearContentEdit ? null : keepEdit,
@@ -3157,13 +3305,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateSidecarPast: nextPast,
       slideCandidateSidecarFuture: nextFuture,
       history: spatialHistoryToStoreHistory(session.history),
-      dirty: extra.sidecarDirection || result.historyEntry ? true : current.dirty,
+      dirty: resourceAware || extra.sidecarDirection || result.historyEntry ? true : current.dirty,
       selectedNodeIds: [...session.selection.selectionIds],
       selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
       editingScope: session.scope === 'global' ? 'global' : 'scene',
       activeSceneId: snapshot.activeCameraFrameId,
       activePresentationStateId: null,
-      ...(extra.componentPackages ? { componentPackages: extra.componentPackages } : {}),
+      componentPackages: nextComponentPackages,
       ...(extra.clearContentEdit ? { editingTextNodeId: null } : {}),
       errorMessage: null,
       ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
@@ -3171,6 +3319,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ? { spatialGraphSelection: null }
         : {}),
       assetFiles: projectedAssetFiles(nextSidecar),
+      ...(nextCourseAuthoringSession
+        ? { courseAuthoringSession: nextCourseAuthoringSession }
+        : {}),
     })
     return result
   }
@@ -3265,6 +3416,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selection?: FlowEditorSelection | null
       clearTextEdit?: boolean
       replaceHistory?: FlowEditorHistory
+      transactionStep?: EditorTransactionStep
+      resourceTransition?: StoreResourceTransition
     } = {},
   ): FlowCommandResult | FlowSharedAuthoringResult => {
     const current = get()
@@ -3284,11 +3437,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
       ? (result.selection ?? session.selection)
       : extra.selection
     const selection = nextSelection ?? session.selection
+    if (
+      (extra.transactionStep || extra.resourceTransition)
+      && (extra.sidecar || extra.sidecarDirection)
+    ) {
+      throw new Error('Flow 资源事务不能同时使用完整 sidecar 快照')
+    }
     const presentSidecar = current.slideCandidateSidecar ?? emptyCourseAssetSidecar()
     let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
     let nextPast = current.slideCandidateSidecarPast
     let nextFuture = current.slideCandidateSidecarFuture
-    if (extra.sidecarDirection === 'undo') {
+    let nextPackages = extra.componentPackages ?? current.componentPackages
+    const resources = applyPersistedResourceTransition(
+      session.history.present,
+      presentSidecar,
+      current.componentPackages,
+      extra,
+    )
+    const resourceAware = resources !== null
+    if (resources) {
+      nextSidecar = freezeCourseAssetSidecar(resources.assetFiles)
+      nextPackages = { ...resources.componentPackages }
+      if (result.historyEntry) nextFuture = []
+    } else if (extra.sidecarDirection === 'undo') {
       const previous = current.slideCandidateSidecarPast.at(-1)
       if (previous) {
         nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
@@ -3309,7 +3480,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
     } else if (extra.sidecar) {
       nextSidecar = cloneSidecar(extra.sidecar)
     }
+    const legacyPastCount = flowEditorLegacyHistoryEntryCount(history.past)
+    const legacyFutureCount = flowEditorLegacyHistoryEntryCount(history.future)
+    nextPast = legacyPastCount === 0 ? [] : nextPast.slice(-legacyPastCount)
+    nextFuture = nextFuture.slice(0, legacyFutureCount)
+    const presentPackageIds = new Set(Object.keys(history.present.componentPackages))
+    const nextComponentPackages = resourceAware || extra.componentPackages
+      ? Object.fromEntries(
+          Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
+        )
+      : current.componentPackages
     const nextSession: FlowAuthoringSession = { history, selection }
+    const nextCourseAuthoringSession = courseSessionAfterSurfaceHistory(
+      current.courseAuthoringSession,
+      history.present,
+      selection.locationId,
+      extra,
+    )
     set({
       flowSession: nextSession,
       flowTextEdit: extra.clearTextEdit ? null : current.flowTextEdit,
@@ -3320,18 +3507,160 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateSidecarPast: nextPast,
       slideCandidateSidecarFuture: nextFuture,
       history: v9HistoryToStoreHistory(history),
-      dirty: extra.sidecarDirection || result.historyEntry ? true : current.dirty,
+      dirty: resourceAware || extra.sidecarDirection || result.historyEntry ? true : current.dirty,
       selectedNodeIds: [...selection.selectedOverlayIds],
       selectedNodeId: selection.selectedOverlayIds.at(-1) ?? null,
       editingScope: selection.authoringScope === 'global' ? 'global' : 'scene',
       activeSceneId: selection.locationId,
       activePresentationStateId: null,
-      ...(extra.componentPackages ? { componentPackages: extra.componentPackages } : {}),
+      componentPackages: nextComponentPackages,
       errorMessage: null,
       ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
       assetFiles: projectedAssetFiles(nextSidecar),
+      ...(nextCourseAuthoringSession
+        ? { courseAuthoringSession: nextCourseAuthoringSession }
+        : {}),
     })
     return result
+  }
+
+  const activeCourseDocument = (state: EditorState): CourseProjectDocument | null => (
+    state.spatialSession?.history.present
+    ?? state.flowSession?.history.present
+    ?? selectSlideAuthoringBackend(state)?.getSession().history.present
+    ?? null
+  )
+
+  const captureCourseProjectRevisionTarget = (): CourseProjectRevisionTarget | null => {
+    const document = activeCourseDocument(get())
+    return document
+      ? Object.freeze({
+          projectId: document.id,
+          documentRevision: document.revision,
+        })
+      : null
+  }
+
+  const persistProjectResourceTransaction = (
+    step: EditorTransactionStep,
+    statusMessage: string,
+  ): boolean => {
+    const state = get()
+    if (state.spatialSession) {
+      const session = state.spatialSession
+      const history = commitSpatialEditorTransactionHistory(session.history, step)
+      persistSpatialResult(succeedSpatialCommand({
+        ...session,
+        history,
+      }, true), {
+        transactionStep: step,
+        statusMessage,
+      })
+      return true
+    }
+    if (state.flowSession) {
+      const session = state.flowSession
+      const history = commitFlowEditorTransactionHistory(session.history, step)
+      persistFlowResult({
+        ok: true,
+        nextDocument: step.nextDocument,
+        historyEntry: true,
+        selection: session.selection,
+      }, {
+        replaceHistory: history,
+        transactionStep: step,
+        statusMessage,
+      })
+      return true
+    }
+    const backend = selectSlideAuthoringBackend(state)
+    if (!backend) return false
+    const session = backend.getSession()
+    const authoringSession = state.courseAuthoringSession
+    persistCandidateResult({
+      ok: true,
+      nextSession: {
+        ...session,
+        history: commitSlideEditorTransactionHistory(session.history, step),
+      },
+      historyEntry: true,
+      selection: session.selection,
+      resourceTransition: {
+        resourceChanges: step.resourceChanges,
+        resourceDirection: 'forward',
+      },
+    }, {
+      transactionStep: step,
+      statusMessage,
+      ...(authoringSession
+        ? {
+            courseAuthoringSession: updateCourseAuthoringSessionItems(
+              updateCourseAuthoringSessionRevision(
+                authoringSession,
+                step.nextDocument.revision,
+              ),
+              authoringSession.itemIds,
+            ),
+          }
+        : {}),
+    })
+    return true
+  }
+
+  const commitMediaLibraryImportAtTarget = (
+    target: CourseProjectRevisionTarget,
+    items: ImportedAssetBatchItem[],
+  ): MediaLibraryImportCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    if (!document || document.id !== target.projectId) {
+      return {
+        ok: false,
+        code: 'project-mismatch',
+        reason: '媒体库导入目标不属于当前 Course Project，请重新选择文件。',
+      }
+    }
+    const planned = planCourseMediaLibraryImport({
+      project: document,
+      sidecar: state.slideCandidateSidecar ?? emptyCourseAssetSidecar(),
+      items: items.map((item) => ({ meta: item.meta, bytes: item.bytes })),
+      projectId: target.projectId,
+      baseRevision: target.documentRevision,
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) return planned
+    if (planned.status === 'no-op') {
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'invalid-asset',
+        reason: error instanceof Error ? error.message : '媒体库导入计划无效。',
+      }
+    }
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      `已批量导入 ${planned.plan.feedback?.importedAssetIds.length ?? items.length} 个媒体素材`,
+    )) {
+      return {
+        ok: false,
+        code: 'invalid-asset',
+        reason: '当前 Course Project 没有可用的作者会话。',
+      }
+    }
+    return {
+      ok: true,
+      status: 'imported',
+      feedback: planned.plan.feedback!,
+    }
   }
 
   const persistFlowLayerCommand = (
@@ -3889,9 +4218,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }))
       }
       if (!input.nativeType) {
-        return persistMediaResult(importCourseMediaAssets(media, items, {
-          expectedRevision: media.session.history.present.revision,
-        }))
+        const target = captureCourseProjectRevisionTarget()
+        const committed = target
+          ? commitMediaLibraryImportAtTarget(target, items)
+          : {
+              ok: false as const,
+              code: 'project-mismatch' as const,
+              reason: '当前没有可写入的 Course Project。',
+            }
+        const backend = selectSlideAuthoringBackend(get())
+        return {
+          ok: committed.ok,
+          reason: committed.ok ? undefined : committed.reason,
+          nextSession: backend?.getSession() ?? media.session,
+          sidecar: get().slideCandidateSidecar ?? media.sidecar,
+          historyEntry: committed.ok && committed.status === 'imported',
+          selection: backend?.getSession().selection ?? media.session.selection,
+          importedAssetIds: committed.ok
+            ? committed.feedback.importedAssetIds
+            : [],
+          reusedAssetIds: committed.ok
+            ? committed.feedback.reusedAssetIds
+            : [],
+          destination: 'library' as const,
+        }
       }
       if (
         get().editingScope === 'global'
@@ -6768,78 +7118,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     importAsset(asset, bytes) {
-      const spatial = get().spatialSession
-      const flow = get().flowSession
-      if (spatial || flow) {
-        const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
-        const files = { ...sidecar.files, [asset.id]: bytes.slice() }
-        if (flow) {
-          const present = flow.history.present
-          const nextDocument = present.assets[asset.id]
-            ? present
-            : commitSlideProjectMutation(present, (draft) => {
-                draft.assets[asset.id] = structuredClone(asset)
-              })
-          persistFlowResult({
-            ok: true,
-            nextDocument,
-            historyEntry: nextDocument !== present,
-            selection: flow.selection,
-          }, {
-            sidecar: freezeCourseAssetSidecar(files),
-            statusMessage: `已导入素材“${asset.filename}”`,
-          })
-          return
-        }
-        const present = spatial!.history.present
-        persistSpatialResult(succeedSpatialCommand({
-          ...spatial!,
-          history: present.assets[asset.id]
-            ? spatial!.history
-            : {
-                ...spatial!.history,
-                present: {
-                  ...present,
-                  assets: { ...present.assets, [asset.id]: structuredClone(asset) },
-                },
-              },
-        }, !present.assets[asset.id]), {
-          sidecar: freezeCourseAssetSidecar(files),
-          statusMessage: `已导入素材“${asset.filename}”`,
-        })
-        return
-      }
-      const media = currentMediaSession()
-      if (media) {
-        persistMediaResult(importCourseMediaAssets(media, [{ meta: asset, bytes }], {
-          expectedRevision: media.session.history.present.revision,
-        }))
-        return
-      }
-      commitAssetBatch(
-        [{ meta: asset, bytes }],
-        () => undefined,
-        undefined,
-        `已导入素材“${asset.filename}”`,
-      )
-      set({ activeTab: 'elements' })
+      const target = captureCourseProjectRevisionTarget()
+      if (!target) return
+      const result = commitMediaLibraryImportAtTarget(target, [{ meta: asset, bytes }])
+      if (!result.ok) set({ errorMessage: result.reason, statusMessage: null })
     },
 
     importAssets(items) {
-      if (get().flowSession || get().spatialSession) {
-        for (const item of items) get().importAsset(item.meta, item.bytes)
-        return
+      const capacityError =
+        `当前场景已达到或将超过 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`
+      const keepCapacityError = get().errorMessage === capacityError
+      const target = captureCourseProjectRevisionTarget()
+      if (!target) return
+      const result = commitMediaLibraryImportAtTarget(target, items)
+      if (!result.ok) set({ errorMessage: result.reason, statusMessage: null })
+      else if (keepCapacityError) {
+        set({ errorMessage: capacityError, statusMessage: null, activeTab: 'elements' })
       }
-      const media = currentMediaSession()
-      if (media) {
-        persistMediaResult(importCourseMediaAssets(media, items.map((item) => ({
-          meta: item.meta,
-          bytes: item.bytes,
-        })), { expectedRevision: media.session.history.present.revision }))
-        return
-      }
-      if (items.length === 0) return
-      commitAssetBatch(items, () => undefined, [], `已批量导入 ${items.length} 个媒体素材`)
+    },
+
+    captureMediaLibraryImportTarget() {
+      return captureCourseProjectRevisionTarget()
+    },
+
+    importAssetsAtTarget(target, items) {
+      return commitMediaLibraryImportAtTarget(target, items)
     },
 
     captureImageReplacementTarget() {
@@ -9684,11 +9987,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const spatial = get().spatialSession
       if (spatial) {
         const before = spatial.history.present
+        const resourceTransition = spatialAuthoringUndoResourceTransition(spatial.history)
         const result = undoSpatialAuthoring(spatial)
         const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
         persistSpatialResult(result, {
           clearContentEdit: true,
-          ...(moved ? { sidecarDirection: 'undo' as const } : {}),
+          ...(moved
+            ? resourceTransition
+              ? { resourceTransition }
+              : { sidecarDirection: 'undo' as const }
+            : {}),
           statusMessage: '已撤销',
         })
         return
@@ -9709,6 +10017,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           })
           return
         }
+        const resourceTransition = flowEditorUndoResourceTransition(flow.history)
         const nextHistory = undoFlowEditorHistory(flow.history)
         if (nextHistory === flow.history) {
           set({ statusMessage: '已撤销' })
@@ -9721,7 +10030,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
           selection: flow.selection,
         }, {
           replaceHistory: nextHistory,
-          sidecarDirection: 'undo',
+          ...(resourceTransition
+            ? { resourceTransition }
+            : { sidecarDirection: 'undo' as const }),
           clearTextEdit: true,
           statusMessage: '已撤销',
         })
@@ -9734,7 +10045,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
         persistCandidateResult(result, {
           clearContentEdit: true,
-          ...(moved ? { sidecarDirection: 'undo' as const } : {}),
+          ...(moved && !result.resourceTransition
+            ? { sidecarDirection: 'undo' as const }
+            : {}),
         })
         return
       }
@@ -9744,11 +10057,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const spatial = get().spatialSession
       if (spatial) {
         const before = spatial.history.present
+        const resourceTransition = spatialAuthoringRedoResourceTransition(spatial.history)
         const result = redoSpatialAuthoring(spatial)
         const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
         persistSpatialResult(result, {
           clearContentEdit: true,
-          ...(moved ? { sidecarDirection: 'redo' as const } : {}),
+          ...(moved
+            ? resourceTransition
+              ? { resourceTransition }
+              : { sidecarDirection: 'redo' as const }
+            : {}),
           statusMessage: '已重做',
         })
         return
@@ -9756,6 +10074,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const flow = get().flowSession
       if (flow) {
         if (get().flowTextEdit?.composing) return
+        const resourceTransition = flowEditorRedoResourceTransition(flow.history)
         const nextHistory = redoFlowEditorHistory(flow.history)
         if (nextHistory === flow.history) {
           set({ statusMessage: '已重做' })
@@ -9768,7 +10087,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
           selection: flow.selection,
         }, {
           replaceHistory: nextHistory,
-          sidecarDirection: 'redo',
+          ...(resourceTransition
+            ? { resourceTransition }
+            : { sidecarDirection: 'redo' as const }),
           clearTextEdit: true,
           statusMessage: '已重做',
         })
@@ -9781,7 +10102,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
         persistCandidateResult(result, {
           clearContentEdit: true,
-          ...(moved ? { sidecarDirection: 'redo' as const } : {}),
+          ...(moved && !result.resourceTransition
+            ? { sidecarDirection: 'redo' as const }
+            : {}),
         })
         return
       }

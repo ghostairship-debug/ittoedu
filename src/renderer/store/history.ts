@@ -72,8 +72,8 @@ export function planAssetFileHistoryChange(
   }
   return Object.freeze({
     assetId,
-    ...(before === undefined ? {} : { before: before.slice() }),
-    ...(after === undefined ? {} : { after: after.slice() }),
+    ...(before === undefined ? {} : { before: Uint8Array.from(before) }),
+    ...(after === undefined ? {} : { after: Uint8Array.from(after) }),
   })
 }
 
@@ -82,8 +82,17 @@ export function cloneAssetFileHistoryChange(
 ): AssetFileHistoryChange {
   return Object.freeze({
     assetId: change.assetId,
-    ...(change.before === undefined ? {} : { before: change.before.slice() }),
-    ...(change.after === undefined ? {} : { after: change.after.slice() }),
+    ...(change.before === undefined ? {} : { before: Uint8Array.from(change.before) }),
+    ...(change.after === undefined ? {} : { after: Uint8Array.from(change.after) }),
+  })
+}
+
+function defineRecordValue<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
   })
 }
 
@@ -143,7 +152,7 @@ export function applyAssetFileHistoryChanges(
   for (const change of changes ?? []) {
     const value = direction === 'forward' ? change.after : change.before
     if (value === undefined) delete nextFiles[change.assetId]
-    else nextFiles[change.assetId] = value.slice()
+    else defineRecordValue(nextFiles, change.assetId, Uint8Array.from(value))
   }
   return Object.freeze(nextFiles)
 }
@@ -158,7 +167,7 @@ export function applyComponentPackageHistoryChanges(
   for (const change of changes ?? []) {
     const value = direction === 'forward' ? change.after : change.before
     if (value === undefined) delete nextPackages[change.packageId]
-    else nextPackages[change.packageId] = structuredClone(value)
+    else defineRecordValue(nextPackages, change.packageId, structuredClone(value))
   }
   return Object.freeze(nextPackages)
 }

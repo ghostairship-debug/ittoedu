@@ -157,7 +157,7 @@ describe('batch media transactions', () => {
   it('routes more than twelve valid placements to the library without creating nodes', () => {
     const items = Array.from({ length: MAX_BATCH_CANVAS_ITEMS + 1 }, (_, index) => ({
       meta: image(`asset_overflow_${index}`, 800, 600),
-      bytes: Uint8Array.from([index]),
+      bytes: Uint8Array.from([index, index, index, index]),
     }))
     const plan = planMediaBatchImport(
       'add',
@@ -187,8 +187,8 @@ describe('batch media transactions', () => {
     store.loadProject(project, null)
     store.setActiveTab('elements')
     const items = [
-      { meta: image('asset_capacity_a', 800, 600), bytes: Uint8Array.from([1]) },
-      { meta: image('asset_capacity_b', 800, 600), bytes: Uint8Array.from([2]) },
+      { meta: image('asset_capacity_a', 800, 600), bytes: Uint8Array.from([1, 1, 1, 1]) },
+      { meta: image('asset_capacity_b', 800, 600), bytes: Uint8Array.from([2, 2, 2, 2]) },
     ]
     const plan = planMediaBatchImport(
       'add',

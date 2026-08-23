@@ -469,7 +469,12 @@ export default function App() {
     (state) => state.replaceImageAssetAtTarget,
   )
   const addVideoNodes = useEditorStore((state) => state.addVideoNodes)
-  const importAssets = useEditorStore((state) => state.importAssets)
+  const captureMediaLibraryImportTarget = useEditorStore(
+    (state) => state.captureMediaLibraryImportTarget,
+  )
+  const importAssetsAtTarget = useEditorStore(
+    (state) => state.importAssetsAtTarget,
+  )
   const importSounds = useEditorStore((state) => state.importSounds)
 
   const run = useCallback(
@@ -696,6 +701,14 @@ export default function App() {
           return
         }
 
+        const libraryTarget = captureMediaLibraryImportTarget()
+        if (!libraryTarget) {
+          throw new UserFacingError(
+            '无法导入图片',
+            '当前没有可写入的 Course Project。',
+            '请重新打开或新建课件后再试。',
+          )
+        }
         const batch = await desktopApi().selectImages()
         if (!batch) return
         const prepared = await prepareAssetBatch<SelectedImageBatchFile>(
@@ -708,6 +721,34 @@ export default function App() {
           },
         )
         const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+        const importPlan = planMediaBatchImport(
+          mode,
+          prepared.placements.length,
+          MAX_BATCH_CANVAS_ITEMS,
+        )
+        const importIntoCapturedLibrary = (items: ImportedAssetBatchItem[]) => {
+          const result = importAssetsAtTarget(libraryTarget, items)
+          if (!result.ok) {
+            throw new UserFacingError(
+              '图片批量入库已取消',
+              result.reason,
+              '工程已发生变化；请重新选择文件后再试。',
+            )
+          }
+        }
+        if (importPlan.destination === 'library') {
+          importIntoCapturedLibrary(prepared.additions)
+          reportBatchOutcome({
+            label: mode === 'library' ? '图片批量入库' : '图片批量添加',
+            completedCount: prepared.additions.length,
+            duplicateCount: prepared.duplicateCount,
+            issues,
+            ...(importPlan.overflowToLibrary
+              ? { libraryFallback: 'batch-size' as const }
+              : {}),
+          })
+          return
+        }
         if (await importCandidateMediaIfInjected({
           kind: 'image',
           items: mode === 'library' ? prepared.additions : prepared.placements,
@@ -725,17 +766,12 @@ export default function App() {
           })
           return
         }
-        const importPlan = planMediaBatchImport(
-          mode,
-          prepared.placements.length,
-          MAX_BATCH_CANVAS_ITEMS,
-        )
         const commitResult = commitMediaBatchImport({
           plan: importPlan,
           placements: prepared.placements,
           additions: prepared.additions,
           placeOnCanvas: (items) => addImageNodes(items, position),
-          importIntoLibrary: importAssets,
+          importIntoLibrary: importIntoCapturedLibrary,
         })
         reportBatchOutcome({
           label: mode === 'library' ? '图片批量入库' : '图片批量添加',
@@ -748,8 +784,9 @@ export default function App() {
     },
     [
       addImageNodes,
+      captureMediaLibraryImportTarget,
       captureImageReplacementTarget,
-      importAssets,
+      importAssetsAtTarget,
       replaceImageAssetAtTarget,
       reportBatchOutcome,
       run,
@@ -808,6 +845,14 @@ export default function App() {
     position?: { x?: number; y?: number },
   ) => {
     await run(async () => {
+      const libraryTarget = captureMediaLibraryImportTarget()
+      if (!libraryTarget) {
+        throw new UserFacingError(
+          '无法导入视频',
+          '当前没有可写入的 Course Project。',
+          '请重新打开或新建课件后再试。',
+        )
+      }
       const batch = await desktopApi().selectVideos()
       if (!batch) return
       const prepared = await prepareAssetBatch<SelectedMediaBatchFile>(
@@ -820,6 +865,34 @@ export default function App() {
         },
       )
       const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+      const importPlan = planMediaBatchImport(
+        mode,
+        prepared.placements.length,
+        MAX_BATCH_CANVAS_ITEMS,
+      )
+      const importIntoCapturedLibrary = (items: ImportedAssetBatchItem[]) => {
+        const result = importAssetsAtTarget(libraryTarget, items)
+        if (!result.ok) {
+          throw new UserFacingError(
+            '视频批量入库已取消',
+            result.reason,
+            '工程已发生变化；请重新选择文件后再试。',
+          )
+        }
+      }
+      if (importPlan.destination === 'library') {
+        importIntoCapturedLibrary(prepared.additions)
+        reportBatchOutcome({
+          label: mode === 'add' ? '视频批量添加' : '视频批量入库',
+          completedCount: prepared.additions.length,
+          duplicateCount: prepared.duplicateCount,
+          issues,
+          ...(importPlan.overflowToLibrary
+            ? { libraryFallback: 'batch-size' as const }
+            : {}),
+        })
+        return
+      }
       if (await importCandidateMediaIfInjected({
         kind: 'video',
         items: mode === 'library' ? prepared.additions : prepared.placements,
@@ -837,17 +910,12 @@ export default function App() {
         })
         return
       }
-      const importPlan = planMediaBatchImport(
-        mode,
-        prepared.placements.length,
-        MAX_BATCH_CANVAS_ITEMS,
-      )
       const commitResult = commitMediaBatchImport({
         plan: importPlan,
         placements: prepared.placements,
         additions: prepared.additions,
         placeOnCanvas: (items) => addVideoNodes(items, position),
-        importIntoLibrary: importAssets,
+        importIntoLibrary: importIntoCapturedLibrary,
       })
       reportBatchOutcome({
         label: mode === 'add' ? '视频批量添加' : '视频批量入库',
@@ -857,7 +925,13 @@ export default function App() {
         libraryFallback: commitResult.libraryFallback,
       })
     }, '视频读取失败。请重新选择 MP4 或 WebM 文件。')
-  }, [addVideoNodes, importAssets, reportBatchOutcome, run])
+  }, [
+    addVideoNodes,
+    captureMediaLibraryImportTarget,
+    importAssetsAtTarget,
+    reportBatchOutcome,
+    run,
+  ])
 
   const handleImportComponent = useCallback(() => {
     void run(async () => {

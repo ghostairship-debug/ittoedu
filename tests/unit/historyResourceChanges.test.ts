@@ -123,6 +123,24 @@ describe('History resource changes', () => {
     expect([...inverse.replaced!]).toEqual([7, 8])
   })
 
+  it('detaches Buffer subclasses and preserves prototype-looking resource keys', () => {
+    const caller = Buffer.from([13, 21, 34])
+    const planned = planAssetFileHistoryChange('__proto__', undefined, caller)
+    if (!planned) throw new Error('Expected a resource change')
+    caller[0] = 255
+    expect([...planned.after!]).toEqual([13, 21, 34])
+    expect(planned.after?.constructor).toBe(Uint8Array)
+
+    const forward = applyAssetFileHistoryChanges({}, [planned], 'forward')
+    expect(Object.hasOwn(forward, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(forward)).toBe(Object.prototype)
+    expect([...forward['__proto__']!]).toEqual([13, 21, 34])
+
+    const inverse = applyAssetFileHistoryChanges(forward, [planned], 'inverse')
+    expect(Object.hasOwn(inverse, '__proto__')).toBe(false)
+    expect(Object.getPrototypeOf(inverse)).toBe(Object.prototype)
+  })
+
   it('clones and reverses component packages through the same resource state', () => {
     const before = componentPackage('com.example.widget', new Uint8Array([1, 2]))
     const after = componentPackage('com.example.widget', new Uint8Array([3, 4]))

@@ -75,13 +75,18 @@ afterEach(() => {
 })
 
 function seedAssets(): string {
+  const bytes = (asset: AssetMeta, marker: number): Uint8Array => {
+    const value = new Uint8Array(asset.byteLength)
+    value.set([marker, marker + 1, marker + 2])
+    return value
+  }
   const soundId = useEditorStore.getState().importSound(
     audioAsset,
-    Uint8Array.from([1, 2, 3]),
+    bytes(audioAsset, 1),
     { name: '雨声', channel: 'sfx' },
   )
-  useEditorStore.getState().importAsset(videoAsset, Uint8Array.from([4, 5, 6]))
-  useEditorStore.getState().importAsset(imageAsset, Uint8Array.from([7, 8, 9]))
+  useEditorStore.getState().importAsset(videoAsset, bytes(videoAsset, 4))
+  useEditorStore.getState().importAsset(imageAsset, bytes(imageAsset, 7))
   return soundId
 }
 

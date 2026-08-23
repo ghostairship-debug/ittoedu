@@ -176,7 +176,7 @@ describe('Flow unified layer entry', () => {
       mimeType: 'audio/mpeg',
       kind: 'audio',
       path: 'assets/voice.mp3',
-      byteLength: 16,
+      byteLength: 4,
     }
     useEditorStore.getState().importAsset(audio, new Uint8Array([1, 2, 3, 4]))
     render(<MediaTab onImportAudio={() => undefined} onImportVideo={() => undefined} />)
