@@ -512,6 +512,11 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md",
+      "title": "ARCH-2 资源快照与跨 Surface 行为基线"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md",
       "title": "ARCH-0A Feature / Writer / Consumer / Owner Ledger"
     },
