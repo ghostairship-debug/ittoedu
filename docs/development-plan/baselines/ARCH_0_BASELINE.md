@@ -2,7 +2,7 @@
 
 > Captured: 2026-08-24 (Asia/Shanghai)
 >
-> Status: baseline checks complete; representative-project, manual-flow, and performance evidence are owned by follow-on ARCH-0A cards.
+> Status: ARCH-0A focused phase gate is `target-green`; Coordinator review, task-board regeneration, and final state integration remain. See `ARCH_0A_GATE_REPORT.md`.
 
 ## Repository
 
@@ -42,6 +42,7 @@
 - Representative V9 fixtures: `tests/fixtures/architecture-baseline/`
 - Representative evidence and hashes: `docs/development-plan/baselines/ARCH_0_REPRESENTATIVE_PROJECTS.md`
 - Performance evidence: `docs/development-plan/baselines/ARCH_0_PERFORMANCE.md`
+- ARCH-0A phase decision: `docs/development-plan/baselines/ARCH_0A_GATE_REPORT.md`
 - Strict development index: `repo-index/`
 - Temporary Context Packs: `repo-index/contexts/` (ignored)
 
@@ -61,7 +62,7 @@ Build/check commands and the capability matrix are canonical in `ARCH_0_REPRESEN
 
 ## Manual flows
 
-Owned by the representative and performance cards. Required flows remain:
+Bounded functional/performance/manual evidence is complete in `ARCH_0_PERFORMANCE.md`; its green/red/unknown classification remains authoritative. The required-flow list is retained as the comparison map for later affected stages:
 
 - create/open/save/save-as/reopen;
 - undo/redo and resource-history consistency;
@@ -74,7 +75,7 @@ Owned by the representative and performance cards. Required flows remain:
 
 ## Performance protocol
 
-Owned by `arch-0a-perf-00-test-and-performance-baseline`. The fixed environment is the machine above. Sample count, fixtures, median/P95, qualitative interaction checks, and regression thresholds must be recorded before product-code migration.
+`arch-0a-perf-00-test-and-performance-baseline` is done. The fixed sample count, fixture hashes, median/P95 values, qualitative interaction boundaries and regression investigation thresholds are canonical in `ARCH_0_PERFORMANCE.md`.
 
 ## Writer/consumer/owner starting counts
 
@@ -106,8 +107,8 @@ Budgets bound a wave and trigger re-planning; they never authorize scope reducti
 
 ## Blocking unknowns
 
-- Exact current E2E/desktop/package status remains intentionally unclaimed until the relevant stage evidence runs.
-- Performance/manual-flow evidence is still owned by the active performance-baseline task.
-- `repo:index`, `repo:index:check`, and `repo:context` do not yet exist.
+- Exact current full E2E/fresh desktop build/package status remains intentionally unclaimed under the ARCH-0A V3 policy; affected product stages own those checks.
+- Mixed/Spatial PPTX is a registered red baseline. Native Save As, real OS IME, trusted pointer input and OS PDF are registered unknowns. Their scope and non-blocking/ later-gate decisions are canonical in `ARCH_0A_GATE_REPORT.md`.
+- ARCH-0B context-safety status is separate from this baseline and remains governed by its own task cards and phase gate.
 
-These remaining unknowns block broad product migration, not the active non-overlapping ARCH-0 work lines.
+ARCH-0A itself has no hidden blocker for the controlled ARCH-1 characterization/vertical slice after Coordinator gate integration. This statement does not authorize broad migration before the separate ARCH-0B gate and does not convert any red/unknown outcome into green.
