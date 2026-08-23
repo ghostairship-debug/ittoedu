@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "courseProjectSchemaVersion": 9,
+  "deterministicMtime": "2026-08-24T00:00:00.000Z",
+  "buildCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts",
+  "checkCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts --check",
+  "fixtures": [
+    {
+      "id": "slide-heavy",
+      "filename": "slide-heavy.h5lesson",
+      "projectId": "arch-0-slide-heavy",
+      "capabilities": [
+        "slide-scenes-and-presentation-states",
+        "unified-global-surface-scene-layers",
+        "image-audio-component-canvas-runtime",
+        "teacher-controller-and-scene-interaction",
+        "published-v2-static-export-inputs"
+      ],
+      "byteLength": 7050,
+      "sha256": "101b8e8186e1fbadbf9f083e5d3273eee9f1166fa3028478f290497537274a7b"
+    },
+    {
+      "id": "flow-heavy",
+      "filename": "flow-heavy.h5lesson",
+      "projectId": "arch-0-flow-heavy",
+      "capabilities": [
+        "flow-semantic-blocks-and-rich-text",
+        "ime-composition-probe-content",
+        "formula-table-code-section-media",
+        "flow-component-block-with-fallback",
+        "flow-print-and-docx-inputs"
+      ],
+      "byteLength": 5358,
+      "sha256": "326b1c29d72358d01373af26cbc6f97f396a34ce40e0e057079bbdcd76beeea0"
+    },
+    {
+      "id": "mixed-spatial",
+      "filename": "mixed-spatial.h5lesson",
+      "projectId": "arch-0-mixed-spatial",
+      "capabilities": [
+        "slide-flow-spatial-surfaces-and-print-plan",
+        "global-surface-shared-and-teacher-controller",
+        "spatial-camera-path-relation-semantic-zoom",
+        "spatial-component-and-surface-runtime",
+        "published-v2-mixed-navigation-inputs"
+      ],
+      "byteLength": 6583,
+      "sha256": "939a0d5520fe21a6608a4cb11b8487f87d223a1da15286965803eb4e2aaa66df"
+    }
+  ]
+}

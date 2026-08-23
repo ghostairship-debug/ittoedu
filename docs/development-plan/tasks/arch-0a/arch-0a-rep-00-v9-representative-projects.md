@@ -4,17 +4,17 @@
 
 - Task ID: `arch-0a-rep-00-v9-representative-projects`
 - Phase / wave: `ARCH-0A / wave 1`
-- Status: `claimed`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Fixture Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, fixture-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Claim commit: `commit containing this card`
+- Claim commit: `090aa11590baee19cf183a1674e4e8bbf72837ef`
 - Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: baseline clean; only this claimed task card may be dirty before dispatch
+- Freshness / relevant dirty inputs: implementation stayed inside Allowed write; concurrent repo-index work is unrelated and was not read or modified
 - Depends on: `arch-0a-bsl-00-baseline-and-budgets (done)`
 - Blocks: `arch-0a-perf-00-test-and-performance-baseline`, ARCH-0A gate
-- Retry count: `0`
+- Retry count: `1` (focused-test byte comparison used a Buffer/Uint8Array prototype-sensitive matcher; replaced with explicit byte comparison)
 
 ## Product outcome
 
@@ -90,11 +90,11 @@ Small legal V9 seed fixtures exist under `tests/fixtures/course-project-v9/`, bu
 
 ## Acceptance
 
-- [ ] Three archives are legal V9 and reproducible
-- [ ] Slide-heavy coverage includes states/layers/media/component/play/static-export inputs
-- [ ] Flow-heavy includes semantic blocks, formula/table/code, FlowComponentBlock, and IME test content
-- [ ] Mixed/Spatial includes three Surfaces, global/shared/controller, camera/path, component, Runtime
-- [ ] No product/contract/dependency change
+- [x] Three archives are legal V9 and reproducible
+- [x] Slide-heavy coverage includes states/layers/media/component/play/static-export inputs
+- [x] Flow-heavy includes semantic blocks, formula/table/code, FlowComponentBlock, and IME test content
+- [x] Mixed/Spatial includes three Surfaces, global/shared/controller, camera/path, component, Runtime
+- [x] No product/contract/dependency change
 
 ## Minimal validation
 
@@ -106,7 +106,7 @@ Small legal V9 seed fixtures exist under `tests/fixtures/course-project-v9/`, bu
 ## Rollback
 
 - Start point: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Implementation commit: pending
+- Implementation commit: not created; Worker was instructed not to commit
 - Old path remains: existing V9 seed fixtures remain unchanged.
 
 ## Consumers and index
@@ -117,11 +117,23 @@ Small legal V9 seed fixtures exist under `tests/fixtures/course-project-v9/`, bu
 
 ## Result evidence
 
-- Pending Worker result.
+- Outcome: generated three new representative archives from V9 factories; no existing seed fixture was renamed or modified.
+- Deterministic manifest: `tests/fixtures/architecture-baseline/manifest.json`.
+- Slide-heavy: `7050` bytes; SHA-256 `101b8e8186e1fbadbf9f083e5d3273eee9f1166fa3028478f290497537274a7b`.
+- Flow-heavy: `5358` bytes; SHA-256 `326b1c29d72358d01373af26cbc6f97f396a34ce40e0e057079bbdcd76beeea0`.
+- Mixed/Spatial: `6583` bytes; SHA-256 `939a0d5520fe21a6608a4cb11b8487f87d223a1da15286965803eb4e2aaa66df`.
+- `npx tsx scripts/build-architecture-baseline-fixtures.ts --check`: passed; all four outputs byte-identical.
+- `npx vitest run tests/unit/architectureBaselineFixtures.test.ts`: passed, 4/4.
+- `npx tsc --noEmit`: passed.
+- Three `npm run --silent validate:course-project -- <archive>` commands: all exit `0`, `valid`, Schema 9, 0 errors, 0 warnings; HTML/Web/PDF/PPTX preflight all `canExport=true`.
+- Manual structural inspection is encoded by the focused test: every extracted root `project.json` is Schema 9, contains no V8 `scenes/globalRuntime/globalNodes`, and satisfies the carrier/capability matrix.
+- Detailed matrix and conclusion boundary: `docs/development-plan/baselines/ARCH_0_REPRESENTATIVE_PROJECTS.md`.
+- Scope evidence: no `src/**`, contract, package manifest, lockfile, existing fixture, or product consumer was changed.
 
 ## Findings / next allowed task
 
 - Performance/manual-flow baseline may start only after hashes and repeatable build commands are recorded.
+- Remaining evidence is intentionally deferred: real editor save/reopen, real Player/IME flows, real export writes, performance, visual outcome and `accepted`.
 
 ## Ready checklist (Coordinator)
 
