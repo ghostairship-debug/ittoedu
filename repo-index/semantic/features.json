@@ -141,8 +141,8 @@
         "图片替换稳定目标"
       ],
       "origin": "semantic",
-      "statusClass": "current-debt",
-      "owner": "ARCH-1 App / Editor Core / Media",
+      "statusClass": "current-must-preserve",
+      "owner": "Editor Core / Media / Slide (ARCH-1 accepted)",
       "moduleIds": [
         "module:editor-core",
         "module:app-persistence",
@@ -150,8 +150,8 @@
         "module:preview-player",
         "module:export-delivery"
       ],
-      "currentFact": "App captures one CourseAuthoringTarget before the asynchronous image dialog; Store validates the current V9 identity and commits the captured image reference plus cloned asset-byte delta in one mixed Slide history transaction frame. The old nodeId-only async writer is removed.",
-      "targetState": "VS-06 proves the same target, one undo/redo step and replacement bytes through real Electron stale-dialog feedback, save/reopen, Preview, standalone HTML and Web delivery before the ARCH-1 gate closes.",
+      "currentFact": "ARCH-1 is wave-validated. App captures one CourseAuthoringTarget before the asynchronous image dialog; Store validates the current V9 identity and commits the captured image reference plus cloned asset-byte delta in one mixed Slide history transaction frame. The old nodeId-only async writer is removed. 检索词：替换图片。",
+      "targetState": "Preserve the accepted end-to-end delivery evidence as a dependency and behavior ratchet. ARCH-2 migrates one real cross-Surface Media behavior at a time and must not infer FlowBlock or Spatial carrier support from the Slide proof.",
       "canonicalFiles": [
         "src/renderer/App.tsx",
         "src/renderer/store/editorStore.ts",

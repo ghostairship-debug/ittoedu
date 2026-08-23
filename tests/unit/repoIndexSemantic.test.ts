@@ -268,12 +268,14 @@ describe('repo-index stable semantic coverage', () => {
     }
 
     const journey = feature('feature:image-replacement-journey')
-    expect(journey.currentFact).toMatch(/CourseAuthoringTarget.*one mixed Slide history transaction frame/i)
-    expect(journey.targetState).toMatch(/VS-06.*Electron.*HTML.*Web/i)
+    expect(journey.statusClass).toBe('current-must-preserve')
+    expect(journey.currentFact).toMatch(/ARCH-1 is wave-validated.*CourseAuthoringTarget.*mixed Slide history/i)
+    expect(journey.targetState).toMatch(/end-to-end delivery.*ARCH-2.*Slide proof/i)
     expect(journey.aliases).toEqual(expect.arrayContaining([
       'captureImageReplacementTarget',
       'replaceImageAssetAtTarget',
     ]))
+    expect(journey.currentFact).toContain('检索词：替换图片')
     expect(journey.canonicalFiles).toEqual([
       'src/renderer/App.tsx',
       'src/renderer/store/editorStore.ts',

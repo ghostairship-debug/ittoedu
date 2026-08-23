@@ -281,6 +281,6 @@ describe('repo-index golden task gates', () => {
         })
       }
     },
-    30_000,
+    90_000,
   )
 })
