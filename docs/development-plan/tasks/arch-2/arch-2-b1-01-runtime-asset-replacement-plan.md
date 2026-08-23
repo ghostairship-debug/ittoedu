@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-b1-01-runtime-asset-replacement-plan`
 - Phase / wave: `ARCH-2 / W2-B1 pure Runtime command`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Runtime Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, new Runtime planner-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `1dfb370`
-- Claim commit: `pending`
+- Claim commit: `db21bb6`
 - Context Pack + manifest hash | bootstrap-manual: `feature:runtime; fresh/high/safe-for-S2; source 16556796, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree; new planner/test paths clean; Store/Workspace/Player locked out`
 - Depends on: `ARCH-2 W2-A gate done`
@@ -33,7 +33,7 @@ One pure Runtime command plans replacing exactly one captured Runtime asset bind
 
 ## Stable target / conflict policy
 
-- Validate exact project/revision/session generation/location/surface/state/owner/ownerKey/item/address.
+- Validate exact project/revision/session generation/location/surface/owner/ownerKey/item/address. Runtime content/assets are shared across named states, so switching state does not invalidate the target; the captured state is used only to enforce its effective lock.
 - Reject missing/locked/type-changed Runtime or missing binding.
 - Accept only valid image metadata/bytes; same-ID metadata/byte disagreement rejects atomically.
 - Handle `added`, `repaired`, `reused`, `unchanged`; do not delete the old asset because other references may remain.
@@ -72,7 +72,7 @@ One pure Runtime command plans replacing exactly one captured Runtime asset bind
 ## Validation
 
 - Carrier matrix: global, surface shared, Slide scene, Flow surface overlay, Spatial surface and Spatial world; API 2 and API 3.
-- Escaped `/` and `~` binding keys; stale identity matrix; wrong address/owner/item/lock/binding/type.
+- Escaped `/` and `~` binding keys; stale identity matrix with state-switch preservation; wrong address/owner/item/effective named-state lock/binding/type.
 - add/repair/reuse/no-op/conflict, one-target-only, immutable inputs and exact revision.
 - `npx vitest run tests/unit/courseRuntimeTransactions.test.ts tests/unit/editorTransaction.test.ts tests/unit/historyResourceChanges.test.ts`
 - `npx tsc --noEmit` and `git diff --check`.
@@ -83,4 +83,9 @@ One pure Runtime command plans replacing exactly one captured Runtime asset bind
 
 ## Result evidence
 
-- Pending Worker implementation and independent review.
+- Pure implementation commit: `0ccc7eb`.
+- Field-specific targets use `runtime/assets/<JSON-pointer-key>/assetId`, wrap `CourseAuthoringTarget`, and never persist host `targetId/hitId`. Global/surface/Slide scene/Spatial world are resolved; Flow blocks are explicitly rejected.
+- Planner validates stable identity, captured-state effective lock, binding, image metadata/bytes and conflicts; state switching remains valid because Runtime assets are shared across named states. It plans one revision and at most one asset delta without deleting the old asset or changing protocol/API/renderMode/other bindings/fallback.
+- Current V9 Schema cannot cross-reference an own asset key named `__proto__`; the planner rejects that key as `invalid-asset` before mutation instead of misreporting support. Buffer inputs are detached as base Uint8Array.
+- Final focused tests passed 31/31; root Runtime/history/session matrix passed 59/59. Independent review passed 3 files / 40 tests and approved after state/lock/prototype/multi-target fixes.
+- Consumers migrated: `0` by design. Next card exclusively integrates Store/Workspace through the existing project-resource transaction seam.
