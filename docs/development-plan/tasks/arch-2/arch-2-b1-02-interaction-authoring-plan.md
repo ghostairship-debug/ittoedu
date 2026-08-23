@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-b1-02-interaction-authoring-plan`
 - Phase / wave: `ARCH-2 / W2-B1 pure Interactions authoring`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Interactions Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, new interactions-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `db21bb6`
-- Claim commit: `pending`
+- Claim commit: `995d411`
 - Context Pack + manifest hash | bootstrap-manual: `feature:interactions; fresh/high/safe-for-S2; source 16556796, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean product tree; new interaction paths clean; Store/UI/Player locked out`
 - Depends on: `ARCH-2 W2-A gate done`
@@ -74,5 +74,9 @@ One pure Interactions Feature exposes honest local/global availability and plans
 
 ## Result evidence
 
-- Pending Worker implementation and review.
-
+- Pure implementation commit: `8d271b8`.
+- Local view reads the actual V9 Slide scene and materializes named-state overrides; Flow/Spatial local returns typed unavailable. Global view remains writable from every Surface and exposes only real Slide scene/state references.
+- The existing reveal-sequence template becomes one standard Interaction V1 rule plus effective base/state initial-hidden changes in one revision/empty-resource plan. Professional update preserves that same rule ID and returns true no-op for identical patches.
+- Carrier-aware validation prevents cross-Surface duplicate-ID lock bypass, dangling scene/state/sound/motion references and unknown templates. Global state references use rule `scene.in` OR candidates or all Slide scenes, not the active editor Surface.
+- Final focused/Slide regressions passed 45 tests; independent review passed 5 files / 55 tests and TypeScript after closing named-state, reference, duplicate-ID, animation and global-state blockers.
+- Consumers migrated: `0` by design. Store/UI integration must generate existing `presentation.in` (and global Slide `scene.in`) conditions and route one plan through the current transaction seam.
