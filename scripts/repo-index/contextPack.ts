@@ -96,7 +96,12 @@ function edgePath(id: string): string | undefined {
 }
 
 function consumerLines(result: QueryResult, limit: number): string[] {
-  const declared = result.matchedFeature?.runtimeConsumers ?? []
+  const declared = unique([
+    ...(result.matchedFeature?.runtimeConsumers ?? []),
+    ...(result.associatedFeatures ?? []).flatMap(
+      (feature) => feature.runtimeConsumers ?? [],
+    ),
+  ])
   const fromEdges = result.relatedEdges.flatMap((edge) => {
     if (!['imports', 'imports_type', 'imports_dynamic', 'tested_by', 're_exports'].includes(edge.kind)) {
       return []
@@ -122,22 +127,39 @@ function currentStatusLines(result: QueryResult): string[] {
     ...result.modules.map((module) =>
       `module ${module.id}: ${module.status}/${module.statusClass}; owner ${module.owner ?? 'unknown'}`,
     ),
+    ...(result.associatedFeatures ?? [])
+      .filter((associated) => associated.id !== feature?.id)
+      .map((associated) =>
+        `associated ${associated.id}: ${associated.statusClass}; ${shorten(associated.currentFact) ?? 'semantic evidence only'}`,
+      ),
   ])
 }
 
 function canonicalLines(result: QueryResult, limit: number): string[] {
-  const feature = result.matchedFeature
-  const carriers = feature?.carriers
+  const features = result.matchedFeature
+    ? [result.matchedFeature, ...(result.associatedFeatures ?? []).filter(
+        (feature) => feature.id !== result.matchedFeature?.id,
+      )]
+    : result.associatedFeatures ?? []
+  const carriers = features.flatMap((feature) => feature.carriers
     ? Object.entries(feature.carriers)
         .sort(([left], [right]) => compareText(left, right))
-        .map(([surface, carrier]) => `carrier ${surface}: ${carrier}`)
-    : []
+        .map(([surface, carrier]) => `${feature.id} carrier ${surface}: ${carrier}`)
+    : [])
   return unique([
-    ...(feature?.canonicalFiles ?? []).map((path) =>
-      path.includes('/contracts/') || path.startsWith('docs/contracts/')
-        ? `contract: ${path}`
-        : `canonical: ${path}`,
-    ),
+    ...features.flatMap((feature) => [
+      ...(feature.canonicalFiles ?? []).map((path) =>
+        path.includes('/contracts/') || path.startsWith('docs/contracts/')
+          ? `${feature.id} contract: ${path}`
+          : `${feature.id} canonical: ${path}`,
+      ),
+      ...(feature.highSignalFiles ?? []).map((path) =>
+        `${feature.id} high-signal: ${path}`,
+      ),
+      ...(feature.catalogBoundaryFiles ?? []).map((path) =>
+        `${feature.id} local Catalog boundary: ${path}`,
+      ),
+    ]),
     ...carriers,
   ]).slice(0, limit)
 }
@@ -147,6 +169,12 @@ function startHerePaths(result: QueryResult, limit: number): string[] {
   return unique([
     ...(feature?.canonicalFiles ?? []),
     ...(feature?.entrypoints ?? []),
+    ...(result.associatedFeatures ?? []).flatMap((associated) => [
+      ...(associated.highSignalFiles ?? []),
+      ...(associated.catalogBoundaryFiles ?? []),
+      ...(associated.canonicalFiles ?? []),
+      ...(associated.entrypoints ?? []),
+    ]),
     ...result.matchedFiles.map((file) => file.path),
     ...result.matchedSymbols.map((symbol) => `${symbol.file}:${symbol.line}`),
     ...result.candidates.flatMap((candidate) => candidate.paths),
@@ -161,6 +189,14 @@ function writePathLines(result: QueryResult, limit: number): string[] {
       `${path} — semantic entrypoint; verify the canonical writer before editing`,
     )
   }
+  const associatedEntrypoints = unique((result.associatedFeatures ?? []).flatMap(
+    (feature) => feature.entrypoints ?? [],
+  ))
+  if (associatedEntrypoints.length > 0) {
+    return associatedEntrypoints.slice(0, limit).map((path) =>
+      `${path} — associated candidate entrypoint; low-confidence output does not authorize writing`,
+    )
+  }
   const paths = unique([
     ...result.matchedFiles.map((file) => file.path),
     ...result.matchedSymbols.map((symbol) => symbol.file),
@@ -171,7 +207,14 @@ function writePathLines(result: QueryResult, limit: number): string[] {
 }
 
 function testLines(result: QueryResult, limit: number): string[] {
-  const declared = result.matchedFeature?.tests ?? []
+  const declared = unique([
+    ...(result.matchedFeature?.highSignalTests ?? []),
+    ...(result.matchedFeature?.tests ?? []),
+    ...(result.associatedFeatures ?? []).flatMap((feature) => [
+      ...(feature.highSignalTests ?? []),
+      ...(feature.tests ?? []),
+    ]),
+  ])
   return unique([
     ...declared.map((path) => `declared test: ${path}`),
     ...result.relatedTests.map((test) =>

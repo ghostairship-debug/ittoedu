@@ -53,6 +53,10 @@ export interface FeatureSemantic {
   entrypoints?: readonly string[]
   runtimeConsumers?: readonly string[]
   tests?: readonly string[]
+  highSignalFiles?: readonly string[]
+  highSignalTests?: readonly string[]
+  catalogBoundaryFiles?: readonly string[]
+  terminology?: readonly string[]
   evidence?: readonly string[]
   moduleIds?: readonly string[]
   carriers?: Record<string, string>
@@ -146,6 +150,7 @@ export interface QueryResult {
   confidence: QueryConfidence
   bootstrapRequired: boolean
   matchedFeature?: FeatureSemantic
+  associatedFeatures?: readonly FeatureSemantic[]
   matchedSymbols: readonly SymbolFact[]
   matchedFiles: readonly FileFact[]
   candidates: readonly QueryCandidate[]
@@ -416,10 +421,13 @@ function featurePaths(feature: FeatureSemantic): string[] {
   return [...new Set([
     ...(feature.canonicalFiles ?? []),
     ...(feature.entrypoints ?? []),
+    ...(feature.highSignalFiles ?? []),
+    ...(feature.catalogBoundaryFiles ?? []),
     ...(feature.runtimeConsumers ?? []),
+    ...(feature.highSignalTests ?? []),
     ...(feature.tests ?? []),
     ...(feature.evidence ?? []),
-  ])].sort(compareText)
+  ])]
 }
 
 function featureTerms(feature: FeatureSemantic): string[] {
@@ -428,6 +436,7 @@ function featureTerms(feature: FeatureSemantic): string[] {
     feature.id.split(':').at(-1) ?? feature.id,
     feature.name,
     ...feature.aliases,
+    ...(feature.terminology ?? []),
   ].map(normalizeQueryTerm)
 }
 
@@ -435,6 +444,7 @@ function featureCandidate(
   feature: FeatureSemantic,
   score: number,
   reasons: string[],
+  paths: readonly string[] = featurePaths(feature),
 ): QueryCandidate {
   return {
     kind: 'feature',
@@ -442,7 +452,7 @@ function featureCandidate(
     label: feature.name,
     score,
     reasons,
-    paths: featurePaths(feature),
+    paths,
     statusClass: feature.statusClass,
   }
 }
@@ -452,16 +462,148 @@ function exactFeatureMatches(features: readonly FeatureSemantic[], value: string
   return features.filter((feature) => featureTerms(feature).includes(normalized))
 }
 
+function exactTerminologyMatches(
+  features: readonly FeatureSemantic[],
+  value: string,
+): FeatureSemantic[] {
+  const normalized = normalizeQueryTerm(value)
+  return features.filter((feature) => [
+    ...feature.aliases,
+    ...(feature.terminology ?? []),
+  ].map(normalizeQueryTerm).includes(normalized))
+}
+
 function featuresForPath(features: readonly FeatureSemantic[], path: string): FeatureSemantic[] {
   return features.filter((feature) => featurePaths(feature).includes(path))
 }
 
+interface FeatureAssociation {
+  feature: FeatureSemantic
+  score: number
+  reasons: string[]
+}
+
+function associationForPath(feature: FeatureSemantic, path: string): FeatureAssociation | undefined {
+  const roles: Array<{ paths: readonly string[]; score: number; reason: string }> = [
+    { paths: feature.canonicalFiles ?? [], score: 100, reason: 'canonical' },
+    { paths: feature.entrypoints ?? [], score: 95, reason: 'entrypoint' },
+    { paths: feature.highSignalFiles ?? [], score: 90, reason: 'high-signal' },
+    { paths: feature.catalogBoundaryFiles ?? [], score: 88, reason: 'catalog-boundary' },
+    { paths: feature.runtimeConsumers ?? [], score: 75, reason: 'consumer' },
+    { paths: feature.highSignalTests ?? [], score: 70, reason: 'high-signal-test' },
+    { paths: feature.tests ?? [], score: 65, reason: 'test' },
+    { paths: feature.evidence ?? [], score: 25, reason: 'evidence' },
+  ]
+  const matched = roles.filter((role) => role.paths.includes(path))
+  if (matched.length === 0) return undefined
+  return {
+    feature,
+    score: Math.max(...matched.map((role) => role.score)),
+    reasons: matched.map((role) => `${role.reason}:${path}`),
+  }
+}
+
+function associateFeatures(
+  features: readonly FeatureSemantic[],
+  paths: readonly string[],
+): FeatureAssociation[] {
+  const byId = new Map<string, FeatureAssociation>()
+  for (const path of paths) {
+    for (const feature of features) {
+      const association = associationForPath(feature, path)
+      if (!association) continue
+      const existing = byId.get(feature.id)
+      if (!existing) {
+        byId.set(feature.id, association)
+      } else {
+        existing.score = Math.max(existing.score, association.score)
+        existing.reasons = [...new Set([...existing.reasons, ...association.reasons])]
+      }
+    }
+  }
+  return [...byId.values()].sort((left, right) =>
+    right.score - left.score || compareText(left.feature.id, right.feature.id),
+  )
+}
+
+function primaryAssociatedFeature(
+  associations: readonly FeatureAssociation[],
+): FeatureSemantic | undefined {
+  const first = associations[0]
+  const second = associations[1]
+  return first && (!second || first.score > second.score) ? first.feature : undefined
+}
+
+function associatedFeatureCandidates(
+  associations: readonly FeatureAssociation[],
+): QueryCandidate[] {
+  return associations.slice(0, 6).map((association) =>
+    featureCandidate(
+      association.feature,
+      association.score,
+      association.reasons.map((reason) => `associated ${reason}`),
+    ),
+  )
+}
+
+function edgeFilePath(id: string): string | undefined {
+  return id.startsWith('file:') ? id.slice('file:'.length) : undefined
+}
+
+function directImpactPaths(
+  index: LoadedIndex,
+  seedPaths: readonly string[],
+  limit = 24,
+): string[] {
+  const seeds = new Set(seedPaths)
+  const priorities: Record<string, number> = {
+    tested_by: 100,
+    references_contract: 95,
+    re_exports: 85,
+    imports_dynamic: 80,
+    imports: 75,
+    imports_type: 70,
+  }
+  const impacted = index.edges.flatMap((edge) => {
+    const from = edgeFilePath(edge.from)
+    const to = edgeFilePath(edge.to)
+    if (!from || !to || !priorities[edge.kind]) return []
+    if (seeds.has(from) && !seeds.has(to)) {
+      return [{ path: to, priority: priorities[edge.kind], id: edge.id }]
+    }
+    if (seeds.has(to) && !seeds.has(from)) {
+      return [{ path: from, priority: priorities[edge.kind], id: edge.id }]
+    }
+    return []
+  }).sort((left, right) =>
+    right.priority - left.priority || compareText(left.path, right.path) || compareText(left.id, right.id),
+  )
+  return [...new Set(impacted.map(({ path }) => path))].slice(0, limit)
+}
+
+function projectPathsForFiles(index: LoadedIndex, paths: readonly string[]): string[] {
+  const selected = new Set(paths)
+  return [...new Set(index.files
+    .filter((file) => selected.has(file.path))
+    .flatMap((file) => file.projects))]
+    .sort(compareText)
+}
+
+function boundedAssociatedPaths(
+  associations: readonly FeatureAssociation[],
+  featureLimit = 4,
+  pathsPerFeature = 12,
+): string[] {
+  return [...new Set(associations
+    .slice(0, featureLimit)
+    .flatMap(({ feature }) => featurePaths(feature).slice(0, pathsPerFeature)))]
+}
+
 function relatedModules(
   modules: readonly ModuleSemantic[],
-  feature: FeatureSemantic | undefined,
+  features: readonly FeatureSemantic[],
 ): ModuleSemantic[] {
-  if (!feature) return []
-  const ids = new Set(feature.moduleIds ?? [])
+  const ids = new Set(features.flatMap((feature) => feature.moduleIds ?? []))
   return modules.filter((module) => ids.has(module.id))
 }
 
@@ -469,6 +611,31 @@ function queryTokens(value: string): string[] {
   return normalizeQueryTerm(value)
     .split(/[^\p{L}\p{N}_:/.-]+/u)
     .filter((token) => token.length >= 2)
+}
+
+function characterBigrams(value: string): Set<string> {
+  const compact = normalizeQueryTerm(value).replace(/\s+/g, '')
+  const result = new Set<string>()
+  for (let index = 0; index < compact.length - 1; index += 1) {
+    result.add(compact.slice(index, index + 2))
+  }
+  return result
+}
+
+function hasStrongPhraseOverlap(tokens: readonly string[], terms: readonly string[]): boolean {
+  return tokens.some((token) => {
+    if (token.length < 4 || !/\p{Script=Han}/u.test(token)) return false
+    const tokenBigrams = characterBigrams(token)
+    return terms.some((term) => {
+      if (term.length < 4 || !/\p{Script=Han}/u.test(term)) return false
+      const termBigrams = characterBigrams(term)
+      let overlap = 0
+      for (const bigram of tokenBigrams) {
+        if (termBigrams.has(bigram)) overlap += 1
+      }
+      return overlap >= 2
+    })
+  })
 }
 
 function textCandidates(index: LoadedIndex, value: string): QueryCandidate[] {
@@ -498,6 +665,37 @@ function textCandidates(index: LoadedIndex, value: string): QueryCandidate[] {
     const matchedTokens = tokens.filter((token) => haystack.includes(token))
     score += matchedTokens.length * 9
     if (matchedTokens.length > 0) reasons.push(`feature tokens: ${matchedTokens.join(', ')}`)
+    const exactAliasTokens = tokens.filter((token) => terms.includes(token))
+    score += Math.min(
+      64,
+      exactAliasTokens.reduce((total, token) => total + Math.min(64, token.length * 8), 0),
+    )
+    if (exactAliasTokens.length > 0) {
+      reasons.push(`exact semantic terms: ${exactAliasTokens.join(', ')}`)
+    }
+    const anchoredAliasTokens = exactAliasTokens.filter((token) =>
+      [
+        ...(feature.canonicalFiles ?? []),
+        ...(feature.highSignalFiles ?? []),
+      ].some((path) => {
+        const stem = normalizeQueryTerm(path.split('/').at(-1) ?? path)
+          .replace(/(?:\.d)?\.[^.]+$/, '')
+        return stem === token || stem.startsWith(`${token}.`)
+      }),
+    )
+    if (anchoredAliasTokens.length > 0) {
+      score += 64
+      reasons.push(`semantic terms anchored by high-signal files: ${anchoredAliasTokens.join(', ')}`)
+    }
+    if (hasStrongPhraseOverlap(tokens, terms)) {
+      score += 80
+      reasons.push('strong semantic phrase overlap')
+    }
+    if (tokens.length >= 4 && (feature.moduleIds?.length ?? 0) > 1) {
+      const breadthBonus = Math.min(40, ((feature.moduleIds?.length ?? 1) - 1) * 10)
+      score += breadthBonus
+      reasons.push(`multi-intent module breadth: +${breadthBonus}`)
+    }
     if (
       !explicitLegacy &&
       (feature.statusClass === 'transitional-allowance' || feature.id.includes('legacy'))
@@ -533,13 +731,26 @@ function textCandidates(index: LoadedIndex, value: string): QueryCandidate[] {
 
   for (const file of index.files) {
     const path = normalizeQueryTerm(file.path)
-    if (normalized.length >= 3 && path.includes(normalized)) {
+    const matchedTokens = tokens.filter((token) => path.includes(token))
+    const baseName = path.split('/').at(-1) ?? path
+    const stem = baseName.replace(/(?:\.d)?\.[^.]+$/, '')
+    const exactStemToken = matchedTokens.some((token) => token.length >= 3 && stem === token)
+    const strongToken = matchedTokens.some((token) => token.length >= 3 && stem.startsWith(token))
+    if ((normalized.length >= 3 && path.includes(normalized)) || matchedTokens.length > 0) {
       candidates.push({
         kind: 'path',
         id: file.id,
         label: file.path,
-        score: path === normalized ? 110 : 36,
-        reasons: [path === normalized ? 'exact path' : 'path substring'],
+        score: path === normalized
+          ? 110
+          : (exactStemToken ? 100 : strongToken ? 40 : 0) +
+            matchedTokens.length * 8 +
+            (path.includes(normalized) ? 36 : 0),
+        reasons: [
+          path === normalized
+            ? 'exact path'
+            : `path tokens: ${matchedTokens.join(', ') || 'phrase substring'}`,
+        ],
         paths: [file.path],
       })
     }
@@ -564,10 +775,20 @@ function textCandidates(index: LoadedIndex, value: string): QueryCandidate[] {
   )
 }
 
-function confidenceForText(candidates: readonly QueryCandidate[]): QueryConfidence {
+function confidenceForText(
+  candidates: readonly QueryCandidate[],
+  value: string,
+): QueryConfidence {
   const first = candidates[0]
   const second = candidates[1]
   if (!first || first.score < 20) return 'low'
+  if (
+    queryTokens(value).length >= 4 &&
+    second &&
+    second.score >= first.score * 0.5
+  ) {
+    return 'low'
+  }
   if (first.score >= 100 && (!second || first.score - second.score >= 20)) return 'high'
   if (first.score >= 40 && (!second || first.score - second.score >= 10)) return 'medium'
   return 'low'
@@ -610,15 +831,19 @@ function finalizeResult(
   request: QueryRequest,
   index: LoadedIndex,
   rawFreshness: RawFreshness,
-  initial: Omit<QueryResult, 'request' | 'freshness' | 'bootstrapRequired' | 'relatedTests' | 'relatedEdges' | 'modules'> & {
+  initial: Omit<QueryResult, 'request' | 'freshness' | 'bootstrapRequired' | 'relatedTests' | 'relatedEdges' | 'modules' | 'associatedFeatures'> & {
     bootstrapRequired?: boolean
+    associatedFeatures?: readonly FeatureSemantic[]
   },
 ): QueryResult {
   const relevantPaths = [...new Set(initial.relevantPaths)].sort(compareText)
   const freshness = assessFreshness(rawFreshness, relevantPaths)
   const relatedTests = relatedTestsForPaths(index, relevantPaths)
   const relatedEdges = relatedEdgesForPaths(index, relevantPaths)
-  const modules = relatedModules(index.modules, initial.matchedFeature)
+  const associatedFeatures = initial.associatedFeatures ?? (
+    initial.matchedFeature ? [initial.matchedFeature] : []
+  )
+  const modules = relatedModules(index.modules, associatedFeatures)
   const bootstrapRequired =
     initial.bootstrapRequired === true ||
     initial.confidence === 'low' ||
@@ -637,6 +862,7 @@ function finalizeResult(
     confidence: initial.confidence,
     bootstrapRequired,
     ...(initial.matchedFeature ? { matchedFeature: initial.matchedFeature } : {}),
+    associatedFeatures,
     matchedSymbols: initial.matchedSymbols,
     matchedFiles: initial.matchedFiles,
     candidates: initial.candidates,
@@ -699,6 +925,7 @@ export class RepoIndexQueryEngine {
       confidence: matches.length === 1 ? 'high' : 'low',
       bootstrapRequired: matches.length !== 1,
       ...(feature ? { matchedFeature: feature } : {}),
+      associatedFeatures: feature ? [feature] : matches,
       matchedSymbols: [],
       matchedFiles: feature
         ? this.index.files.filter((file) => featurePaths(feature).includes(file.path))
@@ -718,35 +945,74 @@ export class RepoIndexQueryEngine {
     const matches = this.index.symbols.filter(
       (symbol) => normalizeQueryTerm(symbol.name) === normalized,
     )
+    if (matches.length === 0) {
+      const terminologyMatches = exactTerminologyMatches(this.index.features, request.value!)
+      const feature = terminologyMatches.length === 1 ? terminologyMatches[0] : undefined
+      return finalizeResult(request, this.index, this.rawFreshness, {
+        confidence: feature ? 'high' : 'low',
+        bootstrapRequired: !feature,
+        ...(feature ? { matchedFeature: feature } : {}),
+        associatedFeatures: terminologyMatches,
+        matchedSymbols: [],
+        matchedFiles: feature
+          ? this.index.files.filter((file) => featurePaths(feature).includes(file.path))
+          : [],
+        candidates: terminologyMatches.map((candidate) =>
+          featureCandidate(
+            candidate,
+            105,
+            ['exact semantic terminology alias; no Symbol fact is fabricated'],
+          ),
+        ),
+        relevantPaths: feature ? featurePaths(feature) : [],
+        unknowns: feature
+          ? [
+              `No Symbol fact named ${request.value} exists; the unique exact semantic terminology alias is used with Feature evidence only.`,
+            ]
+          : terminologyMatches.length > 1
+            ? ['Semantic terminology is ambiguous across multiple Features.']
+            : ['No exact Symbol or unique semantic terminology alias matched.'],
+      })
+    }
     const files = [...new Set(matches.map((symbol) => symbol.file))]
-    const featureMatches = [...new Set(files.flatMap((path) => featuresForPath(this.index.features, path)))]
-    const feature = featureMatches.length === 1 ? featureMatches[0] : undefined
-    const confidence: QueryConfidence = matches.length === 0
-      ? 'low'
-      : files.length === 1
-        ? 'high'
-        : 'medium'
+    const impactPaths = directImpactPaths(this.index, files)
+    const projectPaths = projectPathsForFiles(this.index, files)
+    const associations = associateFeatures(this.index.features, files)
+    const feature = primaryAssociatedFeature(associations)
+    const confidence: QueryConfidence = files.length === 1 ? 'high' : 'medium'
     return finalizeResult(request, this.index, this.rawFreshness, {
       confidence,
       bootstrapRequired: confidence !== 'high',
       ...(feature ? { matchedFeature: feature } : {}),
+      associatedFeatures: associations.map(({ feature: associated }) => associated),
       matchedSymbols: matches,
       matchedFiles: this.index.files.filter((file) => files.includes(file.path)),
-      candidates: matches.map((symbol) => ({
-        kind: 'symbol',
-        id: symbol.id,
-        label: symbol.name,
-        score: 110,
-        reasons: ['exact symbol name'],
-        paths: [symbol.file],
-      })),
+      candidates: [
+        ...matches.map((symbol): QueryCandidate => ({
+          kind: 'symbol',
+          id: symbol.id,
+          label: symbol.name,
+          score: 110,
+          reasons: ['exact symbol name'],
+          paths: [symbol.file],
+        })),
+        ...associatedFeatureCandidates(associations),
+        ...projectPaths.map((path): QueryCandidate => ({
+          kind: 'path',
+          id: `project:${path}`,
+          label: path,
+          score: 82,
+          reasons: ['TypeScript project membership'],
+          paths: [path],
+        })),
+      ],
       relevantPaths: [
         ...files,
-        ...(feature ? featurePaths(feature) : []),
+        ...projectPaths,
+        ...impactPaths,
+        ...boundedAssociatedPaths(associations),
       ],
-      unknowns: matches.length === 0
-        ? ['No exact symbol matched; use --query for conservative candidates.']
-        : files.length > 1
+      unknowns: files.length > 1
           ? ['Exact symbol exists in multiple files; select the intended declaration manually.']
           : [],
     })
@@ -759,27 +1025,44 @@ export class RepoIndexQueryEngine {
       ? direct
       : this.index.files.filter((file) => normalizeQueryTerm(file.path) === normalizeQueryTerm(path))
     const matches = direct.length > 0 ? direct : insensitive
-    const featureMatches = featuresForPath(this.index.features, matches[0]?.path ?? path)
-    const feature = featureMatches.length === 1 ? featureMatches[0] : undefined
+    const matchedPaths = matches.map((file) => file.path)
+    const associations = associateFeatures(this.index.features, matchedPaths)
+    const feature = primaryAssociatedFeature(associations)
+    const impactPaths = directImpactPaths(this.index, matchedPaths)
+    const projectPaths = projectPathsForFiles(this.index, matchedPaths)
     return finalizeResult(request, this.index, this.rawFreshness, {
       confidence: direct.length === 1 ? 'high' : matches.length > 0 ? 'medium' : 'low',
       bootstrapRequired: direct.length !== 1,
       ...(feature ? { matchedFeature: feature } : {}),
+      associatedFeatures: associations.map(({ feature: associated }) => associated),
       matchedSymbols: this.index.symbols.filter((symbol) =>
         matches.some((file) => file.path === symbol.file),
       ),
       matchedFiles: matches,
-      candidates: matches.map((file) => ({
-        kind: 'path',
-        id: file.id,
-        label: file.path,
-        score: direct.includes(file) ? 120 : 80,
-        reasons: [direct.includes(file) ? 'exact path' : 'case-normalized path'],
-        paths: [file.path],
-      })),
+      candidates: [
+        ...matches.map((file): QueryCandidate => ({
+          kind: 'path',
+          id: file.id,
+          label: file.path,
+          score: direct.includes(file) ? 120 : 80,
+          reasons: [direct.includes(file) ? 'exact path' : 'case-normalized path'],
+          paths: [file.path],
+        })),
+        ...associatedFeatureCandidates(associations),
+        ...projectPaths.map((project): QueryCandidate => ({
+          kind: 'path',
+          id: `project:${project}`,
+          label: project,
+          score: 82,
+          reasons: ['TypeScript project membership'],
+          paths: [project],
+        })),
+      ],
       relevantPaths: [
-        ...matches.map((file) => file.path),
-        ...(feature ? featurePaths(feature) : []),
+        ...matchedPaths,
+        ...projectPaths,
+        ...impactPaths,
+        ...boundedAssociatedPaths(associations),
       ],
       unknowns: matches.length === 0
         ? ['Path is not present in generated file facts.']
@@ -792,25 +1075,42 @@ export class RepoIndexQueryEngine {
   private queryChanged(request: QueryRequest): QueryResult {
     const dirtyPaths = this.rawFreshness.dirtyInputs.map((dirty) => dirty.path)
     const files = this.index.files.filter((file) => dirtyPaths.includes(file.path))
-    const featureMatches = [...new Set(
-      dirtyPaths.flatMap((path) => featuresForPath(this.index.features, path)),
-    )]
-    const feature = featureMatches.length === 1 ? featureMatches[0] : undefined
+    const associations = associateFeatures(this.index.features, dirtyPaths)
+    const feature = primaryAssociatedFeature(associations)
+    const projectPaths = projectPathsForFiles(this.index, dirtyPaths)
+    const impactPaths = directImpactPaths(this.index, dirtyPaths, 36)
     return finalizeResult(request, this.index, this.rawFreshness, {
       confidence: 'high',
       bootstrapRequired: dirtyPaths.length > 0,
       ...(feature ? { matchedFeature: feature } : {}),
+      associatedFeatures: associations.map(({ feature: associated }) => associated),
       matchedSymbols: this.index.symbols.filter((symbol) => dirtyPaths.includes(symbol.file)),
       matchedFiles: files,
-      candidates: dirtyPaths.map((path) => ({
-        kind: 'path',
-        id: `dirty:${path}`,
-        label: path,
-        score: 120,
-        reasons: ['git status --porcelain dirty input'],
-        paths: [path],
-      })),
-      relevantPaths: dirtyPaths,
+      candidates: [
+        ...dirtyPaths.map((path): QueryCandidate => ({
+          kind: 'path',
+          id: `dirty:${path}`,
+          label: path,
+          score: 120,
+          reasons: ['git status --porcelain dirty input'],
+          paths: [path],
+        })),
+        ...projectPaths.map((path): QueryCandidate => ({
+          kind: 'path',
+          id: `project:${path}`,
+          label: path,
+          score: 100,
+          reasons: ['dirty file TypeScript project membership'],
+          paths: [path],
+        })),
+        ...associatedFeatureCandidates(associations),
+      ],
+      relevantPaths: [
+        ...dirtyPaths,
+        ...projectPaths,
+        ...impactPaths,
+        ...boundedAssociatedPaths(associations),
+      ],
       unknowns: dirtyPaths.length === 0
         ? ['No dirty files are reported by git status.']
         : ['Dirty paths must be reviewed before generating an implementation task.'],
@@ -823,6 +1123,20 @@ export class RepoIndexQueryEngine {
     const components = external
       ? this.index.features.find((feature) => feature.id === 'feature:components')
       : undefined
+    const externalComponents = components
+      ? {
+          ...components,
+          canonicalFiles: [...new Set([
+            ...(components.catalogBoundaryFiles ?? []),
+            ...(components.highSignalFiles ?? []),
+            ...(components.canonicalFiles ?? []),
+          ])],
+          tests: [...new Set([
+            ...(components.highSignalTests ?? []),
+            ...(components.tests ?? []),
+          ])],
+        }
+      : undefined
     if (external) {
       const existingIndex = components
         ? candidates.findIndex((candidate) => candidate.id === components.id)
@@ -830,26 +1144,71 @@ export class RepoIndexQueryEngine {
       if (existingIndex >= 0) {
         candidates.splice(existingIndex, 1)
       }
-      if (components) {
+      if (externalComponents) {
         candidates.unshift(featureCandidate(
-          components,
+          externalComponents,
           25,
           ['local Components boundary only; external source graph is unavailable'],
+          featurePaths(externalComponents),
         ))
       }
     }
-    const confidence = external ? 'low' : confidenceForText(candidates)
+    const confidence = external ? 'low' : confidenceForText(candidates, request.value!)
     const top = candidates[0]
-    const feature = components ?? (top?.kind === 'feature'
+    const topFeature = top?.kind === 'feature'
       ? this.index.features.find((candidate) => candidate.id === top.id)
-      : undefined)
-    const paths = external && components ? featurePaths(components) : top?.paths ?? []
+      : undefined
+    const featureCandidates = candidates.filter((candidate) => candidate.kind === 'feature')
+    const topFeatureScore = featureCandidates[0]?.score ?? 0
+    const nearTopThreshold = Math.max(1, topFeatureScore * 0.35)
+    const nearTopFeatures = featureCandidates
+      .filter((candidate) => candidate.score >= nearTopThreshold)
+      .map((candidate) => this.index.features.find((feature) => feature.id === candidate.id))
+      .filter((feature): feature is FeatureSemantic => feature !== undefined)
+      .slice(0, 6)
+    const associatedFeatures = externalComponents
+      ? [externalComponents]
+      : nearTopFeatures
+    const feature = externalComponents ?? (
+      confidence === 'low' ? undefined : topFeature
+    )
+    const paths = externalComponents
+      ? featurePaths(externalComponents)
+      : confidence === 'low'
+        ? [...new Set([
+            ...boundedAssociatedPaths(
+              nearTopFeatures.map((associated) => ({
+                feature: associated,
+                score: candidates.find((candidate) => candidate.id === associated.id)?.score ?? 0,
+                reasons: ['near-top free-text candidate'],
+              })),
+              6,
+              10,
+            ),
+            ...candidates
+              .filter((candidate) => candidate.kind !== 'feature')
+              .slice(0, 4)
+              .flatMap((candidate) => candidate.paths),
+          ])]
+        : top?.paths ?? []
+    const impactPaths = directImpactPaths(
+      this.index,
+      paths.filter((path) => this.index.files.some((file) => file.path === path)).slice(0, 24),
+      24,
+    )
     const matchedSymbols = candidates
       .filter((candidate) => candidate.kind === 'symbol' && candidate.score === top?.score)
       .flatMap((candidate) =>
         this.index.symbols.filter((symbol) => symbol.id === candidate.id),
       )
     const matchedFiles = this.index.files.filter((file) => paths.includes(file.path))
+    const associatedIds = new Set(associatedFeatures.map((associated) => associated.id))
+    const outputCandidates = confidence === 'low'
+      ? [
+          ...candidates.filter((candidate) => associatedIds.has(candidate.id)),
+          ...candidates.filter((candidate) => !associatedIds.has(candidate.id)),
+        ]
+      : candidates
     const unknowns: string[] = []
     if (external) {
       unknowns.push(
@@ -863,12 +1222,14 @@ export class RepoIndexQueryEngine {
       confidence,
       bootstrapRequired: confidence === 'low' || external,
       ...(feature ? { matchedFeature: feature } : {}),
+      associatedFeatures,
       matchedSymbols,
       matchedFiles,
-      candidates: candidates.slice(0, 20),
+      candidates: outputCandidates.slice(0, 20),
       relevantPaths: [
         ...paths,
-        ...(feature ? featurePaths(feature) : []),
+        ...impactPaths,
+        ...associatedFeatures.flatMap((associated) => featurePaths(associated)),
       ],
       unknowns,
     })

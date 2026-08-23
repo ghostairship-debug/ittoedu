@@ -102,6 +102,22 @@ describe('repo-index query and Context Pack', () => {
       (candidate) => candidate.id === 'feature:legacy-release',
     )
     expect(legacyRank === -1 || legacyRank > 0).toBe(true)
+
+    const explicitLegacy = engine.query({
+      mode: 'feature',
+      value: 'legacy-release',
+      size: 'small',
+    })
+    expect(explicitLegacy).toMatchObject({
+      confidence: 'high',
+      matchedFeature: { id: 'feature:legacy-release' },
+    })
+    expect(explicitLegacy.candidates[0]?.paths.slice(0, 5)).not.toContain(
+      'src/renderer/App.tsx',
+    )
+    expect(explicitLegacy.candidates[0]?.paths.slice(0, 5)).not.toContain(
+      'src/renderer/store/editorStore.ts',
+    )
   })
 
   it('prioritizes exact symbol and path facts', () => {
@@ -128,6 +144,73 @@ describe('repo-index query and Context Pack', () => {
     expect(path.matchedFiles).toEqual([
       expect.objectContaining({ path: 'src/renderer/App.tsx' }),
     ])
+    expect(path.associatedFeatures?.length).toBeGreaterThan(0)
+    expect(path.relatedEdges.length).toBeGreaterThan(0)
+  })
+
+  it('resolves a unique semantic terminology alias without fabricating a Symbol fact', () => {
+    const result = createEngine().query({
+      mode: 'symbol',
+      value: 'activateCourseLocation',
+      size: 'small',
+    })
+    expect(result).toMatchObject({
+      confidence: 'high',
+      bootstrapRequired: false,
+      matchedFeature: { id: 'feature:preview-player' },
+      matchedSymbols: [],
+    })
+    expect(result.candidates[0]?.reasons.join(' ')).toMatch(/semantic terminology alias/)
+    expect(result.relevantPaths).toEqual(expect.arrayContaining([
+      'src/renderer/store/editorStore.ts',
+      'src/renderer/ui/coursePlayerTryRun.ts',
+      'tests/unit/tryRunLocationMode.test.ts',
+    ]))
+  })
+
+  it('aggregates bounded low-confidence journey Features without authorizing one writer', () => {
+    const result = createEngine().query({
+      mode: 'query',
+      value: 'Slide 替换图片 文件对话框 切页 切项目 撤销 元数据 字节 保存重开 预览 HTML',
+      size: 'small',
+    })
+    expect(result).toMatchObject({
+      confidence: 'low',
+      bootstrapRequired: true,
+    })
+    expect(result.matchedFeature).toBeUndefined()
+    expect(result.associatedFeatures?.map((feature) => feature.id)).toEqual(
+      expect.arrayContaining([
+        'feature:image-replacement-journey',
+        'feature:media',
+        'feature:slide',
+      ]),
+    )
+    expect(result.associatedFeatures?.length).toBeLessThanOrEqual(6)
+    expect(result.relevantPaths).toEqual(expect.arrayContaining([
+      'src/renderer/App.tsx',
+      'src/renderer/store/editorStore.ts',
+      'src/renderer/authoring/courseAuthoringSession.ts',
+      'src/renderer/course/v9MediaAudioCommands.ts',
+      'src/renderer/project/v9AssetAdapter.ts',
+      'src/renderer/course/slideAuthoringBackend.ts',
+    ]))
+  })
+
+  it('routes compiler-boundary free text through Repo Knowledge and all three tsconfigs', () => {
+    const result = createEngine().query({
+      mode: 'query',
+      value: 'tsconfig renderer player main preload e2e shared 去重',
+      size: 'small',
+    })
+    expect(result).toMatchObject({ confidence: 'low', bootstrapRequired: true })
+    expect(result.candidates[0]).toMatchObject({ id: 'feature:repo-knowledge' })
+    expect(result.relevantPaths).toEqual(expect.arrayContaining([
+      'tsconfig.json',
+      'tsconfig.electron.json',
+      'tsconfig.e2e.json',
+      'scripts/repo-index/typescriptAdapter.ts',
+    ]))
   })
 
   it('returns deterministic changed paths and marks relevant dirty state unsafe', () => {
@@ -146,6 +229,22 @@ describe('repo-index query and Context Pack', () => {
       kind: 'path',
       label: 'src/renderer/App.tsx',
     })
+    expect(result.relatedEdges.length).toBeGreaterThan(0)
+
+    const sharedImpact = createEngine([
+      { path: 'src/shared/ipcTypes.ts', status: ' M' },
+      { path: 'src/preload/index.ts', status: ' M' },
+    ]).query({ mode: 'changed', size: 'small' })
+    expect(sharedImpact).toMatchObject({
+      matchedFeature: { id: 'feature:desktop-ipc' },
+      bootstrapRequired: true,
+    })
+    expect(sharedImpact.relevantPaths).toEqual(expect.arrayContaining([
+      'tsconfig.json',
+      'tsconfig.electron.json',
+      'tsconfig.e2e.json',
+      'src/main/ipc.ts',
+    ]))
   })
 
   it('keeps external Catalog and ambiguous free text low-confidence with Bootstrap fallback', () => {
@@ -177,8 +276,10 @@ describe('repo-index query and Context Pack', () => {
     const goldenExternalQueries = [
       // GT-024 original package-identity/source wording.
       'com.ittoedu.*@version + runtime.js/源码/修复',
+      '修复 com.ittoedu.language.pinyin-annotation@1.2.0 的 runtime.js 渲染错误',
       // GT-025 original latest third-party Catalog/source wording.
       'Catalog 里最新的第三方组件…源码',
+      'Catalog 里最新的第三方组件坏了，直接修它的源码',
     ]
     for (const value of goldenExternalQueries) {
       const external = engine.query({ mode: 'query', value, size: 'small' })
@@ -195,6 +296,11 @@ describe('repo-index query and Context Pack', () => {
       expect(external.relevantPaths.join(' ')).not.toMatch(
         /courseware-components|com\.ittoedu\.|runtime\.js/,
       )
+      expect(external.relevantPaths).toEqual(expect.arrayContaining([
+        'artifacts/ai-capabilities/component-catalog.snapshot.json',
+        'src/main/componentCatalogManager.ts',
+        'src/renderer/components/componentCatalogStatus.ts',
+      ]))
     }
   })
 
