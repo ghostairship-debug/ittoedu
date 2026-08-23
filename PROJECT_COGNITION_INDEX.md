@@ -1,6 +1,6 @@
 # IttoEdu 当前项目认知入口
 
-> 状态：人工 Bootstrap 入口
+> 状态：repo-index 默认开发导航；低置信、过期或相关 dirty 时人工 Bootstrap
 >
 > 更新日期：2026-08-24
 >
@@ -8,7 +8,7 @@
 >
 > 详细执行方案：[docs/development-plan/](docs/development-plan/README.md)
 
-当前仓库尚未落地正式的 repo-index 生成器与查询命令。本文件只提供当前源码的短入口，不假装机器索引已经存在。ARCH-0B 完成后，本文件将由模块语义与生成索引自动重建；在此之前，高风险任务必须按本文的人工 Bootstrap 定位。
+当前仓库已落地静态、确定、可检查的开发 repo-index，覆盖 renderer/player、main/preload 和 e2e 三套 TypeScript 工程。开发任务默认先检查索引新鲜度，再用确定性查询生成有界 Context Pack；低置信、全局或相关输入过期、相关文件 dirty，以及外部 Catalog 源码查询必须明确降级到人工 Bootstrap。索引只辅助导航，不能覆盖源码、Schema、合同或用户决定。
 
 ## 1. 权威与当前路线
 
@@ -18,9 +18,28 @@
 4. Course Project V9 软冻结；不支持 V8 .h5lesson，不创建 V10。
 5. 产品能力索引 artifacts/ai-capabilities/ 回答“课件生成能做什么”；待建 repo-index 回答“开发修改应读什么”，二者不得混为一份真相。
 
-## 2. 人工 Bootstrap
+## 2. 默认 repo-index 流程与人工 Bootstrap
 
-repo-index 落地前，每个任务按以下顺序读取：
+中高风险、跨模块和多智能体任务按以下顺序开始：
+
+1. 运行 `npm run repo:index:check`，确认受提交索引与当前严格输入一致；
+2. 优先使用 feature、symbol、path 或 changed 查询，自由文本只作保守兜底；
+3. 阅读 Context Pack 的 Freshness / Dirty Inputs、confidence、canonical carrier、write path、consumers、tests、unknowns 和建议验证；
+4. 只有 `fresh` 且无相关 dirty 输入的高/中置信结果，才可作为 S2 任务的导航起点；
+5. `partially-stale`、`stale`、`low`、`bootstrap-required` 或外部源不可用时，转入下述人工 Bootstrap；
+6. 任务结束按 `indexImpact` 由阶段 Integrator 统一重建，不允许 Worker 手改 `repo-index/generated/**`。
+
+当前查询命令：
+
+~~~bash
+npm run repo:context -- --feature components --size medium
+npm run repo:context -- --symbol buildPublishedCourseV2Payload --size small
+npm run repo:context -- --path src/renderer/App.tsx --size medium
+npm run repo:context -- --changed --size medium
+npm run repo:context -- --query "Flow 图片替换保存重开" --size medium
+~~~
+
+需要保存 Context Pack 时，相对输出只能位于被忽略的 `repo-index/contexts/`；仓库外绝对输出只能位于操作系统临时目录。单文件 S0 小修可直接使用人工 Bootstrap。人工定位按以下顺序读取：
 
 1. 当前任务卡和一个相关合同；
 2. 精确类型、函数、Store action 或 UI 文案；
@@ -81,7 +100,7 @@ Canonical carrier
 7. 新建、打开、Recovery、保存期间继续编辑与关闭流程保持数据安全。
 8. 全局层、Surface 共享层和教师控制器保持正确 owner。
 
-这些旅程将成为 repo-index 的 semantic journeys、任务 Context Pack 和阶段验证入口。
+这些旅程已进入 repo-index 的 Feature/semantic 导航、任务 Context Pack 和阶段验证入口；最终事实仍以当前源码与合同为准。
 
 ## 5. 当前真实债务
 
@@ -89,13 +108,15 @@ Canonical carrier
 - Slide、Flow、Spatial 有三套 session/history 实现，但正常运行时互斥，不是三份同时活动的工程真相；
 - Store、App、Workspace、Properties、FlowWorkspace、InteractionEditor 和全局 CSS 责任过多；
 - HTML/Web、纯 Slide PPTX、PDF raster/preflight、Project Health 和部分 fixtures/release 仍有 Legacy consumer；
-- PROJECT_COGNITION_INDEX.md 的旧版本引用过不存在的 repo-index 和历史路径；本版不再声明这些设施已经存在；
+- repo-index 是提交内快照，源码、semantic、config 或 tool 输入变化后必须由单一 Integrator 重建；相关 dirty 文件仍会使 S2 Context Pack 不安全；
 - 外部组件 Catalog 当前可用，但属于外部输入，状态必须在每次基线时检查。
 
 ## 6. 常用只读检查
 
 ~~~
 git status --short --branch
+npm run repo:index:check
+npm run check:task-board
 npm run check:contracts
 npm run check:ai-capabilities
 npm run typecheck
@@ -112,17 +133,15 @@ npm run test -- --run <target>
 
 仓库没有 agent-kit CLI。课件创作能力索引与开发 repo-index 是两个不同系统。
 
-## 8. repo-index 落地门禁
+## 8. repo-index 当前合同与质量状态
 
-正式开发索引必须：
+ARCH-0B 门禁已在不修改 25 题 corpus、expected、阈值或最终 evaluator 的前提下通过：Hit@5 `100%`，受控 Recall@15 `95%`，广泛 Recall@15 `85.38%`，高置信错误与禁入 Top 5 均为 `0`，四个预期低置信场景全部正确降级。当前合同：
 
-- 覆盖根 renderer/player、Electron main/preload 和 e2e 三套 TypeScript 配置；
-- 自动生成文件、顶层符号、import/export、合同、脚本和测试关系；
-- 人工只维护少量模块、用户旅程、不变量和 Legacy consumer；
-- 不把 HEAD、时间、用户名或绝对路径写入受提交的确定性产物；
-- 相同输入连续生成逐字节一致，提交后立即 check 仍为 fresh；
-- 所有人工路径和命令 100% 存在；
-- 历史真实任务的入口命中和合同/测试召回达到计划门槛；
-- 低置信或相关文件 dirty 时明确降级，不输出伪确定答案。
+- `repo-index/generated/manifest.json` 以 source、semantic、config、tool 四域 hash 判断全局新鲜度，不持久化 HEAD、时间、用户名或绝对路径；
+- `npm run repo:index` 只由阶段 Integrator 执行，`npm run repo:index:check` 只读重建并逐字节比较；
+- 自动事实覆盖文件、顶层符号、import/export、合同、脚本、测试和三套 tsconfig；人工 semantic 只维护少量 Feature、Module、carrier、不变量和排除项；
+- 相同输入连续生成必须逐字节一致，路径必须存在，Markdown 引用和合同产物必须可验证；
+- Context Pack 的 `fresh / partially-stale / stale` 是查询时状态；相关 dirty 输入、低置信或外部源码不可用必须输出未知项和 Bootstrap 要求；
+- repo-index 回答“开发修改应读什么”，`artifacts/ai-capabilities/` 回答“课件生成能做什么”，两者不得合并为一份真相。
 
-通过门禁后，中高风险和多智能体任务必须先生成 Context Pack；单文件小修仍可使用人工 Bootstrap。
+质量基线与阶段结论见 `docs/development-plan/baselines/ARCH_0B_INDEX_QUALITY.md` 和 `ARCH_0B_GATE_REPORT.md`。中高风险与多智能体任务必须先生成 Context Pack；单文件 S0 小修仍可使用人工 Bootstrap。
