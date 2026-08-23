@@ -1,10 +1,12 @@
-# 文档清单、角色与完整性说明
+# 静态计划包文档清单、角色与完整性说明
 
-> 本计划共 56 份 Markdown（包含本清单）。
+> 本静态计划包共 56 份 Markdown（包含本清单）。
 >
 > 根 COURSEWARE_DEVELOPMENT_PLAN.md 是唯一总纲；本目录是唯一详细执行子计划。
 >
 > 清单按实际文件重建，文件移动后必须同步刷新并通过链接检查。
+
+执行期状态和证据不属于这 56 份静态计划文件：`TASK_BOARD.md` 是从任务卡生成的只读视图，`tasks/` 是任务状态真相，`baselines/` 与 `inventories/` 是运行证据/台账。它们分别按任务、基线和 Legacy 协议维护，不追加到本静态清单，也不得反向成为第二份计划。
 
 ## 1. 分组计数
 
@@ -37,7 +39,7 @@
 - 自动执行：40-development/00_SINGLE_MAINTAINER_AI_WORKFLOW.md；
 - 最小验证：40-development/03_VALIDATION_STRATEGY.md。
 
-## 4. 全部文件
+## 4. 全部静态计划文件
 
 | 路径 | 标题 |
 |---|---|
