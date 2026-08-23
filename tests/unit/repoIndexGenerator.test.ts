@@ -1,9 +1,14 @@
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,15 +16,23 @@ import { afterAll, describe, expect, it } from 'vitest'
 
 import {
   checkRepoIndex,
+  createFileFact,
   generateRepoIndexToDirectory,
   hashGeneratedDirectory,
+  validateMarkdownLinks,
+  verifyContractArtifactHash,
 } from '../../scripts/repo-index/generator'
 import {
   classifyInputPath,
+  createInputInventoryRecord,
   hashInputBytes,
   loadRepoIndexConfig,
 } from '../../scripts/repo-index/inputInventory'
-import { readGeneratedDirectory } from '../../scripts/repo-index/writeGenerated'
+import {
+  readGeneratedDirectory,
+  replaceGeneratedDirectoryAtomically,
+  serializeJsonLines,
+} from '../../scripts/repo-index/writeGenerated'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'ittoedu-repo-index-test-'))
@@ -55,6 +68,99 @@ describe('deterministic repo-index generator', () => {
     expect(classifyInputPath('tsconfig.e2e.json', config)).toBe('config')
     expect(classifyInputPath('scripts/repo-index/generator.ts', config)).toBe('tool')
     expect(classifyInputPath('package-lock.json', config)).toBe('tool')
+
+    const crlf = createInputInventoryRecord(
+      'fixture.ts',
+      'source',
+      Buffer.from('\uFEFFalpha\r\nbeta\r', 'utf8'),
+    )
+    const lf = createInputInventoryRecord(
+      'fixture.ts',
+      'source',
+      Buffer.from('alpha\nbeta\n', 'utf8'),
+    )
+    expect(serializeJsonLines([crlf]).equals(serializeJsonLines([lf]))).toBe(true)
+    expect(
+      serializeJsonLines([createFileFact(crlf)]).equals(
+        serializeJsonLines([createFileFact(lf)]),
+      ),
+    ).toBe(true)
+  })
+
+  it('rejects a contract artifact whose bytes do not match the manifest hash', () => {
+    const fixtureRoot = resolve(temporaryRoot, 'contract-hash')
+    const artifactPath = 'artifacts/contracts/fixture.schema.json'
+    const absoluteArtifact = resolve(fixtureRoot, artifactPath)
+    mkdirSync(dirname(absoluteArtifact), { recursive: true })
+    const original = Buffer.from('{"schemaVersion":1}\n', 'utf8')
+    writeFileSync(absoluteArtifact, original)
+    const expected = createHash('sha256').update(original).digest('hex')
+
+    expect(() => verifyContractArtifactHash(fixtureRoot, artifactPath, expected)).not.toThrow()
+    writeFileSync(absoluteArtifact, Buffer.from('{"schemaVersion":2}\n', 'utf8'))
+    expect(() => verifyContractArtifactHash(fixtureRoot, artifactPath, expected)).toThrow(
+      /hash mismatch/,
+    )
+  })
+
+  it('validates inline/reference anchors and ignores fenced Markdown examples', () => {
+    const fixtureRoot = resolve(temporaryRoot, 'markdown')
+    mkdirSync(fixtureRoot, { recursive: true })
+    writeFileSync(
+      resolve(fixtureRoot, 'target.md'),
+      '# Valid Heading\n\n## Valid Heading\n',
+      'utf8',
+    )
+    const source = [
+      '[inline](./target.md#valid-heading)',
+      '[reference][target]',
+      '[target]: ./target.md#valid-heading-1',
+      '```md',
+      '[ignored](./missing.md)',
+      '[ignored-ref]: ./missing.md',
+      '```',
+    ].join('\n')
+    writeFileSync(resolve(fixtureRoot, 'source.md'), source, 'utf8')
+
+    expect(validateMarkdownLinks(fixtureRoot, 'source.md', source)).toEqual([
+      'target.md#valid-heading',
+      'target.md#valid-heading-1',
+    ])
+    expect(() =>
+      validateMarkdownLinks(
+        fixtureRoot,
+        'source.md',
+        '[bad](./target.md#missing-anchor)',
+      )
+    ).toThrow(/anchor does not exist/)
+    expect(() =>
+      validateMarkdownLinks(fixtureRoot, 'source.md', '[bad][undefined]')
+    ).toThrow(/reference is undefined/)
+  })
+
+  it('atomically replaces an existing directory and restores it after an injected failure', () => {
+    const files = new Map([['manifest.json', Buffer.from('{"new":true}\n')]])
+    const successTarget = resolve(temporaryRoot, 'atomic-success/generated')
+    mkdirSync(successTarget, { recursive: true })
+    writeFileSync(resolve(successTarget, 'old.json'), '{"old":true}\n')
+    replaceGeneratedDirectoryAtomically(successTarget, files)
+    expect(readdirSync(successTarget)).toEqual(['manifest.json'])
+    expect(readFileSync(resolve(successTarget, 'manifest.json'), 'utf8')).toBe('{"new":true}\n')
+    expect(readdirSync(resolve(successTarget, '../contexts'))).toEqual([])
+
+    const rollbackTarget = resolve(temporaryRoot, 'atomic-rollback/generated')
+    mkdirSync(rollbackTarget, { recursive: true })
+    writeFileSync(resolve(rollbackTarget, 'old.json'), '{"old":true}\n')
+    expect(() =>
+      replaceGeneratedDirectoryAtomically(rollbackTarget, files, {
+        beforeInstall: () => {
+          throw new Error('injected install failure')
+        },
+      })
+    ).toThrow(/injected install failure/)
+    expect(readdirSync(rollbackTarget)).toEqual(['old.json'])
+    expect(readFileSync(resolve(rollbackTarget, 'old.json'), 'utf8')).toBe('{"old":true}\n')
+    expect(readdirSync(resolve(rollbackTarget, '../contexts'))).toEqual([])
   })
 
   it(
@@ -151,6 +257,48 @@ describe('deterministic repo-index generator', () => {
       expect(parseJsonLines(first.get('symbols.jsonl')!).length).toBeGreaterThan(0)
       expect(parseJsonLines(first.get('edges.jsonl')!).length).toBeGreaterThan(0)
       expect(parseJsonLines(first.get('tests.jsonl')!).length).toBeGreaterThan(0)
+      const edges = parseJsonLines(first.get('edges.jsonl')!)
+      expect(edges).toContainEqual(expect.objectContaining({
+        kind: 'imports_type',
+        from: 'file:src/renderer/ui/Workspace.tsx',
+        specifier: '../course/spatialEditorCommands',
+        line: 121,
+      }))
+      expect(edges).toContainEqual(expect.objectContaining({
+        kind: 'imports',
+        from: 'file:src/renderer/preview/runtimePreviewDocument.ts',
+        to: 'file:src/renderer/preview/runtimePreviewBootstrap.js',
+        specifier: './runtimePreviewBootstrap.js?raw',
+        resolved: true,
+      }))
+      expect(edges).toContainEqual(expect.objectContaining({
+        kind: 'exports',
+        from: 'file:scripts/repo-index/fixtures/adapter/src/index.ts',
+        exportedName: 'renamedLocal',
+        localName: 'localOnly',
+      }))
+      const symbols = parseJsonLines(first.get('symbols.jsonl')!)
+      expect(symbols).toContainEqual(expect.objectContaining({
+        file: 'scripts/repo-index/fixtures/adapter/src/index.ts',
+        name: 'localOnly',
+        exported: true,
+        exportedAs: ['renamedLocal'],
+      }))
+      const tests = parseJsonLines(first.get('tests.jsonl')!)
+      const parserFixture = tests.find(
+        (record) => record.file === 'scripts/repo-index/fixtures/adapter/tests/index.test.ts',
+      )
+      expect(parserFixture).toMatchObject({
+        runnable: false,
+        diagnostic: expect.stringContaining('Parser fixture'),
+      })
+      expect(parserFixture).not.toHaveProperty('command')
+      expect(
+        tests.find((record) => record.file === 'tests/unit/repoIndexGenerator.test.ts'),
+      ).toMatchObject({
+        runnable: true,
+        command: 'npx vitest run tests/unit/repoIndexGenerator.test.ts',
+      })
       for (const [name, property] of [
         ['contracts.json', 'contracts'],
         ['scripts.json', 'packageScripts'],
@@ -171,10 +319,11 @@ describe('deterministic repo-index generator', () => {
   it(
     'checks through a temporary directory without touching committed generated files',
     () => {
-      const generatedDirectory = resolve(repoRoot, 'repo-index/generated')
+      const generatedDirectory = resolve(temporaryRoot, 'check-expected')
+      generateRepoIndexToDirectory(repoRoot, generatedDirectory)
       const beforeHash = hashGeneratedDirectory(generatedDirectory)
       const beforeTimes = modificationTimes(generatedDirectory)
-      const result = checkRepoIndex(repoRoot)
+      const result = checkRepoIndex(repoRoot, generatedDirectory)
 
       expect(result).toMatchObject({
         ok: true,

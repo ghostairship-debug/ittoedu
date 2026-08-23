@@ -27,7 +27,6 @@ export interface InputInventoryRecord {
   domain: InputDomain
   contentHash: string
   bytes: number
-  normalizedBytes: number
 }
 
 export interface InputInventoryResult {
@@ -134,6 +133,20 @@ export function hashInputBytes(bytes: Buffer): string {
   return sha256(normalizeTextBytes(bytes))
 }
 
+export function createInputInventoryRecord(
+  path: string,
+  domain: InputDomain,
+  bytes: Buffer,
+): InputInventoryRecord {
+  const normalized = normalizeTextBytes(bytes)
+  return {
+    path,
+    domain,
+    contentHash: sha256(normalized),
+    bytes: normalized.byteLength,
+  }
+}
+
 export function classifyInputPath(path: string, config: RepoIndexConfig): InputDomain {
   const normalized = normalizedConfiguredPath(path)
   const explicitDomains: InputDomain[] = []
@@ -226,14 +239,7 @@ export function collectInputInventory(
 ): InputInventoryResult {
   const records = enumerateInputPaths(repoRoot, config).map((path) => {
     const bytes = readFileSync(resolve(repoRoot, path))
-    const normalized = normalizeTextBytes(bytes)
-    return {
-      path,
-      domain: classifyInputPath(path, config),
-      contentHash: sha256(normalized),
-      bytes: bytes.byteLength,
-      normalizedBytes: normalized.byteLength,
-    } satisfies InputInventoryRecord
+    return createInputInventoryRecord(path, classifyInputPath(path, config), bytes)
   })
 
   for (const requiredPath of [

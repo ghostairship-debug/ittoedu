@@ -14,9 +14,16 @@ export type IndexedExportKind =
   | 'all'
   | 'assignment'
 
+export interface IndexedExportBinding {
+  exportedName: string
+  localName?: string
+  isTypeOnly: boolean
+}
+
 export interface IndexedExport {
   kind: IndexedExportKind
   names: readonly string[]
+  bindings: readonly IndexedExportBinding[]
   moduleSpecifier?: string
   isTypeOnly: boolean
   isDefault: boolean

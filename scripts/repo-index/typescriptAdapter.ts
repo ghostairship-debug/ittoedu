@@ -17,6 +17,7 @@ import {
   isInterfaceDeclaration,
   isModuleDeclaration,
   isNamedExports,
+  isNamedImports,
   isNamespaceExport,
   isNamespaceExportDeclaration,
   isNoSubstitutionTemplateLiteral,
@@ -27,6 +28,7 @@ import {
   isVariableStatement,
   type BindingName,
   type Expression,
+  type ImportClause,
   type Node,
   type SourceFile,
 } from 'typescript/unstable/ast'
@@ -86,6 +88,23 @@ function moduleText(expression: Expression | undefined): string | undefined {
     return expression.text
   }
   return undefined
+}
+
+function importClauseIsTypeOnly(importClause: ImportClause | undefined): boolean {
+  if (!importClause) {
+    return false
+  }
+  if (importClause.phaseModifier === SyntaxKind.TypeKeyword) {
+    return true
+  }
+  if (importClause.name || !importClause.namedBindings) {
+    return false
+  }
+  return (
+    isNamedImports(importClause.namedBindings) &&
+    importClause.namedBindings.elements.length > 0 &&
+    importClause.namedBindings.elements.every((element) => element.isTypeOnly)
+  )
 }
 
 function lineOf(sourceFile: SourceFile, node: Node): number {
@@ -230,7 +249,7 @@ function collectImports(sourceFile: SourceFile): IndexedImport[] {
         imports.push({
           kind: 'static',
           moduleSpecifier,
-          isTypeOnly: statement.importClause?.phaseModifier === SyntaxKind.TypeKeyword,
+          isTypeOnly: importClauseIsTypeOnly(statement.importClause),
           line: lineOf(sourceFile, statement),
         })
       }
@@ -283,10 +302,17 @@ function collectExports(sourceFile: SourceFile): IndexedExport[] {
     if (isExportDeclaration(statement)) {
       const moduleSpecifier = moduleText(statement.moduleSpecifier)
       const exportClause = statement.exportClause
-      const names = exportClause && isNamedExports(exportClause)
-        ? exportClause.elements.map((element) => element.name.text)
+      const bindings = exportClause && isNamedExports(exportClause)
+        ? exportClause.elements.map((element) => ({
+            exportedName: element.name.text,
+            localName: element.propertyName?.text ?? element.name.text,
+            isTypeOnly: statement.isTypeOnly || element.isTypeOnly,
+          }))
         : exportClause && isNamespaceExport(exportClause)
-          ? [exportClause.name.text]
+          ? [{
+              exportedName: exportClause.name.text,
+              isTypeOnly: statement.isTypeOnly,
+            }]
           : []
       exports.push({
         kind: exportClause && isNamedExports(exportClause)
@@ -294,7 +320,10 @@ function collectExports(sourceFile: SourceFile): IndexedExport[] {
           : exportClause && isNamespaceExport(exportClause)
             ? 'namespace'
             : 'all',
-        names: [...names].sort(compareText),
+        names: bindings.map((binding) => binding.exportedName).sort(compareText),
+        bindings: [...bindings].sort((left, right) =>
+          compareText(left.exportedName, right.exportedName),
+        ),
         ...(moduleSpecifier ? { moduleSpecifier } : {}),
         isTypeOnly: statement.isTypeOnly,
         isDefault: false,
@@ -307,6 +336,13 @@ function collectExports(sourceFile: SourceFile): IndexedExport[] {
       exports.push({
         kind: 'assignment',
         names: [statement.isExportEquals ? 'export=' : 'default'],
+        bindings: [{
+          exportedName: statement.isExportEquals ? 'export=' : 'default',
+          ...(isIdentifier(statement.expression)
+            ? { localName: statement.expression.text }
+            : {}),
+          isTypeOnly: false,
+        }],
         isTypeOnly: false,
         isDefault: !statement.isExportEquals,
         line: lineOf(sourceFile, statement),
@@ -318,6 +354,11 @@ function collectExports(sourceFile: SourceFile): IndexedExport[] {
       exports.push({
         kind: 'namespace',
         names: [statement.name.text],
+        bindings: [{
+          exportedName: statement.name.text,
+          localName: statement.name.text,
+          isTypeOnly: true,
+        }],
         isTypeOnly: true,
         isDefault: false,
         line: lineOf(sourceFile, statement),
@@ -330,11 +371,24 @@ function collectExports(sourceFile: SourceFile): IndexedExport[] {
     }
     const names = declarationNames(statement)
     const isDefault = hasModifier(statement, SyntaxKind.DefaultKeyword)
+    const isTypeOnly =
+      isInterfaceDeclaration(statement) || isTypeAliasDeclaration(statement)
+    const bindings = isDefault
+      ? [{
+          exportedName: 'default',
+          ...(names[0] ? { localName: names[0] } : {}),
+          isTypeOnly,
+        }]
+      : names.map((name) => ({
+          exportedName: name,
+          localName: name,
+          isTypeOnly,
+        }))
     exports.push({
       kind: 'declaration',
-      names: names.length > 0 ? [...names].sort(compareText) : isDefault ? ['default'] : [],
-      isTypeOnly:
-        isInterfaceDeclaration(statement) || isTypeAliasDeclaration(statement),
+      names: bindings.map((binding) => binding.exportedName).sort(compareText),
+      bindings,
+      isTypeOnly,
       isDefault,
       line: lineOf(sourceFile, statement),
     })

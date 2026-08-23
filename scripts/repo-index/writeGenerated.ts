@@ -12,6 +12,10 @@ import { basename, dirname, resolve, sep } from 'node:path'
 
 export type GeneratedFileMap = ReadonlyMap<string, Buffer>
 
+export interface AtomicReplaceHooks {
+  beforeInstall?: () => void
+}
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
@@ -80,6 +84,7 @@ function assertSwapPath(parent: string, candidate: string, prefix: string): void
 export function replaceGeneratedDirectoryAtomically(
   targetDirectory: string,
   files: GeneratedFileMap,
+  hooks: AtomicReplaceHooks = {},
 ): void {
   const target = resolve(targetDirectory)
   const parent = dirname(target)
@@ -103,6 +108,7 @@ export function replaceGeneratedDirectoryAtomically(
       renameSync(target, backup)
       movedExisting = true
     }
+    hooks.beforeInstall?.()
     renameSync(temporary, target)
     if (movedExisting) {
       rmSync(backup, { recursive: true, force: true })

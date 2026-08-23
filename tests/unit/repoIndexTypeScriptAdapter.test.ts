@@ -72,6 +72,11 @@ describe('TypeScript 7 repo-index adapter', () => {
           isTypeOnly: false,
         }),
         expect.objectContaining({
+          kind: 'static',
+          moduleSpecifier: './types',
+          isTypeOnly: true,
+        }),
+        expect.objectContaining({
           kind: 'dynamic',
           moduleSpecifier: './dynamic',
           isTypeOnly: false,
@@ -87,6 +92,13 @@ describe('TypeScript 7 repo-index adapter', () => {
         expect.objectContaining({
           kind: 'named',
           names: ['renamedLocal'],
+          bindings: [
+            {
+              exportedName: 'renamedLocal',
+              localName: 'localOnly',
+              isTypeOnly: false,
+            },
+          ],
         }),
       ]),
     )

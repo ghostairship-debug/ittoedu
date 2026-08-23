@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-01-deterministic-facts-check`
 - Phase / wave: `ARCH-0B / wave 2`
-- Status: `retrying`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Tooling Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / retry 1 opened 2026-08-24 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / retry 1 target-green 2026-08-24 01:46 Asia/Shanghai`
 - Worktree / branch: `shared workspace, repo-index-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `0b34638b19a1787d94c895797fac8eab475d6765`
 - Claim commit: `97bfee276f1944deb4c783bb7fad10715ecbd7e3`
@@ -118,6 +118,15 @@ No `repo-index/`, generator, check command, four-domain inventory/hash, or commi
 - Validation: focused generator suite passed `3/3`; adapter regression passed `3/3`; `npm run typecheck` passed all three TypeScript configs; generate/check and diff hygiene passed. `package-lock.json`, dependencies, product source, contracts/Schema, query/context and other task cards were not modified.
 - Remaining review: Coordinator must review and integrate tooling/semantic/generated changes; manual Bootstrap remains authoritative until IDX-03 gates pass.
 - Independent review finding: the pure generator commit `dd0ee77430891608961e083e1635042e84fe4bad` is retained, but generated integration is blocked until CRLF/LF byte identity, contract artifact tamper detection, inline type-import classification, local export edges, query-suffix resolution, runnable test command metadata, Markdown reference/fence/anchor validation, and Windows existing-target atomic swap coverage are repaired and rerun.
+- Retry 1 repair — normalized bytes: inventory and File facts now persist normalized UTF-8/LF byte counts; focused tests serialize complete CRLF/BOM and LF inventory/File records and require byte identity, not only equal hashes.
+- Retry 1 repair — contract artifacts: generation now hashes each excluded large Schema artifact and compares its actual SHA-256 with `contract-manifest.json`; a tampered temporary artifact fixture must fail.
+- Retry 1 repair — import/export graph: pure inline `import { type X }` produces `imports_type`, mixed value/type imports remain `imports`; every `shouldIndexSymbol` filter uses an explicit closure so Array index cannot become the export-name Set. Local named/default exports now retain stable binding metadata, index otherwise-filtered local symbols, and emit `exports` edges with alias/default/type metadata; virtual export symbols cover expressions without a local declaration.
+- Retry 1 repair — resolution/tests: local module resolution strips Vite query/fragment suffixes, including the current `runtimePreviewBootstrap.js?raw` edge. Parser fixture tests are emitted with `runnable=false`, no command and an actionable harness diagnostic; only paths covered by Vitest/Playwright receive commands.
+- Retry 1 repair — Markdown: validation ignores fenced blocks, resolves inline and reference-style links, rejects undefined references, validates relative targets and Markdown heading/explicit-ID fragments, and handles duplicate heading suffixes. Temporary fixtures cover valid references, fenced fake links, missing references and missing anchors.
+- Retry 1 repair — atomic write: focused Windows tests replace an existing generated directory, prove backup/temp cleanup, inject a failure after backup creation, and require restoration of the old directory. The production target remains hardcoded by `writeRepoIndex` and scratch/backup paths remain under excluded `repo-index/contexts`.
+- Retry 1 validation: adapter suite `3/3`, generator suite `6/6` (combined `9/9`) and all three TypeScript projects passed. The generator suite performs two independent OS-temporary full generations and byte-compares every output; check-mode is tested against a temporary expected directory without touching workspace generated files.
+- Retry 1 current check: `npm run repo:index:check` was run read-only and correctly reported stale facts because tooling files changed in this retry and concurrent semantic/performance inputs were integrated after the previous generated snapshot. Per scope, `repo-index/generated/**` was not rebuilt or modified; Coordinator must regenerate it during generated integration.
+- Retry 1 scope: only IDX-01 tooling, adapter fixture, focused tests and this card changed. Semantic, package/lockfile, product, performance, gate card and generated output were not written.
 
 ## Ready checklist (Coordinator)
 

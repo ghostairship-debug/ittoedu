@@ -11,6 +11,7 @@ import { extname, posix, relative, resolve } from 'node:path'
 import { createTypeScriptIndexAdapter } from './typescriptAdapter'
 import type {
   IndexedExport,
+  IndexedExportBinding,
   IndexedSourceFile,
   IndexedTestCase,
   IndexedTopLevelSymbol,
@@ -70,6 +71,7 @@ interface SymbolFact extends GeneratedFactBase {
   line: number
   endLine: number
   exported: boolean
+  exportedAs: readonly string[]
   isDefault: boolean
   jsDoc?: string
 }
@@ -81,7 +83,9 @@ interface TestFact extends GeneratedFactBase {
   name: string
   line: number
   suite: readonly string[]
-  command: string
+  runnable: boolean
+  command?: string
+  diagnostic?: string
   relatedFiles: readonly string[]
 }
 
@@ -93,6 +97,10 @@ interface EdgeFact extends GeneratedFactBase {
   specifier?: string
   line?: number
   resolved: boolean
+  exportedName?: string
+  localName?: string
+  isTypeOnly?: boolean
+  isDefault?: boolean
 }
 
 interface RepoIndexBuild {
@@ -168,8 +176,28 @@ function fileTags(path: string, inventory: InputInventoryRecord): string[] {
   return [...tags].sort(compareText)
 }
 
-function shouldIndexSymbol(symbol: IndexedTopLevelSymbol): boolean {
-  if (symbol.exported) return true
+export function createFileFact(
+  input: InputInventoryRecord,
+  scan?: IndexedSourceFile,
+): FileFact {
+  return {
+    ...generatedBase([input.path]),
+    id: `file:${input.path}`,
+    path: input.path,
+    kind: fileKind(input.path, scan !== undefined),
+    bytes: input.bytes,
+    contentHash: input.contentHash,
+    projects: scan?.projects ?? [],
+    exports: scan ? flattenExportNames(scan.exports) : [],
+    tags: fileTags(input.path, input),
+  }
+}
+
+function shouldIndexSymbol(
+  symbol: IndexedTopLevelSymbol,
+  exportedLocalNames: ReadonlySet<string> = new Set(),
+): boolean {
+  if (symbol.exported || exportedLocalNames.has(symbol.name)) return true
   if (symbol.kind !== 'const' && symbol.kind !== 'let' && symbol.kind !== 'var') return true
   return /^[A-Z][A-Z0-9_]*$/.test(symbol.name)
 }
@@ -178,26 +206,120 @@ function symbolId(file: string, symbol: IndexedTopLevelSymbol): string {
   return `symbol:${file}#${symbol.kind}:${symbol.name}:${symbol.line}`
 }
 
+function virtualExportSymbolId(file: string, exportedName: string, line: number): string {
+  return `symbol:${file}#export-alias:${exportedName}:${line}`
+}
+
+interface ExportTarget {
+  binding: IndexedExportBinding
+  line: number
+  targetId: string
+}
+
+interface ScanSymbolFacts {
+  facts: SymbolFact[]
+  exportTargets: ExportTarget[]
+}
+
+function buildScanSymbolFacts(scan: IndexedSourceFile): ScanSymbolFacts {
+  const localExports = scan.exports
+    .filter((entry) => !entry.moduleSpecifier)
+    .flatMap((entry) => entry.bindings.map((binding) => ({ binding, line: entry.line })))
+  const exportedByLocalName = new Map<string, Set<string>>()
+  for (const { binding } of localExports) {
+    if (!binding.localName) continue
+    const names = exportedByLocalName.get(binding.localName) ?? new Set<string>()
+    names.add(binding.exportedName)
+    exportedByLocalName.set(binding.localName, names)
+  }
+  const exportedLocalNames = new Set(exportedByLocalName.keys())
+  const facts = scan.symbols
+    .filter((symbol) => shouldIndexSymbol(symbol, exportedLocalNames))
+    .map((symbol): SymbolFact => {
+      const exportedAs = [...(exportedByLocalName.get(symbol.name) ?? [])]
+      if (symbol.exported && exportedAs.length === 0) {
+        exportedAs.push(symbol.isDefault ? 'default' : symbol.name)
+      }
+      exportedAs.sort(compareText)
+      return {
+        ...generatedBase([scan.path]),
+        id: symbolId(scan.path, symbol),
+        file: scan.path,
+        name: symbol.name,
+        kind: symbol.kind,
+        line: symbol.line,
+        endLine: symbol.endLine,
+        exported: symbol.exported || exportedAs.length > 0,
+        exportedAs,
+        isDefault: symbol.isDefault || exportedAs.includes('default'),
+        ...(symbol.jsDoc ? { jsDoc: symbol.jsDoc } : {}),
+      }
+    })
+  const factByLocalName = new Map<string, SymbolFact>()
+  for (const fact of facts) {
+    if (!factByLocalName.has(fact.name)) {
+      factByLocalName.set(fact.name, fact)
+    }
+  }
+
+  const virtualFacts = new Map<string, SymbolFact>()
+  const exportTargets = localExports.map(({ binding, line }) => {
+    const localFact = binding.localName
+      ? factByLocalName.get(binding.localName)
+      : undefined
+    if (localFact) {
+      return { binding, line, targetId: localFact.id }
+    }
+    const id = virtualExportSymbolId(scan.path, binding.exportedName, line)
+    if (!virtualFacts.has(id)) {
+      virtualFacts.set(id, {
+        ...generatedBase([scan.path]),
+        id,
+        file: scan.path,
+        name: binding.exportedName,
+        kind: 'export-alias',
+        line,
+        endLine: line,
+        exported: true,
+        exportedAs: [binding.exportedName],
+        isDefault: binding.exportedName === 'default',
+      })
+    }
+    return { binding, line, targetId: id }
+  })
+
+  return {
+    facts: [...facts, ...virtualFacts.values()].sort((left, right) => compareText(left.id, right.id)),
+    exportTargets,
+  }
+}
+
 function testId(file: string, test: IndexedTestCase): string {
   return `test:${file}#${test.kind}:${test.line}:${test.name}`
 }
 
-function testCommand(path: string): string {
+function testExecution(path: string): Pick<TestFact, 'runnable' | 'command' | 'diagnostic'> {
   if (path.startsWith('tests/e2e/')) {
-    return `npx playwright test ${path}`
+    return { runnable: true, command: `npx playwright test ${path}` }
   }
   if (path.startsWith('tests/unit/') || path.startsWith('tests/integration/')) {
-    return `npx vitest run ${path}`
+    return { runnable: true, command: `npx vitest run ${path}` }
   }
-  return `npx vitest run ${path}`
+  return {
+    runnable: false,
+    diagnostic: path.startsWith('scripts/repo-index/fixtures/')
+      ? 'Parser fixture; execute through tests/unit/repoIndexTypeScriptAdapter.test.ts.'
+      : 'No repository test runner includes this statically detected test path.',
+  }
 }
 
 function moduleCandidates(fromPath: string, specifier: string): string[] {
   let base: string | undefined
-  if (specifier.startsWith('.')) {
-    base = posix.normalize(posix.join(posix.dirname(fromPath), specifier))
-  } else if (specifier.startsWith('@/')) {
-    base = posix.join('src', specifier.slice(2))
+  const pathSpecifier = specifier.replace(/[?#].*$/, '')
+  if (pathSpecifier.startsWith('.')) {
+    base = posix.normalize(posix.join(posix.dirname(fromPath), pathSpecifier))
+  } else if (pathSpecifier.startsWith('@/')) {
+    base = posix.join('src', pathSpecifier.slice(2))
   }
   if (!base) return []
 
@@ -215,6 +337,7 @@ function moduleCandidates(fromPath: string, specifier: string): string[] {
     `${candidate}/index.tsx`,
     `${candidate}/index.mts`,
     `${candidate}/index.cts`,
+    `${candidate}/index.d.ts`,
   ]))]
 }
 
@@ -227,8 +350,16 @@ function resolveModulePath(
     .find((candidate) => indexedPaths.has(candidate))
 }
 
-function edgeId(kind: string, from: string, to: string, line?: number): string {
-  return `edge:${kind}:${from}->${to}${line === undefined ? '' : `:${line}`}`
+function edgeId(
+  kind: string,
+  from: string,
+  to: string,
+  line?: number,
+  discriminator?: string,
+): string {
+  return `edge:${kind}:${from}->${to}${line === undefined ? '' : `:${line}`}${
+    discriminator ? `:${discriminator}` : ''
+  }`
 }
 
 function deduplicateEdges(edges: readonly EdgeFact[]): EdgeFact[] {
@@ -319,6 +450,24 @@ function validateSemantic(repoRoot: string): Record<string, unknown>[] {
   return records.sort((left, right) => compareText(String(left.id), String(right.id)))
 }
 
+export function verifyContractArtifactHash(
+  repoRoot: string,
+  artifactPath: string,
+  expectedSha256: string,
+): void {
+  const artifact = resolve(repoRoot, artifactPath)
+  if (!existsSync(artifact)) {
+    throw new Error(`Contract artifact does not exist: ${artifactPath}`)
+  }
+  const actual = createHash('sha256').update(readFileSync(artifact)).digest('hex')
+  const expected = expectedSha256.replace(/^sha256:/, '').toLowerCase()
+  if (actual !== expected) {
+    throw new Error(
+      `Contract artifact hash mismatch: ${artifactPath} expected ${expected} but found ${actual}`,
+    )
+  }
+}
+
 function buildContracts(
   repoRoot: string,
   inventory: readonly InputInventoryRecord[],
@@ -331,9 +480,10 @@ function buildContracts(
   for (const contract of manifestContracts) {
     const artifact = `artifacts/contracts/${String(contract.file)}`
     const source = String(contract.sourceOfTruth)
-    if (!existsSync(resolve(repoRoot, artifact)) || !existsSync(resolve(repoRoot, source))) {
+    if (!existsSync(resolve(repoRoot, source))) {
       throw new Error(`Contract manifest references a missing path: ${artifact} / ${source}`)
     }
+    verifyContractArtifactHash(repoRoot, artifact, String(contract.sha256))
   }
 
   const scripts = packageJson.scripts as Record<string, string>
@@ -413,41 +563,162 @@ function markdownTitle(text: string, path: string): string {
 function markdownLinkTarget(rawTarget: string): string {
   const trimmed = rawTarget.trim()
   if (trimmed.startsWith('<')) {
-    return trimmed.slice(1, trimmed.indexOf('>'))
+    const closing = trimmed.indexOf('>')
+    return closing >= 0 ? trimmed.slice(1, closing) : trimmed
   }
   return trimmed.split(/\s+['"]/)[0]
 }
 
-function localMarkdownLinks(repoRoot: string, path: string, text: string): string[] {
-  const links = new Set<string>()
-  const pattern = /!?\[[^\]]*\]\(([^)]+)\)/g
-  for (const match of text.matchAll(pattern)) {
-    const target = markdownLinkTarget(match[1])
+function stripFencedMarkdown(text: string): string {
+  const lines = text.split('\n')
+  let fenceCharacter: '`' | '~' | undefined
+  let fenceLength = 0
+  return lines.map((line) => {
+    const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/)?.[1]
+    if (!fenceCharacter) {
+      if (marker) {
+        fenceCharacter = marker[0] as '`' | '~'
+        fenceLength = marker.length
+        return ''
+      }
+      return line
+    }
     if (
-      target.length === 0 ||
-      target.startsWith('#') ||
-      /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)
+      marker &&
+      marker[0] === fenceCharacter &&
+      marker.length >= fenceLength &&
+      /^\s{0,3}(?:`{3,}|~{3,})\s*$/.test(line)
     ) {
-      continue
+      fenceCharacter = undefined
+      fenceLength = 0
     }
-    const withoutFragment = target.split('#', 1)[0].split('?', 1)[0]
-    let decoded: string
-    try {
-      decoded = decodeURIComponent(withoutFragment)
-    } catch {
-      decoded = withoutFragment
+    return ''
+  }).join('\n')
+}
+
+function referenceLabel(label: string): string {
+  return label.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function markdownAnchorSlug(heading: string): string {
+  return heading
+    .replace(/<[^>]*>/g, '')
+    .replace(/[`*_~]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-')
+}
+
+function markdownAnchors(text: string): Set<string> {
+  const stripped = stripFencedMarkdown(text)
+  const anchors = new Set<string>()
+  const duplicateCounts = new Map<string, number>()
+  for (const line of stripped.split('\n')) {
+    const heading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)?.[1]
+    if (heading) {
+      const base = markdownAnchorSlug(heading)
+      if (base) {
+        const duplicate = duplicateCounts.get(base) ?? 0
+        duplicateCounts.set(base, duplicate + 1)
+        anchors.add(duplicate === 0 ? base : `${base}-${duplicate}`)
+      }
     }
-    const normalized = toSlashes(relative(
-      repoRoot,
-      resolve(repoRoot, posix.dirname(path), decoded),
-    ))
-    if (normalized === '..' || normalized.startsWith('../')) {
-      throw new Error(`Markdown link escapes repository: ${path} -> ${target}`)
+    for (const match of line.matchAll(/\bid\s*=\s*["']([^"']+)["']/gi)) {
+      anchors.add(match[1].toLowerCase())
     }
-    if (!existsSync(resolve(repoRoot, normalized))) {
-      throw new Error(`Markdown link target does not exist: ${path} -> ${target}`)
+  }
+  return anchors
+}
+
+function validateMarkdownTarget(
+  repoRoot: string,
+  sourcePath: string,
+  sourceText: string,
+  rawTarget: string,
+): string | undefined {
+  const target = markdownLinkTarget(rawTarget)
+  if (
+    target.length === 0 ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)
+  ) {
+    return undefined
+  }
+  const hashIndex = target.indexOf('#')
+  const rawPath = (hashIndex >= 0 ? target.slice(0, hashIndex) : target).split('?', 1)[0]
+  const rawFragment = hashIndex >= 0 ? target.slice(hashIndex + 1) : ''
+  let decodedPath: string
+  let decodedFragment: string
+  try {
+    decodedPath = decodeURIComponent(rawPath)
+    decodedFragment = decodeURIComponent(rawFragment).toLowerCase()
+  } catch {
+    decodedPath = rawPath
+    decodedFragment = rawFragment.toLowerCase()
+  }
+  if (decodedPath.includes('\\')) {
+    throw new Error(`Markdown links must use POSIX paths: ${sourcePath} -> ${target}`)
+  }
+
+  const normalized = decodedPath.length === 0
+    ? sourcePath
+    : toSlashes(relative(
+        repoRoot,
+        resolve(repoRoot, posix.dirname(sourcePath), decodedPath),
+      ))
+  if (normalized === '..' || normalized.startsWith('../')) {
+    throw new Error(`Markdown link escapes repository: ${sourcePath} -> ${target}`)
+  }
+  const absoluteTarget = resolve(repoRoot, normalized)
+  if (!existsSync(absoluteTarget)) {
+    throw new Error(`Markdown link target does not exist: ${sourcePath} -> ${target}`)
+  }
+  if (decodedFragment && normalized.endsWith('.md')) {
+    const targetText = normalized === sourcePath
+      ? sourceText
+      : normalizeTextBytes(readFileSync(absoluteTarget)).toString('utf8')
+    if (!markdownAnchors(targetText).has(decodedFragment)) {
+      throw new Error(
+        `Markdown link anchor does not exist: ${sourcePath} -> ${target}`,
+      )
     }
-    links.add(normalized)
+  }
+  return decodedFragment ? `${normalized}#${decodedFragment}` : normalized
+}
+
+export function validateMarkdownLinks(
+  repoRoot: string,
+  path: string,
+  text: string,
+): string[] {
+  const stripped = stripFencedMarkdown(text)
+  const rawTargets = new Set<string>()
+  const definitions = new Map<string, string>()
+
+  for (const match of stripped.matchAll(/^\s{0,3}\[([^\]]+)\]:\s*(<[^>]+>|\S+)/gm)) {
+    const label = referenceLabel(match[1])
+    const target = match[2]
+    definitions.set(label, target)
+    rawTargets.add(target)
+  }
+  for (const match of stripped.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
+    rawTargets.add(match[1])
+  }
+  for (const match of stripped.matchAll(/!?\[([^\]]+)\]\[([^\]]*)\]/g)) {
+    const label = referenceLabel(match[2] || match[1])
+    const target = definitions.get(label)
+    if (!target) {
+      throw new Error(`Markdown reference is undefined: ${path} -> [${label}]`)
+    }
+    rawTargets.add(target)
+  }
+
+  const links = new Set<string>()
+  for (const target of rawTargets) {
+    const normalized = validateMarkdownTarget(repoRoot, path, text, target)
+    if (normalized) {
+      links.add(normalized)
+    }
   }
   return [...links].sort(compareText)
 }
@@ -468,7 +739,7 @@ function buildDocs(
         return {
           path: record.path,
           title: markdownTitle(text, record.path),
-          links: localMarkdownLinks(repoRoot, record.path, text),
+          links: validateMarkdownLinks(repoRoot, record.path, text),
         }
       })
       .sort((left, right) => compareText(left.path, right.path)),
@@ -537,35 +808,16 @@ function buildFacts(repoRoot: string): RepoIndexBuild {
     }
   }
 
-  const fileFacts: FileFact[] = inventoryResult.records.map((input) => {
-    const scan = scanByPath.get(input.path)
-    return {
-      ...generatedBase([input.path]),
-      id: `file:${input.path}`,
-      path: input.path,
-      kind: fileKind(input.path, scan !== undefined),
-      bytes: input.bytes,
-      contentHash: input.contentHash,
-      projects: scan?.projects ?? [],
-      exports: scan ? flattenExportNames(scan.exports) : [],
-      tags: fileTags(input.path, input),
-    }
-  })
+  const fileFacts: FileFact[] = inventoryResult.records.map((input) =>
+    createFileFact(input, scanByPath.get(input.path)),
+  )
 
-  const symbolFacts: SymbolFact[] = scans.flatMap((scan) =>
-    scan.symbols.filter(shouldIndexSymbol).map((symbol) => ({
-      ...generatedBase([scan.path]),
-      id: symbolId(scan.path, symbol),
-      file: scan.path,
-      name: symbol.name,
-      kind: symbol.kind,
-      line: symbol.line,
-      endLine: symbol.endLine,
-      exported: symbol.exported,
-      isDefault: symbol.isDefault,
-      ...(symbol.jsDoc ? { jsDoc: symbol.jsDoc } : {}),
-    })),
-  ).sort((left, right) => compareText(left.id, right.id))
+  const symbolFactsByPath = new Map(
+    scans.map((scan) => [scan.path, buildScanSymbolFacts(scan)] as const),
+  )
+  const symbolFacts: SymbolFact[] = [...symbolFactsByPath.values()]
+    .flatMap((entry) => entry.facts)
+    .sort((left, right) => compareText(left.id, right.id))
 
   const indexedPaths = new Set(inventoryResult.records.map((record) => record.path))
   const relatedByTest = new Map<string, Set<string>>()
@@ -588,7 +840,7 @@ function buildFacts(repoRoot: string): RepoIndexBuild {
       name: test.name,
       line: test.line,
       suite: test.suite ?? [],
-      command: testCommand(scan.path),
+      ...testExecution(scan.path),
       relatedFiles: [...(relatedByTest.get(scan.path) ?? [])].sort(compareText),
     })),
   ).sort((left, right) => compareText(left.id, right.id))
@@ -596,8 +848,9 @@ function buildFacts(repoRoot: string): RepoIndexBuild {
   const edges: EdgeFact[] = []
   for (const scan of scans) {
     const from = `file:${scan.path}`
-    for (const symbol of scan.symbols.filter(shouldIndexSymbol)) {
-      const to = symbolId(scan.path, symbol)
+    const scanSymbolFacts = symbolFactsByPath.get(scan.path)!
+    for (const symbol of scanSymbolFacts.facts) {
+      const to = symbol.id
       edges.push({
         ...generatedBase([scan.path]),
         id: edgeId('contains', from, to, symbol.line),
@@ -607,17 +860,27 @@ function buildFacts(repoRoot: string): RepoIndexBuild {
         line: symbol.line,
         resolved: true,
       })
-      if (symbol.exported) {
-        edges.push({
-          ...generatedBase([scan.path]),
-          id: edgeId('exports', from, to, symbol.line),
-          kind: 'exports',
+    }
+    for (const target of scanSymbolFacts.exportTargets) {
+      edges.push({
+        ...generatedBase([scan.path]),
+        id: edgeId(
+          'exports',
           from,
-          to,
-          line: symbol.line,
-          resolved: true,
-        })
-      }
+          target.targetId,
+          target.line,
+          target.binding.exportedName,
+        ),
+        kind: 'exports',
+        from,
+        to: target.targetId,
+        line: target.line,
+        resolved: true,
+        exportedName: target.binding.exportedName,
+        ...(target.binding.localName ? { localName: target.binding.localName } : {}),
+        isTypeOnly: target.binding.isTypeOnly,
+        isDefault: target.binding.exportedName === 'default',
+      })
     }
     for (const test of scan.tests) {
       const to = testId(scan.path, test)
@@ -798,14 +1061,19 @@ export function writeRepoIndex(repoRoot: string): RepoIndexSummary {
   return build.summary
 }
 
-export function checkRepoIndex(repoRoot: string): RepoIndexCheckResult {
+export function checkRepoIndex(
+  repoRoot: string,
+  expectedDirectory?: string,
+): RepoIndexCheckResult {
   const root = resolve(repoRoot)
   const build = buildFacts(root)
   const temporary = mkdtempSync(resolve(tmpdir(), 'ittoedu-repo-index-check-'))
   try {
     writeGeneratedFiles(temporary, build.generatedFiles)
     const temporaryFiles = readGeneratedDirectory(temporary)
-    const committedFiles = readGeneratedDirectory(resolve(root, 'repo-index/generated'))
+    const committedFiles = readGeneratedDirectory(
+      expectedDirectory ? resolve(expectedDirectory) : resolve(root, 'repo-index/generated'),
+    )
     const internalDifference = compareGeneratedFiles(build.generatedFiles, temporaryFiles)
     if (hasGeneratedDifference(internalDifference)) {
       throw new Error('Temporary repo-index output differs from the in-memory deterministic build')

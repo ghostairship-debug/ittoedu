@@ -1,6 +1,6 @@
 import type {} from '@/shared/projectTypes'
-import { fixtureValue } from './barrel'
-import type { FixtureShape } from './types'
+import { fixtureValue, type FixtureIdentifier } from './barrel'
+import { type FixtureShape } from './types'
 
 /**
  * Primary fixture symbol.
@@ -10,7 +10,7 @@ import type { FixtureShape } from './types'
  */
 export const indexedValue = fixtureValue
 
-export type IndexedShape = FixtureShape & { id: string }
+export type IndexedShape = FixtureShape & { id: FixtureIdentifier }
 
 export class IndexedClass {
   readonly value = indexedValue
