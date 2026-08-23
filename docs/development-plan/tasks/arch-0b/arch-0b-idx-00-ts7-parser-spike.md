@@ -4,7 +4,7 @@
 
 - Task ID: `arch-0b-idx-00-ts7-parser-spike`
 - Phase / wave: `ARCH-0B / wave 1`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Tooling Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 01:10 Asia/Shanghai`
 - Worktree / branch: `shared workspace, repo-index tooling-only write scope / codex/architecture-stabilization`
@@ -107,7 +107,7 @@ The repository pins TypeScript `7.0.2`. The package root does not expose the tra
 ## Rollback
 
 - Start point: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Implementation commit: `not created; Worker was instructed not to commit`
+- Implementation commit: `ed892ea5088166bab6a94053b66167a619f47f63`
 - Old path remains: manual Bootstrap remains the only trusted development navigation.
 
 ## Consumers and index
@@ -125,11 +125,11 @@ The repository pins TypeScript `7.0.2`. The package root does not expose the tra
 - Coverage evidence: renderer/player/shared, main/preload, unit/integration/e2e prefixes were all present; `src/shared/projectTypes.ts` retained membership in all three projects.
 - Type validation: `npx tsc --noEmit --pretty false` passed.
 - Hygiene: recursive unstable-import isolation assertion passed; `git diff --check` and explicit trailing-whitespace scan produced no findings. Product source, package/lockfile, contracts, semantic/generated index, generator and query files were unchanged by this task.
-- Remaining review: Coordinator should review and integrate the uncommitted Allowed-write diff before advancing this card beyond `target-green`.
+- Coordinator review: DTO boundary, official API lifecycle, Windows normalization, de-duplication, extraction rules, and recursive unstable-import isolation were reviewed. The focused suite was independently rerun against the shared workspace (542 files after concurrent task additions) and passed 3/3; root TypeScript and diff hygiene also passed.
 
 ## Findings / next allowed task
 
-- IDX-01 parser prerequisite is now target-green. It may consume the stable DTO/factory after Coordinator review; generated index ownership remains with the Coordinator.
+- IDX-01 parser prerequisite is integrated and done. It may consume the stable DTO/factory; generated index ownership remains with the Coordinator.
 
 ## Ready checklist (Coordinator)
 
