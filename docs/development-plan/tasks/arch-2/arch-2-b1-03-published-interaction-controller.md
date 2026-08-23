@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-b1-03-published-interaction-controller`
 - Phase / wave: `ARCH-2 / W2-B1 pure Published Interactions`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Player Interactions Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, new player/interactions-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `db21bb6`
-- Claim commit: `pending`
+- Claim commit: `995d411`
 - Context Pack + manifest hash | bootstrap-manual: `feature:interactions; fresh/high/safe-for-S2; source 16556796, semantic 2616aecc`
 - Freshness / relevant dirty inputs: `new Player interaction paths clean; Published hosts/producer locked out`
 - Depends on: `ARCH-2 W2-A gate done`
@@ -72,4 +72,8 @@ A Store-independent Published controller executes the smallest standard click ru
 
 ## Result evidence
 
-- Pending Worker implementation and review.
+- Pure implementation commit: `70e5da1`.
+- The Store/DOM-independent controller binds enabled `node.click` rules once per node, evaluates supported `scene.in`, groups standard timing, cancels repeated runs, stops after terminal navigation and idempotently releases listeners/timers.
+- Node motion and navigation are injected ports; unsupported trigger/condition/action, bind/session/motion/navigation/dispose failures produce isolated diagnostics. Unsupported-only and disabled-only nodes do not occupy a Surface gesture binding.
+- Focused tests passed 9/9 plus Interaction schema/legacy-engine regressions and TypeScript. Independent review found and closed the unsupported-condition binding leak, then approved.
+- No Published host/session/producer consumer is wired yet. Host integration must keep global/local controllers separate, map sceneId↔location correctly, honor abort/gesture/visibility ownership and destroy local controllers before Surface remount.
