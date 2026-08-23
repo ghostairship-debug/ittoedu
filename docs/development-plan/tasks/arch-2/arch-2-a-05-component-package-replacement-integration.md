@@ -6,12 +6,12 @@
 
 - Task ID: `arch-2-a-05-component-package-replacement-integration`
 - Phase / wave: `ARCH-2 / W2-A Components Store integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent Components reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `2b0d97c`
-- Claim commit: `pending`
+- Claim commit: `85c67b1`
 - Context Pack + manifest hash | bootstrap-manual: `feature:components and feature:editor-core; fresh/high/safe-for-S2; source 7534beb6, semantic d9f5f3a2, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree; App and Editor Store locks exclusively held by Coordinator; A-04 persistence seam done`
 - Depends on: `A-02, A-03 and A-04 done`
@@ -56,8 +56,9 @@ App capture project/revision/package
 
 - `src/renderer/App.tsx` manual/Catalog replacement target plumbing only
 - `src/renderer/store/editorStore.ts` replacement actions and removal of old V8 planner/retarget fallback
-- New component replacement Store/App integration tests
-- Targeted updates to existing component package management/Catalog tests
+- New `tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts`
+- New `tests/integration/componentPackageReplacementRace.test.tsx`
+- Targeted internally-consistent package fixtures/assertions in `tests/unit/componentPackageManagement.test.tsx` and `tests/unit/componentCatalogReplacement.test.ts`
 - This task card result fields
 
 ### Required read
@@ -124,5 +125,12 @@ App capture project/revision/package
 
 ## Result evidence
 
-- Pending implementation, independent review and representative validation.
-
+- Hotspot integration commit: `1dff8eb`.
+- Manual replacement captures project/revision/package before the native file dialog and keeps that target through confirmation. Catalog update captures before deferred package read while preserving directory/file SHA, expected ID/version, source and trust checks. Both routes call `replaceComponentPackageAtTarget`; stale results show actionable feedback and make no project/resource/history write.
+- Store now routes target commit through A-03 → `createEditorTransactionStep` → A-04 current Surface persistence. Slide-heavy, nested Flow-heavy and Mixed→Spatial each produce one revision/history frame and one component-package delta; all four legacy resource-stack depths remain unchanged.
+- Every instance keeps carrier, identity, props, fallback, geometry, order and ownership while version changes. Undo/redo restores exact V9 metadata and executable files; Spatial selection clearing is recorded as its existing history behavior, not introduced by replacement.
+- Archive save/reopen preserves the 4.1 files; Published Course V2 validates API 4 and recursively retains the nested FlowComponentBlock. Published build is proven read-only.
+- Consumers reduced: V8 `planComponentPackageReplacement` production consumer `1 → 0`; Store-local retarget helper/caller `1 → 0`; replacement empty legacy `commit()` fallback `1 → 0`; product `componentPackageChanges` producer `0 → 1`; replacement full-package snapshot behavior `1 → 0`.
+- Root focused run passed 14 files / 130 tests plus all three TypeScript projects and diff hygiene. Independent review passed 11 files / 44 tests with no blocker; App race 3/3 and representative vertical slice 5/5 passed. Three representative V9 validators, deterministic fixture hashes, archive reopen and Published API 4 checks passed.
+- Two legacy unit helpers stored runtime bytes inconsistent with their external manifest/runtime values; only test package construction and clone-aware assertions were corrected. No contract, Catalog IPC/trust behavior, Surface carrier/history module, Published implementation, fixture archive or user file changed.
+- Pipeline status: `engineering candidate`; outcome status: `art candidate unchanged`. No teacher/product acceptance or desktop E2E is claimed by this Store integration card. Package import/delete/editable-copy/editable-update still use legacy resource compatibility and keep the structural full-snapshot fields alive.
