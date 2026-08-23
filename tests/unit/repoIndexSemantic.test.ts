@@ -268,6 +268,12 @@ describe('repo-index stable semantic coverage', () => {
     }
 
     const journey = feature('feature:image-replacement-journey')
+    expect(journey.currentFact).toMatch(/CourseAuthoringTarget.*one mixed Slide history transaction frame/i)
+    expect(journey.targetState).toMatch(/VS-06.*Electron.*HTML.*Web/i)
+    expect(journey.aliases).toEqual(expect.arrayContaining([
+      'captureImageReplacementTarget',
+      'replaceImageAssetAtTarget',
+    ]))
     expect(journey.canonicalFiles).toEqual([
       'src/renderer/App.tsx',
       'src/renderer/store/editorStore.ts',

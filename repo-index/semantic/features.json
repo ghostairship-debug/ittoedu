@@ -135,7 +135,8 @@
       "name": "Stable Image Replacement Journey",
       "aliases": [
         "image-replacement",
-        "replaceImageAsset",
+        "captureImageReplacementTarget",
+        "replaceImageAssetAtTarget",
         "selectAndImportImage",
         "图片替换稳定目标"
       ],
@@ -149,8 +150,8 @@
         "module:preview-player",
         "module:export-delivery"
       ],
-      "currentFact": "Slide image replacement reads the selected node after an asynchronous file dialog and does not carry one project/location/item target through save, preview and HTML delivery.",
-      "targetState": "One stable target and one document/resource history entry survive undo, save/reopen, Published preview and HTML export.",
+      "currentFact": "App captures one CourseAuthoringTarget before the asynchronous image dialog; Store validates the current V9 identity and commits the captured image reference plus cloned asset-byte delta in one mixed Slide history transaction frame. The old nodeId-only async writer is removed.",
+      "targetState": "VS-06 proves the same target, one undo/redo step and replacement bytes through real Electron stale-dialog feedback, save/reopen, Preview, standalone HTML and Web delivery before the ARCH-1 gate closes.",
       "canonicalFiles": [
         "src/renderer/App.tsx",
         "src/renderer/store/editorStore.ts",
