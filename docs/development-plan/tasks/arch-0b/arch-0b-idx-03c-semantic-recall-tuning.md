@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-03c-semantic-recall-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 2`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Semantic Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 03:05 Asia/Shanghai`
 - Worktree / branch: `shared workspace, semantic-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `531d8d589391613b17414bbb0ed4f1dbd6fe68f0`
 - Claim commit: `1d7027fa939b46059e7b4053273bf10096fc19f9`
@@ -82,7 +82,7 @@ After tuning wave 1, task Hit@5 is 100% but Recall@15 is 72.5%/66.15%. Remaining
 ## Rollback
 
 - Start point: `68163868df08abb6aab647971429af513cfee87c`
-- Implementation commit: pending
+- Implementation commit: `54cf7e7d5ebc2e3b992b48a8241ccbddc7a1168a`
 - Old path remains: wave-1 semantic is safe but below recall gate.
 
 ## Consumers and index
@@ -101,6 +101,7 @@ After tuning wave 1, task Hit@5 is 100% but Recall@15 is 72.5%/66.15%. Remaining
 - Validation: `npx vitest run tests/unit/repoIndexSemantic.test.ts` passed `1 file / 5 tests`, including exact Feature order/count, alias uniqueness, path existence, budgets, targeted signal locks and temporary-directory generator validation. `git diff --check` passed.
 - Scope: this task changed only `repo-index/semantic/features.json`, `tests/unit/repoIndexSemantic.test.ts` and this card. Concurrent query/context-pack/query-test writes are disjoint and were not modified. Corpus, expected, evaluator, modules, generated facts, package and product files remain untouched by this task.
 - indexImpact: `semantic-update + regenerate`; Coordinator owns the unchanged-corpus quality rerun and generated refresh.
+- Coordinator integration gate passed twice on the unchanged corpus: controlled Recall@15 `95%`, broad Recall@15 `85.38%`, Hit@5 `100%`, and no forbidden, wrong-high or confidence mismatch. This task's bounded semantic signals are accepted; generated refresh remains owned by the ARCH-0B phase gate.
 
 ## Ready checklist (Coordinator)
 

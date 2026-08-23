@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-03e-semantic-symbol-fallback-integrity`
 - Phase / wave: `ARCH-0B / quality correctness retry 3`
-- Status: `implementing`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 03:01 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 03:01 Asia/Shanghai / done 2026-08-24 03:05 Asia/Shanghai`
 - Worktree / branch: `shared workspace, query-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `75d914f1419c4c0fc108498331e5cb2cd0edbca9`
 - Claim commit: `857e341df96d4cb0496769887d0c4197c80aa8f5`
@@ -66,12 +66,12 @@ A symbol query that has no generated Symbol fact but has one exact semantic term
 
 ## Acceptance
 
-- [ ] `matchedSymbols` and `matchedFiles` are both empty for a terminology-only symbol fallback
-- [ ] matched Feature, confidence, Bootstrap policy, candidates and relevant paths remain correct
-- [ ] a real exact Symbol query still reports its declaring file as exact
-- [ ] unchanged controlled and broad golden gates pass
-- [ ] repeated quality signatures are identical
-- [ ] corpus/expected/evaluator/semantic remain byte-unchanged
+- [x] `matchedSymbols` and `matchedFiles` are both empty for a terminology-only symbol fallback
+- [x] matched Feature, confidence, Bootstrap policy, candidates and relevant paths remain correct
+- [x] a real exact Symbol query still reports its declaring file as exact
+- [x] unchanged controlled and broad golden gates pass
+- [x] repeated quality signatures are identical
+- [x] corpus/expected/evaluator/semantic remain byte-unchanged
 
 ## Minimal validation
 
@@ -83,7 +83,7 @@ A symbol query that has no generated Symbol fact but has one exact semantic term
 ## Rollback
 
 - Start point: `75d914f1419c4c0fc108498331e5cb2cd0edbca9`
-- Implementation commit: `pending`
+- Implementation commit: `a6f2fe7c598fa5c3febc1271cbd901ac818bb442`
 - Old path remains: terminology fallback falsely exposes broad Feature files as exact matches and the broad quality gate fails.
 
 ## Consumers and index
@@ -94,7 +94,11 @@ A symbol query that has no generated Symbol fact but has one exact semantic term
 
 ## Result evidence
 
-- Pending.
+- The terminology-only branch now leaves `matchedFiles` empty, matching its existing empty `matchedSymbols` contract; Feature candidates and relevant paths remain the only semantic evidence channel.
+- The existing `activateCourseLocation` fixture now asserts both empty fact collections while retaining `feature:preview-player`, high confidence, no Bootstrap requirement and its verification paths. The exact `buildPublishedCourseV2Payload` Symbol fixture remains exact-first.
+- `npx vitest run tests/unit/repoIndexQuery.test.ts tests/unit/repoIndexGoldenTasks.test.ts --reporter=verbose` passed `2 files / 18 tests`; all three TypeScript projects passed.
+- The unchanged quality corpus passed twice with signature `946bd025c438e57d55f3c5558d45ede4b75bed1a6591966eb7789846fd0d9a38`: controlled Recall@15 `76/80 = 95%`, broad Recall@15 `111/130 = 85.38%`, Hit@5 `100%`, wrong-high/forbidden/expectation mismatch `0/0/0`, low fallbacks `4/4`.
+- Both generations in each run were byte-identical at `sha256:3d59047375b490120cd08090f37fe6fdfce7fbf94baab622f57110517789a0f0`. Corpus, expected, evaluator, semantic, thresholds, product and contracts were unchanged by this task.
 
 ## Ready checklist (Coordinator)
 

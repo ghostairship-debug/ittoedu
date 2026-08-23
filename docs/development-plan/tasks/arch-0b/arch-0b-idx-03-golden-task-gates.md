@@ -4,17 +4,17 @@
 
 - Task ID: `arch-0b-idx-03-golden-task-gates`
 - Phase / wave: `ARCH-0B / wave 4`
-- Status: `implementing`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Quality Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 03:05 Asia/Shanghai`
 - Worktree / branch: `shared workspace, golden-corpus/evaluator-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `d6fe7e0c57e480f4eed35dc55e0fd5adf893b2a6`
 - Claim commit: `47e79cce01904dfc5580e45871fdd4b637892659`
 - Context: `fresh repo:context + 25-task corpus design + Bootstrap comparison`
-- Freshness / relevant dirty inputs: clean worktree; repo:index and task board fresh
+- Freshness / relevant dirty inputs: fixed corpus passed; generated refresh is owned by the ARCH-0B phase gate
 - Depends on: `arch-0b-idx-02-query-context-pack (done)`
 - Blocks: ARCH-0B exit; ARCH-2 broad multi-agent gate
-- Retry count: `1; evaluator Feature/free-text exactness correction after Coordinator review`
+- Retry count: `3; evaluator correctness plus two bounded semantic/query waves and one fallback fact-integrity correction`
 
 ## Product outcome
 
@@ -22,7 +22,7 @@ Twenty-five evidence-backed real tasks quantify whether repo-index improves navi
 
 ## Current fact and evidence
 
-No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5/Recall@15 metrics, Bootstrap comparison, or quality command exists.
+The immutable 25-task corpus, evaluator and quality command now pass every hard threshold twice. The final correction removed falsely exact `matchedFiles` from terminology-only Symbol fallback without changing corpus, expected evidence, evaluator, semantic records or thresholds.
 
 ## Non-goals
 
@@ -76,7 +76,7 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 - [x] First 15-task controlled milestone recorded before the 25-task gate
 - [x] 25 tasks cover every required module and desktop/compiler boundary
 - [x] Canonical file Hit@5 ≥ 90%
-- [ ] Required contract/high-signal test Recall@15 ≥ 85%
+- [x] Required contract/high-signal test Recall@15 ≥ 85%
 - [x] High-confidence wrong answer count = 0
 - [x] Generation < 10 seconds, query P95 < 2 seconds, same inputs byte-identical
 - [x] Low confidence and external Catalog source queries correctly degrade
@@ -92,7 +92,7 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 ## Rollback
 
 - Start point: IDX-02 completion commit
-- Implementation commit: pending; hard quality gates failed, so this card remains implementing and no commit was created
+- Implementation commits: `8a0d223` fixed corpus/evaluator, `531d8d5` mode correctness; bounded tuning and final correction are recorded in their own task cards
 - Old path remains: manual Bootstrap is mandatory if gates fail.
 
 ## Consumers and index
@@ -117,13 +117,14 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 - Corrected controlled 15: task Hit@5 `15/15 = 100%` (pass), canonical relation recall at 5 `55/75 = 73.33%` diagnostic, required Recall@15 `58/80 = 72.5%` (fail), high-confidence wrong/forbidden/expectation mismatch `0/0/0`, low-confidence `1/1` correct.
 - Corrected broad 25: task Hit@5 `25/25 = 100%` (pass), canonical relation recall at 5 `86/125 = 68.8%` diagnostic, required Recall@15 `86/130 = 66.15%` (fail), high-confidence wrong `0`, expectation mismatch `0`, low-confidence `4/4` correct, and one real forbidden Top 5 hit in `GT-024` (fail).
 - Corrected quality signature: `fe47d786c024aec000e28615c8ff35cfcdaae583c9b5de5b7490c12f8807f3fd`; temporary generation hash matched at `sha256:4201ce8aa87b0c8333e91d92641a0b40c72536b8634c21bdb5203fc28faed6a4`, query determinism passed, query P95 remained `<17 ms`, and generation max was `1,270.98 ms`.
-- The task remains `implementing`: controlled/broad Recall@15 are below 85%, and broad forbidden Top 5 is nonzero. No query, semantic, corpus, expected, threshold, generated fact, package or product file was changed for this retry.
+- That evaluator-only retry remained below threshold; subsequent bounded tuning preserved the same corpus and expected relations.
+- Final unchanged-corpus result passed twice with signature `946bd025c438e57d55f3c5558d45ede4b75bed1a6591966eb7789846fd0d9a38`. Controlled: Hit@5 `15/15`, Recall@15 `76/80 = 95%`. Broad: Hit@5 `25/25`, Recall@15 `111/130 = 85.38%`. Wrong-high, forbidden Top 5 and expectation mismatches are all `0`; low-confidence fallbacks are `4/4` correct.
+- Query P95 stayed below `15 ms`; generation max stayed below `1.31 s`; both temporary generations matched `sha256:3d59047375b490120cd08090f37fe6fdfce7fbf94baab622f57110517789a0f0`. All three TypeScript projects and `2 files / 18` focused tests passed.
 
 ## Findings / next allowed task
 
-- Broad multi-agent dispatch remains blocked. Do not change the corpus or expected sets to pass.
-- The semantic-signal tuning plus evaluator correction removed all zero-hit and expectation gaps. Remaining bounded work is relation recall for `GT-001/002/003/004/006/010/011/012/013/014/017/018/019/020/022/023/024/025` and the `GT-024` forbidden UI Top 5 relation; do not change the corpus or expected sets to pass.
-- After tuning, rerun the unchanged quality corpus twice. This card may move to target-green only when both the controlled and broad hard gates pass.
+- The IDX-03 quality gate is closed successfully. ARCH-0B may proceed to generated refresh, cognition-index activation and its phase gate.
+- Partial per-task recall remains diagnostic rather than a failed threshold; low confidence and stale inputs must continue to request manual Bootstrap.
 
 ## Ready checklist (Coordinator)
 

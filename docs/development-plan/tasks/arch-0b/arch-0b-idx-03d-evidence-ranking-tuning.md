@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-03d-evidence-ranking-tuning`
 - Phase / wave: `ARCH-0B / quality tuning 2`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Query Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 02:52 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 03:05 Asia/Shanghai`
 - Worktree / branch: `shared workspace, query-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `531d8d589391613b17414bbb0ed4f1dbd6fe68f0`
 - Claim commit: `1d7027fa939b46059e7b4053273bf10096fc19f9`
@@ -84,7 +84,7 @@ The corrected evaluator now shows Hit@5 100%, but generic `featurePaths` include
 ## Rollback
 
 - Start point: `135a43fe08802c8fcbfc13ca7923a6092fc91d5d`
-- Implementation commit: `not created; Worker was instructed not to commit`
+- Implementation commit: `4e30c7d973a35f899a5b407861685531031714c5`
 - Old path remains: safe wave-1 query with lower recall and one known forbidden relation.
 
 ## Consumers and index
@@ -103,6 +103,7 @@ The corrected evaluator now shows Hit@5 100%, but generic `featurePaths` include
 - Focused validation: `npx vitest run tests/unit/repoIndexQuery.test.ts --reporter=verbose` passed `14/14`. Capability tests cover normal Components exclusion/order, two package-source phrasings, two ambiguous-latest phrasings, exact five/four path prefixes, ComponentsTab exclusion, ledger/Test association, low confidence, Bootstrap fallback and no external-looking relevant path. All prior exact/changed/multi-intent/Legacy/wrong-high protections remain green.
 - Static validation: root, Electron and E2E TypeScript checks passed; diff hygiene passed. Only `query.ts`, `contextPack.ts`, focused query tests and this card changed. Concurrent semantic recall work was read but not modified; corpus, expected, evaluator, generated, config/package, product/contracts/lockfile and other cards were untouched by this Worker.
 - Full unchanged quality gate was intentionally left to the Coordinator after both semantic and query evidence waves are integrated and strict generated facts are refreshed.
+- Coordinator integration gate subsequently passed twice on the unchanged corpus with signature `946bd025c438e57d55f3c5558d45ede4b75bed1a6591966eb7789846fd0d9a38`; broad Recall@15 is `85.38%`, Hit@5 is `100%`, and forbidden/wrong-high/fallback expectations all pass.
 
 ## Ready checklist (Coordinator)
 

@@ -1,10 +1,10 @@
 # ARCH-0B Repo-index Golden Task Quality Baseline
 
-> Status: **hard gate failed — broad dispatch remains blocked**
+> Status: **hard gate passed — eligible for ARCH-0B phase-gate integration**
 >
 > Corpus: `GT-001`–`GT-025`; controlled milestone: first 15 tasks.
 >
-> Current correctness-retry signature: `fe47d786c024aec000e28615c8ff35cfcdaae583c9b5de5b7490c12f8807f3fd`.
+> Current passing signature: `946bd025c438e57d55f3c5558d45ede4b75bed1a6591966eb7789846fd0d9a38`.
 >
 > Initial baseline signature: `c22c6fd5bf8c6b7a2898c7334c08f81e517c030a034b353ef3c3f7eeba66c46d`.
 
@@ -190,3 +190,29 @@ Controlled zero-hit tasks: none. Partial canonical tasks: `GT-002/003/004/005/00
 Broad zero-hit tasks: none. Partial canonical tasks: `GT-002/003/004/005/006/010/011/012/016/018/019/020/021/022/023/024/025`. Required-recall gaps remain in `GT-001/002/003/004/006/010/011/012/013/014/017/018/019/020/022/023/024/025`. `GT-024` now correctly reaches the local Catalog boundary, but its fixed forbidden UI path also enters Top 5; that is reported as a real remaining gap rather than hidden by changing expected data.
 
 The corrected run produced signature `fe47d786c024aec000e28615c8ff35cfcdaae583c9b5de5b7490c12f8807f3fd`; both temporary generations had hash `sha256:4201ce8aa87b0c8333e91d92641a0b40c72536b8634c21bdb5203fc28faed6a4`, and repeated queries inside the evaluator were deterministic. The hard gate remains closed on controlled/broad Recall@15 and broad forbidden Top 5. No further tuning was performed in this retry.
+
+## 9. Final unchanged-corpus gate closure
+
+Sections 2–8 preserve the initial and intermediate measurements. This section is the current result and supersedes their historical gate status. The 25 tasks, every expected path relation, confidence expectation, threshold and evaluator remained unchanged during the final correction.
+
+The final correctness fix made terminology-only Symbol fallback honest: when no generated Symbol fact exists, it no longer exposes the Feature's broad file set through `matchedFiles` as if those were exact Symbol facts. Semantic candidates and relevant paths remain available, and real exact Symbol queries remain exact-first.
+
+| Metric | Controlled 15 | Broad 25 | Gate |
+|---|---:|---:|---|
+| Canonical task Hit@5 | `15 / 15 = 100%` | `25 / 25 = 100%` | pass |
+| Canonical relation recall at 5 | `58 / 75 = 77.33%` | `91 / 125 = 72.8%` | diagnostic |
+| Required Recall@15 | `76 / 80 = 95%` | `111 / 130 = 85.38%` | pass |
+| High-confidence wrong | `0` | `0` | pass |
+| Forbidden Top 5 relations | `0` | `0` | pass |
+| Confidence/bootstrap expectation mismatches | `0` | `0` | pass |
+| Expected low-confidence fallbacks | `1 / 1` | `4 / 4` | pass |
+| Query P95 | `< 15 ms` | `< 15 ms` | pass |
+| Generation max | `1,304.21 ms` | `1,304.21 ms` | pass |
+| Index/query deterministic | `true / true` | `true / true` | pass |
+| Context Pack / Bootstrap read-path bytes | `129,714 / 4,518,695` | `221,774 / 7,212,343` | informational |
+| Context volume reduction | `97.13%` | `96.93%` | pass |
+
+- The quality command passed twice with identical timing-independent signature `946bd025c438e57d55f3c5558d45ede4b75bed1a6591966eb7789846fd0d9a38`.
+- Both generations inside each run were byte-identical at `sha256:3d59047375b490120cd08090f37fe6fdfce7fbf94baab622f57110517789a0f0`; repeated query results were also deterministic.
+- `npx vitest run tests/unit/repoIndexQuery.test.ts tests/unit/repoIndexGoldenTasks.test.ts --reporter=verbose` passed `2 files / 18 tests` and `npm run typecheck` passed all three TypeScript projects.
+- The gate is closed successfully. Partial task gaps remain visible diagnostics and do not weaken low-confidence/stale Bootstrap fallback.
