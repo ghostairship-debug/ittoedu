@@ -1,0 +1,541 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": 1,
+  "controlledMilestoneCount": 15,
+  "broadGateCount": 25,
+  "tasks": [
+    {
+      "id": "GT-001",
+      "milestone": "controlled-15",
+      "title": "Stable Slide image replacement target",
+      "queryText": "修复 Slide 替换图片：文件对话框期间切页/切项目不得替换新目标；撤销同时恢复元数据和字节，保存重开、预览、单 HTML 一致。",
+      "request": {
+        "mode": "query",
+        "value": "Slide 替换图片 文件对话框 切页 切项目 撤销 元数据 字节 保存重开 预览 HTML",
+        "size": "medium"
+      },
+      "coverage": [
+        "slide",
+        "media",
+        "save",
+        "preview",
+        "html",
+        "e2e"
+      ],
+      "rationale": "ARCH-1 uses this cross-feature journey to prove stale target and one resource history.",
+      "evidence": [
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "id": "GT-002",
+      "milestone": "controlled-15",
+      "title": "Mixed try-run keeps run mode across locations",
+      "queryText": "Mixed 当前位置试运行跨 Slide、Flow、Spatial location 时保持 canvasMode=run，并让 Published session 跟随目标。",
+      "request": {
+        "mode": "symbol",
+        "value": "activateCourseLocation",
+        "size": "medium"
+      },
+      "coverage": [
+        "slide",
+        "flow",
+        "spatial",
+        "preview",
+        "player"
+      ],
+      "rationale": "Frozen P2 captures a real regression in cross-Surface try-run routing.",
+      "evidence": [
+        "docs/tasks/editor-1.0/P2_TRYRUN_LOCATION.md"
+      ]
+    },
+    {
+      "id": "GT-003",
+      "milestone": "controlled-15",
+      "title": "Flow local-file media replacement",
+      "queryText": "Flow media 块从本地文件替换：写入 AssetMeta、更新当前 block.assetId，并把 bytes 通过 sidecar 同一历史提交。",
+      "request": {
+        "mode": "symbol",
+        "value": "importAndReplaceFlowMediaBlock",
+        "size": "medium"
+      },
+      "coverage": [
+        "flow",
+        "media",
+        "save"
+      ],
+      "rationale": "Frozen Q7 defines the real Flow-specific file replacement carrier and write boundary.",
+      "evidence": [
+        "docs/tasks/editor-1.0/Q7_FLOW_FILE_REPLACE.md"
+      ]
+    },
+    {
+      "id": "GT-004",
+      "milestone": "controlled-15",
+      "title": "Flow wrap and paperSpace",
+      "queryText": "实现并验证 Flow wrap 左右绕排、paperSpace 浮层跟稿纸滚动；教师控制器仍固定 viewport。",
+      "request": {
+        "mode": "feature",
+        "value": "flow",
+        "size": "medium"
+      },
+      "coverage": [
+        "flow",
+        "layers",
+        "controller",
+        "player"
+      ],
+      "rationale": "Frozen G3B/G3D protects the distinction between Flow paper and overlay layers.",
+      "evidence": [
+        "docs/tasks/editor-1.0/G3B_WRAP_PAPERSPACE.md"
+      ]
+    },
+    {
+      "id": "GT-005",
+      "milestone": "controlled-15",
+      "title": "Spatial video Published URL",
+      "queryText": "Spatial 世界视频从 Published assets 解析 URL，使用 HTML video 跟随相机变换；当前位置试运行与整课预览一致。",
+      "request": {
+        "mode": "feature",
+        "value": "spatial",
+        "size": "medium"
+      },
+      "coverage": [
+        "spatial",
+        "media",
+        "preview",
+        "player"
+      ],
+      "rationale": "Frozen Q5 records the real Spatial video/runtime inconsistency.",
+      "evidence": [
+        "docs/tasks/editor-1.0/Q5_SPATIAL_VIDEO.md"
+      ]
+    },
+    {
+      "id": "GT-006",
+      "milestone": "controlled-15",
+      "title": "Component API 4 across three Surfaces",
+      "queryText": "组件包导入后，在 Slide、Flow、Spatial 的 Published/试运行正确挂载 API 4；缺包或 capture 使用静态后备。",
+      "request": {
+        "mode": "feature",
+        "value": "components",
+        "size": "medium"
+      },
+      "coverage": [
+        "components",
+        "slide",
+        "flow",
+        "spatial",
+        "player"
+      ],
+      "rationale": "Frozen P8 is the real three-Surface Component API 4 integration.",
+      "evidence": [
+        "docs/tasks/editor-1.0/P8_FLOW_SPATIAL_COMPONENTS.md"
+      ]
+    },
+    {
+      "id": "GT-007",
+      "milestone": "controlled-15",
+      "title": "Runtime API 2/3 and DeveloperTab",
+      "queryText": "保留 DeveloperTab 的 Runtime 源码校验与应用，同时保证 canvas-runtime API 2、surface-runtime API 3 在隔离 Host 中运行。",
+      "request": {
+        "mode": "feature",
+        "value": "runtime",
+        "size": "medium"
+      },
+      "coverage": [
+        "runtime",
+        "developer-tab",
+        "player"
+      ],
+      "rationale": "Current Runtime feature must preserve both protocols and isolated execution.",
+      "evidence": [
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "id": "GT-008",
+      "milestone": "controlled-15",
+      "title": "Simple templates and professional Interaction rules",
+      "queryText": "互动模板和专业规则编辑必须使用同一 InteractionRule 合同，Published producer 与 InteractionEngine 一致消费。",
+      "request": {
+        "mode": "feature",
+        "value": "interactions",
+        "size": "medium"
+      },
+      "coverage": [
+        "interactions",
+        "runtime",
+        "player"
+      ],
+      "rationale": "Current simple/professional authoring shares one Interaction V1 contract.",
+      "evidence": [
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "id": "GT-009",
+      "milestone": "controlled-15",
+      "title": "Global layer and teacher-controller ownership",
+      "queryText": "教师控制器只存在于 globalLayerItems；三 Surface 图层树不得把它当场景/世界普通对象，排序与 authoringAddress 保持稳定。",
+      "request": {
+        "mode": "feature",
+        "value": "global-layers-controller",
+        "size": "medium"
+      },
+      "coverage": [
+        "layers",
+        "controller",
+        "slide",
+        "flow",
+        "spatial"
+      ],
+      "rationale": "Frozen P7/Q1/Q2 and current invariants protect the one-global-controller owner.",
+      "evidence": [
+        "docs/tasks/editor-1.0/P7_LAYER_CONTROLLER.md"
+      ]
+    },
+    {
+      "id": "GT-010",
+      "milestone": "controlled-15",
+      "title": "Save while editing remains dirty",
+      "queryText": "保存 Course Project V9 时用户继续编辑：只标记启动保存时快照已落盘，新 revision 继续 dirty；资源和组件文件保持一致。",
+      "request": {
+        "mode": "symbol",
+        "value": "currentCourseArchiveData",
+        "size": "medium"
+      },
+      "coverage": [
+        "save",
+        "media",
+        "components"
+      ],
+      "rationale": "The current save path contains a real edit-during-save identity guard.",
+      "evidence": [
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "id": "GT-011",
+      "milestone": "controlled-15",
+      "title": "Recovery single-flight and IPC",
+      "queryText": "Recovery 快照去抖、取消过期压缩、单飞写入；main 校验 V9 archive 后原子写，preload/main channel 保持一致。",
+      "request": {
+        "mode": "feature",
+        "value": "save-recovery",
+        "size": "medium"
+      },
+      "coverage": [
+        "save",
+        "recovery",
+        "main",
+        "preload",
+        "ipc"
+      ],
+      "rationale": "Recovery is a current preserved desktop data-safety journey.",
+      "evidence": [
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "id": "GT-012",
+      "milestone": "controlled-15",
+      "title": "Try-run and Full Preview share V2",
+      "queryText": "当前位置试运行和整课预览必须共同使用 buildPublishedCourseV2Payload 与 CoursePlayer 三 Surface hosts。",
+      "request": {
+        "mode": "symbol",
+        "value": "mountPublishedCourseTryRun",
+        "size": "medium"
+      },
+      "coverage": [
+        "preview",
+        "player",
+        "slide",
+        "flow",
+        "spatial"
+      ],
+      "rationale": "Current must-preserve rules require one Published V2 preview path.",
+      "evidence": [
+        "docs/development-plan/90-appendix/00_CURRENT_MUST_PRESERVE.md"
+      ]
+    },
+    {
+      "id": "GT-013",
+      "milestone": "controlled-15",
+      "title": "HTML/Web V2 and no-source reachability",
+      "queryText": "HTML 单文件和 Web 包正常 V9 主路径使用 Published V2；先证明 no-source fallback 是否可达，再决定 Legacy 删除。",
+      "request": {
+        "mode": "symbol",
+        "value": "buildCoursePackages",
+        "size": "medium"
+      },
+      "coverage": [
+        "html",
+        "web",
+        "preview",
+        "player"
+      ],
+      "rationale": "LEG-003 is a real reachability-unproven delivery fallback.",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "id": "GT-014",
+      "milestone": "controlled-15",
+      "title": "Slide-only PPTX Legacy branch",
+      "queryText": "比较 Slide-only V8 投影 PPTX 分支与 Published V2 buildCoursePptx，迁移时保留可编辑对象和静态化警告。",
+      "request": {
+        "mode": "feature",
+        "value": "pptx-export",
+        "size": "medium"
+      },
+      "coverage": [
+        "slide",
+        "pptx",
+        "diagnostics"
+      ],
+      "rationale": "LEG-004 records a confirmed Slide-only Legacy export consumer.",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "id": "GT-015",
+      "milestone": "controlled-15",
+      "title": "PDF and Flow DOCX semantics",
+      "queryText": "PDF 优先消费 Published V2 print artifacts，Flow DOCX 只导出讲义；不支持内容必须报告，不能静默丢失。",
+      "request": {
+        "mode": "feature",
+        "value": "print-export",
+        "size": "medium"
+      },
+      "coverage": [
+        "flow",
+        "pdf",
+        "docx",
+        "diagnostics",
+        "main",
+        "ipc"
+      ],
+      "rationale": "Current print delivery combines real PDF fallback debt and Flow-only DOCX.",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "id": "GT-016",
+      "milestone": "extended-25",
+      "title": "Diagnostics V8 consumer migration",
+      "queryText": "把 Project Health 与 export preflight 从 V8 state.project 迁到 V9 结构诊断，同时保留错误码、定位和报告导出。",
+      "request": {
+        "mode": "symbol",
+        "value": "collectProjectHealth",
+        "size": "medium"
+      },
+      "coverage": [
+        "diagnostics",
+        "save",
+        "pptx",
+        "pdf"
+      ],
+      "rationale": "LEG-006/007 enumerate active V8 diagnostic consumers.",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "id": "GT-017",
+      "milestone": "extended-25",
+      "title": "DeveloperTab stable transaction wiring",
+      "queryText": "DeveloperTab 的 Runtime、对象 JSON、规则 JSON、组件工程副本改接稳定 target/transaction，不新增 Code Workspace 或第三模式。",
+      "request": {
+        "mode": "path",
+        "value": "src/renderer/ui/DeveloperTab.tsx",
+        "size": "medium"
+      },
+      "coverage": [
+        "developer-tab",
+        "runtime",
+        "interactions",
+        "components"
+      ],
+      "rationale": "DeveloperTab is an existing partial feature that must be retained while Store coupling falls.",
+      "evidence": [
+        "docs/development-plan/20-modules/10_UI_COMPOSITION_AND_CODE_WORKSPACE.md"
+      ]
+    },
+    {
+      "id": "GT-018",
+      "milestone": "extended-25",
+      "title": "Batch file-dialog desktop boundary",
+      "queryText": "批量选择图片/音频/视频/组件时，main 对话框过滤、拒绝项、字节读取与 renderer 结果保持一致。",
+      "request": {
+        "mode": "symbol",
+        "value": "selectFileBatch",
+        "size": "medium"
+      },
+      "coverage": [
+        "media",
+        "components",
+        "main",
+        "preload",
+        "ipc"
+      ],
+      "rationale": "Batch dialog tests cover a real delayed desktop operation boundary.",
+      "evidence": [
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "id": "GT-019",
+      "milestone": "extended-25",
+      "title": "Preload/Main IPC parity and close-save",
+      "queryText": "核对 DesktopAPI、preload whitelist、main handlers 与关闭前 request-save-and-close channel 全量一致。",
+      "request": {
+        "mode": "path",
+        "value": "src/preload/index.ts",
+        "size": "medium"
+      },
+      "coverage": [
+        "save",
+        "main",
+        "preload",
+        "ipc"
+      ],
+      "rationale": "IPC parity and close-before-save are explicit desktop hotspots.",
+      "evidence": [
+        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+      ]
+    },
+    {
+      "id": "GT-020",
+      "milestone": "extended-25",
+      "title": "Three tsconfig coverage and shared de-duplication",
+      "queryText": "repo-index/typecheck 如何覆盖 renderer+player、main+preload、e2e，并对 shared 文件去重？",
+      "request": {
+        "mode": "query",
+        "value": "tsconfig renderer player main preload e2e shared 去重",
+        "size": "medium"
+      },
+      "coverage": [
+        "tsconfig",
+        "main",
+        "preload",
+        "player",
+        "e2e"
+      ],
+      "rationale": "ARCH-0B explicitly requires all three TypeScript projects and shared de-duplication.",
+      "evidence": [
+        "docs/development-plan/10-knowledge-system/02_TS7_GENERATOR_AND_ADAPTER.md"
+      ]
+    },
+    {
+      "id": "GT-021",
+      "milestone": "extended-25",
+      "title": "Changed shared IPC impact",
+      "queryText": "changed: src/shared/ipcTypes.ts + src/preload/index.ts；列出受影响 main、renderer 声明、测试和全部 tsconfig。",
+      "request": {
+        "mode": "changed",
+        "size": "medium"
+      },
+      "coverage": [
+        "tsconfig",
+        "main",
+        "preload",
+        "ipc"
+      ],
+      "rationale": "A shared IPC contract participates in all three compiler boundaries.",
+      "evidence": [
+        "docs/development-plan/10-knowledge-system/04_QUERY_CONTEXT_PACK_AND_QUALITY.md"
+      ],
+      "dirtyInputs": [
+        {
+          "path": "src/shared/ipcTypes.ts",
+          "status": " M"
+        },
+        {
+          "path": "src/preload/index.ts",
+          "status": " M"
+        }
+      ]
+    },
+    {
+      "id": "GT-022",
+      "milestone": "extended-25",
+      "title": "Retained V8 release fixtures",
+      "queryText": "为什么产品只打开 V9，但 verify-release 和 render-host benchmark 仍消费 Project V8？哪些可迁移、哪些必须显式保留？",
+      "request": {
+        "mode": "feature",
+        "value": "legacy-release",
+        "size": "medium"
+      },
+      "coverage": [
+        "release",
+        "save",
+        "player"
+      ],
+      "rationale": "LEG-008/009 prevent deleting retained tooling merely because its name contains V8.",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "id": "GT-023",
+      "milestone": "extended-25",
+      "title": "Definition-only V8 validator deletion proof",
+      "queryText": "validateProjectArchiveBytes 是否无消费者？删除前查静态、动态、package、release 和 V9 CLI 替代测试。",
+      "request": {
+        "mode": "symbol",
+        "value": "validateProjectArchiveBytes",
+        "size": "medium"
+      },
+      "coverage": [
+        "diagnostics",
+        "release"
+      ],
+      "rationale": "LEG-010 has definition-only static evidence but not complete packaged deletion proof.",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "id": "GT-024",
+      "milestone": "extended-25",
+      "title": "External Catalog exact package source",
+      "queryText": "修复 com.ittoedu.language.pinyin-annotation@1.2.0 的 runtime.js 渲染错误。",
+      "request": {
+        "mode": "query",
+        "value": "修复 com.ittoedu.language.pinyin-annotation@1.2.0 的 runtime.js 渲染错误",
+        "size": "medium"
+      },
+      "coverage": [
+        "components",
+        "main"
+      ],
+      "rationale": "The exact package is visible only as external Catalog metadata; V1 cannot navigate its source.",
+      "evidence": [
+        "repo-index/semantic/exclusions.json"
+      ]
+    },
+    {
+      "id": "GT-025",
+      "milestone": "extended-25",
+      "title": "Ambiguous latest third-party Catalog source",
+      "queryText": "Catalog 里最新的第三方组件坏了，直接修它的源码。",
+      "request": {
+        "mode": "query",
+        "value": "Catalog 里最新的第三方组件坏了，直接修它的源码",
+        "size": "medium"
+      },
+      "coverage": [
+        "components",
+        "main"
+      ],
+      "rationale": "A vague mutable external input must degrade instead of inventing a package or source path.",
+      "evidence": [
+        "repo-index/semantic/exclusions.json"
+      ]
+    }
+  ]
+}

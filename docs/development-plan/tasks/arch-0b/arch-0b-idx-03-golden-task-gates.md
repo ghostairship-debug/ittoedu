@@ -4,12 +4,12 @@
 
 - Task ID: `arch-0b-idx-03-golden-task-gates`
 - Phase / wave: `ARCH-0B / wave 4`
-- Status: `claimed`
+- Status: `implementing`
 - Owner / Reviewer / Integrator: `Quality Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
 - Worktree / branch: `shared workspace, golden-corpus/evaluator-only scope / codex/architecture-stabilization`
 - Baseline HEAD: `d6fe7e0c57e480f4eed35dc55e0fd5adf893b2a6`
-- Claim commit: `commit containing this claim update`
+- Claim commit: `47e79cce01904dfc5580e45871fdd4b637892659`
 - Context: `fresh repo:context + 25-task corpus design + Bootstrap comparison`
 - Freshness / relevant dirty inputs: clean worktree; repo:index and task board fresh
 - Depends on: `arch-0b-idx-02-query-context-pack (done)`
@@ -73,14 +73,14 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 
 ## Acceptance
 
-- [ ] First 15-task controlled milestone recorded before the 25-task gate
-- [ ] 25 tasks cover every required module and desktop/compiler boundary
+- [x] First 15-task controlled milestone recorded before the 25-task gate
+- [x] 25 tasks cover every required module and desktop/compiler boundary
 - [ ] Canonical file Hit@5 ≥ 90%
 - [ ] Required contract/high-signal test Recall@15 ≥ 85%
-- [ ] High-confidence wrong answer count = 0
-- [ ] Generation < 10 seconds, query P95 < 2 seconds, same inputs byte-identical
-- [ ] Low confidence and external Catalog source queries correctly degrade
-- [ ] Bootstrap time/context-volume comparison shows observable improvement
+- [x] High-confidence wrong answer count = 0
+- [x] Generation < 10 seconds, query P95 < 2 seconds, same inputs byte-identical
+- [x] Low confidence and external Catalog source queries correctly degrade
+- [x] Bootstrap time/context-volume comparison shows observable improvement
 
 ## Minimal validation
 
@@ -92,7 +92,7 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 ## Rollback
 
 - Start point: IDX-02 completion commit
-- Implementation commit: pending
+- Implementation commit: pending; hard quality gates failed, so this card remains implementing and no commit was created
 - Old path remains: manual Bootstrap is mandatory if gates fail.
 
 ## Consumers and index
@@ -103,7 +103,22 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 
 ## Result evidence
 
-- Pending.
+- Added immutable 25-task corpus and separate expected evidence under `repo-index/golden-tasks/`; first 15 are explicitly `controlled-15`, final 10 are `extended-25`.
+- Added evaluator `scripts/repo-index/evaluateGoldenTasks.ts` with unique mode-aware ranked paths, task-level Hit@5, diagnostic `canonicalRecallAt5`, Recall@15, forbidden/high-confidence/fallback checks, P95/generation/determinism, and reproducible Bootstrap locator/path-byte comparison.
+- Added `npm run repo:index:quality` and focused `tests/unit/repoIndexGoldenTasks.test.ts`; focused suite passes 1 file / 4 tests.
+- Recorded controlled and broad results in `docs/development-plan/baselines/ARCH_0B_INDEX_QUALITY.md` before any tuning. Expected evidence was not reduced or rewritten after observation.
+- Controlled 15: task Hit@5 `13/15 = 86.67%` (fail), canonical relation recall at 5 `36/75 = 48.0%` diagnostic, required Recall@15 `30/80 = 37.5%` (fail), high-confidence wrong `0`, forbidden Top 5 `0`, expected low-confidence `1/1`, one expectation mismatch (`GT-002`).
+- Broad 25: task Hit@5 `21/25 = 84.0%` (fail), canonical relation recall at 5 `55/125 = 44.0%` diagnostic, required Recall@15 `52/130 = 40.0%` (fail), high-confidence wrong `0`, forbidden Top 5 `0`, expected low-confidence `4/4` including external `GT-024/025`, one expectation mismatch (`GT-002`).
+- Zero-hit tasks: controlled `GT-001/002`; broad adds `GT-020/025`. Every task has at least one required Recall@15 miss; remaining tasks have partial canonical coverage.
+- Performance/determinism pass with large margin: query P95 `<11 ms`, generation max `<1.3 s`, temporary generations byte-identical, repeated query signature identical.
+- Context volume: 15-task Context Packs `98,474` bytes versus Bootstrap expected read paths `4,495,567` bytes; 25-task `165,905` versus `7,189,215`. Locator timings are reported separately and are not represented as human time.
+- `npm run typecheck` passed all three TypeScript projects. `repo:index:check` and `check:task-board` were run read-only and are expected stale because corpus/package/evaluator/card inputs have not been regenerated/integrated by the Coordinator.
+
+## Findings / next allowed task
+
+- Broad multi-agent dispatch remains blocked. Do not change the corpus or expected sets to pass.
+- Coordinator should open finite tuning cards for: Store object-method symbol recall (`GT-002`); cross-feature image journey association (`GT-001`); tsconfig project membership ranking (`GT-020/021`); exact symbol/path consumer and test expansion (`GT-003/010/013/017/018/023`); and local Catalog boundary recall while retaining low confidence (`GT-024/025`).
+- After tuning, rerun the unchanged quality corpus twice. This card may move to target-green only when both the controlled and broad hard gates pass.
 
 ## Ready checklist (Coordinator)
 
