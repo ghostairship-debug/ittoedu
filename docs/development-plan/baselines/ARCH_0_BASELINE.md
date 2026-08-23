@@ -2,7 +2,7 @@
 
 > Captured: 2026-08-24 (Asia/Shanghai)
 >
-> Status: ARCH-0A focused phase gate is `target-green`; Coordinator review, task-board regeneration, and final state integration remain. See `ARCH_0A_GATE_REPORT.md`.
+> Status: ARCH-0A focused phase gate passed and is `done`. See `ARCH_0A_GATE_REPORT.md`.
 
 ## Repository
 

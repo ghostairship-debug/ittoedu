@@ -1,6 +1,6 @@
 # ARCH-0A Phase Gate Report
 
-> Gate status: `target-green / Coordinator integration pending`
+> Gate status: `done / focused ARCH-0A gate passed`
 >
 > Validation baseline: `c4e7cfcf808c1a3e9aa7c9e19c980806058c10fd`
 >
@@ -81,7 +81,7 @@ Tasks and the generated board are already explicitly excluded from the static Ma
 
 ### Engineering status
 
-`pass for ARCH-0A baseline purpose, pending Coordinator state/board integration`. Governance, rollback, fixture hashes, carrier coverage, 19-module/7-journey ledger, Legacy starting counts, zero-query observations and performance comparison protocol are reproducible. No product source, Schema, dependency or persisted format changed.
+`pass for ARCH-0A baseline purpose`. Governance, rollback, fixture hashes, carrier coverage, 19-module/7-journey ledger, Legacy starting counts, zero-query observations and performance comparison protocol are reproducible. No product source, Schema, dependency or persisted format changed.
 
 ### Outcome status
 
@@ -93,11 +93,6 @@ Tasks and the generated board are already explicitly excluded from the static Ma
 
 ## 6. Gate decision
 
-ARCH-0A has no hidden blocker for the **controlled ARCH-1 characterization and first vertical slice**. The phase may advance after Coordinator:
-
-1. reviews this `target-green` report and advances the gate card;
-2. regenerates/checks the task board for the new card status;
-3. handles the static Manifest wording in its own allowed scope;
-4. respects the separate ARCH-0B context-safety gate required by the roadmap before broad multi-agent product migration.
+ARCH-0A has no hidden blocker for the **controlled ARCH-1 characterization and first vertical slice**. Coordinator review/state integration and the static Manifest wording correction are complete. The separate ARCH-0B context-safety gate remains required by the roadmap before broad multi-agent product migration.
 
 ARCH-1 must use this baseline rather than interpreting existing red/unknown items as green, must preserve all V9 contracts and capabilities, and must stop if its image-replacement slice introduces wrong-target writes, multiple logical histories, save/reopen regression, or HTML/Web regression.

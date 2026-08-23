@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0a-gate-00-phase-validation`
 - Phase / wave: `ARCH-0A / phase gate`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Validation Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `primary workspace / codex/architecture-stabilization`
 - Baseline HEAD: `305eb648141230471a9975bf3fa3facf97a0d0aa`
 - Claim commit: `32429c7d123335e761c24e931c60a8405aa411d3`
@@ -86,7 +86,7 @@ Baseline, task board, representative fixtures, and consumer inventory are integr
 ## Rollback
 
 - Start point: final ARCH-0A implementation task commit
-- Implementation commit: not created; Worker was instructed not to commit
+- Implementation commit: `eaab68c5bbdc38d0f07cb62ec9a37c97d08cc745`
 - Old path remains: individual task evidence remains authoritative.
 
 ## Consumers and index
@@ -114,6 +114,7 @@ Baseline, task board, representative fixtures, and consumer inventory are integr
 - Explicit classification: Mixed PPTX `red`; React key warning registered; Native Save As / real OS IME / trusted pointer / OS PDF `unknown`; these are non-blocking for the controlled Slide-first ARCH-1 slice but remain blocking for any claim that their own outcome is green.
 - Layered decision: focused pipeline pass; ARCH-0A engineering purpose pass pending Coordinator integration; outcome partial/engineering-fixture only; `accepted` not evaluated.
 - No full verify, full E2E, desktop package, product source/test/script, contract, package, inventory, performance/raw or repo-index write occurred.
+- Coordinator integration: report/baseline/card were reviewed and committed; static Manifest scope was clarified in `bf768acfeeed22ded46bb2144b46b4dee5e992a3`; task-board regeneration/check is part of this completion update.
 
 ## Findings / next allowed task
 
