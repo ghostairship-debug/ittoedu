@@ -6,12 +6,12 @@
 
 - Task ID: `arch-1-vs-05-image-replacement-app-store-integration`
 - Phase / wave: `ARCH-1 / first vertical slice integration`
-- Status: `implementing`
+- Status: `target-green`
 - Owner / Reviewer / Integrator: `Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 03:09 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 03:09 Asia/Shanghai / target-green 2026-08-24 03:26 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `6113d83e389d5c6e5e674ec183ef03b3045f4820`
-- Claim commit: `pending`
+- Claim commit: `5b17e93f84ebff07633ab455a427e50b000cc694`
 - Context Pack + manifest hash | bootstrap-manual: `feature:image-replacement-journey, fresh/high/safe-for-S2; sourceTree d4dd9b0d, semantic 1dbbc03a, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree; App, Store and Slide History locks exclusively held by this Coordinator`
 - Depends on: `arch-1-vs-02, arch-1-vs-03 and arch-1-vs-04 done`
@@ -25,7 +25,7 @@ Clicking “replace image” captures image A before the dialog; dialog completi
 
 ## Current status and evidence
 
-`partial / known wrong-target risk`
+`target-green / Store and App integration complete; desktop regression pending VS-06`
 
 - `App.tsx#selectAndImportImage('replace')` awaits `selectImage()` and only then reads `selectSelectedNode(useEditorStore.getState())`.
 - `editorStore.replaceImageAsset(nodeId, asset, bytes)` receives no project/revision/generation/surface/location/owner target.
@@ -227,19 +227,21 @@ All three are held by this task's Coordinator. VS-02/03/04 and every other App/S
 
 - Start point: `pending reviewed VS-02/VS-03/VS-04 integration baseline`
 - Pure implementation commit: `VS-02/03/04 commits; retained if independently green`
-- Hotspot integration commit: `pending single VS-05 commit`
+- Hotspot integration commit: `c85d6e0b33110ee1c24f380e1cee1dd5b5ee46b3`
 - Generated commit: `none`
 - Old path remains: old App/Store path remains recoverable until VS-06 passes; rollback the VS-05 integration commit as one unit.
 - User data copy/restore note: tests use in-memory or copied fixtures only; never overwrite a user or representative source file.
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`
-- Behavior before/after: `pending`
-- Validation results: `pending`
-- Known risks/findings: `pending`
-- indexImpact: `regenerate`
-- Next allowed task: `VS-06 after VS-05 is reviewed and integrated`
+- Consumers migrated/remaining: `App now captures CourseAuthoringTarget before selectImage() and calls replaceImageAssetAtTarget after the dialog. The old nodeId-only replaceImageAsset declaration, implementation, App call and test consumer are removed; exact source/test grep returns zero. No compatibility overload remains.`
+- Behavior before/after: `Before, dialog completion read the then-current selection and wrote V9 metadata plus a full sidecar snapshot. After, capture uses the existing CourseAuthoringSession token and a fresh effective Slide image row; commit rebuilds current project/surface/state/scope identity, invokes the VS-04 planner, creates a VS-03 step, and persists its document/resource transition in one Zustand set. Same-scene A→B keeps B selected but writes captured A. Project/session/location/state/owner/item/revision/lock/conflict failures return structured zero-write results; App turns them into actionable UserFacingError feedback.`
+- History/resource evidence: `Slide history remains the only logical timeline and now supports mixed bare legacy snapshots and editor-transaction frames. A frame carries cloned resourceChanges, including an explicit empty delta; undo/inverse and redo/forward move the same frame. Delta steps do not grow full sidecar/package stacks, while bare-frame counts keep legacy past/future snapshots aligned through a 100-step cap and branch truncation. Actual Slide undo/redo advances the existing Course Session generation in the same set, closing revision ABA for delayed targets.`
+- Validation results: `11 focused files / 109 tests passed, covering App race/cancel, A→B, exact revision, owner/state codes, ABA, same-ID conflicts, legacy→delta→legacy, branch-after-undo, save/reopen, Published V2 and standalone HTML. npm run typecheck passed root/Electron/E2E. Three representative projects each returned schema valid/status valid/canExport=true. ARCH-0 fixture determinism and flow tests passed 2 files / 9 tests. Independent Store and History reviewers reported no remaining blocker; diff hygiene passed.`
+- Pipeline/outcome status: `pipeline engineering candidate; Store-level and jsdom App behavior are target-green. No desktop-visible accepted claim is made here; VS-06 owns native dialog/desktop regression and ARCH-1 gate.`
+- Known risks/findings: `LEG-001 derived V8 projection/history compatibility remains intentionally nonzero. App/Store/Slide history are still hotspots. The transaction frame is editor-memory state only and is not persisted; save/reopen correctly starts a fresh history. No Schema, IPC, Player, Published producer or export writer changed.`
+- indexImpact: `regenerate after this task-state integration; no semantic record change required`
+- Next allowed task: `VS-06 after deterministic repo-index refresh and a fresh Context Pack`
 
 ## Ready checklist（Coordinator）
 
