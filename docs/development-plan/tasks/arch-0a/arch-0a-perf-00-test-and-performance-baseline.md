@@ -4,15 +4,15 @@
 
 - Task ID: `arch-0a-perf-00-test-and-performance-baseline`
 - Phase / wave: `ARCH-0A / wave 2`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / codex/architecture-stabilization`
-- Baseline HEAD: `6893d25449511ef281c9399d6dd740d126a25bb6`
-- Claim commit: `pending`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Validation Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, baseline evidence-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `941ee9275fed73964558c7ff4f68eecb30d61ced`
+- Claim commit: `commit containing this claim update`
 - Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: recheck after representative fixture integration
-- Depends on: `arch-0a-rep-00-v9-representative-projects (target-green then integrated)`
+- Freshness / relevant dirty inputs: representative fixtures integrated and independently revalidated; inventory/repo-index paths are disjoint
+- Depends on: `arch-0a-rep-00-v9-representative-projects (done)`
 - Blocks: ARCH-0A performance/manual-flow gate; product-code migration comparison
 - Retry count: `0`
 
@@ -104,10 +104,10 @@ Static checks and 202/1263 Vitest baseline are recorded, but no current represen
 
 ## Ready checklist (Coordinator)
 
-- [ ] representative fixtures integrated
-- [ ] context refreshed
-- [ ] paths and commands validated
-- [ ] write scope clean and lock-free
-- [ ] retry/validation/rollback complete
-- [ ] no user dirty changes
-- [ ] no product escalation
+- [x] representative fixtures integrated
+- [x] context refreshed
+- [x] paths and commands validated
+- [x] write scope clean and lock-free
+- [x] retry/validation/rollback complete
+- [x] no user dirty changes
+- [x] no product escalation
