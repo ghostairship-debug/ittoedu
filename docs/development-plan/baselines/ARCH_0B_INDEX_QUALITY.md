@@ -4,7 +4,9 @@
 >
 > Corpus: `GT-001`–`GT-025`; controlled milestone: first 15 tasks.
 >
-> Quality signature: `c22c6fd5bf8c6b7a2898c7334c08f81e517c030a034b353ef3c3f7eeba66c46d`.
+> Current correctness-retry signature: `fe47d786c024aec000e28615c8ff35cfcdaae583c9b5de5b7490c12f8807f3fd`.
+>
+> Initial baseline signature: `c22c6fd5bf8c6b7a2898c7334c08f81e517c030a034b353ef3c3f7eeba66c46d`.
 
 ## 1. Fixed inputs and method
 
@@ -79,7 +81,7 @@ Broad zero-hit tasks: `GT-001`, `GT-002`, `GT-020`, `GT-025`. The other 21 tasks
 
 Broad gate failed on `hitAt5`, `recallAt15`, and `confidenceOrBootstrapExpectation`.
 
-## 4. Per-task evidence gaps
+## 4. Initial pre-tuning per-task evidence gaps
 
 `H5` below is the stricter retrieved/expected canonical relation count, retained as `canonicalRecallAt5`; task-level binary Hit@5 is reported separately above. `R15` is retrieved/expected relation count. No expected set was shortened to improve these numbers.
 
@@ -142,3 +144,49 @@ The 15-task controlled milestone and 25-task broad-dispatch gate remain closed u
 - `npm run repo:index:check` — read-only expected stale: generated facts differ after adding package/corpus/evaluator/test inputs.
 - `npm run check:task-board` — expected stale while this live task card is not integrated.
 - Generated facts and task board were not refreshed by this Worker.
+
+## 8. Evaluator correctness retry after semantic-signal tuning
+
+This retry kept `GT-001`–`GT-025`, every expected relation, confidence expectation, threshold, query implementation and semantic input unchanged. The evaluator correction only stopped treating `matchedFiles` and `matchedSymbols` as exact results for Feature/free-text modes. Those arrays contain the full matched feature/candidate path set in those modes, so ranking them alphabetically ahead of semantic high-signal paths was incorrect. Symbol/path/changed modes continue to rank exact facts before semantic evidence; Feature/free-text modes now rank semantic canonical/entrypoint, ordered candidates, then related evidence. Paths remain unique.
+
+Focused validation: `npx vitest run tests/unit/repoIndexGoldenTasks.test.ts` passed `1 file / 4 tests`.
+
+### Controlled 15 after the correctness retry
+
+| Metric | Result | Gate |
+|---|---:|---|
+| Canonical task Hit@5 | `15 / 15 = 100%` | pass |
+| Canonical relation recall at 5 | `55 / 75 = 73.33%` | diagnostic |
+| Required Recall@15 | `58 / 80 = 72.5%` | **fail** |
+| High-confidence wrong | `0` | pass |
+| Forbidden Top 5 relations | `0` | pass |
+| Confidence/bootstrap expectation mismatches | `0` | pass |
+| Expected low-confidence fallbacks | `1 / 1` | pass |
+| Query P95 | `16.52 ms` | pass |
+| Generation max | `1,270.98 ms` | pass |
+| Index/query deterministic | `true / true` | pass |
+| Context Pack / Bootstrap read-path bytes | `129,040 / 4,506,819` | informational |
+| Context volume reduction | `97.14%` | pass |
+
+Controlled zero-hit tasks: none. Partial canonical tasks: `GT-002/003/004/005/006/010/011/012`. Required-recall gaps remain in `GT-001/002/003/004/006/010/011/012/013/014`.
+
+### Broad 25 after the correctness retry
+
+| Metric | Result | Gate |
+|---|---:|---|
+| Canonical task Hit@5 | `25 / 25 = 100%` | pass |
+| Canonical relation recall at 5 | `86 / 125 = 68.8%` | diagnostic |
+| Required Recall@15 | `86 / 130 = 66.15%` | **fail** |
+| High-confidence wrong | `0` | pass |
+| Forbidden Top 5 relations | `1` (`GT-024`) | **fail** |
+| Confidence/bootstrap expectation mismatches | `0` | pass |
+| Expected low-confidence fallbacks | `4 / 4` | pass |
+| Query P95 | `13.80 ms` | pass |
+| Generation max | `1,270.98 ms` | pass |
+| Index/query deterministic | `true / true` | pass |
+| Context Pack / Bootstrap read-path bytes | `221,961 / 7,200,467` | informational |
+| Context volume reduction | `96.92%` | pass |
+
+Broad zero-hit tasks: none. Partial canonical tasks: `GT-002/003/004/005/006/010/011/012/016/018/019/020/021/022/023/024/025`. Required-recall gaps remain in `GT-001/002/003/004/006/010/011/012/013/014/017/018/019/020/022/023/024/025`. `GT-024` now correctly reaches the local Catalog boundary, but its fixed forbidden UI path also enters Top 5; that is reported as a real remaining gap rather than hidden by changing expected data.
+
+The corrected run produced signature `fe47d786c024aec000e28615c8ff35cfcdaae583c9b5de5b7490c12f8807f3fd`; both temporary generations had hash `sha256:4201ce8aa87b0c8333e91d92641a0b40c72536b8634c21bdb5203fc28faed6a4`, and repeated queries inside the evaluator were deterministic. The hard gate remains closed on controlled/broad Recall@15 and broad forbidden Top 5. No further tuning was performed in this retry.

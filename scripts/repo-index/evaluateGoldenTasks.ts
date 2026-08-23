@@ -215,8 +215,10 @@ function edgeFilePath(id: string): string | undefined {
 
 /**
  * Ranking is deliberately small and explainable. It does not reproduce the
- * import graph: semantic canonical files win, then semantic entrypoints,
- * exact file/symbol matches, ordered candidates, and finally related evidence.
+ * import graph. Symbol/path/changed queries start from exact facts, then add
+ * semantic evidence. Feature/free-text queries start from semantic evidence;
+ * their broad matched file/symbol sets are candidate inputs, not exact hits.
+ * Ordered candidates and related evidence follow in both cases.
  */
 export function rankQueryPaths(result: QueryResult): RankedPath[] {
   const ranked: Omit<RankedPath, 'rank'>[] = []
@@ -246,7 +248,6 @@ export function rankQueryPaths(result: QueryResult): RankedPath[] {
     addSemantic()
   } else {
     addSemantic()
-    addExact()
   }
   result.candidates.forEach((candidate) => {
     candidate.paths.forEach((path) => add(path, 'candidate', `candidate:${candidate.id}`))

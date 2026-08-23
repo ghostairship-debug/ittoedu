@@ -191,30 +191,43 @@ describe('repo-index golden task gates', () => {
     }
   })
 
-  it('ranks unique paths by canonical, entrypoint, exact, candidate, then related evidence', () => {
+  it('ranks unique paths by query mode without treating broad feature matches as exact', () => {
     expect(rankQueryPaths(syntheticQueryResult())).toEqual([
       { rank: 1, path: 'canonical-a.ts', source: 'canonical', reason: 'feature:synthetic:canonical' },
       { rank: 2, path: 'shared.ts', source: 'canonical', reason: 'feature:synthetic:canonical' },
       { rank: 3, path: 'entrypoint-b.ts', source: 'entrypoint', reason: 'feature:synthetic:entrypoint' },
-      { rank: 4, path: 'exact-c.ts', source: 'exact', reason: 'matched-file:file:exact-c.ts' },
-      { rank: 5, path: 'exact-d.ts', source: 'exact', reason: 'matched-symbol:exactD' },
-      { rank: 6, path: 'candidate-e.ts', source: 'candidate', reason: 'candidate:candidate:e' },
-      { rank: 7, path: 'runtime-f.ts', source: 'related', reason: 'feature:synthetic:runtime-consumer' },
-      { rank: 8, path: 'related-g.ts', source: 'related', reason: 'query-relevant' },
-      { rank: 9, path: 'related-test-h.ts', source: 'related', reason: 'related-test:test:h' },
-      { rank: 10, path: 'edge-i.ts', source: 'related', reason: 'edge:imports' },
+      { rank: 4, path: 'candidate-e.ts', source: 'candidate', reason: 'candidate:candidate:e' },
+      { rank: 5, path: 'runtime-f.ts', source: 'related', reason: 'feature:synthetic:runtime-consumer' },
+      { rank: 6, path: 'related-g.ts', source: 'related', reason: 'query-relevant' },
+      { rank: 7, path: 'related-test-h.ts', source: 'related', reason: 'related-test:test:h' },
+      { rank: 8, path: 'edge-i.ts', source: 'related', reason: 'edge:imports' },
     ])
 
-    const symbolResult = syntheticQueryResult()
-    symbolResult.request = { mode: 'symbol', value: 'exactD', size: 'medium' }
-    expect(rankQueryPaths(symbolResult).slice(0, 5).map(({ path, source }) => ({ path, source })))
-      .toEqual([
-        { path: 'exact-c.ts', source: 'exact' },
-        { path: 'exact-d.ts', source: 'exact' },
-        { path: 'canonical-a.ts', source: 'canonical' },
-        { path: 'shared.ts', source: 'canonical' },
-        { path: 'entrypoint-b.ts', source: 'entrypoint' },
-      ])
+    const queryBase = syntheticQueryResult()
+    const queryResult: QueryResult = {
+      ...queryBase,
+      request: { mode: 'query', value: 'exactD', size: 'medium' },
+      candidates: queryBase.candidates.map((candidate, index) => index === 0
+        ? { ...candidate, paths: ['exact-d.ts', ...candidate.paths] }
+        : candidate),
+    }
+    expect(rankQueryPaths(queryResult).find(({ path }) => path === 'exact-d.ts'))
+      .toMatchObject({ source: 'candidate', reason: 'candidate:candidate:e' })
+    expect(rankQueryPaths(queryResult).some(({ path }) => path === 'exact-c.ts'))
+      .toBe(false)
+
+    for (const mode of ['symbol', 'path', 'changed'] as const) {
+      const exactResult = syntheticQueryResult()
+      exactResult.request = { mode, value: 'exactD', size: 'medium' }
+      expect(rankQueryPaths(exactResult).slice(0, 5).map(({ path, source }) => ({ path, source })))
+        .toEqual([
+          { path: 'exact-c.ts', source: 'exact' },
+          { path: 'exact-d.ts', source: 'exact' },
+          { path: 'canonical-a.ts', source: 'canonical' },
+          { path: 'shared.ts', source: 'canonical' },
+          { path: 'entrypoint-b.ts', source: 'entrypoint' },
+        ])
+    }
   })
 
   it('computes hard metrics without requiring the live corpus to pass', () => {
