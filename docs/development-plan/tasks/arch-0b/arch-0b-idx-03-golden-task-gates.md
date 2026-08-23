@@ -4,14 +4,14 @@
 
 - Task ID: `arch-0b-idx-03-golden-task-gates`
 - Phase / wave: `ARCH-0B / wave 4`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / codex/architecture-stabilization`
-- Baseline HEAD: `1899deb33eb9b7cef13a3ad2ccbe1018d5eca171`
-- Claim commit: `pending`
-- Context: `repo:context after IDX-02; Bootstrap comparison is required`
-- Freshness / relevant dirty inputs: refresh after query integration
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Quality Worker / Coordinator / Coordinator`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Worktree / branch: `shared workspace, golden-corpus/evaluator-only scope / codex/architecture-stabilization`
+- Baseline HEAD: `d6fe7e0c57e480f4eed35dc55e0fd5adf893b2a6`
+- Claim commit: `commit containing this claim update`
+- Context: `fresh repo:context + 25-task corpus design + Bootstrap comparison`
+- Freshness / relevant dirty inputs: clean worktree; repo:index and task board fresh
 - Depends on: `arch-0b-idx-02-query-context-pack (done)`
 - Blocks: ARCH-0B exit; ARCH-2 broad multi-agent gate
 - Retry count: `0`
@@ -107,8 +107,8 @@ No current golden-task corpus, expected path/contract/test set, evaluator, Hit@5
 
 ## Ready checklist (Coordinator)
 
-- [ ] IDX-02 done and index fresh
-- [ ] 25 evidence-backed task candidates selected
-- [ ] corpus/evaluator scope and budget validated
-- [ ] no relevant user dirty changes
-- [ ] no product escalation
+- [x] IDX-02 done and index fresh
+- [x] 25 evidence-backed task candidates selected
+- [x] corpus/evaluator scope and budget validated
+- [x] no relevant user dirty changes
+- [x] no product escalation
