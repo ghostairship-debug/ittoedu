@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-a-06-resource-safety-gate`
 - Phase / wave: `ARCH-2 / W2-A resource safety gate`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent validation reviewers / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / done 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
 - Baseline HEAD: `04c9949`
 - Claim commit: `847972c`
@@ -47,14 +47,14 @@ W2-A closes only when asset and component package deltas are real cross-Surface 
 
 ## Acceptance
 
-- [ ] Resource-aware histories are 3/3 and both product delta kinds have real consumers.
-- [ ] Media library and component replacement before/after matrices meet A-00 targets.
-- [ ] Old per-item media loop, V8 replacement planner, retarget helper and replacement empty fallback are zero.
-- [ ] Structural full-snapshot fields remain honestly nonzero with their remaining exact consumers named.
-- [ ] FlowComponentBlock and all Surface carriers remain unchanged except intended versions.
-- [ ] Focused, representative, typecheck, contracts/capabilities/index/task-board and performance gates pass.
-- [ ] Dependency ratchet fails if removed paths return.
-- [ ] Pipeline/outcome/accepted status are reported separately.
+- [x] Resource-aware histories are 3/3 and both product delta kinds have real consumers.
+- [x] Media library and component replacement before/after matrices meet A-00 targets.
+- [x] Old per-item media loop, V8 replacement planner, retarget helper and replacement empty fallback are zero.
+- [x] Structural full-snapshot fields remain honestly nonzero with their remaining exact consumers named.
+- [x] FlowComponentBlock and all Surface carriers remain unchanged except intended versions.
+- [x] Focused, representative, typecheck, contracts/capabilities/index/task-board and performance gates pass.
+- [x] Dependency ratchet fails if removed paths return.
+- [x] Pipeline/outcome/accepted status are reported separately.
 
 ## Minimal validation
 
@@ -72,4 +72,11 @@ W2-A closes only when asset and component package deltas are real cross-Surface 
 
 ## Result evidence
 
-- Pending consumer audit, performance comparison, ratchet and final gate validation.
+- Gate evidence commit: `7141956`; final deterministic index refresh: `df0d0ed`.
+- Exact consumer audit passed all requested reductions while preserving 41 sidecar and 19 package snapshot reference lines as explicit remaining debt. New pure public seams have only real bounded consumers: Media planner→Store 1, Components planner→Store 1, shared history helper→Flow/Spatial 2.
+- Dependency ratchet passed 8/8 and prevents removed Store fallbacks, target-after-await regressions, Surface resource-frame loss and Feature→App/UI/editorStore reverse dependencies.
+- Same-fixture performance passed 22/22 metrics with no threshold breach; no new functional red. Mixed/Spatial PPTX remains the registered ARCH-4 red.
+- A-01–A-05 focused, independent reviews, three validators, fixture determinism, save/reopen and Published V2/API 4 passed. Contracts, AI capabilities and all three TypeScript projects passed.
+- Final stable repo-index signature is `116730d...`; controlled Recall=95%, broad Recall=85.3846%, zero forbidden/wrong. Final clean full suite passed 224 files / 1,377 tests in 191.16s.
+- Pipeline=`pass / engineering candidate`; W2-A functional outcome=`green`; visual outcome=`unchanged art candidate`; accepted=`not claimed`.
+- Next allowed work: ARCH-2 W2-B Runtime / Interactions, then shared scope/Diagnostics/Save-Recovery, with fresh Context Packs and the same hotspot locks.

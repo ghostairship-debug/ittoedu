@@ -111,6 +111,8 @@ Mixed history 50 commits/depth 50，heap delta `+25,677,064 bytes`；与 ARCH-0 
 - three fixture validators：3/3 `status=valid`, `canExport=true`；fixture SHA deterministic；
 - contracts、AI capabilities、task board、repo-index freshness/quality 和 final clean full-test rerun：见本 gate 最终提交后的命令记录。
 
+Final index quality signature：`116730d45737aed3ceadf18dfc68707be4ffb9e07fe0704d7f818b89764ba1f5`；controlled Hit@5 `100%` / Recall@15 `95%`，broad Hit@5 `100%` / Recall@15 `85.3846%`，0 forbidden、0 high-confidence wrong。Gate evidence/index 固定后 clean `npm test -- --run` 再次通过 224 files / 1,377 tests（191.16s）。
+
 不在 W2-A 重跑 desktop E2E：本波次没有新可见 UI、placement、Player 或 export implementation；真实风险是 async target + Store/resource/history，已由 5 个 pure/history suites、两个 App deferred race、三 Surface vertical slices、archive reopen 与 Published read-only 覆盖。完整 desktop/E2E 仍在 ARCH-2 phase gate。
 
 ## 7. Ratchet 与当前事实
