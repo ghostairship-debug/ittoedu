@@ -5,15 +5,36 @@
       "schemaVersion": 1,
       "id": "feature:course-project-v9",
       "name": "Course Project V9",
-      "aliases": ["作者工程", "V9 project"],
+      "aliases": [
+        "course-project",
+        "V9",
+        "作者工程",
+        "工程合同"
+      ],
       "origin": "semantic",
       "statusClass": "current-must-preserve",
+      "owner": "Shared Contracts/Domain",
+      "moduleIds": [
+        "module:shared-contracts"
+      ],
+      "currentFact": "Schema 9 strict contract is the only supported authoring project.",
+      "targetState": "Preserve all existing fields, discriminators and semantics.",
       "canonicalFiles": [
         "src/shared/contracts/course-project-v9/index.ts",
-        "src/shared/contracts/course-project-v9/types.ts"
+        "src/shared/contracts/course-project-v9/types.ts",
+        "src/shared/contracts/course-project-v9/schema.ts"
       ],
-      "entrypoints": ["src/shared/contracts/course-project-v9/index.ts"],
-      "tests": ["tests/unit/courseProjectCoreContract.test.ts"],
+      "entrypoints": [
+        "src/shared/contracts/course-project-v9/index.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/renderer/project/courseProjectArchive.ts"
+      ],
+      "tests": [
+        "tests/unit/courseProjectCoreContract.test.ts",
+        "tests/unit/courseProjectTopLevelFields.test.ts"
+      ],
       "evidence": [
         "docs/contracts/COURSE_PROJECT_V9.md",
         "docs/contracts/V9_COMPATIBILITY_POLICY.md"
@@ -23,51 +44,774 @@
       "schemaVersion": 1,
       "id": "feature:published-course-v2",
       "name": "Published Course V2",
-      "aliases": ["V2 publish", "CoursePlayer payload"],
+      "aliases": [
+        "published-v2",
+        "V2 payload",
+        "发布格式"
+      ],
       "origin": "semantic",
       "statusClass": "current-must-preserve",
+      "owner": "Published Producer / Export",
+      "moduleIds": [
+        "module:shared-contracts",
+        "module:export-delivery",
+        "module:preview-player"
+      ],
+      "currentFact": "One-way V9 to Published V2 producer and three Surface hosts exist.",
+      "targetState": "Keep one serialized producer owner and readonly consumers.",
       "canonicalFiles": [
         "src/shared/contracts/published-course-v2/index.ts",
         "src/renderer/export/course/buildPublishedCourse.ts"
       ],
-      "entrypoints": ["src/renderer/export/course/buildPublishedCourse.ts"],
-      "runtimeConsumers": ["src/player/surfaces/CoursePlayer.ts"],
-      "tests": ["tests/unit/buildPublishedCourseV2.test.ts"],
-      "evidence": ["docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"]
+      "entrypoints": [
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "runtimeConsumers": [
+        "src/player/surfaces/CoursePlayer.ts",
+        "src/player/surfaces/publishedDynamicHosts.ts"
+      ],
+      "tests": [
+        "tests/unit/buildPublishedCourseV2.test.ts",
+        "tests/unit/publishedCourseNavigation.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+      ]
     },
     {
       "schemaVersion": 1,
       "id": "feature:editor-core",
       "name": "Editor Core",
-      "aliases": ["Store", "transaction", "history", "authoring target"],
+      "aliases": [
+        "editor-core",
+        "Store",
+        "transaction",
+        "history",
+        "authoring target"
+      ],
       "origin": "semantic",
       "statusClass": "current-debt",
+      "owner": "Editor Core",
+      "moduleIds": [
+        "module:editor-core"
+      ],
+      "currentFact": "Exactly one V9 session is active, but three Surface histories and a V8-shaped projection coexist.",
+      "targetState": "One canonical V9 transaction/history port evolved from the current authoring session.",
       "canonicalFiles": [
         "src/renderer/store/editorStore.ts",
-        "src/renderer/authoring/courseAuthoringSession.ts"
+        "src/renderer/authoring/courseAuthoringSession.ts",
+        "src/renderer/authoring/courseAuthoringScope.ts",
+        "src/renderer/store/history.ts"
       ],
-      "entrypoints": ["src/renderer/course/read-model/index.ts"],
-      "tests": ["tests/unit/readModelBoundary.test.ts"],
+      "entrypoints": [
+        "src/renderer/course/read-model/index.ts",
+        "src/renderer/store/editorStore.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/App.tsx",
+        "src/renderer/ui/Workspace.tsx"
+      ],
+      "tests": [
+        "tests/unit/readModelBoundary.test.ts",
+        "tests/unit/courseAuthoringSession.test.ts",
+        "tests/unit/v9SlideBackendSelection.test.ts"
+      ],
       "evidence": [
-        "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md"
+        "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md",
+        "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:slide",
+      "name": "Slide Authoring",
+      "aliases": [
+        "slide",
+        "演示页",
+        "场景",
+        "presentation state"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Surface/Slide",
+      "moduleIds": [
+        "module:surface-slide"
+      ],
+      "currentFact": "Slide LayerItem/state commands and Phaser edit hit-testing exist behind Store integration.",
+      "targetState": "Expose narrow Slide commands/selectors while preserving Phaser edit-only responsibility.",
+      "canonicalFiles": [
+        "src/renderer/course/slideAuthoringBackend.ts",
+        "src/renderer/course/v9SlideContentCommands.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/course/slideAuthoringBackend.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/phaser/v9SlideHitAdapter.ts",
+        "src/player/surfaces/slide/SlidePublishedAdapter.ts"
+      ],
+      "tests": [
+        "tests/unit/v9SlideDomain.test.ts",
+        "tests/unit/v9SlideProductIntegration.test.tsx"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:flow",
+      "name": "Flow Authoring",
+      "aliases": [
+        "flow",
+        "流式讲义",
+        "稿纸",
+        "FlowBlock"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Surface/Flow",
+      "moduleIds": [
+        "module:surface-flow"
+      ],
+      "currentFact": "FlowBlock body, overlay LayerItems, IME and formatting commands exist but remain coupled through Store/UI hotspots.",
+      "targetState": "Preserve document order and keep body blocks distinct from overlay z-order.",
+      "canonicalFiles": [
+        "src/renderer/course/flowEditorCommands.ts",
+        "src/renderer/course/flowEditorSlice.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/course/flowEditorCommands.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/ui/FlowWorkspace.tsx",
+        "src/player/surfaces/flow/FlowSurfaceHost.ts"
+      ],
+      "tests": [
+        "tests/unit/flowEditorCommands.test.ts",
+        "tests/unit/flowProductIntegration.test.tsx"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:spatial",
+      "name": "Spatial Authoring",
+      "aliases": [
+        "spatial",
+        "spatial-2d",
+        "无限画布",
+        "世界相机"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Surface/Spatial",
+      "moduleIds": [
+        "module:surface-spatial"
+      ],
+      "currentFact": "World items, persisted camera/path/relation and non-persisted session camera exist.",
+      "targetState": "Modularize Spatial commands without writing session camera into V9.",
+      "canonicalFiles": [
+        "src/renderer/course/spatialEditorCommands.ts",
+        "src/renderer/course/spatialAuthoringHistory.ts",
+        "src/renderer/course/spatialEditorView.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/course/spatialEditorCommands.ts"
+      ],
+      "runtimeConsumers": [
+        "src/player/surfaces/spatial/SpatialSurfaceHost.ts"
+      ],
+      "tests": [
+        "tests/unit/spatialProductIntegration.test.tsx",
+        "tests/unit/spatialPathPipeline.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:media",
+      "name": "Media and Asset Sidecars",
+      "aliases": [
+        "media",
+        "素材",
+        "sidecar",
+        "图片替换",
+        "音视频"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Media + Surface Placement",
+      "moduleIds": [
+        "module:feature-media"
+      ],
+      "currentFact": "V9 AssetMeta and sidecar bytes exist, but cross-Surface transaction/history is not unified.",
+      "targetState": "One stable-target logical commit for metadata, bytes and placement.",
+      "canonicalFiles": [
+        "src/renderer/course/v9MediaAudioCommands.ts",
+        "src/renderer/project/v9AssetAdapter.ts",
+        "src/renderer/project/assetManager.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/course/v9MediaAudioCommands.ts",
+        "src/renderer/ui/MediaTab.tsx"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "tests": [
+        "tests/unit/v9MediaTabAdapter.test.tsx",
+        "tests/unit/assetTransactions.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/06_MEDIA_ASSETS_AND_SIDECARS.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:components",
+      "name": "Components",
+      "aliases": [
+        "components",
+        "Component API 4",
+        "组件包",
+        "组件实例"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Components",
+      "moduleIds": [
+        "module:feature-components"
+      ],
+      "currentFact": "Package lifecycle and three-Surface mounting exist; placement/public seams remain coupled.",
+      "targetState": "Components owns packages and validation; Surfaces own correct carrier placement.",
+      "canonicalFiles": [
+        "src/shared/contracts/component-v4/schema.ts",
+        "src/renderer/components/componentPackageStore.ts",
+        "src/renderer/components/importComponentPackage.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/components/componentPackageStore.ts",
+        "src/renderer/components/importComponentPackage.ts"
+      ],
+      "runtimeConsumers": [
+        "src/player/surfaces/publishedComponentMount.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "tests": [
+        "tests/unit/componentPackage.test.ts",
+        "tests/unit/publishedComponentMount.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/04_COMPONENTS.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:runtime",
+      "name": "Runtime API 2 and 3",
+      "aliases": [
+        "runtime",
+        "Runtime API 2",
+        "Runtime API 3",
+        "canvas-runtime",
+        "surface-runtime"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Runtime",
+      "moduleIds": [
+        "module:runtime-interactions"
+      ],
+      "currentFact": "Runtime contracts, isolated hosts and DeveloperTab editing exist.",
+      "targetState": "Narrow authoring/validation/host ports with no Player writeback.",
+      "canonicalFiles": [
+        "src/shared/contracts/runtime/schema.ts",
+        "src/shared/contracts/runtime/types.ts",
+        "src/player/RuntimeHost.ts"
+      ],
+      "entrypoints": [
+        "src/player/RuntimeHost.ts",
+        "src/player/CourseRuntimeKernel.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/ui/DeveloperTab.tsx",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "tests": [
+        "tests/unit/runtimeHostV2.test.ts",
+        "tests/unit/surfaceRuntimeAuthoring.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:interactions",
+      "name": "Interactions",
+      "aliases": [
+        "interactions",
+        "InteractionRule",
+        "互动规则",
+        "Automation"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Interactions",
+      "moduleIds": [
+        "module:runtime-interactions"
+      ],
+      "currentFact": "Simple templates, professional rule UI and InteractionEngine share the V1 contract.",
+      "targetState": "Typed view models and transaction-backed commands without a parallel rule format.",
+      "canonicalFiles": [
+        "src/shared/contracts/interaction-v1/schema.ts",
+        "src/shared/contracts/interaction-v1/types.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/ui/InteractionEditor.tsx",
+        "src/renderer/ui/AutomationTab.tsx"
+      ],
+      "runtimeConsumers": [
+        "src/player/InteractionEngine.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "tests": [
+        "tests/unit/interactionEditor.test.tsx",
+        "tests/unit/interactionEngine.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:global-layers-controller",
+      "name": "Global Layers and Teacher Controller",
+      "aliases": [
+        "global-layers",
+        "layers",
+        "全局层",
+        "共享层",
+        "teacher-controller",
+        "教师控制器"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "owner": "Global Layers + Teacher Controller",
+      "moduleIds": [
+        "module:global-layers-controller"
+      ],
+      "currentFact": "Global/surface ownership, effective order and one global controller are established.",
+      "targetState": "Preserve ownership and stable authoringAddress while narrowing integration.",
+      "canonicalFiles": [
+        "src/renderer/course/effectiveLayerCommands.ts",
+        "src/renderer/course/effectiveLayerProjection.ts",
+        "src/renderer/authoring/v9TeacherControllerAuthoring.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/course/effectiveLayerCommands.ts"
+      ],
+      "runtimeConsumers": [
+        "src/player/renderTeacherController.ts"
+      ],
+      "tests": [
+        "tests/unit/effectiveLayerCommands.test.ts",
+        "tests/unit/teacherControllerRuntimeSession.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/07_GLOBAL_LAYERS_AND_TEACHER_CONTROLLER.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:save-recovery",
+      "name": "Save and Recovery",
+      "aliases": [
+        "save",
+        "recovery",
+        "保存",
+        "恢复",
+        "V9 archive"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "owner": "App/Persistence",
+      "moduleIds": [
+        "module:app-persistence",
+        "module:main-preload"
+      ],
+      "currentFact": "V9-only open/save, edit-during-save detection, Recovery single-flight and atomic main writes exist.",
+      "targetState": "Extract narrow lifecycle use cases without changing archive or IPC semantics.",
+      "canonicalFiles": [
+        "src/renderer/project/courseProjectIo.ts",
+        "src/renderer/project/courseProjectArchive.ts",
+        "src/renderer/project/recoveryWriteCoordinator.ts",
+        "src/main/projectPersistence.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/App.tsx",
+        "src/main/projectPersistence.ts"
+      ],
+      "runtimeConsumers": [],
+      "tests": [
+        "tests/unit/courseProjectArchive.test.ts",
+        "tests/unit/recoveryWriteCoordinator.test.ts",
+        "tests/unit/projectPersistence.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:preview-player",
+      "name": "Preview and CoursePlayer",
+      "aliases": [
+        "preview",
+        "player",
+        "try-run",
+        "full-preview",
+        "试运行",
+        "整课预览",
+        "CoursePlayer"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "owner": "Preview / Player",
+      "moduleIds": [
+        "module:preview-player"
+      ],
+      "currentFact": "Current-location try-run and full preview consume Published V2 through CoursePlayer hosts.",
+      "targetState": "Preserve the V2 path and remove only characterized Legacy consumers.",
+      "canonicalFiles": [
+        "src/renderer/ui/coursePlayerTryRun.ts",
+        "src/player/surfaces/publishedDynamicHosts.ts",
+        "src/renderer/ui/serializedSessionMount.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/ui/coursePlayerTryRun.ts",
+        "src/player/surfaces/publishedDynamicHosts.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/App.tsx",
+        "src/renderer/ui/Workspace.tsx"
+      ],
+      "tests": [
+        "tests/unit/coursePlayerTryRunFit.test.ts",
+        "tests/unit/publishedCourseNavigation.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:html-web-export",
+      "name": "HTML and Web Package Export",
+      "aliases": [
+        "html",
+        "single-html",
+        "web-package",
+        "单 HTML",
+        "网页包"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "owner": "Export",
+      "moduleIds": [
+        "module:export-delivery"
+      ],
+      "currentFact": "Normal V9 standalone HTML and Web package paths use Published V2.",
+      "targetState": "Preserve V2 delivery; no-source fallbacks are tracked only by the Legacy feature.",
+      "canonicalFiles": [
+        "src/renderer/export/course/buildCoursePackages.ts",
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/export/course/buildCoursePackages.ts"
+      ],
+      "runtimeConsumers": [
+        "src/player/index.ts",
+        "src/renderer/App.tsx"
+      ],
+      "tests": [
+        "tests/unit/coursePackageExport.test.ts",
+        "tests/unit/webPackageExport.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:pptx-export",
+      "name": "PPTX Export",
+      "aliases": [
+        "pptx",
+        "PowerPoint",
+        "可编辑 PPTX"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Export",
+      "moduleIds": [
+        "module:export-delivery"
+      ],
+      "currentFact": "Published V2 PPTX exists, but Slide-only export still routes through the V8 projection builder.",
+      "targetState": "Route supported V9 content through one path with editable/staticization parity.",
+      "canonicalFiles": [
+        "src/renderer/export/course/buildCoursePptx.ts",
+        "src/renderer/export/buildPptx.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/export/course/buildCoursePptx.ts",
+        "src/renderer/App.tsx"
+      ],
+      "runtimeConsumers": [],
+      "tests": [
+        "tests/unit/coursePptxExport.test.ts",
+        "tests/unit/renderPptxRuntimeSnapshots.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:print-export",
+      "name": "Print, PDF and DOCX Export",
+      "aliases": [
+        "print",
+        "pdf",
+        "docx",
+        "打印",
+        "讲义导出"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Export",
+      "moduleIds": [
+        "module:export-delivery",
+        "module:main-preload"
+      ],
+      "currentFact": "Published print artifacts and Flow DOCX exist; PDF retains V8 raster fallbacks.",
+      "targetState": "Format-specific V2/static plans with explicit unsupported-content reporting.",
+      "canonicalFiles": [
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+        "src/renderer/export/course/flowDocx.ts",
+        "src/main/pdfExport.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+        "src/renderer/App.tsx"
+      ],
+      "runtimeConsumers": [],
+      "tests": [
+        "tests/unit/coursePrintArtifacts.test.ts",
+        "tests/unit/exportPreflight.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:diagnostics",
+      "name": "Diagnostics and Export Preflight",
+      "aliases": [
+        "diagnostics",
+        "project-health",
+        "export-preflight",
+        "诊断",
+        "预检"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "Diagnostics",
+      "moduleIds": [
+        "module:diagnostics"
+      ],
+      "currentFact": "Project Health and base export preflight still consume V8-shaped ProjectDocument.",
+      "targetState": "Readonly V9 structural/export reports with actionable navigation and stable codes.",
+      "canonicalFiles": [
+        "src/shared/projectHealth.ts",
+        "src/renderer/export/exportPreflight.ts",
+        "src/renderer/ui/ProjectHealthPanel.tsx"
+      ],
+      "entrypoints": [
+        "src/renderer/export/exportPreflight.ts",
+        "scripts/validate-project.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/App.tsx",
+        "src/renderer/export/course/buildCoursePackages.ts"
+      ],
+      "tests": [
+        "tests/unit/projectHealth.test.ts",
+        "tests/unit/projectHealthNavigation.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/09_DIAGNOSTICS_AND_ANALYSIS.md",
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:developer-tab",
+      "name": "DeveloperTab Authoring",
+      "aliases": [
+        "developer-tab",
+        "工程开发工作台",
+        "专业代码能力"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-debt",
+      "owner": "UI Composition + Feature Editors",
+      "moduleIds": [
+        "module:ui-composition",
+        "module:runtime-interactions",
+        "module:feature-components"
+      ],
+      "currentFact": "Runtime, object, rules and editable component views exist in professional mode and write through raw Store actions.",
+      "targetState": "Retain the existing entry and attach stable targets/transactions; no third mode or Code Workspace.",
+      "canonicalFiles": [
+        "src/renderer/ui/DeveloperTab.tsx",
+        "src/shared/contracts/runtime/schema.ts",
+        "src/shared/contracts/interaction-v1/schema.ts"
+      ],
+      "entrypoints": [
+        "src/renderer/ui/DeveloperTab.tsx"
+      ],
+      "runtimeConsumers": [],
+      "tests": [
+        "tests/unit/developerMode.test.tsx",
+        "tests/unit/runtimeTargetEditSession.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/10_UI_COMPOSITION_AND_CODE_WORKSPACE.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:desktop-ipc",
+      "name": "Desktop Main, Preload and IPC",
+      "aliases": [
+        "desktop-ipc",
+        "main",
+        "preload",
+        "ipc",
+        "DesktopAPI",
+        "文件对话框"
+      ],
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "owner": "Main / Preload",
+      "moduleIds": [
+        "module:main-preload"
+      ],
+      "currentFact": "Typed DesktopAPI, preload whitelist and main handlers define the desktop boundary.",
+      "targetState": "Preserve channel parity, trust/path validation and close/save behavior.",
+      "canonicalFiles": [
+        "src/shared/ipcTypes.ts",
+        "src/main/ipc.ts",
+        "src/preload/index.ts"
+      ],
+      "entrypoints": [
+        "src/main/index.ts",
+        "src/preload/index.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/App.tsx"
+      ],
+      "tests": [
+        "tests/unit/batchFileDialogs.test.ts",
+        "tests/unit/projectPersistence.test.ts",
+        "tests/unit/windowVisibility.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "feature:legacy-release",
+      "name": "Legacy Delivery and Release Consumers",
+      "aliases": [
+        "legacy-release",
+        "V8 benchmark",
+        "no-source fallback",
+        "Legacy ExportPayload",
+        "release verifier"
+      ],
+      "origin": "semantic",
+      "statusClass": "transitional-allowance",
+      "owner": "Export / Tooling / Release",
+      "moduleIds": [
+        "module:tooling-release",
+        "module:export-delivery"
+      ],
+      "currentFact": "V8 archive/export paths remain in no-source delivery, fixtures, benchmarks and release verification.",
+      "targetState": "Each consumer is migrated, explicitly retained, or removed only with zero-reference proof.",
+      "removalPhase": "ARCH-4/ARCH-5",
+      "reviewGate": "Canonical legacy-consumers.json record reaches exact zero or retained compatibility is approved.",
+      "canonicalFiles": [
+        "src/renderer/project/projectArchive.ts",
+        "src/renderer/export/buildExportPayload.ts",
+        "src/player/PlayerApp.ts",
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ],
+      "entrypoints": [
+        "scripts/verify-release.ts",
+        "src/renderer/project/projectArchive.ts"
+      ],
+      "runtimeConsumers": [
+        "src/renderer/App.tsx",
+        "src/player/PlayerApp.ts"
+      ],
+      "tests": [
+        "tests/integration/renderHostBenchmark.test.ts",
+        "tests/unit/projectFormatIsolation.test.ts"
+      ],
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json",
+        "docs/contracts/V9_COMPATIBILITY_POLICY.md"
       ]
     },
     {
       "schemaVersion": 1,
       "id": "feature:repo-knowledge",
       "name": "Repo Knowledge",
-      "aliases": ["repo-index", "Context Pack", "开发索引"],
+      "aliases": [
+        "repo-index",
+        "Context Pack",
+        "开发索引"
+      ],
       "origin": "semantic",
       "statusClass": "target-acceptance",
+      "owner": "Repo Knowledge",
+      "moduleIds": [
+        "module:repo-knowledge"
+      ],
+      "currentFact": "Deterministic fact generation exists but broad query use is gated by golden-task quality.",
+      "targetState": "Fresh deterministic Context Packs with conservative low-confidence fallback.",
       "canonicalFiles": [
         "repo-index/config.json",
         "scripts/repo-index/typescriptAdapter.ts",
         "scripts/generate-repo-index.ts"
       ],
-      "entrypoints": ["scripts/generate-repo-index.ts"],
+      "entrypoints": [
+        "scripts/generate-repo-index.ts"
+      ],
+      "runtimeConsumers": [],
       "tests": [
         "tests/unit/repoIndexTypeScriptAdapter.test.ts",
-        "tests/unit/repoIndexGenerator.test.ts"
+        "tests/unit/repoIndexGenerator.test.ts",
+        "tests/unit/repoIndexSemantic.test.ts"
       ],
       "evidence": [
         "docs/development-plan/10-knowledge-system/01_DATA_MODEL_PROVENANCE_AND_FILES.md",

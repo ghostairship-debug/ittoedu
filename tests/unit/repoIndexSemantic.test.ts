@@ -1,0 +1,250 @@
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterAll, describe, expect, it } from 'vitest'
+
+import { generateRepoIndexToDirectory } from '../../scripts/repo-index/generator'
+import { readGeneratedDirectory } from '../../scripts/repo-index/writeGenerated'
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'ittoedu-repo-index-semantic-'))
+
+afterAll(() => {
+  rmSync(temporaryRoot, { recursive: true, force: true })
+})
+
+type StatusClass =
+  | 'current-must-preserve'
+  | 'current-debt'
+  | 'target-acceptance'
+  | 'transitional-allowance'
+
+interface SemanticFeature {
+  schemaVersion: 1
+  id: string
+  name: string
+  aliases: string[]
+  origin: 'semantic'
+  statusClass: StatusClass
+  owner: string
+  moduleIds: string[]
+  currentFact: string
+  targetState: string
+  canonicalFiles: string[]
+  entrypoints: string[]
+  runtimeConsumers: string[]
+  tests: string[]
+  evidence: string[]
+  removalPhase?: string
+  reviewGate?: string
+}
+
+interface SemanticModule {
+  schemaVersion: 1
+  id: string
+  name: string
+  origin: 'semantic'
+  status: string
+  statusClass: StatusClass
+  owner: string
+  currentFact: string
+  targetState: string
+  entrypoints: string[]
+  allowedDependencies: string[]
+  forbiddenDependencies: string[]
+  dependencyPolicyPhase: string
+  dependencyPolicyMeaning: string
+  evidence: string[]
+  removalPhase?: string
+  reviewGate?: string
+}
+
+interface SemanticCollection<T> {
+  schemaVersion: 1
+  features?: T[]
+  modules?: T[]
+  exclusions?: T[]
+}
+
+function readJson<T>(path: string): T {
+  return JSON.parse(readFileSync(resolve(repoRoot, path), 'utf8')) as T
+}
+
+function normalizedAlias(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase('en-US')
+    .replace(/[\s_-]+/gu, '')
+}
+
+const expectedFeatureIds = [
+  'feature:course-project-v9',
+  'feature:published-course-v2',
+  'feature:editor-core',
+  'feature:slide',
+  'feature:flow',
+  'feature:spatial',
+  'feature:media',
+  'feature:components',
+  'feature:runtime',
+  'feature:interactions',
+  'feature:global-layers-controller',
+  'feature:save-recovery',
+  'feature:preview-player',
+  'feature:html-web-export',
+  'feature:pptx-export',
+  'feature:print-export',
+  'feature:diagnostics',
+  'feature:developer-tab',
+  'feature:desktop-ipc',
+  'feature:legacy-release',
+  'feature:repo-knowledge',
+] as const
+
+const expectedModuleIds = [
+  'module:shared-contracts',
+  'module:editor-core',
+  'module:app-persistence',
+  'module:surface-slide',
+  'module:surface-flow',
+  'module:surface-spatial',
+  'module:feature-media',
+  'module:feature-components',
+  'module:runtime-interactions',
+  'module:global-layers-controller',
+  'module:preview-player',
+  'module:export-delivery',
+  'module:diagnostics',
+  'module:ui-composition',
+  'module:main-preload',
+  'module:tooling-release',
+  'module:repo-knowledge',
+] as const
+
+describe('repo-index stable semantic coverage', () => {
+  const featureCollection = readJson<SemanticCollection<SemanticFeature>>(
+    'repo-index/semantic/features.json',
+  )
+  const moduleCollection = readJson<SemanticCollection<SemanticModule>>(
+    'repo-index/semantic/modules.json',
+  )
+  const features = featureCollection.features ?? []
+  const modules = moduleCollection.modules ?? []
+
+  it('keeps the small complete Feature and Module vocabulary deterministic', () => {
+    expect(featureCollection.schemaVersion).toBe(1)
+    expect(moduleCollection.schemaVersion).toBe(1)
+    expect(features.map(({ id }) => id)).toEqual(expectedFeatureIds)
+    expect(modules.map(({ id }) => id)).toEqual(expectedModuleIds)
+    expect(features.length).toBeGreaterThanOrEqual(18)
+    expect(features.length).toBeLessThanOrEqual(22)
+    expect(modules.length).toBeGreaterThanOrEqual(12)
+    expect(modules.length).toBeLessThanOrEqual(18)
+
+    const moduleIds = new Set(modules.map(({ id }) => id))
+    const aliases = new Map<string, string>()
+    for (const feature of features) {
+      expect(feature).toMatchObject({
+        schemaVersion: 1,
+        origin: 'semantic',
+        owner: expect.any(String),
+        currentFact: expect.any(String),
+        targetState: expect.any(String),
+      })
+      expect(feature.moduleIds.length).toBeGreaterThan(0)
+      feature.moduleIds.forEach((moduleId) => expect(moduleIds.has(moduleId), moduleId).toBe(true))
+      for (const alias of feature.aliases) {
+        const normalized = normalizedAlias(alias)
+        expect(normalized.length).toBeGreaterThan(0)
+        expect(aliases.get(normalized), `${alias} collides with ${aliases.get(normalized)}`).toBeUndefined()
+        aliases.set(normalized, `${feature.id}:${alias}`)
+      }
+    }
+
+    for (const module of modules) {
+      expect(module).toMatchObject({
+        schemaVersion: 1,
+        origin: 'semantic',
+        currentFact: expect.any(String),
+        targetState: expect.any(String),
+        dependencyPolicyPhase: expect.any(String),
+        dependencyPolicyMeaning: 'declared-policy-not-current-import-graph-compliance',
+      })
+      expect(module.allowedDependencies.length).toBeLessThanOrEqual(8)
+      expect(module.forbiddenDependencies.length).toBeLessThanOrEqual(4)
+    }
+  })
+
+  it('keeps semantic paths real, POSIX-relative, and transitional records gated', () => {
+    const statusClasses = new Set<StatusClass>([
+      'current-must-preserve',
+      'current-debt',
+      'target-acceptance',
+      'transitional-allowance',
+    ])
+    const pathFields = ['canonicalFiles', 'entrypoints', 'runtimeConsumers', 'tests', 'evidence'] as const
+    for (const record of [...features, ...modules]) {
+      expect(statusClasses.has(record.statusClass)).toBe(true)
+      if (record.statusClass === 'transitional-allowance') {
+        expect(Boolean(record.removalPhase || record.reviewGate), record.id).toBe(true)
+      }
+      for (const field of pathFields) {
+        const values = field in record
+          ? (record as unknown as Record<string, string[]>)[field] ?? []
+          : []
+        for (const path of values) {
+          expect(path).not.toMatch(/^[A-Za-z]:[\\/]/)
+          expect(path).not.toContain('\\')
+          expect(path.startsWith('../')).toBe(false)
+          expect(existsSync(resolve(repoRoot, path)), `${record.id}:${field}:${path}`).toBe(true)
+        }
+      }
+    }
+
+    for (const module of modules) {
+      for (const dependency of [
+        ...module.allowedDependencies,
+        ...module.forbiddenDependencies,
+      ]) {
+        if (!/^(?:src|scripts|repo-index)(?:\/|$)/u.test(dependency)) continue
+        expect(existsSync(resolve(repoRoot, dependency)), `${module.id}:${dependency}`).toBe(true)
+      }
+    }
+
+    const exclusions = readJson<SemanticCollection<Record<string, unknown>>>(
+      'repo-index/semantic/exclusions.json',
+    ).exclusions ?? []
+    expect(exclusions).toContainEqual(expect.objectContaining({
+      id: 'exclusion:external-component-source',
+    }))
+    const components = features.find(({ id }) => id === 'feature:components')
+    expect(components?.canonicalFiles.some((path) => path.includes('courseware-components'))).toBe(false)
+    expect(components?.canonicalFiles).not.toContain(
+      'artifacts/ai-capabilities/component-catalog.snapshot.json',
+    )
+  })
+
+  it(
+    'validates expanded semantic through generator output in an OS temporary directory',
+    () => {
+      const outputDirectory = resolve(temporaryRoot, 'generated')
+      const summary = generateRepoIndexToDirectory(repoRoot, outputDirectory)
+      const generated = readGeneratedDirectory(outputDirectory)
+      const manifest = JSON.parse(
+        generated.get('manifest.json')!.toString('utf8'),
+      ) as Record<string, unknown>
+
+      expect(summary.outputBytes).toBeGreaterThan(0)
+      expect(manifest.semanticHash).toMatch(/^sha256:[a-f0-9]{64}$/)
+      expect(generated.has('input-inventory.jsonl')).toBe(true)
+      expect(outputDirectory.startsWith(resolve(tmpdir()))).toBe(true)
+    },
+    30_000,
+  )
+})
