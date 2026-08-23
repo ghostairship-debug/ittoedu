@@ -6,15 +6,15 @@
 
 - Task ID: `arch-1-vs-05-image-replacement-app-store-integration`
 - Phase / wave: `ARCH-1 / first vertical slice integration`
-- Status: `draft`
+- Status: `implementing`
 - Owner / Reviewer / Integrator: `Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending primary integration worktree / codex/architecture-stabilization`
-- Baseline HEAD: `pending reviewed VS-02/VS-03/VS-04 integration baseline after ARCH-0B gate`
+- Claimed at / released at: `2026-08-24 03:09 Asia/Shanghai / pending`
+- Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
+- Baseline HEAD: `6113d83e389d5c6e5e674ec183ef03b3045f4820`
 - Claim commit: `pending`
-- Context Pack + manifest hash | bootstrap-manual: `pending ARCH-0B gate; require fresh App/Store/History/Media Context Pack`
-- Freshness / relevant dirty inputs: all pure-task commits must be reviewed and worktree clean; App, Store and Slide History locks must be free before claim
-- Depends on: `arch-1-vs-02-authoring-target-stale-guard (reviewed/target-green); arch-1-vs-03-editor-transaction-resource-delta (reviewed/target-green); arch-1-vs-04-slide-image-replacement-command (reviewed/target-green)`
+- Context Pack + manifest hash | bootstrap-manual: `feature:image-replacement-journey, fresh/high/safe-for-S2; sourceTree d4dd9b0d, semantic 1dbbc03a, config 103c4aa4, tool 0895bc33`
+- Freshness / relevant dirty inputs: `clean tree; App, Store and Slide History locks exclusively held by this Coordinator`
+- Depends on: `arch-1-vs-02, arch-1-vs-03 and arch-1-vs-04 done`
 - Blocks: `arch-1-vs-06-image-replacement-desktop-regression; ARCH-1 vertical-slice gate`
 - Risk statement: `This is the only App+Store integrator. A wrong target, resource/history misalignment, sidecar snapshot growth, or V8 double-write can corrupt the active project despite apparently green UI.`
 - Retry count / last failure class: `0 / none`
@@ -109,6 +109,7 @@ The App consumer of the nodeId-only async action must be removed. A synchronous 
 - `src/renderer/course/slideEditorCommands.ts`
 - `src/renderer/course/slideAuthoringBackend.ts` only as required to carry the same resource-aware history step
 - `tests/integration/imageReplacementVerticalSlice.test.ts`
+- `tests/integration/imageReplacementRaceCharacterization.test.tsx` only to convert the now-fixed `it.fails` stale-target case into a permanent passing regression
 - The image-replacement case in `tests/unit/assetTransactions.test.ts`
 - This task card result fields
 
@@ -242,12 +243,12 @@ All three are held by this task's Coordinator. VS-02/03/04 and every other App/S
 
 ## Ready checklist（Coordinator）
 
-- [ ] dependsOn done/wave-validated
-- [ ] context fresh or Bootstrap verified
-- [ ] current write path and all consumer categories evidenced
-- [ ] Allowed/Required/Forbidden paths valid
-- [ ] required hotspot locks available
-- [ ] budgets and validation named
-- [ ] rollback and old path state clear
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- [x] dependsOn done/wave-validated
+- [x] context fresh or Bootstrap verified
+- [x] current write path and all consumer categories evidenced
+- [x] Allowed/Required/Forbidden paths valid
+- [x] required hotspot locks available
+- [x] budgets and validation named
+- [x] rollback and old path state clear
+- [x] no related user dirty change
+- [x] no product escalation triggered
