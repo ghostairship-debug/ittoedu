@@ -4,7 +4,7 @@
 
 - Task ID: `arch-0a-perf-00-test-and-performance-baseline`
 - Phase / wave: `ARCH-0A / wave 2`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Validation Worker / Coordinator / Coordinator`
 - Claimed at / released at: `2026-08-24 Asia/Shanghai / target-green 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, baseline evidence-only scope / codex/architecture-stabilization`
@@ -89,7 +89,7 @@ Static checks and 202/1263 Vitest baseline are recorded, but no current represen
 ## Rollback
 
 - Start point: representative fixture integration commit
-- Implementation commit: not created; Worker was instructed not to commit
+- Implementation commit: `d290d4c49a8d48b42e67988fd6b10646e73c01e4`
 - Old path remains: static/unit baseline remains valid.
 
 ## Consumers and index
