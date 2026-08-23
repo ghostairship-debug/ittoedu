@@ -6,12 +6,12 @@
 
 - Task ID: `arch-1-vs-06-image-replacement-desktop-regression`
 - Phase / wave: `ARCH-1 / first vertical slice validation`
-- Status: `implementing`
+- Status: `wave-validated`
 - Owner / Reviewer / Integrator: `Validation Coordinator / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 03:30 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 03:30 Asia/Shanghai / wave-validated 2026-08-24 04:19 Asia/Shanghai`
 - Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
 - Baseline HEAD: `45bd0ac4374e307b22b19c306341c0bc28f48e14`
-- Claim commit: `pending`
+- Claim commit: `83054bb8035b0c573140a16d04e382259a1bdb4d`
 - Context: `fresh/high/safe-for-S2 image-replacement Context Pack; source 5f300412, semantic d084e338, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean build inputs; representative sources unchanged; exclusive Electron/E2E runtime and output lock held`
 - Depends on: `arch-1-vs-05 target-green; arch-1-vs-05b semantic current fact done`
@@ -104,14 +104,14 @@ In a real Electron run, stale dialog completion never writes the wrong image, wh
 
 ## Acceptance
 
-- [ ] Cross-location deferred completion shows actionable stale feedback and changes no image, bytes, dirty state or history.
-- [ ] Cross-project policy is tested through reachable UI or explicitly recorded UI-unreachable while VS-05 direct integration proves projectId guard.
-- [ ] Normal replace changes captured A only, creates one undo step, undo restores original bytes/ref, redo restores replacement.
-- [ ] Save copy/reopen preserves replacement and remains editable.
-- [ ] Current-location Preview, standalone HTML and Web ZIP consume the replacement bytes through Published V2.
-- [ ] Slide-heavy completes the full slice; Flow-heavy and Mixed/Spatial complete bounded save/reopen/Preview regressions.
-- [ ] Source fixture hashes remain unchanged; no product/test scope expansion or Mixed PPTX claim.
-- [ ] Budget and exclusive desktop lock respected.
+- [x] Cross-location deferred completion shows actionable stale feedback and changes no image, bytes, dirty state or history.
+- [x] Cross-project policy is tested through reachable UI or explicitly recorded UI-unreachable while VS-05 direct integration proves projectId guard.
+- [x] Normal replace changes captured A only, creates one undo step, undo restores original bytes/ref, redo restores replacement.
+- [x] Save copy/reopen preserves replacement and remains editable.
+- [x] Current-location Preview, standalone HTML and Web ZIP consume the replacement bytes through Published V2.
+- [x] Slide-heavy completes the full slice; Flow-heavy and Mixed/Spatial complete bounded save/reopen/Preview regressions.
+- [x] Source fixture hashes remain unchanged; no product/test scope expansion or Mixed PPTX claim.
+- [x] Budget and exclusive desktop lock respected.
 
 ## Minimal validation
 
@@ -125,7 +125,7 @@ In a real Electron run, stale dialog completion never writes the wrong image, wh
 ## Rollback
 
 - Start point: `pending reviewed VS-05 integration commit`
-- Implementation commit: `pending test-only commit`
+- Implementation commit: `d8d158ac99863a2bf729ed855250167c28578fd5`
 - Old path remains: if desktop validation fails, preserve evidence and return VS-05 integration for repair or rollback; pure VS-02–04 commits may remain if independently green.
 - Test outputs are disposable copies; never restore by overwriting source fixtures or user files.
 
@@ -137,16 +137,21 @@ In a real Electron run, stale dialog completion never writes the wrong image, wh
 
 ## Result evidence
 
-- Behavior before/after: `pending`
-- Validation results: `pending`
-- Consumer delta: `pending`
-- Remaining risks: `pending`
-- Rollback commit: `pending`
-- Next allowed task: `ARCH-1 wave gate only after this card is reviewed/wave-validated`
+- Behavior before/after: `A one-shot deferred Electron main-dialog stub retains the real renderer→preload→IPC→file-read path while making completion controllable. Real ScenePanel navigation during the test-injected delay returns actionable stale feedback and preserves both images, assets, bytes, dirty state and history. New/Open buttons and Ctrl+N/Ctrl+O are independently proven busy-blocked; the alternate Open path points to Flow-heavy so a failed guard cannot reopen the same fixture and fake success. Real OS modal behavior itself is not claimed.`
+- Normal full slice: `Summary image replacement visibly changes the editor stage; one Undo restores the original ref/bytes and one Redo restores a distinct new asset/ref/bytes. The intro image that shared the old asset remains on the original metadata and bytes, proving captured-A-only behavior. The redone copy reopens editable, then exact replacement data appears independently in current-location CoursePlayer try-run and full-course Preview.`
+- Delivery evidence: `Standalone HTML and Web ZIP payloads both parse through Published V2. Standalone uses the exact replacement data URL; Web uses a relative asset path whose ZIP bytes equal the imported PNG. Both file:// pages visibly render the replacement after navigation, with zero page errors, zero unexpected console errors and zero HTTP(S) requests. VS-06 exposed and VS-06A fixed a pre-existing Web CSP/style conflict in c6cb941 without allowing inline scripts.`
+- Bounded regression: `Flow-heavy and Mixed/Spatial are opened from immutable sources, saved only as output copies, reopened, and visibly run at Flow and Spatial locations. Screenshots confirm Flow article/IME content and the Spatial world/component/controller. No PDF/PPTX action was invoked; the registered Mixed PPTX base64-header red remains untouched.`
+- Validation results: `Dedicated Playwright spec passed 3/3 serial tests in 3.0 minutes on the final run. Twelve focused unit/integration files passed 112/112; all three TypeScript projects and build:desktop passed. Deterministic fixture check matched manifest plus all three SHA-256 values. The saved Slide output validated schemaVersion 9/status valid/canExport=true with five assets; the three unchanged source validators were also valid/canExport=true.`
+- Visual review: `Ignored evidence output/arch-1-vs-06/run-52340 contains 12 screenshots plus stale/undo/redone archives, HTML, Web ZIP and extracted package. Coordinator inspection confirmed actionable stale toast, visible replace→undo→redo, current-location try-run, full Preview, HTML/Web parity, Flow run and Spatial run. Pipeline status=pass; outcome status=art candidate; teacher/product accepted is not claimed before the ARCH-1 gate.`
+- Safety/diagnostics: `Unique mkdtemp profiles are removed after exact Electron child exit; launch failures clean internally; no VS-06 profile or Electron process remained. ZIP extraction rejects empty, dot, traversal, absolute and backslash paths and verifies resolved containment. Known warnings are separately classified: deterministic tiny fixture PNG may emit WebGL bad-image warnings and Flow currently emits the registered React key-spread warning; unexpected warnings fail.`
+- Consumer delta: `0 product; one dedicated E2E consumer added. The only product finding became the bounded VS-06A export fix.`
+- Remaining risks: `The source fixture's shared banner fails real-layout export preflight at height 44; the E2E adjusts only the loaded in-memory copy to height 80 before export and never rewrites the source. Native OS picker modality/trusted input is not simulated. LEG-001 remains; full E2E/package/release remain later gates.`
+- Rollback commit: `revert d8d158a for the test only; output evidence is ignored/disposable. Revert c6cb941 separately only if Web Player no longer uses dynamic style attributes.`
+- Next allowed task: `ARCH-1 wave gate`
 
 ## Findings / next allowed task
 
-- Pending. Product failures must create/return to the owning implementation card; this validation card may not fix them.
+- VS-06 is independently reviewed and wave-validated. ARCH-1 may run its first vertical-slice gate; no implementation card remains open for this slice.
 
 ## Ready checklist（Coordinator）
 
