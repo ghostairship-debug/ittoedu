@@ -169,6 +169,8 @@
 {"bytes":826,"contentHash":"sha256:851dd20e353c35cb299d1c98f724ad71b79caf89ffb784c74debc150c462ceb7","domain":"source","path":"src/player/global.d.ts"}
 {"bytes":354,"contentHash":"sha256:d06b59f77be968ebb0d9be1a4e8a98fd2d0b171defcfce4c6b93fb615d1b527f","domain":"source","path":"src/player/globalLayerVisibility.ts"}
 {"bytes":16742,"contentHash":"sha256:83c788649f55f66693c5445589929e0e2b8aff19ff2d327cb7afabb5648e9f75","domain":"source","path":"src/player/index.ts"}
+{"bytes":12840,"contentHash":"sha256:91f010feaacb37d8624ced6272a23038b59c45993d916f0e6f7766a6dc0a515e","domain":"source","path":"src/player/interactions/PublishedInteractionController.ts"}
+{"bytes":2104,"contentHash":"sha256:37e06bec1215c252d588966f752d987bb5bbd36f1582b551587f1508b6a06209","domain":"source","path":"src/player/interactions/PublishedInteractionSurfacePort.ts"}
 {"bytes":4204,"contentHash":"sha256:efde8d60b10db285bbbb259be90587a37eff20d5eab41755c4bb42448a6c185f","domain":"source","path":"src/player/payload.ts"}
 {"bytes":4056,"contentHash":"sha256:90641700850bf00815fc85c76f646a467aff052ee9ff904a08513dc58cca3204","domain":"source","path":"src/player/publishedCoursePresenter.ts"}
 {"bytes":11774,"contentHash":"sha256:3e0ef06f628f719bea531f187be85c7414303caacab6d55d6266c89eed8ebb1c","domain":"source","path":"src/player/publishedLesson.ts"}
@@ -277,6 +279,9 @@
 {"bytes":7052,"contentHash":"sha256:69816c5b5f8354e87d84aeae263f36353bd5c33e917bad1f191cb593800d3181","domain":"source","path":"src/renderer/export/renderPptxComponentSnapshots.ts"}
 {"bytes":9737,"contentHash":"sha256:8a9928617d84443730c73f7c2cfcdb1bfc91e066c95295ed36cc85a48f8ab8a1","domain":"source","path":"src/renderer/export/renderPptxRuntimeSnapshots.ts"}
 {"bytes":13727,"contentHash":"sha256:ca368bf9f9853b222f0cc1be5dc8de6dbbb6852c6b77618780094e545cca652d","domain":"source","path":"src/renderer/export/renderSceneImages.ts"}
+{"bytes":24129,"contentHash":"sha256:0bcdd845dcadaca21802e4969ddd1e3342223b39d9ef486386398d51fa19ff32","domain":"source","path":"src/renderer/interactions/interactionAuthoringCommands.ts"}
+{"bytes":9628,"contentHash":"sha256:aa402f25cbfa6b3c1a59ba406bae5e05d3a22577f9243863d45aa36477369a61","domain":"source","path":"src/renderer/interactions/interactionAuthoringView.ts"}
+{"bytes":3406,"contentHash":"sha256:9f814473a53bf11e0ca336f9ef06a8a235e1988d8fb8e57a6ddefb53470a8d36","domain":"source","path":"src/renderer/interactions/interactionTemplates.ts"}
 {"bytes":745,"contentHash":"sha256:0d78a2bef2388c14f7fd2d99894224df5aac01f59d711888393b0d552592b6c0","domain":"source","path":"src/renderer/main.tsx"}
 {"bytes":11421,"contentHash":"sha256:5548019d71f0ea57ad1ced3fa282e984f7fa2f5b009d41fc82bfbe7fa460ddde","domain":"source","path":"src/renderer/media/courseMediaLibraryImport.ts"}
 {"bytes":7508,"contentHash":"sha256:36748a4d4c42aca6ca029257c7066a74c07c0aaee118677d772142c94787843e","domain":"source","path":"src/renderer/phaser/EditorPhaserBridge.ts"}
@@ -310,6 +315,7 @@
 {"bytes":1323,"contentHash":"sha256:af8d89b50c00b4a7b65a77b8d29cfb96d08ddac4ee4064a1d0c8c77c237a80ef","domain":"source","path":"src/renderer/project/saveProject.ts"}
 {"bytes":6154,"contentHash":"sha256:12fcfcc8e684cac023848d83fb2995f8b80c267be74ebed930c7b1c1cdb2d978","domain":"source","path":"src/renderer/project/v9AssetAdapter.ts"}
 {"bytes":8412,"contentHash":"sha256:1d8b901e6009190821fbdf86b2b3b3c1689ca9d75fff8a82386daa05e47b8d40","domain":"source","path":"src/renderer/project/validateProjectArchive.ts"}
+{"bytes":20401,"contentHash":"sha256:a915663be90e27ea8d3dc69d0ab229f4f923554ab8a64946a98b52c07c54ad38","domain":"source","path":"src/renderer/runtime/courseRuntimeTransactions.ts"}
 {"bytes":371174,"contentHash":"sha256:c94d39dab86335258b9b809245f309655eecce45a715d9ed0d986fde39fdcd54","domain":"source","path":"src/renderer/store/editorStore.ts"}
 {"bytes":7144,"contentHash":"sha256:6fe6f145a12197d072dbf544eec1953a417f76372050667dc3ef761c48ed4f46","domain":"source","path":"src/renderer/store/history.ts"}
 {"bytes":1076,"contentHash":"sha256:1b7b0aa36e0ae694d9c4932495f66a8e8b73c43277e7cf6e8849c8d2fe5fd284","domain":"source","path":"src/renderer/store/slideBackendPort.ts"}
@@ -516,6 +522,7 @@
 {"bytes":3704,"contentHash":"sha256:f8c881e89fdd3acb5051e011dd234d37c6ff408ceb8dced6f771797a17b0ffe3","domain":"source","path":"tests/unit/courseProjectTopLevelFields.test.ts"}
 {"bytes":2994,"contentHash":"sha256:ca888a831ea0d945cd2cc7a1d05cda37af9c008076072325a3a86181abd201b0","domain":"source","path":"tests/unit/courseRuntimeKernel.test.ts"}
 {"bytes":3728,"contentHash":"sha256:0bea6bffc9b33331a869b72ce6c96ad80b56de11e5e36efe546e664add50396a","domain":"source","path":"tests/unit/courseRuntimeKernelLifecycle.test.ts"}
+{"bytes":31524,"contentHash":"sha256:7ac5635dad6322afd72302212f1e368e3cb56d9d49c81b23c93654d2f64120fa","domain":"source","path":"tests/unit/courseRuntimeTransactions.test.ts"}
 {"bytes":2667,"contentHash":"sha256:728608e5479cded8621207702e0dad33432d5af075b5a862ca5ccc3b4e8df8e9","domain":"source","path":"tests/unit/courseStateStore.test.ts"}
 {"bytes":9525,"contentHash":"sha256:66d6b6e717e13a114780d366c60a3f1fa627e44a99799c80a2e1f985df897a40","domain":"source","path":"tests/unit/courseTreeView.test.ts"}
 {"bytes":14459,"contentHash":"sha256:189b17c52b11663bf9a4e243480389af80740dad299afe684ddbc47a84717358","domain":"source","path":"tests/unit/coursewareAuthoringRunner.test.ts"}
@@ -567,6 +574,8 @@
 {"bytes":8568,"contentHash":"sha256:4e9fe2ef6a9ed8ed7f80c3478254176eef65e80a7afc17f995510b608d0de538","domain":"source","path":"tests/unit/hostEvidenceRecorder.test.ts"}
 {"bytes":4205,"contentHash":"sha256:ca1248a74aa8cba138c750300a63cae4dbf101ba3a938d2cbdbdd04c09279bbb","domain":"source","path":"tests/unit/imageSafeAreas.test.tsx"}
 {"bytes":4558,"contentHash":"sha256:cdb5c3288368bb6692c5baf53af16a0d3dfefd9fff8f506b59ad683479c5a6e9","domain":"source","path":"tests/unit/informationRelease.test.ts"}
+{"bytes":29172,"contentHash":"sha256:48bf3b27a381e510fc40ef31d3b57782e30576742fc6b44a65cb268395a9bc27","domain":"source","path":"tests/unit/interactionAuthoringCommands.test.ts"}
+{"bytes":6721,"contentHash":"sha256:bad921d1dc33dfc1f526d1d274c746a00503e72a4daaa46e894ac27dfa8fe68a","domain":"source","path":"tests/unit/interactionAuthoringView.test.ts"}
 {"bytes":1706,"contentHash":"sha256:09ad84f3b2d089d5d53bfe01d7948b9f26bc0e8191c63c2e72c87fd0f8e9022a","domain":"source","path":"tests/unit/interactionDiscriminatorContract.test.ts"}
 {"bytes":32127,"contentHash":"sha256:0d39b8f6a5d953dfbf41462b9b66ba724b1f86ab13b4e30e8c0a8af7539425ed","domain":"source","path":"tests/unit/interactionEditor.test.tsx"}
 {"bytes":27492,"contentHash":"sha256:eadeb53336240d7ae6edb9de58cda87f99bc5705a42e83bfa5217f75f5dc010c","domain":"source","path":"tests/unit/interactionEngine.test.ts"}
@@ -601,6 +610,7 @@
 {"bytes":8500,"contentHash":"sha256:85842deb5078a75fbeaf7e1b94671664da24f3953cadf200a42844ca1753bbea","domain":"source","path":"tests/unit/publishedComponentMount.test.ts"}
 {"bytes":18392,"contentHash":"sha256:3d0338dbfbdad48831ecff78c75a9fc420d686bef59ad801a93957b3392d7f80","domain":"source","path":"tests/unit/publishedCourseNavigation.test.ts"}
 {"bytes":9587,"contentHash":"sha256:787efac073c72c260e94b80def483d6ab1c03f133e45d0b0832211c38089dc78","domain":"source","path":"tests/unit/publishedCourseProtocol.test.ts"}
+{"bytes":15932,"contentHash":"sha256:b6419426a8224398a862163e7f5c6675da9f2dbed07891b3c71652a33c15a582","domain":"source","path":"tests/unit/publishedInteractionController.test.ts"}
 {"bytes":17221,"contentHash":"sha256:521770da00aa461cff723bdc93c9d37a5edb0078986f73b1cb13ffbe60adffd8","domain":"source","path":"tests/unit/publishedLesson.test.ts"}
 {"bytes":862,"contentHash":"sha256:e4dd9b9dcab00e4b91d9d05180b6fdae4670bfde111ba547a4897108fbc814aa","domain":"source","path":"tests/unit/readModelBoundary.test.ts"}
 {"bytes":4850,"contentHash":"sha256:abc82f770b80dc77ba11fb87b0f1e58f367b23f86dae97e67aca10bbbfd9af3c","domain":"source","path":"tests/unit/recoveryWriteCoordinator.test.ts"}
