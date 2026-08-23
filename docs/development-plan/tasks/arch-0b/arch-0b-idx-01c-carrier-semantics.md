@@ -4,9 +4,9 @@
 
 - Task ID: `arch-0b-idx-01c-carrier-semantics`
 - Phase / wave: `ARCH-0B / semantic repair`
-- Status: `target-green`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Semantic Worker / Coordinator / Coordinator`
-- Claimed at / released at: `2026-08-24 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 Asia/Shanghai / 2026-08-24 Asia/Shanghai`
 - Worktree / branch: `shared workspace, semantic-only write scope / codex/architecture-stabilization`
 - Baseline HEAD: `fac5be7`
 - Claim commit: `ea3b7c513a72c85d30dbc139c2870010edea06d6`
@@ -76,7 +76,7 @@ The query model and Context Pack support `feature.carriers`, but the 21 semantic
 ## Rollback
 
 - Start point: `ca354119f609055e6839be1f0445102d9958c205`
-- Implementation commit: not created; Worker leaves a target-green uncommitted diff for Coordinator review
+- Implementation commit: `f46f48e3bdecf480be2abd0bedc82bc8e5196ffe`
 - Old path remains: semantic file paths stay available, but carrier section would be less precise.
 
 ## Consumers and index
@@ -94,6 +94,7 @@ The query model and Context Pack support `feature.carriers`, but the 21 semantic
 - Expanded `tests/unit/repoIndexSemantic.test.ts` with carrier assertions that reject collapsing Flow paper into LayerItem and preserve distinct Slide/Spatial locations.
 - Validation: `npx vitest run tests/unit/repoIndexSemantic.test.ts` → 1 file / 4 tests passed, including generator output to the OS temporary directory; JSON parse and `git diff --check` hygiene passed.
 - Scope: only Feature carrier fields, carrier-focused assertions, and this card changed by this Worker. Query/config/package dirty inputs are disjoint and untouched; Modules, invariants, exclusions, generator, generated facts, product source and contracts are unchanged.
+- Coordinator review: inspected all seven carrier maps and independently reran the full semantic suite; 4/4 passed, including OS-temporary generation.
 
 ## Findings / next allowed task
 
