@@ -38,6 +38,7 @@ Manual Bootstrap is the only trusted navigation. The deterministic facts task wi
 - `scripts/query-repo-index.ts`
 - `tests/unit/repoIndexQuery.test.ts`
 - `package.json` script `repo:context` only
+- `repo-index/config.json` only to assign the query entrypoint to the strict `tool` domain
 - `repo-index/contexts/.gitignore`
 - This task card.
 
