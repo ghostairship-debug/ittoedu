@@ -4,6 +4,7 @@ import type {
   ComponentPackageData,
   ComponentScope,
 } from '../../src/shared/componentTypes'
+import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
 import { ComponentsTab } from '../../src/renderer/ui/ComponentsTab'
 import {
   selectActiveScene,
@@ -17,8 +18,7 @@ function componentPackage(
   supportedScopes: ComponentScope[] = ['scene', 'global'],
   packageId = PACKAGE_ID,
 ): ComponentPackageData {
-  return {
-    manifest: {
+  const manifest: ComponentPackageData['manifest'] = {
       schemaVersion: 4,
       runtimeApiVersion: 4,
       id: packageId,
@@ -32,11 +32,17 @@ function componentPackage(
       defaultProps: { label: `默认 ${version}` },
       supportedScopes,
       renderMode: 'phaser',
-    },
-    runtimeSource: `window.CoursewareComponent.define({ version: '${version}' })`,
-    files: {
-      'runtime.js': new Uint8Array([version.charCodeAt(0)]),
-    },
+  }
+  const runtimeSource = `window.CoursewareComponent.define({ version: '${version}' })`
+  const files = {
+    'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+    'runtime.js': new TextEncoder().encode(runtimeSource),
+  }
+  return {
+    manifest,
+    runtimeSource,
+    files,
+    contentSha256: componentContentSha256(files),
   }
 }
 
@@ -135,7 +141,8 @@ describe('editorStore component package management', () => {
     expect(state.history.past).toHaveLength(historyBefore + 1)
     expect(state.activeTab).toBe('components')
     expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toBe(second)
+    expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
+    expect(state.componentPackages[PACKAGE_ID]).not.toBe(second)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
       .toMatchObject({
         component: { packageId: PACKAGE_ID, version: '2.0.0' },
@@ -150,7 +157,8 @@ describe('editorStore component package management', () => {
     state.undo()
     state = useEditorStore.getState()
     expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toBe(first)
+    expect(state.componentPackages[PACKAGE_ID]).toEqual(first)
+    expect(state.componentPackages[PACKAGE_ID]).not.toBe(first)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
       .toMatchObject({
         component: { version: '1.0.0' },
@@ -160,7 +168,8 @@ describe('editorStore component package management', () => {
     state.redo()
     state = useEditorStore.getState()
     expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toBe(second)
+    expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
+    expect(state.componentPackages[PACKAGE_ID]).not.toBe(second)
   })
 
   it('rejects a different ID or incompatible scope without changing the project', () => {

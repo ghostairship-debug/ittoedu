@@ -90,6 +90,7 @@ import {
   selectSlideAuthoringBackend,
   useEditorStore,
   MAX_BATCH_CANVAS_ITEMS,
+  type ComponentPackageReplacementTarget,
   type ImportedAssetBatchItem,
 } from './store/editorStore'
 import { shouldIgnoreSlideLayerDeleteForFocus } from './course/v9SlideActionCommands'
@@ -377,6 +378,7 @@ export default function App() {
     | {
       mode: 'replace'
       packageId: string
+      target: ComponentPackageReplacementTarget
       packageData: ComponentPackageData
       sourceFileName: string
     }
@@ -458,8 +460,11 @@ export default function App() {
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
   )
-  const replacePackageInStore = useEditorStore(
-    (state) => state.replaceComponentPackage,
+  const captureComponentPackageReplacementTarget = useEditorStore(
+    (state) => state.captureComponentPackageReplacementTarget,
+  )
+  const replacePackageAtTarget = useEditorStore(
+    (state) => state.replaceComponentPackageAtTarget,
   )
   const addImageNodes = useEditorStore((state) => state.addImageNodes)
   const captureImageReplacementTarget = useEditorStore(
@@ -1001,6 +1006,14 @@ export default function App() {
 
   const handleReplaceComponent = useCallback((packageId: string) => {
     void run(async () => {
+      const target = captureComponentPackageReplacementTarget(packageId)
+      if (!target) {
+        throw new UserFacingError(
+          '组件替换已取消',
+          `工程中不存在可替换的组件包“${packageId}”。`,
+          '请刷新工程组件列表后重试。',
+        )
+      }
       const file = await desktopApi().selectComponentPackage()
       if (!file) return
       const sha256 = await componentPackageSha256(file.bytes)
@@ -1021,20 +1034,28 @@ export default function App() {
       setComponentPackageRequest({
         mode: 'replace',
         packageId,
+        target,
         packageData: imported,
         sourceFileName: file.name,
       })
     }, '组件替换包读取失败，工程内原版本已保留。')
-  }, [run])
+  }, [captureComponentPackageReplacementTarget, run])
 
   const performComponentReplacement = useCallback(() => {
     const request = componentPackageRequest
     setComponentPackageRequest(null)
     if (!request) return
     void run(async () => {
-      replacePackageInStore(request.packageId, request.packageData)
+      const result = replacePackageAtTarget(request.target, request.packageData)
+      if (!result.ok) {
+        throw new UserFacingError(
+          '组件替换失败',
+          result.reason,
+          '工程或组件状态已发生变化，请重新开始替换。',
+        )
+      }
     }, '组件替换失败，工程内原版本已保留。')
-  }, [componentPackageRequest, replacePackageInStore, run])
+  }, [componentPackageRequest, replacePackageAtTarget, run])
 
   const performCatalogPackageOperation = useCallback(async (
     entries: AvailableComponentCatalogPackage[],
@@ -1068,6 +1089,16 @@ export default function App() {
           '请刷新组件目录，重新审阅版本和哈希后再试。',
         )
       }
+      const updateTarget = mode === 'update' && updateEntry
+        ? stateBefore.captureComponentPackageReplacementTarget(updateEntry.packageId)
+        : null
+      if (mode === 'update' && !updateTarget) {
+        throw new UserFacingError(
+          '组件更新已取消',
+          '工程内组件替换目标已经失效。',
+          '请刷新组件目录，重新审阅版本和哈希后再试。',
+        )
+      }
 
       const importedPackages: ComponentPackageData[] = []
       for (const entry of pendingEntries) {
@@ -1094,7 +1125,14 @@ export default function App() {
         }))
       }
       if (mode === 'update') {
-        replacePackageInStore(updateEntry!.packageId, importedPackages[0]!)
+        const result = replacePackageAtTarget(updateTarget!, importedPackages[0]!)
+        if (!result.ok) {
+          throw new UserFacingError(
+            '组件更新已取消',
+            result.reason,
+            '工程或组件状态已发生变化，请刷新组件目录后重试。',
+          )
+        }
         return true
       }
       const latestState = useEditorStore.getState()
@@ -1117,7 +1155,7 @@ export default function App() {
       ? '组件更新失败，工程内原版本已保留。'
       : '目录组件嵌入失败，工程未改变。')
     return completed === true
-  }, [importPackagesIntoStore, replacePackageInStore, run])
+  }, [importPackagesIntoStore, replacePackageAtTarget, run])
 
   const requestCatalogPackageBatch = useCallback(async (
     entries: AvailableComponentCatalogPackage[],

@@ -64,9 +64,7 @@ import {
   describeProjectAssetReference,
 } from '../../shared/assetReferences'
 import {
-  collectComponentPackageUsage,
   evaluateComponentPackageDeletion,
-  planComponentPackageReplacement,
 } from '../../shared/componentPackageLifecycle'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
@@ -119,6 +117,11 @@ import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
 } from '../components/importComponentPackage'
+import {
+  planCourseComponentPackageReplacement,
+  type CourseComponentPackageReplacementFeedback,
+  type CourseComponentPackageReplacementFailureCode,
+} from '../components/courseComponentPackageTransactions'
 import {
   beginV9SlideContentEdit,
   cancelV9SlideContentEdit,
@@ -763,23 +766,6 @@ function applySceneNodePatchToCourseOverride(
   state.layerItemOverrides[nodeId] = sceneNodeOverrideToLayerItemOverride(nodeOverride, baseNode)
 }
 
-function visitCourseLayerItems(
-  draft: CourseProjectDocument,
-  visit: (item: LayerItem) => void,
-): void {
-  for (const entry of draft.globalLayerItems) visit(entry.item)
-  for (const surface of draft.surfaces) {
-    for (const shared of surface.surfaceLayerItems) visit(shared.item)
-    if (surface.type === 'slide') {
-      for (const scene of surface.scenes) {
-        for (const item of scene.layerItems) visit(item)
-      }
-    } else if (surface.type === 'spatial-2d') {
-      for (const item of surface.world.layerItems) visit(item)
-    }
-  }
-}
-
 function removeCourseComponentPackage(
   draft: CourseProjectDocument,
   packageId: string,
@@ -787,18 +773,6 @@ function removeCourseComponentPackage(
   for (const [key, meta] of Object.entries(draft.componentPackages)) {
     if (meta.packageId === packageId) delete draft.componentPackages[key]
   }
-}
-
-function retargetCourseComponentInstances(
-  draft: CourseProjectDocument,
-  packageId: string,
-  next: { packageId: string; version: string },
-): void {
-  visitCourseLayerItems(draft, (item) => {
-    if (item.kind === 'component' && item.component.packageId === packageId) {
-      item.component = { packageId: next.packageId, version: next.version }
-    }
-  })
 }
 
 function appendGlobalCourseNode(draft: CourseProjectDocument, node: SceneNode): void {
@@ -1466,6 +1440,22 @@ export type MediaLibraryImportCommitResult =
       readonly reason: string
     }
 
+export interface ComponentPackageReplacementTarget extends CourseProjectRevisionTarget {
+  readonly packageId: string
+}
+
+export type ComponentPackageReplacementCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'replaced' | 'unchanged'
+      readonly feedback: CourseComponentPackageReplacementFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseComponentPackageReplacementFailureCode
+      readonly reason: string
+    }
+
 export interface EditorState {
   project: ProjectDocument
   activeSceneId: string
@@ -1657,6 +1647,13 @@ export interface EditorState {
   importComponentPackages(packageData: ComponentPackageData[]): void
   deleteComponentPackage(packageId: string): boolean
   replaceComponentPackage(packageId: string, packageData: ComponentPackageData): void
+  captureComponentPackageReplacementTarget(
+    packageId: string,
+  ): ComponentPackageReplacementTarget | null
+  replaceComponentPackageAtTarget(
+    target: ComponentPackageReplacementTarget,
+    packageData: ComponentPackageData,
+  ): ComponentPackageReplacementCommitResult
   createEditableComponentCopy(packageId: string, nodeId?: string): string | null
   updateEditableComponentPackage(
     packageId: string,
@@ -3659,6 +3656,85 @@ export const useEditorStore = create<EditorState>((set, get) => {
     return {
       ok: true,
       status: 'imported',
+      feedback: planned.plan.feedback!,
+    }
+  }
+
+  const captureComponentReplacementTarget = (
+    packageId: string,
+  ): ComponentPackageReplacementTarget | null => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    if (
+      !document
+      || !Object.hasOwn(document.componentPackages, packageId)
+      || !Object.hasOwn(state.componentPackages, packageId)
+    ) {
+      return null
+    }
+    return Object.freeze({
+      projectId: document.id,
+      documentRevision: document.revision,
+      packageId,
+    })
+  }
+
+  const commitComponentReplacementAtTarget = (
+    target: ComponentPackageReplacementTarget,
+    packageData: ComponentPackageData,
+  ): ComponentPackageReplacementCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    if (!document || document.id !== target.projectId) {
+      return {
+        ok: false,
+        code: 'project-mismatch',
+        reason: '组件替换目标不属于当前 Course Project，请重新开始替换。',
+      }
+    }
+    const planned = planCourseComponentPackageReplacement({
+      project: document,
+      componentPackages: state.componentPackages,
+      packageId: target.packageId,
+      replacement: packageData,
+      expected: {
+        projectId: target.projectId,
+        revision: target.documentRevision,
+      },
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) return planned
+    if (planned.status === 'no-op') {
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'invalid-document',
+        reason: error instanceof Error ? error.message : '组件替换计划无效。',
+      }
+    }
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      `组件“${packageData.manifest.name}”已替换为 ${planned.plan.feedback?.replacementVersion ?? packageData.manifest.version}，${planned.plan.feedback?.affectedInstances.length ?? 0} 个实例已同步`,
+    )) {
+      return {
+        ok: false,
+        code: 'invalid-document',
+        reason: '当前 Course Project 没有可用的作者会话。',
+      }
+    }
+    set({ activeTab: 'components', errorMessage: null })
+    return {
+      ok: true,
+      status: 'replaced',
       feedback: planned.plan.feedback!,
     }
   }
@@ -8312,9 +8388,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           '请选择同一组件 ID 的新版本；替换不会自动把实例迁移到另一种组件。',
         )
       }
-
-      const state = get()
-      const currentPackage = state.componentPackages[packageId]
+      const currentPackage = get().componentPackages[packageId]
       const currentHash = currentPackage?.provenance?.sha256
       const replacementHash = packageData.provenance?.sha256
       if (
@@ -8329,85 +8403,32 @@ export const useEditorStore = create<EditorState>((set, get) => {
           '同一 ID 与版本必须锁定到完全相同的包；请让组件维护者提升版本号后再更新。',
         )
       }
-      const usage = collectComponentPackageUsage(state.project, packageId)
-      const manifest = packageData.manifest
-      const supportsScene = componentSupportsScope(manifest, 'scene')
-      const supportsGlobal = componentSupportsScope(manifest, 'global')
-      const unsupportedScopes = [
-        usage.sceneInstanceCount > 0 && !supportsScene ? '场景层' : null,
-        usage.globalInstanceCount > 0 && !supportsGlobal ? '全局层' : null,
-      ].filter((scope): scope is string => Boolean(scope))
-      if (unsupportedScopes.length > 0) {
+      const target = captureComponentReplacementTarget(packageId)
+      if (!target) {
         throw new UserFacingError(
           '组件替换失败',
-          `新包未声明支持现有实例所在的${unsupportedScopes.join('和')}。`,
-          '请使用 supportedScopes 覆盖现有实例范围的同 ID 组件包，或先删除不兼容范围内的实例。',
+          `工程中不存在可替换的组件包“${packageId}”。`,
+          '请刷新工程组件列表后重试。',
         )
       }
-
-      let plan
-      try {
-        plan = planComponentPackageReplacement(
-          state.project,
-          componentMeta(packageData),
-        )
-      } catch (error) {
+      const result = commitComponentReplacementAtTarget(target, packageData)
+      if (!result.ok) {
         throw new UserFacingError(
           '组件替换失败',
-          error instanceof Error ? error.message : `无法替换组件包“${packageId}”。`,
-          '当前工程未发生变化，请检查组件 ID 与工程中的组件包记录。',
-          { cause: error },
+          result.reason,
+          result.code === 'unsupported-scope'
+            ? '请使用 supportedScopes 覆盖现有实例范围的同 ID 组件包，或先删除不兼容范围内的实例。'
+            : '当前工程未发生变化，请检查组件包内容、版本与工程状态后重试。',
         )
       }
+    },
 
-      if (selectSlideAuthoringBackend(get())) {
-        const result = runV9DocumentMutation((draft) => {
-          removeCourseComponentPackage(draft, packageId)
-          draft.componentPackages[packageData.manifest.id] = componentMeta(packageData)
-          retargetCourseComponentInstances(draft, packageId, {
-            packageId,
-            version: plan.replacementVersion,
-          })
-        }, {
-          componentPackages: { [packageId]: packageData },
-          statusMessage: `组件“${packageData.manifest.name}”已替换为 ${plan.replacementVersion}，${plan.affectedInstances.length} 个实例已同步`,
-        })
-        if (result.ok) {
-          set({
-            activeTab: 'components',
-            errorMessage: null,
-          })
-        }
-        return
-      }
+    captureComponentPackageReplacementTarget(packageId) {
+      return captureComponentReplacementTarget(packageId)
+    },
 
-      commit((draft) => {
-        draft.componentPackages = structuredClone(plan.nextProject.componentPackages)
-        for (const scene of draft.scenes) {
-          for (const node of scene.nodes) {
-            if (
-              node.type === 'external-component' &&
-              node.component.packageId === packageId
-            ) {
-              node.component.version = plan.replacementVersion
-            }
-          }
-        }
-        for (const item of draft.globalLayer) {
-          const node = item.node
-          if (
-            node.type === 'external-component' &&
-            node.component.packageId === packageId
-          ) {
-            node.component.version = plan.replacementVersion
-          }
-        }
-      }, undefined, { packageId, next: packageData })
-      set({
-        activeTab: 'components',
-        errorMessage: null,
-        statusMessage: `组件“${packageData.manifest.name}”已替换为 ${plan.replacementVersion}，${plan.affectedInstances.length} 个实例已同步`,
-      })
+    replaceComponentPackageAtTarget(target, packageData) {
+      return commitComponentReplacementAtTarget(target, packageData)
     },
 
     createEditableComponentCopy(packageId, nodeId) {
