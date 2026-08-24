@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/project/validateProjectArchive.ts`; `src/renderer/course/courseLocationCommands.ts`; `tests/unit/courseLocationCommands.test.ts`; all source barrels/import maps; `src/main/**`; `src/preload/**`; `scripts/**`; `tests/**`; `examples/**`; `package.json`; lockfile/build/release/package configs; `docs/contracts/**`; legacy inventory/semantic/golden inputs and repo-index generator/config
 - Task ID: `arch-5-00-deletion-admission`
 - Phase / wave: `ARCH-5 / deletion necessity admission`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + two deletion auditors / independent deletion-admission reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T20:08:58+08:00 / pending`
+- Claimed at / released at: `2026-08-24T20:08:58+08:00 / 2026-08-24T20:21:59+08:00`
 - Worktree / branch: `shared root, read-only product audit / codex/architecture-stabilization`
 - Baseline HEAD: `2834f26`
 - Context: ARCH-4 is closed and the repo-index was refreshed at its closure; exact candidate sources are re-read directly because this new task card is not itself a product input.
@@ -88,7 +88,11 @@ For each exact symbol/path, record:
 
 ## Result evidence
 
-- Pending two eight-category audits, admission report, independent review and exact cleanup-card decision.
+- `docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md` binds both eight-category audits to product `2834f26` and claim `d80830f`.
+- `validateProjectArchiveBytes` was expanded to its true removal boundary: all nine exports in the isolated V8 validator module have no external consumer; current package validation is independently owned by the V9 CLI.
+- `appendBlankFlowPage` has production incoming `0` and one obsolete-negative test consumer; its supported replacement has direct positive mixed-print/Schema coverage and multi-wave stability.
+- Admitted exactly one subtractive cleanup card, `arch-5-01-remove-dead-validator-and-flow-helper`; no other Legacy target was inferred from the phase title.
+- Independent admission reviewer: APPROVE, no blocker. Required closure sync is explicit for LEG-010, `feature:legacy-release`, GT-016/023 and generated repo-index. No product test/build/E2E was run under V0.
 
 ## Ready checklist（Coordinator）
 
@@ -96,4 +100,3 @@ For each exact symbol/path, record:
 - [x] candidates and deletion questions are exact
 - [x] product/config/generated hotspots remain read-only
 - [x] V4 remains reserved for the final candidate
-
