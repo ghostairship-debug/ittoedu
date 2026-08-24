@@ -159,6 +159,7 @@ import {
   type RuntimeTargetEditContext,
   type RuntimeTargetEditSession,
 } from '../authoring/runtimeTargetEditSession'
+import type { CourseRuntimeContentTextTarget } from '../runtime/runtimeContentTextAuthoringCommands'
 import type { ImportedImageAsset } from '../project/assetManager'
 
 interface WorkspaceProps {
@@ -173,6 +174,11 @@ interface FormulaEditSession {
   sceneId: string
   stateId: string | null
   nodeId: string
+}
+
+interface WorkspaceRuntimeTextEditSession {
+  readonly liveSession: Readonly<RuntimeTargetEditSession>
+  readonly courseTarget: CourseRuntimeContentTextTarget
 }
 
 function nodesEqual(
@@ -1524,7 +1530,7 @@ function SlideLocationWorkspace({
   const [componentTargets, setComponentTargets] =
     useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
   const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
-    useState<Readonly<RuntimeTargetEditSession> | null>(null)
+    useState<Readonly<WorkspaceRuntimeTextEditSession> | null>(null)
   const [activeComponentTextSession, setActiveComponentTextSession] =
     useState<Readonly<ComponentTextEditSession> | null>(null)
   const [activeFormulaEditSession, setActiveFormulaEditSession] =
@@ -2673,8 +2679,8 @@ function SlideLocationWorkspace({
   const activeRuntimeTextTarget = useMemo(() => {
     if (
       !activeRuntimeTextSession ||
-      activeRuntimeTextSession.kind !== 'text' ||
-      !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession, {
+      activeRuntimeTextSession.liveSession.kind !== 'text' ||
+      !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession.liveSession, {
         projectId: project.id,
         scope: editingScope,
         sceneId: scene.id,
@@ -2683,7 +2689,7 @@ function SlideLocationWorkspace({
       return undefined
     }
     return visibleRuntimeTargets.find((target) => (
-      runtimeTargetMatchesEditSession(target, activeRuntimeTextSession)
+      runtimeTargetMatchesEditSession(target, activeRuntimeTextSession.liveSession)
     ))
   }, [
     activeRuntimeTextSession,
@@ -2692,12 +2698,7 @@ function SlideLocationWorkspace({
     scene.id,
     visibleRuntimeTargets,
   ])
-  const activeRuntimeTextValue = activeRuntimeTextTarget?.kind === 'text'
-    ? (activeRuntimeTextTarget.scope === 'global'
-        ? project.globalRuntime
-        : scene.runtime
-      )?.content.values[activeRuntimeTextTarget.key] ?? ''
-    : ''
+  const activeRuntimeTextValue = activeRuntimeTextSession?.courseTarget.initialValue ?? ''
 
   useEffect(() => {
     if (
@@ -2846,17 +2847,26 @@ function SlideLocationWorkspace({
       setActiveRuntimeTextSession(null)
       return
     }
+    const courseTarget = store.captureRuntimeContentTextTarget(result.session)
+    if (!courseTarget) {
+      store.setStatus('运行时文字目标没有可提交的 V9 作者地址，或当前 Runtime 已锁定')
+      setActiveRuntimeTextSession(null)
+      return
+    }
     setActiveComponentTextSession(null)
-    setActiveRuntimeTextSession(result.session)
+    setActiveRuntimeTextSession(Object.freeze({
+      liveSession: result.session,
+      courseTarget,
+    }))
   }, [currentRuntimeTargetEditContext])
 
   const commitRuntimeText = useCallback((
-    session: Readonly<RuntimeTargetEditSession>,
+    session: Readonly<WorkspaceRuntimeTextEditSession>,
     value: string,
   ) => {
     const store = useEditorStore.getState()
     const result = validateRuntimeTargetEditSession(
-      session,
+      session.liveSession,
       currentRuntimeTargetEditContext(),
     )
     if (!result.ok) {
@@ -2868,33 +2878,17 @@ function SlideLocationWorkspace({
       setActiveRuntimeTextSession(null)
       return
     }
-    const target = result.target
-    const runtime = target.scope === 'global'
-      ? store.project.globalRuntime
-      : store.project.scenes.find((item) => item.id === target.sceneId)?.runtime
-    if (
-      !runtime ||
-      target.kind !== 'text' ||
-      !Object.prototype.hasOwnProperty.call(runtime.content.values, target.key)
-    ) {
-      store.setStatus('运行时文字目标已失效，请重新选择')
-      setActiveRuntimeTextSession(null)
-      return
-    }
-    const patch = {
-      content: {
-        ...runtime.content,
-        values: {
-          ...runtime.content.values,
-          [target.key]: value,
-        },
-      },
-    }
-    if (target.scope === 'global') {
-      store.updateGlobalRuntime(patch)
+    const committed = store.updateRuntimeContentTextAtTarget(
+      session.courseTarget,
+      value,
+    )
+    if (!committed.ok) {
+      store.setStatus(`${committed.reason} 未写入修改`)
+    } else if (committed.status === 'unchanged') {
+      store.setStatus('运行时文字没有变化')
+    } else if (session.courseTarget.courseTarget.owner === 'global') {
       store.setStatus('已更新全局运行时文字；此内容由整课共享')
-    } else if (target.sceneId) {
-      store.updateSceneRuntime(target.sceneId, patch)
+    } else {
       store.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
     }
     setActiveRuntimeTextSession(null)

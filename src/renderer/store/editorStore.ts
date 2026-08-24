@@ -189,6 +189,13 @@ import {
   type RuntimeSourceAuthoringPlanFailureCode,
 } from '../runtime/runtimeSourceAuthoringCommands'
 import {
+  captureCourseRuntimeContentTextTarget,
+  planRuntimeContentTextUpdate,
+  type CourseRuntimeContentTextTarget,
+  type RuntimeContentTextAuthoringFeedback,
+  type RuntimeContentTextAuthoringPlanFailureCode,
+} from '../runtime/runtimeContentTextAuthoringCommands'
+import {
   planApplyInteractionTemplate,
   planUpdateInteractionRule,
   type InteractionAuthoringFeedback,
@@ -1502,6 +1509,18 @@ export type RuntimeSourceAuthoringCommitResult =
       readonly reason: string
     }
 
+export type RuntimeContentTextAuthoringCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'updated' | 'unchanged'
+      readonly feedback: RuntimeContentTextAuthoringFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: RuntimeContentTextAuthoringPlanFailureCode
+      readonly reason: string
+    }
+
 export type InteractionAuthoringCommitResult =
   | {
       readonly ok: true
@@ -1635,6 +1654,13 @@ export interface EditorState {
     target: CourseAuthoringTarget,
     source: string,
   ): RuntimeSourceAuthoringCommitResult
+  captureRuntimeContentTextTarget(
+    session: Readonly<RuntimeTargetEditSession>,
+  ): CourseRuntimeContentTextTarget | null
+  updateRuntimeContentTextAtTarget(
+    target: CourseRuntimeContentTextTarget,
+    value: string,
+  ): RuntimeContentTextAuthoringCommitResult
   captureRuntimeAssetReplacementTarget(
     session: Readonly<RuntimeTargetEditSession>,
   ): CourseRuntimeAssetReplacementTarget | null
@@ -3777,6 +3803,205 @@ export const useEditorStore = create<EditorState>((set, get) => {
       )
     }
     return { ok: true, status: 'committed', feedback }
+  }
+
+  const captureRuntimeContentTextTargetForSession = (
+    session: Readonly<RuntimeTargetEditSession>,
+  ): CourseRuntimeContentTextTarget | null => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    const projection = buildCandidateEffectiveLayers(state)
+    let authoringSession = state.courseAuthoringSession
+    if (
+      !document
+      || !projection
+      || !authoringSession
+      || session.kind !== 'text'
+      || session.projectId !== document.id
+      || session.scope !== state.editingScope
+      || session.sceneId !== state.activeSceneId
+      || authoringSession.token.locationId !== projection.locationId
+      || authoringSession.token.surfaceType !== projection.surfaceType
+    ) {
+      return null
+    }
+
+    let expectedOwner: 'global' | 'scene'
+    let projectedItemId: string | undefined
+    if (session.scope === 'global') {
+      if (projection.surfaceType !== 'slide') return null
+      expectedOwner = 'global'
+      projectedItemId = document.globalLayerItems.find(
+        (entry) => entry.item.kind === 'runtime',
+      )?.item.layerItemId
+    } else {
+      const location = document.locations.find(
+        (candidate) => candidate.id === projection.locationId,
+      )
+      const surface = document.surfaces.find(
+        (candidate) => candidate.id === projection.surfaceId,
+      )
+      if (
+        !location
+        || location.kind !== 'slide-scene'
+        || !surface
+        || surface.type !== 'slide'
+        || session.sceneId !== location.sceneId
+      ) {
+        // The current authoring iframe only projects Slide scene/global Runtime.
+        return null
+      }
+      expectedOwner = 'scene'
+      projectedItemId = surface.scenes.find(
+        (scene) => scene.id === location.sceneId,
+      )?.layerItems.find((item) => item.kind === 'runtime')?.layerItemId
+    }
+    if (!projectedItemId) return null
+
+    const row = projection.unifiedRows.find((candidate) => (
+      candidate.owner === expectedOwner
+      && candidate.id === projectedItemId
+      && candidate.item.kind === 'runtime'
+    ))
+    if (
+      !row
+      || row.item.kind !== 'runtime'
+      || row.locked
+      || !Object.hasOwn(row.item.runtime.content.values, session.key)
+    ) {
+      return null
+    }
+    const initialValue = row.item.runtime.content.values[session.key]
+    if (typeof initialValue !== 'string') return null
+
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
+    try {
+      return captureCourseRuntimeContentTextTarget({
+        sessionToken: authoringSession.token,
+        projectId: document.id,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: row.owner,
+        sceneId: row.scopeToken.sceneId,
+        itemId: row.id,
+        contentKey: session.key,
+        initialValue,
+      })
+    } catch {
+      return null
+    }
+  }
+
+  const rejectRuntimeContentTextAuthoring = (
+    code: RuntimeContentTextAuthoringPlanFailureCode,
+    reason: string,
+  ): RuntimeContentTextAuthoringCommitResult => ({
+    ok: false,
+    code,
+    reason,
+  })
+
+  const commitRuntimeContentTextAtTarget = (
+    target: CourseRuntimeContentTextTarget,
+    value: string,
+  ): RuntimeContentTextAuthoringCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    const projection = buildCandidateEffectiveLayers(state)
+    let authoringSession = state.courseAuthoringSession
+    if (!document || document.id !== target.courseTarget.projectId) {
+      return rejectRuntimeContentTextAuthoring(
+        'project-mismatch',
+        '运行时文字目标不属于当前 Course Project。',
+      )
+    }
+    if (!projection || !authoringSession) {
+      return rejectRuntimeContentTextAuthoring(
+        'session-stale',
+        '运行时文字编辑会话已过期，请重新选择目标。',
+      )
+    }
+    if (
+      authoringSession.token.locationId !== projection.locationId
+      || authoringSession.token.surfaceType !== projection.surfaceType
+    ) {
+      return rejectRuntimeContentTextAuthoring(
+        'session-stale',
+        '运行时文字编辑会话已过期，请重新选择目标。',
+      )
+    }
+    const expectedScope = target.courseTarget.owner === 'global' ? 'global' : 'scene'
+    if (
+      state.editingScope !== expectedScope
+      || projection.scope.owner !== target.courseTarget.owner
+      || projection.scope.ownerKey !== target.courseTarget.ownerKey
+    ) {
+      return rejectRuntimeContentTextAuthoring(
+        'owner-mismatch',
+        '当前编辑范围已切换，运行时文字没有写入。',
+      )
+    }
+
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
+    const planned = planRuntimeContentTextUpdate({
+      project: document,
+      currentIdentity: {
+        projectId: document.id,
+        documentRevision: document.revision,
+        sessionToken: authoringSession.token,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: projection.scope.owner,
+        ownerKey: projection.scope.ownerKey,
+      },
+      target,
+      value,
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) {
+      return rejectRuntimeContentTextAuthoring(planned.code, planned.reason)
+    }
+    if (planned.status === 'no-op') {
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    const feedback = planned.plan.feedback
+    if (!feedback) {
+      return rejectRuntimeContentTextAuthoring(
+        'invalid-document',
+        '运行时文字事务缺少结果信息，未写入工程。',
+      )
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return rejectRuntimeContentTextAuthoring(
+        'invalid-document',
+        error instanceof Error ? error.message : '运行时文字事务无效，未写入工程。',
+      )
+    }
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      target.courseTarget.owner === 'global'
+        ? '已更新全局运行时文字；此内容由整课共享'
+        : '已更新运行时文字；此内容由当前场景的所有状态共享',
+    )) {
+      return rejectRuntimeContentTextAuthoring(
+        'invalid-document',
+        '当前 Course Project 没有可用的作者会话。',
+      )
+    }
+    return { ok: true, status: 'updated', feedback }
   }
 
   const rejectInteractionAuthoring = (
@@ -6515,6 +6740,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updateRuntimeSourceAtTarget(target, source) {
       return commitRuntimeSourceAtTarget(target, source)
+    },
+
+    captureRuntimeContentTextTarget(session) {
+      return captureRuntimeContentTextTargetForSession(session)
+    },
+
+    updateRuntimeContentTextAtTarget(target, value) {
+      return commitRuntimeContentTextAtTarget(target, value)
     },
 
     updateGlobalRuntime(patch) {
