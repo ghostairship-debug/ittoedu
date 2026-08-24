@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-07-published-interaction-flow-global-host`
 - Phase / wave: `ARCH-2 / W2-B1 Published Interaction host integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Flow Player Worker / independent Published Interactions reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 09:25 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 09:25 Asia/Shanghai / 2026-08-24 09:40 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `c3b5796`
 - Claim commit: `08ca122`
@@ -25,9 +25,10 @@ In current try-run, Preview and packaged Published V2 playback, the one session-
 
 ## Current status and evidence
 
-- B1-06 owns exactly one current global controller and already discovers any active host exposing `getPublishedInteractionSurfacePort()`.
-- `FlowSurfaceHost` owns the stable wrappers for visible `globalLayerItems` and `surfaceLayerItems`, but exposes no interaction port and excludes `playbackInitialVisibility:hidden` items before render.
-- Flow location updates replace the article/overlay and owned component/controller instances inside the host queue; the adapter currently forwards lifecycle without interaction invalidation/ready hooks.
+- `ca2c9ac` adds the Flow renderer-owned DOM port/handle generation and delegates it through the existing adapter/session seam; no controller is created in Flow.
+- `a624be6` adds the Schema-valid Mixed Flow integration suite; `f2b13c2` closes the independent review's rejected-update atomicity finding and adds active-motion/destroy evidence.
+- Current Flow global/surface overlay wrappers preserve location scope and authored `visible:false`, keep playback-hidden targets mounted/non-hit, share only global visibility state, and reject owned/pass-through clicks while still allowing wrapper motion.
+- Automated evidence supports `engineering candidate`; no visual-art or teacher acceptance is claimed.
 
 ## Supported slice and explicit limits
 
@@ -188,10 +189,10 @@ one session-global controller
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`.
-- Behavior before/after: `pending`.
-- Validation results: `pending`.
-- Known risks/findings: `pending`.
+- Consumers migrated/remaining: `mountPublishedCourseTryRun, whole-course Preview and packaged Published V2 now let the one session-global controller consume active Flow global/surface overlay LayerItems. Spatial global host and scene.enter remain unimplemented; Flow document blocks remain intentionally outside Interaction V1.`
+- Behavior before/after: `Flow previously rendered Published global/surface overlays but exposed no interaction surface, so every global click/motion rule skipped. Eligible native Flow overlays now bind once, hidden nodes enter/exit, global state survives ordinary Flow/Slide generations, surface-local state resets per Flow location, and stale work is cancelled before rerender/suspend/restart/destroy without payload writes or gesture theft.`
+- Validation results: `Final focused Flow host 2 files / 29 tests; expanded Published Interaction/Flow regression 6 files / 76 tests; npm run typecheck (root/Electron/e2e) and git diff --check passed. Two independent source/lifecycle reviews passed after the rejected-update failure-atomicity fix.`
+- Known risks/findings: `Inherited MixedNavigator cross-Surface activation/location failure rollback is not failure-atomic: a rare host activation failure after suspending the old host can leave navigator identity and player activity divergent. This predates B1-07 and should be handled by a separate navigator failure-atomicity card, not inside the Flow host. Spatial global host and scene.enter remain later work.`
 - indexImpact: `Flow Published Interaction host facts will change; refresh generated repo-index after close if indexed facts differ`.
 - Next allowed task: `ARCH-2 B1-08 Spatial global Interaction host, then W2-B1 validation gate`.
 
