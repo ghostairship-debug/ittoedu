@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/course/flowEditorCommands.ts`; `tests/unit/flowEditorCommands.test.ts`; `tests/unit/courseTreeView.test.ts`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-01-neutral-project-mutation-first-flow-consumer`
 - Phase / wave: `ARCH-3 / Flow first consumer`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Flow Boundary Worker / independent Flow reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T18:30:20+08:00 / —`
+- Claimed at / released at: `2026-08-24T18:30:20+08:00 / 2026-08-24T18:35:51+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch3-flow-neutral-mutation / codex/arch3-flow-neutral-mutation`
 - Baseline HEAD: `6d0ff92`
 - Context: `ARCH_3_ADMISSION_REPORT.md` at `629fd15`; last repo-index is product-fresh and subsequent changes are admission docs/task state, with exact source re-read at claim.
@@ -66,7 +66,7 @@ Editing Flow document structure no longer depends on a Slide-named internal help
 - audited `flowEditorCommands` Flow → Slide edge `1 → 0`;
 - audited Flow-named source Slide edges `3 → 2`;
 - audited Flow-named calls through Slide helper `4 → 3`;
-- mutation implementation copies remain `1`;
+- the moved Slide + first-Flow donor implementation remains `1`; the separately owned existing Spatial mutation implementation is retained for re-admission;
 - compatibility export remains consumed and contains no behavior.
 
 ## Must preserve
@@ -90,11 +90,11 @@ Editing Flow document structure no longer depends on a Slide-named internal help
 
 ## Result evidence
 
-- Product commit and before/after: pending
-- Focused validation: pending
-- Exact consumer/implementation delta: pending
-- Independent review: pending
-- Remaining risks/re-admission: pending
+- Product commit and before/after: root `1904d27` (isolated-worker source `9cb7bbc`). The clone/mutate/revision/timestamp/schema implementation moved verbatim to `courseProjectMutation.ts`; Slide exposes a zero-logic import alias/re-export, and only `flowEditorCommands#runMutation` now imports the neutral name.
+- Focused validation: `npx vitest run tests/unit/flowEditorCommands.test.ts tests/unit/courseTreeView.test.ts` passed `2 files / 22 tests`; commit diff check passed. No test change was needed because the existing suite exercises both Flow behavior and the old compatibility name.
+- Exact consumer/implementation delta: `flowEditorCommands` Flow → Slide edge `1 → 0`; audited Flow-named Slide imports `3 → 2`; calls through the old name `4 → 3`; neutral first-consumer call `0 → 1`. The moved donor has one implementation and the Slide export has no function body.
+- Independent review: APPROVE with no blocking finding. It verified the full operation order, compatibility import, absence of cycles/config/facade and focused coverage.
+- Remaining risks/re-admission: `flowSharedAuthoringAdapters` and `createFlowCourseProject` still import the compatibility name. `spatialAuthoringHistory.ts` has a pre-existing structurally similar mutation implementation, so this card does not claim repository-global uniqueness; both facts require fresh admission rather than scope expansion.
 - Generated refresh: defer-to-ARCH-3-gate
 
 ## Ready checklist（Coordinator）
