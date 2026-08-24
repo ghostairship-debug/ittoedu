@@ -14,13 +14,13 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/exportPreflight.ts`; `src/renderer/export/course/buildCoursePackages.ts`; `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `src/renderer/export/course/flowPrintPlan.ts`; `src/renderer/export/buildPptx.ts`; `src/renderer/export/renderSceneImages.ts`; `src/main/pdfExport.ts`; `tests/integration/courseExportPreflightApp.test.tsx`; `tests/integration/coursePdfExportApp.test.tsx`; `tests/unit/coursePackageExport.test.ts`; `tests/unit/coursePrintArtifacts.test.ts`; `tests/fixtures/course-project-v9/mixed.h5lesson`; renderer/electron/Vitest/Playwright build and resolution config
 - Task ID: `arch-4-gate-00-delivery-closure`
 - Phase / wave: `ARCH-4 / phase gate`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent ARCH-4 delivery gate reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:46:09+08:00 / pending`
+- Claimed at / released at: `2026-08-24T19:46:09+08:00 / 2026-08-24T20:07:40+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `e1d13c3`
-- Context: admission and both serial implementation cards are done; root is clean and their invalidating product/test/config inputs have not changed after review.
-- Freshness / relevant dirty inputs: implementation evidence remains bound to reviewed product commits; only this gate card will be added before output validation
+- Context: admission and both serial implementation cards are done; page-fit evidence replaced the affected PDF builder evidence, and later `App.tsx` changes were limited to PDF routing.
+- Freshness / relevant dirty inputs: implementation evidence remains bound to reviewed product commits; combined-head static review confirms the later PDF-only App branch did not change the HTML/Web preflight mapping
 - Depends on: `arch-4-00-delivery-admission`, `arch-4-01-v9-html-web-preflight`, and `arch-4-02-non-slide-v9-pdf-completeness` done
 - Blocks: ARCH-5 deletion admission
 - Risk statement: structure-level tests cannot prove Chromium pagination, scale, clipping or blank pages; the gate must inspect the real PDF once without escalating into full E2E/build or duplicating final V4.
@@ -77,7 +77,13 @@ ARCH-4 closes only if legal V9 HTML/Web preflight is V9-native and one actual de
 
 ## Result evidence
 
-- Pending single actual PDF review, exact combined deltas, generated freshness and independent gate review.
+- Phase report drafted at `docs/development-plan/baselines/ARCH_4_PHASE_GATE_REPORT.md`, bound to product candidate `c49330c`.
+- Reused reviewed focused evidence: HTML/Web `2 files / 5 tests`; PDF completeness `2 / 6`; page-fit replacement evidence `2 / 6`; applicable root/Electron TypeScript checks all passed.
+- Exactly one actual targeted Electron export passed `1 test / 1 passed` through real archive open, App preflight, IPC, hidden print window and save writer. Result: `output/pdf/arch-4-mixed-surface.pdf`, 27,799 bytes, SHA-256 `DAF12E21D503D224913533C23C87DF62D110A2FE6709F162E00FE6AEA9DB8653`.
+- PDF metadata/text: 3 pages at 960×540 pt; Slide → Flow → Spatial markers in order; no runtime TOC. Bundled Poppler rendered all pages at 144 DPI; all three 1920×1080 PNGs were nonblank and their non-white bounds stayed inside the page.
+- Visual qualification: Flow/Spatial are complete and unclipped. Slide's two exported text layers overlap because the committed gate fixture assigns both the identical `(40,40,520,80)` frame; this input fact does not hide an omitted page or edge clipping and prevents no completeness conclusion, but no art/accepted status is claimed.
+- Temporary gate spec was deleted immediately after the single run. Target renderer/Electron builds passed; full E2E/build/V4 was not run.
+- Exact retained-symbol delta and ARCH-5 deletion candidates are recorded in the report. Independent ARCH-4 gate review: APPROVE, no blocker; it independently confirmed the actual artifact metadata/hash/page bounds, fixture-owned overlap, evidence reuse and `engineering candidate` qualification. Final task-board/repo-index freshness is performed by the closure commit.
 
 ## Ready checklist（Coordinator）
 

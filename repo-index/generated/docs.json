@@ -561,6 +561,16 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_4_ADMISSION_REPORT.md",
+      "title": "ARCH-4 Delivery 与 Legacy consumer 必要性准入报告"
+    },
+    {
+      "links": [],
+      "path": "docs/development-plan/baselines/ARCH_4_PHASE_GATE_REPORT.md",
+      "title": "ARCH-4 Delivery 与 Legacy Consumer 阶段门报告"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md",
       "title": "ARCH-0A Feature / Writer / Consumer / Owner Ledger"
     },
