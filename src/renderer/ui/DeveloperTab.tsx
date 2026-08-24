@@ -451,6 +451,10 @@ export function DeveloperTab() {
   const activateCourseLocation = useEditorStore(
     (state) => state.activateCourseLocation,
   )
+  const setEditingScope = useEditorStore((state) => state.setEditingScope)
+  const setActivePresentationState = useEditorStore(
+    (state) => state.setActivePresentationState,
+  )
   const updateInteractionRule = useEditorStore((state) => state.updateInteractionRule)
   const updateGlobalInteractionRule = useEditorStore(
     (state) => state.updateGlobalInteractionRule,
@@ -610,9 +614,17 @@ export function DeveloperTab() {
             view={runtimeView}
             canCreateTemplate={canCreateRuntimeTemplate}
             onCreateTemplate={() => {
+              const preservedScope = editingScope
+              const preservedStateId = activePresentationStateId
               if (editingScope === 'global') setGlobalRuntime(freshRuntime())
               else setSceneRuntime(scene.id, freshRuntime())
-              if (activeCourseLocationId) activateCourseLocation(activeCourseLocationId)
+              if (activeCourseLocationId) {
+                activateCourseLocation(activeCourseLocationId)
+                if (preservedStateId !== null) {
+                  setActivePresentationState(preservedStateId)
+                }
+                if (preservedScope === 'global') setEditingScope('global')
+              }
             }}
             onApply={updateRuntimeSourceAtTarget}
           />

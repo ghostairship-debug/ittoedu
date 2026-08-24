@@ -425,6 +425,25 @@ describe('专业开发模式', () => {
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
   })
 
+  it('全局 Runtime 模板创建后保留全局作用域与当前命名状态', () => {
+    useEditorStore.getState().createNewProject()
+    useEditorStore.getState().addPresentationState('讲解状态')
+    const namedStateId = useEditorStore.getState().activePresentationStateId
+    expect(namedStateId).not.toBeNull()
+    refreshCourseAuthoringLocation()
+    useEditorStore.getState().setActivePresentationState(namedStateId)
+    useEditorStore.getState().setEditingScope('global')
+    render(<DeveloperTab />)
+
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(useEditorStore.getState().editingScope).toBe('global')
+    expect(useEditorStore.getState().activePresentationStateId).toBe(namedStateId)
+    expect((screen.getByLabelText('全局运行时源码') as HTMLTextAreaElement).value)
+      .toContain('runtimeApiVersion: 2')
+    expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
+  })
+
   it('创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复', () => {
     useEditorStore.getState().createNewProject()
     const source = componentPackage()
