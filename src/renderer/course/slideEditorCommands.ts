@@ -1,4 +1,3 @@
-import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -10,7 +9,10 @@ import {
   type HistoryResourceChanges,
   type HistoryResourceDirection,
 } from '../store/history'
+import { commitCourseProjectMutation as commitSlideProjectMutation } from './courseProjectMutation'
 import { buildSlideEditorView, type SlideEditorLayerScope } from './slideEditorView'
+
+export { commitSlideProjectMutation }
 
 export const SLIDE_REJECT_LOCKED = 'locked'
 export const SLIDE_REJECT_STALE_REVISION = 'stale-revision'
@@ -254,18 +256,6 @@ export function redoSlideAuthoringHistory(
     ]),
     future: Object.freeze(history.future.slice(1)),
   })
-}
-
-export function commitSlideProjectMutation(
-  project: CourseProjectDocument,
-  mutate: (draft: CourseProjectDocument) => void,
-  now = new Date().toISOString(),
-): CourseProjectDocument {
-  const draft = structuredClone(project)
-  mutate(draft)
-  draft.revision = project.revision + 1
-  draft.updatedAt = now
-  return courseProjectDocumentSchema.parse(draft)
 }
 
 export function selectSlideEditorLayers(
