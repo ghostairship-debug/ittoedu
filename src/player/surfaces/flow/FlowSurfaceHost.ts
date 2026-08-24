@@ -32,11 +32,11 @@ import {
   type FlowPublishedPlaybackSource,
 } from './flowModel'
 import {
-  FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX,
   FlowRuntimeTocChrome,
   buildFlowRuntimeToc,
   flowRuntimeTocAnchorId,
   flowRuntimeTocPageAnchorId,
+  flowRuntimeTocShellLayout,
   type FlowRuntimeTocEntry,
 } from './flowRuntimeToc'
 import {
@@ -336,9 +336,9 @@ export class FlowSurfaceHost {
   }
 
   #applyShellLayout(): void {
-    const inset = this.tocOpen ? `${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px` : '0px'
-    if (this.#article) this.#article.style.marginLeft = inset
-    if (this.#overlay) this.#overlay.style.left = inset
+    const shell = flowRuntimeTocShellLayout(this.tocOpen)
+    if (this.#article) this.#article.style.marginLeft = `${shell.articleInsetPx}px`
+    if (this.#overlay) this.#overlay.style.left = `${shell.viewportOverlayInsetPx}px`
   }
 
   #registerInteractionNode(
@@ -479,7 +479,7 @@ export class FlowSurfaceHost {
     frameEl.style.position = 'absolute'
     const session = this.#controllerSessions.get(item.layerItemId) ?? {
       offset: { dx: 0, dy: 0 },
-      collapsed: data.defaultCollapsed === true,
+      collapsed: data.collapsible && data.defaultCollapsed === true,
     }
     if (!this.#controllerSessions.has(item.layerItemId)) {
       this.#controllerSessions.set(item.layerItemId, session)
@@ -489,6 +489,8 @@ export class FlowSurfaceHost {
     frameEl.style.width = `${frame.width}px`
     frameEl.style.height = `${frame.height}px`
     frameEl.style.pointerEvents = 'auto'
+    frameEl.style.transform = item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`
+    frameEl.style.transformOrigin = 'center center'
     frameEl.style.zIndex = String(item.order)
     overlay.appendChild(frameEl)
 
@@ -508,6 +510,7 @@ export class FlowSurfaceHost {
     this.#controller = new TeacherControllerDom({
       node,
       container: frameEl,
+      footprintElement: frameEl,
       canvas: { ...FLOW_LOGICAL_CANVAS },
       getRenderedStageBounds: () => stageBoundsFromElement(overlay, FLOW_LOGICAL_CANVAS),
       scenes,

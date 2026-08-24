@@ -19,6 +19,7 @@ import {
   runtimeTeacherControllerButtons,
   teacherControllerLocalPointFromClient,
   teacherControllerStagePointerDelta,
+  teacherControllerVisibleLocalRect,
   TEACHER_CONTROLLER_KEYBOARD_FINE_STEP,
   TEACHER_CONTROLLER_KEYBOARD_STEP,
   TEACHER_CONTROLLER_MOUSE_DRAG_THRESHOLD_PX,
@@ -37,6 +38,8 @@ export interface TeacherControllerDomOptions {
   node: TeacherControllerRuntimeNode
   /** Already positioned by the compositor; the controller fills it 1:1. */
   container: HTMLElement
+  /** Host wrapper whose compositor hit region follows the visible chrome. */
+  footprintElement?: HTMLElement
   /** Logical course canvas used to constrain session offsets. */
   canvas: { width: number; height: number }
   /**
@@ -131,6 +134,30 @@ function applyRect(
 }
 
 /**
+ * Clips the host's real pointer footprint to the visible collapse pill. The
+ * authored frame remains unchanged, so expanding restores the full panel and
+ * session offsets continue to use the shared logical canvas.
+ */
+export function applyTeacherControllerDomFootprint(
+  element: HTMLElement,
+  node: TeacherControllerRuntimeNode,
+  collapsed: boolean,
+): void {
+  const visible = teacherControllerVisibleLocalRect(node, collapsed)
+  const fullFrame = visible.x === 0
+    && visible.y === 0
+    && visible.width === node.width
+    && visible.height === node.height
+  if (!collapsed || fullFrame) {
+    element.style.clipPath = 'none'
+    return
+  }
+  const right = Math.max(0, node.width - visible.x - visible.width)
+  const bottom = Math.max(0, node.height - visible.y - visible.height)
+  element.style.clipPath = `inset(${visible.y}px ${right}px ${bottom}px ${visible.x}px round 999px)`
+}
+
+/**
  * Delivery-time DOM teacher controller. It shares layout and session geometry
  * with the Phaser renderer. Pointer deltas use the stage CSS size, not this
  * element's own box (the failed donor mapping that overscaled drags).
@@ -174,6 +201,8 @@ export class TeacherControllerDom {
     root.addEventListener('pointerup', this.#handlePointerUp)
     root.addEventListener('pointercancel', this.#handlePointerCancel)
     root.addEventListener('keydown', this.#handleKeyDown)
+    root.addEventListener('focusin', this.#handleFocusChange)
+    root.addEventListener('focusout', this.#handleFocusChange)
     dom.defaultView?.addEventListener('fullscreenchange', this.#handleFullscreenChange)
 
     this.#render()
@@ -223,6 +252,13 @@ export class TeacherControllerDom {
     this.#layout = layout
     const { palette } = layout
     const collapsed = this.#session.collapsed
+    if (this.#options.footprintElement) {
+      applyTeacherControllerDomFootprint(
+        this.#options.footprintElement,
+        this.#node,
+        collapsed,
+      )
+    }
     const dom = this.#options.container.ownerDocument
     this.#root.replaceChildren()
     this.#buttons.clear()
@@ -316,6 +352,7 @@ export class TeacherControllerDom {
     } else {
       this.#collapseButton = null
     }
+    this.#syncCollapsedFocusRing()
   }
 
   #createButton(
@@ -351,6 +388,26 @@ export class TeacherControllerDom {
 
   #handleCollapseClick = (): void => {
     this.#toggleCollapsed()
+  }
+
+  #handleFocusChange = (): void => {
+    this.#syncCollapsedFocusRing()
+  }
+
+  #syncCollapsedFocusRing(): void {
+    const collapseButton = this.#collapseButton
+    if (!collapseButton) return
+    const focusVisible = this.#session.collapsed && (
+      this.#root.matches(':focus-visible')
+      || collapseButton.matches(':focus-visible')
+    )
+    if (focusVisible) {
+      collapseButton.style.outline = 'none'
+      collapseButton.style.boxShadow = `inset 0 0 0 3px ${this.#layout.palette.textCss}`
+      return
+    }
+    collapseButton.style.removeProperty('outline')
+    collapseButton.style.removeProperty('box-shadow')
   }
 
   #toggleCollapsed(): void {

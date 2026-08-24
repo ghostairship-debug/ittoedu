@@ -5,9 +5,15 @@ import {
   logicalDragDelta,
   runtimeTeacherControllerButtons,
   teacherControllerGestureOutcome,
+  teacherControllerHitBounds,
   teacherControllerLocalPointFromClient,
   teacherControllerStagePointerDelta,
+  teacherControllerVisibleLocalRect,
 } from '@/player/teacherControllerRuntimeSession'
+import {
+  applyTeacherControllerDomFootprint,
+  TeacherControllerDom,
+} from '@/player/teacherControllerDom'
 import { createTeacherControllerLayout } from '@/shared/teacherControllerLayout'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -79,6 +85,97 @@ describe('teacher controller runtime session geometry', () => {
     )
 
     expect(node.x + constrained.dx + collapse.x).toBeCloseTo(0)
+  })
+
+  it('shares the rotated visible pill between hit bounds and the DOM footprint', () => {
+    const node = createTeacherControllerNode({ x: 200, y: 100 })
+    node.rotation = 90
+    const visible = teacherControllerVisibleLocalRect(node, true)
+    const collapse = createTeacherControllerLayout(node, node.width, node.height).collapse
+    expect(visible).toEqual(collapse)
+
+    const bounds = teacherControllerHitBounds(node, { dx: 7, dy: -9 }, true)
+    expect(bounds.left).toBeCloseTo(642)
+    expect(bounds.top).toBeCloseTo(534.04)
+    expect(bounds.right).toBeCloseTo(672)
+    expect(bounds.bottom).toBeCloseTo(564.04)
+
+    const footprint = document.createElement('div')
+    footprint.style.pointerEvents = 'auto'
+    applyTeacherControllerDomFootprint(footprint, node, true)
+    expect(footprint.style.clipPath).toMatch(/^inset\(.+ round 999px\)$/)
+    expect(footprint.style.pointerEvents).toBe('auto')
+
+    applyTeacherControllerDomFootprint(footprint, node, false)
+    expect(footprint.style.clipPath).toBe('none')
+    expect(teacherControllerVisibleLocalRect(node, false)).toEqual({
+      x: 0,
+      y: 0,
+      width: node.width,
+      height: node.height,
+    })
+  })
+
+  it('keeps keyboard focus visible inside the collapsed pill clip', () => {
+    const node = createTeacherControllerNode({ x: 200, y: 100 })
+    const footprint = document.createElement('div')
+    const container = document.createElement('div')
+    footprint.appendChild(container)
+    document.body.appendChild(footprint)
+    let session = { offset: { dx: 0, dy: 0 }, collapsed: true }
+    const controller = new TeacherControllerDom({
+      node,
+      container,
+      footprintElement: footprint,
+      canvas: { width: 1280, height: 720 },
+      getRenderedStageBounds: () => ({ width: 1280, height: 720, left: 0, top: 0 }),
+      scenes: [],
+      getCurrentSceneId: () => null,
+      getStateLabel: () => null,
+      getStatus: () => ({ muted: false, fullscreen: false }),
+      getSession: () => session,
+      onSessionChange: (next) => { session = next },
+      onAction: () => undefined,
+      getInteractive: () => true,
+    })
+
+    try {
+      const collapse = container.querySelector<HTMLButtonElement>(
+        '[data-teacher-controller-collapse="true"]',
+      )
+      if (!collapse) throw new Error('fixture controller must render a collapse pill')
+      expect(footprint.style.clipPath).toMatch(/^inset\(.+ round 999px\)$/)
+      expect(collapse.style.boxShadow).toBe('')
+      expect(collapse.style.outline).toBe('')
+
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+      collapse.focus()
+      expect(document.activeElement).toBe(collapse)
+      expect(collapse.matches(':focus-visible')).toBe(true)
+      expect(collapse.style.boxShadow).toContain('inset')
+      expect(collapse.style.outline).toBe('none')
+
+      collapse.blur()
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      controller.rootElement.focus()
+      expect(controller.rootElement.matches(':focus-visible')).toBe(false)
+      expect(collapse.style.boxShadow).toBe('')
+      expect(collapse.style.outline).toBe('')
+
+      session = { ...session, collapsed: false }
+      controller.update(node)
+      const expandedCollapse = container.querySelector<HTMLButtonElement>(
+        '[data-teacher-controller-collapse="true"]',
+      )
+      if (!expandedCollapse) throw new Error('expanded fixture must render a collapse button')
+      expandedCollapse.focus()
+      expect(footprint.style.clipPath).toBe('none')
+      expect(expandedCollapse.style.boxShadow).toBe('')
+      expect(expandedCollapse.style.outline).toBe('')
+    } finally {
+      controller.destroy()
+      footprint.remove()
+    }
   })
 
   it('constrains the rotated visible bounds instead of only the author frame', () => {

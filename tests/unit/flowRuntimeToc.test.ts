@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { teacherControllerHitBounds } from '@/player/teacherControllerRuntimeSession'
 import type { FlowBlock } from '@/shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '@/shared/publishedCourseTypes'
 import {
@@ -9,6 +10,7 @@ import {
   buildFlowRuntimeToc,
   flowRuntimeTocAnchorId,
   flowRuntimeTocPageAnchorId,
+  flowRuntimeTocShellLayout,
 } from '@/player/surfaces/flow/flowRuntimeToc'
 
 function flowSurface(): PublishedFlowSurface {
@@ -61,6 +63,41 @@ function secondSurface(): PublishedFlowSurface {
 }
 
 describe('Flow runtime TOC model', () => {
+  it('insets only the article and never accumulates a viewport controller offset', () => {
+    const sessionOffset = { dx: 0, dy: 0 }
+    const controller = {
+      title: '教师控制台',
+      x: 190,
+      y: 638,
+      width: 900,
+      height: 64,
+      rotation: 0,
+      compact: false,
+      showSceneProgress: true,
+      collapsible: true,
+      buttons: [],
+      style: {
+        backgroundColor: '#172033',
+        backgroundOpacity: 0.94,
+        accentColor: '#e7b85c',
+        textColor: '#f8fafc',
+        cornerRadius: 16,
+      },
+    }
+    const sequence = [false, true, false, true].map(flowRuntimeTocShellLayout)
+    expect(sequence.map((layout) => layout.articleInsetPx)).toEqual([0, 260, 0, 260])
+    expect(sequence.map((layout) => layout.viewportOverlayInsetPx)).toEqual([0, 0, 0, 0])
+
+    const pill = teacherControllerHitBounds(controller, sessionOffset, true)
+    for (const layout of sequence) {
+      expect(pill.left + layout.viewportOverlayInsetPx).toBeGreaterThanOrEqual(0)
+      expect(pill.top).toBeGreaterThanOrEqual(0)
+      expect(pill.right + layout.viewportOverlayInsetPx).toBeLessThanOrEqual(1280)
+      expect(pill.bottom).toBeLessThanOrEqual(720)
+    }
+    expect(sessionOffset).toEqual({ dx: 0, dy: 0 })
+  })
+
   it('lists Flow pages plus heading/section anchors and never paragraphs', () => {
     const playback = toFlowPublishedPlayback({
       ...flowPlaybackFromSurface(flowSurface(), {

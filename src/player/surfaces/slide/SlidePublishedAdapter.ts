@@ -639,6 +639,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
     const controller = new TeacherControllerDom({
       node,
       container: wrap,
+      footprintElement: wrap,
       canvas: { width: 1280, height: 720 },
       getRenderedStageBounds: () => stageBoundsFromElement(root, { width: 1280, height: 720 }),
       scenes: this.#payload.locations.map((location) => ({

@@ -973,7 +973,7 @@ export class SpatialSurfaceHost {
         wrapper.classList.add('spatial-screen-teacher-controller')
         wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'controller')
         wrapper.appendChild(content)
-        controllerDom = this.#mountTeacherController(entry.item, content)
+        controllerDom = this.#mountTeacherController(entry.item, content, wrapper)
       } else {
         wrapper.appendChild(createViewportHud(dom, entry.item, {
           components: this.#components,
@@ -1042,11 +1042,13 @@ export class SpatialSurfaceHost {
   #mountTeacherController(
     item: TeacherControllerNativeItem,
     container: HTMLElement,
+    footprintElement: HTMLElement,
   ): TeacherControllerDom {
     const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
     return new TeacherControllerDom({
       node,
       container,
+      footprintElement,
       canvas: {
         width: this.#session.viewport.width,
         height: this.#session.viewport.height,

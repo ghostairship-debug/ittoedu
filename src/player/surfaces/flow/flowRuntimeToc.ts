@@ -13,6 +13,19 @@ export const FLOW_RUNTIME_TOC_TOGGLE_HEIGHT_PX = 56
 export const FLOW_RUNTIME_TOC_OPEN_ARIA_LABEL = '收起目录'
 export const FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL = '打开目录'
 
+export interface FlowRuntimeTocShellLayout {
+  articleInsetPx: number
+  viewportOverlayInsetPx: number
+}
+
+/** The drawer reflows the article; viewport-owned runtime chrome never moves. */
+export function flowRuntimeTocShellLayout(open: boolean): FlowRuntimeTocShellLayout {
+  return {
+    articleInsetPx: open ? FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX : 0,
+    viewportOverlayInsetPx: 0,
+  }
+}
+
 export type FlowRuntimeTocKind = 'page' | 'heading' | 'section'
 
 export interface FlowRuntimeTocEntry {

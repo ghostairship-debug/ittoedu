@@ -52,7 +52,11 @@ interface AxisAlignedBounds {
   bottom: number
 }
 
-function visibleLocalRect(
+/**
+ * Layout-local rectangle that is actually visible and interactive at runtime.
+ * Constraints, DOM clipping and hit bounds must all consume this one result.
+ */
+export function teacherControllerVisibleLocalRect(
   node: TeacherControllerRuntimeNode,
   collapsed: boolean,
 ): TeacherControllerRect {
@@ -69,7 +73,7 @@ function rotatedBounds(
   offset: TeacherControllerSessionOffset,
   collapsed: boolean,
 ): AxisAlignedBounds {
-  const rect = visibleLocalRect(node, collapsed)
+  const rect = teacherControllerVisibleLocalRect(node, collapsed)
   const radians = node.rotation * Math.PI / 180
   const cosine = Math.cos(radians)
   const sine = Math.sin(radians)
