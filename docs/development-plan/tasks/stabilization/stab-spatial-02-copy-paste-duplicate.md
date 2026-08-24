@@ -13,16 +13,16 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: 执行后将 clipboard payload、canonical delta、选择和 history 结果绑定 product commit；文档/任务板/generated-only 变化复用，命中下列方法、快捷键或 focused 测试时失效。
-- Invalidating paths: `src/renderer/store/editorStore.ts#duplicateNode/#duplicateSelectedNodes/#copySelectedNodes/#pasteNodes`; `src/renderer/App.tsx` 的 Ctrl+C/V/D 路由；`src/renderer/ui/NodesTab.tsx` 的重复入口；`tests/unit/editorStore.test.ts`; `tests/unit/spatialProductIntegration.test.tsx`
+- Invalidating paths: `src/renderer/course/spatialClipboardCommands.ts`; `src/renderer/store/editorStore.ts` 的 Spatial clipboard state、persist/backend/location/load seams 与 `duplicateNode/#duplicateSelectedNodes/#copySelectedNodes/#pasteNodes`; `src/renderer/App.tsx` 的 Ctrl+C/V/D 路由；`src/renderer/ui/NodesTab.tsx` 的重复入口；`src/renderer/course/effectiveLayerCommands.ts` 的 target/locate/address helpers；`src/renderer/course/globalLayerCommands.ts` 的 ID/order helpers；`src/renderer/course/spatialRelationCommands.ts#planSpatialGraphAfterWorldCopy`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts#selectSpatialEditorLayers`; Course V9 interaction/resource reference constraints；`tests/unit/editorStore.test.ts`; `tests/unit/spatialProductIntegration.test.tsx`
 - Task ID: `stab-spatial-02-copy-paste-duplicate`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Spatial Clipboard Worker / independent Spatial history reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context Pack + manifest hash | bootstrap-manual: `query Spatial clipboard/duplicate/App shortcuts at claim`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Store/Nodes single-writer firewall / codex/architecture-stabilization`
+- Baseline HEAD: `7ae0797` (history/media/move lanes closed; product baseline includes `2e6be4f` and `093963c`; worktree clean)
+- Context Pack + manifest hash | bootstrap-manual: exact-source trace from App/Nodes entrypoints into the four Store methods, V8 projection/disabled commit fallback, effective owner/address/order helpers, Spatial graph-copy policy and current history selection contract.
+- Freshness / relevant dirty inputs: At `7ae0797`, App and Nodes already call the four stable Store entrypoints, but Spatial still falls through SceneNode/V8 clipboard code and can report success or change projected selection while `spatialSession.history.present` is unchanged. Runtime layers can be omitted by projection and owner/scoped visibility are not captured. Existing Spatial undo/redo intentionally clear selection.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 修复必须复制正确 owner 的真实 LayerItem/资源引用并复用 active Spatial history；不能把临时 selection 或 legacy clipboard 当作保存成功。
@@ -35,7 +35,7 @@ Spatial 中的图层“重复”和 Ctrl+C/V/D 对真实可复制对象产生可
 ## Current fact, canonical write and non-goals
 
 - 审计证据：`duplicateNode` 只有 Slide/部分 global 分支，快捷键仍调用旧 Store 方法；Spatial 可出现状态提示或选择变化但 `SpatialAuthoringSession.history.present` 不变。
-- Canonical write: copy 只读取当前 canonical item 并形成有 owner/address 的临时 clipboard；paste/duplicate 通过 active Spatial command/persistence 写回唯一 `CourseProjectDocument`，新 ID、order、资源与交互引用按现有合同处理，一次操作一条历史。
+- Canonical write: copy 只读取当前 canonical item 并形成有 owner/address 的临时 clipboard；paste/duplicate 通过 active Spatial command/persistence 写回唯一 `CourseProjectDocument`，新 ID、order、资源与交互引用按现有合同处理，一次操作一条历史。成功操作选中新副本；Spatial 历史切换继续使用既有“undo/redo 清空选择”合同，不新增选择历史。
 - 非目标：不建设系统剪贴板协议、跨工程粘贴、跨 Surface 通用 clipboard、批量资源迁移或第二套历史；不改变 Slide/Flow 语义。
 
 ## Scope, locks and acceptance
@@ -47,7 +47,7 @@ Spatial 中的图层“重复”和 Ctrl+C/V/D 对真实可复制对象产生可
 - Acceptance:
   - [ ] 单项图层重复与 Ctrl+D 创建新稳定 ID，进入原 owner，order 唯一并选中新副本。
   - [ ] Ctrl+C 不修改工程/历史，只捕获来自当前 canonical selection 的 payload；Ctrl+V 真实写入工程且只产生一条历史。
-  - [ ] undo/redo 精确移除/恢复副本及选择；资源、组件和相关引用不悬空。
+  - [ ] paste/duplicate 选中新副本；undo/redo 精确移除/恢复副本文档并按既有 Spatial 合同清空选择；资源、组件和相关引用不悬空，不为 redo 新增第二套选择历史。
   - [ ] locked、不可复制、stale、wrong-owner、空 clipboard 或容量失败均为零 document/revision/history/selection 写入，并给出诚实反馈。
   - [ ] 不调用 V9 禁用的 legacy `commit`，不创建第二 clipboard truth。
 
