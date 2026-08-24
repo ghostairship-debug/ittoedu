@@ -16,13 +16,13 @@
 - Invalidating paths: `src/renderer/store/editorStore.ts#persistSpatialResult`; `tests/unit/editorStore.test.ts`
 - Task ID: `stab-diagnostics-01-teacher-facing-command-errors`
 - Phase / wave: `post-audit stabilization / D-cross-surface`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Diagnostics Fix Worker / none / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context: `query persistSpatialResult and renderer diagnostic reporting at claim`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Store diagnostic firewall / codex/architecture-stabilization`
+- Baseline HEAD: `1347c0b` (owner-aware selection closed; Store lock released)
+- Context: generated repo-index is intentionally stale after first-wave product commits; exact-source manual Bootstrap must trace `persistSpatialResult`, both reason shapes, `errorMessage` consumers and the existing local `reportDiagnostic` contract before writing.
+- Freshness / relevant dirty inputs: worktree and the two allowed product/test paths were clean at claim; product baseline includes Spatial selection commit `82e59fc` and must preserve its failure-zero-write boundary.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-audit-closure-gate`
 - Retry count: `0`

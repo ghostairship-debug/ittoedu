@@ -16,13 +16,13 @@
 - Invalidating paths: `src/player/teacherControllerRuntimeSession.ts`; `src/player/surfaces/publishedDynamicHosts.ts`; `src/player/surfaces/mixed/MixedCourseNavigator.ts`; `src/player/surfaces/slide/SlidePublishedAdapter.ts`; `src/player/surfaces/flow/FlowSurfaceHost.ts`; `src/player/surfaces/spatial/SpatialSurfaceHost.ts`; `tests/integration/teacherControllerMixedSession.test.ts`
 - Task ID: `stab-ctrl-05-mixed-runtime-session`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Player Session Worker / Session Boundary Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `isolated worker worktree; integration on codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (refresh after Wave A)
-- Context Pack + manifest hash | bootstrap-manual: `bootstrap-manual`
-- Freshness / relevant dirty inputs: Audit/root-plan/generated changes are read-only; recheck all three host maps and restart callback at claim.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Player Controller Session firewall / codex/architecture-stabilization`
+- Baseline HEAD: `1347c0b` (first Wave B lanes closed; product bytes end at `a2f7386`)
+- Context Pack + manifest hash | bootstrap-manual: generated repo-index is intentionally stale after first-wave product commits; manual Bootstrap must recheck the three host Session maps, dynamic/Mixed wiring, stable controller ID and restart callback before writing.
+- Freshness / relevant dirty inputs: worktree and listed product/test paths were clean at claim; the completed ctrl-03 host changes are part of the baseline and must be preserved.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-ctrl-06-safe-default-collapsed`; `stab-wave-b-ownership-controller`
 - Risk statement: Sharing offsets across unlike surfaces causes jumps; retaining per-host collapse maps keeps duplicate truth and incomplete restart.
@@ -65,4 +65,3 @@ One global controller keeps collapsed/expanded state across Mixed surfaces, keep
 - Stop condition: persisted per-location state, two authoritative maps or unrelated restart changes require re-scope.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
-

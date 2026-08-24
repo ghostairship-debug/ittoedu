@@ -16,13 +16,13 @@
 - Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PublishedFormulaPaint.tsx; src/renderer/ui/FlowFormulaBlockProperties.tsx; tests/unit/flowWorkspace.test.tsx; tests/unit/flowProductIntegration.test.tsx
 - Task ID: stab-flow-03-formula-edit-entry
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: draft
+- Status: claimed
 - Owner / Reviewer / Integrator: Flow Formula Worker / independent formula-entry reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: assigned at claim
-- Baseline HEAD: record at claim
-- Context: re-check rendered formula hit targets after Wave A
-- Freshness / relevant dirty inputs: verify FlowWorkspace and formula UI diffs at claim
+- Claimed at / released at: 2026-08-25 / not released
+- Worktree / branch: shared integration workspace with FlowWorkspace/formula firewall / codex/architecture-stabilization
+- Baseline HEAD: 1347c0b (Wave A and insertion affordance integrated; product bytes end at a2f7386)
+- Context: generated repo-index is intentionally stale after first-wave product commits; exact-source manual Bootstrap must re-check rendered formula target replacement, current editing state and visible entry after Wave A before writing.
+- Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; the existing `flowProductIntegration.test.tsx` now includes the closed cross-01 scope matrix and must be preserved.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-wave-c-flow-authoring
 - Retry count: 0
@@ -62,4 +62,3 @@ Flow 的独立公式块在首次重渲染后仍能从正文可见区域稳定进
 - Rollback: 独立 revert 本卡 UI/测试提交，恢复原入口；不迁移 persisted data。
 - Semantic index impact: none
 - Generated refresh: defer-to-wave-gate
-
