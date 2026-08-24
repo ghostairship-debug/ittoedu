@@ -330,4 +330,29 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     ))
     expect(legacyEngineConsumers).toEqual(['src/player/PlayerScene.ts'])
   })
+
+  it('keeps global playback actions on canonical V9 Surface histories', () => {
+    const store = source('src/renderer/store/editorStore.ts')
+    const updatePlayback = sliceBetween(
+      store,
+      '    updatePlayback(patch) {',
+      '    updateDesignTokens(tokens) {',
+    )
+    expect(updatePlayback).toContain('updateCoursePlaybackSettings(')
+    expect(updatePlayback).toContain('persistSpatialLayerCommand(')
+    expect(updatePlayback).toContain('persistFlowLayerCommand(')
+    expect(updatePlayback).toContain('persistLayerCommand(')
+    expect(updatePlayback).not.toMatch(/\bcommit\(/)
+
+    const ensureTeacherController = sliceBetween(
+      store,
+      '    ensureTeacherController() {',
+      '    addExternalComponentNode(packageId, x, y, presetId) {',
+    )
+    expect(ensureTeacherController).toContain('restoreDefaultTeacherController(')
+    expect(ensureTeacherController).toContain('persistSpatialLayerCommand(')
+    expect(ensureTeacherController).toContain('persistFlowLayerCommand(')
+    expect(ensureTeacherController).toContain('persistLayerCommand(')
+    expect(ensureTeacherController).not.toMatch(/\bcommit\(/)
+  })
 })
