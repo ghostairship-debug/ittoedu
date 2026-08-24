@@ -14,11 +14,11 @@
 - Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `tests/unit/flowWorkspace.test.tsx`; React/Vitest dependency or test configuration
 - Task ID: `fix-flow-direct-react-key`
 - Phase / wave: `current stabilization / simple fix`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / none / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / set on claim`
-- Baseline HEAD: `set on claim`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `Flow Fix Worker / none / Coordinator`
+- Claimed at / released at: `2026-08-24T16:55:56+08:00 / —`
+- Worktree / branch: `shared root / codex/architecture-stabilization`
+- Baseline HEAD: `4a98535`
 - Context / freshness: reproduce the focused warning at claim; repo-index optional
 - Depends on: `none`
 - Blocks: current Flow/UI warning-free integration
