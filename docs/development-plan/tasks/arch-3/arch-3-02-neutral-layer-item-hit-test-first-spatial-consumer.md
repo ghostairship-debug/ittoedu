@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/phaser/layerItemHitTest.ts`; `src/renderer/phaser/v9SlideHitAdapter.ts`; `src/renderer/phaser/v9SpatialHitAdapter.ts`; `src/renderer/authoring/stageViewportTransform.ts`; `tests/unit/spatialWorkspaceAuthoring.test.ts`; `tests/unit/v9SlideViewportAdapter.test.ts`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-02-neutral-layer-item-hit-test-first-spatial-consumer`
 - Phase / wave: `ARCH-3 / Spatial first consumer`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Boundary Worker / independent hit-policy reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T18:31:35+08:00 / —`
+- Claimed at / released at: `2026-08-24T18:31:35+08:00 / 2026-08-24T18:38:30+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch3-spatial-neutral-hit / codex/arch3-spatial-neutral-hit`
 - Baseline HEAD: `c758873`
 - Context: `ARCH_3_ADMISSION_REPORT.md` at `629fd15`; last repo-index is product-fresh and later changes are admission/Flow-claim docs only, with exact hit modules re-read at claim.
@@ -89,11 +89,11 @@ Spatial hit-testing no longer depends on Slide internals while Slide and Spatial
 
 ## Result evidence
 
-- Product commit and before/after: pending
-- Focused validation: pending
-- Exact consumer/implementation delta: pending
-- Independent review: pending
-- Remaining risks/re-admission: pending
+- Product commit and before/after: root `40a3f37` (isolated-worker source `f01c5b7`). Generic bounds/hittability/adapt/reverse point hit/marquee logic moved once to `layerItemHitTest.ts`; Slide keeps zero-logic old-name re-exports and its pointer conversion, while Spatial imports neutral symbols and retains its enrichment/priority/scope code.
+- Focused validation: `npx vitest run tests/unit/spatialWorkspaceAuthoring.test.ts tests/unit/v9SlideViewportAdapter.test.ts` passed `2 files / 14 tests`; commit diff check passed. Existing characterization was sufficient, so tests were not changed.
+- Exact consumer/implementation delta: Spatial → Slide hit edge `1 → 0`; audited Spatial-named Slide edges `2 → 1`; six imported Slide hit symbols `6 → 0`; Slide wrapper source importers `4 → 3`; generic hit implementation copies remain `1`.
+- Independent review: APPROVE with no findings. It verified rotated point/AABB behavior, reverse order, pass-through/visibility/controller/lock semantics, zero-logic Slide aliases and unchanged Spatial coordinate/source/viewport-first/scope mapping.
+- Remaining risks/re-admission: `spatialWorldAuthoring → v9SlideContentEdit` remains the one audited Spatial-named Slide edge and must be separately admitted or retained; this card does not generalize content-edit policy.
 - Generated refresh: defer-to-ARCH-3-gate
 
 ## Ready checklist（Coordinator）
