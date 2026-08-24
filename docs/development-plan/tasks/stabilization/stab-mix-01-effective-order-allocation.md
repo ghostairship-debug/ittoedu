@@ -16,14 +16,14 @@
 - Invalidating paths: `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/globalLayerCommands.ts`; `tests/unit/spatialEditorCommands.test.ts`; `tests/unit/effectiveLayerCommands.test.ts`
 - Task ID: `stab-mix-01-effective-order-allocation`
 - Phase / wave: `post-audit stabilization / A-core`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Mixed Order Worker / Unified Order Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared workspace with file firewall; integration on codex/architecture-stabilization`
 - Baseline HEAD: `5c512f9`
 - Context: fresh `repo:context` query on `Spatial world insertion effective course layer order allocator` returned low confidence, so manual Bootstrap is required before writing.
 - Freshness / relevant dirty inputs: repo-index check passed at claim; worktree was clean and no relevant dirty inputs were present.
-- Hotspot locks: `globalLayerCommands.ts`, `spatialEditorCommands.ts`, and the two focused order tests are reserved to this card until integration.
+- Hotspot locks: released after product commit `0602e23`; `globalLayerCommands.ts` required no change.
 - Depends on: `none`
 - Blocks: `stab-wave-a-core-usability`; `stab-spatial-02-copy-paste-duplicate`; `stab-spatial-03-owner-aware-insertion`
 - Retry count: `0`
@@ -56,9 +56,9 @@ Every Spatial world insertion in a default Mixed project receives a unique effec
 
 ## Result and rollback
 
-- Start point: claim baseline.
-- Product commit and rollback: pending; one implementation commit and one revert boundary, with the local-only allocator removed from authority.
-- Result evidence: pending focused insertion/order results; save/reopen and browser behavior are owned once by Wave A.
+- Start point: `5c512f9`; claim recorded by `726dfd5`.
+- Product commit and rollback: `0602e23`; revert that commit to restore the world-only allocator and its prior tests.
+- Result evidence: at `0602e23`, `npx vitest run tests/unit/spatialEditorCommands.test.ts tests/unit/effectiveLayerCommands.test.ts` passed 2 files / 14 tests and `git diff --check` passed. Independent Unified Order Reviewer approved the allocator coverage, absence of dependency cycles, seven-kind shared path, unchanged history semantics and strict-Schema counterexample. Save/reopen and real-browser evidence remain owned once by Wave A.
 - Outcome conclusion boundary: V1 establishes at most `engineering candidate`.
 - Stop condition: Schema weakening or broad order rewriting requires re-scope.
 - Semantic index impact: `canonical-update`
