@@ -4,7 +4,12 @@ import type {
   ComponentPackageData,
 } from '@/shared/componentTypes'
 import type { RuntimeDocument } from '@/shared/runtimeTypes'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { captureCourseRuntimeContentTextTarget } from '@/renderer/runtime/runtimeContentTextAuthoringCommands'
+import {
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 
 function componentPackage(
   id: string,
@@ -57,6 +62,47 @@ function runtime(title: string): RuntimeDocument {
     },
     assets: {},
   }
+}
+
+function captureRuntimeTitleTarget(
+  owner: 'scene' | 'global',
+  initialValue: string,
+) {
+  const state = useEditorStore.getState()
+  const project = selectActiveCourseProjectDocument(state)
+  const locationId = selectActiveCourseLocationId(state)
+  const sessionToken = state.courseAuthoringSession?.token
+  const location = project?.locations.find((candidate) => candidate.id === locationId)
+  const surface = project?.surfaces.find(
+    (candidate) => candidate.id === location?.surfaceId,
+  )
+  if (
+    !project
+    || !locationId
+    || !sessionToken
+    || location?.kind !== 'slide-scene'
+    || surface?.type !== 'slide'
+  ) {
+    throw new Error('缺少 Slide Runtime 文字编辑会话')
+  }
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  const item = owner === 'global'
+    ? project.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    : scene?.layerItems.find((candidate) => candidate.kind === 'runtime')
+  if (!item || item.kind !== 'runtime') {
+    throw new Error(`缺少 ${owner} Runtime LayerItem`)
+  }
+  return captureCourseRuntimeContentTextTarget({
+    sessionToken,
+    projectId: project.id,
+    surfaceId: surface.id,
+    stateId: state.activePresentationStateId,
+    owner,
+    sceneId: owner === 'scene' ? scene!.id : null,
+    itemId: item.layerItemId,
+    contentKey: 'title',
+    initialValue,
+  })
 }
 
 beforeEach(() => {
@@ -331,33 +377,27 @@ describe('Project V8 global-layer editor store', () => {
   })
 
   it('edits scene and global runtime content without changing source and supports undo', () => {
-    const initial = structuredClone(useEditorStore.getState().project)
     const sceneRuntime = runtime('场景标题')
     const globalRuntime = runtime('全局标题')
-    initial.scenes[0]!.runtime = sceneRuntime
-    initial.globalRuntime = globalRuntime
-    useEditorStore.getState().loadProject(initial, null)
     const store = useEditorStore.getState()
-    const sceneId = initial.scenes[0]!.id
+    const sceneId = store.project.scenes[0]!.id
+    store.setSceneRuntime(sceneId, sceneRuntime)
+    store.setGlobalRuntime(globalRuntime)
+    const locationId = selectActiveCourseLocationId(useEditorStore.getState())
+    if (!locationId) throw new Error('缺少活动课程位置')
+    store.activateCourseLocation(locationId)
 
-    store.updateSceneRuntime(sceneId, {
-      content: {
-        ...sceneRuntime.content,
-        values: {
-          ...sceneRuntime.content.values,
-          title: '修改后的场景标题',
-        },
-      },
-    })
-    store.updateGlobalRuntime({
-      content: {
-        ...globalRuntime.content,
-        values: {
-          ...globalRuntime.content.values,
-          title: '修改后的全局标题',
-        },
-      },
-    })
+    const sceneResult = useEditorStore.getState().updateRuntimeContentTextAtTarget(
+      captureRuntimeTitleTarget('scene', '场景标题'),
+      '修改后的场景标题',
+    )
+    expect(sceneResult).toMatchObject({ ok: true, status: 'updated' })
+    useEditorStore.getState().setEditingScope('global')
+    const globalResult = useEditorStore.getState().updateRuntimeContentTextAtTarget(
+      captureRuntimeTitleTarget('global', '全局标题'),
+      '修改后的全局标题',
+    )
+    expect(globalResult).toMatchObject({ ok: true, status: 'updated' })
 
     let project = useEditorStore.getState().project
     expect(project.scenes[0]!.runtime?.source).toBe(sceneRuntime.source)

@@ -537,21 +537,15 @@ async function publishRuntimeTextTarget(input: {
 
 const originalCapture = useEditorStore.getState().captureRuntimeContentTextTarget
 const originalUpdate = useEditorStore.getState().updateRuntimeContentTextAtTarget
-const originalUpdateSceneRuntime = useEditorStore.getState().updateSceneRuntime
-const originalUpdateGlobalRuntime = useEditorStore.getState().updateGlobalRuntime
 
 function installWorkspaceWriteSpies() {
   const capture = vi.fn(originalCapture)
   const update = vi.fn(originalUpdate)
-  const updateSceneRuntime = vi.fn(originalUpdateSceneRuntime)
-  const updateGlobalRuntime = vi.fn(originalUpdateGlobalRuntime)
   useEditorStore.setState({
     captureRuntimeContentTextTarget: capture,
     updateRuntimeContentTextAtTarget: update,
-    updateSceneRuntime,
-    updateGlobalRuntime,
   })
-  return { capture, update, updateSceneRuntime, updateGlobalRuntime }
+  return { capture, update }
 }
 
 beforeEach(() => {
@@ -571,8 +565,6 @@ afterEach(() => {
   useEditorStore.setState({
     captureRuntimeContentTextTarget: originalCapture,
     updateRuntimeContentTextAtTarget: originalUpdate,
-    updateSceneRuntime: originalUpdateSceneRuntime,
-    updateGlobalRuntime: originalUpdateGlobalRuntime,
   })
   useEditorStore.getState().clearV9SlideCandidateBackend()
   vi.restoreAllMocks()
@@ -814,8 +806,6 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
       expect(spies.update.mock.calls[0]?.[0]).toEqual(
         spies.capture.mock.results[0]?.value,
       )
-      expect(spies.updateSceneRuntime).not.toHaveBeenCalled()
-      expect(spies.updateGlobalRuntime).not.toHaveBeenCalled()
     },
   )
 
@@ -860,8 +850,6 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
     })
     expect(spies.capture).toHaveBeenCalledOnce()
     expect(spies.update).not.toHaveBeenCalled()
-    expect(spies.updateSceneRuntime).not.toHaveBeenCalled()
-    expect(spies.updateGlobalRuntime).not.toHaveBeenCalled()
     expect(authoritativeSnapshot()).toEqual(before)
   })
 })

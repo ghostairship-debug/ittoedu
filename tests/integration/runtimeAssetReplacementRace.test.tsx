@@ -188,28 +188,20 @@ const originalCapture =
   useEditorStore.getState().captureRuntimeAssetReplacementTarget
 const originalReplace = useEditorStore.getState().replaceRuntimeAssetAtTarget
 const originalImportAsset = useEditorStore.getState().importAsset
-const originalUpdateSceneRuntime = useEditorStore.getState().updateSceneRuntime
-const originalUpdateGlobalRuntime = useEditorStore.getState().updateGlobalRuntime
 
 function installWriteSpies() {
   const capture = vi.fn(originalCapture)
   const replace = vi.fn(originalReplace)
   const importAsset = vi.fn(originalImportAsset)
-  const updateSceneRuntime = vi.fn(originalUpdateSceneRuntime)
-  const updateGlobalRuntime = vi.fn(originalUpdateGlobalRuntime)
   useEditorStore.setState({
     captureRuntimeAssetReplacementTarget: capture,
     replaceRuntimeAssetAtTarget: replace,
     importAsset,
-    updateSceneRuntime,
-    updateGlobalRuntime,
   })
   return {
     capture,
     replace,
     importAsset,
-    updateSceneRuntime,
-    updateGlobalRuntime,
   }
 }
 
@@ -287,10 +279,8 @@ async function resolveSelection(
   })
 }
 
-function expectLegacyWritesUnused(spies: ReturnType<typeof installWriteSpies>) {
+function expectBypassImportUnused(spies: ReturnType<typeof installWriteSpies>) {
   expect(spies.importAsset).not.toHaveBeenCalled()
-  expect(spies.updateSceneRuntime).not.toHaveBeenCalled()
-  expect(spies.updateGlobalRuntime).not.toHaveBeenCalled()
 }
 
 beforeEach(() => {
@@ -311,8 +301,6 @@ afterEach(() => {
     captureRuntimeAssetReplacementTarget: originalCapture,
     replaceRuntimeAssetAtTarget: originalReplace,
     importAsset: originalImportAsset,
-    updateSceneRuntime: originalUpdateSceneRuntime,
-    updateGlobalRuntime: originalUpdateGlobalRuntime,
   })
   useEditorStore.getState().clearV9SlideCandidateBackend()
   vi.restoreAllMocks()
@@ -338,7 +326,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expect(activeProject().assets).not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState()))
       .not.toHaveProperty(REPLACEMENT_ASSET_ID)
-    expectLegacyWritesUnused(spies)
+    expectBypassImportUnused(spies)
     const liveButton = await screen.findByRole('button', {
       name: '场景主视觉，双击替换图片',
     })
@@ -362,7 +350,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expect(activeProject().assets).not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState()))
       .not.toHaveProperty(REPLACEMENT_ASSET_ID)
-    expectLegacyWritesUnused(spies)
+    expectBypassImportUnused(spies)
   })
 
   it('drops a deferred callback after the Runtime item is deleted with no orphan resource or extra history frame', async () => {
@@ -383,7 +371,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expect(activeProject().assets).not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState()))
       .not.toHaveProperty(REPLACEMENT_ASSET_ID)
-    expectLegacyWritesUnused(spies)
+    expectBypassImportUnused(spies)
   })
 
   it('uses only replaceRuntimeAssetAtTarget once for a normal replacement, creates one history frame, and clears target busy state', async () => {
@@ -408,7 +396,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expect(after.project.assets[REPLACEMENT_ASSET_ID]).toEqual(REPLACEMENT.meta)
     expect(after.assetFiles[REPLACEMENT_ASSET_ID]).toEqual([...REPLACEMENT_BYTES])
     expect(originalAssetId).not.toBe(REPLACEMENT_ASSET_ID)
-    expectLegacyWritesUnused(spies)
+    expectBypassImportUnused(spies)
 
     const liveButton = await publishRuntimeAssetTarget()
     expect(liveButton).not.toBeDisabled()

@@ -4,6 +4,7 @@ import type { ComponentPackageData } from '../../src/shared/componentTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import { RightSidebar } from '../../src/renderer/ui/RightSidebar'
 import { DeveloperTab } from '../../src/renderer/ui/DeveloperTab'
+import { selectRuntimeSourceAuthoringView } from '../../src/renderer/runtime/runtimeSourceAuthoringView'
 import {
   editableComponentPackageId,
   selectActiveCourseLocationId,
@@ -159,7 +160,27 @@ describe('专业开发模式', () => {
     const nextSource =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){ctx.emit("ready");return{destroy(){}}}})'
     installSceneRuntime(scene.id, initialSource)
-    useEditorStore.getState().updateSceneRuntime(scene.id, { source: nextSource })
+    const state = useEditorStore.getState()
+    const project = selectActiveCourseProjectDocument(state)
+    const locationId = selectActiveCourseLocationId(state)
+    const sessionToken = state.courseAuthoringSession?.token
+    if (!project || !locationId || !sessionToken) {
+      throw new Error('缺少 Runtime 源码编辑会话')
+    }
+    const view = selectRuntimeSourceAuthoringView({
+      project,
+      locationId,
+      editingScope: 'scene',
+      activeStateId: state.activePresentationStateId,
+      sessionToken,
+    })
+    if (view.availability !== 'available') {
+      throw new Error(`Runtime 源码不可编辑：${view.reason}`)
+    }
+    expect(state.updateRuntimeSourceAtTarget(view.target, nextSource)).toMatchObject({
+      ok: true,
+      status: 'committed',
+    })
     expect(selectActiveScene(useEditorStore.getState()).runtime?.source).toBe(nextSource)
 
     useEditorStore.getState().undo()
