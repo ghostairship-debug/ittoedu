@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `src/renderer/course/effectiveLayerProjection.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/store/editorStore.ts`; `src/shared/projectHealth.ts`; `src/shared/projectDiagnostics.ts`; `src/renderer/ui/ProjectHealthPanel.tsx`; `src/renderer/project/recoveryWriteCoordinator.ts`; `src/renderer/project/saveProject.ts`; `src/renderer/App.tsx`; relevant focused tests
 - Task ID: `arch-2-b2-00-remaining-domain-admission`
 - Phase / wave: `ARCH-2 / W2-B2 remaining-domain admission`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + W2-B2 Admission Auditor / independent admission reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T17:08:20+08:00 / —`
+- Claimed at / released at: `2026-08-24T17:08:20+08:00 / 2026-08-24T17:27:33+08:00`
 - Worktree / branch: `shared root, read-only product audit / codex/architecture-stabilization`
 - Baseline HEAD: `16c787f`
 - Context: fresh generated repo-index at `16c787f`; source `28949c93`, semantic `8ae66530`, config `103c4aa4`, tool `2c71dbb7`
@@ -87,11 +87,11 @@ No new Layer, Controller, Diagnostics, persistence, session or lifecycle API; no
 
 ## Acceptance
 
-- [ ] Each of the three candidate domains has an evidence-backed admit/skip/retained decision.
-- [ ] Every admitted item names one observable behavior, exact consumer/replacement, narrow files and 1–3 focused tests.
-- [ ] Every skipped/retained item names its current owner and a concrete revisit trigger.
-- [ ] No product change, speculative abstraction, duplicated truth or product-level escalation is introduced.
-- [ ] Budget and read-only scope are respected.
+- [x] Each of the three candidate domains has an evidence-backed admit/skip/retained decision.
+- [x] Every admitted item names one observable behavior, exact consumer/replacement, narrow files and 1–3 focused tests.
+- [x] Every skipped/retained item names its current owner and a concrete revisit trigger.
+- [x] No product change, speculative abstraction, duplicated truth or product-level escalation is introduced.
+- [x] Budget and read-only scope are respected.
 
 ## Minimal validation
 
@@ -114,17 +114,17 @@ No new Layer, Controller, Diagnostics, persistence, session or lifecycle API; no
 
 ## Result evidence
 
-- Actual change/product commit and evidence key: pending
-- Behavior before/after: pending
-- Validation results: pending
-- Consumer delta: none expected
-- Remaining risks: pending
+- Actual change/product commit and evidence key: `1a167ad` (`docs(arch-2): record W2-B2 admission`); documentation-only, no product commit.
+- Behavior before/after: before, W2-B2 had no exit evidence and the first-pass global skip missed a legal UI no-op; after independent review, Global/Controller and Diagnostics each have one narrow admitted behavior while Save/Recovery has source-backed skip/retained evidence.
+- Validation results: `npm run check:task-board` passed; every cited repository path exists; independent reviewer closed the initial Global/Controller and Diagnostics scope findings; final `git diff --check` passed after removing two Markdown hard-break trailing spaces. No product tests ran under V0.
+- Consumer delta: audit only, `0`; no Legacy status or product consumer changed.
+- Remaining risks: Flow/Spatial global playback settings still require the admitted Store integration; the closed Project Health panel still performs duplicate analysis until the admitted UI task lands; `LEG-001`, `LEG-006`, `LEG-007` and `LEG-008` remain explicitly retained.
 - Rollback commit or start point: `16c787f`
-- Next allowed task: pending evidence-based admit/skip decisions
+- Next allowed task: `arch-2-b2-01-cross-surface-global-playback-controls`, then `arch-2-b2-02-project-health-panel-on-demand-analysis`.
 
 ## Findings / next allowed task
 
-Pending audit and independent review.
+Independent review initially rejected the Global/Controller skip after tracing a legal Flow/Spatial UI path to the Store no-op fallback. The report now admits that workflow, narrows Diagnostics to Panel-owned work only, and is approved with no remaining finding.
 
 ## Ready checklist（Coordinator）
 

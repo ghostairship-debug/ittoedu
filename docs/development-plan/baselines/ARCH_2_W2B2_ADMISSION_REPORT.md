@@ -1,7 +1,9 @@
 # ARCH-2 W2-B2 剩余候选域准入报告
 
-记录时间：2026-08-24（Asia/Shanghai）  
-证据基线：`16c787f`，repo-index `fresh / high confidence / safe-for-S2`  
+记录时间：2026-08-24（Asia/Shanghai）
+
+证据基线：`16c787f`，repo-index `fresh / high confidence / safe-for-S2`
+
 任务卡：`arch-2-b2-00-remaining-domain-admission`
 
 ## 1. 结论
@@ -72,7 +74,7 @@
 
 ## 5. 分层结果与下一步
 
-- Pipeline：`V0 pass pending final task-board/link/diff check`；未运行产品测试。
+- Pipeline：`V0 pass`；任务板、引用路径和最终 diff hygiene 通过，按 docs ceiling 未运行产品测试。
 - Engineering：Save/Recovery 以可复核 skip/retained 结束；Global/Controller 与 Diagnostics 各准入一张最小实现卡；没有 speculative framework、第二份真相或产品扩张。
 - Outcome：产品行为未在本审计中改变。
 - Accepted：不适用；自动审计不产生教师接受结论。
