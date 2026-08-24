@@ -2,12 +2,16 @@ import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
-import type { RuntimeDocument } from '@/shared/runtimeTypes'
+import type {
+  CourseRuntimeDefinition,
+  RuntimeLayerItem,
+} from '@/shared/courseProjectTypes'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { selectRuntimeInspectorAuthoringView } from '@/renderer/runtime/runtimeInspectorAuthoringView'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
@@ -51,8 +55,9 @@ function componentPackage(
   }
 }
 
-function runtime(label: string, value: string): RuntimeDocument {
+function runtime(label: string, value: string): CourseRuntimeDefinition {
   return {
+    protocol: 'canvas-runtime',
     runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'dom',
@@ -69,6 +74,69 @@ function runtime(label: string, value: string): RuntimeDocument {
     },
     assets: {},
   }
+}
+
+function runtimeItem(
+  layerItemId: string,
+  label: string,
+  order: number,
+  definition: CourseRuntimeDefinition,
+): RuntimeLayerItem {
+  return {
+    layerItemId,
+    label,
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    kind: 'runtime',
+    runtime: structuredClone(definition),
+  }
+}
+
+function installRuntimeDefinitions(
+  sceneId: string,
+  sceneRuntime: CourseRuntimeDefinition,
+  globalRuntime: CourseRuntimeDefinition,
+): void {
+  const store = useEditorStore.getState()
+  const current = selectActiveCourseProjectDocument(store)
+  if (!current) throw new Error('缺少当前 Course Project')
+  const project = structuredClone(current)
+  const surface = project.surfaces.find((candidate) => (
+    candidate.type === 'slide'
+    && candidate.scenes.some((scene) => scene.id === sceneId)
+  ))
+  if (!surface || surface.type !== 'slide') throw new Error('缺少当前 Slide Surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
+  if (!scene) throw new Error('缺少当前 Slide 场景')
+  const sceneOrder = allocateCourseLayerOrder(project, 0)
+  scene.layerItems.push(runtimeItem(
+    `test-scene-runtime-${sceneId}`,
+    '场景运行时',
+    sceneOrder,
+    sceneRuntime,
+  ))
+  const globalOrder = allocateCourseLayerOrder(project, sceneOrder + 1)
+  project.globalLayerItems.push({
+    item: runtimeItem(
+      `test-global-runtime-${project.id}`,
+      '全局运行时',
+      globalOrder,
+      globalRuntime,
+    ),
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  store.loadCourseProject(
+    project,
+    null,
+    store.assetFiles,
+    store.componentPackages,
+  )
 }
 
 beforeEach(() => {
@@ -134,8 +202,7 @@ describe('Project V8 global-layer editor UI', () => {
     const [firstScene, secondScene] = useEditorStore.getState().project.scenes
     const sceneRuntime = runtime('场景运行时标题', '场景原文')
     const globalRuntime = runtime('全局运行时标题', '全局原文')
-    store.setSceneRuntime(firstScene!.id, sceneRuntime)
-    store.setGlobalRuntime(globalRuntime)
+    installRuntimeDefinitions(firstScene!.id, sceneRuntime, globalRuntime)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(globalPackage.manifest.id)
     const globalNode = useEditorStore.getState().project.globalLayer.find(

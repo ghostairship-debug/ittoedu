@@ -3,8 +3,12 @@ import type {
   ComponentManifestV4,
   ComponentPackageData,
 } from '@/shared/componentTypes'
-import type { RuntimeDocument } from '@/shared/runtimeTypes'
+import type {
+  CourseRuntimeDefinition,
+  RuntimeLayerItem,
+} from '@/shared/courseProjectTypes'
 import { captureCourseRuntimeContentTextTarget } from '@/renderer/runtime/runtimeContentTextAuthoringCommands'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
@@ -45,8 +49,9 @@ function componentPackage(
   }
 }
 
-function runtime(title: string): RuntimeDocument {
+function runtime(title: string): CourseRuntimeDefinition {
   return {
+    protocol: 'canvas-runtime',
     runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'hybrid',
@@ -62,6 +67,69 @@ function runtime(title: string): RuntimeDocument {
     },
     assets: {},
   }
+}
+
+function runtimeItem(
+  layerItemId: string,
+  label: string,
+  order: number,
+  definition: CourseRuntimeDefinition,
+): RuntimeLayerItem {
+  return {
+    layerItemId,
+    label,
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    kind: 'runtime',
+    runtime: structuredClone(definition),
+  }
+}
+
+function installRuntimeDefinitions(
+  sceneId: string,
+  sceneRuntime: CourseRuntimeDefinition,
+  globalRuntime: CourseRuntimeDefinition,
+): void {
+  const store = useEditorStore.getState()
+  const current = selectActiveCourseProjectDocument(store)
+  if (!current) throw new Error('缺少当前 Course Project')
+  const project = structuredClone(current)
+  const surface = project.surfaces.find((candidate) => (
+    candidate.type === 'slide'
+    && candidate.scenes.some((scene) => scene.id === sceneId)
+  ))
+  if (!surface || surface.type !== 'slide') throw new Error('缺少当前 Slide Surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
+  if (!scene) throw new Error('缺少当前 Slide 场景')
+  const sceneOrder = allocateCourseLayerOrder(project, 0)
+  scene.layerItems.push(runtimeItem(
+    `test-scene-runtime-${sceneId}`,
+    '场景运行时',
+    sceneOrder,
+    sceneRuntime,
+  ))
+  const globalOrder = allocateCourseLayerOrder(project, sceneOrder + 1)
+  project.globalLayerItems.push({
+    item: runtimeItem(
+      `test-global-runtime-${project.id}`,
+      '全局运行时',
+      globalOrder,
+      globalRuntime,
+    ),
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  store.loadCourseProject(
+    project,
+    null,
+    store.assetFiles,
+    store.componentPackages,
+  )
 }
 
 function captureRuntimeTitleTarget(
@@ -381,8 +449,7 @@ describe('Project V8 global-layer editor store', () => {
     const globalRuntime = runtime('全局标题')
     const store = useEditorStore.getState()
     const sceneId = store.project.scenes[0]!.id
-    store.setSceneRuntime(sceneId, sceneRuntime)
-    store.setGlobalRuntime(globalRuntime)
+    installRuntimeDefinitions(sceneId, sceneRuntime, globalRuntime)
     const locationId = selectActiveCourseLocationId(useEditorStore.getState())
     if (!locationId) throw new Error('缺少活动课程位置')
     store.activateCourseLocation(locationId)

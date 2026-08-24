@@ -396,21 +396,30 @@ describe('selectRuntimeInspectorAuthoringView', () => {
     expect(atB.enabledTarget.courseTarget.stateId).toBe('state-b')
   })
 
-  it('preserves B1-09 unavailable results without inventing targets', () => {
+  it('preserves the missing-Runtime creation slot without inventing property targets', () => {
     const source = fixture('scene')
     const project = structuredClone(source.project)
     const surface = project.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('expected Slide')
     surface.scenes[0]!.layerItems = []
 
-    expect(select({
+    const view = select({
       ...source,
       project: courseProjectDocumentSchema.parse(project),
-    })).toEqual({
+    })
+    expect(view).toMatchObject({
       availability: 'unavailable',
       reason: 'runtime-missing',
       label: expect.stringContaining('尚未创建 Runtime'),
       documentKey: null,
+      creationTarget: {
+        projectId: project.id,
+        owner: 'scene',
+        sceneId: surface.scenes[0]!.id,
+        slot: 'runtime-template',
+      },
     })
+    expect(view).not.toHaveProperty('enabledTarget')
+    expect(view).not.toHaveProperty('renderModeTarget')
   })
 })
