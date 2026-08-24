@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 12:46 Asia/Shanghai / pending`
 - Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
 - Baseline HEAD: `ef08171`
-- Claim commit: `pending`
+- Claim commit: `d3c443e`
 - Context Pack + manifest hash | bootstrap-manual: `feature:runtime + feature:interactions + feature:player; fresh generated repo-index at ef08171; source 283cc037, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree after B1-12 close and deterministic repo-index refresh; no product writer lock`
 - Depends on: `arch-2-b1-01 through arch-2-b1-12 done`
