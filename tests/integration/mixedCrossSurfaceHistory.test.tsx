@@ -11,10 +11,13 @@ import {
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
+import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 const SLIDE_LOCATION_ID = 'location-slide'
+const FLOW_LOCATION_ID = 'location-flow'
 const SPATIAL_LOCATION_ID = 'location-spatial'
 const SLIDE_ITEM_ID = 'slide-title'
 const SPATIAL_ITEM_ID = 'spatial-label'
@@ -22,6 +25,44 @@ const SLIDE_ORIGINAL_LABEL = 'slide-title'
 const SPATIAL_ORIGINAL_LABEL = 'spatial-label'
 const SLIDE_EDITED_LABEL = '跨表面后的演示标题'
 const SPATIAL_EDITED_LABEL = '跨表面历史中的空间节点'
+const SPATIAL_PACKAGE_ID = 'com.example.mixed-spatial-history'
+const FLOW_PACKAGE_ID = 'com.example.mixed-flow-history'
+
+function componentPackage(packageId: string, marker: number): ComponentPackageData {
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    id: packageId,
+    name: `${packageId} package`,
+    version: '1.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 320, height: 180 },
+    minSize: { width: 80, height: 45 },
+    preserveAspectRatio: true,
+    assets: { marker: 'assets/marker.bin' },
+    defaultProps: { marker },
+    supportedScopes: ['scene'],
+    renderMode: 'dom',
+  }
+  const runtimeSource = [
+    'window.CoursewareComponent.define({',
+    `id:'${packageId}',`,
+    'runtimeApiVersion:4,',
+    'create:function(){return{destroy:function(){}}}',
+    '})',
+  ].join('')
+  const files = {
+    'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+    'runtime.js': new TextEncoder().encode(runtimeSource),
+    'assets/marker.bin': new Uint8Array([marker, marker + 1, marker + 2]),
+  }
+  return {
+    manifest,
+    runtimeSource,
+    files,
+    contentSha256: componentContentSha256(files),
+  }
+}
 
 function mixedProject(): CourseProjectDocument {
   const fixture = listCourseProjectV9Fixtures().find((candidate) => candidate.id === 'mixed')
@@ -37,6 +78,32 @@ function activeDocument(): CourseProjectDocument {
 
 function layerLabel(document: CourseProjectDocument, layerItemId: string): string | undefined {
   return locateCourseLayer(document, layerItemId)?.item.label
+}
+
+function packageBytes(files: Readonly<Record<string, Uint8Array>>): Record<string, number[]> {
+  return Object.fromEntries(
+    Object.entries(files)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, bytes]) => [path, [...bytes]]),
+  )
+}
+
+function expectComponentPackagePresent(packageData: ComponentPackageData): void {
+  expect(activeDocument().componentPackages[packageData.manifest.id]).toMatchObject({
+    packageId: packageData.manifest.id,
+    version: packageData.manifest.version,
+    contentSha256: packageData.contentSha256,
+  })
+  const payload = useEditorStore.getState().componentPackages[packageData.manifest.id]
+  expect(payload?.manifest).toEqual(packageData.manifest)
+  expect(payload?.runtimeSource).toBe(packageData.runtimeSource)
+  expect(packageBytes(payload?.files ?? {})).toEqual(packageBytes(packageData.files))
+  expect(payload?.contentSha256).toBe(packageData.contentSha256)
+}
+
+function expectComponentPackageAbsent(packageId: string): void {
+  expect(activeDocument().componentPackages[packageId]).toBeUndefined()
+  expect(useEditorStore.getState().componentPackages[packageId]).toBeUndefined()
 }
 
 beforeEach(() => {
@@ -58,6 +125,14 @@ describe('Mixed cross-surface history continuity', () => {
     expect(spatialAfterEdit.history.past).toHaveLength(1)
     expect(layerLabel(spatialAfterEdit.history.present, SPATIAL_ITEM_ID))
       .toBe(SPATIAL_EDITED_LABEL)
+
+    const spatialPackage = componentPackage(SPATIAL_PACKAGE_ID, 17)
+    useEditorStore.getState().importComponentPackage(spatialPackage)
+    const spatialAfterImport = useEditorStore.getState().spatialSession
+    if (!spatialAfterImport) throw new Error('Expected Spatial session after component import')
+    expect(spatialAfterImport.history.past).toHaveLength(2)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(2)
+    expectComponentPackagePresent(spatialPackage)
 
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().setEditingScope('scene')
@@ -116,11 +191,27 @@ describe('Mixed cross-surface history continuity', () => {
     expect(useEditorStore.getState().slideCandidateComponentPackagesFuture)
       .toBe(componentPackagesFutureBeforeCamera)
 
+    useEditorStore.getState().undo()
+    expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
+    expectComponentPackageAbsent(SPATIAL_PACKAGE_ID)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.past)
+      .toHaveLength(1)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(1)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(1)
+
+    useEditorStore.getState().redo()
+    expectComponentPackagePresent(spatialPackage)
+    expect(useEditorStore.getState().componentPackages[SPATIAL_PACKAGE_ID]).toBe(spatialPackage)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.past)
+      .toHaveLength(2)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(2)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(0)
+
     useEditorStore.getState().selectNode(SLIDE_ITEM_ID)
     useEditorStore.getState().updateNode(SLIDE_ITEM_ID, { name: SLIDE_EDITED_LABEL })
     const slideAfterEdit = selectSlideAuthoringBackend(useEditorStore.getState())?.getSession()
     if (!slideAfterEdit) throw new Error('Expected edited Slide authoring session')
-    expect(slideAfterEdit.history.past).toHaveLength(2)
+    expect(slideAfterEdit.history.past).toHaveLength(3)
     expect(layerLabel(slideAfterEdit.history.present, SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(slideAfterEdit.history.present, SLIDE_ITEM_ID)).toBe(SLIDE_EDITED_LABEL)
     const canonicalHistory = slideAfterEdit.history
@@ -177,18 +268,32 @@ describe('Mixed cross-surface history continuity', () => {
     useEditorStore.getState().undo()
     expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(activeDocument(), SLIDE_ITEM_ID)).toBe(SLIDE_ORIGINAL_LABEL)
+    expectComponentPackagePresent(spatialPackage)
+
+    useEditorStore.getState().undo()
+    expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
+    expect(layerLabel(activeDocument(), SLIDE_ITEM_ID)).toBe(SLIDE_ORIGINAL_LABEL)
+    expectComponentPackageAbsent(SPATIAL_PACKAGE_ID)
 
     useEditorStore.getState().undo()
     expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_ORIGINAL_LABEL)
     expect(layerLabel(activeDocument(), SLIDE_ITEM_ID)).toBe(SLIDE_ORIGINAL_LABEL)
+    expectComponentPackageAbsent(SPATIAL_PACKAGE_ID)
 
     useEditorStore.getState().redo()
     expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(activeDocument(), SLIDE_ITEM_ID)).toBe(SLIDE_ORIGINAL_LABEL)
+    expectComponentPackageAbsent(SPATIAL_PACKAGE_ID)
+
+    useEditorStore.getState().redo()
+    expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
+    expect(layerLabel(activeDocument(), SLIDE_ITEM_ID)).toBe(SLIDE_ORIGINAL_LABEL)
+    expectComponentPackagePresent(spatialPackage)
 
     useEditorStore.getState().redo()
     expect(layerLabel(activeDocument(), SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(activeDocument(), SLIDE_ITEM_ID)).toBe(SLIDE_EDITED_LABEL)
+    expectComponentPackagePresent(spatialPackage)
 
     const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
     if (!archive) throw new Error('Expected Course Project archive')
@@ -199,9 +304,50 @@ describe('Mixed cross-surface history continuity', () => {
     expect(reopenedSlide.history.future).toEqual([])
     expect(layerLabel(reopenedSlide.history.present, SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(reopenedSlide.history.present, SLIDE_ITEM_ID)).toBe(SLIDE_EDITED_LABEL)
+    expectComponentPackagePresent(spatialPackage)
     expect(useEditorStore.getState().slideCandidateSidecarPast).toEqual([])
     expect(useEditorStore.getState().slideCandidateSidecarFuture).toEqual([])
     expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toEqual([])
     expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toEqual([])
+  })
+
+  it('moves Flow legacy component payloads with metadata and preserves no-op stack identity', () => {
+    useEditorStore.getState().activateCourseLocation(FLOW_LOCATION_ID)
+    const flowPackage = componentPackage(FLOW_PACKAGE_ID, 41)
+
+    useEditorStore.getState().importComponentPackage(flowPackage)
+    const flowAfterImport = useEditorStore.getState().flowSession
+    if (!flowAfterImport) throw new Error('Expected Flow session after component import')
+    expect(flowAfterImport.history.past).toHaveLength(1)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(1)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(0)
+    expectComponentPackagePresent(flowPackage)
+
+    const packagePastBeforeSelection = (
+      useEditorStore.getState().slideCandidateComponentPackagesPast
+    )
+    const packageFutureBeforeSelection = (
+      useEditorStore.getState().slideCandidateComponentPackagesFuture
+    )
+    useEditorStore.getState().applyFlowSelection(flowAfterImport.selection)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast)
+      .toBe(packagePastBeforeSelection)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture)
+      .toBe(packageFutureBeforeSelection)
+
+    useEditorStore.getState().undo()
+    expectComponentPackageAbsent(FLOW_PACKAGE_ID)
+    expect(useEditorStore.getState().flowSession?.history.past).toHaveLength(0)
+    expect(useEditorStore.getState().flowSession?.history.future).toHaveLength(1)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(0)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(1)
+
+    useEditorStore.getState().redo()
+    expectComponentPackagePresent(flowPackage)
+    expect(useEditorStore.getState().componentPackages[FLOW_PACKAGE_ID]).toBe(flowPackage)
+    expect(useEditorStore.getState().flowSession?.history.past).toHaveLength(1)
+    expect(useEditorStore.getState().flowSession?.history.future).toHaveLength(0)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(1)
+    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(0)
   })
 })

@@ -114,6 +114,10 @@ import {
   validateComponentRuntimeSource,
 } from '../components/importComponentPackage'
 import {
+  componentPackagesFromArchive,
+  componentPackagesToArchiveFiles,
+} from '../components/componentPackageStore'
+import {
   planCourseComponentPackageReplacement,
   type CourseComponentPackageReplacementFeedback,
   type CourseComponentPackageReplacementFailureCode,
@@ -3474,6 +3478,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
     let nextPast = current.slideCandidateSidecarPast
     let nextFuture = current.slideCandidateSidecarFuture
+    let nextPackagePast = current.slideCandidateComponentPackagesPast
+    let nextPackageFuture = current.slideCandidateComponentPackagesFuture
     let nextPackages = extra.componentPackages ?? current.componentPackages
     const resources = applyPersistedResourceTransition(
       current.spatialSession?.history.present ?? session.history.present,
@@ -3485,13 +3491,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (resources) {
       nextSidecar = freezeCourseAssetSidecar(resources.assetFiles)
       nextPackages = { ...resources.componentPackages }
-      if (result.historyEntry) nextFuture = []
+      if (result.historyEntry) {
+        nextFuture = []
+        nextPackageFuture = []
+      }
     } else if (extra.sidecarDirection === 'undo') {
       const previous = current.slideCandidateSidecarPast.at(-1)
       if (previous) {
         nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
         nextSidecar = previous
         nextPast = current.slideCandidateSidecarPast.slice(0, -1)
+      }
+      const previousPackages = current.slideCandidateComponentPackagesPast.at(-1)
+      if (previousPackages) {
+        nextPackageFuture = [
+          current.componentPackages,
+          ...current.slideCandidateComponentPackagesFuture,
+        ]
+        nextPackages = previousPackages
+        nextPackagePast = current.slideCandidateComponentPackagesPast.slice(0, -1)
       }
     } else if (extra.sidecarDirection === 'redo') {
       const upcoming = current.slideCandidateSidecarFuture[0]
@@ -3500,10 +3518,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nextSidecar = upcoming
         nextFuture = current.slideCandidateSidecarFuture.slice(1)
       }
+      const upcomingPackages = current.slideCandidateComponentPackagesFuture[0]
+      if (upcomingPackages) {
+        nextPackagePast = [
+          ...current.slideCandidateComponentPackagesPast,
+          current.componentPackages,
+        ]
+        nextPackages = upcomingPackages
+        nextPackageFuture = current.slideCandidateComponentPackagesFuture.slice(1)
+      }
     } else if (result.historyEntry) {
       nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
       nextFuture = []
       nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+      nextPackagePast = [
+        ...current.slideCandidateComponentPackagesPast,
+        current.componentPackages,
+      ]
+      nextPackageFuture = []
     } else if (extra.sidecar) {
       nextSidecar = cloneSidecar(extra.sidecar)
     }
@@ -3517,8 +3549,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     nextFuture = legacyFutureCount === nextFuture.length
       ? nextFuture
       : nextFuture.slice(0, legacyFutureCount)
+    nextPackagePast = legacyPastCount === nextPackagePast.length
+      ? nextPackagePast
+      : legacyPastCount === 0
+        ? []
+        : nextPackagePast.slice(-legacyPastCount)
+    nextPackageFuture = legacyFutureCount === nextPackageFuture.length
+      ? nextPackageFuture
+      : nextPackageFuture.slice(0, legacyFutureCount)
     const presentPackageIds = new Set(Object.keys(session.history.present.componentPackages))
-    const nextComponentPackages = resourceAware || extra.componentPackages
+    const nextComponentPackages = resourceAware || extra.componentPackages || extra.sidecarDirection
       ? Object.fromEntries(
           Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
         )
@@ -3540,6 +3580,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateSidecar: nextSidecar,
       slideCandidateSidecarPast: nextPast,
       slideCandidateSidecarFuture: nextFuture,
+      slideCandidateComponentPackagesPast: nextPackagePast,
+      slideCandidateComponentPackagesFuture: nextPackageFuture,
       history: spatialHistoryToStoreHistory(session.history),
       dirty: resourceAware || extra.sidecarDirection || result.historyEntry ? true : current.dirty,
       selectedNodeIds: [...session.selection.selectionIds],
@@ -3685,6 +3727,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
     let nextPast = current.slideCandidateSidecarPast
     let nextFuture = current.slideCandidateSidecarFuture
+    let nextPackagePast = current.slideCandidateComponentPackagesPast
+    let nextPackageFuture = current.slideCandidateComponentPackagesFuture
     let nextPackages = extra.componentPackages ?? current.componentPackages
     const resources = applyPersistedResourceTransition(
       session.history.present,
@@ -3696,13 +3740,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (resources) {
       nextSidecar = freezeCourseAssetSidecar(resources.assetFiles)
       nextPackages = { ...resources.componentPackages }
-      if (result.historyEntry) nextFuture = []
+      if (result.historyEntry) {
+        nextFuture = []
+        nextPackageFuture = []
+      }
     } else if (extra.sidecarDirection === 'undo') {
       const previous = current.slideCandidateSidecarPast.at(-1)
       if (previous) {
         nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
         nextSidecar = previous
         nextPast = current.slideCandidateSidecarPast.slice(0, -1)
+      }
+      const previousPackages = current.slideCandidateComponentPackagesPast.at(-1)
+      if (previousPackages) {
+        nextPackageFuture = [
+          current.componentPackages,
+          ...current.slideCandidateComponentPackagesFuture,
+        ]
+        nextPackages = previousPackages
+        nextPackagePast = current.slideCandidateComponentPackagesPast.slice(0, -1)
       }
     } else if (extra.sidecarDirection === 'redo') {
       const upcoming = current.slideCandidateSidecarFuture[0]
@@ -3711,19 +3767,47 @@ export const useEditorStore = create<EditorState>((set, get) => {
         nextSidecar = upcoming
         nextFuture = current.slideCandidateSidecarFuture.slice(1)
       }
+      const upcomingPackages = current.slideCandidateComponentPackagesFuture[0]
+      if (upcomingPackages) {
+        nextPackagePast = [
+          ...current.slideCandidateComponentPackagesPast,
+          current.componentPackages,
+        ]
+        nextPackages = upcomingPackages
+        nextPackageFuture = current.slideCandidateComponentPackagesFuture.slice(1)
+      }
     } else if (result.historyEntry) {
       nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
       nextFuture = []
       nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+      nextPackagePast = [
+        ...current.slideCandidateComponentPackagesPast,
+        current.componentPackages,
+      ]
+      nextPackageFuture = []
     } else if (extra.sidecar) {
       nextSidecar = cloneSidecar(extra.sidecar)
     }
     const legacyPastCount = flowEditorLegacyHistoryEntryCount(history.past)
     const legacyFutureCount = flowEditorLegacyHistoryEntryCount(history.future)
-    nextPast = legacyPastCount === 0 ? [] : nextPast.slice(-legacyPastCount)
-    nextFuture = nextFuture.slice(0, legacyFutureCount)
+    nextPast = legacyPastCount === nextPast.length
+      ? nextPast
+      : legacyPastCount === 0
+        ? []
+        : nextPast.slice(-legacyPastCount)
+    nextFuture = legacyFutureCount === nextFuture.length
+      ? nextFuture
+      : nextFuture.slice(0, legacyFutureCount)
+    nextPackagePast = legacyPastCount === nextPackagePast.length
+      ? nextPackagePast
+      : legacyPastCount === 0
+        ? []
+        : nextPackagePast.slice(-legacyPastCount)
+    nextPackageFuture = legacyFutureCount === nextPackageFuture.length
+      ? nextPackageFuture
+      : nextPackageFuture.slice(0, legacyFutureCount)
     const presentPackageIds = new Set(Object.keys(history.present.componentPackages))
-    const nextComponentPackages = resourceAware || extra.componentPackages
+    const nextComponentPackages = resourceAware || extra.componentPackages || extra.sidecarDirection
       ? Object.fromEntries(
           Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
         )
@@ -3744,6 +3828,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateSidecar: nextSidecar,
       slideCandidateSidecarPast: nextPast,
       slideCandidateSidecarFuture: nextFuture,
+      slideCandidateComponentPackagesPast: nextPackagePast,
+      slideCandidateComponentPackagesFuture: nextPackageFuture,
       history: v9HistoryToStoreHistory(history),
       dirty: resourceAware || extra.sidecarDirection || result.historyEntry ? true : current.dirty,
       selectedNodeIds: [...selection.selectedOverlayIds],
@@ -5404,16 +5490,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
         assetFiles: Object.fromEntries(
           Object.entries(sidecar.files).map(([assetId, bytes]) => [assetId, bytes.slice()]),
         ),
-        componentFiles: {},
+        componentFiles: componentPackagesToArchiveFiles(get().componentPackages),
       })
     },
 
     reopenV9SlideCandidateArchive(bytes) {
       try {
         const archive = openCourseProjectArchive(bytes)
+        const componentPackages = componentPackagesFromArchive(
+          archive.project,
+          archive.componentFiles,
+        )
         if (courseProjectStartsAsSpatial(archive.project)) {
           applySpatialBackend(openSpatialAuthoringSession(archive.project), {
             sidecar: freezeCourseAssetSidecar(archive.assetFiles),
+            componentPackages,
             dirty: false,
             statusMessage: `已打开“${archive.project.title}”`,
             path: get().projectPath,
@@ -5423,6 +5514,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (courseProjectStartsAsFlow(archive.project)) {
           applyFlowBackend(openFlowAuthoringSession(archive.project), {
             sidecar: freezeCourseAssetSidecar(archive.assetFiles),
+            componentPackages,
             dirty: false,
             statusMessage: `已打开“${archive.project.title}”`,
             path: get().projectPath,
@@ -5432,6 +5524,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const backend = createSlideAuthoringBackend(openSlideAuthoringSession(archive.project))
         applyV9Backend(backend, {
           sidecar: freezeCourseAssetSidecar(archive.assetFiles),
+          componentPackages,
           dirty: false,
           statusMessage: `已打开“${archive.project.title}”`,
           path: get().projectPath,
