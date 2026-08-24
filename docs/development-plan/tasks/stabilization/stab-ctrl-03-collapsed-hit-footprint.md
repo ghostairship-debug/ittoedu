@@ -16,13 +16,13 @@
 - Invalidating paths: `src/shared/teacherControllerLayout.ts`; `src/player/teacherControllerDom.ts`; `src/player/teacherControllerRuntimeSession.ts`; `src/player/surfaces/slide/SlidePublishedAdapter.ts`; `src/player/surfaces/flow/flowRuntimeToc.ts`; `src/player/surfaces/flow/FlowSurfaceHost.ts`; `src/player/surfaces/spatial/SpatialSurfaceHost.ts`; `tests/unit/teacherControllerRuntimeSession.test.ts`; `tests/unit/flowRuntimeToc.test.ts`
 - Task ID: `stab-ctrl-03-collapsed-hit-footprint`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Controller Runtime Worker / Runtime Footprint Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `isolated worker worktree; integration on codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (refresh after Wave A)
-- Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: Audit/root-plan/generated changes are read-only; recheck host composition at claim.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Player Controller firewall / codex/architecture-stabilization`
+- Baseline HEAD: `68cfc91` (Wave A gate released and generated index fresh)
+- Context: fresh `repo:context` query on `collapsed teacher controller footprint Flow TOC runtime session` returned low confidence and required Bootstrap; the prepared manual Bootstrap resolved the visible-pill geometry, three host compositions and Flow TOC clipping path before claim.
+- Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; the regenerated index matched source, semantic, config and tool inputs.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-ctrl-06-safe-default-collapsed`; `stab-wave-b-ownership-controller`
 - Retry count: `0`
@@ -64,4 +64,3 @@ In Slide, Flow and Spatial Player, a collapsed controller captures only its visi
 - Stop condition: authored-position mutation or a new layout/state system requires re-scope.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
-

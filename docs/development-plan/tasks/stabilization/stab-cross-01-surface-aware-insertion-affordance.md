@@ -16,13 +16,13 @@
 - Invalidating paths: `src/renderer/ui/ElementsTab.tsx`; `src/renderer/ui/Workspace.tsx` 的 `application/x-courseware-element` drop receiver；`src/renderer/ui/FlowWorkspace.tsx` 的 block DnD 边界；`tests/unit/editorFormattingUi.test.tsx`; `tests/unit/flowProductIntegration.test.tsx`; `tests/unit/spatialProductIntegration.test.tsx`
 - Task ID: `stab-cross-01-surface-aware-insertion-affordance`
 - Phase / wave: `post-audit stabilization / D-cross-surface`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Surface Insertion UX Worker / independent Surface-semantics reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context: `query ElementsTab drag payload and three Surface receivers at claim`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with ElementsTab/UI Shell firewall / codex/architecture-stabilization`
+- Baseline HEAD: `68cfc91` (Wave A gate released and generated index fresh)
+- Context: fresh `repo:context` query on `ElementsTab drag payload Slide Flow Spatial receivers insertion carrier` returned low confidence and required exact-source manual Bootstrap before writing.
+- Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; repo-index source, semantic, config and tool inputs all matched.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-audit-closure-gate`
 - Retry count: `0`

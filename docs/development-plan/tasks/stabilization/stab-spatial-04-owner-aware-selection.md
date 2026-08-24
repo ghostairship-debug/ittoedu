@@ -16,13 +16,13 @@
 - Invalidating paths: `src/renderer/ui/NodesTab.tsx`; `src/renderer/store/editorStore.ts#selectNode/#setEditingScope`; `src/renderer/course/spatialEditorCommands.ts#selectSpatialLayers`; `src/renderer/authoring/spatialWorldAuthoring.ts` 的 scope/selection adapter；`tests/unit/spatialProductIntegration.test.tsx`; `tests/unit/spatialWorkspaceAuthoring.test.ts`
 - Task ID: `stab-spatial-04-owner-aware-selection`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Spatial Selection Worker / independent authoring-address reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context Pack + manifest hash | bootstrap-manual: `query Spatial effective layers/selectNode/selectSpatialLayers at claim`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Spatial Store/selection firewall / codex/architecture-stabilization`
+- Baseline HEAD: `68cfc91` (Wave A gate released and generated index fresh)
+- Context Pack + manifest hash | bootstrap-manual: fresh query on `Spatial effective layers selectNode selectSpatialLayers authoringAddress owner scope` returned low confidence and required Bootstrap; the prepared manual Bootstrap reproduced global/surface row refusal through the exact Store/session path and identified the existing scope transition boundary.
+- Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; repo-index source, semantic, config and tool inputs all matched.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 可见但不可选的行是伪入口；修复必须让选择只改变作者会话而不误写工程，也不能用临时 hitId 代替稳定 authoringAddress。
