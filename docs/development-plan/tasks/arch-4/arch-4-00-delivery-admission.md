@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/exportPreflight.ts`; `src/renderer/export/course/buildCoursePackages.ts`; `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `src/renderer/export/course/buildCoursePptx.ts`; `src/renderer/export/course/flowDocx.ts`; `src/renderer/export/buildPptx.ts`; `src/renderer/export/renderSceneImages.ts`; `src/main/pdfExport.ts`; `tests/unit/coursePackageExport.test.ts`; `tests/unit/coursePrintArtifacts.test.ts`; current App export integration/Electron journey tests; export IPC/preload/types/config
 - Task ID: `arch-4-00-delivery-admission`
 - Phase / wave: `ARCH-4 / necessity admission`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + HTML/Web and PDF Admission Auditors / independent delivery admission reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:14:14+08:00 / pending`
+- Claimed at / released at: `2026-08-24T19:14:14+08:00 / 2026-08-24T19:23:22+08:00`
 - Worktree / branch: `shared root, read-only product audit / codex/architecture-stabilization`
 - Baseline HEAD: `36a92f8`
 - Context: ARCH-3 is closed; previous ARCH-4 hypothesis is being revalidated against actual App orchestration, package artifacts and Electron PDF readiness rather than copied into tasks.
@@ -77,7 +77,12 @@ Only delivery paths with a reproducible current V9 correctness gap or removable 
 
 ## Result evidence
 
-- Pending two source-backed format audits and independent review.
+- Source-backed report: `docs/development-plan/baselines/ARCH_4_ADMISSION_REPORT.md` at product baseline `36a92f8`.
+- Admitted exactly two serial S2 integrations: legal V9 HTML/Web preflight bypasses the V8 base; non-pure-Slide V9 PDF obtains a complete Published/mixed artifact or fails without Legacy fallback.
+- PDF admission corrected the initial two-file hypothesis: mixed Flow markup is currently a nested document and Electron readiness assumes one image per page, so Flow fragment and main readiness are part of the same user behavior.
+- Source-null, pure-Slide PDF/PPTX, Spatial-only PDF, DOCX, diagnostics and compatibility consumers are retained/skip with explicit reasons. `validateProjectArchiveBytes` alone proceeds to ARCH-5 deletion admission.
+- Exact routes/counts, allowed hotspots, focused tests, serial order and the one gate-only actual PDF review are recorded in the report/cards.
+- Independent delivery admission review: APPROVE with no findings. It verified both current control-flow gaps, the renderer/main PDF constraint, serial hotspot order, retained compatibility paths and the minimal focused/one-artifact validation boundary. No product test was run under V0.
 
 ## Ready checklist（Coordinator）
 
