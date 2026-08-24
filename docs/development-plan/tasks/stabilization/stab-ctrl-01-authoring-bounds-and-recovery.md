@@ -16,13 +16,14 @@
 - Invalidating paths: `src/shared/teacherControllerLayout.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/store/editorStore.ts`; `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `tests/unit/teacherControllerAuthoringOwnership.test.tsx`; `tests/unit/teacherControllerAuthoringBounds.test.ts`
 - Task ID: `stab-ctrl-01-authoring-bounds-and-recovery`
 - Phase / wave: `post-audit stabilization / A-core`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Controller Authoring Worker / Controller Ownership Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `isolated worker worktree; integration on codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (reconfirm at claim)
-- Context Pack + manifest hash | bootstrap-manual: `bootstrap-manual`; dirty generated index is not fresh context.
-- Freshness / relevant dirty inputs: Root audit/plan and `repo-index/generated/*` are user/Coordinator-owned read-only inputs.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared workspace with file firewall; integration on codex/architecture-stabilization`
+- Baseline HEAD: `5c512f9`
+- Context Pack + manifest hash | bootstrap-manual: fresh `repo:context` query on `teacher controller page inert preview global layer bounds recovery pointercancel` returned low confidence, so manual Bootstrap is required before writing.
+- Freshness / relevant dirty inputs: repo-index check passed at claim; worktree was clean and no relevant dirty inputs were present.
+- Hotspot locks: `FlowWorkspace.tsx`, `Workspace.tsx`, and Store/History controller exposure are reserved to this card until integration.
 - Depends on: `none`
 - Blocks: `stab-wave-a-core-usability`; `stab-ctrl-06-safe-default-collapsed`
 - Risk statement: Removing the wrong route can disable legitimate Global Layer editing; leaving any page writer or unsafe global commit keeps a whole-course corruption path.
@@ -67,4 +68,3 @@ Slide, Flow and Spatial pages show an inert controller preview that reflects the
 - Stop condition: contract change, silent migration, Published-producer mutation or a second canonical writer requires re-scope/product decision.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
-

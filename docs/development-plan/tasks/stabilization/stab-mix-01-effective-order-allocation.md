@@ -16,13 +16,14 @@
 - Invalidating paths: `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/globalLayerCommands.ts`; `tests/unit/spatialEditorCommands.test.ts`; `tests/unit/effectiveLayerCommands.test.ts`
 - Task ID: `stab-mix-01-effective-order-allocation`
 - Phase / wave: `post-audit stabilization / A-core`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Mixed Order Worker / Unified Order Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `isolated worker worktree; integration on codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (reconfirm at claim)
-- Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: Root audit/plan and generated index changes are read-only.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared workspace with file firewall; integration on codex/architecture-stabilization`
+- Baseline HEAD: `5c512f9`
+- Context: fresh `repo:context` query on `Spatial world insertion effective course layer order allocator` returned low confidence, so manual Bootstrap is required before writing.
+- Freshness / relevant dirty inputs: repo-index check passed at claim; worktree was clean and no relevant dirty inputs were present.
+- Hotspot locks: `globalLayerCommands.ts`, `spatialEditorCommands.ts`, and the two focused order tests are reserved to this card until integration.
 - Depends on: `none`
 - Blocks: `stab-wave-a-core-usability`; `stab-spatial-02-copy-paste-duplicate`; `stab-spatial-03-owner-aware-insertion`
 - Retry count: `0`
@@ -62,4 +63,3 @@ Every Spatial world insertion in a default Mixed project receives a unique effec
 - Stop condition: Schema weakening or broad order rewriting requires re-scope.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
-

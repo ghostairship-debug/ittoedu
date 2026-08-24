@@ -16,13 +16,14 @@
 - Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/authoring/flowTextEdit.ts; src/renderer/styles/globals.css; tests/unit/flowInlineTextEditor.test.tsx; tests/unit/flowWorkspace.test.tsx
 - Task ID: stab-flow-01-real-text-selection
 - Phase / wave: post-audit stabilization / A-core
-- Status: ready
+- Status: claimed
 - Owner / Reviewer / Integrator: Flow Text Worker / independent interaction reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: assigned at claim
-- Baseline HEAD: record at claim
-- Context: inspect Flow text pointer ownership, empty root DOM and composition handling at claim
-- Freshness / relevant dirty inputs: verify audit paths and overlapping user changes at claim
+- Claimed at / released at: 2026-08-25 / —
+- Worktree / branch: shared workspace with file firewall / codex/architecture-stabilization
+- Baseline HEAD: 5c512f9
+- Context: fresh `repo:context` query on `Flow native text selection empty editable root caret IME` returned low confidence; manual Bootstrap must resolve the exact pointer owner, empty-root DOM and composition path before writing.
+- Freshness / relevant dirty inputs: repo-index check passed at claim; worktree was clean and no relevant dirty inputs were present.
+- Hotspot locks: `FlowWorkspace.tsx`, `flowTextEdit.ts`, Flow text styles, and the two focused Flow tests are reserved to this card until integration.
 - Depends on: none
 - Blocks: stab-wave-a-core-usability; stab-flow-03-formula-edit-entry; stab-flow-04-stable-context-toolbar
 - Retry count: 0
@@ -62,4 +63,3 @@ Flow 的文本块先成为可靠的原生文本编辑面：用户能拖选任意
 - Rollback: 一个可独立 revert 的实现/测试提交恢复旧 selection 与空 root 行为；不迁移数据。
 - Semantic index impact: none
 - Generated refresh: defer-to-wave-gate
-
