@@ -90,6 +90,7 @@
 {"bytes":7113,"contentHash":"sha256:d83967ca2c94601ee977cb5061760cfba61dcd1068ce76945f3edc5811f3a665","domain":"source","path":"docs/development-plan/baselines/ARCH_4_ADMISSION_REPORT.md"}
 {"bytes":8068,"contentHash":"sha256:bd43a6311e72c333783dacf99f559486dd2f8dd8f595c8fd9b384e6b2cbf74df","domain":"source","path":"docs/development-plan/baselines/ARCH_4_PHASE_GATE_REPORT.md"}
 {"bytes":6849,"contentHash":"sha256:5e2ed2c5d6d7fbe34fd752f0d6bea1847466046176c9e5446663f3f539903d5e","domain":"source","path":"docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md"}
+{"bytes":12039,"contentHash":"sha256:3f7915faae614bb067a4a4a3b1380f4001b282102820c7722156ba567197aa9e","domain":"source","path":"docs/development-plan/baselines/ARCH_5_FINAL_CANDIDATE_REPORT.md"}
 {"bytes":30694,"contentHash":"sha256:a6267af6b42f7e7f6a7b8ecac85e2caf4f814bfdae6135261d83bf140bf0f36c","domain":"source","path":"docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"}
 {"bytes":68852,"contentHash":"sha256:613011487639f25f60cfb7db341dbd14e9530827839fca42effa4bdc48e28d94","domain":"source","path":"docs/development-plan/inventories/legacy-consumers.json"}
 {"bytes":271015,"contentHash":"sha256:77e3786a27451e7007d9b423e950fa1e817c0bb5ce71b3db61095257bf8a76b2","domain":"tool","path":"package-lock.json"}
@@ -334,7 +335,7 @@
 {"bytes":16671,"contentHash":"sha256:10324ba58a1f396d4f48244da219f0467c0b7404c2c5d141d68562807b6c3277","domain":"source","path":"src/renderer/runtime/runtimeSourceAuthoringCommands.ts"}
 {"bytes":10518,"contentHash":"sha256:8d4b433a1b91b68e0762a75a4643c772ebf5e613831c6a95126b8cec3533ee5a","domain":"source","path":"src/renderer/runtime/runtimeSourceAuthoringView.ts"}
 {"bytes":15393,"contentHash":"sha256:c5a12c7329a2f9718478eaa706772b36408a5bd92c0cd2f17683c8d7f970df16","domain":"source","path":"src/renderer/runtime/runtimeTemplateAuthoringCommands.ts"}
-{"bytes":396179,"contentHash":"sha256:918c5022a8e096f901b4a9728ed0314db0f6753ba069978d601f33d40a524a89","domain":"source","path":"src/renderer/store/editorStore.ts"}
+{"bytes":396927,"contentHash":"sha256:667eed5a41b2ee84a9ad8c0569e4a6a1ff27767c50d5c73eea6caca52ca9173e","domain":"source","path":"src/renderer/store/editorStore.ts"}
 {"bytes":7144,"contentHash":"sha256:6fe6f145a12197d072dbf544eec1953a417f76372050667dc3ef761c48ed4f46","domain":"source","path":"src/renderer/store/history.ts"}
 {"bytes":1076,"contentHash":"sha256:1b7b0aa36e0ae694d9c4932495f66a8e8b73c43277e7cf6e8849c8d2fe5fd284","domain":"source","path":"src/renderer/store/slideBackendPort.ts"}
 {"bytes":6029,"contentHash":"sha256:4288aa341dcb0c89f0c305493e8d00588a3029bfd8eb9190264f3da9f502da4f","domain":"source","path":"src/renderer/store/slideEditorProjection.ts"}
@@ -490,7 +491,7 @@
 {"bytes":3737,"contentHash":"sha256:1cbd6c0a16e707b5a9d9b4ac8049ceb2f36c6ccb788f26039802491921a86646","domain":"source","path":"tests/integration/player-component-registry.test.ts"}
 {"bytes":2927,"contentHash":"sha256:513626a7708562bb5bba122bdf0d0d758d78b7f4bea9d192dccfbd40cde18837","domain":"source","path":"tests/integration/player-payload.test.ts"}
 {"bytes":25530,"contentHash":"sha256:87609ceecd2ade45e215bfbfea57c7ff3162f9755a225f4b92bf561e8817a5b9","domain":"source","path":"tests/integration/publishedInteractionFlowHostIntegration.test.ts"}
-{"bytes":44803,"contentHash":"sha256:c6dffe1c50fb3515a1a0c2d7d7afa2fdd351b62cd06bdbd564409fc4bced9099","domain":"source","path":"tests/integration/publishedInteractionSlideHostIntegration.test.ts"}
+{"bytes":44986,"contentHash":"sha256:7a32de9f54e74c3de07c2951ffd6c021f2469fa5cd905cc27ea1a5e06e1f68a3","domain":"source","path":"tests/integration/publishedInteractionSlideHostIntegration.test.ts"}
 {"bytes":40985,"contentHash":"sha256:87f50659c8d5aac305c2c278582d4071fba92c456e046897c94a2c87a4589fad","domain":"source","path":"tests/integration/publishedInteractionSpatialHostIntegration.test.ts"}
 {"bytes":13979,"contentHash":"sha256:832bbc6002cb8b3772d9e17ca67b95689b2de5bfa5a5308a98f6f2ff5e3326c9","domain":"source","path":"tests/integration/renderHostBenchmark.test.ts"}
 {"bytes":14257,"contentHash":"sha256:ce60817a4eb60f5d87232f98f94cc33ac86ea2f82c311a1ebdea19705e9018df","domain":"source","path":"tests/integration/runtimeAssetReplacementRace.test.tsx"}
@@ -513,7 +514,7 @@
 {"bytes":2198,"contentHash":"sha256:bfe20a6e762c18700c0d28387d475824622fcec6abdf8164909ba96e5102466d","domain":"source","path":"tests/unit/authoringAddress.test.ts"}
 {"bytes":981,"contentHash":"sha256:a74e62ba7489ae2cca626bb515cb23fe3cb2fd49208cd04f6764d7a9e8ac9697","domain":"source","path":"tests/unit/authoringReadiness.test.ts"}
 {"bytes":5617,"contentHash":"sha256:9b96ed63347d76f88fbb7ccead11076f12a91bcdfa1ecb8e4e48e70d356e897d","domain":"source","path":"tests/unit/batchFileDialogs.test.ts"}
-{"bytes":9698,"contentHash":"sha256:1f6519f1436dc22ad63b501a46fd44a45a1d483951d4ca43c2789fbcb7c8383b","domain":"source","path":"tests/unit/batchMediaAndInsertion.test.ts"}
+{"bytes":10180,"contentHash":"sha256:419c5983811b0b1f5b48cf837d194f27199429fd6d8850c4b69f868074498033","domain":"source","path":"tests/unit/batchMediaAndInsertion.test.ts"}
 {"bytes":18444,"contentHash":"sha256:d7fb48ed7cc39ba1aa2674820ab36a160dad40311ba636203f2a9748569cc0de","domain":"source","path":"tests/unit/buildPublishedCourseV2.test.ts"}
 {"bytes":10981,"contentHash":"sha256:ff6cf2178b6a20192970c16617334545c7e2da3037758b1b235998553e798fc3","domain":"source","path":"tests/unit/componentAuthoringTargetRegistry.test.ts"}
 {"bytes":4491,"contentHash":"sha256:5833de6d69a1ac34ba8c1c620638d2175f438ed661465993dd9ee166fc098691","domain":"source","path":"tests/unit/componentCatalog.test.ts"}

@@ -14,9 +14,9 @@
 - Invalidating paths: all tracked product source, tests, fixtures, package/lockfile, TypeScript/Vite/Vitest/Playwright/Electron/build/release config, contracts, capability generator inputs/bundle, repo-index semantic/golden/generator/query/config and representative fixture manifest; final docs/task/generated/output-only closure changes invalidate only their own checks
 - Task ID: `arch-5-final-05-v4-and-outcome`
 - Phase / wave: `ARCH-5 / final candidate 3`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent pipeline reviewer + independent representative-outcome reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T21:08:26+08:00 / pending`
+- Claimed at / released at: `2026-08-24T21:08:26+08:00 / 2026-08-24T22:08:54+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `fb595c5`; product candidate `4560c8f`
 - Context: all implementation/integration repairs are terminal; candidate 3 begins clean after a deterministic first-failure record and no hidden full-suite retry
@@ -70,13 +70,13 @@ The fixed Course Project V9 candidate passes repository-wide engineering gates, 
 
 ## Acceptance
 
-- [ ] capability, TypeScript, complete Vitest and complete E2E pass once on candidate 3
-- [ ] fresh Player/renderer/Electron outputs and Windows portable/unpacked artifacts are valid
-- [ ] three representative source hashes remain fixed and copy-based flows pass
-- [ ] screenshots show expected Slide, Flow and Mixed/Spatial content without obvious unusable output
-- [ ] final contracts/task-board/repo-index freshness and quality checks pass
-- [ ] pipeline, engineering, outcome, art and accepted statuses are separated
-- [ ] no source/fixture/config/user-data mutation occurs during V4
+- [x] capability, all three configured TypeScript checks, complete Vitest and complete E2E passed once on candidate 3
+- [x] fresh Player/renderer/Electron outputs and Windows portable/unpacked artifacts are valid
+- [x] three representative source hashes remain fixed and copy-based flows passed
+- [x] screenshots show the expected Slide, Flow and Mixed/Spatial mechanisms; visible placeholder/overlap/clipping limitations are explicitly retained rather than treated as art acceptance
+- [x] final contracts/task-board/repo-index freshness and quality checks pass
+- [x] pipeline, engineering, outcome, art and accepted statuses are separated
+- [x] no source/fixture/config/user-data mutation occurred during V4
 
 ## Validation
 
@@ -96,7 +96,14 @@ The fixed Course Project V9 candidate passes repository-wide engineering gates, 
 
 ## Result evidence
 
-- Pending candidate-3 V4, package/visual evidence, two independent reviews and exact-state closure.
+- Candidate 3 ran `npm run verify` once, exit `0`: capability index `7,235 / 16,384` bytes with catalog `available`; default/root, Electron and E2E TypeScript checks passed; complete Vitest passed `250 files / 1,765 tests` in `196.15s`; fresh Player/examples/fixtures/Renderer/Electron builds completed; complete Playwright E2E passed `30 / 30` in `24.6m`. No broad retry was used.
+- The complete suite covered all three immutable representative V9 fixtures and the Slide replacement, Flow/Mixed save-reopen/current-location try-run, component-catalog, render benchmark and Electron batch insertion paths. Source hashes remain `101b8e...74a7b`, `326b1c...eea0` and `939a0d...a66df`.
+- `npx electron-builder --win portable dir --x64` ran once after V4 and passed. Unpacked EXE SHA256 is `EBBF279E...E55B1B`; portable EXE SHA256 is `EA2634AB...1E69D`; `app.asar` SHA256 is `0B6A2AB...F79D1`. Both EXEs are actually `NotSigned`; the report does not mistake builder signing output for a certificate signature.
+- Real packaged-executable V9 smoke passed `isPackaged`, `app.asar`/custom protocol, frozen preload API, secure Electron preferences, real dialog IPC, Mixed/Spatial current-location try-run, visible `spatial-world-html`, and zero page/console/external errors. Evidence-capture harness iterations (top-level-await rejection, animated screenshot timeouts, same-process wrong-window capture and blocked CDP capture) are disclosed separately; they changed no product input and are not product/V4 retries.
+- Candidate-3 pretest generated the tracked render benchmark before E2E test 30 passed against its exact bytes. Independent provenance review approved single-file tested-byte adoption at `bb7ff5f`; no regeneration/rerun occurred.
+- Independent visible-outcome review returned **APPROVE only as engineering candidate**. Slide and Flow prove usable mechanisms; Mixed Flow and parts of the reused Mixed PDF remain `placeholder`; Mixed Spatial shows controller overlap/right-edge clipping; packaged screenshot proves the app shell/project open but not Spatial visuals. `art candidate` is not reached and `accepted` is not claimed.
+- Final exact-state `check:contracts`, `check:task-board`, `repo:index:check`, `repo:index:quality` and `git diff --check` passed after the report, card, task board and index were fixed. No product test/build/package was redundantly rerun.
+- Full candidate chain, artifact hashes, package metadata, applicability decisions, visual evidence and remaining risks are recorded in `docs/development-plan/baselines/ARCH_5_FINAL_CANDIDATE_REPORT.md`.
 
 ## Ready checklist（Coordinator）
 
