@@ -512,7 +512,6 @@ export function addCourseFlowPage(
 ): CourseLocationCommandResult {
   const title = input.title ?? '流式讲义'
   return runMutation(project, (draft) => {
-    // Mirrors appendBlankFlowPage surface/location push with mixedPrintPlan sync.
     return appendFlowPageInDraft(draft, title).locationId
   }, input)
 }
