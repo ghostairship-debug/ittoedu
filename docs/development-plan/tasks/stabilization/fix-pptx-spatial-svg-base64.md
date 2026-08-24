@@ -14,11 +14,11 @@
 - Invalidating paths: `src/renderer/export/course/buildCoursePptx.ts`; `src/renderer/export/base64.ts`; `tests/unit/coursePptxExport.test.ts`; `tests/fixtures/architecture-baseline/mixed-spatial.h5lesson`; PptxGenJS/export dependency or test configuration
 - Task ID: `fix-pptx-spatial-svg-base64`
 - Phase / wave: `current stabilization / export fix`
-- Status: `draft`
-- Owner / Reviewer / Integrator: `unassigned / Export Reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `pending / set on claim`
-- Baseline HEAD: `set on claim`
+- Status: `claimed`
+- Owner / Reviewer / Integrator: `PPTX Export Worker / Export Reviewer / Coordinator`
+- Claimed at / released at: `2026-08-24T16:56:34+08:00 / —`
+- Worktree / branch: `shared root / codex/architecture-stabilization`
+- Baseline HEAD: `7f46423`
 - Context / freshness: reproduce with the Mixed/Spatial fixture at claim; repo-index optional
 - Depends on: `none`
 - Blocks: Mixed/Spatial PPTX outcome green
