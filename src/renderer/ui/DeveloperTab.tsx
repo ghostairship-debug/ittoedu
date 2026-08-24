@@ -12,10 +12,12 @@ import { componentManifestSchema } from '../../shared/componentSchema'
 import { courseRuntimeDefinitionSchema } from '../../shared/courseProjectSchema'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
 import { sceneNodeSchema } from '../../shared/projectSchema'
-import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import type { SceneNode } from '../../shared/projectTypes'
 import { validateRuntimeSource } from '../../player/RuntimeRegistry'
 import { validateComponentRuntimeSource } from '../components/importComponentPackage'
+import type {
+  CourseRuntimeTemplateCreationTarget,
+} from '../runtime/runtimeTemplateAuthoringCommands'
 import {
   selectRuntimeSourceAuthoringView,
   type AvailableRuntimeSourceAuthoringView,
@@ -31,19 +33,13 @@ import {
 import type {
   CourseAuthoringTarget,
 } from '../authoring/courseAuthoringSession'
-import type { RuntimeSourceAuthoringCommitResult } from '../store/editorStore'
+import type {
+  RuntimeSourceAuthoringCommitResult,
+  RuntimeTemplateCreationCommitResult,
+} from '../store/editorStore'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
 type ComponentDocument = 'manifest' | 'runtime'
-
-const EMPTY_RUNTIME_SOURCE = `CoursewareRuntime.define({
-  runtimeApiVersion: 2,
-  create(ctx) {
-    return {
-      destroy() {},
-    }
-  },
-})`
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -162,8 +158,9 @@ interface RuntimeSourceDraftBinding {
 
 interface RuntimeSourceEditorProps {
   readonly view: RuntimeSourceAuthoringView | null
-  readonly canCreateTemplate: boolean
-  readonly onCreateTemplate: () => void
+  readonly onCreateTemplate: (
+    target: CourseRuntimeTemplateCreationTarget,
+  ) => RuntimeTemplateCreationCommitResult
   readonly onApply: (
     target: CourseAuthoringTarget,
     source: string,
@@ -209,7 +206,6 @@ function runtimeUnavailableCopy(view: RuntimeSourceAuthoringView | null): string
 
 function RuntimeSourceEditor({
   view,
-  canCreateTemplate,
   onCreateTemplate,
   onApply,
 }: RuntimeSourceEditorProps) {
@@ -219,6 +215,7 @@ function RuntimeSourceEditor({
   const [binding, setBinding] = useState<RuntimeSourceDraftBinding | null>(initial)
   const bindingRef = useRef(binding)
   const [message, setMessage] = useState<RuntimeDraftMessage | null>(null)
+  const [templateMessage, setTemplateMessage] = useState<string | null>(null)
   const [isComposing, setIsComposing] = useState(false)
   const committedSourceRef = useRef<string | null>(null)
 
@@ -230,6 +227,18 @@ function RuntimeSourceEditor({
   const currentDocumentKey = view?.availability === 'available'
     ? view.documentKey
     : null
+  const creationTarget =
+    view?.availability === 'unavailable'
+    && view.reason === 'runtime-missing'
+      ? view.creationTarget
+      : null
+  const creationTargetKey = creationTarget
+    ? JSON.stringify(creationTarget)
+    : null
+
+  useEffect(() => {
+    setTemplateMessage(null)
+  }, [creationTargetKey])
 
   useEffect(() => {
     const current = bindingRef.current
@@ -267,18 +276,32 @@ function RuntimeSourceEditor({
           {missingRuntime ? '当前作用域没有自定义运行时' : '当前运行时源码不可编辑'}
         </strong>
         <span>
-          {missingRuntime && canCreateTemplate
+          {missingRuntime && creationTarget
             ? '创建最小 Runtime API 2 模板后，即可在完整代码区中修改。'
             : runtimeUnavailableCopy(view)}
         </span>
-        {missingRuntime && canCreateTemplate ? (
+        {missingRuntime && creationTarget ? (
           <button
             type="button"
             className="secondary-button"
-            onClick={onCreateTemplate}
+            onClick={() => {
+              const result = onCreateTemplate(creationTarget)
+              setTemplateMessage(
+                result.ok ? null : `未创建：${result.reason}`,
+              )
+            }}
           >
             创建运行时模板
           </button>
+        ) : null}
+        {templateMessage ? (
+          <p
+            className="developer-card__message developer-card__message--error"
+            role="status"
+            data-testid="runtime-template-create-error"
+          >
+            {templateMessage}
+          </p>
         ) : null}
       </section>
     )
@@ -417,17 +440,6 @@ function RuntimeSourceEditor({
   )
 }
 
-function freshRuntime(): RuntimeDocument {
-  return {
-    runtimeApiVersion: 2,
-    enabled: true,
-    renderMode: 'phaser',
-    source: EMPTY_RUNTIME_SOURCE,
-    content: { values: {} },
-    assets: {},
-  }
-}
-
 export function DeveloperTab() {
   const scene = useEditorStore(selectActiveScene)
   const node = useEditorStore(selectSelectedNode)
@@ -446,14 +458,8 @@ export function DeveloperTab() {
   const updateRuntimeSourceAtTarget = useEditorStore(
     (state) => state.updateRuntimeSourceAtTarget,
   )
-  const setSceneRuntime = useEditorStore((state) => state.setSceneRuntime)
-  const setGlobalRuntime = useEditorStore((state) => state.setGlobalRuntime)
-  const activateCourseLocation = useEditorStore(
-    (state) => state.activateCourseLocation,
-  )
-  const setEditingScope = useEditorStore((state) => state.setEditingScope)
-  const setActivePresentationState = useEditorStore(
-    (state) => state.setActivePresentationState,
+  const createRuntimeTemplateAtTarget = useEditorStore(
+    (state) => state.createRuntimeTemplateAtTarget,
   )
   const updateInteractionRule = useEditorStore((state) => state.updateInteractionRule)
   const updateGlobalInteractionRule = useEditorStore(
@@ -521,10 +527,6 @@ export function DeveloperTab() {
     courseProject,
     editingScope,
   ])
-  const canCreateRuntimeTemplate =
-    runtimeView?.availability === 'unavailable'
-    && runtimeView.reason === 'runtime-missing'
-    && activeCourseLocation?.kind === 'slide-scene'
   const runtimeStatus = runtimeView?.availability === 'available'
     ? runtimeView.effectiveLocked ? '已锁定' : `API ${runtimeView.runtime.runtimeApiVersion}`
     : runtimeView?.reason === 'runtime-missing' ? '未创建' : '不可用'
@@ -612,20 +614,7 @@ export function DeveloperTab() {
         {activeSection === 'runtime' && (
           <RuntimeSourceEditor
             view={runtimeView}
-            canCreateTemplate={canCreateRuntimeTemplate}
-            onCreateTemplate={() => {
-              const preservedScope = editingScope
-              const preservedStateId = activePresentationStateId
-              if (editingScope === 'global') setGlobalRuntime(freshRuntime())
-              else setSceneRuntime(scene.id, freshRuntime())
-              if (activeCourseLocationId) {
-                activateCourseLocation(activeCourseLocationId)
-                if (preservedStateId !== null) {
-                  setActivePresentationState(preservedStateId)
-                }
-                if (preservedScope === 'global') setEditingScope('global')
-              }
-            }}
+            onCreateTemplate={createRuntimeTemplateAtTarget}
             onApply={updateRuntimeSourceAtTarget}
           />
         )}

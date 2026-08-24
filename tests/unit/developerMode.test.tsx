@@ -15,37 +15,79 @@ import {
 
 const originalUpdateRuntimeSourceAtTarget =
   useEditorStore.getState().updateRuntimeSourceAtTarget
+const originalCreateRuntimeTemplateAtTarget =
+  useEditorStore.getState().createRuntimeTemplateAtTarget
 
 function refreshCourseAuthoringLocation(): void {
   const locationId = selectActiveCourseLocationId(useEditorStore.getState())
   if (locationId) useEditorStore.getState().activateCourseLocation(locationId)
 }
 
+function selectRuntimeView(editingScope: 'scene' | 'global') {
+  const state = useEditorStore.getState()
+  const project = selectActiveCourseProjectDocument(state)
+  const locationId = selectActiveCourseLocationId(state)
+  const location = project?.locations.find((candidate) => candidate.id === locationId)
+  const sessionToken = state.courseAuthoringSession?.token
+  if (!project || !locationId || !sessionToken) {
+    throw new Error('缺少 Runtime 作者会话')
+  }
+  return selectRuntimeSourceAuthoringView({
+    project,
+    locationId,
+    editingScope,
+    activeStateId: location?.kind === 'slide-scene'
+      ? state.activePresentationStateId
+      : null,
+    sessionToken,
+  })
+}
+
+function createRuntimeTemplate(editingScope: 'scene' | 'global') {
+  if (useEditorStore.getState().editingScope !== editingScope) {
+    useEditorStore.getState().setEditingScope(editingScope)
+  }
+  const missingView = selectRuntimeView(editingScope)
+  if (
+    missingView.availability !== 'unavailable'
+    || missingView.reason !== 'runtime-missing'
+    || !missingView.creationTarget
+  ) {
+    throw new Error('当前 Runtime 槽位不可创建模板')
+  }
+  const result = useEditorStore.getState().createRuntimeTemplateAtTarget(
+    missingView.creationTarget,
+  )
+  if (!result.ok) throw new Error(result.reason)
+  const availableView = selectRuntimeView(editingScope)
+  if (availableView.availability !== 'available') {
+    throw new Error(`新 Runtime 未立即可编辑：${availableView.reason}`)
+  }
+  return availableView
+}
+
 function installSceneRuntime(
   sceneId: string,
   source: string,
 ): void {
-  useEditorStore.getState().setSceneRuntime(sceneId, {
-    runtimeApiVersion: 2,
-    enabled: true,
-    renderMode: 'phaser',
+  if (selectActiveScene(useEditorStore.getState()).id !== sceneId) {
+    throw new Error('测试只能安装当前场景 Runtime')
+  }
+  const view = createRuntimeTemplate('scene')
+  const result = useEditorStore.getState().updateRuntimeSourceAtTarget(
+    view.target,
     source,
-    content: { values: {} },
-    assets: {},
-  })
-  refreshCourseAuthoringLocation()
+  )
+  if (!result.ok) throw new Error(result.reason)
 }
 
 function installGlobalRuntime(source: string): void {
-  useEditorStore.getState().setGlobalRuntime({
-    runtimeApiVersion: 2,
-    enabled: true,
-    renderMode: 'phaser',
+  const view = createRuntimeTemplate('global')
+  const result = useEditorStore.getState().updateRuntimeSourceAtTarget(
+    view.target,
     source,
-    content: { values: {} },
-    assets: {},
-  })
-  refreshCourseAuthoringLocation()
+  )
+  if (!result.ok) throw new Error(result.reason)
 }
 
 function editableSource(id: string, marker = ''): string {
@@ -108,6 +150,7 @@ afterEach(() => {
   cleanup()
   useEditorStore.setState({
     updateRuntimeSourceAtTarget: originalUpdateRuntimeSourceAtTarget,
+    createRuntimeTemplateAtTarget: originalCreateRuntimeTemplateAtTarget,
   })
   useEditorStore.getState().createNewProject()
 })
@@ -398,9 +441,15 @@ describe('专业开发模式', () => {
       .not.toBeInTheDocument()
   })
 
-  it('Flow 与 Spatial 缺少本地 Runtime 时不提供会造成假成功的模板按钮', () => {
+  it('Flow 与 Spatial 的本地及全局缺失 Runtime 都不提供模板按钮', () => {
     useEditorStore.getState().createNewFlowProject()
     const { unmount } = render(<DeveloperTab />)
+    expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
+      '尚未创建 Runtime',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
+    act(() => useEditorStore.getState().setEditingScope('global'))
     expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
       '尚未创建 Runtime',
     )
@@ -410,6 +459,12 @@ describe('专业开发模式', () => {
     unmount()
     useEditorStore.getState().createNewSpatialProject()
     render(<DeveloperTab />)
+    expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
+      '尚未创建 Runtime',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
+    act(() => useEditorStore.getState().setEditingScope('global'))
     expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
       '尚未创建 Runtime',
     )
@@ -437,10 +492,18 @@ describe('专业开发模式', () => {
 
   it('Slide 既有模板入口创建后刷新为可编辑的 canonical Runtime', () => {
     useEditorStore.getState().createNewProject()
+    const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const beforeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
     render(<DeveloperTab />)
 
     fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
 
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(before.revision + 1)
+    expect(selectActiveCourseLocationId(useEditorStore.getState()))
+      .toBe(beforeLocationId)
+    expect(useEditorStore.getState().editingScope).toBe('scene')
+    expect(useEditorStore.getState().activePresentationStateId).toBeNull()
     expect((screen.getByLabelText('场景运行时源码') as HTMLTextAreaElement).value)
       .toContain('runtimeApiVersion: 2')
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
@@ -454,15 +517,50 @@ describe('专业开发模式', () => {
     refreshCourseAuthoringLocation()
     useEditorStore.getState().setActivePresentationState(namedStateId)
     useEditorStore.getState().setEditingScope('global')
+    const beforeRevision = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )!.revision
+    const beforeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
     render(<DeveloperTab />)
 
     fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
 
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(beforeRevision + 1)
+    expect(selectActiveCourseLocationId(useEditorStore.getState()))
+      .toBe(beforeLocationId)
     expect(useEditorStore.getState().editingScope).toBe('global')
     expect(useEditorStore.getState().activePresentationStateId).toBe(namedStateId)
     expect((screen.getByLabelText('全局运行时源码') as HTMLTextAreaElement).value)
       .toContain('runtimeApiVersion: 2')
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['revision-conflict', '模拟的 Runtime 创建目标已经过期'],
+    ['runtime-already-exists', '模拟的 Runtime 槽位已经被占用'],
+  ] as const)('模板创建把 typed %s 失败留在原空状态旁', (code, reason) => {
+    useEditorStore.getState().createNewProject()
+    const before = structuredClone(
+      selectActiveCourseProjectDocument(useEditorStore.getState())!,
+    )
+    useEditorStore.setState({
+      createRuntimeTemplateAtTarget: () => ({
+        ok: false,
+        code,
+        reason,
+      }),
+    })
+    render(<DeveloperTab />)
+
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(screen.getByTestId('runtime-template-create-error'))
+      .toHaveTextContent(`未创建：${reason}`)
+    expect(screen.getByTestId('runtime-source-missing')).toBeInTheDocument()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState()))
+      .toEqual(before)
+    expect(screen.queryByLabelText('场景运行时源码')).not.toBeInTheDocument()
   })
 
   it('创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复', () => {
