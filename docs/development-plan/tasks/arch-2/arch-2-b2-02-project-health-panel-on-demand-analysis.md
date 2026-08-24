@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/ui/ProjectHealthPanel.tsx`; `tests/unit/projectHealthPanel.test.tsx`; `src/shared/projectHealth.ts`; `src/shared/informationRelease.ts`; `src/shared/visualDensity.ts`; `src/renderer/store/editorStore.ts`; React/Vitest configuration
 - Task ID: `arch-2-b2-02-project-health-panel-on-demand-analysis`
 - Phase / wave: `ARCH-2 / W2-B2 Diagnostics on-demand analysis`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Diagnostics UI Worker / independent UI reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T17:31:10+08:00 / —`
+- Claimed at / released at: `2026-08-24T17:31:10+08:00 / 2026-08-24T17:39:20+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch2-b2-panel-on-demand / codex/arch2-b2-panel-on-demand`
 - Baseline HEAD: `8c3c177`
 - Context: bootstrap-manual from fresh repo-index `16c787f`; later commits changed admission/task docs only, and the exact Panel/App source was re-read at claim
@@ -81,11 +81,11 @@ Split or gate the expensive content behind an `open=true` mount boundary so the 
 
 ## Acceptance
 
-- [ ] Closed `ProjectHealthPanel` invokes its own three analysis functions zero times.
-- [ ] Opening uses the current project/package state and renders the existing health summary.
-- [ ] App's Toolbar summary call remains untouched and is not asserted away.
-- [ ] Open-state locate/export/copy and all shared collector behavior remain unchanged.
-- [ ] No public API, cache, framework or unrelated file is added.
+- [x] Closed `ProjectHealthPanel` invokes its own three analysis functions zero times.
+- [x] Opening uses the current project/package state and renders the existing health summary.
+- [x] App's Toolbar summary call remains untouched and is not asserted away.
+- [x] Open-state locate/export/copy and all shared collector behavior remain unchanged.
+- [x] No public API, cache, framework or unrelated file is added.
 
 ## Minimal validation
 
@@ -107,13 +107,13 @@ Split or gate the expensive content behind an `open=true` mount boundary so the 
 
 ## Result evidence
 
-- Actual change/product commit and evidence key: pending
-- Behavior before/after: pending
-- Validation results: pending
-- Consumer delta: pending
-- Remaining risks: pending
-- Rollback commit or start point: `8c3c177`
-- Next allowed task: ARCH-2 W2-B2 / phase gate after global-controls task also closes
+- Actual change/product commit and evidence key: root product commit `cc39791` (isolated-worker source `aafe4a2`); evidence is the focused component test bound to that source diff.
+- Behavior before/after: before, the permanently mounted closed Panel subscribed to Store state and ran all three analyses; after, the closed outer component returns before subscriptions and mounts the unchanged analysis/UI body only when open.
+- Validation results: worker `npx vitest run tests/unit/projectHealthPanel.test.tsx` passed `1/1`; `git diff --check HEAD^ HEAD` passed. Independent UI review approved the exact commit without duplicate execution.
+- Consumer delta: hidden Panel-owned analysis invocations `3 → 0`; App Toolbar `collectProjectHealth` remains the one intentional summary consumer.
+- Remaining risks: the focused test changes the project while closed and asserts the current package argument, but does not also mutate component packages; mount-time Store selectors make that freshness structural. Existing locate/export interactions were preserved by moving the body unchanged rather than redundantly retested.
+- Rollback commit or start point: revert `cc39791`; no persisted data or contract migration exists.
+- Next allowed task: ARCH-2 W2-B2 / phase gate after global-controls task also closes.
 
 ## Findings / next allowed task
 
