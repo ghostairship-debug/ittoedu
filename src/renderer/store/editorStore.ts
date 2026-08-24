@@ -200,6 +200,12 @@ import {
   type RuntimePropertyAuthoringPlanFailureCode,
 } from '../runtime/runtimePropertyAuthoringCommands'
 import {
+  planRuntimeTemplateCreation,
+  type CourseRuntimeTemplateCreationTarget,
+  type CourseRuntimeTemplateCreationFeedback,
+  type CourseRuntimeTemplateCreationPlanFailureCode,
+} from '../runtime/runtimeTemplateAuthoringCommands'
+import {
   planApplyInteractionTemplate,
   planUpdateInteractionRule,
   type InteractionAuthoringFeedback,
@@ -237,7 +243,6 @@ import {
 import {
   allocateCourseLayerOrder,
   setGlobalLayerScenePlane,
-  sortLayerItemList,
   sortScopedLayerList,
 } from '../course/globalLayerCommands'
 import { createBlankCourseProject } from '../project/createCourseProject'
@@ -545,95 +550,6 @@ function courseRuntimeToDocument(runtime: CourseRuntimeDefinition): RuntimeDocum
         }
       : {}),
   }
-}
-
-function runtimeDocumentToCourseRuntime(runtime: RuntimeDocument): CourseRuntimeDefinition {
-  return {
-    protocol: 'canvas-runtime',
-    runtimeApiVersion: 2,
-    enabled: runtime.enabled,
-    renderMode: runtime.renderMode,
-    source: runtime.source,
-    content: structuredClone(runtime.content),
-    assets: structuredClone(runtime.assets),
-    ...(runtime.nodeBindings ? { nodeBindings: structuredClone(runtime.nodeBindings) } : {}),
-    ...(runtime.staticFallback
-      ? {
-          staticFallback: {
-            assetId: runtime.staticFallback.assetId,
-            coverage: runtime.staticFallback.coverage === 'full-scene' ? 'scene' : 'surface',
-          },
-        }
-      : {}),
-  }
-}
-
-function makeRuntimeLayerItem(
-  draft: CourseProjectDocument,
-  runtime: RuntimeDocument,
-  label: string,
-  preferredId: string,
-): LayerItem {
-  return {
-    layerItemId: preferredId,
-    label,
-    kind: 'runtime',
-    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
-    order: allocateCourseLayerOrder(draft, 0),
-    visible: runtime.enabled,
-    locked: false,
-    rotation: 0,
-    opacity: 1,
-    hitPolicy: 'surface',
-    playbackInitialVisibility: 'inherit',
-    runtime: runtimeDocumentToCourseRuntime(runtime),
-  }
-}
-
-function writeSceneRuntime(
-  draft: CourseProjectDocument,
-  sceneId: string,
-  runtime: RuntimeDocument | undefined,
-): void {
-  for (const surface of draft.surfaces) {
-    if (surface.type !== 'slide') continue
-    const scene = surface.scenes.find((item) => item.id === sceneId)
-    if (!scene) continue
-    const existing = scene.layerItems.find((item) => item.kind === 'runtime')
-    if (!runtime) {
-      scene.layerItems = scene.layerItems.filter((item) => item.kind !== 'runtime')
-      return
-    }
-    if (existing && existing.kind === 'runtime') {
-      existing.runtime = runtimeDocumentToCourseRuntime(runtime)
-      existing.visible = runtime.enabled
-      return
-    }
-    scene.layerItems.push(makeRuntimeLayerItem(draft, runtime, '场景运行时', `runtime-${sceneId}`))
-    sortLayerItemList(scene.layerItems)
-    return
-  }
-}
-
-function writeGlobalRuntime(
-  draft: CourseProjectDocument,
-  runtime: RuntimeDocument | undefined,
-): void {
-  const existing = draft.globalLayerItems.find((entry) => entry.item.kind === 'runtime')
-  if (!runtime) {
-    draft.globalLayerItems = draft.globalLayerItems.filter((entry) => entry.item.kind !== 'runtime')
-    return
-  }
-  if (existing && existing.item.kind === 'runtime') {
-    existing.item.runtime = runtimeDocumentToCourseRuntime(runtime)
-    existing.item.visible = runtime.enabled
-    return
-  }
-  draft.globalLayerItems.push({
-    item: makeRuntimeLayerItem(draft, runtime, '全局运行时', `runtime-global-${draft.id}`),
-    visibility: { mode: 'all', locationIds: [] },
-  })
-  sortScopedLayerList(draft.globalLayerItems)
 }
 
 function firstRuntimeItem(items: readonly LayerItem[]): LayerItem | undefined {
@@ -1537,6 +1453,18 @@ export type RuntimePropertyAuthoringCommitResult =
       readonly reason: string
     }
 
+export type RuntimeTemplateCreationCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'created'
+      readonly feedback: CourseRuntimeTemplateCreationFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: CourseRuntimeTemplateCreationPlanFailureCode
+      readonly reason: string
+    }
+
 export type InteractionAuthoringCommitResult =
   | {
       readonly ok: true
@@ -1657,8 +1585,9 @@ export interface EditorState {
     sceneId: string,
     patch: Partial<Pick<SceneDocument, 'name' | 'backgroundColor' | 'backgroundAssetId'>>,
   ): void
-  setSceneRuntime(sceneId: string, runtime: RuntimeDocument | undefined): void
-  setGlobalRuntime(runtime: RuntimeDocument | undefined): void
+  createRuntimeTemplateAtTarget(
+    target: CourseRuntimeTemplateCreationTarget,
+  ): RuntimeTemplateCreationCommitResult
   updateRuntimeSourceAtTarget(
     target: CourseAuthoringTarget,
     source: string,
@@ -4108,6 +4037,106 @@ export const useEditorStore = create<EditorState>((set, get) => {
       )
     }
     return { ok: true, status: 'updated', feedback }
+  }
+
+  const rejectRuntimeTemplateCreation = (
+    code: CourseRuntimeTemplateCreationPlanFailureCode,
+    reason: string,
+  ): RuntimeTemplateCreationCommitResult => {
+    set({ errorMessage: reason, statusMessage: null })
+    return { ok: false, code, reason }
+  }
+
+  const commitRuntimeTemplateCreationAtTarget = (
+    target: CourseRuntimeTemplateCreationTarget,
+  ): RuntimeTemplateCreationCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    const projection = buildCandidateEffectiveLayers(state)
+    let authoringSession = state.courseAuthoringSession
+    if (!document || document.id !== target.projectId) {
+      return rejectRuntimeTemplateCreation(
+        'project-mismatch',
+        '运行时模板目标不属于当前 Course Project。',
+      )
+    }
+    if (!projection || !authoringSession) {
+      return rejectRuntimeTemplateCreation(
+        'session-stale',
+        '运行时模板创建会话已过期，请重新打开开发工作台。',
+      )
+    }
+    if (
+      authoringSession.token.locationId !== projection.locationId
+      || authoringSession.token.surfaceType !== projection.surfaceType
+    ) {
+      return rejectRuntimeTemplateCreation(
+        'session-stale',
+        '运行时模板创建会话已过期，请重新打开开发工作台。',
+      )
+    }
+    const expectedScope = target.owner === 'global' ? 'global' : 'scene'
+    if (
+      state.editingScope !== expectedScope
+      || projection.scope.owner !== target.owner
+      || projection.scope.ownerKey !== target.ownerKey
+    ) {
+      return rejectRuntimeTemplateCreation(
+        'owner-mismatch',
+        '当前编辑范围已切换，运行时模板没有写入。',
+      )
+    }
+
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
+    const planned = planRuntimeTemplateCreation({
+      project: document,
+      currentIdentity: {
+        projectId: document.id,
+        documentRevision: document.revision,
+        sessionToken: authoringSession.token,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: projection.scope.owner,
+        ownerKey: projection.scope.ownerKey,
+      },
+      target,
+      newItemId: nanoid(),
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) {
+      return rejectRuntimeTemplateCreation(planned.code, planned.reason)
+    }
+    const feedback = planned.plan.feedback
+    if (!feedback) {
+      return rejectRuntimeTemplateCreation(
+        'invalid-document',
+        '运行时模板事务缺少结果信息，未写入工程。',
+      )
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return rejectRuntimeTemplateCreation(
+        'invalid-document',
+        error instanceof Error ? error.message : '运行时模板事务无效，未写入工程。',
+      )
+    }
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      target.owner === 'global'
+        ? '已创建全局运行时模板'
+        : '已创建场景运行时模板',
+    )) {
+      return rejectRuntimeTemplateCreation(
+        'invalid-document',
+        '当前 Course Project 没有可用的作者会话。',
+      )
+    }
+    return { ok: true, status: 'created', feedback }
   }
 
   const rejectInteractionAuthoring = (
@@ -6835,38 +6864,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return commitRuntimePropertyAtTarget(target, update)
     },
 
-    setSceneRuntime(sceneId, runtime) {
-      if (selectSlideAuthoringBackend(get())) {
-        runV9DocumentMutation((draft) => {
-          writeSceneRuntime(draft, sceneId, runtime)
-        }, { statusMessage: runtime ? '已创建场景运行时模板' : '已移除场景运行时' })
-        return
-      }
-      commit((draft) => {
-        const scene = draft.scenes.find((item) => item.id === sceneId)
-        if (!scene) return
-        if (runtime) scene.runtime = structuredClone(runtime)
-        else delete scene.runtime
-      })
-      set({
-        statusMessage: runtime ? '已创建场景运行时模板' : '已移除场景运行时',
-      })
-    },
-
-    setGlobalRuntime(runtime) {
-      if (selectSlideAuthoringBackend(get())) {
-        runV9DocumentMutation((draft) => {
-          writeGlobalRuntime(draft, runtime)
-        }, { statusMessage: runtime ? '已创建全局运行时模板' : '已移除全局运行时' })
-        return
-      }
-      commit((draft) => {
-        if (runtime) draft.globalRuntime = structuredClone(runtime)
-        else delete draft.globalRuntime
-      })
-      set({
-        statusMessage: runtime ? '已创建全局运行时模板' : '已移除全局运行时',
-      })
+    createRuntimeTemplateAtTarget(target) {
+      return commitRuntimeTemplateCreationAtTarget(target)
     },
 
     captureRuntimeAssetReplacementTarget(session) {

@@ -111,6 +111,7 @@ export function selectRuntimeInspectorAuthoringView(
       reason: 'invalid-location' as const,
       label: 'Runtime 的 scene ownerKey 无效',
       documentKey: null,
+      creationTarget: null,
     })
   }
   const enabledTarget = retargetCourseRuntimeProperty(source.target, {
