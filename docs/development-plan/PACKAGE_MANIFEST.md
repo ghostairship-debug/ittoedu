@@ -1,12 +1,12 @@
 # 静态计划包文档清单、角色与完整性说明
 
-> 本静态计划包共 56 份 Markdown（包含本清单）。
+> 本静态计划包共 57 份 Markdown（包含本清单）。
 >
 > 根 COURSEWARE_DEVELOPMENT_PLAN.md 是唯一总纲；本目录是唯一详细执行子计划。
 >
 > 清单按实际文件重建，文件移动后必须同步刷新并通过链接检查。
 
-执行期状态和证据不属于这 56 份静态计划文件：`TASK_BOARD.md` 是从任务卡生成的只读视图，`tasks/` 是任务状态真相，`baselines/` 与 `inventories/` 是运行证据/台账。它们分别按任务、基线和 Legacy 协议维护，不追加到本静态清单，也不得反向成为第二份计划。
+执行期状态和证据不属于这 57 份静态计划文件：`TASK_BOARD.md` 是从任务卡生成的只读视图，`tasks/` 是任务状态真相，`baselines/` 与 `inventories/` 是运行证据/台账。它们分别按任务、基线和 Legacy 协议维护，不追加到本静态清单，也不得反向成为第二份计划。
 
 ## 1. 分组计数
 
@@ -18,7 +18,7 @@
 | 20-modules | 12 |
 | 30-execution | 10 |
 | 40-development | 6 |
-| 50-templates | 6 |
+| 50-templates | 7 |
 | 90-appendix | 6 |
 
 ## 2. 文档角色
@@ -87,6 +87,7 @@
 | 50-templates/BASELINE_CAPTURE_TEMPLATE.md | Pre-stabilization Baseline |
 | 50-templates/HANDOFF_TEMPLATE.md | Task Evidence Handoff |
 | 50-templates/LEGACY_CONSUMER_RECORD_TEMPLATE.md | Legacy Consumer Record |
+| 50-templates/S0_SIMPLE_FIX_TASK_CARD_TEMPLATE.md | S0 局部小修任务卡 |
 | 50-templates/S1_TASK_CARD_TEMPLATE.md | S1 普通跨文件任务卡 |
 | 50-templates/S2_MIGRATION_TASK_CARD_TEMPLATE.md | S2 高风险迁移任务卡 |
 | 90-appendix/00_CURRENT_MUST_PRESERVE.md | Current Must Preserve：当前已经成立的硬约束 |

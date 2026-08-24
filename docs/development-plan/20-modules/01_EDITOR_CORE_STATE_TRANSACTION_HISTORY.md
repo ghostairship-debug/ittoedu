@@ -24,7 +24,7 @@
 CourseProjectDocument
 ```
 
-当前阶段不立即改变 Store 形状。先建立 selector/port，迁消费者，再删除旧字段。
+当前阶段不立即改变 Store 形状，也不预建 selector/port 矩阵。只有已准入的用户行为或真实 consumer 被当前边界阻塞时，才在同卡抽取最窄入口并接入首个 consumer；没有明确替代目标时不创建 Port、adapter 或 facade。
 
 当前正常生命周期并不是三个 V9 session 同时竞争：初始化、新建和打开始终恰好激活 Slide、Flow、Spatial 三者之一，切换 Surface 时另外两个置空。真实债务是“一个活动 V9 session + 可写/派生混合的 V8-shaped `state.project` + 三套互斥实现”。先增加 exactly-one-active 不变量，再把 canonical document owner 从 Surface session 中抽离。
 
@@ -108,19 +108,17 @@ commitEditorTransaction({
 - 自动恢复写盘不进入 Undo；
 - 模式/Tab 切换不进入 Undo。
 
-## 8. 迁移顺序
+## 8. 按需迁移路径（非固定施工顺序）
 
 ```text
-characterize current behavior
-→ canonical selectors
-→ AuthoringTarget adapter
-→ transaction facade
-→ 一个完整纵切
-→ 逐命令迁移
-→ resource snapshot 降级
-→ session/history consumer 清零
-→ 删除旧真相
+可复现行为 / 真实 consumer / 明确替代目标
+→ 边界不清时才 characterization
+→ 优先复用现有入口；确有阻塞时抽最窄 seam 并接入首个 consumer
+→ 目标验证与一次可回退接入
+→ 只有已选中的旧目标才减少 consumer，并在 deletion gate 满足后删除
 ```
+
+上图是单张已准入卡可选择的路径，不要求依次建设 canonical selector、AuthoringTarget adapter 或 transaction facade，也不要求所有 session/history consumer 归零。仍有真实用途、兼容责任和 owner 的入口可以保留。
 
 ## 9. 完成标准
 

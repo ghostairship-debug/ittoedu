@@ -79,7 +79,7 @@ HEAD 不写入 manifest 或任何 committed strict generated 文件，也不参�
 - 标记为 generated；
 - 合并冲突不手工拼接，以当前源码重建为准；
 - 只有阶段整合者或单一 owner 更新；
-- 子 Agent 只报告 `indexImpact`；
+- 子 Agent 分别报告 `Semantic index impact` 与 `Generated refresh`；前者决定是否维护 canonical semantic，后者只标记是否在波次门统一重建；
 - PR 中 generated diff 与 semantic diff 分开审阅。
 
 ## 7. Check 模式

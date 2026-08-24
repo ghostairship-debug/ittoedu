@@ -21,7 +21,7 @@ UI 只组合 Feature/Surface view model 和 commands，不直接了解所有 Sto
 - 大量 selection 推导；
 - Preview mount 内联状态机。
 
-迁移前先抽 seam，不一次拆文件。
+只有已准入迁移的首个真实 consumer 需要时，才在同卡抽最窄 seam；能直接局部修复时不先造 seam，也不一次拆文件。
 
 ## 3. Properties
 

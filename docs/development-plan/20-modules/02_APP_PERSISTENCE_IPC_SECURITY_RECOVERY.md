@@ -34,9 +34,9 @@ App 层只负责编排：
 
 具体格式、Surface 命令、package lifecycle、diagnostic rule 留在各模块。
 
-## 3. Persistence port
+## 3. Persistence 边界与按需 Port
 
-建议形成窄接口：
+现有保存链可以继续由当前实现承担，不因目标目录或接口整齐而抽 Port。只有出现可复现保存/恢复错误、第二个真实 consumer、明确旧入口替代目标或可量化上下文下降时，才考虑形成完成当前行为所需的最窄接口，例如：
 
 ```ts
 interface ProjectPersistencePort {
@@ -48,7 +48,7 @@ interface ProjectPersistencePort {
 }
 ```
 
-先包裹现有实现，不立即移动 main/renderer 文件。
+该接口只是候选形状，不是待建合同。新增时必须在同卡接入首个真实 consumer 或替代指定旧入口，并写明退出条件；否则直接局部修复，不移动 main/renderer 文件，也不新建 Service、Coordinator 或平行生命周期。
 
 ## 4. Recovery
 
@@ -62,7 +62,7 @@ interface ProjectPersistencePort {
 - 关闭/打开项目时清理策略；
 - 恢复文件不能覆盖正常保存文件。
 
-任何提取都先锁现有 `RecoveryWriteCoordinator` 行为测试。
+只有提取实际影响 `RecoveryWriteCoordinator` 边界或现有行为不清时，才补对应 characterization；局部且已被 focused 测试直接观察的修复不重复建立整套行为基线。
 
 ## 5. Main / Preload / IPC Owner
 
@@ -102,13 +102,14 @@ interface ProjectPersistencePort {
 
 repo-index 不进入产品运行时，也不通过 IPC 暴露。
 
-## 7. 提取顺序
+## 7. 已准入行为的候选步骤
 
-1. characterization tests；
-2. 纯 archive snapshot builder；
-3. save/recovery hook 或 service；
-4. open/recent；
-5. preview/export actions；
-6. App 只保留 composition。
+每个保存、恢复、open/recent 或 preview/export 行为独立准入，不构成固定提取序列：
 
-不得在同一任务同时重构 IPC、保存格式和 UI。
+1. 先用当前源码和 focused 结果证明具体风险、consumer 或复杂度收益；
+2. 能局部修复时直接修复，不先抽层；
+3. 只有当前行为需要时才提取最窄 snapshot builder、hook 或 Port，并在同卡接入首个 consumer；
+4. 其他行为只有各自通过准入才迁移，不因前一项已抽接口而自动跟进；
+5. 旧入口只有在精确 consumer 为 0 且回滚边界明确时才删除，兼容用途成立时可以 retained。
+
+一个候选域没有合格实现目标时允许零改动。任何已准入任务仍不得同时重构 IPC、保存格式和 UI。

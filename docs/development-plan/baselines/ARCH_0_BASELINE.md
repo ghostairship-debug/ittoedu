@@ -89,9 +89,9 @@ Bounded functional/performance/manual evidence is complete in `ARCH_0_PERFORMANC
 
 Counts are generated from the JSON relation arrays using the reproduction command stored in `startingCounts`; Markdown prose is not a second count authority.
 
-## Phase and wave budgets
+## Historical phase and wave budgets
 
-Budgets bound a wave and trigger re-planning; they never authorize scope reduction, weaker validation, or an incomplete user outcome.
+These rows record the caps used by waves that had already been admitted from evidence. They are historical limits, not current status or authorization for later ARCH titles. Future budgets are registered only when current facts admit an actual wave/gate; no future row is inferred from this baseline.
 
 | Phase / wave | Timebox | Max cards | Max S2 | Hotspot budget | Validation budget | Retry budget |
 |---|---:|---:|---:|---|---|---|
@@ -100,10 +100,6 @@ Budgets bound a wave and trigger re-planning; they never authorize scope reducti
 | ARCH-1 vertical slice | 10 Coordinator workdays | 8 | 4 | Store/History, App, Workspace serialized by Integrator | 1–3 target tests/card; affected typecheck; one desktop slice; 3 representative regressions | 1 repair + 1 diagnosis; max 3 designs |
 | ARCH-2 W2-A | 10 Coordinator workdays | 12 | 4 | Store/History plus one Feature integration lock at a time | affected unit/integration + representative save/preview/export | 1 repair + 1 diagnosis/card |
 | ARCH-2 W2-B | 10 Coordinator workdays | 12 | 4 | App/save, Workspace/Properties, Published producer serialized | affected type/integration + desktop smoke when required | 1 repair + 1 diagnosis/card |
-| ARCH-3 seam | 5 Coordinator workdays | 6 | 3 | Store + Workspace/Properties Integrator only | seam/boundary tests + three Surface read paths | 1 repair + 1 diagnosis/card |
-| ARCH-3 Surface waves | 10 Coordinator workdays/wave | 12 | 4 | no Worker hotspot writes; Integrator wiring serialized | per-Surface command/UI/save/preview/export + input semantics | 1 repair + 1 diagnosis/card |
-| ARCH-4 delivery | 10 Coordinator workdays | 12 | 4 | Published producer, App export, main/preload serialized | format-target tests + representative artifacts + visual/editability review | 1 repair + 1 diagnosis/card |
-| ARCH-5 cleanup/final | 10 Coordinator workdays | 12 | 4 | deletion batches and generated index serialized | consumer-zero proof + full V4 candidate suite once | 1 repair + 1 diagnosis/deletion batch |
 
 ## Blocking unknowns
 

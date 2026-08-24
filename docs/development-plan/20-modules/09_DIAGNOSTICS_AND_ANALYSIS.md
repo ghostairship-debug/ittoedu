@@ -48,16 +48,16 @@ Schema、引用、素材、组件包、互动目标、控制器一致性。适�
 
 ## 4. V9 输入迁移
 
-Project Health 规则逐条分类：
+只有被当前任务实际命中的 Project Health 规则才按以下候选处置分类：
 
 ```text
 V9 可直接实现
 需要 Published/static plan
-仅 V8 遗留且应删除
+仅 V8 遗留：retained 或 deletion-candidate
 启发式建议
 ```
 
-不一次性重写全部规则。每张迁移卡列原规则、V9 数据源、消费者、诊断码和目标测试。
+不一次性盘点或重写全部规则。只有已复现错误归因/性能问题、真实 consumer 或选定替代目标的规则才建卡；卡内只列受影响的原规则、V9 数据源、消费者、诊断码和目标验证。未准入规则保持现状，deletion-candidate 才要求精确 consumer=0。
 
 ## 5. 呈现
 

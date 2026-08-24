@@ -21,10 +21,10 @@
 ### Worker A/B/C
 
 - 每次只执行一张任务卡；
-- 读取 Required read 和必要合同，严格遵守 Allowed/Forbidden write；
-- 先 characterization，再实现，再跑任务允许的目标验证；
+- 读取任务卡指定的最小必要上下文，严格遵守 Allowed/Forbidden write；
+- S0 直接复现、局部修复并跑 focused validation；只有迁移、边界不清或需要锁定旧行为时才做 characterization；
 - 不自行接入未持锁热点，不扩产品范围；
-- 报告 finding、consumer delta、indexImpact 和回滚点；
+- 报告 finding、consumer delta、Semantic index impact、Generated refresh 和回滚点；
 - 不手工修改派生任务板或 generated index。
 
 Worker 角色按任务动态分配，通常覆盖行为测试、纯模块实现、consumer/验证三条工作线。
@@ -36,15 +36,15 @@ Coordinator 读取任务卡
 → 过滤 ready/dependsOn/写锁
 → 按产品风险排序
 → 创建隔离工作区并派发最多三卡
-→ Worker characterization + 实现 + 目标验证
-→ 独立 diff/边界复核
-→ Coordinator 串行接入热点
-→ 相关扩展验证
+→ Worker 按需 characterization + 最短实现 + 目标验证
+→ 按 Reviewer budget 做 diff/边界复核；预算为 0 则不增设独立 Reviewer
+→ 只有任务实际命中热点时由 Coordinator 串行接入
+→ 只补本次改动使失效的扩展证据
 → 更新任务卡、consumer 与指标
 → 释放写锁并派发下一批
 ```
 
-领取、异常退出和 stale lock 恢复以任务协议的原子 claim/release 规则为准；Coordinator 是任务状态和热点锁的唯一写入者。
+领取、异常退出和 stale lock 恢复以任务协议的原子 claim/release 规则为准；Coordinator 是任务状态和热点锁的唯一写入者。独立的生命周期 Git 提交只用于 `claimed` 和 `wave-validated` / `done` / `parked` / `rolled-back` / `product-decision` 等终态或持久检查点；`characterizing`、`implementing`、`target-green`、`reviewed`、`integrating` 是执行期瞬态，不逐个制造状态提交。
 
 任务优先级：数据安全 > 保存/撤销正确性 > 用户可达回归 > 阶段关键路径 > Legacy 减少 > 纯整理。
 
@@ -61,9 +61,9 @@ Coordinator 读取任务卡
 
 ## 5. 自动报告
 
-不逐任务要求用户确认。每个阶段结束输出：解决的用户风险、代表工程结果、保存/撤销/播放/导出状态、已解耦模块、consumer delta、性能变化、重试/回滚/parked 项和下一阶段计划。
+不逐任务要求用户确认。每个阶段结束输出：解决的用户风险、适用的代表工程结果、保存/撤销/播放/导出状态、已解耦模块、consumer delta、被本阶段使失效后的性能结果或未失效证据引用、重试/回滚/parked 项和下一阶段计划。
 
-Handoff 不再人工维护第二份状态；由任务卡的 Result Evidence、Validation、consumer delta、indexImpact 和 rollback 字段自动生成只读交接视图。
+Handoff 不再人工维护第二份状态；由任务卡的 Result Evidence、Validation、consumer delta、semantic/generated index 影响和 rollback 字段自动生成只读交接视图。
 
 ## 6. 仅产品级升级
 

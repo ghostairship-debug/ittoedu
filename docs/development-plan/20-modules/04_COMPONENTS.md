@@ -122,11 +122,15 @@ Flow 稿纸不得被转成 z-order LayerItem。
 - 静态导出使用明确 fallback/snapshot；
 - Package lifecycle、实例 carrier 和格式 adapter 分别测试。
 
-## 8. 迁移重点
+## 8. 候选改进与准入
 
-- 从 ComponentsTab 拆 UI，不先改业务；
-- 建立窄 Components facade；
-- 列出 package/instance/authoring consumers；
-- 迁移代码草稿到统一 transaction；
-- 最后处理旧深层 import；
-- 不把组件文件字节再次复制成新的 Store 真相。
+以下项目彼此独立，不是固定迁移顺序。只有可复现行为、真实 consumer、明确替代目标或可量化上下文下降成立时才建卡：
+
+- ComponentsTab 的某个用户行为确实因 UI/业务耦合难以修改时，才抽取该行为所需的最小 UI 边界；
+- 第二个真实 consumer 被当前入口阻塞时，才建立窄 Components facade，并在同卡接入该 consumer；
+- 只有迁移/deletion-candidate 才穷尽对应 package/instance/authoring consumers；retained 项记录用途和 Owner 即可；
+- 代码草稿只有当前写入路径存在可复现事务问题时才接入统一 transaction；
+- 旧 deep import 只有替代入口已被真实 consumer 采用且能降低边界风险时才处理，不以归零为阶段 KPI；
+- 任何已准入改动都不得把组件文件字节再次复制成新的 Store 真相。
+
+没有合格目标时本模块允许零张实现卡，不为目录整齐预建 facade 或拆 UI。

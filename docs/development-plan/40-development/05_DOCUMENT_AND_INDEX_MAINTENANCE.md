@@ -1,5 +1,7 @@
 # 唯一真相、文档与索引维护
 
+> Policy version: 2
+
 ## 1. 四类真相
 
 只保留：
@@ -19,9 +21,15 @@
 
 ## 3. Semantic 与 Generated
 
-Worker 只报告建议和 `indexImpact`。Feature owner/Coordinator 修改少量 canonical files/entrypoints/aliases/status/high-signal consumers/tests/invariants。generated 由 Coordinator 重建，不手工合并 JSONL；Context Pack 不提交。
+Worker 分别报告 `Semantic index impact: none | canonical-update` 与 `Generated refresh: defer-to-wave-gate | not-required`。前者决定 Feature owner/Coordinator 是否修改少量 canonical files/entrypoints/aliases/status/high-signal consumers/tests/invariants；后者承认被索引源码/测试/文档变化会使严格 source hash 过期，但只在波次门统一刷新。generated 不手工合并 JSONL；Context Pack 不提交。
 
-普通集成后可本地重建以保持下一任务上下文新鲜；达到阶段点再统一提交 generated，避免每卡制造合并噪音。高风险任务若相关输入 stale，自动降级 Bootstrap 或等待 Coordinator 重建。
+一个波次最多统一运行并提交一次 canonical generated index 重建，默认在 wave-gate 收口；不在 claim、实现、review、报告和 close 各阶段重复生成或拆出生命周期提交。波次中相关输入 stale 时使用 Bootstrap，或等本波统一重建，不以逐卡 generated 修复上下文。纯文档和局部实现可以标记 `Semantic index impact: none`，但只要修改了索引输入就必须标记 `Generated refresh: defer-to-wave-gate`；这不触发逐卡生成。`TASK_BOARD.md` 是轻量状态投影，不属于该批量 index：任务状态持久提交时与卡同次生成，不另造生命周期提交。
+
+`repo:index:quality` 只在 semantic、查询逻辑、生成器、config 或黄金任务发生变化后运行一次，或由 phase-gate/final-candidate 明确要求时各运行一次；普通产品任务只记录 deferred refresh，波次门统一生成并做 freshness/check。generated 与质量结果绑定产生它们的输入 commit，后续仅任务卡/报告变化时复用。
+
+每张卡的 Evidence reuse / Invalidating paths 决定任务执行和 Reviewer 是否复用产品证据。差异范围只有文档或 generated 时不触发产品 unit/E2E/性能；只运行相关链接、任务板、索引 freshness 或确定性检查。
+
+每次 PR 都按 base→current head 计算影响；没有可信的跨运行绿色证据存储时，不用 previous head→new head 跳过曾失败的产品提交。普通产品差异只补 Vitest `related` 受影响测试；测试基础设施/包配置或产品输入删除才自动触发完整产品单元套件。Playwright E2E 与 phase/final gate 由对应任务显式执行，卡片状态/结果文字本身不触发全量产品测试。任意任务卡变化都运行轻量 task-board/policy check；repo-index generator/semantic/query/config 或已纳入的 generated 视图才运行 freshness，普通产品输入的 `Generated refresh` 延后到波次门。AI capability generator 在干净 CI 只运行不依赖外部 sibling catalog 的目标测试；含目录快照的 freshness check 只在该输入真实可用的环境或最终候选执行。最终候选仍显式运行所有适用 check。
 
 ## 4. 历史材料
 

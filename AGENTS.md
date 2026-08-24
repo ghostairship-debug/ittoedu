@@ -15,4 +15,6 @@
 
 开发执行默认由一个 Integrator 协调三个 Worker：高并行用于调查、纯模块、目标测试和独立 consumer；Store、App、Workspace、Properties、Published producer、合同与 generated index 等热点始终只有一个写入者。每张任务只做一个用户行为并运行最小充分验证；完整 E2E、打包与 `verify` 只在阶段门或最终候选运行。只有 Schema/V10、用户数据迁移、教师能力取舍、用户可见流程或导出语义变化、付费/重大依赖、安全权限、真实数据损坏风险和最终发布结论升级给产品 Owner。
 
+开发任务使用 `Policy version: 2`。未完成任务卡必须分别记录 Risk tier、Task class、Necessity / skip condition、Complexity delta、Validation ceiling、Validation budget、Reviewer budget、Evidence reuse 与 Invalidating paths；`additive-exception` 还必须写明 Additive exception。阶段标题只是候选问题域，不是必须施工清单：没有可复现用户风险、真实 consumer/替代目标或可量化复杂度下降时，不建实现卡，允许阶段以零张实现卡结束。验证证据绑定 product commit；后续只改任务卡、报告、task-board 或 generated 且未命中 Invalidating paths 时必须复用，不重跑产品套件。Reviewer 不重复跑同一套验证，第二 Reviewer 只覆盖明确不同的风险面。generated 索引每波最多统一生成和提交一次，不为每张卡制造生命周期提交。
+
 V9 合同说明在 [docs/contracts/](docs/contracts/)。当前产品事实以源码、Schema、能力卡和可复现结果为准。自动化最多证明 `engineering candidate`；`art candidate` 与 `accepted` 仍必须来自真实产品复核，但不再作为启动稳定化的技术前置。

@@ -4,7 +4,7 @@
 >
 > 激活日期：2026-08-24
 >
-> 当前主线：立即稳定化、统一架构、渐进解耦、自动多智能体执行
+> 长期路线：稳定化、统一架构、渐进解耦、自动多智能体执行
 >
 > 产品 Owner 决策：当前版本不可用；稳定化不等待教师复核，教师 `accepted` 只保留为最终产品与发布结论。
 
@@ -56,7 +56,7 @@
 
 `T0–T6`、`P1–P8`、`Q1–Q8`、`F1–F3`、`G0–G3` 已合入 `main`，不得重做。它们的任务卡现为历史证据。
 
-本计划整合前的核查基线是 `main @ dbe518e`：产品源码基于父提交 `690411d`，同时 `dbe518e` 还刷新了三份 `artifacts/ai-capabilities/**` 生成物。外部组件目录在核查时可见 4 个实验包，但外部目录状态不是稳定源码事实；ARCH-0A 必须记录计划落盘后的新 HEAD 并重新检查。
+本计划整合前的历史核查基线是 `main @ dbe518e`：产品源码基于父提交 `690411d`，同时 `dbe518e` 还刷新了三份 `artifacts/ai-capabilities/**` 生成物。外部组件目录在核查时可见 4 个实验包，但外部目录状态不是稳定源码事实。本段只解释计划来源，不代表当前 HEAD、当前阶段或待执行任务。
 
 ---
 
@@ -105,9 +105,9 @@
 
 ---
 
-## 5. 当前激活路线
+## 5. 长期候选路线与状态入口
 
-详细阶段合同见 [执行路线](docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md)。编号使用 `ARCH-*`，不复用历史 P/T/Q/F/G。
+详细阶段合同见 [执行路线](docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md)。编号使用 `ARCH-*`，不复用历史 P/T/Q/F/G。以下标题只界定候选问题域和依赖，不声明当前阶段；当前任务状态、已完成范围和下一可领取项只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
 
 ### ARCH-0A：治理、基线与事实重算
 
@@ -137,17 +137,17 @@ ARCH-0A 与 ARCH-0B 可并行，但广泛多智能体迁移必须等待知识索
 
 ### ARCH-2：跨 Surface 公共能力解耦
 
-按两批自动推进：
+按两批候选域检查，而不是按批次配额制造任务：
 
 1. Media、Components、Runtime / Interactions；
 2. Global Layers / Controller、Diagnostics、Save / Recovery。
 
-每批只迁真实用户行为；热点由单一 Integrator 串行接入，Legacy consumer 数量必须单调下降。
+只有可复现缺口、真实 consumer 或用户行为证据才生成实现卡；已经成熟且只需保留的能力允许零张实现卡。热点由单一 Integrator 串行接入，发生迁移时 Legacy consumer 数量必须单调下降。
 
 ### ARCH-3：三种 Surface 模块化
 
-- 先串行建立稳定 Surface seam；
-- 再由三个 Worker 并行处理 Slide、Flow、Spatial 内部；
+- 不预建通用 Surface seam；只有当前用户行为或真实 consumer 需要时，才建立能解除该阻塞的最窄 seam；
+- Slide、Flow、Spatial 仅在各自存在已证实任务且写入范围独立时并行，允许某个 Surface 本阶段零改动；
 - Workspace、Properties、App、Store 始终由单一 Integrator 接线；
 - 如果只是移动文件、没有降低耦合或返工，停止继续拆分。
 
@@ -156,13 +156,13 @@ ARCH-0A 与 ARCH-0B 可并行，但广泛多智能体迁移必须等待知识索
 - HTML/Web/Preview、PPTX、PDF/preflight 可分线处理；
 - Published producer 保持单一 Owner；
 - 先证明 fallback 是否真实可达，不为不可达状态新造模型；
-- 每个旧 consumer 都有替代路径和删除门。
+- 只有明确选择迁移或删除的旧 consumer 才要求替代路径和 deletion gate；仍有真实用途、兼容责任和明确 owner 的 Legacy 可以保留。
 
 ### ARCH-5：清理与最终复核
 
-- 只有精确 consumer 为零且新路径至少稳定一个完整波次后才删除；
+- 只有明确选择删除的 Legacy 目标，才要求其精确 consumer 为零且新路径至少稳定一个完整波次；有保留理由和 owner 的 Legacy 可以继续存在；
 - 检查 Recovery、IPC、动态引用、fixtures、scripts、release 与打包版；
-- 最终运行一次完整工程验证和三份代表课件流程；
+- 最终候选只运行一次完整工程验证和三份代表课件流程；被完整套件包含且同一候选已通过的 focused suite 不再重复；
 - 分别报告 pipeline、engineering、outcome 和 `accepted` 状态。
 
 ---
@@ -203,9 +203,9 @@ ARCH-0A 与 ARCH-0B 可并行，但广泛多智能体迁移必须等待知识索
 
 详细规则见 [验证策略](docs/development-plan/40-development/03_VALIDATION_STRATEGY.md)。
 
-- Worker：差异卫生、1–3 个目标检查、一个最小用户行为；
+- Worker：差异卫生，以及 1–3 个最相关目标检查；只有自动化不能直接观察结果时，才补一个最小用户行为；
 - Integrator 接入：受影响类型/集成检查，必要时一个桌面 smoke；
-- 产品代码阶段：三份代表课件与本阶段相关保存、预览、导出；纯治理/索引阶段只运行自身文档、生成、查询和确定性检查；
+- 产品代码阶段：复用仍有效的任务/波次证据，只补被本阶段改动使失效的代表课件、保存、预览或导出链路；纯治理/索引阶段只运行自身文档、生成、查询和确定性检查；
 - 最终候选：合同、类型、单元/集成、E2E、桌面构建和人工核心流程完整运行一次。
 
 禁止每个小任务或每个阶段重复运行全仓 `verify`、完整 E2E 或全量打包；全仓完整套件只在最终候选或明确的跨系统高风险门运行。失败不得通过弱化断言、无限 retry、复制第二套数据或叠加长期兼容层来掩盖。
@@ -222,7 +222,7 @@ ARCH-0A 与 ARCH-0B 可并行，但广泛多智能体迁移必须等待知识索
 - 三份代表课件：3/3 可打开、保存重开、播放；
 - 适用导出无关键回归；
 - 新增 raw Store 公共旁路和跨模块深层依赖：0；
-- Legacy consumer 只降不升，删除时精确目标为 0；
+- 发生迁移时，卡内精确 Legacy consumer 目标必须下降且不得新增旁路；只有明确删除的目标要求 consumer 为 0，已说明 owner/用途的保留项不以归零为 KPI；
 - 核心操作性能不超过阶段登记的回归阈值；
 - 已有教师能力缩水：0；
 - 热点并行写冲突：0。
@@ -231,14 +231,6 @@ ARCH-0A 与 ARCH-0B 可并行，但广泛多智能体迁移必须等待知识索
 
 ---
 
-## 9. 当前立即执行项
+## 9. 当前状态与领取入口
 
-```text
-ARCH-0A：治理、三份代表课件、事实/consumer/owner 基线
-    ∥
-ARCH-0B：知识索引适配 spike、当前模块/旅程语义、生成/check/context
-    ↓
-ARCH-1：图片替换完整纵切
-```
-
-当前任务状态只能来自最终计划中的任务卡与自动任务板；根 README、历史任务和评估报告不得再声明另一套“当前阶段”。
+当前任务状态、阶段位置、依赖与下一可领取项只能来自任务卡及自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。本总纲、根 README、阶段说明、历史任务和评估报告不得静态声明另一套“当前阶段”或“立即执行项”；任务板没有合格实现卡时，按阶段准入规则允许只读盘点、满足 skip condition 或直接进入适用门禁。

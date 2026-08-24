@@ -1,11 +1,144 @@
-name: Check Contracts
+name: Scoped Validation
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
+concurrency:
+  group: scoped-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      contracts: ${{ steps.scope.outputs.contracts }}
+      product_tests: ${{ steps.scope.outputs.product_tests }}
+      product_full: ${{ steps.scope.outputs.product_full }}
+      repo_tests: ${{ steps.scope.outputs.repo_tests }}
+      governance_tests: ${{ steps.scope.outputs.governance_tests }}
+      task_board_check: ${{ steps.scope.outputs.task_board_check }}
+      repo_index_check: ${{ steps.scope.outputs.repo_index_check }}
+      index_quality: ${{ steps.scope.outputs.index_quality }}
+      capability_check: ${{ steps.scope.outputs.capability_check }}
+      base_sha: ${{ steps.scope.outputs.base_sha }}
+      head_sha: ${{ steps.scope.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            head="$PR_HEAD_SHA"
+            base="$BASE_SHA"
+          else
+            base="$BEFORE_SHA"
+            head="$GITHUB_SHA"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            changed="$(git ls-files)"
+          else
+            changed="$(git diff --name-only "$base" "$head")"
+          fi
+
+          code=false
+          contracts=false
+          product_tests=false
+          product_full=false
+          repo_tests=false
+          governance_tests=false
+          task_board_check=false
+          repo_index_check=false
+          index_quality=false
+          capability_check=false
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            case "$file" in
+              src/*|tests/*|scripts/*|package.json|package-lock.json|tsconfig*.json|vite*.ts|vitest.config.ts|playwright.config.ts)
+                code=true
+                ;;
+            esac
+            case "$file" in
+              src/shared/contracts/*|docs/contracts/*|artifacts/contracts/*|scripts/generate-contracts.ts|package.json|package-lock.json)
+                contracts=true
+                ;;
+            esac
+            case "$file" in
+              package.json|package-lock.json|tsconfig*.json|vitest.config.ts|tests/setup.ts)
+                product_tests=true
+                product_full=true
+                repo_tests=true
+                governance_tests=true
+                ;;
+              scripts/generate-task-board.ts|tests/unit/taskBoardGenerator.test.ts)
+                governance_tests=true
+                ;;
+              scripts/generate-ai-capabilities.ts|tests/unit/aiCapabilities.test.ts)
+                ;;
+              scripts/generate-contracts.ts)
+                ;;
+              repo-index/generated/*)
+                ;;
+              repo-index/*|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts|tests/unit/repoIndex*.test.ts)
+                repo_tests=true
+                ;;
+              tests/e2e/*|playwright.config.ts|vite*.ts)
+                ;;
+              src/*|tests/*|scripts/*)
+                product_tests=true
+                if ! git cat-file -e "$head:$file" 2>/dev/null; then
+                  product_full=true
+                fi
+                ;;
+            esac
+            case "$file" in
+              docs/development-plan/TASK_BOARD.md|docs/development-plan/tasks/*/*.md|scripts/generate-task-board.ts|tests/unit/taskBoardGenerator.test.ts)
+                task_board_check=true
+                ;;
+            esac
+            case "$file" in
+              repo-index/generated/*|repo-index/config.json|repo-index/semantic/*|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts)
+                repo_index_check=true
+                ;;
+            esac
+            case "$file" in
+              repo-index/semantic/*|repo-index/config.json|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts|tests/unit/repoIndexGoldenTasks.test.ts)
+                index_quality=true
+                ;;
+            esac
+            case "$file" in
+              artifacts/ai-capabilities/*|scripts/generate-ai-capabilities.ts|tests/unit/aiCapabilities.test.ts|scripts/validate-project.ts|package.json|package-lock.json|src/shared/*|src/player/*|src/renderer/components/*|src/renderer/export/*|src/renderer/project/*)
+                capability_check=true
+                ;;
+            esac
+          done <<< "$changed"
+
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "contracts=$contracts" >> "$GITHUB_OUTPUT"
+          echo "product_tests=$product_tests" >> "$GITHUB_OUTPUT"
+          echo "product_full=$product_full" >> "$GITHUB_OUTPUT"
+          echo "repo_tests=$repo_tests" >> "$GITHUB_OUTPUT"
+          echo "governance_tests=$governance_tests" >> "$GITHUB_OUTPUT"
+          echo "task_board_check=$task_board_check" >> "$GITHUB_OUTPUT"
+          echo "repo_index_check=$repo_index_check" >> "$GITHUB_OUTPUT"
+          echo "index_quality=$index_quality" >> "$GITHUB_OUTPUT"
+          echo "capability_check=$capability_check" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+
   development-index:
+    needs: changes
+    if: needs.changes.outputs.task_board_check == 'true' || needs.changes.outputs.repo_index_check == 'true' || needs.changes.outputs.index_quality == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,10 +148,15 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run check:task-board
+        if: needs.changes.outputs.task_board_check == 'true'
       - run: npm run repo:index:check
+        if: needs.changes.outputs.repo_index_check == 'true'
       - run: npm run repo:index:quality
+        if: needs.changes.outputs.index_quality == 'true'
 
   check-contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +168,8 @@ jobs:
       - run: npm run check:contracts
 
   typecheck:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,12 +181,53 @@ jobs:
       - run: npm run typecheck
 
   test:
+    needs: changes
+    if: needs.changes.outputs.product_tests == 'true' || needs.changes.outputs.repo_tests == 'true' || needs.changes.outputs.governance_tests == 'true' || needs.changes.outputs.capability_check == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
-      - run: npm test
+      - run: npm run test:product
+        if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full == 'true'
+      - name: Run affected product tests
+        if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full != 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.changes.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.changes.outputs.head_sha }}
+        run: |
+          mapfile -t inputs < <(
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" |
+              while IFS= read -r file; do
+                case "$file" in
+                  tests/unit/repoIndex*.test.ts|tests/unit/taskBoardGenerator.test.ts|tests/unit/aiCapabilities.test.ts)
+                    continue
+                    ;;
+                  tests/e2e/*)
+                    continue
+                    ;;
+                  src/*|tests/*|scripts/*)
+                    printf '%s\n' "$file"
+                    ;;
+                esac
+              done
+          )
+          if (( ${#inputs[@]} == 0 )); then
+            exit 0
+          fi
+          npx vitest related "${inputs[@]}" --run --passWithNoTests \
+            --exclude=tests/unit/repoIndex*.test.ts \
+            --exclude=tests/unit/taskBoardGenerator.test.ts \
+            --exclude=tests/unit/aiCapabilities.test.ts
+      - run: npm run test:repo-index
+        if: needs.changes.outputs.repo_tests == 'true'
+      - run: npm run test:governance
+        if: needs.changes.outputs.governance_tests == 'true'
+      - run: npm run test:capabilities
+        if: needs.changes.outputs.capability_check == 'true'

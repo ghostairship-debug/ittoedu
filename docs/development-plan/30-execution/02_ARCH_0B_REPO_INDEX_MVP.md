@@ -50,7 +50,7 @@ V1 不做函数级完整调用图、业务读写全自动推断、向量检索�
 - Worker C：历史任务盲测、Bootstrap 对照与 Context Pack；
 - Coordinator：schema、semantic 单一 owner 和集成。
 
-generated 只由 Coordinator 更新；Worker 仅报告 `indexImpact`。
+generated 只由 Coordinator 在波次门统一更新；Worker 分别报告 `Semantic index impact` 与 `Generated refresh`，不得把“无需 semantic 更新”写成“源码不影响 freshness”。
 
 ## 7. 广泛多智能体开发前门禁
 
