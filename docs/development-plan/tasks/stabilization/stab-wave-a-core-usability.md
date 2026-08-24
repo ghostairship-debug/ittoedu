@@ -14,13 +14,14 @@
 - Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `src/renderer/authoring/flowTextEdit.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/store/editorStore.ts`; `tests/e2e/stabilizationCoreUsability.spec.ts`; `playwright.config.ts`
 - Task ID: `stab-wave-a-core-usability`
 - Phase / wave: `post-audit stabilization / A-core gate`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Validation Worker / Core Usability Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `integration worktree / codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (replace with integrated candidate at claim)
-- Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: Dependency product commits and listed paths must be rechecked at claim; root docs/generated inputs remain read-only.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace / codex/architecture-stabilization`
+- Baseline HEAD: `cba124f` (integrated dependency candidate; product bytes end at `fcb09b1`)
+- Context: manual Bootstrap read the three dependency cards and evidence, `playwright.config.ts`, the existing Electron launch/save/reopen/preview helpers in `editor.spec.ts` and `imageReplacementVerticalSlice.spec.ts`, and the final listed product paths. The one-spec design uses one Electron process and three bounded `test.step` behaviors.
+- Freshness / relevant dirty inputs: worktree and every listed product/spec path were clean at claim. `npm run repo:index:check` correctly reported the committed index stale after Wave A product changes, so the gate uses the recorded exact-source Bootstrap and defers one generated refresh to the wave checkpoint.
+- Hotspot locks: only `tests/e2e/stabilizationCoreUsability.spec.ts` and this gate's status/evidence are reserved; gate implementation may not change product code.
 - Depends on: `stab-ctrl-01-authoring-bounds-and-recovery`; `stab-mix-01-effective-order-allocation`; `stab-flow-01-real-text-selection`
 - Blocks: `core-gate release for B/C/D cards that explicitly depend on stab-wave-a-core-usability; unrelated cards remain claimable`
 - Risk statement: Integration can reintroduce pointer/hit routing or stale Store behavior not visible in isolated focused tests.
@@ -53,4 +54,3 @@ One integrated candidate proves the three core author behaviors in a real browse
 - Outcome conclusion boundary: real-browser automation is not teacher/product `accepted`.
 - Semantic index impact: `none`
 - Generated refresh: `defer-to-wave-gate`
-
