@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/ui/NodesTab.tsx`; `src/renderer/store/editorStore.ts#moveCandidateLayerOwner`; `src/renderer/course/effectiveLayerCommands.ts#moveEffectiveLayerOwner`; `src/renderer/course/spatialEditorView.ts#spatialLayerCoordinateSpace`; `tests/unit/effectiveLayerCommands.test.ts`; `tests/unit/v9GlobalLayerUiAdapter.test.tsx`
 - Task ID: `stab-spatial-05-cross-owner-move-guard`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Layer Guard Worker / independent coordinate-semantics reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Store/Nodes single-writer firewall / codex/architecture-stabilization`
 - Baseline HEAD: `3a73bdc` (cross-Surface canonical history integrated; worktree clean)
 - Context: `bootstrap-manual: exact-source trace from NodesTab DnD through moveCandidateLayerOwner/moveEffectiveLayerOwner to spatialLayerCoordinateSpace`
@@ -56,7 +56,7 @@
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、零写入拒绝证据、合法 reorder 结果和 Reviewer 结论。
+- Result evidence: product commit `093963c`; the two focused suites passed `21/21`, and the clean integrated candidate at `2e6be4f` reran them inside `5 files / 37 tests`. The command rejects all four Spatial global(viewport)↔surface/world(world) directions before mutation with no next document/history; NodesTab preserves the raw pointer/keyboard target, cancels the unsafe drop, retains a defensive commit guard and shows the exact positioning boundary. Both surface↔world directions preserve frame, same-owner reorder remains one canonical history step, Slide/Flow collision behavior is unchanged, and the independent coordinate-semantics review returned `APPROVE`.
 - Outcome boundary: 只证明不安全跨 owner 移动已被诚实阻止；不声称已支持坐标转换或 Spatial 整体 `accepted`。
 - Rollback: 一个可独立 revert 的产品/测试提交恢复旧拖放路径；无合同或用户数据迁移。
 - Semantic index impact: `canonical-update` if the command boundary changes.

@@ -16,9 +16,9 @@
 - Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PropertiesTab.tsx; src/renderer/course/flowEditorCommands.ts; src/renderer/store/editorStore.ts; src/renderer/course/flowEditorSlice.ts; src/renderer/project/courseProjectArchive.ts; src/renderer/project/v9AssetAdapter.ts; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowMediaBlockEdit.test.ts
 - Task ID: stab-flow-08-video-authoring-basics
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: claimed
+- Status: done
 - Owner / Reviewer / Integrator: Flow Media Authoring Worker / independent media-authoring reviewer / Coordinator
-- Claimed at / released at: 2026-08-25 / not released
+- Claimed at / released at: 2026-08-25 / 2026-08-25
 - Worktree / branch: shared integration workspace with FlowWorkspace/Properties media firewall / codex/architecture-stabilization
 - Baseline HEAD: `96a0c74` (media width parity closed at `01eb6b0`; Spatial Properties changes are isolated by type branch)
 - Context: exact-source Bootstrap confirmed image/video already use real sidecar URLs and existing update/replace/reorder/history commands, while the Editor video lacks controls and the Properties alt-text entry is image-only. Reuse flow-07 layout evidence; do not add a second media command path.
@@ -58,7 +58,7 @@ Flow 文档流中的图片和视频具备当前 V9 合同已经能够表达的�
 
 ## Result and rollback
 
-- Result evidence: pending；完成时记录 product commit、图片/视频字段矩阵、focused 结果与 Reviewer 结论。
+- Result evidence: product commit `8be6f70`; after both declared Store invalidators landed, the exact integrated candidate at `2e6be4f` reran the two focused suites as part of a clean `5 files / 37 tests` pass (`14/14` for this card). Image keeps real preview/alt/caption/layout/wrap/same-kind replace/document order; video adds real preview, native controls and altText-backed label with the same canonical fields; audio intentionally has no alt-text entry. Direct consumers were `29/29`, complete typecheck passed, no advanced fields/Schema/Published/Player write was added, and the independent media-authoring review returned `APPROVE`.
 - Outcome boundary: V1 只证明当前合同内作者能力的实现候选；真实 Player 与浏览器综合路径由 Wave C 证明。
 - Rollback: 独立 revert 媒体 UI/命令/测试提交；现有 persisted fields 无迁移。
 - Semantic index impact: canonical-update if current-contract authoring capability becomes newly reachable

@@ -13,12 +13,12 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: Bind the one cross-Surface integration result to the product commit; docs/task-board/generated-only changes reuse it unless the listed Store/Spatial-session/spec paths change.
-- Invalidating paths: `src/renderer/store/editorStore.ts`; `src/renderer/course/courseAuthoringSession.ts`; `src/renderer/course/resourceAwareAuthoringHistory.ts`; `src/renderer/authoring/slideAuthoringBackend.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/course/flowEditorSlice.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/project/courseProjectArchive.ts`; `tests/integration/mixedCrossSurfaceHistory.test.tsx`
+- Invalidating paths: `src/renderer/store/editorStore.ts`; `src/renderer/authoring/courseAuthoringSession.ts`; `src/renderer/authoring/resourceAwareAuthoringHistory.ts`; `src/renderer/course/slideAuthoringBackend.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/course/flowEditorSlice.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/components/componentPackageStore.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/project/courseProjectArchive.ts`; `tests/integration/mixedCrossSurfaceHistory.test.tsx`
 - Task ID: `stab-mix-02-cross-surface-history-continuity`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Mixed History Worker / Canonical History Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Store/History single-writer firewall / codex/architecture-stabilization`
 - Baseline HEAD: `96a0c74` (atomic Spatial properties closed at `d2e40d4`)
 - Context Pack + manifest hash | bootstrap-manual: exact-source Bootstrap traced `activateCourseLocation` through fresh Surface-session creation, canonical/sidecar history and save/reopen boundaries; repo-index refresh remains deferred to the Wave B gate.
@@ -26,7 +26,7 @@
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: Reusing stale Surface state can overwrite newer canonical content; creating another history or persisting camera would create duplicate truth.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review found legacy component-package metadata/payload stacks were not aligned across Spatial/Flow navigation; repaired at 2e6be4f`
 
 ## Product outcome
 
@@ -58,8 +58,8 @@ After a Spatial edit, switching to Slide and returning to that Spatial surface p
 ## Result and rollback
 
 - Start point: Wave A gate commit.
-- Product/integration commit and rollback: pending; one Store integration commit and one revert boundary, with no double-write period.
-- Result evidence: pending single integration result covering history, stale state and camera exclusion.
+- Product/integration commit and rollback: canonical history/session integration `3a73bdc` plus reviewer repair `2e6be4f`; both are independently revertible and never introduce a second project/history.
+- Result evidence: at `2e6be4f`, the named integration spec passed `2/2` and proves one history across Spatial→Slide→Spatial, fresh session/selection/generation/home camera, camera zero document/history/archive write, equal-revision stale-session rejection, exact multi-edit undo/redo, Spatial/Flow legacy component metadata+payload stack alignment, and archive reopen with content/payload preserved but editor/resource history empty. Direct validation passed `8 files / 50 tests`, complete typecheck and diff check; after repair the independent Canonical History Reviewer returned `APPROVE`. Outcome remains `engineering candidate` pending Wave B browser evidence.
 - Outcome conclusion boundary: V2 establishes at most `engineering candidate`; Wave B owns browser integration.
 - Stop condition: camera product-policy change, App/save ownership or contract change requires re-scope.
 - Semantic index impact: `canonical-update`
