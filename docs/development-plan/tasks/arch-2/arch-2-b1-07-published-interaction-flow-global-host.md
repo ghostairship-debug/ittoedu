@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 09:25 Asia/Shanghai / —`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `c3b5796`
-- Claim commit: `pending`
+- Claim commit: `08ca122`
 - Context Pack + manifest hash | bootstrap-manual: `feature:interactions; fresh/high/safe-for-S2 at B1-06 close; manual Flow host recon by three read-only workers`
 - Freshness / relevant dirty inputs: `clean tree at claim; FlowSurfaceHost and FlowPublishedAdapter exclusively locked by Coordinator`
 - Depends on: `arch-2-b1-06-published-interaction-session-slide-host done`
