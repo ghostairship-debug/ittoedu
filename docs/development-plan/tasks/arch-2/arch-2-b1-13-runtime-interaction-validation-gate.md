@@ -96,11 +96,11 @@ Any product correctness failure blocks this gate. The gate card records the fail
 
 ## Result evidence
 
-- Gate evidence commit: `pending`.
-- Consumer/ratchet result: `pending`.
-- Validation results: `pending`.
-- Pipeline / functional / visual / accepted: `pending`.
-- Known risks/findings: `pending`.
+- Gate evidence commit: `ce72775` (`test(arch-2): integrate W2-B1 gate evidence`).
+- Consumer/ratchet result: `11/11 passed`; nine retired raw Runtime symbols remain `0`, `courseRuntimeToDocument` remains exactly `3` read-projection references, all five Runtime use-case slices retain their expected planner/transaction/resource seams, Automation template/update retains the typed path, raw update-rule UI consumers remain exactly DeveloperTab + PropertiesTab while Automation generic add/delete/duplicate/move stays explicit, and Published session/three-Surface/Legacy consumers remain exactly bounded.
+- Validation results: Runtime focused `24 files / 301 tests`; Interaction/Published focused `17 / 182`; architecture fixtures `2 / 9`, deterministic fixture check `4/4 OK`, validators `3/3 valid`; full unit/integration `247 / 1,720` with `--maxWorkers=4`; root/Electron/E2E typecheck, contracts and AI-capabilities checks passed; full Electron Playwright `30/30` passed in `24.8m`; repo-index deterministic with controlled Hit@5 `100%` / Recall@15 `95%`, broad Hit@5 `100%` / Recall@15 `85.3846%`, and zero forbidden/high-confidence-wrong results.
+- Pipeline / functional / visual / accepted: `pass / engineering candidate`; `green for the scoped W2-B1 functional chain`; `existing art candidate, no teacher visual acceptance`; `accepted not claimed`.
+- Known risks/findings: performance remains `investigation amber` because `8/22` operation rows produced `12` individual median/P95 crossings; Published Runtime is still static fallback while actual Runtime execution remains `LEG-002`; reveal-template `scene.enter`, generic Interaction adapters and Legacy `InteractionEngine` remain outside this playback slice; there is no Electron author-then-play `node.click` test; MixedNavigator failure atomicity, large-world Spatial visual/performance, broader authoring-session revision lag and real teacher/product acceptance remain final-gate work.
 - indexImpact: `gate report and Runtime/Interaction dependency ratchet add indexed test/doc facts; refresh repo-index after close`.
 - Next allowed task: `ARCH-2 W2-B2 shared Global Layers / Controller, Diagnostics and Save / Recovery work`.
 

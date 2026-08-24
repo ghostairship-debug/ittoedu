@@ -130,6 +130,7 @@ Export 状态无新增 functional red：Slide PPTX `green-with-fallback-warnings
 
 ## 7. Repo knowledge 与 current-fact 修正
 
+- Gate evidence commit：`ce72775`（`test(arch-2): integrate W2-B1 gate evidence`）。
 - `feature:runtime` 与 MOD-09 现在区分 canonical V9 authoring、Published static fallback 和 `LEG-002` real Runtime execution。
 - `feature:interactions`、MOD-10 与 MOD-13 现在区分 typed Automation slice、Published global/optional-local controllers、generic adapters 与 Legacy engine。
 - 原 ARCH-2 resource baseline 中“Runtime 两次提交”“Published 无 Interaction consumer”的陈述已更新。
