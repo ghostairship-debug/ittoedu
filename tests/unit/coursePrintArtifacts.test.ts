@@ -131,6 +131,11 @@ describe('buildCoursePrintArtifacts', () => {
     expect(pdfHtml.match(/<html\b/gi)).toHaveLength(1)
     expect(pdfHtml.match(/<body\b/gi)).toHaveLength(1)
     expect(pdfHtml.match(/class="page /g)).toHaveLength(result.pages.length)
+    expect(pdfHtml).toContain('@page{size:A4 landscape;margin:0}')
+    expect(pdfHtml).toContain('class="course-slide-print-canvas"')
+    expect(pdfHtml).toMatch(/\.course-slide-print-canvas\{[^}]*transform:scale\(0\.\d+\)/)
+    expect(pdfHtml).toContain('.course-spatial-print-page svg{display:block;width:100%;height:100%}')
+    expect(pdfHtml).toContain('.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere}')
     expect(pdfHtml).toContain('course-slide-print-page')
     expect(pdfHtml).toContain('flow-print-document')
     expect(pdfHtml).toContain('data-spatial-viewport="1120x760"')
@@ -143,6 +148,16 @@ describe('buildCoursePrintArtifacts', () => {
       'flow-document': 'flow-print-document',
       'spatial-frame': 'course-spatial-print-page',
     })[page.kind]))
+
+    const nativePublished = structuredClone(published)
+    if (!nativePublished.mixedPrintPlan) throw new Error('expected mixed print plan')
+    nativePublished.mixedPrintPlan.pageSize = 'surface-native'
+    const nativeResult = await buildCoursePrintArtifacts(nativePublished)
+    const nativePdf = new TextDecoder().decode(
+      nativeResult.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+    expect(nativePdf).toContain('@page{size:13.333333in 7.5in;margin:0}')
+    expect(nativePdf).toContain('transform:scale(1.000000)')
   })
 
   it('selects semantic Flow, image Spatial, and retained pure-Slide PDF inputs', async () => {
@@ -156,6 +171,7 @@ describe('buildCoursePrintArtifacts', () => {
       flowResult.files.find((file) => file.kind === 'pdf-html')!.bytes,
     )
     expect(flowPdf).toContain('class="page flow-print-document"')
+    expect(flowPdf).toContain('@page{size:A4 portrait;margin:0}')
     expect(flowPdf.match(/<!doctype html>/gi)).toHaveLength(1)
     expect(flowPdf.match(/<html\b/gi)).toHaveLength(1)
     expect(flowPdf.match(/<body\b/gi)).toHaveLength(1)
