@@ -16,18 +16,18 @@
 - Invalidating paths: `src/shared/teacherControllerLayout.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/store/editorStore.ts`; `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `tests/unit/teacherControllerAuthoringOwnership.test.tsx`; `tests/unit/teacherControllerAuthoringBounds.test.ts`
 - Task ID: `stab-ctrl-01-authoring-bounds-and-recovery`
 - Phase / wave: `post-audit stabilization / A-core`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Controller Authoring Worker / Controller Ownership Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared workspace with file firewall; integration on codex/architecture-stabilization`
 - Baseline HEAD: `5c512f9`
 - Context Pack + manifest hash | bootstrap-manual: fresh `repo:context` query on `teacher controller page inert preview global layer bounds recovery pointercancel` returned low confidence, so manual Bootstrap is required before writing.
 - Freshness / relevant dirty inputs: repo-index check passed at claim; worktree was clean and no relevant dirty inputs were present.
-- Hotspot locks: `FlowWorkspace.tsx`, `Workspace.tsx`, and Store/History controller exposure are reserved to this card until integration.
+- Hotspot locks: released after product commit `fcb09b1` and current focused/typecheck evidence.
 - Depends on: `none`
 - Blocks: `stab-wave-a-core-usability`; `stab-ctrl-06-safe-default-collapsed`
 - Risk statement: Removing the wrong route can disable legitimate Global Layer editing; leaving any page writer or unsafe global commit keeps a whole-course corruption path.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / reviewer-blocking`: the first target-green candidate left the real Properties round-trip writer unclamped and added an unused reset command; the original Worker repaired both without widening the task.
 
 ## Product outcome
 
@@ -61,9 +61,9 @@ Slide, Flow and Spatial pages show an inert controller preview that reflects the
 
 ## Result and rollback
 
-- Start point: claim baseline.
-- Product/integration commit and rollback: pending; one main commit and one revert boundary, with no retained page writer or double-write path.
-- Result evidence: pending commit plus focused ownership/bounds results; real Chromium behavior is owned once by Wave A.
+- Start point: `5c512f9`; claim recorded by `726dfd5`.
+- Product/integration commit and rollback: `fcb09b1`; revert that commit to restore the previous page/global controller authoring behavior and remove the two focused tests.
+- Result evidence: at `fcb09b1`, the two named ownership/bounds files passed 8 tests; the integrated invalidation rerun `npx vitest run tests/unit/flowInlineTextEditor.test.tsx tests/unit/flowWorkspace.test.tsx tests/unit/spatialEditorCommands.test.ts tests/unit/effectiveLayerCommands.test.ts tests/unit/teacherControllerAuthoringOwnership.test.tsx tests/unit/teacherControllerAuthoringBounds.test.ts` passed 6 files / 42 tests, and `npm run typecheck` plus `git diff --check` passed. The independent Controller Ownership Reviewer first blocked the Properties bypass and duplicate reset writer, then approved the constrained single-transaction Store path, true Global ensure/restore consumer, non-controller viewport preservation and final strict-V9 diff. Real Chromium behavior is owned once by Wave A.
 - Outcome conclusion boundary: focused automation establishes at most `engineering candidate`; real editor/Player review is required for `accepted`.
 - Stop condition: contract change, silent migration, Published-producer mutation or a second canonical writer requires re-scope/product decision.
 - Semantic index impact: `canonical-update`

@@ -58,7 +58,7 @@ Flow 的文本块先成为可靠的原生文本编辑面：用户能拖选任意
 
 ## Result and rollback
 
-- Result evidence: product commit `f19e6c2`. `npx vitest run tests/unit/flowInlineTextEditor.test.tsx tests/unit/flowWorkspace.test.tsx` passed 2 files / 20 tests and `git diff --check` passed. The independent interaction reviewer found one authored-line-spacing regression in the first candidate; the same Worker repaired it, added a non-default `lineSpacing: 8` counterexample, and the Reviewer approved the final diff without rerunning the suite. Real Chromium pointer selection and bounding geometry remain owned by the Wave A gate.
+- Result evidence: product commit `f19e6c2`. `npx vitest run tests/unit/flowInlineTextEditor.test.tsx tests/unit/flowWorkspace.test.tsx` passed 2 files / 20 tests and `git diff --check` passed. The independent interaction reviewer found one authored-line-spacing regression in the first candidate; the same Worker repaired it, added a non-default `lineSpacing: 8` counterexample, and the Reviewer approved the final diff without rerunning the suite. Controller integration later touched `FlowWorkspace.tsx`; at integrated product commit `fcb09b1`, the six-file invalidation rerun passed all 42 tests, including these two Flow files. Real Chromium pointer selection and bounding geometry remain owned by the Wave A gate.
 - Outcome boundary: V1 只证明交互状态与 DOM 几何的实现候选；不声称真实 Chromium 已通过或整体 Flow 编辑体验 accepted。
 - Rollback: 一个可独立 revert 的实现/测试提交恢复旧 selection 与空 root 行为；不迁移数据。
 - Semantic index impact: none

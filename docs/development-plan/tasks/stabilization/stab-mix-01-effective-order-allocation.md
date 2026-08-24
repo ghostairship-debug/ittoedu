@@ -58,7 +58,7 @@ Every Spatial world insertion in a default Mixed project receives a unique effec
 
 - Start point: `5c512f9`; claim recorded by `726dfd5`.
 - Product commit and rollback: `0602e23`; revert that commit to restore the world-only allocator and its prior tests.
-- Result evidence: at `0602e23`, `npx vitest run tests/unit/spatialEditorCommands.test.ts tests/unit/effectiveLayerCommands.test.ts` passed 2 files / 14 tests and `git diff --check` passed. Independent Unified Order Reviewer approved the allocator coverage, absence of dependency cycles, seven-kind shared path, unchanged history semantics and strict-Schema counterexample. Save/reopen and real-browser evidence remain owned once by Wave A.
+- Result evidence: at `0602e23`, `npx vitest run tests/unit/spatialEditorCommands.test.ts tests/unit/effectiveLayerCommands.test.ts` passed 2 files / 14 tests and `git diff --check` passed. Independent Unified Order Reviewer approved the allocator coverage, absence of dependency cycles, seven-kind shared path, unchanged history semantics and strict-Schema counterexample. Controller integration later touched `globalLayerCommands.ts`; at integrated product commit `fcb09b1`, the six-file invalidation rerun passed all 42 tests, including both order files. Save/reopen and real-browser evidence remain owned once by Wave A.
 - Outcome conclusion boundary: V1 establishes at most `engineering candidate`.
 - Stop condition: Schema weakening or broad order rewriting requires re-scope.
 - Semantic index impact: `canonical-update`
