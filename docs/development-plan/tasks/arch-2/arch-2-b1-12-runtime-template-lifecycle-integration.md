@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 12:14 Asia/Shanghai / pending`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `a870631`
-- Claim commit: `pending`
+- Claim commit: `1b4f0ca`
 - Context Pack + manifest hash | bootstrap-manual: `feature:runtime; fresh/high/safe-for-S2 at a870631; focused template/create/delete/consumer reconnaissance`
 - Freshness / relevant dirty inputs: `clean tree at claim; Runtime template planner, runtime source creation view, editorStore template action, DeveloperTab and focused lifecycle tests exclusively locked by this card`
 - Depends on: `arch-2-b1-09-runtime-source-draft-integration done; arch-2-b1-10-runtime-content-text-integration done; arch-2-b1-11-runtime-properties-integration done`
