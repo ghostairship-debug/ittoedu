@@ -167,6 +167,28 @@ describe('RuntimeContentEditor', () => {
     expect(screen.getByLabelText('成功反馈')).toBeDisabled()
   })
 
+  it('shows an unaddressable legacy key as read-only and never commits it', () => {
+    const onCommit = vi.fn()
+    const legacyField: RuntimeContentEditorField = {
+      ...fields()[0]!,
+      key: 'legacy\u0000key',
+      target: null,
+      readonlyReason: '该文案键无法生成稳定作者地址，只读显示',
+    }
+    render(
+      <RuntimeContentEditor fields={[legacyField]} onCommit={onCommit} />,
+    )
+
+    const input = screen.getByLabelText('主标题')
+    expect(input).toBeDisabled()
+    expect(screen.getByTestId('runtime-content-readonly-legacy-key'))
+      .toHaveTextContent('该文案键无法生成稳定作者地址，只读显示')
+    fireEvent.change(input, { target: { value: '不得写入' } })
+    fireEvent.blur(input)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
   it('shows a clear empty state when the runtime owns no authored text', () => {
     render(<RuntimeContentEditor fields={[]} onCommit={vi.fn()} />)
     expect(screen.getByTestId('runtime-content-empty')).toBeInTheDocument()

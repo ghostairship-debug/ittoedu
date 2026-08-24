@@ -70,10 +70,15 @@ function RuntimeContentField({
   const label = field.metadata?.label ?? humanizeKey(field.key)
   const id = `runtime-content-${field.key.replace(/[^A-Za-z0-9_-]/g, '-')}`
   const descriptionId = field.metadata?.description ? `${id}-description` : undefined
+  const readonlyId = field.readonlyReason ? `${id}-readonly` : undefined
   const resultId = result ? `${id}-result` : undefined
-  const describedBy = [descriptionId, resultId].filter(Boolean).join(' ') || undefined
+  const describedBy = [descriptionId, readonlyId, resultId]
+    .filter(Boolean)
+    .join(' ') || undefined
+  const fieldDisabled = disabled || field.target === null
 
   const commitDraft = () => {
+    if (!editing.target) return
     const next = onCommit(editing.target, editing.draft)
     if (next.ok) {
       dirtyRef.current = false
@@ -102,7 +107,7 @@ function RuntimeContentField({
     'aria-describedby': describedBy,
     value: editing.draft,
     maxLength: field.metadata?.maxLength,
-    disabled,
+    disabled: fieldDisabled,
     onChange: (
       event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
@@ -159,6 +164,14 @@ function RuntimeContentField({
       <label htmlFor={id}>{label}</label>
       {field.metadata?.description && (
         <small id={descriptionId}>{field.metadata.description}</small>
+      )}
+      {field.readonlyReason && (
+        <small
+          id={readonlyId}
+          data-testid={`runtime-content-readonly-${field.key.replace(/[^A-Za-z0-9_-]/g, '-')}`}
+        >
+          {field.readonlyReason}
+        </small>
       )}
       {field.metadata?.multiline
         ? <textarea {...common} className="form-textarea" rows={4} />
