@@ -169,6 +169,7 @@
 {"bytes":826,"contentHash":"sha256:851dd20e353c35cb299d1c98f724ad71b79caf89ffb784c74debc150c462ceb7","domain":"source","path":"src/player/global.d.ts"}
 {"bytes":354,"contentHash":"sha256:d06b59f77be968ebb0d9be1a4e8a98fd2d0b171defcfce4c6b93fb615d1b527f","domain":"source","path":"src/player/globalLayerVisibility.ts"}
 {"bytes":16742,"contentHash":"sha256:83c788649f55f66693c5445589929e0e2b8aff19ff2d327cb7afabb5648e9f75","domain":"source","path":"src/player/index.ts"}
+{"bytes":21995,"contentHash":"sha256:ef71524ddb27bd15f66165e18373825a5ef3bc03c626d86c10db0d3a57122168","domain":"source","path":"src/player/interactions/PublishedDomInteractionSurfacePort.ts"}
 {"bytes":12840,"contentHash":"sha256:91f010feaacb37d8624ced6272a23038b59c45993d916f0e6f7766a6dc0a515e","domain":"source","path":"src/player/interactions/PublishedInteractionController.ts"}
 {"bytes":2104,"contentHash":"sha256:37e06bec1215c252d588966f752d987bb5bbd36f1582b551587f1508b6a06209","domain":"source","path":"src/player/interactions/PublishedInteractionSurfacePort.ts"}
 {"bytes":4204,"contentHash":"sha256:efde8d60b10db285bbbb259be90587a37eff20d5eab41755c4bb42448a6c185f","domain":"source","path":"src/player/payload.ts"}
@@ -184,13 +185,13 @@
 {"bytes":37501,"contentHash":"sha256:5d4430de2c9a6cc890faa2cc9e5660bc090194540643c1d5c88282c4a49945e4","domain":"source","path":"src/player/surfaces/flow/FlowSurfaceHost.ts"}
 {"bytes":8519,"contentHash":"sha256:1b39938fde7a80d042b8a43b1fc0385ecfd961b831610ca86a1c7fc5b4c7e769","domain":"source","path":"src/player/surfaces/flow/flowModel.ts"}
 {"bytes":10459,"contentHash":"sha256:afa01e90e5125755d08173e0c39e3d934ada2181131344779b7675f9db704d37","domain":"source","path":"src/player/surfaces/flow/flowRuntimeToc.ts"}
-{"bytes":10972,"contentHash":"sha256:6f37eb2f3acb76187a5aa7346fa07b4431675d138fcac1a0aeb9fa5e46b282bf","domain":"source","path":"src/player/surfaces/mixed/MixedCourseNavigator.ts"}
+{"bytes":14017,"contentHash":"sha256:e053be4f5680863a1f7bcfbab78c376c17cbec0ec81062afe97c6825bdf176ad","domain":"source","path":"src/player/surfaces/mixed/MixedCourseNavigator.ts"}
 {"bytes":11411,"contentHash":"sha256:34741f1098ffee42f4cdde02cec91307c135047fa5b92627e1706488f0b41c70","domain":"source","path":"src/player/surfaces/publishedComponentMount.ts"}
-{"bytes":14717,"contentHash":"sha256:67f4f453506f39a43d9b4921c57a11be0e12df134be83060b3c6812a70ce9a64","domain":"source","path":"src/player/surfaces/publishedDynamicHosts.ts"}
+{"bytes":29004,"contentHash":"sha256:0c11877288628012a6feaf679d799bd554ba33ad9c38bfc54234a010fa2e689b","domain":"source","path":"src/player/surfaces/publishedDynamicHosts.ts"}
 {"bytes":2303,"contentHash":"sha256:abeddd17e603070d58b6dd72e8e9710ab78f399e4c82ca110cd173d10f20d4e2","domain":"source","path":"src/player/surfaces/publishedFormula.ts"}
 {"bytes":2418,"contentHash":"sha256:718988b1cc5baf13289e98565474816e840239110b2293ee9b648619fc98e140","domain":"source","path":"src/player/surfaces/publishedNativeText.ts"}
 {"bytes":1755,"contentHash":"sha256:cee916137d1be3bae944a4cd3478d43ac2d46afef48c96671820bf7f7eaee09b","domain":"source","path":"src/player/surfaces/publishedStageFit.ts"}
-{"bytes":18704,"contentHash":"sha256:c6915b9dc73b1079d2d44a0fdfd35b50638e018c230847c23d2413801d275205","domain":"source","path":"src/player/surfaces/slide/SlidePublishedAdapter.ts"}
+{"bytes":30810,"contentHash":"sha256:64de8a8947b0e2c48c7aaaf0fd1330c2d0bcc7bfb3c6979cfa415cf1839fea99","domain":"source","path":"src/player/surfaces/slide/SlidePublishedAdapter.ts"}
 {"bytes":37509,"contentHash":"sha256:0d8e5ddeb85c0a9d50bd9e0272a2ad895486c4e3cdddaa421d99fbd1b652de7a","domain":"source","path":"src/player/surfaces/spatial/SpatialSurfaceHost.ts"}
 {"bytes":12222,"contentHash":"sha256:cbc9491db221ef7aec6482d157a898795f0d02179d4ffeac5c47650fe75ee820","domain":"source","path":"src/player/surfaces/spatial/spatialModel.ts"}
 {"bytes":5391,"contentHash":"sha256:1722eb58c25d8344269bd4603fa422ad803c9c1f248828e1f0bc089343f26acc","domain":"source","path":"src/player/surfaces/spatial/spatialPlaybackGestures.ts"}
@@ -468,6 +469,7 @@
 {"bytes":12006,"contentHash":"sha256:dd0ada43da58511f95fcd9a0626a3eeae165b9ba02b1e0b80c4cd9629e37064e","domain":"source","path":"tests/integration/mediaLibraryImportRace.test.tsx"}
 {"bytes":3737,"contentHash":"sha256:1cbd6c0a16e707b5a9d9b4ac8049ceb2f36c6ccb788f26039802491921a86646","domain":"source","path":"tests/integration/player-component-registry.test.ts"}
 {"bytes":2927,"contentHash":"sha256:513626a7708562bb5bba122bdf0d0d758d78b7f4bea9d192dccfbd40cde18837","domain":"source","path":"tests/integration/player-payload.test.ts"}
+{"bytes":44803,"contentHash":"sha256:c6dffe1c50fb3515a1a0c2d7d7afa2fdd351b62cd06bdbd564409fc4bced9099","domain":"source","path":"tests/integration/publishedInteractionSlideHostIntegration.test.ts"}
 {"bytes":13979,"contentHash":"sha256:832bbc6002cb8b3772d9e17ca67b95689b2de5bfa5a5308a98f6f2ff5e3326c9","domain":"source","path":"tests/integration/renderHostBenchmark.test.ts"}
 {"bytes":14868,"contentHash":"sha256:3fa20db8573cc4a7c6b45306b905a36aaa739acd07f72fa6861319a91c66751f","domain":"source","path":"tests/integration/runtimeAssetReplacementRace.test.tsx"}
 {"bytes":6501,"contentHash":"sha256:5577e7a2809c6afcd79d4c4aabb183dc8f9032083bd8b38eb9777d71ea71a988","domain":"source","path":"tests/integration/runtimeRegistry.test.ts"}
@@ -585,6 +587,7 @@
 {"bytes":27492,"contentHash":"sha256:eadeb53336240d7ae6edb9de58cda87f99bc5705a42e83bfa5217f75f5dc010c","domain":"source","path":"tests/unit/interactionEngine.test.ts"}
 {"bytes":7656,"contentHash":"sha256:a6d437d690bfc8bb518b3323943fa7354422b2ebbad48c54bf9255eff1529db7","domain":"source","path":"tests/unit/interactionSchema.test.ts"}
 {"bytes":8701,"contentHash":"sha256:fc8dc63455e30455eb8fe2decf2edf80a8d7d7f41f658396324d97dcf4cc4795","domain":"source","path":"tests/unit/mediaTab.test.tsx"}
+{"bytes":8693,"contentHash":"sha256:92f9e3004b4218b69ce6e95bd629ed0aeb3993ebf78747aaea7679d8d6f6328c","domain":"source","path":"tests/unit/mixedCourseNavigatorBeforeNavigate.test.ts"}
 {"bytes":6092,"contentHash":"sha256:fa35ae55d917ef515f1a8ec1a4168a502fd745a23369869c2f756b3c0c9f1703","domain":"source","path":"tests/unit/nodeAdapterAnimation.test.ts"}
 {"bytes":27190,"contentHash":"sha256:fd351704d8ee049030b38aae227cd204639b4bd647cd3e4bed039f81629cd8b4","domain":"source","path":"tests/unit/nodeMotionDirector.test.ts"}
 {"bytes":783,"contentHash":"sha256:fe46ebec2abc848f5118ce25c186e0901e0a61ccf126f220634c3b73a01ab33e","domain":"source","path":"tests/unit/opacity.test.ts"}
@@ -614,6 +617,7 @@
 {"bytes":8500,"contentHash":"sha256:85842deb5078a75fbeaf7e1b94671664da24f3953cadf200a42844ca1753bbea","domain":"source","path":"tests/unit/publishedComponentMount.test.ts"}
 {"bytes":18392,"contentHash":"sha256:3d0338dbfbdad48831ecff78c75a9fc420d686bef59ad801a93957b3392d7f80","domain":"source","path":"tests/unit/publishedCourseNavigation.test.ts"}
 {"bytes":9587,"contentHash":"sha256:787efac073c72c260e94b80def483d6ab1c03f133e45d0b0832211c38089dc78","domain":"source","path":"tests/unit/publishedCourseProtocol.test.ts"}
+{"bytes":14329,"contentHash":"sha256:bfcf802e03936ebc54c7df58719e63fcd6a4440e53588d84f4bbae0718f24e8e","domain":"source","path":"tests/unit/publishedDomInteractionSurfacePort.test.ts"}
 {"bytes":15932,"contentHash":"sha256:b6419426a8224398a862163e7f5c6675da9f2dbed07891b3c71652a33c15a582","domain":"source","path":"tests/unit/publishedInteractionController.test.ts"}
 {"bytes":17221,"contentHash":"sha256:521770da00aa461cff723bdc93c9d37a5edb0078986f73b1cb13ffbe60adffd8","domain":"source","path":"tests/unit/publishedLesson.test.ts"}
 {"bytes":862,"contentHash":"sha256:e4dd9b9dcab00e4b91d9d05180b6fdae4670bfde111ba547a4897108fbc814aa","domain":"source","path":"tests/unit/readModelBoundary.test.ts"}
