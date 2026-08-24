@@ -14,18 +14,18 @@
 - Invalidating paths: `src/renderer/course/v9SlideContentCommands.ts`; `src/renderer/course/globalLayerCommands.ts#allocateCourseLayerOrder`; `tests/unit/v9SlideContentCommands.test.ts`; `tests/unit/effectiveLayerCommands.test.ts`; `tests/e2e/stabilizationCoreUsability.spec.ts`
 - Task ID: `stab-mix-03-slide-effective-order-allocation`
 - Phase / wave: `post-audit stabilization / A-core repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Mixed Order Worker / Unified Order Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace; Slide content allocator lock / codex/architecture-stabilization`
 - Baseline HEAD: `1c54d46` (Wave A dependency candidate; product bytes end at `fcb09b1`)
 - Context: manual Bootstrap followed the failing browser sequence through `addRectangleNode` into `appendSceneLayer` / `nextSceneLayerOrder`, compared it with `allocateCourseLayerOrder`, and confirmed that the Slide allocator sees only global/current-surface/current-scene orders while Spatial world orders share the same persisted effective namespace.
 - Freshness / relevant dirty inputs: the product paths and focused unit tests are clean at claim. The only dirty input is the Wave A gate spec owned by the waiting gate; its failed saved-project assertion is the discovery evidence and it is listed as invalidating but not writable by this implementation card.
-- Hotspot locks: only `v9SlideContentCommands.ts` and its named unit tests are writable; no Store, Workspace, Properties, Schema, generated or gate-spec changes.
+- Hotspot locks: released after product commit `0f7053e`; no Store, Workspace, Properties, Schema, generated or gate-spec changes were required.
 - Depends on: `stab-mix-01-effective-order-allocation`
 - Blocks: `stab-wave-a-core-usability`
 - Risk statement: adding a Slide item after Spatial content can produce duplicate persisted `order`, making effective-layer sorting ambiguous and violating strict saved-project assumptions.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / the first characterization fixture omitted the strict mixed-project print plan; the fixture was repaired without changing the implementation route`
 
 ## Product outcome
 
@@ -69,8 +69,8 @@ Adding any Slide scene item after content already exists on another Surface pres
 ## Result and rollback
 
 - Start point: `1c54d46`; discovery is the Wave A saved-project assertion reporting four effective items but three unique orders.
-- Product commit and rollback: pending; revert the one allocator/test commit independently.
-- Result evidence: pending product commit and focused result.
+- Product commit and rollback: `0f7053e`; revert that one allocator/test commit independently, with no data migration.
+- Result evidence: at product commit `0f7053e`, `npx vitest run tests/unit/v9SlideContentCommands.test.ts tests/unit/effectiveLayerCommands.test.ts` passed 2 files / 18 tests, `npm run typecheck` passed, and `git diff --check` passed. The focused regression reads the persisted Spatial world order from the result session, proves `[0, 1, 2, 3]` across Spatial plus three sequential Slide insertions, checks three history entries and full source immutability. The independent Unified Order Reviewer approved the final diff, confirming the dependency chain has no runtime cycle, the course allocator preserves current-scene preference without renumbering, and all five native plus component and runtime append paths still share `appendSceneLayer`.
 - Outcome conclusion boundary: V1 plus the resumed browser gate establishes at most `engineering candidate`.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
