@@ -222,10 +222,10 @@
 {"bytes":5250,"contentHash":"sha256:278c161e2813ec88bce06da4b1672386c935ba287ebc9f3f0fa3dc48c2857f49","domain":"source","path":"src/renderer/authoring/resourceAwareAuthoringHistory.ts"}
 {"bytes":480,"contentHash":"sha256:2a5d82ed31487768e871390612e31c76d6e49785b6d90235f2c544050be73b06","domain":"source","path":"src/renderer/authoring/runtimeAuthoringContext.ts"}
 {"bytes":3944,"contentHash":"sha256:26e55bb9e54481ebcaba6cfe6508e8988b78adcb57fc12b14ba65ebd7f1f8d7c","domain":"source","path":"src/renderer/authoring/runtimeTargetEditSession.ts"}
-{"bytes":48808,"contentHash":"sha256:9f03091b700c6f4c8faefb71b24413a08bb754249fe783d690a9e913274dc198","domain":"source","path":"src/renderer/authoring/spatialWorldAuthoring.ts"}
+{"bytes":50663,"contentHash":"sha256:23542725e45b83bc65c46993160ef17a186d9d6b48ab56b148cba24c0f2fca62","domain":"source","path":"src/renderer/authoring/spatialWorldAuthoring.ts"}
 {"bytes":14949,"contentHash":"sha256:b864373af729ae87a91bfab5916c0d32ea1307259f841210d0b51478b6fbf068","domain":"source","path":"src/renderer/authoring/stageViewportTransform.ts"}
 {"bytes":24040,"contentHash":"sha256:4e2aaba010badc7af0bad51e4202e72618352fbce91795199df0895f684d6876","domain":"source","path":"src/renderer/authoring/v9SlideContentEdit.ts"}
-{"bytes":18746,"contentHash":"sha256:f8d16fcfeb783a8c7253f96590d9e3649f612067d1f2175b700c199888ea3ea7","domain":"source","path":"src/renderer/authoring/v9TeacherControllerAuthoring.ts"}
+{"bytes":20025,"contentHash":"sha256:b1a4e138000fd7e6883edd8ce548dcfb139373b0e001af8b1b4e07af269f72f8","domain":"source","path":"src/renderer/authoring/v9TeacherControllerAuthoring.ts"}
 {"bytes":2429,"contentHash":"sha256:49ef50a91726c8a2506d777f2d7202eab25a4aa0012cd6db957e04092d8862e1","domain":"source","path":"src/renderer/components/ComponentRegistry.ts"}
 {"bytes":2751,"contentHash":"sha256:8cdd63e50a6bb9cdc84a2ed2f9b1fc640b606d5700387b62e258caa140aefff6","domain":"source","path":"src/renderer/components/componentCatalogStatus.ts"}
 {"bytes":4511,"contentHash":"sha256:04cf39c565cc5b77e0114a25c3db322cdd1183c3db1d8ad1b7d269449c4bc9f1","domain":"source","path":"src/renderer/components/componentLibraryModel.ts"}
@@ -247,7 +247,7 @@
 {"bytes":9222,"contentHash":"sha256:e7414e864e3e75a687282c16cd462c4ad3384f4bf154b43f2f355b4e78a72012","domain":"source","path":"src/renderer/course/flowEditorView.ts"}
 {"bytes":6036,"contentHash":"sha256:732a487eacb431fc9256b8e6005e00a1e285f53108087cf1ac474726f48b2da8","domain":"source","path":"src/renderer/course/flowOverlayProjection.ts"}
 {"bytes":46345,"contentHash":"sha256:003a18d49a6418efed7182b873b990c67ba2f1a9bb9035ae2313b08718d9ee68","domain":"source","path":"src/renderer/course/flowSharedAuthoringAdapters.ts"}
-{"bytes":34145,"contentHash":"sha256:86247420d57a52e50f551461b4b4a60689a048841209937f02afe30b1b82f23e","domain":"source","path":"src/renderer/course/globalLayerCommands.ts"}
+{"bytes":35153,"contentHash":"sha256:615fc5f62e1b9e6b545cea2ade04a046de9616882ce9c97fcef8001ff766d08c","domain":"source","path":"src/renderer/course/globalLayerCommands.ts"}
 {"bytes":1201,"contentHash":"sha256:d3bf94a1d607be33154475171119598412f31c409e0c5f38290b460b5f2fef02","domain":"source","path":"src/renderer/course/read-model/index.ts"}
 {"bytes":68449,"contentHash":"sha256:b81f3502da96ce4ef2c0b87a65c0cf8a538de7e1a0e7a53da8ec70f82cef437d","domain":"source","path":"src/renderer/course/slideAuthoringBackend.ts"}
 {"bytes":15868,"contentHash":"sha256:f46c180699911ef2acd005a24fcac9d35505936ba522725cfcb37145a6265bb7","domain":"source","path":"src/renderer/course/slideEditorCommands.ts"}
@@ -256,7 +256,7 @@
 {"bytes":9107,"contentHash":"sha256:a9597e511f60c2a987b364b7fbdec4d9f40d97b7e5f49e91693a5dea09d7bc98","domain":"source","path":"src/renderer/course/slideInteractionView.ts"}
 {"bytes":8628,"contentHash":"sha256:602d42fe5ce63fdc2b1156f7cf367f8571f773ddba2f94181cb5e3c61c0bd209","domain":"source","path":"src/renderer/course/spatialAuthoringHistory.ts"}
 {"bytes":19329,"contentHash":"sha256:bfe30ab529b29e8b7e3954e9733ca92caabb0d44cdafaa95c0fadc7e8f42f9cb","domain":"source","path":"src/renderer/course/spatialCameraCommands.ts"}
-{"bytes":41932,"contentHash":"sha256:d93f909b5a8fd47bcff0282f29ac50ae6290e1f159e07e0b569e84d3eeda3e77","domain":"source","path":"src/renderer/course/spatialEditorCommands.ts"}
+{"bytes":41990,"contentHash":"sha256:67a59f49871ac8519cf35506c09c2305fd0647d5fe78eaae773086caa91947b7","domain":"source","path":"src/renderer/course/spatialEditorCommands.ts"}
 {"bytes":9702,"contentHash":"sha256:228b5aaf09dfaa4e096f08248407dafefadf5bcea825ca16b93b1181d0b04570","domain":"source","path":"src/renderer/course/spatialEditorView.ts"}
 {"bytes":16835,"contentHash":"sha256:38e4bb9596fbcf209a69eede1edbc42d9b13d0634f6414bd5dd9e60d906cde53","domain":"source","path":"src/renderer/course/spatialPathCommands.ts"}
 {"bytes":12273,"contentHash":"sha256:ce7c73c1002ca1af64602217acd963d8b8c4fae9166db8416de9fe1b9e1aa8d1","domain":"source","path":"src/renderer/course/spatialRelationCommands.ts"}
@@ -264,7 +264,7 @@
 {"bytes":46877,"contentHash":"sha256:48be9c4deff0984eea1e4e1d4eb0e89e42de2ffbe8eaf046dc0c8f9dc26bdc0c","domain":"source","path":"src/renderer/course/v9MediaAudioCommands.ts"}
 {"bytes":41953,"contentHash":"sha256:536b7ebc6083b6a551d62e8f305edf8ff8029964eb52b23d4ed144bca718015c","domain":"source","path":"src/renderer/course/v9SlideActionCommands.ts"}
 {"bytes":13234,"contentHash":"sha256:5e01c668270b7bb8ec3e6979295afc90d113b51747c4c9df17a9fbb4fe8ac9bd","domain":"source","path":"src/renderer/course/v9SlideClipboard.ts"}
-{"bytes":51517,"contentHash":"sha256:c2ce20f5673b5ac1eeef792b96887ef80e084d13c235581ab77ddddfadfdc3e8","domain":"source","path":"src/renderer/course/v9SlideContentCommands.ts"}
+{"bytes":51181,"contentHash":"sha256:4b1fe4cee353ad4852a91328aaf966d78fa1c0bbbfb7f79cc47a2a09968fa6aa","domain":"source","path":"src/renderer/course/v9SlideContentCommands.ts"}
 {"bytes":5136,"contentHash":"sha256:d6578e4aee62f6931a9ffe76e398ba5017af687daeeafd80fa954008f281e86c","domain":"source","path":"src/renderer/dev/v9CandidateSmokeInject.ts"}
 {"bytes":965,"contentHash":"sha256:0aa03ffbe248938826e605e91f43dff47ad6ee34a00efbc418604aea55795220","domain":"source","path":"src/renderer/diagnostics/installRendererDiagnostics.ts"}
 {"bytes":2020,"contentHash":"sha256:420cb8a9ef958de441bbc265283c8d31fbe39e29b777589ab4ca2ff55231a930","domain":"source","path":"src/renderer/diagnostics/projectHealthNavigation.ts"}
@@ -335,7 +335,7 @@
 {"bytes":16671,"contentHash":"sha256:10324ba58a1f396d4f48244da219f0467c0b7404c2c5d141d68562807b6c3277","domain":"source","path":"src/renderer/runtime/runtimeSourceAuthoringCommands.ts"}
 {"bytes":10518,"contentHash":"sha256:8d4b433a1b91b68e0762a75a4643c772ebf5e613831c6a95126b8cec3533ee5a","domain":"source","path":"src/renderer/runtime/runtimeSourceAuthoringView.ts"}
 {"bytes":15393,"contentHash":"sha256:c5a12c7329a2f9718478eaa706772b36408a5bd92c0cd2f17683c8d7f970df16","domain":"source","path":"src/renderer/runtime/runtimeTemplateAuthoringCommands.ts"}
-{"bytes":396927,"contentHash":"sha256:667eed5a41b2ee84a9ad8c0569e4a6a1ff27767c50d5c73eea6caca52ca9173e","domain":"source","path":"src/renderer/store/editorStore.ts"}
+{"bytes":397798,"contentHash":"sha256:32a31e3f89d61249f5ff046152f4a62b018fa79e88dd115ef9f06254c9f6adfb","domain":"source","path":"src/renderer/store/editorStore.ts"}
 {"bytes":7144,"contentHash":"sha256:6fe6f145a12197d072dbf544eec1953a417f76372050667dc3ef761c48ed4f46","domain":"source","path":"src/renderer/store/history.ts"}
 {"bytes":1076,"contentHash":"sha256:1b7b0aa36e0ae694d9c4932495f66a8e8b73c43277e7cf6e8849c8d2fe5fd284","domain":"source","path":"src/renderer/store/slideBackendPort.ts"}
 {"bytes":6029,"contentHash":"sha256:4288aa341dcb0c89f0c305493e8d00588a3029bfd8eb9190264f3da9f502da4f","domain":"source","path":"src/renderer/store/slideEditorProjection.ts"}
@@ -357,7 +357,7 @@
 {"bytes":3099,"contentHash":"sha256:9ba69a6d3557db59cd799eff4bd657a549c8748ee68e9c20e1f3761fa20f4492","domain":"source","path":"src/renderer/ui/ExportSizeWarningDialog.tsx"}
 {"bytes":9260,"contentHash":"sha256:542a30167255c5898bc5924516bad03b93c32cf4d9aaafa2e46c7634dfe09c25","domain":"source","path":"src/renderer/ui/FlowBlockContextToolbar.tsx"}
 {"bytes":1822,"contentHash":"sha256:89c8015f22822d7336d6d21664f1cafb27ebbb3838a1d7c132c935513afaceb8","domain":"source","path":"src/renderer/ui/FlowFormulaBlockProperties.tsx"}
-{"bytes":65215,"contentHash":"sha256:bab4b521ab26d7644bc230386522d4d566631f6fdcf26338292a58ee41e252b4","domain":"source","path":"src/renderer/ui/FlowWorkspace.tsx"}
+{"bytes":68454,"contentHash":"sha256:d52a2f6b79c030e5c8e8414baf06c5eea42cbb48a2ba982de399aa1b09374f02","domain":"source","path":"src/renderer/ui/FlowWorkspace.tsx"}
 {"bytes":13636,"contentHash":"sha256:b6b8a7f520857c314608c3428dc1adaab99a77ef4f57fa96c93c4147849c2182","domain":"source","path":"src/renderer/ui/FormulaAuthoringEditor.tsx"}
 {"bytes":1806,"contentHash":"sha256:64f57c484fee7419340c5bb67e07f1d9ea35939aa025b718068ae3b7292f0ef3","domain":"source","path":"src/renderer/ui/FormulaEditDialog.tsx"}
 {"bytes":88612,"contentHash":"sha256:cb33c5b03e5dc8c5eafbecd7d6e4c2981b168bebd563c05e80c9f63af6eca2ac","domain":"source","path":"src/renderer/ui/InteractionEditor.tsx"}
@@ -375,10 +375,10 @@
 {"bytes":6427,"contentHash":"sha256:4a93f50711fa42a04f78906f731dc4f82948704872410b5330c90e12902fac8d","domain":"source","path":"src/renderer/ui/SimpleEntranceAnimationEditor.tsx"}
 {"bytes":14234,"contentHash":"sha256:39b375b5d6abd1565443bd43e6ae9ba00a654a7193ac8bcaa180fb2905e9a706","domain":"source","path":"src/renderer/ui/SpatialCameraPanel.tsx"}
 {"bytes":17756,"contentHash":"sha256:336aa60b2d1b14483862862e15861c8c56102636ef8c3f3948c0b93a3ef9e406","domain":"source","path":"src/renderer/ui/SpatialPathEditor.tsx"}
-{"bytes":3162,"contentHash":"sha256:440dea1274c8120bc18c26b92e359d9f727e0db33992cd2f845afd120194aff7","domain":"source","path":"src/renderer/ui/TeacherControllerAuthoringChrome.tsx"}
+{"bytes":3938,"contentHash":"sha256:a209fd791da0fac39bb3e4a18d4a269f819a688025309848057a3147919c2d91","domain":"source","path":"src/renderer/ui/TeacherControllerAuthoringChrome.tsx"}
 {"bytes":23597,"contentHash":"sha256:44973f28306b049ed72261d30342a9202130866c059ad911b6e97af98a35d85e","domain":"source","path":"src/renderer/ui/TextEditOverlay.tsx"}
 {"bytes":15704,"contentHash":"sha256:a74bf8b21b4ba356203258321a3cdcffe0c8816c2def4619ec504b0ed3493cd8","domain":"source","path":"src/renderer/ui/TopToolbar.tsx"}
-{"bytes":144759,"contentHash":"sha256:e76c8ca9c827f595ee1bf460b835363789259dd31dc8638be39203fb539bb565","domain":"source","path":"src/renderer/ui/Workspace.tsx"}
+{"bytes":147141,"contentHash":"sha256:53a9e6d5c7e572163e067fca4280f56849f228da1394fa5b53800eaf0e8ea97b","domain":"source","path":"src/renderer/ui/Workspace.tsx"}
 {"bytes":2093,"contentHash":"sha256:a0c2e01facb889aa2315d69cece2ce5f327817b5a5ba913411d2700c067d8f87","domain":"source","path":"src/renderer/ui/coursePlayerTryRun.ts"}
 {"bytes":1903,"contentHash":"sha256:be5095310eedc53f87d70d17a0607277132b7e2c879cd1e83de4397bdf8a80e5","domain":"source","path":"src/renderer/ui/flowLocationTryRun.ts"}
 {"bytes":2933,"contentHash":"sha256:a7a2f3c2e24ab568b5cd976fe0d75cfd107128ce3e9ae50ba7a36bf9eb2c08e2","domain":"source","path":"src/renderer/ui/sceneThumbnailComposition.ts"}
@@ -456,7 +456,7 @@
 {"bytes":209,"contentHash":"sha256:fec0dba7e7105957ca83398fde5acf9b0de3ba72d841cd674ddaa91f41d6a529","domain":"source","path":"src/shared/stableOrder.ts"}
 {"bytes":44,"contentHash":"sha256:f8050427a3dd397f362045afe63dc1819a63b82c1cdf0656b1e2515941687bd4","domain":"source","path":"src/shared/surfaceRuntimeTypes.ts"}
 {"bytes":7282,"contentHash":"sha256:e95c1c152344477019343ecdc87734db27a47bb081fc6ac7a3b252f1c86dd2d5","domain":"source","path":"src/shared/teacherControllerConsistency.ts"}
-{"bytes":9542,"contentHash":"sha256:8a123f4a3aa79c31f939b81f71dacecc8b941201ecc4e651edc7e4665e5f146f","domain":"source","path":"src/shared/teacherControllerLayout.ts"}
+{"bytes":13251,"contentHash":"sha256:cacce9d9d2bb90cc3287a85575e204f3824965cfcbafb6b8bade88c660771942","domain":"source","path":"src/shared/teacherControllerLayout.ts"}
 {"bytes":15365,"contentHash":"sha256:aa60dec2fa6ddea24ed5fef95827f1ef449f6c7070ca08348a276a553f7b86aa","domain":"source","path":"src/shared/textLayout.ts"}
 {"bytes":6861,"contentHash":"sha256:14477ca181470f30049960aa4f827a6804df5899fd08e16ded83fcbeb4f7a6c1","domain":"source","path":"src/shared/textRuns.ts"}
 {"bytes":4892,"contentHash":"sha256:12bfbac7da0c5f103118f49687cbf07e294507506274e35c806f35aedc341b11","domain":"source","path":"src/shared/visualDensity.ts"}
@@ -465,6 +465,7 @@
 {"bytes":1906,"contentHash":"sha256:779052e97478102e1aa1b047a4e432bd3540098766b9df210e68c330b9043866","domain":"source","path":"tests/e2e/expectBackgroundWindowsIsolated.ts"}
 {"bytes":34085,"contentHash":"sha256:549b640b3d75061f4b8cbccb5c6583ef65bd7c0967c921a5b9d95986cf11ed56","domain":"source","path":"tests/e2e/imageReplacementVerticalSlice.spec.ts"}
 {"bytes":9746,"contentHash":"sha256:1d2356dd17d19a30e5062cf0f64262ae4b4fddf3ea058e9ad238c64531fa530c","domain":"source","path":"tests/e2e/render-host-benchmark.spec.ts"}
+{"bytes":26311,"contentHash":"sha256:bc695d7799f28be5b0e4bf5b3dd175643f6b46e213b7d5b520afa03c02bbb5c7","domain":"source","path":"tests/e2e/stabilizationCoreUsability.spec.ts"}
 {"bytes":1153,"contentHash":"sha256:b0918999685105e3f78170d7baf485e2dd41a66d1a5b5ac1c92dfc3ccd9a1240","domain":"source","path":"tests/e2e/window.d.ts"}
 {"bytes":1805,"contentHash":"sha256:9e9a8a421c652151beb2261e2a8f52685bbf228356e6ca4829caa112880318ef","domain":"source","path":"tests/fixtures/architecture-baseline/manifest.json"}
 {"bytes":1309,"contentHash":"sha256:abd884c58340136a1e08b8bf9b3cb50afc61b657f9d59e32da7fec51bb7c6d70","domain":"source","path":"tests/fixtures/course-project-v9/README.md"}
@@ -570,7 +571,7 @@
 {"bytes":1331,"contentHash":"sha256:8ece44c9997b280d6ec1f4df69a5c05c1f28148d9c34b2eb1620f1f36710db81","domain":"source","path":"tests/unit/editorPreviewNavigation.test.ts"}
 {"bytes":57854,"contentHash":"sha256:902a94e12443e132e85f56933b117f92a69edd299e2e35c87c5fc43aaf98a41e","domain":"source","path":"tests/unit/editorStore.test.ts"}
 {"bytes":8426,"contentHash":"sha256:b91a636bb7c104ed35bebb6fcdc8db6fa7344aae86dc583f7b431aa304dc5e0b","domain":"source","path":"tests/unit/editorTransaction.test.ts"}
-{"bytes":16680,"contentHash":"sha256:7ea35d800f953c106b09dc2f7941aa6275f1ff898eef18591124a39fc394932d","domain":"source","path":"tests/unit/effectiveLayerCommands.test.ts"}
+{"bytes":18305,"contentHash":"sha256:ceeedb7ac321fb3b726bfd255d52bf8bdad33b9aa7c9ff32221e8b2609d03948","domain":"source","path":"tests/unit/effectiveLayerCommands.test.ts"}
 {"bytes":17053,"contentHash":"sha256:2a744f105554a0d552b9b051fb27227514267267c77081fb3fcacf9fc5243f3a","domain":"source","path":"tests/unit/effectiveLayerProjection.test.ts"}
 {"bytes":2401,"contentHash":"sha256:99e045a75aed10907d6a589cf8d34335aa96c3b9fe8c94c85c1da1a6f78f0e29","domain":"source","path":"tests/unit/elementAnimationStaticExport.test.ts"}
 {"bytes":10935,"contentHash":"sha256:bc90679e42781dcb12501384d3ba38f57469b421bc8e0bfb2f9087b915b701e3","domain":"source","path":"tests/unit/export.test.ts"}
@@ -591,7 +592,7 @@
 {"bytes":815,"contentHash":"sha256:ba96d51c52e38a764f5d2a521b9c4a79b5b5be2dbb77578c8dcc981c1ef944a8","domain":"source","path":"tests/unit/flowTryRunCss.test.ts"}
 {"bytes":8929,"contentHash":"sha256:67e8b86c1c6af92887bcf7f1988836664c67b56ec5782db10aea518ea435b5f4","domain":"source","path":"tests/unit/flowUnifiedLayerEntry.test.tsx"}
 {"bytes":8312,"contentHash":"sha256:4a2601108844bcc5b93e0da7c4bdcecffe292eda03b8f2ea07b1a2446c9fcae4","domain":"source","path":"tests/unit/flowUnifiedLayers.test.tsx"}
-{"bytes":17102,"contentHash":"sha256:aa2c1447373cdb6d0e699c654a7eb892cf39eb069b2d368b24c45c265d6a4ea1","domain":"source","path":"tests/unit/flowWorkspace.test.tsx"}
+{"bytes":21429,"contentHash":"sha256:98223c211a4ad430fbe814767b69bc9257ffe1f4abb68741629abb15515fd8b8","domain":"source","path":"tests/unit/flowWorkspace.test.tsx"}
 {"bytes":12928,"contentHash":"sha256:bdf5d444a5a8d71132509bf45795f7605f652cc0fc9d51278ad777b6ac007704","domain":"source","path":"tests/unit/flowWorkspaceMedia.test.tsx"}
 {"bytes":8848,"contentHash":"sha256:b7a3ffef83701c459c4b22f4ca678d0a8b55da642554582bab03fdd58499a96c","domain":"source","path":"tests/unit/formulaCrossSurface.test.tsx"}
 {"bytes":729,"contentHash":"sha256:17686d9136468be4874d5cd170f6dad8da777e9f05544302e9d315ecb3728dd0","domain":"source","path":"tests/unit/formulaEditorBridge.test.ts"}
@@ -688,7 +689,7 @@
 {"bytes":13220,"contentHash":"sha256:db2d4b8d19c4d529f39fc3eb967b01b757541251f01220acf5efbcd904737c87","domain":"source","path":"tests/unit/spatialCameraCommands.test.ts"}
 {"bytes":2699,"contentHash":"sha256:be596a014d6d6746f69ae049f415e1b098023da028d5daeafa7931d5492af730","domain":"source","path":"tests/unit/spatialCameraSession.test.tsx"}
 {"bytes":6089,"contentHash":"sha256:26467a8e735dda80a675ccb7516e0938e000b02c43603cba73a94bf400a0e792","domain":"source","path":"tests/unit/spatialCanvasBackground.test.ts"}
-{"bytes":20701,"contentHash":"sha256:fcd4084638cd54640a46dfb1f7610b6f86521ec1a46ec9c651226de580231686","domain":"source","path":"tests/unit/spatialEditorCommands.test.ts"}
+{"bytes":23630,"contentHash":"sha256:d1a932ab8a3d085a6772fb721202f1515406247a570df342718aefea458c01ec","domain":"source","path":"tests/unit/spatialEditorCommands.test.ts"}
 {"bytes":4498,"contentHash":"sha256:adeee8e6e67f8b8239c45e446024139c7c60943cfbdbabde21ea711b45b3ee81","domain":"source","path":"tests/unit/spatialLocationTryRun.test.ts"}
 {"bytes":13747,"contentHash":"sha256:fe6d2f4b292627ce055447b216e6405191169a3c7aa60c72284485fd9d6ecb36","domain":"source","path":"tests/unit/spatialPathCommands.test.ts"}
 {"bytes":15048,"contentHash":"sha256:1c24a3f99f88f3472004cd0cab1240589a8d582cdee84280840fe3cbd77e40c8","domain":"source","path":"tests/unit/spatialPathPipeline.test.ts"}
@@ -702,6 +703,8 @@
 {"bytes":7582,"contentHash":"sha256:503bdd966be5afafe5daa68bddba823102412149247e1bfc90faa2b057b0185e","domain":"source","path":"tests/unit/surfaceRuntimeAuthoring.test.ts"}
 {"bytes":19988,"contentHash":"sha256:1f5e67c98680060023b70e371e55913aea47961c921771e56b6c6dd2c5483229","domain":"source","path":"tests/unit/taskBoardGenerator.test.ts"}
 {"bytes":1521,"contentHash":"sha256:40db413765b09628e213a5edafe77573ee3e7e1ac60e96a24080b0a0913ad94e","domain":"source","path":"tests/unit/teacherControllerActions.test.ts"}
+{"bytes":8229,"contentHash":"sha256:61b826b573e96613ecec675b7a7b8efccf3f0e4fd6f6021c8ebc156fa9b744a2","domain":"source","path":"tests/unit/teacherControllerAuthoringBounds.test.ts"}
+{"bytes":14027,"contentHash":"sha256:93a0ed2c113b3d3d21a821ee59612332367d684d2d58f9c50ca4cef31801039f","domain":"source","path":"tests/unit/teacherControllerAuthoringOwnership.test.tsx"}
 {"bytes":4349,"contentHash":"sha256:3a198f8690a48226ee8313d9fbc9ede8d8168ee36c6257f16b172be422b89e0f","domain":"source","path":"tests/unit/teacherControllerConsistency.test.ts"}
 {"bytes":11427,"contentHash":"sha256:146ed08e1fe440809b433d742d81a1619583ba2f1db11424d88f2f3d77b77e28","domain":"source","path":"tests/unit/teacherControllerLayout.test.ts"}
 {"bytes":16778,"contentHash":"sha256:8ad7bee2f42b0472566554f19f201590372316b53996902982890da3cecf226f","domain":"source","path":"tests/unit/teacherControllerRuntimeSession.test.ts"}
@@ -715,7 +718,7 @@
 {"bytes":8038,"contentHash":"sha256:d06c83030e86f01e0876452fb286033da1582208f391a89fdca17014e1877e72","domain":"source","path":"tests/unit/v9MediaTabAdapter.test.tsx"}
 {"bytes":17887,"contentHash":"sha256:9d090d70793b5bab9de317353800f5e9dfbc56f848f28f21904e523030d74829","domain":"source","path":"tests/unit/v9SlideActionCommands.test.ts"}
 {"bytes":9259,"contentHash":"sha256:c8805e338e06af059da738f9063b891a43b628874272bdedd8a14c3160a3f236","domain":"source","path":"tests/unit/v9SlideBackendSelection.test.ts"}
-{"bytes":19948,"contentHash":"sha256:cd55f9e01eb91513ffba0dc5a65093ea127d4d86d70b901069bb846ca8f942c9","domain":"source","path":"tests/unit/v9SlideContentCommands.test.ts"}
+{"bytes":22599,"contentHash":"sha256:1c2ac92714240de5228dacb0c238dbefb1f763eeb62727334acae9107cc00869","domain":"source","path":"tests/unit/v9SlideContentCommands.test.ts"}
 {"bytes":19449,"contentHash":"sha256:f1fa16629edddcd9eb2dc2777819b8d7bf730065facb68df4f6afa926f558bcd","domain":"source","path":"tests/unit/v9SlideDomain.test.ts"}
 {"bytes":14185,"contentHash":"sha256:5926061816b7660dd1b115f3db52d0fd18f221a1376d7f3805c06004f801424d","domain":"source","path":"tests/unit/v9SlideProductIntegration.test.tsx"}
 {"bytes":21066,"contentHash":"sha256:2b04af655af83023a2f8008a1ebf0609237eca6cd5be338403556b3777ac2347","domain":"source","path":"tests/unit/v9SlideTextTransaction.test.ts"}

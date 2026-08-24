@@ -11,21 +11,21 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: Reuse dependency-card focused evidence at the integrated commit; rerun only the single gate spec when a listed product/spec/browser path changes. Docs/task-board/generated-only changes do not invalidate it.
-- Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `src/renderer/authoring/flowTextEdit.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/store/editorStore.ts`; `tests/e2e/stabilizationCoreUsability.spec.ts`; `playwright.config.ts`
+- Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `src/renderer/authoring/flowTextEdit.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/v9SlideContentCommands.ts`; `src/renderer/store/editorStore.ts`; `src/shared/teacherControllerLayout.ts`; `tests/e2e/stabilizationCoreUsability.spec.ts`; `playwright.config.ts`
 - Task ID: `stab-wave-a-core-usability`
 - Phase / wave: `post-audit stabilization / A-core gate`
-- Status: `claimed`
+- Status: `wave-validated`
 - Owner / Reviewer / Integrator: `Validation Worker / Core Usability Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / wave-validated 2026-08-25`
 - Worktree / branch: `shared integration workspace / codex/architecture-stabilization`
-- Baseline HEAD: `cba124f` (integrated dependency candidate; product bytes end at `fcb09b1`)
+- Baseline HEAD: `d8d496f` (integrated dependency candidate; product bytes end at `0f7053e`)
 - Context: manual Bootstrap read the three dependency cards and evidence, `playwright.config.ts`, the existing Electron launch/save/reopen/preview helpers in `editor.spec.ts` and `imageReplacementVerticalSlice.spec.ts`, and the final listed product paths. The one-spec design uses one Electron process and three bounded `test.step` behaviors.
 - Freshness / relevant dirty inputs: worktree and every listed product/spec path were clean at claim. `npm run repo:index:check` correctly reported the committed index stale after Wave A product changes, so the gate uses the recorded exact-source Bootstrap and defers one generated refresh to the wave checkpoint.
-- Hotspot locks: only `tests/e2e/stabilizationCoreUsability.spec.ts` and this gate's status/evidence are reserved; gate implementation may not change product code.
+- Hotspot locks: released after gate commit `3cd4719`; the gate made no product-code change.
 - Depends on: `stab-ctrl-01-authoring-bounds-and-recovery`; `stab-mix-01-effective-order-allocation`; `stab-mix-03-slide-effective-order-allocation`; `stab-flow-01-real-text-selection`
 - Blocks: `core-gate release for B/C/D cards that explicitly depend on stab-wave-a-core-usability; unrelated cards remain claimable`
 - Risk statement: Integration can reintroduce pointer/hit routing or stale Store behavior not visible in isolated focused tests.
-- Retry count / last failure class: `6 / five gate-spec contract faults repaired; one product integration failure delegated to stab-mix-03-slide-effective-order-allocation`
+- Retry count / last failure class: `8 / the first independent hit-test oracle targeted the visual child button although runtime intentionally delegates its pointer region to the draggable controller root`
 
 ## Product outcome
 
@@ -48,9 +48,9 @@ One integrated candidate proves the three core author behaviors in a real browse
 
 ## Result and rollback
 
-- Start point: integrated dependency commits.
-- Gate commit and rollback: pending; gate spec/status revert independently, product fixes retain their own rollback points.
-- Result evidence: pending candidate commit, one spec result and evidence-reuse decision.
+- Start point: integrated candidate `d8d496f`, with product bytes ending at `0f7053e`.
+- Gate commit and rollback: `3cd4719`; revert the gate spec/status independently, while dependency product fixes retain their own rollback points.
+- Result evidence: `npm run build:desktop` passed at product commit `0f7053e` with only the existing inline-dynamic-import and bundle-size warnings. `npx tsc -p tsconfig.e2e.json --noEmit`, Playwright test listing and `git diff --check` passed. The final `npx playwright test tests/e2e/stabilizationCoreUsability.spec.ts --workers=1` run passed 1/1 in 2.1 minutes after a prior diagnostic run exposed and repaired an incorrect child-button hit oracle. The final real Electron journey creates two distinct Spatial world kinds, proves course-wide unique persisted orders, performs native Flow mouse selection and empty/first-character geometry checks, verifies Slide/Flow/Spatial controller preview ownership, pointer-cancel zero-write, bounded drag, save/reopen, and a published Player recovery button whose four browser-space edges are inside the Slide stage and whose delegated hit region expands on a real mouse click. Dependency-card focused evidence was reused because the final gate run covered the integrated product candidate and no dependency invalidator changed afterward. The independent Core Usability Reviewer approved the strengthened Player oracle, exact warning boundary and final invalidation list without repeating the browser run. Pipeline status: pass; outcome status: `engineering candidate`, not teacher/product accepted.
 - Outcome conclusion boundary: real-browser automation is not teacher/product `accepted`.
 - Semantic index impact: `none`
-- Generated refresh: `defer-to-wave-gate`
+- Generated refresh: `complete-at-wave-a-gate`
