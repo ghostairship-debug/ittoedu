@@ -15,6 +15,10 @@ import type {
   RuntimeLayerItem,
   SlidePresentationState,
 } from '@/shared/courseProjectTypes'
+import {
+  captureCourseRuntimeTemplateCreationTarget,
+  type CourseRuntimeTemplateCreationTarget,
+} from './runtimeTemplateAuthoringCommands'
 
 export const COURSE_RUNTIME_SOURCE_AUTHORING_FIELD = 'runtime/source' as const
 
@@ -63,6 +67,8 @@ export interface UnavailableRuntimeSourceAuthoringView {
     | 'runtime-missing'
   readonly label: string
   readonly documentKey: null
+  /** Present only for the supported empty Slide scene/global Runtime slot. */
+  readonly creationTarget?: CourseRuntimeTemplateCreationTarget | null
 }
 
 export type RuntimeSourceAuthoringView =
@@ -96,12 +102,14 @@ function deepFreeze<T>(value: T): T {
 function unavailable(
   reason: UnavailableRuntimeSourceAuthoringView['reason'],
   label: string,
+  creationTarget: CourseRuntimeTemplateCreationTarget | null = null,
 ): UnavailableRuntimeSourceAuthoringView {
   return Object.freeze({
     availability: 'unavailable' as const,
     reason,
     label,
     documentKey: null,
+    creationTarget,
   })
 }
 
@@ -257,9 +265,24 @@ export function selectRuntimeSourceAuthoringView(
     return unavailable('invalid-location', '当前课程位置没有有效的 Runtime carrier')
   }
   if (!carrier.item) {
+    const creationTarget = (
+      resolved.location.kind === 'slide-scene'
+      && resolved.surface.type === 'slide'
+      && (carrier.owner === 'scene' || carrier.owner === 'global')
+    )
+      ? captureCourseRuntimeTemplateCreationTarget({
+          sessionToken: input.sessionToken,
+          projectId: input.project.id,
+          surfaceId: resolved.surface.id,
+          stateId: state.stateId,
+          owner: carrier.owner,
+          sceneId: carrier.owner === 'scene' ? carrier.sceneId : null,
+        })
+      : null
     return unavailable(
       'runtime-missing',
       `${carrier.labelPrefix} 尚未创建 Runtime`,
+      creationTarget,
     )
   }
 

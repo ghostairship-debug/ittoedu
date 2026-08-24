@@ -287,8 +287,64 @@ describe('selectRuntimeSourceAuthoringView', () => {
       reason: 'runtime-missing',
       label: 'Flow · Flow 尚未创建 Runtime',
       documentKey: null,
+      creationTarget: null,
     })
   })
+
+  it.each([
+    ['scene', 'scene', 'slide-scene'],
+    ['global', 'global', null],
+  ] as const)(
+    'exposes an exact missing Slide %s Runtime creation slot',
+    (editingScope, owner, expectedSceneId) => {
+      const project = projectFor('slide')
+      const location = project.locations[0]!
+      const view = select(project, editingScope, 'state_initial')
+
+      expect(view).toMatchObject({
+        availability: 'unavailable',
+        reason: 'runtime-missing',
+        creationTarget: {
+          projectId: project.id,
+          documentRevision: project.revision,
+          revisionPolicy: { kind: 'exact' },
+          sessionGeneration: 7,
+          surfaceType: 'slide',
+          surfaceId: location.surfaceId,
+          locationId: location.id,
+          stateId: 'state_initial',
+          owner,
+          ownerKey: owner === 'global' ? 'global' : `scene:${location.id}`,
+          sceneId: expectedSceneId === null ? null : location.id,
+          slot: 'runtime-template',
+        },
+      })
+      if (view.availability !== 'unavailable' || !view.creationTarget) {
+        throw new Error('expected Runtime creation target')
+      }
+      expect(Object.isFrozen(view)).toBe(true)
+      expect(Object.isFrozen(view.creationTarget)).toBe(true)
+      expect(JSON.stringify(view.creationTarget)).not.toContain('itemId')
+      expect(JSON.stringify(view.creationTarget)).not.toContain('authoringAddress')
+    },
+  )
+
+  it.each(['flow', 'spatial'] as const)(
+    'does not expose local or global Runtime creation while located on %s',
+    (kind) => {
+      const project = projectFor(kind)
+      expect(select(project, 'scene')).toMatchObject({
+        availability: 'unavailable',
+        reason: 'runtime-missing',
+        creationTarget: null,
+      })
+      expect(select(project, 'global')).toMatchObject({
+        availability: 'unavailable',
+        reason: 'runtime-missing',
+        creationTarget: null,
+      })
+    },
+  )
 
   it('rejects invalid location, stale session and invalid state without a target', () => {
     const project = projectFor('slide', { local: true })
@@ -305,19 +361,31 @@ describe('selectRuntimeSourceAuthoringView', () => {
       locationId: 'missing-location',
       editingScope: 'scene',
       sessionToken: token,
-    })).toMatchObject({ availability: 'unavailable', reason: 'invalid-location' })
+    })).toMatchObject({
+      availability: 'unavailable',
+      reason: 'invalid-location',
+      creationTarget: null,
+    })
     expect(selectRuntimeSourceAuthoringView({
       project,
       locationId: location.id,
       editingScope: 'scene',
       sessionToken: { ...token, revision: token.revision + 1 },
-    })).toMatchObject({ availability: 'unavailable', reason: 'invalid-session' })
+    })).toMatchObject({
+      availability: 'unavailable',
+      reason: 'invalid-session',
+      creationTarget: null,
+    })
     expect(selectRuntimeSourceAuthoringView({
       project,
       locationId: location.id,
       editingScope: 'scene',
       activeStateId: 'missing-state',
       sessionToken: token,
-    })).toMatchObject({ availability: 'unavailable', reason: 'invalid-state' })
+    })).toMatchObject({
+      availability: 'unavailable',
+      reason: 'invalid-state',
+      creationTarget: null,
+    })
   })
 })
