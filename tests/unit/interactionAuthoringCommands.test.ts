@@ -313,6 +313,92 @@ describe('interaction authoring transaction plans', () => {
     expect(project).toEqual(before)
   })
 
+  it('writes through an explicit live state without persisting session state on the location', () => {
+    const project = mixedProject()
+    const scene = slideScene(project)
+    scene.presentation = {
+      initialStateId: 'state-live',
+      states: [{
+        id: 'state-live',
+        name: '实时状态',
+        layerItemOverrides: {
+          'slide-title': { playbackInitialVisibility: 'inherit' },
+        },
+      }],
+    }
+    const location = project.locations.find((candidate) => candidate.id === 'location-slide')
+    if (!location || location.kind !== 'slide-scene') throw new Error('missing slide location')
+    delete location.stateId
+    const before = structuredClone(project)
+
+    const result = planApplyInteractionTemplate({
+      project,
+      target: { ...localTarget(project), activeStateId: 'state-live' },
+      template: template({
+        conditions: [{ type: 'presentation.in', stateIds: ['state-live'] }],
+      }),
+      now: NOW,
+    })
+
+    expect(result).toMatchObject({ ok: true, status: 'planned' })
+    if (!result.ok || result.status !== 'planned') throw new Error('expected live state plan')
+    const nextLocation = result.plan.nextDocument.locations.find(
+      (candidate) => candidate.id === 'location-slide',
+    )
+    const nextState = slideScene(result.plan.nextDocument).presentation?.states[0]
+    expect(layer(result.plan.nextDocument, 'slide-title').playbackInitialVisibility)
+      .toBe('inherit')
+    expect(nextState?.layerItemOverrides['slide-title']).toEqual({
+      playbackInitialVisibility: 'hidden',
+    })
+    expect(slideScene(result.plan.nextDocument).interactions[0]?.conditions).toEqual([
+      { type: 'presentation.in', stateIds: ['state-live'] },
+    ])
+    expect(nextLocation).not.toHaveProperty('stateId')
+    expect(project).toEqual(before)
+  })
+
+  it('accepts a valid explicit live state for the global carrier without persisting it', () => {
+    const project = mixedProject()
+    const scene = slideScene(project)
+    scene.presentation = {
+      initialStateId: 'state-live',
+      states: [{ id: 'state-live', name: '实时状态', layerItemOverrides: {} }],
+    }
+    const location = project.locations.find((candidate) => candidate.id === 'location-slide')
+    if (!location || location.kind !== 'slide-scene') throw new Error('missing slide location')
+    delete location.stateId
+
+    const result = planApplyInteractionTemplate({
+      project,
+      target: {
+        ...globalTarget(project),
+        activeLocationId: 'location-slide',
+        activeStateId: 'state-live',
+      },
+      template: template({
+        ruleId: 'global-live-state-reveal',
+        actionIds: ['global-live-state-action'],
+        targetLayerItemIds: ['global-banner'],
+        conditions: [
+          { type: 'scene.in', sceneIds: ['scene-1'] },
+          { type: 'presentation.in', stateIds: ['state-live'] },
+        ],
+      }),
+      now: NOW,
+    })
+
+    expect(result).toMatchObject({ ok: true, status: 'planned' })
+    if (!result.ok || result.status !== 'planned') throw new Error('expected global state plan')
+    expect(result.plan.nextDocument.globalInteractions[0]?.conditions).toEqual([
+      { type: 'scene.in', sceneIds: ['scene-1'] },
+      { type: 'presentation.in', stateIds: ['state-live'] },
+    ])
+    expect(result.plan.nextDocument.locations.find(
+      (candidate) => candidate.id === 'location-slide',
+    )).not.toHaveProperty('stateId')
+  })
+
   it('uses the same planner for the one project-global carrier', () => {
     const project = mixedProject()
     const result = planApplyInteractionTemplate({
@@ -553,6 +639,52 @@ describe('interaction authoring transaction plans', () => {
       template: template(),
       now: NOW,
     })).toMatchObject({ ok: false, code: 'locked-layer' })
+  })
+
+  it('rejects stale explicit states and state context outside a Slide location', () => {
+    const project = mixedProject()
+    const scene = slideScene(project)
+    scene.presentation = {
+      initialStateId: 'state-a',
+      states: [{ id: 'state-a', name: '状态 A', layerItemOverrides: {} }],
+    }
+    const before = structuredClone(project)
+
+    expect(planApplyInteractionTemplate({
+      project,
+      target: { ...localTarget(project), activeStateId: 'missing-state' },
+      template: template(),
+      now: NOW,
+    })).toMatchObject({ ok: false, code: 'invalid-location' })
+    expect(planApplyInteractionTemplate({
+      project,
+      target: {
+        ...globalTarget(project),
+        activeLocationId: 'location-slide',
+        activeStateId: 'missing-state',
+      },
+      template: template({
+        ruleId: 'global-missing-state',
+        actionIds: ['global-missing-state-action'],
+        targetLayerItemIds: ['global-banner'],
+      }),
+      now: NOW,
+    })).toMatchObject({ ok: false, code: 'invalid-location' })
+    expect(planApplyInteractionTemplate({
+      project,
+      target: {
+        ...globalTarget(project),
+        activeLocationId: 'location-flow',
+        activeStateId: 'state-a',
+      },
+      template: template({
+        ruleId: 'global-flow-state',
+        actionIds: ['global-flow-state-action'],
+        targetLayerItemIds: ['global-banner'],
+      }),
+      now: NOW,
+    })).toMatchObject({ ok: false, code: 'invalid-location' })
+    expect(project).toEqual(before)
   })
 
   it('uses the effective local carrier when another Surface repeats the same layerItemId', () => {

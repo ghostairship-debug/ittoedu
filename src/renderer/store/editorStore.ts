@@ -184,6 +184,15 @@ import {
   type CourseRuntimeAssetReplacementTarget,
 } from '../runtime/courseRuntimeTransactions'
 import {
+  planApplyInteractionTemplate,
+  planUpdateInteractionRule,
+  type InteractionAuthoringFeedback,
+  type InteractionAuthoringPlanFailureCode,
+  type InteractionAuthoringPlanResult,
+  type InteractionAuthoringTarget,
+} from '../interactions/interactionAuthoringCommands'
+import type { InteractionTemplateRequest } from '../interactions/interactionTemplates'
+import {
   addSlideComponentLayer,
   addSlideFormulaLayer,
   addSlideImageLayer,
@@ -1476,6 +1485,18 @@ export type RuntimeAssetReplacementCommitResult =
       readonly reason: string
     }
 
+export type InteractionAuthoringCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'committed' | 'unchanged'
+      readonly feedback: InteractionAuthoringFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: InteractionAuthoringPlanFailureCode
+      readonly reason: string
+    }
+
 export interface EditorState {
   project: ProjectDocument
   activeSceneId: string
@@ -1649,6 +1670,15 @@ export interface EditorState {
   updateSound(soundId: string, patch: Partial<Omit<SoundDefinition, 'id'>>): void
   deleteSound(soundId: string): boolean
   deleteAsset(assetId: string): boolean
+  applyInteractionTemplateAtTarget(
+    target: InteractionAuthoringTarget,
+    template: InteractionTemplateRequest,
+  ): InteractionAuthoringCommitResult
+  updateInteractionRuleAtTarget(
+    target: InteractionAuthoringTarget,
+    ruleId: string,
+    patch: Partial<Omit<InteractionRule, 'id'>>,
+  ): InteractionAuthoringCommitResult
   addInteractionRule(sceneId: string, rule: InteractionRule): void
   updateInteractionRule(sceneId: string, ruleId: string, rule: InteractionRule): void
   deleteInteractionRule(sceneId: string, ruleId: string): void
@@ -3630,6 +3660,99 @@ export const useEditorStore = create<EditorState>((set, get) => {
         : {}),
     })
     return true
+  }
+
+  const rejectInteractionAuthoring = (
+    code: InteractionAuthoringPlanFailureCode,
+    reason: string,
+  ): InteractionAuthoringCommitResult => {
+    set({ errorMessage: reason, statusMessage: null })
+    return { ok: false, code, reason }
+  }
+
+  const currentInteractionLocationId = (state: EditorState): string | null => (
+    state.spatialSession?.selection.locationId
+    ?? state.flowSession?.selection.locationId
+    ?? state.slideCandidateSnapshot?.locationId
+    ?? null
+  )
+
+  const currentInteractionStateId = (state: EditorState): string | null => (
+    state.slideCandidateSnapshot?.stateId ?? null
+  )
+
+  const validateActiveInteractionTarget = (
+    state: EditorState,
+    target: InteractionAuthoringTarget,
+  ): InteractionAuthoringCommitResult | null => {
+    const expectedLocationId = target.carrier === 'slide-scene'
+      ? target.locationId
+      : target.activeLocationId
+    if (
+      expectedLocationId !== undefined
+      && currentInteractionLocationId(state) !== expectedLocationId
+    ) {
+      return rejectInteractionAuthoring(
+        'revision-conflict',
+        '当前页面已切换，互动规则没有写入。请在目标页面重试。',
+      )
+    }
+    if (
+      target.activeStateId !== undefined
+      && currentInteractionStateId(state) !== target.activeStateId
+    ) {
+      return rejectInteractionAuthoring(
+        'revision-conflict',
+        '当前演示状态已切换，互动规则没有写入。请在目标状态重试。',
+      )
+    }
+    return null
+  }
+
+  const persistInteractionAuthoringPlan = (
+    document: CourseProjectDocument,
+    planned: InteractionAuthoringPlanResult,
+    statusMessage: string,
+  ): InteractionAuthoringCommitResult => {
+    if (!planned.ok) {
+      return rejectInteractionAuthoring(planned.code, planned.reason)
+    }
+    if (planned.status === 'no-op') {
+      set({ errorMessage: null, statusMessage: '互动规则没有变化' })
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    const feedback = planned.plan.feedback
+    if (!feedback) {
+      return rejectInteractionAuthoring(
+        'invalid-document',
+        '互动事务缺少结果信息，未写入工程。',
+      )
+    }
+    let step: EditorTransactionStep
+    try {
+      const candidate = createEditorTransactionStep(document, planned.plan)
+      if (!candidate) {
+        set({ errorMessage: null, statusMessage: '互动规则没有变化' })
+        return { ok: true, status: 'unchanged', feedback }
+      }
+      step = candidate
+    } catch (error) {
+      return rejectInteractionAuthoring(
+        'invalid-document',
+        error instanceof Error ? error.message : '互动事务无效，未写入工程。',
+      )
+    }
+    if (!persistProjectResourceTransaction(step, statusMessage)) {
+      return rejectInteractionAuthoring(
+        'invalid-document',
+        '当前没有可提交互动规则的课程编辑会话。',
+      )
+    }
+    return { ok: true, status: 'committed', feedback }
   }
 
   const commitMediaLibraryImportAtTarget = (
@@ -7807,6 +7930,53 @@ export const useEditorStore = create<EditorState>((set, get) => {
         '未使用素材已删除',
       )
       return true
+    },
+
+    applyInteractionTemplateAtTarget(target, template) {
+      const state = get()
+      const targetFailure = validateActiveInteractionTarget(state, target)
+      if (targetFailure) return targetFailure
+      const document = activeCourseDocument(state)
+      if (!document) {
+        return rejectInteractionAuthoring(
+          'invalid-document',
+          '当前没有可编辑的 Course Project V9 工程。',
+        )
+      }
+      return persistInteractionAuthoringPlan(
+        document,
+        planApplyInteractionTemplate({
+          project: document,
+          target,
+          template,
+          now: new Date().toISOString(),
+        }),
+        '互动模板已创建；元素初始状态与规则已同步',
+      )
+    },
+
+    updateInteractionRuleAtTarget(target, ruleId, patch) {
+      const state = get()
+      const targetFailure = validateActiveInteractionTarget(state, target)
+      if (targetFailure) return targetFailure
+      const document = activeCourseDocument(state)
+      if (!document) {
+        return rejectInteractionAuthoring(
+          'invalid-document',
+          '当前没有可编辑的 Course Project V9 工程。',
+        )
+      }
+      return persistInteractionAuthoringPlan(
+        document,
+        planUpdateInteractionRule({
+          project: document,
+          target,
+          ruleId,
+          patch,
+          now: new Date().toISOString(),
+        }),
+        '交互映射已更新',
+      )
     },
 
     addInteractionRule(sceneId, rule) {

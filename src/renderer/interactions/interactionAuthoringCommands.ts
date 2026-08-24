@@ -29,6 +29,11 @@ export type InteractionAuthoringTarget =
       readonly projectId: string
       readonly baseRevision: number
       readonly locationId: string
+      /**
+       * Live Slide presentation state from the editor session. When omitted,
+       * the persisted location state remains the compatibility fallback.
+       */
+      readonly activeStateId?: string | null
     }
   | {
       readonly carrier: 'global'
@@ -36,6 +41,11 @@ export type InteractionAuthoringTarget =
       readonly baseRevision: number
       /** Active Slide location supplies presentation-state choices; Flow/Spatial supply none. */
       readonly activeLocationId?: string
+      /**
+       * Live state for the active Slide location. A non-null value is invalid
+       * when the active location is not a real Slide scene.
+       */
+      readonly activeStateId?: string | null
     }
 
 export interface InteractionAuthoringSelectionHint {
@@ -196,6 +206,23 @@ function resolveCarrier(
     const activeSlide = target.activeLocationId
       ? resolveSlideScene(project, target.activeLocationId)
       : null
+    if (target.activeStateId != null && !activeSlide) {
+      return fail(
+        'invalid-location',
+        '当前活动位置不是可用的 Slide 场景，无法使用命名状态。',
+      )
+    }
+    const stateId = activeSlide
+      ? target.activeStateId === undefined
+        ? activeSlide.location.stateId ?? null
+        : target.activeStateId
+      : null
+    const presentationState = stateId === null
+      ? null
+      : activeSlide?.scene.presentation?.states.find((state) => state.id === stateId) ?? null
+    if (stateId !== null && !presentationState) {
+      return fail('invalid-location', '当前 Slide 命名状态已失效。')
+    }
     const globalItems = project.globalLayerItems.map((entry) => entry.item)
     return {
       ok: true,
@@ -205,12 +232,8 @@ function resolveCarrier(
         templateLayerItems: globalItems,
         referenceLayerItems: globalItems,
         activeScene: activeSlide?.scene ?? null,
-        stateId: activeSlide?.location.stateId ?? null,
-        presentationState: activeSlide?.location.stateId
-          ? activeSlide.scene.presentation?.states.find(
-              (state) => state.id === activeSlide.location.stateId,
-            ) ?? null
-          : null,
+        stateId,
+        presentationState,
       },
     }
   }
@@ -230,7 +253,9 @@ function resolveCarrier(
   if (!resolved) {
     return fail('invalid-location', '当前 Slide 场景已失效。')
   }
-  const stateId = resolved.location.stateId ?? null
+  const stateId = target.activeStateId === undefined
+    ? resolved.location.stateId ?? null
+    : target.activeStateId
   const presentationState = stateId === null
     ? null
     : resolved.scene.presentation?.states.find((state) => state.id === stateId) ?? null
@@ -240,6 +265,7 @@ function resolveCarrier(
   const referenceLayerItems = buildSlideEditorView({
     project,
     locationId: target.locationId,
+    stateId,
   }).layers
     .filter((layer) => layer.source === 'scene')
     .map((layer) => structuredClone(layer.item) as LayerItem)

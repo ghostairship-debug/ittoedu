@@ -123,6 +123,84 @@ describe('interaction authoring typed views', () => {
     expect(view.rules[0]!.name).toBe('local-rule')
   })
 
+  it('projects an explicit live Slide state without writing it into the location', () => {
+    const project = mixedProject()
+    const scene = slideScene(project)
+    scene.presentation = {
+      initialStateId: 'state-live',
+      states: [{
+        id: 'state-live',
+        name: '实时状态',
+        layerItemOverrides: {
+          'slide-title': {
+            label: '实时标题',
+            visible: false,
+            locked: true,
+            playbackInitialVisibility: 'hidden',
+          },
+        },
+      }],
+    }
+    const location = project.locations.find((candidate) => candidate.id === 'location-slide')
+    if (!location || location.kind !== 'slide-scene') throw new Error('missing slide location')
+    delete location.stateId
+    const before = structuredClone(project)
+
+    const local = selectLocalInteractionAuthoringView(
+      project,
+      'location-slide',
+      'state-live',
+    )
+    const global = selectGlobalInteractionAuthoringView(
+      project,
+      'location-slide',
+      'state-live',
+    )
+
+    expect(local).toMatchObject({
+      availability: 'available',
+      activeStateId: 'state-live',
+      nodes: [expect.objectContaining({
+        id: 'slide-title',
+        label: '实时标题',
+        visible: false,
+        locked: true,
+        playbackInitialVisibility: 'hidden',
+      })],
+    })
+    expect(global).toMatchObject({
+      activeLocationId: 'location-slide',
+      activeSlideSceneId: 'scene-1',
+      activeStateId: 'state-live',
+      states: [{ id: 'state-live', name: '实时状态' }],
+    })
+    expect(project).toEqual(before)
+    expect(location).not.toHaveProperty('stateId')
+  })
+
+  it('never presents a stale explicit state as active', () => {
+    const project = mixedProject()
+    const scene = slideScene(project)
+    scene.presentation = {
+      initialStateId: 'state-a',
+      states: [{ id: 'state-a', name: '状态 A', layerItemOverrides: {} }],
+    }
+
+    expect(selectLocalInteractionAuthoringView(
+      project,
+      'location-slide',
+      'missing-state',
+    )).toMatchObject({
+      availability: 'unavailable',
+      reason: 'invalid-location',
+    })
+    expect(selectGlobalInteractionAuthoringView(
+      project,
+      'location-slide',
+      'missing-state',
+    ).activeStateId).toBeNull()
+  })
+
   it('returns typed local unavailability for Flow and Spatial without writable rules', () => {
     const project = mixedProject()
 

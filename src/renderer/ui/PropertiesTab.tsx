@@ -2760,9 +2760,19 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   if (flowSession && flowSession.selection.focus !== 'overlay' && flowSession.selection.selectedBlockId) {
     return <FlowBlockProperties session={flowSession} />
   }
-  if (flowSession && flowSession.selection.focus === 'overlay' && flowSession.selection.selectedOverlayIds.length > 0) {
+  if (
+    flowSession
+    && flowSession.selection.authoringScope !== 'global'
+    && flowSession.selection.focus === 'overlay'
+    && flowSession.selection.selectedOverlayIds.length > 0
+  ) {
     return <FlowOverlayProperties session={flowSession} />
   }
+  return <PropertiesTabContent onReplaceImage={onReplaceImage} />
+}
+
+function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
+  const flowSession = useEditorStore((state) => state.flowSession)
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
@@ -3049,7 +3059,32 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         />
       )}
       {editorMode === 'professional' &&
+        (spatialSession || flowSession) &&
+        node.type !== 'teacher-controller' && (
+        <section
+          className="property-section"
+          data-testid="interaction-properties-unavailable"
+          role="status"
+        >
+          <h3 className="property-title">交互</h3>
+          <p className="property-hint">
+            {editingScope === 'global'
+              ? '当前 Flow 或 Spatial 页面不在元素属性中提供全局点击规则写入；请在“互动与动画”中使用可写的全局模板与专业字段。'
+              : '当前 Flow 或 Spatial 页面没有元素级局部 Interaction carrier；这里不会创建无法保存的点击规则。'}
+          </p>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setActiveTab('automation')}
+          >
+            打开互动与动画
+          </button>
+        </section>
+      )}
+      {editorMode === 'professional' &&
         editingScope === 'global' &&
+        !spatialSession &&
+        !flowSession &&
         node.type !== 'teacher-controller' && (
         <InteractionEditor
           scene={scene}
@@ -3094,7 +3129,10 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           )}
         </>
       )}
-      {editorMode === 'professional' && editingScope === 'scene' && (
+      {editorMode === 'professional' &&
+        editingScope === 'scene' &&
+        !spatialSession &&
+        !flowSession && (
         <InteractionEditor
           scene={scene}
           selectedNode={node}

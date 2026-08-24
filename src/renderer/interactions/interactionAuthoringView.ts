@@ -206,6 +206,7 @@ function slideSceneAtLocation(
 export function selectLocalInteractionAuthoringView(
   project: CourseProjectDocument,
   locationId: string,
+  activeStateId?: string | null,
 ): LocalInteractionAuthoringView {
   const shared = sharedView(project)
   const location = project.locations.find((candidate) => candidate.id === locationId)
@@ -245,7 +246,27 @@ export function selectLocalInteractionAuthoringView(
     })
   }
   const { surface, scene } = resolved
-  const effectiveSceneItems = buildSlideEditorView({ project, locationId })
+  const resolvedStateId = activeStateId === undefined
+    ? resolved.location.stateId ?? null
+    : activeStateId
+  if (
+    resolvedStateId !== null
+    && !scene.presentation?.states.some((state) => state.id === resolvedStateId)
+  ) {
+    return deepFreeze({
+      ...shared,
+      availability: 'unavailable' as const,
+      reason: 'invalid-location' as const,
+      locationId,
+      surfaceId: location.surfaceId,
+      surfaceType: null,
+    })
+  }
+  const effectiveSceneItems = buildSlideEditorView({
+    project,
+    locationId,
+    stateId: resolvedStateId,
+  })
     .layers
     .filter((layer) => layer.source === 'scene')
     .map((layer) => layer.item)
@@ -258,7 +279,7 @@ export function selectLocalInteractionAuthoringView(
     surfaceId: surface.id,
     sceneId: scene.id,
     sceneName: scene.name,
-    activeStateId: resolved.location.stateId ?? null,
+    activeStateId: resolvedStateId,
     states: statesOf(scene),
     nodes: effectiveSceneItems.map((item) => nodeOption(item, 'scene')),
     rules,
@@ -270,6 +291,7 @@ export function selectLocalInteractionAuthoringView(
 export function selectGlobalInteractionAuthoringView(
   project: CourseProjectDocument,
   activeLocationId: string | null = null,
+  activeStateId?: string | null,
 ): GlobalInteractionAuthoringView {
   const location = activeLocationId
     ? project.locations.find((candidate) => candidate.id === activeLocationId)
@@ -280,6 +302,17 @@ export function selectGlobalInteractionAuthoringView(
   const resolvedSlide = activeLocationId
     ? slideSceneAtLocation(project, activeLocationId)
     : null
+  const requestedStateId = resolvedSlide
+    ? activeStateId === undefined
+      ? resolvedSlide.location.stateId ?? null
+      : activeStateId
+    : null
+  const resolvedStateId = requestedStateId !== null
+    && resolvedSlide?.scene.presentation?.states.some(
+      (state) => state.id === requestedStateId,
+    )
+    ? requestedStateId
+    : null
   const rules = structuredClone(project.globalInteractions)
   return deepFreeze({
     ...sharedView(project),
@@ -288,7 +321,7 @@ export function selectGlobalInteractionAuthoringView(
     activeLocationId: location?.id ?? null,
     activeSurfaceType: surface?.type ?? null,
     activeSlideSceneId: resolvedSlide?.scene.id ?? null,
-    activeStateId: resolvedSlide?.location.stateId ?? null,
+    activeStateId: resolvedStateId,
     states: statesOf(resolvedSlide?.scene ?? null),
     nodes: project.globalLayerItems.map((entry) => nodeOption(entry.item, 'global')),
     rules,
