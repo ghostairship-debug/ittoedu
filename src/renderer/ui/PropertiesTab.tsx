@@ -175,6 +175,11 @@ import {
 import type { SpatialGraphSelection } from '../store/editorStore'
 import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
+import {
+  deriveFlowSelectionFormat,
+  FLOW_PAPER_TEXT_COLOR,
+  type FlowSelectionFormatField,
+} from '../authoring/flowTextEdit'
 import { locateCourseLayer } from '../course/effectiveLayerCommands'
 import {
   commitFlowOverlayFormulaAst,
@@ -194,6 +199,7 @@ interface BufferedInputProps {
   step?: number
   disabled?: boolean
   title?: string
+  placeholder?: string
   onCommit(value: string): void
 }
 
@@ -206,6 +212,7 @@ function BufferedInput({
   step,
   disabled,
   title,
+  placeholder,
   onCommit,
 }: BufferedInputProps) {
   const [draft, setDraft] = useState(String(value))
@@ -239,6 +246,7 @@ function BufferedInput({
         step={step}
         disabled={disabled}
         title={title}
+        placeholder={placeholder}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
@@ -451,8 +459,9 @@ export function detectFontAvailability(fontFamily: string): FontAvailability {
   }
 }
 
-export function FontFamilyPicker({ value, onCommit }: {
+export function FontFamilyPicker({ value, placeholder, onCommit }: {
   value: string
+  placeholder?: string
   onCommit(value: string): void
 }) {
   const [draft, setDraft] = useState(value)
@@ -544,6 +553,7 @@ export function FontFamilyPicker({ value, onCommit }: {
               : undefined
           }
           value={draft}
+          placeholder={placeholder}
           spellCheck={false}
           onFocus={() => {
             if (!open) openAllFonts()
@@ -2177,6 +2187,19 @@ function selectedFlowBlock(session: FlowAuthoringSession): FlowBlock | null {
   }
 }
 
+function uniformFlowFormatValue<T>(field: FlowSelectionFormatField<T>): T | undefined {
+  return field.state === 'uniform' ? field.value : undefined
+}
+
+function flowFormatFieldDescription<T>(
+  label: string,
+  field: FlowSelectionFormatField<T>,
+): string {
+  if (field.state === 'mixed') return `${label}：混合`
+  if (field.state === 'unset') return `${label}：默认`
+  return `${label}：${String(field.value)}`
+}
+
 function FlowPageProperties({ session }: { session: FlowAuthoringSession }) {
   const renameFlowPage = useEditorStore((state) => state.renameFlowPage)
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
@@ -2436,7 +2459,7 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
   const formatFlowTextStyle = useEditorStore((state) => state.formatFlowTextStyle)
-  const project = useEditorStore((state) => state.project)
+  const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
   if (!block) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
@@ -2445,37 +2468,31 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
     )
   }
 
-  function flowRichTextColor(target: FlowBlock): string {
-    if (!('runs' in target) || !Array.isArray(target.runs)) return '#1f2937'
-    for (const run of target.runs) {
-      if (typeof run.style?.color === 'string' && run.style.color.length > 0) return run.style.color
-    }
-    return '#1f2937'
-  }
-
-  function flowRichTextFontFamily(target: FlowBlock): string {
-    if ('runs' in target && Array.isArray(target.runs)) {
-      for (const run of target.runs) {
-        if (typeof run.style?.fontFamily === 'string' && run.style.fontFamily.length > 0) {
-          return run.style.fontFamily
-        }
-      }
-    }
-    return session.history.present.designTokens?.fonts?.[0]?.fontFamily
-      ?? project.designTokens?.fonts?.[0]?.fontFamily
-      ?? ''
-  }
-
-  function flowRichTextFontSize(target: FlowBlock): string | number {
-    if ('runs' in target && Array.isArray(target.runs)) {
-      for (const run of target.runs) {
-        if (typeof run.style?.fontSize === 'number') return run.style.fontSize
-      }
-    }
-    return ''
-  }
-
   const document = session.history.present
+  const selectionFormat = deriveFlowSelectionFormat({
+    block,
+    edit: flowTextEdit?.blockId === block.id ? flowTextEdit : null,
+  })
+  const formatDisabled = !selectionFormat.canApplyInlineStyle
+  const formatScopeTitle = selectionFormat.mode === 'caret'
+    ? '插入点格式'
+    : selectionFormat.mode === 'range'
+      ? '选区格式'
+      : '整块格式'
+  const formatScopeHint = selectionFormat.mode === 'caret'
+    ? '当前显示插入点格式。选择文字后应用；这里不创建待输入样式。'
+    : selectionFormat.mode === 'range'
+      ? selectionFormat.hasMixedValue
+        ? '选区包含混合格式；修改会统一所选文字。'
+        : '修改只应用到当前选中的文字。'
+      : '未进入文字选区；修改会应用到整个文字块。'
+  const fontFamilyField = selectionFormat.fields.fontFamily
+  const fontSizeField = selectionFormat.fields.fontSize
+  const colorField = selectionFormat.fields.color
+  const boldField = selectionFormat.fields.bold
+  const italicField = selectionFormat.fields.italic
+  const boldActive = uniformFlowFormatValue(boldField) === true
+  const italicActive = uniformFlowFormatValue(italicField) === true
 
   const patchBlockLayout = (patch: { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number }) => {
     const target = flowBlockTargetFromSelection(document, session.selection)
@@ -2656,50 +2673,91 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
       {block.type === 'formula' ? (
         <FlowFormulaBlockProperties session={session} />
       ) : null}
-      {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
-        <section className="property-section">
-          <h3 className="property-title"><Type size={14} />选区格式</h3>
-          <FontFamilyPicker
-            value={flowRichTextFontFamily(block)}
-            onCommit={(fontFamily) => formatFlowTextStyle({ fontFamily })}
-          />
-          <div data-testid="flow-font-size">
-            <BufferedInput
-              label="字号"
-              type="number"
-              min={8}
-              max={400}
-              value={flowRichTextFontSize(block)}
-              onCommit={(value) => {
-                const fontSize = value === '' ? undefined : Number(value)
-                formatFlowTextStyle({ fontSize })
-              }}
-            />
-          </div>
-          <div className="property-button-row">
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-format-bold"
-              onClick={() => formatFlowTextStyle({ bold: true })}
+      {selectionFormat.richText ? (
+        <section
+          className="property-section"
+          data-testid="flow-selection-format-properties"
+          data-flow-selection-preserving-target="true"
+          data-flow-format-mode={selectionFormat.mode}
+          data-format-state={selectionFormat.hasMixedValue ? 'mixed' : 'resolved'}
+        >
+          <h3 className="property-title" data-testid="flow-selection-format-title">
+            <Type size={14} />{formatScopeTitle}
+          </h3>
+          <p className="property-hint" data-testid="flow-selection-format-hint">
+            {formatScopeHint}
+          </p>
+          <fieldset
+            disabled={formatDisabled}
+            title={formatDisabled ? '选择文字后应用' : undefined}
+            style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+          >
+            <div
+              data-testid="flow-font-family-state"
+              data-format-state={fontFamilyField.state}
+              aria-label={flowFormatFieldDescription('字体', fontFamilyField)}
             >
-              <Bold size={14} />粗体
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-format-italic"
-              onClick={() => formatFlowTextStyle({ italic: true })}
+              <FontFamilyPicker
+                value={uniformFlowFormatValue(fontFamilyField) ?? ''}
+                placeholder={fontFamilyField.state === 'mixed' ? '混合字体' : '默认字体'}
+                onCommit={(fontFamily) => formatFlowTextStyle({ fontFamily })}
+              />
+            </div>
+            <div
+              data-testid="flow-font-size"
+              data-format-state={fontSizeField.state}
+              aria-label={flowFormatFieldDescription('字号', fontSizeField)}
             >
-              <Italic size={14} />斜体
-            </button>
-          </div>
-          <ColorInput
-            id="flow-text-color"
-            label="文字颜色"
-            value={flowRichTextColor(block)}
-            onChange={(color) => formatFlowTextStyle({ color })}
-          />
+              <BufferedInput
+                label="字号"
+                type="number"
+                min={8}
+                max={400}
+                value={uniformFlowFormatValue(fontSizeField) ?? ''}
+                placeholder={fontSizeField.state === 'mixed' ? '混合' : '默认'}
+                onCommit={(value) => {
+                  const fontSize = value === '' ? undefined : Number(value)
+                  formatFlowTextStyle({ fontSize })
+                }}
+              />
+            </div>
+            <div className="property-button-row">
+              <button
+                type="button"
+                className={`secondary-button${boldActive ? ' secondary-button--active' : ''}`}
+                data-testid="flow-format-bold"
+                data-format-state={boldField.state}
+                aria-pressed={boldField.state === 'mixed' ? 'mixed' : boldActive}
+                title={flowFormatFieldDescription('粗体', boldField)}
+                onClick={() => formatFlowTextStyle({ bold: !boldActive })}
+              >
+                <Bold size={14} />粗体
+              </button>
+              <button
+                type="button"
+                className={`secondary-button${italicActive ? ' secondary-button--active' : ''}`}
+                data-testid="flow-format-italic"
+                data-format-state={italicField.state}
+                aria-pressed={italicField.state === 'mixed' ? 'mixed' : italicActive}
+                title={flowFormatFieldDescription('斜体', italicField)}
+                onClick={() => formatFlowTextStyle({ italic: !italicActive })}
+              >
+                <Italic size={14} />斜体
+              </button>
+            </div>
+            <div
+              data-testid="flow-text-color-state"
+              data-format-state={colorField.state}
+              aria-label={flowFormatFieldDescription('文字颜色', colorField)}
+            >
+              <ColorInput
+                id="flow-text-color"
+                label="文字颜色"
+                value={uniformFlowFormatValue(colorField) ?? FLOW_PAPER_TEXT_COLOR}
+                onChange={(color) => formatFlowTextStyle({ color })}
+              />
+            </div>
+          </fieldset>
         </section>
       ) : null}
     </div>

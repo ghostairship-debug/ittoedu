@@ -1,12 +1,16 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { readFlowSharedOwnership } from '@/renderer/course/flowSharedAuthoringAdapters'
 import { listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
+import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
-import { buildFlowRichTextHtml } from '@/renderer/authoring/flowTextEdit'
+import {
+  buildFlowRichTextHtml,
+  formatFlowAuthoringTextStyle,
+} from '@/renderer/authoring/flowTextEdit'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
@@ -17,6 +21,7 @@ import { NodesTab } from '@/renderer/ui/NodesTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
+import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 import type { AssetMeta } from '@/shared/projectTypes'
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
@@ -46,6 +51,31 @@ function imageAsset(): AssetMeta {
   }
 }
 
+function FlowWorkspacePropertiesHarness() {
+  const session = useEditorStore((state) => state.flowSession)
+  if (!session) return null
+  const view = buildFlowEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+  })
+  return (
+    <div>
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={session.history.present}
+          view={view}
+          selection={session.selection}
+          onProjectChange={(result) => useEditorStore.getState().applyFlowCommand(result)}
+          onSelectionChange={(selection) => useEditorStore.getState().applyFlowSelection(selection)}
+          onTextEditChange={(edit) => useEditorStore.getState().setFlowTextEdit(edit)}
+        />
+      </div>
+      <PropertiesTab onReplaceImage={() => undefined} />
+      <button type="button" data-testid="outside-flow-authoring">离开 Flow 编辑</button>
+    </div>
+  )
+}
+
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
@@ -53,6 +83,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useEditorStore.getState().createNewProject()
 })
 
@@ -152,6 +183,160 @@ describe('Flow product shell wiring', () => {
     fireEvent.click(screen.getByTestId('flow-format-bold'))
     const formatted = flowSurface().blocks.find((block) => block.type === 'heading')
     expect(formatted && formatted.type === 'heading' ? formatted.runs?.some((run) => run.style?.bold) : false).toBe(true)
+  })
+
+  it('keeps no-edit collapsed formatting a no-op and treats omitted range as whole target', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected flow session')
+    const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    const updated = updateFlowEditorBlock(flow.history.present, {
+      surfaceId: flow.selection.surfaceId,
+      blockId: paragraph.id,
+      parentId: null,
+    }, { text: 'ABCD' }, { expectedRevision: flow.history.present.revision })
+    if (!updated.nextDocument) throw new Error('expected updated document')
+    const legacyCaret = selectFlowEditorBlocks(
+      updated.nextDocument,
+      flow.selection.locationId,
+      [paragraph.id],
+      {
+        focus: 'text',
+        textRange: { blockId: paragraph.id, start: 2, end: 2 },
+      },
+    )
+
+    const collapsed = formatFlowAuthoringTextStyle({
+      document: updated.nextDocument,
+      selection: legacyCaret,
+      style: { italic: true },
+      range: { start: 2, end: 2 },
+    })
+    expect(collapsed.historyEntry).toBe(false)
+    expect(collapsed.nextDocument).toBe(updated.nextDocument)
+
+    const whole = formatFlowAuthoringTextStyle({
+      document: updated.nextDocument,
+      selection: legacyCaret,
+      style: { bold: true },
+    })
+    expect(whole.historyEntry).toBe(true)
+    const wholeParagraph = findFlowBlockRecursive(
+      flowSurfaceIn(whole.nextDocument!, flow.selection.surfaceId).blocks,
+      paragraph.id,
+    )?.block
+    expect(wholeParagraph?.type).toBe('paragraph')
+    expect(wholeParagraph?.type === 'paragraph' ? wholeParagraph.runs : []).toEqual([
+      { start: 0, end: 4, style: { bold: true } },
+    ])
+
+    const withList = insertFlowEditorBlock(updated.nextDocument, {
+      surfaceId: flow.selection.surfaceId,
+      parentId: null,
+      index: flowSurfaceIn(updated.nextDocument, flow.selection.surfaceId).blocks.length,
+      block: {
+        id: 'list-format-target',
+        type: 'list',
+        ordered: false,
+        items: [{ id: 'list-item-format-target', text: '列表项' }],
+      },
+    }, { expectedRevision: updated.nextDocument.revision })
+    const nestedSelection = selectFlowEditorBlocks(
+      withList.nextDocument!,
+      flow.selection.locationId,
+      ['list-format-target'],
+      {
+        focus: 'text',
+        textRange: {
+          blockId: 'list-format-target',
+          listItemId: 'list-item-format-target',
+          start: 1,
+          end: 1,
+        },
+      },
+    )
+    const nestedWhole = formatFlowAuthoringTextStyle({
+      document: withList.nextDocument!,
+      selection: nestedSelection,
+      style: { underline: true },
+    })
+    const nestedList = findFlowBlockRecursive(
+      flowSurfaceIn(nestedWhole.nextDocument!, flow.selection.surfaceId).blocks,
+      'list-format-target',
+    )?.block
+    expect(nestedList?.type === 'list' ? nestedList.items[0]?.runs : []).toEqual([
+      { start: 0, end: 3, style: { underline: true } },
+    ])
+  })
+
+  it('hands a live Flow range to Properties and commits the formatted draft once on exit', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    useEditorStore.getState().createNewFlowProject()
+    const initialFlow = useEditorStore.getState().flowSession
+    if (!initialFlow) throw new Error('expected flow session')
+    const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(initialFlow.history.present, {
+      surfaceId: initialFlow.selection.surfaceId,
+      blockId: paragraph.id,
+      parentId: null,
+    }, { text: 'ABCD', runs: [] }, { expectedRevision: initialFlow.history.present.revision }))
+    const readyFlow = useEditorStore.getState().flowSession!
+    useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
+      readyFlow.history.present,
+      readyFlow.selection.locationId,
+      [paragraph.id],
+      {
+        focus: 'text',
+        textRange: { blockId: paragraph.id, start: 1, end: 3 },
+      },
+    ))
+    const revisionBeforeFormat = flowDocument().revision
+    const historyLengthBeforeFormat = useEditorStore.getState().flowSession!.history.past.length
+
+    render(<FlowWorkspacePropertiesHarness />)
+    await waitFor(() => {
+      expect(useEditorStore.getState().flowTextEdit?.range).toEqual({ start: 1, end: 3 })
+    })
+    const editor = screen.getByTestId('flow-inline-editor')
+    const properties = screen.getByTestId('flow-selection-format-properties')
+    const bold = screen.getByTestId('flow-format-bold')
+    expect(properties).toHaveAttribute('data-flow-selection-preserving-target', 'true')
+
+    act(() => editor.focus())
+    act(() => bold.focus())
+    expect(useEditorStore.getState().flowTextEdit).not.toBeNull()
+    fireEvent.click(bold)
+    await waitFor(() => {
+      const draftRuns = (useEditorStore.getState().flowTextEdit?.draft as {
+        runs?: Array<{ start: number; end: number; style: { bold?: boolean } }>
+      }).runs ?? []
+      expect(draftRuns.some((run) => run.start === 1 && run.end === 3 && run.style.bold)).toBe(true)
+    })
+    expect(flowDocument().revision).toBe(revisionBeforeFormat)
+    expect(useEditorStore.getState().flowSession!.history.past).toHaveLength(historyLengthBeforeFormat)
+
+    act(() => screen.getByTestId('outside-flow-authoring').focus())
+    await waitFor(() => {
+      expect(useEditorStore.getState().flowTextEdit).toBeNull()
+      expect(flowDocument().revision).toBe(revisionBeforeFormat + 1)
+      expect(useEditorStore.getState().flowSession?.selection.focus).toBe('block')
+    })
+    expect(useEditorStore.getState().flowSession!.history.past).toHaveLength(
+      historyLengthBeforeFormat + 1,
+    )
+    const committed = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)?.block
+    if (!committed || committed.type !== 'paragraph') throw new Error('expected committed paragraph')
+    for (let index = 0; index < 4; index += 1) {
+      const boldAtIndex = committed.runs?.some(
+        (run) => run.start <= index && run.end > index && run.style.bold,
+      ) ?? false
+      expect(boldAtIndex).toBe(index >= 1 && index < 3)
+    }
   })
 
   it('makes Flow entries click-only and names document blocks separately from overlays', () => {
@@ -359,7 +544,7 @@ describe('Flow product shell wiring', () => {
     expect(pages.some((page) => page.headings.some((h) => h.locationId === paragraph.id))).toBe(true)
   })
 
-  it('reads text color from runs in flow block properties', () => {
+  it('reuses live selection-format derivation in Properties for whole, mixed range, and caret states', () => {
     useEditorStore.getState().createNewFlowProject()
     const heading = flowSurface().blocks.find((block) => block.type === 'heading')
     expect(heading && heading.type === 'heading').toBe(true)
@@ -376,8 +561,68 @@ describe('Flow product shell wiring', () => {
 
     cleanup()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.getByTestId('flow-selection-format-title')).toHaveTextContent('整块格式')
     const colorInput = screen.getByLabelText('文字颜色') as HTMLInputElement
     expect(colorInput.value).toBe('#dc2626')
+
+    const formattedHeading = flowSurface().blocks.find((block) => block.id === heading.id)
+    if (!formattedHeading || formattedHeading.type !== 'heading') throw new Error('expected formatted heading')
+    const mixedRuns = [
+      { start: 0, end: Array.from(formattedHeading.text).length, style: { color: '#dc2626' } },
+      { start: 0, end: 1, style: { bold: true, fontFamily: 'KaiTi', fontSize: 24 } },
+    ]
+    useEditorStore.setState({
+      flowTextEdit: {
+        kind: 'rich-text',
+        source: 'properties',
+        blockId: formattedHeading.id,
+        surfaceId: flow.selection.surfaceId,
+        parentId: null,
+        field: 'text',
+        composing: false,
+        pendingAction: null,
+        revision: flowDocument().revision,
+        original: { text: formattedHeading.text, runs: mixedRuns },
+        draft: { text: formattedHeading.text, runs: mixedRuns },
+        range: { start: 0, end: Math.max(1, Array.from(formattedHeading.text).length - 1) },
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.getByTestId('flow-selection-format-title')).toHaveTextContent('选区格式')
+    expect(screen.getByTestId('flow-selection-format-properties')).toHaveAttribute(
+      'data-format-state',
+      'mixed',
+    )
+    expect(screen.getByTestId('flow-font-family-state')).toHaveAttribute('data-format-state', 'mixed')
+    expect(screen.getByTestId('flow-format-bold')).toHaveAttribute('aria-pressed', 'mixed')
+    expect(screen.getByLabelText('文字颜色')).toHaveValue('#dc2626')
+
+    const revisionBeforeRangeFormat = flowDocument().revision
+    fireEvent.click(screen.getByTestId('flow-format-italic'))
+    const rangeEnd = Math.max(1, Array.from(formattedHeading.text).length - 1)
+    const editedRuns = (useEditorStore.getState().flowTextEdit?.draft as {
+      runs?: Array<{ start: number; end: number; style: { italic?: boolean } }>
+    }).runs ?? []
+    for (let index = 0; index < rangeEnd; index += 1) {
+      expect(editedRuns.some((run) => run.start <= index && run.end > index && run.style.italic)).toBe(true)
+    }
+    expect(editedRuns.some((run) => run.start <= rangeEnd && run.end > rangeEnd && run.style.italic)).toBe(false)
+    expect(flowDocument().revision).toBe(revisionBeforeRangeFormat)
+
+    useEditorStore.setState({
+      flowTextEdit: {
+        ...useEditorStore.getState().flowTextEdit!,
+        range: { start: 1, end: 1 },
+      },
+    })
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.getByTestId('flow-selection-format-title')).toHaveTextContent('插入点格式')
+    expect(screen.getByTestId('flow-selection-format-hint')).toHaveTextContent('选择文字后应用')
+    expect(screen.getByRole('combobox', { name: '字体' })).toHaveValue('KaiTi')
+    expect(screen.getByTestId('flow-format-bold')).toBeDisabled()
   })
 
   it('converts paragraph to quote block via block type dropdown in properties tab', () => {

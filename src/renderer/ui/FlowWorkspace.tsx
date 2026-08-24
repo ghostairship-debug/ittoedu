@@ -50,6 +50,7 @@ import {
   commitFlowFormulaAst,
   commitFlowTextEdit,
   deferFlowTextAction,
+  deriveFlowSelectionFormat,
   extractFlowRichTextFromEditor,
   finishFlowTextComposition,
   FLOW_PAPER_TEXT_COLOR,
@@ -72,6 +73,7 @@ import {
 import { FormulaEditDialog } from './FormulaEditDialog'
 import { PublishedFormulaPaint } from './PublishedFormulaPaint'
 import {
+  FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET,
   FlowBlockContextToolbar,
   type FlowBlockContextCommand,
 } from './FlowBlockContextToolbar'
@@ -95,6 +97,21 @@ export interface FlowWorkspaceProps {
   /** Sidecar bytes for edit-mode previews. Production falls back to the editor store. */
   readonly assetFiles?: Record<string, Uint8Array>
   readonly componentPackages?: Record<string, ComponentPackageData>
+}
+
+const FLOW_SELECTION_PRESERVING_SELECTOR = [
+  '.flow-block-context-toolbar',
+  '[data-flow-selection-preserving-target="true"]',
+].join(',')
+
+function isFlowSelectionPreservingFocusTarget(
+  target: EventTarget | null,
+  workspace?: HTMLElement | null,
+): target is HTMLElement {
+  return target instanceof HTMLElement && (
+    workspace?.contains(target) === true ||
+    target.closest(FLOW_SELECTION_PRESERVING_SELECTOR) !== null
+  )
 }
 
 export function FlowInlineRichTextEditor({
@@ -222,7 +239,7 @@ export function FlowInlineRichTextEditor({
         onComposingChange(false)
       }}
       onBlur={(event) => {
-        if (event.relatedTarget instanceof HTMLElement && event.relatedTarget.closest('.flow-block-context-toolbar')) {
+        if (isFlowSelectionPreservingFocusTarget(event.relatedTarget)) {
           return
         }
         if (!blurReadyRef.current) return
@@ -858,7 +875,11 @@ export function FlowWorkspace({
       const scrollRect = scrollRef.current!.getBoundingClientRect()
       const blockRect = block.getBoundingClientRect()
       const hasLayout = scrollRect.height > 0 && blockRect.height > 0
-      setToolbarPlacement(hasLayout && scrollRect.bottom - blockRect.bottom < 48 ? 'top' : 'below')
+      setToolbarPlacement(
+        hasLayout && scrollRect.bottom - blockRect.bottom < FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET
+          ? 'top'
+          : 'below',
+      )
     }
     update()
     const observer = new ResizeObserver(update)
@@ -927,6 +948,32 @@ export function FlowWorkspace({
     setEditState(null)
     emitProject(result)
   }
+
+  useEffect(() => {
+    if (readOnly) return
+    const workspace = workspaceMeasureRef.current
+    const ownerDocument = workspace?.ownerDocument
+    if (!workspace || !ownerDocument) return
+    let pendingCommit: number | null = null
+    const ownerWindow = ownerDocument.defaultView ?? window
+    const onFocusOut = (event: FocusEvent) => {
+      if (!editRef.current || isFlowSelectionPreservingFocusTarget(event.relatedTarget, workspace)) {
+        return
+      }
+      if (pendingCommit !== null) ownerWindow.clearTimeout(pendingCommit)
+      pendingCommit = ownerWindow.setTimeout(() => {
+        pendingCommit = null
+        if (!editRef.current) return
+        if (isFlowSelectionPreservingFocusTarget(ownerDocument.activeElement, workspace)) return
+        commitCurrent(true)
+      }, 0)
+    }
+    ownerDocument.addEventListener('focusout', onFocusOut)
+    return () => {
+      ownerDocument.removeEventListener('focusout', onFocusOut)
+      if (pendingCommit !== null) ownerWindow.clearTimeout(pendingCommit)
+    }
+  }, [project, readOnly, selection])
 
   useEffect(() => {
     if (readOnly) return
@@ -1228,6 +1275,10 @@ export function FlowWorkspace({
     const richDraft = edit?.kind === 'rich-text' && editingThis
       ? edit.draft as { text: string; runs: import('../../shared/projectTypes').TextRun[] }
       : null
+    const selectionFormat = deriveFlowSelectionFormat({
+      block,
+      edit: editingThis ? edit : null,
+    })
     const plainDraft = edit?.kind === 'plain-string' && editingThis
       ? (edit.draft as { text: string }).text
       : null
@@ -1671,7 +1722,7 @@ export function FlowWorkspace({
         {showToolbar ? (
           <FlowBlockContextToolbar
             block={block}
-            edit={editingThis ? edit : null}
+            selectionFormat={selectionFormat}
             placement={editingThis ? toolbarPlacement : 'below'}
             onPreserveSelection={() => {
               const editor = scrollRef.current?.querySelector('[data-testid="flow-inline-editor"]')
