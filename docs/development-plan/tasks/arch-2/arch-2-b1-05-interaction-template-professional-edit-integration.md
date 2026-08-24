@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-05-interaction-template-professional-edit-integration`
 - Phase / wave: `ARCH-2 / W2-B1 Interaction authoring integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent Interactions reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 07:24 Asia/Shanghai / active`
+- Claimed at / released at: `2026-08-24 07:24 Asia/Shanghai / 2026-08-24 08:07 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `81058f0`
 - Claim commit: `e34c153`
@@ -25,10 +25,10 @@ A teacher can create the existing “enter scene, then reveal in sequence” tem
 
 ## Current status and evidence
 
-- `src/renderer/ui/InteractionEditor.tsx` calls `onPrepareMotionTargets` and later `onAddRule` for one template click.
-- `src/renderer/ui/AutomationTab.tsx` maps those callbacks to `updateNodes` and `addInteractionRule`, producing two revisions/history entries.
-- Flow/Spatial derive a synthetic V8 scene with `interactions: []`; current local Automation/Properties UI can therefore look writable although Course Project V9 has no local Interaction carrier there.
-- B1-02 pure typed views and planners are target-green but have zero product consumers.
+- `0528f56` routes the reveal template and professional field updates through B1-02 typed targets/planners plus the existing project-resource transaction and current Surface history.
+- The live Slide named-state selection now enters the typed view/target explicitly, is guarded against state drift, writes the effective state override, and is never persisted back into `location.stateId`.
+- Flow/Spatial local Automation and element Properties expose honest unavailable states; Flow/Spatial global Automation keeps the atomic reveal template and professional update writable while unsupported legacy click/generic rule mutations are visibly gated.
+- Independent review closed the live-state, synthetic-state, Properties fake-write, and Flow Properties hook-order findings. Automated evidence supports `engineering candidate`; no art/teacher acceptance is claimed.
 
 ## Canonical contract and carrier
 
@@ -129,7 +129,7 @@ Existing add/delete/duplicate/move rules remain adapters for behaviors outside t
 ## Change budget
 
 - Task timebox: `one S2 integration card; split Player host or Developer Runtime work into later cards`.
-- Main source files: `5 maximum after independent review required the two-file B1-02 live-state correction`.
+- Main source files: `6 after independent review required the two-file B1-02 live-state correction and the already-allowed Properties honesty gate`.
 - New/moved files: `0 source; up to 2 focused tests; no moves`.
 - Public exports: `up to 2 Store actions plus typed result/input aliases; no broad Store re-export`.
 - Move/delete: `only remove the obsolete split template callback; no file deletion`.
@@ -193,19 +193,19 @@ Existing add/delete/duplicate/move rules remain adapters for behaviors outside t
 
 - Start point: `81058f0` plus the claim commit.
 - Pure implementation commit: `8d271b8` remains independently green.
-- Hotspot integration commit: `pending`.
+- Hotspot integration commit: `0528f56`.
 - Generated commit: `task-board claim/close only; later repo-index refresh independently revertible`.
 - Old path remains: existing generic add/update actions remain for out-of-scope rule behaviors; the split reveal callback can be restored by reverting one integration commit.
 - User data copy/restore note: tests operate on memory/copied representative archives; no user archive migration or rewrite.
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`.
-- Behavior before/after: `pending`.
-- Validation results: `pending`.
-- Known risks/findings: `Independent diff review found the live named-state selection was not represented by the document-only typed target/view; task scope was corrected before integration to carry that session state explicitly through the existing pure seam.`
-- indexImpact: `expected current-fact update after integration; no Schema impact`.
-- Next allowed task: `Published Interaction host integration or Runtime Developer transaction integration after independent review`.
+- Consumers migrated/remaining: `Automation reveal-template creation and all professional rule patches now consume the typed V9 planner/transaction path. Flow/Spatial synthetic local/global Properties writers are no longer reachable. Slide legacy generic add/delete/duplicate/move and click-rule actions remain adapters outside this slice; Published V2 host execution remains the next card.`
+- Behavior before/after: `One template click previously performed visibility plus rule writes separately and could appear writable on carriers that saved nothing. It now commits visibility and the stable Interaction V1 rule in one revision/history step, preserves live named-state semantics, and gives honest unavailable/limited UI on Flow/Spatial.`
+- Validation results: `Store vertical slice 9/9; mounted Automation/Properties UI 14/14; expanded related regression 16 files / 156 tests; npm run typecheck (root/Electron/e2e), git diff --check and task-board freshness all passed. Archive reopen and Published V2 preservation are covered. Independent Interactions diff and test reviewers reported no remaining blocker/high/medium gap.`
+- Known risks/findings: `The first review found live named-state loss; later reviews found Properties synthetic fake writes and a Flow local→global React hook-order regression. All were fixed and have mounted regression coverage. B1-03 still treats the reveal template's scene.enter trigger as unsupported at runtime, so this card does not claim Player execution.`
+- indexImpact: `current Interaction authoring/UI consumer facts changed; refresh generated repo-index after this close commit; no Schema impact`.
+- Next allowed task: `ARCH-2 B1-06 Published Interaction Host Integration after repo-index refresh; scope only the B1-03 supported node.click subset and do not claim scene.enter playback.`
 
 ## Ready checklist（Coordinator）
 
