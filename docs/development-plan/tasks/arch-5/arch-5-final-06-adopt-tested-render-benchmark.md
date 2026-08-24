@@ -14,9 +14,9 @@
 - Invalidating paths: `dist-player/player.iife.js`; `scripts/build-render-host-benchmark.ts`; `src/player/**`; `examples/render-host-benchmark/render-host-benchmark.html`; `tests/e2e/render-host-benchmark.spec.ts`; `package.json` pretest:e2e order
 - Task ID: `arch-5-final-06-adopt-tested-render-benchmark`
 - Phase / wave: `ARCH-5 / final generated closure`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent tested-byte provenance reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T21:57:41+08:00 / pending`
+- Claimed at / released at: `2026-08-24T21:57:41+08:00 / 2026-08-24T22:03:41+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `966d499`; tested working-tree output SHA256 `45AE90AFEBD0682B50614F63345CED9CF8E72C6989B026351B4BB55F57ED3037`
 - Context: candidate 3 is otherwise complete and green; this tracked Legacy benchmark output is an explicit pretest build product, not an editor-openable V8 input or a new authoring workflow
@@ -43,11 +43,11 @@ The tracked offline render-host benchmark matches the exact bundle exercised by 
 
 ## Acceptance
 
-- [ ] Git diff contains only the one generated HTML before governance closure
-- [ ] working SHA256 remains `45AE90...ED3037`
-- [ ] generator ownership and V4 pretest-before-test ordering are directly evidenced
-- [ ] candidate-3 E2E test 30 passed against these exact bytes
-- [ ] independent reviewer approves adoption without a redundant rerun
+- [x] Git diff contained only the one generated HTML before governance closure
+- [x] committed SHA256 remains `45AE90AFEBD0682B50614F63345CED9CF8E72C6989B026351B4BB55F57ED3037`
+- [x] generator ownership and V4 pretest-before-test ordering are directly evidenced
+- [x] candidate-3 E2E test 30 passed against these exact bytes
+- [x] independent reviewer approved adoption without a redundant rerun
 
 ## Validation
 
@@ -60,4 +60,8 @@ The tracked offline render-host benchmark matches the exact bundle exercised by 
 
 ## Result evidence
 
-- Pending exact-scope provenance review and generated-output commit.
+- Candidate-3 `pretest:e2e` ran `build:render-benchmark:fixture` before the complete Playwright suite; E2E test 30 then exercised this file across five render paths, 100 switches, 25 replays, capture readiness, host-leak checks, page/console error checks and external-request checks, and passed.
+- The generated file was not regenerated after that passing test. Its final size is `3,857,301` bytes and SHA256 is `45AE90AFEBD0682B50614F63345CED9CF8E72C6989B026351B4BB55F57ED3037`.
+- Product/generated-output commit `bb7ff5f8fdeaf08c9ba253954dd162937785e417` contains exactly `examples/render-host-benchmark/render-host-benchmark.html` (`70 insertions / 66 deletions`); `git diff --check bb7ff5f^ bb7ff5f` passed.
+- The independent tested-byte provenance review returned `APPROVE`: the generator explicitly owns the tracked output, the tested pretest ordering is fixed, the bytes remained unchanged after the E2E pass, and adopting them without rerun preserves rather than weakens candidate freshness.
+- No product retry or redundant benchmark regeneration/test was performed (`0 / none`).
