@@ -1,13 +1,16 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { stageResizeHandleWorldPoint, worldToClient } from '@/renderer/authoring/stageViewportTransform'
 import { createSpatialWorldAuthoringController } from '@/renderer/authoring/spatialWorldAuthoring'
+import { openSpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
 import { createSpatialWorldViewTransform } from '@/renderer/course/spatialEditorView'
 import { addSpatialPathInSession } from '@/renderer/course/spatialPathCommands'
 import { addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
 import {
   selectActiveCourseProjectDocument,
   selectEditingNodes,
+  selectEffectiveLayerProjection,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
@@ -46,6 +49,47 @@ function storeHost() {
         ),
       })
     },
+  }
+}
+
+function mixedOwnerSelectionFixture() {
+  const store = useEditorStore.getState()
+  store.createNewProject()
+  store.setEditingScope('global')
+  useEditorStore.getState().addTextNode()
+  const slideDocument = spatialDocument()
+  const globalTextId = slideDocument.globalLayerItems.find((entry) => (
+    entry.item.kind === 'native' && entry.item.content.nativeType === 'text'
+  ))?.item.layerItemId
+  if (!globalTextId) throw new Error('expected global text')
+
+  useEditorStore.getState().setEditingScope('scene')
+  useEditorStore.getState().addCourseContent('spatial-page')
+  useEditorStore.getState().addTextNode()
+  useEditorStore.getState().addTextNode()
+  const spatialSession = useEditorStore.getState().spatialSession
+  if (!spatialSession) throw new Error('expected Spatial session')
+  const locationId = spatialSession.selection.locationId
+  const document = structuredClone(spatialSession.history.present)
+  const surface = document.surfaces.find((candidate) => (
+    candidate.type === 'spatial-2d' && candidate.id === spatialSession.selection.surfaceId
+  ))
+  if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+  const surfaceItem = surface.world.layerItems.pop()
+  const worldItem = surface.world.layerItems[0]
+  if (!surfaceItem || !worldItem) throw new Error('expected two Spatial world items')
+  surface.surfaceLayerItems.push({
+    item: surfaceItem,
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  useEditorStore.getState().applySpatialAuthoringSession(openSpatialAuthoringSession(document, {
+    locationId,
+  }))
+  return {
+    globalTextId,
+    surfaceId: surface.id,
+    surfaceItemId: surfaceItem.layerItemId,
+    worldItemId: worldItem.layerItemId,
   }
 }
 
@@ -199,5 +243,115 @@ describe('Spatial product shell wiring', () => {
     fireEvent.click(framesToggle)
     expect(useEditorStore.getState().spatialSession?.showCameraFrames).toBe(false)
     expect(spatialDocument().revision).toBe(startRevision + 1)
+  })
+
+  it('selects global, surface, and world layer rows in their canonical owner without history writes', () => {
+    const fixture = mixedOwnerSelectionFixture()
+    const initial = useEditorStore.getState().spatialSession
+    if (!initial) throw new Error('expected Spatial session')
+    const document = initial.history.present
+    const revision = document.revision
+    const past = initial.history.past
+    const future = initial.history.future
+    const locationId = initial.selection.locationId
+    const dirty = useEditorStore.getState().dirty
+    render(<NodesTab />)
+
+    const clickRow = (
+      layerItemId: string,
+      options: { ctrlKey?: boolean; shiftKey?: boolean } = {},
+    ) => {
+      const label = screen.getByTestId(`node-item-${layerItemId}`).querySelector('.node-name')
+      if (!label) throw new Error(`expected node label for ${layerItemId}`)
+      fireEvent.click(label, { detail: 0, ...options })
+    }
+    const expectSelectionOnly = (scope: 'global' | 'surface' | 'world', layerItemId: string) => {
+      const state = useEditorStore.getState()
+      const session = state.spatialSession
+      expect(session?.scope).toBe(scope)
+      expect(session?.selection.locationId).toBe(locationId)
+      expect(session?.selection.selectionIds).toEqual([layerItemId])
+      expect(session?.history.present).toBe(document)
+      expect(session?.history.present.revision).toBe(revision)
+      expect(session?.history.past).toBe(past)
+      expect(session?.history.future).toBe(future)
+      expect(state.dirty).toBe(dirty)
+    }
+
+    clickRow(fixture.globalTextId)
+    expectSelectionOnly('global', fixture.globalTextId)
+    let projection = selectEffectiveLayerProjection(useEditorStore.getState())
+    const globalRow = projection?.unifiedRows.find((row) => row.id === fixture.globalTextId)
+    expect(globalRow).toMatchObject({ owner: 'global', ownerKey: 'global', selected: true })
+    expect(globalRow?.authoringAddress).toBe(makeAuthoringAddress({
+      projectId: document.id,
+      scope: 'global',
+      carrier: 'native',
+      layerItemId: fixture.globalTextId,
+      field: 'item',
+    }))
+
+    clickRow(fixture.surfaceItemId)
+    expectSelectionOnly('surface', fixture.surfaceItemId)
+    projection = selectEffectiveLayerProjection(useEditorStore.getState())
+    const surfaceRow = projection?.unifiedRows.find((row) => row.id === fixture.surfaceItemId)
+    expect(surfaceRow).toMatchObject({
+      owner: 'surface',
+      ownerKey: `surface:${fixture.surfaceId}`,
+      selected: true,
+    })
+    expect(surfaceRow?.authoringAddress).toBe(makeAuthoringAddress({
+      projectId: document.id,
+      scope: 'surface',
+      surfaceId: fixture.surfaceId,
+      carrier: 'native',
+      layerItemId: fixture.surfaceItemId,
+      field: 'item',
+    }))
+
+    clickRow(fixture.worldItemId)
+    expectSelectionOnly('world', fixture.worldItemId)
+    projection = selectEffectiveLayerProjection(useEditorStore.getState())
+    const worldRow = projection?.unifiedRows.find((row) => row.id === fixture.worldItemId)
+    expect(worldRow).toMatchObject({
+      owner: 'world',
+      ownerKey: `world:${fixture.surfaceId}`,
+      selected: true,
+    })
+    expect(worldRow?.authoringAddress).toBe(makeAuthoringAddress({
+      projectId: document.id,
+      scope: 'surface',
+      surfaceId: fixture.surfaceId,
+      carrier: 'native',
+      layerItemId: fixture.worldItemId,
+      field: 'item',
+    }))
+
+    const worldText = selectEditingNodes(useEditorStore.getState()).find(
+      (node) => node.id === fixture.worldItemId,
+    )
+    if (!worldText || worldText.type !== 'text') throw new Error('expected Spatial text node')
+    useEditorStore.getState().beginTextEdit(fixture.worldItemId, 'canvas')
+    const openedEdit = useEditorStore.getState().spatialContentEdit
+    if (!openedEdit || openedEdit.kind !== 'text') throw new Error('expected Spatial text edit')
+    useEditorStore.getState().updateTextEditDraft(
+      fixture.worldItemId,
+      `${worldText.text} · 未提交草稿`,
+      worldText.runs,
+      worldText.height,
+      worldText.width,
+    )
+    const beforeRejectedAdditive = useEditorStore.getState()
+    const dirtyEdit = beforeRejectedAdditive.spatialContentEdit
+    expect(dirtyEdit?.kind).toBe('text')
+    expect(dirtyEdit?.draft).not.toEqual(dirtyEdit?.original)
+
+    clickRow(fixture.globalTextId, { ctrlKey: true })
+    expectSelectionOnly('world', fixture.worldItemId)
+    const afterRejectedAdditive = useEditorStore.getState()
+    expect(afterRejectedAdditive.errorMessage).toMatch(/跨范围多选/)
+    expect(afterRejectedAdditive.spatialSession).toBe(beforeRejectedAdditive.spatialSession)
+    expect(afterRejectedAdditive.spatialContentEdit).toBe(dirtyEdit)
+    expect(afterRejectedAdditive.editingTextNodeId).toBe(fixture.worldItemId)
   })
 })

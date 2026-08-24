@@ -145,6 +145,7 @@ import {
   moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
   reorderEffectiveLayerItems,
+  resolveEffectiveLayerTarget,
   restoreDefaultTeacherController,
   setGlobalLayerLocationVisibility,
   setGlobalLayerVisibleAtLocation,
@@ -368,6 +369,7 @@ import {
   type SpatialAuthoringSession,
   type SpatialAuthoringSnapshot,
   type SpatialCommandResult,
+  type SpatialEditorLayerScope,
 } from '../course/spatialEditorCommands'
 import {
   activateSpatialCameraFrame,
@@ -902,6 +904,25 @@ function commandTargetForRow(row: EffectiveLayerProjectionRow) {
   }
 }
 
+const SPATIAL_CROSS_OWNER_SELECTION_REASON = 'Spatial 暂不支持跨范围多选，请先取消当前选择。'
+
+function spatialSelectionScopeForRow(
+  session: SpatialAuthoringSession,
+  row: EffectiveLayerProjectionRow,
+): SpatialEditorLayerScope | null {
+  try {
+    const located = resolveEffectiveLayerTarget(
+      session.history.present,
+      commandTargetForRow(row),
+    )
+    return located.source === 'global' || located.source === 'surface' || located.source === 'world'
+      ? located.source
+      : null
+  } catch {
+    return null
+  }
+}
+
 function sessionFromLayerResult(
   session: SlideAuthoringSession,
   result: LayerCommandResult,
@@ -1190,7 +1211,7 @@ function spatialEffectiveLayers(
     locationId: session.selection.locationId,
     stateId: null,
     selectedIds: session.selection.selectionIds,
-    owner: session.scope === 'global' ? 'global' : 'world',
+    owner: session.scope,
   })
 }
 
@@ -10645,26 +10666,58 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selectNode(selectedNodeId, additive = false) {
       const spatial = get().spatialSession
       if (spatial) {
+        const preflightProjection = buildCandidateEffectiveLayers(get())
+        const preflightRow = selectedNodeId === null
+          ? null
+          : preflightProjection?.unifiedRows.find((candidate) => candidate.id === selectedNodeId) ?? null
+        if (selectedNodeId !== null && !preflightRow) {
+          return
+        }
+        const preflightScope = preflightRow
+          ? spatialSelectionScopeForRow(spatial, preflightRow)
+          : spatial.scope
+        if (!preflightScope) {
+          set({ errorMessage: '所选图层的作者地址已失效，请重新选择。', statusMessage: null })
+          return
+        }
+        if (
+          additive &&
+          spatial.selection.selectionIds.length > 0 &&
+          spatial.scope !== preflightScope
+        ) {
+          set({ errorMessage: SPATIAL_CROSS_OWNER_SELECTION_REASON, statusMessage: null })
+          return
+        }
         persistOpenSpatialContentEdit()
         const live = get().spatialSession ?? spatial
         const projection = buildCandidateEffectiveLayers(get())
-        const available = new Set(projection?.unifiedRows.map((row) => row.id) ?? [])
-        if (selectedNodeId !== null && !available.has(selectedNodeId)) {
+        const row = selectedNodeId === null
+          ? null
+          : projection?.unifiedRows.find((candidate) => candidate.id === selectedNodeId) ?? null
+        if (selectedNodeId !== null && !row) return
+        const desiredScope = row ? spatialSelectionScopeForRow(live, row) : live.scope
+        if (!desiredScope) {
+          set({ errorMessage: '所选图层的作者地址已失效，请重新选择。', statusMessage: null })
           return
         }
-        const previous = get().selectedNodeIds
-        const selectedNodeIds = selectedNodeId === null
-          ? []
-          : additive
-            ? previous.includes(selectedNodeId)
-              ? previous.filter((id) => id !== selectedNodeId)
-              : [...previous, selectedNodeId]
-            : [selectedNodeId]
-        persistSpatialResult(selectSpatialLayers(live, {
-          layerItemIds: selectedNodeIds,
+        let selectionSession = live
+        if (selectionSession.scope !== desiredScope) {
+          const scoped = setSpatialEditingScope(selectionSession, desiredScope)
+          if (!scoped.ok || !scoped.nextSession) {
+            persistSpatialResult(scoped)
+            return
+          }
+          selectionSession = scoped.nextSession
+        }
+        const result = selectSpatialLayers(selectionSession, {
+          layerItemIds: selectedNodeId === null ? [] : [selectedNodeId],
+          additive: selectedNodeId !== null && additive,
         }, {
-          expectedRevision: live.history.present.revision,
-        }))
+          expectedRevision: selectionSession.history.present.revision,
+        })
+        const persisted = persistSpatialResult(result)
+        if (!persisted.ok) return
+        const selectedNodeIds = persisted.nextSession?.selection.selectionIds ?? []
         set({
           activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab,
           spatialGraphSelection: selectedNodeIds.length > 0 ? null : get().spatialGraphSelection,

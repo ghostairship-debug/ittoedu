@@ -19,7 +19,9 @@ import {
 import {
   SPATIAL_REJECT_LOCKED,
   createSpatialWorldViewTransform,
+  makeSpatialAuthoringTarget,
   openSpatialAuthoringSession,
+  selectSpatialLayers,
   setSpatialEditingScope,
   worldLayerItem,
   type SpatialAuthoringSession,
@@ -404,6 +406,40 @@ function nativeWorldFrame(session: SpatialAuthoringSession, id: string) {
 }
 
 describe('Spatial world authoring adapter', () => {
+  it('selects an existing surface owner through its stable address without document or history writes', () => {
+    const initial = openSpatialAuthoringSession(fixture(), { locationId: LOCATION_ID })
+    const present = initial.history.present
+    const past = initial.history.past
+    const future = initial.history.future
+    const scoped = setSpatialEditingScope(initial, 'surface')
+    expect(scoped.ok).toBe(true)
+    expect(scoped.historyEntry).toBe(false)
+    const surfaceSession = scoped.nextSession!
+    const selected = selectSpatialLayers(surfaceSession, {
+      layerItemIds: ['surface-shared'],
+    }, { expectedRevision: present.revision })
+    expect(selected.ok).toBe(true)
+    expect(selected.historyEntry).toBe(false)
+    expect(selected.nextSession?.scope).toBe('surface')
+    expect(selected.nextSession?.selection.selectionIds).toEqual(['surface-shared'])
+    expect(selected.nextSession?.history.present).toBe(present)
+    expect(selected.nextSession?.history.past).toBe(past)
+    expect(selected.nextSession?.history.future).toBe(future)
+
+    const target = makeSpatialAuthoringTarget(selected.nextSession!, 'surface-shared', 'item')
+    expect(target.scope).toBe('surface')
+    expect(target.coordinateSpace).toBe('world')
+    expect(target.authoringAddress).toBe(makeAuthoringAddress({
+      projectId: 'r5b-spatial-world',
+      scope: 'surface',
+      surfaceId: SURFACE_ID,
+      carrier: 'native',
+      layerItemId: 'surface-shared',
+      field: 'item',
+    }))
+    expect(JSON.stringify(target)).not.toMatch(/hitId/)
+  })
+
   it('hits viewport/global before world, and camera-frame overlay does not steal world items', () => {
     const host = hostOf()
     const controller = createSpatialWorldAuthoringController(host)
