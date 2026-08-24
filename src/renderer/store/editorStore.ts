@@ -184,6 +184,11 @@ import {
   type CourseRuntimeAssetReplacementTarget,
 } from '../runtime/courseRuntimeTransactions'
 import {
+  planRuntimeSourceUpdate,
+  type RuntimeSourceAuthoringFeedback,
+  type RuntimeSourceAuthoringPlanFailureCode,
+} from '../runtime/runtimeSourceAuthoringCommands'
+import {
   planApplyInteractionTemplate,
   planUpdateInteractionRule,
   type InteractionAuthoringFeedback,
@@ -1485,6 +1490,18 @@ export type RuntimeAssetReplacementCommitResult =
       readonly reason: string
     }
 
+export type RuntimeSourceAuthoringCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'committed' | 'unchanged'
+      readonly feedback: RuntimeSourceAuthoringFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: RuntimeSourceAuthoringPlanFailureCode
+      readonly reason: string
+    }
+
 export type InteractionAuthoringCommitResult =
   | {
       readonly ok: true
@@ -1614,6 +1631,10 @@ export interface EditorState {
   ): void
   setSceneRuntime(sceneId: string, runtime: RuntimeDocument | undefined): void
   setGlobalRuntime(runtime: RuntimeDocument | undefined): void
+  updateRuntimeSourceAtTarget(
+    target: CourseAuthoringTarget,
+    source: string,
+  ): RuntimeSourceAuthoringCommitResult
   captureRuntimeAssetReplacementTarget(
     session: Readonly<RuntimeTargetEditSession>,
   ): CourseRuntimeAssetReplacementTarget | null
@@ -3660,6 +3681,102 @@ export const useEditorStore = create<EditorState>((set, get) => {
         : {}),
     })
     return true
+  }
+
+  const rejectRuntimeSourceAuthoring = (
+    code: RuntimeSourceAuthoringPlanFailureCode,
+    reason: string,
+  ): RuntimeSourceAuthoringCommitResult => {
+    set({ errorMessage: reason, statusMessage: null })
+    return { ok: false, code, reason }
+  }
+
+  const commitRuntimeSourceAtTarget = (
+    target: CourseAuthoringTarget,
+    source: string,
+  ): RuntimeSourceAuthoringCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    if (!document || document.id !== target.projectId) {
+      return rejectRuntimeSourceAuthoring(
+        'project-mismatch',
+        '运行时源码草稿不属于当前 Course Project。',
+      )
+    }
+    const projection = buildCandidateEffectiveLayers(state)
+    const authoringSession = state.courseAuthoringSession
+    if (!projection || !authoringSession) {
+      return rejectRuntimeSourceAuthoring(
+        'invalid-target',
+        '当前没有可提交运行时源码的课程作者会话。',
+      )
+    }
+    const expectedScope = target.owner === 'global' ? 'global' : 'scene'
+    if (
+      state.editingScope !== expectedScope
+      || projection.scope.owner !== target.owner
+      || projection.scope.ownerKey !== target.ownerKey
+    ) {
+      return rejectRuntimeSourceAuthoring(
+        'owner-mismatch',
+        '当前编辑范围已切换，运行时源码没有写入。',
+      )
+    }
+
+    const planned = planRuntimeSourceUpdate({
+      project: document,
+      currentIdentity: {
+        projectId: document.id,
+        documentRevision: document.revision,
+        sessionToken: authoringSession.token,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: projection.scope.owner,
+        ownerKey: projection.scope.ownerKey,
+      },
+      target,
+      source,
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) {
+      return rejectRuntimeSourceAuthoring(planned.code, planned.reason)
+    }
+    if (planned.status === 'no-op') {
+      set({ errorMessage: null, statusMessage: '运行时源码没有变化' })
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    const feedback = planned.plan.feedback
+    if (!feedback) {
+      return rejectRuntimeSourceAuthoring(
+        'invalid-document',
+        '运行时源码事务缺少结果信息，未写入工程。',
+      )
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return rejectRuntimeSourceAuthoring(
+        'invalid-document',
+        error instanceof Error ? error.message : '运行时源码事务无效，未写入工程。',
+      )
+    }
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      target.owner === 'global'
+        ? '已更新全局运行时源码'
+        : '已更新当前作用域的运行时源码',
+    )) {
+      return rejectRuntimeSourceAuthoring(
+        'invalid-document',
+        '当前没有可提交运行时源码的课程编辑会话。',
+      )
+    }
+    return { ok: true, status: 'committed', feedback }
   }
 
   const rejectInteractionAuthoring = (
@@ -6394,6 +6511,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (!runtime) return
         Object.assign(runtime, safePatch)
       })
+    },
+
+    updateRuntimeSourceAtTarget(target, source) {
+      return commitRuntimeSourceAtTarget(target, source)
     },
 
     updateGlobalRuntime(patch) {
