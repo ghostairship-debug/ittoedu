@@ -1,4 +1,3 @@
-import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { EditorTransactionStep } from '../authoring/editorTransaction'
 import {
@@ -16,6 +15,7 @@ import {
   type AuthoringHistoryTransactionFrame,
   type ResourceAwareAuthoringHistoryEntry,
 } from '../authoring/resourceAwareAuthoringHistory'
+import { commitCourseProjectMutation } from './courseProjectMutation'
 import {
   copySpatialSessionCamera,
   type SpatialEditorLayerScope,
@@ -154,17 +154,7 @@ export function redoSpatialAuthoringHistory(
   return redoResourceAwareAuthoringHistory(history)
 }
 
-export function commitSpatialProjectMutation(
-  project: CourseProjectDocument,
-  mutate: (draft: CourseProjectDocument) => void,
-  now = new Date().toISOString(),
-): CourseProjectDocument {
-  const draft = structuredClone(project)
-  mutate(draft)
-  draft.revision = project.revision + 1
-  draft.updatedAt = now
-  return courseProjectDocumentSchema.parse(draft)
-}
+export const commitSpatialProjectMutation = commitCourseProjectMutation
 
 export function freezeSpatialSelection(
   selection: SpatialAuthoringSelection,
