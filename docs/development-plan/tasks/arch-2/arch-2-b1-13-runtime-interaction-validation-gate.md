@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-13-runtime-interaction-validation-gate`
 - Phase / wave: `ARCH-2 / W2-B1 Runtime + Interaction validation gate`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent Runtime, Interaction and gate-process reviewers / Coordinator`
-- Claimed at / released at: `2026-08-24 12:46 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 12:46 Asia/Shanghai / 2026-08-24 13:51 Asia/Shanghai`
 - Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
 - Baseline HEAD: `ef08171`
 - Claim commit: `d3c443e`
