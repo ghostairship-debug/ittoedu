@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/slideEditorCommands.ts`; `tests/unit/flowSharedAuthoringAdapters.test.tsx`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-04-neutral-flow-shared-overlay-mutation`
 - Phase / wave: `ARCH-3 / Flow second consumer`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Flow Overlay Boundary Worker / independent Flow overlay reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T18:56:43+08:00 / pending`
+- Claimed at / released at: `2026-08-24T18:56:43+08:00 / 2026-08-24T19:01:45+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch3-flow-overlay / codex/arch3-flow-overlay`
 - Baseline HEAD: `70c5d3c`
 - Context: `ARCH_3_RE_ADMISSION_REPORT.md`; first Flow consumer already established one neutral implementation and a zero-logic Slide compatibility export.
@@ -85,7 +85,12 @@ Flow page shared-overlay insertion, conversion, transformation, properties and p
 
 ## Result evidence
 
-- Pending implementation, focused validation and independent review.
+- Product commit: root `d9a1b29` (isolated-worker source `843e9d4`). The target file now imports the neutral helper and both existing recipes call it; no recipe, parameter or result mapping changed.
+- Characterization: added the missing surface-overlay branch for per-location visibility. It selects the page overlay rather than the global controller and verifies one revision/history entry, hidden at the current location and still visible at the other Flow location.
+- Focused validation: `npx vitest run tests/unit/flowSharedAuthoringAdapters.test.tsx` passed `1 file / 7 tests`; only the two allowed files changed and diff hygiene passed.
+- Exact delta: target Slide edge `1 → 0`, old calls `2 → 0`, neutral calls `0 → 2`; audited Flow-named Slide edges `2 → 1` and old calls `3 → 1`. The only remainder is production-dead `appendBlankFlowPage`, already assigned to ARCH-5 deletion admission.
+- Independent review: APPROVE with no findings. It verified the unchanged recipes/result mapping and the new non-global visibility assertions; focused evidence was reused rather than rerun.
+- Generated refresh: defer-to-ARCH-3-gate.
 
 ## Ready checklist（Coordinator）
 

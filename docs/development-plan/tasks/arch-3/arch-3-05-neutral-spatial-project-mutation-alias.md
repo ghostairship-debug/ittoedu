@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/courseProjectMutation.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/course/spatialCameraCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/spatialPathCommands.ts`; `src/renderer/course/spatialRelationCommands.ts`; `src/renderer/course/spatialSemanticZoom.ts`; `src/renderer/store/editorStore.ts`; `tests/unit/spatialEditorCommands.test.ts`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-05-neutral-spatial-project-mutation-alias`
 - Phase / wave: `ARCH-3 / Spatial mutation deduplication`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Mutation Worker / independent Spatial mutation reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T18:56:43+08:00 / pending`
+- Claimed at / released at: `2026-08-24T18:56:43+08:00 / 2026-08-24T19:01:45+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch3-spatial-mutation / codex/arch3-spatial-mutation`
 - Baseline HEAD: `70c5d3c`
 - Context: `ARCH_3_RE_ADMISSION_REPORT.md`; the neutral helper is established and the duplicate Spatial implementation has seven source consumers and thirty calls.
@@ -84,7 +84,11 @@ All Spatial authoring mutations retain their existing domain API and behavior bu
 
 ## Result evidence
 
-- Pending implementation, focused validation and independent review.
+- Product commit: root `3361592` (isolated-worker source `dc15bf8`). `spatialAuthoringHistory.ts` removes its duplicate function and Schema import, imports the neutral helper and exposes `commitSpatialProjectMutation` as a zero-logic const alias.
+- Focused validation: `npx vitest run tests/unit/spatialEditorCommands.test.ts` passed `1 file / 6 tests`; only the allowed source file changed and diff hygiene passed.
+- Exact delta: structurally identical mutation implementations `2 → 1`, target Schema import `1 → 0`; seven source consumers and thirty call sites are unchanged.
+- Independent review: APPROVE with no findings. It verified operation equivalence, zero-logic alias, stable consumers/calls and untouched history/session/resource behavior; focused evidence was reused rather than rerun.
+- Generated refresh: defer-to-ARCH-3-gate.
 
 ## Ready checklist（Coordinator）
 
