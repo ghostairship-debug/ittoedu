@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 11:00 Asia/Shanghai / —`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `5b5c16c`
-- Claim commit: `pending`
+- Claim commit: `2078f9d`
 - Context Pack + manifest hash | bootstrap-manual: `feature:runtime; fresh/high/safe-for-S2 at 5b5c16c; two fresh read-only Workspace/Properties/template recons`
 - Freshness / relevant dirty inputs: `clean tree at claim; Runtime content planner, narrow Store actions and Workspace Runtime-text callbacks exclusively locked by Coordinator`
 - Depends on: `arch-2-b1-09-runtime-source-draft-integration done; arch-2-b1-04-runtime-asset-replacement-integration done`
