@@ -22,6 +22,7 @@ import {
   type CanvasScale,
   type PptxSlide,
 } from '../pptxShared'
+import { bytesToDataUrl } from '../base64'
 import {
   addPptxFormulaNode,
   addPptxShapeNode,
@@ -349,7 +350,7 @@ function addSpatialFramePage(
   }
   const slide = pptx.addSlide()
   slide.background = { color: 'FFFFFF' }
-  const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  const dataUrl = bytesToDataUrl(new TextEncoder().encode(svg), 'image/svg+xml')
   const aspect = viewport.width / viewport.height
   const wideAspect = WIDE_SLIDE_WIDTH / WIDE_SLIDE_HEIGHT
   let width = WIDE_SLIDE_WIDTH
