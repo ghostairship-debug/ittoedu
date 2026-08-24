@@ -14,13 +14,13 @@
 - Invalidating paths: `src/renderer/project/validateProjectArchive.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/course/courseLocationCommands.ts`; `tests/unit/courseLocationCommands.test.ts`; `scripts/validate-project.ts`; `tests/unit/validateProject.test.ts`; `tests/unit/aiCapabilities.test.ts`; `package.json`; main/preload/IPC/recovery/release configs; `docs/development-plan/inventories/legacy-consumers.json`; `repo-index/semantic/features.json`; golden tasks/expected/evaluator and repo-index generator/config
 - Task ID: `arch-5-01-remove-dead-validator-and-flow-helper`
 - Phase / wave: `ARCH-5 / qualified cleanup`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Coordinator / independent deletion reviewer / Coordinator`
-- Claimed at / released at: `pending / pending`
+- Claimed at / released at: `2026-08-24T20:24:10+08:00 / pending`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
-- Baseline HEAD: `2834f26 product; claim after admission closure`
-- Context: manual Bootstrap plus the fresh ARCH-4 repo-index; deletion targets and governance consumers are fully enumerated by ARCH-5 admission.
-- Freshness / relevant dirty inputs: admission docs only; product/config/generated inputs unchanged at draft
+- Baseline HEAD: `5bff98e`
+- Context: manual Bootstrap plus the fresh ARCH-4 repo-index; deletion targets and governance consumers were fully enumerated and independently approved by ARCH-5 admission.
+- Freshness / relevant dirty inputs: clean root at claim; product/config/generated invalidating inputs are unchanged from the approved admission
 - Depends on: `arch-5-00-deletion-admission` done
 - Blocks: ARCH-5 final-candidate / V4
 - Retry count / last failure class: `0 / none`
