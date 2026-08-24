@@ -1132,8 +1132,14 @@ describe('Published Interaction Slide host integration', () => {
       .mockRejectedValueOnce(new Error('forced location failure'))
 
     renderedItem(container, 'rollback-state-trigger').click()
-    await vi.waitFor(() => expect(setLocation).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => {
+      expect(setLocation).toHaveBeenNthCalledWith(2, SLIDE_SURFACE_ID, LOCATION_A_ID)
+    })
     await settle(24)
+    expect(setLocation.mock.calls).toEqual([
+      [SLIDE_SURFACE_ID, LOCATION_B_ID],
+      [SLIDE_SURFACE_ID, LOCATION_A_ID],
+    ])
     setLocation.mockRestore()
     expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
 
