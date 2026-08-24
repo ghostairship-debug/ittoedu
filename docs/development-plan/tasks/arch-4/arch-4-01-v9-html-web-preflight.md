@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/exportPreflight.ts`; `src/renderer/export/course/buildCoursePackages.ts`; `tests/integration/courseExportPreflightApp.test.tsx`; `tests/unit/coursePackageExport.test.ts`; `tsconfig.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-4-01-v9-html-web-preflight`
 - Phase / wave: `ARCH-4 / HTML-Web preflight`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent HTML-Web preflight reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:23:53+08:00 / pending`
+- Claimed at / released at: `2026-08-24T19:23:53+08:00 / 2026-08-24T19:30:35+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `17e7c8e`
 - Context: `ARCH_4_ADMISSION_REPORT.md`; App is an exclusive hotspot and this card must complete before the PDF card claims it.
@@ -88,7 +88,12 @@ When a teacher checks a legal V9 single HTML or Web package export, the visible/
 
 ## Result evidence
 
-- Pending implementation, focused validation and independent review.
+- Product commit: `24212d7`. Legal V9 `single-html`/`web-package` maps the existing Course Package report directly; the V8 collector is computed only for retained PDF/PPTX or source-null paths. `ExportPreflightReport` widens only `schemaVersion` to `8 | 9`.
+- User-visible characterization: the new App integration drives both toolbar targets, keeps missing asset bytes blocking, proves the old collector has zero calls, saves the real report through `desktopApi.exportBinary` and decodes `schemaVersion: 9` with the correct project/target/items/summary.
+- Focused validation: `npx vitest run tests/integration/courseExportPreflightApp.test.tsx tests/unit/coursePackageExport.test.ts` passed `2 files / 5 tests`; `npx tsc --noEmit` passed; diff hygiene passed.
+- Exact delta: two legal V9 HTML/Web routes to the V8 collector `2 → 0`; their per-export old collector call `1 → 0`; V9 collector remains one call; saved schema `8 → 9`. The old collector/import remains for retained paths and is not declared deleted.
+- Independent review: APPROVE with no findings. It verified direct identity/item/summary mapping, blocker preservation, unchanged actual builders/size warning, and retained PDF/PPTX/source-null branches without rerunning validation.
+- Generated refresh: defer-to-ARCH-4-gate.
 
 ## Ready checklist（Coordinator）
 
