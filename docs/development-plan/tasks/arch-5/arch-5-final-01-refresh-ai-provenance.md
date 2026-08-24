@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `scripts/generate-ai-capabilities.ts`; `artifacts/ai-capabilities/generation-evidence.json`; external component catalog bytes
 - Task ID: `arch-5-final-01-refresh-ai-provenance`
 - Phase / wave: `ARCH-5 / final candidate repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent generated-evidence reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T20:46:10+08:00 / pending`
+- Claimed at / released at: `2026-08-24T20:46:10+08:00 / 2026-08-24T20:48:27+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `7713d99`
 - Context: ARCH-4 commits `a887469` and `c49330c` changed print composition; all capability content files matched generation, while only deterministic source provenance was stale
@@ -43,10 +43,10 @@ The generated capability bundle truthfully identifies the reviewed ARCH-4 print 
 
 ## Acceptance
 
-- [ ] generation changes only the recorded SHA256 for `buildCoursePrintArtifacts.ts`
-- [ ] no capability index/schema/diagnostic/limit/catalog snapshot changes
-- [ ] deterministic capability check passes from the resulting tree
-- [ ] independent reviewer confirms scope and attribution
+- [x] generation changes only the recorded SHA256 for `buildCoursePrintArtifacts.ts`
+- [x] no capability index/schema/diagnostic/limit/catalog snapshot changes
+- [x] deterministic capability check passes from the resulting tree
+- [x] independent reviewer confirms scope and attribution
 
 ## Validation
 
@@ -60,4 +60,6 @@ The generated capability bundle truthfully identifies the reviewed ARCH-4 print 
 
 ## Result evidence
 
-- Pending one deterministic generation, exact-diff inspection and independent review.
+- `npm run generate:ai-capabilities` regenerated 11 files but the Git diff contains exactly one line in `generation-evidence.json`: `buildCoursePrintArtifacts.ts` changed from recorded SHA256 `3d77c0df...ef59` to current `0d651908...13fb`.
+- `npm run check:ai-capabilities` passed at index size `7235 / 16384` bytes with component catalog `available`; `git diff --check` passed.
+- Independent generated-evidence review: **APPROVE**. It confirmed the sole field change, exact match to the current source SHA256, no staged/untracked surprise and no capability-content change.
