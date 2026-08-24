@@ -81,6 +81,7 @@ export interface MixedCoursePlayerPort {
 export interface MixedCourseNavigatorOptions {
   onBeforeNavigate?: (transition: MixedNavigationTransition) => void | Promise<void>
   onNavigate?: (state: MixedNavigationState) => void | Promise<void>
+  onResetCourse?: () => void | Promise<void>
 }
 
 function assertStableId(id: string, label: string): void {
@@ -155,6 +156,7 @@ export class MixedCourseNavigator {
   readonly #player: MixedCoursePlayerPort
   readonly #onBeforeNavigate?: MixedCourseNavigatorOptions['onBeforeNavigate']
   readonly #onNavigate?: MixedCourseNavigatorOptions['onNavigate']
+  readonly #onResetCourse?: MixedCourseNavigatorOptions['onResetCourse']
   readonly #locationMap: Map<string, MixedLocationEntry>
   #current: MixedLocationEntry | null = null
   #history: string[] = []
@@ -185,6 +187,7 @@ export class MixedCourseNavigator {
     this.#player = player
     this.#onBeforeNavigate = options.onBeforeNavigate
     this.#onNavigate = options.onNavigate
+    this.#onResetCourse = options.onResetCourse
   }
 
   get current(): MixedNavigationState | null {
@@ -310,6 +313,7 @@ export class MixedCourseNavigator {
       const results = await this.#player.resetCourse()
       const failed = results.find((result) => !result.ok)
       if (failed) throw failed.failure?.error ?? new Error('Course reset failed')
+      await this.#onResetCourse?.()
       this.#history = []
       this.#current = null
       return this.#transitionTo(target, { recordHistory: false, force: true }, false)

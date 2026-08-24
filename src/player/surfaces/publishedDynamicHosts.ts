@@ -2,6 +2,7 @@ import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { TeacherControllerAction } from '../../shared/projectTypes'
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
+import { TeacherControllerRuntimeSessionStore } from '../teacherControllerRuntimeSession'
 import { PublishedInteractionController } from '../interactions/PublishedInteractionController'
 import {
   PublishedInteractionVisibilityState,
@@ -49,6 +50,12 @@ interface PublishedInteractionHostFactoryOptions {
   onInteractionInvalidated?: (surfaceId: string) => void
   /** Internal direct-resume hook for callers that operate the exposed CoursePlayer. */
   onInteractionReady?: (surfaceId: string) => void
+  /** Internal course/session authority shared by every Mixed surface host. */
+  teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  /** Internal route for a controller course.restart action. */
+  restartCourse?: () => Promise<boolean>
+  /** Mixed reset commits the shared controller authority only after all hosts reset. */
+  deferTeacherControllerCourseReset?: boolean
 }
 
 type CreatePublishedSurfaceHostOptions = CreatePublishedDynamicHostsOptions
@@ -106,6 +113,12 @@ function createPublishedSurfaceHostInternal(
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
+      teacherControllerSession: options.teacherControllerSession,
+      executeTeacherControllerAction: async (action) => {
+        if (action.type !== 'course.restart' || !options.restartCourse) return false
+        return options.restartCourse()
+      },
+      deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
     })
   }
   if (kind === 'flow') {
@@ -115,6 +128,9 @@ function createPublishedSurfaceHostInternal(
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
+      teacherControllerSession: options.teacherControllerSession,
+      restartCourse: options.restartCourse,
+      deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
     })
   }
   return new SpatialPublishedAdapter(
@@ -128,6 +144,9 @@ function createPublishedSurfaceHostInternal(
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
+      teacherControllerSession: options.teacherControllerSession,
+      restartCourse: options.restartCourse,
+      deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
     },
   )
 }
@@ -136,8 +155,12 @@ export function createPublishedSurfaceHosts(
   payload: PublishedCourseV2Payload,
   options: CreatePublishedDynamicHostsOptions = {},
 ): SurfaceHost[] {
+  const teacherControllerSession = new TeacherControllerRuntimeSessionStore()
   return payload.surfaces.map((surface) => (
-    createPublishedSurfaceHostInternal(payload, surface.id, options)
+    createPublishedSurfaceHostInternal(payload, surface.id, {
+      ...options,
+      teacherControllerSession,
+    })
   ))
 }
 
@@ -235,6 +258,12 @@ export class PublishedCourseSession {
 
   goToIndex(index: number): Promise<MixedNavigationState> {
     return this.navigator.goToIndex(index)
+  }
+
+  /** Narrow course-runtime restart entry used by delivery controller chrome. */
+  async restartCourse(): Promise<boolean> {
+    await this.navigator.resetCourse()
+    return true
   }
 
   async mount(container: HTMLElement): Promise<void> {
@@ -351,6 +380,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#terminalNavigationInvalidated = false
     this.syncActiveSlot(state.surfaceId)
     this.#mountInteractionControllers()
+  }
+
+  override restartCourse(): Promise<boolean> {
+    return this.#restartCourse(new AbortController().signal)
   }
 
   override async destroy(): Promise<void> {
@@ -567,7 +600,11 @@ export function createPublishedCourseSession(
 ): PublishedCourseSession {
   const playback = structuredClone(payload)
   const globalInteractionVisibilityState = new PublishedInteractionVisibilityState()
+  const teacherControllerSession = new TeacherControllerRuntimeSessionStore()
   let session: PublishedInteractionCourseSession | null = null
+  const restartCourse = (): Promise<boolean> => (
+    session?.restartCourse() ?? Promise.resolve(false)
+  )
   const hosts = playback.surfaces.map((surface) => createPublishedSurfaceHostInternal(
     playback,
     surface.id,
@@ -576,6 +613,9 @@ export function createPublishedCourseSession(
       resolveAsset: options.resolveAsset ?? options.services?.resolveAsset,
       playbackPathId: options.playbackPathId,
       globalInteractionVisibilityState,
+      teacherControllerSession,
+      restartCourse,
+      deferTeacherControllerCourseReset: true,
       onInteractionInvalidated: (surfaceId) => {
         session?.handleInteractionHostInvalidated(surfaceId)
       },
@@ -595,7 +635,7 @@ export function createPublishedCourseSession(
     services,
     onFailure: options.onFailure,
   })
-  const navigator = new MixedCourseNavigator(
+  const mixedNavigator = new MixedCourseNavigator(
     mixedCourseDefinitionFromPublished(playback),
     player,
     {
@@ -605,16 +645,19 @@ export function createPublishedCourseSession(
       onNavigate: (state) => {
         session?.handleNavigation(state)
       },
+      onResetCourse: () => {
+        teacherControllerSession.resetCourse()
+      },
     },
   )
   if (!options.services?.navigate) {
     services.navigate = async (deepLink) => {
-      await navigator.navigateDeepLink(deepLink)
+      await mixedNavigator.navigateDeepLink(deepLink)
     }
   }
   session = new PublishedInteractionCourseSession(
     player,
-    navigator,
+    mixedNavigator,
     hosts,
     playback,
     services,
@@ -666,6 +709,7 @@ class FlowPublishedAdapter implements SurfaceHost {
   readonly #host: FlowSurfaceHost
   readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
+  readonly #restartCourse?: () => Promise<boolean>
   #services: SurfacePlayerServices | null = null
 
   constructor(
@@ -677,11 +721,15 @@ class FlowPublishedAdapter implements SurfaceHost {
       globalInteractionVisibilityState?: PublishedInteractionVisibilityState
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
+      teacherControllerSession?: TeacherControllerRuntimeSessionStore
+      restartCourse?: () => Promise<boolean>
+      deferTeacherControllerCourseReset?: boolean
     },
   ) {
     this.id = surfaceId
     this.#payload = payload
     this.#startLocationId = options.locationId
+    this.#restartCourse = options.restartCourse
     this.#host = new FlowSurfaceHost(payload, {
       surfaceId,
       locationId: options.locationId,
@@ -689,6 +737,8 @@ class FlowPublishedAdapter implements SurfaceHost {
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: options.onInteractionInvalidated,
       onInteractionReady: options.onInteractionReady,
+      teacherControllerSession: options.teacherControllerSession,
+      deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -722,7 +772,8 @@ class FlowPublishedAdapter implements SurfaceHost {
     await this.#host.resume()
   }
 
-  async reset(_scope: SurfaceResetScope): Promise<void> {
+  async reset(scope: SurfaceResetScope): Promise<void> {
+    this.#host.resetTeacherControllerSession(scope)
     await this.#host.setLocationId(this.#startLocationId)
   }
 
@@ -750,12 +801,22 @@ class FlowPublishedAdapter implements SurfaceHost {
   }
 
   async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+    if (action.type === 'course.restart' && this.#restartCourse) {
+      return this.#restartCourse()
+    }
     const target = publishedControllerNavigationTarget(action, {
       locations: this.#payload.locations,
       currentLocationId: this.#host.locationId,
       startLocationId: this.#payload.startLocationId,
     })
     if (!target) return false
+    if (action.type === 'course.restart') {
+      this.#host.resetTeacherControllerSession('course')
+      if (target.surfaceId === this.id) {
+        await this.#host.setLocationId(target.id)
+        return true
+      }
+    }
     await this.#services?.navigate(buildMixedDeepLink({
       locationId: target.id,
       surfaceId: target.surfaceId,
@@ -770,6 +831,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
   readonly #host: SpatialSurfaceHost
   readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
+  readonly #restartCourse?: () => Promise<boolean>
   #services: SurfacePlayerServices | null = null
 
   constructor(
@@ -783,11 +845,15 @@ class SpatialPublishedAdapter implements SurfaceHost {
       globalInteractionVisibilityState?: PublishedInteractionVisibilityState
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
+      teacherControllerSession?: TeacherControllerRuntimeSessionStore
+      restartCourse?: () => Promise<boolean>
+      deferTeacherControllerCourseReset?: boolean
     },
   ) {
     this.id = surfaceId
     this.#payload = payload
     this.#startLocationId = options.startLocationId
+    this.#restartCourse = options.restartCourse
     this.#host = SpatialSurfaceHost.fromPublishedCourse(payload, options.viewport, {
       surfaceId,
       locationId: options.startLocationId,
@@ -797,6 +863,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: options.onInteractionInvalidated,
       onInteractionReady: options.onInteractionReady,
+      teacherControllerSession: options.teacherControllerSession,
+      deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -832,7 +900,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
     await this.#host.resume()
   }
 
-  async reset(_scope: SurfaceResetScope): Promise<void> {
+  async reset(scope: SurfaceResetScope): Promise<void> {
+    this.#host.resetTeacherControllerSession(scope)
     await this.#host.setLocationId(this.#startLocationId)
   }
 
@@ -860,12 +929,22 @@ class SpatialPublishedAdapter implements SurfaceHost {
   }
 
   async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+    if (action.type === 'course.restart' && this.#restartCourse) {
+      return this.#restartCourse()
+    }
     const target = publishedControllerNavigationTarget(action, {
       locations: this.#payload.locations,
       currentLocationId: this.#host.locationId,
       startLocationId: this.#payload.startLocationId,
     })
     if (!target) return false
+    if (action.type === 'course.restart') {
+      this.#host.resetTeacherControllerSession('course')
+      if (target.surfaceId === this.id) {
+        await this.#host.setLocationId(target.id)
+        return true
+      }
+    }
     await this.#services?.navigate(buildMixedDeepLink({
       locationId: target.id,
       surfaceId: target.surfaceId,

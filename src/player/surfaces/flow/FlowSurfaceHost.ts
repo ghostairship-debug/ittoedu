@@ -10,6 +10,7 @@ import {
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
+import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
 import type {
   PublishedFlowSurface,
@@ -73,6 +74,8 @@ export interface FlowSurfaceHostOptions {
   ) => boolean | void | Promise<boolean | void>
   onNavigateLocation?: (locationId: string) => void
   courseProgressSource?: FlowCourseProgressSource
+  teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  deferTeacherControllerCourseReset?: boolean
   /** Published-session only; shared by global LayerItem handles across surfaces. */
   globalInteractionVisibilityState?: PublishedInteractionVisibilityState
   /** Published-session generation hook fired before interaction DOM is invalidated. */
@@ -106,7 +109,7 @@ export class FlowSurfaceHost {
   #overlay: HTMLElement | null = null
   #toc: FlowRuntimeTocChrome | null = null
   #controller: TeacherControllerDom | null = null
-  #controllerSessions = new Map<string, TeacherControllerDomSession>()
+  readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
   #componentHandles: PublishedComponentMountHandle[] = []
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
@@ -121,6 +124,8 @@ export class FlowSurfaceHost {
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
     this.#options = { ...options }
+    this.#teacherControllerSession = options.teacherControllerSession
+      ?? new TeacherControllerRuntimeSessionStore()
     this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
       ?? new PublishedInteractionVisibilityState()
     this.#audio = options.audio ?? createFlowHostAudioSession(
@@ -169,6 +174,14 @@ export class FlowSurfaceHost {
 
   setTocOpen(open: boolean): void {
     this.#toc?.setOpen(open)
+  }
+
+  resetTeacherControllerSession(scope: 'surface' | 'course'): void {
+    if (scope === 'course') {
+      if (!this.#options.deferTeacherControllerCourseReset) {
+        this.#teacherControllerSession.resetCourse()
+      }
+    } else this.#teacherControllerSession.resetSurface(this.#surfaceId)
   }
 
   mount(container: HTMLElement): Promise<void> {
@@ -477,13 +490,7 @@ export class FlowSurfaceHost {
     frameEl.dataset.flowOverlayItem = item.layerItemId
     frameEl.dataset.flowOverlaySource = source
     frameEl.style.position = 'absolute'
-    const session = this.#controllerSessions.get(item.layerItemId) ?? {
-      offset: { dx: 0, dy: 0 },
-      collapsed: data.collapsible && data.defaultCollapsed === true,
-    }
-    if (!this.#controllerSessions.has(item.layerItemId)) {
-      this.#controllerSessions.set(item.layerItemId, session)
-    }
+    const session = this.#controllerSessionFor(item)
     frameEl.style.left = `${frame.x + session.offset.dx}px`
     frameEl.style.top = `${frame.y + session.offset.dy}px`
     frameEl.style.width = `${frame.width}px`
@@ -521,12 +528,13 @@ export class FlowSurfaceHost {
         muted: this.#audio.muted(),
         fullscreen: Boolean(overlay.ownerDocument.fullscreenElement),
       }),
-      getSession: () => this.#controllerSessions.get(item.layerItemId) ?? {
-        offset: { dx: 0, dy: 0 },
-        collapsed: false,
-      },
+      getSession: () => this.#controllerSessionFor(item),
       onSessionChange: (next) => {
-        this.#controllerSessions.set(item.layerItemId, next)
+        this.#teacherControllerSession.set({
+          controllerId: item.layerItemId,
+          surfaceSessionId: this.#surfaceId,
+          defaultCollapsed: data.collapsible && data.defaultCollapsed === true,
+        }, next)
         frameEl.style.left = `${frame.x + next.offset.dx}px`
         frameEl.style.top = `${frame.y + next.offset.dy}px`
       },
@@ -536,6 +544,17 @@ export class FlowSurfaceHost {
       getInteractive: () => this.#active,
     })
     return frameEl
+  }
+
+  #controllerSessionFor(item: PublishedNativeLayerItem): TeacherControllerDomSession {
+    const data = item.content.nativeType === 'teacher-controller'
+      ? item.content.data
+      : null
+    return this.#teacherControllerSession.get({
+      controllerId: item.layerItemId,
+      surfaceSessionId: this.#surfaceId,
+      defaultCollapsed: data?.collapsible === true && data.defaultCollapsed === true,
+    })
   }
 
   #destroyController(): void {
@@ -598,7 +617,12 @@ export class FlowSurfaceHost {
       }
       return
     }
-    if (action.type === 'course.restart' || action.type === 'scene.replay') {
+    if (action.type === 'course.restart') {
+      this.#teacherControllerSession.resetCourse()
+      await this.setLocationId(this.#playback.startLocationId)
+      return
+    }
+    if (action.type === 'scene.replay') {
       await this.setLocationId(this.#playback.startLocationId)
     }
   }

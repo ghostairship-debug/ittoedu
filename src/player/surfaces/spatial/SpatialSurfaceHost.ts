@@ -13,6 +13,7 @@ import {
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
+import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import {
   collectSpatialPlaybackEntries,
   isSpatialTeacherControllerItem,
@@ -89,6 +90,8 @@ export interface SpatialSurfaceHostOptions {
   locationId?: string
   audioChangeSource?: SpatialAudioChangeSource
   courseProgressSource?: SpatialCourseProgressSource
+  teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  deferTeacherControllerCourseReset?: boolean
   resolveAsset?: (assetId: string) => string | undefined
   components?: Record<string, PublishedComponentPackageSource>
   executeTeacherControllerAction?: (
@@ -431,7 +434,7 @@ export class SpatialSurfaceHost {
   #worldHtml: HTMLElement | null = null
   #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialHostRecord>()
-  #controllerSession = new Map<string, TeacherControllerDomSession>()
+  readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
   #gestureDisposer: (() => void) | null = null
   #muted: boolean
   #audioDisposer: (() => void) | null = null
@@ -470,6 +473,8 @@ export class SpatialSurfaceHost {
     options: SpatialSurfaceHostOptions & OpenSpatialRuntimeSessionOptions = {},
   ) {
     this.#options = options
+    this.#teacherControllerSession = options.teacherControllerSession
+      ?? new TeacherControllerRuntimeSessionStore()
     this.#components = ('components' in source && source.components
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
@@ -515,6 +520,14 @@ export class SpatialSurfaceHost {
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
     return this.#interactionPort
+  }
+
+  resetTeacherControllerSession(scope: 'surface' | 'course'): void {
+    if (scope === 'course') {
+      if (!this.#options.deferTeacherControllerCourseReset) {
+        this.#teacherControllerSession.resetCourse()
+      }
+    } else this.#teacherControllerSession.resetSurface(this.id)
   }
 
   publishedCameraSnapshot() {
@@ -662,7 +675,6 @@ export class SpatialSurfaceHost {
       record.componentHandle?.destroy()
     }
     this.#records.clear()
-    this.#controllerSession.clear()
     this.#root?.remove()
     this.#root = null
     this.#svg = null
@@ -1029,14 +1041,11 @@ export class SpatialSurfaceHost {
 
   #controllerSessionFor(item: PublishedLayerItem): TeacherControllerDomSession | undefined {
     if (!isSpatialTeacherControllerItem(item)) return undefined
-    const existing = this.#controllerSession.get(item.layerItemId)
-    if (existing) return existing
-    const session: TeacherControllerDomSession = {
-      offset: { dx: 0, dy: 0 },
-      collapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
-    }
-    this.#controllerSession.set(item.layerItemId, session)
-    return session
+    return this.#teacherControllerSession.get({
+      controllerId: item.layerItemId,
+      surfaceSessionId: this.id,
+      defaultCollapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+    })
   }
 
   #mountTeacherController(
@@ -1063,7 +1072,11 @@ export class SpatialSurfaceHost {
       }),
       getSession: () => this.#controllerSessionFor(item) ?? { offset: { dx: 0, dy: 0 }, collapsed: false },
       onSessionChange: (next) => {
-        this.#controllerSession.set(item.layerItemId, {
+        this.#teacherControllerSession.set({
+          controllerId: item.layerItemId,
+          surfaceSessionId: this.id,
+          defaultCollapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+        }, {
           offset: { ...next.offset },
           collapsed: next.collapsed,
         })
@@ -1137,6 +1150,9 @@ export class SpatialSurfaceHost {
       await this.goPrevious()
     } else if (action.type === 'scene.replay') {
       this.#commitLocationGeneration(reopenSpatialRuntimeSession(this.#session))
+    } else if (action.type === 'course.restart') {
+      this.#teacherControllerSession.resetCourse()
+      await this.setLocationId(this.#session.input.startLocationId)
     } else if (action.type === 'audio.toggle-mute') {
       this.#muted = !this.#muted
       this.#refreshControllers()

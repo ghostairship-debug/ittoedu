@@ -30,6 +30,7 @@ import {
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
+import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import {
   mountPublishedComponent,
   type PublishedComponentMountHandle,
@@ -414,6 +415,11 @@ export class SlidePublishedAdapter implements SurfaceHost {
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   readonly #onInteractionInvalidated?: () => void
   readonly #onInteractionReady?: () => void
+  readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
+  readonly #executeTeacherControllerAction?: (
+    action: TeacherControllerAction,
+  ) => boolean | void | Promise<boolean | void>
+  readonly #deferTeacherControllerCourseReset: boolean
   #locationId: string
   #presentationStateId: string | undefined
   #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
@@ -422,7 +428,6 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #services: SurfacePlayerServices | null = null
   #controllers: TeacherControllerDom[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
-  #controllerSessions = new Map<string, TeacherControllerDomSession>()
   #muted = false
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #interactionGeneration = 0
@@ -437,6 +442,11 @@ export class SlidePublishedAdapter implements SurfaceHost {
       globalInteractionVisibilityState?: PublishedInteractionVisibilityState
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
+      teacherControllerSession?: TeacherControllerRuntimeSessionStore
+      executeTeacherControllerAction?: (
+        action: TeacherControllerAction,
+      ) => boolean | void | Promise<boolean | void>
+      deferTeacherControllerCourseReset?: boolean
     } = {},
   ) {
     this.#payload = clonePayload(payload)
@@ -451,6 +461,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
       ?? new PublishedInteractionVisibilityState()
     this.#onInteractionInvalidated = options.onInteractionInvalidated
     this.#onInteractionReady = options.onInteractionReady
+    this.#teacherControllerSession = options.teacherControllerSession
+      ?? new TeacherControllerRuntimeSessionStore()
+    this.#executeTeacherControllerAction = options.executeTeacherControllerAction
+    this.#deferTeacherControllerCourseReset = options.deferTeacherControllerCourseReset === true
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
     this.#presentationStateId = presentationStateIdForLocation(
       sceneOf(findSlideSurface(this.#payload, this.id), location),
@@ -544,7 +558,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
     return this.activate()
   }
 
-  async reset(_scope: SurfaceResetScope): Promise<void> {
+  async reset(scope: SurfaceResetScope): Promise<void> {
+    if (scope === 'course') {
+      if (!this.#deferTeacherControllerCourseReset) {
+        this.#teacherControllerSession.resetCourse()
+      }
+    } else this.#teacherControllerSession.resetSurface(this.id)
     this.#preparedPresentationState = null
     await this.setLocationId(this.#startLocationId)
   }
@@ -615,17 +634,14 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   #controllerSessionFor(item: PublishedLayerItem): TeacherControllerDomSession {
-    const existing = this.#controllerSessions.get(item.layerItemId)
-    if (existing) return existing
     const collapsed = isPublishedTeacherController(item)
       ? item.content.data.collapsible && item.content.data.defaultCollapsed
       : false
-    const session: TeacherControllerDomSession = {
-      offset: { dx: 0, dy: 0 },
-      collapsed,
-    }
-    this.#controllerSessions.set(item.layerItemId, session)
-    return session
+    return this.#teacherControllerSession.get({
+      controllerId: item.layerItemId,
+      surfaceSessionId: this.id,
+      defaultCollapsed: collapsed,
+    })
   }
 
   #mountTeacherController(wrap: HTMLElement, item: PublishedNativeLayerItem): void {
@@ -654,7 +670,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
       }),
       getSession: () => this.#controllerSessionFor(item),
       onSessionChange: (next) => {
-        this.#controllerSessions.set(item.layerItemId, next)
+        this.#teacherControllerSession.set({
+          controllerId: item.layerItemId,
+          surfaceSessionId: this.id,
+          defaultCollapsed: item.content.data.collapsible
+            && item.content.data.defaultCollapsed,
+        }, next)
         wrap.style.left = `${item.frame.x + next.offset.dx}px`
         wrap.style.top = `${item.frame.y + next.offset.dy}px`
       },
@@ -667,6 +688,13 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async #handleControllerAction(action: TeacherControllerAction): Promise<void> {
+    if (this.#executeTeacherControllerAction) {
+      const handled = await this.#executeTeacherControllerAction(action)
+      if (handled !== false) {
+        for (const controller of this.#controllers) controller.refreshStatus()
+        return
+      }
+    }
     if (action.type === 'audio.toggle-mute') {
       this.#muted = !this.#muted
       for (const controller of this.#controllers) controller.refreshStatus()
@@ -692,9 +720,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
       return
     }
     if (action.type === 'course.restart') {
+      this.#teacherControllerSession.resetCourse()
       const start = locations.find((location) => location.id === this.#payload.startLocationId)
         ?? locations[0]
-      if (start) await this.#navigateTo(start)
+      if (start?.surfaceId === this.id) await this.setLocationId(start.id)
+      else if (start) await this.#navigateTo(start)
+      else this.#render()
       return
     }
     if (action.type === 'scene.replay') {
