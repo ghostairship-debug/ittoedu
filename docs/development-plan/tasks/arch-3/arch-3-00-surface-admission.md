@@ -13,7 +13,7 @@
 - Validation budget: 20 minutes
 - Reviewer budget: 1
 - Evidence reuse: 准入绑定当前 product HEAD 与 fresh repo-index；本卡/报告/task-board-only 变化不失效。命中下列 Surface donor/consumer 或相关 import resolution 后只重审对应决定。
-- Invalidating paths: `src/renderer/course/flowEditorCommands.ts`; `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/phaser/v9SpatialHitAdapter.ts`; `src/renderer/phaser/v9SlideHitAdapter.ts`; `src/renderer/spatial/spatialWorldAuthoring.ts`; `src/renderer/course/v9SlideContentEdit.ts`; relevant focused tests and TypeScript config
+- Invalidating paths: `src/renderer/course/flowEditorCommands.ts`; `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/phaser/v9SpatialHitAdapter.ts`; `src/renderer/phaser/v9SlideHitAdapter.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/authoring/v9SlideContentEdit.ts`; relevant focused tests and TypeScript config
 - Task ID: `arch-3-00-surface-admission`
 - Phase / wave: `ARCH-3 / necessity admission`
 - Status: `claimed`
