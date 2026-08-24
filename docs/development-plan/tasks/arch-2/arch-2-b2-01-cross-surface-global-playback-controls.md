@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/course/globalLayerCommands.ts`; `src/renderer/store/editorStore.ts`; `tests/unit/globalEditorStore.test.ts`; root TypeScript or Vitest configuration
 - Task ID: `arch-2-b2-01-cross-surface-global-playback-controls`
 - Phase / wave: `ARCH-2 / W2-B2 Global Layers and Teacher Controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Global Controls Worker / independent Store reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T17:29:30+08:00 / —`
+- Claimed at / released at: `2026-08-24T17:29:30+08:00 / 2026-08-24T17:52:12+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch2-b2-global-controls / codex/arch2-b2-global-controls`
 - Baseline HEAD: `b25ad58`
 - Context Pack + manifest hash | bootstrap-manual: last generated index at `16c787f` was fresh/high; subsequent commits through `b25ad58` changed only admission docs/task state, so product paths were manually verified against current source
@@ -26,7 +26,7 @@
 - Depends on: `arch-2-b2-00-remaining-domain-admission` done
 - Blocks: ARCH-2 W2-B2 gate and phase gate
 - Risk statement: a global UI currently reports success without a V9 write; the repair must use the active Flow/Spatial/Slide history rather than restore legacy mutation or create a second playback/controller truth.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review caught a Slide authoring-lock regression; the final commit preserves the prior Slide lock behavior and was approved on re-review`
 
 ## Product outcome
 
@@ -138,13 +138,13 @@ Stop and re-scope if correctness requires Schema/contract edits, UI changes, a s
 
 ## Result evidence
 
-- Affected consumer delta: pending
-- Product commit / behavior before-after: pending
-- Validation results: pending
-- Known risks/findings: pending
+- Affected consumer delta: the two target methods' calls into the V9-disabled legacy `commit` fallback fell to `0`; the exposed UI consumers and all other `LEG-001` consumers remain unchanged.
+- Product commit / behavior before-after: root product commit `b5655ec` (isolated-worker source `3f25f0e`). Before, Flow controller restore and Flow/Spatial playback updates reported success without changing the canonical document/history. After, one narrow document command is persisted through the active Slide/Flow/Spatial adapter; a real change creates one current history entry, no-op creates none, and undo/redo restores the exact playback/global-layer state.
+- Validation results: the initial focused regression reproduced `3/13` expected failures; final `npx vitest run tests/unit/globalEditorStore.test.ts` passed `14/14`, `npx tsc --noEmit` passed, and commit diff check passed. Independent Store review first requested a Slide lock fix, then approved final `3f25f0e` after the locked no-op/restore/undo/redo regression was added.
+- Known risks/findings: Slide preserves an intentional authoring lock. Flow/Spatial retain the pre-existing `restoreDefaultTeacherController` behavior that unlocks on restore, so lock behavior is not made artificially uniform in this card; any product decision to unify it requires separate evidence. No Schema, UI, Player, Published, dependency or unrelated Store change was made.
 - Semantic index impact: none
 - Generated refresh: defer-to-wave-gate
-- Next allowed task: `arch-2-b2-02-project-health-panel-on-demand-analysis` or ARCH-2 gate after both admitted tasks close
+- Next allowed task: the ARCH-2 gate-discovered Mixed navigation failure-atomicity card, then the ARCH-2 phase gate.
 
 ## Ready checklist（Coordinator）
 
