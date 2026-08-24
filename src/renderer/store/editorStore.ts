@@ -401,6 +401,12 @@ import {
   updateSpatialRelationInSession,
 } from '../course/spatialRelationCommands'
 import {
+  copySpatialClipboard,
+  duplicateSpatialLayers,
+  pasteSpatialClipboard,
+  type SpatialClipboardPayload,
+} from '../course/spatialClipboardCommands'
+import {
   addSpatialSemanticZoomRuleInSession,
   deleteSpatialSemanticZoomRuleInSession,
   updateSpatialSemanticZoomRuleInSession,
@@ -1669,6 +1675,8 @@ export interface EditorState {
   slideCandidateComponentPackagesFuture: Record<string, ComponentPackageData>[]
   /** Pure Spatial authoring session. Null on the default Slide product path. */
   spatialSession: SpatialAuthoringSession | null
+  /** Session-only canonical Spatial clipboard; never mirrored into legacy clipboard fields. */
+  spatialClipboard: SpatialClipboardPayload | null
   spatialContentEdit: SpatialWorldContentEditSession | null
   spatialGraphSelection: SpatialGraphSelection | null
   spatialPlaybackPathId: string | null
@@ -3088,6 +3096,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const courseProject = backend.getSession().history.present
     set({
       spatialSession: null,
+      spatialClipboard: null,
       spatialContentEdit: null,
       spatialGraphSelection: null,
       spatialPlaybackPathId: null,
@@ -3415,6 +3424,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       } else if (normalizedReason === 'wrong-owner' || rawReason.includes('不属于')) {
         teacherMessage = '当前内容不在这个编辑范围内。请切换到对应图层后重试。'
       } else if (
+        /剪贴板为空|教师控制器|超过.*上限|最多.*互动规则/.test(rawReason)
+      ) {
+        teacherMessage = rawReason
+      } else if (/引用已失效|资源引用已失效|素材已失效|组件已失效/.test(rawReason)) {
+        teacherMessage = '复制内容引用的资源已失效。请重新复制后再试。'
+      } else if (
         normalizedReason === 'invalid-selection'
         || normalizedReason === 'invalid-target'
         || rawReason.includes('已失效')
@@ -3465,6 +3480,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       return result
     }
+    const previousSession = current.spatialSession
+    const spatialClipboardContextChanged = !previousSession
+      || previousSession.history.present.id !== session.history.present.id
+      || previousSession.sessionId !== session.sessionId
+      || previousSession.selection.locationId !== session.selection.locationId
+      || previousSession.selection.surfaceId !== session.selection.surfaceId
     const keepEdit = extra.clearContentEdit
       ? null
       : current.spatialContentEdit
@@ -3574,6 +3595,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     )
     set({
       spatialSession: session,
+      ...(spatialClipboardContextChanged ? { spatialClipboard: null } : {}),
       spatialContentEdit: extra.clearContentEdit ? null : keepEdit,
       slideCandidateSnapshot: null,
       ...spatialViewState(session, nextSidecar, keep),
@@ -3648,6 +3670,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const snapshot = buildSpatialAuthoringSnapshot(session)
     set({
       spatialSession: session,
+      spatialClipboard: null,
       spatialContentEdit: null,
       spatialGraphSelection: null,
       spatialPlaybackPathId: null,
@@ -4955,6 +4978,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       flowSession: session,
       flowTextEdit: null,
       spatialSession: null,
+      spatialClipboard: null,
       spatialContentEdit: null,
       spatialGraphSelection: null,
       spatialPlaybackPathId: null,
@@ -5347,6 +5371,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     slideCandidateComponentPackagesPast: [],
     slideCandidateComponentPackagesFuture: [],
     spatialSession: null,
+    spatialClipboard: null,
     spatialContentEdit: null,
     spatialGraphSelection: null,
     spatialPlaybackPathId: null,
@@ -10007,6 +10032,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateNode(nodeId) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const result = duplicateSpatialLayers(spatial, [nodeId], {
+          expectedRevision: spatial.history.present.revision,
+          allowTargetOwner: true,
+        })
+        persistSpatialResult(result, {
+          statusMessage: result.ok ? '已复制 Spatial 图层' : undefined,
+        })
+        if (result.ok) set({ activeTab: 'properties' })
+        return
+      }
       const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const row = findCandidateLayerRow(get(), nodeId)
@@ -10119,6 +10156,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateSelectedNodes() {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const result = duplicateSpatialLayers(
+          spatial,
+          spatial.selection.selectionIds,
+          { expectedRevision: spatial.history.present.revision },
+        )
+        persistSpatialResult(result, {
+          statusMessage: result.ok
+            ? `已复制 ${result.createdIds?.length ?? 0} 个 Spatial 图层`
+            : undefined,
+        })
+        if (result.ok) set({ activeTab: 'properties' })
+        return
+      }
       if (selectSlideAuthoringBackend(get())) {
         runCandidateAction('duplicate')
         return
@@ -10212,6 +10264,26 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     copySelectedNodes() {
+      const spatial = get().spatialSession
+      if (spatial) {
+        try {
+          const clipboard = copySpatialClipboard(
+            spatial,
+            spatial.selection.selectionIds,
+          )
+          set({
+            spatialClipboard: clipboard,
+            errorMessage: null,
+            statusMessage: `已复制 ${clipboard.items.length} 个 Spatial 图层到剪贴板`,
+          })
+        } catch (error) {
+          persistSpatialResult(rejectSpatialCommand(
+            spatial,
+            error instanceof Error ? error.message : '无法复制 Spatial 图层',
+          ))
+        }
+        return
+      }
       if (selectSlideAuthoringBackend(get()) && get().editingScope !== 'global') {
         runCandidateAction('copy')
         return
@@ -10248,6 +10320,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     pasteNodes() {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const clipboard = get().spatialClipboard
+        const result = pasteSpatialClipboard(spatial, clipboard, {
+          expectedRevision: spatial.history.present.revision,
+        })
+        persistSpatialResult(result, {
+          statusMessage: result.ok
+            ? `已粘贴 ${result.createdIds?.length ?? 0} 个 Spatial 图层`
+            : undefined,
+        })
+        if (result.ok) set({ activeTab: 'properties' })
+        return
+      }
       if (selectSlideAuthoringBackend(get()) && get().editingScope !== 'global') {
         runCandidateAction('paste')
         return

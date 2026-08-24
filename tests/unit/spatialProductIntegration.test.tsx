@@ -14,6 +14,10 @@ import {
 import { createSpatialWorldViewTransform } from '@/renderer/course/spatialEditorView'
 import { addSpatialPathInSession } from '@/renderer/course/spatialPathCommands'
 import { addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
+import {
+  addSpatialCameraFrameFromSession,
+  deleteSpatialCameraFrameInSession,
+} from '@/renderer/course/spatialCameraCommands'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import {
   selectActiveCourseProjectDocument,
@@ -29,6 +33,18 @@ import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import type { SpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
+import App from '@/renderer/App'
+
+vi.mock('@/renderer/export/loadPlayerBundle', () => ({
+  loadPlayerBundle: () => 'window.__coursePlayerTestBundle = true',
+}))
+vi.mock('@/renderer/export/renderSceneImages', () => ({
+  renderProjectSceneImages: vi.fn(async () => []),
+  renderProjectSceneImagesWithRuntime: vi.fn(async () => []),
+}))
+vi.mock('@/renderer/ui/Workspace', () => ({
+  Workspace: () => null,
+}))
 
 const VIEWPORT = { x: 0, y: 0, width: 800, height: 450 }
 const IMAGE_ASSET: AssetMeta = {
@@ -778,5 +794,136 @@ describe('Spatial product shell wiring', () => {
     expect(screen.getByTestId('spatial-multi-actions-unavailable')).toHaveTextContent(
       '不会执行部分写入',
     )
+  })
+
+  it('routes real App Ctrl+C/V/D/Z/Y through the canonical Spatial document', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode(40, 50)
+    useEditorStore.getState().addTextNode(300, 220)
+    const sourceIds = spatialSurface().world.layerItems.map((item) => item.layerItemId)
+    act(() => useEditorStore.getState().selectNodes(sourceIds))
+    const before = useEditorStore.getState().spatialSession!
+    const { container } = render(<App />)
+    const shortcutTarget = container.querySelector('.app-shell')
+    if (!shortcutTarget) throw new Error('expected App shell')
+
+    fireEvent.keyDown(shortcutTarget, { key: 'c', ctrlKey: true })
+    const copied = useEditorStore.getState()
+    expect(copied.spatialClipboard?.items.map((entry) => entry.item.layerItemId)).toEqual(sourceIds)
+    expect(copied.spatialSession).toBe(before)
+    expect(copied.spatialSession?.history).toBe(before.history)
+
+    fireEvent.keyDown(shortcutTarget, { key: 'v', ctrlKey: true })
+    const pasted = useEditorStore.getState().spatialSession!
+    const pastedIds = [...pasted.selection.selectionIds]
+    expect(pastedIds).toHaveLength(2)
+    expect(pasted.history.present.revision).toBe(before.history.present.revision + 1)
+    expect(pasted.history.past).toHaveLength(before.history.past.length + 1)
+    expect(pastedIds.every((id) => locateCourseLayer(pasted.history.present, id) !== null)).toBe(true)
+
+    fireEvent.keyDown(shortcutTarget, { key: 'd', ctrlKey: true })
+    const duplicated = useEditorStore.getState().spatialSession!
+    const duplicatedIds = [...duplicated.selection.selectionIds]
+    expect(duplicatedIds).toHaveLength(2)
+    expect(duplicated.history.present.revision).toBe(pasted.history.present.revision + 1)
+    expect(duplicated.history.past).toHaveLength(pasted.history.past.length + 1)
+
+    fireEvent.keyDown(shortcutTarget, { key: 'z', ctrlKey: true })
+    const undone = useEditorStore.getState().spatialSession!
+    expect(undone.selection.selectionIds).toEqual([])
+    expect(duplicatedIds.every((id) => locateCourseLayer(undone.history.present, id) === null)).toBe(true)
+
+    fireEvent.keyDown(shortcutTarget, { key: 'y', ctrlKey: true })
+    const redone = useEditorStore.getState().spatialSession!
+    expect(redone.selection.selectionIds).toEqual([])
+    expect(duplicatedIds.every((id) => locateCourseLayer(redone.history.present, id) !== null)).toBe(true)
+  })
+
+  it('duplicates an unselected Nodes surface row into its exact canonical owner once', () => {
+    const fixture = mixedOwnerSelectionFixture()
+    act(() => useEditorStore.getState().selectNode(fixture.worldItemId))
+    const before = useEditorStore.getState().spatialSession!
+    const source = locateCourseLayer(before.history.present, fixture.surfaceItemId)
+    if (!source?.scoped) throw new Error('expected surface scoped layer')
+    const sourceVisibility = structuredClone(source.scoped.visibility)
+    render(<NodesTab />)
+
+    const row = screen.getByTestId(`node-item-${fixture.surfaceItemId}`)
+    fireEvent.click(within(row).getByRole('button', { name: `复制“${source.item.label}”` }))
+
+    const after = useEditorStore.getState().spatialSession!
+    const duplicateId = after.selection.selectionIds[0]
+    expect(duplicateId).toBeTruthy()
+    expect(duplicateId).not.toBe(fixture.surfaceItemId)
+    expect(after.scope).toBe('surface')
+    expect(after.history.present.revision).toBe(before.history.present.revision + 1)
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(locateCourseLayer(after.history.present, duplicateId!)).toMatchObject({
+      source: 'surface',
+      scoped: { visibility: sourceVisibility },
+      item: {
+        locked: false,
+        label: `${source.item.label} 副本`,
+        frame: {
+          x: source.item.frame.x + 20,
+          y: source.item.frame.y + 20,
+        },
+      },
+    })
+    expect(locateCourseLayer(after.history.present, fixture.worldItemId)).toMatchObject({
+      source: 'world',
+    })
+  })
+
+  it('rejects a clipboard visibility reference after its non-active location is removed', () => {
+    const fixture = mixedOwnerSelectionFixture()
+    useEditorStore.getState().runSpatialCommand((session) => (
+      addSpatialCameraFrameFromSession(session, { name: '临时可见位置' })
+    ))
+    const withFrame = useEditorStore.getState().spatialSession!
+    const surface = withFrame.history.present.surfaces.find(
+      (candidate) => candidate.id === withFrame.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const activeLocation = withFrame.history.present.locations.find(
+      (location) => location.id === withFrame.selection.locationId,
+    )
+    if (!activeLocation || activeLocation.kind !== 'spatial-camera') {
+      throw new Error('expected active Spatial location')
+    }
+    const temporaryFrame = surface.camera.frames.find(
+      (frame) => frame.id !== activeLocation.cameraFrameId,
+    )
+    if (!temporaryFrame) throw new Error('expected temporary camera frame')
+
+    useEditorStore.getState().setCandidateGlobalLayerLocationVisibility(
+      fixture.globalTextId,
+      { mode: 'include', locationIds: [temporaryFrame.id] },
+    )
+    useEditorStore.getState().selectNode(fixture.globalTextId)
+    useEditorStore.getState().copySelectedNodes()
+    const captured = useEditorStore.getState().spatialClipboard
+    expect(captured?.items[0]?.visibility).toEqual({
+      mode: 'include',
+      locationIds: [temporaryFrame.id],
+    })
+
+    useEditorStore.getState().setCandidateGlobalLayerLocationVisibility(
+      fixture.globalTextId,
+      { mode: 'all', locationIds: [] },
+    )
+    useEditorStore.getState().runSpatialCommand((session) => (
+      deleteSpatialCameraFrameInSession(session, temporaryFrame.id)
+    ))
+    expect(useEditorStore.getState().spatialClipboard).toBe(captured)
+    const beforePaste = useEditorStore.getState()
+    beforePaste.pasteNodes()
+    const afterPaste = useEditorStore.getState()
+    expect(afterPaste.spatialSession).toBe(beforePaste.spatialSession)
+    expect(afterPaste.spatialSession?.history).toBe(beforePaste.spatialSession?.history)
+    expect(afterPaste.spatialSession?.selection).toBe(beforePaste.spatialSession?.selection)
+    expect(afterPaste.selectedNodeIds).toBe(beforePaste.selectedNodeIds)
+    expect(afterPaste.spatialClipboard).toBe(captured)
+    expect(afterPaste.errorMessage).toMatch(/引用|失效/)
   })
 })
