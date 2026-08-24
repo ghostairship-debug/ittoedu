@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -309,6 +310,92 @@ describe('V9 Slide content commands', () => {
     expect(video?.frame).toMatchObject({ x: expectedVideo.x, y: expectedVideo.y })
     expect(session.history.present.schemaVersion).toBe(9)
     expect(source.surfaces[0]).toEqual(documentShell().surfaces[0])
+  })
+
+  it('allocates Slide items after Spatial content from the course-wide order namespace', () => {
+    const source = documentShell()
+    const worldItem = sceneNodeToCourseLayerItem(createTextNode({
+      id: 'spatial-world-text',
+      name: '空间文字',
+      text: '先创建的空间内容',
+    }))
+    worldItem.order = 0
+    source.locations.push({
+      id: 'location-spatial-home',
+      label: '空间首页',
+      kind: 'spatial-camera',
+      surfaceId: 'surface-spatial',
+      cameraFrameId: 'camera-spatial-home',
+    })
+    source.surfaces.push({
+      id: 'surface-spatial',
+      title: '空间',
+      type: 'spatial-2d',
+      surfaceLayerItems: [],
+      world: {
+        bounds: { mode: 'infinite' },
+        layerItems: [worldItem],
+      },
+      camera: {
+        home: { x: 0, y: 0, zoom: 1 },
+        frames: [{ id: 'camera-spatial-home', name: '首页', x: 0, y: 0, zoom: 1 }],
+      },
+      semanticZoom: [],
+    })
+    source.mixedPrintPlan = {
+      pageSize: 'A4',
+      orientation: 'auto',
+      entries: [
+        {
+          id: 'print-slide',
+          kind: 'slide-scenes',
+          surfaceId: 'surface-slide',
+          sceneIds: ['scene-1'],
+        },
+        {
+          id: 'print-spatial',
+          kind: 'spatial-frames',
+          surfaceId: 'surface-spatial',
+          cameraFrameIds: ['camera-spatial-home'],
+        },
+      ],
+    }
+    const sourceBefore = structuredClone(source)
+
+    let session = requireSession(addSlideTextLayer(
+      openSlideAuthoringSession(source),
+      { id: 'slide-after-spatial' },
+      { now: NOW },
+    ))
+    session = requireSession(addSlideComponentLayer(
+      session,
+      {
+        packageId: 'com.example.v4-dom',
+        id: 'component-after-spatial',
+        manifest: componentManifest,
+      },
+      { now: NOW },
+    ))
+    const runtime = addSlideRuntimeLayer(
+      session,
+      { id: 'runtime-after-spatial' },
+      { now: NOW },
+    )
+    expect(runtime.historyEntry).toBe(true)
+    session = requireSession(runtime)
+
+    const spatial = session.history.present.surfaces.find(
+      (surface) => surface.id === 'surface-spatial',
+    )
+    if (!spatial || spatial.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const orders = [
+      ...spatial.world.layerItems.map((item) => item.order),
+      ...sceneItems(session).map((item) => item.order),
+    ]
+    expect(orders).toEqual([0, 1, 2, 3])
+    expect(new Set(orders).size).toBe(orders.length)
+    expect(session.history.past).toHaveLength(3)
+    expect(source).toEqual(sourceBefore)
   })
 
   it('does not offset an insert that already has an explicit position', () => {

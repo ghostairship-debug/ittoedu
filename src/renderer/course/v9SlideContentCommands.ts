@@ -56,6 +56,7 @@ import {
   makeSlideAuthoringTarget,
   type SlideAuthoringSession,
 } from './slideAuthoringBackend'
+import { allocateCourseLayerOrder } from './globalLayerCommands'
 
 /**
  * V8 `offsetDefaultInsertion` contract from editorStore.
@@ -283,23 +284,14 @@ function sortSceneLayers(scene: SlideSceneDocument): void {
 
 function nextSceneLayerOrder(
   project: CourseProjectDocument,
-  surface: SlideSurfaceDocument,
   scene: SlideSceneDocument,
 ): number {
-  const used = new Set<number>([
-    ...project.globalLayerItems.map((entry) => entry.item.order),
-    ...surface.surfaceLayerItems.map((entry) => entry.item.order),
-    ...scene.layerItems.map((item) => item.order),
-  ])
-  let order = Math.max(-1, ...scene.layerItems.map((item) => item.order)) + 1
-  if (order < 0) order = 0
-  while (used.has(order)) order += 1
-  return order
+  const preferred = Math.max(-1, ...scene.layerItems.map((item) => item.order)) + 1
+  return allocateCourseLayerOrder(project, Math.max(0, preferred))
 }
 
 function appendSceneLayer(
   project: CourseProjectDocument,
-  surface: SlideSurfaceDocument,
   scene: SlideSceneDocument,
   item: LayerItem,
   stateId: string | null,
@@ -310,7 +302,7 @@ function appendSceneLayer(
   if (scene.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
     throw new Error(`图层 ID 已存在：${item.layerItemId}`)
   }
-  item.order = nextSceneLayerOrder(project, surface, scene)
+  item.order = nextSceneLayerOrder(project, scene)
   if (stateId) {
     const presentationState = scene.presentation?.states.find(
       (candidate) => candidate.id === stateId,
@@ -617,7 +609,7 @@ export function addSlideTextLayer(
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -648,7 +640,7 @@ export function addSlideFormulaLayer(
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -679,7 +671,7 @@ export function addSlideShapeLayer(
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -716,7 +708,7 @@ export function addSlideImageLayer(
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -752,7 +744,7 @@ export function addSlideVideoLayer(
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -806,7 +798,7 @@ export function addSlideComponentLayer(
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -852,7 +844,7 @@ export function addSlideRuntimeLayer(
     })
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.surface, next.scene, structuredClone(item), session.selection.stateId)
+      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
     }, options.now)
     return commitAdded(session, project, layerItemId)
   } catch (error) {
