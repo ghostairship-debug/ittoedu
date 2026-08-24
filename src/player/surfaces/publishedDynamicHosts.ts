@@ -2,6 +2,14 @@ import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { TeacherControllerAction } from '../../shared/projectTypes'
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
+import { PublishedInteractionController } from '../interactions/PublishedInteractionController'
+import {
+  PublishedInteractionVisibilityState,
+} from '../interactions/PublishedDomInteractionSurfacePort'
+import type {
+  PublishedInteractionSessionPort,
+  PublishedInteractionSurfacePort,
+} from '../interactions/PublishedInteractionSurfacePort'
 import { CoursePlayer, type CoursePlayerOptions } from './CoursePlayer'
 import { FlowSurfaceHost } from './flow/FlowSurfaceHost'
 import {
@@ -10,6 +18,7 @@ import {
   mixedCourseDefinitionFromPublished,
   type MixedCatalogEntry,
   type MixedCourseProgress,
+  type MixedNavigationTransition,
   type MixedNavigationState,
 } from './mixed/MixedCourseNavigator'
 import { SlidePublishedAdapter } from './slide/SlidePublishedAdapter'
@@ -32,6 +41,18 @@ export interface CreatePublishedDynamicHostsOptions {
   resolveAsset?: (assetId: string) => string | undefined
   playbackPathId?: string | null
 }
+
+interface PublishedInteractionHostFactoryOptions {
+  /** Internal Published Interaction session state shared by every host. */
+  globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+  /** Internal generation hook; current controllers must stop before host teardown/rerender. */
+  onInteractionInvalidated?: (surfaceId: string) => void
+  /** Internal direct-resume hook for callers that operate the exposed CoursePlayer. */
+  onInteractionReady?: (surfaceId: string) => void
+}
+
+type CreatePublishedSurfaceHostOptions = CreatePublishedDynamicHostsOptions
+  & PublishedInteractionHostFactoryOptions
 
 export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHostsOptions {
   services?: Partial<SurfacePlayerServices>
@@ -64,6 +85,14 @@ export function createPublishedSurfaceHost(
   surfaceId: string,
   options: CreatePublishedDynamicHostsOptions = {},
 ): SurfaceHost {
+  return createPublishedSurfaceHostInternal(payload, surfaceId, options)
+}
+
+function createPublishedSurfaceHostInternal(
+  payload: PublishedCourseV2Payload,
+  surfaceId: string,
+  options: CreatePublishedSurfaceHostOptions,
+): SurfaceHost {
   const surface = payload.surfaces.find((candidate) => candidate.id === surfaceId)
   if (!surface) throw new Error(`Unknown published surface: ${surfaceId}`)
   const startLocationId = firstPublishedLocationId(payload, surfaceId)
@@ -74,6 +103,9 @@ export function createPublishedSurfaceHost(
     return new SlidePublishedAdapter(payload, surface.id, {
       locationId: startLocationId,
       resolveAsset,
+      globalInteractionVisibilityState: options.globalInteractionVisibilityState,
+      onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
+      onInteractionReady: () => options.onInteractionReady?.(surface.id),
     })
   }
   if (kind === 'flow') {
@@ -94,7 +126,7 @@ export function createPublishedSurfaceHosts(
   options: CreatePublishedDynamicHostsOptions = {},
 ): SurfaceHost[] {
   return payload.surfaces.map((surface) => (
-    createPublishedSurfaceHost(payload, surface.id, options)
+    createPublishedSurfaceHostInternal(payload, surface.id, options)
   ))
 }
 
@@ -109,6 +141,50 @@ function defaultCourseStateServices(
       state.set(key, value)
     },
     resolveAsset: (assetId) => payload.assets[assetId]?.url,
+  }
+}
+
+interface PublishedInteractionCapableHost extends SurfaceHost {
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null
+  /** One-shot, session-only state request used by scene.go(targetStateId). */
+  preparePublishedPresentationState?(
+    locationId: string,
+    stateId: string | undefined,
+  ): boolean
+  validatePublishedPresentationState?(
+    locationId: string,
+    stateId: string | undefined,
+  ): boolean
+  cancelPreparedPublishedPresentationState?(locationId: string): void
+}
+
+function interactionCapableHost(
+  host: SurfaceHost | undefined,
+): PublishedInteractionCapableHost | null {
+  if (!host || !('getPublishedInteractionSurfacePort' in host)) return null
+  const candidate = host as Partial<PublishedInteractionCapableHost>
+  return typeof candidate.getPublishedInteractionSurfacePort === 'function'
+    ? host as PublishedInteractionCapableHost
+    : null
+}
+
+const UNAVAILABLE_INTERACTION_SURFACE_PORT: PublishedInteractionSurfacePort = {
+  bindNodeClick: () => null,
+  executeNodeMotion: () => false,
+}
+
+interface CancellablePublishedInteractionSurfacePort extends PublishedInteractionSurfacePort {
+  cancelActiveMotions(): void
+}
+
+function cancelActiveMotions(port: PublishedInteractionSurfacePort | null): void {
+  if (!port || !('cancelActiveMotions' in port)) return
+  const candidate = port as Partial<CancellablePublishedInteractionSurfacePort>
+  if (typeof candidate.cancelActiveMotions !== 'function') return
+  try {
+    candidate.cancelActiveMotions()
+  } catch {
+    // A stale renderer port must not block the owning navigation teardown.
   }
 }
 
@@ -196,16 +272,307 @@ export class PublishedCourseSession {
   }
 }
 
+/** Internal coordinator; the exported session keeps its original product API. */
+class PublishedInteractionCourseSession extends PublishedCourseSession {
+  readonly #hostsById: ReadonlyMap<string, SurfaceHost>
+  readonly #payload: PublishedCourseV2Payload
+  readonly #services: SurfacePlayerServices
+  readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
+  readonly #interactionSessionPort: PublishedInteractionSessionPort
+  #globalInteractionController: PublishedInteractionController | null = null
+  #localInteractionController: PublishedInteractionController | null = null
+  #terminalNavigationClaimed = false
+  #terminalNavigationInvalidated = false
+  #interactionDestroyStarted = false
+
+  constructor(
+    player: CoursePlayer,
+    navigator: MixedCourseNavigator,
+    hosts: readonly SurfaceHost[],
+    payload: PublishedCourseV2Payload,
+    services: SurfacePlayerServices,
+    globalInteractionVisibilityState: PublishedInteractionVisibilityState,
+  ) {
+    super(player, navigator, hosts)
+    this.#hostsById = new Map(hosts.map((host) => [host.id, host]))
+    this.#payload = payload
+    this.#services = services
+    this.#globalInteractionVisibilityState = globalInteractionVisibilityState
+    this.#interactionSessionPort = {
+      currentSceneId: () => this.#currentSlideSceneId(),
+      goToScene: (sceneId, targetStateId, signal) => (
+        this.#goToScene(sceneId, targetStateId, signal)
+      ),
+      nextScene: (signal) => this.#nextScene(signal),
+      previousScene: (signal) => this.#previousScene(signal),
+      replayScene: (signal) => this.#replayScene(signal),
+      restartCourse: (signal) => this.#restartCourse(signal),
+    }
+  }
+
+  /** Navigator callback: every real/forced navigation invalidates the old generation. */
+  handleBeforeNavigation(_transition?: MixedNavigationTransition): void {
+    if (this.#terminalNavigationClaimed) this.#terminalNavigationInvalidated = true
+    this.#destroyInteractionControllers()
+  }
+
+  /** Host callbacks are relevant only when that host owns the navigator generation. */
+  handleInteractionHostInvalidated(surfaceId: string): void {
+    if (this.navigator.current?.surfaceId !== surfaceId) return
+    this.#destroyInteractionControllers()
+  }
+
+  /** Direct CoursePlayer resume support for the intentionally exposed player port. */
+  handleInteractionHostReady(surfaceId: string): void {
+    const current = this.navigator.current
+    const host = this.#hostsById.get(surfaceId)
+    if (
+      this.#interactionDestroyStarted
+      || current?.surfaceId !== surfaceId
+      || (host?.getLocationId?.() ?? current.locationId) !== current.locationId
+    ) return
+    this.#mountInteractionControllers(surfaceId)
+  }
+
+  handleNavigation(state: MixedNavigationState): void {
+    if (this.#interactionDestroyStarted) return
+    this.#terminalNavigationClaimed = false
+    this.#terminalNavigationInvalidated = false
+    this.syncActiveSlot(state.surfaceId)
+    this.#mountInteractionControllers()
+  }
+
+  override async destroy(): Promise<void> {
+    if (!this.#interactionDestroyStarted) {
+      this.#interactionDestroyStarted = true
+      this.#destroyInteractionControllers()
+      this.#globalInteractionVisibilityState.reset()
+    }
+    await super.destroy()
+  }
+
+  #destroyInteractionControllers(): void {
+    this.#localInteractionController?.destroy()
+    this.#localInteractionController = null
+    this.#globalInteractionController?.destroy()
+    this.#globalInteractionController = null
+    const surfaceId = this.navigator.current?.surfaceId ?? this.player.activeSurfaceId
+    const host = surfaceId ? interactionCapableHost(this.#hostsById.get(surfaceId)) : null
+    cancelActiveMotions(host?.getPublishedInteractionSurfacePort() ?? null)
+  }
+
+  #mountInteractionControllers(activatingSurfaceId?: string): void {
+    this.#destroyInteractionControllers()
+    if (this.#interactionDestroyStarted) return
+    const current = this.navigator.current
+    if (
+      !current
+      || (
+        this.player.activeSurfaceId !== current.surfaceId
+        && activatingSurfaceId !== current.surfaceId
+      )
+    ) return
+    const rawHost = this.#hostsById.get(current.surfaceId)
+    if (
+      rawHost?.getLocationId
+      && rawHost.getLocationId() !== current.locationId
+    ) return
+    const host = interactionCapableHost(rawHost)
+    const surfacePort = host?.getPublishedInteractionSurfacePort()
+      ?? UNAVAILABLE_INTERACTION_SURFACE_PORT
+    const reportDiagnostic = this.#services.reportDiagnostic
+
+    if (this.#payload.globalInteractions.length > 0) {
+      this.#globalInteractionController = new PublishedInteractionController({
+        surfaceId: current.surfaceId,
+        rules: this.#payload.globalInteractions,
+        surface: surfacePort,
+        session: this.#interactionSessionPort,
+        ...(reportDiagnostic ? { reportDiagnostic } : {}),
+      })
+    }
+
+    const location = this.#locationById(current.locationId)
+    if (location?.kind !== 'slide-scene') return
+    const surface = this.#payload.surfaces.find((candidate) => (
+      candidate.id === location.surfaceId && candidate.type === 'slide'
+    ))
+    const scene = surface?.type === 'slide'
+      ? surface.scenes.find((candidate) => candidate.id === location.sceneId)
+      : undefined
+    if (!scene || scene.interactions.length === 0) return
+    this.#localInteractionController = new PublishedInteractionController({
+      surfaceId: current.surfaceId,
+      rules: scene.interactions,
+      surface: surfacePort,
+      session: this.#interactionSessionPort,
+      ...(reportDiagnostic ? { reportDiagnostic } : {}),
+    })
+  }
+
+  #locationById(locationId: string): CourseLocation | undefined {
+    return this.#payload.locations.find((location) => location.id === locationId)
+  }
+
+  #currentSlideSceneId(): string | null {
+    const current = this.navigator.current
+    if (!current) return null
+    const location = this.#locationById(current.locationId)
+    return location?.kind === 'slide-scene' ? location.sceneId : null
+  }
+
+  #slideLocationForScene(sceneId: string): Extract<CourseLocation, { kind: 'slide-scene' }> | null {
+    const current = this.navigator.current
+      ? this.#locationById(this.navigator.current.locationId)
+      : undefined
+    if (current?.kind === 'slide-scene' && current.sceneId === sceneId) return current
+    return this.#payload.locations.find((location): location is Extract<
+      CourseLocation,
+      { kind: 'slide-scene' }
+    > => location.kind === 'slide-scene' && location.sceneId === sceneId) ?? null
+  }
+
+  #claimTerminalNavigation(signal: AbortSignal): boolean {
+    if (
+      this.#interactionDestroyStarted
+      || this.#terminalNavigationClaimed
+      || signal.aborted
+    ) return false
+    // Claim synchronously so another local/global listener from the same click
+    // cannot prepare state or enqueue stale navigation before onBeforeNavigate.
+    this.#terminalNavigationClaimed = true
+    this.#terminalNavigationInvalidated = false
+    return true
+  }
+
+  #releaseTerminalNavigationClaim(): void {
+    const shouldRemount = this.#terminalNavigationInvalidated
+    this.#terminalNavigationClaimed = false
+    this.#terminalNavigationInvalidated = false
+    if (shouldRemount && !this.#interactionDestroyStarted) {
+      this.#mountInteractionControllers()
+    }
+  }
+
+  async #goToScene(
+    sceneId: string,
+    targetStateId: string | undefined,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (signal.aborted) return false
+    const location = this.#slideLocationForScene(sceneId)
+    if (!location) return false
+    const current = this.navigator.current
+    if (targetStateId === undefined && current?.locationId === location.id) return false
+    const targetHost = interactionCapableHost(this.#hostsById.get(location.surfaceId))
+    if (
+      !targetHost?.validatePublishedPresentationState
+      || !targetHost.validatePublishedPresentationState(location.id, targetStateId)
+    ) return false
+    if (!this.#claimTerminalNavigation(signal)) return false
+    try {
+      await this.navigator.goToLocation(location.id, {
+        force: targetStateId !== undefined,
+        recordHistory: current?.locationId !== location.id,
+        signal,
+        prepareTransition: () => {
+          if (
+            !targetHost.preparePublishedPresentationState
+            || !targetHost.preparePublishedPresentationState(location.id, targetStateId)
+          ) throw new Error(`Unable to prepare Published scene state for ${location.id}`)
+        },
+      })
+      return true
+    } catch (error) {
+      targetHost.cancelPreparedPublishedPresentationState?.(location.id)
+      this.#releaseTerminalNavigationClaim()
+      throw error
+    }
+  }
+
+  async #nextScene(signal: AbortSignal): Promise<boolean> {
+    const current = this.navigator.current
+    if (!current || current.index >= current.total - 1) return false
+    const target = this.navigator.listCatalog()[current.index + 1]
+    if (!target) return false
+    if (!this.#claimTerminalNavigation(signal)) return false
+    try {
+      await this.navigator.goToLocation(target.id, { signal })
+      return true
+    } catch (error) {
+      this.#releaseTerminalNavigationClaim()
+      throw error
+    }
+  }
+
+  async #previousScene(signal: AbortSignal): Promise<boolean> {
+    const current = this.navigator.current
+    if (!current || current.index <= 0) return false
+    const target = this.navigator.listCatalog()[current.index - 1]
+    if (!target) return false
+    if (!this.#claimTerminalNavigation(signal)) return false
+    try {
+      await this.navigator.goToLocation(target.id, { signal })
+      return true
+    } catch (error) {
+      this.#releaseTerminalNavigationClaim()
+      throw error
+    }
+  }
+
+  async #replayScene(signal: AbortSignal): Promise<boolean> {
+    const current = this.navigator.current
+    if (!current) return false
+    if (!this.#claimTerminalNavigation(signal)) return false
+    try {
+      await this.navigator.goToLocation(current.locationId, {
+        force: true,
+        recordHistory: false,
+        signal,
+      })
+      return true
+    } catch (error) {
+      this.#releaseTerminalNavigationClaim()
+      throw error
+    }
+  }
+
+  async #restartCourse(signal: AbortSignal): Promise<boolean> {
+    if (!this.navigator.current || !this.#claimTerminalNavigation(signal)) return false
+    try {
+      await this.navigator.resetCourse({ signal })
+      this.#globalInteractionVisibilityState.reset()
+      return true
+    } catch (error) {
+      this.#releaseTerminalNavigationClaim()
+      throw error
+    }
+  }
+}
+
 export function createPublishedCourseSession(
   payload: PublishedCourseV2Payload,
   options: PublishedCourseSessionOptions = {},
 ): PublishedCourseSession {
   const playback = structuredClone(payload)
-  const hosts = createPublishedSurfaceHosts(playback, {
-    viewport: options.viewport,
-    resolveAsset: options.resolveAsset ?? options.services?.resolveAsset,
-    playbackPathId: options.playbackPathId,
-  })
+  const globalInteractionVisibilityState = new PublishedInteractionVisibilityState()
+  let session: PublishedInteractionCourseSession | null = null
+  const hosts = playback.surfaces.map((surface) => createPublishedSurfaceHostInternal(
+    playback,
+    surface.id,
+    {
+      viewport: options.viewport,
+      resolveAsset: options.resolveAsset ?? options.services?.resolveAsset,
+      playbackPathId: options.playbackPathId,
+      globalInteractionVisibilityState,
+      onInteractionInvalidated: (surfaceId) => {
+        session?.handleInteractionHostInvalidated(surfaceId)
+      },
+      onInteractionReady: (surfaceId) => {
+        session?.handleInteractionHostReady(surfaceId)
+      },
+    },
+  ))
   const services: SurfacePlayerServices = {
     ...defaultCourseStateServices(playback),
     ...options.services,
@@ -217,13 +584,15 @@ export function createPublishedCourseSession(
     services,
     onFailure: options.onFailure,
   })
-  let session: PublishedCourseSession | null = null
   const navigator = new MixedCourseNavigator(
     mixedCourseDefinitionFromPublished(playback),
     player,
     {
+      onBeforeNavigate: (transition) => {
+        session?.handleBeforeNavigation(transition)
+      },
       onNavigate: (state) => {
-        session?.syncActiveSlot(state.surfaceId)
+        session?.handleNavigation(state)
       },
     },
   )
@@ -232,7 +601,14 @@ export function createPublishedCourseSession(
       await navigator.navigateDeepLink(deepLink)
     }
   }
-  session = new PublishedCourseSession(player, navigator, hosts)
+  session = new PublishedInteractionCourseSession(
+    player,
+    navigator,
+    hosts,
+    playback,
+    services,
+    globalInteractionVisibilityState,
+  )
   return session
 }
 

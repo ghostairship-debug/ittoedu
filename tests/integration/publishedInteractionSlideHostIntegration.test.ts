@@ -53,6 +53,10 @@ const textStyle = {
 }
 
 interface FixtureOptions {
+  sceneALocationId?: string
+  sceneBLocationStateId?: string
+  sceneBDuplicateLocationId?: string
+  sceneBDuplicateLocationStateId?: string
   sceneAItems?: PublishedLayerItem[]
   sceneAInteractions?: InteractionRule[]
   sceneBItems?: PublishedLayerItem[]
@@ -220,6 +224,20 @@ function clickRule(
 }
 
 function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payload {
+  const sceneALocationId = options.sceneALocationId ?? LOCATION_A_ID
+  const duplicateSceneBLocations: PublishedCourseV2Payload['locations'] =
+    options.sceneBDuplicateLocationId
+      ? [{
+          id: options.sceneBDuplicateLocationId,
+          label: 'Beta duplicate location',
+          kind: 'slide-scene',
+          surfaceId: SLIDE_SURFACE_ID,
+          sceneId: SCENE_B_ID,
+          ...(options.sceneBDuplicateLocationStateId
+            ? { stateId: options.sceneBDuplicateLocationStateId }
+            : {}),
+        }]
+      : []
   const payload: PublishedCourseV2Payload = {
     format: 'h5course-published',
     formatVersion: 2,
@@ -267,7 +285,7 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
     navigationGuards: [],
     locations: [
       {
-        id: LOCATION_A_ID,
+        id: sceneALocationId,
         label: 'Alpha location',
         kind: 'slide-scene',
         surfaceId: SLIDE_SURFACE_ID,
@@ -279,7 +297,11 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         kind: 'slide-scene',
         surfaceId: SLIDE_SURFACE_ID,
         sceneId: SCENE_B_ID,
+        ...(options.sceneBLocationStateId
+          ? { stateId: options.sceneBLocationStateId }
+          : {}),
       },
+      ...duplicateSceneBLocations,
       {
         id: FLOW_LOCATION_ID,
         label: 'Flow location',
@@ -288,7 +310,7 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         blockId: 'flow-heading',
       },
     ],
-    startLocationId: LOCATION_A_ID,
+    startLocationId: sceneALocationId,
     globalLayerItems: options.globalItems ?? [],
     globalInteractions: options.globalInteractions ?? [],
     surfaces: [
@@ -499,6 +521,159 @@ describe('Published Interaction Slide host integration', () => {
     expectInteractionVisibility(renderedItem(container, otherSceneTarget.layerItemId), false)
   })
 
+  it('resets local visibility per generation while global visibility persists until course restart', async () => {
+    const localTarget = textItem('lifecycle-local-target', 40, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const globalTarget = textItem('lifecycle-global-target', 1_000, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [
+        textItem('lifecycle-reveal-trigger', 10),
+        textItem('lifecycle-replay-trigger', 20),
+        textItem('lifecycle-restart-trigger', 30),
+        localTarget,
+      ],
+      sceneAInteractions: [
+        clickRule('reveal-local', 'lifecycle-reveal-trigger', [
+          step('enter-local', motion('node.enter', localTarget.layerItemId)),
+        ]),
+        clickRule('replay-lifecycle-scene', 'lifecycle-replay-trigger', [
+          step('replay-lifecycle', { type: 'scene.replay' }),
+        ]),
+        clickRule('restart-lifecycle-course', 'lifecycle-restart-trigger', [
+          step('restart-lifecycle', { type: 'course.restart' }),
+        ]),
+      ],
+      globalItems: [scoped(globalTarget)],
+      globalInteractions: [clickRule('reveal-global', 'lifecycle-reveal-trigger', [
+        step('enter-global', motion('node.enter', globalTarget.layerItemId)),
+      ])],
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload)
+
+    renderedItem(container, 'lifecycle-reveal-trigger').click()
+    await settle()
+    expectInteractionVisibility(renderedItem(container, localTarget.layerItemId), true)
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), true)
+
+    renderedItem(container, 'lifecycle-replay-trigger').click()
+    await settle(24)
+    expectInteractionVisibility(renderedItem(container, localTarget.layerItemId), false)
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), true)
+
+    await session.goToLocation(LOCATION_B_ID)
+    await session.goToLocation(LOCATION_A_ID)
+    expectInteractionVisibility(renderedItem(container, localTarget.layerItemId), false)
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), true)
+
+    renderedItem(container, 'lifecycle-reveal-trigger').click()
+    await settle()
+    expect(animationTargets.filter((id) => id === globalTarget.layerItemId)).toHaveLength(2)
+
+    renderedItem(container, 'lifecycle-restart-trigger').click()
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+      expect(renderedItem(container, globalTarget.layerItemId).dataset.interactionVisibility)
+        .toBe('hidden')
+    })
+    expectInteractionVisibility(renderedItem(container, localTarget.layerItemId), false)
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), false)
+    expect(payload).toEqual(before)
+  })
+
+  it('cancels an active global motion before course restart commits hidden visibility', async () => {
+    const globalTarget = textItem('restart-motion-global-target', 1_000, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [
+        textItem('restart-motion-reveal', 10),
+        textItem('restart-motion-exit', 20),
+        textItem('restart-motion-trigger', 30),
+      ],
+      sceneAInteractions: [clickRule('restart-during-motion', 'restart-motion-trigger', [
+        step('restart-after-cancel', { type: 'course.restart' }),
+      ])],
+      globalItems: [scoped(globalTarget)],
+      globalInteractions: [
+        clickRule('reveal-before-restart', 'restart-motion-reveal', [
+          step('reveal-global-before-restart', motion('node.enter', globalTarget.layerItemId)),
+        ]),
+        clickRule('active-exit-before-restart', 'restart-motion-exit', [
+          step('active-global-exit', motion('node.exit', globalTarget.layerItemId, 1_000)),
+        ]),
+      ],
+    })
+    const { container, session } = await mount(payload)
+    renderedItem(container, 'restart-motion-reveal').click()
+    await settle()
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), true)
+
+    const cancel = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      writable: true,
+      value: () => ({ cancel, finished: new Promise<void>(() => undefined) }) as unknown as Animation,
+    })
+    renderedItem(container, 'restart-motion-exit').click()
+    await settle()
+    renderedItem(container, 'restart-motion-trigger').click()
+
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+      expect(renderedItem(container, globalTarget.layerItemId).dataset.interactionVisibility)
+        .toBe('hidden')
+    })
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), false)
+  })
+
+  it('preserves global visibility and restores bindings when course restart fails', async () => {
+    const globalTarget = textItem('restart-rollback-global-target', 1_000, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [
+        textItem('restart-rollback-reveal', 10),
+        textItem('restart-rollback-trigger', 20),
+      ],
+      sceneAInteractions: [clickRule('restart-rollback-rule', 'restart-rollback-trigger', [
+        step('restart-rollback-step', { type: 'course.restart' }),
+      ])],
+      globalItems: [scoped(globalTarget)],
+      globalInteractions: [clickRule('restart-rollback-reveal-rule', 'restart-rollback-reveal', [
+        step('restart-rollback-enter', motion('node.enter', globalTarget.layerItemId)),
+      ])],
+    })
+    const { container, session } = await mount(payload)
+    renderedItem(container, 'restart-rollback-reveal').click()
+    await settle()
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), true)
+
+    const resetCourse = vi.spyOn(session.player, 'resetCourse')
+      .mockRejectedValueOnce(new Error('forced course reset failure'))
+    renderedItem(container, 'restart-rollback-trigger').click()
+    await vi.waitFor(() => expect(resetCourse).toHaveBeenCalledTimes(1))
+    await settle(24)
+    resetCourse.mockRestore()
+
+    expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), true)
+    renderedItem(container, 'restart-rollback-reveal').click()
+    await settle()
+    expect(animationTargets.filter((id) => id === globalTarget.layerItemId)).toHaveLength(2)
+
+    renderedItem(container, 'restart-rollback-trigger').click()
+    await vi.waitFor(() => {
+      expect(renderedItem(container, globalTarget.layerItemId).dataset.interactionVisibility)
+        .toBe('hidden')
+    })
+    expectInteractionVisibility(renderedItem(container, globalTarget.layerItemId), false)
+  })
+
   it('maps scene.go(sceneId) to its location and cancels delayed sibling work', async () => {
     const lateTarget = textItem('terminal-late-target', 1_000, {
       playbackInitialVisibility: 'hidden',
@@ -535,6 +710,55 @@ describe('Published Interaction Slide host integration', () => {
     expectInteractionVisibility(renderedItem(container, lateTarget.layerItemId), false)
     expect(animationTargets).not.toContain(lateTarget.layerItemId)
     expect(payload).toEqual(before)
+  })
+
+  it('resolves scene.go strictly by sceneId when another location.id collides', async () => {
+    const payload = publishedFixture({
+      sceneALocationId: SCENE_B_ID,
+      sceneAItems: [textItem('collision-trigger', 10)],
+      sceneAInteractions: [clickRule('collision-rule', 'collision-trigger', [
+        step('collision-go', { type: 'scene.go', sceneId: SCENE_B_ID }),
+      ])],
+    })
+    const { container, session } = await mount(payload)
+    expect(session.navigator.current).toMatchObject({
+      locationId: SCENE_B_ID,
+      surfaceId: SLIDE_SURFACE_ID,
+    })
+
+    renderedItem(container, 'collision-trigger').click()
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    })
+
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.locationId).toBe(LOCATION_B_ID)
+    expect(root.dataset.sceneId).toBe(SCENE_B_ID)
+  })
+
+  it('admits only one local/global terminal navigation from the same click generation', async () => {
+    const payload = publishedFixture({
+      sceneAItems: [textItem('terminal-race-trigger', 10)],
+      sceneAInteractions: [clickRule('local-restart-race', 'terminal-race-trigger', [
+        step('local-restart', { type: 'course.restart' }),
+      ])],
+      globalInteractions: [clickRule('global-go-race', 'terminal-race-trigger', [
+        step('global-go', { type: 'scene.go', sceneId: SCENE_B_ID }),
+      ])],
+    })
+    const { container, session } = await mount(payload)
+    const goToLocation = vi.spyOn(session.navigator, 'goToLocation')
+    const resetCourse = vi.spyOn(session.navigator, 'resetCourse')
+
+    renderedItem(container, 'terminal-race-trigger').click()
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    })
+    await settle(40)
+
+    expect(goToLocation).toHaveBeenCalledTimes(1)
+    expect(resetCourse).not.toHaveBeenCalled()
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
   })
 
   it.each([
@@ -588,6 +812,39 @@ describe('Published Interaction Slide host integration', () => {
     expect(payload).toEqual(before)
   })
 
+  it('cancels delayed work across direct player suspend and restores one fresh binding on resume', async () => {
+    vi.useFakeTimers()
+    const target = textItem('suspend-cancel-target', 30, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [textItem('suspend-trigger', 10), target],
+      sceneAInteractions: [clickRule('suspend-slow-rule', 'suspend-trigger', [
+        step('suspend-delayed-enter', motion('node.enter', target.layerItemId), { delayMs: 100 }),
+      ])],
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload)
+
+    renderedItem(container, 'suspend-trigger').click()
+    await settle()
+    expect(await session.player.suspendSurface(SLIDE_SURFACE_ID)).toEqual({ ok: true })
+    await vi.advanceTimersByTimeAsync(200)
+    await settle()
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), false)
+    expect(animationTargets).not.toContain(target.layerItemId)
+
+    expect(await session.player.resumeSurface(SLIDE_SURFACE_ID)).toEqual({ ok: true })
+    renderedItem(container, 'suspend-trigger').click()
+    await settle()
+    await vi.advanceTimersByTimeAsync(100)
+    await settle()
+
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), true)
+    expect(animationTargets.filter((id) => id === target.layerItemId)).toHaveLength(1)
+    expect(payload).toEqual(before)
+  })
+
   it('cancels delayed work and removes its DOM on session destroy', async () => {
     vi.useFakeTimers()
     const target = textItem('destroy-cancel-target', 20, {
@@ -626,6 +883,7 @@ describe('Published Interaction Slide host integration', () => {
       videoItem('video-trigger', 30),
       controllerItem('controller-trigger', 40),
       textItem('pass-through-trigger', 50, { hitPolicy: 'pass-through' }),
+      textItem('surface-owned-trigger', 60, { hitPolicy: 'surface' }),
     ]
     const payload = publishedFixture({
       sceneAItems: [...ownedItems, ownedTarget],
@@ -636,10 +894,9 @@ describe('Published Interaction Slide host integration', () => {
       )),
     })
     const { container } = await mount(payload, diagnostics)
-    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
-    let rootGestureCount = 0
-    root.addEventListener('click', () => {
-      rootGestureCount += 1
+    let outerClickCount = 0
+    container.addEventListener('click', () => {
+      outerClickCount += 1
     })
 
     for (const item of ownedItems) {
@@ -650,7 +907,7 @@ describe('Published Interaction Slide host integration', () => {
     }
     await settle()
 
-    expect(rootGestureCount).toBe(ownedItems.length)
+    expect(outerClickCount).toBe(ownedItems.length)
     expectInteractionVisibility(renderedItem(container, ownedTarget.layerItemId), false)
     expect(animationTargets).not.toContain(ownedTarget.layerItemId)
     const unavailable = diagnostics.filter((diagnostic) => diagnostic.code === 'bind-unavailable')
@@ -712,6 +969,264 @@ describe('Published Interaction Slide host integration', () => {
     const materialized = renderedItem(container, stateTarget.layerItemId)
     expect(materialized.style.left).toBe('333px')
     expect(materialized.style.opacity).toBe('0.4')
+
+    await session.goToLocation(LOCATION_A_ID)
+    await session.goToLocation(LOCATION_B_ID)
+    expect(root.dataset.presentationStateId).toBe('state-base')
+    expect(root.style.backgroundColor).toMatch(/#f8fafc|rgb\(248,\s*250,\s*252\)/)
+    expect(container.querySelector(`[data-slide-layer-item="${stateTarget.layerItemId}"]`)).toBeNull()
+    expect(payload).toEqual(before)
+  })
+
+  it('enters the authored initial state when scene.go omits targetStateId', async () => {
+    const payload = publishedFixture({
+      sceneBLocationStateId: 'state-linked-from-location',
+      sceneAItems: [textItem('initial-state-trigger', 10)],
+      sceneAInteractions: [clickRule('go-to-authored-initial', 'initial-state-trigger', [
+        step('go-without-state', { type: 'scene.go', sceneId: SCENE_B_ID }),
+      ])],
+      sceneBPresentation: {
+        initialStateId: 'state-authored-initial',
+        states: [
+          {
+            id: 'state-authored-initial',
+            name: 'Authored initial',
+            backgroundColor: '#123456',
+            layerItemOverrides: {},
+          },
+          {
+            id: 'state-linked-from-location',
+            name: 'Location-linked state',
+            backgroundColor: '#abcdef',
+            layerItemOverrides: {},
+          },
+        ],
+      },
+    })
+    const { container, session } = await mount(payload)
+
+    renderedItem(container, 'initial-state-trigger').click()
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    })
+
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.presentationStateId).toBe('state-authored-initial')
+    expect(root.style.backgroundColor).toMatch(/#123456|rgb\(18,\s*52,\s*86\)/)
+  })
+
+  it('forces same-location scene.go to materialize its explicit targetStateId', async () => {
+    const target = textItem('same-location-state-target', 20)
+    const duplicateLocationId = 'location-beta-alternate'
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const payload = publishedFixture({
+      sceneBDuplicateLocationId: duplicateLocationId,
+      sceneBItems: [
+        textItem('same-location-state-trigger', 10),
+        textItem('same-location-noop-trigger', 15),
+        target,
+      ],
+      sceneBInteractions: [
+        clickRule(
+          'same-location-state-rule',
+          'same-location-state-trigger',
+          [step('same-location-state-step', {
+            type: 'scene.go',
+            sceneId: SCENE_B_ID,
+            targetStateId: 'same-location-revealed',
+          })],
+        ),
+        clickRule('same-location-noop-rule', 'same-location-noop-trigger', [
+          step('same-location-noop-step', { type: 'scene.go', sceneId: SCENE_B_ID }),
+        ]),
+      ],
+      sceneBPresentation: {
+        initialStateId: 'same-location-base',
+        states: [
+          {
+            id: 'same-location-base',
+            name: 'Base',
+            layerItemOverrides: { [target.layerItemId]: { visible: false } },
+          },
+          {
+            id: 'same-location-revealed',
+            name: 'Revealed',
+            layerItemOverrides: { [target.layerItemId]: { visible: true } },
+          },
+        ],
+      },
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload, diagnostics)
+    await session.goToLocation(duplicateLocationId)
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.presentationStateId).toBe('same-location-base')
+    expect(container.querySelector(`[data-slide-layer-item="${target.layerItemId}"]`)).toBeNull()
+
+    renderedItem(container, 'same-location-state-trigger').click()
+    await vi.waitFor(() => {
+      expect(root.dataset.presentationStateId).toBe('same-location-revealed')
+    })
+
+    expect(session.navigator.current?.locationId).toBe(duplicateLocationId)
+    expect(renderedItem(container, target.layerItemId)).toBeTruthy()
+
+    const goToLocation = vi.spyOn(session.navigator, 'goToLocation')
+    renderedItem(container, 'same-location-noop-trigger').click()
+    await settle()
+    expect(goToLocation).not.toHaveBeenCalled()
+    expect(session.navigator.current?.locationId).toBe(duplicateLocationId)
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      code: 'navigation-failed',
+      ruleId: 'same-location-noop-rule',
+      stepId: 'same-location-noop-step',
+    }))
+
+    await session.navigator.back()
+    expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+    expect(payload).toEqual(before)
+  })
+
+  it('clears a prepared target state when navigation fails before location render', async () => {
+    const target = textItem('rollback-state-target', 20)
+    const remountTarget = textItem('rollback-remount-target', 30, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [
+        textItem('rollback-state-trigger', 10),
+        textItem('rollback-remount-trigger', 15),
+        remountTarget,
+      ],
+      sceneAInteractions: [
+        clickRule('rollback-state-rule', 'rollback-state-trigger', [
+          step('rollback-state-step', {
+            type: 'scene.go',
+            sceneId: SCENE_B_ID,
+            targetStateId: 'rollback-revealed',
+          }),
+        ]),
+        clickRule('rollback-remount-rule', 'rollback-remount-trigger', [
+          step('rollback-remount-step', motion('node.enter', remountTarget.layerItemId)),
+        ]),
+      ],
+      sceneBItems: [target],
+      sceneBPresentation: {
+        initialStateId: 'rollback-base',
+        states: [
+          {
+            id: 'rollback-base',
+            name: 'Base',
+            layerItemOverrides: { [target.layerItemId]: { visible: false } },
+          },
+          {
+            id: 'rollback-revealed',
+            name: 'Revealed',
+            layerItemOverrides: { [target.layerItemId]: { visible: true } },
+          },
+        ],
+      },
+    })
+    const { container, session } = await mount(payload)
+    const setLocation = vi.spyOn(session.player, 'setSurfaceLocation')
+      .mockRejectedValueOnce(new Error('forced location failure'))
+
+    renderedItem(container, 'rollback-state-trigger').click()
+    await vi.waitFor(() => expect(setLocation).toHaveBeenCalledTimes(1))
+    await settle(24)
+    setLocation.mockRestore()
+    expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+
+    renderedItem(container, 'rollback-remount-trigger').click()
+    await settle()
+    expectInteractionVisibility(renderedItem(container, remountTarget.layerItemId), true)
+
+    await session.goToLocation(LOCATION_B_ID)
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.presentationStateId).toBe('rollback-base')
+    expect(container.querySelector(`[data-slide-layer-item="${target.layerItemId}"]`)).toBeNull()
+  })
+
+  it('does not let an aborted queued targetState request contaminate an earlier external navigation', async () => {
+    const target = textItem('queued-state-target', 20)
+    const payload = publishedFixture({
+      sceneAItems: [textItem('queued-state-trigger', 10)],
+      sceneAInteractions: [clickRule('queued-state-rule', 'queued-state-trigger', [
+        step('queued-state-step', {
+          type: 'scene.go',
+          sceneId: SCENE_B_ID,
+          targetStateId: 'queued-revealed',
+        }),
+      ])],
+      sceneBItems: [target],
+      sceneBPresentation: {
+        initialStateId: 'queued-base',
+        states: [
+          {
+            id: 'queued-base',
+            name: 'Base',
+            layerItemOverrides: { [target.layerItemId]: { visible: false } },
+          },
+          {
+            id: 'queued-revealed',
+            name: 'Revealed',
+            layerItemOverrides: { [target.layerItemId]: { visible: true } },
+          },
+        ],
+      },
+    })
+    const { container, session } = await mount(payload)
+    let externalNavigation: Promise<unknown> | null = null
+    container.addEventListener('click', (event) => {
+      const targetElement = event.target as Element | null
+      if (!targetElement?.closest('[data-slide-layer-item="queued-state-trigger"]')) return
+      externalNavigation = session.goToLocation(LOCATION_B_ID)
+    })
+
+    renderedItem(container, 'queued-state-trigger').click()
+    await vi.waitFor(() => expect(externalNavigation).not.toBeNull())
+    await externalNavigation
+    await settle(24)
+
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.presentationStateId).toBe('queued-base')
+    expect(container.querySelector(`[data-slide-layer-item="${target.layerItemId}"]`)).toBeNull()
+  })
+
+  it('rejects an unknown scene.go targetStateId without navigating or hiding the failure', async () => {
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const payload = publishedFixture({
+      sceneAItems: [textItem('invalid-state-trigger', 10)],
+      sceneAInteractions: [clickRule('invalid-state-rule', 'invalid-state-trigger', [
+        step('invalid-state-step', {
+          type: 'scene.go',
+          sceneId: SCENE_B_ID,
+          targetStateId: 'missing-state',
+        }),
+      ])],
+      sceneBPresentation: {
+        initialStateId: 'only-state',
+        states: [{ id: 'only-state', name: 'Only state', layerItemOverrides: {} }],
+      },
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload, diagnostics)
+
+    renderedItem(container, 'invalid-state-trigger').click()
+    await settle(24)
+
+    expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.locationId).toBe(LOCATION_A_ID)
+    expect(root.dataset.sceneId).toBe(SCENE_A_ID)
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      phase: 'execute',
+      code: 'navigation-failed',
+      ruleId: 'invalid-state-rule',
+      stepId: 'invalid-state-step',
+      interactionType: 'scene.go',
+    }))
     expect(payload).toEqual(before)
   })
 })

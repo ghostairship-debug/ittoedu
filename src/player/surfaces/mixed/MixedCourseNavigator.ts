@@ -45,6 +45,15 @@ export interface MixedNavigationTransition {
   forced: boolean
 }
 
+export interface MixedNavigationRequestOptions {
+  recordHistory?: boolean
+  force?: boolean
+  /** Checked when queued work begins; later teardown may abort it without cancelling its own transition. */
+  signal?: AbortSignal
+  /** Internal request-local preparation after the dequeue guard and before host mutation. */
+  prepareTransition?: () => void
+}
+
 export interface MixedCourseProgress {
   index: number
   total: number
@@ -78,6 +87,13 @@ function assertStableId(id: string, label: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)) {
     throw new Error(`${label} must be a stable non-empty id`)
   }
+}
+
+function assertNavigationNotAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return
+  const error = new Error('Mixed course navigation was aborted before it began')
+  error.name = 'AbortError'
+  throw error
 }
 
 export function mixedCourseDefinitionFromPublished(
@@ -235,11 +251,13 @@ export class MixedCourseNavigator {
 
   async goToLocation(
     locationId: string,
-    options: { recordHistory?: boolean; force?: boolean } = {},
+    options: MixedNavigationRequestOptions = {},
   ): Promise<MixedNavigationState> {
     return this.#enqueue(async () => {
+      assertNavigationNotAborted(options.signal)
       const location = this.#locationMap.get(locationId)
       if (!location) throw new Error(`Unknown mixed-course location: ${locationId}`)
+      if (this.#current?.id === location.id && options.force !== true) return this.#state()
       return this.#transitionTo(location, options)
     })
   }
@@ -284,8 +302,9 @@ export class MixedCourseNavigator {
     })
   }
 
-  async resetCourse(): Promise<MixedNavigationState> {
+  async resetCourse(options: Pick<MixedNavigationRequestOptions, 'signal'> = {}): Promise<MixedNavigationState> {
     return this.#enqueue(async () => {
+      assertNavigationNotAborted(options.signal)
       const target = this.#startLocation()
       await this.#notifyBeforeNavigate(target, true)
       const results = await this.#player.resetCourse()
@@ -299,7 +318,7 @@ export class MixedCourseNavigator {
 
   async #transitionTo(
     location: MixedLocationEntry,
-    options: { recordHistory?: boolean; force?: boolean },
+    options: MixedNavigationRequestOptions,
     notifyBeforeNavigate = true,
   ): Promise<MixedNavigationState> {
     const previous = this.#current
@@ -310,6 +329,7 @@ export class MixedCourseNavigator {
     }
     const activation = await this.#player.activateSurface(location.surfaceId)
     if (!activation.ok) throw activation.failure?.error ?? new Error('Surface activation failed')
+    options.prepareTransition?.()
     const located = await this.#player.setSurfaceLocation?.(location.surfaceId, location.id)
     if (located && !located.ok) throw located.failure?.error ?? new Error('Surface location failed')
     if (previous && options.recordHistory !== false) this.#history.push(previous.id)

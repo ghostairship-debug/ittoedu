@@ -226,4 +226,44 @@ describe('MixedCourseNavigator onBeforeNavigate', () => {
       forced: true,
     })
   })
+
+  it('rejects an aborted queued request before its navigation lifecycle begins', async () => {
+    const player = new RecordingPlayer()
+    let holdNext = false
+    let enterHeldTransition!: () => void
+    let releaseHeldTransition!: () => void
+    const heldTransitionEntered = new Promise<void>((resolve) => {
+      enterHeldTransition = resolve
+    })
+    const heldTransition = new Promise<void>((resolve) => {
+      releaseHeldTransition = resolve
+    })
+    const navigator = new MixedCourseNavigator(course, player, {
+      onBeforeNavigate: async () => {
+        player.calls.push('before')
+        if (!holdNext) return
+        enterHeldTransition()
+        await heldTransition
+      },
+    })
+    await navigator.start()
+    player.calls.length = 0
+    holdNext = true
+
+    const first = navigator.goToLocation('slide-two')
+    await heldTransitionEntered
+    const controller = new AbortController()
+    const stale = navigator.goToLocation('flow-page', { signal: controller.signal })
+    controller.abort()
+    releaseHeldTransition()
+
+    await first
+    await expect(stale).rejects.toMatchObject({ name: 'AbortError' })
+    expect(player.calls).toEqual([
+      'before',
+      'activate:surface-slide',
+      'set:surface-slide:slide-two',
+    ])
+    expect(navigator.current?.locationId).toBe('slide-two')
+  })
 })

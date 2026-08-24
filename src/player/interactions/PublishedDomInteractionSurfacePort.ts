@@ -257,6 +257,12 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     this.#applyAllVisibility()
   }
 
+  /** Synchronously restore every active motion before a session generation commits new state. */
+  cancelActiveMotions(): void {
+    if (this.#destroyed) return
+    this.#cancelMotions()
+  }
+
   bindNodeClick(nodeId: string, listener: () => void): (() => void) | null {
     if (!this.active) return null
     const handle = this.#handles.get(nodeId)

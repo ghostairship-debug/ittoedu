@@ -393,9 +393,8 @@ function presentationStateIdForLocation(
 function exactPresentationStateId(
   scene: PublishedSlideScene,
   stateId: string | undefined,
-  location: Extract<CourseLocation, { kind: 'slide-scene' }>,
 ): string | undefined {
-  if (stateId === undefined) return presentationStateIdForLocation(scene, location)
+  if (stateId === undefined) return scene.presentation?.initialStateId
   if (!scene.presentation?.states.some((state) => state.id === stateId)) {
     throw new Error(`找不到 Slide 呈现状态：${stateId}`)
   }
@@ -476,11 +475,31 @@ export class SlidePublishedAdapter implements SurfaceHost {
       const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
       this.#preparedPresentationState = {
         locationId,
-        stateId: exactPresentationStateId(scene, stateId, location),
+        stateId: exactPresentationStateId(scene, stateId),
       }
       return true
     } catch {
       return false
+    }
+  }
+
+  validatePublishedPresentationState(
+    locationId: string,
+    stateId: string | undefined,
+  ): boolean {
+    try {
+      const location = resolveSlideLocation(this.#payload, this.id, locationId)
+      const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
+      exactPresentationStateId(scene, stateId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  cancelPreparedPublishedPresentationState(locationId: string): void {
+    if (this.#preparedPresentationState?.locationId === locationId) {
+      this.#preparedPresentationState = null
     }
   }
 
