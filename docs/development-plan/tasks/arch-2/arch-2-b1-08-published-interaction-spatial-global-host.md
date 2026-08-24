@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 09:46 Asia/Shanghai / —`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `f3ed789`
-- Claim commit: `pending`
+- Claim commit: `67141c5`
 - Context Pack + manifest hash | bootstrap-manual: `feature:interactions; freshly regenerated at f3ed789; manual Spatial renderer/lifecycle/test recon by three read-only workers`
 - Freshness / relevant dirty inputs: `clean tree at claim; SpatialSurfaceHost/model and SpatialPublishedAdapter exclusively locked by Coordinator`
 - Depends on: `arch-2-b1-07-published-interaction-flow-global-host done`
