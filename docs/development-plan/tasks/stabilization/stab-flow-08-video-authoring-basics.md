@@ -13,16 +13,16 @@
 - Validation budget: 18 minutes
 - Reviewer budget: 1
 - Evidence reuse: flow-07 的 Editor/Player layout 证据直接复用；本卡 focused 结果绑定 product commit。仅文档/generated 变化时复用，命中下列媒体作者实现、命令或 focused 测试时失效。
-- Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PropertiesTab.tsx; src/renderer/course/flowEditorCommands.ts; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowMediaBlockEdit.test.ts
+- Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PropertiesTab.tsx; src/renderer/course/flowEditorCommands.ts; src/renderer/store/editorStore.ts; src/renderer/course/flowEditorSlice.ts; src/renderer/project/courseProjectArchive.ts; src/renderer/project/v9AssetAdapter.ts; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowMediaBlockEdit.test.ts
 - Task ID: stab-flow-08-video-authoring-basics
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: draft
+- Status: claimed
 - Owner / Reviewer / Integrator: Flow Media Authoring Worker / independent media-authoring reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: assigned at claim
-- Baseline HEAD: record at claim
-- Context: inspect current media fields and authoring commands after flow-07
-- Freshness / relevant dirty inputs: verify FlowWorkspace/Properties media diffs at claim
+- Claimed at / released at: 2026-08-25 / not released
+- Worktree / branch: shared integration workspace with FlowWorkspace/Properties media firewall / codex/architecture-stabilization
+- Baseline HEAD: `96a0c74` (media width parity closed at `01eb6b0`; Spatial Properties changes are isolated by type branch)
+- Context: exact-source Bootstrap confirmed image/video already use real sidecar URLs and existing update/replace/reorder/history commands, while the Editor video lacks controls and the Properties alt-text entry is image-only. Reuse flow-07 layout evidence; do not add a second media command path.
+- Freshness / relevant dirty inputs: FlowWorkspace/Properties and both focused test paths were clean at claim. Baseline focused passed `12/12` but had no assertion for video controls, video alt authoring, undo or edited-video archive reopen.
 - Depends on: stab-flow-07-media-layout-widths
 - Blocks: stab-wave-c-flow-authoring
 - Retry count: 0
@@ -63,4 +63,3 @@ Flow 文档流中的图片和视频具备当前 V9 合同已经能够表达的�
 - Rollback: 独立 revert 媒体 UI/命令/测试提交；现有 persisted fields 无迁移。
 - Semantic index impact: canonical-update if current-contract authoring capability becomes newly reachable
 - Generated refresh: defer-to-wave-gate
-

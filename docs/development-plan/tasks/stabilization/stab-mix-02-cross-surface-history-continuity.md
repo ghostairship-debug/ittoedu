@@ -13,16 +13,16 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: Bind the one cross-Surface integration result to the product commit; docs/task-board/generated-only changes reuse it unless the listed Store/Spatial-session/spec paths change.
-- Invalidating paths: `src/renderer/store/editorStore.ts`; `src/renderer/course/spatialEditorCommands.ts`; `tests/integration/mixedCrossSurfaceHistory.test.tsx`
+- Invalidating paths: `src/renderer/store/editorStore.ts`; `src/renderer/course/courseAuthoringSession.ts`; `src/renderer/course/resourceAwareAuthoringHistory.ts`; `src/renderer/authoring/slideAuthoringBackend.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/course/flowEditorSlice.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/project/courseProjectArchive.ts`; `tests/integration/mixedCrossSurfaceHistory.test.tsx`
 - Task ID: `stab-mix-02-cross-surface-history-continuity`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Mixed History Worker / Canonical History Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `isolated worker worktree; integration on codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (refresh after Wave A)
-- Context Pack + manifest hash | bootstrap-manual: `bootstrap-manual`
-- Freshness / relevant dirty inputs: Root audit/plan/generated changes are read-only; characterize current Store session opening at claim.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Store/History single-writer firewall / codex/architecture-stabilization`
+- Baseline HEAD: `96a0c74` (atomic Spatial properties closed at `d2e40d4`)
+- Context Pack + manifest hash | bootstrap-manual: exact-source Bootstrap traced `activateCourseLocation` through fresh Surface-session creation, canonical/sidecar history and save/reopen boundaries; repo-index refresh remains deferred to the Wave B gate.
+- Freshness / relevant dirty inputs: worktree and the allowed Store/spec paths were clean at claim. Reproduction confirmed navigation preserves canonical content but constructs the returning Spatial session with empty history and clears companion resource stacks; camera changes remain Session-only.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: Reusing stale Surface state can overwrite newer canonical content; creating another history or persisting camera would create duplicate truth.
@@ -64,4 +64,3 @@ After a Spatial edit, switching to Slide and returning to that Spatial surface p
 - Stop condition: camera product-policy change, App/save ownership or contract change requires re-scope.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
-
