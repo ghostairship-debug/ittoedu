@@ -30,7 +30,9 @@ export interface RuntimeInspectorContentField {
   readonly metadata?: RuntimeSourceReadonly<
     NonNullable<CourseRuntimeContent['metadata']>[string]
   >
-  readonly target: CourseRuntimeContentTextTarget
+  /** Null when a schema-valid legacy key cannot form a stable authoring path. */
+  readonly target: CourseRuntimeContentTextTarget | null
+  readonly readonlyReason?: string
 }
 
 export interface AvailableRuntimeInspectorAuthoringView {
@@ -122,12 +124,12 @@ export function selectRuntimeInspectorAuthoringView(
   const metadata = source.runtime.content.metadata
   const contentFields = Object.entries(source.runtime.content.values).map(
     ([key, value]): RuntimeInspectorContentField => {
-      const fieldMetadata = metadata?.[key]
-      return deepFreeze({
-        key,
-        value,
-        ...(fieldMetadata ? { metadata: structuredClone(fieldMetadata) } : {}),
-        target: captureCourseRuntimeContentTextTarget({
+      const fieldMetadata = metadata && Object.hasOwn(metadata, key)
+        ? metadata[key]
+        : undefined
+      let target: CourseRuntimeContentTextTarget | null = null
+      try {
+        target = captureCourseRuntimeContentTextTarget({
           sessionToken: input.sessionToken,
           projectId: source.target.projectId,
           surfaceId: source.target.surfaceId,
@@ -137,7 +139,20 @@ export function selectRuntimeInspectorAuthoringView(
           itemId: source.target.itemId,
           contentKey: key,
           initialValue: value,
-        }),
+        })
+      } catch {
+        // Course Project V9 permits legacy record keys that the stable B1-10
+        // authoring address deliberately rejects. Keep them visible/read-only
+        // instead of crashing the whole Properties inspector.
+      }
+      return deepFreeze({
+        key,
+        value,
+        ...(fieldMetadata ? { metadata: structuredClone(fieldMetadata) } : {}),
+        target,
+        ...(!target
+          ? { readonlyReason: '该文案键无法生成稳定作者地址，只读显示' }
+          : {}),
       })
     },
   )

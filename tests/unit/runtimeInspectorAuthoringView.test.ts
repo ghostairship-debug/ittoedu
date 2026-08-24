@@ -300,7 +300,7 @@ describe('selectRuntimeInspectorAuthoringView', () => {
         courseTarget: { itemId: source.itemId },
       },
     })
-    expect(view.contentFields[0]!.target.courseTarget.authoringAddress).toContain(
+    expect(view.contentFields[0]!.target!.courseTarget.authoringAddress).toContain(
       `field=${encodeURIComponent(courseRuntimeContentValueAuthoringField(CONTENT_KEY))}`,
     )
     expect(view.contentFields[1]).not.toHaveProperty('metadata')
@@ -326,6 +326,38 @@ describe('selectRuntimeInspectorAuthoringView', () => {
     expect(view.contentFields[0]!.metadata).not.toBe(
       persisted.runtime.content.metadata?.[CONTENT_KEY],
     )
+  })
+
+  it('keeps schema-valid legacy content keys visible and read-only without inherited metadata', () => {
+    const source = fixture('global')
+    const project = structuredClone(source.project)
+    const entry = project.globalLayerItems[0]?.item
+    if (entry?.kind !== 'runtime') throw new Error('expected Runtime')
+    const excessiveKey = 'x'.repeat(257)
+    entry.runtime.content = {
+      values: JSON.parse(JSON.stringify({
+        constructor: '构造器文案',
+        '': '空键文案',
+        [excessiveKey]: '长键文案',
+        safe: '安全文案',
+      })) as Record<string, string>,
+      metadata: {},
+    }
+    const parsed = courseProjectDocumentSchema.parse(project)
+    const view = select({ ...source, project: parsed })
+    if (view.availability !== 'available') throw new Error('expected view')
+
+    for (const key of ['constructor', '', excessiveKey]) {
+      expect(view.contentFields.find((field) => field.key === key)).toMatchObject({
+        key,
+        target: null,
+        readonlyReason: expect.stringContaining('只读'),
+      })
+    }
+    expect(view.contentFields.find((field) => field.key === 'constructor'))
+      .not.toHaveProperty('metadata')
+    expect(view.contentFields.find((field) => field.key === 'safe')?.target)
+      .toMatchObject({ contentKey: 'safe', initialValue: '安全文案' })
   })
 
   it('uses named-state effective lock while keeping one inspector document key', () => {
