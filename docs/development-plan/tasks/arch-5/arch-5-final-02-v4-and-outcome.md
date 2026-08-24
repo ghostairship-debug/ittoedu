@@ -14,9 +14,9 @@
 - Invalidating paths: all tracked product source, tests, fixtures, package/lockfile, TypeScript/Vite/Vitest/Playwright/Electron/build/release config, contracts, capability generator inputs, generated capability bundle, repo-index semantic/golden/generator/query/config and representative fixture manifest; final docs/task/generated/output-only closure changes invalidate only their own checks
 - Task ID: `arch-5-final-02-v4-and-outcome`
 - Phase / wave: `ARCH-5 / final candidate 2`
-- Status: `claimed`
+- Status: `rolled-back`
 - Owner / Reviewer / Integrator: `Coordinator / independent pipeline reviewer + independent representative-outcome reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T20:49:06+08:00 / pending`
+- Claimed at / released at: `2026-08-24T20:49:06+08:00 / 2026-08-24T20:54:34+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `b3558fa`; product candidate `3bcbebf`
 - Context: the deterministic capability bundle now includes the reviewed ARCH-4 print-source SHA256; all prior implementation tasks are terminal
@@ -24,7 +24,7 @@
 - Depends on: `arch-5-final-01-refresh-ai-provenance` done and independently approved
 - Blocks: ARCH-5 closure and active goal completion
 - Risk statement: this is the only broad verification/build/package run for candidate 2. Failures must remain visible and must not be erased through an unrecorded retry or source repair inside the card.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / two deterministic full-Vitest behavior failures`
 
 ## Product outcome
 
@@ -98,7 +98,11 @@ One fixed Course Project V9 candidate passes repository-wide engineering gates, 
 
 ## Result evidence
 
-- Pending the single candidate-2 V4, package/visual evidence, two independent reviews and exact-state generated closure.
+- The single candidate-2 `npm run verify` passed capability freshness and all three TypeScript projects, then stopped in complete Vitest; Playwright/build/package did not run.
+- Complete Vitest result: `248 passed / 2 failed` files and `1763 passed / 2 failed` tests in `211.19s`.
+- Failure 1: `publishedInteractionSlideHostIntegration.test.ts` expected failed navigation to call `setSurfaceLocation` once, but observed twice.
+- Failure 2: `batchMediaAndInsertion.test.ts` expected the insertion tab to remain `elements` after creating a missing teacher controller, but state ended at `properties`.
+- Candidate 2 is retained as failed audit evidence and is not rerun. Each failed user behavior is assigned to a separate narrow diagnosis/fix task before another final candidate.
 
 ## Ready checklist（Coordinator）
 
