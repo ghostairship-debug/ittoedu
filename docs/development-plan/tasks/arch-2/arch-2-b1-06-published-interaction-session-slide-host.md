@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 08:20 Asia/Shanghai / active`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `2380f8b`
-- Claim commit: `pending`
+- Claim commit: `0c05015`
 - Context Pack + manifest hash | bootstrap-manual: `feature:interactions; fresh/high/safe-for-S2; source e9f45f95, semantic 2616aecc, config 103c4aa4, tool 0895bc33; manual Published host recon by three read-only workers`
 - Freshness / relevant dirty inputs: `clean tree at claim; Published session/navigation hotspot exclusively locked by Coordinator; Slide host and new DOM port assigned as one implementation track`
 - Depends on: `arch-2-b1-03-published-interaction-controller done; arch-2-b1-05-interaction-template-professional-edit-integration done`
