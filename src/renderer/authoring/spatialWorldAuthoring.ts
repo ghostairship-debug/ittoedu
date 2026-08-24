@@ -1,4 +1,6 @@
-import { MIN_NODE_SIZE } from '../../shared/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
+import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
+import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
 import type {
@@ -233,12 +235,17 @@ function layerHits(session: SpatialAuthoringSession): V9SpatialHitTarget[] {
   return adaptV9SpatialEditorLayers(editorView(session).layers)
 }
 
+function authoringLayerHits(session: SpatialAuthoringSession): V9SpatialHitTarget[] {
+  if (session.scope === 'global') return layerHits(session)
+  return layerHits(session).filter((target) => target.nativeType !== 'teacher-controller')
+}
+
 function hitAtPointer(
   session: SpatialAuthoringSession,
   viewport: StageRect,
   pointer: StagePoint,
 ): V9SpatialHitTarget | null {
-  return hitTestV9SpatialLayerItems(layerHits(session), {
+  return hitTestV9SpatialLayerItems(authoringLayerHits(session), {
     viewport: pointerToSpatialViewport(pointer, viewport),
     world: pointerToSpatialWorld(pointer, viewport, session.sessionCamera),
   })
@@ -325,7 +332,7 @@ function viewportFrames(session: SpatialAuthoringSession): Map<string, SpatialEd
 
 function writableViewportTransforms(session: SpatialAuthoringSession): SpatialEditorWorldTransform[] {
   const frames = viewportFrames(session)
-  const hits = new Map(layerHits(session).map((target) => [target.layerItemId, target]))
+  const hits = new Map(authoringLayerHits(session).map((target) => [target.layerItemId, target]))
   return session.selection.selectionIds.flatMap((id) => {
     const frame = frames.get(id)
     const hit = hits.get(id)
@@ -334,8 +341,32 @@ function writableViewportTransforms(session: SpatialAuthoringSession): SpatialEd
   })
 }
 
+function constrainTeacherControllerViewportTransforms(
+  session: SpatialAuthoringSession,
+  nodes: readonly SpatialEditorWorldTransform[],
+): SpatialEditorWorldTransform[] {
+  const controllers = new Map(session.history.present.globalLayerItems.flatMap((entry) => (
+    isCourseTeacherControllerLayerItem(entry.item)
+      ? [[entry.item.layerItemId, entry.item] as const]
+      : []
+  )))
+  return nodes.map((node) => {
+    const item = controllers.get(node.layerItemId)
+    if (!item) return node
+    const frame = constrainTeacherControllerAuthoringFrame(
+      item.content.data,
+      node,
+      node.rotation,
+      { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+    )
+    return { ...node, ...frame }
+  })
+}
+
 function makeTargets(session: SpatialAuthoringSession): SpatialAuthoringTarget[] {
+  const hits = new Set(authoringLayerHits(session).map((target) => target.layerItemId))
   return session.selection.selectionIds.flatMap((layerItemId) => {
+    if (!hits.has(layerItemId)) return []
     try {
       return [makeSpatialAuthoringTarget(session, layerItemId)]
     } catch {
@@ -350,7 +381,7 @@ function overlayItemsFromSelection(
   space: 'world' | 'viewport',
 ): StageRect[] {
   const previewById = new Map((preview ?? []).map((node) => [node.layerItemId, node]))
-  const hits = new Map(layerHits(session).map((target) => [target.layerItemId, target]))
+  const hits = new Map(authoringLayerHits(session).map((target) => [target.layerItemId, target]))
   return session.selection.selectionIds.flatMap((id) => {
     const hit = hits.get(id)
     if (!hit || hit.coordinateSpace !== space) return []
@@ -507,7 +538,7 @@ function hitViewportHandle(
   session: SpatialAuthoringSession,
   viewportPoint: StagePoint,
 ): { kind: 'resize'; direction: StageResizeHandleDirection } | null {
-  const hits = new Map(layerHits(session).map((target) => [target.layerItemId, target]))
+  const hits = new Map(authoringLayerHits(session).map((target) => [target.layerItemId, target]))
   const selected = session.selection.selectionIds.flatMap((id) => {
     const target = hits.get(id)
     if (!target || target.coordinateSpace !== 'viewport') return []
@@ -781,20 +812,20 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
     if (!gesture) return resultOf(host, viewport)
 
     if (gesture.type === 'viewport-move') {
-      preview = previewMove({
+      preview = constrainTeacherControllerViewportTransforms(session, previewMove({
         type: 'move',
         startWorld: gesture.startViewport,
         nodes: gesture.nodes,
-      }, viewportPoint)
+      }, viewportPoint))
       return resultOf(host, viewport, { preview })
     }
     if (gesture.type === 'viewport-resize') {
-      preview = previewResize({
+      preview = constrainTeacherControllerViewportTransforms(session, previewResize({
         type: 'resize',
         direction: gesture.direction,
         startWorld: gesture.startViewport,
         nodes: gesture.nodes,
-      }, viewportPoint)
+      }, viewportPoint))
       return resultOf(host, viewport, { preview })
     }
     if (gesture.type === 'move') {
@@ -871,7 +902,7 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
 
     if (active.type === 'viewport-move' || active.type === 'viewport-resize') {
       const viewportPoint = pointerToSpatialViewport(client, viewport)
-      const next = active.type === 'viewport-move'
+      const rawNext = active.type === 'viewport-move'
         ? previewMove({
             type: 'move',
             startWorld: active.startViewport,
@@ -883,6 +914,7 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
             startWorld: active.startViewport,
             nodes: active.nodes,
           }, viewportPoint)
+      const next = constrainTeacherControllerViewportTransforms(session, rawNext)
       preview = null
       previewCamera = null
       const command = applyCommand(host, (current) =>
@@ -906,6 +938,16 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
       }),
     )
     return resultOf(host, viewport, { command, preview: undefined })
+  }
+
+  const pointerCancel = (
+    _pointer: SpatialWorldAuthoringPointer,
+    viewport: StageRect,
+  ): SpatialWorldAuthoringResult => {
+    gesture = null
+    preview = null
+    previewCamera = null
+    return resultOf(host, viewport, { preview: undefined, previewCamera: undefined })
   }
 
   const doubleClick = (
@@ -1028,6 +1070,7 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
     pointerDown,
     pointerMove,
     pointerUp,
+    pointerCancel,
     doubleClick,
     transformSelection,
     zoomSession,
@@ -1043,7 +1086,7 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
 }
 
 export function listSpatialWorldHitTargets(session: SpatialAuthoringSession): V9SpatialHitTarget[] {
-  return layerHits(session)
+  return authoringLayerHits(session)
 }
 
 function sameJson(left: unknown, right: unknown): boolean {

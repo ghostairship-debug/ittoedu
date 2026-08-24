@@ -66,9 +66,11 @@ import {
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
+  isCourseTeacherControllerLayerItem,
   synchronizeCourseTeacherControllerControls,
   synchronizeTeacherControllerControls,
 } from '../../shared/teacherControllerConsistency'
+import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -751,6 +753,28 @@ const V9_SPECIALIZED_NODE_PATCH_KEYS = new Set([
 
 function v9NodePatchNeedsRoundTrip(patch: DeepPartial<SceneNode>): boolean {
   return Object.keys(patch).some((key) => !V9_SPECIALIZED_NODE_PATCH_KEYS.has(key))
+}
+
+function v9NodePatchTouchesFrame(patch: DeepPartial<SceneNode>): boolean {
+  return patch.x !== undefined ||
+    patch.y !== undefined ||
+    patch.width !== undefined ||
+    patch.height !== undefined ||
+    patch.rotation !== undefined
+}
+
+function constrainRoundTripTeacherControllerFrame(
+  item: LayerItem,
+  patch: DeepPartial<SceneNode>,
+): void {
+  if (!v9NodePatchTouchesFrame(patch) || !isCourseTeacherControllerLayerItem(item)) return
+  const frame = constrainTeacherControllerAuthoringFrame(
+    item.content.data,
+    item.frame,
+    item.rotation,
+    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+  )
+  item.frame = { ...item.frame, ...frame }
 }
 
 function locationIdsToSceneIds(
@@ -10239,6 +10263,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
               const layer = findMutableCourseLayerItem(draft, item.nodeId)
               if (!layer || (layer.locked && item.patch.locked !== false)) continue
               applySceneNodePatchToLayerItem(layer, item.patch, get().componentPackages)
+              constrainRoundTripTeacherControllerFrame(layer, item.patch)
             }
             synchronizeCourseTeacherControllerControls(draft)
           })

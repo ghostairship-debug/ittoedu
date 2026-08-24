@@ -15,6 +15,7 @@ import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constan
 import type { FormulaAstNode } from '../../shared/projectTypes'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
+import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import type { FlowCommandResult } from '../course/flowEditorCommands'
 import {
   executeFlowDelete,
@@ -322,6 +323,19 @@ function overlayCardStyle(
     boxSizing: 'border-box',
     pointerEvents: 'auto',
   }
+}
+
+function constrainFlowControllerOverlayFrame(
+  layer: FlowEditorLayerView | undefined,
+  frame: StageRect,
+): StageRect {
+  if (!layer || !isTeacherControllerLayerItem(layer.item)) return frame
+  return constrainTeacherControllerAuthoringFrame(
+    layer.item.content.data,
+    frame,
+    layer.item.rotation,
+    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+  )
 }
 
 function createFlowAssetObjectUrls(
@@ -1683,7 +1697,7 @@ export function FlowWorkspace({
     const overlay = overlayRef.current
     if (!gesture || !overlay) return
     const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
-    const next = gesture.type === 'resize' && gesture.direction
+    const rawNext = gesture.type === 'resize' && gesture.direction
       ? resizeWorldFrameFromHandle(
           gesture.startFrame,
           gesture.direction,
@@ -1696,6 +1710,10 @@ export function FlowWorkspace({
           width: gesture.startFrame.width,
           height: gesture.startFrame.height,
         }
+    const next = constrainFlowControllerOverlayFrame(
+      view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId),
+      rawNext,
+    )
     setOverlayPreview({ id: gesture.layerItemId, frame: next })
   }
 
@@ -1708,7 +1726,7 @@ export function FlowWorkspace({
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
     const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
-    const next = gesture.type === 'resize' && gesture.direction
+    const rawNext = gesture.type === 'resize' && gesture.direction
       ? resizeWorldFrameFromHandle(
           gesture.startFrame,
           gesture.direction,
@@ -1721,6 +1739,10 @@ export function FlowWorkspace({
           width: gesture.startFrame.width,
           height: gesture.startFrame.height,
         }
+    const next = constrainFlowControllerOverlayFrame(
+      view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId),
+      rawNext,
+    )
     setOverlayPreview(null)
     const selected = selectFlowOverlay(
       project,
@@ -1733,6 +1755,18 @@ export function FlowWorkspace({
     emitProject(transformFlowOverlayFrame(project, selected, next, {
       expectedRevision: project.revision,
     }))
+  }
+
+  const cancelOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = overlayGestureRef.current
+    overlayGestureRef.current = null
+    setOverlayPreview(null)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (!gesture) return
+    event.preventDefault()
+    event.stopPropagation()
   }
 
   return (
@@ -1812,22 +1846,30 @@ export function FlowWorkspace({
         >
           {overlayLayers.map((layer) => {
             const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
-            const selected = selection?.selectedOverlayIds.includes(layer.selectionId) === true
             const controller = isTeacherControllerLayerItem(layer.item)
+            const controllerGlobalAuthoring = controller && selection?.authoringScope === 'global'
+            const controllerPagePreview = controller && !controllerGlobalAuthoring
+            const selected = !controllerPagePreview &&
+              selection?.selectedOverlayIds.includes(layer.selectionId) === true
             return (
               <div
                 key={layer.selectionId}
-                role="button"
-                tabIndex={readOnly ? -1 : 0}
+                role={controllerPagePreview ? undefined : 'button'}
+                tabIndex={controllerPagePreview ? undefined : readOnly ? -1 : 0}
                 className={`flow-layer-card${selected ? ' flow-layer-card--selected' : ''}${controller ? ' flow-layer-card--controller' : ''}`}
                 data-layer-item-id={layer.selectionId}
                 data-testid={`flow-layer-card-${layer.selectionId}`}
-                aria-label={layer.item.label || '浮层'}
-                style={overlayCardStyle(layer, preview, paperScrollTop)}
-                onPointerDown={(event) => beginOverlayGesture(event, layer)}
-                onPointerMove={moveOverlayGesture}
-                onPointerUp={endOverlayGesture}
-                onPointerCancel={endOverlayGesture}
+                data-controller-page-preview={controllerPagePreview || undefined}
+                aria-hidden={controllerPagePreview || undefined}
+                aria-label={controllerPagePreview ? undefined : layer.item.label || '浮层'}
+                style={{
+                  ...overlayCardStyle(layer, preview, paperScrollTop),
+                  ...(controllerPagePreview ? { pointerEvents: 'none' } : {}),
+                }}
+                onPointerDown={controllerPagePreview ? undefined : (event) => beginOverlayGesture(event, layer)}
+                onPointerMove={controllerPagePreview ? undefined : moveOverlayGesture}
+                onPointerUp={controllerPagePreview ? undefined : endOverlayGesture}
+                onPointerCancel={controllerPagePreview ? undefined : cancelOverlayGesture}
               >
                 {controller ? (
                   <TeacherControllerAuthoringChrome
@@ -1848,7 +1890,7 @@ export function FlowWorkspace({
                 ) : (
                   renderFlowOverlayCardContent(layer, assetUrls, componentPackages)
                 )}
-                {selected && !readOnly && !layer.item.locked ? (
+                {selected && !readOnly && !layer.item.locked && !controllerPagePreview ? (
                   STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
                     const point = overlayHandlePoint(overlayFrameOf(layer), direction)
                     const frame = overlayFrameOf(layer)

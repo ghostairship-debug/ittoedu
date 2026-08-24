@@ -1,4 +1,4 @@
-import { MIN_NODE_SIZE } from '../../shared/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import type {
   CourseProjectDocument,
@@ -8,6 +8,7 @@ import {
   isCourseTeacherControllerLayerItem,
 } from '../../shared/teacherControllerConsistency'
 import {
+  constrainTeacherControllerAuthoringFrame,
   createTeacherControllerLayout,
   teacherControllerContentRect,
   teacherControllerSelectionChrome,
@@ -214,6 +215,19 @@ function layoutSourceFromItem(item: NativeLayerItem): TeacherControllerLayoutSou
   return item.content.data
 }
 
+function safeAuthoringFrame(
+  item: NativeLayerItem,
+  frame: StageRect,
+  rotation: number,
+): StageRect {
+  return constrainTeacherControllerAuthoringFrame(
+    layoutSourceFromItem(item),
+    frame,
+    rotation,
+    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+  )
+}
+
 function failCommand(
   session: SlideAuthoringSession,
   reason: string,
@@ -266,11 +280,13 @@ export function commitTeacherControllerAuthoringFrame(
     return failCommand(session, 'invalid-target')
   }
   const rotation = input.rotation ?? current.rotation
+  if (!Number.isFinite(rotation)) return failCommand(session, 'invalid-target')
+  const frame = safeAuthoringFrame(current, input.frame, rotation)
   const unchanged =
-    Math.abs(current.frame.x - input.frame.x) < 0.01 &&
-    Math.abs(current.frame.y - input.frame.y) < 0.01 &&
-    Math.abs(current.frame.width - input.frame.width) < 0.01 &&
-    Math.abs(current.frame.height - input.frame.height) < 0.01 &&
+    Math.abs(current.frame.x - frame.x) < 0.01 &&
+    Math.abs(current.frame.y - frame.y) < 0.01 &&
+    Math.abs(current.frame.width - frame.width) < 0.01 &&
+    Math.abs(current.frame.height - frame.height) < 0.01 &&
     Math.abs(current.rotation - rotation) < 0.01
   if (unchanged) {
     return {
@@ -290,10 +306,10 @@ export function commitTeacherControllerAuthoringFrame(
       }
       entry.item.frame = {
         mode: 'absolute',
-        x: input.frame.x,
-        y: input.frame.y,
-        width: input.frame.width,
-        height: input.frame.height,
+        x: frame.x,
+        y: frame.y,
+        width: frame.width,
+        height: frame.height,
       }
       entry.item.rotation = rotation
     }, options.now)
@@ -390,6 +406,7 @@ export function createV9TeacherControllerAuthoringController() {
   ): StageSelectionOverlayGeometry | null => {
     const backend = readCandidate()
     if (!backend) return null
+    if (backend.getSession().scope !== 'global') return null
     const item = currentItem()
     if (!item) return null
     const frame = preview ?? teacherControllerCanonicalFrame(item)
@@ -423,9 +440,10 @@ export function createV9TeacherControllerAuthoringController() {
       preview ??
       (item ? teacherControllerCanonicalFrame(item) : null)
     const rotation = item?.rotation ?? 0
+    const globalAuthoring = backend.getSession().scope === 'global'
     return {
       kind: 'v9-controller-candidate',
-      overlay: frame
+      overlay: globalAuthoring && frame
         ? teacherControllerOverlayGeometry(viewportTransform(options), frame, rotation)
         : null,
       layout: item
@@ -447,6 +465,11 @@ export function createV9TeacherControllerAuthoringController() {
     const backend = readCandidate()
     if (!backend) return v8Fallback()
     const session = backend.getSession()
+    if (session.scope !== 'global') {
+      gesture = null
+      preview = null
+      return v9Result(backend, options)
+    }
     const world = pointerToControllerWorld(pointer, options)
     const items = findGlobalTeacherControllerItems(session.history.present)
     if (items.length === 0) {
@@ -460,11 +483,6 @@ export function createV9TeacherControllerAuthoringController() {
         return hitResizeHandle(frame, candidate.rotation, world) !== null
       })
     if (!item) {
-      gesture = null
-      preview = null
-      return v9Result(backend, options)
-    }
-    if (session.scope !== 'global') {
       gesture = null
       preview = null
       return v9Result(backend, options)
@@ -506,7 +524,7 @@ export function createV9TeacherControllerAuthoringController() {
     if (!backend) return v8Fallback()
     if (!gesture) return v9Result(backend, options)
     const world = pointerToControllerWorld(pointer, options)
-    preview = gesture.type === 'resize'
+    const rawPreview = gesture.type === 'resize'
       ? teacherControllerGestureFrame(gesture.startFrame, {
           kind: 'resize',
           direction: gesture.direction,
@@ -522,6 +540,9 @@ export function createV9TeacherControllerAuthoringController() {
       backend.getSession().history.present,
       gesture.layerItemId,
     )
+    preview = item
+      ? safeAuthoringFrame(item, rawPreview, gesture.rotation)
+      : rawPreview
     return v9Result(backend, options, {
       preview,
       ...(item ? { target: makeControllerTarget(backend.getSession(), item) } : {}),
@@ -541,7 +562,7 @@ export function createV9TeacherControllerAuthoringController() {
       return v9Result(backend, options)
     }
     const world = pointerToControllerWorld(pointer, options)
-    const frame = active.type === 'resize'
+    const rawFrame = active.type === 'resize'
       ? teacherControllerGestureFrame(active.startFrame, {
           kind: 'resize',
           direction: active.direction,
@@ -553,6 +574,13 @@ export function createV9TeacherControllerAuthoringController() {
           startWorld: active.startWorld,
           currentWorld: world,
         }, 'commit')
+    const liveItem = findGlobalTeacherController(
+      backend.getSession().history.present,
+      active.layerItemId,
+    )
+    const frame = liveItem
+      ? safeAuthoringFrame(liveItem, rawFrame, active.rotation)
+      : rawFrame
     const snapshot = backend.getSnapshot()
     const command = applyCandidate((session) =>
       commitTeacherControllerAuthoringFrame(session, {
@@ -576,6 +604,17 @@ export function createV9TeacherControllerAuthoringController() {
     })
   }
 
+  const pointerCancel = (
+    _pointer: TeacherControllerAuthoringPointer,
+    options: StageViewportTransformOptions,
+  ): TeacherControllerAuthoringResult => {
+    const backend = readCandidate()
+    if (!backend) return v8Fallback()
+    gesture = null
+    preview = null
+    return v9Result(backend, options)
+  }
+
   return {
     resolveKind,
     overlayGeometry,
@@ -583,6 +622,7 @@ export function createV9TeacherControllerAuthoringController() {
     pointerDown,
     pointerMove,
     pointerUp,
+    pointerCancel,
     previewFrame: () => preview,
   }
 }

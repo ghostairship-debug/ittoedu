@@ -17,6 +17,11 @@ import type {
   ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
 import type { ProjectPlaybackSettings } from '../../shared/projectTypes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import {
+  centerTeacherControllerAuthoringFrame,
+  teacherControllerAuthoringRecoveryBounds,
+} from '../../shared/teacherControllerLayout'
 import type { DeepReadonly } from './slideEditorView'
 import { createTeacherControllerNode } from '../project/createProject'
 import {
@@ -899,6 +904,31 @@ interface TeacherControllerRestoreOptions extends LayerCommandOptions {
   readonly preserveAuthoringLock?: boolean
 }
 
+function resetCourseTeacherControllerAuthoringFrame(entry: ScopedLayerItem): void {
+  if (!isTeacherControllerLayerItem(entry.item)) return
+  const recovery = teacherControllerAuthoringRecoveryBounds(
+    entry.item.content.data,
+    entry.item.frame,
+    entry.item.rotation,
+  )
+  if (
+    recovery.left >= 0 &&
+    recovery.top >= 0 &&
+    recovery.right <= CANVAS_WIDTH &&
+    recovery.bottom <= CANVAS_HEIGHT
+  ) return
+  const frame = centerTeacherControllerAuthoringFrame(
+    entry.item.content.data,
+    entry.item.frame,
+    entry.item.rotation,
+    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+  )
+  entry.item.frame = {
+    ...entry.item.frame,
+    ...frame,
+  }
+}
+
 /**
  * Restores the one global teacher controller to delivery-visible consistency.
  * It never writes a scene or Surface-local item.
@@ -915,6 +945,7 @@ export function restoreDefaultTeacherController(
       const candidate = structuredClone(existing)
       if (!options.preserveAuthoringLock) candidate.item.locked = false
       restoreCourseTeacherControllerLayer(candidate)
+      resetCourseTeacherControllerAuthoringFrame(candidate)
       const unchanged = JSON.stringify(candidate) === JSON.stringify(existing) &&
         document.playback.controls === 'canvas'
       if (unchanged) return succeedLayerNoop(document, '教师控制器已可用')
@@ -925,6 +956,7 @@ export function restoreDefaultTeacherController(
         }
         if (!options.preserveAuthoringLock) entry.item.locked = false
         restoreCourseTeacherControllerLayer(entry)
+        resetCourseTeacherControllerAuthoringFrame(entry)
         draft.playback.controls = 'canvas'
         synchronizeCourseTeacherControllerControls(draft)
       }, '已恢复教师控制器', options, existing.item.layerItemId)

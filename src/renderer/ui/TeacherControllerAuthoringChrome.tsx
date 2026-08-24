@@ -17,6 +17,22 @@ export interface TeacherControllerAuthoringChromeProps {
   readonly currentSceneId: string | null
 }
 
+export function teacherControllerAuthoringPreviewCollapsed(item: LayerItem): boolean {
+  return isTeacherControllerLayerItem(item) &&
+    item.content.data.collapsible &&
+    item.content.data.defaultCollapsed
+}
+
+function makeAuthoringPreviewInert(controller: TeacherControllerDom): void {
+  const root = controller.rootElement
+  root.style.pointerEvents = 'none'
+  root.tabIndex = -1
+  root.setAttribute('aria-hidden', 'true')
+  root.setAttribute('inert', '')
+  root.removeAttribute('aria-label')
+  root.removeAttribute('aria-keyshortcuts')
+}
+
 /**
  * Authoring-time controller chrome. Interactive playback stays off so Flow/Spatial
  * overlay gestures own the hit region.
@@ -64,11 +80,15 @@ export function TeacherControllerAuthoringChrome({
       getCurrentSceneId: () => live().currentSceneId,
       getStateLabel: () => null,
       getStatus: () => ({ muted: false, fullscreen: false }),
-      getSession: () => ({ offset: { dx: 0, dy: 0 }, collapsed: false }),
+      getSession: () => ({
+        offset: { dx: 0, dy: 0 },
+        collapsed: teacherControllerAuthoringPreviewCollapsed(live().item),
+      }),
       onSessionChange: () => undefined,
       onAction: () => undefined,
       getInteractive: () => false,
     })
+    makeAuthoringPreviewInert(controller)
     controllerRef.current = controller
     return () => {
       controller.destroy()
@@ -93,6 +113,8 @@ export function TeacherControllerAuthoringChrome({
       ref={hostRef}
       className="teacher-controller-authoring-chrome"
       data-testid="teacher-controller-authoring-chrome"
+      data-controller-preview-collapsed={teacherControllerAuthoringPreviewCollapsed(item)}
+      aria-hidden="true"
       style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
     />
   )

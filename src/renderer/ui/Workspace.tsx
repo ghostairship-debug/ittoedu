@@ -762,11 +762,7 @@ function SpatialLocationWorkspace({
     }
     const authoring = authoringRef.current
     setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
-    setHudOverlay(
-      selectedNode?.type === 'teacher-controller' || editingScope === 'global'
-        ? authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT)
-        : null,
-    )
+    setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
   }, [canvasMode, editingScope, selectedNode, session, session?.selection.selectionIds, session?.sessionCamera, session?.history.present.revision])
 
   useEffect(() => {
@@ -938,7 +934,9 @@ function SpatialLocationWorkspace({
             pointer,
           )
           const layerHit = hitTestV9SpatialLayerItems(
-            adaptV9SpatialEditorLayers(view.layers),
+            adaptV9SpatialEditorLayers(view.layers).filter((target) => (
+              editingScope === 'global' || target.nativeType !== 'teacher-controller'
+            )),
             { viewport: hudPoint, world },
           )
           if (!layerHit) {
@@ -972,14 +970,32 @@ function SpatialLocationWorkspace({
           if (!pointerActiveRef.current) return
           pointerActiveRef.current = false
           const stagePoint = readLogicalPointer(event.clientX, event.clientY)
-          if (!stagePoint) return
-          authoringRef.current.pointerUp({
-            ...stagePoint,
-            additive: event.shiftKey,
-          }, LOGICAL_STAGE_VIEWPORT)
+          if (stagePoint) {
+            authoringRef.current.pointerUp({
+              ...stagePoint,
+              additive: event.shiftKey,
+            }, LOGICAL_STAGE_VIEWPORT)
+          } else {
+            authoringRef.current.pointerCancel({ x: 0, y: 0 }, LOGICAL_STAGE_VIEWPORT)
+          }
           setPreviewFrames(null)
           setPreviewCamera(null)
           syncOverlays()
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (!pointerActiveRef.current) return
+          pointerActiveRef.current = false
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY) ?? { x: 0, y: 0 }
+          authoringRef.current.pointerCancel(stagePoint, LOGICAL_STAGE_VIEWPORT)
+          setPreviewFrames(null)
+          setPreviewCamera(null)
+          syncOverlays()
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
         }}
         onDoubleClick={(event) => {
           if (canvasMode !== 'edit') return
@@ -1237,7 +1253,7 @@ function SpatialLocationWorkspace({
             {worldOverlay && editingScope !== 'global' ? (
               <SpatialSelectionOverlay overlay={worldOverlay} locked={selectedLocked} />
             ) : null}
-            {hudOverlay && (editingScope === 'global' || selectedNode?.type === 'teacher-controller') ? (
+            {hudOverlay ? (
               <SpatialSelectionOverlay overlay={hudOverlay} locked={selectedLocked} />
             ) : null}
           </>
@@ -1627,7 +1643,11 @@ function SlideLocationWorkspace({
   }, [view.x, view.y, view.zoom])
 
   useEffect(() => {
-    if (slideBackendKind !== 'slide-authoring' || canvasMode !== 'edit') {
+    if (
+      slideBackendKind !== 'slide-authoring' ||
+      canvasMode !== 'edit' ||
+      editingScope !== 'global'
+    ) {
       setControllerOverlay(null)
       return
     }
@@ -1642,6 +1662,7 @@ function SlideLocationWorkspace({
   }, [
     canvasMode,
     candidateDocument,
+    editingScope,
     readCandidateViewport,
     selectedNode,
     slideBackendKind,
@@ -3404,27 +3425,29 @@ function SlideLocationWorkspace({
         }
         const viewport = readCandidateViewport()
         if (!viewport) return
-        const controllerResult = controllerAuthoringRef.current.pointerDown({
-          x: event.clientX,
-          y: event.clientY,
-        }, viewport)
-        if (
-          controllerResult.kind !== 'v8' &&
-          controllerGestureConsumed(
-            controllerResult.overlay,
-            controllerResult.preview,
-            controllerResult.target,
-          )
-        ) {
-          controllerPointerActiveRef.current = true
-          if (controllerResult.target) {
-            store.selectNode(controllerResult.target.layerItemId)
+        if (store.editingScope === 'global') {
+          const controllerResult = controllerAuthoringRef.current.pointerDown({
+            x: event.clientX,
+            y: event.clientY,
+          }, viewport)
+          if (
+            controllerResult.kind !== 'v8' &&
+            controllerGestureConsumed(
+              controllerResult.overlay,
+              controllerResult.preview,
+              controllerResult.target,
+            )
+          ) {
+            controllerPointerActiveRef.current = true
+            if (controllerResult.target) {
+              store.selectNode(controllerResult.target.layerItemId)
+            }
+            setControllerOverlay(controllerResult.overlay)
+            event.currentTarget.setPointerCapture(event.pointerId)
+            event.preventDefault()
+            event.stopPropagation()
+            return
           }
-          setControllerOverlay(controllerResult.overlay)
-          event.currentTarget.setPointerCapture(event.pointerId)
-          event.preventDefault()
-          event.stopPropagation()
-          return
         }
         const result = slideAuthoringRef.current.pointerDown({
           x: event.clientX,
@@ -3498,12 +3521,21 @@ function SlideLocationWorkspace({
         ) {
           const viewport = readCandidateViewport()
           if (viewport) {
-            const controllerResult = controllerAuthoringRef.current.pointerUp({
-              x: event.clientX,
-              y: event.clientY,
-            }, viewport)
+            const controllerResult = useEditorStore.getState().editingScope === 'global'
+              ? controllerAuthoringRef.current.pointerUp({
+                  x: event.clientX,
+                  y: event.clientY,
+                }, viewport)
+              : controllerAuthoringRef.current.pointerCancel({
+                  x: event.clientX,
+                  y: event.clientY,
+                }, viewport)
             if (controllerResult.kind !== 'v8') {
-              setControllerOverlay(controllerResult.overlay)
+              setControllerOverlay(
+                useEditorStore.getState().editingScope === 'global'
+                  ? controllerResult.overlay
+                  : null,
+              )
             }
           }
           controllerPointerActiveRef.current = false
@@ -3541,6 +3573,35 @@ function SlideLocationWorkspace({
         setPanning(false)
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }}
+      onPointerCancelCapture={(event) => {
+        if (
+          slideBackendKind === 'slide-authoring' &&
+          controllerPointerActiveRef.current
+        ) {
+          const viewport = readCandidateViewport()
+          if (viewport) {
+            controllerAuthoringRef.current.pointerCancel({
+              x: event.clientX,
+              y: event.clientY,
+            }, viewport)
+          }
+          controllerPointerActiveRef.current = false
+          setControllerOverlay(null)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        if (panRef.current?.pointerId === event.pointerId) {
+          panRef.current = null
+          setPanning(false)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
         }
       }}
       onPointerLeave={() => setHoveredAuthoringTargetId(null)}
@@ -3890,7 +3951,7 @@ function SlideLocationWorkspace({
           </div>
         ) : null}
       </div>
-      {canvasMode === 'edit' && controllerOverlay ? (
+      {canvasMode === 'edit' && editingScope === 'global' && controllerOverlay ? (
         <TeacherControllerAuthoringOverlay overlay={controllerOverlay} />
       ) : null}
       {canvasMode === 'edit' && editingFormulaNode && (
