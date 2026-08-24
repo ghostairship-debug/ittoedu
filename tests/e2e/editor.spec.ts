@@ -887,6 +887,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   })
 
   test('里程碑闭环：专业模式创建、复制、排序规则并修改受控运行时', async () => {
+    test.setTimeout(120_000)
     const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
       await addText(page)
@@ -918,6 +919,25 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         '校验通过，修改已写入工程历史。',
         { exact: true },
       )).toBeVisible()
+
+      await slideSceneItems(page).first().click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      const runtimeInspector = page.getByTestId('scene-runtime-inspector')
+      await expect(runtimeInspector).toBeVisible()
+      const enabled = runtimeInspector.getByRole('checkbox', { name: '启用运行时' })
+      const renderMode = runtimeInspector.getByRole('combobox', { name: '渲染能力声明' })
+      await expect(enabled).toBeChecked()
+      await runtimeInspector.locator('.toggle-track').click()
+      await expect(enabled).not.toBeChecked()
+      await renderMode.selectOption('hybrid')
+      await expect(renderMode).toHaveValue('hybrid')
+
+      await page.getByRole('tab', { name: '开发' }).click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      await expect(runtimeInspector.getByRole('checkbox', { name: '启用运行时' }))
+        .not.toBeChecked()
+      await expect(runtimeInspector.getByRole('combobox', { name: '渲染能力声明' }))
+        .toHaveValue('hybrid')
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
     } finally {
