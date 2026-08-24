@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-09-runtime-source-draft-integration`
 - Phase / wave: `ARCH-2 / W2-B1 Runtime authoring integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Runtime Worker / independent Runtime reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 13:16 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 13:16 Asia/Shanghai / 2026-08-24 13:56 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `223e020`
 - Claim commit: `211b404`
@@ -17,7 +17,7 @@
 - Depends on: `arch-2-b1-04-runtime-asset-replacement-integration done; W2-A project-resource transaction gate done`
 - Blocks: `Runtime template/properties/content consumer migration; W2-B1 Runtime authoring validation`
 - Risk statement: `DeveloperTab edits a V8 RuntimeDocument projection: applying even unchanged API 3 source downgrades the canonical definition to canvas-runtime/API 2 and adds history; a dirty draft can silently move to another target with identical source, while Flow/Spatial may report success without a canonical write.`
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / reviewer-found authoring-context regression fixed in c9b34ac`
 
 ## Product outcome
 
@@ -25,11 +25,12 @@ A teacher can edit an existing current-scope Runtime source in DeveloperTab, exp
 
 ## Current status and evidence
 
-- Baseline Runtime/Developer/schema/archive/Published suite is green (`14 files / 107 tests`), but it characterizes only the old path.
-- A permanent API 3 fixture proves that current `updateSceneRuntime` converts `surface-runtime / API 3` to `canvas-runtime / API 2`, advances revision and adds history even when source is unchanged.
-- `CodeDocumentEditor` resets only when `value` changes. Same-source target switches retarget a dirty draft; different-source switches discard it without an explicit decision. There is no cancel action or composition guard.
-- Flow/Spatial V8 projections do not carry Runtime definitions; current local Store actions can set a success message while canonical document, revision, history and dirty state stay unchanged.
-- Current Surface Runtime definitions are valid V9 API 3 records. The product Player does not yet execute API 3 code in every Published host, so this card proves authoring/read preservation, not new runtime execution support.
+- `20259e6` locks the old API 3 downgrade, same-source retarget, fake-success, no-op, archive and Published-read failures in a permanent vertical-slice suite.
+- `e5da5d7` adds the immutable canonical V9 Runtime source view and pure exact-target planner for global/surface/scene/world owners.
+- `3660c6c` persists valid source changes through one typed project-resource transaction and current-Surface history; no-op and every rejection remain zero-write.
+- `ec046b5` binds Developer Runtime source drafts to the captured document target with explicit Apply/Cancel, composition guards and honest Flow/Spatial availability.
+- `c9b34ac` closes the independent-review finding by preserving the current named state and global scope while the legacy Slide template entry refreshes its authoring session.
+- Current Surface Runtime definitions remain valid V9 API 3 records. This card proves authoring/read preservation only and does not claim new API 3 execution support in Player hosts.
 
 ## Canonical contract and carrier
 
@@ -156,7 +157,12 @@ V9 Runtime source view + captured field target
 
 ## Result evidence
 
-- Pending implementation, independent review, validation and consumer-count evidence.
+- Consumers migrated/remaining: `Developer Runtime source apply no longer consumes updateSceneRuntime, updateGlobalRuntime or the V8 RuntimeDocument schema. PropertiesTab and the Slide-only Workspace Runtime text path still consume both raw update actions; Developer template creation still consumes setSceneRuntime/setGlobalRuntime. No remaining raw consumer count increased.`
+- Behavior before/after: `An apply could downgrade API 3, add history for unchanged source, retarget or discard a dirty draft, and report success without a Flow/Spatial canonical write. Existing global/surface/scene/world Runtime source now binds to one captured V9 runtime/source address, preserves every other definition field, commits exactly one current-Surface history frame, or reports an honest no-op/stale/lock/schema error with zero writes. Template creation still uses its legacy Slide path, but its refresh now preserves named state and global scope.`
+- Validation results: `V1 3 files / 52 tests; V2 6 files / 58 tests; adjacent Runtime host/preview/export 7 files / 42 tests; npm run typecheck (root/Electron/e2e), git diff --check and task-board freshness passed. Independent core review passed after c9b34ac with V1 52 tests plus 18-file / 131-test Runtime regression; independent UI review passed 4 files / 59 tests; independent legacy-consumer regression review passed 17 files / 139 tests.`
+- Known risks/findings: `Properties Runtime fields, Workspace Runtime text and template create/remove remain legacy consumers and are the next migration boundary. Flow/Spatial have canonical Developer source editing, but Workspace in-place Runtime text targets are currently mounted only for Slide. No new Runtime API 3 execution behavior is claimed.`
+- indexImpact: `Developer Runtime source authoring, exact target/planner and typed Store transaction facts changed; refresh generated repo-index after close`.
+- Next allowed task: `ARCH-2 B1-10 Runtime property/content consumer migration`.
 
 ## Ready checklist (Coordinator)
 
