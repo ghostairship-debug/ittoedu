@@ -16,17 +16,17 @@
 - Invalidating paths: `src/renderer/course/spatialClipboardCommands.ts`; `src/renderer/store/editorStore.ts` 的 Spatial clipboard state、persist/backend/location/load seams 与 `duplicateNode/#duplicateSelectedNodes/#copySelectedNodes/#pasteNodes`; `src/renderer/App.tsx` 的 Ctrl+C/V/D 路由；`src/renderer/ui/NodesTab.tsx` 的重复入口；`src/renderer/course/effectiveLayerCommands.ts` 的 target/locate/address helpers；`src/renderer/course/globalLayerCommands.ts` 的 ID/order helpers；`src/renderer/course/spatialRelationCommands.ts#planSpatialGraphAfterWorldCopy`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts#selectSpatialEditorLayers`; Course V9 interaction/resource reference constraints；`tests/unit/editorStore.test.ts`; `tests/unit/spatialProductIntegration.test.tsx`
 - Task ID: `stab-spatial-02-copy-paste-duplicate`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Clipboard Worker / independent Spatial history reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Store/Nodes single-writer firewall / codex/architecture-stabilization`
 - Baseline HEAD: `7ae0797` (history/media/move lanes closed; product baseline includes `2e6be4f` and `093963c`; worktree clean)
 - Context Pack + manifest hash | bootstrap-manual: exact-source trace from App/Nodes entrypoints into the four Store methods, V8 projection/disabled commit fallback, effective owner/address/order helpers, Spatial graph-copy policy and current history selection contract.
-- Freshness / relevant dirty inputs: At `7ae0797`, App and Nodes already call the four stable Store entrypoints, but Spatial still falls through SceneNode/V8 clipboard code and can report success or change projected selection while `spatialSession.history.present` is unchanged. Runtime layers can be omitted by projection and owner/scoped visibility are not captured. Existing Spatial undo/redo intentionally clear selection.
+- Freshness / relevant dirty inputs: Product/test commit `120243d` is the fixed implementation candidate and was clean immediately after commit. App and Nodes retain their stable public entrypoints; Store now dispatches all four Spatial operations before the V8 fallback. Any later change to an Invalidating path requires narrow refresh before Wave B/closure.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 修复必须复制正确 owner 的真实 LayerItem/资源引用并复用 active Spatial history；不能把临时 selection 或 legacy clipboard 当作保存成功。
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review found retained clipboard across camera context, missing live-lock paste recheck and incomplete external-reference preflight; all three repaired before approval`
 
 ## Product outcome
 
@@ -45,11 +45,11 @@ Spatial 中的图层“重复”和 Ctrl+C/V/D 对真实可复制对象产生可
 - Forbidden write: Schema/contracts、系统剪贴板/main/preload、Player/Published/export、Properties 行为、Slide/Flow clipboard、dependencies/generated。
 - Hotspot lock: Spatial 的 Store / Properties / Clipboard / History 由同一 Coordinator/Integrator 串行接入；五张 Spatial 卡可并行调查、实现纯命令和编写独立测试，只有命中 Store / Nodes / Properties 的接入提交必须串行。
 - Acceptance:
-  - [ ] 单项图层重复与 Ctrl+D 创建新稳定 ID，进入原 owner，order 唯一并选中新副本。
-  - [ ] Ctrl+C 不修改工程/历史，只捕获来自当前 canonical selection 的 payload；Ctrl+V 真实写入工程且只产生一条历史。
-  - [ ] paste/duplicate 选中新副本；undo/redo 精确移除/恢复副本文档并按既有 Spatial 合同清空选择；资源、组件和相关引用不悬空，不为 redo 新增第二套选择历史。
-  - [ ] locked、不可复制、stale、wrong-owner、空 clipboard 或容量失败均为零 document/revision/history/selection 写入，并给出诚实反馈。
-  - [ ] 不调用 V9 禁用的 legacy `commit`，不创建第二 clipboard truth。
+  - [x] 单项图层重复与 Ctrl+D 创建新稳定 ID，进入原 owner，order 唯一并选中新副本。
+  - [x] Ctrl+C 不修改工程/历史，只捕获来自当前 canonical selection 的 payload；Ctrl+V 真实写入工程且只产生一条历史。
+  - [x] paste/duplicate 选中新副本；undo/redo 精确移除/恢复副本文档并按既有 Spatial 合同清空选择；资源、组件和相关引用不悬空，不为 redo 新增第二套选择历史。
+  - [x] locked、不可复制、stale、wrong-owner、空 clipboard 或容量失败均为零 document/revision/history/selection 写入，并给出诚实反馈。
+  - [x] 不调用 V9 禁用的 legacy `commit`，不创建第二 clipboard truth。
 
 ## Minimal validation
 
@@ -58,8 +58,8 @@ Spatial 中的图层“重复”和 Ctrl+C/V/D 对真实可复制对象产生可
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、copy/paste/duplicate 的 canonical before/after、失败零写入证据和 Reviewer 结论。
+- Result evidence: Product/test commit `120243d` adds one session-only `SpatialClipboardPayload`, a narrow canonical command module and Spatial-first branches in the four existing Store entrypoints; App/Nodes product source did not need modification. The two named focused files passed `88/88`; six direct-consumer files passed `31/31`; `npm run typecheck` passed all three TS projects; `git diff --check` passed on the exact committed bytes. Tests prove same-owner multi-copy, unselected row duplicate into its exact owner, stable project-wide IDs/orders, +20/+20 unlocked copies, scoped visibility, Runtime binding remap, one cross-rule action-ID map with transitive completion follower, world-only relation copy, unchanged paths/semantic zoom, one revision/history entry, repeated paste after ordinary edits, undo/redo document restoration with cleared selection, and zero-write failures for empty/stale/wrong-owner/locked/controller/capacity/dangling-reference cases. Camera/location transitions clear the clipboard while same-context mutations retain it. Independent review first rejected three context/lock/reference gaps; the repaired candidate received `APPROVE` without rerunning duplicate suites.
 - Outcome boundary: 只证明 Spatial clipboard/duplicate 纵切为 `engineering candidate`；不证明跨工程/跨 Surface 粘贴或教师 `accepted`。
-- Rollback: 一个可独立 revert 的产品/测试提交恢复旧路由；clipboard 为会话态且无用户数据迁移，回滚不得重写现有项目。
+- Rollback: Revert product/test commit `120243d`; clipboard is Session-only and introduced no Schema, archive or user-data migration, so rollback does not rewrite existing projects.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
