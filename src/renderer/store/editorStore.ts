@@ -413,6 +413,7 @@ import {
   commitSpatialAuthoringHistory,
   commitSpatialEditorTransactionHistory,
   commitSpatialProjectMutation,
+  freezeSpatialSession,
   rejectSpatialCommand,
   spatialAuthoringLegacyHistoryEntryCount,
   spatialAuthoringRedoResourceTransition,
@@ -520,6 +521,38 @@ function emptySidecarStacks(): Pick<
     slideCandidateSidecarFuture: [],
     slideCandidateComponentPackagesPast: [],
     slideCandidateComponentPackagesFuture: [],
+  }
+}
+
+interface CourseResourceHistoryContinuation {
+  readonly sidecarPast: CourseAssetSidecar[]
+  readonly sidecarFuture: CourseAssetSidecar[]
+  readonly componentPackagesPast: Record<string, ComponentPackageData>[]
+  readonly componentPackagesFuture: Record<string, ComponentPackageData>[]
+}
+
+function continuedSidecarStacks(
+  continuation?: CourseResourceHistoryContinuation,
+): Pick<
+  EditorState,
+  | 'slideCandidateSidecarPast'
+  | 'slideCandidateSidecarFuture'
+  | 'slideCandidateComponentPackagesPast'
+  | 'slideCandidateComponentPackagesFuture'
+> {
+  if (!continuation) {
+    return {
+      slideCandidateSidecarPast: [],
+      slideCandidateSidecarFuture: [],
+      slideCandidateComponentPackagesPast: [],
+      slideCandidateComponentPackagesFuture: [],
+    }
+  }
+  return {
+    slideCandidateSidecarPast: continuation.sidecarPast,
+    slideCandidateSidecarFuture: continuation.sidecarFuture,
+    slideCandidateComponentPackagesPast: continuation.componentPackagesPast,
+    slideCandidateComponentPackagesFuture: continuation.componentPackagesFuture,
   }
 }
 
@@ -3042,6 +3075,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       componentPackages?: Record<string, ComponentPackageData>
       clearClipboard?: boolean
       canvasMode?: CanvasMode
+      resourceHistory?: CourseResourceHistoryContinuation
     } = {},
   ) => {
     const snapshot = backend.getSnapshot()
@@ -3062,7 +3096,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         : null,
       v9ContentEdit: null,
       ...candidateViewState(backend, null),
-      ...emptySidecarStacks(),
+      ...continuedSidecarStacks(extra.resourceHistory),
       slideCandidateSidecar: sidecar,
       project,
       activeSceneId: snapshot.sceneId,
@@ -3475,8 +3509,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
     const legacyPastCount = spatialAuthoringLegacyHistoryEntryCount(session.history.past)
     const legacyFutureCount = spatialAuthoringLegacyHistoryEntryCount(session.history.future)
-    nextPast = legacyPastCount === 0 ? [] : nextPast.slice(-legacyPastCount)
-    nextFuture = nextFuture.slice(0, legacyFutureCount)
+    nextPast = legacyPastCount === nextPast.length
+      ? nextPast
+      : legacyPastCount === 0
+        ? []
+        : nextPast.slice(-legacyPastCount)
+    nextFuture = legacyFutureCount === nextFuture.length
+      ? nextFuture
+      : nextFuture.slice(0, legacyFutureCount)
     const presentPackageIds = new Set(Object.keys(session.history.present.componentPackages))
     const nextComponentPackages = resourceAware || extra.componentPackages
       ? Object.fromEntries(
@@ -3559,6 +3599,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       statusMessage?: string | null
       componentPackages?: Record<string, ComponentPackageData>
       canvasMode?: CanvasMode
+      resourceHistory?: CourseResourceHistoryContinuation
     } = {},
   ) => {
     const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
@@ -3575,7 +3616,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateClipboard: null,
       v9ContentEdit: null,
       ...spatialViewState(session, sidecar, null),
-      ...emptySidecarStacks(),
+      ...continuedSidecarStacks(extra.resourceHistory),
       slideCandidateSidecar: sidecar,
       activeSceneId: snapshot.activeCameraFrameId,
       activePresentationStateId: null,
@@ -4820,6 +4861,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       statusMessage?: string | null
       componentPackages?: Record<string, ComponentPackageData>
       canvasMode?: CanvasMode
+      resourceHistory?: CourseResourceHistoryContinuation
     } = {},
   ) => {
     const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
@@ -4835,7 +4877,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideCandidateClipboard: null,
       v9ContentEdit: null,
       ...flowViewState(session, sidecar),
-      ...emptySidecarStacks(),
+      ...continuedSidecarStacks(extra.resourceHistory),
       slideCandidateSidecar: sidecar,
       activeSceneId: session.selection.locationId,
       activePresentationStateId: null,
@@ -5419,6 +5461,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     applySpatialAuthoringSession(session, extra = {}) {
+      const state = get()
+      const currentDocument = activeCourseDocument(state)
+      const commandResult = Object.prototype.hasOwnProperty.call(extra, 'historyEntry')
+      const stale = Boolean(
+        currentDocument && (
+          session.history.present.id !== currentDocument.id ||
+          session.history.present.revision < currentDocument.revision ||
+          !state.spatialSession ||
+          (commandResult && session.sessionId !== state.spatialSession.sessionId)
+        ),
+      )
+      if (stale) {
+        set({
+          errorMessage: '课件内容已更新。旧的 Spatial 会话没有写入。',
+          statusMessage: null,
+        })
+        return rejectSpatialCommand(state.spatialSession ?? session, 'stale-revision')
+      }
       return persistSpatialResult(
         succeedSpatialCommand(session, extra.historyEntry === true),
         { statusMessage: extra.statusMessage },
@@ -6462,12 +6522,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return
       }
 
+      const canonicalHistory = state.spatialSession?.history
+        ?? state.flowSession?.history
+        ?? selectSlideAuthoringBackend(state)?.getSession().history
+      if (!canonicalHistory) return
       const preserve = {
         sidecar: state.slideCandidateSidecar ?? emptyCourseAssetSidecar(),
         path: state.projectPath,
         dirty: state.dirty,
         componentPackages: state.componentPackages,
         statusMessage: null as string | null,
+        resourceHistory: {
+          sidecarPast: state.slideCandidateSidecarPast,
+          sidecarFuture: state.slideCandidateSidecarFuture,
+          componentPackagesPast: state.slideCandidateComponentPackagesPast,
+          componentPackagesFuture: state.slideCandidateComponentPackagesFuture,
+        },
         ...(state.canvasMode === 'run' ? { canvasMode: 'run' as const } : {}),
       }
 
@@ -6484,7 +6554,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           })
           return
         }
-        applyFlowBackend(openFlowAuthoringSessionAtLocation(project, locationId), preserve)
+        const fresh = openFlowAuthoringSessionAtLocation(project, locationId)
+        applyFlowBackend({ ...fresh, history: canonicalHistory }, preserve)
         set({ courseAuthoringSession: nextAuthoringSession })
         return
       }
@@ -6503,7 +6574,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
           })
           return
         }
-        applySpatialBackend(openSpatialAuthoringSession(project, { locationId }), preserve)
+        const fresh = openSpatialAuthoringSession(project, { locationId })
+        applySpatialBackend(freezeSpatialSession({ ...fresh, history: canonicalHistory }), preserve)
         set({ courseAuthoringSession: nextAuthoringSession })
         return
       }
@@ -6511,7 +6583,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (location.kind === 'slide-scene') {
         if (state.spatialSession || state.flowSession) {
           applyV9Backend(
-            createSlideAuthoringBackend(openSlideAuthoringSession(project, { locationId })),
+            createSlideAuthoringBackend({
+              ...openSlideAuthoringSession(project, { locationId }),
+              history: canonicalHistory,
+            }),
             preserve,
           )
           set({ courseAuthoringSession: nextAuthoringSession })
