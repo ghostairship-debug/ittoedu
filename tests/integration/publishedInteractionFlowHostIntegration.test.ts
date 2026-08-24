@@ -654,6 +654,44 @@ describe('Published Interaction Flow host integration', () => {
     expect(payload).toEqual(before)
   })
 
+  it('cancels an active Flow motion and removes delegated bindings before destroy', async () => {
+    const trigger = textItem('flow-destroy-trigger', 100)
+    const target = textItem('flow-destroy-target', 110)
+    const payload = publishedFixture({
+      globalItems: [scoped(trigger), scoped(target)],
+      globalInteractions: [clickRule('flow-destroy-rule', trigger.layerItemId, [
+        step('flow-destroy-exit', motion('node.exit', target.layerItemId, 1_000)),
+      ])],
+    })
+    const before = structuredClone(payload)
+    const cancel = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      writable: true,
+      value(this: HTMLElement) {
+        animationTargets.push(this.dataset.flowOverlayItem ?? 'unknown')
+        return {
+          cancel,
+          finished: new Promise<void>(() => undefined),
+        } as unknown as Animation
+      },
+    })
+    const { container, session } = await mount(payload)
+    const staleTrigger = renderedFlowItem(container, trigger.layerItemId)
+
+    staleTrigger.click()
+    await settle()
+    expect(animationTargets).toEqual([target.layerItemId])
+
+    await session.destroy()
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('.flow-surface-host')).toBeNull()
+    staleTrigger.click()
+    await settle()
+    expect(animationTargets).toEqual([target.layerItemId])
+    expect(payload).toEqual(before)
+  })
+
   it('diagnoses gesture-owned and pass-through targets without stealing their clicks', async () => {
     const diagnostics: PublishedInteractionDiagnostic[] = []
     const hiddenTarget = textItem('flow-owned-target', 170, {

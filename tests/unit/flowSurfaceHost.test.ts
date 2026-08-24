@@ -54,6 +54,48 @@ function overlayVideo(): PublishedNativeLayerItem {
   }
 }
 
+function overlayText(): PublishedNativeLayerItem {
+  return {
+    layerItemId: 'flow-overlay-text',
+    kind: 'native',
+    frame: { mode: 'absolute', x: 48, y: 48, width: 240, height: 72 },
+    order: 10,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    content: {
+      nativeType: 'text',
+      data: {
+        text: '可交互提示',
+        runs: [],
+        style: {
+          fontFamily: 'sans-serif',
+          fontSize: 20,
+          color: '#172033',
+          bold: false,
+          italic: false,
+          underline: false,
+          strike: false,
+          emphasis: false,
+          highlightColor: null,
+          align: 'left',
+          verticalAlign: 'top',
+          writingMode: 'horizontal',
+          lineSpacing: 1.2,
+          letterSpacing: 0,
+          padding: 0,
+          overflow: 'fixed',
+          backgroundColor: '#ffffff',
+          backgroundOpacity: 0,
+          cornerRadius: 0,
+        },
+      },
+    },
+  }
+}
+
 function teacherController(): PublishedNativeLayerItem {
   return {
     layerItemId: 'flow-controller',
@@ -274,6 +316,36 @@ describe('FlowSurfaceHost course session overlay', () => {
     expect(progress?.textContent).toContain('运行讲义')
     expect(progress?.textContent).not.toContain('语义长文覆盖图层')
     expect(host.surface.id).toBe('flow-host')
+    await host.destroy()
+  })
+
+  it('keeps the active interaction generation usable when a course update is rejected', async () => {
+    const course = publishedCourse()
+    course.globalLayerItems.unshift({
+      item: overlayText(),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const { host, container } = await mountHost(course)
+    const port = host.getPublishedInteractionSurfacePort()!
+    const text = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-overlay-text"]',
+    )!
+    let clicks = 0
+    const unbind = port.bindNodeClick('flow-overlay-text', () => {
+      clicks += 1
+    })
+    expect(unbind).not.toBeNull()
+    text.click()
+    expect(clicks).toBe(1)
+
+    const invalid = structuredClone(course)
+    invalid.surfaces = []
+    await expect(host.updatePublishedCourse(invalid)).rejects.toThrow('课件没有 Flow 页面')
+
+    expect(container.querySelector('[data-flow-overlay-item="flow-overlay-text"]')).toBe(text)
+    text.click()
+    expect(clicks).toBe(2)
+    unbind?.()
     await host.destroy()
   })
 })

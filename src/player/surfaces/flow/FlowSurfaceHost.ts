@@ -256,16 +256,30 @@ export class FlowSurfaceHost {
 
   updatePublishedCourse(source: FlowPublishedPlaybackSource): Promise<void> {
     return this.#enqueue(async () => {
+      // Validate and resolve the replacement before touching the live generation.
+      // A rejected update must leave the current DOM port and controller usable.
+      const nextPlayback = toFlowPublishedPlayback(source)
+      const nextComponents = 'components' in source && source.components
+        ? source.components as Record<string, PublishedComponentPackageSource>
+        : this.#components
+      const keepsCurrentSurface = nextPlayback.surfaces.some(
+        (surface) => surface.id === this.#surfaceId,
+      )
+      const currentLocation = tryResolveLocation(nextPlayback, this.#locationId)
+      const keepsCurrentLocation = currentLocation?.surfaceId === this.#surfaceId
+      const nextSurfaceId = keepsCurrentSurface
+        ? this.#surfaceId
+        : nextPlayback.surfaces[0]!.id
+      const nextLocationId = keepsCurrentSurface && keepsCurrentLocation
+        ? currentLocation.id
+        : flowPageStartLocationId(nextPlayback, nextSurfaceId)
+
       this.#invalidateInteractions()
       this.#interactionPort?.resetLocalVisibility()
-      this.#playback = toFlowPublishedPlayback(source)
-      if ('components' in source && source.components) {
-        this.#components = source.components as Record<string, PublishedComponentPackageSource>
-      }
-      if (!this.#playback.surfaces.some((surface) => surface.id === this.#surfaceId)) {
-        this.#surfaceId = this.#playback.surfaces[0]!.id
-        this.#locationId = flowPageStartLocationId(this.#playback, this.#surfaceId)
-      }
+      this.#playback = nextPlayback
+      this.#components = nextComponents
+      this.#surfaceId = nextSurfaceId
+      this.#locationId = nextLocationId
       if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
       this.#render()
       this.#toc?.sync()
