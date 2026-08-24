@@ -13,19 +13,19 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: 决定绑定 `cf846e0` 的产品源码、当前 focused tests 与直接 source/import/reference 计数；只改本卡、报告、后续任务卡或生成任务板不失效。
-- Invalidating paths: `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/authoring/v9SlideContentEdit.ts`; relevant focused tests and TypeScript resolution config
+- Invalidating paths: `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/authoring/v9SlideContentEdit.ts`; `src/renderer/store/editorStore.ts`; `src/renderer/course/courseLocationCommands.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/v9MediaAudioCommands.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; relevant focused tests and TypeScript resolution config
 - Task ID: `arch-3-03-remaining-edge-readmission`
 - Phase / wave: `ARCH-3 / remaining-edge re-admission`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Remaining Edge Auditor / independent re-admission reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T18:49:17+08:00 / pending`
+- Claimed at / released at: `2026-08-24T18:49:17+08:00 / 2026-08-24T18:56:14+08:00`
 - Worktree / branch: `shared root, read-only product audit / codex/architecture-stabilization`
 - Baseline HEAD: `cf846e0`
 - Context: first-consumer cards and their independent reviews are done; product tree is clean and the previous repo-index remains product-fresh for admission, with exact source re-read at claim.
 - Freshness / relevant dirty inputs: clean root before this claim; all product hotspots read-only
 - Depends on: `arch-3-01-neutral-project-mutation-first-flow-consumer` and `arch-3-02-neutral-layer-item-hit-test-first-spatial-consumer` done
 - Blocks: any second-wave ARCH-3 implementation card and ARCH-3 phase gate
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review required complete invalidation coverage for retained Store/generic conclusions and the seven Spatial consumer counts`
 
 ## Product outcome
 
@@ -75,7 +75,11 @@ ARCH-3 continues only for remaining edges whose removal measurably reduces Surfa
 
 ## Result evidence
 
-- Pending read-only report and independent review.
+- Read-only decision report: `docs/development-plan/baselines/ARCH_3_RE_ADMISSION_REPORT.md` at product baseline `cf846e0`.
+- Admitted exactly two subtractive tasks: the two online Flow shared-overlay calls move together to the existing neutral helper; the duplicate Spatial mutation implementation becomes a zero-logic compatibility alias while all domain consumers remain unchanged.
+- Retained: production-dead `appendBlankFlowPage` becomes an ARCH-5 deletion candidate; the Spatial content edge has no current resolver consumer; Store/generic renames do not remove their remaining boundary.
+- Exact counts, focused test targets, forbidden hotspots, phase-gate scope and re-entry conditions are recorded in the report and the two ready task cards.
+- Independent review: APPROVE after the invalidating paths were expanded to cover every retained Store/generic source and all seven Spatial consumers; no remaining finding. No product test was run under V0.
 
 ## Ready checklist（Coordinator）
 
