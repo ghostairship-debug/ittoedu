@@ -284,7 +284,53 @@ describe('createBlankCourseProject', () => {
     expect(project.globalLayerItems.some((entry) => (
       entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
     ))).toBe(true)
+    const controller = project.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))
+    if (!controller || controller.item.kind !== 'native' ||
+      controller.item.content.nativeType !== 'teacher-controller') {
+      throw new Error('expected teacher controller')
+    }
+    expect(controller.item.content.data.defaultCollapsed).toBe(true)
     expect(courseProjectDocumentSchema.parse(structuredClone(project))).toEqual(project)
     expect(courseProjectDocumentSchema.parse(structuredClone(aliased))).toEqual(aliased)
   })
+
+  it.each([true, false])(
+    'preserves an explicit defaultCollapsed=%s through save and reopen',
+    (defaultCollapsed) => {
+      const project = createBlankCourseProject({
+        id: `blank-explicit-${defaultCollapsed}`,
+        title: '显式折叠设置',
+        now: NOW,
+      })
+      const controller = project.globalLayerItems.find((entry) => (
+        entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      ))
+      if (!controller || controller.item.kind !== 'native' ||
+        controller.item.content.nativeType !== 'teacher-controller') {
+        throw new Error('expected teacher controller')
+      }
+      controller.item.content.data.defaultCollapsed = defaultCollapsed
+      const revisionBeforeSave = project.revision
+
+      const bytes = createCourseProjectArchive({
+        project: courseProjectDocumentSchema.parse(project),
+        assetFiles: {},
+        componentFiles: {},
+      }, { mtime: NOW })
+      const reopened = openCourseProjectArchive(bytes)
+      const reopenedController = reopened.project.globalLayerItems.find((entry) => (
+        entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      ))
+      if (!reopenedController || reopenedController.item.kind !== 'native' ||
+        reopenedController.item.content.nativeType !== 'teacher-controller') {
+        throw new Error('expected reopened teacher controller')
+      }
+
+      expect(reopenedController.item.content.data.defaultCollapsed).toBe(defaultCollapsed)
+      expect(reopened.project.revision).toBe(revisionBeforeSave)
+      expect(reopened.project).toEqual(project)
+    },
+  )
 })

@@ -494,7 +494,34 @@ describe('V9 effective / global layer commands', () => {
     const controller = findGlobalTeacherController(restored.nextDocument!)
     expect(controller).toBeDefined()
     expect(locateCourseLayer(restored.nextDocument!, controller!.item.layerItemId)?.source).toBe('global')
+    expect(controller?.item.kind === 'native' &&
+      controller.item.content.nativeType === 'teacher-controller' &&
+      controller.item.content.data.defaultCollapsed).toBe(true)
     expect(restored.nextDocument?.playback.controls).toBe('canvas')
     expect(courseProjectDocumentSchema.safeParse(restored.nextDocument).success).toBe(true)
   })
+
+  it.each([true, false])(
+    'preserves an existing explicit defaultCollapsed=%s during a no-op restore',
+    (defaultCollapsed) => {
+      const project = v9LayerFixture()
+      const controller = findGlobalTeacherController(project)
+      if (!controller || !isTeacherControllerLayerItem(controller.item)) {
+        throw new Error('expected teacher controller')
+      }
+      controller.item.content.data.defaultCollapsed = defaultCollapsed
+      const beforeRestore = structuredClone(project)
+
+      const restored = restoreDefaultTeacherController(project, {
+        expectedRevision: project.revision,
+        now: NOW,
+      })
+
+      expect(restored).toMatchObject({ ok: true, historyEntry: false })
+      expect(restored.nextDocument).toBe(project)
+      expect(project).toEqual(beforeRestore)
+      expect(controller.item.content.data.defaultCollapsed).toBe(defaultCollapsed)
+      expect(project.revision).toBe(beforeRestore.revision)
+    },
+  )
 })
