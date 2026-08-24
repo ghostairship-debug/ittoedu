@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `src/renderer/export/course/flowPrintPlan.ts`; `src/main/pdfExport.ts`; `tests/unit/coursePrintArtifacts.test.ts`; `tests/integration/coursePdfExportApp.test.tsx`; `src/renderer/export/renderSceneImages.ts`; `src/renderer/export/buildPptx.ts`; `tsconfig.json`; `tsconfig.electron.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-4-02-non-slide-v9-pdf-completeness`
 - Phase / wave: `ARCH-4 / Published PDF completeness`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent PDF delivery reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:31:05+08:00 / pending`
+- Claimed at / released at: `2026-08-24T19:31:05+08:00 / 2026-08-24T19:45:05+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `36b53e1`
 - Context: `ARCH_4_ADMISSION_REPORT.md`; must claim only after arch-4-01 closes because App is the shared exclusive hotspot.
@@ -97,7 +97,12 @@ Main-process printing/decode errors remain visible through existing error handli
 
 ## Result evidence
 
-- Pending implementation, focused validation and independent review.
+- Product/test commit: `a887469`. Mixed/Flow semantic PDF HTML now follows the complete ordered page list with one valid document and a reusable Flow body fragment; complete ordered image coverage still wins, preserving Spatial-only, while pure Slide without Published capture keeps its existing raster path.
+- App failure boundary: legal non-pure-Slide V9 with no `pdf-html` throws the exact three-part `PDF 导出不完整` error before any V8 raster or desktop export call. Source-null, PPTX, DOCX and HTML/Web paths were not changed.
+- Electron readiness: at least one `.page` is still mandatory and every actual `document.images` entry must decode; only the invalid one-image-per-logical-page assumption was removed.
+- Focused validation bound to `a887469`: `npx vitest run tests/unit/coursePrintArtifacts.test.ts tests/integration/coursePdfExportApp.test.tsx` passed `2 files / 6 tests`; `npx tsc --noEmit` and `npx tsc -p tsconfig.electron.json --noEmit` both passed; allowed-path audit and `git diff --check` passed.
+- Independent PDF delivery review: APPROVE with no blocking finding. It verified coverage/order, no nested Flow document, image selection, pure-Slide fallback, exact fail-closed semantics, readiness and forbidden-boundary preservation while reusing the existing evidence. The only residual is actual Chromium pagination/scaling/clipping, intentionally deferred to the single ARCH-4 Mixed PDF gate.
+- Generated refresh: task board only at card closure; repo-index remains deferred to the ARCH-4 phase gate.
 
 ## Ready checklist（Coordinator）
 
