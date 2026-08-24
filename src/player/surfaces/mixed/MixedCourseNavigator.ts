@@ -324,19 +324,69 @@ export class MixedCourseNavigator {
     const previous = this.#current
     if (previous?.id === location.id && options.force !== true) return this.#state()
     if (notifyBeforeNavigate) await this.#notifyBeforeNavigate(location, options.force === true)
-    if (previous && previous.surfaceId !== location.surfaceId) {
-      await this.#player.releaseSurfaceSession?.(previous.surfaceId)
+    let targetActivated = false
+    try {
+      if (previous && previous.surfaceId !== location.surfaceId) {
+        const released = await this.#player.releaseSurfaceSession?.(previous.surfaceId)
+        this.#throwIfSurfaceOperationFailed(released, 'Previous surface release failed')
+      }
+      const activation = await this.#player.activateSurface(location.surfaceId)
+      if (!activation.ok) throw activation.failure?.error ?? new Error('Surface activation failed')
+      targetActivated = true
+      options.prepareTransition?.()
+      const located = await this.#player.setSurfaceLocation?.(location.surfaceId, location.id)
+      this.#throwIfSurfaceOperationFailed(located, 'Surface location failed')
+    } catch (navigationFailure) {
+      try {
+        await this.#restoreAfterFailedTransition(previous, location, targetActivated)
+      } catch (rollbackFailure) {
+        throw new AggregateError(
+          [navigationFailure, rollbackFailure],
+          'Mixed course navigation failed and its previous location could not be restored',
+        )
+      }
+      throw navigationFailure
     }
-    const activation = await this.#player.activateSurface(location.surfaceId)
-    if (!activation.ok) throw activation.failure?.error ?? new Error('Surface activation failed')
-    options.prepareTransition?.()
-    const located = await this.#player.setSurfaceLocation?.(location.surfaceId, location.id)
-    if (located && !located.ok) throw located.failure?.error ?? new Error('Surface location failed')
     if (previous && options.recordHistory !== false) this.#history.push(previous.id)
     this.#current = { ...location }
     const state = this.#state(previous?.id, previous?.surfaceId)
     await this.#onNavigate?.(state)
     return state
+  }
+
+  async #restoreAfterFailedTransition(
+    previous: MixedLocationEntry | null,
+    target: MixedLocationEntry,
+    targetActivated: boolean,
+  ): Promise<void> {
+    if (previous?.surfaceId === target.surfaceId) {
+      const located = await this.#player.setSurfaceLocation?.(previous.surfaceId, previous.id)
+      this.#throwIfSurfaceOperationFailed(located, 'Previous surface location restore failed')
+      return
+    }
+
+    if (
+      this.#player.releaseSurfaceSession
+      && (targetActivated || this.#player.activeSurfaceId === target.surfaceId)
+    ) {
+      const released = await this.#player.releaseSurfaceSession(target.surfaceId)
+      this.#throwIfSurfaceOperationFailed(released, 'Target surface release during rollback failed')
+    }
+    if (!previous) return
+
+    if (this.#player.activeSurfaceId !== previous.surfaceId) {
+      const activated = await this.#player.activateSurface(previous.surfaceId)
+      this.#throwIfSurfaceOperationFailed(activated, 'Previous surface activation restore failed')
+    }
+    const located = await this.#player.setSurfaceLocation?.(previous.surfaceId, previous.id)
+    this.#throwIfSurfaceOperationFailed(located, 'Previous surface location restore failed')
+  }
+
+  #throwIfSurfaceOperationFailed(
+    result: SurfaceOperationResult | undefined,
+    fallbackMessage: string,
+  ): void {
+    if (result && !result.ok) throw result.failure?.error ?? new Error(fallbackMessage)
   }
 
   async #notifyBeforeNavigate(location: MixedLocationEntry, forced: boolean): Promise<void> {

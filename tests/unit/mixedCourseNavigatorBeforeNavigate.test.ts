@@ -49,6 +49,91 @@ class RecordingPlayer implements MixedCoursePlayerPort {
   }
 }
 
+function failedOperation(
+  surfaceId: string,
+  phase: 'activate' | 'suspend' | 'execute',
+  error: Error,
+): SurfaceOperationResult {
+  return {
+    ok: false,
+    failure: {
+      surfaceId,
+      kind: surfaceId.includes('flow') ? 'flow' : 'slide',
+      phase,
+      error,
+    },
+  }
+}
+
+class FailureInjectingPlayer implements MixedCoursePlayerPort {
+  activeSurfaceId: string | null = null
+  readonly calls: string[] = []
+  readonly locations = new Map<string, string>()
+  readonly #activationFailures = new Map<string, Error[]>()
+  readonly #releaseFailures = new Map<string, Error[]>()
+  readonly #locationFailures = new Map<string, Error[]>()
+
+  get visibleLocationId(): string | null {
+    return this.activeSurfaceId ? this.locations.get(this.activeSurfaceId) ?? null : null
+  }
+
+  failNextActivation(surfaceId: string, error: Error): void {
+    this.#activationFailures.set(surfaceId, [
+      ...(this.#activationFailures.get(surfaceId) ?? []),
+      error,
+    ])
+  }
+
+  failNextLocation(locationId: string, error: Error): void {
+    this.#locationFailures.set(locationId, [
+      ...(this.#locationFailures.get(locationId) ?? []),
+      error,
+    ])
+  }
+
+  failNextRelease(surfaceId: string, error: Error): void {
+    this.#releaseFailures.set(surfaceId, [
+      ...(this.#releaseFailures.get(surfaceId) ?? []),
+      error,
+    ])
+  }
+
+  async activateSurface(surfaceId: string): Promise<SurfaceOperationResult> {
+    this.calls.push(`activate:${surfaceId}`)
+    const failures = this.#activationFailures.get(surfaceId)
+    const failure = failures?.shift()
+    if (failure) return failedOperation(surfaceId, 'activate', failure)
+    this.activeSurfaceId = surfaceId
+    return { ok: true }
+  }
+
+  async releaseSurfaceSession(surfaceId: string): Promise<SurfaceOperationResult> {
+    this.calls.push(`release:${surfaceId}`)
+    const failures = this.#releaseFailures.get(surfaceId)
+    const failure = failures?.shift()
+    if (failure) return failedOperation(surfaceId, 'suspend', failure)
+    if (this.activeSurfaceId === surfaceId) this.activeSurfaceId = null
+    return { ok: true }
+  }
+
+  async setSurfaceLocation(surfaceId: string, locationId: string): Promise<SurfaceOperationResult> {
+    this.calls.push(`set:${surfaceId}:${locationId}`)
+    this.locations.set(surfaceId, locationId)
+    const failures = this.#locationFailures.get(locationId)
+    const failure = failures?.shift()
+    if (failure) return failedOperation(surfaceId, 'execute', failure)
+    return { ok: true }
+  }
+
+  async resetSurface(): Promise<SurfaceOperationResult> {
+    return { ok: true }
+  }
+
+  async resetCourse(): Promise<readonly SurfaceOperationResult[]> {
+    return []
+  }
+}
+
 describe('MixedCourseNavigator onBeforeNavigate', () => {
   it('runs once before the first start mutates the player', async () => {
     const player = new RecordingPlayer()
@@ -265,5 +350,157 @@ describe('MixedCourseNavigator onBeforeNavigate', () => {
       'set:surface-slide:slide-two',
     ])
     expect(navigator.current?.locationId).toBe('slide-two')
+  })
+
+  it('restores the previous surface after target activation fails and remains retryable', async () => {
+    const player = new FailureInjectingPlayer()
+    const navigations: string[] = []
+    const navigator = new MixedCourseNavigator(course, player, {
+      onNavigate: ({ locationId }) => {
+        navigations.push(locationId)
+      },
+    })
+    await navigator.start()
+    await navigator.goToLocation('slide-two')
+    player.calls.length = 0
+    navigations.length = 0
+    const activationFailure = new Error('flow activation failed')
+    player.failNextActivation('surface-flow', activationFailure)
+
+    await expect(navigator.goToLocation('flow-page')).rejects.toBe(activationFailure)
+
+    expect(player.calls).toEqual([
+      'release:surface-slide',
+      'activate:surface-flow',
+      'activate:surface-slide',
+      'set:surface-slide:slide-two',
+    ])
+    expect(player.activeSurfaceId).toBe('surface-slide')
+    expect(player.visibleLocationId).toBe('slide-two')
+    expect(navigator.current?.locationId).toBe('slide-two')
+    expect(navigator.canGoBack).toBe(true)
+    expect(navigations).toEqual([])
+
+    player.calls.length = 0
+    await navigator.goToLocation('flow-page')
+    expect(player.calls).toEqual([
+      'release:surface-slide',
+      'activate:surface-flow',
+      'set:surface-flow:flow-page',
+    ])
+    expect(navigator.current?.locationId).toBe('flow-page')
+    expect(navigations).toEqual(['flow-page'])
+    await navigator.back()
+    expect(navigator.current?.locationId).toBe('slide-two')
+    expect(navigator.canGoBack).toBe(true)
+  })
+
+  it('does not activate the target when releasing the previous surface fails', async () => {
+    const player = new FailureInjectingPlayer()
+    const navigator = new MixedCourseNavigator(course, player)
+    await navigator.start()
+    player.calls.length = 0
+    const releaseFailure = new Error('slide release failed')
+    player.failNextRelease('surface-slide', releaseFailure)
+
+    await expect(navigator.goToLocation('flow-page')).rejects.toBe(releaseFailure)
+
+    expect(player.calls).toEqual([
+      'release:surface-slide',
+      'set:surface-slide:slide-home',
+    ])
+    expect(player.activeSurfaceId).toBe('surface-slide')
+    expect(player.visibleLocationId).toBe('slide-home')
+    expect(navigator.current?.locationId).toBe('slide-home')
+    expect(navigator.canGoBack).toBe(false)
+
+    player.calls.length = 0
+    await navigator.goToLocation('flow-page')
+    expect(player.calls).toEqual([
+      'release:surface-slide',
+      'activate:surface-flow',
+      'set:surface-flow:flow-page',
+    ])
+    expect(navigator.current?.locationId).toBe('flow-page')
+  })
+
+  it('releases the activated target and restores the previous surface after location fails', async () => {
+    const player = new FailureInjectingPlayer()
+    const navigator = new MixedCourseNavigator(course, player)
+    await navigator.start()
+    player.calls.length = 0
+    const locationFailure = new Error('flow location failed')
+    player.failNextLocation('flow-page', locationFailure)
+
+    await expect(navigator.goToLocation('flow-page')).rejects.toBe(locationFailure)
+
+    expect(player.calls).toEqual([
+      'release:surface-slide',
+      'activate:surface-flow',
+      'set:surface-flow:flow-page',
+      'release:surface-flow',
+      'activate:surface-slide',
+      'set:surface-slide:slide-home',
+    ])
+    expect(player.activeSurfaceId).toBe('surface-slide')
+    expect(player.visibleLocationId).toBe('slide-home')
+    expect(navigator.current?.locationId).toBe('slide-home')
+    expect(navigator.canGoBack).toBe(false)
+  })
+
+  it('restores a same-surface location without releasing or reactivating its host', async () => {
+    const player = new FailureInjectingPlayer()
+    const navigator = new MixedCourseNavigator(course, player)
+    await navigator.start()
+    player.calls.length = 0
+    const locationFailure = new Error('slide location failed')
+    player.failNextLocation('slide-two', locationFailure)
+
+    await expect(navigator.goToLocation('slide-two')).rejects.toBe(locationFailure)
+
+    expect(player.calls).toEqual([
+      'activate:surface-slide',
+      'set:surface-slide:slide-two',
+      'set:surface-slide:slide-home',
+    ])
+    expect(player.activeSurfaceId).toBe('surface-slide')
+    expect(player.visibleLocationId).toBe('slide-home')
+    expect(navigator.current?.locationId).toBe('slide-home')
+  })
+
+  it('releases an activated target when the first start cannot locate it', async () => {
+    const player = new FailureInjectingPlayer()
+    const navigator = new MixedCourseNavigator(course, player)
+    const locationFailure = new Error('initial location failed')
+    player.failNextLocation('slide-home', locationFailure)
+
+    await expect(navigator.start()).rejects.toBe(locationFailure)
+
+    expect(player.calls).toEqual([
+      'activate:surface-slide',
+      'set:surface-slide:slide-home',
+      'release:surface-slide',
+    ])
+    expect(player.activeSurfaceId).toBeNull()
+    expect(player.visibleLocationId).toBeNull()
+    expect(navigator.current).toBeNull()
+    expect(navigator.canGoBack).toBe(false)
+  })
+
+  it('preserves the navigation and rollback failures when compensation also fails', async () => {
+    const player = new FailureInjectingPlayer()
+    const navigator = new MixedCourseNavigator(course, player)
+    await navigator.start()
+    const navigationFailure = new Error('flow activation failed')
+    const rollbackFailure = new Error('slide rollback failed')
+    player.failNextActivation('surface-flow', navigationFailure)
+    player.failNextActivation('surface-slide', rollbackFailure)
+
+    const rejection = await navigator.goToLocation('flow-page').catch((error: unknown) => error)
+
+    expect(rejection).toBeInstanceOf(AggregateError)
+    expect((rejection as AggregateError).errors).toEqual([navigationFailure, rollbackFailure])
+    expect(navigator.current?.locationId).toBe('slide-home')
+    expect(navigator.canGoBack).toBe(false)
   })
 })
