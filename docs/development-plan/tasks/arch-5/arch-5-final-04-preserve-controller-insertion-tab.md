@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/store/editorStore.ts`; `tests/unit/batchMediaAndInsertion.test.ts`; `tests/unit/globalEditorStore.test.ts`; `tests/unit/architectureDependencyRatchet.test.ts`
 - Task ID: `arch-5-final-04-preserve-controller-insertion-tab`
 - Phase / wave: `ARCH-5 / candidate repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Store worker / independent behavior reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T20:59:36+08:00 / pending`
+- Claimed at / released at: `2026-08-24T20:59:36+08:00 / 2026-08-24T21:07:13+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `406c0b1`
 - Context: `restoreDefaultTeacherController` and persistence already select a newly created ID; explicit locate remains needed for global authoring scope and for existing-controller behavior
@@ -24,7 +24,7 @@
 - Depends on: `arch-5-final-02-v4-and-outcome` rolled back
 - Blocks: candidate 3
 - Risk statement: skipping selection entirely would preserve the tab but could lose global scope/location semantics, while restoring the tab for existing controllers would silently change the explicit locate workflow.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / reviewer rejected createdLayerItemId as a creation-only signal; final code checks pre-restore existence`
 
 ## Product outcome
 
@@ -55,10 +55,10 @@ Adding a missing teacher controller from Elements keeps the teacher in the inser
 
 ## Acceptance
 
-- [ ] a created controller is selected in global scope while the source `elements` tab remains active
-- [ ] existing/no-op controller locate still opens Properties
-- [ ] controller history/playback restore semantics remain green
-- [ ] no App/UI/contract or unrelated Store behavior changes
+- [x] a created controller is selected in global scope while the source `elements` tab remains active
+- [x] existing/no-op controller locate still opens Properties
+- [x] controller history/playback restore semantics remain green
+- [x] no App/UI/contract or unrelated Store behavior changes
 
 ## Validation
 
@@ -71,4 +71,6 @@ Adding a missing teacher controller from Elements keeps the teacher in the inser
 
 ## Result evidence
 
-- Pending bounded Store repair, focused validation and independent review.
+- Product commit `4560c8f` changes only `editorStore.ts` and the focused insertion test (`31 insertions / 4 deletions`). Slide, Flow and Spatial record whether a controller existed before restore, always locate through `selectNode`, and restore the source tab only for a genuinely missing controller.
+- Final-code focused evidence: `batchMediaAndInsertion.test.ts` passed `8 / 8`; `globalEditorStore.test.ts` plus `architectureDependencyRatchet.test.ts` passed `2 files / 26 tests`, for `3 files / 34 tests` total. Root `npx tsc --noEmit` and `git diff --check` passed.
+- Independent reviewer first issued **REQUEST_CHANGES** because `createdLayerItemId` also identifies repaired existing controllers. The implementation changed to pre-restore existence, added the existing `controls: none → Properties` assertion, and final re-review returned **APPROVE** with no remaining blocker.
