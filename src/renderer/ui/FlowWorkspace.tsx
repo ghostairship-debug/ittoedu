@@ -683,6 +683,12 @@ function isTextTarget(target: EventTarget | null): boolean {
   )
 }
 
+function isFormulaEditTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(
+    target.closest('[data-flow-formula-edit-target="true"]'),
+  )
+}
+
 function headingTag(level: 1 | 2 | 3 | 4 | 5 | 6): 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' {
   return (`h${level}`) as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
 }
@@ -971,6 +977,10 @@ export function FlowWorkspace({
 
   const openFormula = (blockId: string) => {
     if (readOnly || selection?.authoringScope === 'global') return
+    if (editRef.current?.kind === 'formula' && editRef.current.blockId === blockId) {
+      setFormulaBlockId(blockId)
+      return
+    }
     const currentSelection = selection ?? selectFlowEditorBlocks(project, locationId, [blockId])
     const begun = beginFlowFormulaEdit({
       project,
@@ -989,6 +999,17 @@ export function FlowWorkspace({
     if (selection?.authoringScope === 'global') return
     if (editRef.current && editRef.current.blockId !== blockId) {
       commitCurrent(false)
+    }
+    if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      selection?.focus === 'block' &&
+      selection.selectedBlockId === blockId &&
+      isFormulaEditTarget(event.target)
+    ) {
+      openFormula(blockId)
+      return
     }
     if (
       selection?.focus === 'block' &&
@@ -1203,6 +1224,7 @@ export function FlowWorkspace({
     const selected = selection?.selectedBlockIds.includes(blockView.blockId) ?? false
     const editingThis = edit?.blockId === blockView.blockId
     const showToolbar = selected && !readOnly
+    const formulaEditingAvailable = !readOnly && selection?.authoringScope !== 'global'
     const richDraft = edit?.kind === 'rich-text' && editingThis
       ? edit.draft as { text: string; runs: import('../../shared/projectTypes').TextRun[] }
       : null
@@ -1466,7 +1488,16 @@ export function FlowWorkspace({
         break
       case 'formula':
         body = (
-          <div data-flow-formula-id={block.formulaId}>
+          <div
+            data-flow-formula-id={block.formulaId}
+            data-flow-formula-edit-target="true"
+            data-testid={`flow-formula-edit-target-${block.id}`}
+            style={{
+              position: 'relative',
+              minHeight: 96,
+              cursor: formulaEditingAvailable ? 'pointer' : undefined,
+            }}
+          >
             <PublishedFormulaPaint
               formulaId={block.formulaId}
               accessibleText={block.accessibleText}
@@ -1474,7 +1505,34 @@ export function FlowWorkspace({
               style={{ fontSize: 32, color: '#1f2937', align: 'left' }}
               width={Math.max(160, view.layout.readingWidth)}
               height={96}
+              pointerEvents={formulaEditingAvailable ? 'none' : 'auto'}
             />
+            {formulaEditingAvailable ? (
+              <button
+                type="button"
+                aria-label="编辑公式"
+                data-testid={`flow-formula-edit-${block.id}`}
+                title="打开公式编辑器"
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  padding: '4px 10px',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  background: '#ffffff',
+                  color: '#334155',
+                  cursor: 'pointer',
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  openFormula(blockView.blockId)
+                }}
+              >
+                编辑公式
+              </button>
+            ) : null}
           </div>
         )
         break

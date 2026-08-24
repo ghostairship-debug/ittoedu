@@ -251,6 +251,7 @@ describe('FlowWorkspace paper', () => {
     )
     fireEvent.click(screen.getByTestId('flow-block-p-body').querySelector('[data-flow-rich-text="true"]')!)
     expect(onSelectionChange.mock.calls.at(-1)?.[0]?.focus).toBe('text')
+    expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
 
     rerender(
       <div style={{ width: 900, height: 640 }}>
@@ -381,10 +382,45 @@ describe('FlowWorkspace paper', () => {
     expect(onSelectionChange).not.toHaveBeenCalled()
   })
 
-  it('opens the formula editor on double-click instead of a run editor', () => {
-    renderPaper()
-    fireEvent.doubleClick(screen.getByRole('math'))
+  it('keeps the formula body target stable across selection rerender and opens on a second real click', () => {
+    const { onSelectionChange, onTextEditChange, project, rerender } = renderPaper()
+    const explicitEntry = screen.getByRole('button', { name: '编辑公式' })
+    expect(explicitEntry).toBeVisible()
+    fireEvent.click(explicitEntry)
     expect(screen.getByTestId('formula-edit-dialog')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭公式编辑' }))
+    expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
+    onSelectionChange.mockClear()
+    onTextEditChange.mockClear()
+
+    const formulaTarget = document.querySelector<HTMLElement>('[data-flow-formula-id="formula-1"]')
+    if (!formulaTarget) throw new Error('expected formula body target')
+
+    fireEvent.click(formulaTarget)
+    const selected = onSelectionChange.mock.calls.at(-1)?.[0]
+    expect(selected).toMatchObject({ selectedBlockId: 'formula-1', focus: 'block' })
+
+    rerender(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={project}
+          view={buildFlowEditorView({ project, locationId: 'h1' })}
+          selection={selected ?? null}
+          onSelectionChange={onSelectionChange}
+          onTextEditChange={onTextEditChange}
+        />
+      </div>,
+    )
+    const rerenderedTarget = document.querySelector<HTMLElement>('[data-flow-formula-id="formula-1"]')
+    expect(rerenderedTarget).toBe(formulaTarget)
+    expect(screen.getByRole('math')).toHaveStyle({ pointerEvents: 'none' })
+
+    fireEvent.click(rerenderedTarget!)
+    expect(screen.getByTestId('formula-edit-dialog')).toBeTruthy()
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toMatchObject({
+      kind: 'formula',
+      blockId: 'formula-1',
+    })
     expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
   })
 
