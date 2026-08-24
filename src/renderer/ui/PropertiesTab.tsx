@@ -70,11 +70,7 @@ import type {
   WritingMode,
 } from '../../shared/projectTypes'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
-import type {
-  RuntimeDocument,
-  RuntimeLayer,
-  RuntimeRenderMode,
-} from '../../shared/runtimeTypes'
+import type { RuntimeLayer } from '../../shared/runtimeTypes'
 import { isStrokeOnlyShapeType, SHAPE_TYPES } from '../../shared/projectTypes'
 import {
   isVerticalWritingMode,
@@ -102,6 +98,7 @@ import {
 } from '../course/globalLayerCommands'
 import {
   selectActiveCourseProjectDocument,
+  selectActiveCourseLocationId,
   selectActiveScene,
   selectCandidateGlobalLayerItems,
   selectEditingNodes,
@@ -112,6 +109,11 @@ import {
   type AlignmentMode,
   useEditorStore,
 } from '../store/editorStore'
+import {
+  selectRuntimeInspectorAuthoringView,
+  type RuntimeInspectorAuthoringView,
+} from '../runtime/runtimeInspectorAuthoringView'
+import { updateCourseAuthoringSessionRevision } from '../authoring/courseAuthoringSession'
 import {
   createImageAssetImport,
   createMediaAssetImport,
@@ -255,11 +257,13 @@ function SelectField<T extends string>({
   label,
   value,
   options,
+  disabled = false,
   onChange,
 }: {
   label: string
   value: T
   options: Array<{ value: T; label: string }>
+  disabled?: boolean
   onChange(value: T): void
 }) {
   return (
@@ -269,6 +273,7 @@ function SelectField<T extends string>({
         className="form-input"
         aria-label={label}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value as T)}
       >
         {options.map((option) => (
@@ -1607,39 +1612,80 @@ function MultiSelectionProperties({
   )
 }
 
-type RuntimeEditorPatch = Partial<
-  Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>
->
-
 function runtimeSourceSummary(source: string): string {
   const compact = source.replace(/\s+/g, ' ').trim()
   if (!compact) return '空源码'
   return compact.length > 96 ? `${compact.slice(0, 96)}…` : compact
 }
 
+type RuntimeInspectorCommitResult =
+  | { readonly ok: true; readonly status: 'updated' | 'unchanged' }
+  | { readonly ok: false; readonly reason: string }
+
 function RuntimeInspector({
-  runtime,
+  view,
   scope,
-  onChange,
 }: {
-  runtime: RuntimeDocument | undefined
+  view: RuntimeInspectorAuthoringView | null
   scope: 'scene' | 'global'
-  onChange(patch: RuntimeEditorPatch): void
 }) {
+  const updateRuntimePropertyAtTarget = useEditorStore(
+    (state) => state.updateRuntimePropertyAtTarget,
+  )
+  const updateRuntimeContentTextAtTarget = useEditorStore(
+    (state) => state.updateRuntimeContentTextAtTarget,
+  )
+  const setStatus = useEditorStore((state) => state.setStatus)
+  const setError = useEditorStore((state) => state.setError)
+  const [result, setResult] = useState<{
+    kind: 'success' | 'error'
+    message: string
+  } | null>(null)
+  const runtimeDocumentKey = view?.documentKey ?? null
+  useEffect(() => setResult(null), [runtimeDocumentKey])
+
+  const reportCommit = (
+    commit: RuntimeInspectorCommitResult,
+    updatedMessage: string,
+    unchangedMessage: string,
+  ) => {
+    if (!commit.ok) {
+      setResult({ kind: 'error', message: commit.reason })
+      setError(commit.reason)
+      setStatus(null)
+      return commit
+    }
+    const message = commit.status === 'updated'
+      ? updatedMessage
+      : unchangedMessage
+    setResult({ kind: 'success', message })
+    setError(null)
+    setStatus(message)
+    return commit
+  }
+
   const title = scope === 'global' ? '全局自定义运行时' : '场景自定义运行时'
-  if (!runtime) {
+  if (!view || view.availability !== 'available') {
     return (
       <section className="property-section" data-testid={`${scope}-runtime-empty`}>
         <h3 className="property-title"><Code2 size={14} />{title}</h3>
         <p className="property-empty">
-          当前没有自定义运行时。运行时代码由 AI 或生成脚本写入工程，编辑器只负责管理和修改登记文案。
+          {view?.label ?? '当前 Runtime 作者会话不可用'}。运行时代码由 AI 或生成脚本写入工程，编辑器只负责管理和修改登记文案。
         </p>
       </section>
     )
   }
 
-  const sourceBytes = new TextEncoder().encode(runtime.source).byteLength
-  const fallbackAsset = runtime.staticFallback?.assetId
+  const renderModeOptions: Array<{
+    value: typeof view.renderMode
+    label: string
+  }> = view.runtimeApiVersion === 3
+    ? [{ value: 'dom', label: 'HTML / DOM（API 3 固定）' }]
+    : [
+        { value: 'phaser', label: 'Phaser 画布' },
+        { value: 'dom', label: 'HTML / DOM' },
+        { value: 'hybrid', label: '混合渲染' },
+      ]
   return (
     <section
       className="property-section runtime-inspector"
@@ -1648,38 +1694,66 @@ function RuntimeInspector({
       <h3 className="property-title"><Code2 size={14} />{title}</h3>
       <ToggleRow
         label="启用运行时"
-        checked={runtime.enabled}
-        onChange={(enabled) => onChange({ enabled })}
+        checked={view.enabled}
+        disabled={view.effectiveLocked}
+        onChange={(enabled) => reportCommit(
+          updateRuntimePropertyAtTarget(
+            view.enabledTarget,
+            { field: 'enabled', value: enabled },
+          ),
+          enabled ? '运行时已启用' : '运行时已停用',
+          '运行时启用状态没有变化',
+        )}
       />
-      <SelectField<RuntimeRenderMode>
+      <SelectField
         label="渲染能力声明"
-        value={runtime.renderMode}
-        options={[
-          { value: 'phaser', label: 'Phaser 画布' },
-          { value: 'dom', label: 'HTML / DOM' },
-          { value: 'hybrid', label: '混合渲染' },
-        ]}
-        onChange={(renderMode) => onChange({ renderMode })}
+        value={view.renderMode}
+        options={renderModeOptions}
+        disabled={view.effectiveLocked || view.runtimeApiVersion === 3}
+        onChange={(renderMode) => reportCommit(
+          updateRuntimePropertyAtTarget(
+            view.renderModeTarget,
+            { field: 'renderMode', value: renderMode },
+          ),
+          '运行时渲染能力声明已更新',
+          '运行时渲染能力声明没有变化',
+        )}
       />
       <p className="property-hint">
-        Runtime API 2 会按此字段只挂载并暴露声明的能力。修改字段不会转换源码，请确认源码支持新模式。
+        {view.runtimeApiVersion === 3
+          ? 'Surface Runtime / API 3 固定使用 HTML / DOM；编辑器会保留其真实协议与版本。'
+          : 'Canvas Runtime / API 2 会按此字段只挂载并暴露声明的能力。修改字段不会转换源码，请确认源码支持新模式。'}
       </p>
+      {view.effectiveLocked && (
+        <p className="property-hint" role="status">
+          当前 Runtime 已锁定，属性与登记文案均为只读。
+        </p>
+      )}
+      {result && (
+        <p
+          className="property-hint"
+          role={result.kind === 'error' ? 'alert' : 'status'}
+          data-testid={`${scope}-runtime-result`}
+        >
+          {result.message}
+        </p>
+      )}
       <div className="runtime-summary-grid" aria-label="运行时摘要">
-        <span><small>运行时协议</small>API {runtime.runtimeApiVersion}</span>
-        <span><small>源码体积</small>{(sourceBytes / 1024).toFixed(sourceBytes >= 1024 ? 1 : 2)} KiB</span>
-        <span><small>素材绑定</small>{Object.keys(runtime.assets).length}</span>
-        <span><small>可编辑文案</small>{Object.keys(runtime.content.values).length}</span>
-        <span><small>静态后备</small>{fallbackAsset ? '已配置' : '未配置'}</span>
+        <span><small>运行时协议</small>{view.protocol} · API {view.runtimeApiVersion}</span>
+        <span><small>源码体积</small>{(view.sourceBytes / 1024).toFixed(view.sourceBytes >= 1024 ? 1 : 2)} KiB</span>
+        <span><small>素材绑定</small>{view.assetCount}</span>
+        <span><small>可编辑文案</small>{view.contentFields.length}</span>
+        <span><small>静态后备</small>{view.fallback ? '已配置' : '未配置'}</span>
       </div>
       <div className="form-field">
         <label>源码摘要（只读）</label>
         <div className="readonly-value runtime-source-summary">
-          {runtimeSourceSummary(runtime.source)}
+          {runtimeSourceSummary(view.runtime.source)}
         </div>
       </div>
-      {fallbackAsset && (
+      {view.fallback && (
         <p className="property-hint">
-          静态后备：{runtime.staticFallback!.coverage === 'full-scene' ? '整场景' : '运行时图层'} · {runtime.staticFallback!.layer}
+          静态后备：{view.fallback.coverage === 'scene' ? '整场景' : '整表面'} · {view.fallback.assetId}
         </p>
       )}
       <div className="runtime-content-heading">
@@ -1687,8 +1761,13 @@ function RuntimeInspector({
         <span>修改这里只更新 content.values，不会改写源码。</span>
       </div>
       <RuntimeContentEditor
-        runtime={runtime}
-        onChange={(nextRuntime) => onChange({ content: nextRuntime.content })}
+        fields={view.contentFields}
+        disabled={view.effectiveLocked}
+        onCommit={(target, value) => reportCommit(
+          updateRuntimeContentTextAtTarget(target, value),
+          `运行时文案“${target.contentKey}”已更新`,
+          `运行时文案“${target.contentKey}”没有变化`,
+        )}
       />
     </section>
   )
@@ -2757,7 +2836,12 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
 
 export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const flowSession = useEditorStore((state) => state.flowSession)
-  if (flowSession && flowSession.selection.focus !== 'overlay' && flowSession.selection.selectedBlockId) {
+  if (
+    flowSession
+    && flowSession.selection.authoringScope !== 'global'
+    && flowSession.selection.focus !== 'overlay'
+    && flowSession.selection.selectedBlockId
+  ) {
     return <FlowBlockProperties session={flowSession} />
   }
   if (
@@ -2779,6 +2863,11 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
+  const courseProject = useEditorStore(selectActiveCourseProjectDocument)
+  const activeCourseLocationId = useEditorStore(selectActiveCourseLocationId)
+  const courseAuthoringSession = useEditorStore(
+    (state) => state.courseAuthoringSession,
+  )
   const editingNodes = useEditorStore(selectEditingNodes)
   const node = useEditorStore(selectSelectedNode)
   const spatialSession = useEditorStore((state) => state.spatialSession)
@@ -2795,8 +2884,6 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
     [project],
   )
   const updateScene = useEditorStore((state) => state.updateScene)
-  const updateSceneRuntime = useEditorStore((state) => state.updateSceneRuntime)
-  const updateGlobalRuntime = useEditorStore((state) => state.updateGlobalRuntime)
   const updateNode = useEditorStore((state) => state.updateNode)
   const addInteractionRule = useEditorStore((state) => state.addInteractionRule)
   const updateInteractionRule = useEditorStore((state) => state.updateInteractionRule)
@@ -2812,6 +2899,34 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
   const clearNodePresentationOverride = useEditorStore(
     (state) => state.clearNodePresentationOverride,
   )
+  const activeCourseLocation = courseProject?.locations.find(
+    (location) => location.id === activeCourseLocationId,
+  )
+  const runtimeInspectorView = useMemo<RuntimeInspectorAuthoringView | null>(() => {
+    if (!courseProject || !activeCourseLocationId || !courseAuthoringSession) {
+      return null
+    }
+    const currentAuthoringSession = updateCourseAuthoringSessionRevision(
+      courseAuthoringSession,
+      courseProject.revision,
+    )
+    return selectRuntimeInspectorAuthoringView({
+      project: courseProject,
+      locationId: activeCourseLocationId,
+      editingScope,
+      activeStateId: activeCourseLocation?.kind === 'slide-scene'
+        ? activePresentationStateId
+        : null,
+      sessionToken: currentAuthoringSession.token,
+    })
+  }, [
+    activeCourseLocation?.kind,
+    activeCourseLocationId,
+    activePresentationStateId,
+    courseAuthoringSession,
+    courseProject,
+    editingScope,
+  ])
   const effectiveScene = materializeScene(scene, activePresentationStateId)
   const activePresentationState = activePresentationStateId === null
     ? null
@@ -2852,7 +2967,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
                     ? globalLayerCount
                     : project.globalLayer.filter((item) => item.layer === 'overlay').length
                 }</span>
-                <span><small>运行时</small>{project.globalRuntime ? '已配置' : '无'}</span>
+                <span><small>运行时</small>{runtimeInspectorView?.availability === 'available' ? '已配置' : '无'}</span>
               </div>
               <p className="property-hint">
                 全局层类似课件母版：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
@@ -2905,8 +3020,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
             {editorMode === 'professional' && (
               <RuntimeInspector
                 scope="global"
-                runtime={project.globalRuntime}
-                onChange={updateGlobalRuntime}
+                view={runtimeInspectorView}
               />
             )}
           </>
@@ -2947,8 +3061,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
                 </section>
                 <RuntimeInspector
                   scope="scene"
-                  runtime={scene.runtime}
-                  onChange={(patch) => updateSceneRuntime(scene.id, patch)}
+                  view={runtimeInspectorView}
                 />
               </>
             ) : scene.interactions.length > 0 ? (

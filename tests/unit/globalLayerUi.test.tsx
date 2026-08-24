@@ -7,7 +7,10 @@ import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
+import { selectRuntimeInspectorAuthoringView } from '@/renderer/runtime/runtimeInspectorAuthoringView'
 import {
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
   selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -138,6 +141,23 @@ describe('Project V8 global-layer editor UI', () => {
     const globalNode = useEditorStore.getState().project.globalLayer.find(
       (item) => item.node.type === 'external-component',
     )!.node
+    const locationId = selectActiveCourseLocationId(useEditorStore.getState())
+    if (!locationId) throw new Error('缺少当前课程位置')
+    store.activateCourseLocation(locationId)
+    store.setEditingScope('global')
+    store.selectNode(globalNode.id)
+    const refreshed = useEditorStore.getState()
+    const canonicalProject = selectActiveCourseProjectDocument(refreshed)
+    if (!canonicalProject || !refreshed.courseAuthoringSession) {
+      throw new Error('缺少当前 Course Project 作者会话')
+    }
+    expect(selectRuntimeInspectorAuthoringView({
+      project: canonicalProject,
+      locationId,
+      editingScope: 'global',
+      activeStateId: null,
+      sessionToken: refreshed.courseAuthoringSession.token,
+    })).toMatchObject({ availability: 'available' })
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -180,12 +200,46 @@ describe('Project V8 global-layer editor UI', () => {
 
     act(() => useEditorStore.getState().selectNode(null))
     expect(screen.getByTestId('global-runtime-inspector')).toBeInTheDocument()
+    const globalRuntimeBefore = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    if (globalRuntimeBefore?.kind !== 'runtime') {
+      throw new Error('缺少 canonical 全局 Runtime')
+    }
+    const visibleBefore = globalRuntimeBefore.visible
+    fireEvent.click(screen.getByLabelText('启用运行时'))
+    const disabledGlobalRuntime = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    expect(disabledGlobalRuntime).toMatchObject({
+      kind: 'runtime',
+      visible: visibleBefore,
+      runtime: { enabled: false, renderMode: 'dom' },
+    })
+    fireEvent.change(screen.getByLabelText('渲染能力声明'), {
+      target: { value: 'hybrid' },
+    })
+    const hybridGlobalRuntime = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    expect(hybridGlobalRuntime).toMatchObject({
+      kind: 'runtime',
+      visible: visibleBefore,
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: false,
+        renderMode: 'hybrid',
+      },
+    })
     fireEvent.change(screen.getByLabelText('全局运行时标题'), {
       target: { value: '全局新标题' },
     })
+    fireEvent.blur(screen.getByLabelText('全局运行时标题'))
     fireEvent.change(screen.getByLabelText('全局运行时标题操作'), {
       target: { value: '统一开始' },
     })
+    fireEvent.blur(screen.getByLabelText('全局运行时标题操作'))
     expect(useEditorStore.getState().project.globalRuntime?.content.values).toEqual({
       title: '全局新标题',
       action: '统一开始',
@@ -194,14 +248,27 @@ describe('Project V8 global-layer editor UI', () => {
       globalRuntime.source,
     )
 
-    act(() => useEditorStore.getState().setActiveScene(firstScene!.id))
+    const projectAfterGlobalEdit = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )
+    const firstSceneLocation = projectAfterGlobalEdit?.locations.find(
+      (location) => location.kind === 'slide-scene'
+        && location.sceneId === firstScene!.id,
+    )
+    if (!firstSceneLocation) throw new Error('缺少首场景课程位置')
+    act(() => {
+      useEditorStore.getState().activateCourseLocation(firstSceneLocation.id)
+      useEditorStore.getState().setEditingScope('scene')
+    })
     expect(screen.getByTestId('scene-runtime-inspector')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('场景运行时标题'), {
       target: { value: '场景新标题' },
     })
+    fireEvent.blur(screen.getByLabelText('场景运行时标题'))
     fireEvent.change(screen.getByLabelText('场景运行时标题操作'), {
       target: { value: '进入互动' },
     })
+    fireEvent.blur(screen.getByLabelText('场景运行时标题操作'))
     const updatedSceneRuntime = useEditorStore
       .getState()
       .project.scenes.find((scene) => scene.id === firstScene!.id)!.runtime!
@@ -210,6 +277,94 @@ describe('Project V8 global-layer editor UI', () => {
       action: '进入互动',
     })
     expect(updatedSceneRuntime.source).toBe(sceneRuntime.source)
+  })
+
+  it('keeps an API 3 global Runtime exact and reachable from a Flow location', () => {
+    const store = useEditorStore.getState()
+    store.createNewFlowProject()
+    const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!canonical) throw new Error('缺少 Flow Course Project')
+    const api3Project = structuredClone(canonical)
+    const source = 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return{destroy(){}}}})'
+    api3Project.globalLayerItems.push({
+      item: {
+        kind: 'runtime',
+        layerItemId: 'flow-global-api-3-runtime',
+        label: 'Flow 全局 API 3 Runtime',
+        frame: { mode: 'absolute', x: 120, y: 80, width: 640, height: 360 },
+        order: 99,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        runtime: {
+          protocol: 'surface-runtime',
+          runtimeApiVersion: 3,
+          enabled: false,
+          renderMode: 'dom',
+          source,
+          content: {
+            values: { title: '曲面运行时', action: '开始' },
+            metadata: {
+              title: { label: 'API 3 全局标题' },
+              action: { label: 'API 3 全局操作' },
+            },
+          },
+          assets: {},
+        },
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const visibleBefore = true
+
+    useEditorStore.getState().loadCourseProject(api3Project, null, {}, {})
+    useEditorStore.getState().activateCourseLocation(api3Project.startLocationId)
+    useEditorStore.getState().selectNode(null)
+    useEditorStore.getState().setEditingScope('global')
+    useEditorStore.setState({
+      editorMode: 'professional',
+      selectedNodeId: null,
+      selectedNodeIds: [],
+    })
+    expect(useEditorStore.getState().flowSession?.selection.authoringScope)
+      .toBe('global')
+
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+
+    expect(screen.getByTestId('global-runtime-inspector')).toBeInTheDocument()
+    expect(screen.queryByTestId('scene-runtime-inspector')).not.toBeInTheDocument()
+    expect(screen.getByText('surface-runtime · API 3')).toBeInTheDocument()
+    expect(screen.getByLabelText('启用运行时')).not.toBeChecked()
+    const renderMode = screen.getByLabelText<HTMLSelectElement>('渲染能力声明')
+    expect(renderMode).toBeDisabled()
+    expect(renderMode).toHaveValue('dom')
+    expect(renderMode.options).toHaveLength(1)
+    expect(screen.getByLabelText('API 3 全局标题')).toHaveValue('曲面运行时')
+
+    fireEvent.click(screen.getByLabelText('启用运行时'))
+
+    const updated = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    expect(updated).toMatchObject({
+      kind: 'runtime',
+      visible: visibleBefore,
+      runtime: {
+        protocol: 'surface-runtime',
+        runtimeApiVersion: 3,
+        enabled: true,
+        renderMode: 'dom',
+        source,
+        content: {
+          values: {
+            title: '曲面运行时',
+            action: '开始',
+          },
+        },
+      },
+    })
   })
 
   it('offers a state-free scene directory and keeps fixed scene targets as an advanced action', () => {
