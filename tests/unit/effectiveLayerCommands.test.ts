@@ -28,6 +28,7 @@ import {
   reorderEffectiveLayerItems,
 } from '@/renderer/course/effectiveLayerCommands'
 import {
+  allocateCourseLayerOrder,
   findGlobalTeacherController,
   isTeacherControllerLayerItem,
   makeGlobalLayerAuthoringAddress,
@@ -36,6 +37,7 @@ import {
   setGlobalLayerVisibleAtLocation,
   type EffectiveLayerCommandTarget,
 } from '@/renderer/course/globalLayerCommands'
+import { addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
 
 /**
  * V9 command fixture. Proves global/effective layer commands.
@@ -228,6 +230,38 @@ function sceneTarget(
 }
 
 describe('V9 effective / global layer commands', () => {
+  it('allocates from one course-wide order set without rewriting existing owner order', () => {
+    const appended = addCourseSpatialPage(v9LayerFixture(), {
+      title: '空间顺序',
+      now: NOW,
+    })
+    expect(appended.ok).toBe(true)
+    if (!appended.ok) throw new Error(appended.reason)
+    const location = appended.project.locations.find(
+      (candidate) => candidate.id === appended.activatedLocationId,
+    )
+    if (!location || location.kind !== 'spatial-camera') throw new Error('expected spatial location')
+    const surface = appended.project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    surface.surfaceLayerItems.push(scoped(nativeText('spatial-shared-order', 1, '空间共享')))
+    surface.world.layerItems.push(nativeText('spatial-world-order', 2, '世界元素'))
+    const project = courseProjectDocumentSchema.parse(appended.project)
+    const before = JSON.stringify(project)
+    const beforeEffectiveIds = getEffectiveCourseLayerOrder({
+      project,
+      surfaceId: surface.id,
+      locationId: location.id,
+    }).map((entry) => entry.item.layerItemId)
+
+    expect(allocateCourseLayerOrder(project, 0)).toBe(3)
+    expect(JSON.stringify(project)).toBe(before)
+    expect(getEffectiveCourseLayerOrder({
+      project,
+      surfaceId: surface.id,
+      locationId: location.id,
+    }).map((entry) => entry.item.layerItemId)).toEqual(beforeEffectiveIds)
+  })
+
   it('lists unified effective layers with stable owner addresses and no hitId', () => {
     const project = v9LayerFixture()
     const items = listEffectiveLayerCommandItems({
