@@ -263,7 +263,7 @@ describe('continuous insertion context', () => {
     expect(useEditorStore.getState().activeTab).toBe('properties')
   })
 
-  it('keeps the insertion tab when creating a missing teacher controller', () => {
+  it('keeps the insertion tab when creating a missing teacher controller and opens properties when restoring it', () => {
     const project = createProject({ includeDefaultController: false, controls: 'none' })
     const store = useEditorStore.getState()
     store.loadProject(project, null)
@@ -274,5 +274,15 @@ describe('continuous insertion context', () => {
     expect(state.activeTab).toBe('elements')
     expect(state.project.globalLayer).toHaveLength(1)
     expect(state.project.globalLayer[0]!.node.type).toBe('teacher-controller')
+    expect(state.selectedNodeId).toBe(state.project.globalLayer[0]!.node.id)
+    expect(state.editingScope).toBe('global')
+
+    store.updatePlayback({ controls: 'none' })
+    store.setActiveTab('elements')
+    store.ensureTeacherController()
+
+    const restoredState = useEditorStore.getState()
+    expect(restoredState.activeTab).toBe('properties')
+    expect(restoredState.selectedNodeId).toBe(restoredState.project.globalLayer[0]!.node.id)
   })
 })

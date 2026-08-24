@@ -8841,8 +8841,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     ensureTeacherController() {
+      const sourceTab = get().activeTab
+      const selectRestoredTeacherController = (
+        layerItemId: string,
+        existedBeforeRestore: boolean,
+      ) => {
+        get().selectNode(layerItemId)
+        if (!existedBeforeRestore) set({ activeTab: sourceTab })
+      }
       const spatial = get().spatialSession
       if (spatial) {
+        const existedBeforeRestore = Boolean(findGlobalTeacherController(spatial.history.present))
         const result = restoreDefaultTeacherController(
           spatial.history.present,
           { expectedRevision: spatial.history.present.revision },
@@ -8854,12 +8863,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const restored = findGlobalTeacherController(
             get().spatialSession?.history.present ?? spatial.history.present,
           )
-          if (restored) get().selectNode(restored.item.layerItemId)
+          if (restored) {
+            selectRestoredTeacherController(restored.item.layerItemId, existedBeforeRestore)
+          }
         }
         return
       }
       const flow = get().flowSession
       if (flow) {
+        const existedBeforeRestore = Boolean(findGlobalTeacherController(flow.history.present))
         const result = restoreDefaultTeacherController(
           flow.history.present,
           { expectedRevision: flow.history.present.revision },
@@ -8871,13 +8883,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const restored = findGlobalTeacherController(
             get().flowSession?.history.present ?? flow.history.present,
           )
-          if (restored) get().selectNode(restored.item.layerItemId)
+          if (restored) {
+            selectRestoredTeacherController(restored.item.layerItemId, existedBeforeRestore)
+          }
         }
         return
       }
       const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const document = backend.getSession().history.present
+        const existedBeforeRestore = Boolean(findGlobalTeacherController(document))
         const result = restoreDefaultTeacherController(document, {
           expectedRevision: document.revision,
           preserveAuthoringLock: true,
@@ -8889,7 +8904,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const restored = findGlobalTeacherController(
             selectSlideAuthoringBackend(get())?.getSession().history.present ?? document,
           )
-          if (restored) get().selectNode(restored.item.layerItemId)
+          if (restored) {
+            selectRestoredTeacherController(restored.item.layerItemId, existedBeforeRestore)
+          }
         }
         return
       }
