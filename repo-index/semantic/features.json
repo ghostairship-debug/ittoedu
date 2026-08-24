@@ -1058,7 +1058,6 @@
         "scripts/build-examples.ts",
         "examples/render-host-benchmark/project.json",
         "src/renderer/project/courseProjectIo.ts",
-        "src/renderer/project/validateProjectArchive.ts",
         "scripts/validate-project.ts",
         "package.json",
         "docs/contracts/V9_COMPATIBILITY_POLICY.md"

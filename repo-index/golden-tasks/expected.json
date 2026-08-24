@@ -433,8 +433,7 @@
       ],
       "forbiddenTop5": [
         "artifacts/ai-capabilities/diagnostics.json",
-        "src/renderer/project/projectArchive.ts",
-        "src/renderer/project/validateProjectArchive.ts"
+        "src/renderer/project/projectArchive.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -600,17 +599,15 @@
     {
       "id": "GT-023",
       "mustHitTop5": [
-        "src/renderer/project/validateProjectArchive.ts",
-        "scripts/validate-project.ts",
-        "package.json",
-        "docs/development-plan/inventories/legacy-consumers.json",
-        "tests/unit/aiCapabilities.test.ts"
+        "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "requiredTop15": [
-        "src/shared/contracts/course-project-v9/schema.ts",
+        "scripts/validate-project.ts",
+        "package.json",
+        "docs/contracts/V9_COMPATIBILITY_POLICY.md",
+        "tests/unit/aiCapabilities.test.ts",
         "tests/unit/validateProject.test.ts",
-        "src/renderer/project/courseProjectIo.ts",
-        "tests/unit/projectFormatIsolation.test.ts"
+        "src/renderer/project/courseProjectIo.ts"
       ],
       "forbiddenTop5": [
         "src/renderer/App.tsx",
@@ -619,7 +616,8 @@
       ],
       "expected": {
         "confidence": "high",
-        "bootstrapRequired": false
+        "bootstrapRequired": false,
+        "matchedFeatureId": "feature:legacy-release"
       }
     },
     {

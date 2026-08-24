@@ -571,6 +571,11 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md",
+      "title": "ARCH-5 删除必要性准入报告"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md",
       "title": "ARCH-0A Feature / Writer / Consumer / Owner Ledger"
     },

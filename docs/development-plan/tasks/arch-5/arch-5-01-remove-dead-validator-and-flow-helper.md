@@ -14,16 +14,16 @@
 - Invalidating paths: `src/renderer/project/validateProjectArchive.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/course/courseLocationCommands.ts`; `tests/unit/courseLocationCommands.test.ts`; `scripts/validate-project.ts`; `tests/unit/validateProject.test.ts`; `tests/unit/aiCapabilities.test.ts`; `package.json`; main/preload/IPC/recovery/release configs; `docs/development-plan/inventories/legacy-consumers.json`; `repo-index/semantic/features.json`; golden tasks/expected/evaluator and repo-index generator/config
 - Task ID: `arch-5-01-remove-dead-validator-and-flow-helper`
 - Phase / wave: `ARCH-5 / qualified cleanup`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent deletion reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T20:24:10+08:00 / pending`
+- Claimed at / released at: `2026-08-24T20:24:10+08:00 / 2026-08-24T20:37:20+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `5bff98e`
 - Context: manual Bootstrap plus the fresh ARCH-4 repo-index; deletion targets and governance consumers were fully enumerated and independently approved by ARCH-5 admission.
-- Freshness / relevant dirty inputs: clean root at claim; product/config/generated invalidating inputs are unchanged from the approved admission
+- Freshness / relevant dirty inputs: product deletion fixed at `3bcbebf`; only this card, canonical Legacy/semantic/golden facts and their generated views change in the closure commit
 - Depends on: `arch-5-00-deletion-admission` done
 - Blocks: ARCH-5 final-candidate / V4
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / reviewer found GT-023 symbol-query expectations did not match the intended Context Pack ranking; changed it to the existing legacy-release feature route, preserved thresholds, and received APPROVE`
 
 ## Product outcome
 
@@ -87,11 +87,11 @@ The repository and its generated knowledge no longer carry an unreachable V8 arc
 
 ## Acceptance
 
-- [ ] deleted module and helper have no remaining production/test/dynamic/package consumer
-- [ ] current V9 CLI and supported Flow page behavior remain directly covered
-- [ ] Flow-named project factory no longer imports the Slide mutation helper
-- [ ] LEG-010, semantic/golden facts and generated repo-index describe the post-delete state
-- [ ] no compatibility layer, contract/product behavior or dependency is added
+- [x] deleted module and helper have no remaining production/test/dynamic/package consumer
+- [x] current V9 CLI and supported Flow page behavior remain directly covered
+- [x] Flow-named project factory no longer imports the Slide mutation helper
+- [x] LEG-010, semantic/golden facts and generated repo-index describe the post-delete state
+- [x] no compatibility layer, contract/product behavior or dependency is added
 
 ## Minimal validation
 
@@ -106,7 +106,7 @@ Closure-only knowledge checks: generate/check task board and generate/check repo
 ## Rollback
 
 - Start point: admission closure commit
-- Product deletion commit: pending
+- Product deletion commit: `3bcbebf`
 - Old path remains: no; direct revert restores both isolated implementations without changing persisted data
 
 ## Consumers and index
@@ -116,11 +116,17 @@ Closure-only knowledge checks: generate/check task board and generate/check repo
 - Flow project factory → Slide mutation direct edge `1 → 0`
 - Legacy record: LEG-010 `dead-candidate → removed`
 - Semantic index impact: canonical-update
-- Generated refresh: required once after product/semantic closure
+- Generated refresh: completed once after product/semantic closure
 
 ## Result evidence
 
-- Pending claim, product commit, focused results, independent review and semantic/generated closure.
+- Product deletion commit: `3bcbebf`, `1 insertion / 309 deletions`; one isolated 285-line V8 module was removed and no replacement layer was added.
+- Focused product evidence: `npx vitest run tests/unit/courseLocationCommands.test.ts tests/unit/validateProject.test.ts tests/unit/aiCapabilities.test.ts` passed `3 files / 31 tests`; `npx tsc --noEmit` passed.
+- Post-delete scans: both deleted symbols are absent from `src/** scripts/** tests/** examples/**` and package/build config; the Flow factory → Slide mutation import edge is absent; diff hygiene passed.
+- Independent deletion reviewer: final APPROVE, no blocker. It confirmed the current V9 CLI is untouched, the supported Flow positive assertions remain, imports are clean, and the four-path product diff stays within scope. Its one golden-routing finding was fixed: GT-023 now selects `feature:legacy-release`, whose targeted evaluator ranking places the removal record in Top 5 and the V9 CLI/package/compatibility/tests in Top 15 without changing global thresholds.
+- Canonical closure: LEG-010 is `removed` with exact-zero evidence and rollback `3bcbebf`; `feature:legacy-release` no longer names the deleted file; GT-016/023 now reference only existing/current paths; task-board and repo-index were generated and checked after these inputs were fixed. Golden corpus quality remains reserved for final V4 as required by Policy v2.
+- Remaining risk: only the full final-candidate suite/build and representative-course outcome review remain; no cleanup-specific product risk is open.
+- Next allowed task: ARCH-5 final-candidate / V4.
 
 ## Ready checklist（Coordinator）
 

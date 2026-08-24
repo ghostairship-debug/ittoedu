@@ -1725,44 +1725,40 @@
     {
       "id": "LEG-010",
       "legacyTarget": {
-        "kind": "dead-candidate-v8-validator",
+        "kind": "removed-v8-validator",
         "path": "src/renderer/project/validateProjectArchive.ts",
         "symbols": [
           "validateProjectArchiveBytes"
         ]
       },
       "owner": "Diagnostics / Tooling",
-      "status": "dead-candidate",
-      "currentFact": "The tracked function validates V8 archives and builds V8 health/preflight reports; exact symbol search finds only its declaration, while the current CLI uses scripts/validate-project.ts for V9.",
+      "status": "removed",
+      "currentFact": "ARCH-5 removed the entire isolated V8 archive-validation module at 3bcbebf after all nine exports had zero external consumers; current package validation remains on the Course Project V9 CLI.",
       "evidence": [
         {
-          "path": "src/renderer/project/validateProjectArchive.ts",
+          "path": "docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md",
           "symbol": "validateProjectArchiveBytes",
-          "note": "Only exact tracked occurrence is the exported declaration."
+          "note": "Records the complete eight-category deletion gate and whole-module boundary."
         },
         {
           "path": "scripts/validate-project.ts",
-          "symbol": "runValidateProjectCli",
-          "note": "Current package validation command targets Course Project V9."
+          "symbol": "validateCourseProjectArchiveBytes",
+          "note": "Current V9 archive validation implementation retained by both package command aliases."
         },
         {
           "path": "tests/unit/aiCapabilities.test.ts",
           "symbol": "tracedSources",
-          "note": "Explicitly asserts the AI capability trace does not include validateProjectArchive.ts."
+          "note": "Retained negative ratchet prevents the removed V8 module path from becoming a capability source."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [],
-          "unknowns": [
-            "Exact symbol search found no caller/import beyond the declaration."
-          ]
+          "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
           "confirmed": [],
-          "unknowns": [
-            "No package script, IPC channel, or exact string consumer was found; generated repo-index/package audit is still required before deletion."
-          ]
+          "unknowns": []
         },
         "playerPreviewOrExport": {
           "confirmed": [],
@@ -1770,84 +1766,75 @@
         },
         "buildFixtureOrRelease": {
           "confirmed": [],
-          "unknowns": [
-            "No package script or release verifier imports this module."
-          ]
+          "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
           "confirmed": [],
-          "unknowns": [
-            "The function accepts V8 archives, but no current caller establishes a persisted compatibility obligation."
-          ]
+          "unknowns": []
         },
         "testConsumers": {
-          "confirmed": [
-            {
-              "path": "tests/unit/aiCapabilities.test.ts",
-              "symbol": "tracedSources",
-              "use": "Negative assertion that the module is not a current capability source."
-            }
-          ],
-          "unknowns": [
-            "No direct behavior test imports validateProjectArchiveBytes."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
           "confirmed": [],
-          "unknowns": [
-            "No generated artifact or packaged entrypoint is confirmed; final packaged-reference proof remains required."
-          ]
+          "unknowns": []
         }
       },
       "replacement": {
-        "status": "existing-v9-cli",
+        "status": "active-v9-cli",
         "paths": [
+          {
+            "path": "scripts/validate-project.ts",
+            "symbol": "validateCourseProjectArchiveBytes"
+          },
           {
             "path": "scripts/validate-project.ts",
             "symbol": "runValidateProjectCli"
           },
           {
             "path": "package.json",
-            "symbol": "validate:course-project"
+            "symbol": "validate:course-project / validate:project"
           }
         ],
-        "notes": "The CLI replacement exists, but no claim is made that it preserves an unknown private caller."
+        "notes": "The private application exposes no library API for the removed module; both current command aliases validate only legal Course Project V9 archives."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
-        "state": "definition-only-static-evidence",
+        "state": "removed-exact-zero",
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'validateProjectArchiveBytes' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 1
+            "observedMatches": 0
           }
         ],
-        "requiredForRemoval": "Generated repo-index, dynamic/config/package scan, and release-package inspection must confirm no caller; replacement CLI tests must remain green."
+        "requiredForRemoval": "Satisfied at product commit 3bcbebf: static, dynamic/config, IPC/Recovery, package/release and generated reachability were all closed before deletion."
       },
       "persistedCompatibility": {
-        "status": "none-confirmed",
-        "evidence": [],
-        "unknowns": [
-          "No caller means no confirmed compatibility obligation, but deletion waits for generated/dynamic/package proof."
-        ]
+        "status": "none",
+        "evidence": [
+          "docs/contracts/V9_COMPATIBILITY_POLICY.md"
+        ],
+        "unknowns": []
       },
       "tests": [
         "tests/unit/validateProject.test.ts",
         "tests/unit/aiCapabilities.test.ts"
       ],
       "stableSince": {
-        "status": "v9-cli-existing-but-deletion-not-proven",
-        "wave": null,
-        "evidence": []
+        "status": "v9-replacement-stable-through-arch-4",
+        "wave": "ARCH-0A through ARCH-4",
+        "evidence": [
+          "scripts/validate-project.ts",
+          "tests/unit/validateProject.test.ts"
+        ]
       },
       "rollback": {
-        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
-        "strategy": "Restore the isolated module if a previously unknown tooling caller is reproduced; do not expose V8 import in the product."
+        "commit": "3bcbebf",
+        "strategy": "Revert the isolated deletion commit only if a concrete previously unknown caller is reproduced; never reconnect the V8 validator to the product."
       },
-      "indexImpact": "semantic-update",
-      "unknowns": [
-        "Dynamic and packaged reachability cannot be closed until ARCH-0B and final release inspection."
-      ]
+      "indexImpact": "semantic-updated",
+      "unknowns": []
     }
   ]
 }

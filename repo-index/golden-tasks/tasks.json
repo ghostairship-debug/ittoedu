@@ -483,18 +483,18 @@
     {
       "id": "GT-023",
       "milestone": "extended-25",
-      "title": "Definition-only V8 validator deletion proof",
-      "queryText": "validateProjectArchiveBytes 是否无消费者？删除前查静态、动态、package、release 和 V9 CLI 替代测试。",
+      "title": "Removed V8 validator and current V9 CLI proof",
+      "queryText": "旧 validateProjectArchiveBytes 已按零消费者门禁删除；定位当前 Course Project V9 archive validator、CLI、package 命令、替代测试与 LEG-010 删除记录。",
       "request": {
-        "mode": "symbol",
-        "value": "validateProjectArchiveBytes",
+        "mode": "feature",
+        "value": "legacy-release",
         "size": "medium"
       },
       "coverage": [
         "diagnostics",
         "release"
       ],
-      "rationale": "LEG-010 has definition-only static evidence but not complete packaged deletion proof.",
+      "rationale": "LEG-010 is removed; the golden query must now locate the supported V9 validation path, package/compatibility boundary and removal record instead of requiring a deleted source file.",
       "evidence": [
         "docs/development-plan/inventories/legacy-consumers.json"
       ]
