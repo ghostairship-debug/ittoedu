@@ -66,9 +66,6 @@ import {
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
-  isCourseTeacherControllerLayerItem,
-  restoreCourseTeacherControllerLayer,
-  restoreTeacherControllerForDelivery,
   synchronizeCourseTeacherControllerControls,
   synchronizeTeacherControllerControls,
 } from '../../shared/teacherControllerConsistency'
@@ -244,6 +241,7 @@ import {
   allocateCourseLayerOrder,
   setGlobalLayerScenePlane,
   sortScopedLayerList,
+  updateCoursePlaybackSettings,
 } from '../course/globalLayerCommands'
 import { createBlankCourseProject } from '../project/createCourseProject'
 import {
@@ -8801,55 +8799,32 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updatePlayback(patch) {
-      const requestedControls = patch.controls
-      if (selectSlideAuthoringBackend(get())) {
-        runV9DocumentMutation((draft) => {
-          draft.playback = { ...draft.playback, ...patch }
-          if (requestedControls === 'none') {
-            for (const entry of draft.globalLayerItems) {
-              if (isCourseTeacherControllerLayerItem(entry.item)) {
-                entry.item.playbackInitialVisibility = 'hidden'
-              }
-            }
-          } else if (requestedControls === 'canvas') {
-            const controller = findGlobalTeacherController(draft)
-            if (controller) restoreCourseTeacherControllerLayer(controller)
-            else {
-              appendGlobalCourseNode(draft, createTeacherControllerNode())
-            }
-          }
-          if (requestedControls !== undefined) {
-            synchronizeCourseTeacherControllerControls(draft)
-            if (requestedControls === 'none') draft.playback.controls = 'none'
-            if (requestedControls === 'canvas') draft.playback.controls = 'canvas'
-          }
-        }, { statusMessage: '成品控制设置已更新' })
+      const state = get()
+      const document = state.spatialSession?.history.present
+        ?? state.flowSession?.history.present
+        ?? selectSlideAuthoringBackend(state)?.getSession().history.present
+      if (!document) {
+        set({
+          errorMessage: '当前 Course Project 没有可用的作者会话。',
+          statusMessage: null,
+        })
         return
       }
-      commit((draft) => {
-        draft.playback = { ...draft.playback, ...patch }
-        if (requestedControls === 'none') {
-          for (const item of draft.globalLayer) {
-            if (item.node.type === 'teacher-controller') {
-              item.node.playbackInitialVisibility = 'hidden'
-            }
-          }
-        } else if (requestedControls === 'canvas') {
-          let controller = draft.globalLayer.find(
-            (item) => item.node.type === 'teacher-controller',
-          )
-          if (!controller) {
-            controller = {
-              node: createTeacherControllerNode(),
-              layer: 'overlay',
-              visibility: { mode: 'all', sceneIds: [] },
-            }
-            draft.globalLayer.push(controller)
-          }
-          restoreTeacherControllerForDelivery(controller)
-        }
+      const result = updateCoursePlaybackSettings(document, patch, {
+        expectedRevision: document.revision,
       })
-      set({ statusMessage: '成品控制设置已更新' })
+      const extra = {
+        statusMessage: result.ok ? result.reason ?? '成品控制设置已更新' : undefined,
+      }
+      if (state.spatialSession) {
+        persistSpatialLayerCommand(result, extra)
+        return
+      }
+      if (state.flowSession) {
+        persistFlowLayerCommand(result, extra)
+        return
+      }
+      persistLayerCommand(result, extra)
     },
 
     updateDesignTokens(tokens) {
@@ -8868,56 +8843,59 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ensureTeacherController() {
       const spatial = get().spatialSession
       if (spatial) {
-        persistSpatialLayerCommand(restoreDefaultTeacherController(
+        const result = restoreDefaultTeacherController(
           spatial.history.present,
           { expectedRevision: spatial.history.present.revision },
-        ))
-        const restored = findGlobalTeacherController(get().spatialSession?.history.present ?? spatial.history.present)
-        if (restored) get().selectNode(restored.item.layerItemId)
+        )
+        persistSpatialLayerCommand(result, {
+          statusMessage: result.ok ? result.reason : undefined,
+        })
+        if (result.ok) {
+          const restored = findGlobalTeacherController(
+            get().spatialSession?.history.present ?? spatial.history.present,
+          )
+          if (restored) get().selectNode(restored.item.layerItemId)
+        }
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const result = restoreDefaultTeacherController(
+          flow.history.present,
+          { expectedRevision: flow.history.present.revision },
+        )
+        persistFlowLayerCommand(result, {
+          statusMessage: result.ok ? result.reason : undefined,
+        })
+        if (result.ok) {
+          const restored = findGlobalTeacherController(
+            get().flowSession?.history.present ?? flow.history.present,
+          )
+          if (restored) get().selectNode(restored.item.layerItemId)
+        }
         return
       }
       const backend = selectSlideAuthoringBackend(get())
       if (backend) {
-        runV9DocumentMutation((draft) => {
-          const controller = findGlobalTeacherController(draft)
-          if (controller) restoreCourseTeacherControllerLayer(controller)
-          else appendGlobalCourseNode(draft, createTeacherControllerNode())
-          draft.playback.controls = 'canvas'
-          synchronizeCourseTeacherControllerControls(draft)
-        }, { statusMessage: '已定位画布内教师控制器' })
-        return
-      }
-      const existing = get().project.globalLayer.find(
-        (item) => item.node.type === 'teacher-controller',
-      )
-      if (existing) {
-        commit((draft) => {
-          const controller = draft.globalLayer.find(
-            (item) => item.node.id === existing.node.id,
+        const document = backend.getSession().history.present
+        const result = restoreDefaultTeacherController(document, {
+          expectedRevision: document.revision,
+          preserveAuthoringLock: true,
+        })
+        persistLayerCommand(result, {
+          statusMessage: result.ok ? result.reason : undefined,
+        })
+        if (result.ok) {
+          const restored = findGlobalTeacherController(
+            selectSlideAuthoringBackend(get())?.getSession().history.present ?? document,
           )
-          if (!controller || controller.node.type !== 'teacher-controller') return
-          restoreTeacherControllerForDelivery(controller)
-        }, existing.node.id)
-        set({
-          editingScope: 'global',
-          selectedNodeId: existing.node.id,
-          selectedNodeIds: [existing.node.id],
-          activeTab: 'properties',
-          statusMessage: '已定位画布内教师控制器',
-        })
+          if (restored) get().selectNode(restored.item.layerItemId)
+        }
         return
       }
-      const node = createTeacherControllerNode()
-      commit((draft) => {
-        draft.globalLayer.push({
-          node,
-          layer: 'overlay',
-          visibility: { mode: 'all', sceneIds: [] },
-        })
-      }, node.id)
       set({
-        editingScope: 'global',
-        statusMessage: '已添加画布内教师控制器',
+        errorMessage: '当前 Course Project 没有可用的作者会话。',
+        statusMessage: null,
       })
     },
 
