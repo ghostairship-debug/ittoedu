@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-06-published-interaction-session-slide-host`
 - Phase / wave: `ARCH-2 / W2-B1 Published Interaction host integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Slide Player Worker / independent Published Interactions reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 08:20 Asia/Shanghai / active`
+- Claimed at / released at: `2026-08-24 08:20 Asia/Shanghai / 2026-08-24 09:19 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `2380f8b`
 - Claim commit: `0c05015`
@@ -24,6 +24,13 @@
 In current try-run, Preview and packaged Published V2 playback, clicking an eligible native Slide LayerItem executes the B1-03 `node.click` slice from the active scene-local carrier and the one global carrier, including host-owned enter/exit motion and whole-course navigation, without Store/V9 writes or gesture theft.
 
 This card establishes the one-session orchestration and reusable host port used by later Flow and Spatial global consumers. It does **not** claim the B1-05 reveal template's unsupported `scene.enter` trigger.
+
+## Current status and evidence
+
+- `396e717` adds the navigator pre-mutation lifecycle; `f68760e` adds the renderer-owned DOM port; `46e8396` adds the Slide node/state host; `c8766a3` and `6ef1978` integrate and harden the real Published session vertical slice.
+- The session now owns one current global controller plus one Slide-local controller, uses stable delegated native clicks, preserves global visibility across ordinary generations, resets local visibility per Slide generation, and synchronously cancels active motion before teardown/reset.
+- Interaction navigation strictly resolves real Slide scene IDs, gives the current location priority when multiple locations share one scene, materializes authored initial/explicit presentation state inside the guarded navigator transaction, and rolls back failed or stale requests without duplicate history.
+- Independent lifecycle, contract and test reviews closed terminal-navigation queue races, stale target-state contamination, restart motion/state ordering, inactive-host invalidation, failure remount and public-API leakage. Automated evidence supports `engineering candidate`; no art/teacher acceptance is claimed.
 
 ## Supported slice and explicit limits
 
@@ -195,12 +202,12 @@ PublishedCourseSession navigation generation
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`.
-- Behavior before/after: `pending`.
-- Validation results: `pending`.
-- Known risks/findings: `Flow/Spatial global click hosts and scene.enter template playback intentionally remain later cards; targetStateId must be supported or diagnosed honestly.`
-- indexImpact: `expected: Published Interaction current consumer/lifecycle facts change; refresh after close`.
-- Next allowed task: `Flow global Interaction host, then Spatial global Interaction host, then W2-B1 validation gate`.
+- Consumers migrated/remaining: `mountPublishedCourseTryRun, whole-course Preview and packaged Published V2 all reach the shared createPublishedCourseSession consumer. Slide scene-local and the one session-global node.click carriers now execute. Flow/Spatial global DOM hosts and scene.enter remain intentionally unimplemented.`
+- Behavior before/after: `Published V2 previously serialized Interaction V1 rules but never consumed them. Eligible native Slide clicks now execute supported motion/navigation actions without gesture theft or authoring writes; local/global visibility, presentation state, replay/restart and stale-generation cancellation follow the card policy.`
+- Validation results: `Final focused vertical slice 5 files / 54 tests; expanded related regression 10 files / 90 tests; npm run typecheck (root/Electron/e2e), git diff --check and all three independent reviews passed. Schema-valid integration coverage includes scene/location ID collision, duplicate locations for one scene, same-click terminal arbitration, queued external navigation, active-motion restart, restart/navigation rollback, direct suspend/resume, gestures and payload immutability.`
+- Known risks/findings: `Flow/Spatial global click hosts and scene.enter template playback intentionally remain later cards. Teacher-controller/Presenter replay/restart retain their existing generic navigation route and are not claimed as Interaction V1 actions by this card.`
+- indexImpact: `Published Interaction consumer, session lifecycle, Slide host and guarded Mixed navigation facts changed; refresh generated repo-index after this close commit; no Schema impact`.
+- Next allowed task: `ARCH-2 B1-07 Flow global Interaction host, then Spatial global Interaction host, then W2-B1 validation gate`.
 
 ## Ready checklist（Coordinator）
 
