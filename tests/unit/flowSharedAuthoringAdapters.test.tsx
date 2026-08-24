@@ -531,6 +531,23 @@ describe('Flow shared authoring adapters', () => {
     expect(globalInsert.reason).toBe(FLOW_GLOBAL_STRUCTURE_REASON)
   })
 
+  it('changes a surface overlay visibility only at the selected Flow location', () => {
+    const project = createFlowProject()
+    const selection = selectFlowOverlay(project, 'h1', ['overlay-text'])
+    const hidden = setFlowOverlayVisibleAtLocation(project, selection, false, { now: NOW })
+
+    expect(hidden.ok).toBe(true)
+    expect(hidden.historyEntry).toBe(true)
+    expect(hidden.nextDocument!.revision).toBe(project.revision + 1)
+    expect(engineIds(hidden.nextDocument!, 'h1')).not.toContain('overlay-text')
+
+    const otherLocation = hidden.nextDocument!.locations.find(
+      (location) => location.kind === 'flow-block' && location.blockId === 'h2',
+    )
+    expect(otherLocation).toBeDefined()
+    expect(engineIds(hidden.nextDocument!, otherLocation!.id)).toContain('overlay-text')
+  })
+
   it('keeps overlay hits off document blocks and never persists hitId', () => {
     const project = createFlowProject()
     const leaked = resolveFlowOverlayAuthoringTarget(project, 'h1', {
