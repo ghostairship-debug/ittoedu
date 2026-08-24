@@ -1188,7 +1188,6 @@ export function FlowWorkspace({
     }
 
     const frameProps = {
-      key: blockView.blockId,
       'data-testid': `flow-block-${blockView.blockId}`,
       'data-flow-block-id': blockView.blockId,
       'data-flow-parent-id': blockView.parentId ?? '',
@@ -1540,7 +1539,7 @@ export function FlowWorkspace({
     }
 
     return (
-      <div {...frameProps}>
+      <div key={blockView.blockId} {...frameProps}>
         {!readOnly && !editingThis ? (
           <button
             type="button"
