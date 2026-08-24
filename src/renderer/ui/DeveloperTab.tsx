@@ -6,21 +6,32 @@ import {
   ShieldCheck,
   WandSparkles,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentManifest } from '../../shared/componentTypes'
 import { componentManifestSchema } from '../../shared/componentSchema'
+import { courseRuntimeDefinitionSchema } from '../../shared/courseProjectSchema'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
 import { sceneNodeSchema } from '../../shared/projectSchema'
-import { runtimeDocumentSchema } from '../../shared/runtimeSchema'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import type { SceneNode } from '../../shared/projectTypes'
 import { validateRuntimeSource } from '../../player/RuntimeRegistry'
 import { validateComponentRuntimeSource } from '../components/importComponentPackage'
 import {
+  selectRuntimeSourceAuthoringView,
+  type AvailableRuntimeSourceAuthoringView,
+  type RuntimeSourceAuthoringView,
+} from '../runtime/runtimeSourceAuthoringView'
+import {
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
   selectActiveScene,
   selectSelectedNode,
   useEditorStore,
 } from '../store/editorStore'
+import type {
+  CourseAuthoringTarget,
+} from '../authoring/courseAuthoringSession'
+import type { RuntimeSourceAuthoringCommitResult } from '../store/editorStore'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
 type ComponentDocument = 'manifest' | 'runtime'
@@ -136,6 +147,276 @@ function CodeDocumentEditor({
   )
 }
 
+interface RuntimeSourceDraftBinding {
+  readonly documentKey: string
+  readonly carrier: AvailableRuntimeSourceAuthoringView['carrier']
+  readonly label: string
+  readonly protocol: AvailableRuntimeSourceAuthoringView['runtime']['protocol']
+  readonly runtimeApiVersion: AvailableRuntimeSourceAuthoringView['runtime']['runtimeApiVersion']
+  readonly runtime: AvailableRuntimeSourceAuthoringView['runtime']
+  readonly target: CourseAuthoringTarget
+  readonly effectiveLocked: boolean
+  readonly baseline: string
+  readonly draft: string
+}
+
+interface RuntimeSourceEditorProps {
+  readonly view: RuntimeSourceAuthoringView | null
+  readonly canCreateTemplate: boolean
+  readonly onCreateTemplate: () => void
+  readonly onApply: (
+    target: CourseAuthoringTarget,
+    source: string,
+  ) => RuntimeSourceAuthoringCommitResult
+}
+
+interface RuntimeDraftMessage {
+  readonly kind: 'success' | 'unchanged' | 'error' | 'cancelled'
+  readonly text: string
+}
+
+function runtimeDraftBinding(
+  view: AvailableRuntimeSourceAuthoringView,
+): RuntimeSourceDraftBinding {
+  return {
+    documentKey: view.documentKey,
+    carrier: view.carrier,
+    label: view.label,
+    protocol: view.runtime.protocol,
+    runtimeApiVersion: view.runtime.runtimeApiVersion,
+    runtime: view.runtime,
+    target: view.target,
+    effectiveLocked: view.effectiveLocked,
+    baseline: view.runtime.source,
+    draft: view.runtime.source,
+  }
+}
+
+function runtimeUnavailableCopy(view: RuntimeSourceAuthoringView | null): string {
+  if (!view) return '当前 Course Project 或作者会话尚未准备好，运行时源码不会写入。'
+  if (view.availability === 'available') return view.label
+  switch (view.reason) {
+    case 'invalid-location':
+      return '当前课程位置没有有效的 Runtime 载体，请重新选择页面。'
+    case 'invalid-session':
+      return 'Runtime 编辑会话已经失效，请重新选择当前页面后再编辑。'
+    case 'invalid-state':
+      return '当前呈现状态无效，请切回基础状态或有效的命名状态。'
+    case 'runtime-missing':
+      return view.label
+  }
+}
+
+function RuntimeSourceEditor({
+  view,
+  canCreateTemplate,
+  onCreateTemplate,
+  onApply,
+}: RuntimeSourceEditorProps) {
+  const initial = view?.availability === 'available'
+    ? runtimeDraftBinding(view)
+    : null
+  const [binding, setBinding] = useState<RuntimeSourceDraftBinding | null>(initial)
+  const bindingRef = useRef(binding)
+  const [message, setMessage] = useState<RuntimeDraftMessage | null>(null)
+  const [isComposing, setIsComposing] = useState(false)
+  const committedSourceRef = useRef<string | null>(null)
+
+  const replaceBinding = (next: RuntimeSourceDraftBinding | null): void => {
+    bindingRef.current = next
+    setBinding(next)
+  }
+
+  const currentDocumentKey = view?.availability === 'available'
+    ? view.documentKey
+    : null
+
+  useEffect(() => {
+    const current = bindingRef.current
+    if (view?.availability === 'available') {
+      if (current?.documentKey === view.documentKey) return
+      if (current && current.draft !== current.baseline) return
+
+      const keepCommitMessage =
+        committedSourceRef.current !== null
+        && view.runtime.source === committedSourceRef.current
+        && current?.target.itemId === view.target.itemId
+      committedSourceRef.current = null
+      replaceBinding(runtimeDraftBinding(view))
+      if (!keepCommitMessage) setMessage(null)
+      return
+    }
+
+    if (current && current.draft !== current.baseline) return
+    committedSourceRef.current = null
+    replaceBinding(null)
+    setMessage(null)
+  }, [currentDocumentKey, view])
+
+  if (!binding) {
+    const missingRuntime = view?.availability === 'unavailable'
+      && view.reason === 'runtime-missing'
+    return (
+      <section
+        className="developer-empty-card"
+        data-testid={missingRuntime ? 'runtime-source-missing' : 'runtime-source-unavailable'}
+        role={missingRuntime ? undefined : 'status'}
+      >
+        <Code2 size={20} />
+        <strong>
+          {missingRuntime ? '当前作用域没有自定义运行时' : '当前运行时源码不可编辑'}
+        </strong>
+        <span>
+          {missingRuntime && canCreateTemplate
+            ? '创建最小 Runtime API 2 模板后，即可在完整代码区中修改。'
+            : runtimeUnavailableCopy(view)}
+        </span>
+        {missingRuntime && canCreateTemplate ? (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onCreateTemplate}
+          >
+            创建运行时模板
+          </button>
+        ) : null}
+      </section>
+    )
+  }
+
+  const dirty = binding.draft !== binding.baseline
+  const stale = currentDocumentKey !== binding.documentKey
+  const title = binding.carrier === 'global-layer'
+    ? '全局运行时源码'
+    : binding.carrier === 'surface-layer'
+      ? 'Flow 页面运行时源码'
+      : binding.carrier === 'spatial-world'
+        ? 'Spatial 世界运行时源码'
+        : '场景运行时源码'
+  const protocolLabel = binding.protocol === 'surface-runtime'
+    ? 'Surface Runtime'
+    : 'Canvas Runtime'
+  const status = stale
+    ? {
+        kind: 'error' as const,
+        text: `草稿仍绑定到“${binding.label}”，当前目标已经切换。返回原目标后应用，或取消草稿以加载当前目标。`,
+      }
+    : message
+
+  const updateDraft = (draft: string): void => {
+    const next = { ...bindingRef.current!, draft }
+    replaceBinding(next)
+    setMessage(null)
+  }
+
+  const cancel = (): void => {
+    if (isComposing) return
+    if (view?.availability === 'available') {
+      replaceBinding(runtimeDraftBinding(view))
+      setMessage({
+        kind: 'cancelled',
+        text: '草稿已取消，已重新载入当前 Runtime 源码。',
+      })
+    } else {
+      replaceBinding(null)
+      setMessage(null)
+    }
+  }
+
+  const apply = (): void => {
+    if (isComposing || stale || binding.effectiveLocked) return
+    try {
+      validateRuntimeSource(binding.draft)
+      syntaxCheck(binding.draft)
+      const parsed = courseRuntimeDefinitionSchema.safeParse({
+        ...binding.runtime,
+        source: binding.draft,
+      })
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message ?? '运行时数据无效')
+      }
+      const result = onApply(binding.target, binding.draft)
+      if (!result.ok) throw new Error(result.reason)
+      if (result.status === 'unchanged') {
+        replaceBinding({ ...binding, baseline: binding.draft })
+        setMessage({
+          kind: 'unchanged',
+          text: '源码没有变化，未写入工程历史。',
+        })
+        return
+      }
+      committedSourceRef.current = parsed.data.source
+      replaceBinding({ ...binding, baseline: binding.draft })
+      setMessage({
+        kind: 'success',
+        text: '校验通过，修改已写入工程历史。',
+      })
+    } catch (error) {
+      setMessage({ kind: 'error', text: `未应用：${errorMessage(error)}` })
+    }
+  }
+
+  return (
+    <section className="developer-card" data-testid="runtime-source-editor">
+      <div className="developer-card__heading">
+        <div>
+          <strong>{title}</strong>
+          <span>
+            {binding.label} · {protocolLabel} / Runtime API {binding.runtimeApiVersion}。
+            校验模块、JavaScript 语法与完整 V9 Runtime 定义后写入工程；执行仍发生在隔离播放器。
+            {binding.effectiveLocked ? ' 捕获状态中的 Runtime 已锁定，当前为只读。' : ''}
+          </span>
+        </div>
+        <code>JS</code>
+      </div>
+      <textarea
+        className="developer-code-editor"
+        aria-label={title}
+        value={binding.draft}
+        readOnly={binding.effectiveLocked}
+        wrap="off"
+        spellCheck={false}
+        onCompositionStart={() => setIsComposing(true)}
+        onCompositionEnd={() => setIsComposing(false)}
+        onChange={(event) => updateDraft(event.currentTarget.value)}
+      />
+      <div className="developer-card__actions">
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={isComposing}
+          onClick={cancel}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={isComposing || stale || binding.effectiveLocked}
+          onClick={apply}
+        >
+          <ShieldCheck size={13} />校验并应用
+        </button>
+      </div>
+      {status ? (
+        <p
+          className={status.kind === 'error'
+            ? 'developer-card__message developer-card__message--error'
+            : 'developer-card__message'}
+          role="status"
+          data-testid={stale ? 'runtime-source-stale' : undefined}
+        >
+          {status.text}
+        </p>
+      ) : dirty ? (
+        <p className="developer-card__message" role="status">
+          源码草稿尚未写入工程。
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
 function freshRuntime(): RuntimeDocument {
   return {
     runtimeApiVersion: 2,
@@ -151,16 +432,25 @@ export function DeveloperTab() {
   const scene = useEditorStore(selectActiveScene)
   const node = useEditorStore(selectSelectedNode)
   const project = useEditorStore((state) => state.project)
+  const courseProject = useEditorStore(selectActiveCourseProjectDocument)
+  const activeCourseLocationId = useEditorStore(selectActiveCourseLocationId)
+  const courseAuthoringSessionToken = useEditorStore(
+    (state) => state.courseAuthoringSession?.token ?? null,
+  )
   const componentPackages = useEditorStore((state) => state.componentPackages)
   const editingScope = useEditorStore((state) => state.editingScope)
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
   const updateNode = useEditorStore((state) => state.updateNode)
-  const updateSceneRuntime = useEditorStore((state) => state.updateSceneRuntime)
-  const updateGlobalRuntime = useEditorStore((state) => state.updateGlobalRuntime)
+  const updateRuntimeSourceAtTarget = useEditorStore(
+    (state) => state.updateRuntimeSourceAtTarget,
+  )
   const setSceneRuntime = useEditorStore((state) => state.setSceneRuntime)
   const setGlobalRuntime = useEditorStore((state) => state.setGlobalRuntime)
+  const activateCourseLocation = useEditorStore(
+    (state) => state.activateCourseLocation,
+  )
   const updateInteractionRule = useEditorStore((state) => state.updateInteractionRule)
   const updateGlobalInteractionRule = useEditorStore(
     (state) => state.updateGlobalInteractionRule,
@@ -172,7 +462,6 @@ export function DeveloperTab() {
     (state) => state.updateEditableComponentPackage,
   )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
-  const runtime = editingScope === 'global' ? project.globalRuntime : scene.runtime
   const rules = editingScope === 'global'
     ? project.globalInteractions
     : scene.interactions
@@ -204,16 +493,44 @@ export function DeveloperTab() {
     () => node ? JSON.stringify(node, null, 2) : '',
     [node],
   )
-
-  const applyRuntimeSource = (source: string): void => {
-    if (!runtime) throw new Error('当前作用域没有运行时')
-    validateRuntimeSource(source)
-    syntaxCheck(source)
-    const result = runtimeDocumentSchema.safeParse({ ...runtime, source })
-    if (!result.success) throw new Error(result.error.issues[0]?.message ?? '运行时数据无效')
-    if (editingScope === 'global') updateGlobalRuntime({ source })
-    else updateSceneRuntime(scene.id, { source })
-  }
+  const activeCourseLocation = courseProject?.locations.find(
+    (location) => location.id === activeCourseLocationId,
+  )
+  const runtimeView = useMemo<RuntimeSourceAuthoringView | null>(() => {
+    if (!courseProject || !activeCourseLocationId || !courseAuthoringSessionToken) {
+      return null
+    }
+    return selectRuntimeSourceAuthoringView({
+      project: courseProject,
+      locationId: activeCourseLocationId,
+      editingScope,
+      activeStateId: activeCourseLocation?.kind === 'slide-scene'
+        ? activePresentationStateId
+        : null,
+      sessionToken: courseAuthoringSessionToken,
+    })
+  }, [
+    activeCourseLocation?.kind,
+    activeCourseLocationId,
+    activePresentationStateId,
+    courseAuthoringSessionToken,
+    courseProject,
+    editingScope,
+  ])
+  const canCreateRuntimeTemplate =
+    runtimeView?.availability === 'unavailable'
+    && runtimeView.reason === 'runtime-missing'
+    && activeCourseLocation?.kind === 'slide-scene'
+  const runtimeStatus = runtimeView?.availability === 'available'
+    ? runtimeView.effectiveLocked ? '已锁定' : `API ${runtimeView.runtime.runtimeApiVersion}`
+    : runtimeView?.reason === 'runtime-missing' ? '未创建' : '不可用'
+  const editingScopeLabel = editingScope === 'global'
+    ? '全局层'
+    : activeCourseLocation?.kind === 'flow-block'
+      ? `Flow · ${activeCourseLocation.label}`
+      : activeCourseLocation?.kind === 'spatial-camera'
+        ? `Spatial · ${activeCourseLocation.label}`
+        : `场景 · ${scene.name}`
 
   const sections: Array<{
     id: DeveloperSection
@@ -223,7 +540,7 @@ export function DeveloperTab() {
     {
       id: 'runtime',
       label: '运行时',
-      status: runtime ? '可编辑' : '未创建',
+      status: runtimeStatus,
     },
     {
       id: 'object',
@@ -256,7 +573,7 @@ export function DeveloperTab() {
         </div>
         <div className="developer-workbench-meta">
           <span>作用域</span>
-          <strong>{editingScope === 'global' ? '全局层' : `场景 · ${scene.name}`}</strong>
+          <strong>{editingScopeLabel}</strong>
           <button type="button" className="secondary-button" onClick={() => setCanvasMode('run')}>
             <Play size={13} />试运行
           </button>
@@ -289,31 +606,16 @@ export function DeveloperTab() {
         aria-label={sections.find((section) => section.id === activeSection)?.label}
       >
         {activeSection === 'runtime' && (
-          runtime ? (
-            <CodeDocumentEditor
-              title={editingScope === 'global' ? '全局运行时源码' : '场景运行时源码'}
-              description="校验模块与 JavaScript 语法后写入工程；执行仍发生在隔离播放器。"
-              value={runtime.source}
-              language="javascript"
-              onApply={applyRuntimeSource}
-            />
-          ) : (
-            <section className="developer-empty-card">
-              <Code2 size={20} />
-              <strong>当前作用域没有自定义运行时</strong>
-              <span>创建最小 Runtime API 2 模板后，即可在完整代码区中修改。</span>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  if (editingScope === 'global') setGlobalRuntime(freshRuntime())
-                  else setSceneRuntime(scene.id, freshRuntime())
-                }}
-              >
-                创建运行时模板
-              </button>
-            </section>
-          )
+          <RuntimeSourceEditor
+            view={runtimeView}
+            canCreateTemplate={canCreateRuntimeTemplate}
+            onCreateTemplate={() => {
+              if (editingScope === 'global') setGlobalRuntime(freshRuntime())
+              else setSceneRuntime(scene.id, freshRuntime())
+              if (activeCourseLocationId) activateCourseLocation(activeCourseLocationId)
+            }}
+            onApply={updateRuntimeSourceAtTarget}
+          />
         )}
 
         {activeSection === 'object' && (
