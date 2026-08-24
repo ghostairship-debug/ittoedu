@@ -13,7 +13,7 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: focused 结果绑定 product commit；仅文档/generated 变化时复用，命中下列编辑器/Player 投影、媒体样式或 focused 测试时失效。真实 bounding rect 由 Wave C 的单一浏览器纵切统一证明。
-- Invalidating paths: src/shared/flowMediaLayout.ts; src/renderer/ui/FlowWorkspace.tsx; src/player/surfaces/flow/FlowSurfaceHost.ts; src/renderer/styles/globals.css; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowSurfaceHost.test.ts
+- Invalidating paths: src/shared/flowMediaLayout.ts; src/renderer/ui/FlowWorkspace.tsx; src/player/surfaces/flow/FlowSurfaceHost.ts; src/renderer/styles/globals.css; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowSurfaceHost.test.ts; tests/unit/flowWorkspace.test.tsx 的既有媒体宽度 direct-consumer 断言
 - Task ID: stab-flow-07-media-layout-widths
 - Phase / wave: post-audit stabilization / C-flow-authoring
 - Status: claimed
@@ -40,7 +40,7 @@ Flow 图片与视频的紧凑、正文、宽幅三档在 Editor 与真实 Player
 
 ## Scope, locks and acceptance
 
-- Allowed write: one pure shared media-layout mapping, Editor/Player 的现有 layout class/style 投影、必要的容器查询样式和最多两个 focused 单测。
+- Allowed write: one pure shared media-layout mapping, Editor/Player 的现有 layout class/style 投影、必要的容器查询样式、最多两个 focused 单测，以及因 breakout 语义失效的 `flowWorkspace.test.tsx` 既有媒体宽度 direct-consumer 断言；不得在第三个测试文件扩充新行为用例。
 - Forbidden write: contracts/schema、媒体高级字段、Published producer 结构、替换流程、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: FlowWorkspace 在 Wave A、公式与格式任务之后由 Coordinator 串行接入；Player renderer 可独立写。
 - Acceptance:
@@ -53,6 +53,7 @@ Flow 图片与视频的紧凑、正文、宽幅三档在 Editor 与真实 Player
 
 - npx vitest run tests/unit/flowWorkspaceMedia.test.tsx
 - npx vitest run tests/unit/flowSurfaceHost.test.ts
+- npx vitest run tests/unit/flowWorkspace.test.tsx
 - 静态核对三档映射与 Editor/Player parity，并运行 git diff --check；本卡不运行 Playwright。
 
 ## Result and rollback
