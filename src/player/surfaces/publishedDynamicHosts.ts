@@ -120,10 +120,15 @@ function createPublishedSurfaceHostInternal(
   return new SpatialPublishedAdapter(
     payload,
     surface.id,
-    startLocationId,
-    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-    resolveAsset,
-    options.playbackPathId,
+    {
+      startLocationId,
+      viewport: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      resolveAsset,
+      playbackPathId: options.playbackPathId,
+      globalInteractionVisibilityState: options.globalInteractionVisibilityState,
+      onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
+      onInteractionReady: () => options.onInteractionReady?.(surface.id),
+    },
   )
 }
 
@@ -770,20 +775,28 @@ class SpatialPublishedAdapter implements SurfaceHost {
   constructor(
     payload: PublishedCourseV2Payload,
     surfaceId: string,
-    startLocationId: string,
-    viewport: { width: number; height: number },
-    resolveAsset: (assetId: string) => string | undefined,
-    playbackPathId?: string | null,
+    options: {
+      startLocationId: string
+      viewport: { width: number; height: number }
+      resolveAsset: (assetId: string) => string | undefined
+      playbackPathId?: string | null
+      globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+      onInteractionInvalidated?: () => void
+      onInteractionReady?: () => void
+    },
   ) {
     this.id = surfaceId
     this.#payload = payload
-    this.#startLocationId = startLocationId
-    this.#host = SpatialSurfaceHost.fromPublishedCourse(payload, viewport, {
+    this.#startLocationId = options.startLocationId
+    this.#host = SpatialSurfaceHost.fromPublishedCourse(payload, options.viewport, {
       surfaceId,
-      locationId: startLocationId,
-      resolveAsset,
-      playbackPathId: playbackPathId ?? null,
+      locationId: options.startLocationId,
+      resolveAsset: options.resolveAsset,
+      playbackPathId: options.playbackPathId ?? null,
       playbackControls: payload.playback.controls === 'none' ? 'none' : 'canvas',
+      globalInteractionVisibilityState: options.globalInteractionVisibilityState,
+      onInteractionInvalidated: options.onInteractionInvalidated,
+      onInteractionReady: options.onInteractionReady,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -801,6 +814,10 @@ class SpatialPublishedAdapter implements SurfaceHost {
     await this.#host.mount(context.container)
     const root = this.#host.rootElement
     if (root) root.hidden = true
+  }
+
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
+    return this.#host.getPublishedInteractionSurfacePort()
   }
 
   async activate(): Promise<void> {

@@ -333,24 +333,30 @@ export function collectSpatialPlaybackEntries(
 ): SpatialPlaybackEntry[] {
   const entries: SpatialPlaybackEntry[] = [
     ...input.globalLayerItems
-      .filter((entry) => isPublishedScopedVisible(entry.visibility, locationId))
+      .filter((entry) => (
+        entry.item.visible && isPublishedScopedVisible(entry.visibility, locationId)
+      ))
       .map((entry) => ({
         item: entry.item,
         source: 'global' as const,
         coordinateSpace: spatialPlaybackCoordinateSpace('global', entry.item),
       })),
     ...input.surface.surfaceLayerItems
-      .filter((entry) => isPublishedScopedVisible(entry.visibility, locationId))
+      .filter((entry) => (
+        entry.item.visible && isPublishedScopedVisible(entry.visibility, locationId)
+      ))
       .map((entry) => ({
         item: entry.item,
         source: 'surface' as const,
         coordinateSpace: spatialPlaybackCoordinateSpace('surface', entry.item),
       })),
-    ...input.surface.world.layerItems.map((item) => ({
-      item,
-      source: 'world' as const,
-      coordinateSpace: spatialPlaybackCoordinateSpace('world', item),
-    })),
+    ...input.surface.world.layerItems
+      .filter((item) => item.visible)
+      .map((item) => ({
+        item,
+        source: 'world' as const,
+        coordinateSpace: spatialPlaybackCoordinateSpace('world', item),
+      })),
   ]
   return entries.sort((left, right) => (
     left.item.order - right.item.order ||
@@ -386,8 +392,20 @@ export function worldItemVisibleInRuntimeCamera(
   camera: SpatialRuntimeCamera,
   rules: readonly SpatialSemanticZoomRule[],
 ): boolean {
-  if (!item.visible) return false
   if (item.playbackInitialVisibility === 'hidden') return false
+  return worldItemWithinRuntimeCamera(item, camera, rules)
+}
+
+/**
+ * Renderer/camera scope without transient Interaction visibility. Playback-hidden
+ * nodes must remain mountable in this scope so node.enter can reveal them.
+ */
+export function worldItemWithinRuntimeCamera(
+  item: PublishedLayerItem,
+  camera: SpatialRuntimeCamera,
+  rules: readonly SpatialSemanticZoomRule[],
+): boolean {
+  if (!item.visible) return false
   if (!worldRectIntersects(item, camera)) return false
   return isSpatialItemSemanticallyVisible(item.layerItemId, camera.zoom, rules)
 }

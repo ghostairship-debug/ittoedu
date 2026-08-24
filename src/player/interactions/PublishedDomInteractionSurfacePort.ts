@@ -8,7 +8,7 @@ const MAX_MOTION_DURATION_MS = 10_000
 const SLIDE_DISTANCE_PX = 48
 const SCALE_MULTIPLIER = 0.84
 
-export type PublishedInteractionNodeSource = 'scene' | 'surface' | 'global'
+export type PublishedInteractionNodeSource = 'scene' | 'surface' | 'global' | 'world'
 
 export type PublishedInteractionNodeOwnership =
   | 'native'
