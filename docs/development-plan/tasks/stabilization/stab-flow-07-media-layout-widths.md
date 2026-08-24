@@ -13,16 +13,16 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: focused 结果绑定 product commit；仅文档/generated 变化时复用，命中下列编辑器/Player 投影、媒体样式或 focused 测试时失效。真实 bounding rect 由 Wave C 的单一浏览器纵切统一证明。
-- Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/player/surfaces/flow/FlowSurfaceHost.ts; src/renderer/styles/globals.css; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowSurfaceHost.test.ts
+- Invalidating paths: src/shared/flowMediaLayout.ts; src/renderer/ui/FlowWorkspace.tsx; src/player/surfaces/flow/FlowSurfaceHost.ts; src/renderer/styles/globals.css; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowSurfaceHost.test.ts
 - Task ID: stab-flow-07-media-layout-widths
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: draft
+- Status: claimed
 - Owner / Reviewer / Integrator: Flow Media Layout Worker / independent Editor-Player parity reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: assigned at claim
-- Baseline HEAD: record at claim
-- Context: inspect current layout projection in Editor and Player after Wave A
-- Freshness / relevant dirty inputs: verify Flow media renderer/style diffs at claim
+- Claimed at / released at: 2026-08-25 / not released
+- Worktree / branch: shared integration workspace with FlowWorkspace/media-style firewall / codex/architecture-stabilization
+- Baseline HEAD: `ddbe070` (stable Flow formatting shell closed at `27ff341`)
+- Context: exact-source Bootstrap confirmed both Editor and Player read the parent layout field, but their current max-width projection collapses the three choices in common containers. Use one pure shared layout-to-width mapping and no persisted measurement.
+- Freshness / relevant dirty inputs: FlowWorkspace, Player host, media CSS and both focused tests were clean at claim. Baseline focused run passed `25/25` but only asserted style strings; Wave C remains responsible for actual bounding rectangles.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-flow-08-video-authoring-basics; stab-wave-c-flow-authoring
 - Retry count: 0
@@ -40,7 +40,7 @@ Flow 图片与视频的紧凑、正文、宽幅三档在 Editor 与真实 Player
 
 ## Scope, locks and acceptance
 
-- Allowed write: Editor/Player 的现有 layout class/style 投影、必要的共享映射和最多两个 focused 单测。
+- Allowed write: one pure shared media-layout mapping, Editor/Player 的现有 layout class/style 投影、必要的容器查询样式和最多两个 focused 单测。
 - Forbidden write: contracts/schema、媒体高级字段、Published producer 结构、替换流程、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: FlowWorkspace 在 Wave A、公式与格式任务之后由 Coordinator 串行接入；Player renderer 可独立写。
 - Acceptance:

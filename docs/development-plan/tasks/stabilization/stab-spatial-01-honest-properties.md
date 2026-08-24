@@ -13,16 +13,16 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: 执行后将逐控件 canonical-delta、一次历史及 focused UI/Store 结果绑定 product commit；仅任务卡、报告、task-board 或 generated 变化时复用，命中下列产品或测试路径时失效。
-- Invalidating paths: `src/renderer/ui/PropertiesTab.tsx` 的 Spatial node 属性分支；`src/renderer/store/editorStore.ts#updateNodes`; `src/renderer/course/effectiveLayerCommands.ts#patchEffectiveLayerItem`; `tests/unit/editorStore.test.ts`; `tests/unit/spatialProductIntegration.test.tsx`
+- Invalidating paths: `src/renderer/ui/PropertiesTab.tsx` 的 Spatial node 属性分支；`src/renderer/store/editorStore.ts#updateNodes`; `src/renderer/course/effectiveLayerCommands.ts` 的单项与原子批量 effective-layer patch；`src/renderer/course/spatialEditorCommands.ts` 的 Spatial 属性错误映射；`tests/unit/editorStore.test.ts`; `tests/unit/spatialProductIntegration.test.tsx`
 - Task ID: `stab-spatial-01-honest-properties`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Spatial Properties Worker / independent Spatial canonical-write reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context Pack + manifest hash | bootstrap-manual: `query Spatial properties/updateNodes at claim; fall back to exact-source Bootstrap if stale or low-confidence`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Store/Properties single-writer firewall / codex/architecture-stabilization`
+- Baseline HEAD: `ddbe070` (owner-aware insertion closed at `59f5fdc`; Flow Properties formatting handoff closed at `27ff341`)
+- Context Pack + manifest hash | bootstrap-manual: exact-source Bootstrap traced every visible Spatial Properties control through `updateNodes`, the active Spatial history and effective owner carriers; repo-index refresh remains deferred to the next wave gate.
+- Freshness / relevant dirty inputs: worktree and every allowed product/test path were clean at claim. Reproduction confirmed name, opacity, playback initial visibility and whole-node text style could be silently dropped, geometry was world-only, and a multi-selection update could create partial/multiple history writes.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 可见控件当前可能制造“成功但工程未变”的假象；修复不得建立第二套 Spatial 属性状态、绕过 active Spatial history 或误改 global/surface/world owner。

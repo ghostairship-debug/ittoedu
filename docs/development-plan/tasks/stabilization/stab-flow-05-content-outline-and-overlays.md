@@ -13,16 +13,16 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: focused 结果绑定 product commit；仅文档/generated 变化时复用，命中下列 Nodes、Flow 投影或 focused 测试时失效。Wave A 文本基础证据可复用。
-- Invalidating paths: src/renderer/ui/NodesTab.tsx; src/renderer/course/flowEditorView.ts; src/renderer/course/flowOverlayProjection.ts; tests/unit/flowUnifiedLayers.test.tsx; tests/unit/flowEditorView.test.ts
+- Invalidating paths: src/renderer/ui/NodesTab.tsx; src/renderer/course/flowEditorView.ts; src/renderer/course/flowOverlayProjection.ts; tests/unit/flowUnifiedLayerEntry.test.tsx; tests/unit/flowUnifiedLayers.test.tsx; tests/unit/flowEditorView.test.ts
 - Task ID: stab-flow-05-content-outline-and-overlays
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: draft
+- Status: claimed
 - Owner / Reviewer / Integrator: Flow Information Architecture Worker / independent ownership reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: assigned at claim
-- Baseline HEAD: record at claim
-- Context: inspect current Flow outline projection and overlay layer commands after Wave A
-- Freshness / relevant dirty inputs: verify NodesTab and projection diffs at claim
+- Claimed at / released at: 2026-08-25 / not released
+- Worktree / branch: shared integration workspace with NodesTab firewall / codex/architecture-stabilization
+- Baseline HEAD: `ddbe070` (Flow formatting surface closed at `27ff341`)
+- Context: exact-source Bootstrap confirmed `flowEditorView.blocks` already exposes the canonical DFS order, depth, parent and sibling index, while NodesTab still collapses the body to one aggregate row and mixes it with overlay affordances.
+- Freshness / relevant dirty inputs: NodesTab, Flow projection and all three direct test paths were clean at claim; no Store, Schema or projection migration is required.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-wave-c-flow-authoring
 - Retry count: 0
@@ -40,7 +40,7 @@ Flow 作者在大纲中看到正文的真实顺序与嵌套，在单独的浮层
 
 ## Scope, locks and acceptance
 
-- Allowed write: NodesTab 的 Flow 分区/文案、正文 outline 投影、overlay 命令可达性及最多两个 focused 单测。
+- Allowed write: NodesTab 的 Flow 分区/文案、正文 outline 投影、overlay 命令可达性，以及 `flowUnifiedLayerEntry` 与 `flowEditorView` 两个 focused 单测；未改的 `flowUnifiedLayers` 只作 direct-consumer validation。
 - Forbidden write: contracts/schema、Store/history 迁移、Slide/Spatial IA、Published producer、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: NodesTab 与 shared authoring shell 由 Coordinator 串行接入；FlowWorkspace 仅做必要只读 selection/command 接线。
 - Acceptance:
@@ -51,8 +51,8 @@ Flow 作者在大纲中看到正文的真实顺序与嵌套，在单独的浮层
 
 ## Minimal validation
 
+- npx vitest run tests/unit/flowUnifiedLayerEntry.test.tsx tests/unit/flowEditorView.test.ts
 - npx vitest run tests/unit/flowUnifiedLayers.test.tsx
-- npx vitest run tests/unit/flowEditorView.test.ts
 - 静态核对正文与 overlay 的命令/载体映射，并运行 git diff --check；不运行 Playwright。
 
 ## Result and rollback
@@ -62,4 +62,3 @@ Flow 作者在大纲中看到正文的真实顺序与嵌套，在单独的浮层
 - Rollback: 独立 revert IA/投影/测试提交；不迁移 persisted data。
 - Semantic index impact: canonical-update if user-facing layer capability text changes
 - Generated refresh: defer-to-wave-gate
-
