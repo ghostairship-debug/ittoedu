@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `src/renderer/export/course/flowPrintPlan.ts`; `src/main/pdfExport.ts`; `tests/unit/coursePrintArtifacts.test.ts`; `tests/integration/coursePdfExportApp.test.tsx`; `src/renderer/export/renderSceneImages.ts`; `src/renderer/export/buildPptx.ts`; `tsconfig.json`; `tsconfig.electron.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-4-02-non-slide-v9-pdf-completeness`
 - Phase / wave: `ARCH-4 / Published PDF completeness`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent PDF delivery reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:31:05+08:00; retry claimed 2026-08-24T19:49:19+08:00 / pending`
+- Claimed at / released at: `2026-08-24T19:31:05+08:00; retry claimed 2026-08-24T19:49:19+08:00 / 2026-08-24T19:56:04+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `36b53e1`
 - Context: `ARCH_4_ADMISSION_REPORT.md`; must claim only after arch-4-01 closes because App is the shared exclusive hotspot.
@@ -91,7 +91,7 @@ Main-process printing/decode errors remain visible through existing error handli
 - exact artifact coverage/fallback/failure assertions and `git diff --check`
 - one actual Mixed Electron PDF is deferred to and run exactly once at the ARCH-4 phase gate; no other E2E, build, full suite or generated refresh under V2
 
-The retry adds only HTML/CSS structure assertions to the existing unit file and reruns that unit plus root TypeScript; App integration and Electron TypeScript evidence remain fresh because their inputs do not change.
+The retry adds only HTML/CSS structure assertions to the existing unit file and reruns the affected print unit, App PDF integration and root TypeScript; Electron main/config did not change, so its prior TypeScript evidence remains fresh.
 
 ## Rollback
 
@@ -107,6 +107,9 @@ The retry adds only HTML/CSS structure assertions to the existing unit file and 
 - Independent PDF delivery review: APPROVE with no blocking finding. It verified coverage/order, no nested Flow document, image selection, pure-Slide fallback, exact fail-closed semantics, readiness and forbidden-boundary preservation while reusing the existing evidence. The only residual is actual Chromium pagination/scaling/clipping, intentionally deferred to the single ARCH-4 Mixed PDF gate.
 - Generated refresh: task board only at card closure; repo-index remains deferred to the ARCH-4 phase gate.
 - Retry trigger before the actual gate output: the gate harness review proved a dimension mismatch between fixed 1280×720 / 1120×760 content and an unspecified Chromium paper box. No PDF had yet been created. The retry is limited to page-size/fit CSS in `buildCoursePrintArtifacts.ts` and its existing unit test; prior App/main/fail-closed evidence remains reusable.
+- Retry product/test commit: `c49330c`. Semantic HTML now derives one explicit paper box from the existing `mixedPrintPlan`: A4/Letter keep configured size, `surface-native` uses the Slide 1280×720 canvas or Spatial 1120×760 viewport, and `auto` selects landscape for native visual pages or portrait for Flow-only. The Slide inner canvas scales as one unit, Spatial preserves its SVG viewBox fit, and Flow receives padding without a fixed/hidden content height.
+- Retry validation bound to `c49330c`: the affected `coursePrintArtifacts` unit and real-builder App integration passed together as `2 files / 6 tests`; `npx tsc --noEmit` and `git diff --check` passed. Electron source/config and its earlier TypeScript result were unchanged.
+- Incremental independent review: APPROVE twice, including the amended `surface-native` branch. It verified physical dimensions, orientation, Slide transform geometry, Spatial aspect-ratio behavior, unbounded Flow pagination and unchanged image/Spatial-only/pure-Slide routes. Actual Chromium output remains solely the phase-gate decision.
 
 ## Ready checklist（Coordinator）
 
