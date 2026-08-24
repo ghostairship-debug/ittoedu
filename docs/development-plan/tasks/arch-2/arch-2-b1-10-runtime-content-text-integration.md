@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-10-runtime-content-text-integration`
 - Phase / wave: `ARCH-2 / W2-B1 Runtime authoring integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Runtime Content Worker / independent Runtime reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 11:00 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 11:00 Asia/Shanghai / 2026-08-24 11:24 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `5b5c16c`
 - Claim commit: `2078f9d`
@@ -25,11 +25,11 @@ On the existing unified Slide canvas, a teacher can open a visible scene/global 
 
 ## Current status and evidence
 
-- Workspace `beginRuntimeTextEdit` captures only `{projectId, scope, sceneId, targetId, kind, key}` from the Player host; it captures no V9 revision/generation/location/surface/owner/item/address.
-- `commitRuntimeText` revalidates the live host target, reads `store.project` (the V8 projection), then calls `updateSceneRuntime`/`updateGlobalRuntime` with a whole-content patch.
-- Those raw actions convert V9 Runtime through `RuntimeDocument`, force `canvas-runtime / API 2`, and assign `LayerItem.visible = runtime.enabled`; same-value text still advances revision/history.
-- The authoring iframe is mounted only in `SlideLocationWorkspace`. Real visual reachability is Slide scene Runtime and Slide-location global Runtime; Flow, Spatial, Slide surface-layer and API 3 in-place target discovery are not current product capabilities.
-- The existing Runtime asset path already proves the correct two-phase pattern: live host discovery plus an exact canonical V9 target captured before the deferred write.
+- `8c2001e` adds the immutable exact content-key target and pure V9 planner, including JSON-Pointer field escaping, four owners, captured-state lock, true no-op and API 2/API 3 field preservation.
+- `1feaf50` adds narrow Store capture/commit actions and binds Workspace to the two-phase live-host plus canonical-target edit session; the former V8 scene/global text write is removed.
+- `5a76981` adds a permanent Store/mounted Workspace vertical slice covering current-Surface transactions, undo/redo, resource/compatibility stacks, stale/lock/delete races, archive/Published reads and host target replacement.
+- Real visual reachability remains intentionally limited to Slide scene Runtime and Slide-location global Runtime. Flow, Spatial, Slide surface-layer and API 3 in-place target discovery were neither claimed nor fabricated.
+- The existing Runtime asset, Component text and native text paths remain separate and pass adjacent mounted regressions.
 
 ## Canonical contract and carrier
 
@@ -157,7 +157,12 @@ Player host targetId/key
 
 ## Result evidence
 
-- Pending implementation, independent review, validation and consumer-count evidence.
+- Consumers migrated/remaining: `Workspace direct store.updateSceneRuntime 1 → 0; direct store.updateGlobalRuntime 1 → 0; commit-time V8 scene/global Runtime text read 1 path → 0. Properties retains the only product updateSceneRuntime/updateGlobalRuntime consumers (one selector plus one call each); Developer retains the Slide template set actions. Neither remaining count increased.`
+- Behavior before/after: `A visible Runtime target previously persisted by copying the V8 RuntimeDocument, bypassing canonical lock/item/revision identity, adding history for unchanged text, coupling LayerItem.visible to enabled and exposing an API 3 downgrade path. Workspace now opens only after both live-host validation and an exact V9 key target capture, revalidates both identities at commit, and either changes that one string through one current transaction or reports an honest unchanged/stale/locked/replaced result with zero authoritative writes.`
+- Validation results: `V1 3 files / 56 tests; V2 6 files / 43 tests; Properties/global adjacent regression 4 files / 21 tests; target Electron E2E 1/1 passed twice. npm run typecheck (root/Electron/e2e), git diff --check and task-board freshness passed. Independent Core/Store, Workspace/UI and regression/scope reviewers all approved; Workspace reviewer additionally passed mounted Runtime/asset/Component races 3 files / 26 tests, session units 2 / 20 and native/Component text regressions 3 / 16.`
+- Known risks/findings: `Properties Runtime settings/content and Slide Runtime template creation still use legacy RuntimeDocument actions and are separate follow-up cards. The current visual authoring iframe still exposes only Slide scene/global API 2 Runtime targets; no Flow/Spatial/API 3 in-place editing or execution support is claimed.`
+- indexImpact: `Runtime content-text target/planner, Store transaction and Workspace host-binding facts changed; refresh generated repo-index after close`.
+- Next allowed task: `ARCH-2 B1-11 Runtime Properties canonical integration`.
 
 ## Ready checklist (Coordinator)
 
