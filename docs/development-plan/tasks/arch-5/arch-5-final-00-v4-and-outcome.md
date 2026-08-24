@@ -14,9 +14,9 @@
 - Invalidating paths: all tracked product source, tests, fixtures, package/lockfile, TypeScript/Vite/Vitest/Playwright/Electron/build/release config, contracts, capability generator inputs, repo-index semantic/golden/generator/query/config and representative fixture manifest; final report/task-board/generated-only changes invalidate only their own freshness/index evidence
 - Task ID: `arch-5-final-00-v4-and-outcome`
 - Phase / wave: `ARCH-5 / final candidate`
-- Status: `claimed`
+- Status: `rolled-back`
 - Owner / Reviewer / Integrator: `Coordinator / independent pipeline reviewer + independent representative-outcome reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T20:41:43+08:00 / pending`
+- Claimed at / released at: `2026-08-24T20:41:43+08:00 / 2026-08-24T20:46:10+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `1692f2f`; product candidate `3bcbebf`
 - Context: all earlier phase reports/cards plus fresh ARCH-5 deletion ledger; product tree clean and no candidate-invalidating input changed after cleanup review
@@ -24,7 +24,7 @@
 - Depends on: `arch-5-01-remove-dead-validator-and-flow-helper` done
 - Blocks: ARCH-5 closure and active goal completion
 - Risk statement: this is the only full-suite/build/release-artifact run. A broad failure must be attributed to baseline, retained non-applicable Legacy tooling or the current candidate; it must not be hidden by retries, weaker assertions or a second data path.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / stale generated provenance evidence`
 
 ## Product outcome
 
@@ -107,7 +107,9 @@ One fixed Course Project V9 candidate passes the repository-wide engineering gat
 
 ## Result evidence
 
-- Pending the single V4 sequence, package/visual evidence, two independent reviews and final generated closure.
+- The single `npm run verify` attempt stopped in its first subcommand, before TypeScript, tests, builds or packaging. `check:ai-capabilities` reported only `来源溯源证据过期 generation-evidence.json`.
+- Read-only hash comparison found exactly one stale recorded source: `src/renderer/export/course/buildCoursePrintArtifacts.ts` recorded `3d77c0df...`, current `0d651908...`. That file changed in reviewed ARCH-4 commits `a887469` and `c49330c`; capability content outputs were not reported stale.
+- This candidate is retained as failed audit evidence and is not rerun. A narrow provenance-refresh task must produce a new clean baseline before a new final-candidate card may run V4.
 
 ## Ready checklist（Coordinator）
 
