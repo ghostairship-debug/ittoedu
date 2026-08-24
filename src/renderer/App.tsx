@@ -143,17 +143,40 @@ function isSlideOnlyCourseProject(project: CourseProjectDocument): boolean {
     && project.surfaces.every((surface) => surface.type === 'slide')
 }
 
+function mapCoursePackagePreflightItems(
+  target: ExportPreflightReport['target'],
+  report: CoursePackagePreflightReport,
+): ExportPreflightItem[] {
+  return report.items.map((item) => ({
+    severity: item.severity,
+    code: item.code as ExportPreflightItem['code'],
+    message: item.message,
+    target,
+    ...(item.path ? { path: item.path } : {}),
+  }))
+}
+
+function coursePackagePreflightToExportReport(
+  target: 'single-html' | 'web-package',
+  project: CourseProjectDocument,
+  report: CoursePackagePreflightReport,
+): ExportPreflightReport {
+  return {
+    reportVersion: 1,
+    projectId: project.id,
+    schemaVersion: project.schemaVersion,
+    target,
+    generatedAt: report.generatedAt,
+    items: mapCoursePackagePreflightItems(target, report),
+    summary: { ...report.summary },
+  }
+}
+
 function mergeCoursePackagePreflight(
   base: ExportPreflightReport,
   extra: CoursePackagePreflightReport,
 ): ExportPreflightReport {
-  const mapped: ExportPreflightItem[] = extra.items.map((item) => ({
-    severity: item.severity,
-    code: item.code as ExportPreflightItem['code'],
-    message: item.message,
-    target: base.target,
-    ...(item.path ? { path: item.path } : {}),
-  }))
+  const mapped = mapCoursePackagePreflightItems(base.target, extra)
   const items = [...base.items]
   for (const item of mapped) {
     if (items.some((existing) => existing.code === item.code && existing.message === item.message)) {
@@ -1410,15 +1433,15 @@ export default function App() {
     }
     const state = useEditorStore.getState()
     const sources = activeCoursePublishSources()
-    const base = collectExportPreflight(
-      state.project,
-      format,
-      {
-        assetFiles: selectMediaAssetFiles(state),
-        components: state.componentPackages,
-      },
-    )
     if (!sources) {
+      const base = collectExportPreflight(
+        state.project,
+        format,
+        {
+          assetFiles: selectMediaAssetFiles(state),
+          components: state.componentPackages,
+        },
+      )
       setExportPreflightReport(base)
       return
     }
@@ -1431,6 +1454,22 @@ export default function App() {
         components: sources.components,
       },
       loadPlayerBundle(),
+    )
+    if (format === 'single-html' || format === 'web-package') {
+      setExportPreflightReport(coursePackagePreflightToExportReport(
+        format,
+        sources.project,
+        v9,
+      ))
+      return
+    }
+    const base = collectExportPreflight(
+      state.project,
+      format,
+      {
+        assetFiles: selectMediaAssetFiles(state),
+        components: state.componentPackages,
+      },
     )
     setExportPreflightReport(mergeCoursePackagePreflight(base, v9))
   }, [handleExportDocx])

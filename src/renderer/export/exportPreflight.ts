@@ -47,7 +47,7 @@ export interface ExportPreflightItem {
 export interface ExportPreflightReport {
   reportVersion: 1
   projectId: string
-  schemaVersion: 8
+  schemaVersion: 8 | 9
   target: ExportPreflightTarget
   generatedAt: string
   items: ExportPreflightItem[]
