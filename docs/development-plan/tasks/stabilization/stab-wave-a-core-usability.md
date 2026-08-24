@@ -22,10 +22,10 @@
 - Context: manual Bootstrap read the three dependency cards and evidence, `playwright.config.ts`, the existing Electron launch/save/reopen/preview helpers in `editor.spec.ts` and `imageReplacementVerticalSlice.spec.ts`, and the final listed product paths. The one-spec design uses one Electron process and three bounded `test.step` behaviors.
 - Freshness / relevant dirty inputs: worktree and every listed product/spec path were clean at claim. `npm run repo:index:check` correctly reported the committed index stale after Wave A product changes, so the gate uses the recorded exact-source Bootstrap and defers one generated refresh to the wave checkpoint.
 - Hotspot locks: only `tests/e2e/stabilizationCoreUsability.spec.ts` and this gate's status/evidence are reserved; gate implementation may not change product code.
-- Depends on: `stab-ctrl-01-authoring-bounds-and-recovery`; `stab-mix-01-effective-order-allocation`; `stab-flow-01-real-text-selection`
+- Depends on: `stab-ctrl-01-authoring-bounds-and-recovery`; `stab-mix-01-effective-order-allocation`; `stab-mix-03-slide-effective-order-allocation`; `stab-flow-01-real-text-selection`
 - Blocks: `core-gate release for B/C/D cards that explicitly depend on stab-wave-a-core-usability; unrelated cards remain claimable`
 - Risk statement: Integration can reintroduce pointer/hit routing or stale Store behavior not visible in isolated focused tests.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `6 / five gate-spec contract faults repaired; one product integration failure delegated to stab-mix-03-slide-effective-order-allocation`
 
 ## Product outcome
 
