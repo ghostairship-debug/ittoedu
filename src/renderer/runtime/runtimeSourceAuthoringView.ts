@@ -68,7 +68,7 @@ export interface UnavailableRuntimeSourceAuthoringView {
   readonly label: string
   readonly documentKey: null
   /** Present only for the supported empty Slide scene/global Runtime slot. */
-  readonly creationTarget?: CourseRuntimeTemplateCreationTarget | null
+  readonly creationTarget: CourseRuntimeTemplateCreationTarget | null
 }
 
 export type RuntimeSourceAuthoringView =
