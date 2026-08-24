@@ -105,6 +105,7 @@ export function FlowInlineRichTextEditor({
   range,
   composing,
   onDraftChange,
+  onRangeChange,
   onComposingChange,
   onCommit,
   onCancel,
@@ -122,6 +123,7 @@ export function FlowInlineRichTextEditor({
     runs: import('../../shared/projectTypes').TextRun[],
     offsets: { start: number; end: number } | null,
   ) => void
+  readonly onRangeChange: (offsets: { start: number; end: number }) => void
   readonly onComposingChange: (composing: boolean) => void
   readonly onCommit: () => void
   readonly onCancel: () => void
@@ -133,7 +135,9 @@ export function FlowInlineRichTextEditor({
   const finishedRef = useRef(false)
   const blurReadyRef = useRef(false)
   const lastRestyleRef = useRef(-1)
+  const onRangeChangeRef = useRef(onRangeChange)
   composingRef.current = composing
+  onRangeChangeRef.current = onRangeChange
 
   const read = () => editorRef.current
     ? extractFlowRichTextFromEditor(editorRef.current)
@@ -143,7 +147,8 @@ export function FlowInlineRichTextEditor({
     const editor = editorRef.current
     if (!editor) return
     if (!initializedRef.current || lastRestyleRef.current !== restyleToken) {
-      editor.innerHTML = buildFlowRichTextHtml(text, runs)
+      const html = buildFlowRichTextHtml(text, runs)
+      editor.innerHTML = html || '<br data-flow-empty-placeholder="true">'
       lastRestyleRef.current = restyleToken
       initializedRef.current = true
       restoreFlowLogicalSelection(editor, range.start, range.end)
@@ -156,6 +161,19 @@ export function FlowInlineRichTextEditor({
     }, 0)
     return () => window.clearTimeout(timer)
   }, [restyleToken])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const ownerDocument = editor.ownerDocument
+    const syncNativeRange = () => {
+      if (composingRef.current || finishedRef.current) return
+      const offsets = logicalFlowSelectionOffsets(editor)
+      if (offsets) onRangeChangeRef.current(offsets)
+    }
+    ownerDocument.addEventListener('selectionchange', syncNativeRange)
+    return () => ownerDocument.removeEventListener('selectionchange', syncNativeRange)
+  }, [])
 
   return (
     <span
@@ -172,12 +190,19 @@ export function FlowInlineRichTextEditor({
       style={{
         outline: 'none',
         caretColor: '#1a1d24',
+        display: 'block',
+        width: '100%',
+        minWidth: 0,
         whiteSpace: 'pre-wrap',
         overflowWrap: 'anywhere',
         minHeight: '1.4em',
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
+        cursor: 'text',
         color: FLOW_PAPER_TEXT_COLOR,
       }}
       onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
       onInput={() => {
         const value = read()
@@ -1256,6 +1281,12 @@ export function FlowWorkspace({
             let next = updateFlowTextDraft(current, { text: nextText, runs: nextRuns })
             if (offsets) next = updateFlowTextRange(next, offsets)
             setEditState(next)
+          }}
+          onRangeChange={(offsets) => {
+            const current = editRef.current
+            if (!current) return
+            if (current.range.start === offsets.start && current.range.end === offsets.end) return
+            setEditState(updateFlowTextRange(current, offsets))
           }}
           onComposingChange={(composing) => {
             const current = editRef.current
