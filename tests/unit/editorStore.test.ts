@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { MAX_PROJECT_SCENES, MAX_SCENE_NODES } from '@/shared/constants'
 import type { AssetMeta } from '@/shared/projectTypes'
@@ -96,6 +96,7 @@ function mediaFiles() {
 }
 
 beforeEach(() => {
+  delete (window as Partial<Window>).desktopAPI
   useEditorStore.getState().createNewProject()
 })
 
@@ -131,6 +132,102 @@ describe('default Course Project V9 persistence', () => {
     expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
     expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/格式版本|版本不支持/)
     expect(() => openDefaultCourseProject(v8Bytes)).toThrow(/格式版本|版本不支持/)
+  })
+})
+
+describe('Spatial command failure diagnostics', () => {
+  it('keeps a structured reason out of teacher feedback and preserves failed-command state', () => {
+    const reportDiagnostic = vi.fn(async (
+      _input: Parameters<Window['desktopAPI']['reportDiagnostic']>[0],
+    ) => undefined)
+    Object.defineProperty(window, 'desktopAPI', {
+      configurable: true,
+      value: { reportDiagnostic },
+    })
+    useEditorStore.getState().createNewSpatialProject()
+    const before = useEditorStore.getState()
+    const sessionBefore = before.spatialSession
+    if (!sessionBefore) throw new Error('expected Spatial session')
+    const documentBefore = sessionBefore.history.present
+    const rawReason = JSON.stringify([
+      {
+        code: 'invalid_type',
+        path: ['surfaces', 0, 'world', 'layerItems', 0, 'order'],
+        message: 'Invalid input: expected number, received string',
+      },
+    ], null, 2)
+
+    const result = before.runSpatialCommand((session) => ({
+      ok: false,
+      reason: rawReason,
+      nextSession: session,
+      historyEntry: false,
+      selection: session.selection,
+    }))
+
+    const after = useEditorStore.getState()
+    expect(result.reason).toBe(rawReason)
+    expect(after.errorMessage).toBe('课件内容格式不正确。请检查刚才的输入后重试。')
+    expect(after.errorMessage).not.toMatch(/invalid_type|surfaces|code|path|[\[\]{}]/)
+    expect(reportDiagnostic).toHaveBeenCalledTimes(1)
+    expect(reportDiagnostic.mock.calls[0]?.[0]).toMatchObject({
+      source: 'renderer',
+      stack: rawReason,
+    })
+    expect(reportDiagnostic.mock.calls[0]?.[0]?.message).toContain(
+      `"sessionId":"${sessionBefore.sessionId}"`,
+    )
+    expect(reportDiagnostic.mock.calls[0]?.[0]?.message).toContain(
+      `"revision":${documentBefore.revision}`,
+    )
+    expect(after.spatialSession).toBe(sessionBefore)
+    expect(after.spatialSession?.history).toBe(sessionBefore.history)
+    expect(after.spatialSession?.history.present).toBe(documentBefore)
+    expect(after.spatialSession?.history.present.revision).toBe(documentBefore.revision)
+    expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
+    expect(after.history).toBe(before.history)
+    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+    expect(after.selectedNodeId).toBe(before.selectedNodeId)
+    expect(after.dirty).toBe(before.dirty)
+  })
+
+  it('maps an ordinary reason even when the local diagnostic write rejects', async () => {
+    const reportDiagnostic = vi.fn(async (
+      _input: Parameters<Window['desktopAPI']['reportDiagnostic']>[0],
+    ) => {
+      throw new Error('diagnostic disk unavailable')
+    })
+    Object.defineProperty(window, 'desktopAPI', {
+      configurable: true,
+      value: { reportDiagnostic },
+    })
+    useEditorStore.getState().createNewSpatialProject()
+    const before = useEditorStore.getState()
+    const sessionBefore = before.spatialSession
+    if (!sessionBefore) throw new Error('expected Spatial session')
+
+    const result = before.runSpatialCommand((session) => ({
+      ok: false,
+      reason: 'locked',
+      nextSession: session,
+      historyEntry: false,
+      selection: session.selection,
+    }))
+    await Promise.resolve()
+
+    const after = useEditorStore.getState()
+    expect(result.reason).toBe('locked')
+    expect(after.errorMessage).toBe('当前内容已锁定。请先解锁后重试。')
+    expect(after.errorMessage).not.toContain('locked')
+    expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'renderer',
+      stack: 'locked',
+    }))
+    expect(after.spatialSession).toBe(sessionBefore)
+    expect(after.spatialSession?.history).toBe(sessionBefore.history)
+    expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
+    expect(after.history).toBe(before.history)
+    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
   })
 })
 

@@ -3295,8 +3295,56 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const session = result.nextSession ?? current.spatialSession
     if (!session) return result
     if (!result.ok) {
-      if (result.reason) {
-        set({ errorMessage: result.reason, statusMessage: null })
+      const rawReason = result.reason ?? 'unknown-spatial-command-failure'
+      const normalizedReason = rawReason.trim().toLowerCase()
+      let teacherMessage = '操作未完成。请重新选择目标后再试。'
+      if (/^[\[{]/.test(normalizedReason) || /"(?:code|path)"\s*:/.test(rawReason)) {
+        teacherMessage = '课件内容格式不正确。请检查刚才的输入后重试。'
+      } else if (normalizedReason === 'locked' || rawReason.includes('锁定')) {
+        teacherMessage = '当前内容已锁定。请先解锁后重试。'
+      } else if (normalizedReason === 'stale-revision' || normalizedReason.includes('stale')) {
+        teacherMessage = '课件内容已更新。请重新选择后再试。'
+      } else if (normalizedReason === 'wrong-owner' || rawReason.includes('不属于')) {
+        teacherMessage = '当前内容不在这个编辑范围内。请切换到对应图层后重试。'
+      } else if (
+        normalizedReason === 'invalid-selection'
+        || normalizedReason === 'invalid-target'
+        || rawReason.includes('已失效')
+        || rawReason.includes('找不到')
+      ) {
+        teacherMessage = '所选内容已失效。请重新选择后再试。'
+      } else if (normalizedReason === 'invalid-color') {
+        teacherMessage = '颜色值无效。请重新选择颜色后再试。'
+      } else if (/排序|顺序|层级|跨来源/.test(rawReason)) {
+        teacherMessage = '图层顺序未更新。请在同一分组内重新排序。'
+      }
+      set({ errorMessage: teacherMessage, statusMessage: null })
+      const diagnosticSession = current.spatialSession ?? session
+      try {
+        if (window.desktopAPI?.reportDiagnostic) {
+          const selectionIds = diagnosticSession.selection.selectionIds
+          void window.desktopAPI.reportDiagnostic({
+            source: 'renderer',
+            message: [
+              'Spatial command context',
+              JSON.stringify({
+                projectId: diagnosticSession.history.present.id,
+                sessionId: diagnosticSession.sessionId,
+                revision: diagnosticSession.history.present.revision,
+                generation: diagnosticSession.generation,
+                locationId: diagnosticSession.selection.locationId,
+                surfaceId: diagnosticSession.selection.surfaceId,
+                scope: diagnosticSession.scope,
+                selectionCount: selectionIds.length,
+                selectionIds: selectionIds.slice(0, 20),
+                selectionTruncated: selectionIds.length > 20,
+              }),
+            ].join('\n'),
+            stack: rawReason,
+          }).catch(() => undefined)
+        }
+      } catch {
+        // A local diagnostic failure must never replace the actionable teacher message.
       }
       return result
     }
