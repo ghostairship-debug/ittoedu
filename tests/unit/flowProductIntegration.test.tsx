@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
@@ -52,6 +52,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   useEditorStore.getState().createNewProject()
 })
 
@@ -151,6 +152,122 @@ describe('Flow product shell wiring', () => {
     fireEvent.click(screen.getByTestId('flow-format-bold'))
     const formatted = flowSurface().blocks.find((block) => block.type === 'heading')
     expect(formatted && formatted.type === 'heading' ? formatted.runs?.some((run) => run.style?.bold) : false).toBe(true)
+  })
+
+  it('makes Flow entries click-only and names document blocks separately from overlays', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () => null as never,
+    )
+    useEditorStore.getState().createNewFlowProject()
+    const onAddImage = vi.fn()
+    const onAddVideo = vi.fn()
+    render(
+      <ElementsTab
+        onAddImage={onAddImage}
+        onAddVideo={onAddVideo}
+      />,
+    )
+
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
+      '流式讲义：单击添加文档块；图形添加为页面浮层。当前不可从面板拖入。',
+    )
+    const documentBlockEntries = [
+      ['add-text', '文档段落'],
+      ['add-formula', '独立公式块'],
+      ['add-image', '文中图片块'],
+      ['add-video', '文中视频块'],
+    ] as const
+    const setData = vi.fn()
+    for (const [testId, carrierLabel] of documentBlockEntries) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toHaveProperty('draggable', false)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'document-block')
+      expect(entry).toHaveAttribute('title', expect.stringContaining(carrierLabel))
+      fireEvent.dragStart(entry, { dataTransfer: { setData } })
+    }
+    const rectangle = screen.getByTestId('add-rectangle')
+    expect(rectangle).toHaveProperty('draggable', false)
+    expect(rectangle).toHaveAttribute('data-insertion-carrier', 'page-overlay')
+    expect(rectangle).toHaveAttribute('title', expect.stringContaining('页面浮层'))
+    fireEvent.dragStart(rectangle, { dataTransfer: { setData } })
+    expect(setData).not.toHaveBeenCalled()
+
+    const initialBlockCount = flowSurface().blocks.length
+    fireEvent.click(screen.getByTestId('add-text'))
+    expect(flowSurface().blocks).toHaveLength(initialBlockCount + 1)
+    expect(useEditorStore.getState().flowSession?.selection.selectedBlockId).toBeTruthy()
+
+    fireEvent.click(rectangle)
+    const overlayId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
+    expect(overlayId).toBeTruthy()
+    expect(readFlowSharedOwnership(flowDocument(), overlayId!)).toBe('viewport-overlay')
+    expect(locateCourseLayer(flowDocument(), overlayId!)?.item).toBeTruthy()
+    expect(useEditorStore.getState().errorMessage).toBeNull()
+
+    fireEvent.click(screen.getByTestId('add-image'))
+    fireEvent.click(screen.getByTestId('add-video'))
+    expect(onAddImage).toHaveBeenCalledTimes(1)
+    expect(onAddVideo).toHaveBeenCalledTimes(1)
+
+    onAddImage.mockClear()
+    onAddVideo.mockClear()
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
+      'Flow 全局层：图形添加为全局浮层；文字和公式仍添加到当前文档页',
+    )
+    expect(screen.getByTestId('global-elements-notice')).toHaveTextContent(
+      '在上方快速添加中，当前只有图形会添加为跨页全局浮层',
+    )
+
+    for (const testId of ['add-text', 'add-formula'] as const) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toBeEnabled()
+      expect(entry).toHaveProperty('draggable', false)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'document-block')
+      expect(entry).toHaveAttribute('title', expect.stringContaining('不会添加到全局层'))
+    }
+    const globalRectangle = screen.getByTestId('add-rectangle')
+    expect(globalRectangle).toBeEnabled()
+    expect(globalRectangle).toHaveProperty('draggable', false)
+    expect(globalRectangle).toHaveAttribute('data-insertion-carrier', 'global-layer-item')
+    expect(globalRectangle).toHaveAttribute('title', expect.stringContaining('全局浮层'))
+
+    const globalCount = flowDocument().globalLayerItems.length
+    const surfaceOverlayCount = flowSurface().surfaceLayerItems.length
+    fireEvent.click(globalRectangle)
+    const globalOverlayId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
+    expect(globalOverlayId).toBeTruthy()
+    expect(flowDocument().globalLayerItems.some(
+      (entry) => entry.item.layerItemId === globalOverlayId,
+    )).toBe(true)
+    expect(flowDocument().globalLayerItems).toHaveLength(globalCount + 1)
+    expect(flowSurface().surfaceLayerItems).toHaveLength(surfaceOverlayCount)
+
+    const disabledDocument = structuredClone(flowDocument())
+    const disabledHistory = structuredClone(useEditorStore.getState().flowSession?.history)
+    for (const testId of ['add-image', 'add-video'] as const) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toBeDisabled()
+      expect(entry).toHaveProperty('draggable', false)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'unavailable')
+      expect(entry).toHaveAttribute('title', expect.stringContaining('Flow 全局层暂不支持插入'))
+      fireEvent.click(entry)
+    }
+    expect(onAddImage).not.toHaveBeenCalled()
+    expect(onAddVideo).not.toHaveBeenCalled()
+    expect(flowDocument()).toEqual(disabledDocument)
+    expect(useEditorStore.getState().flowSession?.history).toEqual(disabledHistory)
+
+    const blockCount = flowSurface().blocks.length
+    fireEvent.click(screen.getByTestId('add-text'))
+    expect(flowSurface().blocks).toHaveLength(blockCount + 1)
+    expect(useEditorStore.getState().editingScope).toBe('scene')
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    fireEvent.click(screen.getByTestId('add-formula'))
+    expect(flowSurface().blocks).toHaveLength(blockCount + 2)
+    expect(useEditorStore.getState().editingScope).toBe('global')
+    expect(flowDocument().globalLayerItems).toHaveLength(globalCount + 1)
+    expect(useEditorStore.getState().errorMessage).toBeNull()
   })
 
   it('inserts MediaTab images as document blocks and round-trips a V9 archive', () => {
