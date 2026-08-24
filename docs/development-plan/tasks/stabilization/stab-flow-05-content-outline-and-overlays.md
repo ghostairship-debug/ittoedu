@@ -16,9 +16,9 @@
 - Invalidating paths: src/renderer/ui/NodesTab.tsx; src/renderer/course/flowEditorView.ts; src/renderer/course/flowOverlayProjection.ts; tests/unit/flowUnifiedLayerEntry.test.tsx; tests/unit/flowUnifiedLayers.test.tsx; tests/unit/flowEditorView.test.ts
 - Task ID: stab-flow-05-content-outline-and-overlays
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: claimed
+- Status: done
 - Owner / Reviewer / Integrator: Flow Information Architecture Worker / independent ownership reviewer / Coordinator
-- Claimed at / released at: 2026-08-25 / not released
+- Claimed at / released at: 2026-08-25 / 2026-08-25
 - Worktree / branch: shared integration workspace with NodesTab firewall / codex/architecture-stabilization
 - Baseline HEAD: `ddbe070` (Flow formatting surface closed at `27ff341`)
 - Context: exact-source Bootstrap confirmed `flowEditorView.blocks` already exposes the canonical DFS order, depth, parent and sibling index, while NodesTab still collapses the body to one aggregate row and mixes it with overlay affordances.
@@ -44,10 +44,10 @@ Flow 作者在大纲中看到正文的真实顺序与嵌套，在单独的浮层
 - Forbidden write: contracts/schema、Store/history 迁移、Slide/Spatial IA、Published producer、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: NodesTab 与 shared authoring shell 由 Coordinator 串行接入；FlowWorkspace 仅做必要只读 selection/command 接线。
 - Acceptance:
-  - [ ] 正文按真实顺序与嵌套显示，并只提供结构上有效的移动操作。
-  - [ ] overlay 单独呈现且保留 z-order；正文不显示置顶/置底等无效命令。
-  - [ ] ownership 与定位空间使用不同名称，不把 global 等同 viewport、surface 等同 document。
-  - [ ] 所有动作继续写现有 canonical carrier，并保持 undo/save 语义。
+  - [x] 正文按真实顺序与嵌套显示，并只提供结构上有效的移动操作。
+  - [x] overlay 单独呈现且保留 z-order；正文不显示置顶/置底等无效命令。
+  - [x] ownership 与定位空间使用不同名称，不把 global 等同 viewport、surface 等同 document。
+  - [x] 所有动作继续写现有 canonical carrier，并保持 undo/save 语义。
 
 ## Minimal validation
 
@@ -57,8 +57,8 @@ Flow 作者在大纲中看到正文的真实顺序与嵌套，在单独的浮层
 
 ## Result and rollback
 
-- Result evidence: pending；完成时记录 product commit、outline/overlay 映射、focused 结果与 Reviewer 结论。
-- Outcome boundary: V1 只证明信息架构和命令投影的实现候选；真实浏览器综合路径由 Wave C 证明。
-- Rollback: 独立 revert IA/投影/测试提交；不迁移 persisted data。
+- Result evidence: product commit `03cd27a`. NodesTab maps the existing `buildFlowEditorView.blocks` DFS/depth/parent/index into a selectable body outline and exposes only structurally valid move/indent/outdent actions through the existing canonical Flow commands. Body rows have no drag/z-order/visibility/lock affordance; a separate overlay section retains the existing DnD and layer actions. Labels independently state owner (`全课` / `当前 Flow 页面`) and coordinate placement (`钉在视口` / `跟随稿纸`). The UI path proves one history entry, undo and archive reopen. Focused validation passed `9/9`, unchanged direct consumer `3/3`; the fourth-lane integrated candidate passed `154/154`, full typecheck and `git diff --check`. Independent ownership review: `APPROVE`, no retry.
+- Outcome boundary: V1 establishes `engineering candidate`；真实浏览器综合路径由 Wave C 证明。
+- Rollback: revert `03cd27a`；不迁移 persisted data。
 - Semantic index impact: canonical-update if user-facing layer capability text changes
 - Generated refresh: defer-to-wave-gate

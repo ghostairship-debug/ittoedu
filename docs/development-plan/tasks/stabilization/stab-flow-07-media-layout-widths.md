@@ -16,16 +16,16 @@
 - Invalidating paths: src/shared/flowMediaLayout.ts; src/renderer/ui/FlowWorkspace.tsx; src/player/surfaces/flow/FlowSurfaceHost.ts; src/renderer/styles/globals.css; tests/unit/flowWorkspaceMedia.test.tsx; tests/unit/flowSurfaceHost.test.ts; tests/unit/flowWorkspace.test.tsx 的既有媒体宽度 direct-consumer 断言
 - Task ID: stab-flow-07-media-layout-widths
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: claimed
+- Status: done
 - Owner / Reviewer / Integrator: Flow Media Layout Worker / independent Editor-Player parity reviewer / Coordinator
-- Claimed at / released at: 2026-08-25 / not released
+- Claimed at / released at: 2026-08-25 / 2026-08-25
 - Worktree / branch: shared integration workspace with FlowWorkspace/media-style firewall / codex/architecture-stabilization
 - Baseline HEAD: `ddbe070` (stable Flow formatting shell closed at `27ff341`)
 - Context: exact-source Bootstrap confirmed both Editor and Player read the parent layout field, but their current max-width projection collapses the three choices in common containers. Use one pure shared layout-to-width mapping and no persisted measurement.
 - Freshness / relevant dirty inputs: FlowWorkspace, Player host, media CSS and both focused tests were clean at claim. Baseline focused run passed `25/25` but only asserted style strings; Wave C remains responsible for actual bounding rectangles.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-flow-08-video-authoring-basics; stab-wave-c-flow-authoring
-- Retry count: 0
+- Retry count: 1
 
 ## Product outcome
 
@@ -44,10 +44,10 @@ Flow 图片与视频的紧凑、正文、宽幅三档在 Editor 与真实 Player
 - Forbidden write: contracts/schema、媒体高级字段、Published producer 结构、替换流程、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: FlowWorkspace 在 Wave A、公式与格式任务之后由 Coordinator 串行接入；Player renderer 可独立写。
 - Acceptance:
-  - [ ] 三档 layout 各自映射到确定且不同的有效宽度约束。
-  - [ ] 同一 block 在 Editor 与 Player 使用同一档位语义。
-  - [ ] responsive 容器内不溢出，且不靠保存瞬时 bounding rect。
-  - [ ] Wave C 能对两端各三档 actual bounding rect 做单一纵切断言。
+  - [x] 三档 layout 各自映射到确定且不同的有效宽度约束。
+  - [x] 同一 block 在 Editor 与 Player 使用同一档位语义。
+  - [x] responsive 容器内不溢出，且不靠保存瞬时 bounding rect。
+  - [x] Wave C 能对两端各三档 actual bounding rect 做单一纵切断言。
 
 ## Minimal validation
 
@@ -58,8 +58,8 @@ Flow 图片与视频的紧凑、正文、宽幅三档在 Editor 与真实 Player
 
 ## Result and rollback
 
-- Result evidence: pending；完成时记录 product commit、三档映射表、focused 结果与 Reviewer 结论。
-- Outcome boundary: V1 只证明映射实现候选；真实浏览器 actual bounding rect 由 Wave C 证明。
-- Rollback: 独立 revert 映射/样式/测试提交；不改数据合同。
+- Result evidence: product commit `01eb6b0` with direct-consumer boundary amendment `9af07fb`. Editor and Player call one pure layout projection and one inline-size query root; unwrapped media centers outside the reading lane while wrapped media remains `48%`. Content/wide/full resolve to `572/604/636` at 700px, `760/808/840` at 904px and `760/1120/1216` at 1280px. Physical/logical width constraints share one CSS custom property, and physical `left:50% + translateX(-50%)` remains centered under RTL. The review retry fixed narrow-container collapse, RTL direction and conflicting legacy max-width constraints. Two focused files plus the amended direct consumer passed `40/40`; the fourth-lane integrated candidate passed `154/154`, full typecheck and `git diff --check`. Final Editor/Player parity review: `APPROVE`.
+- Outcome boundary: V1 establishes `engineering candidate`；真实浏览器 actual bounding rect 由 Wave C 证明。
+- Rollback: revert `01eb6b0`；不改数据合同。
 - Semantic index impact: canonical-update only if published capability wording changes
 - Generated refresh: defer-to-wave-gate

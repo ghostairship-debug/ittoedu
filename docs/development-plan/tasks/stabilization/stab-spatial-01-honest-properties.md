@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/ui/PropertiesTab.tsx` 的 Spatial node 属性分支；`src/renderer/store/editorStore.ts#updateNodes`; `src/renderer/course/effectiveLayerCommands.ts` 的单项与原子批量 effective-layer patch；`src/renderer/course/spatialEditorCommands.ts` 的 Spatial 属性错误映射；`tests/unit/editorStore.test.ts`; `tests/unit/spatialProductIntegration.test.tsx`
 - Task ID: `stab-spatial-01-honest-properties`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Properties Worker / independent Spatial canonical-write reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Store/Properties single-writer firewall / codex/architecture-stabilization`
 - Baseline HEAD: `ddbe070` (owner-aware insertion closed at `59f5fdc`; Flow Properties formatting handoff closed at `27ff341`)
 - Context Pack + manifest hash | bootstrap-manual: exact-source Bootstrap traced every visible Spatial Properties control through `updateNodes`, the active Spatial history and effective owner carriers; repo-index refresh remains deferred to the next wave gate.
@@ -26,7 +26,7 @@
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 可见控件当前可能制造“成功但工程未变”的假象；修复不得建立第二套 Spatial 属性状态、绕过 active Spatial history 或误改 global/surface/world owner。
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review found unselected Nodes row regression and unconstrained teacher-controller frame; both repaired with real UI coverage`
 
 ## Product outcome
 
@@ -45,11 +45,11 @@
 - Forbidden write: Schema/contracts、Player/Published/export、Slide/Flow 属性行为、Clipboard、App 快捷键、依赖与 generated 文件。
 - Hotspot lock: Spatial 的 Store / Properties / Clipboard / History 由同一 Coordinator/Integrator 串行接入；五张 Spatial 卡可并行调查、实现纯命令和编写独立测试，只有命中 Store / Nodes / Properties 的接入提交必须串行。
 - Acceptance:
-  - [ ] 为每个仍可见的 Spatial 属性建立“UI 操作 → canonical 字段 delta → 一条 history → undo/redo”证据。
-  - [ ] 当前 carrier/owner 不支持的属性不再可提交，且提示不声称成功。
-  - [ ] 多属性批量提交仍是一次用户操作、一条逻辑历史；no-op 不制造 revision/history。
-  - [ ] global/surface/world 项不会被错误路由到 world transform。
-  - [ ] 无 Schema、Player、导出或跨 Surface 能力扩张。
+  - [x] 为每个仍可见的 Spatial 属性建立“UI 操作 → canonical 字段 delta → 一条 history → undo/redo”证据。
+  - [x] 当前 carrier/owner 不支持的属性不再可提交，且提示不声称成功。
+  - [x] 多属性批量提交仍是一次用户操作、一条逻辑历史；no-op 不制造 revision/history。
+  - [x] global/surface/world 项不会被错误路由到 world transform。
+  - [x] 无 Schema、Player、导出或跨 Surface 能力扩张。
 
 ## Minimal validation
 
@@ -58,8 +58,8 @@
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、逐控件 before/after、focused 命令结果、Reviewer 结论和仍被禁用的属性。
+- Result evidence: product commit `d2e40d4`. The owner-aware batch seam resolves and validates every effective address before one cloned mutation/revision/history, applies only patched common fields and whole-node native-text style, and leaves no-op/failure at the original session/history. Global, surface and world UI probes wrote label/style to their real carrier; the Store probe atomically covered frame/rotation, opacity, visibility, lock and playback initial visibility with undo/redo. Unsupported type-specific controls, non-world text content/local formatting, simple entrance animation and non-atomic Spatial multi-copy/delete are hidden or explicitly disabled. Review retry repaired unselected Nodes-row rename/visible/locked so each direct action writes its exact owner without stealing selection, and constrained global teacher-controller frame/rotation through the existing recovery-footprint boundary. Focused validation passed `80/80`, direct consumers `22/22`; the fourth-lane integrated candidate passed `154/154`, full typecheck and `git diff --check`. Final independent review: `APPROVE`.
 - Outcome boundary: focused 自动化最多把该行为提升为 `engineering candidate`，不声称 Spatial 整体可用、视觉合格或教师 `accepted`。
-- Rollback: 从 claim baseline 以一个可独立 revert 的产品/测试提交回退；无用户数据迁移，旧字段保持原样。
+- Rollback: revert `d2e40d4`；无用户数据迁移，旧字段保持原样。
 - Semantic index impact: `canonical-update` only if the actual write path changes.
 - Generated refresh: `defer-to-wave-gate`
