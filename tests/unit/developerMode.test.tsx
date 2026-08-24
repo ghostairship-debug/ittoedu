@@ -18,11 +18,6 @@ const originalUpdateRuntimeSourceAtTarget =
 const originalCreateRuntimeTemplateAtTarget =
   useEditorStore.getState().createRuntimeTemplateAtTarget
 
-function refreshCourseAuthoringLocation(): void {
-  const locationId = selectActiveCourseLocationId(useEditorStore.getState())
-  if (locationId) useEditorStore.getState().activateCourseLocation(locationId)
-}
-
 function selectRuntimeView(editingScope: 'scene' | 'global') {
   const state = useEditorStore.getState()
   const project = selectActiveCourseProjectDocument(state)
@@ -352,7 +347,6 @@ describe('专业开发模式', () => {
     const namedStateId = useEditorStore.getState().activePresentationStateId
     expect(namedStateId).not.toBeNull()
     useEditorStore.getState().setActivePresentationState(null)
-    refreshCourseAuthoringLocation()
     let capturedStateId: string | null | undefined = undefined
     useEditorStore.setState({
       updateRuntimeSourceAtTarget: (target, draft) => {
@@ -509,12 +503,27 @@ describe('专业开发模式', () => {
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
   })
 
+  it('当前 Slide 经过其他编辑事务后仍可创建 Runtime 模板', () => {
+    useEditorStore.getState().createNewProject()
+    act(() => useEditorStore.getState().addTextNode())
+    const beforeRevision = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )!.revision
+
+    render(<DeveloperTab />)
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(beforeRevision + 1)
+    expect((screen.getByLabelText('场景运行时源码') as HTMLTextAreaElement).value)
+      .toContain('runtimeApiVersion: 2')
+  })
+
   it('全局 Runtime 模板创建后保留全局作用域与当前命名状态', () => {
     useEditorStore.getState().createNewProject()
     useEditorStore.getState().addPresentationState('讲解状态')
     const namedStateId = useEditorStore.getState().activePresentationStateId
     expect(namedStateId).not.toBeNull()
-    refreshCourseAuthoringLocation()
     useEditorStore.getState().setActivePresentationState(namedStateId)
     useEditorStore.getState().setEditingScope('global')
     const beforeRevision = selectActiveCourseProjectDocument(

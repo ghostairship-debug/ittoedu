@@ -30,8 +30,9 @@ import {
   selectSelectedNode,
   useEditorStore,
 } from '../store/editorStore'
-import type {
-  CourseAuthoringTarget,
+import {
+  updateCourseAuthoringSessionRevision,
+  type CourseAuthoringTarget,
 } from '../authoring/courseAuthoringSession'
 import type {
   RuntimeSourceAuthoringCommitResult,
@@ -446,8 +447,8 @@ export function DeveloperTab() {
   const project = useEditorStore((state) => state.project)
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const activeCourseLocationId = useEditorStore(selectActiveCourseLocationId)
-  const courseAuthoringSessionToken = useEditorStore(
-    (state) => state.courseAuthoringSession?.token ?? null,
+  const courseAuthoringSession = useEditorStore(
+    (state) => state.courseAuthoringSession,
   )
   const componentPackages = useEditorStore((state) => state.componentPackages)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -507,9 +508,13 @@ export function DeveloperTab() {
     (location) => location.id === activeCourseLocationId,
   )
   const runtimeView = useMemo<RuntimeSourceAuthoringView | null>(() => {
-    if (!courseProject || !activeCourseLocationId || !courseAuthoringSessionToken) {
+    if (!courseProject || !activeCourseLocationId || !courseAuthoringSession) {
       return null
     }
+    const currentAuthoringSession = updateCourseAuthoringSessionRevision(
+      courseAuthoringSession,
+      courseProject.revision,
+    )
     return selectRuntimeSourceAuthoringView({
       project: courseProject,
       locationId: activeCourseLocationId,
@@ -517,13 +522,13 @@ export function DeveloperTab() {
       activeStateId: activeCourseLocation?.kind === 'slide-scene'
         ? activePresentationStateId
         : null,
-      sessionToken: courseAuthoringSessionToken,
+      sessionToken: currentAuthoringSession.token,
     })
   }, [
     activeCourseLocation?.kind,
     activeCourseLocationId,
     activePresentationStateId,
-    courseAuthoringSessionToken,
+    courseAuthoringSession,
     courseProject,
     editingScope,
   ])

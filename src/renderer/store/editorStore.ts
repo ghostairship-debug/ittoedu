@@ -3654,7 +3654,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       )
     }
     const projection = buildCandidateEffectiveLayers(state)
-    const authoringSession = state.courseAuthoringSession
+    let authoringSession = state.courseAuthoringSession
     if (!projection || !authoringSession) {
       return rejectRuntimeSourceAuthoring(
         'invalid-target',
@@ -3672,6 +3672,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         '当前编辑范围已切换，运行时源码没有写入。',
       )
     }
+
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
 
     const planned = planRuntimeSourceUpdate({
       project: document,

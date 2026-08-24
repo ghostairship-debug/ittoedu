@@ -914,6 +914,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(runtimeSource).toHaveValue(/CoursewareRuntime\.define/)
       await expect(runtimeSource).toHaveAttribute('wrap', 'off')
       const runtimeEditor = runtimeSource.locator('xpath=ancestor::section[1]')
+      await runtimeSource.fill(`${await runtimeSource.inputValue()}\n// Electron canonical source edit`)
       await runtimeEditor.getByRole('button', { name: '校验并应用' }).click()
       await expect(runtimeEditor.getByText(
         '校验通过，修改已写入工程历史。',
