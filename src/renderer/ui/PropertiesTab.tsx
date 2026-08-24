@@ -2300,7 +2300,7 @@ function FlowMediaBlockProperties({
         {FLOW_MEDIA_KIND_LABEL[block.mediaKind]}
         {asset?.filename ? ` · ${asset.filename}` : ''}
       </p>
-      {block.mediaKind === 'image' ? (
+      {block.mediaKind === 'image' || block.mediaKind === 'video' ? (
         <BufferedInput
           label="替代文本"
           value={block.altText ?? ''}

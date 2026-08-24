@@ -428,6 +428,8 @@ function renderFlowPaperMedia(
         data-flow-asset-id={block.assetId}
         data-flow-media-kind="video"
         {...(url ? { src: url } : {})}
+        aria-label={block.altText ?? ''}
+        controls
         muted
         playsInline
         preload="metadata"

@@ -175,6 +175,7 @@ function createMediaFlowProject(): CourseProjectDocument {
       type: 'media',
       assetId: 'asset-video',
       mediaKind: 'video',
+      altText: '讲解步骤视频',
       caption: '讲解视频',
       layout: 'wide',
     },
@@ -341,6 +342,11 @@ describe('FlowWorkspace edit media', () => {
     expect(video).toHaveAttribute('data-flow-media-kind', 'video')
     expect(video).toHaveAttribute('src')
     expect(video?.getAttribute('src')).toMatch(/^blob:flow-video\/mp4-/)
+    expect(video).toHaveAttribute('controls')
+    expect(video).toHaveAttribute('aria-label', '讲解步骤视频')
+    expect(video).toHaveProperty('muted', true)
+    expect(video).toHaveAttribute('playsinline')
+    expect(video).toHaveAttribute('preload', 'metadata')
     expect(screen.getByTestId('flow-block-media-audio').textContent).toContain('音频占位符')
   })
 
