@@ -15,6 +15,12 @@ import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constan
 import type { FormulaAstNode } from '../../shared/projectTypes'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
+import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  FLOW_MEDIA_QUERY_CONTAINER_TYPE,
+  resolveFlowMediaLayoutProjection,
+} from '../../shared/flowMediaLayout'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import type { FlowCommandResult } from '../course/flowEditorCommands'
 import {
@@ -1265,6 +1271,13 @@ export function FlowWorkspace({
     if (siblings) siblings.push(blockView)
     else childrenByParent.set(blockView.parentId, [blockView])
   }
+  const activeFlowSurface = project.surfaces.find((entry) => entry.id === view.surfaceId)
+  const flowMediaWidths = {
+    readingWidth: view.layout.readingWidth,
+    wideContentWidth: activeFlowSurface?.type === 'flow'
+      ? activeFlowSurface.layout.wideContentWidth
+      : view.layout.readingWidth,
+  }
 
   const renderBlock = (blockView: FlowBlockView): ReactNode => {
     const block = blockView.block as FlowBlock
@@ -1282,6 +1295,9 @@ export function FlowWorkspace({
     const plainDraft = edit?.kind === 'plain-string' && editingThis
       ? (edit.draft as { text: string }).text
       : null
+    const mediaProjection = block.type === 'media'
+      ? resolveFlowMediaLayoutProjection(block.layout, flowMediaWidths)
+      : null
 
     const isWrapLeft = (block.type === 'media' || block.type === 'component') && block.wrap === 'left'
     const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
@@ -1293,9 +1309,17 @@ export function FlowWorkspace({
       padding: '12px 16px',
       margin: '0 0 12px',
       ...(isWrapLeft
-        ? { float: 'left', width: '48%', margin: '0 16px 8px 0' }
+        ? {
+            float: 'left',
+            width: mediaProjection?.wrappedOuterInlineSize ?? '48%',
+            margin: '0 16px 8px 0',
+          }
         : isWrapRight
-          ? { float: 'right', width: '48%', margin: '0 0 8px 16px' }
+          ? {
+              float: 'right',
+              width: mediaProjection?.wrappedOuterInlineSize ?? '48%',
+              margin: '0 0 8px 16px',
+            }
           : {}),
     }
 
@@ -1469,22 +1493,36 @@ export function FlowWorkspace({
         body = <hr />
         break
       case 'media': {
-        const surface = project.surfaces.find((entry) => entry.id === view.surfaceId)
-        const wide = surface?.type === 'flow' ? surface.layout.wideContentWidth : view.layout.readingWidth
-        const maxWidth = block.layout === 'wide'
-          ? wide
-          : block.layout === 'full-width'
-            ? '100%'
-            : view.layout.readingWidth
+        const projection = mediaProjection!
+        const wrapped = isWrapLeft || isWrapRight
         body = (
           <figure
+            className={`flow-block-media ${projection.className}`}
             data-flow-media-layout={block.layout}
+            data-flow-media-width-tier={projection.tier}
+            data-flow-media-inline-size={wrapped
+              ? projection.wrappedInnerInlineSize
+              : projection.inlineSize}
             {...(selected ? { 'data-flow-media-selected': 'true' } : {})}
-            style={{
-              width: '100%',
-              maxWidth,
-              marginInline: 'auto',
-            }}
+            style={wrapped
+              ? {
+                  width: '100%',
+                  maxWidth: '100%',
+                  inlineSize: projection.wrappedInnerInlineSize,
+                  maxInlineSize: '100%',
+                  marginInline: 'auto',
+                }
+              : {
+                  [FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY]: projection.inlineSize,
+                  width: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+                  maxWidth: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+                  position: 'relative',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  inlineSize: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+                  maxInlineSize: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+                  marginInline: 0,
+                } as CSSProperties}
           >
             {renderFlowPaperMedia(block, assetUrls)}
             {block.caption ? <figcaption>{block.caption}</figcaption> : null}
@@ -1897,8 +1935,9 @@ export function FlowWorkspace({
     >
       <div
         ref={scrollRef}
-        className="flow-workspace__scroll"
+        className="flow-workspace__scroll flow-media-query-root"
         data-testid="flow-workspace-scroll"
+        data-flow-media-query-root="true"
         onScroll={(e) => {
           setPaperScrollTop(e.currentTarget.scrollTop)
         }}
@@ -1907,6 +1946,8 @@ export function FlowWorkspace({
           overflow: 'auto',
           height: '100%',
           padding: '24px 16px 48px',
+          containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
+          containerName: 'flow-media-root',
         }}
       >
         <article

@@ -1,5 +1,11 @@
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
+import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  FLOW_MEDIA_QUERY_CONTAINER_TYPE,
+  resolveFlowMediaLayoutProjection,
+} from '../../../shared/flowMediaLayout'
 import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
@@ -854,15 +860,18 @@ function renderFlowArticle(
 ): HTMLElement {
   const { dom } = options
   const article = dom.createElement('article')
-  article.className = 'flow-runtime-article'
+  article.className = 'flow-runtime-article flow-media-query-root'
   article.dataset.testid = 'flow-runtime-article'
   article.dataset.flowPaperScroll = 'true'
+  article.dataset.flowMediaQueryRoot = 'true'
   article.id = flowRuntimeTocPageAnchorId(surface.id)
   article.style.boxSizing = 'border-box'
   article.style.height = '100%'
   article.style.overflow = 'auto'
   article.style.pointerEvents = 'auto'
   article.style.overscrollBehavior = 'contain'
+  article.style.setProperty('container-type', FLOW_MEDIA_QUERY_CONTAINER_TYPE)
+  article.style.setProperty('container-name', 'flow-media-root')
   article.style.background = resolveCourseSurfaceBackgroundColor(surface.backgroundColor)
   article.style.color = '#172033'
 
@@ -1018,30 +1027,44 @@ function renderBlockDom(
       return
     case 'media': {
       const figure = assignBlock(dom.createElement('figure'))
-      figure.className = 'flow-block-media'
       figure.dataset.flowMediaLayout = block.layout
       const readingWidth = options.readingWidth ?? 760
       const wideContentWidth = options.wideContentWidth ?? 1120
+      const projection = resolveFlowMediaLayoutProjection(block.layout, {
+        readingWidth,
+        wideContentWidth,
+      })
+      figure.className = `flow-block-media ${projection.className}`
+      figure.dataset.flowMediaWidthTier = projection.tier
 
       if (block.wrap === 'left') {
-        figure.style.width = '48%'
+        figure.style.width = projection.wrappedOuterInlineSize
+        figure.style.maxWidth = '100%'
+        figure.style.inlineSize = projection.wrappedOuterInlineSize
+        figure.style.maxInlineSize = '100%'
         figure.style.float = 'left'
         figure.style.margin = '0 16px 8px 0'
+        figure.dataset.flowMediaInlineSize = projection.wrappedOuterInlineSize
       } else if (block.wrap === 'right') {
-        figure.style.width = '48%'
+        figure.style.width = projection.wrappedOuterInlineSize
+        figure.style.maxWidth = '100%'
+        figure.style.inlineSize = projection.wrappedOuterInlineSize
+        figure.style.maxInlineSize = '100%'
         figure.style.float = 'right'
         figure.style.margin = '0 0 8px 16px'
+        figure.dataset.flowMediaInlineSize = projection.wrappedOuterInlineSize
       } else {
-        figure.style.width = '100%'
+        figure.style.setProperty(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, projection.inlineSize)
+        figure.style.width = FLOW_MEDIA_INLINE_SIZE_REFERENCE
+        figure.style.maxWidth = FLOW_MEDIA_INLINE_SIZE_REFERENCE
         figure.style.float = 'none'
-        figure.style.margin = '0 auto'
-        if (block.layout === 'wide') {
-          figure.style.maxWidth = `${wideContentWidth}px`
-        } else if (block.layout === 'full-width') {
-          figure.style.maxWidth = '100%'
-        } else {
-          figure.style.maxWidth = `${readingWidth}px`
-        }
+        figure.style.margin = '0'
+        figure.style.position = 'relative'
+        figure.style.left = '50%'
+        figure.style.transform = 'translateX(-50%)'
+        figure.style.inlineSize = FLOW_MEDIA_INLINE_SIZE_REFERENCE
+        figure.style.maxInlineSize = FLOW_MEDIA_INLINE_SIZE_REFERENCE
+        figure.dataset.flowMediaInlineSize = projection.inlineSize
       }
 
       const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)

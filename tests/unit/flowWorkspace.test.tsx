@@ -7,6 +7,11 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  resolveFlowMediaLayoutProjection,
+} from '@/shared/flowMediaLayout'
 import { createTextNode } from '@/renderer/project/createProject'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
@@ -496,7 +501,7 @@ describe('FlowWorkspace paper', () => {
     }
   })
 
-  it('applies wide and content-width maxWidth to media figure', () => {
+  it('applies the shared conflict-free width projection to media figures', () => {
     const project = createFlowProject()
     const flowSurface = project.surfaces.find((entry) => entry.id === 'flow')
     if (flowSurface && flowSurface.type === 'flow') {
@@ -511,13 +516,24 @@ describe('FlowWorkspace paper', () => {
       })
     }
     renderPaper(project)
-    const contentFigure = screen.getByTestId('flow-block-media-1').querySelector('figure')
-    expect(contentFigure).toHaveAttribute('data-flow-media-layout', 'content-width')
-    expect(contentFigure).toHaveStyle({ maxWidth: '760px', width: '100%' })
-
-    const wideFigure = screen.getByTestId('flow-block-media-wide').querySelector('figure')
-    expect(wideFigure).toHaveAttribute('data-flow-media-layout', 'wide')
-    expect(wideFigure).toHaveStyle({ maxWidth: '1120px', width: '100%' })
+    const widths = { readingWidth: 760, wideContentWidth: 1120 }
+    const cases = [
+      ['media-1', 'content-width'],
+      ['media-wide', 'wide'],
+    ] as const
+    for (const [blockId, layout] of cases) {
+      const projection = resolveFlowMediaLayoutProjection(layout, widths)
+      const figure = screen.getByTestId(`flow-block-${blockId}`).querySelector<HTMLElement>('figure')!
+      expect(figure).toHaveAttribute('data-flow-media-layout', layout)
+      expect(figure.style.getPropertyValue(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY)).toBe(projection.inlineSize)
+      expect(figure.style.width).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.maxWidth).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.inlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.maxInlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.left).toBe('50%')
+      expect(figure.style.insetInlineStart).toBe('')
+      expect(figure.style.transform).toBe('translateX(-50%)')
+    }
   })
 
   it('syncs store flowTextEdit updates to local inline editor during in-place editing', async () => {

@@ -8,6 +8,12 @@ import {
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  resolveFlowMediaLayoutInlineSize,
+  resolveFlowMediaLayoutProjection,
+} from '@/shared/flowMediaLayout'
+import {
   createImageNode,
   createTextNode,
   createVideoNode,
@@ -170,7 +176,15 @@ function createMediaFlowProject(): CourseProjectDocument {
       assetId: 'asset-video',
       mediaKind: 'video',
       caption: '讲解视频',
-      layout: 'content-width',
+      layout: 'wide',
+    },
+    {
+      id: 'media-image-full',
+      type: 'media',
+      assetId: 'asset-image',
+      mediaKind: 'image',
+      altText: '全宽示意图',
+      layout: 'full-width',
     },
     {
       id: 'media-audio',
@@ -260,6 +274,49 @@ function renderMediaPaper(project = createMediaFlowProject()) {
 }
 
 describe('FlowWorkspace edit media', () => {
+  it('projects all three media tiers from the shared responsive mapping', () => {
+    const widths = { readingWidth: 760, wideContentWidth: 1120 }
+    const matrix = [700, 904, 1280].map((containerWidth) => [
+      resolveFlowMediaLayoutInlineSize('content-width', widths, containerWidth),
+      resolveFlowMediaLayoutInlineSize('wide', widths, containerWidth),
+      resolveFlowMediaLayoutInlineSize('full-width', widths, containerWidth),
+    ])
+    expect(matrix).toEqual([
+      [572, 604, 636],
+      [760, 808, 840],
+      [760, 1120, 1216],
+    ])
+    for (const [content, wide, full] of matrix) {
+      expect(content).toBeLessThan(wide!)
+      expect(wide).toBeLessThan(full!)
+    }
+
+    renderMediaPaper()
+    const root = screen.getByTestId('flow-workspace-scroll')
+    expect(root.style.containerType).toBe('inline-size')
+    expect(root).toHaveAttribute('data-flow-media-query-root', 'true')
+
+    const cases = [
+      ['media-image', 'content-width'],
+      ['media-video', 'wide'],
+      ['media-image-full', 'full-width'],
+    ] as const
+    for (const [blockId, layout] of cases) {
+      const projection = resolveFlowMediaLayoutProjection(layout, widths)
+      const figure = screen.getByTestId(`flow-block-${blockId}`).querySelector<HTMLElement>('figure')!
+      expect(figure).toHaveClass(projection.className)
+      expect(figure.dataset.flowMediaWidthTier).toBe(projection.tier)
+      expect(figure.style.getPropertyValue(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY)).toBe(projection.inlineSize)
+      expect(figure.style.width).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.maxWidth).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.inlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.maxInlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.left).toBe('50%')
+      expect(figure.style.insetInlineStart).toBe('')
+      expect(figure.style.transform).toBe('translateX(-50%)')
+    }
+  })
+
   it('fills paper image src from sidecar object URLs and keeps the block as document-block', () => {
     renderMediaPaper()
     const block = screen.getByTestId('flow-block-media-image')
