@@ -18,7 +18,8 @@
         "docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md",
         "docs/development-plan/40-development/00_SINGLE_MAINTAINER_AI_WORKFLOW.md",
         "docs/development-plan/40-development/03_VALIDATION_STRATEGY.md",
-        "docs/development-plan/README.md"
+        "docs/development-plan/README.md",
+        "docs/development-plan/TASK_BOARD.md"
       ],
       "path": "COURSEWARE_DEVELOPMENT_PLAN.md",
       "title": "IttoEdu 编辑器稳定化与模块解耦总纲"
@@ -312,7 +313,9 @@
       "title": "当前目录到目标 Owner 的迁移地图"
     },
     {
-      "links": [],
+      "links": [
+        "docs/development-plan/TASK_BOARD.md"
+      ],
       "path": "docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md",
       "title": "稳定化路线、阶段门禁与停止权"
     },
@@ -413,6 +416,11 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/50-templates/S0_SIMPLE_FIX_TASK_CARD_TEMPLATE.md",
+      "title": "S0 局部小修任务卡"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/50-templates/S1_TASK_CARD_TEMPLATE.md",
       "title": "S1 普通跨文件任务卡"
     },
@@ -460,7 +468,8 @@
       "links": [
         "COURSEWARE_DEVELOPMENT_PLAN.md",
         "docs/development-plan/00-foundation/00_READING_MATRIX.md",
-        "docs/development-plan/10-knowledge-system/00_SCOPE_DECISION_AND_BOOTSTRAP.md"
+        "docs/development-plan/10-knowledge-system/00_SCOPE_DECISION_AND_BOOTSTRAP.md",
+        "docs/development-plan/TASK_BOARD.md"
       ],
       "path": "docs/development-plan/README.md",
       "title": "IttoEdu 架构稳定化、模块解耦与项目知识系统执行方案"

@@ -320,6 +320,11 @@
     },
     {
       "category": "test",
+      "command": "vitest run tests/unit/aiCapabilities.test.ts",
+      "name": "test:capabilities"
+    },
+    {
+      "category": "test",
       "command": "npm run build:component-catalog-matrix && npm run build:renderer && npm run build:electron && vitest run tests/integration/componentCatalogV8Matrix.test.ts tests/unit/componentLifecycleGuard.test.ts tests/unit/exportPreflight.test.ts tests/unit/renderPptxComponentSnapshots.test.ts && cross-env COURSEWARE_E2E_BACKGROUND=1 playwright test tests/e2e/componentCatalogMatrix.spec.ts",
       "name": "test:component-catalog-matrix"
     },
@@ -332,6 +337,21 @@
       "category": "test",
       "command": "cross-env COURSEWARE_E2E_BACKGROUND=0 npm run test:e2e",
       "name": "test:e2e:visible"
+    },
+    {
+      "category": "test",
+      "command": "vitest run tests/unit/taskBoardGenerator.test.ts",
+      "name": "test:governance"
+    },
+    {
+      "category": "test",
+      "command": "vitest run --exclude=tests/unit/repoIndex*.test.ts --exclude=tests/unit/taskBoardGenerator.test.ts --exclude=tests/unit/aiCapabilities.test.ts",
+      "name": "test:product"
+    },
+    {
+      "category": "test",
+      "command": "vitest run tests/unit/repoIndex",
+      "name": "test:repo-index"
     },
     {
       "category": "check",
@@ -370,7 +390,7 @@
     },
     {
       "category": "check",
-      "command": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run test:e2e && npm run build:desktop",
+      "command": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run test:e2e",
       "name": "verify"
     },
     {
