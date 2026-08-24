@@ -14,13 +14,13 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `src/renderer/export/course/flowPrintPlan.ts`; `src/main/pdfExport.ts`; `tests/unit/coursePrintArtifacts.test.ts`; `tests/integration/coursePdfExportApp.test.tsx`; `src/renderer/export/renderSceneImages.ts`; `src/renderer/export/buildPptx.ts`; `tsconfig.json`; `tsconfig.electron.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-4-02-non-slide-v9-pdf-completeness`
 - Phase / wave: `ARCH-4 / Published PDF completeness`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Coordinator / independent PDF delivery reviewer / Coordinator`
-- Claimed at / released at: `pending / pending`
+- Claimed at / released at: `2026-08-24T19:31:05+08:00 / pending`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
-- Baseline HEAD: `pending at claim`
+- Baseline HEAD: `36b53e1`
 - Context: `ARCH_4_ADMISSION_REPORT.md`; must claim only after arch-4-01 closes because App is the shared exclusive hotspot.
-- Freshness / relevant dirty inputs: re-read current PDF matrix, main readiness and pure-Slide parity gap at claim
+- Freshness / relevant dirty inputs: clean root; current PDF matrix, nested Flow document, main readiness and pure-Slide parity gap re-read at claim; App has no concurrent writer
 - Depends on: `arch-4-01-v9-html-web-preflight` done
 - Blocks: ARCH-4 phase gate and its one actual Mixed PDF review
 - Risk statement: a nominal pdf-html file is not success unless it is a valid document, passes Electron readiness and covers the complete ordered page plan without weakening pure-Slide fidelity.
