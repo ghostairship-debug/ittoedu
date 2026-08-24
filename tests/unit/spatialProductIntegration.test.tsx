@@ -1,9 +1,14 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
+import type { ComponentPackageData } from '@/shared/componentTypes'
+import type { AssetMeta } from '@/shared/projectTypes'
 import { stageResizeHandleWorldPoint, worldToClient } from '@/renderer/authoring/stageViewportTransform'
 import { createSpatialWorldAuthoringController } from '@/renderer/authoring/spatialWorldAuthoring'
-import { openSpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
+import {
+  openSpatialAuthoringSession,
+  setSpatialEditingScope,
+} from '@/renderer/course/spatialEditorCommands'
 import { createSpatialWorldViewTransform } from '@/renderer/course/spatialEditorView'
 import { addSpatialPathInSession } from '@/renderer/course/spatialPathCommands'
 import { addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
@@ -14,6 +19,8 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
+import { MediaTab } from '@/renderer/ui/MediaTab'
+import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { NodesTab } from '@/renderer/ui/NodesTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
@@ -21,6 +28,63 @@ import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import type { SpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
 
 const VIEWPORT = { x: 0, y: 0, width: 800, height: 450 }
+const IMAGE_ASSET: AssetMeta = {
+  id: 'spatial-owner-image',
+  filename: 'owner.png',
+  mimeType: 'image/png',
+  kind: 'image',
+  path: 'assets/owner.png',
+  byteLength: 4,
+  width: 640,
+  height: 360,
+}
+const IMAGE_BYTES = new Uint8Array([1, 2, 3, 4])
+const VIDEO_ASSET: AssetMeta = {
+  id: 'spatial-owner-video',
+  filename: 'owner.mp4',
+  mimeType: 'video/mp4',
+  kind: 'video',
+  path: 'assets/owner.mp4',
+  byteLength: 4,
+  width: 640,
+  height: 360,
+  duration: 12,
+}
+const VIDEO_BYTES = new Uint8Array([5, 6, 7, 8])
+
+function spatialComponentPackage(
+  packageId: string,
+  supportedScopes: Array<'scene' | 'global'>,
+): ComponentPackageData {
+  return {
+    manifest: {
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
+      id: packageId,
+      name: packageId.endsWith('scene') ? '世界组件' : '全局组件',
+      version: '1.0.0',
+      entry: 'runtime.js',
+      defaultSize: { width: 360, height: 220 },
+      minSize: { width: 120, height: 80 },
+      preserveAspectRatio: true,
+      assets: {},
+      defaultProps: { label: '默认' },
+      supportedScopes,
+      renderMode: 'phaser',
+      ...(supportedScopes.includes('scene')
+        ? { presets: [{ id: 'ready', label: '即用', props: { label: '预设' } }] }
+        : {}),
+    },
+    runtimeSource: 'window.CoursewareComponent.define({ runtimeApiVersion: 4 })',
+    files: {},
+  }
+}
+
+function setSpatialScope(scope: 'world' | 'surface' | 'global') {
+  act(() => {
+    useEditorStore.getState().runSpatialCommand((session) => setSpatialEditingScope(session, scope))
+  })
+}
 
 function spatialDocument() {
   const document = selectActiveCourseProjectDocument(useEditorStore.getState())
@@ -127,6 +191,165 @@ describe('Spatial product shell wiring', () => {
     const spatial = spatialDocument()
     expect(spatial.surfaces[0]?.type).toBe('spatial-2d')
     expect(useEditorStore.getState().spatialSession).not.toBeNull()
+  })
+
+  it('enables quick insertion only for the actual Spatial world owner', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    const onAddImage = vi.fn()
+    const onAddVideo = vi.fn()
+    render(<ElementsTab onAddImage={onAddImage} onAddVideo={onAddVideo} />)
+
+    const quickIds = ['add-text', 'add-formula', 'add-image', 'add-video', 'add-rectangle']
+    for (const testId of quickIds) {
+      const button = screen.getByTestId(testId)
+      expect(button).toBeEnabled()
+      expect(button).toHaveAttribute('draggable', 'false')
+      expect(button).toHaveAttribute('data-insertion-carrier', 'world-item')
+    }
+
+    setSpatialScope('surface')
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent('表面共享层暂不支持插入')
+    const surfaceSession = useEditorStore.getState().spatialSession
+    for (const testId of quickIds) {
+      const button = screen.getByTestId(testId)
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('draggable', 'false')
+      expect(button).toHaveAttribute('data-insertion-carrier', 'unavailable')
+      expect(button).toHaveAttribute('title', expect.stringContaining('表面共享层'))
+      fireEvent.click(button)
+    }
+    expect(useEditorStore.getState().spatialSession).toBe(surfaceSession)
+    expect(onAddImage).not.toHaveBeenCalled()
+    expect(onAddVideo).not.toHaveBeenCalled()
+
+    setSpatialScope('global')
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent('无限画布全局层暂不支持插入')
+    const globalSession = useEditorStore.getState().spatialSession
+    for (const testId of quickIds) {
+      const button = screen.getByTestId(testId)
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('data-insertion-carrier', 'unavailable')
+      expect(button).toHaveAttribute('title', expect.stringContaining('无限画布全局层'))
+      fireEvent.click(button)
+    }
+    expect(useEditorStore.getState().spatialSession).toBe(globalSession)
+  })
+
+  it('keeps Spatial media management but prevents global and surface placement with zero writes', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().importAsset(IMAGE_ASSET, IMAGE_BYTES)
+    useEditorStore.getState().importAsset(VIDEO_ASSET, VIDEO_BYTES)
+    const onImportImage = vi.fn()
+    const onImportAudio = vi.fn()
+    const onImportVideo = vi.fn()
+    render(
+      <MediaTab
+        onImportImage={onImportImage}
+        onImportAudio={onImportAudio}
+        onImportVideo={onImportVideo}
+      />,
+    )
+
+    const insertImage = screen.getByTestId(`insert-flow-media-${IMAGE_ASSET.id}`)
+    const insertVideo = screen.getByTestId(`insert-flow-media-${VIDEO_ASSET.id}`)
+    const insertButtons = [insertImage, insertVideo]
+    const beforeWorld = useEditorStore.getState().spatialSession!
+    const beforeWorldCount = spatialSurface().world.layerItems.length
+    insertButtons.forEach((button) => expect(button).toBeEnabled())
+    fireEvent.click(insertImage)
+    fireEvent.click(insertVideo)
+    const afterWorld = useEditorStore.getState().spatialSession!
+    expect(afterWorld.history.present.revision).toBe(beforeWorld.history.present.revision + 2)
+    expect(afterWorld.history.past).toHaveLength(beforeWorld.history.past.length + 2)
+    expect(spatialSurface().world.layerItems).toHaveLength(beforeWorldCount + 2)
+    const insertedMedia = spatialSurface().world.layerItems.slice(-2)
+    expect(insertedMedia[0]).toMatchObject({ kind: 'native', content: { nativeType: 'image' } })
+    expect(insertedMedia[1]).toMatchObject({ kind: 'native', content: { nativeType: 'video' } })
+    expect(afterWorld.selection.selectionIds).toEqual([insertedMedia[1]!.layerItemId])
+
+    setSpatialScope('surface')
+    const surfaceSession = useEditorStore.getState().spatialSession
+    insertButtons.forEach((button) => {
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', expect.stringContaining('表面共享层'))
+      fireEvent.click(button)
+    })
+    expect(screen.getByTestId(`media-placement-reason-${IMAGE_ASSET.id}`))
+      .toHaveTextContent('请切换到无限画布世界层')
+    expect(useEditorStore.getState().spatialSession).toBe(surfaceSession)
+
+    setSpatialScope('global')
+    const globalSession = useEditorStore.getState().spatialSession
+    insertButtons.forEach((button) => {
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', expect.stringContaining('无限画布全局层'))
+      fireEvent.click(button)
+    })
+    expect(useEditorStore.getState().spatialSession).toBe(globalSession)
+
+    fireEvent.click(screen.getByRole('button', { name: '导入图片' }))
+    fireEvent.click(screen.getByRole('button', { name: '导入声音' }))
+    fireEvent.click(screen.getByRole('button', { name: '导入视频' }))
+    expect(onImportImage).toHaveBeenCalledOnce()
+    expect(onImportAudio).toHaveBeenCalledOnce()
+    expect(onImportVideo).toHaveBeenCalledOnce()
+  })
+
+  it('inserts only scene-compatible components into the Spatial world and never exposes Spatial drag', () => {
+    const scenePackageId = 'com.example.spatial.scene'
+    const globalPackageId = 'com.example.spatial.global'
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().importComponentPackages([
+      spatialComponentPackage(scenePackageId, ['scene']),
+      spatialComponentPackage(globalPackageId, ['global']),
+    ])
+    const onImportExternalComponents = vi.fn()
+    render(<ComponentsTab onImportExternalComponents={onImportExternalComponents} />)
+
+    const sceneButton = screen.getByTestId(`component-${scenePackageId}`)
+    const globalButton = screen.getByTestId(`component-${globalPackageId}`)
+    const scenePreset = within(screen.getByLabelText('世界组件预设'))
+      .getByRole('button', { name: '即用' })
+    expect(sceneButton).toBeEnabled()
+    expect(sceneButton).toHaveAttribute('draggable', 'false')
+    expect(scenePreset).toBeEnabled()
+    expect(scenePreset).toHaveAttribute('draggable', 'false')
+    expect(globalButton).toBeDisabled()
+    expect(globalButton).toHaveAttribute('draggable', 'false')
+    expect(globalButton).toHaveAttribute('title', expect.stringContaining('未声明支持场景层'))
+
+    const beforeWorld = useEditorStore.getState().spatialSession!
+    fireEvent.click(sceneButton)
+    const afterWorld = useEditorStore.getState().spatialSession!
+    expect(afterWorld.history.present.revision).toBe(beforeWorld.history.present.revision + 1)
+    expect(afterWorld.history.past).toHaveLength(beforeWorld.history.past.length + 1)
+    const inserted = spatialSurface().world.layerItems.at(-1)!
+    expect(inserted).toMatchObject({
+      kind: 'component',
+      component: { packageId: scenePackageId },
+    })
+    expect(afterWorld.selection.selectionIds).toEqual([inserted.layerItemId])
+
+    setSpatialScope('surface')
+    const surfaceSession = useEditorStore.getState().spatialSession
+    expect(sceneButton).toBeDisabled()
+    expect(scenePreset).toBeDisabled()
+    expect(sceneButton).toHaveAttribute('title', expect.stringContaining('表面共享层'))
+    fireEvent.click(sceneButton)
+    fireEvent.click(scenePreset)
+    expect(useEditorStore.getState().spatialSession).toBe(surfaceSession)
+
+    setSpatialScope('global')
+    const globalSession = useEditorStore.getState().spatialSession
+    expect(sceneButton).toBeDisabled()
+    expect(scenePreset).toBeDisabled()
+    expect(sceneButton).toHaveAttribute('title', expect.stringContaining('无限画布全局层'))
+    fireEvent.click(sceneButton)
+    fireEvent.click(scenePreset)
+    expect(useEditorStore.getState().spatialSession).toBe(globalSession)
+
+    fireEvent.click(screen.getByTestId('import-external-components'))
+    expect(onImportExternalComponents).toHaveBeenCalledOnce()
   })
 
   it('notifies Zustand after inserting world text and keeps cameras after archive reopen', () => {

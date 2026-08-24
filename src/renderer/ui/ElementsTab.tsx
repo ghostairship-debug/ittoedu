@@ -32,6 +32,7 @@ type AddCategory =
 
 type AuthoringSurface = 'slide' | 'flow' | 'spatial'
 type AuthoringScope = 'scene' | 'global'
+type SpatialInsertionScope = 'world' | 'surface' | 'global'
 type InsertableElementKind = 'text' | 'formula' | 'image' | 'video' | 'shape'
 type InsertionCarrier =
   | 'free-node'
@@ -81,6 +82,7 @@ function insertionCapability(
   surface: AuthoringSurface,
   scope: AuthoringScope,
   kind: InsertableElementKind,
+  spatialScope?: SpatialInsertionScope,
 ): InsertionCapability {
   if (surface === 'slide') {
     return {
@@ -90,9 +92,9 @@ function insertionCapability(
     }
   }
   if (surface === 'spatial') {
-    return scope === 'global'
-      ? { enabled: false, draggable: false, carrier: 'unavailable' }
-      : { enabled: true, draggable: false, carrier: 'world-item' }
+    return spatialScope === 'world'
+      ? { enabled: true, draggable: false, carrier: 'world-item' }
+      : { enabled: false, draggable: false, carrier: 'unavailable' }
   }
   if (scope === 'global') {
     if (kind === 'shape') {
@@ -114,11 +116,14 @@ function insertionTitle(
   scope: AuthoringScope,
   kind: InsertableElementKind,
   label: string,
+  spatialScope?: SpatialInsertionScope,
 ): string {
-  const capability = insertionCapability(surface, scope, kind)
+  const capability = insertionCapability(surface, scope, kind, spatialScope)
   if (!capability.enabled) {
     return surface === 'spatial'
-      ? `${label}：无限画布全局层暂不支持插入；请切换到当前画布`
+      ? spatialScope === 'surface'
+        ? `${label}：表面共享层暂不支持插入；请切换到无限画布世界层`
+        : `${label}：无限画布全局层暂不支持插入；请切换到无限画布世界层`
       : `${label}：Flow 全局层暂不支持插入；请切换到当前文档页`
   }
   if (surface === 'slide') {
@@ -198,17 +203,29 @@ export function ElementsTab({
   const project = useEditorStore((state) => state.project)
   const editorMode = useEditorStore((state) => state.editorMode)
   const editingScope = useEditorStore((state) => state.editingScope)
-  const authoringSurface = useEditorStore<AuthoringSurface>((state) => (
-    state.spatialSession ? 'spatial' : state.flowSession ? 'flow' : 'slide'
+  const spatialInsertionScope = useEditorStore<SpatialInsertionScope | null>((state) => (
+    state.spatialSession?.scope ?? null
   ))
-  const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
-  const surfaceInsertionHint = SURFACE_INSERTION_HINT[authoringSurface][editingScope]
+  const flowSessionActive = useEditorStore((state) => Boolean(state.flowSession))
+  const authoringSurface: AuthoringSurface = spatialInsertionScope
+    ? 'spatial'
+    : flowSessionActive
+      ? 'flow'
+      : 'slide'
+  const surfaceInsertionHint = authoringSurface === 'spatial'
+    ? spatialInsertionScope === 'world'
+      ? '无限画布：单击添加世界元素。当前不可从面板拖入。'
+      : spatialInsertionScope === 'surface'
+        ? '表面共享层暂不支持插入元素；请切换到无限画布世界层。'
+        : '无限画布全局层暂不支持插入元素；请切换到无限画布世界层。'
+    : SURFACE_INSERTION_HINT[authoringSurface][editingScope]
   const globalScopeNotice = GLOBAL_SCOPE_NOTICE[authoringSurface]
-  const textInsertion = insertionCapability(authoringSurface, editingScope, 'text')
-  const formulaInsertion = insertionCapability(authoringSurface, editingScope, 'formula')
-  const imageInsertion = insertionCapability(authoringSurface, editingScope, 'image')
-  const videoInsertion = insertionCapability(authoringSurface, editingScope, 'video')
-  const shapeInsertion = insertionCapability(authoringSurface, editingScope, 'shape')
+  const textInsertion = insertionCapability(authoringSurface, editingScope, 'text', spatialInsertionScope ?? undefined)
+  const formulaInsertion = insertionCapability(authoringSurface, editingScope, 'formula', spatialInsertionScope ?? undefined)
+  const imageInsertion = insertionCapability(authoringSurface, editingScope, 'image', spatialInsertionScope ?? undefined)
+  const videoInsertion = insertionCapability(authoringSurface, editingScope, 'video', spatialInsertionScope ?? undefined)
+  const shapeInsertion = insertionCapability(authoringSurface, editingScope, 'shape', spatialInsertionScope ?? undefined)
+  const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
   const categories = editorMode === 'professional'
     ? PROFESSIONAL_ADD_CATEGORIES
     : SIMPLE_ADD_CATEGORIES
@@ -339,7 +356,7 @@ export function ElementsTab({
               type="button"
               aria-label="文本"
               className="element-card element-card--primary"
-              title={insertionTitle(authoringSurface, editingScope, 'text', '文本')}
+              title={insertionTitle(authoringSurface, editingScope, 'text', '文本', spatialInsertionScope ?? undefined)}
               disabled={!textInsertion.enabled}
               draggable={textInsertion.draggable}
               data-testid="add-text"
@@ -361,7 +378,7 @@ export function ElementsTab({
               type="button"
               aria-label="公式"
               className="element-card element-card--primary"
-              title={insertionTitle(authoringSurface, editingScope, 'formula', '公式')}
+              title={insertionTitle(authoringSurface, editingScope, 'formula', '公式', spatialInsertionScope ?? undefined)}
               disabled={!formulaInsertion.enabled}
               draggable={formulaInsertion.draggable}
               data-testid="add-formula"
@@ -383,7 +400,7 @@ export function ElementsTab({
               type="button"
               aria-label="图片"
               className="element-card element-card--primary"
-              title={insertionTitle(authoringSurface, editingScope, 'image', '图片')}
+              title={insertionTitle(authoringSurface, editingScope, 'image', '图片', spatialInsertionScope ?? undefined)}
               disabled={!imageInsertion.enabled}
               draggable={imageInsertion.draggable}
               data-testid="add-image"
@@ -406,7 +423,7 @@ export function ElementsTab({
               aria-label="视频"
               className="element-card element-card--primary"
               data-testid="add-video"
-              title={insertionTitle(authoringSurface, editingScope, 'video', '视频')}
+              title={insertionTitle(authoringSurface, editingScope, 'video', '视频', spatialInsertionScope ?? undefined)}
               disabled={!videoInsertion.enabled}
               draggable={videoInsertion.draggable}
               data-insertion-carrier={videoInsertion.carrier}
@@ -475,7 +492,7 @@ export function ElementsTab({
                       type="button"
                       className="shape-button"
                       key={type}
-                      title={insertionTitle(authoringSurface, editingScope, 'shape', label)}
+                      title={insertionTitle(authoringSurface, editingScope, 'shape', label, spatialInsertionScope ?? undefined)}
                       disabled={!shapeInsertion.enabled}
                       aria-label={`添加${label}`}
                       data-testid={testId ?? `add-shape-${type}`}

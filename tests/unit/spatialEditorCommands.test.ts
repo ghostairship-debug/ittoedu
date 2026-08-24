@@ -34,6 +34,7 @@ import {
   makeSpatialAuthoringTarget,
   openSpatialAuthoringSession,
   panSpatialSessionCamera,
+  redoSpatialAuthoring,
   selectSpatialLayers,
   setSpatialEditingScope,
   zoomSpatialSessionCamera,
@@ -432,6 +433,17 @@ describe('Spatial authoring session, address, snapshot, insert/update/transform/
     expect(text.ok).toBe(true)
     expect(text.historyEntry).toBe(true)
     expect(text.nextSession?.history.present.revision).toBe(before + 1)
+    expect(text.nextSession?.selection.selectionIds).toEqual(['w-text'])
+    expect(makeSpatialAuthoringTarget(text.nextSession!, 'w-text').authoringAddress).toBe(
+      makeAuthoringAddress({
+        projectId: session.history.present.id,
+        scope: 'surface',
+        surfaceId: SURFACE_ID,
+        carrier: 'native',
+        layerItemId: 'w-text',
+        field: 'content.data.text',
+      }),
+    )
     const textItem = worldLayerItem(text.nextSession!.history.present, SURFACE_ID, 'w-text')
     expect(textItem.frame.x).toBe(-1000 - 200 + 40)
     expect(textItem.frame.y).toBe(2500 - 40)
@@ -479,6 +491,24 @@ describe('Spatial authoring session, address, snapshot, insert/update/transform/
       height: 120,
     }, { now: NOW })
 
+    expect([
+      text,
+      shape,
+      formula,
+      image,
+      video,
+      component,
+      runtime,
+    ].map((result) => result.nextSession?.selection.selectionIds)).toEqual([
+      ['w-text'],
+      ['w-shape'],
+      ['w-formula'],
+      ['w-image'],
+      ['w-video'],
+      ['w-component'],
+      ['w-runtime'],
+    ])
+
     expect(runtime.nextSession?.history.present.revision).toBe(before + 7)
     expect(runtime.nextSession?.history.past).toHaveLength(7)
     expect(courseProjectDocumentSchema.parse(runtime.nextSession!.history.present).revision)
@@ -490,11 +520,28 @@ describe('Spatial authoring session, address, snapshot, insert/update/transform/
     }).map((entry) => entry.item.order)
     expect(new Set(effectiveOrders).size).toBe(effectiveOrders.length)
 
-    const globalScope = setSpatialEditingScope(session, 'global')
-    const refused = addSpatialWorldTextLayer(globalScope.nextSession!, { id: 'nope' }, { now: NOW })
-    expect(refused.ok).toBe(false)
-    expect(refused.reason).toBe(SPATIAL_REJECT_WRONG_OWNER)
-    expect(refused.historyEntry).toBe(false)
+    const undone = undoSpatialAuthoring(runtime.nextSession!)
+    expect(undone.ok).toBe(true)
+    expect(undone.nextSession?.history.present.revision).toBe(before + 6)
+    expect(undone.nextSession?.history.future).toHaveLength(1)
+    expect(() => worldLayerItem(undone.nextSession!.history.present, SURFACE_ID, 'w-runtime'))
+      .toThrow(/找不到世界元素/)
+    const redone = redoSpatialAuthoring(undone.nextSession!)
+    expect(redone.ok).toBe(true)
+    expect(redone.nextSession?.history.present.revision).toBe(before + 7)
+    expect(redone.nextSession?.history.future).toHaveLength(0)
+    expect(worldLayerItem(redone.nextSession!.history.present, SURFACE_ID, 'w-runtime').kind)
+      .toBe('runtime')
+
+    for (const scope of ['surface', 'global'] as const) {
+      const ownerSession = setSpatialEditingScope(session, scope).nextSession!
+      const refused = addSpatialWorldTextLayer(ownerSession, { id: `nope-${scope}` }, { now: NOW })
+      expect(refused.ok).toBe(false)
+      expect(refused.reason).toBe(SPATIAL_REJECT_WRONG_OWNER)
+      expect(refused.historyEntry).toBe(false)
+      expect(refused.nextSession?.history).toBe(ownerSession.history)
+      expect(refused.nextSession?.selection).toEqual(ownerSession.selection)
+    }
   })
 
   it('commits one world gesture as one revision, keeps negative coords, and does not write the session camera', () => {

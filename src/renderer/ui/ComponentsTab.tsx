@@ -402,6 +402,7 @@ export function ComponentsTab({
   const components = useEditorStore((state) => state.componentPackages)
   const project = useEditorStore((state) => state.project)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
   const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)
   const packages = useMemo(() => Object.values(components).sort((left, right) =>
@@ -478,7 +479,24 @@ export function ComponentsTab({
           {visiblePackages.map((data) => {
             const packageId = data.manifest.id
             const usage = collectComponentPackageUsage(project, packageId)
-            const scopeSupported = componentSupportsScope(data.manifest, editingScope)
+            const isSpatial = spatialScope !== null
+            const manifestScopeSupported = componentSupportsScope(
+              data.manifest,
+              isSpatial ? 'scene' : editingScope,
+            )
+            const scopeSupported = isSpatial
+              ? spatialScope === 'world' && manifestScopeSupported
+              : manifestScopeSupported
+            const draggable = isSpatial ? false : scopeSupported
+            const insertionDisabledReason = spatialScope === 'surface'
+              ? '表面共享层暂不支持插入组件；请切换到无限画布世界层。'
+              : spatialScope === 'global'
+                ? '无限画布全局层暂不支持插入组件；请切换到无限画布世界层。'
+                : spatialScope === 'world' && !manifestScopeSupported
+                  ? '该组件未声明支持场景层，不能插入无限画布世界层。'
+                  : editingScope === 'global'
+                    ? '该组件不支持全局层；仍可从右侧菜单管理。'
+                    : '该组件不支持场景层；仍可从右侧菜单管理。'
             const catalogEntry = currentCatalogEntries.find((entry) => entry.packageId === packageId)
             const catalogStatus = catalogEntry
               ? componentCatalogInstallStatus(catalogEntry, data)
@@ -491,13 +509,15 @@ export function ComponentsTab({
                     type="button"
                     className="component-card"
                     data-testid={`component-${packageId}`}
-                    draggable={scopeSupported}
+                    draggable={draggable}
                     disabled={!scopeSupported}
                     title={scopeSupported
                       ? `插入“${data.manifest.name}”`
-                      : `该组件不支持${editingScope === 'global' ? '全局层' : '场景层'}；仍可从右侧菜单管理。`}
-                    onDragStart={(event) => setComponentDragData(event, packageId, data.manifest.name)}
-                    onClick={() => addExternalComponentNode(packageId)}
+                      : insertionDisabledReason}
+                    onDragStart={draggable
+                      ? (event) => setComponentDragData(event, packageId, data.manifest.name)
+                      : undefined}
+                    onClick={scopeSupported ? () => addExternalComponentNode(packageId) : undefined}
                   >
                     <span className="component-thumb"><ComponentThumbnail data={data} /></span>
                     <span>
@@ -540,10 +560,14 @@ export function ComponentsTab({
                         type="button"
                         key={preset.id}
                         disabled={!scopeSupported}
-                        draggable={scopeSupported}
-                        title={preset.description}
-                        onDragStart={(event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)}
-                        onClick={() => addExternalComponentNode(packageId, undefined, undefined, preset.id)}
+                        draggable={draggable}
+                        title={scopeSupported ? preset.description : insertionDisabledReason}
+                        onDragStart={draggable
+                          ? (event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)
+                          : undefined}
+                        onClick={scopeSupported
+                          ? () => addExternalComponentNode(packageId, undefined, undefined, preset.id)
+                          : undefined}
                       >
                         {preset.label}
                       </button>
@@ -552,7 +576,7 @@ export function ComponentsTab({
                 )}
                 {!scopeSupported && (
                   <div className="project-component-card__hint">
-                    当前处于{editingScope === 'global' ? '全局层' : '场景层'}，该组件只能在其他层使用。
+                    {insertionDisabledReason}
                   </div>
                 )}
               </article>
