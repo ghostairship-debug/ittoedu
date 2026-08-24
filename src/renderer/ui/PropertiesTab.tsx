@@ -791,9 +791,10 @@ function CommonNodeProperties({ node, update }: {
   )
 }
 
-function TextProperties({ node, update }: {
+function TextProperties({ node, update, contentEditingEnabled = true }: {
   node: TextNode
   update(patch: DeepPartial<SceneNode>): void
+  contentEditingEnabled?: boolean
 }) {
   const style = node.style
   const beginTextEdit = useEditorStore((state) => state.beginTextEdit)
@@ -862,23 +863,35 @@ function TextProperties({ node, update }: {
   return (
     <section className="property-section">
       <h3 className="property-title"><Type size={14} />文本</h3>
-      <TextContentTextarea
-        label="文字内容"
-        value={node.text}
-        onBegin={() => beginTextEdit(node.id, 'properties')}
-        onChange={updateTextDraft}
-        onCommit={commitTextEdit}
-        onCancel={cancelTextEdit}
-      />
-      <button
-        type="button"
-        className="secondary-button"
-        style={{ width: '100%', marginBottom: 10 }}
-        onClick={() => beginTextEdit(node.id, 'canvas')}
-      >
-        <Type size={14} />编辑局部文字格式
-      </button>
-      <p className="property-hint">也可以双击画布中的文字，选中部分内容后设置局部格式。</p>
+      {contentEditingEnabled ? (
+        <>
+          <TextContentTextarea
+            label="文字内容"
+            value={node.text}
+            onBegin={() => beginTextEdit(node.id, 'properties')}
+            onChange={updateTextDraft}
+            onCommit={commitTextEdit}
+            onCancel={cancelTextEdit}
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ width: '100%', marginBottom: 10 }}
+            onClick={() => beginTextEdit(node.id, 'canvas')}
+          >
+            <Type size={14} />编辑局部文字格式
+          </button>
+          <p className="property-hint">也可以双击画布中的文字，选中部分内容后设置局部格式。</p>
+        </>
+      ) : (
+        <p
+          className="property-hint"
+          data-testid="spatial-text-content-unavailable"
+          role="status"
+        >
+          当前 Spatial 范围只支持整节点文字样式；文字内容与局部格式不会提供无法保存的控件。
+        </p>
+      )}
       <FontFamilyPicker value={style.fontFamily} onCommit={(fontFamily) => update({ style: { fontFamily } })} />
       <div className="coordinate-grid">
         <BufferedInput label="字号" type="number" min={8} max={400} value={style.fontSize} onCommit={(fontSize) => update({ style: { fontSize: Number(fontSize) } })} />
@@ -1512,12 +1525,14 @@ const ALIGN_ACTIONS: Array<{
 function MultiSelectionProperties({
   nodes,
   presentationContext,
+  spatialMode = false,
 }: {
   nodes: SceneNode[]
   presentationContext: {
     scene: SceneDocument
     stateId: string | null
   } | null
+  spatialMode?: boolean
 }) {
   const alignSelection = useEditorStore((state) => state.alignSelection)
   const distributeSelection = useEditorStore((state) => state.distributeSelection)
@@ -1614,9 +1629,26 @@ function MultiSelectionProperties({
           <button type="button" className="property-action-button" onClick={() => applyToAll({ locked: false })}><Unlock size={16} /><span>全部解锁</span></button>
         </div>
         <div className="button-row property-action-footer">
-          <button type="button" className="secondary-button" onClick={duplicateSelectedNodes}><Copy size={14} />复制所选</button>
-          <button type="button" className="secondary-button secondary-button--danger" onClick={deleteSelectedNodes}><Trash2 size={14} />删除所选</button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={spatialMode}
+            title={spatialMode ? 'Spatial 多选复制暂未接入原子历史' : undefined}
+            onClick={duplicateSelectedNodes}
+          ><Copy size={14} />复制所选</button>
+          <button
+            type="button"
+            className="secondary-button secondary-button--danger"
+            disabled={spatialMode}
+            title={spatialMode ? 'Spatial 多选删除暂未接入原子历史' : undefined}
+            onClick={deleteSelectedNodes}
+          ><Trash2 size={14} />删除所选</button>
         </div>
+        {spatialMode ? (
+          <p className="property-hint" data-testid="spatial-multi-actions-unavailable">
+            Spatial 多选复制与删除尚未接入一次提交，因此当前不会执行部分写入。
+          </p>
+        ) : null}
       </section>
     </div>
   )
@@ -2993,6 +3025,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
     return (
       <MultiSelectionProperties
         nodes={selectedNodes}
+        spatialMode={Boolean(spatialSession)}
         presentationContext={editingScope === 'scene'
           ? { scene, stateId: activePresentationStateId }
           : null}
@@ -3194,26 +3227,44 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
         </section>
       )}
       <CommonNodeProperties node={node} update={update} />
-      {editingScope === 'scene' && editorMode === 'simple' && (
+      {editingScope === 'scene' && editorMode === 'simple' && !spatialSession && (
         <SimpleEntranceAnimationEditor
           scene={scene}
           node={node}
           activeStateId={activePresentationStateId}
         />
       )}
-{(editingScope === 'global' ||
+      {(editingScope === 'global' ||
         Boolean(candidateGlobalLayerItems?.some((entry) => entry.item.layerItemId === node.id))) && (
         <GlobalLayerSettings nodeId={node.id} />
       )}
-      {node.type === 'text' && <TextProperties node={node} update={update} />}
-      {node.type === 'formula' && (
+      {spatialSession && node.type !== 'text' ? (
+        <section
+          className="property-section"
+          data-testid="spatial-type-properties-unavailable"
+          role="status"
+        >
+          <h3 className="property-title">类型属性</h3>
+          <p className="property-hint">
+            当前 Spatial 载体只开放上方可写入真实图层的通用属性；此类型的专属属性尚未接入 canonical 历史，因此已隐藏可提交控件。
+          </p>
+        </section>
+      ) : null}
+      {node.type === 'text' && (
+        <TextProperties
+          node={node}
+          update={update}
+          contentEditingEnabled={!spatialSession || spatialSession.scope === 'world'}
+        />
+      )}
+      {!spatialSession && node.type === 'formula' && (
         <FormulaProperties
           node={node}
           update={update}
         />
       )}
-      {node.type === 'image' && <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />}
-      {node.type === 'video' && (
+      {!spatialSession && node.type === 'image' && <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />}
+      {!spatialSession && node.type === 'video' && (
         <VideoProperties
           node={node}
           update={update}
@@ -3278,11 +3329,11 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
           onDeleteRule={deleteGlobalInteractionRule}
         />
       )}
-      {node.type === 'shape' && <ShapeProperties node={node} update={update} />}
-      {node.type === 'teacher-controller' && (
+      {!spatialSession && node.type === 'shape' && <ShapeProperties node={node} update={update} />}
+      {!spatialSession && node.type === 'teacher-controller' && (
         <TeacherControllerProperties node={node} scenes={project.scenes} update={update} />
       )}
-      {node.type === 'external-component' && (
+      {!spatialSession && node.type === 'external-component' && (
         <>
           <section className="property-section">
             <h3 className="property-title"><Box size={14} />外部组件</h3>

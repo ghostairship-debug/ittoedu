@@ -144,12 +144,14 @@ import {
   findGlobalTeacherController,
   moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
+  patchEffectiveLayerItems,
   reorderEffectiveLayerItems,
   resolveEffectiveLayerTarget,
   restoreDefaultTeacherController,
   setGlobalLayerLocationVisibility,
   setGlobalLayerVisibleAtLocation,
   type EffectiveLayerOwnerDestination,
+  type EffectiveLayerPropertyPatch,
   type LayerCommandResult,
 } from '../course/effectiveLayerCommands'
 import {
@@ -364,7 +366,6 @@ import {
   redoSpatialAuthoring,
   selectSpatialLayers,
   setSpatialEditingScope,
-  transformSpatialWorldLayersInSession,
   undoSpatialAuthoring,
   type SpatialAuthoringSession,
   type SpatialAuthoringSnapshot,
@@ -905,6 +906,75 @@ function commandTargetForRow(row: EffectiveLayerProjectionRow) {
 }
 
 const SPATIAL_CROSS_OWNER_SELECTION_REASON = 'Spatial 暂不支持跨范围多选，请先取消当前选择。'
+const SPATIAL_UNSUPPORTED_PROPERTY_REASON = '当前元素不支持这项 Spatial 属性'
+const SPATIAL_INVALID_PROPERTY_VALUE_REASON = 'Spatial 属性值无效'
+
+const SPATIAL_LAYER_PROPERTY_KEYS = new Set([
+  'name',
+  'x',
+  'y',
+  'width',
+  'height',
+  'rotation',
+  'opacity',
+  'visible',
+  'locked',
+  'playbackInitialVisibility',
+  'style',
+])
+
+const SPATIAL_DIRECT_ROW_PROPERTY_KEYS = new Set(['name', 'visible', 'locked'])
+
+function isSpatialDirectRowPropertyPatch(patch: DeepPartial<SceneNode>): boolean {
+  const record = patch as Record<string, unknown>
+  const keys = Object.keys(record).filter((key) => record[key] !== undefined)
+  return keys.length > 0 && keys.every((key) => SPATIAL_DIRECT_ROW_PROPERTY_KEYS.has(key))
+}
+
+function spatialLayerPropertyPatch(
+  node: SceneNode | null,
+  patch: DeepPartial<SceneNode>,
+): { readonly ok: true; readonly patch: EffectiveLayerPropertyPatch } |
+  { readonly ok: false; readonly reason: string } {
+  const record = patch as Record<string, unknown>
+  const unsupported = Object.keys(record).find((key) => !SPATIAL_LAYER_PROPERTY_KEYS.has(key))
+  if (unsupported) {
+    return { ok: false, reason: `${SPATIAL_UNSUPPORTED_PROPERTY_REASON}：${unsupported}` }
+  }
+  if (record.style !== undefined && node?.type !== 'text') {
+    return { ok: false, reason: `${SPATIAL_UNSUPPORTED_PROPERTY_REASON}：仅文字支持整节点样式` }
+  }
+  if (
+    record.style !== undefined &&
+    (record.style === null || typeof record.style !== 'object' || Array.isArray(record.style))
+  ) {
+    return { ok: false, reason: SPATIAL_INVALID_PROPERTY_VALUE_REASON }
+  }
+  const frame: NonNullable<EffectiveLayerPropertyPatch['frame']> = {}
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    if (record[key] !== undefined) frame[key] = record[key] as number
+  }
+  return {
+    ok: true,
+    patch: {
+      ...(record.name !== undefined ? { label: record.name as string } : {}),
+      ...(Object.keys(frame).length > 0 ? { frame } : {}),
+      ...(record.rotation !== undefined ? { rotation: record.rotation as number } : {}),
+      ...(record.opacity !== undefined ? { opacity: record.opacity as number } : {}),
+      ...(record.visible !== undefined ? { visible: record.visible as boolean } : {}),
+      ...(record.locked !== undefined ? { locked: record.locked as boolean } : {}),
+      ...(record.playbackInitialVisibility !== undefined
+        ? {
+            playbackInitialVisibility: record.playbackInitialVisibility as
+              EffectiveLayerPropertyPatch['playbackInitialVisibility'],
+          }
+        : {}),
+      ...(record.style !== undefined
+        ? { nativeTextStyle: record.style as EffectiveLayerPropertyPatch['nativeTextStyle'] }
+        : {}),
+    },
+  }
+}
 
 function spatialSelectionScopeForRow(
   session: SpatialAuthoringSession,
@@ -3315,6 +3385,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
         teacherMessage = '所选内容已失效。请重新选择后再试。'
       } else if (normalizedReason === 'invalid-color') {
         teacherMessage = '颜色值无效。请重新选择颜色后再试。'
+      } else if (rawReason.includes('名称不能为空')) {
+        teacherMessage = '名称不能为空。请输入名称后再试。'
+      } else if (rawReason.includes('不支持') && rawReason.includes('属性')) {
+        teacherMessage = '当前元素不支持这项属性，未保存任何更改。'
+      } else if (
+        rawReason.includes('属性值无效') ||
+        /必须是有效数字|必须大于|必须是文字|超出允许范围|不透明度必须|初始状态无效|范围无效|状态无效|样式无效/.test(rawReason)
+      ) {
+        teacherMessage = '属性值无效，未保存任何更改。请修正后再试。'
       } else if (/排序|顺序|层级|跨来源/.test(rawReason)) {
         teacherMessage = '图层顺序未更新。请在同一分组内重新排序。'
       }
@@ -3458,8 +3537,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     }
     if (!result.ok || !result.nextDocument) {
-      if (result.reason) set({ errorMessage: result.reason, statusMessage: null })
-      return rejectSpatialCommand(session, result.reason ?? 'layer-command-failed')
+      return persistSpatialResult(
+        rejectSpatialCommand(session, result.reason ?? 'layer-command-failed'),
+      )
     }
     const history = result.historyEntry
       ? commitSpatialAuthoringHistory(session.history, result.nextDocument)
@@ -10220,55 +10300,64 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (spatial) {
         if (patches.length === 0) return
         const document = spatial.history.present
-        const revision = document.revision
-        const lockPatches = patches.filter((item) => item.patch.locked !== undefined)
-        const visiblePatches = patches.filter((item) => item.patch.visible !== undefined)
-        for (const item of lockPatches) {
+        const selectedIds = new Set(spatial.selection.selectionIds)
+        const requestedIds = patches.map((item) => item.nodeId)
+        const rejectPropertyUpdate = (reason: string) => {
+          persistSpatialResult(rejectSpatialCommand(spatial, reason))
+        }
+        if (new Set(requestedIds).size !== requestedIds.length) {
+          rejectPropertyUpdate('invalid-selection')
+          return
+        }
+        const currentNodes = new Map(
+          spatialEditingNodes(spatial, get().spatialContentEdit).map((node) => [node.id, node]),
+        )
+        const updates = [] as Array<{
+          target: ReturnType<typeof commandTargetForRow>
+          patch: EffectiveLayerPropertyPatch
+        }>
+        for (const item of patches) {
           const row = findCandidateLayerRow(get(), item.nodeId)
-          if (!row) continue
-          persistSpatialLayerCommand(patchEffectiveLayerItem(
-            get().spatialSession?.history.present ?? document,
-            commandTargetForRow(row),
-            { locked: Boolean(item.patch.locked) },
-            { expectedRevision: get().spatialSession?.history.present.revision ?? revision },
-          ))
+          if (!row) {
+            rejectPropertyUpdate('invalid-target')
+            return
+          }
+          const directRowPatch = isSpatialDirectRowPropertyPatch(item.patch)
+          if (!directRowPatch) {
+            if (!selectedIds.has(item.nodeId)) {
+              rejectPropertyUpdate('invalid-selection')
+              return
+            }
+            const owner = spatialSelectionScopeForRow(spatial, row)
+            if (owner !== spatial.scope) {
+              rejectPropertyUpdate('wrong-owner')
+              return
+            }
+          }
+          const node = directRowPatch
+            ? courseLayerItemToSceneNode(row.item)
+            : currentNodes.get(item.nodeId) ?? null
+          if (!node && !directRowPatch) {
+            rejectPropertyUpdate('invalid-target')
+            return
+          }
+          const planned = spatialLayerPropertyPatch(node, item.patch)
+          if (!planned.ok) {
+            rejectPropertyUpdate(planned.reason)
+            return
+          }
+          updates.push({ target: commandTargetForRow(row), patch: planned.patch })
         }
-        for (const item of visiblePatches) {
-          const row = findCandidateLayerRow(get(), item.nodeId)
-          if (!row) continue
-          persistSpatialLayerCommand(patchEffectiveLayerItem(
-            get().spatialSession?.history.present ?? document,
-            commandTargetForRow(row),
-            { visible: Boolean(item.patch.visible) },
-            { expectedRevision: get().spatialSession?.history.present.revision ?? revision },
-          ))
+        const result = patchEffectiveLayerItems(document, updates, {
+          expectedRevision: document.revision,
+        })
+        if (result.ok && !result.historyEntry) {
+          set({ errorMessage: null, statusMessage: '属性未变化' })
+          return
         }
-        const live = get().spatialSession
-        if (!live) return
-        const framePatches = patches.filter((item) => (
-          item.patch.x !== undefined ||
-          item.patch.y !== undefined ||
-          item.patch.width !== undefined ||
-          item.patch.height !== undefined ||
-          item.patch.rotation !== undefined
-        ))
-        if (framePatches.length > 0) {
-          const current = new Map(spatialEditingNodes(live, get().spatialContentEdit).map((node) => [node.id, node]))
-          persistSpatialResult(transformSpatialWorldLayersInSession(live, {
-            layers: framePatches.flatMap((item) => {
-              const node = current.get(item.nodeId)
-              if (!node) return []
-              return [{
-                layerItemId: item.nodeId,
-                x: typeof item.patch.x === 'number' ? item.patch.x : node.x,
-                y: typeof item.patch.y === 'number' ? item.patch.y : node.y,
-                width: typeof item.patch.width === 'number' ? item.patch.width : node.width,
-                height: typeof item.patch.height === 'number' ? item.patch.height : node.height,
-                rotation: typeof item.patch.rotation === 'number' ? item.patch.rotation : node.rotation,
-              }]
-            }),
-          }, { expectedRevision: live.history.present.revision }))
-        }
+        persistSpatialLayerCommand(result, {
+          statusMessage: `已更新 ${updates.length} 个图层属性`,
+        })
         return
       }
       const flow = get().flowSession

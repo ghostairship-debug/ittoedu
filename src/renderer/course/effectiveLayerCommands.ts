@@ -1,4 +1,5 @@
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import {
   getEffectiveCourseLayerOrder,
   type EffectiveCourseLayerItem,
@@ -6,6 +7,7 @@ import {
 import type {
   CourseProjectDocument,
   CourseSurfaceDocument,
+  LayerFrame,
   LayerItem,
   LayerItemOverride,
   LocationVisibility,
@@ -13,6 +15,8 @@ import type {
   SlidePresentationState,
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
+import type { TextNode } from '../../shared/projectTypes'
+import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import {
   CONTROLLER_MOVE_REASON,
   CROSS_OWNER_REORDER_REASON,
@@ -77,6 +81,23 @@ export interface LocatedCourseLayer {
   readonly surfaceId: string | null
   readonly sceneId: string | null
   readonly scoped?: ScopedLayerItem
+}
+
+export interface EffectiveLayerPropertyPatch {
+  readonly label?: string
+  readonly frame?: Partial<Pick<LayerFrame, 'x' | 'y' | 'width' | 'height'>>
+  readonly rotation?: number
+  readonly opacity?: number
+  readonly visible?: boolean
+  readonly locked?: boolean
+  readonly playbackInitialVisibility?: LayerItem['playbackInitialVisibility']
+  /** Whole-node text style only. Rich-text runs keep their dedicated edit command. */
+  readonly nativeTextStyle?: Partial<TextNode['style']>
+}
+
+export interface EffectiveLayerPropertyUpdate {
+  readonly target: EffectiveLayerCommandTarget
+  readonly patch: EffectiveLayerPropertyPatch
 }
 
 function requireLocationSurface(
@@ -341,6 +362,209 @@ function ownerItemsFromDraft(
     surfaceId: located.surfaceId,
     sceneId: located.sceneId,
   })
+}
+
+const EFFECTIVE_LAYER_PROPERTY_KEYS = new Set<keyof EffectiveLayerPropertyPatch>([
+  'label',
+  'frame',
+  'rotation',
+  'opacity',
+  'visible',
+  'locked',
+  'playbackInitialVisibility',
+  'nativeTextStyle',
+])
+
+function validateFiniteProperty(value: number, label: string): void {
+  if (!Number.isFinite(value)) throw new Error(`${label}必须是有效数字`)
+}
+
+function normalizeEffectiveLayerPropertyPatch(
+  item: LayerItem,
+  source: LayerOwnerSource,
+  patch: EffectiveLayerPropertyPatch,
+): { readonly patch: EffectiveLayerPropertyPatch; readonly changed: boolean } {
+  const unknownKey = Object.keys(patch).find(
+    (key) => !EFFECTIVE_LAYER_PROPERTY_KEYS.has(key as keyof EffectiveLayerPropertyPatch),
+  )
+  if (unknownKey) throw new Error(`当前元素不支持属性“${unknownKey}”`)
+  const definedKeys = Object.entries(patch)
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key)
+  if (
+    item.locked &&
+    !(patch.locked === false && definedKeys.length === 1 && definedKeys[0] === 'locked')
+  ) {
+    throw new Error(LAYER_REJECT_LOCKED)
+  }
+
+  if (patch.label !== undefined && typeof patch.label !== 'string') {
+    throw new Error('名称必须是文字')
+  }
+  if (patch.frame !== undefined && (
+    patch.frame === null || typeof patch.frame !== 'object' || Array.isArray(patch.frame)
+  )) {
+    throw new Error('画面范围无效')
+  }
+  if (patch.visible !== undefined && typeof patch.visible !== 'boolean') {
+    throw new Error('显示状态无效')
+  }
+  if (patch.locked !== undefined && typeof patch.locked !== 'boolean') {
+    throw new Error('锁定状态无效')
+  }
+
+  const label = patch.label?.trim()
+  if (patch.label !== undefined && !label) throw new Error('名称不能为空')
+
+  const frame = patch.frame
+    ? Object.fromEntries(
+        Object.entries(patch.frame).filter(([, value]) => value !== undefined),
+      ) as EffectiveLayerPropertyPatch['frame']
+    : undefined
+  if (frame) {
+    for (const key of ['x', 'y', 'width', 'height'] as const) {
+      const value = frame[key]
+      if (value === undefined) continue
+      validateFiniteProperty(value, key === 'width' ? '宽度' : key === 'height' ? '高度' : key.toUpperCase())
+      if ((key === 'width' || key === 'height') && value <= 0) {
+        throw new Error(`${key === 'width' ? '宽度' : '高度'}必须大于 0`)
+      }
+    }
+  }
+  if (patch.rotation !== undefined) {
+    validateFiniteProperty(patch.rotation, '旋转角度')
+    if (patch.rotation < -36_000 || patch.rotation > 36_000) {
+      throw new Error('旋转角度超出允许范围')
+    }
+  }
+  if (patch.opacity !== undefined) {
+    validateFiniteProperty(patch.opacity, '不透明度')
+    if (patch.opacity < 0 || patch.opacity > 1) throw new Error('不透明度必须介于 0 和 1 之间')
+  }
+  if (
+    patch.playbackInitialVisibility !== undefined &&
+    patch.playbackInitialVisibility !== 'inherit' &&
+    patch.playbackInitialVisibility !== 'hidden'
+  ) {
+    throw new Error('播放初始状态无效')
+  }
+
+  let nativeTextStyle: EffectiveLayerPropertyPatch['nativeTextStyle']
+  if (patch.nativeTextStyle !== undefined) {
+    if (item.kind !== 'native' || item.content.nativeType !== 'text') {
+      throw new Error('当前元素不支持文字整节点样式')
+    }
+    if (
+      patch.nativeTextStyle === null ||
+      typeof patch.nativeTextStyle !== 'object' ||
+      Array.isArray(patch.nativeTextStyle)
+    ) {
+      throw new Error('文字整节点样式无效')
+    }
+    nativeTextStyle = Object.fromEntries(
+      Object.entries(patch.nativeTextStyle).filter(([, value]) => value !== undefined),
+    ) as EffectiveLayerPropertyPatch['nativeTextStyle']
+  }
+
+  const normalizedFrame = source === 'global' &&
+    isTeacherControllerLayerItem(item) &&
+    ((frame !== undefined && Object.keys(frame).length > 0) || patch.rotation !== undefined)
+    ? constrainTeacherControllerAuthoringFrame(
+        item.content.data,
+        { ...item.frame, ...frame },
+        patch.rotation ?? item.rotation,
+        { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      )
+    : frame
+
+  const normalized: EffectiveLayerPropertyPatch = {
+    ...(patch.label !== undefined ? { label: label!.slice(0, 200) } : {}),
+    ...(normalizedFrame && Object.keys(normalizedFrame).length > 0 ? { frame: normalizedFrame } : {}),
+    ...(patch.rotation !== undefined ? { rotation: patch.rotation } : {}),
+    ...(patch.opacity !== undefined ? { opacity: patch.opacity } : {}),
+    ...(patch.visible !== undefined ? { visible: patch.visible } : {}),
+    ...(patch.locked !== undefined ? { locked: patch.locked } : {}),
+    ...(patch.playbackInitialVisibility !== undefined
+      ? { playbackInitialVisibility: patch.playbackInitialVisibility }
+      : {}),
+    ...(nativeTextStyle && Object.keys(nativeTextStyle).length > 0 ? { nativeTextStyle } : {}),
+  }
+  const currentTextStyle = item.kind === 'native' && item.content.nativeType === 'text'
+    ? item.content.data.style
+    : null
+  const changed =
+    (normalized.label !== undefined && normalized.label !== item.label) ||
+    (normalized.frame !== undefined && Object.entries(normalized.frame).some(
+      ([key, value]) => item.frame[key as keyof typeof normalized.frame] !== value,
+    )) ||
+    (normalized.rotation !== undefined && normalized.rotation !== item.rotation) ||
+    (normalized.opacity !== undefined && normalized.opacity !== item.opacity) ||
+    (normalized.visible !== undefined && normalized.visible !== item.visible) ||
+    (normalized.locked !== undefined && normalized.locked !== item.locked) ||
+    (normalized.playbackInitialVisibility !== undefined &&
+      normalized.playbackInitialVisibility !== item.playbackInitialVisibility) ||
+    (normalized.nativeTextStyle !== undefined &&
+      currentTextStyle !== null &&
+      Object.entries(normalized.nativeTextStyle).some(
+        ([key, value]) => currentTextStyle[key as keyof TextNode['style']] !== value,
+      ))
+  return { patch: normalized, changed }
+}
+
+/**
+ * Applies one Properties gesture across one or more effective-layer owners.
+ * Every address and supported top-level value is planned before the single
+ * cloned document mutation; the Course V9 schema remains final validation.
+ */
+export function patchEffectiveLayerItems(
+  document: CourseProjectDocument,
+  updates: readonly EffectiveLayerPropertyUpdate[],
+  options: LayerCommandOptions = {},
+): LayerCommandResult {
+  const stale = rejectIfStaleDocument(document, options.expectedRevision)
+  if (stale) return stale
+  if (updates.length === 0) return succeedLayerNoop(document, '未变化')
+  try {
+    const plans = updates.map(({ target, patch }) => {
+      if (target.stateId) throw new Error('当前原子属性写入不支持命名状态')
+      const located = resolveEffectiveLayerTarget(document, target)
+      const normalized = normalizeEffectiveLayerPropertyPatch(located.item, located.source, patch)
+      return {
+        layerItemId: located.item.layerItemId,
+        patch: normalized.patch,
+        changed: normalized.changed,
+      }
+    })
+    const ids = plans.map((plan) => plan.layerItemId)
+    if (new Set(ids).size !== ids.length) throw new Error('一次属性更新不能包含重复元素')
+    if (!plans.some((plan) => plan.changed)) return succeedLayerNoop(document, '未变化')
+
+    return runMutation(document, (draft) => {
+      for (const plan of plans) {
+        if (!plan.changed) continue
+        const located = locateCourseLayer(draft, plan.layerItemId)
+        if (!located) throw new Error(`找不到图层：${plan.layerItemId}`)
+        const { patch } = plan
+        if (patch.label !== undefined) located.item.label = patch.label
+        if (patch.frame) Object.assign(located.item.frame, patch.frame)
+        if (patch.rotation !== undefined) located.item.rotation = patch.rotation
+        if (patch.opacity !== undefined) located.item.opacity = patch.opacity
+        if (patch.visible !== undefined) located.item.visible = patch.visible
+        if (patch.locked !== undefined) located.item.locked = patch.locked
+        if (patch.playbackInitialVisibility !== undefined) {
+          located.item.playbackInitialVisibility = patch.playbackInitialVisibility
+        }
+        if (patch.nativeTextStyle !== undefined) {
+          if (located.item.kind !== 'native' || located.item.content.nativeType !== 'text') {
+            throw new Error('当前元素不支持文字整节点样式')
+          }
+          Object.assign(located.item.content.data.style, patch.nativeTextStyle)
+        }
+      }
+    }, `已更新 ${plans.filter((plan) => plan.changed).length} 个图层属性`, options)
+  } catch (error) {
+    return failLayerCommand(error instanceof Error ? error.message : '无法更新图层属性')
+  }
 }
 
 export function patchEffectiveLayerItem(

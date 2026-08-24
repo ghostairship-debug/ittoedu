@@ -16,6 +16,7 @@ import {
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import { openDefaultCourseProject } from '@/renderer/project/courseProjectIo'
+import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { COURSE_PROJECT_SCHEMA_VERSION } from '@/shared/courseProjectTypes'
 import {
   selectActiveScene,
@@ -228,6 +229,196 @@ describe('Spatial command failure diagnostics', () => {
     expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
     expect(after.history).toBe(before.history)
     expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+  })
+})
+
+describe('Spatial canonical property updates', () => {
+  it('commits common and whole-node text properties atomically with undo and redo', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const nodes = selectEditingNodes(useEditorStore.getState()).filter(
+      (node) => node.type === 'text',
+    )
+    const [first, second] = nodes
+    if (!first || !second || first.type !== 'text' || second.type !== 'text') {
+      throw new Error('expected two Spatial text nodes')
+    }
+    useEditorStore.getState().selectNodes([first.id, second.id])
+    const before = useEditorStore.getState().spatialSession!
+
+    useEditorStore.getState().updateNodes([
+      {
+        nodeId: first.id,
+        patch: {
+          name: '原子标题',
+          x: first.x + 37,
+          y: first.y + 19,
+          width: first.width + 23,
+          height: first.height + 11,
+          rotation: 17,
+          opacity: 0.42,
+          visible: false,
+          locked: true,
+          playbackInitialVisibility: 'hidden',
+        },
+      },
+      {
+        nodeId: second.id,
+        patch: {
+          style: {
+            fontFamily: 'SimHei',
+            fontSize: 36,
+            color: '#123456',
+            bold: true,
+            lineSpacing: 1.8,
+          },
+        },
+      },
+    ])
+
+    const changed = useEditorStore.getState().spatialSession!
+    expect(changed.history.present.revision).toBe(before.history.present.revision + 1)
+    expect(changed.history.past).toHaveLength(before.history.past.length + 1)
+    const surface = changed.history.present.surfaces.find(
+      (candidate) => candidate.id === changed.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const firstItem = surface.world.layerItems.find((item) => item.layerItemId === first.id)
+    const secondItem = surface.world.layerItems.find((item) => item.layerItemId === second.id)
+    expect(firstItem).toMatchObject({
+      label: '原子标题',
+      frame: {
+        x: first.x + 37,
+        y: first.y + 19,
+        width: first.width + 23,
+        height: first.height + 11,
+      },
+      rotation: 17,
+      opacity: 0.42,
+      visible: false,
+      locked: true,
+      playbackInitialVisibility: 'hidden',
+    })
+    expect(secondItem).toMatchObject({
+      kind: 'native',
+      content: {
+        nativeType: 'text',
+        data: {
+          style: {
+            fontFamily: 'SimHei',
+            fontSize: 36,
+            color: '#123456',
+            bold: true,
+            lineSpacing: 1.8,
+          },
+        },
+      },
+    })
+
+    useEditorStore.getState().undo()
+    const undone = useEditorStore.getState().spatialSession!
+    const undoneSurface = undone.history.present.surfaces.find(
+      (candidate) => candidate.id === undone.selection.surfaceId,
+    )
+    if (!undoneSurface || undoneSurface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    expect(undoneSurface.world.layerItems.find((item) => item.layerItemId === first.id)?.label)
+      .toBe(first.name)
+    expect(undoneSurface.world.layerItems.find((item) => item.layerItemId === second.id))
+      .toMatchObject({ kind: 'native', content: { nativeType: 'text', data: { style: second.style } } })
+
+    useEditorStore.getState().redo()
+    const redone = useEditorStore.getState().spatialSession!
+    expect(redone.history.present.surfaces
+      .find((candidate) => candidate.id === redone.selection.surfaceId))
+      .toMatchObject({
+        type: 'spatial-2d',
+        world: {
+          layerItems: expect.arrayContaining([
+            expect.objectContaining({ layerItemId: first.id, label: '原子标题' }),
+            expect.objectContaining({
+              layerItemId: second.id,
+              content: expect.objectContaining({
+                data: expect.objectContaining({
+                  style: expect.objectContaining({ bold: true, color: '#123456' }),
+                }),
+              }),
+            }),
+          ]),
+        },
+      })
+  })
+
+  it('keeps no-op, locked, and unsupported batches at zero document and history writes', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const [first, second] = selectEditingNodes(useEditorStore.getState()).filter(
+      (node) => node.type === 'text',
+    )
+    if (!first || !second || first.type !== 'text' || second.type !== 'text') {
+      throw new Error('expected two Spatial text nodes')
+    }
+    useEditorStore.getState().selectNodes([first.id, second.id])
+
+    const beforeNoop = useEditorStore.getState().spatialSession!
+    useEditorStore.getState().updateNodes([{
+      nodeId: second.id,
+      patch: { opacity: second.opacity, style: { bold: second.style.bold } },
+    }])
+    expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
+    expect(useEditorStore.getState().spatialSession?.history).toBe(beforeNoop.history)
+
+    useEditorStore.getState().updateNode(first.id, { locked: true })
+    const beforeLocked = useEditorStore.getState().spatialSession!
+    const secondOpacity = beforeLocked.history.present.surfaces
+      .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
+      .find((item) => item.layerItemId === second.id)?.opacity
+    useEditorStore.getState().updateNodes([
+      { nodeId: first.id, patch: { name: '不应部分写入' } },
+      { nodeId: second.id, patch: { opacity: 0.25 } },
+    ])
+    const afterLocked = useEditorStore.getState()
+    expect(afterLocked.spatialSession).toBe(beforeLocked)
+    expect(afterLocked.spatialSession?.history).toBe(beforeLocked.history)
+    expect(afterLocked.errorMessage).toBe('当前内容已锁定。请先解锁后重试。')
+    expect(afterLocked.spatialSession?.history.present.surfaces
+      .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
+      .find((item) => item.layerItemId === second.id)?.opacity).toBe(secondOpacity)
+
+    useEditorStore.getState().updateNode(second.id, {
+      fit: 'cover',
+    } as never)
+    const afterUnsupported = useEditorStore.getState()
+    expect(afterUnsupported.spatialSession).toBe(beforeLocked)
+    expect(afterUnsupported.errorMessage).toBe(
+      '当前元素不支持这项属性，未保存任何更改。',
+    )
+  })
+
+  it('keeps geometry and presentation properties selection-bound', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const [selected, unselected] = selectEditingNodes(useEditorStore.getState()).filter(
+      (node) => node.type === 'text',
+    )
+    if (!selected || !unselected) throw new Error('expected two Spatial text nodes')
+    useEditorStore.getState().selectNode(selected.id)
+    const before = useEditorStore.getState().spatialSession!
+
+    useEditorStore.getState().updateNode(unselected.id, {
+      name: '不得借直接行属性绕过选择',
+      opacity: 0.25,
+    })
+
+    const after = useEditorStore.getState()
+    expect(after.spatialSession).toBe(before)
+    expect(after.spatialSession?.history).toBe(before.history)
+    expect(after.errorMessage).toBe('所选内容已失效。请重新选择后再试。')
+    const located = locateCourseLayer(before.history.present, unselected.id)
+    expect(located?.item.label).toBe(unselected.name)
+    expect(located?.item.opacity).toBe(unselected.opacity)
   })
 })
 

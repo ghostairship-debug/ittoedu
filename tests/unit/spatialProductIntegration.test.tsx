@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import type { ComponentPackageData } from '@/shared/componentTypes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import type { AssetMeta } from '@/shared/projectTypes'
+import { constrainTeacherControllerAuthoringFrame } from '@/shared/teacherControllerLayout'
 import { stageResizeHandleWorldPoint, worldToClient } from '@/renderer/authoring/stageViewportTransform'
 import { createSpatialWorldAuthoringController } from '@/renderer/authoring/spatialWorldAuthoring'
 import {
@@ -12,6 +14,7 @@ import {
 import { createSpatialWorldViewTransform } from '@/renderer/course/spatialEditorView'
 import { addSpatialPathInSession } from '@/renderer/course/spatialPathCommands'
 import { addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
+import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import {
   selectActiveCourseProjectDocument,
   selectEditingNodes,
@@ -146,6 +149,16 @@ function mixedOwnerSelectionFixture() {
     item: surfaceItem,
     visibility: { mode: 'all', locationIds: [] },
   })
+  const propertyTextItems = [
+    document.globalLayerItems.find((entry) => entry.item.layerItemId === globalTextId)?.item,
+    surfaceItem,
+    worldItem,
+  ]
+  for (const item of propertyTextItems) {
+    if (item?.kind === 'native' && item.content.nativeType === 'text') {
+      item.content.data.style.overflow = 'fixed'
+    }
+  }
   useEditorStore.getState().applySpatialAuthoringSession(openSpatialAuthoringSession(document, {
     locationId,
   }))
@@ -576,5 +589,194 @@ describe('Spatial product shell wiring', () => {
     expect(afterRejectedAdditive.spatialSession).toBe(beforeRejectedAdditive.spatialSession)
     expect(afterRejectedAdditive.spatialContentEdit).toBe(dirtyEdit)
     expect(afterRejectedAdditive.editingTextNodeId).toBe(fixture.worldItemId)
+  })
+
+  it('edits an unselected Spatial row in place without stealing its current selection', () => {
+    const fixture = mixedOwnerSelectionFixture()
+    act(() => useEditorStore.getState().selectNode(fixture.worldItemId))
+    const initial = useEditorStore.getState().spatialSession!
+    expect(initial.scope).toBe('world')
+    expect(initial.selection.selectionIds).toEqual([fixture.worldItemId])
+    render(<NodesTab />)
+
+    const expectSelectionUnchanged = () => {
+      const session = useEditorStore.getState().spatialSession!
+      expect(session.scope).toBe('world')
+      expect(session.selection.selectionIds).toEqual([fixture.worldItemId])
+      expect(session.selection.locationId).toBe(initial.selection.locationId)
+    }
+    const targetBefore = locateCourseLayer(initial.history.present, fixture.surfaceItemId)
+    if (!targetBefore) throw new Error('expected surface layer row')
+    const originalName = targetBefore.item.label
+    const renamed = '未选中共享行'
+    const row = screen.getByTestId(`node-item-${fixture.surfaceItemId}`)
+    const label = row.querySelector('.node-name')
+    if (!label) throw new Error('expected row name')
+
+    fireEvent.doubleClick(label)
+    const nameInput = within(row).getByLabelText(`重命名“${originalName}”`)
+    fireEvent.change(nameInput, { target: { value: renamed } })
+    fireEvent.blur(nameInput)
+    const afterRename = useEditorStore.getState().spatialSession!
+    expect(afterRename.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(afterRename.history.past).toHaveLength(initial.history.past.length + 1)
+    expect(locateCourseLayer(afterRename.history.present, fixture.surfaceItemId)).toMatchObject({
+      source: 'surface',
+      item: { label: renamed, visible: true, locked: false },
+    })
+    expectSelectionUnchanged()
+
+    fireEvent.click(within(screen.getByTestId(`node-item-${fixture.surfaceItemId}`))
+      .getByRole('button', { name: `隐藏“${renamed}”` }))
+    const afterVisible = useEditorStore.getState().spatialSession!
+    expect(afterVisible.history.present.revision).toBe(afterRename.history.present.revision + 1)
+    expect(afterVisible.history.past).toHaveLength(afterRename.history.past.length + 1)
+    expect(locateCourseLayer(afterVisible.history.present, fixture.surfaceItemId)).toMatchObject({
+      source: 'surface',
+      item: { label: renamed, visible: false, locked: false },
+    })
+    expectSelectionUnchanged()
+
+    fireEvent.click(within(screen.getByTestId(`node-item-${fixture.surfaceItemId}`))
+      .getByRole('button', { name: `锁定“${renamed}”` }))
+    const afterLocked = useEditorStore.getState().spatialSession!
+    expect(afterLocked.history.present.revision).toBe(afterVisible.history.present.revision + 1)
+    expect(afterLocked.history.past).toHaveLength(afterVisible.history.past.length + 1)
+    expect(locateCourseLayer(afterLocked.history.present, fixture.surfaceItemId)).toMatchObject({
+      source: 'surface',
+      item: { label: renamed, visible: false, locked: true },
+    })
+    expectSelectionUnchanged()
+  })
+
+  it('writes visible Spatial common and whole-node text controls to each canonical owner', () => {
+    const fixture = mixedOwnerSelectionFixture()
+    const cases = [
+      { id: fixture.globalTextId, owner: 'global' as const, name: '全课文字属性' },
+      { id: fixture.surfaceItemId, owner: 'surface' as const, name: '页面共享文字属性' },
+      { id: fixture.worldItemId, owner: 'world' as const, name: '世界文字属性' },
+    ]
+
+    for (const item of cases) {
+      act(() => useEditorStore.getState().selectNode(item.id))
+      cleanup()
+      render(<PropertiesTab onReplaceImage={() => undefined} />)
+      expect(screen.queryByTestId('simple-entrance-animation')).toBeNull()
+      if (item.owner === 'world') {
+        expect(screen.getByLabelText('文字内容')).toBeEnabled()
+        expect(screen.queryByTestId('spatial-text-content-unavailable')).toBeNull()
+      } else {
+        expect(screen.queryByLabelText('文字内容')).toBeNull()
+        expect(screen.getByTestId('spatial-text-content-unavailable')).toHaveTextContent(
+          '只支持整节点文字样式',
+        )
+      }
+
+      const beforeName = useEditorStore.getState().spatialSession!
+      const nameInput = screen.getByLabelText('名称')
+      fireEvent.change(nameInput, { target: { value: item.name } })
+      fireEvent.blur(nameInput)
+      const afterName = useEditorStore.getState().spatialSession!
+      expect(afterName.history.present.revision).toBe(beforeName.history.present.revision + 1)
+      expect(afterName.history.past).toHaveLength(beforeName.history.past.length + 1)
+      expect(locateCourseLayer(afterName.history.present, item.id)).toMatchObject({
+        source: item.owner,
+        item: { label: item.name },
+      })
+
+      const beforeStyle = afterName
+      fireEvent.click(screen.getByRole('button', { name: '加粗' }))
+      const afterStyle = useEditorStore.getState().spatialSession!
+      expect(afterStyle.history.present.revision).toBe(beforeStyle.history.present.revision + 1)
+      expect(afterStyle.history.past).toHaveLength(beforeStyle.history.past.length + 1)
+      const located = locateCourseLayer(afterStyle.history.present, item.id)
+      expect(located?.source).toBe(item.owner)
+      expect(located?.item).toMatchObject({
+        kind: 'native',
+        content: { nativeType: 'text', data: { style: { bold: true } } },
+      })
+    }
+  })
+
+  it('constrains an out-of-bounds global teacher controller Properties write once', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    const initial = useEditorStore.getState().spatialSession!
+    const document = structuredClone(initial.history.present)
+    const controller = document.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))?.item
+    if (!controller || controller.kind !== 'native' || controller.content.nativeType !== 'teacher-controller') {
+      throw new Error('expected global teacher controller')
+    }
+    controller.rotation = 37
+    controller.locked = false
+    act(() => useEditorStore.getState().applySpatialAuthoringSession(openSpatialAuthoringSession(
+      document,
+      { locationId: initial.selection.locationId },
+    )))
+    act(() => useEditorStore.getState().selectNode(controller.layerItemId))
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    const before = useEditorStore.getState().spatialSession!
+    const locatedBefore = locateCourseLayer(before.history.present, controller.layerItemId)
+    if (
+      !locatedBefore ||
+      locatedBefore.item.kind !== 'native' ||
+      locatedBefore.item.content.nativeType !== 'teacher-controller'
+    ) {
+      throw new Error('expected selected global teacher controller')
+    }
+    const proposedFrame = { ...locatedBefore.item.frame, x: -5_000 }
+    const expectedFrame = constrainTeacherControllerAuthoringFrame(
+      locatedBefore.item.content.data,
+      proposedFrame,
+      locatedBefore.item.rotation,
+      { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+    )
+
+    const xInput = screen.getByLabelText('X')
+    fireEvent.change(xInput, { target: { value: String(proposedFrame.x) } })
+    fireEvent.blur(xInput)
+
+    const after = useEditorStore.getState().spatialSession!
+    expect(after.history.present.revision).toBe(before.history.present.revision + 1)
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(after.selection.selectionIds).toEqual([controller.layerItemId])
+    expect(after.scope).toBe('global')
+    expect(locateCourseLayer(after.history.present, controller.layerItemId)).toMatchObject({
+      source: 'global',
+      item: {
+        frame: expectedFrame,
+        rotation: 37,
+      },
+    })
+    expect(expectedFrame.x).not.toBe(proposedFrame.x)
+  })
+
+  it('hides unsupported Spatial type controls and disables non-atomic multi actions', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addImageNode(IMAGE_ASSET, IMAGE_BYTES)
+    const image = selectEditingNodes(useEditorStore.getState()).find((node) => node.type === 'image')
+    if (!image) throw new Error('expected Spatial image')
+    act(() => useEditorStore.getState().selectNode(image.id))
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    expect(screen.getByLabelText('名称')).toBeEnabled()
+    expect(screen.getByTestId('spatial-type-properties-unavailable')).toHaveTextContent(
+      '专属属性尚未接入 canonical 历史',
+    )
+    expect(screen.queryByRole('heading', { name: '图片' })).toBeNull()
+    expect(screen.queryByTestId('simple-entrance-animation')).toBeNull()
+
+    cleanup()
+    useEditorStore.getState().addTextNode()
+    const ids = selectEditingNodes(useEditorStore.getState()).map((node) => node.id)
+    act(() => useEditorStore.getState().selectNodes(ids))
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.getByRole('button', { name: '复制所选' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '删除所选' })).toBeDisabled()
+    expect(screen.getByTestId('spatial-multi-actions-unavailable')).toHaveTextContent(
+      '不会执行部分写入',
+    )
   })
 })
