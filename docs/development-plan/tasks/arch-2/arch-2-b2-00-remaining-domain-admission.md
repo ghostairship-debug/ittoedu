@@ -13,7 +13,7 @@
 - Validation budget: 30 minutes
 - Reviewer budget: 1
 - Evidence reuse: 结论绑定 baseline `16c787f` 的源码、合同、现有 focused evidence 与 fresh repo-index；只改本卡、报告、任务板或 generated 不使准入证据失效，命中下列产品路径或相关依赖/测试配置时重审对应域。
-- Invalidating paths: `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `src/renderer/course/effectiveLayerProjection.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/shared/projectHealth.ts`; `src/shared/projectDiagnostics.ts`; `src/renderer/project/recoveryWriteCoordinator.ts`; `src/renderer/project/saveProject.ts`; `src/renderer/App.tsx`; relevant focused tests
+- Invalidating paths: `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `src/renderer/course/effectiveLayerProjection.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/store/editorStore.ts`; `src/shared/projectHealth.ts`; `src/shared/projectDiagnostics.ts`; `src/renderer/ui/ProjectHealthPanel.tsx`; `src/renderer/project/recoveryWriteCoordinator.ts`; `src/renderer/project/saveProject.ts`; `src/renderer/App.tsx`; relevant focused tests
 - Task ID: `arch-2-b2-00-remaining-domain-admission`
 - Phase / wave: `ARCH-2 / W2-B2 remaining-domain admission`
 - Status: `claimed`
