@@ -16,16 +16,17 @@
 - Invalidating paths: `src/renderer/ui/ElementsTab.tsx`; `src/renderer/ui/Workspace.tsx` 的 `application/x-courseware-element` drop receiver；`src/renderer/ui/FlowWorkspace.tsx` 的 block DnD 边界；`tests/unit/editorFormattingUi.test.tsx`; `tests/unit/flowProductIntegration.test.tsx`; `tests/unit/spatialProductIntegration.test.tsx`
 - Task ID: `stab-cross-01-surface-aware-insertion-affordance`
 - Phase / wave: `post-audit stabilization / D-cross-surface`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Surface Insertion UX Worker / independent Surface-semantics reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with ElementsTab/UI Shell firewall / codex/architecture-stabilization`
 - Baseline HEAD: `68cfc91` (Wave A gate released and generated index fresh)
 - Context: fresh `repo:context` query on `ElementsTab drag payload Slide Flow Spatial receivers insertion carrier` returned low confidence and required exact-source manual Bootstrap before writing.
 - Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; repo-index source, semantic, config and tool inputs all matched.
+- Hotspot lock release: ElementsTab/UI Shell lock released after product commit `a6fdba4`.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-audit-closure-gate`
-- Retry count: `0`
+- Retry count: `1` (independent review found the first candidate ignored global editing scope; the Worker replaced the Surface-only promise with a tested Surface × scope × kind capability matrix and re-review approved it.)
 
 ## Product outcome
 
@@ -56,8 +57,8 @@ Elements 面板只承诺当前 Surface 真正支持的操作：Flow/Spatial 没�
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、三种 Surface UI before/after、focused 结果和 Reviewer 结论。
+- Result evidence: product commit `a6fdba4`. Slide scene/global entries retain the only real `application/x-courseware-element` drag path and identify free-node versus global-layer carriers. Flow page entries are click-only document blocks/page overlays; in Flow global scope shapes identify the real global carrier, text/formula explicitly disclose their existing page-block behavior, and unsupported image/video actions are disabled. Spatial world entries are click-only world items, while Spatial global entries are disabled and zero-write because no insertion command exists there. Surface-specific global notices agree with the buttons, and every retained click still calls the original Store/App command. At integrated product commit `a2f7386`, the nine-file focused stabilization run passed 9 files / 93 tests, `npm run typecheck` passed and `git diff --check` passed, with only registered jsdom Canvas warnings. The independent Surface-semantics Reviewer approved the corrected Surface/scope/carrier matrix without rerunning tests. Current outcome is `engineering candidate`; no Flow/Spatial drop support is claimed.
 - Outcome boundary: 只证明插入 affordance 与当前能力一致；不声称 Flow/Spatial 已支持 drag-and-drop，也不证明整体视觉 `accepted`。
-- Rollback: 一个可独立 revert 的 UI/测试提交恢复旧文案和 draggable 标志；不涉及 persisted data。
+- Rollback: revert `a6fdba4` to restore the former copy/draggable flags; no persisted data is involved.
 - Semantic index impact: `canonical-update` only if a stable Surface capability selector is introduced.
 - Generated refresh: `defer-to-wave-gate`

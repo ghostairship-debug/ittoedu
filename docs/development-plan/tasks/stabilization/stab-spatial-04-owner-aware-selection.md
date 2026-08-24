@@ -16,17 +16,18 @@
 - Invalidating paths: `src/renderer/ui/NodesTab.tsx`; `src/renderer/store/editorStore.ts#selectNode/#setEditingScope`; `src/renderer/course/spatialEditorCommands.ts#selectSpatialLayers`; `src/renderer/authoring/spatialWorldAuthoring.ts` 的 scope/selection adapter；`tests/unit/spatialProductIntegration.test.tsx`; `tests/unit/spatialWorkspaceAuthoring.test.ts`
 - Task ID: `stab-spatial-04-owner-aware-selection`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Selection Worker / independent authoring-address reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Spatial Store/selection firewall / codex/architecture-stabilization`
 - Baseline HEAD: `68cfc91` (Wave A gate released and generated index fresh)
 - Context Pack + manifest hash | bootstrap-manual: fresh query on `Spatial effective layers selectNode selectSpatialLayers authoringAddress owner scope` returned low confidence and required Bootstrap; the prepared manual Bootstrap reproduced global/surface row refusal through the exact Store/session path and identified the existing scope transition boundary.
 - Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; repo-index source, semantic, config and tool inputs all matched.
+- Hotspot lock release: Spatial Store/selection and the two focused test locks released after product commit `82e59fc`.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 可见但不可选的行是伪入口；修复必须让选择只改变作者会话而不误写工程，也不能用临时 hitId 代替稳定 authoringAddress。
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review found that a rejected cross-owner additive click could first persist an open dirty text draft; preflight now occurs before any draft commit and the dirty-edit counterexample is covered`
 
 ## Product outcome
 
@@ -59,8 +60,8 @@ Spatial 统一图层中每一条当前可见且公开承诺可编辑的 owner �
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、当前公开可编辑 owner 的 selection/address、无 consumer owner 的处置、零持久化写入、focused 结果及 Reviewer 结论。
+- Result evidence: product commit `82e59fc`. Unified global, surface and world rows resolve their stable authoringAddress through the canonical effective-layer target, switch only the existing in-memory Spatial scope for non-additive selection, and keep document/revision/history/dirty unchanged. Cross-owner additive selection rejects before `persistOpenSpatialContentEdit`, preserving the original scope, selection, editing node and dirty draft; valid selections commit any open edit first and then re-resolve against the fresh session. Surface owner remains visible because existing Properties/delete/lock/visibility consumers address it canonically; no new scope or hitId contract was added. At integrated product commit `a2f7386`, the nine-file focused stabilization run passed 9 files / 93 tests, `npm run typecheck` passed and `git diff --check` passed, with only registered jsdom Canvas warnings. The independent authoring-address Reviewer approved the repaired failure-zero-write boundary without rerunning tests.
 - Outcome boundary: 只证明统一图层选择链为 `engineering candidate`；不证明跨 owner 移动、属性完整性或 Spatial 整体可用。
-- Rollback: 一个可独立 revert 的产品/测试提交恢复旧选择路由；selection 为 session-only，无用户数据迁移。
+- Rollback: revert `82e59fc` to restore the old selection route; selection is session-only and requires no user-data migration.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
