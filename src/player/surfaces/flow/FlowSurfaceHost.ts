@@ -45,6 +45,14 @@ import {
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
 import { fittedPublishedFormulaSize, paintPublishedFormula } from '../publishedFormula'
+import {
+  PublishedDomInteractionSurfacePort,
+  PublishedInteractionVisibilityState,
+  type PublishedInteractionNodeHandle,
+  type PublishedInteractionNodeOwnership,
+  type PublishedInteractionNodeState,
+} from '../../interactions/PublishedDomInteractionSurfacePort'
+import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
 
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
@@ -65,6 +73,12 @@ export interface FlowSurfaceHostOptions {
   ) => boolean | void | Promise<boolean | void>
   onNavigateLocation?: (locationId: string) => void
   courseProgressSource?: FlowCourseProgressSource
+  /** Published-session only; shared by global LayerItem handles across surfaces. */
+  globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+  /** Published-session generation hook fired before interaction DOM is invalidated. */
+  onInteractionInvalidated?: () => void
+  /** Published-session generation hook fired after an active interaction DOM is ready. */
+  onInteractionReady?: () => void
 }
 
 export interface FlowHostAudioSession {
@@ -94,6 +108,10 @@ export class FlowSurfaceHost {
   #controller: TeacherControllerDom | null = null
   #controllerSessions = new Map<string, TeacherControllerDomSession>()
   #componentHandles: PublishedComponentMountHandle[] = []
+  readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
+  #interactionPort: PublishedDomInteractionSurfacePort | null = null
+  #interactionGeneration = 0
+  #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #active = false
   #queue: Promise<void> = Promise.resolve()
 
@@ -103,6 +121,8 @@ export class FlowSurfaceHost {
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
     this.#options = { ...options }
+    this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
+      ?? new PublishedInteractionVisibilityState()
     this.#audio = options.audio ?? createFlowHostAudioSession(
       this.#playback.media?.audio.defaultMuted === true,
     )
@@ -143,6 +163,10 @@ export class FlowSurfaceHost {
     return this.#root
   }
 
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
+    return this.#interactionPort
+  }
+
   setTocOpen(open: boolean): void {
     this.#toc?.setOpen(open)
   }
@@ -180,6 +204,7 @@ export class FlowSurfaceHost {
       container.appendChild(root)
       this.#root = root
       this.#overlay = overlay
+      this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
       this.#toc = new FlowRuntimeTocChrome(root, {
         initialOpen: this.#options.initialTocOpen === true,
         getEntries: () => buildFlowRuntimeToc(this.#playback),
@@ -190,15 +215,18 @@ export class FlowSurfaceHost {
       })
       this.#render()
       this.#applyShellLayout()
+      this.#restoreInteractionsIfActive()
     })
   }
 
   async activate(): Promise<void> {
     this.#active = true
     if (this.#root) this.#root.hidden = false
+    this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
+    this.#invalidateInteractions()
     this.#active = false
     if (this.#root) this.#root.hidden = true
   }
@@ -210,6 +238,8 @@ export class FlowSurfaceHost {
   setLocationId(locationId: string): Promise<void> {
     return this.#enqueue(async () => {
       const location = resolveFlowLocation(this.#playback, locationId)
+      this.#invalidateInteractions()
+      this.#interactionPort?.resetLocalVisibility()
       this.#locationId = location.id
       this.#surfaceId = location.surfaceId
       if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
@@ -220,11 +250,14 @@ export class FlowSurfaceHost {
           ? flowRuntimeTocAnchorId(location.blockId)
           : flowRuntimeTocPageAnchorId(location.surfaceId),
       )
+      this.#restoreInteractionsIfActive()
     })
   }
 
   updatePublishedCourse(source: FlowPublishedPlaybackSource): Promise<void> {
     return this.#enqueue(async () => {
+      this.#invalidateInteractions()
+      this.#interactionPort?.resetLocalVisibility()
       this.#playback = toFlowPublishedPlayback(source)
       if ('components' in source && source.components) {
         this.#components = source.components as Record<string, PublishedComponentPackageSource>
@@ -237,11 +270,16 @@ export class FlowSurfaceHost {
       this.#render()
       this.#toc?.sync()
       this.#applyShellLayout()
+      this.#restoreInteractionsIfActive()
     })
   }
 
   destroy(): Promise<void> {
     return this.#enqueue(async () => {
+      this.#invalidateInteractions()
+      this.#interactionPort?.destroy()
+      this.#interactionPort = null
+      this.#interactionNodes.clear()
       this.#destroyComponentHandles()
       this.#destroyController()
       this.#toc?.destroy()
@@ -253,6 +291,17 @@ export class FlowSurfaceHost {
       this.#container = null
       this.#active = false
     })
+  }
+
+  #invalidateInteractions(): void {
+    this.#options.onInteractionInvalidated?.()
+    this.#interactionPort?.setActive(false)
+  }
+
+  #restoreInteractionsIfActive(): void {
+    if (!this.#active || !this.#interactionPort || !this.#root) return
+    this.#interactionPort.setActive(true)
+    this.#options.onInteractionReady?.()
   }
 
   #destroyComponentHandles(): void {
@@ -278,8 +327,52 @@ export class FlowSurfaceHost {
     if (this.#overlay) this.#overlay.style.left = inset
   }
 
+  #registerInteractionNode(
+    wrap: HTMLElement,
+    item: PublishedLayerItem,
+    source: 'global' | 'surface',
+  ): void {
+    if (this.#interactionNodes.has(item.layerItemId)) return
+    const authoredPointerEvents = wrap.style.pointerEvents || 'none'
+    const authoredTransform = wrap.style.transform || 'none'
+    let handle: PublishedInteractionNodeHandle
+    handle = {
+      nodeId: item.layerItemId,
+      source,
+      ownership: publishedInteractionOwnership(item),
+      ...(source === 'global'
+        ? { visibilityState: this.#globalInteractionVisibilityState }
+        : {}),
+      resolveElement: () => wrap,
+      isInteractionAvailable: () => (
+        this.#root?.contains(wrap) === true
+        && this.#interactionNodes.get(item.layerItemId) === handle
+      ),
+      canBindClick: () => canBindPublishedNativeClick(item),
+      canRunMotion: () => true,
+      authoredVisible: () => item.playbackInitialVisibility !== 'hidden',
+      applyInteractionState: (state: PublishedInteractionNodeState) => {
+        const visible = state.visible
+        wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
+        wrap.style.visibility = visible ? 'visible' : 'hidden'
+        wrap.style.pointerEvents = visible
+          ? state.clickBound ? 'auto' : authoredPointerEvents
+          : 'none'
+        if (visible) wrap.removeAttribute('aria-hidden')
+        else wrap.setAttribute('aria-hidden', 'true')
+      },
+      authoredMotionStyle: () => ({
+        opacity: String(item.opacity),
+        transform: authoredTransform,
+      }),
+    }
+    this.#interactionNodes.set(item.layerItemId, handle)
+  }
+
   #render(): void {
     if (!this.#root || !this.#overlay) return
+    this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
+    this.#interactionNodes.clear()
     this.#destroyComponentHandles()
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
     const article = renderFlowArticle(surface, {
@@ -300,6 +393,10 @@ export class FlowSurfaceHost {
     this.#article = article
     this.#toc?.sync()
     this.#renderOverlay(surface)
+    this.#interactionPort?.refreshNodes(
+      this.#interactionNodes.values(),
+      ++this.#interactionGeneration,
+    )
   }
 
   #syncPaperOverlayPositions(surface: PublishedFlowSurface): void {
@@ -327,10 +424,11 @@ export class FlowSurfaceHost {
     const scrollTop = this.#article?.scrollTop ?? 0
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
-        this.#mountTeacherController(entry.item)
+        const wrap = this.#mountTeacherController(entry.item, entry.source)
+        if (wrap) this.#registerInteractionNode(wrap, entry.item, entry.source)
         continue
       }
-      overlay.appendChild(renderStaticOverlayItem(
+      const wrap = renderStaticOverlayItem(
         overlay.ownerDocument,
         entry,
         (assetId) => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
@@ -342,14 +440,19 @@ export class FlowSurfaceHost {
             this.#componentHandles.push(handle)
           },
         },
-      ))
+      )
+      overlay.appendChild(wrap)
+      this.#registerInteractionNode(wrap, entry.item, entry.source)
     }
   }
 
-  #mountTeacherController(item: PublishedNativeLayerItem): void {
+  #mountTeacherController(
+    item: PublishedNativeLayerItem,
+    source: 'global' | 'surface',
+  ): HTMLElement | null {
     const overlay = this.#overlay
-    if (!overlay || item.content.nativeType !== 'teacher-controller') return
-    if (this.#playback.playback?.controls === 'none') return
+    if (!overlay || item.content.nativeType !== 'teacher-controller') return null
+    if (this.#playback.playback?.controls === 'none') return null
     const data = item.content.data
     const frame = item.frame
     const dom = overlay.ownerDocument
@@ -357,6 +460,8 @@ export class FlowSurfaceHost {
     frameEl.className = 'flow-runtime-teacher-controller-frame'
     frameEl.dataset.testid = 'flow-runtime-teacher-controller'
     frameEl.dataset.layerItemId = item.layerItemId
+    frameEl.dataset.flowOverlayItem = item.layerItemId
+    frameEl.dataset.flowOverlaySource = source
     frameEl.style.position = 'absolute'
     const session = this.#controllerSessions.get(item.layerItemId) ?? {
       offset: { dx: 0, dy: 0 },
@@ -413,6 +518,7 @@ export class FlowSurfaceHost {
       },
       getInteractive: () => this.#active,
     })
+    return frameEl
   }
 
   #destroyController(): void {
@@ -540,7 +646,9 @@ function visibleOverlayEntries(
   const push = (list: readonly PublishedScopedLayerItem[], source: 'global' | 'surface') => {
     for (const entry of list) {
       if (!isPublishedScopedVisible(entry, locationId)) continue
-      if (!entry.item.visible || entry.item.playbackInitialVisibility === 'hidden') continue
+      // Playback-hidden nodes stay mounted so Interaction V1 node.enter can reveal them.
+      // Authored visible:false and location scope remain hard renderer boundaries.
+      if (!entry.item.visible) continue
       entries.push({ item: entry.item, source, order: entry.item.order })
     }
   }
@@ -564,6 +672,24 @@ function isPublishedTeacherController(
   content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
 } {
   return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
+function publishedInteractionOwnership(
+  item: PublishedLayerItem,
+): PublishedInteractionNodeOwnership {
+  if (item.kind === 'component') return 'component'
+  if (item.kind === 'runtime') return 'runtime'
+  if (item.content.nativeType === 'video') return 'media'
+  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  return 'native'
+}
+
+function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
+  if (item.kind !== 'native' || item.hitPolicy !== 'auto') return false
+  return item.content.nativeType === 'text'
+    || item.content.nativeType === 'image'
+    || item.content.nativeType === 'formula'
+    || item.content.nativeType === 'shape'
 }
 
 function renderStaticOverlayItem(

@@ -109,7 +109,13 @@ function createPublishedSurfaceHostInternal(
     })
   }
   if (kind === 'flow') {
-    return new FlowPublishedAdapter(payload, surface.id, startLocationId, resolveAsset)
+    return new FlowPublishedAdapter(payload, surface.id, {
+      locationId: startLocationId,
+      resolveAsset,
+      globalInteractionVisibilityState: options.globalInteractionVisibilityState,
+      onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
+      onInteractionReady: () => options.onInteractionReady?.(surface.id),
+    })
   }
   return new SpatialPublishedAdapter(
     payload,
@@ -660,16 +666,24 @@ class FlowPublishedAdapter implements SurfaceHost {
   constructor(
     payload: PublishedCourseV2Payload,
     surfaceId: string,
-    startLocationId: string,
-    resolveAsset: (assetId: string) => string | undefined,
+    options: {
+      locationId: string
+      resolveAsset: (assetId: string) => string | undefined
+      globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+      onInteractionInvalidated?: () => void
+      onInteractionReady?: () => void
+    },
   ) {
     this.id = surfaceId
     this.#payload = payload
-    this.#startLocationId = startLocationId
+    this.#startLocationId = options.locationId
     this.#host = new FlowSurfaceHost(payload, {
       surfaceId,
-      locationId: startLocationId,
-      resolveAsset,
+      locationId: options.locationId,
+      resolveAsset: options.resolveAsset,
+      globalInteractionVisibilityState: options.globalInteractionVisibilityState,
+      onInteractionInvalidated: options.onInteractionInvalidated,
+      onInteractionReady: options.onInteractionReady,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -685,6 +699,10 @@ class FlowPublishedAdapter implements SurfaceHost {
   async mount(context: SurfaceMountContext): Promise<void> {
     this.#services = context.services
     await this.#host.mount(context.container)
+  }
+
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
+    return this.#host.getPublishedInteractionSurfacePort()
   }
 
   async activate(): Promise<void> {
