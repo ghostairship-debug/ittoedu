@@ -12,13 +12,13 @@
 - Validation ceiling: V3
 - Validation budget: 30 minutes
 - Reviewer budget: 2
-- Evidence reuse: 复用各 implementation/wave gate 绑定的 focused/full/Electron/fixture 证据；产品、相关测试、性能 harness/fixture、ratchet、生成器或 gate report 路径变化时，仅使对应证据失效。
-- Invalidating paths: ARCH-2 product/test paths; `scripts/measure-architecture-baseline.ts`; `tests/fixtures/architecture-baseline/**`; `tests/unit/architectureDependencyRatchet.test.ts`; repo-index/task-board/capability generators; this gate report/card
+- Evidence reuse: 各 implementation/wave gate 的 product/focused/full/Electron/fixture 证据继续服从其原卡的精确 invalidating paths；性能、ratchet 与 generated freshness 分别判定。报告、任务卡、task-board 或 generated-output-only 变化不使产品/性能证据失效。
+- Invalidating paths: product/focused evidence → each implementation card's recorded source/test/config paths; performance → `scripts/measure-architecture-baseline.ts`, architecture fixtures and Player build inputs; ratchet → `tests/unit/architectureDependencyRatchet.test.ts` or the two sliced Store methods; generated checks → generator or indexed input changes. Gate report/card/task-board/generated-output-only changes invalidate only the corresponding documentation/generated freshness check.
 - Task ID: `arch-2-gate-00-cross-surface-features`
 - Phase / wave: `ARCH-2 / phase gate`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Validation Worker + Coordinator / independent gate-process and performance reviewers / Coordinator`
-- Claimed at / released at: `2026-08-24T18:08:26+08:00 / —`
+- Claimed at / released at: `2026-08-24T18:08:26+08:00 / 2026-08-24T18:20:59+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch2-phase-gate / codex/arch2-phase-gate`
 - Baseline HEAD: `3fd845b`
 - Context: manual phase-gate audit against current source and `ARCH_2_W2B1_GATE_REPORT.md`; repo-index refresh intentionally occurs once after final gate inputs.
@@ -26,7 +26,7 @@
 - Depends on: all ARCH-2 W2-A, W2-B1 and W2-B2 implementation/admission cards done
 - Blocks: ARCH-3 admission and implementation
 - Risk statement: the gate must not call automation success “accepted”, hide retained Published Runtime/large-world unknowns, or rerun broad suites merely because they exist.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / gate-process review corrected an overly broad, self-invalidating evidence rule and an incomplete report header; no product or validation rerun was required`
 
 ## Product outcome
 
@@ -73,14 +73,14 @@ ARCH-2 closes as an engineering candidate only if every admitted cross-Surface b
 
 ## Acceptance
 
-- [ ] All ARCH-2 tasks are terminal and their exact product commits/reviews are recorded.
-- [ ] Mixed failure compensation and normal Published V2 navigation are green.
-- [ ] Removed Store fallback targets are protected or precisely evidenced at zero.
-- [ ] Performance has one final same-protocol classification; no cherry-picked rerun.
-- [ ] Spatial large-world remains an explicit unknown with a re-entry trigger, not a fabricated pass.
-- [ ] `LEG-002` remains nonzero with owner/ARCH-5 target and no false Runtime execution claim.
-- [ ] Generated repo-index/task-board and AI capability checks are fresh after final inputs.
-- [ ] Pipeline, engineering, outcome and teacher/product accepted statuses are separate.
+- [x] All ARCH-2 tasks are terminal and their exact product commits/reviews are recorded.
+- [x] Mixed failure compensation and normal Published V2 navigation are green.
+- [x] Removed Store fallback targets are protected or precisely evidenced at zero.
+- [x] Performance has one final same-protocol classification; no cherry-picked rerun.
+- [x] Spatial large-world remains an explicit unknown with a re-entry trigger, not a fabricated pass.
+- [x] `LEG-002` remains nonzero with owner/ARCH-5 target and no false Runtime execution claim.
+- [x] Generated repo-index/task-board and AI capability checks are fresh after final inputs.
+- [x] Pipeline, engineering, outcome and teacher/product accepted statuses are separate.
 
 ## Stop and escalation
 
@@ -95,12 +95,12 @@ ARCH-2 closes as an engineering candidate only if every admitted cross-Surface b
 
 ## Result evidence
 
-- Gate decision/report commit: pending
-- Ratchet/static consumer evidence: pending
-- Performance classification: pending
-- Generated/check results: pending
-- Pipeline / engineering / outcome / accepted: pending
-- Remaining risks and next phase: pending
+- Gate decision/report commit: `d09ef70` (`test(arch-2): add phase gate evidence`); `ARCH_2_PHASE_GATE_REPORT.md` records the reuse matrix, deltas, performance table and status separation. Independent gate-process review requested two documentation corrections and approved the final text with no remaining findings.
+- Ratchet/static consumer evidence: combined-head ratchet passed `12/12` after adding one exact Store-slice sentinel for both removed legacy fallbacks. `LEG-002 buildExportPayload` remains exactly `23`, matching the ledger; no related execution path changed since W2-B1.
+- Performance classification: exactly one 21-sample/5-warmup run produced `22/22` rows below registered ARCH-0 investigation lines; Mixed navigate was `1.145 / 1.892ms` versus `3.131 / 4.949ms`. Independent performance review recomputed medians/P95 and thresholds and approved only the bounded conclusion that the registered investigation is closed; no performance product card was admitted.
+- Generated/check results: after all final report/card/board inputs, `repo:index` generation/check, task-board generation/check, AI capability check and diff hygiene passed. No semantic/golden/contract/capability source was changed.
+- Pipeline / engineering / outcome / accepted: `pass / ARCH-2 engineering candidate`; scoped functional chain green; registered performance investigation green; visual remains existing art candidate with large-world unassessed; teacher/product accepted `not claimed`.
+- Remaining risks and next phase: Spatial large-world requires a defined scale/device budget or a reproduction before characterization; `LEG-002` remains owned active debt for ARCH-5 review. ARCH-3 begins with fresh per-Surface necessity admission and may create zero tasks for a Surface.
 
 ## Ready checklist（Coordinator）
 

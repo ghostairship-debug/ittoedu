@@ -521,6 +521,11 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_2_PHASE_GATE_REPORT.md",
+      "title": "ARCH-2 跨 Surface 公共能力最终阶段门报告"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md",
       "title": "ARCH-2 资源快照与跨 Surface 行为基线"
     },
@@ -533,6 +538,11 @@
       "links": [],
       "path": "docs/development-plan/baselines/ARCH_2_W2B1_GATE_REPORT.md",
       "title": "ARCH-2 W2-B1 Runtime / Interaction 阶段门"
+    },
+    {
+      "links": [],
+      "path": "docs/development-plan/baselines/ARCH_2_W2B2_ADMISSION_REPORT.md",
+      "title": "ARCH-2 W2-B2 剩余候选域准入报告"
     },
     {
       "links": [],
