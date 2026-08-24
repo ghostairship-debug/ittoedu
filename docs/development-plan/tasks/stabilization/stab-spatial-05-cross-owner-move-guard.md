@@ -13,16 +13,16 @@
 - Validation budget: 9 minutes
 - Reviewer budget: 1
 - Evidence reuse: 执行后将跨坐标 owner 零写入、说明文案和同 owner reorder 结果绑定 product commit；文档/任务板/generated-only 变化复用，命中下列拖放、命令或 focused 测试时失效。
-- Invalidating paths: `src/renderer/ui/NodesTab.tsx` 的 owner drop 分支；`src/renderer/store/editorStore.ts#moveCandidateLayerOwner`; `src/renderer/course/effectiveLayerCommands.ts#moveEffectiveLayerOwner`; `tests/unit/effectiveLayerCommands.test.ts`; `tests/unit/v9GlobalLayerUiAdapter.test.tsx`
+- Invalidating paths: `src/renderer/ui/NodesTab.tsx`; `src/renderer/store/editorStore.ts#moveCandidateLayerOwner`; `src/renderer/course/effectiveLayerCommands.ts#moveEffectiveLayerOwner`; `src/renderer/course/spatialEditorView.ts#spatialLayerCoordinateSpace`; `tests/unit/effectiveLayerCommands.test.ts`; `tests/unit/v9GlobalLayerUiAdapter.test.tsx`
 - Task ID: `stab-spatial-05-cross-owner-move-guard`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Spatial Layer Guard Worker / independent coordinate-semantics reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context: `query effective layer owner move and Spatial coordinates at claim; Bootstrap exact source if index is stale`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Store/Nodes single-writer firewall / codex/architecture-stabilization`
+- Baseline HEAD: `3a73bdc` (cross-Surface canonical history integrated; worktree clean)
+- Context: `bootstrap-manual: exact-source trace from NodesTab DnD through moveCandidateLayerOwner/moveEffectiveLayerOwner to spatialLayerCoordinateSpace`
+- Freshness / relevant dirty inputs: `At 3a73bdc, a world item can still move to global with unchanged frame and one history entry; global is viewport while surface/world are world coordinates. NodesTab collision snapping only protects teacher-controller ownership and can hide the actual cross-coordinate target. Focused baseline remains the two named suites.`
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Retry count: `0`
