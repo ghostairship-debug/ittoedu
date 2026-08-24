@@ -11,12 +11,12 @@
 - Validation budget: 20 minutes
 - Reviewer budget: 1
 - Evidence reuse: reuse the four implementation cards' product-bound focused tests and independent reviews; product evidence is invalidated only by their listed source/tests, root renderer TypeScript resolution, or renderer Slide/Flow/Spatial-named file membership changes. Report/task/task-board/repo-index generated-only changes do not invalidate it.
-- Invalidating paths: `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/course/flowEditorCommands.ts`; `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/phaser/layerItemHitTest.ts`; `src/renderer/phaser/v9SlideHitAdapter.ts`; `src/renderer/phaser/v9SpatialHitAdapter.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/authoring/v9SlideContentEdit.ts`; the four cards' focused tests; renderer Slide/Flow/Spatial-named source membership; `tsconfig.json`; Vitest/TypeScript resolution config
+- Invalidating paths: `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/slideEditorCommands.ts`; `src/renderer/course/flowEditorCommands.ts`; `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/project/createFlowCourseProject.ts`; `src/renderer/phaser/layerItemHitTest.ts`; `src/renderer/phaser/v9SlideHitAdapter.ts`; `src/renderer/phaser/v9SpatialHitAdapter.ts`; `src/renderer/authoring/stageViewportTransform.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/authoring/v9SlideContentEdit.ts`; `src/renderer/course/spatialCameraCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/spatialPathCommands.ts`; `src/renderer/course/spatialRelationCommands.ts`; `src/renderer/course/spatialSemanticZoom.ts`; `src/renderer/store/editorStore.ts`; `src/renderer/course/courseLocationCommands.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/v9MediaAudioCommands.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `tests/unit/flowEditorCommands.test.ts`; `tests/unit/courseTreeView.test.ts`; `tests/unit/spatialWorkspaceAuthoring.test.ts`; `tests/unit/v9SlideViewportAdapter.test.ts`; `tests/unit/flowSharedAuthoringAdapters.test.tsx`; `tests/unit/spatialEditorCommands.test.ts`; `tests/unit/courseLocationCommands.test.ts`; renderer Slide/Flow/Spatial-named source membership; `tsconfig.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-gate-00-surface-modularization`
 - Phase / wave: `ARCH-3 / phase gate`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent ARCH-3 gate reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:03:00+08:00 / pending`
+- Claimed at / released at: `2026-08-24T19:03:00+08:00 / 2026-08-24T19:11:54+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `d26ba7c`
 - Context: all six ARCH-3 admission/implementation cards are done; combined product HEAD contains four reviewed subtractive commits and the root worktree is clean.
@@ -24,7 +24,7 @@
 - Depends on: `arch-3-00-surface-admission`, `arch-3-01-neutral-project-mutation-first-flow-consumer`, `arch-3-02-neutral-layer-item-hit-test-first-spatial-consumer`, `arch-3-03-remaining-edge-readmission`, `arch-3-04-neutral-flow-shared-overlay-mutation`, and `arch-3-05-neutral-spatial-project-mutation-alias` done
 - Blocks: ARCH-4 necessity admission
 - Risk statement: the gate must distinguish intentionally retained edges from regressions and must not turn a one-time ownership snapshot into a brittle permanent ratchet.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `2 / independent review expanded invalidation coverage; closure then corrected the generated repo-index write path from an obsolete artifacts location to the actual root directory`
 
 ## Product outcome
 
@@ -45,7 +45,7 @@ No focused command is rerun unless an invalidating input changed.
 
 - new `docs/development-plan/baselines/ARCH_3_PHASE_GATE_REPORT.md`
 - this card and generated `docs/development-plan/TASK_BOARD.md`
-- one final refresh of `artifacts/repo-index/generated/**`
+- final refresh of `repo-index/generated/**`
 
 ### Required read
 
@@ -83,7 +83,12 @@ No focused command is rerun unless an invalidating input changed.
 
 ## Result evidence
 
-- Pending combined validation, report and independent review.
+- Phase report: `docs/development-plan/baselines/ARCH_3_PHASE_GATE_REPORT.md`, bound to combined product candidate `d9a1b29`.
+- Reused fresh focused evidence: `2/22`, `2/14`, `1/7`, and `1/6` tests from the four reviewed implementation commits; no invalidating path changed and no focused command was rerun.
+- Combined validation: `npx tsc --noEmit` passed. A TypeScript 7 AST snapshot confirmed Slide → Flow/Spatial `0`; Flow → Slide `1 edge / 1 call`; Spatial → Slide `1 edge / 10 symbols`; one mutation function body; zero Spatial Schema import; seven Spatial mutation consumers/thirty calls; and zero production incoming consumer for `appendBlankFlowPage`.
+- Retained edges and re-entry conditions are recorded rather than hidden or migrated for naming symmetry. No architecture ratchet or new abstraction was added.
+- Independent gate review: APPROVE after invalidating paths were expanded to cover every counted consumer, retained generic source, focused test and deletion-candidate test; no remaining finding and no product validation rerun requested.
+- Closure freshness: final task-board and repo-index generate/check plus diff hygiene passed after the card's generated-output path was corrected; no product validation was repeated.
 
 ## Ready checklist（Coordinator）
 

@@ -546,6 +546,21 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/ARCH_3_ADMISSION_REPORT.md",
+      "title": "ARCH-3 Surface 模块化必要性准入报告"
+    },
+    {
+      "links": [],
+      "path": "docs/development-plan/baselines/ARCH_3_PHASE_GATE_REPORT.md",
+      "title": "ARCH-3 Surface 模块化阶段门报告"
+    },
+    {
+      "links": [],
+      "path": "docs/development-plan/baselines/ARCH_3_RE_ADMISSION_REPORT.md",
+      "title": "ARCH-3 剩余边二次准入报告"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md",
       "title": "ARCH-0A Feature / Writer / Consumer / Owner Ledger"
     },
