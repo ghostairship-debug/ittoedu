@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-11-runtime-properties-integration`
 - Phase / wave: `ARCH-2 / W2-B1 Runtime authoring integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Runtime Properties Workers / independent Runtime reviewers / Coordinator`
-- Claimed at / released at: `2026-08-24 11:32 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 11:32 Asia/Shanghai / 2026-08-24 12:11 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `273e2dd`
 - Claim commit: `3049064`
@@ -22,6 +22,14 @@
 ## Product outcome
 
 In the existing professional Properties surface, a teacher can inspect the exact canonical Runtime and edit enabled, an API-valid render mode, or one registered content string for the currently visible Slide scene/global Runtime. Each real field commit changes only that canonical field in one current transaction; unchanged, locked, stale, replaced or detached targets remain honest zero-write outcomes. Existing cross-location global visibility remains, while no Flow/Spatial local Runtime inspector or execution capability is invented.
+
+## Current status and evidence
+
+- `eb382f7` adds the canonical inspector view plus exact enabled/renderMode target and pure all-owner planner; `bb35c25` binds the narrow Store transaction and removes both raw Runtime update actions.
+- `f90d443` proves the real Store/history/resource/archive/Published vertical slice. `aeefac9` binds Properties and the buffered keyed content editor; `5b0b970` locks the real Electron Properties path.
+- `d5109a6` / `9aa8d4f` keep schema-valid legacy content keys visible but read-only when they cannot form a stable B1-10 address. `4119205` protects IME composition and keeps Spatial global Runtime reachable despite retained graph selection.
+- `0be7386` removes the obsolete raw-action test ratchets while preserving Developer template setup and Runtime source/content/asset regression intent.
+- Independent Core/Store and UI reviews approve with no remaining findings after the legacy-key, Spatial-global and IME fixes.
 
 ## Canonical contract and carrier
 
@@ -155,10 +163,10 @@ canonical Properties Runtime view
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`.
-- Behavior before/after: `pending`.
-- Validation results: `pending`.
-- Known risks/findings: `pending`.
+- Consumers migrated/remaining: `Properties direct updateSceneRuntime/updateGlobalRuntime 1/1 → 0/0; Properties V8 scene.runtime/project.globalRuntime inspector reads 1/1 → 0/0; raw updateSceneRuntime/updateGlobalRuntime symbols in src+tests → 0. Developer setSceneRuntime/setGlobalRuntime retain exactly one product path each (selector+call) for B1-12 and did not grow.`
+- Behavior before/after: `Properties previously copied a lossy V8 RuntimeDocument through whole-patch actions, which could downgrade surface-runtime/API 3 to canvas-runtime/API 2, couple enabled to LayerItem.visible and create history per content keystroke. It now reads an immutable canonical V9 view and submits an exact scalar or content-key target through one current transaction. API 3 remains DOM-only and exact; visibility stays independent; buffered content commits once, preserves dirty/stale drafts and is IME-safe; invalid legacy keys display read-only instead of crashing.`
+- Validation results: `Coordinator V1 5 files / 55 tests; V2 7 files / 67 tests; independent Core/Store 7 / 93 and UI 5 / 55; legacy cleanup 4 / 52; real Electron Properties milestone 1/1 passed in 43.6s. npm run typecheck (renderer/Electron/e2e), git diff --check and raw-consumer gates passed.`
+- Known risks/findings: `Slide scene/global Runtime template creation still uses legacy RuntimeDocument set actions and is the next card. Existing global Properties reachability is preserved across Slide/Flow/Spatial, but Flow surface, Spatial world and Slide surface Runtime still have no local Properties inspector; API 3 execution reachability is not claimed. Automated outcome remains engineering candidate, not teacher-accepted visual evidence.`
 - indexImpact: `Runtime Properties canonical view/planner, Store transaction, UI bindings and raw-action inventory change; refresh generated repo-index after close`.
 - Next allowed task: `ARCH-2 B1-12 Slide Runtime template lifecycle integration`.
 
