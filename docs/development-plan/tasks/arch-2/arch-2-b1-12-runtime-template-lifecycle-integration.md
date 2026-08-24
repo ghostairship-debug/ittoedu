@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-12-runtime-template-lifecycle-integration`
 - Phase / wave: `ARCH-2 / W2-B1 Runtime authoring integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Runtime Template Workers / independent Runtime reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 12:14 Asia/Shanghai / pending`
+- Claimed at / released at: `2026-08-24 12:14 Asia/Shanghai / 2026-08-24 12:44 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `a870631`
 - Claim commit: `1b4f0ca`
@@ -156,10 +156,10 @@ canonical Runtime source view creationTarget
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`.
-- Behavior before/after: `pending`.
-- Validation results: `pending`.
-- Known risks/findings: `pending`.
+- Consumers migrated/remaining: `setSceneRuntime`, `setGlobalRuntime`, `runtimeDocumentToCourseRuntime`, `makeRuntimeLayerItem`, `writeSceneRuntime`, `writeGlobalRuntime` and `freshRuntime` are all 0 in src+tests. `courseRuntimeToDocument` remains at exactly 3 V9→V8 read-projection references. Runtime template creation has one product path, in DeveloperTab, through the narrow Store action.`
+- Behavior before/after: `Before, Developer built a lossy V8 RuntimeDocument, replaced the whole scene/global slot and depended on manual location/state/scope refresh. After, the source view exposes an exact supported Slide slot target, the canonical pure planner creates one fixed V9 Runtime LayerItem or returns a typed zero-write rejection, and the existing unified layer deletion plus undo/redo owns scene/global/base/named-state removal semantics. Runtime authoring remains reachable after unrelated edits by aligning the current read/source session revision without weakening the captured target's exact revision check.`
+- Validation results: `V1: 7 files / 79 tests passed. V2 adjacent Runtime integration: 9 files / 79 tests passed. Post-review session-revision fix: 4 files / 67 tests passed, including DeveloperMode 22/22. Two independent reviewers approved after the surfaced session-revision and honest E2E assertion findings were fixed. Real Electron milestone passed 1/1 in 34.2s. npm run typecheck, npm run pretest:e2e and git diff --check passed; every retired legacy symbol gate is 0.`
+- Known risks/findings: `Creation intentionally supports only current Slide scene/global slots; Flow, Spatial, Slide-surface and global creation while outside Slide remain unavailable. The canonical template is fixed to canvas-runtime API 2 and does not add a chooser. Automation establishes engineering candidate status, not teacher-reviewed art/accepted status. Generic authoring-session revision lag remains broader product debt, while the Runtime read/source seams now safely align only the current session.`
 - indexImpact: `Runtime template planner/target, Store transaction, Developer binding and legacy writer inventory change; refresh generated repo-index after close`.
 - Next allowed task: `ARCH-2 W2-B1 Runtime authoring validation gate`.
 
