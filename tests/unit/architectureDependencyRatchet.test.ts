@@ -36,6 +36,18 @@ function expectBefore(text: string, first: string, second: string): void {
   expect(firstIndex, `${first} before ${second}`).toBeLessThan(secondIndex)
 }
 
+function countLiteral(text: string, literal: string): number {
+  return text.split(literal).length - 1
+}
+
+function sliceBetween(text: string, first: string, second: string): string {
+  const start = text.indexOf(first)
+  const end = text.indexOf(second, start + first.length)
+  expect(start, first).toBeGreaterThanOrEqual(0)
+  expect(end, second).toBeGreaterThan(start)
+  return text.slice(start, end)
+}
+
 describe('ARCH-1 dependency ratchet', () => {
   it('keeps Core identity and transaction seams independent of concrete Surfaces and Features', () => {
     for (const path of [
@@ -189,5 +201,133 @@ describe('ARCH-2 resource-safety ratchet', () => {
       'captureComponentPackageReplacementTarget',
       'readComponentCatalogPackage',
     )
+  })
+})
+
+describe('ARCH-2 Runtime and Interaction ratchet', () => {
+  it('keeps Runtime authoring on canonical target planners with retired raw writers at zero', () => {
+    const runtimeFiles = filesUnder('src/renderer/runtime')
+    const runtimeCorpus = runtimeFiles.map(source).join('\n')
+    const sourceCorpus = filesUnder('src').map(source).join('\n')
+    const store = source('src/renderer/store/editorStore.ts')
+
+    const pureRuntimeFiles = new Set([
+      ...runtimeFiles.filter((candidate) => (
+        /(?:AuthoringCommands|AuthoringView)\.ts$/.test(candidate)
+      )),
+      'src/renderer/runtime/courseRuntimeTransactions.ts',
+    ])
+    for (const path of pureRuntimeFiles) {
+      const text = source(path)
+      expect(text, path).not.toMatch(/\buseEditorStore\b|\bApp\.tsx\b/)
+      expect(importSpecifiers(text).filter((specifier) => (
+        /(?:^|\/)ui\//.test(specifier) || /editorStore/.test(specifier)
+      )), path).toEqual([])
+    }
+
+    const runtimeWord = 'Runtime'
+    for (const retired of [
+      ['set', 'Scene', runtimeWord].join(''),
+      ['set', 'Global', runtimeWord].join(''),
+      ['update', 'Scene', runtimeWord].join(''),
+      ['update', 'Global', runtimeWord].join(''),
+      ['runtime', 'Document', 'To', 'Course', runtimeWord].join(''),
+      ['make', runtimeWord, 'Layer', 'Item'].join(''),
+      ['write', 'Scene', runtimeWord].join(''),
+      ['write', 'Global', runtimeWord].join(''),
+      ['fresh', runtimeWord].join(''),
+    ]) {
+      expect(sourceCorpus, retired).not.toMatch(new RegExp(`\\b${retired}\\b`))
+    }
+    const readProjection = ['course', runtimeWord, 'To', 'Document'].join('')
+    expect(countLiteral(sourceCorpus, readProjection)).toBe(3)
+
+    for (const [start, end, planner] of [
+      ['  const commitRuntimeSourceAtTarget = (', '  const commitRuntimeContentTextAtTarget = (', 'planRuntimeSourceUpdate({'],
+      ['  const commitRuntimeContentTextAtTarget = (', '  const commitRuntimePropertyAtTarget = (', 'planRuntimeContentTextUpdate({'],
+      ['  const commitRuntimePropertyAtTarget = (', '  const rejectRuntimeTemplateCreation = (', 'planRuntimePropertyUpdate({'],
+      ['  const commitRuntimeTemplateCreationAtTarget = (', '  const rejectInteractionAuthoring = (', 'planRuntimeTemplateCreation({'],
+      ['  const commitRuntimeAssetReplacementAtTarget = (', '  const persistFlowLayerCommand = (', 'planCourseRuntimeAssetReplacement({'],
+    ] as const) {
+      const useCase = sliceBetween(store, start, end)
+      expect(useCase, planner).toContain(planner)
+      expect(useCase, start).toContain('createEditorTransactionStep(')
+      expect(useCase, start).toContain('persistProjectResourceTransaction(')
+    }
+    expect(runtimeCorpus).not.toMatch(/\bRuntimeDocument\b/)
+
+    const templateUiConsumers = filesUnder('src/renderer/ui').filter((path) => (
+      source(path).includes('createRuntimeTemplateAtTarget')
+    ))
+    expect(templateUiConsumers).toEqual(['src/renderer/ui/DeveloperTab.tsx'])
+  })
+
+  it('keeps Automation template and supported professional fields on the V9 planner path', () => {
+    for (const path of [
+      'src/renderer/interactions/interactionAuthoringCommands.ts',
+      'src/renderer/interactions/interactionAuthoringView.ts',
+      'src/renderer/interactions/interactionTemplates.ts',
+    ]) {
+      const text = source(path)
+      expect(text, path).not.toMatch(/\buseEditorStore\b|\bApp\.tsx\b/)
+      expect(importSpecifiers(text).filter((specifier) => (
+        /(?:^|\/)ui\//.test(specifier) || /editorStore/.test(specifier)
+      )), path).toEqual([])
+    }
+
+    const store = source('src/renderer/store/editorStore.ts')
+    const applyTemplate = sliceBetween(
+      store,
+      '    applyInteractionTemplateAtTarget(target, template) {',
+      '    updateInteractionRuleAtTarget(target, ruleId, patch) {',
+    )
+    expect(applyTemplate).toContain('planApplyInteractionTemplate({')
+    expect(applyTemplate).toContain('persistInteractionAuthoringPlan(')
+    const updateRule = sliceBetween(
+      store,
+      '    updateInteractionRuleAtTarget(target, ruleId, patch) {',
+      '    addInteractionRule(sceneId, rule) {',
+    )
+    expect(updateRule).toContain('planUpdateInteractionRule({')
+    expect(updateRule).toContain('persistInteractionAuthoringPlan(')
+
+    const automation = source('src/renderer/ui/AutomationTab.tsx')
+    expect(automation).toContain('applyInteractionTemplateAtTarget(authoringTarget, {')
+    expect(automation).toContain('updateInteractionRuleAtTarget(authoringTarget, ruleId, patch)')
+    expect(automation).toContain("interactionView.carrier === 'global'")
+    expect(automation).toContain("interactionView.activeSurfaceType !== 'slide'")
+
+    const rawUiConsumers = filesUnder('src/renderer/ui').filter((path) => (
+      /\bupdate(?:Global)?InteractionRule\b/.test(source(path))
+    ))
+    expect(rawUiConsumers).toEqual([
+      'src/renderer/ui/DeveloperTab.tsx',
+      'src/renderer/ui/PropertiesTab.tsx',
+    ])
+  })
+
+  it('keeps session-owned global and optional Slide-local controllers on all three Surface ports', () => {
+    const session = source('src/player/surfaces/publishedDynamicHosts.ts')
+    expect(countLiteral(session, 'new PublishedInteractionController({')).toBe(2)
+    expect(session).toContain('#globalInteractionController')
+    expect(session).toContain('#localInteractionController')
+    expect(session).toContain('createPublishedCourseSession(')
+    expect(session).toContain('getPublishedInteractionSurfacePort()')
+
+    for (const path of [
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
+      'src/player/surfaces/flow/FlowSurfaceHost.ts',
+      'src/player/surfaces/spatial/SpatialSurfaceHost.ts',
+    ]) {
+      const host = source(path)
+      expect(host, path).toContain('PublishedDomInteractionSurfacePort')
+      expect(host, path).toContain('getPublishedInteractionSurfacePort()')
+      expect(host, path).toContain('refreshNodes(')
+    }
+
+    const legacyEngineConsumers = filesUnder('src/player').filter((path) => (
+      source(path).includes('new InteractionEngine(')
+    ))
+    expect(legacyEngineConsumers).toEqual(['src/player/PlayerScene.ts'])
   })
 })

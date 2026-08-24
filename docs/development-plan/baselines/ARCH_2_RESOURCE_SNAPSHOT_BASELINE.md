@@ -69,9 +69,9 @@ ARCH-1 已证明一个 Slide 图片替换可以把 V9 document 与素材 bytes �
 - Library → canvas 涉及四种 placement：Slide LayerItem、FlowMediaBlock、Flow overlay LayerItem、Spatial world LayerItem；另卡迁移。
 - Flow “从文件替换媒体”仍有 await 后目标/sidecar 会话漂移；另做 stable-target card。
 - Component import/delete/editable copy/editable update 尚未全走 delta，因此 package snapshot 字段暂不可删除。
-- Runtime asset replacement当前是先 import 再 binding update 的两次提交；W2-B 首卡处理。
-- Runtime、Interaction、Flow teacher controller 在 Flow/Spatial 活动时存在 no-op/V8 projection 写入；W2-B 分行为迁移。
-- Published V2 hosts 当前没有真实 Runtime execution 或 InteractionEngine consumer；Legacy authoring preview 在行为等价前不得删除。
+- Runtime asset replacement 已改为异步前捕获精确 V9 target，并把 binding、AssetMeta 与 bytes 作为一个 document/resource transaction 提交；公开可达的 source/content/Properties/template 写入也已迁到字段或 slot 级 canonical target。
+- Automation reveal-sequence 模板创建及对同一规则的后续专业字段 patch 已走 typed V9 planner/transaction；既有 generic add/delete/duplicate/move/click-rule 与 Developer JSON adapters 仍在该 slice 之外。Flow/Spatial 本地 authoring 仍明确不可用，Flow teacher controller 等共享行为留在 W2-B2。
+- Published V2 CoursePlayer session 的 Runtime LayerItem 仍只呈现静态后备；真实 `RuntimeHost` / `CourseRuntimeKernel` 仍是 `LEG-002` 的 Legacy ExportPayload consumer。Published Interaction 由 session-owned global controller 与可选 Slide-local controller 通过 Slide/Flow/Spatial DOM ports 执行受支持的 `node.click` slice；Legacy `InteractionEngine` 仍有独立真实 consumer，未满足删除门。
 
 ## 6. 首批验收与量化下降
 

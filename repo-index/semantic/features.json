@@ -487,15 +487,19 @@
       "moduleIds": [
         "module:runtime-interactions"
       ],
-      "currentFact": "Runtime contracts, isolated hosts and DeveloperTab editing exist.",
+      "currentFact": "Canonical V9 targets now author Runtime assets, source, keyed content, scalar Properties and supported Slide scene/global templates as single current-Surface transactions; Published V2 preserves a read-only minimal/static-fallback projection, while actual RuntimeHost/CourseRuntimeKernel execution remains on the characterized Legacy path.",
       "targetState": "Narrow authoring/validation/host ports with no Player writeback.",
       "highSignalFiles": [
         "src/renderer/ui/DeveloperTab.tsx",
-        "src/renderer/export/course/buildPublishedCourse.ts"
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/renderer/runtime/runtimeTemplateAuthoringCommands.ts",
+        "src/renderer/store/editorStore.ts"
       ],
       "highSignalTests": [
         "tests/integration/runtimeRegistry.test.ts",
-        "tests/unit/developerMode.test.tsx"
+        "tests/unit/developerMode.test.tsx",
+        "tests/integration/courseRuntimeAssetReplacementVerticalSlice.test.ts",
+        "tests/unit/runtimeTemplateLifecycleIntegration.test.ts"
       ],
       "canonicalFiles": [
         "src/shared/contracts/runtime/schema.ts",
@@ -534,14 +538,18 @@
       "moduleIds": [
         "module:runtime-interactions"
       ],
-      "currentFact": "Simple templates, professional rule UI and InteractionEngine share the V1 contract.",
+      "currentFact": "Typed V9 views and planners apply Automation's reveal-sequence template and its supported subsequent field patches to the same Interaction V1 rule; session-owned global and optional Slide-local Published controllers execute the supported node.click slice through Slide, Flow and Spatial DOM ports, while generic rule adapters and the legacy InteractionEngine remain explicit consumers.",
       "targetState": "Typed view models and transaction-backed commands without a parallel rule format.",
       "highSignalFiles": [
         "src/player/InteractionEngine.ts",
-        "src/renderer/export/course/buildPublishedCourse.ts"
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/renderer/interactions/interactionAuthoringCommands.ts",
+        "src/player/interactions/PublishedInteractionController.ts"
       ],
       "highSignalTests": [
-        "tests/unit/interactionSchema.test.ts"
+        "tests/unit/interactionSchema.test.ts",
+        "tests/integration/courseInteractionAuthoringVerticalSlice.test.ts",
+        "tests/integration/publishedInteractionSlideHostIntegration.test.ts"
       ],
       "canonicalFiles": [
         "src/shared/contracts/interaction-v1/schema.ts",
@@ -553,11 +561,14 @@
       ],
       "runtimeConsumers": [
         "src/player/InteractionEngine.ts",
-        "src/renderer/export/course/buildPublishedCourse.ts"
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/player/interactions/PublishedInteractionController.ts",
+        "src/player/surfaces/publishedDynamicHosts.ts"
       ],
       "tests": [
         "tests/unit/interactionEditor.test.tsx",
-        "tests/unit/interactionEngine.test.ts"
+        "tests/unit/interactionEngine.test.ts",
+        "tests/unit/publishedInteractionController.test.ts"
       ],
       "evidence": [
         "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md"

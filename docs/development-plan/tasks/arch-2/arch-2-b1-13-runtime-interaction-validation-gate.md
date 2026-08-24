@@ -12,7 +12,7 @@
 - Worktree / branch: `primary validation workspace / codex/architecture-stabilization`
 - Baseline HEAD: `ef08171`
 - Claim commit: `d3c443e`
-- Context Pack + manifest hash | bootstrap-manual: `feature:runtime + feature:interactions + feature:player; fresh generated repo-index at ef08171; source 283cc037, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
+- Context Pack + manifest hash | bootstrap-manual: `feature:runtime + feature:interactions + feature:preview-player; fresh generated repo-index at ef08171; source 283cc037, semantic 2616aecc, config 103c4aa4, tool 0895bc33`
 - Freshness / relevant dirty inputs: `clean tree after B1-12 close and deterministic repo-index refresh; no product writer lock`
 - Depends on: `arch-2-b1-01 through arch-2-b1-12 done`
 - Blocks: `ARCH-2 W2-B2 shared Global Layers / Controller, Diagnostics and Save / Recovery work`
@@ -20,7 +20,7 @@
 
 ## Product outcome
 
-W2-B1 closes only when the user-visible Runtime authoring lifecycle and the standard Interaction V1 authoring/playback slice work as one coherent current Course Project V9 → Published Course V2 product chain. Exact targets must never retarget or overwrite on stale input; each real authoring change must be one canonical transaction; Preview and packaged playback must remain read-only; Slide, Flow and Spatial host ownership/gesture rules must remain exact; removed V8/raw writers must stay removed.
+W2-B1 closes only when the user-visible Runtime authoring lifecycle and the standard Interaction V1 authoring/playback slice form an honest current Course Project V9 → Published Course V2 chain. Exact targets must never retarget or overwrite on stale input; each real authoring change must be one canonical transaction; Runtime definitions must round-trip into the read-only Published projection without claiming Published Runtime execution; supported Interaction playback must remain read-only; Slide, Flow and Spatial host ownership/gesture rules must remain exact; removed V8/raw writers must stay removed.
 
 This gate validates and ratchets the completed behavior. It does not add another Runtime or Interaction format, broaden the supported trigger/action/template set, claim Flow/Spatial-local authoring, change Schema, or turn automated evidence into teacher acceptance.
 
@@ -28,8 +28,8 @@ This gate validates and ratchets the completed behavior. It does not add another
 
 - Runtime assets, source, content, Properties and Slide scene/global template lifecycle all use stable V9 targets and current Surface transaction/history semantics.
 - Runtime stale/locked/replaced/detached/occupied/no-op paths are zero-write; resource bytes and document bindings undo/redo together where applicable.
-- Interaction template creation and professional editing preserve one standard Interaction V1 rule and one transaction, with honest local/global availability.
-- The shared Published controller executes the supported `node.click` / enter-exit motion / whole-course navigation slice on eligible Slide local/global, Flow global/surface and Spatial global/surface/world native LayerItems.
+- Automation reveal-sequence template creation and its supported subsequent professional-field patches preserve one standard Interaction V1 rule and one transaction, with honest local/global availability; generic add/delete/duplicate/move/click-rule and Developer JSON adapters remain outside this migrated slice.
+- Session-owned global and optional Slide-local Published controllers execute the supported `node.click` / enter-exit motion / whole-course navigation slice on eligible Slide local/global, Flow global/surface and Spatial global/surface/world native LayerItems.
 - Published execution never writes the authoring Store or payload, never steals occupied/pass-through/camera/component/runtime/media/controller gestures, and tears down stale work across navigation/replay/restart/destroy.
 - Exact legacy-consumer reductions from B1-01 through B1-12 remain true and are protected by a focused dependency/consumer ratchet.
 - Focused union, full unit/integration candidate, all TypeScript projects, desktop build, targeted real Electron milestones, contracts/capabilities/task-board/repo-index gates and diff hygiene pass.
@@ -40,6 +40,9 @@ This gate validates and ratchets the completed behavior. It does not add another
 ### Allowed write
 
 - New `docs/development-plan/baselines/ARCH_2_W2B1_GATE_REPORT.md`.
+- Runtime/Interaction current-fact bullets in `docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md`.
+- Audited `MOD-09`, `MOD-10` and `MOD-13` rows only in `docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md`.
+- `feature:runtime`, `feature:interactions` and directly affected `feature:preview-player` records in `repo-index/semantic/features.json`.
 - Focused additive assertions in `tests/unit/architectureDependencyRatchet.test.ts` that freeze already-removed writers and required product seams.
 - Current-fact updates to existing Runtime/Interactions/Player semantic records only when directly evidenced.
 - This task card result fields, generated task board and generated repo-index outputs.
@@ -68,15 +71,16 @@ This gate validates and ratchets the completed behavior. It does not add another
 ### V2 final candidate
 
 - Clean full `npm test` candidate.
-- `npm run typecheck` and `npm run build:desktop`.
-- Targeted real Electron Runtime lifecycle/source/Properties and Interaction template/professional-edit milestones; full desktop E2E remains the final ARCH-2 phase gate unless focused evidence exposes broader desktop risk.
+- `npm run typecheck`.
+- One full `npm run test:e2e` desktop gate; its pretest hook builds Player, renderer, Electron and registered fixtures. The existing Electron milestone proves Interaction template operations plus Runtime template/source/Properties; professional Interaction patching remains mounted-test evidence, and no reveal-template playback is claimed because its `scene.enter` trigger is outside the supported controller slice.
+- Deterministic representative-fixture checks, all three validators and an ARCH-0-compatible architecture performance measurement because Published session and Spatial DOM lifecycle changed.
 - `npm run check:contracts`, `npm run check:ai-capabilities`, `npm run check:task-board`, `npm run repo:index:check`, `npm run repo:index:quality`, and `git diff --check`.
 
 ## Consumer / legacy gate
 
 - Retired Runtime raw writers/helpers from B1-09 through B1-12 remain exactly zero; `courseRuntimeToDocument` remains read-projection-only.
 - Runtime asset replacement has one product target-based path and no direct Workspace import/update fallback.
-- Interaction template/professional edits use the typed V9 planner/transaction path; no synthetic Flow/Spatial local writer returns.
+- Automation reveal-template creation and supported subsequent field patches use the typed V9 planner/transaction path; no synthetic Flow/Spatial local writer returns. Existing generic rule and Developer JSON adapters remain explicitly nonzero outside this slice.
 - Published controller/session have only Player/Preview/packaged read-only consumers; Player remains independent from renderer Store modules.
 - Legacy `InteractionEngine` is not deleted or falsely claimed zero until its separate exact consumer gate is satisfied.
 

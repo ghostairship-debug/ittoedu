@@ -78,9 +78,10 @@
 {"bytes":9682,"contentHash":"sha256:6185b110757b6cdda7fc9608024b41c76dbee9d654aa85afa4b61f11d7ff7632","domain":"source","path":"docs/development-plan/baselines/ARCH_0_PERFORMANCE.md"}
 {"bytes":4410,"contentHash":"sha256:82756bb2a9bea0378c16a24d3de913b0e9cec70d947df39afbff3a80010b15c6","domain":"source","path":"docs/development-plan/baselines/ARCH_0_REPRESENTATIVE_PROJECTS.md"}
 {"bytes":9770,"contentHash":"sha256:391a6611376eaf90d8c5ad2d267ab170893539ce12730cb953281671f5bec2c4","domain":"source","path":"docs/development-plan/baselines/ARCH_1_GATE_REPORT.md"}
-{"bytes":7819,"contentHash":"sha256:4718ddbd6aa0224ac4291f8f0a081db9ad297a319872c74fb454aa9ea415df94","domain":"source","path":"docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md"}
+{"bytes":8461,"contentHash":"sha256:74575e6eb2708cf66f488550054cd51ba46cc4a21a59d6a2bcf6e7c2a6dadc50","domain":"source","path":"docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md"}
 {"bytes":9236,"contentHash":"sha256:178363a2176343c82884250b33a901abf3db2125470c79d4dd67fbb4196c77fa","domain":"source","path":"docs/development-plan/baselines/ARCH_2_W2A_GATE_REPORT.md"}
-{"bytes":29684,"contentHash":"sha256:b79fc496c2a0f1d97ea8fc472039301f53f9b3efd6f50d8bfd558b17272a26b2","domain":"source","path":"docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"}
+{"bytes":12192,"contentHash":"sha256:2220df1bf73e0d55b75609a1f22361d33b86610926bba81fad29eb01d7475cc6","domain":"source","path":"docs/development-plan/baselines/ARCH_2_W2B1_GATE_REPORT.md"}
+{"bytes":30694,"contentHash":"sha256:a6267af6b42f7e7f6a7b8ecac85e2caf4f814bfdae6135261d83bf140bf0f36c","domain":"source","path":"docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"}
 {"bytes":69594,"contentHash":"sha256:3bfdd1d6d16470983e68929c885ca570b01a57c71be1abc3d45242e33f115297","domain":"source","path":"docs/development-plan/inventories/legacy-consumers.json"}
 {"bytes":271015,"contentHash":"sha256:77e3786a27451e7007d9b423e950fa1e817c0bb5ce71b3db61095257bf8a76b2","domain":"tool","path":"package-lock.json"}
 {"bytes":6076,"contentHash":"sha256:5b43caf1a6741962c5ce9e46fc71049ac9eeae0f0e4cdac4764b6482ee6edac6","domain":"tool","path":"package.json"}
@@ -90,7 +91,7 @@
 {"bytes":22332,"contentHash":"sha256:8f7f9e220382589eb56b0d11bc481efe8b60df6457e52151121d4360a5b85ab8","domain":"source","path":"repo-index/golden-tasks/expected.json"}
 {"bytes":17670,"contentHash":"sha256:91f075a378399b7fcf15b90b2900b9d9dfab32e0883f41bd9c43beedd7c5235e","domain":"source","path":"repo-index/golden-tasks/tasks.json"}
 {"bytes":1313,"contentHash":"sha256:99564dbe8cb236079f0335935410430ef0f681c4c3136104e4c6f109417feaae","domain":"semantic","path":"repo-index/semantic/exclusions.json"}
-{"bytes":41302,"contentHash":"sha256:93c86dd9817162eb16341ae2f73da0b367961c47366a44e87c7bfd3b5a76d8ee","domain":"semantic","path":"repo-index/semantic/features.json"}
+{"bytes":42616,"contentHash":"sha256:28a822429aa442c10a445c74c01a42827ba6cba8b81fa4e50ce653f2a8189018","domain":"semantic","path":"repo-index/semantic/features.json"}
 {"bytes":1592,"contentHash":"sha256:bb66236d2ba1c474696ae6429b26b5b7b2a18e0f90db03bbd9f08302816f22f3","domain":"semantic","path":"repo-index/semantic/invariants.json"}
 {"bytes":18303,"contentHash":"sha256:a51154fee3282f9f04abb15a38cf73eaf443f982a6f353bf23c397820da57f7a","domain":"semantic","path":"repo-index/semantic/modules.json"}
 {"bytes":41461,"contentHash":"sha256:cdc220e10425b78259ad8aac0a53d0755446095acaa0425dbc9e270e328bfe8a","domain":"source","path":"scripts/build-architecture-baseline-fixtures.ts"}
@@ -490,7 +491,7 @@
 {"bytes":818,"contentHash":"sha256:e22ce8791dc7021806028e0aeb416e8eafa2559987a54eb4927b46377a56eb3d","domain":"source","path":"tests/unit/appErrorBoundary.test.tsx"}
 {"bytes":1547,"contentHash":"sha256:37c7b4722fb4b723c313dfd5f75629a06544a31b830b8600c7bb1efe8cfe7515","domain":"source","path":"tests/unit/applicationIdentity.test.ts"}
 {"bytes":9094,"contentHash":"sha256:9fda5eb4fd06481f7fcda5e0e97230911f51bb0bb4464ef02a7d1ab3c27ecafe","domain":"source","path":"tests/unit/architectureBaselineFixtures.test.ts"}
-{"bytes":8294,"contentHash":"sha256:a8812942931a6966cab15c76d8e2c3ea647ef50206a446c3c68bea26a5394ba5","domain":"source","path":"tests/unit/architectureDependencyRatchet.test.ts"}
+{"bytes":14859,"contentHash":"sha256:22656a1c4e9bc105e3db609dfcb4af00d4872bab687b2c11fa23ef454ddae58c","domain":"source","path":"tests/unit/architectureDependencyRatchet.test.ts"}
 {"bytes":2364,"contentHash":"sha256:39aaea67531abf08dff47660fd30c8badd9116a55c3ab0bc59fe337cc6de4b87","domain":"source","path":"tests/unit/assessmentEvaluators.test.ts"}
 {"bytes":9584,"contentHash":"sha256:13f4f96402d02cb61d55be9847f8ef62b19f0b7608191568e8dfb4a61c0805b7","domain":"source","path":"tests/unit/assetReferences.test.ts"}
 {"bytes":10771,"contentHash":"sha256:942cf2114c5226813d621436fe34a4bd5e9f471637717005036827afe542eb31","domain":"source","path":"tests/unit/assetTransactions.test.ts"}
