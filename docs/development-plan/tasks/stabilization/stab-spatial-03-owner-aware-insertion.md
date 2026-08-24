@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/ui/ElementsTab.tsx`; `src/renderer/ui/MediaTab.tsx`; `src/renderer/ui/ComponentsTab.tsx`; `src/renderer/store/editorStore.ts` 的 add text/formula/shape/image/video/component/runtime Spatial 分支；`src/renderer/course/spatialEditorCommands.ts` 的 world insert commands；`src/renderer/course/globalLayerCommands.ts`; `tests/unit/spatialProductIntegration.test.tsx`; `tests/unit/spatialEditorCommands.test.ts`
 - Task ID: `stab-spatial-03-owner-aware-insertion`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Insertion Worker / independent owner-routing reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Spatial Insertion UI firewall / codex/architecture-stabilization`
 - Baseline HEAD: `c9c290a` (owner-aware selection `82e59fc`, insertion affordance `a6fdba4`, diagnostics `ac5f0e6`)
 - Context Pack + manifest hash | bootstrap-manual: exact-source Bootstrap traced Elements, Media and Components entries through the canonical world commands; repo-index refresh remains deferred to the Wave B gate.
@@ -26,7 +26,7 @@
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 同一插入按钮在错误 owner 写入会破坏全课/本表面/世界语义；修复不得复制对象模拟 owner、偷改 Schema 或让成功提示先于 canonical commit。
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / focused test act-reference assertion precision; product behavior unchanged`
 
 ## Product outcome
 
@@ -45,12 +45,12 @@
 - Forbidden write: Schema/contracts、Player/Published/export、Slide/Flow 插入语义、媒体文件对话框协议、Dependencies/generated。
 - Hotspot lock: Spatial 的 Store / Properties / Clipboard / History 由同一 Coordinator/Integrator 串行接入；五张 Spatial 卡可并行调查、实现纯命令和编写独立测试，只有命中 Store / Nodes / Properties 的接入提交必须串行。
 - Acceptance:
-  - [ ] 每个当前可见且公开承诺的 owner/type 入口至少有一个受支持对象完成“插入 → canonical owner → selection → 一条 history → undo/redo”。
-  - [ ] surface 若没有真实入口/consumer，则隐藏、只读或以 skip evidence 关闭；不得为通过矩阵而新增 scope 入口。
-  - [ ] 插入不再仅因 Spatial session 存在就固定落到 world；status 文案与实际 owner 一致。
-  - [ ] 不支持的 owner/type 组合禁用或不显示，并给出教师可理解的原因；不得 fallback 到另一 owner。
-  - [ ] 插入后的有效 order 唯一，稳定 authoringAddress 指向实际 carrier。
-  - [ ] 失败、stale、locked、容量或资源错误为零写入。
+  - [x] 每个当前可见且公开承诺的 owner/type 入口至少有一个受支持对象完成“插入 → canonical owner → selection → 一条 history → undo/redo”。
+  - [x] surface 若没有真实入口/consumer，则隐藏、只读或以 skip evidence 关闭；不得为通过矩阵而新增 scope 入口。
+  - [x] 插入不再仅因 Spatial session 存在就固定落到 world；status 文案与实际 owner 一致。
+  - [x] 不支持的 owner/type 组合禁用或不显示，并给出教师可理解的原因；不得 fallback 到另一 owner。
+  - [x] 插入后的有效 order 唯一，稳定 authoringAddress 指向实际 carrier。
+  - [x] 失败、stale、locked、容量或资源错误为零写入。
 
 ## Minimal validation
 
@@ -59,8 +59,8 @@
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、各 owner 的 before/after、禁用组合、focused 结果及 Reviewer 结论。
-- Outcome boundary: 只证明已公开的 Spatial 插入入口诚实且 canonical；不宣称所有元素支持所有 owner、Spatial 整体 `accepted`。
-- Rollback: 以一个可独立 revert 的集成提交恢复原路由；无合同或用户数据迁移，不修改既有项目载体。
+- Result evidence: product commit `59f5fdc`. Spatial world scope keeps the existing canonical insertion path and selection/history semantics; surface/global scopes no longer advertise unsupported placement. Media import/manage remains reachable while placement is disabled outside world scope; Spatial components are clickable only for world-compatible scene packages and are never advertised as draggable. Focused command/product validation passed `15/15`, direct consumer coverage passed `19/19`, and the third-lane integrated run at `27ff341` passed `65/65`, full typecheck and `git diff --check`. One test-only retry tightened the act/reference assertion; the independent owner-routing review concluded `APPROVE`.
+- Outcome boundary: `engineering candidate`；只证明已公开的 Spatial 插入入口诚实且 canonical；不宣称所有元素支持所有 owner、Spatial 整体 `accepted`。
+- Rollback: revert `59f5fdc` to restore the prior affordance routing；无合同或用户数据迁移，不修改既有项目载体。
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`

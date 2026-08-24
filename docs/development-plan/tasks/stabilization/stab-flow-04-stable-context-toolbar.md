@@ -16,16 +16,16 @@
 - Invalidating paths: src/renderer/ui/FlowBlockContextToolbar.tsx; src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PropertiesTab.tsx; src/renderer/authoring/flowTextEdit.ts; tests/unit/flowBlockContextToolbar.test.tsx; tests/unit/flowProductIntegration.test.tsx
 - Task ID: stab-flow-04-stable-context-toolbar
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: claimed
+- Status: done
 - Owner / Reviewer / Integrator: Flow Formatting Worker / independent rich-text reviewer / Coordinator
-- Claimed at / released at: 2026-08-25 / not released
+- Claimed at / released at: 2026-08-25 / 2026-08-25
 - Worktree / branch: shared integration workspace with Flow Formatting firewall / codex/architecture-stabilization
 - Baseline HEAD: `c9c290a` (formula entry closed at `7b0676c`; integrated second-lane evidence at `b737820`)
 - Context: exact-source Bootstrap confirmed the toolbar currently changes content/geometry by edit kind, exposes no selection-derived mixed state, and Properties reads only the first run; use one pure derivation in `flowTextEdit.ts` and preserve the existing collapsed-range no-op contract.
 - Freshness / relevant dirty inputs: worktree and every listed toolbar/Properties/test path were clean at claim; Wave A selection and flow-03 formula entry changes are part of the baseline and must be preserved.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-wave-c-flow-authoring
-- Retry count: 0
+- Retry count: 2
 
 ## Product outcome
 
@@ -44,10 +44,10 @@ Flow 文本编辑时主要格式工具保持稳定位置，高频能力直接可
 - Forbidden write: contracts/schema、Published producer、媒体布局、节点大纲、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: FlowWorkspace 只在 Wave A 和公式入口接入边界后串行合入；PropertiesTab 同期只允许本卡写 Flow formatting 区。
 - Acceptance:
-  - [ ] 常用控件所在壳层不随 selection 长短或 mixed 值改变尺寸/锚点。
-  - [ ] caret 显示插入点格式，range 显示选区格式，整块显示块级值，mixed 值有明确不确定态。
-  - [ ] 对 range 的格式命令只修改选中 runs；整块命令不伪装为选区格式。
-  - [ ] 低频控件可发现但默认不挤占主要工具几何。
+  - [x] 常用控件所在壳层不随 selection 长短或 mixed 值改变尺寸/锚点。
+  - [x] caret 显示插入点格式，range 显示选区格式，整块显示块级值，mixed 值有明确不确定态。
+  - [x] 对 range 的格式命令只修改选中 runs；整块命令不伪装为选区格式。
+  - [x] 低频控件可发现但默认不挤占主要工具几何。
 
 ## Minimal validation
 
@@ -57,8 +57,8 @@ Flow 文本编辑时主要格式工具保持稳定位置，高频能力直接可
 
 ## Result and rollback
 
-- Result evidence: pending；完成时记录 product commit、四种 selection 状态矩阵、focused 结果与 Reviewer 结论。
-- Outcome boundary: V1 只证明格式状态和命令接线的实现候选；真实拖选后的格式纵切由 Wave C 证明。
-- Rollback: 独立 revert toolbar/adapter/测试提交，恢复旧呈现；不改合同或数据。
+- Result evidence: product commit `27ff341`. One pure derivation now reports caret/range/whole-block values as unset/uniform/mixed from the live draft or canonical block, with no persisted toolbar mirror. Range writes stay range-only, explicit collapsed ranges are zero-write, and whole-block writes retain nested list/table targets. The stable shell keeps all primary slots mounted, exposes low-frequency controls progressively, preserves Wave A hooks, and reserves physical scrollbar height. Properties and toolbar share the derivation; their focus handoff produces one canonical revision/history entry. Toolbar/product/workspace validation passed `35/35`; the third-lane integrated run passed `65/65`, full typecheck and `git diff --check`. Two independent-review remediation rounds fixed collapsed-range/focus compatibility and then accessible naming/scrollbar geometry; the final review concluded `APPROVE` without modifying files or duplicating validation.
+- Outcome boundary: V1 establishes `engineering candidate`；真实拖选后的格式纵切由 Wave C 证明。
+- Rollback: revert `27ff341` to restore the prior toolbar/adapter behavior；不改合同或数据。
 - Semantic index impact: canonical-update only if an existing authoring capability description changes
 - Generated refresh: defer-to-wave-gate

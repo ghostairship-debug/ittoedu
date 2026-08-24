@@ -16,9 +16,9 @@
 - Invalidating paths: `src/renderer/project/createProject.ts`; `src/renderer/project/createCourseProject.ts`; `src/renderer/course/globalLayerCommands.ts`; `tests/unit/courseProjectArchive.test.ts`; `tests/unit/effectiveLayerCommands.test.ts`
 - Task ID: `stab-ctrl-06-safe-default-collapsed`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Controller Default Worker / Default Preservation Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Controller Factory firewall / codex/architecture-stabilization`
 - Baseline HEAD: `c9c290a` (ctrl-05 session dependency closed at `b737820`)
 - Context: `bootstrap-manual`; inspect blank-project controller factory, missing-controller recovery and explicit-value reopen paths before writing.
@@ -44,9 +44,9 @@ New projects and genuinely missing-controller recovery start collapsed; existing
 - Forbidden write: Schema, load migration, fixtures-only masking, Player/Workspace/Properties, dependencies and generated files.
 - Hotspot lock and order: one writer for `createProject.ts`/`globalLayerCommands.ts`, after all three dependencies release shared paths.
 - Acceptance:
-  - [ ] New blank project and missing-controller recovery emit `defaultCollapsed: true`.
-  - [ ] Existing explicit `true` and `false` survive restore/reopen with no migration/history write.
-  - [ ] Strict V9 parsing and Published copy semantics remain unchanged.
+  - [x] New blank project and missing-controller recovery emit `defaultCollapsed: true`.
+  - [x] Existing explicit `true` and `false` survive restore/reopen with no migration/history write.
+  - [x] Strict V9 parsing and Published copy semantics remain unchanged.
 
 ## Minimal validation
 
@@ -56,9 +56,9 @@ New projects and genuinely missing-controller recovery start collapsed; existing
 ## Result and rollback
 
 - Start point: dependency commits at claim.
-- Product commit and rollback: pending; one factory/recovery commit and one revert boundary.
-- Result evidence: pending focused new/missing/explicit-value results.
-- Outcome conclusion boundary: V1 establishes at most `engineering candidate`; Wave B owns integrated behavior.
+- Product commit and rollback: `acab5a2`; revert that single factory-default commit to restore the old expanded default.
+- Result evidence: blank-project and genuinely missing-controller recovery now both obtain `defaultCollapsed: true` from the canonical factory, while explicit saved `true` and `false` reopen unchanged. Focused archive/effective-layer validation passed `15/15`; the third-lane integrated run at `27ff341` passed `65/65`, full typecheck and `git diff --check`. The independent preservation review concluded `APPROVE` with no retry.
+- Outcome conclusion boundary: V1 establishes `engineering candidate`; Wave B owns integrated behavior.
 - Stop condition: any required legacy migration or contract coercion becomes a separate product decision.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
