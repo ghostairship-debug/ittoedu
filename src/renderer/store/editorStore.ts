@@ -54,10 +54,7 @@ import {
   materializeScene,
   rewritePresentationNodeIds,
 } from '../../shared/presentation'
-import type {
-  EditableTextContent,
-  RuntimeDocument,
-} from '../../shared/runtimeTypes'
+import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import { UserFacingError } from '../../shared/errors'
 import {
   analyzeProjectAssetReferences,
@@ -195,6 +192,13 @@ import {
   type RuntimeContentTextAuthoringFeedback,
   type RuntimeContentTextAuthoringPlanFailureCode,
 } from '../runtime/runtimeContentTextAuthoringCommands'
+import {
+  planRuntimePropertyUpdate,
+  type CourseRuntimePropertyTarget,
+  type CourseRuntimePropertyUpdate,
+  type RuntimePropertyAuthoringFeedback,
+  type RuntimePropertyAuthoringPlanFailureCode,
+} from '../runtime/runtimePropertyAuthoringCommands'
 import {
   planApplyInteractionTemplate,
   planUpdateInteractionRule,
@@ -1521,6 +1525,18 @@ export type RuntimeContentTextAuthoringCommitResult =
       readonly reason: string
     }
 
+export type RuntimePropertyAuthoringCommitResult =
+  | {
+      readonly ok: true
+      readonly status: 'updated' | 'unchanged'
+      readonly feedback: RuntimePropertyAuthoringFeedback
+    }
+  | {
+      readonly ok: false
+      readonly code: RuntimePropertyAuthoringPlanFailureCode
+      readonly reason: string
+    }
+
 export type InteractionAuthoringCommitResult =
   | {
       readonly ok: true
@@ -1641,13 +1657,6 @@ export interface EditorState {
     sceneId: string,
     patch: Partial<Pick<SceneDocument, 'name' | 'backgroundColor' | 'backgroundAssetId'>>,
   ): void
-  updateSceneRuntime(
-    sceneId: string,
-    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>>,
-  ): void
-  updateGlobalRuntime(
-    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>>,
-  ): void
   setSceneRuntime(sceneId: string, runtime: RuntimeDocument | undefined): void
   setGlobalRuntime(runtime: RuntimeDocument | undefined): void
   updateRuntimeSourceAtTarget(
@@ -1661,6 +1670,10 @@ export interface EditorState {
     target: CourseRuntimeContentTextTarget,
     value: string,
   ): RuntimeContentTextAuthoringCommitResult
+  updateRuntimePropertyAtTarget(
+    target: CourseRuntimePropertyTarget,
+    update: CourseRuntimePropertyUpdate,
+  ): RuntimePropertyAuthoringCommitResult
   captureRuntimeAssetReplacementTarget(
     session: Readonly<RuntimeTargetEditSession>,
   ): CourseRuntimeAssetReplacementTarget | null
@@ -1995,24 +2008,6 @@ function normalizedVisibility(
     mode: visibility.mode,
     sceneIds: [fallbackSceneId],
   }
-}
-
-function editableRuntimePatch(
-  patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>>,
-): Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>> {
-  const next: Partial<
-    Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>
-  > = {}
-  if (patch.enabled !== undefined) next.enabled = patch.enabled
-  if (patch.renderMode !== undefined) next.renderMode = patch.renderMode
-  if (patch.source !== undefined) next.source = patch.source
-  if (patch.content !== undefined) {
-    next.content = structuredClone(patch.content) as EditableTextContent
-  }
-  if (patch.assets !== undefined) {
-    next.assets = structuredClone(patch.assets)
-  }
-  return next
 }
 
 function textNodeForSession(
@@ -3997,6 +3992,117 @@ export const useEditorStore = create<EditorState>((set, get) => {
         : '已更新运行时文字；此内容由当前场景的所有状态共享',
     )) {
       return rejectRuntimeContentTextAuthoring(
+        'invalid-document',
+        '当前 Course Project 没有可用的作者会话。',
+      )
+    }
+    return { ok: true, status: 'updated', feedback }
+  }
+
+  const rejectRuntimePropertyAuthoring = (
+    code: RuntimePropertyAuthoringPlanFailureCode,
+    reason: string,
+  ): RuntimePropertyAuthoringCommitResult => ({
+    ok: false,
+    code,
+    reason,
+  })
+
+  const commitRuntimePropertyAtTarget = (
+    target: CourseRuntimePropertyTarget,
+    update: CourseRuntimePropertyUpdate,
+  ): RuntimePropertyAuthoringCommitResult => {
+    const state = get()
+    const document = activeCourseDocument(state)
+    const projection = buildCandidateEffectiveLayers(state)
+    let authoringSession = state.courseAuthoringSession
+    const stable = target.courseTarget
+    if (!document || document.id !== stable.projectId) {
+      return rejectRuntimePropertyAuthoring(
+        'project-mismatch',
+        '运行时属性目标不属于当前 Course Project。',
+      )
+    }
+    if (!projection || !authoringSession) {
+      return rejectRuntimePropertyAuthoring(
+        'session-stale',
+        '运行时属性编辑会话已过期，请重新选择目标。',
+      )
+    }
+    if (
+      authoringSession.token.locationId !== projection.locationId
+      || authoringSession.token.surfaceType !== projection.surfaceType
+    ) {
+      return rejectRuntimePropertyAuthoring(
+        'session-stale',
+        '运行时属性编辑会话已过期，请重新选择目标。',
+      )
+    }
+    const expectedScope = stable.owner === 'global' ? 'global' : 'scene'
+    if (
+      state.editingScope !== expectedScope
+      || projection.scope.owner !== stable.owner
+      || projection.scope.ownerKey !== stable.ownerKey
+    ) {
+      return rejectRuntimePropertyAuthoring(
+        'owner-mismatch',
+        '当前编辑范围已切换，运行时属性没有写入。',
+      )
+    }
+
+    authoringSession = updateCourseAuthoringSessionRevision(
+      authoringSession,
+      document.revision,
+    )
+    const planned = planRuntimePropertyUpdate({
+      project: document,
+      currentIdentity: {
+        projectId: document.id,
+        documentRevision: document.revision,
+        sessionToken: authoringSession.token,
+        surfaceId: projection.surfaceId,
+        stateId: projection.stateId,
+        owner: projection.scope.owner,
+        ownerKey: projection.scope.ownerKey,
+      },
+      target,
+      update,
+      now: new Date().toISOString(),
+    })
+    if (!planned.ok) {
+      return rejectRuntimePropertyAuthoring(planned.code, planned.reason)
+    }
+    if (planned.status === 'no-op') {
+      return {
+        ok: true,
+        status: 'unchanged',
+        feedback: planned.feedback,
+      }
+    }
+    const feedback = planned.plan.feedback
+    if (!feedback) {
+      return rejectRuntimePropertyAuthoring(
+        'invalid-document',
+        '运行时属性事务缺少结果信息，未写入工程。',
+      )
+    }
+    let step: EditorTransactionStep | null
+    try {
+      step = createEditorTransactionStep(document, planned.plan)
+    } catch (error) {
+      return rejectRuntimePropertyAuthoring(
+        'invalid-document',
+        error instanceof Error ? error.message : '运行时属性事务无效，未写入工程。',
+      )
+    }
+    const fieldLabel = target.field === 'enabled' ? '启用状态' : '渲染模式'
+    if (!step || !persistProjectResourceTransaction(
+      step,
+      stable.owner === 'global'
+        ? `已更新全局运行时${fieldLabel}`
+        : `已更新当前作用域的运行时${fieldLabel}`,
+    )) {
+      return rejectRuntimePropertyAuthoring(
         'invalid-document',
         '当前 Course Project 没有可用的作者会话。',
       )
@@ -6713,31 +6819,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     },
 
-    updateSceneRuntime(sceneId, patch) {
-      const safePatch = editableRuntimePatch(patch)
-      if (selectSlideAuthoringBackend(get())) {
-        runV9DocumentMutation((draft) => {
-          for (const surface of draft.surfaces) {
-            if (surface.type !== 'slide') continue
-            const scene = surface.scenes.find((item) => item.id === sceneId)
-            if (!scene) continue
-            const existing = scene.layerItems.find((item) => item.kind === 'runtime')
-            if (!existing || existing.kind !== 'runtime') return
-            const next = { ...courseRuntimeToDocument(existing.runtime), ...safePatch }
-            existing.runtime = runtimeDocumentToCourseRuntime(next)
-            existing.visible = next.enabled
-            return
-          }
-        })
-        return
-      }
-      commit((draft) => {
-        const runtime = draft.scenes.find((scene) => scene.id === sceneId)?.runtime
-        if (!runtime) return
-        Object.assign(runtime, safePatch)
-      })
-    },
-
     updateRuntimeSourceAtTarget(target, source) {
       return commitRuntimeSourceAtTarget(target, source)
     },
@@ -6750,22 +6831,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return commitRuntimeContentTextAtTarget(target, value)
     },
 
-    updateGlobalRuntime(patch) {
-      const safePatch = editableRuntimePatch(patch)
-      if (selectSlideAuthoringBackend(get())) {
-        runV9DocumentMutation((draft) => {
-          const existing = draft.globalLayerItems.find((entry) => entry.item.kind === 'runtime')
-          if (!existing || existing.item.kind !== 'runtime') return
-          const next = { ...courseRuntimeToDocument(existing.item.runtime), ...safePatch }
-          existing.item.runtime = runtimeDocumentToCourseRuntime(next)
-          existing.item.visible = next.enabled
-        })
-        return
-      }
-      commit((draft) => {
-        if (!draft.globalRuntime) return
-        Object.assign(draft.globalRuntime, safePatch)
-      })
+    updateRuntimePropertyAtTarget(target, update) {
+      return commitRuntimePropertyAtTarget(target, update)
     },
 
     setSceneRuntime(sceneId, runtime) {
