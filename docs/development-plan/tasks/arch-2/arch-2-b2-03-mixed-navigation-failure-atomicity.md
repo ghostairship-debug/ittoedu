@@ -16,9 +16,9 @@
 - Invalidating paths: `src/player/surfaces/mixed/MixedCourseNavigator.ts`; `tests/unit/mixedCourseNavigatorBeforeNavigate.test.ts`; `src/player/surfaces/SurfaceHost.ts`; `src/player/surfaces/publishedDynamicHosts.ts`; root TypeScript or Vitest configuration
 - Task ID: `arch-2-b2-03-mixed-navigation-failure-atomicity`
 - Phase / wave: `ARCH-2 / phase-gate finding`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Mixed Navigation Worker / independent Player reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T17:53:02+08:00 / —`
+- Claimed at / released at: `2026-08-24T17:53:02+08:00 / 2026-08-24T18:06:42+08:00`
 - Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch2-mixed-navigation-rollback / codex/arch2-mixed-navigation-rollback`
 - Baseline HEAD: `38d4fd0`
 - Context: Bootstrap-manual from current source plus the read-only ARCH-2 gate audit; the last generated index is intentionally deferred until the phase gate.
@@ -26,7 +26,7 @@
 - Depends on: `arch-2-b1-13-runtime-interaction-validation-gate`, `arch-2-b2-01-cross-surface-global-playback-controls`, and `arch-2-b2-02-project-health-panel-on-demand-analysis` done
 - Blocks: ARCH-2 phase gate
 - Risk statement: a rejected navigation currently leaves navigator bookkeeping on the old location while the visible Player may have no active host or the target host active, so retry/back behavior and user-visible playback truth diverge.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / independent review found that previous-surface release failure remained outside compensation; final commit checks and compensates that result before target activation`
 
 ## Product outcome
 
@@ -109,10 +109,10 @@ Fix `MixedCourseNavigator`, which owns previous/target identity and navigation c
 
 ## Result evidence
 
-- Reproduction and behavior before/after: pending
-- Product commit: pending
-- Validation/review: pending
-- Remaining risks: pending
+- Reproduction and behavior before/after: initial port-level assertions produced `4` expected failures: activation failure left no active host, target-location failure left the target active, same-Surface failure left the visible location diverged, and rollback failure lost dual causality. A reviewer then added the missing release-failure case, which showed the old path resolving and switching to Flow. After the fix, release/activation/prepare/location failures compensate to the prior host/location before rethrowing; navigator current/history/onNavigate commit only on success, and retry adds only its normal history entry.
+- Product commit: root `eb224da` (isolated-worker source `689bc38`). Only `MixedCourseNavigator.ts` and its focused unit test changed; `CoursePlayer`, hosts, Published integration and contracts remain untouched.
+- Validation/review: `npx vitest run tests/unit/mixedCourseNavigatorBeforeNavigate.test.ts` passed `13/13`; the targeted Published V2 Mixed integration passed `1/1` (`4` unrelated tests skipped); `npx tsc --noEmit` and commit diff check passed. Independent Player review first rejected the unchecked previous-release result, then approved the corrected commit with no findings.
+- Remaining risks: `prepareTransition` failure is covered by the same catch/compensation structure and its existing outer cancellation owner but has no duplicate focused case. An optional port with no `releaseSurfaceSession` cannot physically release a newly activated target after first-start location failure; the current product `CoursePlayer` provides the port. Existing `onNavigate` callback-throw semantics remain outside host-transition atomicity.
 - Generated refresh: defer-to-ARCH-2-phase-gate
 - Next allowed task: ARCH-2 phase gate
 
