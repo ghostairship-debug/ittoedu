@@ -6,9 +6,9 @@
 
 - Task ID: `arch-2-b1-08-published-interaction-spatial-global-host`
 - Phase / wave: `ARCH-2 / W2-B1 Published Interaction host integration`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator + Spatial Player Worker / independent Published Interactions reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24 09:46 Asia/Shanghai / —`
+- Claimed at / released at: `2026-08-24 09:46 Asia/Shanghai / 2026-08-24 10:04 Asia/Shanghai`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `f3ed789`
 - Claim commit: `67141c5`
@@ -25,10 +25,10 @@ In try-run, Preview and packaged Published V2 playback, the one session-global I
 
 ## Current status and evidence
 
-- B1-06/B1-07 already own exactly one current global controller and one reusable HTML/SVG-capable DOM port; the Spatial adapter does not expose it.
-- `SpatialSurfaceHost` owns a stable `SpatialHostRecord` map keyed by `layerItemId` and renders SVG groups, HTML world video wrappers and viewport wrappers with exact `global | surface | world` source data.
-- `collectSpatialPlaybackEntries` includes Schema-valid global/surface/world LayerItems, but world camera visibility treats `playbackInitialVisibility:hidden` as a reason to detach, preventing `node.enter`.
-- Spatial camera gestures deliberately allow native tap targets and suppress the click after a real pan; Component/Runtime/media/controller descendants carry explicit gesture-owner markers.
+- `5bbc4ac` adds the Spatial renderer-owned HTML/SVG port and exact global/surface/world record handles, then delegates that one port through the existing Spatial adapter/session seam; no Spatial controller is created.
+- `4cb410d` adds a Schema-valid Mixed integration suite covering record sources, visibility/motion, camera/location lifecycle, cross-Surface shared state, navigation, gesture ownership, stale cancellation and payload immutability.
+- Authored `visible:false` stays absent; playback-hidden records remain mounted and non-hit; semantic/off-camera records keep stable renderer identity under `display:none` so a pan can reactivate the existing click binding without creating an Interaction generation.
+- Two independent renderer/lifecycle reviews passed. Automated evidence supports `engineering candidate`; no visual-art, large-world performance or teacher acceptance is claimed.
 
 ## Supported slice and explicit limits
 
@@ -177,11 +177,11 @@ one session-global controller
 
 ## Result evidence
 
-- Consumers migrated/remaining: `pending`.
-- Behavior before/after: `pending`.
-- Validation results: `pending`.
-- Known risks/findings: `pending`.
-- indexImpact: `Spatial Published Interaction host/record/camera facts will change; refresh repo-index after close`.
+- Consumers migrated/remaining: `mountPublishedCourseTryRun, whole-course Preview and packaged Published V2 now let the one session-global controller consume eligible active Spatial global, surface and world LayerItems. Spatial-local rules remain intentionally absent; scene.in on Spatial and non-Slide scene.go targets remain unsupported; the legacy InteractionEngine deletion gate remains separate.`
+- Behavior before/after: `Spatial previously rendered the three LayerItem sources but exposed no Interaction surface, while playback-hidden world targets were culled. Eligible native HTML/SVG records now bind once, enter/exit preserves authored opacity/rotation, global state survives ordinary Slide/Flow/Spatial generations, surface/world state resets on a real location/replay generation, and camera-only pan/zoom/path movement preserves delayed work and bindings. Real pan still suppresses its click; Component/Runtime/media/controller/pass-through ownership remains stronger.`
+- Validation results: `Focused Spatial host suite 4 files / 26 tests; expanded Slide/Flow/Spatial Published Interaction and DOM/controller regression 8 files / 73 tests; npm run typecheck (root/Electron/e2e), npx tsc --noEmit and git diff --check passed. Independent renderer review passed with 4 files / 33 tests; independent lifecycle review passed with the 11-test Spatial integration suite.`
+- Known risks/findings: `The inherited MixedNavigator cross-Surface activation/location failure rollback gap from B1-07 remains outside this host card. Semantic/off-camera records deliberately retain stable hidden DOM wrappers to preserve camera-pan binding; the existing Spatial renderer already materializes every record, but large-world visual/performance acceptance still needs real-product review. The supported controller slice still excludes scene.enter and Spatial-local carriers by design.`
+- indexImpact: `Spatial Published Interaction host/record/camera facts changed; refresh generated repo-index after close`.
 - Next allowed task: `W2-B1 Published Interaction validation gate`.
 
 ## Ready checklist（Coordinator）
