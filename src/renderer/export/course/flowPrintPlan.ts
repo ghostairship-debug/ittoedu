@@ -125,8 +125,12 @@ export function buildFlowMixedPrintEntries(
   ))
 }
 
+export function renderFlowPrintBodyHtml(plan: FlowPrintPlan): string {
+  return plan.nodes.map(printNodeToHtml).join('')
+}
+
 export function renderFlowPrintHtml(plan: FlowPrintPlan): string {
-  const body = plan.nodes.map(printNodeToHtml).join('')
+  const body = renderFlowPrintBodyHtml(plan)
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(plan.title)}</title></head><body class="flow-print-document" data-flow-print-surface="${escapeHtml(plan.surfaceId)}">${body}</body></html>`
 }
 

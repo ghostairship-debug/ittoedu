@@ -1360,6 +1360,13 @@ export default function App() {
           }
           return
         }
+        if (!isSlideOnlyCourseProject(sources.project)) {
+          throw new UserFacingError(
+            'PDF 导出不完整',
+            '未生成覆盖当前课程全部表面的 PDF 打印内容。',
+            '请检查混合打印计划后重试；为避免遗漏 Flow 或 Spatial 内容，本次未回退到旧版 Slide 快照。',
+          )
+        }
         const preview = projectCandidatePreviewDocument(state)
         const rasterFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
         const rasterProject = preview?.project ?? state.project
