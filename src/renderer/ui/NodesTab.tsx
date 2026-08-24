@@ -5,6 +5,7 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  type CancelDrop,
   type CollisionDetection,
   type DragEndEvent,
   type KeyboardCoordinateGetter,
@@ -40,7 +41,12 @@ import {
   SlidersHorizontal,
   Sigma,
 } from 'lucide-react'
+import type { CourseSurfaceType } from '../../shared/courseProjectTypes'
 import type { SceneNode } from '../../shared/projectTypes'
+import {
+  SPATIAL_CROSS_COORDINATE_MOVE_REASON,
+  isSpatialCrossCoordinateOwnerMove,
+} from '../course/effectiveLayerCommands'
 import {
   indentFlowEditorBlock,
   outdentFlowEditorBlock,
@@ -411,6 +417,16 @@ export function isForeignTeacherControllerDrop(
   return from.owner !== 'global' || to.owner !== 'global' || from.ownerKey !== to.ownerKey
 }
 
+export function isRejectedSpatialOwnerDrop(
+  surfaceType: CourseSurfaceType,
+  from: EffectiveLayerProjectionRow,
+  to: EffectiveLayerProjectionRow,
+): boolean {
+  if (surfaceType !== 'spatial-2d' || from.ownerKey === to.ownerKey) return false
+  return (from.isTeacherController && from.owner === 'global' && to.owner !== 'global') ||
+    isSpatialCrossCoordinateOwnerMove(from.item, from.owner, to.owner)
+}
+
 function sameOwnerDropRow(
   visualRows: readonly EffectiveLayerProjectionRow[],
   fromIndex: number,
@@ -435,12 +451,15 @@ function sameOwnerDropRow(
 
 function layerKeyboardCoordinates(
   rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
+  preserveRawSpatialTargetsRef: { current: boolean },
 ): KeyboardCoordinateGetter {
   return (event, args) => {
     const rows = rowsRef.current
     const activeId = String(args.context.active?.id ?? args.active)
     const activeRow = rows?.find((row) => row.id === activeId)
-    if (!rows || !activeRow) return sortableKeyboardCoordinates(event, args)
+    if (!rows || !activeRow || preserveRawSpatialTargetsRef.current) {
+      return sortableKeyboardCoordinates(event, args)
+    }
     const droppableContainers = args.context.droppableContainers
     return sortableKeyboardCoordinates(event, {
       ...args,
@@ -463,11 +482,12 @@ function layerKeyboardCoordinates(
 
 function layerCollisionDetection(
   rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
+  preserveRawSpatialTargetsRef: { current: boolean },
 ): CollisionDetection {
   return (args) => {
     const rows = rowsRef.current
     const activeRow = rows?.find((row) => row.id === String(args.active.id))
-    if (!rows || !activeRow) return closestCenter(args)
+    if (!rows || !activeRow || preserveRawSpatialTargetsRef.current) return closestCenter(args)
     return closestCenter({
       ...args,
       droppableContainers: args.droppableContainers.filter((container) => {
@@ -523,18 +543,31 @@ export function NodesTab() {
   const moveCandidateLayerOwner = useEditorStore((state) => state.moveCandidateLayerOwner)
   const visualRowsRef = useRef(visualRows)
   visualRowsRef.current = visualRows
+  const preserveRawSpatialTargetsRef = useRef(projection?.surfaceType === 'spatial-2d')
+  preserveRawSpatialTargetsRef.current = projection?.surfaceType === 'spatial-2d'
   const skipControllerCoordinates = useMemo(
-    () => layerKeyboardCoordinates(visualRowsRef),
+    () => layerKeyboardCoordinates(visualRowsRef, preserveRawSpatialTargetsRef),
     [],
   )
   const skipControllerCollision = useMemo(
-    () => layerCollisionDetection(visualRowsRef),
+    () => layerCollisionDetection(visualRowsRef, preserveRawSpatialTargetsRef),
     [],
   )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: skipControllerCoordinates }),
   )
+
+  const cancelRejectedSpatialDrop: CancelDrop = ({ active, over }) => {
+    if (!over || !visualRows || projection?.surfaceType !== 'spatial-2d') return false
+    const from = visualRows.find((row) => row.id === String(active.id))
+    const to = visualRows.find((row) => row.id === String(over.id))
+    if (!from || !to || !isRejectedSpatialOwnerDrop(projection.surfaceType, from, to)) {
+      return false
+    }
+    moveCandidateLayerOwner(from.id, to.id)
+    return true
+  }
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
@@ -545,7 +578,13 @@ export function NodesTab() {
       const from = visualRows[oldIndex]!
       const overRow = visualRows[newIndex]!
       let to = overRow
-      if (isForeignTeacherControllerDrop(from, overRow)) {
+      if (
+        projection?.surfaceType === 'spatial-2d' &&
+        isRejectedSpatialOwnerDrop(projection.surfaceType, from, overRow)
+      ) {
+        moveCandidateLayerOwner(from.id, overRow.id)
+        return
+      } else if (isForeignTeacherControllerDrop(from, overRow)) {
         const snapped = sameOwnerDropRow(visualRows, oldIndex, newIndex)
         if (!snapped) return
         to = snapped
@@ -685,6 +724,7 @@ export function NodesTab() {
           <DndContext
             sensors={sensors}
             collisionDetection={skipControllerCollision}
+            cancelDrop={cancelRejectedSpatialDrop}
             onDragEnd={onDragEnd}
           >
             <SortableContext
@@ -746,11 +786,16 @@ export function NodesTab() {
               </div>
             </SortableContext>
           </DndContext>
-          <div className="tree-order-note">
+          <div
+            className="tree-order-note"
+            data-testid={spatialSession ? 'spatial-layer-move-note' : undefined}
+          >
             {flowSession
               ? editingScope === 'global'
                 ? '这里只管理归属全课、钉在视口的浮层；可拖动调整前后层级。'
                 : '这里只管理钉在视口的浮层；可拖动调整前后层级。正文顺序使用上方大纲的结构按钮。'
+              : spatialSession
+              ? `同一定位内可拖动排序；${SPATIAL_CROSS_COORDINATE_MOVE_REASON}`
               : candidate
               ? '同一来源内可拖动排序；跨来源放置会改存储范围。教师控制器必须留在全课。'
               : editingScope === 'global'

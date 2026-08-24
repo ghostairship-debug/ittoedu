@@ -13,8 +13,10 @@ import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
 } from '@/renderer/course/slideAuthoringBackend'
+import { openSpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
 import {
   CONTROLLER_MOVE_REASON,
+  SPATIAL_CROSS_COORDINATE_MOVE_REASON,
 } from '@/renderer/course/effectiveLayerCommands'
 import {
   rowsForListKind,
@@ -39,6 +41,7 @@ import type { EffectiveLayerProjectionRow } from '@/renderer/course/effectiveLay
 import {
   groupedVisualRows,
   isForeignTeacherControllerDrop,
+  isRejectedSpatialOwnerDrop,
   NodesTab,
 } from '@/renderer/ui/NodesTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
@@ -228,7 +231,37 @@ function visualRow(
     owner,
     ownerKey: options.ownerKey ?? owner,
     isTeacherController: Boolean(options.isTeacherController),
+    item: nativeText(id, 0, id),
   } as EffectiveLayerProjectionRow
+}
+
+function injectSpatialOwnerFixture(): {
+  globalId: string
+  surfaceId: string
+  surfaceItemId: string
+  worldItemIds: readonly [string, string]
+} {
+  useEditorStore.getState().createNewSpatialProject()
+  const initial = useEditorStore.getState().spatialSession
+  if (!initial) throw new Error('expected Spatial session')
+  const project = structuredClone(initial.history.present)
+  const surface = project.surfaces.find(
+    (candidate) => candidate.id === initial.selection.surfaceId,
+  )
+  if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+  const globalId = 'spatial-global-text'
+  const surfaceItemId = 'spatial-surface-text'
+  const worldItemIds = ['spatial-world-a', 'spatial-world-b'] as const
+  project.globalLayerItems.push(scoped(nativeText(globalId, 100_001, '视口说明')))
+  surface.surfaceLayerItems.push(scoped(nativeText(surfaceItemId, 100_002, '本页说明')))
+  surface.world.layerItems.push(
+    nativeText(worldItemIds[0], 100_003, '世界 A'),
+    nativeText(worldItemIds[1], 100_004, '世界 B'),
+  )
+  useEditorStore.getState().applySpatialAuthoringSession(openSpatialAuthoringSession(project, {
+    locationId: initial.selection.locationId,
+  }))
+  return { globalId, surfaceId: surface.id, surfaceItemId, worldItemIds }
 }
 
 function v9WithMisplacedControllerCopies(): CourseProjectDocument {
@@ -391,10 +424,16 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   })
 
   it('isForeignTeacherControllerDrop refuses any non-global owner', () => {
-    const controller = visualRow('teacher-controller-main', 'global', {
-      isTeacherController: true,
-      ownerKey: 'global',
-    })
+    const controller = {
+      ...visualRow('teacher-controller-main', 'global', {
+        isTeacherController: true,
+        ownerKey: 'global',
+      }),
+      item: sceneNodeToCourseLayerItem(
+        createTeacherControllerNode({ id: 'teacher-controller-main' }),
+        100_000,
+      ),
+    }
     const banner = visualRow('global-banner', 'global', { ownerKey: 'global' })
     const scene = visualRow('slide-title', 'scene', { ownerKey: 'scene:scene-1' })
     const sceneController = visualRow('teacher-controller-scene-copy', 'scene', {
@@ -407,6 +446,88 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(isForeignTeacherControllerDrop(scene, controller)).toBe(true)
     expect(isForeignTeacherControllerDrop(sceneController, scene)).toBe(true)
     expect(isForeignTeacherControllerDrop(scene, banner)).toBe(false)
+  })
+
+  it('classifies only unsafe Spatial owner drops while retaining safe owner operations', () => {
+    const global = visualRow('global-note', 'global', { ownerKey: 'global' })
+    const surface = visualRow('surface-note', 'surface', {
+      ownerKey: 'surface:surface-spatial',
+    })
+    const world = visualRow('world-note', 'world', {
+      ownerKey: 'world:surface-spatial',
+    })
+    const controller = visualRow('teacher-controller-main', 'global', {
+      isTeacherController: true,
+      ownerKey: 'global',
+    })
+    expect(isRejectedSpatialOwnerDrop('spatial-2d', global, world)).toBe(true)
+    expect(isRejectedSpatialOwnerDrop('spatial-2d', world, global)).toBe(true)
+    expect(isRejectedSpatialOwnerDrop('spatial-2d', controller, world)).toBe(true)
+    expect(isRejectedSpatialOwnerDrop('spatial-2d', surface, world)).toBe(false)
+    expect(isRejectedSpatialOwnerDrop('spatial-2d', world, world)).toBe(false)
+    expect(isRejectedSpatialOwnerDrop('slide', global, world)).toBe(false)
+  })
+
+  it('shows the Spatial move boundary, keeps rejected drops at zero writes, and preserves safe history', () => {
+    const { globalId, surfaceId, surfaceItemId, worldItemIds } = injectSpatialOwnerFixture()
+    render(<NodesTab />)
+    expect(screen.getByTestId('spatial-layer-move-note').textContent)
+      .toContain(SPATIAL_CROSS_COORDINATE_MOVE_REASON)
+
+    useEditorStore.getState().selectNode(globalId)
+    const beforeGlobalMove = useEditorStore.getState().spatialSession!
+    const beforeGlobalDocument = JSON.stringify(beforeGlobalMove.history.present)
+    useEditorStore.getState().moveCandidateLayerOwner(globalId, worldItemIds[0])
+    const afterGlobalMove = useEditorStore.getState()
+    expect(afterGlobalMove.errorMessage).toBe('操作未完成。请重新选择目标后再试。')
+    expect(afterGlobalMove.statusMessage).toBeNull()
+    expect(afterGlobalMove.spatialSession).toBe(beforeGlobalMove)
+    expect(JSON.stringify(afterGlobalMove.spatialSession!.history.present)).toBe(beforeGlobalDocument)
+    expect(afterGlobalMove.spatialSession!.history.past).toHaveLength(beforeGlobalMove.history.past.length)
+    expect(afterGlobalMove.spatialSession!.selection).toEqual(beforeGlobalMove.selection)
+
+    useEditorStore.getState().selectNode(worldItemIds[0])
+    const beforeWorldMove = useEditorStore.getState().spatialSession!
+    useEditorStore.getState().moveCandidateLayerOwner(worldItemIds[0], globalId)
+    const afterWorldMove = useEditorStore.getState()
+    expect(afterWorldMove.errorMessage).toBe('操作未完成。请重新选择目标后再试。')
+    expect(afterWorldMove.spatialSession).toBe(beforeWorldMove)
+    expect(afterWorldMove.spatialSession!.history.present.revision)
+      .toBe(beforeWorldMove.history.present.revision)
+    expect(afterWorldMove.spatialSession!.history.past).toHaveLength(beforeWorldMove.history.past.length)
+    expect(afterWorldMove.spatialSession!.selection).toEqual(beforeWorldMove.selection)
+
+    useEditorStore.getState().selectNode(surfaceItemId)
+    const beforeSafeMove = useEditorStore.getState().spatialSession!
+    useEditorStore.getState().moveCandidateLayerOwner(surfaceItemId, worldItemIds[0])
+    const afterSafeMove = useEditorStore.getState().spatialSession!
+    expect(afterSafeMove.history.present.revision).toBe(beforeSafeMove.history.present.revision + 1)
+    expect(afterSafeMove.history.past).toHaveLength(beforeSafeMove.history.past.length + 1)
+    const movedSurface = afterSafeMove.history.present.surfaces.find(
+      (candidate) => candidate.id === surfaceId,
+    )
+    if (!movedSurface || movedSurface.type !== 'spatial-2d') {
+      throw new Error('expected Spatial surface after owner move')
+    }
+    expect(movedSurface.surfaceLayerItems.some((entry) => entry.item.layerItemId === surfaceItemId))
+      .toBe(false)
+    expect(movedSurface.world.layerItems.some((item) => item.layerItemId === surfaceItemId))
+      .toBe(true)
+
+    const beforeReorder = useEditorStore.getState().spatialSession!
+    const worldIds = movedSurface.world.layerItems.map((item) => item.layerItemId)
+    useEditorStore.getState().reorderNodes([...worldIds].reverse())
+    const afterReorder = useEditorStore.getState().spatialSession!
+    expect(afterReorder.history.present.revision).toBe(beforeReorder.history.present.revision + 1)
+    expect(afterReorder.history.past).toHaveLength(beforeReorder.history.past.length + 1)
+    const reorderedSurface = afterReorder.history.present.surfaces.find(
+      (candidate) => candidate.id === surfaceId,
+    )
+    if (!reorderedSurface || reorderedSurface.type !== 'spatial-2d') {
+      throw new Error('expected reordered Spatial surface')
+    }
+    expect(reorderedSurface.world.layerItems.map((item) => item.layerItemId))
+      .toEqual([...worldIds].reverse())
   })
 
   it('hides misplaced teacher-controller copies without rewriting globalLayerItems', () => {

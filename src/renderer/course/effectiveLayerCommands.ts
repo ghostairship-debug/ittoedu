@@ -47,6 +47,10 @@ import {
   type LayerCommandResult,
 } from './globalLayerCommands'
 import { commitSlideProjectMutation } from './slideEditorCommands'
+import {
+  spatialLayerCoordinateSpace,
+  type SpatialEditorLayerScope,
+} from './spatialEditorView'
 
 export type {
   EffectiveLayerCommandTarget,
@@ -55,6 +59,23 @@ export type {
 } from './globalLayerCommands'
 
 export type LayerOwnerSource = EffectiveCourseLayerItem['source']
+
+export const SPATIAL_CROSS_COORDINATE_MOVE_REASON =
+  '空间画布中的全课图层固定在视口，本页和世界图层跟随画布；当前不能跨这两种定位移动。'
+
+function isSpatialLayerOwner(source: LayerOwnerSource): source is SpatialEditorLayerScope {
+  return source === 'global' || source === 'surface' || source === 'world'
+}
+
+export function isSpatialCrossCoordinateOwnerMove(
+  item: LayerItem,
+  source: LayerOwnerSource,
+  destination: LayerOwnerSource,
+): boolean {
+  if (!isSpatialLayerOwner(source) || !isSpatialLayerOwner(destination)) return false
+  return spatialLayerCoordinateSpace(source, item) !==
+    spatialLayerCoordinateSpace(destination, item)
+}
 
 export interface EffectiveLayerCommandItem {
   readonly id: string
@@ -911,6 +932,13 @@ export function moveEffectiveLayerOwner(
       located.sceneId === (destination.sceneId ?? null)
     ) {
       return succeedLayerNoop(document, '来源未变化')
+    }
+    const { surface } = requireLocationSurface(document, target.locationId)
+    if (
+      surface.type === 'spatial-2d' &&
+      isSpatialCrossCoordinateOwnerMove(located.item, located.source, destination.source)
+    ) {
+      return failLayerCommand(SPATIAL_CROSS_COORDINATE_MOVE_REASON)
     }
     if (isTeacherControllerLayerItem(located.item) && destination.source !== 'global') {
       return failLayerCommand(CONTROLLER_MOVE_REASON)
