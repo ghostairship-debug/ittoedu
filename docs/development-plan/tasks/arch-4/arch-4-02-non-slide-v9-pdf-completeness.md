@@ -14,17 +14,17 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/course/buildCoursePrintArtifacts.ts`; `src/renderer/export/course/flowPrintPlan.ts`; `src/main/pdfExport.ts`; `tests/unit/coursePrintArtifacts.test.ts`; `tests/integration/coursePdfExportApp.test.tsx`; `src/renderer/export/renderSceneImages.ts`; `src/renderer/export/buildPptx.ts`; `tsconfig.json`; `tsconfig.electron.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-4-02-non-slide-v9-pdf-completeness`
 - Phase / wave: `ARCH-4 / Published PDF completeness`
-- Status: `done`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Coordinator / independent PDF delivery reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T19:31:05+08:00 / 2026-08-24T19:45:05+08:00`
+- Claimed at / released at: `2026-08-24T19:31:05+08:00; retry claimed 2026-08-24T19:49:19+08:00 / pending`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `36b53e1`
 - Context: `ARCH_4_ADMISSION_REPORT.md`; must claim only after arch-4-01 closes because App is the shared exclusive hotspot.
-- Freshness / relevant dirty inputs: clean root; current PDF matrix, nested Flow document, main readiness and pure-Slide parity gap re-read at claim; App has no concurrent writer
+- Freshness / relevant dirty inputs: gate-only design review found the semantic document has no explicit physical page box or Slide/Spatial fit rule; no actual PDF has been generated, and App/main/failure evidence remains unchanged
 - Depends on: `arch-4-01-v9-html-web-preflight` done
 - Blocks: ARCH-4 phase gate and its one actual Mixed PDF review
 - Risk statement: a nominal pdf-html file is not success unless it is a valid document, passes Electron readiness and covers the complete ordered page plan without weakening pure-Slide fidelity.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 / pre-output completeness risk: fixed-size Slide/Spatial markup can overflow Chromium's implicit paper size`
 
 ## Product outcome
 
@@ -64,6 +64,7 @@ Published print artifacts currently create image PDF HTML only for captured Slid
 5. Keep pure Slide without Published captures on the current V8 raster path.
 6. For a non-pure-Slide V9 course with no complete `pdf-html`, throw the exact actionable completeness error and perform zero V8 render/export calls.
 7. Main readiness requires at least one `.page` and all actual images decoded; it must not require one image per page.
+8. Give semantic print pages one explicit configured paper box: resolve `auto` to landscape when Slide/Spatial is present and portrait for Flow-only, fit the 1280×720 Slide canvas and Spatial SVG inside it, and give Flow printable padding without clipping overflow content.
 
 ## Exact failure semantics
 
@@ -90,6 +91,8 @@ Main-process printing/decode errors remain visible through existing error handli
 - exact artifact coverage/fallback/failure assertions and `git diff --check`
 - one actual Mixed Electron PDF is deferred to and run exactly once at the ARCH-4 phase gate; no other E2E, build, full suite or generated refresh under V2
 
+The retry adds only HTML/CSS structure assertions to the existing unit file and reruns that unit plus root TypeScript; App integration and Electron TypeScript evidence remain fresh because their inputs do not change.
+
 ## Rollback
 
 - Start point: claim commit plus recorded baseline after arch-4-01.
@@ -103,6 +106,7 @@ Main-process printing/decode errors remain visible through existing error handli
 - Focused validation bound to `a887469`: `npx vitest run tests/unit/coursePrintArtifacts.test.ts tests/integration/coursePdfExportApp.test.tsx` passed `2 files / 6 tests`; `npx tsc --noEmit` and `npx tsc -p tsconfig.electron.json --noEmit` both passed; allowed-path audit and `git diff --check` passed.
 - Independent PDF delivery review: APPROVE with no blocking finding. It verified coverage/order, no nested Flow document, image selection, pure-Slide fallback, exact fail-closed semantics, readiness and forbidden-boundary preservation while reusing the existing evidence. The only residual is actual Chromium pagination/scaling/clipping, intentionally deferred to the single ARCH-4 Mixed PDF gate.
 - Generated refresh: task board only at card closure; repo-index remains deferred to the ARCH-4 phase gate.
+- Retry trigger before the actual gate output: the gate harness review proved a dimension mismatch between fixed 1280×720 / 1120×760 content and an unspecified Chromium paper box. No PDF had yet been created. The retry is limited to page-size/fit CSS in `buildCoursePrintArtifacts.ts` and its existing unit test; prior App/main/fail-closed evidence remains reusable.
 
 ## Ready checklist（Coordinator）
 
