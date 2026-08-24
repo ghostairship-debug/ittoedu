@@ -13,16 +13,16 @@
 - Validation budget: 15 minutes
 - Reviewer budget: 1
 - Evidence reuse: 执行后将每个支持的 Spatial 插入入口、owner、canonical delta 和一次历史绑定 product commit；仅任务卡/报告/任务板/generated 变化时复用，命中下列路由、命令或 focused 测试时失效。
-- Invalidating paths: `src/renderer/ui/ElementsTab.tsx`; `src/renderer/store/editorStore.ts` 的 add text/formula/shape/image/video/component/runtime Spatial 分支；`src/renderer/course/spatialEditorCommands.ts` 的 world insert commands；`src/renderer/course/globalLayerCommands.ts`; `tests/unit/spatialProductIntegration.test.tsx`; `tests/unit/spatialEditorCommands.test.ts`
+- Invalidating paths: `src/renderer/ui/ElementsTab.tsx`; `src/renderer/ui/MediaTab.tsx`; `src/renderer/ui/ComponentsTab.tsx`; `src/renderer/store/editorStore.ts` 的 add text/formula/shape/image/video/component/runtime Spatial 分支；`src/renderer/course/spatialEditorCommands.ts` 的 world insert commands；`src/renderer/course/globalLayerCommands.ts`; `tests/unit/spatialProductIntegration.test.tsx`; `tests/unit/spatialEditorCommands.test.ts`
 - Task ID: `stab-spatial-03-owner-aware-insertion`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Spatial Insertion Worker / independent owner-routing reviewer / Coordinator`
-- Claimed at / released at: `— / —`
-- Worktree / branch: `assigned at claim`
-- Baseline HEAD: `record at claim`
-- Context Pack + manifest hash | bootstrap-manual: `query Spatial Elements insertion and currently exposed owner carriers at claim`
-- Freshness / relevant dirty inputs: `verify the audit paths and related user changes at claim`
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Spatial Insertion UI firewall / codex/architecture-stabilization`
+- Baseline HEAD: `c9c290a` (owner-aware selection `82e59fc`, insertion affordance `a6fdba4`, diagnostics `ac5f0e6`)
+- Context Pack + manifest hash | bootstrap-manual: exact-source Bootstrap traced Elements, Media and Components entries through the canonical world commands; repo-index refresh remains deferred to the Wave B gate.
+- Freshness / relevant dirty inputs: every allowed product/test path was clean at claim. Reproduction confirmed `spatialSession.scope='surface'` is reachable while `editingScope` folds it to scene; Elements then advertises world insertion, and Media/Components remain enabled in Spatial global/surface although commands correctly reject `wrong-owner`.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-wave-b-ownership-controller`
 - Risk statement: 同一插入按钮在错误 owner 写入会破坏全课/本表面/世界语义；修复不得复制对象模拟 owner、偷改 Schema 或让成功提示先于 canonical commit。
@@ -40,7 +40,7 @@
 
 ## Scope, locks and acceptance
 
-- Allowed write: ElementsTab 的 Spatial owner-aware 可用性，Store 中现有插入方法的 Spatial 路由，当前公开 owner 所需的既有 command，及两个 focused 测试。
+- Allowed write: ElementsTab、MediaTab 与 ComponentsTab 的 Spatial owner-aware 可用性，Store 中现有插入方法的 Spatial 路由，当前公开 owner 所需的既有 command，及两个 focused 测试。
 - Required read: `authoringAddress`、effective layer owner、Spatial scope 切换、素材/组件资源事务与 order 分配。
 - Forbidden write: Schema/contracts、Player/Published/export、Slide/Flow 插入语义、媒体文件对话框协议、Dependencies/generated。
 - Hotspot lock: Spatial 的 Store / Properties / Clipboard / History 由同一 Coordinator/Integrator 串行接入；五张 Spatial 卡可并行调查、实现纯命令和编写独立测试，只有命中 Store / Nodes / Properties 的接入提交必须串行。

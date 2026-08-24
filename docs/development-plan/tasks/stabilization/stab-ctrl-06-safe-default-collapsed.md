@@ -16,13 +16,13 @@
 - Invalidating paths: `src/renderer/project/createProject.ts`; `src/renderer/project/createCourseProject.ts`; `src/renderer/course/globalLayerCommands.ts`; `tests/unit/courseProjectArchive.test.ts`; `tests/unit/effectiveLayerCommands.test.ts`
 - Task ID: `stab-ctrl-06-safe-default-collapsed`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Controller Default Worker / Default Preservation Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
-- Worktree / branch: `isolated worker worktree; integration on codex/architecture-stabilization`
-- Baseline HEAD: `d2371aa` (refresh after dependencies)
-- Context: `bootstrap-manual`
-- Freshness / relevant dirty inputs: Audit/root-plan/generated changes are read-only.
+- Claimed at / released at: `2026-08-25 / not released`
+- Worktree / branch: `shared integration workspace with Controller Factory firewall / codex/architecture-stabilization`
+- Baseline HEAD: `c9c290a` (ctrl-05 session dependency closed at `b737820`)
+- Context: `bootstrap-manual`; inspect blank-project controller factory, missing-controller recovery and explicit-value reopen paths before writing.
+- Freshness / relevant dirty inputs: worktree and listed factory/command/test paths were clean at claim; all three dependencies are done and their runtime/authoring behavior must be preserved.
 - Depends on: `stab-ctrl-01-authoring-bounds-and-recovery`; `stab-ctrl-03-collapsed-hit-footprint`; `stab-ctrl-05-mixed-runtime-session`
 - Blocks: `stab-wave-b-ownership-controller`
 - Retry count: `0`
@@ -62,4 +62,3 @@ New projects and genuinely missing-controller recovery start collapsed; existing
 - Stop condition: any required legacy migration or contract coercion becomes a separate product decision.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
-

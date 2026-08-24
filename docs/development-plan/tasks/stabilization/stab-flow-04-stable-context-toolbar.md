@@ -16,13 +16,13 @@
 - Invalidating paths: src/renderer/ui/FlowBlockContextToolbar.tsx; src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PropertiesTab.tsx; src/renderer/authoring/flowTextEdit.ts; tests/unit/flowBlockContextToolbar.test.tsx; tests/unit/flowProductIntegration.test.tsx
 - Task ID: stab-flow-04-stable-context-toolbar
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: draft
+- Status: claimed
 - Owner / Reviewer / Integrator: Flow Formatting Worker / independent rich-text reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: assigned at claim
-- Baseline HEAD: record at claim
-- Context: inspect selection-derived toolbar and Properties state after Wave A
-- Freshness / relevant dirty inputs: verify shared toolbar/Properties diffs at claim
+- Claimed at / released at: 2026-08-25 / not released
+- Worktree / branch: shared integration workspace with Flow Formatting firewall / codex/architecture-stabilization
+- Baseline HEAD: `c9c290a` (formula entry closed at `7b0676c`; integrated second-lane evidence at `b737820`)
+- Context: exact-source Bootstrap confirmed the toolbar currently changes content/geometry by edit kind, exposes no selection-derived mixed state, and Properties reads only the first run; use one pure derivation in `flowTextEdit.ts` and preserve the existing collapsed-range no-op contract.
+- Freshness / relevant dirty inputs: worktree and every listed toolbar/Properties/test path were clean at claim; Wave A selection and flow-03 formula entry changes are part of the baseline and must be preserved.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-wave-c-flow-authoring
 - Retry count: 0
@@ -62,4 +62,3 @@ Flow 文本编辑时主要格式工具保持稳定位置，高频能力直接可
 - Rollback: 独立 revert toolbar/adapter/测试提交，恢复旧呈现；不改合同或数据。
 - Semantic index impact: canonical-update only if an existing authoring capability description changes
 - Generated refresh: defer-to-wave-gate
-
