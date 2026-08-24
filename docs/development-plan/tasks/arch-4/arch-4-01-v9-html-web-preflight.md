@@ -14,13 +14,13 @@
 - Invalidating paths: `src/renderer/App.tsx`; `src/renderer/export/exportPreflight.ts`; `src/renderer/export/course/buildCoursePackages.ts`; `tests/integration/courseExportPreflightApp.test.tsx`; `tests/unit/coursePackageExport.test.ts`; `tsconfig.json`; Vitest/TypeScript resolution config
 - Task ID: `arch-4-01-v9-html-web-preflight`
 - Phase / wave: `ARCH-4 / HTML-Web preflight`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Coordinator / independent HTML-Web preflight reviewer / Coordinator`
-- Claimed at / released at: `pending / pending`
+- Claimed at / released at: `2026-08-24T19:23:53+08:00 / pending`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
-- Baseline HEAD: `pending at claim`
+- Baseline HEAD: `17e7c8e`
 - Context: `ARCH_4_ADMISSION_REPORT.md`; App is an exclusive hotspot and this card must complete before the PDF card claims it.
-- Freshness / relevant dirty inputs: re-read legal V9/source-null routing and the saved-report mapping at claim
+- Freshness / relevant dirty inputs: clean root; legal V9/source-null routing, saved-report mapping and focused package tests re-read at claim; App has no concurrent writer
 - Depends on: `arch-4-00-delivery-admission` done
 - Blocks: `arch-4-02-non-slide-v9-pdf-completeness` and ARCH-4 phase gate
 - Risk statement: removing the V8 base must not weaken the existing V9 package closure/resource/component/player-bundle blockers or change retained PDF/PPTX/source-null preflight paths.
