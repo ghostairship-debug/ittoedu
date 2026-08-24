@@ -1,14 +1,17 @@
 import { isGlobalLayerItemVisible } from '../../globalLayerVisibility'
 import type {
   CourseLocation,
+  LayerItemOverride,
   NativeElementContent,
 } from '../../../shared/courseProjectTypes'
+import { mergeCourseNativeData } from '../../../shared/courseProjectSchema'
 import type { TeacherControllerAction } from '../../../shared/projectTypes'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
   PublishedNativeLayerItem,
   PublishedScopedLayerItem,
+  PublishedSlidePresentationState,
   PublishedSlideScene,
   PublishedSlideSurface,
 } from '../../../shared/publishedCourseTypes'
@@ -33,6 +36,15 @@ import {
 } from '../publishedComponentMount'
 import { paintPublishedNativeText } from '../publishedNativeText'
 import { paintPublishedFormula } from '../publishedFormula'
+import {
+  PublishedDomInteractionSurfacePort,
+  PublishedInteractionVisibilityState,
+  type PublishedInteractionNodeHandle,
+  type PublishedInteractionNodeOwnership,
+  type PublishedInteractionNodeSource,
+  type PublishedInteractionNodeState,
+} from '../../interactions/PublishedDomInteractionSurfacePort'
+import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
 
 function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
   return structuredClone(payload)
@@ -164,6 +176,99 @@ function isPublishedInteractiveLayer(item: PublishedLayerItem): boolean {
     || (item.kind === 'native' && item.content.nativeType === 'video')
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function mergeComponentProps(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = structuredClone(base)
+  for (const [key, value] of Object.entries(patch)) {
+    const previous = result[key]
+    result[key] = isPlainRecord(value) && isPlainRecord(previous)
+      ? mergeComponentProps(previous, value)
+      : structuredClone(value)
+  }
+  return result
+}
+
+function applyPublishedLayerOverride(
+  source: PublishedLayerItem,
+  override: LayerItemOverride | undefined,
+): PublishedLayerItem {
+  const item = structuredClone(source)
+  if (!override) return item
+  if (override.frame) item.frame = { ...item.frame, ...override.frame, mode: 'absolute' }
+  if (override.order !== undefined) item.order = override.order
+  if (override.visible !== undefined) item.visible = override.visible
+  if (override.rotation !== undefined) item.rotation = override.rotation
+  if (override.opacity !== undefined) item.opacity = override.opacity
+  if (override.hitPolicy !== undefined) item.hitPolicy = override.hitPolicy
+  if (override.playbackInitialVisibility !== undefined) {
+    item.playbackInitialVisibility = override.playbackInitialVisibility
+  }
+  if (item.kind === 'native' && override.nativeData) {
+    const content = item.content as typeof item.content & { data: Record<string, unknown> }
+    content.data = mergeCourseNativeData(
+      content.data,
+      override.nativeData,
+    ) as typeof content.data
+  }
+  if (item.kind === 'component' && override.componentProps) {
+    item.props = mergeComponentProps(item.props, override.componentProps)
+  }
+  return item
+}
+
+function materializePublishedSceneItems(
+  items: readonly PublishedLayerItem[],
+  state: PublishedSlidePresentationState | undefined,
+): PublishedLayerItem[] {
+  const materialized = items.map((item) => (
+    applyPublishedLayerOverride(item, state?.layerItemOverrides[item.layerItemId])
+  ))
+  if (!state?.layerItemOrder) return materialized
+
+  const byId = new Map(materialized.map((item) => [item.layerItemId, item]))
+  const seen = new Set<string>()
+  const ordered: PublishedLayerItem[] = []
+  for (const id of state.layerItemOrder) {
+    const item = byId.get(id)
+    if (!item || seen.has(id)) continue
+    seen.add(id)
+    ordered.push(item)
+  }
+  ordered.push(...materialized
+    .filter((item) => !seen.has(item.layerItemId))
+    .sort((left, right) => left.order - right.order
+      || (left.layerItemId < right.layerItemId ? -1 : left.layerItemId > right.layerItemId ? 1 : 0)))
+  const orderSlots = materialized.map((item) => item.order).sort((left, right) => left - right)
+  ordered.forEach((item, index) => {
+    item.order = orderSlots[index]!
+  })
+  return ordered
+}
+
+function publishedInteractionOwnership(
+  item: PublishedLayerItem,
+): PublishedInteractionNodeOwnership {
+  if (item.kind === 'component') return 'component'
+  if (item.kind === 'runtime') return 'runtime'
+  if (item.content.nativeType === 'video') return 'media'
+  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  return 'native'
+}
+
+function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
+  if (item.kind !== 'native' || item.hitPolicy !== 'auto') return false
+  return item.content.nativeType === 'text'
+    || item.content.nativeType === 'image'
+    || item.content.nativeType === 'formula'
+    || item.content.nativeType === 'shape'
+}
+
 function appendLayerNode(
   dom: Document,
   parent: HTMLElement,
@@ -176,8 +281,8 @@ function appendLayerNode(
     interactive?: boolean
     mountComponent?: (handle: PublishedComponentMountHandle) => void
   },
-): void {
-  if (!item.visible || item.playbackInitialVisibility === 'hidden') return
+): HTMLElement | null {
+  if (!item.visible) return null
   const wrap = dom.createElement('div')
   wrap.dataset.slideLayerItem = item.layerItemId
   wrap.dataset.layerSource = source
@@ -189,8 +294,15 @@ function appendLayerNode(
   wrap.style.width = `${item.frame.width}px`
   wrap.style.height = `${item.frame.height}px`
   wrap.style.opacity = String(item.opacity)
+  wrap.style.transform = `rotate(${item.rotation}deg)`
+  wrap.style.transformOrigin = 'center center'
   wrap.style.pointerEvents = isPublishedInteractiveLayer(item) || item.kind === 'component' ? 'auto' : 'none'
   wrap.style.zIndex = String(item.order)
+  if (item.playbackInitialVisibility === 'hidden') {
+    wrap.style.visibility = 'hidden'
+    wrap.style.pointerEvents = 'none'
+    wrap.setAttribute('aria-hidden', 'true')
+  }
   if (item.kind === 'native') wrap.dataset.nativeType = item.content.nativeType
   if (isPublishedTeacherController(item)) {
     mountTeacherController?.(wrap, item)
@@ -263,6 +375,31 @@ function appendLayerNode(
     wrap.dataset.slideFallbackKind = item.kind
   }
   parent.appendChild(wrap)
+  return wrap
+}
+
+function presentationStateIdForLocation(
+  scene: PublishedSlideScene,
+  location: Extract<CourseLocation, { kind: 'slide-scene' }>,
+): string | undefined {
+  const stateId = location.stateId ?? scene.presentation?.initialStateId
+  if (stateId === undefined) return undefined
+  if (!scene.presentation?.states.some((state) => state.id === stateId)) {
+    throw new Error(`找不到 Slide 呈现状态：${stateId}`)
+  }
+  return stateId
+}
+
+function exactPresentationStateId(
+  scene: PublishedSlideScene,
+  stateId: string | undefined,
+  location: Extract<CourseLocation, { kind: 'slide-scene' }>,
+): string | undefined {
+  if (stateId === undefined) return presentationStateIdForLocation(scene, location)
+  if (!scene.presentation?.states.some((state) => state.id === stateId)) {
+    throw new Error(`找不到 Slide 呈现状态：${stateId}`)
+  }
+  return stateId
 }
 
 /**
@@ -275,7 +412,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
   readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
   readonly #resolveAsset: (assetId: string) => string | undefined
+  readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
+  readonly #onInteractionInvalidated?: () => void
+  readonly #onInteractionReady?: () => void
   #locationId: string
+  #presentationStateId: string | undefined
+  #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
   #root: HTMLElement | null = null
   #active = false
   #services: SurfacePlayerServices | null = null
@@ -283,6 +425,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #componentHandles: PublishedComponentMountHandle[] = []
   #controllerSessions = new Map<string, TeacherControllerDomSession>()
   #muted = false
+  #interactionPort: PublishedDomInteractionSurfacePort | null = null
+  #interactionGeneration = 0
+  #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
 
   constructor(
     payload: PublishedCourseV2Payload,
@@ -290,6 +435,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
     options: {
       locationId?: string
       resolveAsset?: (assetId: string) => string | undefined
+      globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+      onInteractionInvalidated?: () => void
+      onInteractionReady?: () => void
     } = {},
   ) {
     this.#payload = clonePayload(payload)
@@ -300,10 +448,46 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#locationId = this.#startLocationId
     this.#resolveAsset = options.resolveAsset
       ?? ((assetId: string) => this.#payload.assets[assetId]?.url)
+    this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
+      ?? new PublishedInteractionVisibilityState()
+    this.#onInteractionInvalidated = options.onInteractionInvalidated
+    this.#onInteractionReady = options.onInteractionReady
+    const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
+    this.#presentationStateId = presentationStateIdForLocation(
+      sceneOf(findSlideSurface(this.#payload, this.id), location),
+      location,
+    )
   }
 
   getLocationId(): string {
     return this.#locationId
+  }
+
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
+    return this.#interactionPort
+  }
+
+  preparePublishedPresentationState(
+    locationId: string,
+    stateId: string | undefined,
+  ): boolean {
+    try {
+      const location = resolveSlideLocation(this.#payload, this.id, locationId)
+      const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
+      this.#preparedPresentationState = {
+        locationId,
+        stateId: exactPresentationStateId(scene, stateId, location),
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  resetPublishedInteractionLocalState(): void {
+    this.#invalidateInteractions()
+    this.#interactionPort?.resetLocalVisibility()
+    this.#restoreInteractionsIfActive()
   }
 
   async mount(context: SurfaceMountContext): Promise<void> {
@@ -320,15 +504,19 @@ export class SlidePublishedAdapter implements SurfaceHost {
     context.container.appendChild(root)
     this.#root = root
     this.#services = context.services
+    this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
     this.#render()
+    this.#restoreInteractionsIfActive()
   }
 
   async activate(): Promise<void> {
     this.#active = true
     if (this.#root) this.#root.hidden = false
+    this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
+    this.#invalidateInteractions()
     this.#active = false
     if (this.#root) this.#root.hidden = true
   }
@@ -338,6 +526,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async reset(_scope: SurfaceResetScope): Promise<void> {
+    this.#preparedPresentationState = null
     await this.setLocationId(this.#startLocationId)
   }
 
@@ -352,18 +541,42 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async setLocationId(locationId: string): Promise<void> {
-    resolveSlideLocation(this.#payload, this.id, locationId)
+    const location = resolveSlideLocation(this.#payload, this.id, locationId)
+    const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
+    const presentationStateId = this.#preparedPresentationState?.locationId === locationId
+      ? this.#preparedPresentationState.stateId
+      : presentationStateIdForLocation(scene, location)
+    this.#preparedPresentationState = null
+    this.#invalidateInteractions()
+    this.#interactionPort?.resetLocalVisibility()
     this.#locationId = locationId
+    this.#presentationStateId = presentationStateId
     this.#render()
+    this.#restoreInteractionsIfActive()
   }
 
   async destroy(): Promise<void> {
+    this.#invalidateInteractions()
+    this.#interactionPort?.destroy()
+    this.#interactionPort = null
+    this.#interactionNodes.clear()
     this.#destroyComponents()
     this.#destroyControllers()
     this.#root?.remove()
     this.#root = null
     this.#active = false
     this.#services = null
+  }
+
+  #invalidateInteractions(): void {
+    this.#onInteractionInvalidated?.()
+    this.#interactionPort?.setActive(false)
+  }
+
+  #restoreInteractionsIfActive(): void {
+    if (!this.#active || !this.#interactionPort || !this.#root) return
+    this.#interactionPort.setActive(true)
+    this.#onInteractionReady?.()
   }
 
   #destroyComponents(): void {
@@ -485,17 +698,79 @@ export class SlidePublishedAdapter implements SurfaceHost {
     }))
   }
 
+  #registerInteractionNode(
+    wrap: HTMLElement,
+    item: PublishedLayerItem,
+    source: PublishedInteractionNodeSource,
+  ): void {
+    if (this.#interactionNodes.has(item.layerItemId)) return
+    const authoredPointerEvents = wrap.style.pointerEvents || 'none'
+    let handle: PublishedInteractionNodeHandle
+    handle = {
+      nodeId: item.layerItemId,
+      source,
+      ownership: publishedInteractionOwnership(item),
+      ...(source === 'global'
+        ? { visibilityState: this.#globalInteractionVisibilityState }
+        : {}),
+      resolveElement: () => wrap,
+      isInteractionAvailable: () => (
+        this.#root?.contains(wrap) === true
+        && this.#interactionNodes.get(item.layerItemId) === handle
+      ),
+      canBindClick: () => canBindPublishedNativeClick(item),
+      canRunMotion: () => true,
+      authoredVisible: () => item.playbackInitialVisibility !== 'hidden',
+      applyInteractionState: (state: PublishedInteractionNodeState) => {
+        const visible = state.visible
+        wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
+        wrap.style.visibility = visible ? 'visible' : 'hidden'
+        wrap.style.pointerEvents = visible
+          ? state.clickBound ? 'auto' : authoredPointerEvents
+          : 'none'
+        if (visible) wrap.removeAttribute('aria-hidden')
+        else wrap.setAttribute('aria-hidden', 'true')
+      },
+      authoredMotionStyle: () => ({
+        opacity: String(item.opacity),
+        transform: `rotate(${item.rotation}deg)`,
+      }),
+    }
+    this.#interactionNodes.set(item.layerItemId, handle)
+  }
+
   #render(): void {
     const root = this.#root
     if (!root) return
+    this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
+    this.#interactionNodes.clear()
     this.#destroyComponents()
     this.#destroyControllers()
     const surface = findSlideSurface(this.#payload, this.id)
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
     const scene = sceneOf(surface, location)
+    const presentationState = scene.presentation?.states.find(
+      (state) => state.id === this.#presentationStateId,
+    )
+    const sceneItems = materializePublishedSceneItems(scene.layerItems, presentationState)
+    const backgroundColor = presentationState?.backgroundColor ?? scene.backgroundColor
+    const backgroundAssetId = presentationState?.backgroundAssetId !== undefined
+      ? presentationState.backgroundAssetId
+      : scene.backgroundAssetId
+    const backgroundAssetUrl = backgroundAssetId
+      ? this.#resolveAsset(backgroundAssetId)
+      : undefined
     root.dataset.locationId = location.id
     root.dataset.sceneId = scene.id
-    root.style.background = scene.backgroundColor
+    if (this.#presentationStateId) root.dataset.presentationStateId = this.#presentationStateId
+    else delete root.dataset.presentationStateId
+    root.style.backgroundColor = backgroundColor
+    root.style.backgroundImage = backgroundAssetUrl
+      ? `url(${JSON.stringify(backgroundAssetUrl)})`
+      : 'none'
+    root.style.backgroundPosition = 'center'
+    root.style.backgroundRepeat = 'no-repeat'
+    root.style.backgroundSize = 'cover'
     root.replaceChildren()
     const stage = root.ownerDocument.createElement('div')
     stage.dataset.slideSceneStage = 'true'
@@ -512,17 +787,48 @@ export class SlidePublishedAdapter implements SurfaceHost {
         this.#componentHandles.push(handle)
       },
     }
-    for (const item of scene.layerItems) {
-      appendLayerNode(root.ownerDocument, stage, item, 'scene', this.#resolveAsset, mountController, layerOptions)
+    for (const item of sceneItems) {
+      const wrap = appendLayerNode(
+        root.ownerDocument,
+        stage,
+        item,
+        'scene',
+        this.#resolveAsset,
+        mountController,
+        layerOptions,
+      )
+      if (wrap) this.#registerInteractionNode(wrap, item, 'scene')
     }
     for (const entry of this.#payload.globalLayerItems) {
       if (!isScopedVisible(entry, location.id)) continue
-      appendLayerNode(root.ownerDocument, stage, entry.item, 'global', this.#resolveAsset, mountController, layerOptions)
+      const wrap = appendLayerNode(
+        root.ownerDocument,
+        stage,
+        entry.item,
+        'global',
+        this.#resolveAsset,
+        mountController,
+        layerOptions,
+      )
+      if (wrap) this.#registerInteractionNode(wrap, entry.item, 'global')
     }
     for (const entry of surface.surfaceLayerItems) {
       if (!isScopedVisible(entry, location.id)) continue
-      appendLayerNode(root.ownerDocument, stage, entry.item, 'surface', this.#resolveAsset, mountController, layerOptions)
+      const wrap = appendLayerNode(
+        root.ownerDocument,
+        stage,
+        entry.item,
+        'surface',
+        this.#resolveAsset,
+        mountController,
+        layerOptions,
+      )
+      if (wrap) this.#registerInteractionNode(wrap, entry.item, 'surface')
     }
+    this.#interactionPort?.refreshNodes(
+      this.#interactionNodes.values(),
+      ++this.#interactionGeneration,
+    )
   }
 }
 
