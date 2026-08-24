@@ -17,15 +17,19 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import {
   Box,
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   Copy,
   Eye,
   EyeOff,
   GripVertical,
   ImageIcon,
+  IndentDecrease,
+  IndentIncrease,
   Layers3,
   Lock,
   Square,
@@ -37,6 +41,13 @@ import {
   Sigma,
 } from 'lucide-react'
 import type { SceneNode } from '../../shared/projectTypes'
+import {
+  indentFlowEditorBlock,
+  outdentFlowEditorBlock,
+  reorderFlowEditorBlock,
+  type FlowCommandResult,
+} from '../course/flowEditorCommands'
+import { buildFlowEditorView, type FlowBlockView } from '../course/flowEditorView'
 import {
   courseLayerItemToSceneNode,
   describeLayerImpact,
@@ -63,6 +74,121 @@ const nodeIcon = {
 } as const
 
 type NodesTabRowNode = Pick<SceneNode, 'id' | 'name' | 'type' | 'visible' | 'locked'>
+
+type FlowOutlineAction = 'move-up' | 'move-down' | 'indent' | 'outdent'
+
+interface FlowOutlineActionSpec {
+  readonly action: FlowOutlineAction
+  readonly label: string
+  readonly title: string
+  readonly Icon: typeof ArrowUp
+}
+
+function flowOutlineActionSpecs(
+  block: FlowBlockView,
+  blocks: readonly FlowBlockView[],
+): FlowOutlineActionSpec[] {
+  const siblings = blocks.filter((candidate) => candidate.parentId === block.parentId)
+  const previous = siblings.find((candidate) => candidate.index === block.index - 1)
+  return [
+    block.index > 0
+      ? { action: 'move-up', label: '上移', title: '在同级正文中上移', Icon: ArrowUp }
+      : null,
+    siblings.some((candidate) => candidate.index === block.index + 1)
+      ? { action: 'move-down', label: '下移', title: '在同级正文中下移', Icon: ArrowDown }
+      : null,
+    previous?.block.type === 'section'
+      ? { action: 'indent', label: '缩进', title: '缩进到上一分节', Icon: IndentIncrease }
+      : null,
+    block.parentId !== null
+      ? { action: 'outdent', label: '取消缩进', title: '移出当前分节', Icon: IndentDecrease }
+      : null,
+  ].filter((spec): spec is FlowOutlineActionSpec => spec !== null)
+}
+
+const FLOW_BLOCK_TYPE_LABELS: Readonly<Record<string, string>> = {
+  heading: '标题', paragraph: '段落', list: '列表', quote: '引用', divider: '分隔线',
+  media: '媒体', table: '表格', formula: '公式', code: '代码', callout: '提示',
+  section: '分节', component: '组件',
+}
+
+function flowBlockTypeLabel(block: FlowBlockView): string {
+  return FLOW_BLOCK_TYPE_LABELS[block.block.type] ?? '正文块'
+}
+
+interface FlowOutlineRowProps {
+  readonly block: FlowBlockView
+  readonly blocks: readonly FlowBlockView[]
+  readonly selected: boolean
+  onSelect(): void
+  onAction(action: FlowOutlineAction): void
+}
+
+function FlowOutlineRow({
+  block,
+  blocks,
+  selected,
+  onSelect,
+  onAction,
+}: FlowOutlineRowProps) {
+  const actionSpecs = flowOutlineActionSpecs(block, blocks)
+  const Icon = block.block.type === 'media' ? ImageIcon : block.block.type === 'section' ? Box : Type
+  return (
+    <div
+      className={`node-item${selected ? ' node-item--selected' : ''}`}
+      data-testid={`flow-outline-block-${block.blockId}`}
+      data-depth={block.depth}
+      style={{
+        marginLeft: `${Math.min(block.depth, 6) * 12}px`,
+        width: `calc(100% - ${Math.min(block.depth, 6) * 12}px)`,
+      }}
+      onClick={onSelect}
+    >
+      <span aria-hidden="true" />
+      <span className="node-type-icon" title={block.block.type}>
+        <Icon size={15} />
+      </span>
+      <div className="node-label node-label--with-source">
+        <span
+          className="node-name"
+          role="button"
+          tabIndex={0}
+          aria-label={`选择正文块“${block.label}”`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onSelect()
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            onSelect()
+          }}
+        >
+          {block.label}
+        </span>
+        <small className="node-source">
+          {flowBlockTypeLabel(block)} · 嵌套第 {block.depth + 1} 级
+        </small>
+      </div>
+      {actionSpecs.map(({ action, label, title, Icon: ActionIcon }) => (
+        <button
+          key={action}
+          type="button"
+          className="icon-button"
+          data-testid={`flow-outline-${action}-${block.blockId}`}
+          title={title}
+          aria-label={`${label}正文块“${block.label}”`}
+          onClick={(event: MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation()
+            onAction(action)
+          }}
+        >
+          <ActionIcon size={14} />
+        </button>
+      ))}
+    </div>
+  )
+}
 
 interface SortableNodeProps {
   node: NodesTabRowNode
@@ -353,6 +479,11 @@ function layerCollisionDetection(
   }
 }
 
+function flowOverlaySourceLabel(row: EffectiveLayerProjectionRow): string {
+  const owner = row.owner === 'global' ? '全课' : '当前 Flow 页面'
+  return `归属：${owner} · 定位：钉在视口${row.isTeacherController ? ' · 不可下沉' : ''}`
+}
+
 export function NodesTab() {
   const scene = useEditorStore(selectActiveScene)
   const v8Nodes = useEditorStore(selectEditingNodes)
@@ -376,6 +507,12 @@ export function NodesTab() {
   const nodes = layerGroups
     ? layerGroups.flatMap((group) => group.rows.map(rowAsNode))
     : [...v8Nodes].reverse()
+  const flowView = useMemo(() => flowSession && editingScope !== 'global'
+    ? buildFlowEditorView({
+        project: flowSession.history.present,
+        locationId: flowSession.selection.locationId,
+      })
+    : null, [editingScope, flowSession])
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectNode = useEditorStore((state) => state.selectNode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
@@ -438,58 +575,113 @@ export function NodesTab() {
     )
   }
 
+  const selectFlowOutlineBlock = (blockId: string) => {
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) return
+    useEditorStore.getState().applyFlowSelection(
+      selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [blockId]),
+    )
+  }
+
+  const runFlowOutlineAction = (block: FlowBlockView, action: FlowOutlineAction) => {
+    const state = useEditorStore.getState()
+    const flow = state.flowSession
+    if (!flow) return
+    const target = {
+      surfaceId: flow.selection.surfaceId,
+      blockId: block.blockId,
+      parentId: block.parentId,
+    }
+    const options = { expectedRevision: flow.history.present.revision }
+    let result: FlowCommandResult
+    if (action === 'move-up') {
+      result = reorderFlowEditorBlock(flow.history.present, target, block.index - 1, options)
+    } else if (action === 'move-down') {
+      result = reorderFlowEditorBlock(flow.history.present, target, block.index + 1, options)
+    } else if (action === 'indent') {
+      result = indentFlowEditorBlock(flow.history.present, target, options)
+    } else {
+      result = outdentFlowEditorBlock(flow.history.present, target, options)
+    }
+    if (result.ok && result.nextDocument) {
+      result = {
+        ...result,
+        selection: selectFlowEditorBlocks(
+          result.nextDocument,
+          flow.selection.locationId,
+          [block.blockId],
+        ),
+      }
+    }
+    state.applyFlowCommand(result, {
+      statusMessage: result.ok ? (result.reason ?? null) : null,
+    })
+  }
+
   return (
     <div className="nodes-tree" data-testid="nodes-tab">
       <div className="tree-root" onClick={() => selectNode(null)}>
         <ChevronDown size={14} />
         <Layers3 size={15} />
         <span>
-          {candidate
-            ? '有效图层'
-            : editingScope === 'global' ? '全局元素' : scene.name}
+          {flowSession
+            ? (editingScope === 'global' ? '全课浮层' : '正文与浮层')
+            : candidate
+              ? '有效图层'
+              : editingScope === 'global' ? '全局元素' : scene.name}
         </span>
         {selectedNodeIds.length > 0 && <span className="tree-selection-count">已选 {selectedNodeIds.length}</span>}
       </div>
-      {flowSession && editingScope !== 'global' ? (
-        <button
-          type="button"
-          data-testid="flow-paper-body-row"
-          className="node-item flow-paper-body-row"
-          onClick={() => {
-            const flow = useEditorStore.getState().flowSession
-            if (!flow) return
-            const surface = flow.history.present.surfaces.find((s) => s.id === flow.selection.surfaceId)
-            const first = surface && surface.type === 'flow'
-              ? surface.blocks.find((b) => b.type === 'heading') ?? surface.blocks[0]
-              : null
-            if (!first) return
-            useEditorStore.getState().applyFlowSelection(
-              selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [first.id]),
-            )
-          }}
+      {flowView ? (
+        <section
+          className="nodes-layer-group"
+          data-testid="flow-content-outline"
         >
-          <span className="node-type-icon" title="text">
-            <Type size={15} />
-          </span>
-          <div className="node-label">
-            <span className="node-name">正文</span>
+          <h3 className="nodes-layer-group__title">正文大纲</h3>
+          <div className="tree-order-note" data-testid="flow-content-placement">
+            归属：当前 Flow 页面 · 定位：跟随稿纸
           </div>
-        </button>
+          <div className="nodes-list">
+            {flowView.blocks.map((block) => (
+              <FlowOutlineRow
+                key={block.blockId}
+                block={block}
+                blocks={flowView.blocks}
+                selected={flowSession?.selection.selectedBlockIds.includes(block.blockId) === true}
+                onSelect={() => selectFlowOutlineBlock(block.blockId)}
+                onAction={(action) => runFlowOutlineAction(block, action)}
+              />
+            ))}
+          </div>
+        </section>
       ) : null}
-      {nodes.length === 0 ? (
-        <div className="empty-state">
-          {flowSession
-            ? '本页没有浮层。标题和段落在稿纸里编辑，不出现在图层。'
-            : editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
-          {flowSession ? null : (
-            <>
-              <br />
-              从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
-            </>
-          )}
-        </div>
-      ) : (
-        <>
+      <div data-testid={flowSession ? 'flow-overlay-layers' : undefined}>
+        {flowSession ? (
+          <>
+            <h3 className="nodes-layer-group__title">浮层</h3>
+            <div className="tree-order-note" data-testid="flow-overlay-placement">
+              {editingScope === 'global'
+                ? '归属：全课 · 定位：钉在视口'
+                : '归属：全课 / 当前 Flow 页面 · 定位：钉在视口'}
+            </div>
+          </>
+        ) : null}
+        {nodes.length === 0 ? (
+          <div className="empty-state">
+            {flowSession
+              ? editingScope === 'global'
+                ? '全课还没有可管理的浮层。'
+                : '当前页面没有浮层。正文内容在上方大纲中按阅读顺序管理。'
+              : editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
+            {flowSession ? null : (
+              <>
+                <br />
+                从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
+              </>
+            )}
+          </div>
+        ) : (
+          <>
           <DndContext
             sensors={sensors}
             collisionDetection={skipControllerCollision}
@@ -506,7 +698,11 @@ export function NodesTab() {
                     className="nodes-layer-group"
                     data-testid={`nodes-layer-group-${group.id}`}
                   >
-                    <h3 className="nodes-layer-group__title">{group.label}</h3>
+                    <h3 className="nodes-layer-group__title">
+                      {flowSession
+                        ? group.id === 'global' ? '全课浮层' : '当前 Flow 页面浮层'
+                        : group.label}
+                    </h3>
                     {group.rows.map((row) => {
                       const node = rowAsNode(row)
                       return (
@@ -514,9 +710,9 @@ export function NodesTab() {
                           key={node.id}
                           node={node}
                           selected={selectedNodeIds.includes(node.id)}
-                          sourceLabel={row.isTeacherController
-                            ? '全课、不可下沉'
-                            : row.sourceLabel}
+                          sourceLabel={flowSession
+                            ? flowOverlaySourceLabel(row)
+                            : row.isTeacherController ? '全课、不可下沉' : row.sourceLabel}
                           impactLabel={describeLayerImpact(row.impact)}
                           onSelect={(additive) => {
                             selectNode(node.id, additive)
@@ -551,14 +747,19 @@ export function NodesTab() {
             </SortableContext>
           </DndContext>
           <div className="tree-order-note">
-            {candidate
+            {flowSession
+              ? editingScope === 'global'
+                ? '这里只管理归属全课、钉在视口的浮层；可拖动调整前后层级。'
+                : '这里只管理钉在视口的浮层；可拖动调整前后层级。正文顺序使用上方大纲的结构按钮。'
+              : candidate
               ? '同一来源内可拖动排序；跨来源放置会改存储范围。教师控制器必须留在全课。'
               : editingScope === 'global'
                 ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
                 : '列表最上方就是画面最上层；拖动条目可改变层级。'}
           </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
