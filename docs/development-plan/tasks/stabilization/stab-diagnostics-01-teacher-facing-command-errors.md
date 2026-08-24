@@ -16,16 +16,17 @@
 - Invalidating paths: `src/renderer/store/editorStore.ts#persistSpatialResult`; `tests/unit/editorStore.test.ts`
 - Task ID: `stab-diagnostics-01-teacher-facing-command-errors`
 - Phase / wave: `post-audit stabilization / D-cross-surface`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Diagnostics Fix Worker / none / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Store diagnostic firewall / codex/architecture-stabilization`
 - Baseline HEAD: `1347c0b` (owner-aware selection closed; Store lock released)
 - Context: generated repo-index is intentionally stale after first-wave product commits; exact-source manual Bootstrap must trace `persistSpatialResult`, both reason shapes, `errorMessage` consumers and the existing local `reportDiagnostic` contract before writing.
 - Freshness / relevant dirty inputs: worktree and the two allowed product/test paths were clean at claim; product baseline includes Spatial selection commit `82e59fc` and must preserve its failure-zero-write boundary.
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-audit-closure-gate`
-- Retry count: `0`
+- Hotspot lock release: Store diagnostic lock released after product commit `ac5f0e6`.
+- Retry count: `1` (the first test spy shape did not satisfy TypeScript; production behavior was unchanged and the focused harness was corrected.)
 
 ## Product outcome
 
@@ -44,10 +45,10 @@ Spatial 命令失败时，教师只看到说明发生了什么以及如何恢复
 - Forbidden write: Schema/contracts、业务命令成功路径、ProjectHealth 模型、网络/遥测、main/preload API 变化、dependencies/generated。
 - Hotspot lock: Store 接入由 Coordinator 独占；本卡不得与 Spatial Store/History 卡并行写 `editorStore.ts`。
 - Acceptance:
-  - [ ] 已知 Zod/command 失败在主 UI 显示短、具体、可恢复的中文提示，不含 JSON、`code` 或字段 `path`。
-  - [ ] 原始 reason 和足够上下文进入现有本地 Diagnostics；日志失败不得覆盖主错误或抛出新的用户错误。
-  - [ ] 失败保持 canonical document/revision/history/selection 零写入，成功路径完全不变。
-  - [ ] 不新增错误状态机、诊断 Store 或远程上报。
+  - [x] 已知 Zod/command 失败在主 UI 显示短、具体、可恢复的中文提示，不含 JSON、`code` 或字段 `path`。
+  - [x] 原始 reason 和足够上下文进入现有本地 Diagnostics；日志失败不得覆盖主错误或抛出新的用户错误。
+  - [x] 失败保持 canonical document/revision/history/selection 零写入，成功路径完全不变。
+  - [x] 不新增错误状态机、诊断 Store 或远程上报。
 
 ## Minimal validation
 
@@ -56,8 +57,10 @@ Spatial 命令失败时，教师只看到说明发生了什么以及如何恢复
 
 ## Result and rollback
 
-- Result evidence: `pending`; 完成时记录 product commit、两个 reason 的 UI/日志 before/after、focused 命令结果和 Coordinator 检查。
+- Product commit / result: `ac5f0e6` (`fix(spatial): separate teacher errors from diagnostics`); `persistSpatialResult` maps structured validation and ordinary command failures to bounded recoverable Chinese messages while retaining the raw reason in the existing local `reportDiagnostic` channel. Synchronous throws and rejected diagnostic promises are swallowed without replacing the teacher message, and failed commands remain zero-write.
+- Validation evidence: the focused `editorStore.test.ts` run passed 65/65 at the product commit. At integrated product commit `b737820`, the 11-file stabilization run passed 165/165, `npm run typecheck` passed and `git diff --check` passed; only registered jsdom Canvas diagnostics remained.
+- Review evidence: reviewer budget is `0`; the Coordinator inspected both reason shapes, bounded context, raw diagnostic preservation, diagnostic-failure isolation and the unchanged success/zero-write boundaries.
 - Outcome boundary: 只证明 Spatial command 错误呈现为 `engineering candidate`；不证明具体错误已修复或整个 Diagnostics/产品 `accepted`。
-- Rollback: 一个可独立 revert 的产品/测试提交恢复原呈现；诊断日志是本地追加记录，不迁移或重写用户工程。
+- Rollback: `git revert ac5f0e6` restores the former presentation; diagnostic logs are local append-only records and no user project is migrated or rewritten.
 - Semantic index impact: `canonical-update` for the Store error-presentation path.
 - Generated refresh: `defer-to-wave-gate`

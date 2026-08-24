@@ -16,15 +16,16 @@
 - Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/PublishedFormulaPaint.tsx; src/renderer/ui/FlowFormulaBlockProperties.tsx; tests/unit/flowWorkspace.test.tsx; tests/unit/flowProductIntegration.test.tsx
 - Task ID: stab-flow-03-formula-edit-entry
 - Phase / wave: post-audit stabilization / C-flow-authoring
-- Status: claimed
+- Status: done
 - Owner / Reviewer / Integrator: Flow Formula Worker / independent formula-entry reviewer / Coordinator
-- Claimed at / released at: 2026-08-25 / not released
+- Claimed at / released at: 2026-08-25 / 2026-08-25
 - Worktree / branch: shared integration workspace with FlowWorkspace/formula firewall / codex/architecture-stabilization
 - Baseline HEAD: 1347c0b (Wave A and insertion affordance integrated; product bytes end at a2f7386)
 - Context: generated repo-index is intentionally stale after first-wave product commits; exact-source manual Bootstrap must re-check rendered formula target replacement, current editing state and visible entry after Wave A before writing.
 - Freshness / relevant dirty inputs: worktree and every listed product/test path were clean at claim; the existing `flowProductIntegration.test.tsx` now includes the closed cross-01 scope matrix and must be preserved.
 - Depends on: stab-wave-a-core-usability
 - Blocks: stab-wave-c-flow-authoring
+- Hotspot lock release: Flow formula-entry lock released after product commit `7b0676c`.
 - Retry count: 0
 
 ## Product outcome
@@ -44,10 +45,10 @@ Flow 的独立公式块在首次重渲染后仍能从正文可见区域稳定进
 - Forbidden write: contracts/schema、Published producer、Player/export、inline formula、Wave C E2E spec、dependencies/generated。
 - Hotspot lock: 仅在 Wave A 完成“选区/空块 → 页面 inert”后进入 FlowWorkspace；公式改动先于工具栏/媒体接入。
 - Acceptance:
-  - [ ] 首次重渲染后，正文可见 target 仍能进入现有公式编辑状态。
-  - [ ] 两次连续真实 click 的语义在组件层保持稳定，不以仅派发合成 dblclick 的测试代替。
-  - [ ] 有明确可发现的公式编辑入口，狭窄左侧区域不再是唯一入口。
-  - [ ] 普通文本块 target 和选择行为不被公式入口接管。
+  - [x] 首次重渲染后，正文可见 target 仍能进入现有公式编辑状态。
+  - [x] 两次连续真实 click 的语义在组件层保持稳定，不以仅派发合成 dblclick 的测试代替。
+  - [x] 有明确可发现的公式编辑入口，狭窄左侧区域不再是唯一入口。
+  - [x] 普通文本块 target 和选择行为不被公式入口接管。
 
 ## Minimal validation
 
@@ -57,7 +58,9 @@ Flow 的独立公式块在首次重渲染后仍能从正文可见区域稳定进
 
 ## Result and rollback
 
-- Result evidence: pending；完成时记录 product commit、入口状态断言与 Reviewer 结论。
+- Product commit / result: `7b0676c` (`fix(flow): stabilize formula edit entry`); the authoring formula paint no longer replaces its real pointer target, a stable outer target implements first-click select / second-click edit, and an accessible visible “编辑公式” action reaches the same existing editing state. Read-only, modifier, global-scope and ordinary-text guards remain intact.
+- Validation evidence: the two focused Flow files passed 27/27 at the product commit. At integrated product commit `b737820`, the 11-file stabilization run passed 165/165, `npm run typecheck` passed and `git diff --check` passed; only registered jsdom Canvas diagnostics remained.
+- Independent review: the formula-entry Reviewer approved the stable target identity, real consecutive-click semantics, explicit accessible entry and non-formula/scope guards without findings.
 - Outcome boundary: V1 只证明独立公式入口的实现候选；真实点击与首轮渲染纵切由 Wave C 证明。
 - Rollback: 独立 revert 本卡 UI/测试提交，恢复原入口；不迁移 persisted data。
 - Semantic index impact: none

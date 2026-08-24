@@ -16,9 +16,9 @@
 - Invalidating paths: `src/player/teacherControllerRuntimeSession.ts`; `src/player/surfaces/publishedDynamicHosts.ts`; `src/player/surfaces/mixed/MixedCourseNavigator.ts`; `src/player/surfaces/slide/SlidePublishedAdapter.ts`; `src/player/surfaces/flow/FlowSurfaceHost.ts`; `src/player/surfaces/spatial/SpatialSurfaceHost.ts`; `tests/integration/teacherControllerMixedSession.test.ts`
 - Task ID: `stab-ctrl-05-mixed-runtime-session`
 - Phase / wave: `post-audit stabilization / B-ownership-controller`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Player Session Worker / Session Boundary Reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace with Player Controller Session firewall / codex/architecture-stabilization`
 - Baseline HEAD: `1347c0b` (first Wave B lanes closed; product bytes end at `a2f7386`)
 - Context Pack + manifest hash | bootstrap-manual: generated repo-index is intentionally stale after first-wave product commits; manual Bootstrap must recheck the three host Session maps, dynamic/Mixed wiring, stable controller ID and restart callback before writing.
@@ -26,7 +26,8 @@
 - Depends on: `stab-wave-a-core-usability`
 - Blocks: `stab-ctrl-06-safe-default-collapsed`; `stab-wave-b-ownership-controller`
 - Risk statement: Sharing offsets across unlike surfaces causes jumps; retaining per-host collapse maps keeps duplicate truth and incomplete restart.
-- Retry count / last failure class: `0 / none`
+- Hotspot lock release: `Player Controller Session` lock released after product commit `b737820`.
+- Retry count / last failure class: `1 / independent review found restart bypassed the coordinated global-interaction reset and cleared shared controller state before all Surface resets succeeded; both transaction-boundary defects were repaired before approval.`
 
 ## Product outcome
 
@@ -46,10 +47,10 @@ One global controller keeps collapsed/expanded state across Mixed surfaces, keep
 - Forbidden write: V9/Published producer/contracts, authoring Store/history, persisted runtime state, dependencies and generated files.
 - Hotspot lock and order: `Player Controller Session` has one writer, `Stabilization Integrator`; serialize with ctrl-03 because host files overlap, not because TOC is a product prerequisite.
 - Acceptance:
-  - [ ] Collapse follows the controller across Slide→Flow→Spatial; offsets remain Surface-session scoped.
-  - [ ] Navigation away/back preserves Session state; restart clears all Session state and restores authored defaults.
-  - [ ] Project revision, history, archive and Published input remain byte/structure equivalent.
-  - [ ] Standalone single-Surface behavior remains compatible.
+  - [x] Collapse follows the controller across Slide→Flow→Spatial; offsets remain Surface-session scoped.
+  - [x] Navigation away/back preserves Session state; restart clears all Session state and restores authored defaults.
+  - [x] Project revision, history, archive and Published input remain byte/structure equivalent.
+  - [x] Standalone single-Surface behavior remains compatible.
 
 ## Minimal validation
 
@@ -58,10 +59,12 @@ One global controller keeps collapsed/expanded state across Mixed surfaces, keep
 
 ## Result and rollback
 
-- Start point: Wave A gate commit.
-- Product/integration commit and rollback: pending; one commit and one revert boundary, with old per-host maps removed from authority.
-- Result evidence: pending single integration result; Wave B owns real-browser runtime integration.
+- Start point: `1347c0b`.
+- Product/integration commit and rollback: `b737820` (`fix(controller): unify mixed runtime session`); one commit and one revert boundary removes the three host-local maps from authority and introduces one course collapse store plus Surface-scoped offsets.
+- Result evidence: at product commit `b737820`, the Mixed integration proves Slide→Flow→Spatial collapse continuity, per-Surface offset retention, navigation preservation, zero project/history/archive writes, failure rollback and subsequent successful restart to authored defaults. The integrated stabilization run passed 11 files / 165 tests, `npm run typecheck` passed and `git diff --check` passed; only the registered jsdom Canvas diagnostic remained.
+- Independent review: the Session Boundary Reviewer initially blocked two restart transaction defects, then approved the repaired candidate: controller restart now dynamically dispatches through the coordinated course restart, Mixed hosts defer shared-state clearing until every Surface reset succeeds, failed restart preserves navigation/controller/global-interaction Session state, and standalone hosts retain self-clear behavior.
 - Outcome conclusion boundary: integration automation establishes at most `engineering candidate`.
 - Stop condition: persisted per-location state, two authoritative maps or unrelated restart changes require re-scope.
+- Rollback: `git revert b737820` restores the prior host-local runtime maps and restart wiring; no persisted migration is involved.
 - Semantic index impact: `canonical-update`
 - Generated refresh: `defer-to-wave-gate`
