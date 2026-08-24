@@ -11,7 +11,7 @@
 - Claimed at / released at: `2026-08-24 11:32 Asia/Shanghai / pending`
 - Worktree / branch: `primary integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `273e2dd`
-- Claim commit: `pending`
+- Claim commit: `3049064`
 - Context Pack + manifest hash | bootstrap-manual: `feature:runtime; fresh/high/safe-for-S2 at 273e2dd; three fresh read-only Properties/UI/raw-action recons`
 - Freshness / relevant dirty inputs: `clean tree at claim; Runtime property view/planner, editorStore Runtime-property actions and PropertiesTab/RuntimeContentEditor paths exclusively locked by this card`
 - Depends on: `arch-2-b1-09-runtime-source-draft-integration done; arch-2-b1-10-runtime-content-text-integration done`
