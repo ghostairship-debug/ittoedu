@@ -14,13 +14,13 @@
 - Invalidating paths: `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/courseProjectMutation.ts`; `src/renderer/authoring/spatialWorldAuthoring.ts`; `src/renderer/course/spatialCameraCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/spatialPathCommands.ts`; `src/renderer/course/spatialRelationCommands.ts`; `src/renderer/course/spatialSemanticZoom.ts`; `src/renderer/store/editorStore.ts`; `tests/unit/spatialEditorCommands.test.ts`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-05-neutral-spatial-project-mutation-alias`
 - Phase / wave: `ARCH-3 / Spatial mutation deduplication`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Spatial Mutation Worker / independent Spatial mutation reviewer / Coordinator`
-- Claimed at / released at: `pending / pending`
-- Worktree / branch: `pending / pending`
-- Baseline HEAD: `pending at claim`
+- Claimed at / released at: `2026-08-24T18:56:43+08:00 / pending`
+- Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch3-spatial-mutation / codex/arch3-spatial-mutation`
+- Baseline HEAD: `70c5d3c`
 - Context: `ARCH_3_RE_ADMISSION_REPORT.md`; the neutral helper is established and the duplicate Spatial implementation has seven source consumers and thirty calls.
-- Freshness / relevant dirty inputs: must re-read both implementations and source consumer/call counts at claim
+- Freshness / relevant dirty inputs: clean root; both implementations and the seven source consumers/thirty calls re-read at claim; write set disjoint from Flow task
 - Depends on: `arch-3-03-remaining-edge-readmission` done
 - Blocks: ARCH-3 phase gate
 - Risk statement: deduplication must preserve the Spatial public name and every call site while leaving history/session/resource-transition behavior untouched.

@@ -14,13 +14,13 @@
 - Invalidating paths: `src/renderer/course/flowSharedAuthoringAdapters.ts`; `src/renderer/course/courseProjectMutation.ts`; `src/renderer/course/slideEditorCommands.ts`; `tests/unit/flowSharedAuthoringAdapters.test.tsx`; Vitest/TypeScript resolution config
 - Task ID: `arch-3-04-neutral-flow-shared-overlay-mutation`
 - Phase / wave: `ARCH-3 / Flow second consumer`
-- Status: `ready`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Flow Overlay Boundary Worker / independent Flow overlay reviewer / Coordinator`
-- Claimed at / released at: `pending / pending`
-- Worktree / branch: `pending / pending`
-- Baseline HEAD: `pending at claim`
+- Claimed at / released at: `2026-08-24T18:56:43+08:00 / pending`
+- Worktree / branch: `C:/Users/74755/Documents/HTML课件编辑器-worktrees/arch3-flow-overlay / codex/arch3-flow-overlay`
+- Baseline HEAD: `70c5d3c`
 - Context: `ARCH_3_RE_ADMISSION_REPORT.md`; first Flow consumer already established one neutral implementation and a zero-logic Slide compatibility export.
-- Freshness / relevant dirty inputs: must re-read the two current call sites and focused visibility coverage at claim
+- Freshness / relevant dirty inputs: clean root; exact two call sites and the global-only visibility coverage re-read at claim; write set disjoint from Spatial task
 - Depends on: `arch-3-03-remaining-edge-readmission` done
 - Blocks: ARCH-3 phase gate
 - Risk statement: both online calls must move together without changing overlay ownership, visibility, revision/history, Schema or error behavior.
