@@ -12,7 +12,7 @@
 - Reviewer budget: 2
 - Reviewer risk surfaces: `Controller Session/Player lifecycle`; `Spatial canonical owner/history`
 - Evidence reuse: Reuse still-fresh dependency focused evidence at the integrated candidate; because the Spatial clipboard Store commit invalidated only the named cross-Surface history consumer, refresh that one spec before the gate. Run the new browser spec and renderer typecheck once, using freshly materialized desktop artifacts from the same product bytes. Docs/task-board/generated-only changes do not invalidate product evidence.
-- Invalidating paths: `src/player/teacherControllerDom.ts`; `src/player/renderTeacherController.ts`; `src/player/teacherControllerRuntimeSession.ts`; `src/player/TeacherEscapeControls.ts`; `src/player/surfaces/publishedDynamicHosts.ts`; `src/player/surfaces/slide/SlidePublishedAdapter.ts`; `src/player/surfaces/flow/FlowSurfaceHost.ts`; `src/player/surfaces/spatial/SpatialSurfaceHost.ts`; `src/renderer/App.tsx`; `src/renderer/store/editorStore.ts`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/ScenePanel.tsx`; `src/renderer/ui/ElementsTab.tsx`; `src/renderer/ui/NodesTab.tsx`; `src/renderer/ui/PropertiesTab.tsx`; `src/renderer/course/effectiveLayerProjection.ts`; `src/renderer/authoring/courseAuthoringScope.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/spatialClipboardCommands.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `tests/unit/mixedCrossSurfaceHistory.test.tsx`; `tests/e2e/stabilizationOwnershipController.spec.ts`; `playwright.config.ts`; `tsconfig.json`; `tsconfig.e2e.json`; Electron/Renderer build inputs used by fresh artifact materialization
+- Invalidating paths: `src/player/teacherControllerDom.ts`; `src/player/renderTeacherController.ts`; `src/player/teacherControllerRuntimeSession.ts`; `src/player/TeacherEscapeControls.ts`; `src/player/surfaces/publishedDynamicHosts.ts`; `src/player/surfaces/slide/SlidePublishedAdapter.ts`; `src/player/surfaces/flow/FlowSurfaceHost.ts`; `src/player/surfaces/spatial/SpatialSurfaceHost.ts`; `src/renderer/App.tsx`; `src/renderer/store/editorStore.ts`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/ScenePanel.tsx`; `src/renderer/ui/ElementsTab.tsx`; `src/renderer/ui/NodesTab.tsx`; `src/renderer/ui/PropertiesTab.tsx`; `src/renderer/course/effectiveLayerProjection.ts`; `src/renderer/authoring/courseAuthoringScope.ts`; `src/renderer/course/spatialAuthoringHistory.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/spatialClipboardCommands.ts`; `src/renderer/course/effectiveLayerCommands.ts`; `tests/integration/mixedCrossSurfaceHistory.test.tsx`; `tests/e2e/stabilizationOwnershipController.spec.ts`; `playwright.config.ts`; `tsconfig.json`; `tsconfig.e2e.json`; Electron/Renderer build inputs used by fresh artifact materialization
 - Task ID: `stab-wave-b-ownership-controller`
 - Phase / wave: `post-audit stabilization / B-ownership-controller gate`
 - Status: `claimed`
@@ -45,7 +45,7 @@ One integrated candidate proves honest controller runtime semantics and Spatial 
 
 ## Minimal validation
 
-- `npx vitest run tests/unit/mixedCrossSurfaceHistory.test.tsx`
+- `npx vitest run tests/integration/mixedCrossSurfaceHistory.test.tsx`
 - `npm run typecheck`
 - `npx playwright test tests/e2e/stabilizationOwnershipController.spec.ts --workers=1`
 - `git diff --check`
