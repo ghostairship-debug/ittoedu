@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/export/course/buildCoursePptx.ts`; `src/renderer/export/base64.ts`; `tests/unit/coursePptxExport.test.ts`; `tests/fixtures/architecture-baseline/mixed-spatial.h5lesson`; PptxGenJS/export dependency or test configuration
 - Task ID: `fix-pptx-spatial-svg-base64`
 - Phase / wave: `current stabilization / export fix`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `PPTX Export Worker / Export Reviewer / Coordinator`
-- Claimed at / released at: `2026-08-24T16:56:34+08:00 / —`
+- Claimed at / released at: `2026-08-24T16:56:34+08:00 / 2026-08-24T17:02:03+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `7f46423`
 - Context / freshness: reproduce with the Mixed/Spatial fixture at claim; repo-index optional
@@ -46,9 +46,12 @@ Mixed/Spatial PPTX contains the rendered Spatial SVG media and relationships ins
 
 ## Result and rollback
 
-- Product commit / result: pending.
-- Rollback: revert the one adapter conversion from the claim baseline.
-- Remaining risk: PptxGenJS SVG support only; no Published or PDF path change.
+- Product commit / result: `68c2463` (`fix(export): embed Spatial SVG media in PPTX`); Spatial SVG now uses the existing `bytesToDataUrl` helper over `TextEncoder` UTF-8 bytes, producing the base64 data URI required by PptxGenJS.
+- Failure / validation evidence: the old percent-encoded implementation reproduced `data lacks a base64 header` and produced no SVG relationship. At product commit `68c2463`, `npx vitest run tests/unit/coursePptxExport.test.ts` passed `3/3`; the test unzips the PPTX, locates the actual Spatial slide relationship, follows it to `ppt/media/*.svg`, and verifies the frame and viewport markers. `git diff --check` passed.
+- Independent review: `/root/pptx_svg_review` approved exact commit `68c24631604ba682c74f87445f6c3d195813963b` with no blocking or non-blocking findings; UTF-8/base64 conversion, page ordering, relationship lookup, regex and scope were all accepted.
+- Pipeline / outcome: focused pipeline `pass`; Mixed/Spatial PPTX export is an `engineering candidate`; PowerPoint/LibreOffice visual acceptance is not claimed.
+- Rollback: `git revert 68c2463` restores the one adapter conversion and its focused assertions.
+- Remaining risk: real PowerPoint/LibreOffice rendering was not manually reviewed; no Published, PDF, Schema or dependency path changed.
 - Legacy record: `LEG-004` read-only context; no count change.
 - Semantic index impact: `none`
 - Generated refresh: `defer-to-wave-gate`
