@@ -55,6 +55,7 @@ function RuntimeContentField({
   } | null>(null)
   const cancelBlurRef = useRef(false)
   const dirtyRef = useRef(false)
+  const composingRef = useRef(false)
 
   useEffect(() => {
     if (dirtyRef.current) return
@@ -97,7 +98,7 @@ function RuntimeContentField({
   }
 
   const commit = () => {
-    if (cancelBlurRef.current) return
+    if (cancelBlurRef.current || composingRef.current) return
     commitDraft()
   }
 
@@ -132,9 +133,16 @@ function RuntimeContentField({
       setResult(null)
     },
     onBlur: commit,
+    onCompositionStart: () => {
+      composingRef.current = true
+    },
+    onCompositionEnd: () => {
+      composingRef.current = false
+    },
     onKeyDown: (
       event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
+      if (composingRef.current || event.nativeEvent.isComposing) return
       if (event.key === 'Enter') {
         event.preventDefault()
         cancelBlurRef.current = true

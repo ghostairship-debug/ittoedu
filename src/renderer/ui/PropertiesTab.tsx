@@ -2941,7 +2941,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
       />
     )
   }
-  if (spatialSession && spatialGraphSelection) {
+  if (editingScope !== 'global' && spatialSession && spatialGraphSelection) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
         <SpatialPathRelationFields

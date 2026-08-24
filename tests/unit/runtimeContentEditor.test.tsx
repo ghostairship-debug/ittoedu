@@ -106,6 +106,33 @@ describe('RuntimeContentEditor', () => {
     expect(onCommit).toHaveBeenCalledTimes(1)
   })
 
+  it('does not commit, blur, or reset Enter and Escape keystrokes during IME composition', () => {
+    const onCommit = vi.fn(() => ({ ok: true as const, status: 'updated' as const }))
+    render(<RuntimeContentEditor fields={fields()} onCommit={onCommit} />)
+    const input = screen.getByLabelText('主标题')
+
+    input.focus()
+    fireEvent.change(input, { target: { value: '拼音组合草稿' } })
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input).toHaveValue('拼音组合草稿')
+    expect(document.activeElement).toBe(input)
+
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input).toHaveValue('拼音组合草稿')
+    expect(document.activeElement).toBe(input)
+
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ contentKey: 'title' }),
+      '拼音组合草稿',
+    )
+  })
+
   it('syncs clean replacements but retains a dirty captured target until an explicit retry', () => {
     const onCommit = vi.fn(() => ({
       ok: false as const,

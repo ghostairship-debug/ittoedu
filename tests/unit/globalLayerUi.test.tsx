@@ -367,6 +367,64 @@ describe('Project V8 global-layer editor UI', () => {
     })
   })
 
+  it('keeps the global Runtime inspector above a retained Spatial graph selection', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!canonical) throw new Error('缺少 Spatial Course Project')
+    const spatialProject = structuredClone(canonical)
+    spatialProject.globalLayerItems.push({
+      item: {
+        kind: 'runtime',
+        layerItemId: 'spatial-global-runtime',
+        label: 'Spatial 全局 Runtime',
+        frame: { mode: 'absolute', x: 80, y: 60, width: 640, height: 360 },
+        order: 100001,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        runtime: {
+          protocol: 'canvas-runtime',
+          runtimeApiVersion: 2,
+          enabled: true,
+          renderMode: 'hybrid',
+          source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
+          content: { values: {} },
+          assets: {},
+        },
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+
+    useEditorStore.getState().loadCourseProject(spatialProject, null, {}, {})
+    useEditorStore.getState().activateCourseLocation(spatialProject.startLocationId)
+    useEditorStore.getState().setEditingScope('global')
+    useEditorStore.getState().setSpatialGraphSelection({
+      kind: 'path',
+      id: 'retained-spatial-path',
+    })
+    useEditorStore.setState({
+      editorMode: 'professional',
+      selectedNodeId: null,
+      selectedNodeIds: [],
+    })
+    expect(useEditorStore.getState()).toMatchObject({
+      editingScope: 'global',
+      spatialGraphSelection: {
+        kind: 'path',
+        id: 'retained-spatial-path',
+      },
+    })
+
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+
+    expect(screen.getByTestId('global-runtime-inspector')).toBeInTheDocument()
+    expect(screen.queryByTestId('scene-runtime-inspector')).not.toBeInTheDocument()
+    expect(screen.getByText('canvas-runtime · API 2')).toBeInTheDocument()
+  })
+
   it('offers a state-free scene directory and keeps fixed scene targets as an advanced action', () => {
     const store = useEditorStore.getState()
     store.addScene()
