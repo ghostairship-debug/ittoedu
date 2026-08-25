@@ -441,7 +441,6 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       await teacherControllerRows(page).locator('.node-name').click()
       await page.getByRole('tab', { name: '属性' }).click()
       const defaultCollapsed = page.getByLabel('打开课件时默认折叠')
-      await defaultCollapsed.locator('..').locator('.toggle-track').click()
       await expect(defaultCollapsed).toBeChecked()
 
       await openSlide(page)

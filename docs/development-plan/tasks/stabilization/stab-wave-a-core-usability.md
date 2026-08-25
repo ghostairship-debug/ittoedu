@@ -14,7 +14,7 @@
 - Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `src/renderer/authoring/flowTextEdit.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/v9SlideContentCommands.ts`; `src/renderer/store/editorStore.ts`; `src/shared/teacherControllerLayout.ts`; `tests/e2e/stabilizationCoreUsability.spec.ts`; `playwright.config.ts`
 - Task ID: `stab-wave-a-core-usability`
 - Phase / wave: `post-audit stabilization / A-core gate`
-- Status: `wave-validated`
+- Status: `retrying`
 - Owner / Reviewer / Integrator: `Validation Worker / Core Usability Reviewer / Stabilization Integrator`
 - Claimed at / released at: `2026-08-25 / wave-validated 2026-08-25`
 - Worktree / branch: `shared integration workspace / codex/architecture-stabilization`
@@ -26,6 +26,7 @@
 - Blocks: `core-gate release for B/C/D cards that explicitly depend on stab-wave-a-core-usability; unrelated cards remain claimable`
 - Risk statement: Integration can reintroduce pointer/hit routing or stale Store behavior not visible in isolated focused tests.
 - Retry count / last failure class: `8 / the first independent hit-test oracle targeted the visual child button although runtime intentionally delegates its pointer region to the draggable controller root`
+- Final-candidate freshness attempts / last failure class: `2 / test-oracle: the old gate clicked an already-checked safe-default controller toggle and therefore changed the intentional default from true to false before asserting true`
 
 ## Product outcome
 
@@ -51,6 +52,8 @@ One integrated candidate proves the three core author behaviors in a real browse
 - Start point: integrated candidate `d8d496f`, with product bytes ending at `0f7053e`.
 - Gate commit and rollback: `3cd4719`; revert the gate spec/status independently, while dependency product fixes retain their own rollback points.
 - Result evidence: `npm run build:desktop` passed at product commit `0f7053e` with only the existing inline-dynamic-import and bundle-size warnings. `npx tsc -p tsconfig.e2e.json --noEmit`, Playwright test listing and `git diff --check` passed. The final `npx playwright test tests/e2e/stabilizationCoreUsability.spec.ts --workers=1` run passed 1/1 in 2.1 minutes after a prior diagnostic run exposed and repaired an incorrect child-button hit oracle. The final real Electron journey creates two distinct Spatial world kinds, proves course-wide unique persisted orders, performs native Flow mouse selection and empty/first-character geometry checks, verifies Slide/Flow/Spatial controller preview ownership, pointer-cancel zero-write, bounded drag, save/reopen, and a published Player recovery button whose four browser-space edges are inside the Slide stage and whose delegated hit region expands on a real mouse click. Dependency-card focused evidence was reused because the final gate run covered the integrated product candidate and no dependency invalidator changed afterward. The independent Core Usability Reviewer approved the strengthened Player oracle, exact warning boundary and final invalidation list without repeating the browser run. Pipeline status: pass; outcome status: `engineering candidate`, not teacher/product accepted.
+  - Final-candidate freshness attempt 1 at product `0999b1c`: the four focused suites passed `28/28`, then the browser gate deterministically failed while double-clicking the first Flow paragraph because the newly stable below-placed formatting toolbar covered 48px of that neighboring block. This was a product usability regression against FLOW-02, not a locator workaround opportunity; `stab-flow-09-toolbar-neighbor-hit-isolation` owns the narrow 60px layout reservation repair.
+  - Final-candidate freshness attempt 2 after that product repair and a fresh desktop build passed the unchanged center double-click, empty-caret geometry and real native-range Flow behavior, then failed in the controller group because the old gate clicked the `打开课件时默认折叠` toggle before asserting it. `stab-ctrl-06-safe-default-collapsed` intentionally changed new/missing controllers to checked by default, so the click inverted the correct value. The repaired oracle directly requires the initial checked state; it is not conditional and the downstream save/reopen/Player recovery path remains unchanged.
 - Outcome conclusion boundary: real-browser automation is not teacher/product `accepted`.
 - Semantic index impact: `none`
 - Generated refresh: `complete-at-wave-a-gate`
