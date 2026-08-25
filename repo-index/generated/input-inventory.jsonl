@@ -1,5 +1,5 @@
 {"bytes":6349,"contentHash":"sha256:febd7b07bca59e5b6a8c9a7e01920d5b2d0db69647c904d3e134b2247bb032be","domain":"source","path":"AGENTS.md"}
-{"bytes":13246,"contentHash":"sha256:c0df2a5eae8f0edc175472f094e91833336d6370057d370ed8b760d0daf89eb8","domain":"source","path":"COURSEWARE_DEVELOPMENT_PLAN.md"}
+{"bytes":13247,"contentHash":"sha256:f279dd951e37bfd671aeaaac1b5290ba89e82bd2e538fe011e44d517f625ec0a","domain":"source","path":"COURSEWARE_DEVELOPMENT_PLAN.md"}
 {"bytes":50435,"contentHash":"sha256:908fb9a31268b65919126cecbfd67542d68f50fa1c378d1482f530279b691291","domain":"source","path":"README.md"}
 {"bytes":930,"contentHash":"sha256:561504aa6be02d10c1b4048ac6590e16f2b3c238b36af774338a1bd4bbbd2fd3","domain":"source","path":"artifacts/contracts/contract-manifest.json"}
 {"bytes":40405,"contentHash":"sha256:51201aa6d6e1e37b15391cf1b8811e2a94b52d7a66cbb18a95c8efe080122e7e","domain":"source","path":"docs/COMPONENT_AUTHORING.md"}
@@ -12,7 +12,7 @@
 {"bytes":5128,"contentHash":"sha256:ba03516e5a1cf0a707ef1d5e3a13a06acb2d02a95e350d540ddf9722b2d576a3","domain":"source","path":"docs/contracts/V9_COMPATIBILITY_POLICY.md"}
 {"bytes":13496,"contentHash":"sha256:9828035c6cf4db276dd47f7304135c50a34128e4b1c7bfa9ba1a92145bdda85d","domain":"source","path":"docs/development-plan/ARCHITECTURE_CONTRACT.md"}
 {"bytes":4017,"contentHash":"sha256:fb75d031487e492ce731f36d3b0be53a110c0390e226810ad8f3b51209c7a198","domain":"source","path":"docs/development-plan/README.md"}
-{"bytes":12463,"contentHash":"sha256:975d06b241b600cee55d4f416eec904595a4c48df8e0fe9accf10761c32822e0","domain":"source","path":"docs/development-plan/REPAIR_PLAN.md"}
+{"bytes":12557,"contentHash":"sha256:178ca3cb29d743004f0c7906671e1e42695f86039341d59d0c25ea98a52c5531","domain":"source","path":"docs/development-plan/REPAIR_PLAN.md"}
 {"bytes":2006,"contentHash":"sha256:5d983de662c75c662159bfe039abfc5c8f5164f9d701a77029d06fe4c598d006","domain":"source","path":"docs/development-plan/TASK_CARD_TEMPLATE.md"}
 {"bytes":14212,"contentHash":"sha256:882f39aa378bfbc5c60dfd5507add50761990d46e96644c0eafbfbefc9db445f","domain":"source","path":"docs/development-plan/WORKING_PROTOCOL.md"}
 {"bytes":9682,"contentHash":"sha256:6185b110757b6cdda7fc9608024b41c76dbee9d654aa85afa4b61f11d7ff7632","domain":"source","path":"docs/development-plan/baselines/ARCH_0_PERFORMANCE.md"}

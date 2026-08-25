@@ -90,7 +90,7 @@
 
 唯一详细台账见 [修复方案](docs/development-plan/REPAIR_PLAN.md)。本节只记录依赖顺序和 Owner 已裁决边界，不复制任务状态。本轮仍不含 skill 重构、黄金样例、真实课例生产、声明式数据条件或行内公式；新增范围只有 Owner 已明确要求的远程资源、API 与轻量在线导出。V9 继续软冻结，网络字段只能走 additive 可选合同。
 
-- **Gate R0（当前）**：信任模型与网络方向已经裁决；计划、精简流程和首批 Ready 卡形成一个固定基线提交后开放实现。
+- **Gate R0（已关闭）**：信任模型与网络方向已经裁决；计划与精简流程基线为 `b967c96`，首批 7 张 Ready 卡已进入任务板。
 - **Wave 0 安全、诚实契约与直接用户行为**：`CAP-01` 先移除未兑现的宽泛 `project-health` 声明；`SEC-01` 复用现有 sandbox Player/authoring bridge 隔离 `desktopAPI`，不把联网一并封死；并行修 `UI-01`、`CMP-01`、`EXP-01`。同一 Editor Store 热点上的 UI/CMP 串行。
 - **Wave 1 网络基础纵切**：先完成远程资源交付与工程网络声明的 additive 合同；再按“在线轻量单 HTML → 隔离预览动态 origin → API 连接 → CORS/静态捕获降级”逐个用户行为实施。长期密钥不进入静态课件。
 - **Wave 2 诊断合同**：Validation Report 与 Diagnostic Target 分别定约，再实现逐码 ledger。原“成功分支映射 17 码”控制流不可达，继续否决。

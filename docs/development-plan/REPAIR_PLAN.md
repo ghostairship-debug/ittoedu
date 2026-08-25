@@ -2,9 +2,9 @@
 
 > 日期：2026-08-25
 >
-> 产品源码基线：`a7d11e9`；当前文档/流程基线以 Gate R0 提交为准。
+> 产品源码基线：`a7d11e9`；文档/流程与任务基线：`b967c96`。
 >
-> 状态：**Gate R0 收口中**。Owner 已完成安全与网络方向裁决；本文档、精简任务机制和首批任务卡落到固定提交后即可实现。
+> 状态：**Gate R0 已关闭，首批 7 张卡 queued**。Owner 已完成安全与网络方向裁决；实现从任务板领取。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -102,7 +102,7 @@
 5. **NET-C1 媒体与捕获降级**：播放、Canvas、缩略图、PDF/PPTX 分别给出可执行结果；CORS 不满足时使用本地 fallback 或明确报告。
 6. **NET-AI 边界**：只定义凭证与调用边界，不接入具体 AI Provider；长期密钥零持久化、零导出。
 
-本轮只为 NET-R1 与 NET-P1 创建合同卡。E1/H1/C1 在合同落地后按真实接口创建，不预建依赖卡。
+NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明远程依赖”这一行为，因此合并为一张合同卡。E1/H1/C1 在合同落地后按真实接口创建，不预建依赖卡。
 
 ### Wave 2：Validation Report 与 Diagnostic Target
 
@@ -137,9 +137,7 @@ Gate R0 后只创建以下卡：
 4. `repair-cmp-01-flow-spatial-component-delete`
 5. `repair-exp-01-preflight-producer-parity`
 6. `repair-exa-02-generation-boundary`
-7. `network-resource-contract-01`
-8. `network-access-contract-01`
-
+7. `network-contract-01-remote-dependencies`
 Validation Report、Diagnostic Target、在线导出、隔离联网、CORS 捕获和 V8 删除卡都在前置完成后再创建。
 
 ## 6. 并发安排
@@ -148,7 +146,7 @@ Validation Report、Diagnostic Target、在线导出、隔离联网、CORS 捕�
 - 通道 B：UI-01 → CMP-01，共享 Editor Store 热点，严格串行；
 - 通道 C：EXP-01，Published producer；
 - 通道 D：CAP-01 与 EXA-02，确认写入范围互斥后并行；
-- 通道 E：NET-R1 → NET-P1，共享 contracts/Schema 热点，严格串行。
+- 通道 E：NET-R1/NET-P1 合同作为一个原子提交，避免同一 Schema 的两次串行往返。
 
 每个通道使用隔离 worktree。若 SEC-01 实证必须修改 main/preload、Published producer 或合同，先停止并重标 hotspot，不能越界写入。
 
@@ -180,9 +178,9 @@ Validation Report、Diagnostic Target、在线导出、隔离联网、CORS 捕�
 - blanket 消灭“未变化”、无阈值性能优化、GUI 诊断增强；
 - 新建权限审批平台、图数据库、证据平台或 Provider 插件框架。
 
-## 9. Gate R0 关闭条件
+## 9. Gate R0 关闭证据
 
-1. 本方案、总纲、架构合同和精简任务机制形成一个固定提交；
-2. 首批 8 张卡记录该基线，任务板生成通过；
-3. typecheck、治理测试、合同/能力/任务板/repo-index freshness 通过；
-4. 实现只从任务板的 Ready 卡领取，不从 Wave 标题直接派工。
+1. 总纲、架构合同、网络边界和精简任务机制已形成固定提交 `b967c96`；
+2. 首批 7 张卡均记录该基线，任务板为 `queued: 7`；
+3. typecheck、14 项治理测试、合同/能力/任务板/repo-index freshness 与 repo-index quality 已通过；
+4. 后续实现只从任务板领取，不从 Wave 标题直接派工。
