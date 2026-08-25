@@ -25,7 +25,7 @@
 - Depends on: `stab-audit-closure-gate` done at `1d4936d`.
 - Blocks: active goal completion.
 - Risk statement: a broad retry can hide a non-deterministic or candidate-specific failure, while a second package can detach performance and artifact evidence from the tested build. Each broad command is therefore allowed exactly once.
-- Retry count / last failure class: `0 / none`
+- Retry count / last failure class: `1 governance-only / initial claim generation rejected an unrecognized validation-section heading; product/test inputs were unchanged and no V4 command had started`
 
 ## Product outcome
 
@@ -123,7 +123,7 @@ Size thresholds are the prior fixed candidate's portable/app.asar/first-party-ma
 - [ ] Final contracts/task-board/repo-index freshness/quality and diff checks pass.
 - [ ] No forbidden tracked input or user data changes during the candidate.
 
-## Final exact-state validation
+## Validation
 
 - `npm run check:contracts`
 - `npm run check:task-board`
