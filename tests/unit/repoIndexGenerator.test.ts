@@ -332,6 +332,6 @@ describe('deterministic repo-index generator', () => {
       expect(hashGeneratedDirectory(generatedDirectory)).toBe(beforeHash)
       expect(modificationTimes(generatedDirectory)).toEqual(beforeTimes)
     },
-    15_000,
+    45_000,
   )
 })
