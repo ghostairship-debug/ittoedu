@@ -7,7 +7,8 @@
         "COURSEWARE_DEVELOPMENT_PLAN.md",
         "artifacts/ai-capabilities/index.json",
         "docs/contracts",
-        "docs/development-plan/README.md"
+        "docs/development-plan/README.md",
+        "docs/development-plan/WORKING_PROTOCOL.md"
       ],
       "path": "AGENTS.md",
       "title": "互动课件创作路由"
@@ -137,12 +138,12 @@
     {
       "links": [],
       "path": "docs/development-plan/REPAIR_PLAN.md",
-      "title": "工程修复开发方案（2026-08-25）"
+      "title": "工程修复与网络基础方案"
     },
     {
       "links": [],
       "path": "docs/development-plan/TASK_CARD_TEMPLATE.md",
-      "title": "任务卡模板（S0 / S1 / S2 三合一）"
+      "title": "任务卡模板（精简生产模式）"
     },
     {
       "links": [
@@ -150,7 +151,7 @@
         "docs/development-plan/TASK_CARD_TEMPLATE.md"
       ],
       "path": "docs/development-plan/WORKING_PROTOCOL.md",
-      "title": "工作协议：任务、验证与热点"
+      "title": "工作协议：精简生产模式（Lean Production Mode）"
     },
     {
       "links": [],

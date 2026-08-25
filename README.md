@@ -2,9 +2,9 @@
 
 面向教师的可编辑互动课件桌面编辑器。**当前产品就是本仓库根目录 / `main`**：默认工程真相为 Course Project V9，发布为 Published Course V2，兼容 Runtime API 2/3 与 Component API 4。
 
-当前开发以根目录 [开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md) 为唯一入口：架构稳定化与审计修复已收口为 `engineering candidate`，当前活动路线是总纲第 5 节的工程修复准入（REPAIR）。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)；历史阶段任务与评估已随 2026-08-25 文档整合移除，由 Git 历史保留。
+当前开发以根目录 [开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md) 为唯一入口：架构稳定化与审计修复已收口为 `engineering candidate`，当前活动路线是总纲第 5 节的工程修复与网络基础。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。
 
-开发默认由一个 Integrator 协调三个 Worker 自动拆解、并行、验证、修复和回滚；完整验证只在阶段门或最终候选运行。当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 仍来自产品 Owner 的真实验收，但不再作为启动稳定化的前置。
+开发使用精简生产模式：默认路径"确认问题 → 实现一个行为 → 最小充分验证 → product commit"，S2/热点/并发才建卡，Reviewer 按风险触发，验证同 SHA 去重，完整验证只在集成/发布门运行。当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 仍来自产品 Owner 的真实验收。
 
 ## 快速开始
 
@@ -89,7 +89,7 @@ npm test
 | 统一视觉画布 | Player Runtime：编辑状态、当前位置试运行和成品共用同一 1280 × 720 合成语义 |
 | 原生编辑交互 | Phaser 4：编辑状态中的透明选择、框选、拖拽、缩放、旋转与命中层 |
 | DOM 增强 | Shadow DOM 宿主：密集文字、表格、表单、HUD 和 HTML 组件/运行时 |
-| 可选真 3D | Three.js/WebGL 由具体运行时或 V4 组件离线打包；编辑器核心和 Player 不直接依赖或暴露 Three.js |
+| 可选真 3D | Three.js/WebGL 由具体运行时或 V4 组件携带执行代码；当前资源离线打包，后续远程媒体按工程 origin 声明加载；编辑器核心不暴露 Three.js |
 | 构建 | TypeScript 7、Vite 8 |
 | 数据校验 | Zod 4 |
 | 工程压缩 | fflate |
@@ -212,7 +212,7 @@ Course Project V9 的声明式交互规则是稳定状态与运行逻辑之间�
 
 `.h5component` 也是 ZIP，根目录必须包含 `manifest.json` 和入口脚本。当前只接受 Component API 4：`schemaVersion: 4`、`runtimeApiVersion: 4`，显式声明 `supportedScopes` 和 `renderMode: 'dom' | 'phaser' | 'hybrid'`，按模式只获得 `ctx.dom` 和/或 `ctx.phaser`，并支持显隐、暂停、恢复与捕获准备生命周期。API 1–3 包会给出“不受支持”诊断。
 
-组件使用可信的离线浏览器 JavaScript，不允许在成品运行时依赖 Node.js、npm、CDN 或远程网络。历史 Runtime API 1 / Component API 1–3 示例只保留在归档标签。Three.js 等第三方库如确有必要，应在构建阶段打进具体运行时/组件；程序化一次性 3D 可由运行时内联，模型默认用离线 GLB 并作为 V4 组件包 asset。Course Project V9 当前没有一等 `model` 素材类型，不得把 GLB 伪装成图片；独立模型库需后续正式扩展 Schema、归档、媒体管理和导出。不要把 Three.js 加入编辑器核心或假定宿主全局提供 `THREE`。
+组件的目标执行边界是低桌面权限浏览器 JavaScript，不允许依赖 Node.js、npm、`desktopAPI` 或任意 Electron IPC；当前整课 try-run 尚有同 renderer 暴露缺口，由 SEC-01 修复。**当前版本**仍按离线资源执行；计划中的网络合同会允许工程声明的远程图片、音视频与 API，但不会开放远程脚本或把长期 Provider Key 写入课件。Three.js 等执行依赖仍应在构建阶段打进具体运行时/组件；远程模型/媒体以后作为正式资源类型处理，不得把 GLB 伪装成图片。
 
 组件画布文字编辑必须显式加入协议：DOM 元素使用 `data-courseware-edit-key="content.title"`；Phaser/hybrid 组件在隔离 authoring Player 提供编辑宿主时调用 `ctx.editor?.registerTextRegion({ key, getBounds })`。`key` 必须同时对应 manifest 公开的文字字段或有效 `props.content` 字符串。普通试运行、整课预览、捕获和成品不提供该桥；未登记区域继续整体选择并通过属性栏编辑，不会根据画面文字反推 Props。
 
@@ -243,11 +243,11 @@ Course Project V9 的声明式交互规则是稳定状态与运行逻辑之间�
 
 ## 导出链路
 
-选择单 HTML、网页包、PDF 或 PPTX 后，编辑器都会先为该目标生成当前已接线的 Export Preflight。报告统一包含 `error`、`warning`、`info` 三档以及可选的 `sceneId/stateId/nodeId/path` 定位信息；已检出的错误会阻断导出，静态格式差异与启发式问题作为人工复核线索。当前 V9 路径尚未完整接入 Runtime/Component 源码外联网络检查和全部富排版分析，因此“无错误”只表示现有检查未发现阻断项，不能证明完整离线合规。报告可保存为带 `reportVersion`、工程/格式信息和汇总结果的 JSON；它面向一次具体导出，不能代替真实浏览器外部请求检查、长期结构检查或异常诊断日志。
+选择单 HTML、网页包、PDF 或 PPTX 后，编辑器都会先为该目标生成当前已接线的 Export Preflight。报告统一包含 `error`、`warning`、`info` 三档以及可选的 `sceneId/stateId/nodeId/path` 定位信息；已检出的错误会阻断导出，静态格式差异与启发式问题作为人工复核线索。当前 V9 路径尚未完整接入 Runtime/Component 网络声明一致性检查和全部富排版分析，因此“无错误”只表示现有检查未发现阻断项，不能证明远程依赖、离线便携或静态捕获均可用。报告可保存为带 `reportVersion`、工程/格式信息和汇总结果的 JSON；它面向一次具体导出，不能代替真实浏览器外部请求检查、长期结构检查或异常诊断日志。
 
 | 格式 | 实现方式 | 交互 | 后续编辑 |
 | --- | --- | --- | --- |
-| 单 HTML | 单向编译的 PublishedLesson、素材和 Player Runtime 内联为单文件；超过 50 MB 提示改用网页包 | 保留 | 不能从成品恢复工程；修改原 `.h5lesson` |
+| 单 HTML | 当前版本把 PublishedLesson、素材和 Player Runtime 内联；后续增加“离线便携/在线轻量”导出选择 | 保留 | 不能从成品恢复工程；修改原 `.h5lesson` |
 | 网页包 | ZIP 内分离 `index.html`、唯一 `course-data.js` 发布数据、Player 和运行素材 | 保留 | 不能从成品恢复工程；修改原 `.h5lesson` |
 | PDF | 使用实际 Player Runtime 捕获 Canvas、DOM、全局层与场景层，再由 Electron 打印 | 不保留 | 固定版式 |
 | PPTX | 原生节点逐对象生成；公式、组件和运行时按透明快照/`staticFallback` 静态化 | 不保留 | 原生对象可修改；公式等静态化内容只能整体调整 |
@@ -368,7 +368,7 @@ npm run verify
 - 不包含通用时间轴、关键帧/路径系统、节点连线式状态机、题库/成绩、多用户协作、云同步、模板市场和移动端编辑；编辑器提供事件驱动的入场/退场、顺序/并行步骤、表单式声明交互映射和稳定场景状态，复杂连续效果仍由可信运行时或组件实现；
 - PDF 为静态版式；
 - PPTX 为对象级素材导出，互动组件只保留其在 `capture` 模式经 `prepareCapture()` 生成的确定性静态快照；失败时使用带名称的诊断占位；
-- 单 HTML 和网页包保留互动与音视频，但不应依赖远程服务；含大视频或大量媒体的课件优先网页包；
+- 当前单 HTML 和网页包仍是离线资源输出；网络基础完成后，在线轻量单 HTML 可依赖工程声明的远程媒体/API，离线便携模式继续内嵌资源；
 - 当前源码入口直接运行项目锁定的 Electron，不生成已签名安装包；请只从可信仓库获取源码和依赖锁文件。
 
 ## 源码 ZIP 说明

@@ -8,12 +8,12 @@
 
 | 文件 | 职责 |
 |---|---|
-| [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md) | 什么不能坏：协议边界、由原 35 条合并的 24 组现状硬约束、状态七分类、模块 Owner 与负边界、carrier 矩阵、棘轮与例外、术语 |
-| [WORKING_PROTOCOL.md](WORKING_PROTOCOL.md) | 怎么干活：角色、S0/S1/S2、Policy v2 字段与状态机、文件防火墙、验证预算（class→ceiling）、热点排他、Done 定义、阅读矩阵、Legacy 删除八问、文档与索引维护 |
-| [TASK_CARD_TEMPLATE.md](TASK_CARD_TEMPLATE.md) | S0/S1/S2 三合一任务卡模板（与 `scripts/generate-task-board.ts` 同步） |
-| [REPAIR_PLAN.md](REPAIR_PLAN.md) | 当前活动路线的详细方案：五个修复域、批次估算、否决路线、Owner 裁决记录 |
-| [TASK_BOARD.md](TASK_BOARD.md) | 生成的任务板（`npm run generate:task-board`，不可手改） |
-| `tasks/` | 任务卡（唯一可写状态真相）；当前修复波使用 `tasks/repair/` |
+| [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md) | 什么不能坏/本轮必须兑现：25 组架构不变量、状态七分类、模块 Owner、carrier、桌面权限隔离与声明式网络边界 |
+| [WORKING_PROTOCOL.md](WORKING_PROTOCOL.md) | 怎么干活（精简生产模式）：默认直达路径、S0/S1/S2、三态任务卡、Reviewer 风险触发器、并发三层、验证同 SHA 去重、Done 定义、Legacy 删除八问 |
+| [TASK_CARD_TEMPLATE.md](TASK_CARD_TEMPLATE.md) | 7 字段 Ready 任务卡模板，仅 S2/并发/热点/跨会话需要（与 `scripts/generate-task-board.ts` 同步） |
+| [REPAIR_PLAN.md](REPAIR_PLAN.md) | 当前活动路线：工程修复、作者代码权限隔离、远程资源/API 基础、V8 测试产物清退与投影退出 |
+| [TASK_BOARD.md](TASK_BOARD.md) | 生成的活跃任务摘要（`npm run generate:task-board`，不可手改；完成即删卡） |
+| `tasks/` | 建卡任务的卡文件；当前修复波使用 `tasks/repair/` |
 | `inventories/legacy-consumers.json` | Legacy consumer 台账（被 repo-index semantic 与测试消费，删除状态唯一真相） |
 | `inventories/FEATURE_CONSUMER_OWNER_LEDGER.md` | ARCH-0A 时期的 Feature/consumer/owner 清单（被 repo-index 引用） |
 | `baselines/ARCH_0_PERFORMANCE.md` | 性能对照基线（同机同夹具 median/P95 口径，PRJ 性能修复的对照来源） |
@@ -32,7 +32,7 @@
 - `globalLayerItems`、`surfaceLayerItems`、教师控制器和三种 Surface 能力保留。
 - 自动化最多证明 `engineering candidate`；真实视觉、互动和教师确认决定 `art candidate` / `accepted`。
 - repo-index 不进入产品运行时，不建图数据库、向量库、Watcher 或常驻服务。
-- 不借重构扩建产品能力、重型平台或第二份数据真相；不预建通用 seam 再找消费者；不在缺少真实行为或 consumer 证据时大拆 `editorStore.ts` / `Workspace.tsx` / `PropertiesTab.tsx`。
+- 不借重构扩建重型平台或第二份数据真相；Owner 已明确准入的远程资源/API 只做最小纵切，不预建 Provider 插件框架；不在缺少真实行为或 consumer 证据时大拆 `editorStore.ts` / `Workspace.tsx` / `PropertiesTab.tsx`。
 
 ## 历史纪要
 

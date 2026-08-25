@@ -11,10 +11,12 @@
 
 当前产品协议是 Course Project V9、Published Course V2、Runtime API 2/3 兼容与 Component API 4。不打开、不导入 V8 `.h5lesson`；非 `schemaVersion: 9` 的工程一律视为不受支持。Course Project V9 作者工程 Schema 已**软冻结**：已有字段、判别器和语义不得改；允许 additive 可选字段（单独合同提交、保持 `.strict()`）；不承诺旧编辑器打开含新键的课。当前编辑器内没有可见 AI：无复制引用、Clipboard、Patch 应用、聊天、模型、Provider 或网络调用；`courseAiHandoff` / `courseAiPatch` 只是未挂载纯接口（internal/reserved），不得把接口预留宣称成可用工作流，也不得新增调用点。
 
-长期开发方向只看根目录 [唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)；当前活动路线是其第 5 节"工程修复准入（REPAIR）"。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史阶段任务卡与评估已随 2026-08-25 文档整合从工作树移除，由 Git 历史保留，不再派工。开发导航使用 repo-index（`npm run repo:context`），低置信或过期时回退到直接读源码与合同。
+长期开发方向只看根目录 [唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)；当前活动路线是其第 5 节“工程修复与网络基础”。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史材料不再派工；开发导航使用 repo-index（`npm run repo:context`），低置信或过期时回退到直接读源码与合同。
 
-开发执行默认由一个 Integrator 协调三个 Worker：高并行用于调查、纯模块、目标测试和独立 consumer；Store、App、Workspace、Properties、Published producer、合同与 generated index 等热点始终只有一个写入者。每张任务只做一个用户行为并运行最小充分验证；完整 E2E、打包与 `verify` 只在阶段门或最终候选运行。只有 Schema/V10、用户数据迁移、教师能力取舍、用户可见流程或导出语义变化、付费/重大依赖、安全权限、真实数据损坏风险和最终发布结论升级给产品 Owner。
+开发执行使用精简生产模式（[工作协议](docs/development-plan/WORKING_PROTOCOL.md)）：默认路径是"确认问题 → 实现一个行为 → 最小充分验证 → product commit → 合入"，领取与关闭不产生独立提交。并发三层：调查无限并行；实现按互斥写入范围并行（隔离 worktree）；Store、App、Workspace/Properties、Published producer、合同、main/preload 与 generated index 等热点始终单写入者。完整 E2E、打包与 `verify` 只在集成/发布门运行。只有 Schema/V10、用户数据迁移、教师能力取舍、用户可见流程或导出语义变化、付费/重大依赖、安全权限、真实数据损坏风险和最终发布结论升级给产品 Owner。
 
-开发任务使用 `Policy version: 2`。未完成任务卡必须分别记录 Risk tier、Task class、Necessity / skip condition、Complexity delta、Validation ceiling、Validation budget、Reviewer budget、Evidence reuse 与 Invalidating paths；`additive-exception` 还必须写明 Additive exception。阶段标题只是候选问题域，不是必须施工清单：没有可复现用户风险、真实 consumer/替代目标或可量化复杂度下降时，不建实现卡，允许阶段以零张实现卡结束。验证证据绑定 product commit；后续只改任务卡、报告、task-board 或 generated 且未命中 Invalidating paths 时必须复用，不重跑产品套件。Reviewer 不重复跑同一套验证，第二 Reviewer 只覆盖明确不同的风险面。generated 索引每波最多统一生成和提交一次，不为每张卡制造生命周期提交。
+任务风险只有 S0/S1/S2 一个维度：S0/S1 默认不建卡；S2、并发协调、热点写入、跨会话或交接才建最多 7 字段任务卡（状态仅 queued/active/blocked，完成即删卡）。只为前置已满足的 Ready 工作建卡，`Write scope / Baseline` 必填，不预建未来依赖卡。Reviewer 按风险触发，验证同 SHA 去重。没有可复现风险、真实 consumer 或可量化复杂度下降时不创建实现任务。
+
+作者 Runtime/Component 代码必须与 `desktopAPI`、Node、任意 Electron IPC 和本地文件能力隔离；这不等于禁止联网。Owner 已明确远程图片、音视频、HTTP API、WebSocket 与未来 AI API 是正式能力：隔离 Player 按工程声明放行精确 `https`/`wss` origin，未声明访问拒绝；远程脚本暂不开放；长期 Provider Secret 不得写入工程、Published payload、组件包或导出 HTML。单 HTML 必须区分离线便携与在线轻量两种导出语义。
 
 V9 合同说明在 [docs/contracts/](docs/contracts/)。当前产品事实以源码、Schema、能力卡和可复现结果为准。自动化最多证明 `engineering candidate`；`art candidate` 与 `accepted` 仍必须来自真实产品复核，但不再作为启动稳定化的技术前置。

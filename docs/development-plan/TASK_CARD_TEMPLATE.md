@@ -1,127 +1,27 @@
-# 任务卡模板（S0 / S1 / S2 三合一）
+# 任务卡模板（精简生产模式）
 
-> 任务卡是该任务状态的唯一真相；任务板由任务卡生成。字段枚举的执行真相在 `scripts/generate-task-board.ts`（`taskStatuses` / `policy2RiskTiers` / `policy2TaskClasses` / `policy2ValidationCeilingByClass`），本文件是其人类可读镜像，两边必须同步修改。
+> 只有满足建卡条件（S2 / 并发协调 / 热点写入 / 跨会话 / 交接）才创建任务卡；普通 S0/S1 不建卡。只为前置已满足的 Ready 工作建卡，未来依赖任务不预建。状态与字段的执行真相在 `scripts/generate-task-board.ts`，本文是其人类可读镜像，两边必须同步修改。
 >
-> 按 Risk tier 取舍章节：S0 只保留标 ★ 的最小集；S1 用全部常规节；S2 额外补标 ◆ 的迁移节。ceiling 固定按 class：docs=V0，implementation=V1，integration/wave-gate=V2，phase-gate=V3，final-candidate=V4。
+> 完成后删除卡文件（随实质提交或波次收口提交），完成事实由 product commit 承载；不设 done 状态、不做关闭提交。
 
-## State and assignment ★
+最多 7 项字段：
 
-- Policy version: 2
-- Risk tier: S0 | S1 | S2
-- Task class: docs | implementation | integration | wave-gate | phase-gate | final-candidate
-- Necessity / skip condition:
-- Complexity delta: subtractive | neutral | additive-exception
-- Validation ceiling: V0 | V1 | V2 | V3 | V4
-- Validation budget: N minutes
-- Reviewer budget: 0 | 1 | 2
-- Evidence reuse:
-- Invalidating paths:
-<!-- 仅当 Complexity delta 为 additive-exception 时，紧随其后增加独立字段：- Additive exception: 首个真实 consumer、替代目标和退出条件 -->
-<!-- Reviewer budget：S0 为 0；S1 docs/implementation/integration 上限 1；2 只用于 wave/phase/final 且写明两个不同风险面。Ready 时 Evidence reuse 不填未来 commit。 -->
-- Task ID:
-- Phase / wave:
-- Status: draft | ready | claimed | characterizing | implementing | target-green | reviewed | integrating | wave-validated | done | retrying | parked | rolled-back | product-decision
-- Owner / Reviewer / Integrator:
-- Claimed at / released at:
-- Worktree / branch:
-- Baseline HEAD:
-- Context: repo-index query + manifest hash | bootstrap-manual
-- Freshness / relevant dirty inputs:
-- Depends on:
-- Blocks:
-- Retry count:
+```markdown
+# <task-id> <标题>
 
-## Product outcome ★
+- Status / Owner: queued | active | blocked / <唯一写入者；queued 可为空；blocked 须在 Outcome 写原因、解除条件与下一决策者>
+- Risk / Hotspot: S1 | S2 / none | editor-store-history | app-save-recovery | workspace-properties | published-producer | contracts-schema | main-preload | generated-index
+- Outcome / Why now: <要改变的一个用户行为 + 当前证据（源码/复现/评估引用）>
+- Write scope / Baseline: <必填：允许写入的精确范围；S2 或跨会话任务记录 baseline commit>
+- Acceptance: <可判断的完成条件>
+- Focused validation: <1–3 条命令或最小人工检查>
+- S2 safety / rollback: <仅 S2 必填：失败路径、回滚起点、副本/fixture 要求>
+```
 
-一句话描述用户或工程可观察结果。
+约定：
 
-## Current fact and evidence ★
-
-当前实现、状态、源码/合同/测试路径；不得把目标写成现状。
-
-## Non-goals
-
-明确不改的产品行为、模块和未来能力。
-
-## Scope and locks ★
-
-### Allowed write
-### Required read（S1/S2）
-### Forbidden write
-### Do not read unless needed
-### Hotspot locks（S0 必须为空；S1 通常 0–1 个；S2 由 Coordinator 持有）
-
-## Change budget
-
-- Task timebox:
-- Main source files:
-- New/moved files:
-- Public exports:
-- Deletion allowed:
-- Dependency/lockfile changes:
-- UI copy/behavior changes:
-- Schema/contract changes: no（默认）
-- Generated diff: none for implementation; defer indexed refresh to wave-gate
-- Target tests / expected validation time:
-- Max implementation retries: 2（默认）
-
-## Characterization（仅在边界不清时；S0 不建此节）
-
-- Current successful behavior / known failure:
-- Relevant async/stale/history/save/preview implications:
-
-## Migration boundary ◆（仅 S2）
-
-- 旧 owner / 新 owner / 公共入口 / consumers / rollback / Legacy 记录 ID：
-- 双写禁止确认；stale-target 合同覆盖切页/切项目：
-
-## Implementation outline
-
-最短步骤，不写伪精确未来行号。
-
-## Acceptance ★
-
-- [ ] Product behavior
-- [ ] Module boundary
-- [ ] No duplicate truth/deep import
-- [ ] No regression in named flow
-- [ ] Budget and locks respected
-
-## Minimal validation ★
-
-列 1–3 个最相关目标命令；只有自动化不能直接观察结果时才加一个最小人工流程。不得把同一套件拆成多行规避预算。
-
-## Rollback ★
-
-- Start point:
-- Implementation commit:
-- Old path remains:
-
-## Consumers and index
-
-- Consumer delta（仅实际影响 consumer 时）:
-- Legacy record IDs（仅迁移/deletion-candidate 时）:
-- Semantic index impact: none | canonical-update
-- Generated refresh: defer-to-wave-gate | not-required
-
-## Result evidence ★
-
-- Actual change/product commit and evidence key: change commit + command/result + environment
-- Behavior before/after:
-- Validation results:
-- Consumer delta:
-- Remaining risks:
-- Rollback commit or start point:
-- Next allowed task:
-
-## Findings / next allowed task
-
-## Ready checklist（Coordinator）★
-
-- [ ] dependsOn satisfied
-- [ ] context fresh or Bootstrap verified
-- [ ] evidence and paths valid
-- [ ] write locks available
-- [ ] budget/validation/rollback complete
-- [ ] no related user dirty change
-- [ ] no product escalation triggered
+- `Hotspot` 从固定枚举中选（可多个，逗号分隔，非热点写 `none`）；生成器校验同一热点标签不得出现在两张 `active` 卡上——这是并发护栏，不是仪式。
+- `active` 必须有 Owner；owner 是并发事实，不需要领取提交。
+- 未满足前置时不要创建 queued 卡；执行中才出现阻断时改为 `blocked`，并在 Outcome 写明原因、解除条件和下一决策者。
+- 文件放在 `docs/development-plan/tasks/<wave>/<task-id>.md`，task-id 用小写稳定 ID。
+- 任务板由 `npm run generate:task-board` 从卡生成（当前活跃任务摘要），只在任务集合实质变化时更新。

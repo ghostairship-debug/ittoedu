@@ -1,6 +1,6 @@
 # 架构合同：什么不能坏
 
-> 本文是"任何任务都不得破坏的现状约束"的唯一落点，供 S1/S2 任务按需补读。协议细节以 `src/shared/contracts/**`、Zod Schema 与源码为准；本文与源码冲突时修正本文。
+> 本文是“必须守住的现状能力 + 已裁决但尚待修复的目标不变量”的唯一落点，供 S1/S2 任务按需补读。目标态条目会明确标出当前缺口，不能伪称已经满足。协议细节以 `src/shared/contracts/**`、Zod Schema 与源码为准；本文与源码冲突时修正本文。
 
 ## 1. 协议与版本边界
 
@@ -10,7 +10,7 @@
 - 项目 `id` 与单调 `revision` 语义保留；`globalLayerItems`、`surfaceLayerItems` 和三 Surface 保留；不新增 persisted `projectMode`。
 - 当前编辑器内没有可见 AI、聊天、Provider 或网络调用；internal/reserved 接口不得宣称为可用工作流。
 
-## 2. Current Must Preserve（原 35 条合并为 24 组）
+## 2. Must Preserve / Must Achieve（25 组）
 
 ### 产品能力
 
@@ -41,14 +41,23 @@
 19. 作者与交付的有效域必须闭合：任何作者端允许保存的状态都必须被 Preview、统一画布、Published Player 和适用导出接受。
 20. 公开入口必须诚实：属性、复制、粘贴、重复、拖放和错误反馈要么真实改变唯一工程并进入正确历史，要么明确不可用；禁止静默 no-op、伪成功和底层校验 JSON 直出。
 
+### 执行权限与网络
+
+21. **作者代码低桌面权限、网络按声明开放**：
+   - 课件工程与组件包中的 Runtime/Component 代码不得看见 `desktopAPI`、Node、任意 Electron IPC、本地文件、保存/恢复或导出能力；
+   - 编辑态现有 opaque-origin sandbox iframe 是可复用边界；整课 try-run 仍在主 renderer 执行作者代码，是 SEC-01 待修缺口；
+   - 外链图片、音频、视频、`fetch`、EventSource 与 WebSocket 是正式能力，不因作者代码低权限而 blanket 禁止；隔离 Player 只放行工程声明的精确 `https`/`wss` origin；
+   - 远程脚本本轮不开放；长期 Provider Secret 不得持久化或写入 Published/导出物；
+   - 单 HTML 的离线便携与在线轻量是不同导出语义；任何宿主统一都必须同时复用桌面权限隔离和网络 origin 策略。
+
 ### 工具与治理
 
-21. contracts 和 ai-capabilities 的生成/check 保留；`.agents/skills` 两个课件工作流入口保留。
-22. read-model boundary 与 forbidden-token 棘轮保留并只允许收紧。
-23. 自动化最多证明 engineering candidate；未经明确教师验收不得宣称 accepted/发布。
-24. 用户未提交修改不得被自动回退或覆盖。
+22. contracts 和 ai-capabilities 的生成/check 保留；`.agents/skills` 两个课件工作流入口保留。
+23. read-model boundary 与 forbidden-token 棘轮保留并只允许收紧。
+24. 自动化最多证明 engineering candidate；未经明确教师验收不得宣称 accepted/发布。
+25. 用户未提交修改不得被自动回退或覆盖。
 
-（以下 24 组覆盖原 35 条语义；协议、产品、保存、编辑与治理各组内的合并关系可由 Git 历史中的 `90-appendix/00_CURRENT_MUST_PRESERVE.md` 对照。）
+（第 1–20、22–25 组覆盖原 35 条语义，合并关系可由 Git 历史中的 `90-appendix/00_CURRENT_MUST_PRESERVE.md` 对照；第 21 组是 2026-08-25 评估新增的安全不变量。）
 
 ## 3. 状态七分类与唯一工程真相
 
@@ -110,8 +119,9 @@
 - **Runtime/互动**：简洁模板与专业规则必须生成同一种标准 Interaction V1 规则；Automation UI 是界面不是第三套业务模型。
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
 - **全局层**：有效图层管线为 global+surface+scene/world → visibility filter → ownership-aware order → rows/canvas/player。
-- **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。
-- **Diagnostics**：不预建 structural/contextual/authoring/export 框架矩阵，只处理已复现的债务。
+- **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。
+- **Diagnostics**：不预建 structural/contextual/authoring/export 框架矩阵，只处理已复现的债务。网络 finding 判断“声明与使用是否一致”，不得把合法外链本身定义为错误。
+- **Secrets**：长期 API/AI Provider 密钥不属于 Course Project、Published payload、component package 或导出文件；只允许服务端代理、运行时用户输入或短期限域 Token。
 - **UI**：只有已准入迁移的首个真实 consumer 需要时才抽最窄 seam；能局部修复就不造 seam，不一次拆大文件。
 - **EditorMode**：只有 simple/professional 两种；不建第三 `code` 模式、新 Code Workspace 入口或结构化 Diff。
 
