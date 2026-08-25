@@ -126,6 +126,7 @@ vi.mock('phaser', () => {
 
 import { CourseEventBus } from '../../src/player/CourseEventBus'
 import { CoursePlayer } from '../../src/player/surfaces/CoursePlayer'
+import { SlidePublishedAdapter } from '../../src/player/surfaces/slide/SlidePublishedAdapter'
 import { mountPublishedSlidePhaserComponent } from '../../src/player/surfaces/slide/publishedSlidePhaserComponentMount'
 import {
   createPublishedCourseSession,
@@ -199,7 +200,9 @@ function runtime(version: string): string {
       id: '${PUBLISHED_PHASER_COMPONENT_ID}',
       runtimeApiVersion: 4,
       create(ctx) {
+        var previousProbe = window.__publishedPhaserUnitProbe;
         var probe = window.__publishedPhaserUnitProbe = {
+          creates: ((previousProbe && previousProbe.creates) || 0) + 1,
           version: '${version}',
           context: ctx.renderMode === 'phaser' && !!ctx.phaser.Phaser
             && !!ctx.phaser.scene && !!ctx.phaser.root
@@ -470,6 +473,64 @@ describe('Published Slide Phaser Component API 4 host', () => {
     await player.destroy()
   })
 
+  it('waits for prepared noncurrent and forced locations before materializing deferred Phaser', async () => {
+    await import('phaser')
+
+    const runPreparedActivation = async (
+      targetIndex: 0 | 1,
+      forced: boolean,
+      version: string,
+    ): Promise<void> => {
+      const fixture = createPublishedPhaserComponentV2Fixture(runtime(version))
+      const payload = buildPublishedCourseV2Payload({
+        project: fixture.project,
+        assetFiles: fixture.assetFiles,
+        components: fixture.components,
+      })
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const host = new SlidePublishedAdapter(payload, fixture.slideSurfaceId)
+      const player = new CoursePlayer([host], { services: services() })
+      const emitted: unknown[] = []
+      const onEmit = (event: Event) => emitted.push((event as CustomEvent).detail)
+      window.addEventListener('courseware-component-event', onEmit)
+      try {
+        expect(await player.mountSurface(fixture.slideSurfaceId, container)).toEqual({ ok: true })
+        host.preparePublishedLocation(fixture.slideLocationIds[targetIndex], forced)
+        expect(await player.activateSurface(fixture.slideSurfaceId)).toEqual({ ok: true })
+        await flushTeardown()
+
+        expect(globalThis.__fakePublishedPhaserGames ?? []).toHaveLength(0)
+        expect(window.__publishedPhaserUnitProbe).toBeUndefined()
+        expect(emitted).toEqual([])
+
+        await host.setLocationId(fixture.slideLocationIds[targetIndex])
+        if (targetIndex === 0) {
+          await vi.waitFor(() => expect(window.__publishedPhaserUnitProbe).toMatchObject({
+            creates: 1,
+            version,
+          }))
+          expect(globalThis.__fakePublishedPhaserGames).toHaveLength(1)
+          expect(emitted).toHaveLength(1)
+        } else {
+          await flushTeardown()
+          expect(globalThis.__fakePublishedPhaserGames ?? []).toHaveLength(0)
+          expect(window.__publishedPhaserUnitProbe).toBeUndefined()
+          expect(emitted).toEqual([])
+        }
+      } finally {
+        window.removeEventListener('courseware-component-event', onEmit)
+        await player.destroy()
+        document.body.replaceChildren()
+        delete globalThis.__fakePublishedPhaserGames
+        delete window.__publishedPhaserUnitProbe
+      }
+    }
+
+    await runPreparedActivation(1, false, 'prepared-noncurrent')
+    await runPreparedActivation(0, true, 'prepared-forced')
+  })
+
   it('routes the materialized scene item for current-location and whole-course preview consumers', async () => {
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       configurable: true,
@@ -539,10 +600,19 @@ describe('Published Slide Phaser Component API 4 host', () => {
     expect(suspendedProbe).toMatchObject({ stopped: true })
     await session.goToIndex(0)
     expect(window.__publishedPhaserComponentV4Probe).toMatchObject({ resumes: 1 })
+    await session.goToIndex(2)
+    window.__publishedPhaserComponentV4Probe = {}
+    const gameCountBeforeInactiveRestart = globalThis.__fakePublishedPhaserGames?.length ?? 0
     await session.restartCourse()
     await vi.waitFor(() => expect(courseRoot.querySelector(
       `[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
     )).not.toBeNull())
+    await vi.waitFor(() => expect(window.__publishedPhaserComponentV4Probe)
+      .toMatchObject({ creates: 1 }))
+    expect(Number(window.__publishedPhaserComponentV4Probe?.destroys ?? 0)).toBe(0)
+    expect(globalThis.__fakePublishedPhaserGames).toHaveLength(
+      gameCountBeforeInactiveRestart + 1,
+    )
     await session.destroy()
     await flushTeardown()
     expect(globalThis.__fakePublishedPhaserGames?.every((game) => (

@@ -647,7 +647,16 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
-    if (wasInactive && this.#deferredPhaserComponentMounts.length > 0) {
+    const canMaterializeCurrentGeneration = preparedActivation === null
+      || (
+        preparedActivation.locationId === this.#locationId
+        && !preparedActivation.forced
+      )
+    if (
+      wasInactive
+      && canMaterializeCurrentGeneration
+      && this.#deferredPhaserComponentMounts.length > 0
+    ) {
       const deferredMounts = this.#deferredPhaserComponentMounts.splice(0)
       for (const mount of deferredMounts) mount()
     }
@@ -709,6 +718,15 @@ export class SlidePublishedAdapter implements SurfaceHost {
       && preparedReset.locationId === this.#startLocationId
     ) {
       this.#completedActiveResetLocationId = this.#startLocationId
+    } else if (
+      !resetWasActive
+      && preparedReset?.forced
+      && preparedReset.locationId === this.#startLocationId
+    ) {
+      // Mixed restart prepares the inactive start surface before reset. Keep
+      // that forced hint so activate cannot materialize the reset generation
+      // immediately before the navigator's authoritative setLocationId().
+      this.#preparedRuntimeActivation = preparedReset
     }
   }
 
