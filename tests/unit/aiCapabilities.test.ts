@@ -91,6 +91,7 @@ describe('AI capability manifest generation', () => {
         command: string
         output: string
         reportVersion: number
+        checks: string[]
         exitCodes: Record<string, number>
         execution: string
       }
@@ -150,6 +151,17 @@ describe('AI capability manifest generation', () => {
       input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
+      checks: [
+        'course-project-v9-schema',
+        'assets-and-components',
+        'runtime-component-protocol',
+        'single-html-preflight',
+        'web-package-preflight',
+        'pdf-preflight',
+        'pptx-preflight',
+        'stable-ids',
+        'no-v8-fields-or-migration-markers',
+      ],
       exitCodes: {
         valid: 0,
         diagnosedErrors: 1,

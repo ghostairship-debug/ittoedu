@@ -1064,7 +1064,6 @@ export async function generateAiCapabilityArtifacts(
       reportVersion: 1,
       checks: [
         'course-project-v9-schema',
-        'project-health',
         'assets-and-components',
         'runtime-component-protocol',
         'single-html-preflight',
