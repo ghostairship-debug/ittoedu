@@ -602,11 +602,36 @@ describe('AI capability manifest generation', () => {
     const surfaceRuntime = parseFile<{
       runtimeApiVersion: number
       protocol: string
+      publishedPlayback: {
+        status: string
+        supportedSlice: { consumers: string[] }
+        notCovered: string[]
+      }
     }>(generated.files, 'schemas/runtime-api3.json')
     expect(surfaceRuntime).toMatchObject({
-      protocol: 'surface-v1',
+      protocol: 'surface-runtime',
       runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
+      publishedPlayback: {
+        status: 'partial',
+        supportedSlice: {
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+        },
+      },
     })
+    expect(surfaceRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
+      'canvas-runtime-api2',
+      'flow-or-spatial',
+      'globalLayerItems-or-surfaceLayerItems',
+      'runtime.event-or-host-actions',
+      'cross-surface-courseState-or-presentation',
+      'capture-pdf-or-pptx',
+      'network-or-host-local-capabilities',
+    ]))
     const interactions = parseFile<{
       contract: string
       protocolVersion: number

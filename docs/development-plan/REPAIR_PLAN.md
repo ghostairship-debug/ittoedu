@@ -143,18 +143,18 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 任务状态仍只看自动生成的任务板。UI-01、EXA-02、EXP-02、CMP-02 与网络合同均已合入；完成事实由 product commit 和 Git 历史保存。SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项，也不保留任务卡。
 
-当前只有 `repair-rtp-01-published-slide-surface-runtime` 一项 Ready/active：先让 Slide 场景内 API 3 DOM Surface Runtime 在当前位置试运行、整课预览、单 HTML 与网页包共用的 Published V2 链路真实执行。该项是独立 Player parity 纵切，不属于 SEC，也不以隔离桌面权限为目标；API 2、Flow/Spatial、全局/共享 scope 与捕获 parity 不由本卡伪称完成。
+当前没有 Ready/active 任务卡。`repair-rtp-01-published-slide-surface-runtime` 已完成：Slide 场景内 API 3 DOM Surface Runtime 在当前位置试运行、整课预览、单 HTML 与网页包复用的 Published V2 执行路径中真实运行。该项是独立 Player parity 纵切，不属于 SEC，也不以隔离桌面权限为目标；API 2、Flow/Spatial、全局/共享 scope 与捕获 parity 仍未因此完成。
 
 Validation Report、Diagnostic Target、在线轻量导出、预览宿主联网、CORS 捕获和 V8 删除卡都在前置完成且出现真实 consumer 后再创建。
 
 ## 6. 并发安排
 
-当前只有 Runtime parity 通道，独占 Published/Player 写入范围；不得写 Store、App、Workspace/Properties、合同或 main/preload。后续只为前置已满足、具有真实 consumer 的工作建卡，再按写入热点分配隔离 worktree；Store、App、Workspace/Properties、Published producer、合同、main/preload 与 generated index 继续保持单写入者。
+当前没有 Ready 实现通道。后续只为前置已满足、具有真实 consumer 的工作建卡，再按写入热点分配隔离 worktree；Store、App、Workspace/Properties、Published producer、合同、main/preload 与 generated index 继续保持单写入者。
 
 ## 7. 成功门槛
 
 - Runtime/Component 因“外部导入”被误判为不可信并强制低权限执行的路径：0；
-- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：按独立纵切逐项归零，首项为 Slide scene-local API 3 DOM playback；
+- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：Slide scene-local API 3 DOM 在四个现有 consumer 已归零；API 2、Flow/Spatial、global/surface layer 与 capture 等剩余 carrier 继续按独立纵切逐项归零；
 - 已声明远程资源/API 被 blanket 拦截：0；未声明 origin 被错误放行：0；
 - 长期 API Key 进入工程或导出物：0；
 - 能力索引与 CLI 实现不一致：0；

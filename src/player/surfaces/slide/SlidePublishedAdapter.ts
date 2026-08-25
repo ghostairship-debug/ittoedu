@@ -10,6 +10,7 @@ import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
   PublishedNativeLayerItem,
+  PublishedRuntimeLayerItem,
   PublishedScopedLayerItem,
   PublishedSlidePresentationState,
   PublishedSlideScene,
@@ -37,6 +38,11 @@ import {
 } from '../publishedComponentMount'
 import { paintPublishedNativeText } from '../publishedNativeText'
 import { paintPublishedFormula } from '../publishedFormula'
+import {
+  createPublishedSurfaceRuntimeSession,
+  mountPublishedSurfaceRuntime,
+  type PublishedSurfaceRuntimeMountHandle,
+} from '../runtime/publishedSurfaceRuntimeMount'
 import {
   PublishedDomInteractionSurfacePort,
   PublishedInteractionVisibilityState,
@@ -177,6 +183,14 @@ function isPublishedInteractiveLayer(item: PublishedLayerItem): boolean {
     || (item.kind === 'native' && item.content.nativeType === 'video')
 }
 
+function isPublishedSlideSurfaceRuntime(item: PublishedLayerItem): boolean {
+  return item.kind === 'runtime'
+    && item.runtime.enabled
+    && item.runtime.protocol === 'surface-runtime'
+    && item.runtime.runtimeApiVersion === 3
+    && item.runtime.renderMode === 'dom'
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -281,6 +295,7 @@ function appendLayerNode(
     components?: PublishedCourseV2Payload['components']
     interactive?: boolean
     mountComponent?: (handle: PublishedComponentMountHandle) => void
+    mountRuntime?: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => void
   },
 ): HTMLElement | null {
   if (!item.visible) return null
@@ -297,7 +312,15 @@ function appendLayerNode(
   wrap.style.opacity = String(item.opacity)
   wrap.style.transform = `rotate(${item.rotation}deg)`
   wrap.style.transformOrigin = 'center center'
-  wrap.style.pointerEvents = isPublishedInteractiveLayer(item) || item.kind === 'component' ? 'auto' : 'none'
+  wrap.style.pointerEvents = isPublishedInteractiveLayer(item)
+    || item.kind === 'component'
+    || (
+      source === 'scene'
+      && item.hitPolicy !== 'pass-through'
+      && isPublishedSlideSurfaceRuntime(item)
+    )
+    ? 'auto'
+    : 'none'
   wrap.style.zIndex = String(item.order)
   if (item.playbackInitialVisibility === 'hidden') {
     wrap.style.visibility = 'hidden'
@@ -360,17 +383,26 @@ function appendLayerNode(
     })
     options?.mountComponent?.(handle)
   } else if (item.kind === 'runtime') {
-    wrap.dataset.slideFallbackKind = 'runtime'
-    const url = item.runtime.staticFallback
-      ? resolveAsset(item.runtime.staticFallback.assetId)
-      : undefined
-    if (url) {
-      appendFallbackImage(wrap, url, 'runtime 后备')
+    wrap.dataset.slideRuntimeKind = item.runtime.protocol
+    if (!item.runtime.enabled) {
+      wrap.dataset.slideRuntimeState = 'disabled'
+    } else if (source === 'scene' && isPublishedSlideSurfaceRuntime(item) && options?.mountRuntime) {
+      wrap.dataset.slideRuntimeState = 'playback'
+      options.mountRuntime(wrap, item)
     } else {
-      applyVisibleTextFallback(
-        wrap,
-        firstVisibleText(item.runtime.content.values) ?? item.runtime.protocol,
-      )
+      wrap.dataset.slideFallbackKind = 'runtime'
+      wrap.dataset.slideRuntimeState = 'fallback'
+      const url = item.runtime.staticFallback
+        ? resolveAsset(item.runtime.staticFallback.assetId)
+        : undefined
+      if (url) {
+        appendFallbackImage(wrap, url, 'runtime 后备')
+      } else {
+        applyVisibleTextFallback(
+          wrap,
+          firstVisibleText(item.runtime.content.values) ?? item.runtime.protocol,
+        )
+      }
     }
   } else {
     wrap.dataset.slideFallbackKind = item.kind
@@ -423,11 +455,15 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #locationId: string
   #presentationStateId: string | undefined
   #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
+  #preparedActivationLocationId: string | null = null
+  #pendingRuntimeActivationLocationId: string | null = null
   #root: HTMLElement | null = null
   #active = false
   #services: SurfacePlayerServices | null = null
   #controllers: TeacherControllerDom[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
+  #runtimeHandles: PublishedSurfaceRuntimeMountHandle[] = []
+  readonly #runtimeSession = createPublishedSurfaceRuntimeSession()
   #muted = false
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #interactionGeneration = 0
@@ -474,6 +510,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
 
   getLocationId(): string {
     return this.#locationId
+  }
+
+  /** Published navigator hint used to avoid resuming a stale scene before setLocationId(). */
+  preparePublishedLocation(locationId: string): void {
+    resolveSlideLocation(this.#payload, this.id, locationId)
+    this.#preparedActivationLocationId = locationId
   }
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
@@ -543,14 +585,34 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async activate(): Promise<void> {
+    const wasInactive = !this.#active
+    const preparedLocationId = this.#preparedActivationLocationId
+    this.#preparedActivationLocationId = null
     this.#active = true
     if (this.#root) this.#root.hidden = false
+    this.#pendingRuntimeActivationLocationId = null
+    if (wasInactive && this.#runtimeHandles.length > 0) {
+      if (preparedLocationId !== null) {
+        this.#pendingRuntimeActivationLocationId = preparedLocationId
+      } else {
+        for (const handle of this.#runtimeHandles) {
+          handle.setVisible(true)
+          handle.resume()
+        }
+      }
+    }
     this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    this.#preparedActivationLocationId = null
+    this.#pendingRuntimeActivationLocationId = null
+    for (const handle of this.#runtimeHandles) {
+      handle.setVisible(false)
+      handle.suspend()
+    }
     if (this.#root) this.#root.hidden = true
   }
 
@@ -563,6 +625,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
       if (!this.#deferTeacherControllerCourseReset) {
         this.#teacherControllerSession.resetCourse()
       }
+      this.#runtimeSession.resetCourse()
     } else this.#teacherControllerSession.resetSurface(this.id)
     this.#preparedPresentationState = null
     await this.setLocationId(this.#startLocationId)
@@ -581,10 +644,22 @@ export class SlidePublishedAdapter implements SurfaceHost {
   async setLocationId(locationId: string): Promise<void> {
     const location = resolveSlideLocation(this.#payload, this.id, locationId)
     const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
+    this.#preparedActivationLocationId = null
     const presentationStateId = this.#preparedPresentationState?.locationId === locationId
       ? this.#preparedPresentationState.stateId
       : presentationStateIdForLocation(scene, location)
     this.#preparedPresentationState = null
+    const sameLocation = locationId === this.#locationId
+      && presentationStateId === this.#presentationStateId
+    const pendingActivationLocationId = this.#pendingRuntimeActivationLocationId
+    this.#pendingRuntimeActivationLocationId = null
+    if (pendingActivationLocationId === locationId && sameLocation) {
+      for (const handle of this.#runtimeHandles) {
+        handle.setVisible(true)
+        handle.resume()
+      }
+      return
+    }
     this.#invalidateInteractions()
     this.#interactionPort?.resetLocalVisibility()
     this.#locationId = locationId
@@ -598,11 +673,15 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#interactionPort?.destroy()
     this.#interactionPort = null
     this.#interactionNodes.clear()
+    this.#destroyRuntimes()
     this.#destroyComponents()
     this.#destroyControllers()
+    this.#runtimeSession.destroy()
     this.#root?.remove()
     this.#root = null
     this.#active = false
+    this.#preparedActivationLocationId = null
+    this.#pendingRuntimeActivationLocationId = null
     this.#services = null
   }
 
@@ -626,6 +705,17 @@ export class SlidePublishedAdapter implements SurfaceHost {
       }
     }
     this.#componentHandles = []
+  }
+
+  #destroyRuntimes(): void {
+    for (const handle of this.#runtimeHandles) {
+      try {
+        handle.destroy()
+      } catch (error) {
+        console.error('Slide Surface Runtime destroy failed', error)
+      }
+    }
+    this.#runtimeHandles = []
   }
 
   #destroyControllers(): void {
@@ -793,8 +883,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #render(): void {
     const root = this.#root
     if (!root) return
+    this.#pendingRuntimeActivationLocationId = null
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
+    this.#destroyRuntimes()
     this.#destroyComponents()
     this.#destroyControllers()
     const surface = findSlideSurface(this.#payload, this.id)
@@ -836,6 +928,39 @@ export class SlidePublishedAdapter implements SurfaceHost {
       interactive: this.#active,
       mountComponent: (handle: PublishedComponentMountHandle) => {
         this.#componentHandles.push(handle)
+      },
+      mountRuntime: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => {
+        if (!this.#active) {
+          wrap.dataset.slideRuntimeState = 'deferred'
+          wrap.style.pointerEvents = 'none'
+          return
+        }
+        const handle = mountPublishedSurfaceRuntime(wrap, {
+          instanceId: item.layerItemId,
+          runtime: item.runtime,
+          width: item.frame.width,
+          height: item.frame.height,
+          visible: this.#active,
+          resolveAsset: this.#resolveAsset,
+          session: this.#runtimeSession,
+          fallbackText: firstVisibleText(item.runtime.content.values)
+            ?? item.runtime.protocol,
+          reportError: (phase, error) => {
+            this.#services?.reportDiagnostic?.({
+              surfaceId: this.id,
+              phase: 'mount',
+              severity: 'error',
+              message: `Runtime“${item.layerItemId}”${phase}失败：${error.message}`,
+              cause: error,
+            })
+          },
+        })
+        if (!handle.ok) {
+          wrap.dataset.slideFallbackKind = 'runtime'
+          wrap.dataset.slideRuntimeState = 'fallback'
+          wrap.style.pointerEvents = 'none'
+        }
+        this.#runtimeHandles.push(handle)
       },
     }
     for (const item of sceneItems) {

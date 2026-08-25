@@ -62,6 +62,8 @@ type CreatePublishedSurfaceHostOptions = CreatePublishedDynamicHostsOptions
   & PublishedInteractionHostFactoryOptions
 
 export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHostsOptions {
+  /** Ephemeral session start; never mutates the caller's Published payload. */
+  initialLocationId?: string
   services?: Partial<SurfacePlayerServices>
   onFailure?: CoursePlayerOptions['onFailure']
 }
@@ -102,7 +104,10 @@ function createPublishedSurfaceHostInternal(
 ): SurfaceHost {
   const surface = payload.surfaces.find((candidate) => candidate.id === surfaceId)
   if (!surface) throw new Error(`Unknown published surface: ${surfaceId}`)
-  const startLocationId = firstPublishedLocationId(payload, surfaceId)
+  const sessionStart = payload.locations.find((location) => (
+    location.id === payload.startLocationId && location.surfaceId === surfaceId
+  ))
+  const startLocationId = sessionStart?.id ?? firstPublishedLocationId(payload, surfaceId)
   const resolveAsset = options.resolveAsset
     ?? ((assetId: string) => payload.assets[assetId]?.url)
   const kind = publishedDynamicHostKind(surface.type)
@@ -190,6 +195,18 @@ interface PublishedInteractionCapableHost extends SurfaceHost {
     stateId: string | undefined,
   ): boolean
   cancelPreparedPublishedPresentationState?(locationId: string): void
+}
+
+interface PublishedLocationPreparedHost extends SurfaceHost {
+  preparePublishedLocation(locationId: string): void
+}
+
+function locationPreparedHost(host: SurfaceHost | undefined): PublishedLocationPreparedHost | null {
+  if (!host || !('preparePublishedLocation' in host)) return null
+  const candidate = host as Partial<PublishedLocationPreparedHost>
+  return typeof candidate.preparePublishedLocation === 'function'
+    ? host as PublishedLocationPreparedHost
+    : null
 }
 
 function interactionCapableHost(
@@ -351,7 +368,11 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   }
 
   /** Navigator callback: every real/forced navigation invalidates the old generation. */
-  handleBeforeNavigation(_transition?: MixedNavigationTransition): void {
+  handleBeforeNavigation(transition?: MixedNavigationTransition): void {
+    if (transition) {
+      locationPreparedHost(this.#hostsById.get(transition.next.surfaceId))
+        ?.preparePublishedLocation(transition.next.locationId)
+    }
     if (this.#terminalNavigationClaimed) this.#terminalNavigationInvalidated = true
     this.#destroyInteractionControllers()
   }
@@ -599,6 +620,15 @@ export function createPublishedCourseSession(
   options: PublishedCourseSessionOptions = {},
 ): PublishedCourseSession {
   const playback = structuredClone(payload)
+  if (options.initialLocationId !== undefined) {
+    const initialLocation = playback.locations.find((location) => (
+      location.id === options.initialLocationId
+    ))
+    if (!initialLocation) {
+      throw new Error(`Unknown Published session start location: ${options.initialLocationId}`)
+    }
+    playback.startLocationId = initialLocation.id
+  }
   const globalInteractionVisibilityState = new PublishedInteractionVisibilityState()
   const teacherControllerSession = new TeacherControllerRuntimeSessionStore()
   let session: PublishedInteractionCourseSession | null = null

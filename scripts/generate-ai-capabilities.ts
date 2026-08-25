@@ -661,11 +661,15 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/renderer/export/course/buildPublishedCourse.ts',
     'src/renderer/project/createCourseProject.ts',
     'src/renderer/project/courseProjectArchive.ts',
+    'src/renderer/ui/coursePlayerTryRun.ts',
     'src/player/RuntimeHost.ts',
     'src/player/CourseRuntimeKernel.ts',
     'src/player/HostEvidenceRecorder.ts',
     'src/player/PlayerApp.ts',
     'src/player/TeacherEscapeControls.ts',
+    'src/player/surfaces/publishedDynamicHosts.ts',
+    'src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts',
+    'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     'src/shared/builtInComponentCatalog.ts',
     'src/shared/assessmentEvaluators.ts',
     'src/shared/componentCatalog.ts',
@@ -782,7 +786,7 @@ export async function generateAiCapabilityArtifacts(
     layerItemKinds: LAYER_ITEM_KINDS,
     nativeTypes: COURSE_NATIVE_TYPES,
     runtimeProtocols: {
-      current: { protocol: 'surface-v1', runtimeApiVersion: SURFACE_RUNTIME_API_VERSION },
+      current: { protocol: 'surface-runtime', runtimeApiVersion: SURFACE_RUNTIME_API_VERSION },
     },
     nativeTypeSchemas: Object.fromEntries(
       COURSE_NATIVE_TYPES.map((type) => [type, {
@@ -904,9 +908,34 @@ export async function generateAiCapabilityArtifacts(
   }))
   files.set('schemas/runtime-api3.json', canonicalJson({
     contract: 'Surface Runtime API 3',
-    protocol: 'surface-v1',
+    protocol: 'surface-runtime',
     runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
     renderMode: 'dom',
+    publishedPlayback: {
+      status: 'partial',
+      supportedSlice: {
+        surface: 'slide',
+        carrier: 'scene.layerItems',
+        scope: 'scene-local',
+        renderMode: 'dom',
+        consumers: [
+          'current-location-try-run',
+          'whole-course-preview',
+          'single-html',
+          'web-package',
+        ],
+        behavior: 'interactive-dom-playback',
+      },
+      notCovered: [
+        'canvas-runtime-api2',
+        'flow-or-spatial',
+        'globalLayerItems-or-surfaceLayerItems',
+        'runtime.event-or-host-actions',
+        'cross-surface-courseState-or-presentation',
+        'capture-pdf-or-pptx',
+        'network-or-host-local-capabilities',
+      ],
+    },
     hostContract: {
       modes: ['playback', 'inspect', 'capture'],
       hostActions: runtimeHostActionNames,
@@ -918,6 +947,10 @@ export async function generateAiCapabilityArtifacts(
     documentation: 'docs/RUNTIME_AUTHORING.md',
     sourceOfTruth: [
       'src/shared/surfaceRuntimeTypes.ts',
+      'src/renderer/ui/coursePlayerTryRun.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
+      'src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     ],
   }))
   files.set('schemas/component-api4.json', canonicalJson({
@@ -1026,8 +1059,8 @@ export async function generateAiCapabilityArtifacts(
       authoringModes: ['professional'],
       scopes: RUNTIME_SCOPES,
       exports: {
-        singleHtml: 'static-fallback-only',
-        webPackage: 'static-fallback-only',
+        singleHtml: 'partial:slide-scene-surface-runtime-api3-dom-interactive',
+        webPackage: 'partial:slide-scene-surface-runtime-api3-dom-interactive',
         pdf: 'captured-with-static-fallback',
         pptx: 'captured-per-runtime-with-static-fallback',
       },

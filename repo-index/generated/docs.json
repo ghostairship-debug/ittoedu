@@ -88,7 +88,7 @@
         "src/shared/runtimeTypes.ts"
       ],
       "path": "docs/RUNTIME_AUTHORING.md",
-      "title": "场景与全局自由运行时开发指南（API 2）"
+      "title": "场景与全局自由运行时开发指南（API 2；API 3 Published 纵切）"
     },
     {
       "links": [

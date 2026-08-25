@@ -231,7 +231,7 @@ Runtime/Component 都是经过审核的可信扩展，外部导入只是分发�
 - 中央“当前位置试运行”使用最新工程从当前场景/状态启动；若正在编辑基础场景，则以该场景 `initialStateId` 启动。顶部“整课预览”始终在独立窗口从第一场景的初始状态开始；
 - 文字、公式、图片、视频、图形或教师控制器增加新属性时，需要同时检查类型/Schema、默认创建、状态物化、透明几何代理、Player 渲染、素材引用、诊断和静态导出；
 - 外部组件在编辑模式中可整体变换；V4 使用显式公开属性，并自动显示所有 `props.content` 字符串；
-- 场景/全局运行时的 `content.values` 可由属性面板修改；当前 Published V2 试运行和网页导出只呈现 Runtime 的静态 fallback，尚未执行真实源码。活动修复从 Slide scene-local API 3 DOM playback 开始，未完成的 carrier 不宣称 interactive；
+- 场景/全局运行时的 `content.values` 可由属性面板修改。Published V2 现已在 Slide 场景 `layerItems` 中真实执行 `surface-runtime` API 3 DOM：当前位置试运行、整课预览、单 HTML 和网页包均复用 `createPublishedCourseSession` 执行路径，并各自创建会话；`enabled: false` 不执行，单实例注册/创建失败只回退该图层。API 2、Flow/Spatial、global/surfaceLayer、Runtime 事件/宿主动作、静态捕获与网络/宿主本地能力仍不得借此宣称 parity；
 - 当前场景或全局运行时显式登记的 text/asset 目标可在对应编辑作用域原位修改；场景值由该场景全部命名状态共享，全局值由整课共享，均不生成 `presentation.nodeOverrides`；
 - 场景的 `interactions` 与课程级 `globalInteractions` 将可编辑节点、组件事件和带作用域的运行时事件映射到元素入场/退场、状态、导航和音视频动作；连续 `with-previous` 步骤同组并行，下一个 `after-previous` 等待整组完成；
 - 新工程的 `TeacherControllerNode` 位于全局画布。默认“场景目录”是 `scene.open-picker`，列出全部场景，选择后进入该场景初始状态；展开与选中不会写入场景状态。固定 `scene.go` 可为高级按钮配置目标场景与可选目标状态；

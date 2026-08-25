@@ -51,16 +51,9 @@ export async function mountPublishedCourseTryRun(input: {
   await waitForHostLayout(input.container)
   const session = createPublishedCourseSession(published, {
     playbackPathId: input.playbackPathId,
+    ...(input.locationId ? { initialLocationId: input.locationId } : {}),
   })
   await session.mount(input.container)
-  fitPublishedCourseStage(input.container)
-  if (input.locationId) {
-    try {
-      await session.goToLocation(input.locationId)
-    } catch {
-      // Navigator already started at the course start location.
-    }
-  }
   fitPublishedCourseStage(input.container)
   return session
 }

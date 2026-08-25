@@ -1,9 +1,0 @@
-# repair-rtp-01-published-slide-surface-runtime Slide 场景 Surface Runtime 真实运行
-
-- Status / Owner: active / codex-runtime-parity
-- Risk / Hotspot: S2 / generated-index
-- Outcome / Why now: 一个放在 Slide 场景 `layerItems` 中、`protocol: 'surface-runtime'`、API 3、DOM 模式且无 `staticFallback` 的可信 Runtime，在“当前位置试运行”、整课预览、单 HTML 与网页包中执行同一份 Published V2 code 并呈现真实 DOM，而不是静态后备/占位；当前 `SlidePublishedAdapter` 只画 fallback，而 README 与能力索引已承诺网页导出执行互动 Runtime。
-- Write scope / Baseline: baseline `5a4bf9c`; 允许写 `src/player/surfaces/slide/SlidePublishedAdapter.ts`、为该纵切新建的 `src/player/surfaces/runtime/**`、必要的 `src/player/surfaces/publishedDynamicHosts.ts`/Published code 解码复用点、直接 unit/integration/E2E、`scripts/generate-ai-capabilities.ts` 及其 `artifacts/ai-capabilities/**` 生成物和精确能力说明；禁止写 Course Project V9/Published V2 Schema、Published producer、App/Workspace、Flow/Spatial host、Legacy `PlayerApp`/`CourseRuntimeKernel`、main/preload，也不得以 opaque sandbox 或 `desktopAPI === undefined` 为验收。
-- Acceptance: 使用内存 V9 fixture 构建 V2：场景内 API 3 DOM Runtime 从 `content.values` 渲染按钮/标记，点击后发生可观察变化，且四个现有 consumer 复用同一执行实现；`enabled:false` 不执行，注册/创建失败只降级该实例并保留其余场景内容；离开场景、重新进入及销毁 session 时旧实例恰好销毁且无 stale DOM/监听器，Published payload 保持只读；能力说明只标记“Slide scene-local + surface-runtime API 3 + DOM playback”这一 slice，其余 API 2、Flow/Spatial、global/surfaceLayer、runtime.event/actions、capture/PDF/PPTX、网络及宿主本地能力继续明确为未覆盖/partial。
-- Focused validation: `npx vitest run tests/integration/publishedRuntimeSlideHostIntegration.test.ts tests/unit/publishedCourseNavigation.test.ts tests/unit/buildPublishedCourseV2.test.ts`; `npm run typecheck && npm run check:ai-capabilities`; `npm run pretest:e2e && npx playwright test tests/e2e/publishedRuntimeV2.spec.ts`。
-- S2 safety / rollback: 回滚起点 `5a4bf9c`；不改任何持久化/发布 Schema，不重写真实课件或基准 fixture；测试 Runtime 只写自身 DOM 标记并记录 lifecycle，不访问文件/IPC；任一 Runtime 错误必须限于该实例，不能中止课程或回退到主 renderer 的 Legacy PlayerApp；回滚后原 staticFallback/占位行为完整恢复。
