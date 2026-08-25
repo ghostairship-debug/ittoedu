@@ -3186,7 +3186,14 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
         ...textPatch,
         style: { ...node.style, ...textPatch.style },
       } as TextNode
-      if (nextNode.style.overflow === 'auto-height') {
+      const affectsTextLayout = (
+        'text' in textPatch ||
+        'runs' in textPatch ||
+        'style' in textPatch ||
+        'width' in textPatch ||
+        'height' in textPatch
+      )
+      if (affectsTextLayout && nextNode.style.overflow === 'auto-height') {
         const rendered = renderTextNodeCanvas(nextNode, nextNode.width)
         updateNode(node.id, {
           ...patch,

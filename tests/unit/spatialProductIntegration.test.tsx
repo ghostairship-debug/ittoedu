@@ -665,6 +665,67 @@ describe('Spatial product shell wiring', () => {
     expectSelectionUnchanged()
   })
 
+  it('renames a default auto-height Spatial world text without changing its layout', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    const text = selectEditingNodes(useEditorStore.getState()).find((node) => node.type === 'text')
+    if (!text || text.type !== 'text') throw new Error('expected default Spatial text')
+    expect(text.style.overflow).toBe('auto-height')
+    act(() => useEditorStore.getState().selectNode(text.id))
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    const before = useEditorStore.getState().spatialSession!
+    const beforeDocument = structuredClone(before.history.present)
+    const beforeLocated = locateCourseLayer(beforeDocument, text.id)
+    if (
+      !beforeLocated ||
+      beforeLocated.source !== 'world' ||
+      beforeLocated.item.kind !== 'native' ||
+      beforeLocated.item.content.nativeType !== 'text'
+    ) {
+      throw new Error('expected canonical Spatial world text')
+    }
+    const beforeItem = structuredClone(beforeLocated.item)
+    const renamed = '只改名称的自动高度文字'
+
+    const nameInput = screen.getByLabelText('名称')
+    fireEvent.change(nameInput, { target: { value: renamed } })
+    fireEvent.blur(nameInput)
+
+    const after = useEditorStore.getState().spatialSession!
+    const expectedDocument = structuredClone(beforeDocument)
+    const expectedLocated = locateCourseLayer(expectedDocument, text.id)
+    if (!expectedLocated) throw new Error('expected text in cloned Spatial document')
+    expectedLocated.item.label = renamed
+    expectedDocument.revision += 1
+    expectedDocument.updatedAt = after.history.present.updatedAt
+    expect(after.history.present).toEqual(expectedDocument)
+    expect(locateCourseLayer(after.history.present, text.id)?.item).toEqual({
+      ...beforeItem,
+      label: renamed,
+    })
+    expect(after.history.present.revision).toBe(before.history.present.revision + 1)
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(after.history.past.at(-1)).toEqual(beforeDocument)
+
+    useEditorStore.getState().undo()
+    const undone = useEditorStore.getState().spatialSession!
+    expect(undone.history.present).toEqual(beforeDocument)
+    expect(locateCourseLayer(undone.history.present, text.id)?.item).toEqual(beforeItem)
+    expect(undone.history.past).toHaveLength(before.history.past.length)
+    expect(undone.history.future).toHaveLength(after.history.future.length + 1)
+
+    useEditorStore.getState().redo()
+    const redone = useEditorStore.getState().spatialSession!
+    expect(redone.history.present).toEqual(expectedDocument)
+    expect(locateCourseLayer(redone.history.present, text.id)?.item).toEqual({
+      ...beforeItem,
+      label: renamed,
+    })
+    expect(redone.history.past).toHaveLength(after.history.past.length)
+    expect(redone.history.future).toHaveLength(after.history.future.length)
+  })
+
   it('writes visible Spatial common and whole-node text controls to each canonical owner', () => {
     const fixture = mixedOwnerSelectionFixture()
     const cases = [
