@@ -15,9 +15,9 @@
 - Invalidating paths: the three allowed outputs; `scripts/build-examples.ts`; `scripts/build-interactive-lesson.ts`; `scripts/build-render-host-benchmark.ts`; project/archive safe defaults; Player bundle/export payload generation
 - Task ID: `arch-5-final-13-adopt-v4-generated-example-bytes`
 - Phase / wave: `ARCH-5 / final generated-output provenance`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent generated-byte provenance reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25T12:19:44+08:00 / not released`
+- Claimed at / released at: `2026-08-25T12:19:44+08:00 / 2026-08-25T12:27:37+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `64abba2`; exactly three V4-generated tracked outputs are dirty and all product/test/fixture inputs are otherwise clean.
 - Context: candidate 12 is immutable and rolled back; this card adopts only bytes already generated and exercised, not a repair or second build.
@@ -35,7 +35,7 @@ Tracked examples match the current deterministic generators and the exact bytes 
 
 - `examples/sample-project.h5lesson`: `18,612` bytes, SHA256 `F8EBAA940C1CBA9611DFB8C42A1C349DF7392E0C068668FB392B02822DC04FA3`.
 - `examples/photosynthesis-interactive-lesson.h5lesson`: `50,923` bytes, SHA256 `E57785860386B8FB37AB1C284AE592E13A07C04E1D3F77AF3533640663C25AAE`.
-- `examples/render-host-benchmark/render-host-benchmark.html`: SHA256 `7ABF5B8167B586A31A9C05D226A08955665A6F066D1A87BB91FF09B5EDAA4837`.
+- `examples/render-host-benchmark/render-host-benchmark.html`: `3,863,027` bytes, SHA256 `7ABF5B8167B586A31A9C05D226A08955665A6F066D1A87BB91FF09B5EDAA4837`.
 
 ## Scope
 
@@ -50,12 +50,12 @@ Tracked examples match the current deterministic generators and the exact bytes 
 
 ## Acceptance
 
-- [ ] Both archives differ from HEAD only at `globalLayer.0.node.defaultCollapsed: false → true`, and their generator reopen checks passed before V4 E2E.
-- [ ] The render-host HTML lesson payload is semantically byte-equivalent before/after; only the embedded current Player/build shell changes.
-- [ ] Exact sizes and SHA256 values match the registered boundary.
-- [ ] Candidate 12's build order proves generation preceded the consuming E2E tests.
-- [ ] One independent reviewer approves without regeneration or broad-suite rerun.
-- [ ] `git diff --check` passes and only the three registered outputs plus governance files differ.
+- [x] Both archives differ from HEAD only at `globalLayer.0.node.defaultCollapsed: false → true`, and their generator reopen checks passed before V4 E2E.
+- [x] The render-host HTML lesson payload is semantically byte-equivalent before/after; only the embedded current Player/build shell changes.
+- [x] Exact sizes and SHA256 values match the registered boundary.
+- [x] Candidate 12's build order proves generation preceded the consuming E2E tests.
+- [x] One independent reviewer approves without regeneration or broad-suite rerun.
+- [x] `git diff --check` passes and only the three registered outputs plus governance files differ.
 
 ## Validation
 
@@ -69,4 +69,8 @@ Tracked examples match the current deterministic generators and the exact bytes 
 
 ## Result evidence
 
-- Pending exact-byte adoption and independent provenance review.
+- Generated-output commit `941e936` contains exactly the three registered files (`86 insertions / 86 deletions` in the text artifact; two same-size archives). No generator, source, test, contract or configuration file changed.
+- Complete ZIP entry comparison found each archive changed only `project.json`, whose complete semantic diff is `globalLayer[0].node.defaultCollapsed: false → true`; all component entries are byte-identical. Both generator reopen validations had passed before candidate 12's E2E began.
+- The render-host HTML prefix, payload script, Base64 payload and suffix are byte-identical; the decoded `1,507,992`-byte payload SHA256 remains `14F8C7…2D5A`. Its sole change is the Player script, which is byte-identical to the candidate V4 `dist-player/player.iife.js` after the canonical standalone-HTML escaping rule (SHA256 `EAD24B…6DF4`).
+- Candidate 12's npm lifecycle generated all three outputs before Playwright; photosynthesis E2E test 26 and render-host E2E test 30 passed against the generated results. `sample-project.h5lesson` has generator reopen validation rather than a direct E2E consumer, matching this card's evidence boundary.
+- The independent generated-byte provenance Reviewer returned `APPROVE` with no blocker. Exact sizes/hashes and `git diff --check` passed; no regeneration, broad test or package command was run.
