@@ -309,7 +309,7 @@ describe('elements panel', () => {
 
     act(() => useEditorStore.getState().setEditingScope('global'))
     expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
-      '无限画布全局层：文本、公式、图片、视频和图形当前不可用',
+      '无限画布全局层暂不支持插入元素；请切换到无限画布世界层。',
     )
     expect(screen.getByTestId('global-elements-notice')).toHaveTextContent(
       '当前全局层不能插入文本、公式、图片、视频或图形',
