@@ -486,7 +486,7 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 
 “重播本页”只重建当前场景的原生节点、场景组件和场景运行时；统一全局层、全局运行时和课程进度状态保留。“重开课程”会清空课程状态，重建全局/场景作用域并回到第一场景。两者语义不同。
 
-关闭整课预览覆盖层不会修改工程。有 active V9 工程时，当前 Published V2 数据直接在主 renderer 内存中挂载并随覆盖层释放，不会把课件写成临时 HTML 文件；实际引用且声明 `remote.url` 的远程工程素材与 `network.connectOrigins` 会在预览期间取得精确 origin lease，关闭预览、切换工程或跨文档导航即撤销。未声明 origin 仍被拒绝，CORS/TLS 不会被绕过，远程脚本不开放。只有没有 active V9 source 的后备流程才使用独立预览窗口。
+关闭整课预览覆盖层不会修改工程。当前 Published V2 数据直接在主 renderer 内存中挂载并随覆盖层释放，不会把课件写成临时 HTML 文件；实际引用且声明 `remote.url` 的远程工程素材与 `network.connectOrigins` 会在预览期间取得精确 origin lease，关闭预览、切换工程或跨文档导航即撤销。未声明 origin 仍被拒绝，CORS/TLS 不会被绕过，远程脚本不开放。异常缺失活动 Course Project V9 时会明确报告整课预览不可用，不生成 V8 课件或打开独立窗口。
 
 ## 14. 导出单 HTML、网页包、PPTX 和 PDF
 
@@ -593,15 +593,15 @@ PPTX 的定位是提取素材和继续排版，而不是高保真静态归档。
 | `Ctrl` / `Command` + 鼠标滚轮 | 缩放编辑画布（50%–200%） |
 | 空格 + 鼠标左键拖动 | 平移编辑画布 |
 | 鼠标中键拖动 | 平移编辑画布 |
-| `←` / `→`（预览窗口） | 上一页 / 下一页 |
+| `←` / `→`（整课预览） | 上一页 / 下一页 |
 
 macOS 风格的 `Command` 组合在代码中有兼容处理，但 Editor 1.0.0 发布目标仅为 Windows x64。
 
 ## 16. 安全与本地数据边界
 
 - 编辑器 Renderer 没有不受限的 Node.js、文件系统或 Shell 入口；桌面操作通过 Preload 暴露的冻结 API，并继续校验 IPC 参数、路径和文件类型。可信扩展若与该宿主同上下文，可以使用宿主明确提供的能力；这不是外部导入造成的安全缺口。
-- 编辑器与预览窗口禁止任意外部导航和新窗口；远程媒体/API 只按工程声明与宿主策略开放，下载和设备能力只在出现真实 consumer 后逐项接入。
-- 中央统一画布的 authoring / playback Player 文档使用临时 Blob URL，并位于不授予同源权限的 sandbox iframe；工程与组件素材通过可转移二进制缓冲区进入沙箱，再由 iframe 创建同源 Blob URL。主进程仅允许编辑器主窗口中的同源派生 Blob 子框架导航，主框架与独立预览窗口仍拒绝 Blob 和外部导航。编辑器只接受当前会话的 Player 消息；实例替换、关闭或失败时，父窗口撤销文档 URL，iframe 在卸载时撤销素材 URL。authoring 状态还冻结互动、媒体、导航与课程状态写入；这些机制解决视觉合成、生命周期与状态竞态，不是可信 Runtime/Component 必须永久继承的权限边界。
+- 编辑器主框架禁止任意外部导航和新窗口；远程媒体/API 只按工程声明与宿主策略开放，下载和设备能力只在出现真实 consumer 后逐项接入。
+- 中央统一画布的 authoring / playback Player 文档使用临时 Blob URL，并位于不授予同源权限的 sandbox iframe；工程与组件素材通过可转移二进制缓冲区进入沙箱，再由 iframe 创建同源 Blob URL。主进程仅允许编辑器主窗口中的同源派生 Blob 子框架导航，主框架仍拒绝 Blob 和外部导航。编辑器只接受当前会话的 Player 消息；实例替换、关闭或失败时，父窗口撤销文档 URL，iframe 在卸载时撤销素材 URL。authoring 状态还冻结互动、媒体、导航与课程状态写入；这些机制解决视觉合成、生命周期与状态竞态，不是可信 Runtime/Component 必须永久继承的权限边界。
 - `.h5lesson`、最近工程列表和自动恢复副本保存在本机；单 HTML、网页包、PDF、PPTX 仅写入用户在系统对话框中选择的位置。
 - 离线便携单 HTML 不开放外部 origin；网页包只允许包内资源及部署后的同源连接，不开放外部 origin；在线轻量单 HTML 只放行远程素材的精确 HTTPS origin 与工程声明的 `https`/`wss` `connectOrigins`，远程脚本仍禁止。三者中的可信运行时和组件代码都可控制课件页面自身。
 - `.h5lesson` 的自由运行时和 `.h5component` 都是可执行代码，不等同于普通图片素材；本产品只接收已经审核的 Runtime/Component，格式校验本身不替代该审核。

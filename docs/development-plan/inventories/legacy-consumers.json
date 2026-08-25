@@ -113,16 +113,6 @@
           "confirmed": [
             {
               "path": "src/renderer/App.tsx",
-              "symbol": "buildHtml",
-              "use": "Uses the projection in the no-source standalone HTML path."
-            },
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExportWebPackage",
-              "use": "Uses the projection in the no-source Web package path."
-            },
-            {
-              "path": "src/renderer/App.tsx",
               "symbol": "handleExportPptx",
               "use": "Uses the projection for the Slide-only Legacy PPTX branch."
             },
@@ -208,7 +198,7 @@
             "symbol": "buildPublishedCourseV2Payload"
           }
         ],
-        "notes": "Save and V2 publish already read V9. UI/history/legacy delivery consumers still require migration."
+        "notes": "Save, full preview and HTML/Web publish read V9. UI/history, Slide-only PPTX, PDF and authoring-preview projection consumers still require migration."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
@@ -216,7 +206,7 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'projectCandidatePreviewDocument' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 13
+            "observedMatches": 10
           }
         ],
         "requiredForRemoval": "All projection consumers and EditorState.project reads must use V9 selectors/view models; exact target references must be zero."
@@ -289,7 +279,7 @@
             {
               "path": "src/renderer/App.tsx",
               "symbol": "buildExportPayload",
-              "use": "Imported for no-source and static-export Legacy branches."
+              "use": "Imported for retained static-export Legacy branches."
             },
             {
               "path": "src/renderer/ui/Workspace.tsx",
@@ -465,82 +455,46 @@
     {
       "id": "LEG-003",
       "legacyTarget": {
-        "kind": "reachability-unproven-no-source-fallback",
+        "kind": "removed-no-source-app-delivery-fallback",
         "path": "src/renderer/App.tsx",
         "symbols": [
-          "activeCoursePublishSources",
-          "buildHtml",
+          "courseDeliveryUnavailable",
           "handlePreview",
           "handleExportWebPackage"
         ]
       },
       "owner": "App / Preview / Export",
-      "status": "reachability-unproven",
-      "currentFact": "App retains preview and HTML/Web branches for a state with no active V9 publish sources, while normal new/open/location transitions establish exactly one active V9 session.",
+      "status": "removed",
+      "currentFact": "Normal V9 lifecycle characterization at f3fd31f proves new/open/Mixed navigation/replacement/restore always has exactly one active V9 document. Product commit 63fbf66 removed the unreachable Legacy HTML/Web/full-preview fallback and its exclusive desktop preview IPC/window/protocol chain; abnormal source-null now reports unavailable explicitly.",
       "evidence": [
         {
-          "path": "src/renderer/App.tsx",
-          "symbol": "activeCoursePublishSources",
-          "note": "Returns null only if selectActiveCourseProjectDocument returns null."
+          "path": "tests/unit/v9SlideBackendSelection.test.ts",
+          "symbol": "never loses publish sources during normal V9 new, open, mixed-switch, and restore lifecycles",
+          "note": "Characterizes exactly one active V9 backend and document throughout supported lifecycle transitions."
         },
         {
-          "path": "src/renderer/store/editorStore.ts",
-          "symbol": "selectActiveCourseProjectDocument",
-          "note": "Falls through the three mutually exclusive active V9 backends."
+          "path": "src/renderer/App.tsx",
+          "symbol": "courseDeliveryUnavailable",
+          "note": "HTML, Web package and full preview reject abnormal source-null instead of constructing a Legacy artifact."
+        },
+        {
+          "path": "tests/integration/courseExportPreflightApp.test.tsx",
+          "symbol": "reports source-null as unavailable",
+          "note": "Covers initial source-null and preflight-to-export source disappearance without Legacy fallback calls."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
-          "confirmed": [
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "buildHtml",
-              "use": "Branches to projectCandidatePreviewDocument + buildExportPayload when sources are null."
-            },
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handlePreview",
-              "use": "Opens the Legacy preview window when sources are null."
-            },
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExportWebPackage",
-              "use": "Builds a Legacy Web package when sources are null."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
-          "confirmed": [
-            {
-              "path": "src/preload/index.ts",
-              "symbol": "preview:open",
-              "use": "IPC route used only by the App Legacy preview branch."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "src/renderer/export/buildStandaloneHtml.ts",
-              "symbol": "buildStandaloneHtml",
-              "use": "Legacy standalone HTML fallback."
-            },
-            {
-              "path": "src/renderer/export/buildWebPackage.ts",
-              "symbol": "buildWebPackageFromProjectAsync",
-              "use": "Legacy Web package fallback."
-            },
-            {
-              "path": "src/main/previewWindow.ts",
-              "symbol": "openPreviewWindow",
-              "use": "Desktop preview window invoked by App when V9 sources are absent."
-            }
-          ],
-          "unknowns": [
-            "No current user journey proving the source-null state is reachable was found."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "buildFixtureOrRelease": {
           "confirmed": [],
@@ -555,35 +509,16 @@
           ]
         },
         "testConsumers": {
-          "confirmed": [
-            {
-              "path": "tests/unit/exportMenuUi.test.tsx",
-              "symbol": "selectActiveCourseProjectDocument",
-              "use": "Characterizes export UI with an active V9 document, not the null-source fallback."
-            },
-            {
-              "path": "tests/unit/webPackageExport.test.ts",
-              "symbol": "buildWebPackage",
-              "use": "Tests the Legacy Web package builder independently of App reachability."
-            }
-          ],
-          "unknowns": [
-            "No test invokes the App fallback from a legal normal-lifecycle V9 state."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
-          "confirmed": [
-            {
-              "path": "src/main/previewWindow.ts",
-              "symbol": "cleanupPreviewFiles",
-              "use": "Owns temporary preview-file lifecycle for the Legacy preview window."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         }
       },
       "replacement": {
-        "status": "existing-for-normal-v9",
+        "status": "active-v9-only",
         "paths": [
           {
             "path": "src/renderer/export/course/buildCoursePackages.ts",
@@ -596,20 +531,28 @@
           {
             "path": "src/renderer/ui/coursePlayerTryRun.ts",
             "symbol": "mountPublishedCourseTryRun"
+          },
+          {
+            "path": "src/renderer/App.tsx",
+            "symbol": "courseDeliveryUnavailable"
           }
         ],
-        "notes": "Do not invent a sessionless V9 state. First prove the fallback unreachable in normal product lifecycle."
+        "notes": "Normal V9 uses Published V2 only. Do not invent a sessionless V9 state or restore desktop preview infrastructure to preserve removed V8 behavior."
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
-        "state": "nonzero-reachability-unproven",
+        "state": "removed-exact-zero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'activeCoursePublishSources' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 9
+            "command": "(git grep -n -I -F -- 'preview:open' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 0
+          },
+          {
+            "command": "(git grep -n -I -F -- 'openPreviewWindow' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 0
           }
         ],
-        "requiredForRemoval": "A normal-lifecycle characterization must show source-null is unreachable; then App fallback references, preview IPC-only consumers, and related temp-file behavior must be removed or retained for another proven caller."
+        "requiredForRemoval": "Satisfied at f3fd31f + 63fbf66: supported lifecycle reachability is characterized, source-null fails explicitly, and the exclusive App/preload/main preview chain has zero tracked product/test/script/example references."
       },
       "persistedCompatibility": {
         "status": "none-confirmed",
@@ -620,22 +563,22 @@
       },
       "tests": [
         "tests/unit/v9SlideBackendSelection.test.ts",
-        "tests/unit/flowProductIntegration.test.tsx",
-        "tests/unit/spatialProductIntegration.test.tsx"
+        "tests/integration/courseExportPreflightApp.test.tsx"
       ],
       "stableSince": {
-        "status": "normal-v9-replacement-not-wave-validated",
-        "wave": null,
-        "evidence": []
+        "status": "normal-v9-lifecycle-characterized-and-fallback-removed",
+        "wave": "current repair route",
+        "evidence": [
+          "f3fd31f",
+          "63fbf66"
+        ]
       },
       "rollback": {
-        "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
-        "strategy": "Restore the App branch only if a legal V9 source-null journey is reproduced; do not add a second Store/session truth."
+        "commit": "63fbf66",
+        "strategy": "Revert only if a supported legal V9 source-null journey is reproduced; do not add a second Store/session truth or restore the desktop preview chain for dev-only use."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "Source-null reachability through dev injection or an abnormal partially initialized renderer has not been characterized."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-004",

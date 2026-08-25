@@ -292,8 +292,7 @@
       ],
       "forbiddenTop5": [
         "src/renderer/project/projectArchive.ts",
-        "src/renderer/store/editorStore.ts",
-        "src/main/previewWindow.ts"
+        "src/renderer/store/editorStore.ts"
       ],
       "expected": {
         "confidence": "high",

@@ -262,8 +262,8 @@
     {
       "id": "GT-013",
       "milestone": "controlled-15",
-      "title": "HTML/Web V2 and no-source reachability",
-      "queryText": "HTML 单文件和 Web 包正常 V9 主路径使用 Published V2；先证明 no-source fallback 是否可达，再决定 Legacy 删除。",
+      "title": "HTML/Web V2 and explicit no-source failure",
+      "queryText": "HTML 单文件、Web 包与整课预览只使用 Published V2；异常 no-source 必须明确失败，不得恢复 Legacy 交付或桌面预览窗口。",
       "request": {
         "mode": "symbol",
         "value": "buildCoursePackages",
@@ -275,7 +275,7 @@
         "preview",
         "player"
       ],
-      "rationale": "LEG-003 is a real reachability-unproven delivery fallback.",
+      "rationale": "LEG-003 removed the unreachable fallback after normal V9 lifecycle characterization; the V2-only route is now a negative ratchet.",
       "evidence": [
         "docs/development-plan/inventories/legacy-consumers.json"
       ]

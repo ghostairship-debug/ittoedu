@@ -6,7 +6,7 @@
 >
 > 当前批次编排基线：`7d17fed384804e998e15ae21380ed98259acf897`。
 >
-> 状态：**上一批固定候选 `7d17fed` 已通过完整 phase gate；当前 RTP-04 与 LEG-003 active，CMP-03 因共享 Slide Published host 排在 RTP-04 后**。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**LEG-003 已完成产品实现和独立审查；当前 RTP-04 active，CMP-03 因共享 Slide Published host 排在 RTP-04 后**。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -154,9 +154,9 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的完整 Vitest、预构建、风险 Playwright、任务板、repo-index check/quality 门。当前 RTP-04 与 LEG-003 active、CMP-03 queued；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的完整 Vitest、预构建、风险 Playwright、任务板、repo-index check/quality 门。LEG-003 由 `f3fd31f` 生命周期表征准入，`63fbf66` 已删除不可达 App Legacy HTML/Web/full-preview 与专属 desktop preview 链并独立审查通过。当前 RTP-04 active、CMP-03 queued；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
-当前 RTP-04 只建立 session-global API 2 ownership 与容器迁移；LEG-003 只删除正常 V9 不可达的 App Legacy HTML/Web/full-preview 回退及其专属 desktop preview IPC 链，可在独占 App/main/preload 范围并行；CMP-03 随后只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
+当前 RTP-04 只建立 session-global API 2 ownership 与容器迁移；CMP-03 随后只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
 已知不准入事实：sample、benchmark/release 与 portability 需等 CMP-03 通过后再逐项审计；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；Validation Report/Diagnostic Target 仍需先裁决合同；Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
@@ -172,12 +172,11 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ### 6.2 当前实现编排
 
-RTP-04 与 LEG-003 写入范围互斥，可并行；CMP-03 共享 RTP-04 的 Slide Published host，必须等待：
+CMP-03 共享 RTP-04 的 Slide Published host，必须等待：
 
 | Lane | Hotspot / 写入范围 | 并行约束 |
 |---|---|---|
 | RTP-04 | session owner、API 2 mount 与三个 Surface 的窄 mount-target port | active；不得顺带开放 API 3、actions/events/nodes/capture/Component |
-| LEG-003 | App source-null delivery 分支与专属 main/preload preview 链 | active；保留 Workspace preview、PPTX/PDF 与仍有 consumer 的 builders/scripts |
 | CMP-03 | Component Phaser mount 与 Slide Published adapter | queued；RTP-04 合入后重置 baseline 再 active，不改其它 carrier 或 producer |
 
 计划、任务卡、`TASK_BOARD.md`、README/作者文档、共享 fixture/helper、能力与 repo-index 生成输出仍由 Integrator 单写。各 S2 作者只跑卡内 focused checks，独立 Reviewer 审 diff、失败路径与遗漏反例，不机械复跑作者命令。

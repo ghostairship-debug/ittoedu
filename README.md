@@ -228,7 +228,7 @@ Runtime/Component 都是经过审核的可信扩展，外部导入只是分发�
 - Player 进入场景时物化 `initialStateId`；状态切换原位更新同一节点/组件实例，不修改工程数据；
 - `scene.go` 可选携带 `targetStateId`，Player 在创建目标场景节点、运行时和组件前原子物化目标状态；状态引用无效时使用目标场景 `initialStateId`；
 - 预览、单 HTML 和网页包使用 `src/player/`；
-- 中央“当前位置试运行”使用最新工程从当前场景/状态启动；若正在编辑基础场景，则以该场景 `initialStateId` 启动。有 active V9 工程时，顶部“整课预览”在主 renderer 的全屏覆盖层中从第一场景初始状态开始；只有没有 active V9 source 的后备流程才打开独立预览窗口；
+- 中央“当前位置试运行”使用最新工程从当前场景/状态启动；若正在编辑基础场景，则以该场景 `initialStateId` 启动。顶部“整课预览”只接受活动 Course Project V9，在主 renderer 的全屏覆盖层中从第一场景初始状态开始；异常缺失活动 V9 时明确报告不可用，不生成 V8 课件或打开独立预览窗口；
 - 文字、公式、图片、视频、图形或教师控制器增加新属性时，需要同时检查类型/Schema、默认创建、状态物化、透明几何代理、Player 渲染、素材引用、诊断和静态导出；
 - 外部组件在编辑模式中可整体变换；V4 使用显式公开属性，并自动显示所有 `props.content` 字符串；
 - 场景/全局运行时的 `content.values` 可由属性面板修改。Published V2 现已真实执行三个窄幅 slice：Slide scene-local API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM、Flow surface-local API 3 DOM；当前位置试运行、整课预览、离线/在线单 HTML 和网页包均复用 `createPublishedCourseSession`。`enabled: false` 不执行，global 与未覆盖 shared/Spatial carrier 仍显示后备，注册、创建、生命周期或 Phaser 核心销毁失败只隔离该实例。API 2 的宿主动作、presentation 与节点解析仍是 partial context；Runtime 事件、跨 Surface 状态、静态捕获及宿主本地能力不得借此宣称 parity；
@@ -312,7 +312,7 @@ PPTX 映射规则：
 
 外部 Builder 的最低闭环是“读取已确认教学文件与 Capability → 使用仓库真实 TypeScript API 生成 Course Project V9 → 校验 → 按稳定绑定局部修正 → 重开、Player、四格式与视觉证据 → 人工验收”。`validate:project` 命令本身不启动 Electron、不执行真实导出、不改写工程；当前 `projectHealth` 以结构性检查为主，V9 语义与源码外联网络检查仍按 REPAIR 路线补齐。Node 下文字/公式布局使用公开标注的确定性近似测量，最终像素裁切、互动与离线外部请求必须以真实编辑器、Player 或导出复核。自动闭环最多给出 `engineering candidate`，不得用 Headless 通过代替这些证据或人类验收。
 
-E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口和课件预览窗口保持 `BrowserWindow.isVisible() === false`，不会调用 `show()`、出现在任务栏或抢占焦点；透明、离屏坐标与关闭后台渲染节流只是额外防护和稳定性设置，不再依赖“显示一个透明窗口”实现后台测试。生产构建/制品验证中的自动启动也显式使用同一环境变量。正常 `npm start`、开发启动和双击入口不读取该测试默认值，仍会照常显示窗口。常规验证不得使用可视 E2E；只有开发者明确需要观察单个故障时才手工运行 `npm run test:e2e:visible`。
+E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口保持 `BrowserWindow.isVisible() === false`，不会调用 `show()`、出现在任务栏或抢占焦点；透明、离屏坐标与关闭后台渲染节流只是额外防护和稳定性设置。生产构建/制品验证中的自动启动也显式使用同一环境变量。正常 `npm start`、开发启动和双击入口不读取该测试默认值，仍会照常显示窗口。常规验证不得使用可视 E2E；只有开发者明确需要观察单个故障时才手工运行 `npm run test:e2e:visible`。
 
 架构与回归基准见 [`examples/render-host-benchmark/`](examples/render-host-benchmark/README.md)。当前基准覆盖统一 Player 的组件宿主和捕获路径；旧 API 兼容夹具不再进入当前回归。
 
@@ -349,13 +349,13 @@ npm run verify
 
 ## 安全边界
 
-- 主窗口和预览窗口开启 `contextIsolation`、`sandbox` 和 `webSecurity`；
+- 主窗口开启 `contextIsolation`、`sandbox` 和 `webSecurity`；
 - 禁用 `nodeIntegration`、`<webview>`、生产版 DevTools、任意导航和新窗口；
 - Renderer 只能调用 Preload 暴露的冻结白名单 API；
 - 文件位置由系统对话框或已批准的最近工程路径确定；
 - IPC 参数、扩展名、签名、文件大小和 ZIP 路径均需校验；
 - 导出的离线 HTML 使用 CSP 禁止网络连接；
-- 中央统一画布的 authoring / playback Player 通过仅允许同源派生 Blob 子框架的受限导航策略装载不含 `allow-same-origin` 的 sandbox iframe，并把消息绑定到当前会话；主框架及独立预览窗口继续拒绝 Blob、外部页面和任意导航。该机制服务于视觉合成、生命周期和旧实例竞态，不代表可以执行不可信代码，也不是可信扩展必须永久继承的权限边界；真实 consumer 需要宿主能力时，应另行提供稳定宿主接口或同宿主执行语义；
+- 中央统一画布的 authoring / playback Player 通过仅允许同源派生 Blob 子框架的受限导航策略装载不含 `allow-same-origin` 的 sandbox iframe，并把消息绑定到当前会话；主框架继续拒绝 Blob、外部页面和任意导航。该机制服务于视觉合成、生命周期和旧实例竞态，不代表可以执行不可信代码，也不是可信扩展必须永久继承的权限边界；真实 consumer 需要宿主能力时，应另行提供稳定宿主接口或同宿主执行语义；
 - 中央统一画布用父窗口临时 Blob URL 承载 Player 文档；工程与组件素材以可转移二进制缓冲区送入 sandbox，再由 iframe 在自身不透明源内创建并回收 Blob URL。这样既不授予 `allow-same-origin`，也避免大媒体 Base64 膨胀和父窗口 Blob URL 被沙箱拒绝；
 - `.h5lesson` 的场景/全局运行时及 `.h5component` 都含可执行 JavaScript，只能打开可信来源。
 

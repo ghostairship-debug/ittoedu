@@ -642,6 +642,6 @@ Runtime 是经过审核的可信扩展。当前统一画布的 authoring 与 pla
 - [ ] 工程检查没有已检出的阻断错误；信息释放/视觉密度只作为只读复核线索；四种目标的 Export Preflight 已审阅，但不把报告存在当作完整覆盖证明；需要排障时另行导出异常诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。
 - [ ] 编辑状态与当前位置试运行使用同一 1280×720 Player 视觉边界；authoring 冻结互动、媒体、导航和课程状态，透明 Phaser 层没有造成位置偏移或重复视觉。
-- [ ] 自动化 Electron 验证保持主窗口和预览窗口始终隐藏，不调用 `show()` 或抢占桌面；只在显式可视调试命令中显示窗口。
+- [ ] 自动化 Electron 验证保持主窗口始终隐藏，不调用 `show()` 或抢占桌面；只在显式可视调试命令中显示窗口。
 
 API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。其规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。该基准不替代真实课件的命名呈现状态设计。
