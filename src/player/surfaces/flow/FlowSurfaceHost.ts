@@ -294,6 +294,7 @@ export class FlowSurfaceHost {
         this.#mountDeferredRuntimes()
       }
     }
+    this.#syncTeacherControllerSession()
     this.#restoreInteractionsIfActive()
   }
 
@@ -769,6 +770,36 @@ export class FlowSurfaceHost {
       surfaceSessionId: this.#surfaceId,
       defaultCollapsed: data?.collapsible === true && data.defaultCollapsed === true,
     })
+  }
+
+  #syncTeacherControllerSession(): void {
+    const controller = this.#controller
+    if (!controller) return
+    const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
+    const item = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+      .map((entry) => entry.item)
+      .find(isPublishedTeacherController)
+    if (!item || item.content.nativeType !== 'teacher-controller') return
+    const data = item.content.data
+    const frame = item.frame
+    const session = this.#controllerSessionFor(item)
+    const frameEl = controller.rootElement.parentElement
+    if (frameEl) {
+      frameEl.style.left = `${frame.x + session.offset.dx}px`
+      frameEl.style.top = `${frame.y + session.offset.dy}px`
+    }
+    controller.update(teacherControllerDomNode(
+      { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
+      item.rotation,
+      {
+        title: data.title,
+        compact: data.compact,
+        showSceneProgress: data.showSceneProgress,
+        collapsible: data.collapsible,
+        buttons: data.buttons,
+        style: data.style,
+      },
+    ))
   }
 
   #destroyController(): void {

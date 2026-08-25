@@ -26,6 +26,7 @@ import type {
 const root = resolve(__dirname, '..', '..')
 const runRoot = mkdtempSync(join(tmpdir(), 'published-runtime-flow-v2-'))
 const standalonePath = join(runRoot, 'standalone.html')
+const onlineStandalonePath = join(runRoot, 'online-standalone.html')
 const webRoot = join(runRoot, 'web')
 const NOW = '2026-08-26T01:30:00.000Z'
 
@@ -142,6 +143,14 @@ function writeFixture(): void {
     buildPublishedCourseStandaloneHtml(sources, playerBundle),
     'utf8',
   )
+  writeFileSync(
+    onlineStandalonePath,
+    buildPublishedCourseStandaloneHtml(sources, {
+      playerBundle,
+      singleHtmlMode: 'online-lightweight',
+    }),
+    'utf8',
+  )
   const webFiles = buildPublishedCourseWebPackageFiles(sources, playerBundle)
   for (const [path, bytes] of Object.entries(webFiles)) {
     const target = join(webRoot, ...path.split('/'))
@@ -159,8 +168,9 @@ test.afterAll(() => {
 })
 
 for (const delivery of [
-  { name: '单 HTML', path: standalonePath },
-  { name: '网页包', path: join(webRoot, 'index.html') },
+  { name: '离线便携单 HTML', path: standalonePath, online: false },
+  { name: '在线轻量单 HTML', path: onlineStandalonePath, online: true },
+  { name: '网页包', path: join(webRoot, 'index.html'), online: false },
 ] as const) {
   test(`${delivery.name} 用真实指针点击执行 Flow Surface Runtime`, async ({ page }) => {
     const errors: string[] = []
@@ -188,6 +198,14 @@ for (const delivery of [
     expect(topHit).toBe(true)
     await button.click()
     await expect(button).toHaveText('Flow 真实 Runtime:1')
+    if (delivery.online) {
+      const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]')
+        .getAttribute('content')
+      const scriptPolicy = csp?.match(/script-src[^;]*/)?.[0]
+      expect(scriptPolicy).toContain("'unsafe-eval'")
+      expect(scriptPolicy).not.toContain('https://')
+      expect(scriptPolicy).not.toContain('*')
+    }
     expect(errors).toEqual([])
   })
 }
