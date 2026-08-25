@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs } from 'node:fs'
 import { strToU8, zipSync } from 'fflate'
 import sharp from 'sharp'
@@ -20,15 +20,22 @@ import {
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
 import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
+import {
+  checkTrackedExampleOutputs,
+  type GeneratedExampleOutputs,
+} from './exampleGenerationBoundary'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(scriptDirectory, '..')
-const sourceDirectory = path.join(root, 'examples', 'photosynthesis-lab-component')
-const componentPath = path.join(root, 'examples', 'photosynthesis-lab.h5component')
-const lessonPath = path.join(root, 'examples', 'photosynthesis-interactive-lesson.h5lesson')
+const examplesDirectory = path.join(root, 'examples')
+const sourceDirectory = path.join(examplesDirectory, 'photosynthesis-lab-component')
+export const INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS = {
+  thumbnail: 'photosynthesis-lab-component/thumbnail.png',
+  component: 'photosynthesis-lab.h5component',
+  lesson: 'photosynthesis-interactive-lesson.h5lesson',
+} as const
 const artifactDirectory = path.join(root, 'artifacts', 'photosynthesis-lesson')
 const htmlPath = path.join(artifactDirectory, 'photosynthesis-interactive-lesson.html')
-const thumbnailPath = path.join(sourceDirectory, 'thumbnail.png')
 const timestamp = new Date('2026-07-21T00:00:00.000Z')
 
 const thumbnailSvg = String.raw`
@@ -198,17 +205,18 @@ function buildProject(
   return project
 }
 
-async function main(): Promise<void> {
-  await fs.mkdir(sourceDirectory, { recursive: true })
-  await fs.mkdir(artifactDirectory, { recursive: true })
+export interface InteractiveLessonOutputs {
+  tracked: GeneratedExampleOutputs
+  html: string
+}
 
+export async function buildInteractiveLessonOutputs(): Promise<InteractiveLessonOutputs> {
   const [manifestText, runtimeText] = await Promise.all([
     fs.readFile(path.join(sourceDirectory, 'manifest.json'), 'utf8'),
     fs.readFile(path.join(sourceDirectory, 'runtime.js'), 'utf8'),
   ])
   const parsedManifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
   const thumbnail = await sharp(Buffer.from(thumbnailSvg)).png({ compressionLevel: 9 }).toBuffer()
-  await fs.writeFile(thumbnailPath, thumbnail)
 
   const componentFiles = {
     'manifest.json': strToU8(`${JSON.stringify(parsedManifest, null, 2)}\n`),
@@ -220,7 +228,6 @@ async function main(): Promise<void> {
     expectedId: parsedManifest.id,
     expectedVersion: parsedManifest.version,
   })
-  await fs.writeFile(componentPath, componentArchive)
 
   const project = buildProject(component.manifest, component.metadata)
   const lessonArchive = createProjectArchive({
@@ -228,7 +235,6 @@ async function main(): Promise<void> {
     assetFiles: {},
     componentFiles: { [component.key]: component.files },
   }, { mtime: timestamp })
-  await fs.writeFile(lessonPath, lessonArchive)
 
   const reopened = openProjectArchive(lessonArchive)
   if (reopened.project.scenes.length !== 3) throw new Error('课例工程场景数量不是 3')
@@ -243,14 +249,79 @@ async function main(): Promise<void> {
   })
   const html = buildStandaloneHtml(payload, { playerBundle, lang: 'zh-CN' })
   if (/https?:\/\//i.test(html)) throw new Error('离线 HTML 中出现远程 URL')
-  await fs.writeFile(htmlPath, html, 'utf8')
 
-  console.log(`互动组件：${componentPath}`)
-  console.log(`课例工程：${lessonPath}`)
-  console.log(`离线预览：${htmlPath}`)
+  return {
+    tracked: {
+      [INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.thumbnail]: Uint8Array.from(thumbnail),
+      [INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.component]: componentArchive,
+      [INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.lesson]: lessonArchive,
+    },
+    html,
+  }
 }
 
-main().catch((error: unknown) => {
-  console.error('生成互动教学课例失败', error)
-  process.exitCode = 1
-})
+export async function checkInteractiveLessonOutputs(): Promise<void> {
+  const outputs = await buildInteractiveLessonOutputs()
+  await checkTrackedExampleOutputs(
+    examplesDirectory,
+    outputs.tracked,
+    '光合作用课例',
+  )
+}
+
+async function writeInteractiveLessonHtml(html: string): Promise<void> {
+  await fs.mkdir(artifactDirectory, { recursive: true })
+  await fs.writeFile(htmlPath, html, 'utf8')
+}
+
+async function refreshInteractiveLessonOutputs(): Promise<void> {
+  const outputs = await buildInteractiveLessonOutputs()
+  await Promise.all([
+    ...Object.entries(outputs.tracked).map(([relativePath, bytes]) =>
+      fs.writeFile(path.join(examplesDirectory, relativePath), bytes)),
+    writeInteractiveLessonHtml(outputs.html),
+  ])
+  console.log('已刷新光合作用组件、工程和离线预览')
+}
+
+async function prepareInteractiveLessonHtml(): Promise<void> {
+  const outputs = await buildInteractiveLessonOutputs()
+  await writeInteractiveLessonHtml(outputs.html)
+  console.log(`已准备 E2E 所需离线预览：${htmlPath}`)
+}
+
+export type InteractiveLessonGenerationMode = 'refresh' | 'check' | 'prepare'
+
+export function parseInteractiveLessonGenerationMode(
+  argv: readonly string[],
+): InteractiveLessonGenerationMode {
+  if (argv.length === 0 || (argv.length === 1 && argv[0] === '--refresh')) {
+    return 'refresh'
+  }
+  if (argv.length === 1 && argv[0] === '--check') return 'check'
+  if (argv.length === 1 && argv[0] === '--prepare') return 'prepare'
+  throw new Error(
+    'Usage: tsx scripts/build-interactive-lesson.ts [--refresh|--check|--prepare]',
+  )
+}
+
+async function main(argv: readonly string[]): Promise<void> {
+  switch (parseInteractiveLessonGenerationMode(argv)) {
+    case 'check':
+      await checkInteractiveLessonOutputs()
+      return
+    case 'prepare':
+      await prepareInteractiveLessonHtml()
+      return
+    case 'refresh':
+      await refreshInteractiveLessonOutputs()
+  }
+}
+
+const invokedPath = process.argv[1]
+if (invokedPath && import.meta.url === pathToFileURL(path.resolve(invokedPath)).href) {
+  main(process.argv.slice(2)).catch((error: unknown) => {
+    console.error('生成互动教学课例失败', error)
+    process.exitCode = 1
+  })
+}

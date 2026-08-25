@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs } from 'node:fs'
 import { strToU8, zipSync } from 'fflate'
 import sharp from 'sharp'
@@ -22,6 +22,10 @@ import {
 } from '../src/renderer/project/projectArchive'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 import { executeComponentRuntime } from '../src/renderer/components/executeComponentRuntime'
+import {
+  checkTrackedExampleOutputs,
+  type GeneratedExampleOutputs,
+} from './exampleGenerationBoundary'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
@@ -30,8 +34,11 @@ const componentSourceDirectory = path.join(
   examplesDirectory,
   'sample-counter-component',
 )
-const componentOutputPath = path.join(examplesDirectory, 'sample-counter.h5component')
-const projectOutputPath = path.join(examplesDirectory, 'sample-project.h5lesson')
+export const SAMPLE_EXAMPLE_OUTPUT_PATHS = {
+  thumbnail: 'sample-counter-component/thumbnail.png',
+  component: 'sample-counter.h5component',
+  project: 'sample-project.h5lesson',
+} as const
 const reproducibleTimestamp = new Date('2026-07-20T00:00:00.000Z')
 
 const thumbnailSvg = String.raw`
@@ -75,7 +82,6 @@ async function readComponentSources(): Promise<{
 }> {
   const manifestPath = path.join(componentSourceDirectory, 'manifest.json')
   const runtimePath = path.join(componentSourceDirectory, 'runtime.js')
-  const thumbnailPath = path.join(componentSourceDirectory, 'thumbnail.png')
 
   const [manifestText, runtimeText] = await Promise.all([
     fs.readFile(manifestPath, 'utf8'),
@@ -91,7 +97,6 @@ async function readComponentSources(): Promise<{
   const thumbnail = await sharp(Buffer.from(thumbnailSvg))
     .png({ compressionLevel: 9 })
     .toBuffer()
-  await fs.writeFile(thumbnailPath, thumbnail)
 
   return {
     manifest: manifestResult.data,
@@ -373,8 +378,7 @@ function validateCounterRuntime(runtimeSource: string, manifest: ComponentManife
   lifecycle.destroy()
 }
 
-async function main(): Promise<void> {
-  await fs.mkdir(componentSourceDirectory, { recursive: true })
+export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutputs> {
   const source = await readComponentSources()
   const componentFiles = {
     'manifest.json': source.manifestBytes,
@@ -387,7 +391,6 @@ async function main(): Promise<void> {
   })
   const importedComponent = importComponentPackage(componentArchive)
   validateCounterRuntime(importedComponent.runtimeSource, importedComponent.manifest)
-  await fs.writeFile(componentOutputPath, componentArchive)
 
   const project = buildSampleProject(
     importedComponent.manifest,
@@ -402,7 +405,6 @@ async function main(): Promise<void> {
   }, {
     mtime: reproducibleTimestamp,
   })
-  await fs.writeFile(projectOutputPath, projectArchive)
 
   const reopened = openProjectArchive(projectArchive)
   validateGeneratedProject(reopened.project)
@@ -411,11 +413,52 @@ async function main(): Promise<void> {
     expectedVersion: importedComponent.manifest.version,
   })
 
-  console.log(`已生成示例组件：${componentOutputPath}`)
-  console.log(`已生成示例工程：${projectOutputPath}`)
+  return {
+    [SAMPLE_EXAMPLE_OUTPUT_PATHS.thumbnail]: source.thumbnailBytes,
+    [SAMPLE_EXAMPLE_OUTPUT_PATHS.component]: componentArchive,
+    [SAMPLE_EXAMPLE_OUTPUT_PATHS.project]: projectArchive,
+  }
 }
 
-main().catch((error: unknown) => {
-  console.error('生成示例文件失败', error)
-  process.exitCode = 1
-})
+export async function checkSampleExampleOutputs(): Promise<void> {
+  await checkTrackedExampleOutputs(
+    examplesDirectory,
+    await buildSampleExampleOutputs(),
+    '计数器示例',
+  )
+}
+
+async function refreshSampleExampleOutputs(): Promise<void> {
+  const outputs = await buildSampleExampleOutputs()
+  await Promise.all(Object.entries(outputs).map(([relativePath, bytes]) =>
+    fs.writeFile(path.join(examplesDirectory, relativePath), bytes)))
+  console.log('已刷新计数器示例组件、工程和缩略图')
+}
+
+export type SampleExampleGenerationMode = 'refresh' | 'check'
+
+export function parseSampleExampleGenerationMode(
+  argv: readonly string[],
+): SampleExampleGenerationMode {
+  if (argv.length === 0 || (argv.length === 1 && argv[0] === '--refresh')) {
+    return 'refresh'
+  }
+  if (argv.length === 1 && argv[0] === '--check') return 'check'
+  throw new Error('Usage: tsx scripts/build-examples.ts [--refresh|--check]')
+}
+
+async function main(argv: readonly string[]): Promise<void> {
+  if (parseSampleExampleGenerationMode(argv) === 'check') {
+    await checkSampleExampleOutputs()
+    return
+  }
+  await refreshSampleExampleOutputs()
+}
+
+const invokedPath = process.argv[1]
+if (invokedPath && import.meta.url === pathToFileURL(path.resolve(invokedPath)).href) {
+  main(process.argv.slice(2)).catch((error: unknown) => {
+    console.error('生成示例文件失败', error)
+    process.exitCode = 1
+  })
+}

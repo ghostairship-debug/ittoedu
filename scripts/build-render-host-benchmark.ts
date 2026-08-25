@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { strToU8, zipSync } from 'fflate'
 import { build as viteBuild } from 'vite'
 import { componentManifestSchema } from '../src/shared/componentSchema'
@@ -25,6 +25,10 @@ import {
   createProjectArchive,
   openProjectArchive,
 } from '../src/renderer/project/projectArchive'
+import {
+  checkTrackedExampleOutputs,
+  type GeneratedExampleOutputs,
+} from './exampleGenerationBoundary'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
@@ -33,15 +37,20 @@ const installedThreePackageJsonPath = path.join(projectRoot, 'node_modules', 'th
 const installedThreeLicensePath = path.join(projectRoot, 'node_modules', 'three', 'LICENSE')
 const exampleDirectory = path.join(projectRoot, 'examples', 'render-host-benchmark')
 const runtimeDirectory = path.join(exampleDirectory, 'runtimes')
-const assetDirectory = path.join(exampleDirectory, 'assets')
 const componentRoot = path.join(exampleDirectory, 'components')
 const playerBundlePath = path.join(projectRoot, 'dist-player', 'player.iife.js')
 const threeEntryPath = path.join(runtimeDirectory, 'three-runtime.entry.ts')
-const threeBundlePath = path.join(runtimeDirectory, 'three-runtime.js')
-const projectJsonPath = path.join(exampleDirectory, 'project.json')
-const lessonArchivePath = path.join(exampleDirectory, 'render-host-benchmark.h5lesson')
-const standaloneHtmlPath = path.join(exampleDirectory, 'render-host-benchmark.html')
-const thirdPartyNoticesPath = path.join(exampleDirectory, 'THIRD_PARTY_NOTICES.md')
+export const RENDER_HOST_BENCHMARK_OUTPUT_PATHS = {
+  threeRuntime: 'runtimes/three-runtime.js',
+  phaserFallback: 'assets/phaser-runtime-fallback.svg',
+  threeFallback: 'assets/three-runtime-fallback.svg',
+  tableComponent: 'render-host-editable-table.h5component',
+  phaserMeterComponent: 'render-host-phaser-meter.h5component',
+  project: 'project.json',
+  lesson: 'render-host-benchmark.h5lesson',
+  html: 'render-host-benchmark.html',
+  notices: 'THIRD_PARTY_NOTICES.md',
+} as const
 const reproducibleTimestamp = new Date('2026-07-23T00:00:00.000Z')
 const timestamp = reproducibleTimestamp.toISOString()
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024
@@ -406,12 +415,13 @@ function assertOfflineBundle(source: string, label: string): void {
 }
 
 async function bundleThreeRuntime(): Promise<string> {
-  await viteBuild({
+  const result = await viteBuild({
     configFile: false,
     logLevel: 'warn',
     build: {
       outDir: runtimeDirectory,
       emptyOutDir: false,
+      write: false,
       copyPublicDir: false,
       sourcemap: false,
       minify: 'esbuild',
@@ -423,7 +433,22 @@ async function bundleThreeRuntime(): Promise<string> {
       },
     },
   })
-  const source = await fs.readFile(threeBundlePath, 'utf8')
+  const candidates = (Array.isArray(result) ? result : [result]).flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null || !('output' in entry)) return []
+    const output = Reflect.get(entry, 'output')
+    return Array.isArray(output) ? output : []
+  })
+  const chunk = candidates.find((entry) => (
+    typeof entry === 'object'
+    && entry !== null
+    && Reflect.get(entry, 'type') === 'chunk'
+    && Reflect.get(entry, 'fileName') === 'three-runtime.js'
+    && typeof Reflect.get(entry, 'code') === 'string'
+  ))
+  if (!chunk || typeof chunk !== 'object') {
+    throw new Error('Three.js 场景运行时打包后缺少 three-runtime.js')
+  }
+  const source = Reflect.get(chunk, 'code') as string
   assertOfflineBundle(source, 'Three.js 场景运行时')
   validateRuntimeDefinition(source, 'Three.js 场景运行时')
   return source
@@ -436,7 +461,6 @@ interface LoadedComponent {
 
 async function loadComponent(
   directoryName: string,
-  archiveFilename: string,
 ): Promise<LoadedComponent> {
   const directory = path.join(componentRoot, directoryName)
   const manifestText = await fs.readFile(path.join(directory, 'manifest.json'), 'utf8')
@@ -451,7 +475,6 @@ async function loadComponent(
     files[manifest.thumbnail] = await fs.readFile(path.join(directory, manifest.thumbnail))
   }
   const archive = zipSync(files, { level: 6, mtime: reproducibleTimestamp })
-  await fs.writeFile(path.join(exampleDirectory, archiveFilename), archive)
   return {
     archive,
     data: importComponentPackage(archive, {
@@ -482,8 +505,7 @@ function headerNodes(
   ]
 }
 
-async function main(): Promise<void> {
-  await fs.mkdir(assetDirectory, { recursive: true })
+export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampleOutputs> {
   const [
     threePackageMetadata,
     threeRuntimeSource,
@@ -498,8 +520,8 @@ async function main(): Promise<void> {
     fs.readFile(playerBundlePath, 'utf8').catch((error: unknown) => {
       throw new Error('缺少 dist-player/player.iife.js；请先运行 npm run build:player', { cause: error })
     }),
-    loadComponent('editable-table', 'render-host-editable-table.h5component'),
-    loadComponent('phaser-meter', 'render-host-phaser-meter.h5component'),
+    loadComponent('editable-table'),
+    loadComponent('phaser-meter'),
   ])
 
   assertOfflineBundle(phaserRuntimeSource, 'Phaser 场景运行时')
@@ -540,7 +562,6 @@ async function main(): Promise<void> {
       width: 1280,
       height: 720,
     }
-    await fs.writeFile(path.join(assetDirectory, asset.filename), bytes)
   }
 
   const nativeHeaders = headerNodes(
@@ -719,7 +740,6 @@ async function main(): Promise<void> {
   }
 
   const project = projectDocumentSchema.parse(projectCandidate)
-  await fs.writeFile(projectJsonPath, `${JSON.stringify(project, null, 2)}\n`, 'utf8')
 
   const components: Record<string, ComponentPackageData> = {
     [tableComponent.data.key]: tableComponent.data,
@@ -733,7 +753,6 @@ async function main(): Promise<void> {
     { project, assetFiles, componentFiles },
     { mtime: reproducibleTimestamp },
   )
-  await fs.writeFile(lessonArchivePath, lessonArchive)
 
   const reopened = openProjectArchive(lessonArchive)
   if (
@@ -748,24 +767,64 @@ async function main(): Promise<void> {
 
   const payload = buildExportPayload({ project, assets: assetFiles, components })
   const html = buildStandaloneHtml(payload, { playerBundle })
-  await Promise.all([
-    fs.writeFile(standaloneHtmlPath, html, 'utf8'),
-    fs.writeFile(
-      thirdPartyNoticesPath,
-      buildThreeThirdPartyNotice(threePackageMetadata),
-      'utf8',
+  return {
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.threeRuntime]: strToU8(threeRuntimeSource),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.phaserFallback]: assetFiles.asset_phaser_runtime_fallback!,
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.threeFallback]: assetFiles.asset_three_runtime_fallback!,
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.tableComponent]: tableComponent.archive,
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.phaserMeterComponent]: phaserMeterComponent.archive,
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.project]: strToU8(
+      `${JSON.stringify(project, null, 2)}\n`,
     ),
-  ])
-
-  console.log(`已生成 Three.js 离线 Runtime：${threeBundlePath}`)
-  console.log(`已生成 Three.js ${threePackageMetadata.version} 第三方通知：${thirdPartyNoticesPath}`)
-  console.log(`已生成 Project V8 JSON：${projectJsonPath}`)
-  console.log(`已生成两个组件包：${exampleDirectory}`)
-  console.log(`已生成渲染宿主基准工程：${lessonArchivePath}`)
-  console.log(`已生成离线单 HTML：${standaloneHtmlPath}`)
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.lesson]: lessonArchive,
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html]: strToU8(html),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.notices]: strToU8(
+      buildThreeThirdPartyNotice(threePackageMetadata),
+    ),
+  }
 }
 
-main().catch((error: unknown) => {
-  console.error('生成渲染宿主基准失败', error)
-  process.exitCode = 1
-})
+export async function checkRenderHostBenchmarkOutputs(): Promise<void> {
+  await checkTrackedExampleOutputs(
+    exampleDirectory,
+    await buildRenderHostBenchmarkOutputs(),
+    '渲染宿主基准',
+  )
+}
+
+async function refreshRenderHostBenchmarkOutputs(): Promise<void> {
+  const outputs = await buildRenderHostBenchmarkOutputs()
+  await Promise.all(Object.entries(outputs).map(([relativePath, bytes]) =>
+    fs.writeFile(path.join(exampleDirectory, relativePath), bytes)))
+  console.log('已刷新渲染宿主基准 fixtures')
+}
+
+export type RenderHostBenchmarkGenerationMode = 'refresh' | 'check'
+
+export function parseRenderHostBenchmarkGenerationMode(
+  argv: readonly string[],
+): RenderHostBenchmarkGenerationMode {
+  if (argv.length === 0 || (argv.length === 1 && argv[0] === '--refresh')) {
+    return 'refresh'
+  }
+  if (argv.length === 1 && argv[0] === '--check') return 'check'
+  throw new Error(
+    'Usage: tsx scripts/build-render-host-benchmark.ts [--refresh|--check]',
+  )
+}
+
+async function main(argv: readonly string[]): Promise<void> {
+  if (parseRenderHostBenchmarkGenerationMode(argv) === 'check') {
+    await checkRenderHostBenchmarkOutputs()
+    return
+  }
+  await refreshRenderHostBenchmarkOutputs()
+}
+
+const invokedPath = process.argv[1]
+if (invokedPath && import.meta.url === pathToFileURL(path.resolve(invokedPath)).href) {
+  main(process.argv.slice(2)).catch((error: unknown) => {
+    console.error('生成渲染宿主基准失败', error)
+    process.exitCode = 1
+  })
+}
