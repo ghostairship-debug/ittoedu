@@ -55,7 +55,7 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 
 选择 UTF-16LE 是为了精确保留所有 JavaScript 字符串，包括中文、Emoji、代理对和孤立代理代码单元。编码只避免原始文件结构和明文源码的主动交付，不提供加密或抗逆向能力。
 
-当前 CoursePlayer 对可执行 Runtime 的 Published playback 是明确的 partial slice：Slide `scene.layerItems` 中的 API 2 `canvas-runtime` 可按 DOM/Phaser/hybrid 执行，Slide scene-local 与 Flow surface-local 的 API 3 DOM `surface-runtime` 也可执行；global/shared/Spatial/capture 等未覆盖 carrier 仍使用后备。API 2 的宿主动作、presentation 与节点解析尚未接入，不得把“源码已携带”解释为完整宿主上下文 parity。三种互动交付与编辑器当前位置/整课预览复用同一 Published host。
+当前 CoursePlayer 对可执行 Runtime 的 Published playback 是明确的 partial slice：Slide `scene.layerItems` 中的 API 2 `canvas-runtime` 可按 DOM/Phaser/hybrid 执行；`globalLayerItems` 中的 API 2 由 Published session 持有唯一实例，并把同一容器迁入当前 Slide/Flow/Spatial global wrapper；Slide scene-local 与 Flow surface-local 的 API 3 DOM `surface-runtime` 也可执行。global API 3、其它 shared、Flow/Spatial scene-local API 2 与 capture 等未覆盖 carrier 仍使用后备。API 2 的宿主动作、presentation 与节点解析尚未接入，不得把“源码已携带”解释为完整宿主上下文 parity。三种互动交付与编辑器当前位置/整课预览复用同一 Published host。
 
 ## 两种互动发布物
 

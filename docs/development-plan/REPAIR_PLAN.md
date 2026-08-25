@@ -6,7 +6,7 @@
 >
 > 当前批次编排基线：`7d17fed384804e998e15ae21380ed98259acf897`。
 >
-> 状态：**LEG-005A 已完成产品实现与独立审查；当前 RTP-04 active，CMP-03 因共享 Slide Published host 排在 RTP-04 后**。合法纯 Slide PDF raster 继续保留。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**RTP-04 已完成产品实现与独立审查；CMP-03 已在最终集成 SHA `c6b3869` 上 active**。合法纯 Slide PDF raster 继续保留。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -126,7 +126,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 - **RTP-01（已完成）**：Slide scene-local API 3 DOM Runtime 已在当前位置试运行、整课预览、单 HTML 与网页包的 Published V2 路径真实运行。
 - **RTP-02（已完成）**：Flow 作者命令写入 `surfaceLayerItems` 的 surface-scoped API 3 DOM Runtime 已复用现有 Published mount，在四个 consumer 中真实运行；global/disabled 仍后备，失败实例立即销毁并隔离。
 - **RTP-03（已完成）**：教师通过真实 Slide runtime template/source/property authoring command 创建的 scene-local API 2 DOM/Phaser/hybrid 已在四个 Published consumer 执行；跨 generation、暂离/恢复、失败隔离与 Phaser Core `DESTROY` 已覆盖。宿主动作、presentation、节点解析、global/shared/Spatial/capture 仍不在该 partial slice 内。
-- **RTP-04（active）**：为 `globalLayerItems` 中 API 2 Runtime 建立 session-global 单实例 ownership；同一容器迁入当前 Slide/Flow/Spatial host 的既有 global wrapper，保留跨 Surface 状态、排序、命中与 restart/destroy 语义。
+- **RTP-04 已完成**：`globalLayerItems` 中每个 enabled API 2 Runtime 由 Published session 创建一次；同一容器在 Slide/Flow/Spatial 的既有 global wrapper 间迁移，保留内部状态、排序、显隐与命中，restart/destroy 可靠重建/释放；lifecycle/create 与 hostile GameObject teardown 失败只隔离当前 item，Phaser Core/renderer/loop 仍完整释放。
 
 ### Wave 2：Validation Report 与 Diagnostic Target
 
@@ -139,7 +139,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 - EXA-02 与 V8-01 已完成；经 consumer 查询确认没有 package、测试、发布或产品调用者的 incline-motion 全链已经删除；
 - **V8-02 已完成**：photosynthesis 用当前 V9 factory 生成三 Slide archive，并以 Published V2 离线 HTML保留三页导航、前两页像素变化、第三页指针操作与截图、零 HTTP(S) 与零 `pageerror` 的原行为门；专属 V8 archive/component chain 活引用为零；
-- **CMP-03（queued）**：Slide scene-local Component API 4 Phaser 的作者入口与 producer 已闭合，Published host 仍无条件 fallback；RTP-04 合入后在新 baseline 激活，完成后才分别准入 sample、benchmark、portability 与 release verifier 的替代/清退；
+- **CMP-03（active）**：Slide scene-local Component API 4 Phaser 的作者入口与 producer 已闭合，Published host 仍无条件 fallback；当前 baseline 为 RTP-04 最终集成 SHA `c6b3869`，完成后才分别准入 sample、benchmark、portability 与 release verifier 的替代/清退；
 - **LEG-005A 已完成**：PDF 预检后 source 消失现在明确报不可用且不进入 raster/write；不可达的 V8 payload + Runtime raster 已删除，正常纯 Slide raster、Mixed V2、PPTX capture、PDF preflight 与 LEG-005 的其余 active debt保留；
 - `verify-release.ts` 的 controller、DOM、navigation、Published oracle 全部改为 V9/V2；
 - 不用 V8→V9 migrate 兜底，不复活退役保真门；
@@ -155,9 +155,9 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的完整 Vitest、预构建、风险 Playwright、任务板、repo-index check/quality 门。LEG-003 由 `f3fd31f` 生命周期表征准入并删除不可达 App Legacy HTML/Web/full-preview 链；LEG-005A 的 `7176614` / `e3b5dd2` 又删除不可达 PDF source-null Runtime raster，二者均经独立审查通过。当前 RTP-04 active、CMP-03 queued；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的 phase gate；LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退。RTP-04 产品提交 `84c21bd` / `82bfa7e` / `9c51adb` / `876631c` / `c6b3869` 已通过独立审查，当前仅 CMP-03 active；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
-当前 RTP-04 只建立 session-global API 2 ownership 与容器迁移；CMP-03 随后只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
+RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 RuntimeHost teardown 异常安全；CMP-03 只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
 已知不准入事实：sample、benchmark/release 与 portability 需等 CMP-03 通过后再逐项审计；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；Validation Report/Diagnostic Target 仍需先裁决合同；Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
@@ -173,25 +173,25 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ### 6.2 当前实现编排
 
-CMP-03 共享 RTP-04 的 Slide Published host，必须等待：
+CMP-03 已在 RTP-04 集成后获得 Slide Published host 单写入权：
 
 | Lane | Hotspot / 写入范围 | 并行约束 |
 |---|---|---|
-| RTP-04 | session owner、API 2 mount 与三个 Surface 的窄 mount-target port | active；不得顺带开放 API 3、actions/events/nodes/capture/Component |
-| CMP-03 | Component Phaser mount 与 Slide Published adapter | queued；RTP-04 合入后重置 baseline 再 active，不改其它 carrier 或 producer |
+| RTP-04 | session owner、API 2 mount、RuntimeHost teardown 与三个 Surface 的窄 mount-target port | completed；产品实现及 P1 反例修复已审查通过 |
+| CMP-03 | Component Phaser mount 与 Slide Published adapter | active；baseline `c6b3869`，不改其它 carrier 或 producer |
 
 计划、任务卡、`TASK_BOARD.md`、README/作者文档、共享 fixture/helper、能力与 repo-index 生成输出仍由 Integrator 单写。各 S2 作者只跑卡内 focused checks，独立 Reviewer 审 diff、失败路径与遗漏反例，不机械复跑作者命令。
 
 ### 6.3 后续准入点
 
 - NET-H1 稳定后：以真实 HTTP/WebSocket consumer 准入 API 与 NET-C1；CORS/捕获必须给出明确 fallback 或诊断。
-- RTP-04 完成后只把 CMP-03 切为 active；Spatial、global API 3、Published capture 与非 Flow shared 继续不准入。
+- RTP-04 完成后已只把 CMP-03 切为 active；Spatial scene-local API 2、global API 3、Published capture 与非 Flow shared 继续不准入。
 - CMP-03 完成后重新生成 Legacy consumer 事实，再分别决定 sample、benchmark/verify-release 与 portability 的 V9/V2 替代；不得打成一张“大清退”卡。
 
 ## 7. 成功门槛
 
 - Runtime/Component 因“外部导入”被误判为不可信并强制低权限执行的路径：0；
-- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：Slide scene-local API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 在四个现有 consumer 已归零；其余 carrier 与 API 2 partial host context 继续按独立纵切逐项归零；
+- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM、Flow surface-local API 3 DOM 在四个现有 consumer 已归零；其余 carrier 与 API 2 partial host context 继续按独立纵切逐项归零；
 - 已声明远程资源/API 被 blanket 拦截：0；未声明 origin 被错误放行：0；
 - 长期 API Key 进入工程或导出物：0；
 - 能力索引与 CLI 实现不一致：0；

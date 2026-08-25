@@ -653,11 +653,13 @@ describe('AI capability manifest generation', () => {
       publishedPlayback: {
         status: string
         supportedSlices: Array<{
-          surface: string
+          surface?: string
+          surfaces?: string[]
           carrier: string
           scope: string
           renderModes: string[]
           consumers: string[]
+          lifetime?: string
         }>
         notCovered: string[]
       }
@@ -677,14 +679,27 @@ describe('AI capability manifest generation', () => {
             'web-package',
           ],
         },
+        {
+          surfaces: ['slide', 'flow', 'spatial-2d'],
+          carrier: 'globalLayerItems',
+          scope: 'session-global',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          lifetime: 'one-instance-per-published-session-moved-between-surface-wrappers',
+        },
       ],
     })
     expect(canvasRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
-      'globalLayerItems-or-surfaceLayerItems',
-      'flow-or-spatial',
+      'surfaceLayerItems',
+      'flow-or-spatial-scene-local',
       'runtime.event-or-host-actions',
       'node-resolution-or-presentation',
-      'cross-surface-courseState',
+      'scene-local-cross-surface-courseState',
       'capture-pdf-or-pptx',
       'host-local-capabilities',
     ]))

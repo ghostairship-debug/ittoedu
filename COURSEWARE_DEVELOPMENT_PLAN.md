@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：17.8（2026-08-26：LEG-005A 已删除正常 V9 生命周期不可达的 PDF source-null Runtime raster并独立审查通过；RTP-04 active，CMP-03 因共享 Slide Published host 排队）
+> 计划版本：17.9（2026-08-26：RTP-04 session-global API 2 Runtime 已合入并独立审查通过；CMP-03 已在最终集成 SHA `c6b3869` 上激活）
 >
 > 当前活动路线：第 5 节“工程修复与网络基础——Gate R0 → Wave 0–5”；详细证据与开工顺序见 [修复方案](docs/development-plan/REPAIR_PLAN.md)
 >
@@ -100,7 +100,7 @@
 - **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
 - **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
 
-上一批三个互斥 S2 已按 photosynthesis V9/V2 oracle → Slide API 2 Published playback → 真实 V9 预览联网的顺序合入并通过固定候选 `7d17fed` phase gate；独立 Reviewer 发现并关闭了 Phaser 核心销毁、overlay A→B 授权残留与跨文档迟到 IPC 三类 P1。最新 consumer 审计确认 RTP-04 session-global API 2 Runtime 与 CMP-03 Slide Phaser Component 均 Ready；二者共享 Slide Published host，当前只激活 RTP-04，CMP-03 排队并在 RTP-04 合入后重置 baseline。`f3fd31f` 的正常 V9 生命周期表征又解锁 LEG-003，产品提交 `63fbf66` 已删除 HTML/Web/full-preview 的 V8 回退及其专属 desktop preview IPC/window/protocol，并经独立审查通过。网络/CORS/捕获因没有真实作者消费链继续 No-Ready。
+上一批三个互斥 S2 已按 photosynthesis V9/V2 oracle → Slide API 2 Published playback → 真实 V9 预览联网的顺序合入并通过固定候选 `7d17fed` phase gate；独立 Reviewer 发现并关闭了 Phaser 核心销毁、overlay A→B 授权残留与跨文档迟到 IPC 三类 P1。RTP-04 又以 session owner 接通 `globalLayerItems` API 2 单实例播放，并在审查中补齐三 Surface 命中组合、lifecycle/create 双重异常下的 Phaser Core teardown，以及普通 Runtime 卸载的 `fromScene=false` 语义；CMP-03 已在最终集成 SHA `c6b3869` 上激活。`f3fd31f` 的正常 V9 生命周期表征解锁并完成 LEG-003，LEG-005A 随后删除 PDF source-null Runtime raster；网络/CORS/捕获因没有真实作者消费链继续 No-Ready。
 
 已删除/降级项：`HYG-02` 删除（8 处均为合法 unchanged guard）；`HYG-01/03/05` 降级或移出产品路线；`NAV-01` P2 登记。已完成治理项：`CAP-02`、`CAP-03`、`HYG-04`。
 
@@ -109,7 +109,7 @@
 - 能力索引声明与 CLI 实现不一致处：0；未兑现能力先收窄，完成实现后再恢复声明；
 - Wave 0 用户可达缺陷（surface 选择、组件删除/定位假成功、preflight 假绿）未闭合数：0；
 - Runtime/Component 文档或新实现把“外部导入”误当“不可信代码”并强制低权限执行：0；
-- Published V2 在合法 Runtime carrier 上只画 fallback、没有执行真实 Runtime 的路径：按独立纵切逐项归零；当前只宣称 Slide scene-local API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 三个 slice，不冒充完整宿主上下文或全 carrier parity；
+- Published V2 在合法 Runtime carrier 上只画 fallback、没有执行真实 Runtime 的路径：按独立纵切逐项归零；当前只宣称 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM、Flow surface-local API 3 DOM 四个 slice，不冒充完整宿主上下文或全 carrier parity；
 - Slide surface 的 backend、projection、Store owner token 一致；命名状态下修改 surface 属性产生且只产生一次 canonical V9 commit，undo 后可恢复；
 - Schema-invalid V9 不进入不安全 source-facts 遍历，preflight/producer 共享 `project-schema-invalid` code 与首个 Zod issue path，抛出的原生 `TypeError`：0；合法 V9 的缺 metadata/bytes/component closure 仍保持共享稳定 code/path；
 - Flow 组件使用位置只有在所属 surface 的有效 location 已激活且 block 真实选中后才报告成功；无法解析的 Flow 使用位置假成功：0；
@@ -132,6 +132,6 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前卡统一放在 `docs/development-plan/tasks/repair/**`，完成即删除。
 
-当前任务板以 RTP-04 为 active、CMP-03 为 queued；CMP-03 因共享 Slide Published host 等 RTP-04 合入。LEG-005A 已让 PDF 预检后 source 消失明确失败并删除不可达 Runtime raster，合法纯 Slide raster、Mixed V2、PPTX capture 与 PDF preflight 均保留。CMP-03 通过后再分别审计 sample、benchmark/portability/release 的最小 V9/V2 替代，不打包成“大清退”；其余纵切继续按 consumer 证据准入。
+当前任务板只有 CMP-03 active。RTP-04 已关闭；global API 3、API 2 actions/events/nodes/capture、其它 shared Runtime carrier 仍不随之开放。CMP-03 通过后再分别准入 sample、benchmark/portability/release 的最小 V9/V2 替代，不打包成“大清退”；其余纵切继续按 consumer 证据准入。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。
