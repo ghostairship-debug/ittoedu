@@ -90,11 +90,12 @@
 
 唯一详细台账见 [修复方案](docs/development-plan/REPAIR_PLAN.md)。本节只记录依赖顺序和 Owner 已裁决边界，不复制任务状态。本轮仍不含 skill 重构、黄金样例、真实课例生产、声明式数据条件或行内公式；新增范围只有 Owner 已明确要求的远程资源、API 与轻量在线导出。V9 继续软冻结，网络字段只能走 additive 可选合同。
 
-- **Gate R0（已关闭）**：信任模型与网络方向已经裁决；计划与精简流程基线为 `b967c96`，首批 7 张 Ready 卡已进入任务板。
+- **Gate R0（已关闭）**：信任模型与网络方向已经裁决；计划与精简流程基线为 `b967c96`。初始任务的完成事实由 product commit 承载，当前状态只看任务板。
 - **Wave 0 安全、诚实契约与直接用户行为**：`CAP-01` 先移除未兑现的宽泛 `project-health` 声明；`SEC-01` 复用现有 sandbox Player/authoring bridge 隔离 `desktopAPI`，不把联网一并封死；并行修 `UI-01`、`CMP-01`、`EXP-01`。同一 Editor Store 热点上的 UI/CMP 串行。
+- **Wave 0 集成后质量补修（审计基线 `3780090`）**：`CAP-01` 维持关闭；`UI-01` 与 `EXA-02` 因原验收仍有反例而重开；新增 `EXP-02` 处理畸形 V9 的原生异常，新增 `CMP-02` 处理 Flow 组件使用位置的定位假成功。这些是现有 Wave 的完成质量补修，不另建新 Wave；四项在各自互斥范围内均已 Ready，CMP 若实证需要 Store 写入则停止并等待 UI 热点释放。
 - **Wave 1 网络基础纵切**：先完成远程资源交付与工程网络声明的 additive 合同；再按“在线轻量单 HTML → 隔离预览动态 origin → API 连接 → CORS/静态捕获降级”逐个用户行为实施。长期密钥不进入静态课件。
 - **Wave 2 诊断合同**：Validation Report 与 Diagnostic Target 分别定约，再实现逐码 ledger。原“成功分支映射 17 码”控制流不可达，继续否决。
-- **Wave 3 V8 测试产物清退与真实发布门**：先解决生成物/fresh checkout，再删除全部 V8 课例内容；只有活测试或 verifier 所需内容才用产品工厂重建最小 V9 fixture，不迁移 photosynthesis、incline-motion 或 benchmark 的旧课例设计。
+- **Wave 3 V8 测试产物清退与真实发布门**：先解决生成物/fresh checkout，且生成与检查结果不得依赖 checkout 的 LF/CRLF 或 `core.autocrlf=true/false`；再删除全部 V8 课例内容。只有活测试或 verifier 所需内容才用产品工厂重建最小 V9 fixture，不迁移 photosynthesis、incline-motion 或 benchmark 的旧课例设计。
 - **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
 - **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须复用 SEC-01 的隔离边界与网络策略。
 
@@ -104,8 +105,11 @@
 
 - 作者 Runtime/Component 代码可触达 `desktopAPI` 的执行路径：0（SEC-01 后）；
 - 能力索引声明与 CLI 实现不一致处：0；未兑现能力先收窄，完成实现后再恢复声明；
-- Wave 0 四项用户可达缺陷（surface 选择、组件删除假成功、preflight 假绿、作者代码隔离）未闭合数：0；
-- 连续两次 `pretest:e2e` 后 `git status --porcelain` 非空：0；fresh checkout 上 `npm test` 因缺生成物失败：0；
+- Wave 0 用户可达缺陷（surface 选择、组件删除/定位假成功、preflight 假绿、作者代码隔离）未闭合数：0；
+- Slide surface 的 backend、projection、Store owner token 一致；命名状态下修改 surface 属性产生且只产生一次 canonical V9 commit，undo 后可恢复；
+- Schema-invalid V9 不进入不安全 source-facts 遍历，preflight/producer 共享 `project-schema-invalid` code 与首个 Zod issue path，抛出的原生 `TypeError`：0；合法 V9 的缺 metadata/bytes/component closure 仍保持共享稳定 code/path；
+- Flow 组件使用位置只有在所属 surface 的有效 location 已激活且 block 真实选中后才报告成功；无法解析的 Flow 使用位置假成功：0；
+- 连续两次 `pretest:e2e` 后 `git status --porcelain` 非空：0；fresh checkout 上 `npm test` 因缺生成物失败：0；`core.autocrlf=true/false` 两种 checkout 的生成结果字节漂移：0；
 - `verify:release` 在"GUI 打开示例"段失败：0（含 oracle 重写，不只换 opener）；
 - 在线轻量单 HTML 能保留声明的远程图片/音视频 URL，并生成最小必要 CSP；离线便携模式继续内嵌资源；
 - 隔离 Player 对已声明 `https`/`wss` origin 可联网、对未声明 origin 可重复拒绝，同时始终看不到 `desktopAPI`；
