@@ -12,6 +12,7 @@ import {
 } from './security'
 import { editorEntryUrl } from './protocols'
 import { clearRecoveryProject } from './projectPersistence'
+import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
 import {
   BACKGROUND_E2E_WINDOW_ORIGIN,
   shouldShowApplicationWindows,
@@ -102,9 +103,19 @@ export async function createMainWindow(
   const developmentServerUrl = parseDevelopmentServerUrl()
   const rendererEntryUrl = developmentServerUrl?.toString() ?? editorEntryUrl()
 
-  const allowedNetworkOrigins = new Set<string>()
-  if (developmentServerUrl) allowedNetworkOrigins.add(developmentServerUrl.origin)
-  configureRestrictedSession(session.defaultSession, allowedNetworkOrigins)
+  const baseNetworkOrigins = new Set<string>()
+  if (developmentServerUrl) {
+    baseNetworkOrigins.add(developmentServerUrl.origin)
+    const websocketUrl = new URL(developmentServerUrl)
+    websocketUrl.protocol = 'ws:'
+    baseNetworkOrigins.add(websocketUrl.origin)
+  }
+  mainPreviewNetworkPolicy.replaceBaseOrigins(baseNetworkOrigins)
+  mainPreviewNetworkPolicy.clearPreviewLeases()
+  configureRestrictedSession(
+    session.defaultSession,
+    (url) => mainPreviewNetworkPolicy.allowsRequest(url),
+  )
   const showApplicationWindows = shouldShowApplicationWindows()
 
   const window = new BrowserWindow({
@@ -200,7 +211,16 @@ export async function createMainWindow(
   })
 
   window.on('closed', () => {
+    mainPreviewNetworkPolicy.clearPreviewLeases()
     appState.detachWindow(window)
+  })
+
+  window.webContents.on('render-process-gone', () => {
+    mainPreviewNetworkPolicy.clearPreviewLeases()
+  })
+
+  window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) mainPreviewNetworkPolicy.clearPreviewLeases()
   })
 
   window.once('ready-to-show', () => {

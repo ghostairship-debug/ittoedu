@@ -35,7 +35,11 @@ describe('runtime preview document', () => {
     const editorHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
 
     expect(editorHtml).toContain('frame-src blob:')
-    expect(editorHtml).toContain("connect-src 'self' blob:")
+    expect(editorHtml).toContain("img-src 'self' blob: data: https:")
+    expect(editorHtml).toContain("media-src 'self' blob: data: https:")
+    expect(editorHtml).toContain("font-src 'self' data: https:")
+    expect(editorHtml).toContain("connect-src 'self' blob: https: wss:")
+    expect(editorHtml).not.toMatch(/script-src[^;]*https:/)
     expect(editorHtml).not.toContain("frame-src 'none'")
     const bootstrapSource = readFileSync(resolve(
       process.cwd(),

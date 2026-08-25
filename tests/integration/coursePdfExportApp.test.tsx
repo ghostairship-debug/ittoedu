@@ -132,6 +132,8 @@ function appApi(): AppDesktopApi {
     exportBinary: vi.fn(async () => null),
     exportPdf: vi.fn(async () => ({ path: 'C:\\exports\\course.pdf' })),
     openPreview: vi.fn(async () => undefined),
+    setPreviewNetworkPolicy: vi.fn(async () => undefined),
+    releasePreviewNetworkPolicy: vi.fn(async () => undefined),
     confirmDiscardChanges: vi.fn(async () => 'discard' as const),
     setDirtyState: vi.fn(async () => undefined),
     onRequestSave: vi.fn(() => () => undefined),

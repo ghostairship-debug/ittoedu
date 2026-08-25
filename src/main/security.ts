@@ -18,8 +18,6 @@ function canonicalFilePath(value: string): string {
 function networkOrigin(value: string): string | null {
   try {
     const url = new URL(value)
-    if (url.protocol === 'ws:') url.protocol = 'http:'
-    if (url.protocol === 'wss:') url.protocol = 'https:'
     return url.origin
   } catch {
     return null
@@ -109,7 +107,7 @@ export function hardenWebContents(
 
 export function configureRestrictedSession(
   electronSession: Session,
-  allowedNetworkOrigins: ReadonlySet<string>,
+  allowedNetworkOrigins: ReadonlySet<string> | ((url: string) => boolean),
 ): void {
   if (configuredSessions.has(electronSession)) return
   configuredSessions.add(electronSession)
@@ -130,8 +128,13 @@ export function configureRestrictedSession(
   electronSession.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
     (details, callback) => {
-      const origin = networkOrigin(details.url)
-      callback({ cancel: origin === null || !allowedNetworkOrigins.has(origin) })
+      const allowed = typeof allowedNetworkOrigins === 'function'
+        ? allowedNetworkOrigins(details.url)
+        : (() => {
+            const origin = networkOrigin(details.url)
+            return origin !== null && allowedNetworkOrigins.has(origin)
+          })()
+      callback({ cancel: !allowed })
     },
   )
 }

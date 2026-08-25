@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
-import { fitPublishedCourseStage, waitForHostLayout } from '@/renderer/ui/coursePlayerTryRun'
+import {
+  buildPublishedCourseTryRunPayload,
+  fitPublishedCourseStage,
+  waitForHostLayout,
+} from '@/renderer/ui/coursePlayerTryRun'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 function mockClientSize(element: HTMLElement, width: number, height: number): void {
   Object.defineProperty(element, 'clientWidth', { configurable: true, value: width })
@@ -68,5 +73,36 @@ describe('waitForHostLayout', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('buildPublishedCourseTryRunPayload', () => {
+  it('projects only referenced remote project assets while keeping local assets in memory', () => {
+    const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'multi-asset')!
+    const project = structuredClone(fixture.data.project)
+    project.assets.photo.remote = { url: 'https://cdn.example.com/photo.png?rev=2' }
+    project.assets.unused = {
+      ...structuredClone(project.assets.photo),
+      id: 'unused',
+      filename: 'unused.png',
+      path: 'assets/unused.png',
+      remote: { url: 'https://unused.example.com/image.png' },
+    }
+    const assetFiles = {
+      ...fixture.data.assetFiles,
+      unused: fixture.data.assetFiles.photo!,
+    }
+
+    const published = buildPublishedCourseTryRunPayload({
+      project,
+      assetFiles,
+      components: {},
+    })
+
+    expect(published.assets.photo?.url).toBe('https://cdn.example.com/photo.png?rev=2')
+    expect(published.assets.diagram?.url).toMatch(/^data:image\/png;base64,/)
+    expect(published.assets.clip?.url).toMatch(/^data:video\/mp4;base64,/)
+    expect(published.assets.voice?.url).toMatch(/^data:audio\/mpeg;base64,/)
+    expect(published.assets.unused).toBeUndefined()
   })
 })

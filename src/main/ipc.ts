@@ -37,6 +37,7 @@ import {
 import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
+import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
 
 interface IpcSuccess<T> {
   ok: true
@@ -125,6 +126,16 @@ const previewSchema = z
     html: z.string().min(1).max(256 * 1024 * 1024),
   })
   .strict()
+
+const previewNetworkLeaseIdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/)
+const previewNetworkPolicySchema = z.object({
+  leaseId: previewNetworkLeaseIdSchema,
+  connectOrigins: z.array(z.string().min(1).max(300)).max(1_000),
+  remoteAssetUrls: z.array(z.string().min(1).max(2_000)).max(10_000),
+}).strict()
+const previewNetworkReleaseSchema = z.object({
+  leaseId: previewNetworkLeaseIdSchema,
+}).strict()
 
 const dirtySchema = z.boolean()
 
@@ -595,6 +606,36 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       const input = previewSchema.parse(requireSingleArgument(args))
       await openPreviewWindow(input.html, requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.setPreviewNetworkPolicy,
+    context,
+    {
+      code: 'PREVIEW_NETWORK_POLICY_FAILED',
+      title: '预览网络配置失败',
+      message: '无法应用当前课件的网络声明。',
+      suggestion: '请检查工程网络声明并重新打开预览。',
+    },
+    (_event, args) => {
+      const input = previewNetworkPolicySchema.parse(requireSingleArgument(args))
+      mainPreviewNetworkPolicy.replacePreviewLease(input)
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.releasePreviewNetworkPolicy,
+    context,
+    {
+      code: 'PREVIEW_NETWORK_RELEASE_FAILED',
+      title: '预览网络清理失败',
+      message: '无法撤销已关闭预览的网络声明。',
+      suggestion: '请关闭当前工程或重启编辑器。',
+    },
+    (_event, args) => {
+      const input = previewNetworkReleaseSchema.parse(requireSingleArgument(args))
+      mainPreviewNetworkPolicy.releasePreviewLease(input.leaseId)
     },
   )
 

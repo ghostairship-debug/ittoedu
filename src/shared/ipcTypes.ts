@@ -72,6 +72,12 @@ export interface RecoveryProjectResult extends RecoveryProjectInput {
   savedAt: number
 }
 
+export interface PreviewNetworkPolicyInput {
+  leaseId: string
+  connectOrigins: string[]
+  remoteAssetUrls: string[]
+}
+
 export interface DesktopAPI {
   openProject(): Promise<OpenBinaryFileResult | null>
   listRecentProjects(): Promise<RecentProjectEntry[]>
@@ -118,6 +124,8 @@ export interface DesktopAPI {
     html: string
   }): Promise<{ path: string } | null>
   openPreview(input: { html: string }): Promise<void>
+  setPreviewNetworkPolicy(input: PreviewNetworkPolicyInput): Promise<void>
+  releasePreviewNetworkPolicy(input: { leaseId: string }): Promise<void>
   confirmDiscardChanges(): Promise<'discard' | 'cancel'>
   setDirtyState(dirty: boolean): Promise<void>
   onRequestSave(handler: () => void): () => void
@@ -156,6 +164,8 @@ export const IPC_CHANNELS = {
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
   openPreview: 'preview:open',
+  setPreviewNetworkPolicy: 'preview-network:set',
+  releasePreviewNetworkPolicy: 'preview-network:release',
   confirmDiscard: 'app:confirm-discard',
   dirtyState: 'app:dirty-state',
   requestSave: 'app:request-save',
