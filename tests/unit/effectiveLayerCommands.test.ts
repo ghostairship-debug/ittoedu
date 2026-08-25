@@ -26,6 +26,7 @@ import {
   makeEffectiveLayerAuthoringAddress,
   moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
+  patchEffectiveLayerItems,
   reorderEffectiveLayerItems,
 } from '@/renderer/course/effectiveLayerCommands'
 import {
@@ -596,6 +597,39 @@ describe('V9 effective / global layer commands', () => {
     expect(scene.scenes[0]!.presentation?.states.find((state) => state.id === 'state-explain')
       ?.layerItemOverrides['slide-title']).toMatchObject({ visible: false })
     expect(courseProjectDocumentSchema.safeParse(hiddenInState.nextDocument).success).toBe(true)
+  })
+
+  it('writes the surface base item under a named state and still rejects scene named-state atomic writes', () => {
+    const project = v9LayerFixture()
+    const surfaceTarget: EffectiveLayerCommandTarget = {
+      ...globalTarget(project, 'surface-shared'),
+      stateId: 'state-explain',
+    }
+    const renamed = patchEffectiveLayerItems(project, [
+      { target: surfaceTarget, patch: { label: '表面共享（已更新）', opacity: 0.5 } },
+    ], { expectedRevision: 1, now: NOW })
+    expect(renamed).toMatchObject({ ok: true, historyEntry: true })
+    const surface = renamed.nextDocument?.surfaces.find(
+      (candidate) => candidate.id === 'surface-slide',
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    expect(surface.surfaceLayerItems[0]!.item).toMatchObject({
+      layerItemId: 'surface-shared',
+      label: '表面共享（已更新）',
+      opacity: 0.5,
+    })
+    const scene = surface.scenes.find((candidate) => candidate.id === 'scene-1')!
+    expect(scene.presentation?.states.every(
+      (state) => !('surface-shared' in state.layerItemOverrides),
+    )).toBe(true)
+    expect(courseProjectDocumentSchema.safeParse(renamed.nextDocument).success).toBe(true)
+
+    const sceneWrite = patchEffectiveLayerItems(project, [
+      { target: sceneTarget(project, 'slide-title', 'state-explain'), patch: { label: '不应写入' } },
+    ], { expectedRevision: 1, now: NOW })
+    expect(sceneWrite).toMatchObject({ ok: false, historyEntry: false })
+    expect(sceneWrite.reason).toContain('命名状态')
+    expect(locateCourseLayer(project, 'slide-title')?.item.label).toBe('本页标题')
   })
 
   it('rejects stale revision and restores a missing controller as a global item', () => {

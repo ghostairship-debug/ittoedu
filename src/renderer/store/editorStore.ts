@@ -926,7 +926,7 @@ function buildCandidateEffectiveLayers(
     locationId: session.selection.locationId,
     stateId: session.selection.stateId,
     selectedIds: session.selection.selectionIds,
-    owner: session.scope === 'global' ? 'global' : 'scene',
+    owner: session.scope,
   })
 }
 
@@ -9897,7 +9897,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })) return
         const row = findCandidateLayerRow(get(), nodeId)
         if (!row) return
-        if (get().editingScope === 'scene' && backend.getSession().selection.stateId !== null) {
+        if (backend.getSession().scope === 'scene' && backend.getSession().selection.stateId !== null) {
           get().updateNode(nodeId, { visible: false })
           set({
             selectedNodeId: null,

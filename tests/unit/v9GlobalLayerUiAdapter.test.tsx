@@ -419,6 +419,85 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       })
   })
 
+  it('writes a surface row base item under a named state with one undoable commit', () => {
+    const project = structuredClone(v9ThreeLocationFixture())
+    const surface = project.surfaces.find((candidate) => candidate.id === 'surface-slide')
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const surfaceItemId = 'slide-surface-note'
+    surface.surfaceLayerItems.push(scoped(nativeText(surfaceItemId, 30, '表面说明')))
+    const scene = surface.scenes.find((candidate) => candidate.id === 'scene-1')!
+    scene.presentation = {
+      initialStateId: 'state-initial',
+      states: [
+        { id: 'state-initial', name: '初始', layerItemOverrides: {} },
+        { id: 'state-explain', name: '讲解', layerItemOverrides: {} },
+      ],
+    }
+    injectCandidate(project)
+
+    useEditorStore.getState().setActivePresentationState('state-explain')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().selection.stateId)
+      .toBe('state-explain')
+
+    const row = selectEffectiveLayerProjection(useEditorStore.getState())!
+      .unifiedRows.find((candidate) => candidate.id === surfaceItemId)!
+    expect(row).toMatchObject({ owner: 'surface', ownerKey: 'surface:surface-slide' })
+    expect(row.scopeToken.stateId).toBe('state-explain')
+    const address = row.authoringAddress
+
+    useEditorStore.getState().selectNode(surfaceItemId)
+    const selectedBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
+    expect(selectedBackend.getSession().scope).toBe('surface')
+    expect(selectedBackend.getSession().selection.stateId).toBe('state-explain')
+    expect(selectedBackend.makeTarget(surfaceItemId, 'item').authoringAddress).toBe(address)
+    expect(selectEffectiveLayerProjection(useEditorStore.getState())!.scope.owner).toBe('surface')
+
+    const beforeEdit = selectedBackend.getSession()
+    useEditorStore.getState().updateNode(surfaceItemId, { name: '命名状态下的表面说明', x: 120 })
+    const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
+    const editedSurface = afterEdit.history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide')
+    if (!editedSurface || editedSurface.type !== 'slide') throw new Error('expected Slide surface')
+    expect(editedSurface.surfaceLayerItems[0]!.item).toMatchObject({
+      layerItemId: surfaceItemId,
+      label: '命名状态下的表面说明',
+      frame: expect.objectContaining({ x: 120 }),
+    })
+    // No named-state override is materialized for a surface-owned item.
+    const editedScene = editedSurface.scenes.find((candidate) => candidate.id === 'scene-1')!
+    expect(editedScene.presentation?.states.every(
+      (state) => !('slide-surface-note' in state.layerItemOverrides),
+    )).toBe(true)
+    expect(editedScene.layerItems.find((item) => item.layerItemId === 'slide-title'))
+      .toMatchObject({ label: '本页标题' })
+    expect(afterEdit.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
+      .toEqual(['global-banner', 'teacher-controller-main'])
+
+    useEditorStore.getState().undo()
+    const undone = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(undone.scope).toBe('surface')
+    expect(undone.selection.stateId).toBe('state-explain')
+    const undoneSurface = undone.history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide')
+    if (!undoneSurface || undoneSurface.type !== 'slide') throw new Error('expected Slide surface')
+    expect(undoneSurface.surfaceLayerItems[0]!.item).toMatchObject({
+      layerItemId: surfaceItemId,
+      label: '表面说明',
+      frame: expect.objectContaining({ x: 40 }),
+    })
+
+    useEditorStore.getState().redo()
+    const redone = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const redoneSurface = redone.history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide')
+    if (!redoneSurface || redoneSurface.type !== 'slide') throw new Error('expected Slide surface')
+    expect(redoneSurface.surfaceLayerItems[0]!.item).toMatchObject({
+      layerItemId: surfaceItemId,
+      label: '命名状态下的表面说明',
+    })
+  })
+
   it('groupedVisualRows keeps one controller under 全局 and out of scene/surface/world', () => {
     const globalController = visualRow('teacher-controller-main', 'global', {
       isTeacherController: true,

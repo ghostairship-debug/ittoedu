@@ -547,8 +547,13 @@ export function patchEffectiveLayerItems(
   if (updates.length === 0) return succeedLayerNoop(document, '未变化')
   try {
     const plans = updates.map(({ target, patch }) => {
-      if (target.stateId) throw new Error('当前原子属性写入不支持命名状态')
       const located = resolveEffectiveLayerTarget(document, target)
+      // stateId is a viewing context; only scene storage materializes named-state
+      // overrides, which this atomic write does not support. Surface / global /
+      // world targets keep stateId but always write the base item.
+      if (target.stateId && located.source === 'scene') {
+        throw new Error('当前原子属性写入不支持命名状态')
+      }
       const normalized = normalizeEffectiveLayerPropertyPatch(located.item, located.source, patch)
       return {
         layerItemId: located.item.layerItemId,
