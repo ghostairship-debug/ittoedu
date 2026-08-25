@@ -516,7 +516,22 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(page.getByRole('button', { name: '局部加粗' }))
         .toHaveAttribute('aria-pressed', 'mixed')
 
+      await expect(editor).toBeFocused()
+      await editor.evaluate((element) => {
+        element.addEventListener('keydown', (event) => {
+          const keyboardEvent = event as KeyboardEvent
+          ;(window as Window & { __waveCCommitKey?: unknown }).__waveCCommitKey = {
+            key: keyboardEvent.key,
+            ctrlKey: keyboardEvent.ctrlKey,
+            metaKey: keyboardEvent.metaKey,
+            isComposing: keyboardEvent.isComposing,
+          }
+        }, { capture: true, once: true })
+      })
       await editor.press('Control+Enter')
+      expect(await page.evaluate(() => (
+        (window as Window & { __waveCCommitKey?: unknown }).__waveCCommitKey
+      ))).toEqual({ key: 'Enter', ctrlKey: true, metaKey: false, isComposing: false })
       await expect(editor).toHaveCount(0)
 
       await page.getByRole('tab', { name: '图层' }).click()
