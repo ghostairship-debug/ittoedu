@@ -82,6 +82,20 @@
           "duration": {
             "type": "number",
             "minimum": 0
+          },
+          "remote": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -167,6 +181,21 @@
         ],
         "additionalProperties": false
       }
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "connectOrigins": {
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "designTokens": {
       "type": "object",

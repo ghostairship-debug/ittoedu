@@ -14,6 +14,8 @@ import {
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
+  courseConnectOriginSchema,
+  courseNetworkDeclarationSchema,
   courseProjectDocumentSchema,
   flowBlockSchema,
 } from '@/shared/courseProjectSchema'
@@ -729,5 +731,118 @@ describe('Course Project V9 core contract', () => {
     expect(headingBlock.lineSpacing).toBe(24)
     expect(headingBlock.runs?.[0]?.style.fontFamily).toBe('CustomFont, sans-serif')
     expect(headingBlock.runs?.[0]?.style.fontSize).toBe(32)
+  })
+
+  it('keeps additive NET-01 fields undefined on a minimal project', () => {
+    const parsed = courseProjectDocumentSchema.parse(minimalSlideProject())
+    expect(parsed.network).toBeUndefined()
+    Object.values(parsed.assets).forEach((asset) => {
+      expect(asset.remote).toBeUndefined()
+    })
+  })
+
+  it('round-trips asset remote delivery URL and course network connect origins', () => {
+    const project = minimalSlideProject()
+    project.assets = {
+      'asset-video-1': {
+        id: 'asset-video-1',
+        filename: 'intro.mp4',
+        mimeType: 'video/mp4',
+        kind: 'video',
+        path: 'assets/intro.mp4',
+        byteLength: 2_048,
+        remote: { url: 'https://media.example.com/courses/intro.mp4?token=abc' },
+      },
+    }
+    project.network = {
+      connectOrigins: ['https://api.example.com', 'wss://realtime.example.com:8443'],
+    }
+
+    const parsed = courseProjectDocumentSchema.parse(project)
+    expect(parsed.assets['asset-video-1']?.remote?.url).toBe(
+      'https://media.example.com/courses/intro.mp4?token=abc',
+    )
+    expect(parsed.assets['asset-video-1']?.path).toBe('assets/intro.mp4')
+    expect(parsed.assets['asset-video-1']?.byteLength).toBe(2_048)
+    expect(parsed.network?.connectOrigins).toEqual([
+      'https://api.example.com',
+      'wss://realtime.example.com:8443',
+    ])
+    expect(courseProjectDocumentSchema.parse(
+      JSON.parse(JSON.stringify(parsed)) as unknown,
+    )).toEqual(parsed)
+  })
+
+  it('rejects remote asset delivery URLs that are not credential-free https', () => {
+    const asset = {
+      id: 'asset-image-1',
+      filename: 'img.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/img.png',
+      byteLength: 1_024,
+    }
+    const withRemote = (remote: unknown): CourseProjectDocument => ({
+      ...minimalSlideProject(),
+      assets: { 'asset-image-1': { ...asset, ...(remote === undefined ? {} : { remote }) } },
+    })
+
+    expect(courseProjectDocumentSchema.safeParse(withRemote(undefined)).success).toBe(true)
+    for (const url of [
+      'http://media.example.com/img.png',
+      'data:image/png;base64,AAAA',
+      'https://user:secret@media.example.com/img.png',
+      'not-a-url',
+    ]) {
+      expect(courseProjectDocumentSchema.safeParse(withRemote({ url })).success).toBe(false)
+    }
+    expect(courseProjectDocumentSchema.safeParse(
+      withRemote({ url: 'https://media.example.com/img.png', sha256: 'ff'.repeat(32) }),
+    ).success).toBe(false)
+  })
+
+  it('accepts only normalized exact https/wss connect origins', () => {
+    const withOrigins = (connectOrigins: unknown): CourseProjectDocument => ({
+      ...minimalSlideProject(),
+      network: { connectOrigins } as CourseProjectDocument['network'],
+    })
+
+    for (const origin of [
+      'https://*',
+      'https://*.example.com',
+      'http://api.example.com',
+      'ws://api.example.com',
+      'ftp://api.example.com',
+      'https://user@api.example.com',
+      'https://api.example.com/path',
+      'https://api.example.com?query=1',
+      'https://api.example.com#fragment',
+      'https://api.example.com/',
+      'https://API.example.com',
+      'https://api.example.com:443',
+      'wss://api.example.com:443',
+      'not-a-url',
+    ]) {
+      expect(courseConnectOriginSchema.safeParse(origin).success).toBe(false)
+      expect(courseProjectDocumentSchema.safeParse(withOrigins([origin])).success).toBe(false)
+    }
+
+    for (const origin of [
+      'https://api.example.com',
+      'wss://realtime.example.com:8443',
+      'https://[2001:db8::1]:8443',
+    ]) {
+      expect(courseConnectOriginSchema.safeParse(origin).success).toBe(true)
+      expect(courseProjectDocumentSchema.safeParse(withOrigins([origin])).success).toBe(true)
+    }
+
+    expect(courseProjectDocumentSchema.safeParse(
+      withOrigins(['https://api.example.com', 'https://api.example.com']),
+    ).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...minimalSlideProject(),
+      network: { connectOrigins: [], secretAccessToken: 'sk-1' },
+    }).success).toBe(false)
+    expect(courseNetworkDeclarationSchema.parse({})).toEqual({})
   })
 })
