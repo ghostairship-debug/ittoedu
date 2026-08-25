@@ -35,6 +35,20 @@ export interface CourseComponentPackageInstanceReference {
   readonly sceneId?: string
 }
 
+/**
+ * Course Project V9 usage is derived from the authoritative document, never
+ * from a lossy V8 projection.  The same carrier traversal drives package
+ * replacement, removal guards, and the Components tab.
+ */
+export interface CourseComponentPackageUsage {
+  readonly packageId: string
+  readonly packageExists: boolean
+  readonly references: readonly CourseComponentPackageInstanceReference[]
+  readonly sceneInstanceCount: number
+  readonly globalInstanceCount: number
+  readonly totalInstanceCount: number
+}
+
 export interface CourseComponentPackageReplacementFeedback {
   readonly kind: 'component-package-replaced'
   readonly packageId: string
@@ -91,6 +105,58 @@ export interface PlanCourseComponentPackageReplacementInput {
   readonly now: string
 }
 
+export interface CourseComponentPackageDeletionFeedback {
+  readonly kind: 'component-package-deleted'
+  readonly packageId: string
+  readonly version: string
+}
+
+export type CourseComponentPackageDeletionTransactionPlan =
+  EditorTransactionPlan<never, CourseComponentPackageDeletionFeedback>
+
+export type CourseComponentPackageDeletionFailureCode =
+  | 'project-mismatch'
+  | 'revision-conflict'
+  | 'package-missing'
+  | 'package-resource-missing'
+  | 'package-identity-mismatch'
+  | 'package-referenced'
+  | 'invalid-clock'
+  | 'invalid-document'
+
+export type CourseComponentPackageDeletionPlanResult =
+  | {
+      readonly ok: true
+      readonly status: 'planned'
+      readonly plan: CourseComponentPackageDeletionTransactionPlan
+    }
+  | {
+      readonly ok: false
+      readonly code: 'package-referenced'
+      readonly reason: string
+      readonly references: readonly CourseComponentPackageInstanceReference[]
+    }
+  | {
+      readonly ok: false
+      readonly code: Exclude<
+        CourseComponentPackageDeletionFailureCode,
+        'package-referenced'
+      >
+      readonly reason: string
+    }
+
+export interface PlanCourseComponentPackageDeletionInput {
+  readonly project: CourseProjectDocument
+  readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
+  readonly packageId: string
+  readonly expected: {
+    readonly projectId: string
+    readonly revision: number
+  }
+  /** Explicit clock input keeps the planner deterministic and side-effect free. */
+  readonly now: string
+}
+
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const ISO_TIMESTAMP_SCHEMA = z.string().datetime()
 
@@ -98,6 +164,13 @@ function fail(
   code: CourseComponentPackageReplacementFailureCode,
   reason: string,
 ): CourseComponentPackageReplacementPlanResult {
+  return Object.freeze({ ok: false as const, code, reason })
+}
+
+function deletionFail(
+  code: Exclude<CourseComponentPackageDeletionFailureCode, 'package-referenced'>,
+  reason: string,
+): CourseComponentPackageDeletionPlanResult {
   return Object.freeze({ ok: false as const, code, reason })
 }
 
@@ -246,10 +319,10 @@ function validProvenance(packageData: ComponentPackageData): boolean {
   )
 }
 
-function referencesForPackage(
+export function collectCourseComponentPackageReferences(
   project: CourseProjectDocument,
   packageId: string,
-): CourseComponentPackageInstanceReference[] {
+): readonly CourseComponentPackageInstanceReference[] {
   const references: CourseComponentPackageInstanceReference[] = []
   const appendLayer = (
     item: LayerItem,
@@ -303,7 +376,23 @@ function referencesForPackage(
       }))
     }
   }
-  return references
+  return Object.freeze(references)
+}
+
+export function collectCourseComponentPackageUsage(
+  project: CourseProjectDocument,
+  packageId: string,
+): CourseComponentPackageUsage {
+  const references = collectCourseComponentPackageReferences(project, packageId)
+  const globalInstanceCount = references.filter((reference) => reference.scope === 'global').length
+  return Object.freeze({
+    packageId,
+    packageExists: Object.hasOwn(project.componentPackages, packageId),
+    references,
+    sceneInstanceCount: references.length - globalInstanceCount,
+    globalInstanceCount,
+    totalInstanceCount: references.length,
+  })
 }
 
 function retargetPackageReferences(
@@ -486,7 +575,7 @@ export function planCourseComponentPackageReplacement(
     )
   }
 
-  const affectedInstances = referencesForPackage(input.project, packageId)
+  const affectedInstances = collectCourseComponentPackageReferences(input.project, packageId)
   if (affectedInstances.some((reference) => reference.version !== currentMetadata.version)) {
     return fail(
       'instance-version-mismatch',
@@ -560,6 +649,95 @@ export function planCourseComponentPackageReplacement(
     after: deepFreezeValue(clonePackage(nextPackage)),
   })]) as unknown as ComponentPackageHistoryChange[]
   const plan: CourseComponentPackageReplacementTransactionPlan = Object.freeze({
+    projectId: input.project.id,
+    baseRevision: input.project.revision,
+    nextDocument: deepFreezeValue(parsedNextDocument.data),
+    resourceChanges: Object.freeze({
+      componentPackageChanges,
+    }),
+    feedback,
+  })
+  return Object.freeze({ ok: true as const, status: 'planned' as const, plan })
+}
+
+/**
+ * Plans one atomic Course Project V9 package removal.  Package metadata and
+ * executable bytes are deliberately represented by the same resource delta,
+ * so a removal cannot leave the document and sidecar out of sync on any
+ * authoring surface.
+ */
+export function planCourseComponentPackageDeletion(
+  input: PlanCourseComponentPackageDeletionInput,
+): CourseComponentPackageDeletionPlanResult {
+  if (input.project.id !== input.expected.projectId) {
+    return deletionFail('project-mismatch', '组件删除目标不属于当前 Course Project。')
+  }
+  if (
+    !Number.isInteger(input.expected.revision)
+    || input.expected.revision < 0
+    || input.project.revision !== input.expected.revision
+  ) {
+    return deletionFail('revision-conflict', '组件删除目标 revision 已失效。')
+  }
+  if (!ISO_TIMESTAMP_SCHEMA.safeParse(input.now).success) {
+    return deletionFail('invalid-clock', '组件删除时间必须是有效的 ISO 时间。')
+  }
+
+  const packageId = input.packageId
+  if (!packageId.trim() || packageId !== packageId.trim()) {
+    return deletionFail('package-identity-mismatch', '待删除组件包 ID 必须是精确的非空 ID。')
+  }
+  const currentMetadata = input.project.componentPackages[packageId]
+  if (!packageId || currentMetadata === undefined) {
+    return deletionFail('package-missing', `工程中不存在组件包“${packageId || input.packageId}”。`)
+  }
+
+  const references = collectCourseComponentPackageReferences(input.project, packageId)
+  if (references.length > 0) {
+    return Object.freeze({
+      ok: false as const,
+      code: 'package-referenced' as const,
+      reason: `组件包“${packageId}”仍被 ${references.length} 个实例引用。`,
+      references,
+    })
+  }
+
+  const currentPackage = input.componentPackages[packageId]
+  if (currentPackage === undefined) {
+    return deletionFail('package-resource-missing', `工程缺少组件包“${packageId}”的执行资源。`)
+  }
+  if (
+    currentMetadata.packageId !== packageId
+    || currentPackage.manifest.id !== packageId
+    || currentPackage.manifest.version !== currentMetadata.version
+  ) {
+    return deletionFail('package-identity-mismatch', `组件包“${packageId}”的文档与执行资源身份不一致。`)
+  }
+
+  const nextDocument = structuredClone(input.project)
+  delete nextDocument.componentPackages[packageId]
+  nextDocument.revision = input.project.revision + 1
+  nextDocument.updatedAt = input.now
+  const parsedNextDocument = courseProjectDocumentSchema.safeParse(nextDocument)
+  if (!parsedNextDocument.success) {
+    const issue = parsedNextDocument.error.issues[0]
+    const path = issue?.path.join('.') || 'project'
+    return deletionFail(
+      'invalid-document',
+      `组件删除后的 Course Project V9 无效：${path} ${issue?.message ?? '字段无效'}。`,
+    )
+  }
+
+  const feedback: CourseComponentPackageDeletionFeedback = Object.freeze({
+    kind: 'component-package-deleted',
+    packageId,
+    version: currentMetadata.version,
+  })
+  const componentPackageChanges = Object.freeze([deepFreezeValue({
+    packageId,
+    before: deepFreezeValue(clonePackage(currentPackage)),
+  })]) as unknown as ComponentPackageHistoryChange[]
+  const plan: CourseComponentPackageDeletionTransactionPlan = Object.freeze({
     projectId: input.project.id,
     baseRevision: input.project.revision,
     nextDocument: deepFreezeValue(parsedNextDocument.data),

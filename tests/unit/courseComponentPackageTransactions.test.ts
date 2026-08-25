@@ -4,6 +4,8 @@ import {
   createEditorTransactionStep,
 } from '@/renderer/authoring/editorTransaction'
 import {
+  collectCourseComponentPackageUsage,
+  planCourseComponentPackageDeletion,
   planCourseComponentPackageReplacement,
   type CourseComponentPackageReplacementPlanResult,
   type PlanCourseComponentPackageReplacementInput,
@@ -154,7 +156,11 @@ function mixedProjectFixture(): {
     visibility: { mode: 'include', locationIds: ['location-slide'] },
   })
   slide.scenes[0]!.layerItems.push(componentLayer('component-slide', '1.0.0', 1_002))
-  spatial.world.layerItems.push(componentLayer('component-spatial', '1.0.0', 1_003))
+  flow.surfaceLayerItems.push({
+    item: componentLayer('component-flow-overlay', '1.0.0', 1_003),
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  spatial.world.layerItems.push(componentLayer('component-spatial', '1.0.0', 1_004))
   flow.blocks.push({
     id: 'component-section-outer',
     type: 'section',
@@ -237,6 +243,56 @@ function inputFor(
   }
 }
 
+function deletionInputFor(
+  project: CourseProjectDocument,
+  currentPackage: ComponentPackageData,
+) {
+  return {
+    project,
+    componentPackages: { [PACKAGE_ID]: currentPackage },
+    packageId: PACKAGE_ID,
+    expected: { projectId: project.id, revision: project.revision },
+    now: NOW,
+  }
+}
+
+function removePackageReferences(project: CourseProjectDocument): void {
+  const isTargetLayer = (item: ComponentLayerItem) => (
+    item.component.packageId === PACKAGE_ID
+  )
+  const removeFlowBlocks = (blocks: FlowBlock[]): FlowBlock[] => {
+    const remaining: FlowBlock[] = []
+    for (const block of blocks) {
+      if (block.type === 'component' && block.component.packageId === PACKAGE_ID) continue
+      if (block.type === 'section') block.blocks = removeFlowBlocks(block.blocks)
+      remaining.push(block)
+    }
+    return remaining
+  }
+
+  project.globalLayerItems = project.globalLayerItems.filter((entry) => (
+    entry.item.kind !== 'component' || !isTargetLayer(entry.item)
+  ))
+  for (const surface of project.surfaces) {
+    surface.surfaceLayerItems = surface.surfaceLayerItems.filter((entry) => (
+      entry.item.kind !== 'component' || !isTargetLayer(entry.item)
+    ))
+    if (surface.type === 'slide') {
+      surface.scenes.forEach((scene) => {
+        scene.layerItems = scene.layerItems.filter((item) => (
+          item.kind !== 'component' || !isTargetLayer(item)
+        ))
+      })
+    } else if (surface.type === 'flow') {
+      surface.blocks = removeFlowBlocks(surface.blocks)
+    } else {
+      surface.world.layerItems = surface.world.layerItems.filter((item) => (
+        item.kind !== 'component' || !isTargetLayer(item)
+      ))
+    }
+  }
+}
+
 function planned(result: CourseComponentPackageReplacementPlanResult) {
   if (!result.ok) throw new Error(`${result.code}: ${result.reason}`)
   if (result.status !== 'planned') throw new Error('Expected a transaction plan')
@@ -294,6 +350,7 @@ describe('Course component package replacement transaction planner', () => {
         'global-layer',
         'surface-layer',
         'slide-scene',
+        'surface-layer',
         'flow-block',
         'spatial-world',
       ])
@@ -601,5 +658,92 @@ describe('Course component package replacement transaction planner', () => {
       expect(result).toMatchObject({ ok: false, code: 'unsupported-scope' })
       if (!result.ok) expect(result.reason).toContain(expectedScope)
     }
+  })
+})
+
+describe('Course component package deletion transaction planner', () => {
+  it('collects every V9 carrier and rejects a referenced package without mutation', () => {
+    const { project, currentPackage } = mixedProjectFixture()
+    const beforeProject = structuredClone(project)
+    const beforePackage = structuredClone(currentPackage)
+
+    const usage = collectCourseComponentPackageUsage(project, PACKAGE_ID)
+    expect(usage).toMatchObject({
+      packageId: PACKAGE_ID,
+      packageExists: true,
+      sceneInstanceCount: 5,
+      globalInstanceCount: 1,
+      totalInstanceCount: 6,
+    })
+    expect(usage.references.map((reference) => ({
+      carrier: reference.carrier,
+      instanceId: reference.instanceId,
+    }))).toEqual([
+      { carrier: 'global-layer', instanceId: 'component-global' },
+      { carrier: 'surface-layer', instanceId: 'component-surface' },
+      { carrier: 'slide-scene', instanceId: 'component-slide' },
+      { carrier: 'surface-layer', instanceId: 'component-flow-overlay' },
+      { carrier: 'flow-block', instanceId: 'component-flow' },
+      { carrier: 'spatial-world', instanceId: 'component-spatial' },
+    ])
+
+    const result = planCourseComponentPackageDeletion(
+      deletionInputFor(project, currentPackage),
+    )
+    expect(result).toMatchObject({ ok: false, code: 'package-referenced' })
+    if (result.ok || result.code !== 'package-referenced') {
+      throw new Error('Expected referenced-package rejection')
+    }
+    expect(result.references).toEqual(usage.references)
+    expect(project).toEqual(beforeProject)
+    expectPackageValue(currentPackage, beforePackage)
+  })
+
+  it('removes an unused package with one invertible document-and-bytes transaction', () => {
+    const { project, currentPackage } = mixedProjectFixture()
+    removePackageReferences(project)
+    expect(collectCourseComponentPackageUsage(project, PACKAGE_ID)).toMatchObject({
+      packageExists: true,
+      totalInstanceCount: 0,
+    })
+    const beforeProject = structuredClone(project)
+    const beforePackage = structuredClone(currentPackage)
+
+    const result = planCourseComponentPackageDeletion(
+      deletionInputFor(project, currentPackage),
+    )
+    expect(result).toMatchObject({ ok: true, status: 'planned' })
+    if (!result.ok) throw new Error(`${result.code}: ${result.reason}`)
+    const plan = result.plan
+
+    expect(plan.nextDocument.componentPackages[PACKAGE_ID]).toBeUndefined()
+    expect(plan.nextDocument.revision).toBe(beforeProject.revision + 1)
+    expect(plan.nextDocument.updatedAt).toBe(NOW)
+    expect(plan.feedback).toEqual({
+      kind: 'component-package-deleted',
+      packageId: PACKAGE_ID,
+      version: '1.0.0',
+    })
+    const change = plan.resourceChanges.componentPackageChanges?.[0]
+    if (!change || !change.before) throw new Error('Expected a removal package delta')
+    expect(change.packageId).toBe(PACKAGE_ID)
+    expect(change.after).toBeUndefined()
+    expectPackageValue(change.before, beforePackage)
+
+    const step = createEditorTransactionStep(beforeProject, plan)
+    if (!step) throw new Error('Expected a removal transaction step')
+    const forward = applyEditorTransactionStep({
+      document: beforeProject,
+      resources: {
+        componentPackages: { [PACKAGE_ID]: beforePackage },
+        assetFiles: {},
+      },
+    }, step, 'forward')
+    expect(forward.document).toEqual(plan.nextDocument)
+    expect(forward.resources.componentPackages[PACKAGE_ID]).toBeUndefined()
+
+    const inverse = applyEditorTransactionStep(forward, step, 'inverse')
+    expect(inverse.document).toEqual(beforeProject)
+    expectPackageValue(inverse.resources.componentPackages[PACKAGE_ID]!, beforePackage)
   })
 })

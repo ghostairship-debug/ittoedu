@@ -60,9 +60,6 @@ import {
   analyzeProjectAssetReferences,
   describeProjectAssetReference,
 } from '../../shared/assetReferences'
-import {
-  evaluateComponentPackageDeletion,
-} from '../../shared/componentPackageLifecycle'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
@@ -118,6 +115,7 @@ import {
   componentPackagesToArchiveFiles,
 } from '../components/componentPackageStore'
 import {
+  planCourseComponentPackageDeletion,
   planCourseComponentPackageReplacement,
   type CourseComponentPackageReplacementFeedback,
   type CourseComponentPackageReplacementFailureCode,
@@ -9524,42 +9522,71 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     deleteComponentPackage(packageId) {
       const state = get()
-      const decision = evaluateComponentPackageDeletion(state.project, packageId)
-      if (!decision.packageExists) {
+      const document = activeCourseDocument(state)
+      if (!document) {
         set({
-          errorMessage: `工程中不存在组件包“${packageId}”。`,
+          errorMessage: '当前 Course Project 没有可用的作者会话。',
           statusMessage: null,
         })
         return false
       }
-      if (!decision.canDelete) {
-        const { sceneInstanceCount, globalInstanceCount } = decision.usage
+
+      const planned = planCourseComponentPackageDeletion({
+        project: document,
+        componentPackages: state.componentPackages,
+        packageId,
+        expected: {
+          projectId: document.id,
+          revision: document.revision,
+        },
+        now: new Date().toISOString(),
+      })
+      if (!planned.ok) {
+        const sceneInstanceCount = planned.code === 'package-referenced'
+          ? planned.references.filter((reference) => reference.scope === 'scene').length
+          : 0
+        const globalInstanceCount = planned.code === 'package-referenced'
+          ? planned.references.filter((reference) => reference.scope === 'global').length
+          : 0
         set({
-          errorMessage: `组件包仍被 ${sceneInstanceCount} 个场景实例和 ${globalInstanceCount} 个全局实例引用。请先删除这些实例，再删除组件包。`,
+          errorMessage: planned.code === 'package-referenced'
+            ? `组件包仍被 ${sceneInstanceCount} 个场景实例和 ${globalInstanceCount} 个全局实例引用。请先删除这些实例，再删除组件包。`
+            : planned.reason,
           statusMessage: null,
         })
         return false
       }
 
       const packageName = state.componentPackages[packageId]?.manifest.name ?? packageId
-      if (selectSlideAuthoringBackend(get())) {
-        const result = runV9DocumentMutation((draft) => {
-          removeCourseComponentPackage(draft, packageId)
-        }, { statusMessage: `未使用组件包“${packageName}”已删除` })
-        if (result.ok) {
-          set({ errorMessage: null })
-        }
-        return result.ok
+      let step: EditorTransactionStep | null
+      try {
+        step = createEditorTransactionStep(document, planned.plan)
+      } catch (error) {
+        set({
+          errorMessage: error instanceof Error ? error.message : '组件删除计划无效。',
+          statusMessage: null,
+        })
+        return false
       }
-      commit((draft) => {
-        for (const [key, meta] of Object.entries(draft.componentPackages)) {
-          if (meta.packageId === packageId) delete draft.componentPackages[key]
+      try {
+        if (!step || !persistProjectResourceTransaction(
+          step,
+          `未使用组件包“${packageName}”已删除`,
+        )) {
+          set({
+            errorMessage: '当前 Course Project 没有可用的作者会话。',
+            statusMessage: null,
+          })
+          return false
         }
-      }, undefined, { packageId })
-      set({
-        errorMessage: null,
-        statusMessage: `未使用组件包“${packageName}”已删除`,
-      })
+      } catch (error) {
+        set({
+          errorMessage: error instanceof Error ? error.message : '组件删除未写入当前课件。',
+          statusMessage: null,
+        })
+        return false
+      }
+      set({ activeTab: 'components', errorMessage: null })
       return true
     },
 

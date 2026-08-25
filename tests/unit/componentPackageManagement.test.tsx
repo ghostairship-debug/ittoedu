@@ -7,6 +7,7 @@ import type {
 import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
 import { ComponentsTab } from '../../src/renderer/ui/ComponentsTab'
 import {
+  selectActiveCourseProjectDocument,
   selectActiveScene,
   useEditorStore,
 } from '../../src/renderer/store/editorStore'
@@ -44,6 +45,26 @@ function componentPackage(
     files,
     contentSha256: componentContentSha256(files),
   }
+}
+
+function expectComponentPackageContents(
+  actual: ComponentPackageData | undefined,
+  expected: ComponentPackageData,
+): void {
+  if (!actual) throw new Error('Expected embedded component package')
+  expect(actual.manifest).toEqual(expected.manifest)
+  expect(actual.runtimeSource).toBe(expected.runtimeSource)
+  expect(actual.contentSha256).toBe(expected.contentSha256)
+  expect(Object.keys(actual.files).sort()).toEqual(Object.keys(expected.files).sort())
+  for (const [path, bytes] of Object.entries(expected.files)) {
+    expect([...actual.files[path]!], path).toEqual([...bytes])
+  }
+}
+
+function activeCourseProject() {
+  const project = selectActiveCourseProjectDocument(useEditorStore.getState())
+  if (!project) throw new Error('Expected an active Course Project V9')
+  return project
 }
 
 beforeEach(() => {
@@ -91,7 +112,7 @@ describe('editorStore component package management', () => {
     state.undo()
     state = useEditorStore.getState()
     expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toBe(imported)
+    expectComponentPackageContents(state.componentPackages[PACKAGE_ID], imported)
 
     state.redo()
     state = useEditorStore.getState()
@@ -114,6 +135,84 @@ describe('editorStore component package management', () => {
     expect(state.componentPackages[PACKAGE_ID]).toBeDefined()
     expect(state.history.past).toHaveLength(historyBefore)
     expect(state.errorMessage).toContain('1 个场景实例和 1 个全局实例')
+  })
+
+  it('uses one V9 resource transaction for unreferenced Flow and Spatial package deletion', () => {
+    const cases = [
+      ['Flow', () => useEditorStore.getState().createNewFlowProject()],
+      ['Spatial', () => useEditorStore.getState().createNewSpatialProject()],
+    ] as const
+
+    for (const [surface, create] of cases) {
+      create()
+      const imported = componentPackage('1.0.0')
+      useEditorStore.getState().importComponentPackage(imported)
+      const beforeDocument = structuredClone(activeCourseProject())
+      const historyBefore = useEditorStore.getState().history.past.length
+
+      expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID), surface).toBe(true)
+      expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
+      expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
+      expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+      const session = surface === 'Flow'
+        ? useEditorStore.getState().flowSession
+        : useEditorStore.getState().spatialSession
+      expect(session?.history.past.at(-1)).toMatchObject({
+        kind: 'editor-transaction',
+        resourceChanges: {
+          componentPackageChanges: [{ packageId: PACKAGE_ID }],
+        },
+      })
+
+      useEditorStore.getState().undo()
+      expect(activeCourseProject()).toEqual(beforeDocument)
+      expectComponentPackageContents(
+        useEditorStore.getState().componentPackages[PACKAGE_ID],
+        imported,
+      )
+
+      const restoredArchive = useEditorStore.getState().exportV9SlideCandidateArchive()
+      expect(restoredArchive).not.toBeNull()
+
+      useEditorStore.getState().redo()
+      expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
+      expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
+
+      const deletedArchive = useEditorStore.getState().exportV9SlideCandidateArchive()
+      expect(deletedArchive).not.toBeNull()
+      expect(useEditorStore.getState().reopenV9SlideCandidateArchive(restoredArchive!)).toBe(true)
+      expect(activeCourseProject()).toEqual(beforeDocument)
+      expectComponentPackageContents(
+        useEditorStore.getState().componentPackages[PACKAGE_ID],
+        imported,
+      )
+      expect(useEditorStore.getState().reopenV9SlideCandidateArchive(deletedArchive!)).toBe(true)
+      expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
+      expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
+    }
+  })
+
+  it('blocks referenced Flow and Spatial packages without history, document, or success-message writes', () => {
+    const cases = [
+      ['Flow', () => useEditorStore.getState().createNewFlowProject()],
+      ['Spatial', () => useEditorStore.getState().createNewSpatialProject()],
+    ] as const
+
+    for (const [surface, create] of cases) {
+      create()
+      useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+      useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+      const beforeDocument = structuredClone(activeCourseProject())
+      const beforePackages = structuredClone(useEditorStore.getState().componentPackages)
+      const historyBefore = useEditorStore.getState().history.past.length
+
+      expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID), surface).toBe(false)
+      expect(activeCourseProject()).toEqual(beforeDocument)
+      expect(useEditorStore.getState().componentPackages).toEqual(beforePackages)
+      expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+      expect(useEditorStore.getState().statusMessage).toBeNull()
+      expect(useEditorStore.getState().errorMessage).toContain('1 个场景实例和 0 个全局实例')
+    }
   })
 
   it('replaces every scene/global instance in one undo step and preserves props', () => {
@@ -239,6 +338,23 @@ describe('ComponentsTab project component management', () => {
       expect(screen.queryByTestId(`component-package-${PACKAGE_ID}`))
         .not.toBeInTheDocument()
       expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+
+  it('uses the active Flow V9 document to disable deletion for a floating component', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+    useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab onReplaceComponent={vi.fn()} />)
+      const manager = screen.getByTestId(`component-package-${PACKAGE_ID}`)
+      expect(manager).toHaveTextContent('场景 1 · 全局 0')
+      fireEvent.click(screen.getByLabelText('管理可管理组件'))
+      expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }

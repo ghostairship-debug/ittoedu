@@ -19,15 +19,21 @@ import type {
   ComponentCatalogSnapshot,
 } from '../../shared/componentCatalog'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
-import { collectComponentPackageUsage } from '../../shared/componentPackageLifecycle'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
+import {
+  collectCourseComponentPackageUsage,
+  type CourseComponentPackageUsage,
+} from '../components/courseComponentPackageTransactions'
 import {
   collectComponentLibrarySubjects,
   filterComponentLibraryPackages,
   selectCurrentCatalogPackages,
 } from '../components/componentLibraryModel'
-import { useEditorStore } from '../store/editorStore'
+import {
+  selectActiveCourseProjectDocument,
+  useEditorStore,
+} from '../store/editorStore'
 
 interface ComponentsTabProps {
   componentCatalog?: ComponentCatalogSnapshot
@@ -93,8 +99,19 @@ function closeContainingMenu(target: HTMLElement) {
 interface ComponentDetailsDialogProps {
   data?: ComponentPackageData
   entry?: AvailableComponentCatalogPackage
-  usage?: ReturnType<typeof collectComponentPackageUsage>
+  usage?: CourseComponentPackageUsage
   onClose(): void
+}
+
+function emptyCourseComponentPackageUsage(packageId: string): CourseComponentPackageUsage {
+  return {
+    packageId,
+    packageExists: false,
+    references: [],
+    sceneInstanceCount: 0,
+    globalInstanceCount: 0,
+    totalInstanceCount: 0,
+  }
 }
 
 function ComponentDetailsDialog({ data, entry, usage, onClose }: ComponentDetailsDialogProps) {
@@ -400,7 +417,7 @@ export function ComponentsTab({
   const [searchQuery, setSearchQuery] = useState('')
   const [detailsPackageId, setDetailsPackageId] = useState<string | null>(null)
   const components = useEditorStore((state) => state.componentPackages)
-  const project = useEditorStore((state) => state.project)
+  const project = useEditorStore(selectActiveCourseProjectDocument)
   const editingScope = useEditorStore((state) => state.editingScope)
   const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
@@ -425,21 +442,32 @@ export function ComponentsTab({
     ? currentCatalogEntries.find((entry) => entry.packageId === detailsPackageId)
     : undefined
   const detailsUsage = detailsPackageId
-    ? collectComponentPackageUsage(project, detailsPackageId)
+    ? project
+      ? collectCourseComponentPackageUsage(project, detailsPackageId)
+      : emptyCourseComponentPackageUsage(detailsPackageId)
     : undefined
 
   const locateFirstUsage = (packageId: string) => {
-    const usage = collectComponentPackageUsage(useEditorStore.getState().project, packageId)
+    const state = useEditorStore.getState()
+    const document = selectActiveCourseProjectDocument(state)
+    if (!document) return
+    const usage = collectCourseComponentPackageUsage(document, packageId)
     const reference = usage.references[0]
     if (!reference) return
-    const state = useEditorStore.getState()
     if (reference.scope === 'global') {
       state.setEditingScope('global')
     } else if (reference.sceneId) {
       state.setActiveScene(reference.sceneId)
+    } else if (reference.surfaceId) {
+      const location = document.locations.find((candidate) => (
+        candidate.surfaceId === reference.surfaceId
+        && (reference.carrier !== 'flow-block'
+          || (candidate.kind === 'flow-block' && candidate.blockId === reference.instanceId))
+      ))
+      if (location) state.activateCourseLocation(location.id)
     }
-    useEditorStore.getState().selectNode(reference.nodeId)
-    useEditorStore.getState().setStatus(`已定位“${reference.nodeName}”`)
+    useEditorStore.getState().selectNode(reference.instanceId)
+    useEditorStore.getState().setStatus('已定位组件使用位置')
   }
 
   return (
@@ -478,7 +506,9 @@ export function ComponentsTab({
         <div className="project-component-list">
           {visiblePackages.map((data) => {
             const packageId = data.manifest.id
-            const usage = collectComponentPackageUsage(project, packageId)
+            const usage = project
+              ? collectCourseComponentPackageUsage(project, packageId)
+              : emptyCourseComponentPackageUsage(packageId)
             const isSpatial = spatialScope !== null
             const manifestScopeSupported = componentSupportsScope(
               data.manifest,
