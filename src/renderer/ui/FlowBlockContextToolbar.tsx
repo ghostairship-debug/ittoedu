@@ -173,6 +173,7 @@ export function FlowBlockContextToolbar({
         capture()
         preserveFocus(event)
       }}
+      onClick={(event) => event.stopPropagation()}
     >
       <div
         data-testid="flow-range-toolbar"

@@ -374,17 +374,28 @@ describe('FlowWorkspace paper', () => {
     }
   })
 
-  it('keeps the context toolbar inside the selected block and does not steal focus on pointer down', () => {
+  it('keeps toolbar commands inside the selected text range event boundary', () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], { focus: 'text', textRange: { blockId: 'p-body', start: 0, end: 4 } })
-    const { onSelectionChange } = renderPaper(project, selection)
+    const { onSelectionChange, onTextEditChange } = renderPaper(project, selection)
     const block = screen.getByTestId('flow-block-p-body')
     const toolbar = screen.getByTestId('flow-block-context-toolbar')
     expect(block?.contains(toolbar)).toBe(true)
     expect(toolbar).toHaveAttribute('data-flow-toolbar-placement', 'below')
     expect(screen.getByTestId('flow-range-toolbar')).toBeTruthy()
-    fireEvent.mouseDown(screen.getByLabelText('局部加粗'))
+    const bold = screen.getByLabelText('局部加粗')
+    fireEvent.mouseDown(bold)
+    fireEvent.click(bold)
     expect(onSelectionChange).not.toHaveBeenCalled()
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toMatchObject({
+      range: { start: 0, end: 4 },
+      draft: {
+        text: '阅读任务',
+        runs: [{ start: 0, end: 4, style: { bold: true } }],
+      },
+    })
+    expect(screen.getByTestId('flow-inline-editor')).toBeInTheDocument()
+    expect(screen.getByLabelText('局部加粗')).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('reserves the complete below-toolbar footprint before neighboring blocks', () => {
