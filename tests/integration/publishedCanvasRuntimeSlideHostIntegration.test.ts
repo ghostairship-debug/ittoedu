@@ -212,7 +212,7 @@ describe('Published V2 Slide scene canvas-runtime API 2 playback', () => {
       }});
     `, 310))
     project.globalLayerItems.push({
-      item: cloneRuntime(firstRuntime, 'global-api2-not-played', `
+      item: cloneRuntime(firstRuntime, 'global-api2-played', `
         window.__globalCanvasRuntimeExecuted = true;
         CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}});
       `, 100),
@@ -269,7 +269,9 @@ describe('Published V2 Slide scene canvas-runtime API 2 playback', () => {
       expect(Reflect.get(view, '__canvasCreateFailureExecuted')).toBe(true)
     })
     expect(Reflect.get(view, '__disabledCanvasRuntimeExecuted')).toBeUndefined()
-    expect(Reflect.get(view, '__globalCanvasRuntimeExecuted')).toBeUndefined()
+    await vi.waitFor(() => {
+      expect(Reflect.get(view, '__globalCanvasRuntimeExecuted')).toBe(true)
+    })
     expect(Reflect.get(view, '__surfaceCanvasRuntimeExecuted')).toBeUndefined()
     expect(container.querySelector('[data-slide-layer-item="register-failure-canvas-runtime"] [data-runtime-fallback="true"]')).not.toBeNull()
     expect(container.querySelector('[data-slide-layer-item="create-failure-canvas-runtime"] [data-runtime-fallback="true"]')).not.toBeNull()

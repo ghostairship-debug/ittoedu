@@ -24,6 +24,7 @@ import {
 } from './mixed/MixedCourseNavigator'
 import { SlidePublishedAdapter } from './slide/SlidePublishedAdapter'
 import { SpatialSurfaceHost } from './spatial/SpatialSurfaceHost'
+import { PublishedGlobalCanvasRuntimeOwner } from './runtime/publishedGlobalCanvasRuntimeOwner'
 import type {
   SurfaceCapture,
   SurfaceCaptureRequest,
@@ -244,13 +245,20 @@ export class PublishedCourseSession {
   readonly player: CoursePlayer
   readonly navigator: MixedCourseNavigator
   readonly #hosts: readonly SurfaceHost[]
+  readonly #globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null
   #slots: HTMLElement[] = []
   #destroyPromise: Promise<void> | null = null
 
-  constructor(player: CoursePlayer, navigator: MixedCourseNavigator, hosts: readonly SurfaceHost[]) {
+  constructor(
+    player: CoursePlayer,
+    navigator: MixedCourseNavigator,
+    hosts: readonly SurfaceHost[],
+    globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null = null,
+  ) {
     this.player = player
     this.navigator = navigator
     this.#hosts = hosts
+    this.#globalRuntimeOwner = globalRuntimeOwner
   }
 
   listCatalog(): MixedCatalogEntry[] {
@@ -279,8 +287,15 @@ export class PublishedCourseSession {
 
   /** Narrow course-runtime restart entry used by delivery controller chrome. */
   async restartCourse(): Promise<boolean> {
-    await this.navigator.resetCourse()
-    return true
+    this.#globalRuntimeOwner?.restart()
+    try {
+      await this.navigator.resetCourse()
+      return true
+    } catch (error) {
+      const currentSurfaceId = this.navigator.current?.surfaceId
+      if (currentSurfaceId) this.#globalRuntimeOwner?.moveTo(currentSurfaceId)
+      throw error
+    }
   }
 
   async mount(container: HTMLElement): Promise<void> {
@@ -301,6 +316,7 @@ export class PublishedCourseSession {
       const mounted = await this.player.mountSurface(host.id, slot)
       if (!mounted.ok) throw mounted.failure?.error ?? new Error(`Failed to mount ${host.id}`)
     }
+    this.#globalRuntimeOwner?.mount(container.ownerDocument)
     await this.navigator.start()
     this.syncActiveSlot(this.navigator.current?.surfaceId ?? this.#hosts[0]?.id ?? '')
   }
@@ -316,6 +332,14 @@ export class PublishedCourseSession {
     }
   }
 
+  protected movePublishedGlobalRuntimes(surfaceId: string): void {
+    this.#globalRuntimeOwner?.moveTo(surfaceId)
+  }
+
+  protected restartPublishedGlobalRuntimes(): void {
+    this.#globalRuntimeOwner?.restart()
+  }
+
   async destroy(): Promise<void> {
     if (this.#destroyPromise) return this.#destroyPromise
     this.#destroyPromise = this.#runDestroy()
@@ -323,6 +347,7 @@ export class PublishedCourseSession {
   }
 
   async #runDestroy(): Promise<void> {
+    this.#globalRuntimeOwner?.destroy()
     await this.player.destroy()
     for (const slot of this.#slots) slot.remove()
     this.#slots = []
@@ -349,8 +374,9 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     payload: PublishedCourseV2Payload,
     services: SurfacePlayerServices,
     globalInteractionVisibilityState: PublishedInteractionVisibilityState,
+    globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner,
   ) {
-    super(player, navigator, hosts)
+    super(player, navigator, hosts, globalRuntimeOwner)
     this.#hostsById = new Map(hosts.map((host) => [host.id, host]))
     this.#payload = payload
     this.#services = services
@@ -392,6 +418,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       || current?.surfaceId !== surfaceId
       || (host?.getLocationId?.() ?? current.locationId) !== current.locationId
     ) return
+    this.movePublishedGlobalRuntimes(surfaceId)
     this.#mountInteractionControllers(surfaceId)
   }
 
@@ -400,6 +427,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#terminalNavigationClaimed = false
     this.#terminalNavigationInvalidated = false
     this.syncActiveSlot(state.surfaceId)
+    this.movePublishedGlobalRuntimes(state.surfaceId)
     this.#mountInteractionControllers()
   }
 
@@ -604,11 +632,14 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   async #restartCourse(signal: AbortSignal): Promise<boolean> {
     if (!this.navigator.current || !this.#claimTerminalNavigation(signal)) return false
+    this.restartPublishedGlobalRuntimes()
     try {
       await this.navigator.resetCourse({ signal })
       this.#globalInteractionVisibilityState.reset()
       return true
     } catch (error) {
+      const currentSurfaceId = this.navigator.current?.surfaceId
+      if (currentSurfaceId) this.movePublishedGlobalRuntimes(currentSurfaceId)
       this.#releaseTerminalNavigationClaim()
       throw error
     }
@@ -685,6 +716,12 @@ export function createPublishedCourseSession(
       await mixedNavigator.navigateDeepLink(deepLink)
     }
   }
+  const globalRuntimeOwner = new PublishedGlobalCanvasRuntimeOwner({
+    payload: playback,
+    hosts,
+    services,
+    resolveAsset: services.resolveAsset,
+  })
   session = new PublishedInteractionCourseSession(
     player,
     mixedNavigator,
@@ -692,6 +729,7 @@ export function createPublishedCourseSession(
     playback,
     services,
     globalInteractionVisibilityState,
+    globalRuntimeOwner,
   )
   return session
 }
@@ -797,6 +835,10 @@ class FlowPublishedAdapter implements SurfaceHost {
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
     return this.#host.getPublishedInteractionSurfacePort()
+  }
+
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    return this.#host.getPublishedGlobalRuntimeMountTarget(itemId)
   }
 
   preparePublishedLocation(locationId: string, forced: boolean): void {
@@ -928,6 +970,10 @@ class SpatialPublishedAdapter implements SurfaceHost {
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
     return this.#host.getPublishedInteractionSurfacePort()
+  }
+
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    return this.#host.getPublishedGlobalRuntimeMountTarget(itemId)
   }
 
   async activate(): Promise<void> {

@@ -541,6 +541,15 @@ export class SlidePublishedAdapter implements SurfaceHost {
     return this.#interactionPort
   }
 
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    const root = this.#root
+    if (!root) return null
+    for (const candidate of root.querySelectorAll<HTMLElement>('[data-global-layer-item]')) {
+      if (candidate.dataset.globalLayerItem === itemId) return candidate
+    }
+    return null
+  }
+
   preparePublishedPresentationState(
     locationId: string,
     stateId: string | undefined,

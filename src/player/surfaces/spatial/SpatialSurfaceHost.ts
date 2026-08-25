@@ -522,6 +522,15 @@ export class SpatialSurfaceHost {
     return this.#interactionPort
   }
 
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    const record = this.#records.get(itemId)
+    if (
+      record?.entry.source !== 'global'
+      || record.wrapper.namespaceURI !== 'http://www.w3.org/1999/xhtml'
+    ) return null
+    return record.wrapper as HTMLElement
+  }
+
   resetTeacherControllerSession(scope: 'surface' | 'course'): void {
     if (scope === 'course') {
       if (!this.#options.deferTeacherControllerCourseReset) {

@@ -208,6 +208,15 @@ export class FlowSurfaceHost {
     return this.#interactionPort
   }
 
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    const overlay = this.#overlay
+    if (!overlay) return null
+    for (const candidate of overlay.querySelectorAll<HTMLElement>('[data-flow-overlay-source="global"]')) {
+      if (candidate.dataset.flowOverlayItem === itemId) return candidate
+    }
+    return null
+  }
+
   /** Published navigator hint used to avoid resuming a stale Flow generation. */
   preparePublishedLocation(locationId: string, forced: boolean): void {
     resolveFlowLocation(this.#playback, locationId)

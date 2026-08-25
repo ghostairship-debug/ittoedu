@@ -1,0 +1,242 @@
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { expect, test } from '@playwright/test'
+import {
+  buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseWebPackageFiles,
+} from '../../src/renderer/export/course/buildCoursePackages'
+import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
+import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
+import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
+
+const root = resolve(__dirname, '..', '..')
+const runRoot = mkdtempSync(join(tmpdir(), 'published-global-runtime-canvas-v2-'))
+const standalonePath = join(runRoot, 'standalone.html')
+const onlineStandalonePath = join(runRoot, 'online-standalone.html')
+const webRoot = join(runRoot, 'web')
+let controllerItemId = ''
+let restartButtonId = ''
+
+const globalHybridSource = `
+  CoursewareRuntime.define({
+    runtimeApiVersion: 2,
+    create(ctx) {
+      var probe = window.__publishedGlobalCanvasApi2Probe || {
+        creates: 0, destroys: 0, coreDestroys: 0,
+        suspends: 0, resumes: 0, visibleFalse: 0, visibleTrue: 0
+      };
+      window.__publishedGlobalCanvasApi2Probe = probe;
+      probe.creates += 1;
+      probe.scope = ctx.scope;
+      probe.context = ctx.renderMode === 'hybrid'
+        && !!ctx.Phaser && !!ctx.phaser.scene && !!ctx.dom.root;
+      var game = ctx.phaser.scene.game;
+      window.__publishedGlobalCanvasApi2Game = game;
+      window.__publishedGlobalCanvasApi2Games = window.__publishedGlobalCanvasApi2Games || [];
+      window.__publishedGlobalCanvasApi2Games.push(game);
+      game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
+        probe.coreDestroys += 1;
+      });
+      var count = 0;
+      var button = document.createElement('button');
+      button.dataset.publishedGlobalCanvasE2e = 'true';
+      button.textContent = 'GLOBAL API2:' + count;
+      Object.assign(button.style, {
+        width: '100%', height: '100%', pointerEvents: 'auto', cursor: 'pointer',
+        font: 'bold 30px sans-serif'
+      });
+      button.addEventListener('click', function () {
+        count += 1;
+        button.textContent = 'GLOBAL API2:' + count;
+      });
+      ctx.dom.root.appendChild(button);
+      var panel = ctx.phaser.scene.add.rectangle(0, 0, ctx.width, ctx.height, 0x0f766e, 0.25)
+        .setOrigin(0, 0);
+      ctx.phaser.root.add(panel);
+      return {
+        setVisible(value) {
+          value ? probe.visibleTrue += 1 : probe.visibleFalse += 1;
+        },
+        suspend() {
+          probe.suspends += 1;
+          game.loop.stop();
+          probe.stopped = !game.loop.started && !game.loop.running;
+        },
+        resume() { probe.resumes += 1; },
+        destroy() {
+          probe.destroys += 1;
+          button.remove();
+        }
+      };
+    }
+  });
+`
+
+function writeFixture(): void {
+  const fixture = createPublishedCanvasRuntimeV2Fixture([
+    { itemId: 'global-api2-template', renderMode: 'hybrid', source: globalHybridSource },
+  ], { includeFlow: true, includeSpatial: true })
+  const project = structuredClone(fixture.project)
+  const controller = project.globalLayerItems.find((entry) => (
+    entry.item.kind === 'native'
+    && entry.item.content.nativeType === 'teacher-controller'
+  ))
+  if (
+    !controller
+    || controller.item.kind !== 'native'
+    || controller.item.content.nativeType !== 'teacher-controller'
+  ) throw new Error('expected global teacher controller')
+  controller.item.content.data.defaultCollapsed = false
+  controllerItemId = controller.item.layerItemId
+  const restartButton = controller.item.content.data.buttons.find(
+    (button) => button.action.type === 'course.restart',
+  )
+  if (!restartButton) throw new Error('expected course.restart controller button')
+  restartButton.visible = true
+  restartButtonId = restartButton.id
+  const slide = project.surfaces.find((surface) => surface.id === fixture.slideSurfaceId)
+  if (!slide || slide.type !== 'slide') throw new Error('expected Slide fixture')
+  const item = slide.scenes[0]?.layerItems.find(
+    (candidate): candidate is RuntimeLayerItem => candidate.kind === 'runtime',
+  )
+  if (!item) throw new Error('expected authored Runtime')
+  slide.scenes[0]!.layerItems = slide.scenes[0]!.layerItems.filter(
+    (candidate) => candidate.layerItemId !== item.layerItemId,
+  )
+  item.layerItemId = 'published-global-api2-hybrid'
+  item.label = 'Published global API2 hybrid'
+  item.order = 415
+  item.frame = { mode: 'absolute', x: 72, y: 64, width: 360, height: 180 }
+  item.hitPolicy = 'auto'
+  project.globalLayerItems.push({
+    item,
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  const sources = {
+    project: courseProjectDocumentSchema.parse(project),
+    assetFiles: {},
+    components: {},
+  }
+  const playerBundle = readFileSync(join(root, 'dist-player', 'player.iife.js'), 'utf8')
+  writeFileSync(standalonePath, buildPublishedCourseStandaloneHtml(sources, playerBundle), 'utf8')
+  writeFileSync(onlineStandalonePath, buildPublishedCourseStandaloneHtml(sources, {
+    playerBundle,
+    singleHtmlMode: 'online-lightweight',
+  }), 'utf8')
+  for (const [path, bytes] of Object.entries(
+    buildPublishedCourseWebPackageFiles(sources, playerBundle),
+  )) {
+    const target = join(webRoot, ...path.split('/'))
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, bytes)
+  }
+}
+
+test.beforeAll(() => {
+  writeFixture()
+})
+
+test.afterAll(() => {
+  rmSync(runRoot, { recursive: true, force: true })
+})
+
+for (const delivery of [
+  { name: '离线便携单 HTML', path: standalonePath },
+  { name: '在线轻量单 HTML', path: onlineStandalonePath },
+  { name: '网页包', path: join(webRoot, 'index.html') },
+] as const) {
+  test(`${delivery.name} 共用跨 Slide/Flow/Spatial 的全局 API 2 单实例`, async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text())
+    })
+    await page.goto(pathToFileURL(delivery.path).toString())
+
+    const button = page.locator('[data-published-global-canvas-e2e="true"]')
+    await expect(button).toBeVisible({ timeout: 15_000 })
+    await expect(button).toHaveText('GLOBAL API2:0')
+    await expect(page.locator('[data-global-layer-item="published-global-api2-hybrid"]'))
+      .toHaveCSS('z-index', '415')
+    await expect(page.locator('[data-global-layer-item="published-global-api2-hybrid"]'))
+      .toHaveCSS('pointer-events', 'auto')
+    await button.click()
+    await expect(button).toHaveText('GLOBAL API2:1')
+
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.goToScene(1))
+    await expect(page.locator(
+      '[data-flow-overlay-source="global"][data-flow-overlay-item="published-global-api2-hybrid"] '
+      + '[data-published-global-runtime-inner="published-global-api2-hybrid"]',
+    )).toBeVisible()
+    await expect(button).toHaveText('GLOBAL API2:1')
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.goToScene(2))
+    await expect(page.locator(
+      '[data-layer-source="global"][data-layer-item-id="published-global-api2-hybrid"] '
+      + '[data-published-global-runtime-inner="published-global-api2-hybrid"]',
+    )).toBeVisible()
+    await expect(button).toHaveText('GLOBAL API2:1')
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.goToScene(0))
+    await expect(button).toBeVisible()
+    await expect(button).toHaveText('GLOBAL API2:1')
+
+    await expect.poll(() => page.evaluate(() => window.__publishedGlobalCanvasApi2Probe))
+      .toMatchObject({
+        creates: 1,
+        destroys: 0,
+        scope: 'global',
+        context: true,
+        suspends: 3,
+        resumes: 3,
+        visibleFalse: 3,
+        visibleTrue: 3,
+        stopped: true,
+      })
+
+    await page.locator(
+      `[data-global-layer-item="${controllerItemId}"] `
+      + `[data-controller-button-id="${restartButtonId}"]`,
+    ).dispatchEvent('click')
+    await expect(button).toBeVisible()
+    await expect(button).toHaveText('GLOBAL API2:0')
+    await expect.poll(() => page.evaluate(() => window.__publishedGlobalCanvasApi2Probe))
+      .toMatchObject({ creates: 2, destroys: 1, coreDestroys: 1 })
+    await expect.poll(() => page.evaluate(() => ({
+      loopGameReleased: window.__publishedGlobalCanvasApi2Games?.[0]?.loop.game === null,
+      loopCallbackReleased: window.__publishedGlobalCanvasApi2Games?.[0]?.loop.callback === null,
+    }))).toEqual({
+      loopGameReleased: true,
+      loopCallbackReleased: true,
+    })
+
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.destroy())
+    await expect.poll(() => page.evaluate(() => window.__publishedGlobalCanvasApi2Probe))
+      .toMatchObject({ creates: 2, destroys: 2, coreDestroys: 2 })
+    await expect.poll(() => page.evaluate(() => ({
+      canvasConnected: window.__publishedGlobalCanvasApi2Games?.[1]?.canvas.isConnected,
+      loopGameReleased: window.__publishedGlobalCanvasApi2Games?.[1]?.loop.game === null,
+      loopCallbackReleased: window.__publishedGlobalCanvasApi2Games?.[1]?.loop.callback === null,
+    }))).toEqual({
+      canvasConnected: false,
+      loopGameReleased: true,
+      loopCallbackReleased: true,
+    })
+    await expect(button).toHaveCount(0)
+    expect(errors).toEqual([])
+  })
+}
+
+declare global {
+  interface Window {
+    __publishedGlobalCanvasApi2Probe?: Record<string, unknown>
+    __publishedGlobalCanvasApi2Game?: {
+      canvas: HTMLCanvasElement
+      loop: { game: unknown; callback: unknown }
+    }
+    __publishedGlobalCanvasApi2Games?: Array<{
+      canvas: HTMLCanvasElement
+      loop: { game: unknown; callback: unknown }
+    }>
+  }
+}

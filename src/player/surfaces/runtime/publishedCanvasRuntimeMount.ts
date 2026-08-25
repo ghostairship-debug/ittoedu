@@ -24,7 +24,8 @@ export interface PublishedCanvasRuntimeMountHandle {
 
 export interface PublishedCanvasRuntimeMountOptions {
   instanceId: string
-  sceneId: string
+  scope?: 'scene' | 'global'
+  sceneId?: string
   runtime: PublishedCanvasRuntime
   width: number
   height: number
@@ -180,8 +181,9 @@ function createDomOnlyEnvironment(
 }
 
 /**
- * Mounts the narrow Published V2 scene-local canvas-runtime API 2 slice.
- * Flow/Spatial/shared/global/capture callers do not route through this module.
+ * Mounts one Published V2 canvas-runtime API 2 instance. Scene-local callers
+ * own their generation; the Published course session owns global instances.
+ * Capture and API 3 callers do not route through this module.
  */
 export function mountPublishedCanvasRuntime(
   container: HTMLElement,
@@ -321,7 +323,7 @@ export function mountPublishedCanvasRuntime(
           registry: activeRegistry,
           runtime,
           label: options.instanceId,
-          scope: 'scene',
+          scope: options.scope ?? 'scene',
           mode: 'preview',
           sceneId: options.sceneId,
           width: options.width,

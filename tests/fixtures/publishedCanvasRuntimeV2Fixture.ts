@@ -10,6 +10,7 @@ import {
 import {
   addCourseFlowPage,
   addCourseScene,
+  addCourseSpatialPage,
 } from '../../src/renderer/course/courseLocationCommands'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import {
@@ -42,6 +43,7 @@ export interface PublishedCanvasRuntimeV2Fixture {
   readonly slideSurfaceId: string
   readonly slideLocationIds: readonly string[]
   readonly flowLocationId?: string
+  readonly spatialLocationId?: string
   readonly itemIds: readonly string[]
 }
 
@@ -217,7 +219,7 @@ function authorCanvasRuntime(
 
 export function createPublishedCanvasRuntimeV2Fixture(
   specs: readonly AuthoredCanvasRuntimeSpec[],
-  options: { readonly includeFlow?: boolean } = {},
+  options: { readonly includeFlow?: boolean; readonly includeSpatial?: boolean } = {},
 ): PublishedCanvasRuntimeV2Fixture {
   if (specs.length === 0) throw new Error('at least one Canvas Runtime spec is required')
   let id = 0
@@ -248,6 +250,15 @@ export function createPublishedCanvasRuntimeV2Fixture(
     if (!added.ok) throw new Error(added.reason)
     project = added.project
   }
+  if (options.includeSpatial) {
+    const added = addCourseSpatialPage(project, {
+      title: 'Spatial pause target',
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    if (!added.ok) throw new Error(added.reason)
+    project = added.project
+  }
 
   const locations = project.locations.filter((location): location is Extract<
     CourseProjectDocument['locations'][number],
@@ -265,6 +276,13 @@ export function createPublishedCanvasRuntimeV2Fixture(
     ...(options.includeFlow
       ? {
           flowLocationId: project.locations.find((location) => location.kind === 'flow-block')?.id,
+        }
+      : {}),
+    ...(options.includeSpatial
+      ? {
+          spatialLocationId: project.locations.find(
+            (location) => location.kind === 'spatial-camera',
+          )?.id,
         }
       : {}),
     itemIds: specs.map((spec) => spec.itemId),
