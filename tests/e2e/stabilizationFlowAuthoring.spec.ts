@@ -361,14 +361,35 @@ async function selectRealTextRange(
   editor: Locator,
   startOffset: number,
   endCharacterOffset: number,
-): Promise<string> {
+): Promise<{
+  editorConnected: boolean
+  text: string
+  collapsed: boolean
+  inside: boolean
+}> {
   const start = await flowTextPoint(editor, startOffset, 'start')
   const end = await flowTextPoint(editor, endCharacterOffset, 'end')
   await page.mouse.move(start.x, start.y)
   await page.mouse.down()
-  await page.mouse.move(end.x, end.y, { steps: 12 })
+  // A two-character range needs only two native pointer moves. More sub-pixel
+  // steps repeatedly cross the collapsed/range boundary and make this short
+  // drag unlike a real coalesced mouse gesture in Electron.
+  await page.mouse.move(end.x, end.y, { steps: 2 })
   await page.mouse.up()
-  return editor.evaluate((element) => element.ownerDocument.getSelection()?.toString() ?? '')
+  return page.evaluate(() => {
+    const element = document.querySelector<HTMLElement>('[data-testid="flow-inline-editor"]')
+    const selection = document.getSelection()
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null
+    const inside = (node: Node | null) => Boolean(
+      element && node && (node === element || element.contains(node)),
+    )
+    return {
+      editorConnected: element?.isConnected === true,
+      text: selection?.toString() ?? '',
+      collapsed: range?.collapsed ?? true,
+      inside: inside(range?.startContainer ?? null) && inside(range?.endContainer ?? null),
+    }
+  })
 }
 
 async function measureMedia(
@@ -469,7 +490,12 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await paragraph.dblclick()
       const editor = page.getByTestId('flow-inline-editor')
       await expect(editor).toBeFocused()
-      expect(await selectRealTextRange(page, editor, 2, 3)).toBe('丙丁')
+      expect(await selectRealTextRange(page, editor, 2, 3)).toEqual({
+        editorConnected: true,
+        text: '丙丁',
+        collapsed: false,
+        inside: true,
+      })
       await expect(page.getByTestId('flow-toolbar-format-scope'))
         .toHaveAttribute('data-flow-format-mode', 'range')
       const bold = page.getByRole('button', { name: '局部加粗' })
@@ -477,7 +503,12 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await bold.click()
       await expect(bold).toHaveAttribute('aria-pressed', 'true')
 
-      expect(await selectRealTextRange(page, editor, 0, 3)).toBe('甲乙丙丁')
+      expect(await selectRealTextRange(page, editor, 0, 3)).toEqual({
+        editorConnected: true,
+        text: '甲乙丙丁',
+        collapsed: false,
+        inside: true,
+      })
       await expect(page.getByTestId('flow-toolbar-format-scope')).toHaveText('选区 · 混合格式')
       await expect(page.getByRole('button', { name: '局部加粗' }))
         .toHaveAttribute('aria-pressed', 'mixed')
