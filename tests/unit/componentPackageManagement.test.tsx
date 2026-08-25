@@ -6,6 +6,11 @@ import type {
 } from '../../src/shared/componentTypes'
 import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
 import { ComponentsTab } from '../../src/renderer/ui/ComponentsTab'
+import { collectCourseComponentPackageUsage } from '../../src/renderer/components/courseComponentPackageTransactions'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '../../src/renderer/project/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
@@ -65,6 +70,58 @@ function activeCourseProject() {
   const project = selectActiveCourseProjectDocument(useEditorStore.getState())
   if (!project) throw new Error('Expected an active Course Project V9')
   return project
+}
+
+function clickLocateUsage() {
+  fireEvent.click(screen.getByLabelText('管理可管理组件'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '定位使用位置' }))
+}
+
+function openFlowProjectWithEmbeddedComponentBlock(): { surfaceId: string; blockId: string } {
+  useEditorStore.getState().createNewFlowProject()
+  useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+  const exported = useEditorStore.getState().exportV9SlideCandidateArchive()
+  if (!exported) throw new Error('Expected a Flow archive export')
+  const archive = openCourseProjectArchive(exported)
+  const project = structuredClone(archive.project)
+  project.assets['component-fallback'] = {
+    id: 'component-fallback',
+    filename: 'component-fallback.png',
+    mimeType: 'image/png',
+    kind: 'image',
+    path: 'assets/component-fallback.png',
+    byteLength: 4,
+    width: 2,
+    height: 2,
+  }
+  const surface = project.surfaces.find((candidate) => candidate.type === 'flow')
+  if (!surface || surface.type !== 'flow') throw new Error('Expected a Flow surface')
+  const blockId = 'flow-component-usage'
+  surface.blocks.push({
+    id: blockId,
+    type: 'component',
+    component: { packageId: PACKAGE_ID, version: '1.0.0' },
+    props: {},
+    staticFallbackAssetId: 'component-fallback',
+  })
+  const reopened = useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
+    project,
+    assetFiles: { ...archive.assetFiles, 'component-fallback': new Uint8Array([1, 2, 3, 4]) },
+    componentFiles: archive.componentFiles,
+  }))
+  if (!reopened) throw new Error('Expected the crafted Flow project to reopen')
+  return { surfaceId: surface.id, blockId }
+}
+
+function expectFlowBlockUsageReference(surfaceId: string, blockId: string) {
+  const reference = collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID)
+    .references[0]
+  expect(reference).toMatchObject({
+    carrier: 'flow-block',
+    scope: 'scene',
+    instanceId: blockId,
+    surfaceId,
+  })
 }
 
 beforeEach(() => {
@@ -355,6 +412,96 @@ describe('ComponentsTab project component management', () => {
       expect(manager).toHaveTextContent('场景 1 · 全局 0')
       fireEvent.click(screen.getByLabelText('管理可管理组件'))
       expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+})
+
+describe('ComponentsTab locate component usage', () => {
+  it('selects a Flow component block that has no location with the same ID', () => {
+    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+    expectFlowBlockUsageReference(surfaceId, blockId)
+    expect(activeCourseProject().locations.some((location) =>
+      location.kind === 'flow-block' && location.blockId === blockId,
+    )).toBe(false)
+    expect(useEditorStore.getState().flowSession?.selection.selectedBlockId).not.toBe(blockId)
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab />)
+      clickLocateUsage()
+      const state = useEditorStore.getState()
+      expect(state.flowSession?.selection.surfaceId).toBe(surfaceId)
+      expect(state.flowSession?.selection.selectedBlockId).toBe(blockId)
+      expect(state.statusMessage).toBe('已定位组件使用位置')
+      expect(state.errorMessage).toBeNull()
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+
+  it('leaves a stale active Flow surface to select the usage block on its own surface', () => {
+    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+    expectFlowBlockUsageReference(surfaceId, blockId)
+    useEditorStore.getState().addCourseContent('flow-page')
+    const staleSurfaceId = useEditorStore.getState().flowSession?.selection.surfaceId
+    expect(staleSurfaceId).toBeDefined()
+    expect(staleSurfaceId).not.toBe(surfaceId)
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab />)
+      clickLocateUsage()
+      const state = useEditorStore.getState()
+      expect(state.flowSession?.selection.surfaceId).toBe(surfaceId)
+      expect(state.flowSession?.selection.selectedBlockId).toBe(blockId)
+      expect(state.statusMessage).toBe('已定位组件使用位置')
+      expect(state.errorMessage).toBeNull()
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+
+  it('reports an actionable failure without document or history writes when the usage surface has no valid location', () => {
+    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+    useEditorStore.getState().addCourseContent('flow-page')
+    const exported = useEditorStore.getState().exportV9SlideCandidateArchive()
+    expect(exported).not.toBeNull()
+    const archive = openCourseProjectArchive(exported!)
+    const relocated = structuredClone(archive.project)
+    const fallbackLocation = relocated.locations.find((location) =>
+      location.kind === 'flow-block' && location.surfaceId !== surfaceId,
+    )
+    if (!fallbackLocation) throw new Error('Expected a fallback Flow location')
+    relocated.locations = relocated.locations.filter((location) =>
+      location.surfaceId !== surfaceId,
+    )
+    relocated.startLocationId = fallbackLocation.id
+    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
+      project: relocated,
+      assetFiles: archive.assetFiles,
+      componentFiles: archive.componentFiles,
+    }))).toBe(true)
+    expectFlowBlockUsageReference(surfaceId, blockId)
+    expect(activeCourseProject().locations.some((location) =>
+      location.surfaceId === surfaceId,
+    )).toBe(false)
+    const beforeDocument = structuredClone(activeCourseProject())
+    const historyBefore = useEditorStore.getState().history.past.length
+    const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab />)
+      clickLocateUsage()
+      const state = useEditorStore.getState()
+      expect(state.statusMessage).toBeNull()
+      expect(state.errorMessage).toContain('没有可激活的位置')
+      expect(state.flowSession?.selection.surfaceId).toBe(fallbackLocation.surfaceId)
+      expect(activeCourseProject()).toEqual(beforeDocument)
+      expect(state.history.past).toHaveLength(historyBefore)
+      expect(state.flowSession?.history.past).toHaveLength(flowHistoryBefore)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }

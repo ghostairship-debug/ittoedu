@@ -25,6 +25,7 @@ import {
   collectCourseComponentPackageUsage,
   type CourseComponentPackageUsage,
 } from '../components/courseComponentPackageTransactions'
+import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import {
   collectComponentLibrarySubjects,
   filterComponentLibraryPackages,
@@ -94,6 +95,49 @@ function setComponentDragData(
 
 function closeContainingMenu(target: HTMLElement) {
   target.closest('details')?.removeAttribute('open')
+}
+
+function locateFlowBlockUsage(surfaceId: string, blockId: string) {
+  const fail = (message: string) => {
+    const state = useEditorStore.getState()
+    state.setStatus(null)
+    state.setError(message)
+  }
+  const state = useEditorStore.getState()
+  const document = selectActiveCourseProjectDocument(state)
+  if (!document) return
+  const location = document.locations.find((candidate) => (
+    candidate.kind === 'flow-block'
+    && candidate.surfaceId === surfaceId
+    && candidate.blockId === blockId
+  )) ?? document.locations.find((candidate) => (
+    candidate.kind === 'flow-block' && candidate.surfaceId === surfaceId
+  ))
+  if (!location || location.kind !== 'flow-block') {
+    fail('该组件所在的流式讲义没有可激活的位置；请从页面列表打开该讲义后手动选择组件。')
+    return
+  }
+  state.activateCourseLocation(location.id)
+  const activated = useEditorStore.getState()
+  const activeDocument = selectActiveCourseProjectDocument(activated)
+  if (!activeDocument || activated.flowSession?.selection.surfaceId !== surfaceId) {
+    fail('无法切换到该组件所在的流式讲义；请从页面列表打开该讲义后重试。')
+    return
+  }
+  try {
+    activated.applyFlowSelection(selectFlowEditorBlock(activeDocument, location.id, blockId))
+  } catch {
+    fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
+    return
+  }
+  const confirmed = useEditorStore.getState().flowSession?.selection
+  if (confirmed?.surfaceId !== surfaceId || confirmed.selectedBlockId !== blockId) {
+    fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
+    return
+  }
+  const latest = useEditorStore.getState()
+  latest.setError(null)
+  latest.setStatus('已定位组件使用位置')
 }
 
 interface ComponentDetailsDialogProps {
@@ -454,6 +498,10 @@ export function ComponentsTab({
     const usage = collectCourseComponentPackageUsage(document, packageId)
     const reference = usage.references[0]
     if (!reference) return
+    if (reference.carrier === 'flow-block' && reference.surfaceId) {
+      locateFlowBlockUsage(reference.surfaceId, reference.instanceId)
+      return
+    }
     if (reference.scope === 'global') {
       state.setEditingScope('global')
     } else if (reference.sceneId) {
@@ -461,8 +509,6 @@ export function ComponentsTab({
     } else if (reference.surfaceId) {
       const location = document.locations.find((candidate) => (
         candidate.surfaceId === reference.surfaceId
-        && (reference.carrier !== 'flow-block'
-          || (candidate.kind === 'flow-block' && candidate.blockId === reference.instanceId))
       ))
       if (location) state.activateCourseLocation(location.id)
     }
