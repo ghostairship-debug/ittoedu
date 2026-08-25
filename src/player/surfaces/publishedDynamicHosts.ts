@@ -198,7 +198,7 @@ interface PublishedInteractionCapableHost extends SurfaceHost {
 }
 
 interface PublishedLocationPreparedHost extends SurfaceHost {
-  preparePublishedLocation(locationId: string): void
+  preparePublishedLocation(locationId: string, forced: boolean): void
 }
 
 function locationPreparedHost(host: SurfaceHost | undefined): PublishedLocationPreparedHost | null {
@@ -371,7 +371,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   handleBeforeNavigation(transition?: MixedNavigationTransition): void {
     if (transition) {
       locationPreparedHost(this.#hostsById.get(transition.next.surfaceId))
-        ?.preparePublishedLocation(transition.next.locationId)
+        ?.preparePublishedLocation(transition.next.locationId, transition.forced)
     }
     if (this.#terminalNavigationClaimed) this.#terminalNavigationInvalidated = true
     this.#destroyInteractionControllers()

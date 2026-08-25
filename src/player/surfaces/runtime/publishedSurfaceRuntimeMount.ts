@@ -6,6 +6,7 @@ import type {
 } from '../../../shared/surfaceRuntimeTypes'
 import type {
   CourseEventBus as CourseEventBusContract,
+  CourseStateStore as CourseStateStoreContract,
   RuntimeEventDisposer,
   RuntimeEventListener,
   RuntimeHostActions,
@@ -164,6 +165,124 @@ function frozenStringRecord(values: Readonly<Record<string, string>>): Readonly<
   return Object.freeze({ ...values })
 }
 
+function cloneIntoRuntimeRealm<T>(targetWindow: Window, value: T): T {
+  const RuntimeArray = Reflect.get(targetWindow, 'Array')
+  const RuntimeObject = Reflect.get(targetWindow, 'Object')
+  if (typeof RuntimeArray !== 'function' || typeof RuntimeObject !== 'function') {
+    throw new Error('Surface Runtime 宿主缺少 Object/Array 构造器')
+  }
+  const memo = new WeakMap<object, unknown>()
+  const clone = (input: unknown): unknown => {
+    if (typeof input !== 'object' || input === null) return input
+    const cached = memo.get(input)
+    if (cached !== undefined) return cached
+    const output = Array.isArray(input)
+      ? Reflect.construct(RuntimeArray, []) as unknown[]
+      : Reflect.construct(RuntimeObject, []) as Record<string, unknown>
+    memo.set(input, output)
+    for (const [key, entry] of Object.entries(input)) {
+      Object.defineProperty(output, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: clone(entry),
+      })
+    }
+    return output
+  }
+  return clone(value) as T
+}
+
+function cloneRuntimeStateIntoHostRealm(targetWindow: Window, value: unknown): unknown {
+  const RuntimeArray = Reflect.get(targetWindow, 'Array')
+  const RuntimeObject = Reflect.get(targetWindow, 'Object')
+  if (typeof RuntimeArray !== 'function' || typeof RuntimeObject !== 'function') {
+    throw new Error('Surface Runtime 宿主缺少 Object/Array 构造器')
+  }
+  const runtimeArrayPrototype = Reflect.get(RuntimeArray, 'prototype')
+  const runtimeObjectPrototype = Reflect.get(RuntimeObject, 'prototype')
+  const active = new WeakSet<object>()
+  const memo = new WeakMap<object, unknown>()
+  const clone = (input: unknown): unknown => {
+    if (
+      input === null
+      || input === undefined
+      || typeof input === 'string'
+      || typeof input === 'number'
+      || typeof input === 'boolean'
+      || typeof input === 'bigint'
+    ) return input
+    if (typeof input !== 'object') {
+      throw new TypeError('Surface Runtime courseState 只能保存纯数据')
+    }
+    if (active.has(input)) {
+      throw new TypeError('Surface Runtime courseState 不能包含循环引用')
+    }
+    const isArray = Array.isArray(input)
+    const prototype = Object.getPrototypeOf(input)
+    if (
+      (isArray && prototype !== runtimeArrayPrototype && prototype !== Array.prototype)
+      || (
+        !isArray
+        && prototype !== runtimeObjectPrototype
+        && prototype !== Object.prototype
+        && prototype !== null
+      )
+    ) {
+      throw new TypeError('Surface Runtime courseState 不能保存类实例或平台对象')
+    }
+    if (Object.getOwnPropertySymbols(input).length > 0) {
+      throw new TypeError('Surface Runtime courseState 不能包含 Symbol 属性')
+    }
+    const cached = memo.get(input)
+    if (cached !== undefined) return cached
+    const output: unknown[] | Record<string, unknown> = isArray ? [] : {}
+    memo.set(input, output)
+    active.add(input)
+    try {
+      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(input))) {
+        if (isArray && key === 'length') continue
+        if (!('value' in descriptor) || !descriptor.enumerable) {
+          throw new TypeError('Surface Runtime courseState 只能包含可枚举数据属性')
+        }
+        Object.defineProperty(output, key, {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: clone(descriptor.value),
+        })
+      }
+    } finally {
+      active.delete(input)
+    }
+    return output
+  }
+  return clone(value)
+}
+
+function createRealmCourseStateStore(
+  targetWindow: Window,
+  store: CourseStateStoreContract,
+): CourseStateStoreContract {
+  return Object.freeze({
+    get<T>(key: string): T | undefined {
+      return cloneIntoRuntimeRealm(targetWindow, store.get<T>(key))
+    },
+    set(key: string, value: unknown): void {
+      store.set(key, cloneRuntimeStateIntoHostRealm(targetWindow, value))
+    },
+    delete(key: string): void {
+      store.delete(key)
+    },
+    clear(): void {
+      store.clear()
+    },
+    snapshot(): Record<string, unknown> {
+      return cloneIntoRuntimeRealm(targetWindow, store.snapshot())
+    },
+  })
+}
+
 class ScopedRuntimeEvents implements CourseEventBusContract {
   readonly #disposers = new Map<
     string,
@@ -176,12 +295,12 @@ class ScopedRuntimeEvents implements CourseEventBusContract {
   on<T = unknown>(eventName: string, listener: RuntimeEventListener<T>): RuntimeEventDisposer {
     if (this.#disposed) throw new Error('Surface Runtime 事件作用域已销毁')
     const stored = listener as RuntimeEventListener<unknown>
+    this.#disposers.get(eventName)?.get(stored)?.()
     let eventDisposers = this.#disposers.get(eventName)
     if (!eventDisposers) {
       eventDisposers = new Map()
       this.#disposers.set(eventName, eventDisposers)
     }
-    eventDisposers.get(stored)?.()
     const parentDispose = this.parent.on(eventName, stored)
     let active = true
     const dispose = () => {
@@ -203,7 +322,8 @@ class ScopedRuntimeEvents implements CourseEventBusContract {
     if (!this.#disposed) this.parent.emit(eventName, payload)
   }
 
-  listenerCount(): number {
+  listenerCount(eventName?: string): number {
+    if (eventName !== undefined) return this.#disposers.get(eventName)?.size ?? 0
     let count = 0
     for (const eventDisposers of this.#disposers.values()) count += eventDisposers.size
     return count
@@ -311,9 +431,11 @@ export function mountPublishedSurfaceRuntime(
   options: PublishedSurfaceRuntimeMountOptions,
 ): PublishedSurfaceRuntimeMountHandle {
   let definition: SurfaceRuntimeDefinition
+  let targetWindow: Window
   try {
-    const targetWindow = container.ownerDocument.defaultView
-    if (!targetWindow) throw new Error('Surface Runtime 挂载文档没有可执行 Window')
+    const runtimeWindow = container.ownerDocument.defaultView
+    if (!runtimeWindow) throw new Error('Surface Runtime 挂载文档没有可执行 Window')
+    targetWindow = runtimeWindow
     definition = executeSurfaceRuntimeDefinition(
       targetWindow,
       decodePublishedCode(options.runtime.code, `Runtime“${options.instanceId}”代码`),
@@ -334,7 +456,7 @@ export function mountPublishedSurfaceRuntime(
     width: '100%',
     height: '100%',
     overflow: 'hidden',
-    pointerEvents: 'auto',
+    pointerEvents: 'inherit',
   })
   const root = container.ownerDocument.createElement('div')
   root.dataset.surfaceRuntimeRoot = options.instanceId
@@ -355,6 +477,7 @@ export function mountPublishedSurfaceRuntime(
     ]),
   ))
   const events = new ScopedRuntimeEvents(options.session.events)
+  const courseState = createRealmCourseStateStore(targetWindow, options.session.courseState)
   const context: SurfaceRuntimeCreateContext = {
     runtimeApiVersion: 3,
     mode: 'playback',
@@ -387,7 +510,7 @@ export function mountPublishedSurfaceRuntime(
         return url
       },
     }),
-    courseState: options.session.courseState,
+    courseState,
     presentation: options.presentation ?? inertPresentation,
     actions: options.actions ?? inertActions,
     events,
@@ -438,8 +561,8 @@ export function mountPublishedSurfaceRuntime(
   }
 
   let quarantined = false
-  const invoke = (operation: (() => void) | undefined): void => {
-    if (!operation || quarantined || instanceDestroyed) return
+  const invoke = (operation: () => void): void => {
+    if (quarantined || instanceDestroyed) return
     try {
       operation()
     } catch (cause) {
@@ -452,13 +575,13 @@ export function mountPublishedSurfaceRuntime(
     ok: true,
     element: host,
     setVisible(visible: boolean) {
-      invoke(lifecycle.setVisible?.bind(lifecycle, visible))
+      invoke(() => lifecycle.setVisible?.(visible))
     },
     suspend() {
-      invoke(lifecycle.suspend?.bind(lifecycle))
+      invoke(() => lifecycle.suspend?.())
     },
     resume() {
-      invoke(lifecycle.resume?.bind(lifecycle))
+      invoke(() => lifecycle.resume?.())
     },
     destroy() {
       if (instanceDestroyed) return

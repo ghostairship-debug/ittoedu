@@ -455,8 +455,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #locationId: string
   #presentationStateId: string | undefined
   #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
-  #preparedActivationLocationId: string | null = null
-  #pendingRuntimeActivationLocationId: string | null = null
+  #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #completedActiveResetLocationId: string | null = null
   #root: HTMLElement | null = null
   #active = false
   #services: SurfacePlayerServices | null = null
@@ -513,9 +514,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   /** Published navigator hint used to avoid resuming a stale scene before setLocationId(). */
-  preparePublishedLocation(locationId: string): void {
+  preparePublishedLocation(locationId: string, forced: boolean): void {
     resolveSlideLocation(this.#payload, this.id, locationId)
-    this.#preparedActivationLocationId = locationId
+    this.#completedActiveResetLocationId = null
+    this.#preparedRuntimeActivation = { locationId, forced }
   }
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
@@ -586,14 +588,14 @@ export class SlidePublishedAdapter implements SurfaceHost {
 
   async activate(): Promise<void> {
     const wasInactive = !this.#active
-    const preparedLocationId = this.#preparedActivationLocationId
-    this.#preparedActivationLocationId = null
+    const preparedActivation = this.#preparedRuntimeActivation
+    this.#preparedRuntimeActivation = null
     this.#active = true
     if (this.#root) this.#root.hidden = false
-    this.#pendingRuntimeActivationLocationId = null
+    this.#pendingRuntimeActivation = null
     if (wasInactive && this.#runtimeHandles.length > 0) {
-      if (preparedLocationId !== null) {
-        this.#pendingRuntimeActivationLocationId = preparedLocationId
+      if (preparedActivation !== null) {
+        this.#pendingRuntimeActivation = preparedActivation
       } else {
         for (const handle of this.#runtimeHandles) {
           handle.setVisible(true)
@@ -607,8 +609,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
-    this.#preparedActivationLocationId = null
-    this.#pendingRuntimeActivationLocationId = null
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
+    this.#completedActiveResetLocationId = null
     for (const handle of this.#runtimeHandles) {
       handle.setVisible(false)
       handle.suspend()
@@ -628,7 +631,16 @@ export class SlidePublishedAdapter implements SurfaceHost {
       this.#runtimeSession.resetCourse()
     } else this.#teacherControllerSession.resetSurface(this.id)
     this.#preparedPresentationState = null
+    const preparedReset = this.#preparedRuntimeActivation
+    const resetWasActive = this.#active
     await this.setLocationId(this.#startLocationId)
+    if (
+      resetWasActive
+      && preparedReset?.forced
+      && preparedReset.locationId === this.#startLocationId
+    ) {
+      this.#completedActiveResetLocationId = this.#startLocationId
+    }
   }
 
   async capture(_request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
@@ -644,16 +656,23 @@ export class SlidePublishedAdapter implements SurfaceHost {
   async setLocationId(locationId: string): Promise<void> {
     const location = resolveSlideLocation(this.#payload, this.id, locationId)
     const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
-    this.#preparedActivationLocationId = null
+    const completedResetLocationId = this.#completedActiveResetLocationId
+    this.#completedActiveResetLocationId = null
+    this.#preparedRuntimeActivation = null
     const presentationStateId = this.#preparedPresentationState?.locationId === locationId
       ? this.#preparedPresentationState.stateId
       : presentationStateIdForLocation(scene, location)
     this.#preparedPresentationState = null
     const sameLocation = locationId === this.#locationId
       && presentationStateId === this.#presentationStateId
-    const pendingActivationLocationId = this.#pendingRuntimeActivationLocationId
-    this.#pendingRuntimeActivationLocationId = null
-    if (pendingActivationLocationId === locationId && sameLocation) {
+    const pendingActivation = this.#pendingRuntimeActivation
+    this.#pendingRuntimeActivation = null
+    if (completedResetLocationId === locationId && sameLocation) return
+    if (
+      pendingActivation?.locationId === locationId
+      && !pendingActivation.forced
+      && sameLocation
+    ) {
       for (const handle of this.#runtimeHandles) {
         handle.setVisible(true)
         handle.resume()
@@ -680,8 +699,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#root?.remove()
     this.#root = null
     this.#active = false
-    this.#preparedActivationLocationId = null
-    this.#pendingRuntimeActivationLocationId = null
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
+    this.#completedActiveResetLocationId = null
     this.#services = null
   }
 
@@ -883,7 +903,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #render(): void {
     const root = this.#root
     if (!root) return
-    this.#pendingRuntimeActivationLocationId = null
+    this.#pendingRuntimeActivation = null
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
     this.#destroyRuntimes()

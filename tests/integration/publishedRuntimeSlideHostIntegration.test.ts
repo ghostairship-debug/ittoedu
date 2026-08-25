@@ -11,6 +11,10 @@ import {
   createPublishedCourseSession,
   type PublishedCourseSession,
 } from '@/player/surfaces/publishedDynamicHosts'
+import {
+  createPublishedSurfaceRuntimeSession,
+  mountPublishedSurfaceRuntime,
+} from '@/player/surfaces/runtime/publishedSurfaceRuntimeMount'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
@@ -194,6 +198,65 @@ afterEach(async () => {
 })
 
 describe('Published V2 Slide scene Surface Runtime playback', () => {
+  it('replaces duplicate scoped listeners and removes the parent subscription on destroy', () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 3,
+        create(ctx) {
+          window.__duplicateRuntimeCalls = 0;
+          var listener = function () { window.__duplicateRuntimeCalls += 1; };
+          ctx.events.on('probe:duplicate', listener);
+          ctx.events.on('probe:duplicate', listener);
+          window.__duplicateRuntimeNamedCount = ctx.events.listenerCount('probe:duplicate');
+          window.__duplicateRuntimeTotalCount = ctx.events.listenerCount();
+          return { destroy() {} };
+        }
+      });
+    `
+    const fixture = projectWithRuntimeItems([
+      runtimeItem('duplicate-listener-runtime', 1, source),
+    ])
+    const payload = buildPublishedCourseV2Payload({
+      project: fixture.project,
+      assetFiles: {},
+      components: {},
+    })
+    const publishedRuntime = payload.surfaces
+      .filter((surface) => surface.type === 'slide')
+      .flatMap((surface) => surface.scenes)
+      .flatMap((scene) => scene.layerItems)
+      .find((item) => item.layerItemId === 'duplicate-listener-runtime')
+    if (!publishedRuntime || publishedRuntime.kind !== 'runtime') {
+      throw new Error('published duplicate-listener Runtime missing')
+    }
+    const runtimeSession = createPublishedSurfaceRuntimeSession()
+    const { frame, container, view } = mountDocument()
+    const diagnostics: string[] = []
+    const handle = mountPublishedSurfaceRuntime(container, {
+      instanceId: 'duplicate-listener-runtime',
+      runtime: publishedRuntime.runtime,
+      width: 320,
+      height: 120,
+      visible: true,
+      resolveAsset: () => undefined,
+      session: runtimeSession,
+      reportError: (phase, error) => diagnostics.push(`${phase}: ${error.message}`),
+    })
+
+    expect(handle.ok, diagnostics.join('\n')).toBe(true)
+    expect(Reflect.get(view, '__duplicateRuntimeNamedCount')).toBe(1)
+    expect(Reflect.get(view, '__duplicateRuntimeTotalCount')).toBe(1)
+    expect(runtimeSession.events.listenerCount('probe:duplicate')).toBe(1)
+    runtimeSession.events.emit('probe:duplicate')
+    expect(Reflect.get(view, '__duplicateRuntimeCalls')).toBe(1)
+    handle.destroy()
+    expect(runtimeSession.events.listenerCount('probe:duplicate')).toBe(0)
+    runtimeSession.events.emit('probe:duplicate')
+    expect(Reflect.get(view, '__duplicateRuntimeCalls')).toBe(1)
+    runtimeSession.destroy()
+    frame.remove()
+  })
+
   it('starts current-location try-run at the requested scene without executing inactive Slide hosts', async () => {
     let project = createBlankCourseProject({ now: NOW })
     const firstSlide = project.surfaces.find((surface) => surface.type === 'slide')
@@ -296,6 +359,37 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
           };
           window.__publishedSurfaceRuntimeProbe = state;
           state.creates += 1;
+          ctx.courseState.set('realm-object', {
+            n: state.creates,
+            nested: [{ ok: true }]
+          });
+          var realmState = ctx.courseState.get('realm-object');
+          state.courseStateRoundTrip = realmState.n;
+          state.courseStateObjectRealm = Object.getPrototypeOf(realmState) === Object.prototype;
+          state.courseStateArrayRealm = Object.getPrototypeOf(realmState.nested) === Array.prototype;
+          ctx.courseState.set('realm-array', [{ value: state.creates }]);
+          var realmArray = ctx.courseState.get('realm-array');
+          state.courseStateTopArrayRealm = Object.getPrototypeOf(realmArray) === Array.prototype;
+          ctx.courseState.set('content-copy', ctx.content.all());
+          var contentCopy = ctx.courseState.get('content-copy');
+          state.courseStateContentCopy = contentCopy.label;
+          var shared = { value: state.creates };
+          ctx.courseState.set('shared-reference', { first: shared, second: shared });
+          var sharedCopy = ctx.courseState.get('shared-reference');
+          state.courseStateSharedReference = sharedCopy.first === sharedCopy.second;
+          var protoKey = {};
+          Object.defineProperty(protoKey, '__proto__', {
+            configurable: true, enumerable: true, writable: true, value: { safe: true }
+          });
+          ctx.courseState.set('proto-key', protoKey);
+          var protoKeyCopy = ctx.courseState.get('proto-key');
+          state.courseStateProtoKeySafe =
+            Object.getPrototypeOf(protoKeyCopy) === Object.prototype
+            && Object.prototype.hasOwnProperty.call(protoKeyCopy, '__proto__')
+            && protoKeyCopy.__proto__.safe === true;
+          try { ctx.courseState.set('invalid-realm-state', new Date()); } catch (error) {
+            state.invalidCourseStateRejected = true;
+          }
           state.contentFrozen = Object.isFrozen(ctx.content.all());
           try { ctx.content.all().label = 'mutated'; } catch (error) { state.mutationRejected = true; }
           try { ctx.content.get('missing'); } catch (error) { state.missingContentRejected = true; }
@@ -381,6 +475,14 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
       clicks: 1,
       suspends: 0,
       resumes: 0,
+      courseStateRoundTrip: 1,
+      courseStateObjectRealm: true,
+      courseStateArrayRealm: true,
+      courseStateTopArrayRealm: true,
+      courseStateContentCopy: '按钮-surface-runtime-good',
+      courseStateSharedReference: true,
+      courseStateProtoKeySafe: true,
+      invalidCourseStateRejected: true,
       contentFrozen: true,
       mutationRejected: true,
       missingContentRejected: true,
@@ -417,11 +519,26 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
     expect(probe(view)).toMatchObject({ creates: 2, destroys: 1, suspends: 1, resumes: 1 })
 
     await session.goToLocation(fixture.flowLocationId)
-    await session.goToLocation(fixture.secondLocationId)
+    await session.navigator.goToLocation(fixture.firstLocationId, { force: true })
+    const forcedButton = container.querySelector<HTMLButtonElement>(
+      '[data-published-runtime-button="true"]',
+    )
+    expect(forcedButton).not.toBe(secondButton)
     expect(probe(view)).toMatchObject({
-      creates: 2,
+      creates: 3,
       destroys: 2,
       suspends: 2,
+      resumes: 1,
+      busCalls: 9,
+      courseStateRoundTrip: 3,
+    })
+
+    await session.goToLocation(fixture.flowLocationId)
+    await session.goToLocation(fixture.secondLocationId)
+    expect(probe(view)).toMatchObject({
+      creates: 3,
+      destroys: 3,
+      suspends: 3,
       resumes: 1,
     })
     secondButton?.click()
@@ -437,16 +554,23 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
     expect((await session.player.suspendSurface(slideSurfaceId)).ok).toBe(true)
     expect((await session.player.resumeSurface(slideSurfaceId)).ok).toBe(true)
     expect(probe(view)).toMatchObject({
-      creates: 3,
-      destroys: 2,
-      suspends: 3,
+      creates: 4,
+      destroys: 3,
+      suspends: 4,
       resumes: 2,
-      busCalls: 9,
+      busCalls: 12,
     })
+
+    await session.navigator.resetCurrentSurface()
+    expect(session.navigator.current?.locationId).toBe(fixture.firstLocationId)
+    expect(probe(view)).toMatchObject({ creates: 5, destroys: 4, busCalls: 15 })
+    await session.navigator.resetCourse()
+    expect(session.navigator.current?.locationId).toBe(fixture.firstLocationId)
+    expect(probe(view)).toMatchObject({ creates: 6, destroys: 5, busCalls: 18 })
 
     await session.destroy()
     sessions.splice(sessions.indexOf(session), 1)
-    expect(probe(view)).toMatchObject({ creates: 3, destroys: 3, clicks: 2 })
+    expect(probe(view)).toMatchObject({ creates: 6, destroys: 6, clicks: 2 })
     expect(container.querySelector('[data-published-runtime-button]')).toBeNull()
     expect(fixture.project).toEqual(projectBefore)
     expect(payload).toEqual(payloadBefore)
@@ -480,7 +604,31 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
           marker.dataset.survivingSurfaceRuntime = 'true';
           marker.textContent = ctx.content.get('label');
           ctx.dom.root.appendChild(marker);
-          return { destroy() { marker.remove(); } };
+          return {
+            suspend() {
+              window.__survivingSurfaceRuntimeSuspends =
+                (window.__survivingSurfaceRuntimeSuspends || 0) + 1;
+            },
+            resume() {
+              window.__survivingSurfaceRuntimeResumes =
+                (window.__survivingSurfaceRuntimeResumes || 0) + 1;
+            },
+            destroy() { marker.remove(); }
+          };
+        }
+      });
+    `
+    const lifecycleGetterFailureSource = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 3,
+        create() {
+          return {
+            get suspend() {
+              window.__lifecycleGetterFailureReached = true;
+              throw new Error('suspend getter failed intentionally');
+            },
+            destroy() {}
+          };
         }
       });
     `
@@ -500,8 +648,9 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
       runtimeItem('runtime-disabled', 1, disabledSource, false),
       runtimeItem('runtime-register-failure', 2, registerFailureSource),
       runtimeItem('runtime-create-failure', 3, createFailureSource),
-      runtimeItem('runtime-survives', 4, survivingSource),
-      runtimeItem('runtime-pass-through', 5, passThroughSource, true, 'pass-through'),
+      runtimeItem('runtime-lifecycle-getter-failure', 4, lifecycleGetterFailureSource),
+      runtimeItem('runtime-survives', 5, survivingSource),
+      runtimeItem('runtime-pass-through', 6, passThroughSource, true, 'pass-through'),
     ])
     const payload = buildPublishedCourseV2Payload({
       project: fixture.project,
@@ -541,10 +690,23 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
     expect(passThroughWrap?.querySelector('[data-pass-through-surface-runtime="true"]'))
       .not.toBeNull()
     expect(passThroughWrap?.style.pointerEvents).toBe('none')
+    const passThroughRuntimeMount = passThroughWrap?.querySelector<HTMLElement>(
+      '.published-surface-runtime-mount',
+    )
+    expect(passThroughRuntimeMount?.style.pointerEvents).toBe('inherit')
+    expect(passThroughRuntimeMount?.querySelector<HTMLElement>(
+      '[data-surface-runtime-root]',
+    )?.style.pointerEvents).toBe('')
     expect(container.querySelector('[data-slide-layer-item="native-sibling"]')).not.toBeNull()
-    expect(diagnostics).toHaveLength(2)
+    await session.goToLocation(fixture.flowLocationId)
+    expect(Reflect.get(view, '__lifecycleGetterFailureReached')).toBe(true)
+    expect(Reflect.get(view, '__survivingSurfaceRuntimeSuspends')).toBe(1)
+    await session.goToLocation(fixture.firstLocationId)
+    expect(Reflect.get(view, '__survivingSurfaceRuntimeResumes')).toBe(1)
+    expect(diagnostics).toHaveLength(3)
     expect(diagnostics.join('\n')).toContain('register失败')
     expect(diagnostics.join('\n')).toContain('create失败')
+    expect(diagnostics.join('\n')).toContain('lifecycle失败')
     frame.remove()
   })
 })

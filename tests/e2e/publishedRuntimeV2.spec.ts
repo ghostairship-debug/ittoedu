@@ -74,6 +74,32 @@ function runtimeItem(): RuntimeLayerItem {
   }
 }
 
+function passThroughRuntimeItem(): RuntimeLayerItem {
+  return {
+    ...runtimeItem(),
+    layerItemId: 'published-runtime-e2e-pass-through',
+    label: 'Published Runtime E2E Pass Through',
+    order: 21_000,
+    hitPolicy: 'pass-through',
+    runtime: {
+      ...runtimeItem().runtime,
+      source: `
+        CoursewareRuntime.define({
+          protocol: 'surface-runtime',
+          runtimeApiVersion: 3,
+          create(ctx) {
+            var overlay = document.createElement('div');
+            overlay.dataset.publishedRuntimeE2ePassThrough = 'true';
+            Object.assign(overlay.style, { width: '100%', height: '100%' });
+            ctx.dom.root.appendChild(overlay);
+            return { destroy() { overlay.remove(); } };
+          }
+        });
+      `,
+    },
+  }
+}
+
 function writeFixture(): void {
   const project = createBlankCourseProject({ now: '2026-08-25T09:30:00.000Z' })
   const next = structuredClone(project)
@@ -81,7 +107,7 @@ function writeFixture(): void {
   if (!slide || slide.type !== 'slide' || !slide.scenes[0]) {
     throw new Error('expected blank Slide scene')
   }
-  slide.scenes[0].layerItems = [runtimeItem()]
+  slide.scenes[0].layerItems = [runtimeItem(), passThroughRuntimeItem()]
   const sources = {
     project: courseProjectDocumentSchema.parse(next),
     assetFiles: {},
@@ -121,8 +147,18 @@ for (const delivery of [
     })
     await page.goto(pathToFileURL(delivery.path).toString())
     const button = page.locator('[data-published-runtime-e2e-button="true"]')
+    const passThrough = page.locator('[data-published-runtime-e2e-pass-through="true"]')
     await expect(button).toBeVisible({ timeout: 15_000 })
+    await expect(passThrough).toBeVisible()
     await expect(button).toHaveText('真实 Runtime:0')
+    const topHit = await button.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return document.elementFromPoint(
+        bounds.left + bounds.width / 2,
+        bounds.top + bounds.height / 2,
+      ) === element
+    })
+    expect(topHit).toBe(true)
     await button.click()
     await expect(button).toHaveText('真实 Runtime:1')
     expect(errors).toEqual([])
