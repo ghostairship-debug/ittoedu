@@ -1346,7 +1346,7 @@
       },
       "owner": "Tooling / Release",
       "status": "retained-compatibility",
-      "currentFact": "The product open path rejects V8, but committed examples, render-host benchmarks, portability checks, release verification, and focused tests still intentionally use the separate V8 archive/tooling path.",
+      "currentFact": "The product open path rejects V8; the separate V8 archive/tooling path remains only for the committed sample and render-host benchmark fixtures, portability checks, release verification, and focused archive tests.",
       "evidence": [
         {
           "path": "src/renderer/project/courseProjectIo.ts",
@@ -1426,11 +1426,6 @@
               "path": "scripts/build-examples.ts",
               "symbol": "createProjectArchive",
               "use": "Builds examples/sample-project.h5lesson."
-            },
-            {
-              "path": "scripts/build-incline-motion-lesson.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds a Legacy lesson fixture."
             },
             {
               "path": "scripts/build-interactive-lesson.ts",
@@ -1533,11 +1528,11 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'openProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 47
+            "observedMatches": 43
           },
           {
             "command": "(git grep -n -I -F -- 'createProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 56
+            "observedMatches": 54
           }
         ],
         "requiredForRemoval": "Every script, committed fixture, release assertion, portability check, and archive test must be migrated or split into an approved retained record; product V8 rejection must remain."
