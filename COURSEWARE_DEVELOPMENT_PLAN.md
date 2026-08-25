@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：17.6（2026-08-26：LEG-003 已删除正常 V9 不可达的 App Legacy 交付回退与专属桌面预览链；RTP-04 active，CMP-03 因共享 Slide Published host 排队）
+> 计划版本：17.7（2026-08-26：RTP-04 active，CMP-03 因共享 Slide Published host 排队；LEG-005A 并行删除正常 V9 生命周期不可达的 PDF source-null Runtime raster，保留合法纯 Slide raster）
 >
 > 当前活动路线：第 5 节“工程修复与网络基础——Gate R0 → Wave 0–5”；详细证据与开工顺序见 [修复方案](docs/development-plan/REPAIR_PLAN.md)
 >
@@ -132,6 +132,6 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前卡统一放在 `docs/development-plan/tasks/repair/**`，完成即删除。
 
-当前任务板以 RTP-04 为 active、CMP-03 为 queued；CMP-03 因共享 Slide Published host 等 RTP-04 合入。CMP-03 通过后再分别审计 sample、benchmark/portability/release 的最小 V9/V2 替代，不打包成“大清退”；其余纵切继续按 consumer 证据准入。
+当前任务板以 RTP-04、LEG-005A 为 active，CMP-03 为 queued；CMP-03 因共享 Slide Published host 等 RTP-04 合入。LEG-005A 只删除正常 V9 生命周期不可达的 PDF source-null Runtime raster，不改变合法纯 Slide raster、Mixed V2、PPTX capture 或 PDF preflight。CMP-03 通过后再分别审计 sample、benchmark/portability/release 的最小 V9/V2 替代，不打包成“大清退”；其余纵切继续按 consumer 证据准入。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。
