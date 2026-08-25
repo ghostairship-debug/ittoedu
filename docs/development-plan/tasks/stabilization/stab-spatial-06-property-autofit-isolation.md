@@ -14,9 +14,9 @@
 - Invalidating paths: `src/renderer/ui/PropertiesTab.tsx` text auto-fit patch expansion; `tests/unit/spatialProductIntegration.test.tsx` default auto-height Properties counterexample; shared text layout/render helpers only if the implementation actually changes them
 - Task ID: `stab-spatial-06-property-autofit-isolation`
 - Phase / wave: `post-audit stabilization / B-ownership-controller repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial Properties Repair Worker / independent property-delta reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace; Properties hotspot has one writer / codex/architecture-stabilization`
 - Baseline HEAD: `63d3e58`; product bytes remain the Wave B candidate introduced at `ad9d904`, with both failed browser attempts preserved in the gate card.
 - Context: `bootstrap-manual`; the failing archive delta, Playwright trace, `PropertiesTab` auto-fit wrapper, canonical Spatial patch routing and the prior focused fixture's forced `overflow='fixed'` were inspected before claim.
@@ -37,10 +37,10 @@ Renaming or changing another non-layout property of an auto-height text preserve
 - Forbidden write: Store/history commands, Course Project contracts/Schema, Player/Published/export, text layout algorithms, insertion defaults, other Surface architecture, dependencies or generated indexes.
 - Hotspot lock: Properties is single-writer until this card reaches a terminal state; the gate spec and docs may be read but not changed under this implementation card.
 - Acceptance:
-  - [ ] A default auto-height Spatial world text name edit changes only its canonical `label`, preserves its complete frame/content/style, and adds exactly one revision/history entry.
-  - [ ] Undo/redo restores and reapplies that exact label-only delta.
-  - [ ] Text/runs, style and the writing dimension continue to request auto-fit; x/y/rotation/name/visibility/lock/opacity/playback-only patches do not append width/height.
-  - [ ] No Store, contract, Player, insertion-default or layout-algorithm change.
+  - [x] A default auto-height Spatial world text name edit changes only its canonical `label`, preserves its complete frame/content/style, and adds exactly one revision/history entry.
+  - [x] Undo/redo restores and reapplies that exact label-only delta.
+  - [x] Text/runs, style and the writing dimension continue to request auto-fit; x/y/rotation/name/visibility/lock/opacity/playback-only patches do not append width/height.
+  - [x] No Store, contract, Player, insertion-default or layout-algorithm change.
 
 ## Minimal validation
 
@@ -51,9 +51,8 @@ Renaming or changing another non-layout property of an auto-height text preserve
 ## Result and rollback
 
 - Start point: `63d3e58` with Wave B retrying after the deterministic label-plus-geometry failure.
-- Product commit and rollback: pending; revert the single implementation commit if the focused counterexample or Wave B gate regresses.
-- Result evidence: pending focused result, typecheck and independent review.
+- Product commit and rollback: `58c1e45`; revert that commit if the focused counterexample or Wave B gate regresses.
+- Result evidence: `PropertiesTab` now invokes text auto-fit only when a patch contains text, runs, style, width or height; metadata/common patches pass through without derived dimensions. The new default Spatial world-text UI counterexample proves full-document equality except label/revision/timestamp, exact frame/content/style preservation, one revision/history entry and exact undo/redo. `npx vitest run tests/unit/spatialProductIntegration.test.tsx` passed `16/16`; `npm run typecheck` passed all three TypeScript projects; `git diff --check` passed. The independent property-delta reviewer inspected layout/non-layout categories, fixed↔auto semantics, the shared Slide boundary and the exact history oracle and concluded `APPROVE` without editing or duplicating validation. Pipeline status: pass; outcome status: `engineering candidate` pending the Wave B real-browser rerun.
 - Outcome boundary: focused automation permits only `engineering candidate`; the real browser behavior remains owned by Wave B.
 - Semantic index impact: `none`
 - Generated refresh: `defer-to-wave-gate`
-
