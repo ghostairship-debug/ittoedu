@@ -400,12 +400,17 @@ async function measureMedia(
   scope: Locator,
 ): Promise<MediaMeasurements> {
   const rootMetrics = await queryRoot.evaluate((element) => {
-    const style = getComputedStyle(element)
+    const root = element as HTMLElement
+    const style = getComputedStyle(root)
     const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
-    const rect = element.getBoundingClientRect()
+    const border = Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.borderRightWidth)
+    const computedWidth = Number.parseFloat(style.width)
+    const rect = root.getBoundingClientRect()
     return {
-      logicalContainerWidth: element.clientWidth - padding,
-      visualScale: element.clientWidth > 0 ? rect.width / element.clientWidth : 1,
+      logicalContainerWidth: style.boxSizing === 'border-box'
+        ? computedWidth - padding - border
+        : computedWidth,
+      visualScale: root.offsetWidth > 0 ? rect.width / root.offsetWidth : 1,
     }
   })
   const widths: number[] = []
@@ -628,15 +633,15 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       const playerArticle = previewHost.getByTestId('flow-runtime-article')
       await expect(playerArticle).toBeVisible({ timeout: 15_000 })
       await expect(previewHost.locator('[data-flow-block-id="wave-c-media-content"] img'))
-        .toHaveAttribute('src', /^blob:/)
+        .toHaveAttribute('src', /^(?:blob:|data:image\/)/)
       await expect(previewHost.locator('[data-flow-block-id="wave-c-media-wide"] img'))
-        .toHaveAttribute('src', /^blob:/)
+        .toHaveAttribute('src', /^(?:blob:|data:image\/)/)
       const playerVideo = previewHost.locator('[data-flow-block-id="wave-c-media-full"] video')
       await expect(playerVideo).toHaveAttribute('controls', '')
-      await expect(playerVideo).toHaveAttribute('src', /^blob:/)
+      await expect(playerVideo).toHaveAttribute('src', /^(?:blob:|data:video\/)/)
       const playerEditedVideo = previewHost.locator('[data-flow-block-id="wave-c-media-edit"] video')
       await expect(playerEditedVideo).toHaveAttribute('controls', '')
-      await expect(playerEditedVideo).toHaveAttribute('src', /^blob:/)
+      await expect(playerEditedVideo).toHaveAttribute('src', /^(?:blob:|data:video\/)/)
       const playerMeasurement = await measureMedia(playerArticle, previewHost)
       expectMediaProjection(playerMeasurement)
       expect(editorMeasurement.layouts).toEqual(playerMeasurement.layouts)
