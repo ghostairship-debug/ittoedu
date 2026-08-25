@@ -387,6 +387,28 @@ describe('FlowWorkspace paper', () => {
     expect(onSelectionChange).not.toHaveBeenCalled()
   })
 
+  it('reserves the complete below-toolbar footprint before neighboring blocks', () => {
+    const project = createFlowProject()
+    const headingSelection = selectFlowEditorBlocks(project, 'h1', ['h1'])
+    const headingRender = renderPaper(project, headingSelection)
+    expect(screen.getByTestId('flow-block-context-toolbar'))
+      .toHaveAttribute('data-flow-toolbar-placement', 'below')
+    expect(screen.getByTestId('flow-block-h1')).toHaveStyle({ marginBottom: '72px' })
+    expect(screen.getByTestId('flow-block-p-body')).toHaveStyle({ marginBottom: '12px' })
+    headingRender.unmount()
+
+    const wrappedProject = createFlowProject()
+    const flow = wrappedProject.surfaces.find((surface) => surface.type === 'flow')
+    const media = flow?.type === 'flow'
+      ? flow.blocks.find((block) => block.id === 'media-1')
+      : undefined
+    if (!media || media.type !== 'media') throw new Error('expected Flow media fixture')
+    media.wrap = 'left'
+    const mediaSelection = selectFlowEditorBlocks(wrappedProject, 'h1', ['media-1'])
+    renderPaper(wrappedProject, mediaSelection)
+    expect(screen.getByTestId('flow-block-media-1')).toHaveStyle({ marginBottom: '68px' })
+  })
+
   it('keeps the formula body target stable across selection rerender and opens on a second real click', () => {
     const { onSelectionChange, onTextEditChange, project, rerender } = renderPaper()
     const explicitEntry = screen.getByRole('button', { name: '编辑公式' })

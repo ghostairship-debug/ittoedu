@@ -1303,6 +1303,11 @@ export function FlowWorkspace({
 
     const isWrapLeft = (block.type === 'media' || block.type === 'component') && block.wrap === 'left'
     const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
+    const effectiveToolbarPlacement = editingThis ? toolbarPlacement : 'below'
+    const baseMarginBottom = isWrapLeft || isWrapRight ? 8 : 12
+    const toolbarMarginReserve = showToolbar && effectiveToolbarPlacement === 'below'
+      ? FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET
+      : 0
 
     const frameStyle: CSSProperties = {
       position: 'relative' as const,
@@ -1323,6 +1328,7 @@ export function FlowWorkspace({
               margin: '0 0 8px 16px',
             }
           : {}),
+      marginBottom: baseMarginBottom + toolbarMarginReserve,
     }
 
     const frameProps = {
@@ -1763,7 +1769,7 @@ export function FlowWorkspace({
           <FlowBlockContextToolbar
             block={block}
             selectionFormat={selectionFormat}
-            placement={editingThis ? toolbarPlacement : 'below'}
+            placement={effectiveToolbarPlacement}
             onPreserveSelection={() => {
               const editor = scrollRef.current?.querySelector('[data-testid="flow-inline-editor"]')
               if (editor instanceof HTMLElement) {
