@@ -741,10 +741,80 @@ describe('Published Course V2 producer', () => {
     expect(buildPublishedCourseV2Payload(sources).assets['slide-image']).toBeDefined()
   })
 
-  it('keeps structurally invalid V9 and raw V8 projects on the Zod error path', () => {
+  it('gates native image content.data=null with the shared project-schema-invalid diagnostic', () => {
+    const sources = mutableMixedSources()
+    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const image = slide.scenes[0]!.layerItems.find(
+      (item) => item.kind === 'native' && item.content.nativeType === 'image',
+    )
+    if (!image || image.kind !== 'native') throw new Error('expected native image item')
+    ;(image.content as { data: unknown }).data = null
+
+    const parsed = courseProjectDocumentSchema.safeParse(sources.project)
+    if (parsed.success) throw new Error('expected malformed native data to fail schema parse')
+    expect(parsed.error.issues.every((issue) => issue.code === 'custom')).toBe(true)
+    const firstIssuePath = parsed.error.issues[0]!.path
+
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'project-schema-invalid',
+      path: firstIssuePath,
+    }))
+
+    try {
+      buildPublishedCourseV2Payload(sources)
+      throw new Error('expected producer to reject malformed native data')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PublishedCourseSourceError)
+      expect(error).not.toBeInstanceOf(TypeError)
+      expect(error).toMatchObject({
+        code: 'project-schema-invalid',
+        path: firstIssuePath,
+      })
+    }
+  })
+
+  it('gates schema-invalid V9 with the shared typed diagnostic and keeps raw V8 on the Zod error path', () => {
     const malformedV9 = mutableMixedSources()
     delete (malformedV9.project as unknown as Record<string, unknown>).globalLayerItems
-    expect(() => buildPublishedCourseV2Payload(malformedV9)).toThrow(ZodError)
+
+    const parsed = courseProjectDocumentSchema.safeParse(malformedV9.project)
+    if (parsed.success) throw new Error('expected malformed V9 to fail schema parse')
+    const firstIssuePath = parsed.error.issues[0]!.path
+
+    const report = collectCoursePackageExportPreflight(
+      malformedV9.project,
+      'web-package',
+      { assetFiles: malformedV9.assetFiles, components: malformedV9.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'project-schema-invalid',
+      path: firstIssuePath,
+    }))
+    try {
+      buildPublishedCourseV2Payload(malformedV9)
+      throw new Error('expected producer to reject schema-invalid V9')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PublishedCourseSourceError)
+      expect(error).not.toBeInstanceOf(ZodError)
+      expect(error).toMatchObject({
+        code: 'project-schema-invalid',
+        path: firstIssuePath,
+      })
+    }
 
     const v8 = createProject({
       id: 'v8-raw',

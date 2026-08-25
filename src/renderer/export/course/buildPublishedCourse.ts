@@ -1,3 +1,4 @@
+import type { ZodError } from 'zod'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import {
@@ -66,6 +67,7 @@ export interface BuildPublishedCourseOptions {
 
 /** Deterministic source facts that must hold before a V9 project can publish. */
 export type PublishedCourseSourceIssueCode =
+  | 'project-schema-invalid'
   | 'asset-metadata-missing'
   | 'asset-bytes-missing'
   | 'asset-byte-length-mismatch'
@@ -393,12 +395,48 @@ function isRawV9Project(value: unknown): value is { schemaVersion: 9 } {
 }
 
 /**
+ * Probe the exact read-only graph walkers used for source-fact collection.
+ * Both walks are pure, so a clean probe guarantees the real collection cannot
+ * leak a native TypeError on a malformed raw shape.
+ */
+function isRawSourceWalkSafe(sources: CoursePublishSources): boolean {
+  try {
+    collectPublishedCourseAssetIds(sources)
+    collectPublishedCourseComponentKeys(sources.project)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Stable schema diagnostic shared by preflight and the producer for a raw V9
+ * project that failed parsing, keyed to the first Zod issue path.
+ */
+function publishedCourseSchemaInvalidIssue(
+  error: ZodError,
+): PublishedCourseSourceIssue {
+  const first = error.issues[0]
+  const path = (first?.path ?? []).filter(
+    (key): key is string | number => typeof key !== 'symbol',
+  )
+  return {
+    code: 'project-schema-invalid',
+    message: `工程不符合 Course Project V9 Schema：${first?.message ?? '未知错误'}`,
+    path,
+  }
+}
+
+/**
  * Derive source facts from the same canonical V9 document the producer emits.
  * A schema-valid document can trim stable IDs, so collecting against the raw
  * object would disagree with subsequent producer lookups.  When parsing only
  * fails on custom semantic/reference checks, the raw shape is still safe to
- * inspect for an actionable source issue.  Other failures must stay on the
- * ordinary Zod error path rather than entering the graph walker.
+ * inspect for an actionable source issue.  Structural gates expressed as
+ * custom-issue transforms (for example native `content.data`) also fail with
+ * custom issues alone, so the raw shape is only trusted after a walk-safety
+ * probe; malformed input stays on the schema rejection path rather than
+ * entering the graph walker.
  */
 function resolvePublishedCourseSourceFacts(
   input: CoursePublishSources,
@@ -414,6 +452,7 @@ function resolvePublishedCourseSourceFacts(
     isRawV9Project(input.project)
     && parsedProject.error.issues.length > 0
     && parsedProject.error.issues.every((issue) => issue.code === 'custom')
+    && isRawSourceWalkSafe(input)
   ) {
     return { parsedProject, sources: input }
   }
@@ -516,12 +555,22 @@ function collectPublishedCourseSourceIssuesFromFacts(
  * Collect every deterministic local source condition required by the V2
  * producer. Package preflight maps these facts directly, while the producer
  * raises the first fact as a structured hard gate before it starts emitting.
+ * A raw V9 project rejected by the schema reports the shared
+ * `project-schema-invalid` diagnostic keyed to the first Zod issue path.
  */
 export function collectPublishedCourseSourceIssues(
   input: CoursePublishSources,
 ): PublishedCourseSourceIssue[] {
-  const { sources } = resolvePublishedCourseSourceFacts(input)
-  return sources ? collectPublishedCourseSourceIssuesFromFacts(sources) : []
+  const facts = resolvePublishedCourseSourceFacts(input)
+  if (facts.parsedProject.success) {
+    return collectPublishedCourseSourceIssuesFromFacts(facts.sources!)
+  }
+  if (!isRawV9Project(input.project)) return []
+  if (facts.sources) {
+    const issues = collectPublishedCourseSourceIssuesFromFacts(facts.sources)
+    if (issues.length > 0) return issues
+  }
+  return [publishedCourseSchemaInvalidIssue(facts.parsedProject.error)]
 }
 
 export function assertPublishedCourseSourceIssues(
@@ -737,11 +786,20 @@ export function buildPublishedCourseV2Payload(
   options: BuildPublishedCourseOptions = {},
 ): PublishedCourseV2Payload {
   const sourceFacts = resolvePublishedCourseSourceFacts(input)
-  // Keep the stable source-issue gate for V9 projects that are safe to walk;
-  // raw V8 and structurally malformed V9 input continue to surface Zod errors.
-  if (isRawV9Project(input.project) && sourceFacts.sources) {
-    const issue = collectPublishedCourseSourceIssuesFromFacts(sourceFacts.sources)[0]
-    if (issue) throw new PublishedCourseSourceError(issue)
+  // Keep the stable source-issue gate for V9 projects that are safe to walk.
+  // Schema-invalid V9 input shares the typed project-schema-invalid diagnostic
+  // with preflight instead of leaking a native TypeError from a raw walk;
+  // raw V8 input continues to surface Zod errors.
+  if (isRawV9Project(input.project)) {
+    if (sourceFacts.sources) {
+      const issue = collectPublishedCourseSourceIssuesFromFacts(sourceFacts.sources)[0]
+      if (issue) throw new PublishedCourseSourceError(issue)
+    }
+    if (!sourceFacts.parsedProject.success) {
+      throw new PublishedCourseSourceError(
+        publishedCourseSchemaInvalidIssue(sourceFacts.parsedProject.error),
+      )
+    }
   }
   if (!sourceFacts.parsedProject.success) throw sourceFacts.parsedProject.error
   const project = sourceFacts.parsedProject.data
