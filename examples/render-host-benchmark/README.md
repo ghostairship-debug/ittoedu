@@ -69,14 +69,16 @@ Three.js 的 MIT 许可证和版本信息分别位于 [`THIRD_PARTY_NOTICES.md`]
 
 ## 实际互动验收
 
-1. 用编辑器打开 `render-host-benchmark.h5lesson`，确认左侧有五个场景，且第一页只有可直接选择的原生节点。
+以下步骤只以当前 V9 / Published V2 产物为验收入口；`render-host-benchmark.h5lesson` 与 `render-host-benchmark.html` 仅作为 release verifier 使用的冻结 V8 兼容输入，不参与当前产品验收。
+
+1. 用编辑器打开 `render-host-benchmark-v9.h5lesson`，确认左侧有五个场景，且第一页只有可直接选择的原生节点。
 2. 第二页进入“当前位置试运行”，点击轨道左/右侧；确认行星相位改变、状态文字更新。
 3. 第三页拖动地球并滚动鼠标滚轮；确认视角和距离变化，“恢复视角”能回到确定状态。
 4. 第四页点击表格行、排序和恢复按钮；回到编辑模式修改组件 `props.content` 文案，确认预览更新。
 5. 第五页点击 V4 Phaser 仪表盘不同位置；确认指针和计数文案更新，且单个组件不影响其他场景。
 6. 快速往返切换第二/三/四/五页 25 轮并在每轮重播末页（100 次切页、25 次重播），观察浏览器性能面板；确认不累积 RAF、DOM 监听、Phaser `update` 监听或 WebGL 上下文。
 7. 执行 PDF/PPTX 静态导出；确认 Three runtime 在 `prepareCapture()` 中主动渲染确定帧，V4 表格在捕获时固定高亮首行；Three runtime 捕获失败时使用登记的 SVG `staticFallback`，组件捕获失败时显示带名称的诊断占位。
-8. 打开 `render-host-benchmark.html` 重复 2–5 步，确认无 CDN、远程模型或其他网络请求。
+8. 打开 `render-host-benchmark-v2.html` 重复 2–5 步，确认无 CDN、远程模型或其他网络请求。
 
 自动化 E2E 会实际完成 25 轮第二至第五页切换和末页重播，即 100 次切页、25 次重播；结束时断言没有遗留 runtime/component mount 或 runtime Canvas，活动 RAF 数未持续增长，并检查无外部请求、页面异常和控制台错误。DOM 监听器数量和浏览器 WebGL 上下文回收仍应按第 6 步用性能工具人工复核。
 

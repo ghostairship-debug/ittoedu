@@ -1,4 +1,4 @@
-import { chromium, expect, test, type Page } from '@playwright/test'
+import { chromium, expect, test, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -53,6 +53,23 @@ async function phaserTexts(page: Page): Promise<string[]> {
     scene.children.list.forEach(visit)
     return texts
   })
+}
+
+async function screenshotLogicalCanvasRegion(
+  canvas: Locator,
+  region: { x: number; y: number; width: number; height: number },
+): Promise<Buffer> {
+  const image = sharp(await canvas.screenshot())
+  const metadata = await image.metadata()
+  if (!metadata.width || !metadata.height) {
+    throw new Error('Canvas screenshot has no dimensions')
+  }
+  return image.extract({
+    left: Math.floor(region.x / 1280 * metadata.width),
+    top: Math.floor(region.y / 720 * metadata.height),
+    width: Math.max(1, Math.floor(region.width / 1280 * metadata.width)),
+    height: Math.max(1, Math.floor(region.height / 720 * metadata.height)),
+  }).png().toBuffer()
 }
 
 test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主', async () => {
@@ -351,12 +368,20 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
     await page.waitForTimeout(200)
     const phaserBounds = await phaserRuntimeCanvas.boundingBox()
     if (!phaserBounds) throw new Error('Published V2 Phaser Runtime canvas is not visible')
+    const phaserStatusRegion = { x: 80, y: 460, width: 440, height: 58 }
+    const phaserStatusBefore = await screenshotLogicalCanvasRegion(
+      phaserRuntimeCanvas,
+      phaserStatusRegion,
+    )
     await phaserRuntimeCanvas.click({
       position: {
         x: phaserBounds.width * (652 / 1280),
         y: phaserBounds.height * (344 / 720),
       },
     })
+    await expect.poll(async () => (
+      await screenshotLogicalCanvasRegion(phaserRuntimeCanvas, phaserStatusRegion)
+    ).equals(phaserStatusBefore)).toBe(false)
     const phaserRuntimeStats = await sharp(await phaserRuntimeCanvas.screenshot()).stats()
     expect(phaserRuntimeStats.channels.some(({ stdev }) => stdev > 12)).toBe(true)
 
@@ -397,6 +422,17 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
     await expect(table.locator('output')).toContainText('已选中：原生节点')
     await table.getByRole('button', { name: '按适用度排序' }).click()
     await expect(table.locator('output')).toHaveText('已按适用度从高到低排序')
+    expect(await table.locator('tbody tr').evaluateAll((rows) => rows.map((row) => {
+      const cells = [...row.querySelectorAll('td')]
+      return {
+        route: cells[0]?.textContent?.trim() ?? '',
+        score: cells[3]?.textContent?.trim() ?? '',
+      }
+    }))).toEqual([
+      { route: '原生节点', score: '95' },
+      { route: 'DOM / Three.js 增强', score: '92' },
+      { route: 'Phaser 运行时', score: '88' },
+    ])
 
     await goToScene(page, 4)
     await waitForLocation('scene_component_v4_phaser_v9')
