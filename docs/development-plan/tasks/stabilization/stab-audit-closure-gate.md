@@ -10,17 +10,18 @@
 - Validation ceiling: V0
 - Validation budget: 10 minutes
 - Reviewer budget: 1
-- Evidence reuse: 复用 Wave A/B/C、focused 任务、合同裁决和性能处置绑定固定候选的证据；closure 只检查覆盖、终态和证据 freshness，不重复产品测试、浏览器、typecheck 或打包。
-- Invalidating paths: `PRODUCT_DEEP_AUDIT_2026-08-24.md`; `COURSEWARE_DEVELOPMENT_PLAN.md`; `docs/development-plan/TASK_BOARD.md`; the state/result or recorded invalidating paths of cards named in Depends on
+- Evidence reuse: 复用 Wave A/B/C、focused 任务、合同裁决和性能处置绑定固定候选的证据；closure 只检查覆盖、终态和证据 freshness，不重复产品测试、浏览器、typecheck 或打包。仅 closure 卡、报告、TASK_BOARD、repo-index 或其他 generated 变化不使产品证据失效。
+- Invalidating paths: `PRODUCT_DEEP_AUDIT_2026-08-24.md`; `COURSEWARE_DEVELOPMENT_PLAN.md`; the state/result or product/test/contract invalidating paths of cards named in Depends on; excludes closure-only cards/reports, TASK_BOARD and repo-index/generated-only refreshes
 - Task ID: `stab-audit-closure-gate`
 - Phase / wave: `post-audit stabilization / audit closure`
-- Status: `draft`
+- Status: `claimed`
 - Owner / Reviewer / Integrator: `Stabilization Integrator / Product-truth Reviewer / Stabilization Integrator`
-- Claimed at / released at: `not claimed / not released`
+- Claimed at / released at: `2026-08-25 / not released`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
-- Baseline HEAD: `record after all dependencies have an explicit disposition`
+- Baseline HEAD: audit revision `5c512f9`; final integrated product `23f2d00`; Wave C closure `2aba2fa`; all named dependencies have an explicit terminal disposition.
 - Depends on: `stab-wave-a-core-usability`, `stab-wave-b-ownership-controller`, `stab-wave-c-flow-authoring`, `stab-cross-01-surface-aware-insertion-affordance`, `stab-cross-02-interaction-properties-entry`, `stab-diagnostics-01-teacher-facing-command-errors`, `stab-flow-10-inline-formula-contract-and-vertical-slice`, `stab-flow-11-video-playback-contract-decision`, `stab-flow-12-image-editing-contract-decision`, `stab-perf-00-packaged-startup-baseline`
 - Blocks: claim of a new ARCH-5 final-candidate card
+- Retry count / last failure class: `0 / closure inventory in progress`
 
 ## Product outcome
 
@@ -46,4 +47,3 @@
 
 - Planned result: 输出审计关闭记录和下一张 ARCH-5 final-candidate 的精确输入；未满足时列出最小阻断卡并保持 draft。
 - Rollback: 只回滚 closure 记录和状态；各产品修复、合同与性能处置维持独立回滚链。
-
