@@ -741,45 +741,51 @@ describe('Published Course V2 producer', () => {
     expect(buildPublishedCourseV2Payload(sources).assets['slide-image']).toBeDefined()
   })
 
-  it('gates native image content.data=null with the shared project-schema-invalid diagnostic', () => {
-    const sources = mutableMixedSources()
-    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
-    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
-    const image = slide.scenes[0]!.layerItems.find(
-      (item) => item.kind === 'native' && item.content.nativeType === 'image',
-    )
-    if (!image || image.kind !== 'native') throw new Error('expected native image item')
-    ;(image.content as { data: unknown }).data = null
+  it('gates structurally malformed native image data with the shared schema diagnostic', () => {
+    for (const scenario of [
+      { name: 'null data', data: null },
+      { name: 'empty data object', data: {} },
+    ]) {
+      const sources = mutableMixedSources()
+      const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+      if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+      const image = slide.scenes[0]!.layerItems.find(
+        (item) => item.kind === 'native' && item.content.nativeType === 'image',
+      )
+      if (!image || image.kind !== 'native') throw new Error('expected native image item')
+      ;(image.content as { data: unknown }).data = scenario.data
 
-    const parsed = courseProjectDocumentSchema.safeParse(sources.project)
-    if (parsed.success) throw new Error('expected malformed native data to fail schema parse')
-    expect(parsed.error.issues.every((issue) => issue.code === 'custom')).toBe(true)
-    const firstIssuePath = parsed.error.issues[0]!.path
+      const parsed = courseProjectDocumentSchema.safeParse(sources.project)
+      if (parsed.success) throw new Error('expected malformed native data to fail schema parse')
+      expect(parsed.error.issues.every((issue) => issue.code === 'custom'), scenario.name)
+        .toBe(true)
+      const firstIssuePath = parsed.error.issues[0]!.path
 
-    const report = collectCoursePackageExportPreflight(
-      sources.project,
-      'web-package',
-      { assetFiles: sources.assetFiles, components: sources.components },
-      PLAYER_BUNDLE,
-      new Date(NOW),
-    )
-    expect(report.summary.canExport).toBe(false)
-    expect(report.items).toContainEqual(expect.objectContaining({
-      severity: 'error',
-      code: 'project-schema-invalid',
-      path: firstIssuePath,
-    }))
-
-    try {
-      buildPublishedCourseV2Payload(sources)
-      throw new Error('expected producer to reject malformed native data')
-    } catch (error) {
-      expect(error).toBeInstanceOf(PublishedCourseSourceError)
-      expect(error).not.toBeInstanceOf(TypeError)
-      expect(error).toMatchObject({
+      const report = collectCoursePackageExportPreflight(
+        sources.project,
+        'web-package',
+        { assetFiles: sources.assetFiles, components: sources.components },
+        PLAYER_BUNDLE,
+        new Date(NOW),
+      )
+      expect(report.summary.canExport, scenario.name).toBe(false)
+      expect(report.items, scenario.name).toContainEqual(expect.objectContaining({
+        severity: 'error',
         code: 'project-schema-invalid',
         path: firstIssuePath,
-      })
+      }))
+
+      try {
+        buildPublishedCourseV2Payload(sources)
+        throw new Error(`expected producer to reject ${scenario.name}`)
+      } catch (error) {
+        expect(error, scenario.name).toBeInstanceOf(PublishedCourseSourceError)
+        expect(error, scenario.name).not.toBeInstanceOf(TypeError)
+        expect(error, scenario.name).toMatchObject({
+          code: 'project-schema-invalid',
+          path: firstIssuePath,
+        })
+      }
     }
   })
 

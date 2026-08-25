@@ -1,4 +1,4 @@
-import type { ZodError } from 'zod'
+import type { ZodError, ZodIssue } from 'zod'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import {
@@ -382,9 +382,9 @@ function compareSourceIssues(
 interface PublishedCourseSourceFacts {
   /**
    * Available only when this is a V9 project that is either fully parsed, or
-   * has passed every structural check and failed solely on semantic references.
-   * The latter retains actionable missing-resource diagnostics before the
-   * final schema rejection path.
+   * has passed every nested/structural check and failed solely on missing
+   * asset/component reference checks. The latter retains actionable missing-
+   * resource diagnostics before the final schema rejection path.
    */
   sources: CoursePublishSources | null
   parsedProject: ReturnType<typeof courseProjectDocumentSchema.safeParse>
@@ -410,6 +410,21 @@ function isRawSourceWalkSafe(sources: CoursePublishSources): boolean {
 }
 
 /**
+ * These messages are emitted only by the document-level reference refinement,
+ * after every nested carrier has parsed successfully. They are the two schema
+ * failures for which source-fact collection intentionally provides the more
+ * actionable missing-metadata diagnostic. Other custom issues can be
+ * structural (notably native-data transforms) and must stay on the schema path
+ * even when a raw walker happens not to throw.
+ */
+function isMissingPublishedSourceReferenceIssue(issue: ZodIssue): boolean {
+  return issue.code === 'custom' && (
+    issue.message.startsWith('Missing asset: ')
+    || issue.message.startsWith('Missing component package/version: ')
+  )
+}
+
+/**
  * Stable schema diagnostic shared by preflight and the producer for a raw V9
  * project that failed parsing, keyed to the first Zod issue path.
  */
@@ -430,13 +445,12 @@ function publishedCourseSchemaInvalidIssue(
 /**
  * Derive source facts from the same canonical V9 document the producer emits.
  * A schema-valid document can trim stable IDs, so collecting against the raw
- * object would disagree with subsequent producer lookups.  When parsing only
- * fails on custom semantic/reference checks, the raw shape is still safe to
- * inspect for an actionable source issue.  Structural gates expressed as
- * custom-issue transforms (for example native `content.data`) also fail with
- * custom issues alone, so the raw shape is only trusted after a walk-safety
- * probe; malformed input stays on the schema rejection path rather than
- * entering the graph walker.
+ * object would disagree with subsequent producer lookups. When parsing fails
+ * solely on the document-level missing asset/component reference checks, every
+ * nested carrier has already parsed, so the raw shape may be inspected for the
+ * more actionable missing-metadata issue. Other custom issues can be structural
+ * (for example native `content.data`) and must stay on the schema rejection
+ * path; walker exception-safety alone is not evidence of structural validity.
  */
 function resolvePublishedCourseSourceFacts(
   input: CoursePublishSources,
@@ -451,7 +465,7 @@ function resolvePublishedCourseSourceFacts(
   if (
     isRawV9Project(input.project)
     && parsedProject.error.issues.length > 0
-    && parsedProject.error.issues.every((issue) => issue.code === 'custom')
+    && parsedProject.error.issues.every(isMissingPublishedSourceReferenceIssue)
     && isRawSourceWalkSafe(input)
   ) {
     return { parsedProject, sources: input }
