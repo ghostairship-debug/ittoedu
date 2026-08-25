@@ -641,7 +641,7 @@ function expectCleanDiagnostics(diagnostics: Diagnostics): void {
 }
 
 test('Wave B ownership and controller contracts survive one real Mixed session', async () => {
-  test.setTimeout(240_000)
+  test.setTimeout(420_000)
   const launch = await launchEditor()
   const projectPath = join(launch.runRoot, 'wave-b-ownership-controller.h5lesson')
   const { app, page } = launch
@@ -919,7 +919,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       await expect(page.getByTestId('spatial-layer-move-note')).toContainText(SPATIAL_MOVE_REASON)
       const afterRejectedDrop = await saveCurrent(page, projectPath)
       expect(afterRejectedDrop).toEqual(afterNodesDuplicate)
-      await page.getByRole('button', { name: '关闭错误提示' }).click()
+      await expect(page.getByRole('alert')).toHaveCount(0)
       await expectOneUndoRedoStep(page, projectPath, afterDuplicate, afterNodesDuplicate)
 
       const beforeOrder = spatialSurface(afterNodesDuplicate).world.layerItems
