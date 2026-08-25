@@ -1,15 +1,13 @@
 import { strToU8, zip, zipSync } from 'fflate'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
-import type { AssetMeta } from '../../../shared/projectTypes'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import {
   buildPublishedCourseV2Payload,
-  collectPublishedCourseAssetIds,
-  collectPublishedCourseComponentKeys,
+  collectPublishedCourseSourceIssues,
   type CoursePublishSources,
+  type PublishedCourseSourceIssue,
 } from './buildPublishedCourse'
 
 export interface PublishedCoursePackageOptions {
@@ -27,11 +25,7 @@ export interface CoursePackageExportResources {
 
 export interface CoursePackagePreflightItem {
   severity: 'error' | 'warning' | 'info'
-  code:
-    | 'asset-bytes-missing'
-    | 'component-bytes-missing'
-    | 'component-hash-mismatch'
-    | 'player-bundle-empty'
+  code: PublishedCourseSourceIssue['code'] | 'player-bundle-empty'
   message: string
   path?: ReadonlyArray<string | number>
 }
@@ -97,31 +91,6 @@ const EXTENSIONS: Readonly<Record<string, string>> = {
   'text/plain': 'txt',
 }
 
-function componentKey(packageId: string, version: string): string {
-  return `${packageId}@${version}`
-}
-
-function findAssetEntry(
-  project: CourseProjectDocument,
-  assetId: string,
-): readonly [string, AssetMeta] | undefined {
-  const direct = project.assets[assetId]
-  if (direct) return [assetId, direct]
-  return Object.entries(project.assets).find(([, metadata]) => metadata.id === assetId)
-}
-
-function findComponentSource(
-  components: Readonly<Record<string, ComponentPackageData>>,
-  packageId: string,
-  version: string,
-): ComponentPackageData | undefined {
-  return components[componentKey(packageId, version)]
-    ?? components[packageId]
-    ?? Object.values(components).find(({ manifest }) => (
-      manifest.id === packageId && manifest.version === version
-    ))
-}
-
 function summarize(items: readonly CoursePackagePreflightItem[]): CoursePackagePreflightReport['summary'] {
   const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: true }
   items.forEach(({ severity }) => { summary[severity] += 1 })
@@ -145,52 +114,8 @@ export function collectCoursePackageExportPreflight(
     })
   }
 
-  for (const assetId of [...collectPublishedCourseAssetIds({ project, components: resources.components })].sort()) {
-    const entry = findAssetEntry(project, assetId)
-    if (!entry) continue
-    const [recordKey, meta] = entry
-    const bytes = resources.assetFiles[meta.id]
-      ?? resources.assetFiles[recordKey]
-    if (!bytes) {
-      items.push({
-        severity: 'error',
-        code: 'asset-bytes-missing',
-        message: `素材“${meta.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
-        path: ['assets', recordKey],
-      })
-    }
-  }
-
-  for (const key of [...collectPublishedCourseComponentKeys(project)].sort()) {
-    const separator = key.lastIndexOf('@')
-    const packageId = key.slice(0, separator)
-    const version = key.slice(separator + 1)
-    const metadataEntry = Object.entries(project.componentPackages).find(([, metadata]) => (
-      metadata.packageId === packageId && metadata.version === version
-    ))
-    const recordKey = metadataEntry?.[0] ?? key
-    const embedded = metadataEntry?.[1]
-    const component = findComponentSource(resources.components, packageId, version)
-    if (!component) {
-      items.push({
-        severity: 'error',
-        code: 'component-bytes-missing',
-        message: `组件包“${key}”没有可嵌入导出物的执行内容。`,
-        path: ['componentPackages', recordKey],
-      })
-      continue
-    }
-    if (embedded) {
-      const actualHash = component.contentSha256 ?? componentContentSha256(component.files)
-      if (embedded.contentSha256 !== actualHash) {
-        items.push({
-          severity: 'error',
-          code: 'component-hash-mismatch',
-          message: `组件包“${key}”的工程锁定内容哈希与当前执行内容不一致。`,
-          path: ['componentPackages', recordKey, 'contentSha256'],
-        })
-      }
-    }
+  for (const issue of collectPublishedCourseSourceIssues({ project, ...resources })) {
+    items.push({ severity: 'error', ...issue })
   }
 
   const sorted = [...items].sort((left, right) => {

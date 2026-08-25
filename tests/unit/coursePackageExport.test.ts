@@ -149,5 +149,32 @@ describe('course package export', () => {
     }))
     expect(report.summary.canExport).toBe(false)
     expect(report.generatedAt).toBe('2026-08-17T00:00:00.000Z')
+
+    const byteLengthReport = collectCoursePackageExportPreflight(
+      project,
+      'web-package',
+      { assetFiles: { hero: new Uint8Array([1, 2, 3]) }, components: {} },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+    )
+    expect(byteLengthReport.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'asset-byte-length-mismatch',
+      path: ['assets', 'hero', 'byteLength'],
+    }))
+
+    delete project.assets.hero
+    const metadataReport = collectCoursePackageExportPreflight(
+      project,
+      'web-package',
+      { assetFiles: {}, components: {} },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+    )
+    expect(metadataReport.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'asset-metadata-missing',
+      path: ['assets', 'hero'],
+    }))
   })
 })

@@ -32,6 +32,7 @@ import {
 } from '../../../shared/publishedCourseTypes'
 import { publishedCourseV2Schema } from '../../../shared/publishedCourseSchema'
 import type { AssetMeta, EmbeddedComponentPackageMeta } from '../../../shared/projectTypes'
+import { compareStableStrings } from '../../../shared/stableOrder'
 import { bytesToBase64, bytesToDataUrl } from '../base64'
 
 export interface CoursePublishSources {
@@ -61,6 +62,39 @@ export interface BuildPublishedCourseOptions {
     mimeType: string,
     bytes: Uint8Array,
   ) => string
+}
+
+/** Deterministic source facts that must hold before a V9 project can publish. */
+export type PublishedCourseSourceIssueCode =
+  | 'asset-metadata-missing'
+  | 'asset-bytes-missing'
+  | 'asset-byte-length-mismatch'
+  | 'component-metadata-missing'
+  | 'component-bytes-missing'
+  | 'component-manifest-identity-mismatch'
+  | 'component-hash-mismatch'
+  | 'component-asset-bytes-missing'
+
+export interface PublishedCourseSourceIssue {
+  code: PublishedCourseSourceIssueCode
+  message: string
+  path: ReadonlyArray<string | number>
+}
+
+/**
+ * Retains the machine-stable source fact for callers that build without first
+ * showing the package preflight report.
+ */
+export class PublishedCourseSourceError extends Error {
+  readonly code: PublishedCourseSourceIssueCode
+  readonly path: ReadonlyArray<string | number>
+
+  constructor(readonly issue: PublishedCourseSourceIssue) {
+    super(issue.message)
+    this.name = 'PublishedCourseSourceError'
+    this.code = issue.code
+    this.path = issue.path
+  }
 }
 
 interface ComponentReference {
@@ -330,6 +364,123 @@ export function collectPublishedCourseAssetIds(
   return result
 }
 
+function sourceIssuePathKey(path: ReadonlyArray<string | number>): string {
+  return JSON.stringify(path)
+}
+
+function compareSourceIssues(
+  left: PublishedCourseSourceIssue,
+  right: PublishedCourseSourceIssue,
+): number {
+  return compareStableStrings(left.code, right.code) ||
+    compareStableStrings(left.message, right.message) ||
+    compareStableStrings(sourceIssuePathKey(left.path), sourceIssuePathKey(right.path))
+}
+
+/**
+ * Collect every deterministic local source condition required by the V2
+ * producer. Package preflight maps these facts directly, while the producer
+ * raises the first fact as a structured hard gate before it starts emitting.
+ */
+export function collectPublishedCourseSourceIssues(
+  sources: CoursePublishSources,
+): PublishedCourseSourceIssue[] {
+  const issues: PublishedCourseSourceIssue[] = []
+  const add = (issue: PublishedCourseSourceIssue): void => { issues.push(issue) }
+
+  for (const assetId of [...collectPublishedCourseAssetIds(sources)].sort(compareStableStrings)) {
+    const entry = findAssetEntry(sources.project, assetId)
+    if (!entry) {
+      add({
+        code: 'asset-metadata-missing',
+        message: `工程引用的素材“${assetId}”没有对应的素材元数据。`,
+        path: ['assets', assetId],
+      })
+      continue
+    }
+    const [recordKey, metadata] = entry
+    const bytes = findAssetBytes(sources, recordKey, metadata)
+    if (!bytes) {
+      add({
+        code: 'asset-bytes-missing',
+        message: `素材“${metadata.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
+        path: ['assets', recordKey],
+      })
+      continue
+    }
+    if (bytes.byteLength !== metadata.byteLength) {
+      add({
+        code: 'asset-byte-length-mismatch',
+        message: `素材“${metadata.filename}”的本地字节长度与工程元数据不一致。`,
+        path: ['assets', recordKey, 'byteLength'],
+      })
+    }
+  }
+
+  for (const key of [...collectPublishedCourseComponentKeys(sources.project)].sort(compareStableStrings)) {
+    const separator = key.lastIndexOf('@')
+    const packageId = key.slice(0, separator)
+    const version = key.slice(separator + 1)
+    const metadataEntry = findComponentMetadata(sources.project, packageId, version)
+    if (!metadataEntry) {
+      add({
+        code: 'component-metadata-missing',
+        message: `工程引用的组件包“${key}”没有对应的工程锁定元数据。`,
+        path: ['componentPackages', packageId],
+      })
+      continue
+    }
+
+    const [recordKey, metadata] = metadataEntry
+    const source = findComponentSource(sources, recordKey, packageId, version)
+    if (!source) {
+      add({
+        code: 'component-bytes-missing',
+        message: `组件包“${key}”没有可嵌入导出物的执行内容。`,
+        path: ['componentPackages', recordKey],
+      })
+      continue
+    }
+
+    if (source.manifest.id !== metadata.packageId || source.manifest.version !== metadata.version) {
+      add({
+        code: 'component-manifest-identity-mismatch',
+        message: `组件包“${key}”的 manifest ID 或版本与工程锁定值不一致。`,
+        path: ['componentPackages', recordKey],
+      })
+    }
+
+    const actualHash = source.contentSha256 ?? componentContentSha256(source.files)
+    if (actualHash !== metadata.contentSha256) {
+      add({
+        code: 'component-hash-mismatch',
+        message: `组件包“${key}”的工程锁定内容哈希与当前执行内容不一致。`,
+        path: ['componentPackages', recordKey, 'contentSha256'],
+      })
+    }
+
+    for (const [assetKey, path] of Object.entries(source.manifest.assets)
+      .sort(([left], [right]) => compareStableStrings(left, right))) {
+      if (!source.files[path]) {
+        add({
+          code: 'component-asset-bytes-missing',
+          message: `组件包“${key}”缺少声明素材“${assetKey}”对应的文件“${path}”。`,
+          path: ['componentPackages', recordKey],
+        })
+      }
+    }
+  }
+
+  return issues.sort(compareSourceIssues)
+}
+
+export function assertPublishedCourseSourceIssues(
+  sources: CoursePublishSources,
+): void {
+  const issue = collectPublishedCourseSourceIssues(sources)[0]
+  if (issue) throw new PublishedCourseSourceError(issue)
+}
+
 function publishComponent(
   metadata: EmbeddedComponentPackageMeta,
   source: ComponentPackageData,
@@ -535,6 +686,11 @@ export function buildPublishedCourseV2Payload(
   input: CoursePublishSources,
   options: BuildPublishedCourseOptions = {},
 ): PublishedCourseV2Payload {
+  // This narrow V9 check intentionally precedes Schema parsing so a referenced
+  // asset/component record missing from an otherwise structural project is
+  // reported with the same code/path as package preflight. Non-V9 input still
+  // follows the Schema rejection path below.
+  if (input.project.schemaVersion === 9) assertPublishedCourseSourceIssues(input)
   const project = courseProjectDocumentSchema.parse(input.project)
   const sources: CoursePublishSources = { ...input, project }
   const assetIds = collectPublishedCourseAssetIds(sources)
