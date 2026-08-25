@@ -7,14 +7,17 @@ import { link, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { createTextNode } from '@/renderer/project/createProject'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { canonicalDeliveryFingerprint } from '../../scripts/run-courseware-authoring'
+import {
+  canonicalDeliveryFingerprint,
+  runCoursewareAuthoringCli,
+} from '../../scripts/run-courseware-authoring'
 
 const execFileAsync = promisify(execFile)
 const root = path.resolve(__dirname, '..', '..')
@@ -137,26 +140,44 @@ describe('trusted courseware authoring runner', () => {
       projectPath: 'project/path-safety.h5lesson',
     })
     const baseArgs = [
-      tsx, '--tsconfig', path.join(root, 'tsconfig.json'), runner,
       '--case-dir', caseRoot,
       '--editor-root', root,
+      '--delivery-html', 'evidence/delivery.html',
+      '--delivery-web-package', 'evidence/delivery.zip',
+      '--delivery-pdf', 'evidence/delivery.pdf',
+      '--delivery-pptx', 'evidence/delivery.pptx',
     ]
     const inventoryBefore = await readFile(inventoryPath)
     const hardlinkReport = path.join(caseRoot, 'evidence', 'hardlink-report.json')
     await mkdir(path.dirname(hardlinkReport), { recursive: true })
     await link(inventoryPath, hardlinkReport)
-    for (const unsafeArgs of [
-      ['--report', 'implementation/authoring-inventory.json'],
-      ['--report', 'evidence/hardlink-report.json'],
-      ['--report', 'evidence/session.json', '--delivery-html', 'project/path-safety.h5lesson', '--write-delivery-html'],
-      ['--report', 'evidence/session.txt'],
-    ]) {
-      await expect(execFileAsync(process.execPath, [...baseArgs, ...unsafeArgs], {
-        cwd: os.tmpdir(),
-        encoding: 'utf8',
-        timeout: 15_000,
-      })).rejects.toMatchObject({ code: 2 })
-      expect(await readFile(inventoryPath)).toEqual(inventoryBefore)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      for (const { unsafeArgs, expectedError } of [
+        {
+          unsafeArgs: ['--report', 'implementation/authoring-inventory.json'],
+          expectedError: '--report must not alias or overwrite --inventory',
+        },
+        {
+          unsafeArgs: ['--report', 'evidence/hardlink-report.json'],
+          expectedError: '--report must not alias or overwrite --inventory',
+        },
+        {
+          unsafeArgs: ['--report', 'evidence/session.json', '--delivery-html', 'project/path-safety.h5lesson'],
+          expectedError: '--delivery-html must use .html or .htm',
+        },
+        {
+          unsafeArgs: ['--report', 'evidence/session.txt'],
+          expectedError: '--report must use .json',
+        },
+      ]) {
+        stderr.mockClear()
+        await expect(runCoursewareAuthoringCli([...baseArgs, ...unsafeArgs])).resolves.toBe(2)
+        expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(expectedError)
+        expect(await readFile(inventoryPath)).toEqual(inventoryBefore)
+      }
+    } finally {
+      stderr.mockRestore()
     }
   })
 
