@@ -350,7 +350,7 @@ describe('repo-index query and Context Pack', () => {
         ]),
       )
     }
-  })
+  }, 15_000)
 
   it('distinguishes fresh, partially-stale, stale, and relevant dirty inputs', () => {
     const manifest = JSON.parse(

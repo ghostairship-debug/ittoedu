@@ -600,7 +600,7 @@
 {"bytes":12900,"contentHash":"sha256:39f1dec5c3d944ddeca86a1b5a74f8757dec895360dec39111eaa3ca67e44577","domain":"source","path":"tests/unit/renderVideoNode.test.ts"}
 {"bytes":13084,"contentHash":"sha256:7dfce7ecb36bc542a554e6ce53970f6218e7c19820dcc2b385f34cc96b4afee3","domain":"source","path":"tests/unit/repoIndexGenerator.test.ts"}
 {"bytes":9068,"contentHash":"sha256:29fc46379dffd81106adc105d962600dc8544dd1aafa957eb6b334d4e45c1b77","domain":"source","path":"tests/unit/repoIndexGoldenTasks.test.ts"}
-{"bytes":18208,"contentHash":"sha256:469e2cfbe23df95cae83e0cd803aa389ca3a882ec8551bbf844f6b0acf2b644f","domain":"source","path":"tests/unit/repoIndexQuery.test.ts"}
+{"bytes":18216,"contentHash":"sha256:933266e9f7e60fc9bc94900c182a5f7004104933f6fa9ddf24d46bf37896596f","domain":"source","path":"tests/unit/repoIndexQuery.test.ts"}
 {"bytes":17637,"contentHash":"sha256:038ff2a91119331129dbe45d17cc4644e78a7d04f2776ade8ede448a73c9c7a1","domain":"source","path":"tests/unit/repoIndexSemantic.test.ts"}
 {"bytes":6560,"contentHash":"sha256:1645ca92ea1b167e1596614ee9e101da5ee33b00faf35df2b0a2d48078dc3cab","domain":"source","path":"tests/unit/repoIndexTypeScriptAdapter.test.ts"}
 {"bytes":1055,"contentHash":"sha256:f54b570f7ad9c0bc6ab34f755be9867ad88c401b47d4e8d83621468b7cbadb86","domain":"source","path":"tests/unit/runtimeAuthoringContext.test.ts"}
