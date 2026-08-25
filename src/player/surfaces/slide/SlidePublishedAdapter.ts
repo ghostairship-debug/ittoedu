@@ -33,9 +33,12 @@ import {
 } from '../../teacherControllerDom'
 import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import {
+  extractPublishedComponentManifest,
+  findComponentPackageSource,
   mountPublishedComponent,
   type PublishedComponentMountHandle,
 } from '../publishedComponentMount'
+import { mountPublishedSlidePhaserComponent } from './publishedSlidePhaserComponentMount'
 import { paintPublishedNativeText } from '../publishedNativeText'
 import { paintPublishedFormula } from '../publishedFormula'
 import {
@@ -314,6 +317,10 @@ function appendLayerNode(
     components?: PublishedCourseV2Payload['components']
     interactive?: boolean
     mountComponent?: (handle: PublishedComponentMountHandle) => void
+    mountPhaserComponent?: (
+      wrap: HTMLElement,
+      item: Extract<PublishedLayerItem, { kind: 'component' }>,
+    ) => void
     mountRuntime?: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => void
   },
 ): HTMLElement | null {
@@ -387,20 +394,35 @@ function appendLayerNode(
     }
   } else if (item.kind === 'component') {
     wrap.dataset.slideFallbackKind = 'component'
-    const handle = mountPublishedComponent(wrap, {
-      container: wrap,
-      componentId: item.component.packageId,
-      version: item.component.version,
-      instanceId: item.layerItemId,
-      width: item.frame.width,
-      height: item.frame.height,
-      props: item.props,
-      staticFallbackAssetId: item.staticFallbackAssetId,
-      components: options?.components,
-      resolveAsset,
-      interactive: options?.interactive ?? true,
-    })
-    options?.mountComponent?.(handle)
+    const packageSource = findComponentPackageSource(
+      options?.components,
+      item.component.packageId,
+      item.component.version,
+    )
+    let scenePhaser = false
+    if (source === 'scene' && packageSource !== undefined) {
+      const manifest = extractPublishedComponentManifest(packageSource)
+      scenePhaser = manifest.renderMode === 'phaser'
+        && manifest.supportedScopes.includes('scene')
+    }
+    if (scenePhaser && options?.mountPhaserComponent) {
+      options.mountPhaserComponent(wrap, item)
+    } else {
+      const handle = mountPublishedComponent(wrap, {
+        container: wrap,
+        componentId: item.component.packageId,
+        version: item.component.version,
+        instanceId: item.layerItemId,
+        width: item.frame.width,
+        height: item.frame.height,
+        props: item.props,
+        staticFallbackAssetId: item.staticFallbackAssetId,
+        components: options?.components,
+        resolveAsset,
+        interactive: options?.interactive ?? true,
+      })
+      options?.mountComponent?.(handle)
+    }
   } else if (item.kind === 'runtime') {
     wrap.dataset.slideRuntimeKind = item.runtime.protocol
     if (!item.runtime.enabled) {
@@ -482,6 +504,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #services: SurfacePlayerServices | null = null
   #controllers: TeacherControllerDom[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
+  #phaserComponentHandles: PublishedComponentMountHandle[] = []
   #runtimeHandles: Array<
     PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle
   > = []
@@ -623,11 +646,18 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
-    if (wasInactive && this.#runtimeHandles.length > 0) {
+    if (
+      wasInactive
+      && (this.#runtimeHandles.length > 0 || this.#phaserComponentHandles.length > 0)
+    ) {
       if (preparedActivation !== null) {
         this.#pendingRuntimeActivation = preparedActivation
       } else {
         for (const handle of this.#runtimeHandles) {
+          handle.setVisible(true)
+          handle.resume()
+        }
+        for (const handle of this.#phaserComponentHandles) {
           handle.setVisible(true)
           handle.resume()
         }
@@ -643,6 +673,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#pendingRuntimeActivation = null
     this.#completedActiveResetLocationId = null
     for (const handle of this.#runtimeHandles) {
+      handle.setVisible(false)
+      handle.suspend()
+    }
+    for (const handle of this.#phaserComponentHandles) {
       handle.setVisible(false)
       handle.suspend()
     }
@@ -707,6 +741,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
         handle.setVisible(true)
         handle.resume()
       }
+      for (const handle of this.#phaserComponentHandles) {
+        handle.setVisible(true)
+        handle.resume()
+      }
       return
     }
     this.#invalidateInteractions()
@@ -755,6 +793,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
       }
     }
     this.#componentHandles = []
+    this.#phaserComponentHandles = []
   }
 
   #destroyRuntimes(): void {
@@ -982,6 +1021,53 @@ export class SlidePublishedAdapter implements SurfaceHost {
       interactive: this.#active,
       mountComponent: (handle: PublishedComponentMountHandle) => {
         this.#componentHandles.push(handle)
+      },
+      mountPhaserComponent: (
+        wrap: HTMLElement,
+        item: Extract<PublishedLayerItem, { kind: 'component' }>,
+      ) => {
+        if (!this.#active) {
+          wrap.dataset.slideComponentState = 'deferred'
+          wrap.style.pointerEvents = 'none'
+          return
+        }
+        const markFailure = () => {
+          wrap.dataset.slideFallbackKind = 'component'
+          wrap.dataset.slideComponentState = 'fallback'
+          wrap.style.pointerEvents = 'none'
+        }
+        wrap.dataset.slideComponentState = 'playback'
+        const handle = mountPublishedSlidePhaserComponent(wrap, {
+          container: wrap,
+          componentId: item.component.packageId,
+          version: item.component.version,
+          instanceId: item.layerItemId,
+          width: item.frame.width,
+          height: item.frame.height,
+          props: item.props,
+          staticFallbackAssetId: item.staticFallbackAssetId,
+          components: this.#payload.components,
+          resolveAsset: this.#resolveAsset,
+          mode: 'preview',
+          scope: 'scene',
+          sceneId: scene.id,
+          interactive: true,
+          events: this.#runtimeSession.events,
+          courseState: this.#runtimeSession.courseState,
+          reportError: (phase, error) => {
+            markFailure()
+            this.#services?.reportDiagnostic?.({
+              surfaceId: this.id,
+              phase: 'mount',
+              severity: 'error',
+              message: `Component“${item.layerItemId}”${phase}失败：${error.message}`,
+              cause: error,
+            })
+          },
+        })
+        if (!handle.ok) markFailure()
+        this.#componentHandles.push(handle)
+        this.#phaserComponentHandles.push(handle)
       },
       mountRuntime: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => {
         if (!this.#active) {
