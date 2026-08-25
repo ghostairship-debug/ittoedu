@@ -746,22 +746,21 @@
     {
       "id": "LEG-005",
       "legacyTarget": {
-        "kind": "legacy-pdf-raster-and-no-source-branches",
+        "kind": "legacy-pdf-raster-fallback",
         "path": "src/renderer/App.tsx",
         "symbols": [
           "handleExportPdf",
-          "renderProjectSceneImages",
-          "renderProjectSceneImagesWithRuntime"
+          "renderProjectSceneImages"
         ]
       },
       "owner": "Export",
-      "status": "reachability-unproven",
-      "currentFact": "PDF first builds Published V2 print artifacts, but falls back to V8-projected raster scenes when no pdf-html file exists; a separate source-null branch also uses the Legacy runtime raster path.",
+      "status": "active-debt",
+      "currentFact": "PDF first builds Published V2 print artifacts. Legal pure-Slide V9 projects normally lack pdf-html because App has no capture callback, so they still use the V8-projected raster path. The unreachable source-null V8 payload plus Runtime raster branch was removed by LEG-005A and now fails closed.",
       "evidence": [
         {
           "path": "src/renderer/App.tsx",
           "symbol": "handleExportPdf",
-          "note": "Contains both V2-first and V8 raster fallback branches."
+          "note": "Contains the V2-first path and the retained legal pure-Slide raster fallback; source-null now reports PDF unavailable."
         },
         {
           "path": "src/renderer/export/course/buildCoursePrintArtifacts.ts",
@@ -776,11 +775,6 @@
               "path": "src/renderer/App.tsx",
               "symbol": "renderProjectSceneImages",
               "use": "V8 raster fallback for V9 sources when print artifacts lack pdf-html."
-            },
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "renderProjectSceneImagesWithRuntime",
-              "use": "Source-null Legacy PDF path."
             },
             {
               "path": "src/renderer/export/renderSceneImages.ts",
@@ -813,9 +807,7 @@
               "use": "Consumes renderer print HTML."
             }
           ],
-          "unknowns": [
-            "Reachability of the V2-source inner fallback when buildCoursePrintArtifacts returns no pdf-html has not been proven."
-          ]
+          "unknowns": []
         },
         "buildFixtureOrRelease": {
           "confirmed": [
@@ -876,18 +868,22 @@
             "symbol": "buildCoursePrintArtifacts"
           }
         ],
-        "notes": "Characterize missing-pdf-html reachability and staticization/warning parity before removing raster fallbacks."
+        "notes": "The source-null Runtime raster is removed. Replace the retained legal pure-Slide raster only after V2 capture/staticization and warning parity cover native, global, Component and Runtime content."
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
-        "state": "nonzero-reachability-unproven",
+        "state": "nonzero-retained",
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'renderProjectSceneImages' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 6
+            "observedMatches": 9
+          },
+          {
+            "command": "(git grep -n -I -F -- 'renderProjectSceneImagesWithRuntime' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "observedMatches": 0
           }
         ],
-        "requiredForRemoval": "Both App fallback branches and direct ProjectDocument raster consumers must be zero, with V2 print behavior verified."
+        "requiredForRemoval": "The retained pure-Slide raster and direct ProjectDocument consumers may reach zero only after V2 capture/staticization and warning parity are verified; the removed source-null Runtime raster symbol must stay at zero."
       },
       "persistedCompatibility": {
         "status": "output-semantics-required",
@@ -906,7 +902,7 @@
         "tests/unit/playerCapture.test.ts"
       ],
       "stableSince": {
-        "status": "not-established-for-all-pdf-branches",
+        "status": "source-null-removed-pure-slide-raster-retained",
         "wave": null,
         "evidence": []
       },
@@ -916,7 +912,7 @@
       },
       "indexImpact": "semantic-update",
       "unknowns": [
-        "The exact condition under which a legal V9 print artifact set lacks pdf-html is not characterized."
+        "V2 static capture does not yet cover the visual and warning semantics required to replace the legal pure-Slide raster path."
       ]
     },
     {

@@ -6,7 +6,7 @@
 >
 > 当前批次编排基线：`7d17fed384804e998e15ae21380ed98259acf897`。
 >
-> 状态：**当前 RTP-04 与 LEG-005A active，CMP-03 因共享 Slide Published host 排在 RTP-04 后**。LEG-005A 只删正常 V9 生命周期不可达的 PDF source-null Runtime raster，合法纯 Slide raster 继续保留。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**LEG-005A 已完成产品实现与独立审查；当前 RTP-04 active，CMP-03 因共享 Slide Published host 排在 RTP-04 后**。合法纯 Slide PDF raster 继续保留。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -140,7 +140,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 - EXA-02 与 V8-01 已完成；经 consumer 查询确认没有 package、测试、发布或产品调用者的 incline-motion 全链已经删除；
 - **V8-02 已完成**：photosynthesis 用当前 V9 factory 生成三 Slide archive，并以 Published V2 离线 HTML保留三页导航、前两页像素变化、第三页指针操作与截图、零 HTTP(S) 与零 `pageerror` 的原行为门；专属 V8 archive/component chain 活引用为零；
 - **CMP-03（queued）**：Slide scene-local Component API 4 Phaser 的作者入口与 producer 已闭合，Published host 仍无条件 fallback；RTP-04 合入后在新 baseline 激活，完成后才分别准入 sample、benchmark、portability 与 release verifier 的替代/清退；
-- **LEG-005A（active）**：仅删除 PDF 预检后 source 消失时不可达的 V8 payload + Runtime raster 分支；保留正常纯 Slide raster、Mixed V2、PPTX capture、PDF preflight 与 LEG-005 的其余 active debt；
+- **LEG-005A 已完成**：PDF 预检后 source 消失现在明确报不可用且不进入 raster/write；不可达的 V8 payload + Runtime raster 已删除，正常纯 Slide raster、Mixed V2、PPTX capture、PDF preflight 与 LEG-005 的其余 active debt保留；
 - `verify-release.ts` 的 controller、DOM、navigation、Published oracle 全部改为 V9/V2；
 - 不用 V8→V9 migrate 兜底，不复活退役保真门；
 - 巨型生成物只有存在 fresh-checkout consumer 时才 tracked，否则转显式 build output。
@@ -155,7 +155,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的完整 Vitest、预构建、风险 Playwright、任务板、repo-index check/quality 门。LEG-003 由 `f3fd31f` 生命周期表征准入，`63fbf66` 已删除不可达 App Legacy HTML/Web/full-preview 与专属 desktop preview 链并独立审查通过。当前 RTP-04、LEG-005A active，CMP-03 queued；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的完整 Vitest、预构建、风险 Playwright、任务板、repo-index check/quality 门。LEG-003 由 `f3fd31f` 生命周期表征准入并删除不可达 App Legacy HTML/Web/full-preview 链；LEG-005A 的 `7176614` / `e3b5dd2` 又删除不可达 PDF source-null Runtime raster，二者均经独立审查通过。当前 RTP-04 active、CMP-03 queued；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
 当前 RTP-04 只建立 session-global API 2 ownership 与容器迁移；CMP-03 随后只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
