@@ -16,16 +16,16 @@
 - Invalidating paths: src/renderer/ui/FlowWorkspace.tsx; src/renderer/ui/FlowBlockContextToolbar.tsx; src/renderer/ui/PropertiesTab.tsx; src/renderer/ui/NodesTab.tsx; src/renderer/course/flowEditorView.ts; src/renderer/course/flowOverlayProjection.ts; src/renderer/course/flowEditorCommands.ts; src/player/surfaces/flow/FlowSurfaceHost.ts; src/renderer/styles/globals.css; tests/e2e/stabilizationCoreUsability.spec.ts; tests/e2e/stabilizationFlowAuthoring.spec.ts; tests/fixtures/course-project-v9/flow.h5lesson; tests/fixtures/course-project-v9/multi-asset.h5lesson; playwright.config.ts; tsconfig.json; tsconfig.e2e.json
 - Task ID: stab-wave-c-flow-authoring
 - Phase / wave: post-audit stabilization / C-flow-authoring gate
-- Status: claimed
+- Status: wave-validated
 - Owner / Reviewer / Integrator: Validation Worker / independent Flow vertical-slice reviewer / Stabilization Integrator
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace; validation spec is the only product-adjacent write / codex/architecture-stabilization`
-- Baseline HEAD: product commit `0999b1c`; refreshed Wave A/task closure `53d6997`; worktree clean at claim.
+- Baseline HEAD: final integrated product commit `23f2d00`; final spec commit `97d35a5`; refreshed Wave A/task closure `53d6997`.
 - Context: exact-source Bootstrap covers the five dependency cards, refreshed Wave A evidence, existing Electron launch/save/archive/preview helpers, `flow.h5lesson`, `multi-asset.h5lesson`, Flow editor/Player media projections and the one new gate spec.
-- Freshness / relevant dirty inputs: Wave A is freshly `wave-validated` on `0999b1c`; the fresh desktop artifact from that same product commit is reusable. The exact affected focused consumers named below must be refreshed once because their declared invalidators changed after their original V1 evidence; no unrelated suite is rerun.
-- Depends on: `stab-wave-a-core-usability`; `stab-flow-03-formula-edit-entry`; `stab-flow-04-stable-context-toolbar`; `stab-flow-05-content-outline-and-overlays`; `stab-flow-07-media-layout-widths`; `stab-flow-08-video-authoring-basics`; `stab-flow-09-toolbar-neighbor-hit-isolation`
+- Freshness / relevant dirty inputs: Wave A was freshly `wave-validated` at product `0999b1c`. Wave C then exposed and closed two narrow interaction defects: toolbar command click isolation at `d6c95fc` and inline terminal-key isolation at `23f2d00`. A fresh desktop build was produced after the final product repair. Exact current consumers passed `17/17` plus `21/21`; unrelated focused suites reuse the original `82/82` evidence because neither narrow repair changed their media/model/Player paths.
+- Depends on: `stab-wave-a-core-usability`; `stab-flow-03-formula-edit-entry`; `stab-flow-04-stable-context-toolbar`; `stab-flow-05-content-outline-and-overlays`; `stab-flow-07-media-layout-widths`; `stab-flow-08-video-authoring-basics`; `stab-flow-09-toolbar-neighbor-hit-isolation`; `stab-flow-13-toolbar-command-hit-isolation`; `stab-flow-14-inline-terminal-key-isolation`
 - Blocks: stab-audit-closure-gate
-- Retry count / last failure class: `0 / not yet run`
+- Retry count / last failure class: `10 / last failure was a test-contract mismatch that forced the Player's valid local data URL to be blob-only; final rerun passed 1/1`
 
 ## Product outcome
 
@@ -41,11 +41,11 @@
 
 ## Acceptance
 
-- [ ] 单一 spec 最多包含三个复合行为：公式；格式/信息架构；媒体。
-- [ ] 公式行为覆盖首次重渲染后两次真实 click 与显式入口。
-- [ ] 格式/信息架构行为复用 Wave A 的真实 range，验证 range-only 格式、mixed 状态、正文顺序与 overlay z-order 分离。
-- [ ] 媒体行为覆盖当前合同字段、替换/controls，并比较 Editor 与真实 Player 三档 actual bounding rect。
-- [ ] 仅运行一次 `npm run typecheck`；依赖证据只刷新被后续 invalidating path 命中的聚焦 consumer 合集一次。
+- [x] 单一 spec 最多包含三个复合行为：公式；格式/信息架构；媒体。
+- [x] 公式行为覆盖首次重渲染后两次真实 click 与显式入口。
+- [x] 格式/信息架构行为复用 Wave A 的真实 range，验证 range-only 格式、mixed 状态、正文顺序与 overlay z-order 分离。
+- [x] 媒体行为覆盖当前合同字段、替换/controls，并比较 Editor 与真实 Player 三档 actual bounding rect。
+- [x] `npm run typecheck` 只运行一次；后续产品修复仅刷新被命中路径的 renderer/E2E TypeScript legs 与精确 focused consumers。
 
 ## Minimal validation
 
@@ -54,11 +54,13 @@
 - `npm run typecheck`
 - `npx playwright test tests/e2e/stabilizationFlowAuthoring.spec.ts --list`
 - `npx playwright test tests/e2e/stabilizationFlowAuthoring.spec.ts --workers=1`
-- 核对 spec 仅含三个复合行为并运行 `git diff --check`；不运行全量 verify、完整 E2E 或包构建。直接 Playwright 复用产品 `0999b1c` 的新鲜 desktop artifact，不重复构建。
+- 核对 spec 仅含三个复合行为并运行 `git diff --check`；不运行全量 verify、完整 E2E 或包构建。最终产品修复后只刷新一次 `23f2d00` 的 desktop artifact，直接 Playwright 复用该产物。
 
 ## Result and rollback
 
-- Result evidence: pending；完成时记录 integrated product commit、Wave A/依赖证据引用、typecheck、单 spec 结果与 Reviewer 结论。
+- Result evidence: integrated product `23f2d00`; final spec `97d35a5`. The initial nine-file affected set passed `82/82` at `0999b1c`. After the two exact interaction repairs, `flowWorkspace.test.tsx` passed `17/17` and the toolbar/product-integration pair passed `21/21` on the final product. The one mandated `npm run typecheck` passed on the original integrated candidate; after renderer/spec invalidation, renderer TypeScript and E2E TypeScript passed separately, while the fresh desktop build also passed Electron TypeScript. The build emitted only the pre-existing inline-dynamic-import and large-chunk warnings. `--list` reports one test, and source inspection confirms exactly three `test.step` blocks in one Electron app/profile/archive. The final real Electron run passed `1/1` in about one minute with the strict diagnostics gate intact. Formula entry, native range/mixed formatting, saved exact runs/revision, content-outline/overlay separation, current media authoring fields, same-kind replacement, controls, local asset resolution and Editor/Player three-tier actual rects all completed in one session. The measurement derives query-container content width from the computed box model and derives visual scale from border-box `offsetWidth`, so a vertical scrollbar is not misclassified as a transform. Player accepts its two valid local URL representations (`blob:` or typed `data:`), while the no-external-request gate remains authoritative. The independent Wave C Reviewer concluded `APPROVE` at product `23f2d00` / spec `97d35a5`: structure is exactly one test / three steps / one app / one temp profile / one archive, the box-model correction and local URL assertions match Editor/Published V2/Player behavior, and no product or spec blocker remains.
+- Pipeline status: pass at product `23f2d00` / spec `97d35a5`.
+- Outcome status: `engineering candidate`; automation proves only the three scoped Flow authoring outcomes, not whole-product visual acceptance.
 - Outcome boundary: V2 只证明这三个 Flow 作者纵切达到 engineering candidate；不证明未覆盖能力、整体视觉或产品体验 accepted。
 - Rollback: E2E spec 可独立 revert；若集成失败，按首次失败行为回退对应依赖任务提交，不在门卡修改产品代码。
 - Semantic index impact: none
