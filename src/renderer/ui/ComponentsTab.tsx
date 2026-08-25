@@ -120,7 +120,11 @@ function locateFlowBlockUsage(surfaceId: string, blockId: string) {
   state.activateCourseLocation(location.id)
   const activated = useEditorStore.getState()
   const activeDocument = selectActiveCourseProjectDocument(activated)
-  if (!activeDocument || activated.flowSession?.selection.surfaceId !== surfaceId) {
+  if (
+    !activeDocument
+    || activated.flowSession?.selection.surfaceId !== surfaceId
+    || activated.flowSession.selection.locationId !== location.id
+  ) {
     fail('无法切换到该组件所在的流式讲义；请从页面列表打开该讲义后重试。')
     return
   }
@@ -131,7 +135,11 @@ function locateFlowBlockUsage(surfaceId: string, blockId: string) {
     return
   }
   const confirmed = useEditorStore.getState().flowSession?.selection
-  if (confirmed?.surfaceId !== surfaceId || confirmed.selectedBlockId !== blockId) {
+  if (
+    confirmed?.surfaceId !== surfaceId
+    || confirmed.locationId !== location.id
+    || confirmed.selectedBlockId !== blockId
+  ) {
     fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
     return
   }

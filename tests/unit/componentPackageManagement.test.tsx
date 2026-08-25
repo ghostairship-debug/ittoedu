@@ -422,6 +422,10 @@ describe('ComponentsTab locate component usage', () => {
   it('selects a Flow component block that has no location with the same ID', () => {
     const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
     expectFlowBlockUsageReference(surfaceId, blockId)
+    const targetLocation = activeCourseProject().locations.find((location) => (
+      location.kind === 'flow-block' && location.surfaceId === surfaceId
+    ))
+    if (!targetLocation) throw new Error('Expected a target Flow location')
     expect(activeCourseProject().locations.some((location) =>
       location.kind === 'flow-block' && location.blockId === blockId,
     )).toBe(false)
@@ -433,9 +437,76 @@ describe('ComponentsTab locate component usage', () => {
       clickLocateUsage()
       const state = useEditorStore.getState()
       expect(state.flowSession?.selection.surfaceId).toBe(surfaceId)
+      expect(state.flowSession?.selection.locationId).toBe(targetLocation.id)
       expect(state.flowSession?.selection.selectedBlockId).toBe(blockId)
       expect(state.statusMessage).toBe('已定位组件使用位置')
       expect(state.errorMessage).toBeNull()
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+
+  it('does not bypass a composing location-switch refusal on the same Flow surface', () => {
+    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+    expectFlowBlockUsageReference(surfaceId, blockId)
+    const exported = useEditorStore.getState().exportV9SlideCandidateArchive()
+    if (!exported) throw new Error('Expected a Flow archive export')
+    const archive = openCourseProjectArchive(exported)
+    const project = structuredClone(archive.project)
+    const surface = project.surfaces.find((candidate) => candidate.id === surfaceId)
+    if (!surface || surface.type !== 'flow') throw new Error('Expected the usage Flow surface')
+    const currentBlockId = 'flow-composing-current-block'
+    const currentLocationId = 'flow-composing-current-location'
+    surface.blocks.push({ id: currentBlockId, type: 'paragraph', text: '输入中的段落' })
+    project.locations.push({
+      id: currentLocationId,
+      label: '输入中的位置',
+      kind: 'flow-block',
+      surfaceId,
+      blockId: currentBlockId,
+    })
+    project.startLocationId = currentLocationId
+    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
+      project,
+      assetFiles: archive.assetFiles,
+      componentFiles: archive.componentFiles,
+    }))).toBe(true)
+    const active = useEditorStore.getState()
+    expect(active.flowSession?.selection.locationId).toBe(currentLocationId)
+    const composingEdit = {
+      kind: 'rich-text' as const,
+      source: 'paper' as const,
+      blockId: currentBlockId,
+      surfaceId,
+      parentId: null,
+      field: 'text' as const,
+      composing: true,
+      pendingAction: null,
+      revision: activeCourseProject().revision,
+      original: { text: '输入中的段落', runs: [] },
+      draft: { text: '尚未提交的拼音草稿', runs: [] },
+      range: { start: 0, end: 0 },
+    }
+    useEditorStore.setState({ flowTextEdit: composingEdit })
+    const beforeDocument = structuredClone(activeCourseProject())
+    const historyBefore = useEditorStore.getState().history.past.length
+    const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
+    if (flowHistoryBefore === undefined) throw new Error('Expected Flow history')
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab />)
+      clickLocateUsage()
+      const state = useEditorStore.getState()
+      expect(state.statusMessage).toBeNull()
+      expect(state.errorMessage).toContain('无法切换')
+      expect(state.flowSession?.selection.locationId).toBe(currentLocationId)
+      expect(state.flowSession?.selection.selectedBlockId).toBe(currentBlockId)
+      expect(state.flowSession?.selection.selectedBlockId).not.toBe(blockId)
+      expect(state.flowTextEdit).toBe(composingEdit)
+      expect(activeCourseProject()).toEqual(beforeDocument)
+      expect(state.history.past).toHaveLength(historyBefore)
+      expect(state.flowSession?.history.past).toHaveLength(flowHistoryBefore)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
@@ -490,6 +561,7 @@ describe('ComponentsTab locate component usage', () => {
     const beforeDocument = structuredClone(activeCourseProject())
     const historyBefore = useEditorStore.getState().history.past.length
     const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
+    if (flowHistoryBefore === undefined) throw new Error('Expected Flow history')
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
