@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
@@ -152,6 +153,25 @@ export async function createMainWindow(
   })
   let closeApproved = false
   let closeCheckInFlight = false
+  let previewNetworkDocumentToken: string | null = null
+
+  const beginPreviewNetworkDocumentNavigation = (): void => {
+    previewNetworkDocumentToken = null
+    mainPreviewNetworkPolicy.beginDocumentNavigation()
+  }
+  const sendPreviewNetworkDocumentToken = (): void => {
+    if (previewNetworkDocumentToken === null || window.isDestroyed()) return
+    const mainFrame = window.webContents.mainFrame
+    if (mainFrame.detached) return
+    try {
+      mainFrame.send(
+        IPC_CHANNELS.previewNetworkDocumentToken,
+        previewNetworkDocumentToken,
+      )
+    } catch (error) {
+      console.error('下发预览网络文档凭据失败', error)
+    }
+  }
 
   onCreated?.({ window, rendererEntryUrl })
   appState.attachWindow(window)
@@ -211,16 +231,16 @@ export async function createMainWindow(
   })
 
   window.on('closed', () => {
-    mainPreviewNetworkPolicy.beginDocumentNavigation()
+    beginPreviewNetworkDocumentNavigation()
     appState.detachWindow(window)
   })
 
   window.webContents.on('render-process-gone', () => {
-    mainPreviewNetworkPolicy.beginDocumentNavigation()
+    beginPreviewNetworkDocumentNavigation()
   })
 
   window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) mainPreviewNetworkPolicy.beginDocumentNavigation()
+    if (isMainFrame && !isInPlace) beginPreviewNetworkDocumentNavigation()
   })
 
   window.webContents.on('did-frame-navigate', (
@@ -232,11 +252,16 @@ export async function createMainWindow(
   ) => {
     if (!isMainFrame) return
     const mainFrame = window.webContents.mainFrame
+    previewNetworkDocumentToken = randomUUID()
     mainPreviewNetworkPolicy.activateDocument({
       processId: mainFrame.processId,
       frameToken: mainFrame.frameToken,
+      documentToken: previewNetworkDocumentToken,
     })
+    sendPreviewNetworkDocumentToken()
   })
+
+  window.webContents.on('dom-ready', sendPreviewNetworkDocumentToken)
 
   window.once('ready-to-show', () => {
     if (window.isDestroyed()) return

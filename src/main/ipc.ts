@@ -135,9 +135,11 @@ const previewNetworkPolicySchema = z.object({
   leaseId: previewNetworkLeaseIdSchema,
   connectOrigins: z.array(z.string().min(1).max(300)).max(1_000),
   remoteAssetUrls: z.array(z.string().min(1).max(2_000)).max(10_000),
+  documentToken: z.string().uuid(),
 }).strict()
 const previewNetworkReleaseSchema = z.object({
   leaseId: previewNetworkLeaseIdSchema,
+  documentToken: z.string().uuid(),
 }).strict()
 
 const dirtySchema = z.boolean()
@@ -196,6 +198,7 @@ function requireWindow(context: IpcContext): BrowserWindow {
 
 function previewNetworkDocumentOwner(
   event: IpcMainInvokeEvent,
+  documentToken: string,
 ): PreviewNetworkDocumentOwner {
   const frame = event.senderFrame
   if (frame === null || frame.detached) {
@@ -204,6 +207,7 @@ function previewNetworkDocumentOwner(
   return {
     processId: frame.processId,
     frameToken: frame.frameToken,
+    documentToken,
   }
 }
 
@@ -638,7 +642,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const input = previewNetworkPolicySchema.parse(requireSingleArgument(args))
       mainPreviewNetworkPolicy.replacePreviewLease(
         input,
-        previewNetworkDocumentOwner(event),
+        previewNetworkDocumentOwner(event, input.documentToken),
       )
     },
   )
@@ -656,7 +660,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const input = previewNetworkReleaseSchema.parse(requireSingleArgument(args))
       mainPreviewNetworkPolicy.releasePreviewLease(
         input.leaseId,
-        previewNetworkDocumentOwner(event),
+        previewNetworkDocumentOwner(event, input.documentToken),
       )
     },
   )

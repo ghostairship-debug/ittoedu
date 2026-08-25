@@ -7,6 +7,7 @@ export interface PreviewNetworkLeaseInput {
 export interface PreviewNetworkDocumentOwner {
   processId: number
   frameToken: string
+  documentToken: string
 }
 
 const CONNECT_PROTOCOLS = new Set(['https:', 'wss:'])
@@ -99,6 +100,7 @@ export class PreviewNetworkPolicy {
       !Number.isInteger(owner.processId)
       || owner.processId < 0
       || owner.frameToken.length === 0
+      || owner.documentToken.length === 0
     ) {
       throw new Error('Preview network document owner is invalid')
     }
@@ -145,6 +147,7 @@ export class PreviewNetworkPolicy {
       this.#activeDocumentOwner === null
       || this.#activeDocumentOwner.processId !== owner.processId
       || this.#activeDocumentOwner.frameToken !== owner.frameToken
+      || this.#activeDocumentOwner.documentToken !== owner.documentToken
     ) {
       throw new Error('Preview network policy source is not the active document')
     }

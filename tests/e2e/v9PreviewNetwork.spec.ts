@@ -356,6 +356,23 @@ test('V9 current/full preview allows declared origins and revokes them per proje
       .resolves.toBe(false)
     expect(assetA.requests).toHaveLength(assetAAfterReload)
 
+    await page.evaluate(async (newDocumentOrigin) => {
+      await window.desktopAPI.setPreviewNetworkPolicy({
+        leaseId: 'new-document-generation',
+        connectOrigins: [newDocumentOrigin],
+        remoteAssetUrls: [],
+      })
+    }, assetB.origin)
+    const assetBBeforeNewDocument = assetB.requests.length
+    await expect(fetchSucceeded(page, `${assetB.origin}/new-document-generation`))
+      .resolves.toBe(true)
+    expect(assetB.requests).toHaveLength(assetBBeforeNewDocument + 1)
+    await page.evaluate(() => window.desktopAPI.releasePreviewNetworkPolicy({
+      leaseId: 'new-document-generation',
+    }))
+    await expect.poll(() => fetchSucceeded(page, `${assetB.origin}/new-document-released`))
+      .toBe(false)
+
     const baseProbeBefore = renderer.requests.filter((path) => path === '/base-probe').length
     await expect(fetchSucceeded(page, `${renderer.origin}/base-probe`)).resolves.toBe(true)
     expect(renderer.requests.filter((path) => path === '/base-probe')).toHaveLength(

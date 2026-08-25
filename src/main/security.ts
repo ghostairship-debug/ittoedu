@@ -146,6 +146,8 @@ export function assertTrustedIpcSender(
 ): void {
   const senderFrame = event.senderFrame
   const mainFrame = event.sender.mainFrame
+  // This confirms the current top-level frame only. Preview-network document
+  // freshness is enforced separately by its per-commit capability token.
   const isMainFrame =
     senderFrame !== null &&
     !senderFrame.detached &&

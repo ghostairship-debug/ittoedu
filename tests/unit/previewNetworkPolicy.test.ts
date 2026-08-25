@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { PreviewNetworkPolicy } from '@/main/previewNetworkPolicy'
 
-const DOCUMENT_A = { processId: 101, frameToken: 'document-a' }
-const DOCUMENT_B = { processId: 202, frameToken: 'document-b' }
+const MAIN_FRAME = { processId: 101, frameToken: 'same-main-frame' }
+const DOCUMENT_A = {
+  ...MAIN_FRAME,
+  documentToken: '00000000-0000-4000-8000-000000000001',
+}
+const DOCUMENT_B = {
+  ...MAIN_FRAME,
+  documentToken: '00000000-0000-4000-8000-000000000002',
+}
 
 function activePolicy(): PreviewNetworkPolicy {
   const policy = new PreviewNetworkPolicy()
@@ -93,8 +100,9 @@ describe('PreviewNetworkPolicy', () => {
     expect(policy.allowsRequest('https://expanded.example.com/image.png')).toBe(false)
   })
 
-  it('rejects an old document lease after navigation clear and after the next commit', () => {
+  it('rejects the old generation after a same-frame navigation commits', () => {
     const policy = activePolicy()
+    expect(DOCUMENT_B).toMatchObject(MAIN_FRAME)
     policy.replaceBaseOrigins(['http://127.0.0.1:5173'])
     policy.replacePreviewLease({
       leaseId: 'preview-a',

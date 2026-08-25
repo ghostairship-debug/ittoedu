@@ -29,6 +29,7 @@ const IPC_CHANNELS = {
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
   openPreview: 'preview:open',
+  previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
   confirmDiscard: 'app:confirm-discard',
@@ -58,6 +59,20 @@ interface IpcFailure {
 }
 
 type IpcEnvelope<T> = IpcSuccess<T> | IpcFailure
+
+let previewNetworkDocumentToken: string | null = null
+ipcRenderer.on(IPC_CHANNELS.previewNetworkDocumentToken, (_event, value: unknown) => {
+  previewNetworkDocumentToken = typeof value === 'string' && value.length > 0
+    ? value
+    : null
+})
+
+function requirePreviewNetworkDocumentToken(): string {
+  if (previewNetworkDocumentToken === null) {
+    throw new Error('预览网络文档尚未就绪。请关闭预览后重试。')
+  }
+  return previewNetworkDocumentToken
+}
 
 function isDesktopErrorPayload(value: unknown): value is DesktopErrorPayload {
   if (typeof value !== 'object' || value === null) return false
@@ -132,10 +147,16 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   exportBinary: (input) => invoke(IPC_CHANNELS.exportBinary, input),
   exportPdf: (input) => invoke(IPC_CHANNELS.exportPdf, input),
   openPreview: (input) => invoke(IPC_CHANNELS.openPreview, input),
-  setPreviewNetworkPolicy: (input) => invoke(IPC_CHANNELS.setPreviewNetworkPolicy, input),
+  setPreviewNetworkPolicy: (input) => invoke(IPC_CHANNELS.setPreviewNetworkPolicy, {
+    ...input,
+    documentToken: requirePreviewNetworkDocumentToken(),
+  }),
   releasePreviewNetworkPolicy: (input) => invoke(
     IPC_CHANNELS.releasePreviewNetworkPolicy,
-    input,
+    {
+      ...input,
+      documentToken: requirePreviewNetworkDocumentToken(),
+    },
   ),
   confirmDiscardChanges: () => invoke(IPC_CHANNELS.confirmDiscard),
   setDirtyState: (dirty) => invoke(IPC_CHANNELS.dirtyState, dirty),

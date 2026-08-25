@@ -164,6 +164,7 @@ export const IPC_CHANNELS = {
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
   openPreview: 'preview:open',
+  previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
   confirmDiscard: 'app:confirm-discard',
