@@ -279,6 +279,9 @@ export function mountPublishedCanvasRuntime(
       // the public step() entry point after this stack/frame, so teardown does
       // not depend on a Runtime leaving TimeStep running, awake, or started.
       mountedGame.destroy(true)
+    } catch (cause) {
+      reportError(options, 'destroy', cause)
+    } finally {
       targetWindow.queueMicrotask(() => {
         try {
           mountedGame.step(mountedGame.getTime(), 0)
@@ -286,6 +289,26 @@ export function mountPublishedCanvasRuntime(
           reportError(options, 'destroy', cause)
         }
       })
+    }
+  }
+
+  const destroyRuntimeHost = (): void => {
+    const mountedHost = runtimeHost
+    runtimeHost = null
+    if (!mountedHost) return
+    try {
+      mountedHost.destroy()
+    } catch (cause) {
+      reportError(options, 'destroy', cause)
+    }
+  }
+
+  const disposeRegistry = (): void => {
+    const activeRegistry = registry
+    registry = null
+    if (!activeRegistry) return
+    try {
+      activeRegistry.dispose()
     } catch (cause) {
       reportError(options, 'destroy', cause)
     }
@@ -295,9 +318,8 @@ export function mountPublishedCanvasRuntime(
     if (destroyed || quarantined) return
     quarantined = true
     reportError(options, phase, cause)
-    runtimeHost?.destroy()
-    runtimeHost = null
-    registry?.dispose()
+    destroyRuntimeHost()
+    disposeRegistry()
     if (initializingPhaser) {
       targetWindow.queueMicrotask(destroyGame)
     } else destroyGame()
@@ -317,7 +339,8 @@ export function mountPublishedCanvasRuntime(
         throw new Error('Canvas Runtime 宿主模块尚未就绪')
       }
       const activeRegistry = registry
-      let nextHost: RuntimeHost
+      let nextHost: RuntimeHost | null = null
+      let constructionFailure: unknown
       try {
         nextHost = new RuntimeHostConstructor({
           registry: activeRegistry,
@@ -339,11 +362,20 @@ export function mountPublishedCanvasRuntime(
           },
           registerNavigationGuard: () => () => undefined,
         })
-      } finally {
-        activeRegistry.dispose()
-        if (registry === activeRegistry) registry = null
+      } catch (cause) {
+        constructionFailure = cause
       }
-      runtimeHost = nextHost
+      if (registry === activeRegistry) registry = null
+      let disposalFailure: unknown
+      try {
+        activeRegistry.dispose()
+      } catch (cause) {
+        disposalFailure = cause
+      }
+      if (nextHost) runtimeHost = nextHost
+      if (constructionFailure !== undefined) throw constructionFailure
+      if (disposalFailure !== undefined) throw disposalFailure
+      if (!nextHost) throw new Error('Canvas Runtime 宿主创建未返回实例')
       const startupFailure = nextHost.getFailure()
       if (startupFailure) {
         quarantine(startupFailurePhase(startupFailure), startupFailure)
@@ -431,31 +463,38 @@ export function mountPublishedCanvasRuntime(
     setVisible(nextVisible: boolean) {
       if (destroyed || quarantined) return
       visible = nextVisible
-      runtimeHost?.setVisible(nextVisible)
-      checkLifecycleFailure()
+      try {
+        runtimeHost?.setVisible(nextVisible)
+        checkLifecycleFailure()
+      } catch (cause) {
+        quarantine('lifecycle', cause)
+      }
     },
     suspend() {
       if (destroyed || quarantined) return
       suspended = true
-      runtimeHost?.suspend()
-      checkLifecycleFailure()
+      try {
+        runtimeHost?.suspend()
+        checkLifecycleFailure()
+      } catch (cause) {
+        quarantine('lifecycle', cause)
+      }
     },
     resume() {
       if (destroyed || quarantined) return
       suspended = false
-      runtimeHost?.resume()
-      checkLifecycleFailure()
+      try {
+        runtimeHost?.resume()
+        checkLifecycleFailure()
+      } catch (cause) {
+        quarantine('lifecycle', cause)
+      }
     },
     destroy() {
       if (destroyed) return
       destroyed = true
-      try {
-        runtimeHost?.destroy()
-      } catch (cause) {
-        reportError(options, 'destroy', cause)
-      }
-      runtimeHost = null
-      registry?.dispose()
+      destroyRuntimeHost()
+      disposeRegistry()
       destroyGame()
       fallback?.remove()
       fallback = null

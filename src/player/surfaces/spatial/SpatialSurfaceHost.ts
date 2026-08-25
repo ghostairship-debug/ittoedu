@@ -58,6 +58,10 @@ import {
   type PublishedInteractionNodeState,
 } from '../../interactions/PublishedDomInteractionSurfacePort'
 import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
+import {
+  isPublishedGlobalCanvasRuntimePointerItem,
+  setPublishedGlobalCanvasRuntimeInteractionVisibility,
+} from '../runtime/publishedGlobalCanvasRuntimePointer'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -933,9 +937,13 @@ export class SpatialSurfaceHost {
         const visible = state.visible
         wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
         wrap.style.visibility = visible ? 'visible' : 'hidden'
-        wrap.style.pointerEvents = visible
-          ? state.clickBound ? 'auto' : authoredPointerEvents
-          : 'none'
+        if (source === 'global' && isPublishedGlobalCanvasRuntimePointerItem(item)) {
+          setPublishedGlobalCanvasRuntimeInteractionVisibility(wrap, item, visible)
+        } else {
+          wrap.style.pointerEvents = visible
+            ? state.clickBound ? 'auto' : authoredPointerEvents
+            : 'none'
+        }
         if (visible) wrap.removeAttribute('aria-hidden')
         else wrap.setAttribute('aria-hidden', 'true')
       },

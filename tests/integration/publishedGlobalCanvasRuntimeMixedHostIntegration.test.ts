@@ -6,9 +6,88 @@ import { PublishedGlobalCanvasRuntimeOwner } from '@/player/surfaces/runtime/pub
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, RuntimeLayerItem } from '@/shared/courseProjectTypes'
+import type {
+  InteractionActionStep,
+  InteractionRule,
+  NodeMotionAction,
+} from '@/shared/contracts/interaction-v1/types'
+import type {
+  PublishedNativeLayerItem,
+  PublishedRuntimeLayerItem,
+  PublishedScopedLayerItem,
+} from '@/shared/publishedCourseTypes'
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 
 const sessions: PublishedCourseSession[] = []
+
+const interactionTextStyle = {
+  fontFamily: 'sans-serif',
+  fontSize: 20,
+  color: '#172033',
+  bold: false,
+  italic: false,
+  underline: false,
+  strike: false,
+  emphasis: false,
+  highlightColor: null,
+  align: 'left' as const,
+  verticalAlign: 'top' as const,
+  writingMode: 'horizontal' as const,
+  lineSpacing: 1.2,
+  letterSpacing: 0,
+  padding: 0,
+  overflow: 'fixed' as const,
+  backgroundColor: '#ffffff',
+  backgroundOpacity: 0,
+  cornerRadius: 0,
+}
+
+function interactionTrigger(id: string, order: number): PublishedScopedLayerItem {
+  const item: PublishedNativeLayerItem = {
+    layerItemId: id,
+    kind: 'native',
+    frame: { mode: 'absolute', x: order === 9_001 ? 400 : 560, y: 56, width: 120, height: 48 },
+    order,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    content: {
+      nativeType: 'text',
+      data: { text: id, runs: [], style: interactionTextStyle },
+    },
+  }
+  return { item, visibility: { mode: 'all', locationIds: [] } }
+}
+
+function visibilityRule(
+  id: string,
+  triggerId: string,
+  runtimeId: string,
+  type: NodeMotionAction['type'],
+): InteractionRule {
+  const action: NodeMotionAction = {
+    type,
+    nodeId: runtimeId,
+    durationMs: 0,
+    easing: 'linear',
+    effect: 'none',
+  }
+  const step: InteractionActionStep = {
+    id: `${id}-step`,
+    start: 'after-previous',
+    delayMs: 0,
+    action,
+  }
+  return {
+    id,
+    enabled: true,
+    trigger: { type: 'node.click', nodeId: triggerId },
+    conditions: [],
+    actions: [step],
+  }
+}
 
 function mountDocument(): { frame: HTMLIFrameElement; container: HTMLElement; view: Window } {
   const frame = document.createElement('iframe')
@@ -229,6 +308,88 @@ afterEach(async () => {
 })
 
 describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
+  it('composes hidden/exit/enter pointer state on Slide, Flow and Spatial without activating fallbacks', async () => {
+    const fixture = mixedGlobalRuntimeProject()
+    const payload = buildPublishedCourseV2Payload({
+      project: fixture.project,
+      assetFiles: {},
+      components: {},
+    })
+    const healthy = payload.globalLayerItems.find((entry): entry is PublishedScopedLayerItem & {
+      item: PublishedRuntimeLayerItem
+    } => entry.item.kind === 'runtime' && entry.item.layerItemId === 'global-api2-healthy')
+    if (!healthy) throw new Error('missing healthy Published global Runtime')
+    healthy.item.playbackInitialVisibility = 'hidden'
+    payload.globalLayerItems.push(
+      interactionTrigger('global-runtime-enter', 9_001),
+      interactionTrigger('global-runtime-exit', 9_002),
+    )
+    payload.globalInteractions.push(
+      visibilityRule(
+        'global-runtime-enter-rule',
+        'global-runtime-enter',
+        healthy.item.layerItemId,
+        'node.enter',
+      ),
+      visibilityRule(
+        'global-runtime-exit-rule',
+        'global-runtime-exit',
+        healthy.item.layerItemId,
+        'node.exit',
+      ),
+    )
+    const { frame, container } = mountDocument()
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    await session.mount(container)
+
+    const locations = [
+      fixture.slideLocationIds[0]!,
+      fixture.flowLocationId,
+      fixture.spatialLocationId,
+    ]
+    for (const [index, locationId] of locations.entries()) {
+      if (index > 0) await session.goToLocation(locationId)
+      const surfaceId = session.navigator.current!.surfaceId
+      const wrapper = globalWrapper(container, surfaceId, healthy.item.layerItemId)
+      const failed = globalWrapper(container, surfaceId, 'global-api2-create-failure')
+
+      expect(wrapper.dataset.interactionVisibility).toBe('hidden')
+      expect(wrapper.style.visibility).toBe('hidden')
+      expect(wrapper.style.pointerEvents).toBe('none')
+      await vi.waitFor(() => {
+        expect(failed.dataset.globalRuntimeState).toBe('fallback')
+        expect(failed.style.pointerEvents).toBe('none')
+      })
+
+      globalWrapper(container, surfaceId, 'global-runtime-enter').click()
+      await vi.waitFor(() => {
+        expect(wrapper.dataset.interactionVisibility).toBe('visible')
+        expect(wrapper.style.visibility).toBe('visible')
+        expect(wrapper.style.pointerEvents).toBe('auto')
+      })
+
+      globalWrapper(container, surfaceId, 'global-runtime-exit').click()
+      await vi.waitFor(() => {
+        expect(wrapper.dataset.interactionVisibility).toBe('hidden')
+        expect(wrapper.style.visibility).toBe('hidden')
+        expect(wrapper.style.pointerEvents).toBe('none')
+      })
+      expect(failed.style.pointerEvents).toBe('none')
+    }
+
+    const spatialSurfaceId = session.navigator.current!.surfaceId
+    const spatialWrapper = globalWrapper(container, spatialSurfaceId, healthy.item.layerItemId)
+    globalWrapper(container, spatialSurfaceId, 'global-runtime-enter').click()
+    await vi.waitFor(() => expect(spatialWrapper.style.pointerEvents).toBe('auto'))
+    expect(globalWrapper(container, spatialSurfaceId, 'global-api2-create-failure')
+      .style.pointerEvents).toBe('none')
+
+    await session.destroy()
+    sessions.splice(sessions.indexOf(session), 1)
+    frame.remove()
+  })
+
   it('moves one instance through Slide, Flow and Spatial wrappers and rebuilds only on restart', async () => {
     const fixture = mixedGlobalRuntimeProject()
     const payload = buildPublishedCourseV2Payload({

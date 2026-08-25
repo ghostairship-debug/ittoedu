@@ -11,6 +11,7 @@ import {
   createPublishedSurfaceRuntimeSession,
   type PublishedSurfaceRuntimeSession,
 } from './publishedSurfaceRuntimeMount'
+import { setPublishedGlobalCanvasRuntimeState } from './publishedGlobalCanvasRuntimePointer'
 
 type RuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -59,8 +60,9 @@ function firstVisibleRuntimeText(values: Readonly<Record<string, string>>): stri
 function setTargetRuntimeState(
   target: HTMLElement,
   state: 'playback' | 'fallback',
+  item: PublishedRuntimeLayerItem,
 ): void {
-  target.dataset.globalRuntimeState = state
+  setPublishedGlobalCanvasRuntimeState(target, state, item)
   if (target.dataset.slideRuntimeKind !== undefined) target.dataset.slideRuntimeState = state
   if (target.dataset.flowRuntimeKind !== undefined) target.dataset.flowRuntimeState = state
   if (target.dataset.layerSource === 'global') target.dataset.spatialRuntimeState = state
@@ -112,31 +114,25 @@ export class PublishedGlobalCanvasRuntimeOwner {
     for (const record of this.#records.values()) {
       const target = port?.getPublishedGlobalRuntimeMountTarget(record.item.layerItemId) ?? null
       if (record.target === target && target?.contains(record.inner)) {
-        setTargetRuntimeState(target, record.failed ? 'fallback' : 'playback')
-        target.style.pointerEvents = !record.failed && record.item.hitPolicy === 'auto'
-          ? 'auto'
-          : 'none'
+        setTargetRuntimeState(target, record.failed ? 'fallback' : 'playback', record.item)
         continue
       }
 
       if (record.active) {
-        record.handle.setVisible(false)
-        record.handle.suspend()
+        this.#invokeLifecycle(record, 'setVisible', () => record.handle.setVisible(false))
+        this.#invokeLifecycle(record, 'suspend', () => record.handle.suspend())
       }
       record.inner.remove()
       record.target = target
       record.active = false
       if (!target) continue
 
-      setTargetRuntimeState(target, record.failed ? 'fallback' : 'playback')
-      target.style.pointerEvents = !record.failed && record.item.hitPolicy === 'auto'
-        ? 'auto'
-        : 'none'
+      setTargetRuntimeState(target, record.failed ? 'fallback' : 'playback', record.item)
       target.replaceChildren(record.inner)
       if (!record.failed) {
-        record.handle.setVisible(true)
-        record.handle.resume()
-        record.active = true
+        this.#invokeLifecycle(record, 'setVisible', () => record.handle.setVisible(true))
+        if (!record.failed) this.#invokeLifecycle(record, 'resume', () => record.handle.resume())
+        record.active = !record.failed
       }
     }
   }
@@ -222,8 +218,7 @@ export class PublishedGlobalCanvasRuntimeOwner {
       record.failed = true
       record.active = false
       if (record.target) {
-        setTargetRuntimeState(record.target, 'fallback')
-        record.target.style.pointerEvents = 'none'
+        setTargetRuntimeState(record.target, 'fallback', record.item)
       }
     }
     if (record.failureReported) return
@@ -239,6 +234,22 @@ export class PublishedGlobalCanvasRuntimeOwner {
       message: `Global Runtime“${record.item.layerItemId}”${phase}失败：${error.message}`,
       cause: error,
     })
+  }
+
+  #invokeLifecycle(
+    record: GlobalRuntimeRecord,
+    operation: 'setVisible' | 'suspend' | 'resume',
+    invoke: () => void,
+  ): void {
+    try {
+      invoke()
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause))
+      this.#handleFailure(record, 'lifecycle', new Error(
+        `Global Runtime ${operation} 失败：${error.message}`,
+        { cause: error },
+      ))
+    }
   }
 
   #destroyRecords(): void {

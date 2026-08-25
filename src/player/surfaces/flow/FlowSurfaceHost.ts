@@ -66,6 +66,10 @@ import {
   mountPublishedSurfaceRuntime,
   type PublishedSurfaceRuntimeMountHandle,
 } from '../runtime/publishedSurfaceRuntimeMount'
+import {
+  isPublishedGlobalCanvasRuntimePointerItem,
+  setPublishedGlobalCanvasRuntimeInteractionVisibility,
+} from '../runtime/publishedGlobalCanvasRuntimePointer'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -592,9 +596,13 @@ export class FlowSurfaceHost {
         const visible = state.visible
         wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
         wrap.style.visibility = visible ? 'visible' : 'hidden'
-        wrap.style.pointerEvents = visible
-          ? state.clickBound ? 'auto' : authoredPointerEvents
-          : 'none'
+        if (source === 'global' && isPublishedGlobalCanvasRuntimePointerItem(item)) {
+          setPublishedGlobalCanvasRuntimeInteractionVisibility(wrap, item, visible)
+        } else {
+          wrap.style.pointerEvents = visible
+            ? state.clickBound ? 'auto' : authoredPointerEvents
+            : 'none'
+        }
         if (visible) wrap.removeAttribute('aria-hidden')
         else wrap.setAttribute('aria-hidden', 'true')
       },
