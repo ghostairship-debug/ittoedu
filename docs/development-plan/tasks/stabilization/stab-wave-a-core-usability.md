@@ -14,19 +14,19 @@
 - Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `src/renderer/ui/Workspace.tsx`; `src/renderer/ui/TeacherControllerAuthoringChrome.tsx`; `src/renderer/authoring/flowTextEdit.ts`; `src/renderer/authoring/v9TeacherControllerAuthoring.ts`; `src/renderer/course/globalLayerCommands.ts`; `src/renderer/course/spatialEditorCommands.ts`; `src/renderer/course/v9SlideContentCommands.ts`; `src/renderer/store/editorStore.ts`; `src/shared/teacherControllerLayout.ts`; `tests/e2e/stabilizationCoreUsability.spec.ts`; `playwright.config.ts`
 - Task ID: `stab-wave-a-core-usability`
 - Phase / wave: `post-audit stabilization / A-core gate`
-- Status: `wave-validated`
+- Status: `retrying`
 - Owner / Reviewer / Integrator: `Validation Worker / Core Usability Reviewer / Stabilization Integrator`
 - Claimed at / released at: `2026-08-25 / wave-validated 2026-08-25`
 - Worktree / branch: `shared integration workspace / codex/architecture-stabilization`
 - Baseline HEAD: `d8d496f` (integrated dependency candidate; product bytes end at `0f7053e`)
 - Context: manual Bootstrap read the three dependency cards and evidence, `playwright.config.ts`, the existing Electron launch/save/reopen/preview helpers in `editor.spec.ts` and `imageReplacementVerticalSlice.spec.ts`, and the final listed product paths. The one-spec design uses one Electron process and three bounded `test.step` behaviors.
-- Freshness / relevant dirty inputs: worktree and every listed product/spec path were clean at claim. `npm run repo:index:check` correctly reported the committed index stale after Wave A product changes, so the gate uses the recorded exact-source Bootstrap and defers one generated refresh to the wave checkpoint.
+- Freshness / relevant dirty inputs: worktree and every listed product/spec path were clean at claim. `npm run repo:index:check` correctly reported the committed index stale after Wave A product changes, so the gate uses the recorded exact-source Bootstrap and defers one generated refresh to the wave checkpoint. Post-Wave-C product commit `23f2d00` later changed the listed `FlowWorkspace.tsx` terminal-key branches; Policy v2 therefore requires one unchanged-spec freshness rerun before audit closure even though the diff is narrow.
 - Hotspot locks: released after gate commit `3cd4719`; the gate made no product-code change.
 - Depends on: `stab-ctrl-01-authoring-bounds-and-recovery`; `stab-mix-01-effective-order-allocation`; `stab-mix-03-slide-effective-order-allocation`; `stab-flow-01-real-text-selection`
 - Blocks: `core-gate release for B/C/D cards that explicitly depend on stab-wave-a-core-usability; unrelated cards remain claimable`
 - Risk statement: Integration can reintroduce pointer/hit routing or stale Store behavior not visible in isolated focused tests.
 - Retry count / last failure class: `8 / the first independent hit-test oracle targeted the visual child button although runtime intentionally delegates its pointer region to the draggable controller root`
-- Final-candidate freshness attempts / last failure class: `3 / pass: the complete unchanged three-group acceptance journey passed in 2.0 minutes`
+- Final-candidate freshness attempts / last failure class: `4 / post-Wave-C freshness rerun pending at product 23f2d00`
 
 ## Product outcome
 
