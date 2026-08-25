@@ -662,6 +662,9 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/renderer/project/createCourseProject.ts',
     'src/renderer/project/courseProjectArchive.ts',
     'src/renderer/ui/coursePlayerTryRun.ts',
+    'src/main/createWindow.ts',
+    'src/main/previewNetworkPolicy.ts',
+    'src/preload/index.ts',
     'src/player/RuntimeHost.ts',
     'src/player/CourseRuntimeKernel.ts',
     'src/player/HostEvidenceRecorder.ts',
@@ -669,6 +672,7 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/player/TeacherEscapeControls.ts',
     'src/player/surfaces/publishedDynamicHosts.ts',
     'src/player/surfaces/flow/FlowSurfaceHost.ts',
+    'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
     'src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts',
     'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     'src/shared/builtInComponentCatalog.ts',
@@ -896,6 +900,33 @@ export async function generateAiCapabilityArtifacts(
         restartCourse: 'cleared',
       },
     },
+    publishedPlayback: {
+      status: 'partial',
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-canvas-runtime-playback-with-partial-host-context',
+        },
+      ],
+      notCovered: [
+        'globalLayerItems-or-surfaceLayerItems',
+        'flow-or-spatial',
+        'runtime.event-or-host-actions',
+        'node-resolution-or-presentation',
+        'cross-surface-courseState',
+        'capture-pdf-or-pptx',
+        'host-local-capabilities',
+      ],
+    },
     documentation: 'docs/RUNTIME_AUTHORING.md',
     sourceOfTruth: [
       'src/shared/runtimeSchema.ts',
@@ -905,6 +936,8 @@ export async function generateAiCapabilityArtifacts(
       'src/player/CourseRuntimeKernel.ts',
       'src/player/PlayerApp.ts',
       'src/player/TeacherEscapeControls.ts',
+      'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     ],
   }))
   files.set('schemas/runtime-api3.json', canonicalJson({
@@ -956,7 +989,6 @@ export async function generateAiCapabilityArtifacts(
         },
       ],
       notCovered: [
-        'canvas-runtime-api2',
         'spatial',
         'globalLayerItems-or-non-flow-surfaceLayerItems',
         'runtime.event-or-host-actions',
@@ -1089,8 +1121,8 @@ export async function generateAiCapabilityArtifacts(
       authoringModes: ['professional'],
       scopes: RUNTIME_SCOPES,
       exports: {
-        singleHtml: 'partial:slide-scene-and-flow-surface-runtime-api3-dom-interactive',
-        webPackage: 'partial:slide-scene-and-flow-surface-runtime-api3-dom-interactive',
+        singleHtml: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
+        webPackage: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
         pdf: 'captured-with-static-fallback',
         pptx: 'captured-per-runtime-with-static-fallback',
       },
@@ -1173,6 +1205,22 @@ export async function generateAiCapabilityArtifacts(
       webPackage: { interactivity: 'preserved', resources: 'relative-files' },
       pdf: { interactivity: 'omitted', representation: 'player-capture' },
       pptx: { interactivity: 'omitted', representation: 'native-plus-static-fallback' },
+    },
+    previewSurfaces: {
+      host: 'main-renderer-published-v2',
+      consumers: ['current-location-try-run', 'whole-course-preview'],
+      resources: {
+        remoteProjectAssets: 'actual-published-references-with-https-remote-url',
+        localProjectAssets: 'inline-data-url',
+        componentAssets: 'inline-data-url',
+      },
+      networkPolicy: {
+        declaredConnectOrigins: ['https', 'wss'],
+        enforcement: 'editor-scheme-csp-plus-main-session-exact-origin-leases',
+        leaseLifetime: 'published-session-and-document-generation',
+        corsTls: 'browser-enforced',
+        remoteScripts: 'blocked',
+      },
     },
     documentation: {
       authoring: '.agents/skills/build-courseware-project/SKILL.md',

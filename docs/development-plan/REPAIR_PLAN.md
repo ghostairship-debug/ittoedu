@@ -4,9 +4,9 @@
 >
 > 当前质量审计基线：`3780090`；Gate R0 文档/流程基线：`b967c96`。
 >
-> 当前批次编排基线：`a1ccc9cc0703d1e4d323baa21d256921c7360879`。
+> 当前批次编排基线：`ddab68b2173af79ba6d72922786303bc6f8c3bf0`。
 >
-> 状态：**Gate R0、Wave 0、网络合同、RTP-01、NET-E1、RTP-02 与 V8-01 已关闭；当前执行本批唯一 phase gate，任务板暂为空**。门通过后才创建 NET-H1、Slide scene-local API 2 Published playback 与 photosynthesis V9/V2 oracle 三张下一批卡。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**Gate R0、Wave 0、网络合同、NET-E1/H1、RTP-01/02/03 与 V8-01/02 已完成产品实现和独立审查；当前执行本批唯一 phase gate，任务板暂为空**。门通过后才按最新 consumer 审计创建前置已满足的下一批卡。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -34,15 +34,18 @@
 
 这些是当前宿主能力差异，不是“非内置代码获得桌面权限”的安全缺陷。SEC-01 的信任前提已被 Owner 推翻，不得合入其 blanket sandbox 实现。未来只在真实 Runtime/Component consumer 要求某项宿主能力时，针对该执行路径补稳定宿主接口或调整执行上下文。
 
-### 2.2 网络声明与在线单 HTML 已落地，真实 V9 预览宿主尚未接线
+### 2.2 网络声明、在线单 HTML 与真实 V9 预览宿主已接线
 
 - V9 `CourseAssetMeta.remote.url` 已能记录内嵌资产的 HTTPS 交付地址，`network.connectOrigins` 已能声明 Runtime/Component 使用的精确 `https`/`wss` origin；
 - Published producer 继续要求每个资产存在本地 bytes；离线便携模式内嵌资源，在线轻量模式只把实际引用且声明 `remote.url` 的工程资产投影为原 HTTPS URL；
 - 在线轻量单 HTML 已从实际远程图片/音视频/字体与 `network.connectOrigins` 生成精确 CSP；网页包仍使用本地相对资源；
-- 合法 V9 的当前位置试运行与整课预览直接挂载在主 renderer，当前主 session 尚未从工程动态接收 origin，HTTP(S)/WS(S) 仍会被拦截；独立 preview partition 只是无 active V9 source 的后备，不是 NET-H1 的唯一修复点；
+- 合法 V9 的当前位置试运行与整课预览直接挂载在主 renderer，只把实际 Published 引用且带 `remote.url` 的工程素材投影为 HTTPS；组件素材、本地素材和未引用远程素材不扩大授权；
+- editor meta CSP 只开放远程图片/媒体/字体与连接所需的 HTTPS/WSS scheme，远程脚本仍禁止；main session 以精确 origin lease 最终裁决，CORS/TLS 不被绕过；
+- preview/session 销毁、overlay 内 A→B、导航、renderer 退出与窗口关闭都会撤销动态 lease；每次主文档 commit 的随机 capability 使 reload 前旧文档迟到的 set/release 永久失效，开发服务器基础 origin 独立保留；
+- 独立 preview partition 仍只是无 active V9 source 的后备，不冒充主路径；
 - 旧 `inspectSourceNetworkUse` 仍把 `fetch`、WebSocket 与外链媒体统一当作外部网络问题。
 
-因此网络合同与在线单 HTML 交付已经完成，下一步按真实 V9 consumer 接线主 renderer 预览宿主，再处理 API、捕获与诊断。诊断只能报告**未声明或不安全的访问**，不能 blanket 禁止网络。
+因此合同、在线交付与主 renderer 预览宿主已经闭合；下一步只按真实 HTTP/WebSocket、媒体与捕获 consumer 处理 API/CORS/fallback/诊断。诊断只能报告**未声明或不安全的访问**，不能 blanket 禁止网络。
 
 ### 2.3 Wave 0 的真实用户缺陷
 
@@ -58,9 +61,9 @@
 - 投影缓存不能只用 `history.present`：Slide 还需 surface，Flow 需 location/scope，Spatial 需 location/surface/scope/edit；
 - V9 Schema 已覆盖大量结构完整性，缺口是 post-load 语义、启发式、生命周期和交付 preflight，不是“V9 100% 无检查”。
 
-### 2.5 V8 测试产物仍未清退
+### 2.5 V8 测试产物仍在逐链清退
 
-当前仍有三个 `schemaVersion: 8` 的 `.h5lesson`：sample、photosynthesis 与 render-host benchmark；incline-motion 的无 consumer 脚本、组件和归档链已精确删除。文档不得把这次单链删除写成“V8 已清退”。其余处置顺序仍是：先识别活 consumer → 建最小 V9 替代 → 重写行为 oracle → 删除对应旧内容。
+当前仍有两个 `schemaVersion: 8` 的 `.h5lesson`：sample 与 render-host benchmark。incline-motion 无 consumer 全链已删除；photosynthesis 已改为三 Slide Course Project V9 archive + Published V2 离线行为 oracle，并删除专属旧组件链。文档不得把两次单链替代写成“V8 已清退”。其余处置顺序仍是：先识别活 consumer → 建最小 V9 替代 → 重写行为 oracle → 删除对应旧内容。
 
 ### 2.6 集成后完成质量审计（baseline `3780090`）
 
@@ -112,7 +115,7 @@
 1. **NET-R1 远程资源合同（已合入）**：V9 以 additive 可选字段声明远程交付 URL，同时保留现有本地 bytes 作为作者缓存/离线来源；既有 V9 文件逐字节语义不变。真正 remote-only 作者资产以后按 consumer 再开，不用伪造 `path/byteLength`。
 2. **NET-P1 工程网络合同（已合入）**：项目声明允许的 `https`/`wss` origins；禁止 wildcard、userinfo、非网络 scheme；凭证值不进入合同。
 3. **NET-E1 在线轻量单 HTML（已完成）**：producer 在在线模式保留实际引用的 remote URL，并从资源/连接声明生成最小精确 CSP；离线模式维持 Data URL，网页包不变。非精确 HTTPS 地址在写盘前阻断，预检列出实际远程依赖但不伪造可达性/CORS 成功。
-4. **NET-H1 真实 V9 预览宿主联网（阶段门后 Ready）**：当前位置试运行与整课预览所在主 renderer 使用课程 origin 策略；工程切换/关闭时撤销旧 origin，并保持该执行路径已经明确提供的宿主能力。独立 preview partition 只按其真实 fallback consumer 同步，不用它冒充主路径修复。
+4. **NET-H1 真实 V9 预览宿主联网（已完成）**：当前位置与整课预览共用 Published V2 mount，只为实际引用的远程工程素材与声明的 `connectOrigins` 建精确、可撤销的 main-session lease；工程切换/关闭、预览卸载和跨文档导航均撤销，document capability 阻断旧文档迟到 IPC。独立 preview partition 仍保持无 source fallback 语义。
 5. **NET-C1 媒体与捕获降级**：播放、Canvas、缩略图、PDF/PPTX 分别给出可执行结果；CORS 不满足时使用本地 fallback 或明确报告。
 6. **NET-AI 边界**：只定义凭证与调用边界，不接入具体 AI Provider；长期密钥零持久化、零导出。
 
@@ -122,7 +125,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 - **RTP-01（已完成）**：Slide scene-local API 3 DOM Runtime 已在当前位置试运行、整课预览、单 HTML 与网页包的 Published V2 路径真实运行。
 - **RTP-02（已完成）**：Flow 作者命令写入 `surfaceLayerItems` 的 surface-scoped API 3 DOM Runtime 已复用现有 Published mount，在四个 consumer 中真实运行；global/disabled 仍后备，失败实例立即销毁并隔离。
-- **下一纵切（阶段门后 Ready）**：教师可从 Slide 工程开发工作台真实创建并保存 scene-local API 2 Runtime，但 Published V2 仍只显示 fallback；只接通这一个 authoring consumer。Spatial API 3 尚无生产 UI caller，global 会重复挂载，capture 尚无 Published consumer，继续不建卡。
+- **RTP-03（已完成）**：教师通过真实 Slide runtime template/source/property authoring command 创建的 scene-local API 2 DOM/Phaser/hybrid 已在四个 Published consumer 执行；跨 generation、暂离/恢复、失败隔离与 Phaser Core `DESTROY` 已覆盖。宿主动作、presentation、节点解析、global/shared/Spatial/capture 仍不在该 partial slice 内。
 
 ### Wave 2：Validation Report 与 Diagnostic Target
 
@@ -134,8 +137,8 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 ### Wave 3：V8 测试产物清退与发布门
 
 - EXA-02 与 V8-01 已完成；经 consumer 查询确认没有 package、测试、发布或产品调用者的 incline-motion 全链已经删除；
-- photosynthesis 的 E2E 只要求三页导航、前两页指针操作后的像素变化、第三页完成指针操作与截图、零 HTTP(S) 请求和零 `pageerror`；阶段门后用当前 V9 archive + Published V2 单 HTML 重建这一最小 oracle，不迁移旧课内容；
-- sample、benchmark、portability 与 release verifier 仍有 Phaser Component/API 2/打包等活 consumer，当前不删除；
+- **V8-02 已完成**：photosynthesis 用当前 V9 factory 生成三 Slide archive，并以 Published V2 离线 HTML保留三页导航、前两页像素变化、第三页指针操作与截图、零 HTTP(S) 与零 `pageerror` 的原行为门；专属 V8 archive/component chain 活引用为零；
+- sample、benchmark、portability 与 release verifier 仍有 Phaser Component/API 2/打包等活 consumer；最新审计确认它们都先依赖 Published Phaser Component parity，当前不删除；
 - `verify-release.ts` 的 controller、DOM、navigation、Published oracle 全部改为 V9/V2；
 - 不用 V8→V9 migrate 兜底，不复活退役保真门；
 - 巨型生成物只有存在 fresh-checkout consumer 时才 tracked，否则转显式 build output。
@@ -150,31 +153,25 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板。NET-E1、RTP-02 与 V8-01 的产品提交和独立审查已经闭合，三张卡已删除；当前任务板为空只表示 Integrator 正在执行本批一次性 phase gate，不表示路线完成。SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 的产品提交和独立审查已经闭合，三张卡已删除；当前任务板为空只表示 Integrator 正在执行本批一次性 phase gate，不表示路线完成。SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
-阶段门通过后才创建下列三张前置已满足且写域互斥的 S2 卡：
+阶段门通过后才从最新审计中建立前置已满足的最小纵切。当前唯一已审计 Ready 候选是 `repair-rtp-04-published-global-api2-runtime`：全局开发面板与 producer 已能创建/发布 `globalLayerItems` API 2，真实失败面是所有 Surface host 预挂载时不能各自执行一份；实现只建立 session-global 单实例 ownership，并把同一内层容器迁入当前 host 的既有 global wrapper，保留 order/坐标/命中、跨 Surface 状态、restart/destroy 和失败隔离。global API 3、actions/events/nodes/capture/Component 不随卡开放。
 
-| Task | Ready 证据 | 独占写入边界 |
-|---|---|---|
-| `repair-net-h1-v9-preview-network` | 合法 V9 的当前位置试运行/整课预览直接挂载在主 renderer；当前 `network.connectOrigins` 与远程素材没有驱动主 session 策略 | main/preload/IPC + App/真实 V9 try-run；唯一热点 writer |
-| `repair-rtp-03-published-slide-api2-runtime` | 工程开发工作台可真实创建并保存 Slide scene-local API 2 Runtime；Published V2 当前无条件 fallback | 新窄幅 Published API 2 mount + Slide adapter；不接 Legacy Player |
-| `repair-v8-02-photosynthesis-v9-oracle` | 现有 E2E 只要求三页导航、前两页像素变化、第三页指针操作与截图、零 HTTP(S) 请求和零 `pageerror`，可由当前 V9 archive + Published V2 最小 fixture 等价证明 | 精确示例生成器、该示例产物与对应 oracle；不迁移旧课内容 |
-
-Spatial API 3 尚无生产 UI caller；global Runtime 缺 session-global 唯一 ownership；Published capture 尚无真实 consumer。sample、benchmark、portability 与 release verifier 仍依赖 Phaser Component、API 2 或打包行为。这些均不随下一批建卡。Validation Report/Diagnostic Target 也仍需先裁决合同。
+已知不准入事实：sample、benchmark/release 与 portability 均仍被 Published Phaser Component parity 阻塞；NET-C1 必须以真实 HTTP/WebSocket/媒体或捕获 consumer 定义结果；Validation Report/Diagnostic Target 仍需先裁决合同；Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
 ## 6. 并发与集成安排
 
 ### 6.1 当前批次收口
 
-1. 三条分支均从 `a1ccc9c` 派生，已按 **V8-01 → RTP-02 → NET-E1** 合入；独立 Reviewer 发现的 Legacy 当前计数、Flow lifecycle stale listener、wildcard CSP 与远程依赖漏报均已修复后复审通过。
+1. 三条分支均从 `ddab68b` 派生，已按 **V8-02 → RTP-03 → NET-H1** 合入；独立 Reviewer 发现的 Phaser 核心销毁、overlay A→B lease 残留与同 frame 跨文档迟到 IPC 均已修复后复审通过。
 2. Integrator 删除任务卡，统一同步用户文档、能力声明、Legacy inventory、任务板与 repo-index；AI capabilities 与 repo-index 各只生成一次。
-3. 复用作者与 Reviewer 的 focused 证据；当前只补组合风险：离线导出不变、在线 CSP 能加载声明资源、Flow Runtime 在离线/在线单 HTML 均执行、删除 incline 后示例与 fresh-checkout checks 仍绿。
-4. 当前批次只跑一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、两条新增定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。只有固定发布候选才追加完整 `npm run verify`、打包、性能与签名门。
+3. 复用作者与 Reviewer 的 focused 证据；当前只补组合风险：Player bundle 刷新后的 benchmark 确定性、photosynthesis V9/V2 oracle、API 2 三 renderMode 三交付、真实 Electron preview network allow/deny/revoke 与 examples/fresh-checkout checks。
+4. 当前批次只跑一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、三条新增/改写定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。只有固定发布候选才追加完整 `npm run verify`、打包、性能与签名门。
 5. 组合门失败时只为精确失败面建 repair 卡或重开直接责任任务；通过后提交本批集成收口，再建立下一批卡。
 
-### 6.2 下一批产品实现并行
+### 6.2 本批产品实现并行（已收口）
 
-下一批三张卡必须从阶段门固定 baseline 建隔离 worktree，并在变为 `active` 前记录唯一 Owner：
+本批三张卡从同一 baseline 建隔离 worktree，并在 `active` 前记录唯一 Owner：
 
 | Lane | Hotspot / 写入范围 | 并行约束 |
 |---|---|---|
@@ -184,16 +181,16 @@ Spatial API 3 尚无生产 UI caller；global Runtime 缺 session-global 唯一 
 
 计划、任务卡、`TASK_BOARD.md`、README/作者文档、共享 fixture/helper、能力与 repo-index 生成输出仍由 Integrator 单写。各 S2 作者只跑卡内 focused checks，独立 Reviewer 审 diff、失败路径与遗漏反例，不机械复跑作者命令。
 
-### 6.3 后续准入点（不建卡）
+### 6.3 后续准入点（阶段门前不建卡）
 
 - NET-H1 稳定后：以真实 HTTP/WebSocket consumer 准入 API 与 NET-C1；CORS/捕获必须给出明确 fallback 或诊断。
-- RTP-03 稳定后：再重新比较 Spatial UI consumer、global 唯一 ownership 与 Published capture，仍只选择一个最小真实失败面；benchmark 清退受 API 2 与 Component Phaser parity 共同约束。
+- RTP-03 稳定后的审计已选择 global API 2 单实例 ownership 作为唯一 Ready 失败面；门通过后只建 RTP-04，Spatial、global API 3、Published capture 与非 Flow shared 继续不准入；benchmark 清退仍受 Component Phaser parity 约束。
 - V8-02 完成后：重新生成 Legacy consumer 事实，再分别决定 sample、benchmark/verify-release 与 portability 的 V9/V2 替代；不得打成一张“大清退”卡。
 
 ## 7. 成功门槛
 
 - Runtime/Component 因“外部导入”被误判为不可信并强制低权限执行的路径：0；
-- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：Slide scene-local 与 Flow surface-local API 3 DOM 在四个现有 consumer 已归零；API 2、Spatial、globalLayer、非 Flow surfaceLayer 与 capture 等剩余 carrier 继续按独立纵切逐项归零；
+- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：Slide scene-local API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 在四个现有 consumer 已归零；其余 carrier 与 API 2 partial host context 继续按独立纵切逐项归零；
 - 已声明远程资源/API 被 blanket 拦截：0；未声明 origin 被错误放行：0；
 - 长期 API Key 进入工程或导出物：0；
 - 能力索引与 CLI 实现不一致：0；
@@ -201,7 +198,7 @@ Spatial API 3 尚无生产 UI caller；global Runtime 缺 session-global 唯一 
 - Flow 组件 usage 定位在未激活所属 surface 的有效 location、未选中 block 时报告成功：0；
 - Schema-invalid V9 的 preflight/producer 泄漏原生 `TypeError`：0；同一输入的 `project-schema-invalid` code/首个 Zod issue path 漂移：0；合法 V9 静态前置的 shared code/path 漂移：0；
 - 连续两次测试准备造成 tracked 工作树漂移：0；LF/CRLF 或 `core.autocrlf=true/false` 导致 fixture 字节漂移：0；
-- 已确认无 consumer 的旧课例链残留：0；仍有 consumer 的三个 V8 `.h5lesson` 只按替代 oracle 就绪顺序逐项清退；
+- 已确认无 consumer 的旧课例链残留：0；仍有 consumer 的两个 V8 `.h5lesson` 只按替代 oracle 就绪顺序逐项清退；
 - 新增语义码直接以 error 回归阻断既有离线便携或网页包导出：0；新在线轻量模式的专属 blocker 不计作既有路径回归；
 - 热点并行写冲突：0；
 - 自动化最多声明 `engineering candidate`。

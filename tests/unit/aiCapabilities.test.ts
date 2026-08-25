@@ -120,6 +120,18 @@ describe('AI capability manifest generation', () => {
           networkPolicy: string
         }
       }
+      previewSurfaces: {
+        host: string
+        consumers: string[]
+        resources: Record<string, string>
+        networkPolicy: {
+          declaredConnectOrigins: string[]
+          enforcement: string
+          leaseLifetime: string
+          corsTls: string
+          remoteScripts: string
+        }
+      }
     }>(first.files, 'index.json')
     expect(first.indexBytes).toBeLessThanOrEqual(AI_CAPABILITY_INDEX_MAX_BYTES)
     expect(first.indexBytes).toBe(canonicalJsonByteLength(index))
@@ -186,8 +198,8 @@ describe('AI capability manifest generation', () => {
       maintainerMustBeAssigned: true,
     })
     expect(index.runtime.exports).toMatchObject({
-      singleHtml: 'partial:slide-scene-and-flow-surface-runtime-api3-dom-interactive',
-      webPackage: 'partial:slide-scene-and-flow-surface-runtime-api3-dom-interactive',
+      singleHtml: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
+      webPackage: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
     })
     expect(index.exportSurfaces.singleHtml).toEqual({
       interactivity: 'preserved',
@@ -197,6 +209,22 @@ describe('AI capability manifest generation', () => {
         onlineLightweight: 'referenced-project-assets-with-remote-url-remote-others-inline',
       },
       networkPolicy: 'exact-declared-origins-no-remote-script',
+    })
+    expect(index.previewSurfaces).toEqual({
+      host: 'main-renderer-published-v2',
+      consumers: ['current-location-try-run', 'whole-course-preview'],
+      resources: {
+        remoteProjectAssets: 'actual-published-references-with-https-remote-url',
+        localProjectAssets: 'inline-data-url',
+        componentAssets: 'inline-data-url',
+      },
+      networkPolicy: {
+        declaredConnectOrigins: ['https', 'wss'],
+        enforcement: 'editor-scheme-csp-plus-main-session-exact-origin-leases',
+        leaseLifetime: 'published-session-and-document-generation',
+        corsTls: 'browser-enforced',
+        remoteScripts: 'blocked',
+      },
     })
     expect(index.headlessBuild).toEqual({
       language: 'typescript',
@@ -620,6 +648,46 @@ describe('AI capability manifest generation', () => {
       formatVersion: number
     }>(generated.files, 'schemas/published-course-v2.json')
     expect(published.formatVersion).toBe(PUBLISHED_COURSE_VERSION)
+    const canvasRuntime = parseFile<{
+      runtimeApiVersion: number
+      publishedPlayback: {
+        status: string
+        supportedSlices: Array<{
+          surface: string
+          carrier: string
+          scope: string
+          renderModes: string[]
+          consumers: string[]
+        }>
+        notCovered: string[]
+      }
+    }>(generated.files, 'schemas/runtime-api2.json')
+    expect(canvasRuntime.publishedPlayback).toMatchObject({
+      status: 'partial',
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+        },
+      ],
+    })
+    expect(canvasRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
+      'globalLayerItems-or-surfaceLayerItems',
+      'flow-or-spatial',
+      'runtime.event-or-host-actions',
+      'node-resolution-or-presentation',
+      'cross-surface-courseState',
+      'capture-pdf-or-pptx',
+      'host-local-capabilities',
+    ]))
     const surfaceRuntime = parseFile<{
       runtimeApiVersion: number
       protocol: string
@@ -651,7 +719,6 @@ describe('AI capability manifest generation', () => {
       },
     })
     expect(surfaceRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
-      'canvas-runtime-api2',
       'spatial',
       'globalLayerItems-or-non-flow-surfaceLayerItems',
       'runtime.event-or-host-actions',
@@ -810,6 +877,10 @@ describe('AI capability manifest generation', () => {
       'src/renderer/components/componentPackageStore.ts',
       'src/renderer/project/createCourseProject.ts',
       'src/renderer/project/courseProjectArchive.ts',
+      'src/main/createWindow.ts',
+      'src/main/previewNetworkPolicy.ts',
+      'src/preload/index.ts',
+      'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
       'src/shared/layoutMeasure.ts',
       'src/shared/componentContentIntegrity.ts',
       'src/shared/textLayout.ts',
