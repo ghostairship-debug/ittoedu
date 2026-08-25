@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：17.0（2026-08-25：Owner 确认 Runtime/Component 均为经审核的可信扩展，外部导入只是分发方式；取消基于错误信任前提的 SEC-01 blanket sandbox 路线）
+> 计划版本：17.1（2026-08-26：修正 Wave 0 过期状态；在网络合同与首个 Published Runtime 纵切稳定后，准入在线轻量单 HTML、Flow 共享层 Runtime 与无 consumer V8 链清退的下一批并行工作）
 >
 > 当前活动路线：第 5 节“工程修复与网络基础——Gate R0 → Wave 0–5”；详细证据与开工顺序见 [修复方案](docs/development-plan/REPAIR_PLAN.md)
 >
@@ -92,13 +92,15 @@
 
 - **Gate R0（已关闭）**：网络方向和精简流程已经裁决；原基线 `b967c96` 中“外部作者代码=低权限代码”的信任前提已被 Owner 本次明确替代。初始任务的完成事实由 product commit 承载，当前状态只看任务板。
 - **Wave 0 契约诚实与直接用户行为**：`CAP-01` 移除了未兑现的宽泛 `project-health` 声明；`UI-01`、`CMP-01`、`EXP-01` 及其集成后补修已由 product commit 承载。`SEC-01` 基于错误信任前提，未合入产品代码并已取消。
-- **Wave 0 集成后质量补修（审计基线 `3780090`）**：`CAP-01` 维持关闭；`UI-01` 与 `EXA-02` 因原验收仍有反例而重开；新增 `EXP-02` 处理畸形 V9 的原生异常，新增 `CMP-02` 处理 Flow 组件使用位置的定位假成功。这些是现有 Wave 的完成质量补修，不另建新 Wave；四项在各自互斥范围内均已 Ready，CMP 若实证需要 Store 写入则停止并等待 UI 热点释放。
-- **Published Runtime parity（独立 S2 纵切）**：取消 SEC-01 后的宿主核对确认 Published V2 已携带 Runtime API 2/3 源码，但 Slide/Flow/Spatial 只渲染静态 fallback；首张 `repair-rtp-01` 只证明 Slide scene-local API 3 DOM playback，稳定后才按真实失败面扩到其他 carrier。不得用首张卡伪称 API 2、Flow/Spatial、全局/共享 scope 或捕获已完成，也不复活 sandbox 权限目标或接回 Legacy Player。
-- **Wave 1 网络基础纵切**：远程资源交付与工程网络声明的 additive 合同已落地；后续按“在线轻量单 HTML → 预览宿主动态 origin → API 连接 → CORS/静态捕获降级”逐个用户行为实施。长期密钥不进入静态课件。
+- **Wave 0 集成后质量补修（审计基线 `3780090`）**：`CAP-01` 维持关闭；`UI-01`、`EXA-02`、`EXP-02` 与 `CMP-02` 已由各自 product commit 收口，完成事实见 Git 历史与当前修复方案，不再以过期的 Ready 文案派工。
+- **Published Runtime parity（独立 S2 纵切）**：`repair-rtp-01` 已证明 Slide scene-local API 3 DOM playback；下一纵切只接通现有 Flow 作者命令会真实产生的 surface-scoped API 3 DOM Runtime，复用同一 Published mount。API 2、Spatial、global scope 与捕获仍按后续真实失败面逐项准入，不复活 sandbox 权限目标或接回 Legacy Player。
+- **Wave 1 网络基础纵切**：远程资源交付与工程网络声明的 additive 合同已落地；当前先实现在线轻量单 HTML，再按“预览宿主动态 origin → API 连接 → CORS/静态捕获降级”逐个用户行为实施。长期密钥不进入静态课件。
 - **Wave 2 诊断合同**：Validation Report 与 Diagnostic Target 分别定约，再实现逐码 ledger。原“成功分支映射 17 码”控制流不可达，继续否决。
-- **Wave 3 V8 测试产物清退与真实发布门**：先解决生成物/fresh checkout，且生成与检查结果不得依赖 checkout 的 LF/CRLF 或 `core.autocrlf=true/false`；再删除全部 V8 课例内容。只有活测试或 verifier 所需内容才用产品工厂重建最小 V9 fixture，不迁移 photosynthesis、incline-motion 或 benchmark 的旧课例设计。
+- **Wave 3 V8 测试产物清退与真实发布门**：生成物/fresh checkout 前置已经关闭；当前先删除没有 package、测试、发布或产品 consumer 的 incline-motion 全链。其余 sample、photosynthesis、benchmark 与 release verifier 仍有活 consumer，只能在各自 V9/V2 替代和行为 oracle 就绪后逐项建卡，不迁移旧课例设计。
 - **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
 - **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
+
+当前批次只包含三个前置已满足且写入范围互斥的 S2：在线轻量单 HTML、Flow `surfaceLayerItems` API 3 DOM Runtime playback、incline-motion V8 全链删除。三条产品实现从同一 baseline 在隔离 worktree 并行；计划/任务板、能力索引、示例内嵌 Player 与 repo-index 由 Integrator 合并后单写一次。`NET-H1`、下一 Runtime carrier 与其余 V8 consumer 迁移只记录依赖，不提前建卡。
 
 已删除/降级项：`HYG-02` 删除（8 处均为合法 unchanged guard）；`HYG-01/03/05` 降级或移出产品路线；`NAV-01` P2 登记。已完成治理项：`CAP-02`、`CAP-03`、`HYG-04`。
 

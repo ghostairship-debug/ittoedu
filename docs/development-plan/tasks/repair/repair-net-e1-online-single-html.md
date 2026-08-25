@@ -1,0 +1,9 @@
+# repair-net-e1-online-single-html 在线轻量单 HTML
+
+- Status / Owner: queued /
+- Risk / Hotspot: S2 / published-producer, app-save-recovery
+- Outcome / Why now: 教师可在现有导出入口明确选择“离线便携”或“在线轻量”单 HTML；当前 producer 始终把资产转成 Data URL，CSP 也只允许 data/blob，导致已合入的 `remote.url` 与 `network.connectOrigins` 没有交付 consumer。
+- Write scope / Baseline: baseline `a1ccc9cc0703d1e4d323baa21d256921c7360879`；仅允许写 `src/renderer/export/course/buildPublishedCourse.ts`、`src/renderer/export/course/buildCoursePackages.ts`、`src/renderer/App.tsx`、`src/renderer/export/exportPreflight.ts`、`src/renderer/ui/TopToolbar.tsx`、至多一个新建的单 HTML 模式选择 UI 文件，以及 `tests/unit/coursePackageExport.test.ts`、`tests/unit/buildPublishedCourseV2.test.ts`、`tests/unit/exportMenuUi.test.tsx`、`tests/integration/courseExportPreflightApp.test.tsx`、新建 `tests/e2e/publishedOnlineSingleHtml.spec.ts`；禁止修改共享 fixture/helper、V9/Published Schema、main/preload、网页包语义、远程脚本策略及 Integrator 独占的计划/能力/generated 输出。
+- Acceptance: 导出入口直接区分离线便携与在线轻量，模式经过 preflight、继续导出和大文件确认后不丢失；在线模式仅把实际引用且声明 `remote.url` 的工程资产投影为原 HTTPS URL，未声明资产与组件资产仍内嵌，本地 bytes 校验保留；CSP 按实际远程图片/音视频/字体来源和 `project.network.connectOrigins` 生成确定性精确 origin，无 wildcard、无远程 script；在线 preflight 以 info 提供稳定排序的实际远程依赖清单，只有既有结构/source error 阻断导出，不做网络可达性假检测、不新增语义 error，也不静默退回离线；默认/离线模式继续使用既有 Data URL 与 CSP，网页包行为不变；真实 Chromium 在 mock HTTPS 下能加载已声明依赖，未声明 origin 被 CSP 拒绝。
+- Focused validation: `npx vitest run tests/unit/coursePackageExport.test.ts tests/unit/buildPublishedCourseV2.test.ts tests/unit/exportMenuUi.test.tsx tests/integration/courseExportPreflightApp.test.tsx`; `npm run typecheck`; `npm run build:player && npx playwright test tests/e2e/publishedOnlineSingleHtml.spec.ts`。
+- S2 safety / rollback: 只使用 fixture 与 Playwright route 模拟远端，不访问真实服务或用户文件；失败必须发生在 `exportHtml` 写盘前；默认/无 mode 调用继续走离线便携，整个纵切可回滚到 baseline product commit。
