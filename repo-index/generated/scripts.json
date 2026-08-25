@@ -29,6 +29,10 @@
       "role": "project-tool"
     },
     {
+      "path": "scripts/exampleGenerationBoundary.ts",
+      "role": "project-tool"
+    },
+    {
       "path": "scripts/generate-ai-capabilities.ts",
       "role": "project-tool"
     },
@@ -150,7 +154,7 @@
     },
     {
       "category": "build",
-      "command": "tsx scripts/build-examples.ts",
+      "command": "npm run refresh:sample-examples",
       "name": "build:examples"
     },
     {
@@ -165,7 +169,7 @@
     },
     {
       "category": "build",
-      "command": "tsx scripts/build-interactive-lesson.ts",
+      "command": "npm run refresh:lesson-demo:fixture",
       "name": "build:lesson-demo:fixture"
     },
     {
@@ -180,7 +184,7 @@
     },
     {
       "category": "build",
-      "command": "tsx scripts/build-render-host-benchmark.ts",
+      "command": "npm run refresh:render-benchmark:fixture",
       "name": "build:render-benchmark:fixture"
     },
     {
@@ -197,6 +201,26 @@
       "category": "check",
       "command": "tsx scripts/generate-contracts.ts --check",
       "name": "check:contracts"
+    },
+    {
+      "category": "check",
+      "command": "npm run check:sample-examples && npm run check:lesson-demo:fixture && npm run check:render-benchmark:fixture",
+      "name": "check:examples"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/build-interactive-lesson.ts --check",
+      "name": "check:lesson-demo:fixture"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/build-render-host-benchmark.ts --check",
+      "name": "check:render-benchmark:fixture"
+    },
+    {
+      "category": "check",
+      "command": "tsx scripts/build-examples.ts --check",
+      "name": "check:sample-examples"
     },
     {
       "category": "check",
@@ -250,13 +274,38 @@
     },
     {
       "category": "other",
+      "command": "tsx scripts/build-interactive-lesson.ts --prepare",
+      "name": "prepare:lesson-demo:fixture"
+    },
+    {
+      "category": "other",
       "command": "npm run install:courseware-skills",
       "name": "prestart"
     },
     {
       "category": "test",
-      "command": "npm run build:player && npm run build:examples && npm run build:lesson-demo:fixture && npm run build:render-benchmark:fixture && npm run build:component-catalog-matrix:fixture && npm run build:renderer && npm run build:electron",
+      "command": "npm run build:player && npm run check:examples && npm run prepare:lesson-demo:fixture && npm run build:component-catalog-matrix:fixture && npm run build:renderer && npm run build:electron",
       "name": "pretest:e2e"
+    },
+    {
+      "category": "other",
+      "command": "npm run build:player && npm run refresh:sample-examples && npm run refresh:lesson-demo:fixture && npm run refresh:render-benchmark:fixture",
+      "name": "refresh:examples"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/build-interactive-lesson.ts --refresh",
+      "name": "refresh:lesson-demo:fixture"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/build-render-host-benchmark.ts --refresh",
+      "name": "refresh:render-benchmark:fixture"
+    },
+    {
+      "category": "other",
+      "command": "tsx scripts/build-examples.ts --refresh",
+      "name": "refresh:sample-examples"
     },
     {
       "category": "other",
