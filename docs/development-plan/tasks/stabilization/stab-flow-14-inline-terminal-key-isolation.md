@@ -15,9 +15,9 @@
 - Invalidating paths: `src/renderer/ui/FlowWorkspace.tsx`; `tests/unit/flowWorkspace.test.tsx`; `tests/e2e/stabilizationFlowAuthoring.spec.ts`
 - Task ID: `stab-flow-14-inline-terminal-key-isolation`
 - Phase / wave: `post-audit stabilization / C-flow-authoring repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Flow Keyboard Repair Worker / independent Flow interaction reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace; Integrator is the sole FlowWorkspace writer / codex/architecture-stabilization`
 - Baseline HEAD: product commit `d6c95fc`; Wave C diagnostic spec `00a5165`; worktree clean at claim.
 - Context: exact-source Bootstrap covers both inline editors, the outer block keyboard handler, focused workspace tests and Wave C trace.
@@ -25,7 +25,7 @@
 - Depends on: `stab-flow-13-toolbar-command-hit-isolation`
 - Blocks: `stab-wave-c-flow-authoring`
 - Risk statement: stopping propagation outside terminal branches could suppress ordinary typing/history shortcuts; failing to cover both editor variants would leave code/callout/section blocks inconsistent.
-- Retry count / last failure class: `0 / product defect isolated before implementation`
+- Retry count / last failure class: `0 / focused product repair passed; V2 Wave C fulfilled at spec commit 97d35a5`
 
 ## Product outcome
 
@@ -36,9 +36,9 @@ Finishing or cancelling Flow inline text editing performs exactly one terminal a
 - Allowed write: terminal-key event boundaries in the two existing inline editors, focused rich/plain regressions, this task card and generated task-board state.
 - Forbidden write: Flow contracts/schema, edit/history command semantics, Properties, Player/export, dependencies or unrelated refactors.
 - Acceptance:
-  - [ ] Rich `Ctrl/Meta+Enter` commits exactly one history entry, preserves the local text run, returns block focus and unmounts the editor.
-  - [ ] Rich `Escape` cancels once, returns block focus and never bubbles into a second null selection.
-  - [ ] Plain input/textarea terminal Enter and Escape use the same boundary without changing ordinary multiline Enter behavior.
+  - [x] Rich `Ctrl/Meta+Enter` commits exactly one history entry, preserves the local text run, returns block focus and unmounts the editor.
+  - [x] Rich `Escape` cancels once, returns block focus and never bubbles into a second null selection.
+  - [x] Plain input/textarea terminal Enter and Escape use the same boundary without changing ordinary multiline Enter behavior.
 - No new abstraction: stop propagation only inside the existing terminal branches.
 
 ## Minimal validation
@@ -52,9 +52,10 @@ Finishing or cancelling Flow inline text editing performs exactly one terminal a
 ## Result and rollback
 
 - Start evidence: product commit `d6c95fc`; Wave C diagnostic checkpoint `00a5165`.
-- Result evidence: pending.
-- Pipeline status: pending.
-- Outcome status: pending V1 repair and V2 Wave C fulfillment.
+- Product commit: `23f2d00`.
+- Result evidence: `stopPropagation()` is limited to the existing Escape and terminal Enter branches, after the IME guard. The focused workspace suite passed `17/17`, including one rich `Ctrl+Enter` history commit with the exact local bold run, rich Escape without a second null selection, textarea `Ctrl+Enter`, input Enter and both plain Escape paths. Renderer and E2E TypeScript checks plus `git diff --check` passed. The fresh desktop build completed with only the already-known inline-dynamic-import and large-chunk warnings. Independent review at product `23f2d00` concluded `APPROVE`: ordinary typing, IME, history shortcuts and bare multiline Enter do not enter the repaired branches. The composed real Electron gate then passed `1/1` at spec commit `97d35a5` in about one minute.
+- Pipeline status: pass at product commit `23f2d00`; V2 consumer fulfilled at `97d35a5`.
+- Outcome status: `engineering candidate`; the exact terminal-key double action is removed in both inline editor variants.
 - Outcome boundary: V1 proves terminal-key isolation only; the composed Flow outcome remains owned by Wave C.
 - Rollback: revert the narrow product commit; no contract, migration or persisted-byte changes are involved.
 - Semantic index impact: none
