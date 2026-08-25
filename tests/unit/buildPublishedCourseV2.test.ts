@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ZodError } from 'zod'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -691,7 +692,60 @@ describe('Published Course V2 producer', () => {
     }
   })
 
-  it('rejects a raw V8 project and missing asset bytes', () => {
+  it('normalizes schema-valid V9 source facts before preflight and production', () => {
+    const sources = mutableMixedSources()
+    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+
+    sources.project.assets['slide-image']!.id = ' slide-image '
+    slide.scenes[0]!.backgroundAssetId = ' slide-image '
+    const bytes = sources.assetFiles['slide-image']!
+    delete sources.assetFiles['slide-image']
+    sources.assetFiles[' slide-image '] = bytes
+
+    expect(courseProjectDocumentSchema.safeParse(sources.project).success).toBe(true)
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'asset-bytes-missing',
+      path: ['assets', 'slide-image'],
+    }))
+    try {
+      buildPublishedCourseV2Payload(sources)
+      throw new Error('expected normalized source gate to reject raw asset bytes')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PublishedCourseSourceError)
+      expect(error).toMatchObject({
+        code: 'asset-bytes-missing',
+        path: ['assets', 'slide-image'],
+      })
+    }
+
+    delete sources.assetFiles[' slide-image ']
+    sources.assetFiles['slide-image'] = bytes
+    const readyReport = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(readyReport.summary.canExport).toBe(true)
+    expect(buildPublishedCourseV2Payload(sources).assets['slide-image']).toBeDefined()
+  })
+
+  it('keeps structurally invalid V9 and raw V8 projects on the Zod error path', () => {
+    const malformedV9 = mutableMixedSources()
+    delete (malformedV9.project as unknown as Record<string, unknown>).globalLayerItems
+    expect(() => buildPublishedCourseV2Payload(malformedV9)).toThrow(ZodError)
+
     const v8 = createProject({
       id: 'v8-raw',
       title: 'V8 工程',
@@ -702,7 +756,7 @@ describe('Published Course V2 producer', () => {
       project: v8 as unknown as CourseProjectDocument,
       assetFiles: {},
       components: {},
-    })).toThrow()
+    })).toThrow(ZodError)
 
     const sources = mixedSources()
     const { 'slide-image': _omit, ...rest } = sources.assetFiles

@@ -377,12 +377,50 @@ function compareSourceIssues(
     compareStableStrings(sourceIssuePathKey(left.path), sourceIssuePathKey(right.path))
 }
 
+interface PublishedCourseSourceFacts {
+  /**
+   * Available only when this is a V9 project that is either fully parsed, or
+   * has passed every structural check and failed solely on semantic references.
+   * The latter retains actionable missing-resource diagnostics before the
+   * final schema rejection path.
+   */
+  sources: CoursePublishSources | null
+  parsedProject: ReturnType<typeof courseProjectDocumentSchema.safeParse>
+}
+
+function isRawV9Project(value: unknown): value is { schemaVersion: 9 } {
+  return isRecord(value) && value.schemaVersion === 9
+}
+
 /**
- * Collect every deterministic local source condition required by the V2
- * producer. Package preflight maps these facts directly, while the producer
- * raises the first fact as a structured hard gate before it starts emitting.
+ * Derive source facts from the same canonical V9 document the producer emits.
+ * A schema-valid document can trim stable IDs, so collecting against the raw
+ * object would disagree with subsequent producer lookups.  When parsing only
+ * fails on custom semantic/reference checks, the raw shape is still safe to
+ * inspect for an actionable source issue.  Other failures must stay on the
+ * ordinary Zod error path rather than entering the graph walker.
  */
-export function collectPublishedCourseSourceIssues(
+function resolvePublishedCourseSourceFacts(
+  input: CoursePublishSources,
+): PublishedCourseSourceFacts {
+  const parsedProject = courseProjectDocumentSchema.safeParse(input.project)
+  if (parsedProject.success) {
+    return {
+      parsedProject,
+      sources: { ...input, project: parsedProject.data },
+    }
+  }
+  if (
+    isRawV9Project(input.project)
+    && parsedProject.error.issues.length > 0
+    && parsedProject.error.issues.every((issue) => issue.code === 'custom')
+  ) {
+    return { parsedProject, sources: input }
+  }
+  return { parsedProject, sources: null }
+}
+
+function collectPublishedCourseSourceIssuesFromFacts(
   sources: CoursePublishSources,
 ): PublishedCourseSourceIssue[] {
   const issues: PublishedCourseSourceIssue[] = []
@@ -472,6 +510,18 @@ export function collectPublishedCourseSourceIssues(
   }
 
   return issues.sort(compareSourceIssues)
+}
+
+/**
+ * Collect every deterministic local source condition required by the V2
+ * producer. Package preflight maps these facts directly, while the producer
+ * raises the first fact as a structured hard gate before it starts emitting.
+ */
+export function collectPublishedCourseSourceIssues(
+  input: CoursePublishSources,
+): PublishedCourseSourceIssue[] {
+  const { sources } = resolvePublishedCourseSourceFacts(input)
+  return sources ? collectPublishedCourseSourceIssuesFromFacts(sources) : []
 }
 
 export function assertPublishedCourseSourceIssues(
@@ -686,13 +736,16 @@ export function buildPublishedCourseV2Payload(
   input: CoursePublishSources,
   options: BuildPublishedCourseOptions = {},
 ): PublishedCourseV2Payload {
-  // This narrow V9 check intentionally precedes Schema parsing so a referenced
-  // asset/component record missing from an otherwise structural project is
-  // reported with the same code/path as package preflight. Non-V9 input still
-  // follows the Schema rejection path below.
-  if (input.project.schemaVersion === 9) assertPublishedCourseSourceIssues(input)
-  const project = courseProjectDocumentSchema.parse(input.project)
-  const sources: CoursePublishSources = { ...input, project }
+  const sourceFacts = resolvePublishedCourseSourceFacts(input)
+  // Keep the stable source-issue gate for V9 projects that are safe to walk;
+  // raw V8 and structurally malformed V9 input continue to surface Zod errors.
+  if (isRawV9Project(input.project) && sourceFacts.sources) {
+    const issue = collectPublishedCourseSourceIssuesFromFacts(sourceFacts.sources)[0]
+    if (issue) throw new PublishedCourseSourceError(issue)
+  }
+  if (!sourceFacts.parsedProject.success) throw sourceFacts.parsedProject.error
+  const project = sourceFacts.parsedProject.data
+  const sources: CoursePublishSources = sourceFacts.sources ?? { ...input, project }
   const assetIds = collectPublishedCourseAssetIds(sources)
   const assets: PublishedCourseV2Payload['assets'] = {}
   for (const assetId of [...assetIds].sort()) {
