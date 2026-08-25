@@ -81,7 +81,6 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
 
 vi.mock('../../src/renderer/export/renderSceneImages', () => ({
   renderProjectSceneImages: vi.fn(async () => []),
-  renderProjectSceneImagesWithRuntime: vi.fn(async () => []),
 }))
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({

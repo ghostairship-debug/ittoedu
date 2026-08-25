@@ -46,7 +46,7 @@ import {
   type ExportPreflightReport,
 } from './export/exportPreflight'
 import { loadPlayerBundle } from './export/loadPlayerBundle'
-import { renderProjectSceneImages, renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
+import { renderProjectSceneImages } from './export/renderSceneImages'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -137,14 +137,16 @@ function activeCoursePublishSources() {
   }
 }
 
-type CourseDeliveryTarget = 'full-preview' | 'single-html' | 'web-package'
+type CourseDeliveryTarget = 'full-preview' | 'single-html' | 'web-package' | 'pdf'
 
 function courseDeliveryUnavailable(target: CourseDeliveryTarget): UserFacingError {
   const title = target === 'full-preview'
     ? '整课预览不可用'
     : target === 'single-html'
       ? '单 HTML 导出不可用'
-      : '网页包导出不可用'
+      : target === 'web-package'
+        ? '网页包导出不可用'
+        : 'PDF 导出不可用'
   return new UserFacingError(
     title,
     '当前编辑会话没有可发布的 Course Project V9 文档。',
@@ -1398,19 +1400,7 @@ export default function App() {
         }
         return
       }
-      const preview = projectCandidatePreviewDocument(state)
-      const assetFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
-      const payload = buildExportPayload({
-        project: preview?.project ?? state.project,
-        assetFiles,
-        components: state.componentPackages,
-      })
-      const images = await renderProjectSceneImagesWithRuntime(payload, assetFiles)
-      const result = await desktopApi().exportPdf({
-        suggestedName: `${state.project.title}.pdf`,
-        html: buildPdfPrintHtml(state.project.title, images),
-      })
-      if (result) state.setStatus(`PDF 已导出到 ${result.path}（互动组件已静态化）`)
+      throw courseDeliveryUnavailable('pdf')
     }, 'PDF 导出失败。请减少大图片数量后重试。')
   }, [run])
 

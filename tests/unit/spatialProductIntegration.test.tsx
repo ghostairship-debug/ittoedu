@@ -40,7 +40,6 @@ vi.mock('@/renderer/export/loadPlayerBundle', () => ({
 }))
 vi.mock('@/renderer/export/renderSceneImages', () => ({
   renderProjectSceneImages: vi.fn(async () => []),
-  renderProjectSceneImagesWithRuntime: vi.fn(async () => []),
 }))
 vi.mock('@/renderer/ui/Workspace', () => ({
   Workspace: () => null,

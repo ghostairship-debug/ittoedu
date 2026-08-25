@@ -16,10 +16,23 @@ const printArtifacts = vi.hoisted(() => ({
   omitPdfHtml: false,
 }))
 
+const publishSourceProbe = vi.hoisted(() => ({ forceUnavailable: false }))
+
 const sceneRenderers = vi.hoisted(() => ({
   legacy: vi.fn(),
-  runtime: vi.fn(),
 }))
+
+vi.mock('../../src/renderer/store/editorStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/store/editorStore')>()
+  return {
+    ...actual,
+    selectActiveCourseProjectDocument: (
+      state: Parameters<typeof actual.selectActiveCourseProjectDocument>[0],
+    ) => publishSourceProbe.forceUnavailable
+      ? null
+      : actual.selectActiveCourseProjectDocument(state),
+  }
+})
 
 vi.mock(
   '../../src/renderer/export/course/buildCoursePrintArtifacts',
@@ -83,7 +96,6 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
 
 vi.mock('../../src/renderer/export/renderSceneImages', () => ({
   renderProjectSceneImages: sceneRenderers.legacy,
-  renderProjectSceneImagesWithRuntime: sceneRenderers.runtime,
 }))
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
@@ -100,6 +112,9 @@ const TEST_IMAGE = 'data:image/png;base64,AA=='
 const EXPECTED_COMPLETENESS_ERROR =
   'PDF 导出不完整：未生成覆盖当前课程全部表面的 PDF 打印内容。\n' +
   '请检查混合打印计划后重试；为避免遗漏 Flow 或 Spatial 内容，本次未回退到旧版 Slide 快照。'
+const EXPECTED_UNAVAILABLE_ERROR =
+  'PDF 导出不可用：当前编辑会话没有可发布的 Course Project V9 文档。\n' +
+  '请新建或重新打开受支持的课程工程后再试。'
 
 type AppDesktopApi = DesktopAPI & {
   exportPdf: ReturnType<typeof vi.fn>
@@ -189,8 +204,8 @@ beforeEach(() => {
   })
   printArtifacts.calls.mockClear()
   printArtifacts.omitPdfHtml = false
+  publishSourceProbe.forceUnavailable = false
   sceneRenderers.legacy.mockReset().mockResolvedValue([TEST_IMAGE])
-  sceneRenderers.runtime.mockReset().mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -231,7 +246,6 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     expect(html).toContain('flow-print-document')
     expect(html).toContain('course-spatial-print-page')
     expect(sceneRenderers.legacy).not.toHaveBeenCalled()
-    expect(sceneRenderers.runtime).not.toHaveBeenCalled()
   })
 
   it('fails closed when a non-pure-Slide course has no complete PDF artifact', async () => {
@@ -253,7 +267,33 @@ describe('ARCH-4 V9 PDF export completeness', () => {
       expect(useEditorStore.getState().errorMessage).toBe(EXPECTED_COMPLETENESS_ERROR)
     })
     expect(sceneRenderers.legacy).not.toHaveBeenCalled()
-    expect(sceneRenderers.runtime).not.toHaveBeenCalled()
+    expect(api.exportPdf).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the V9 publish source disappears after preflight', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    loadCourse(project)
+    const api = appApi()
+    window.desktopAPI = api
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-pdf'))
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'PDF 导出预检',
+    })
+    publishSourceProbe.forceUnavailable = true
+    fireEvent.click(within(dialog).getByRole('button', { name: '继续导出' }))
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().errorMessage).toBe(EXPECTED_UNAVAILABLE_ERROR)
+    })
+    expect(printArtifacts.calls).not.toHaveBeenCalled()
+    expect(sceneRenderers.legacy).not.toHaveBeenCalled()
     expect(api.exportPdf).not.toHaveBeenCalled()
   })
 
@@ -274,6 +314,5 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     expect(sceneRenderers.legacy).toHaveBeenCalledOnce()
     expect(sceneRenderers.legacy.mock.calls[0]?.[2]).toBe(1.5)
     expect(api.exportPdf.mock.calls[0]?.[0].html).toContain(TEST_IMAGE)
-    expect(sceneRenderers.runtime).not.toHaveBeenCalled()
   })
 })

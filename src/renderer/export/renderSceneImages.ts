@@ -5,16 +5,7 @@ import { renderImageNodeCanvas } from '../../shared/imageEffects'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import type { ExportPayload } from '../../shared/componentTypes'
 import { materializeScene } from '../../shared/presentation'
-import { PlayerApp } from '../../player/PlayerApp'
 import {
-  capturePlayerStage,
-  createHiddenPlayerRoot,
-  sizeHiddenPlayerStage,
-  waitForPlayerCaptureReady,
-  waitForPlayerScene,
-} from './playerCapture'
-import {
-  assertExportPayloadDependencies,
   runtimeEntriesForScene,
   visibleGlobalLayerItemsForScene,
 } from './exportPayloadSupport'
@@ -335,72 +326,4 @@ export async function renderProjectSceneImages(
     images.push(canvas.toDataURL('image/png'))
   }
   return images
-}
-
-/**
- * Renders through the actual offline player first and composites its Phaser
- * canvas with all DOM runtime roots. The static renderer is only a failure path;
- * it applies authored runtime fallbacks and visible warning placeholders.
- */
-export async function renderProjectSceneImagesWithRuntime(
-  payload: ExportPayload,
-  fallbackAssetFiles: Record<string, Uint8Array>,
-): Promise<string[]> {
-  assertExportPayloadDependencies(payload)
-  const width = payload.project.canvas.width
-  const height = payload.project.canvas.height
-  const root = createHiddenPlayerRoot(width, height)
-  let player: PlayerApp | null = null
-  try {
-    player = new PlayerApp(payload, root, {
-      renderWidth: width,
-      renderHeight: height,
-      controls: false,
-      mode: 'capture',
-    })
-    sizeHiddenPlayerStage(root, width, height)
-    await waitForPlayerScene(player, 0)
-    const images: string[] = []
-    for (let index = 0; index < payload.project.scenes.length; index += 1) {
-      try {
-        if (index > 0) {
-          if (!player.goToScene(index)) throw new Error(`无法渲染第 ${index + 1} 个场景`)
-          await waitForPlayerScene(player, index)
-        }
-        await waitForPlayerCaptureReady(player)
-        images.push(await capturePlayerStage(player, root, width, height))
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error)
-        const scene = payload.project.scenes[index]
-        console.warn(
-          `场景“${scene.name}”实际播放器快照不可用；仅该页使用静态后备`,
-          error,
-        )
-        const fallbackCanvas = await renderSceneCanvas(
-          payload.project,
-          scene,
-          fallbackAssetFiles,
-          1.5,
-          { payload, captureFailure: reason },
-        )
-        images.push(fallbackCanvas.toDataURL('image/png'))
-      }
-    }
-    return images
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    console.warn(
-      '实际播放器 Canvas+DOM 合成快照不可用；将使用静态后备并在页面中显示警告',
-      error,
-    )
-    return renderProjectSceneImages(
-      payload.project,
-      fallbackAssetFiles,
-      1.5,
-      { payload, captureFailure: reason },
-    )
-  } finally {
-    player?.destroy()
-    root.remove()
-  }
 }
