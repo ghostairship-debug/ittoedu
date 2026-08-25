@@ -19,7 +19,10 @@ import {
   APP_PRODUCT_NAME,
   APP_VERSION,
 } from '../src/shared/constants'
-import type { CourseProjectDocument } from '../src/shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  LayerFrame,
+} from '../src/shared/courseProjectTypes'
 import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
 import {
   assertExpectedAsarPackage,
@@ -40,7 +43,14 @@ interface VerificationCheck {
 interface ControllerVerificationTarget {
   itemId: string
   nextButtonId: string
+  frame: LayerFrame
+  canvas: {
+    width: number
+    height: number
+  }
 }
+
+const PUBLISHED_FRAME_TOLERANCE_CSS_PX = 1
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
@@ -166,6 +176,47 @@ function sampleControllerTarget(
   return {
     itemId: controller.layerItemId,
     nextButtonId: nextButton.id,
+    frame: structuredClone(controller.frame),
+    canvas: structuredClone(slide.canvas),
+  }
+}
+
+async function assertPublishedControllerFrame(
+  page: Page,
+  target: ControllerVerificationTarget,
+): Promise<void> {
+  const stage = page.locator('[data-slide-scene-stage="true"]')
+  const wrapper = page.locator(`[data-global-layer-item="${target.itemId}"]`)
+  assert(await stage.count() === 1, '离线 HTML 中未找到唯一的 Published Slide 画布宿主')
+  assert(await wrapper.count() === 1, '离线 HTML 中未找到 Published 教师控制器 wrapper')
+  const [stageBounds, wrapperBounds] = await Promise.all([
+    stage.boundingBox(),
+    wrapper.boundingBox(),
+  ])
+  assert(stageBounds, 'Published Slide 画布宿主没有可见范围')
+  assert(wrapperBounds, 'Published 教师控制器 wrapper 没有可见范围')
+  const scaleX = stageBounds.width / target.canvas.width
+  const scaleY = stageBounds.height / target.canvas.height
+  assert(scaleX > 0 && scaleY > 0, 'Published Slide 画布缩放比例无效')
+  const mapped = {
+    left: wrapperBounds.x - stageBounds.x,
+    top: wrapperBounds.y - stageBounds.y,
+    width: wrapperBounds.width,
+    height: wrapperBounds.height,
+  }
+  const expected = {
+    left: target.frame.x * scaleX,
+    top: target.frame.y * scaleY,
+    width: target.frame.width * scaleX,
+    height: target.frame.height * scaleY,
+  }
+  for (const key of ['left', 'top', 'width', 'height'] as const) {
+    assert(
+      Math.abs(mapped[key] - expected[key]) <= PUBLISHED_FRAME_TOLERANCE_CSS_PX,
+      `Published 教师控制器 ${key} 映射错误：` +
+        `实际 ${mapped[key].toFixed(2)}px，预期 ${expected[key].toFixed(2)}px，` +
+        `容差 ${PUBLISHED_FRAME_TOLERANCE_CSS_PX}px`,
+    )
   }
 }
 
@@ -557,9 +608,25 @@ async function verifyUnpackedWorkflows(): Promise<void> {
       .getByRole('button', { name: '重命名课件' })
       .filter({ hasText: '示例互动课件' })
       .waitFor({ timeout: 20_000 })
-    const sceneCount = await projectRun.page.locator('.scene-item').count()
-    assert(sceneCount === 2, `示例工程应有 2 个场景，实际为 ${sceneCount}`)
-    pass('示例工程打开', '目录版 GUI 已打开双场景示例工程')
+    const sceneItems = projectRun.page.locator('[data-testid^="scene-item-"]')
+    await sceneItems.first().waitFor({ state: 'visible', timeout: 20_000 })
+    const sceneCount = await sceneItems.count()
+    assert(sceneCount === 2, `示例工程应有 2 个 Slide 位置，实际为 ${sceneCount}`)
+    for (let index = 0; index < sceneCount; index += 1) {
+      const sceneItem = sceneItems.nth(index)
+      assert(await sceneItem.isVisible(), `示例工程第 ${index + 1} 个 Slide 位置不可见`)
+      await sceneItem.click()
+      await projectRun.page.waitForFunction((activeIndex) => (
+        document.querySelectorAll('[data-testid^="scene-item-"]')[activeIndex]
+          ?.getAttribute('aria-current') === 'page'
+      ), index)
+    }
+    await sceneItems.first().click()
+    await projectRun.page.waitForFunction(() => (
+      document.querySelector('[data-testid^="scene-item-"]')
+        ?.getAttribute('aria-current') === 'page'
+    ))
+    pass('示例工程打开', '目录版 GUI 已打开且可切换两个 V9 Slide 位置')
 
     await fs.rm(exportedHtml, { force: true })
     await projectRun.page
@@ -703,6 +770,7 @@ async function verifyOfflineHtml(
     )
     assert(initialSceneIndex === 0, '离线 HTML 初始场景错误')
 
+    await assertPublishedControllerFrame(page, controllerTarget)
     const controller = page.locator(
       `[data-global-layer-item="${controllerTarget.itemId}"] .slide-native-teacher-controller`,
     )

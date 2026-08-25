@@ -7,12 +7,16 @@ import { parseComponentPackageFiles } from '../../src/renderer/components/import
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { ComponentPackageData } from '../../src/shared/componentTypes'
+import type { LayerFrame } from '../../src/shared/courseProjectTypes'
 
 const root = resolve(__dirname, '..', '..')
 const runRoot = mkdtempSync(join(tmpdir(), 'sample-v9-published-'))
 const standalonePath = join(runRoot, 'sample-v9.html')
 let controllerItemId = ''
 let nextButtonId = ''
+let controllerFrame: LayerFrame | null = null
+let slideCanvas: { width: number; height: number } | null = null
+const PUBLISHED_FRAME_TOLERANCE_CSS_PX = 1
 
 test.beforeAll(() => {
   const opened = openCourseProjectArchive(Uint8Array.from(readFileSync(
@@ -40,8 +44,12 @@ test.beforeAll(() => {
     (button) => button.action.type === 'scene.next' && button.visible,
   )
   if (!nextButton) throw new Error('sample teacher controller has no visible next button')
+  const slide = opened.project.surfaces.find((surface) => surface.type === 'slide')
+  if (!slide || slide.type !== 'slide') throw new Error('sample V9 project has no Slide surface')
   controllerItemId = controller.item.layerItemId
   nextButtonId = nextButton.id
+  controllerFrame = structuredClone(controller.item.frame)
+  slideCanvas = structuredClone(slide.canvas)
   const playerBundle = readFileSync(
     join(root, 'dist-player', 'player.iife.js'),
     'utf8',
@@ -72,9 +80,38 @@ test('committed V9 sample publishes an interactive offline Phaser counter', asyn
 
   await page.goto(pathToFileURL(standalonePath).toString())
   await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
-  const controller = page.locator(
-    `[data-global-layer-item="${controllerItemId}"] .slide-native-teacher-controller`,
-  )
+  if (!controllerFrame || !slideCanvas) throw new Error('sample controller geometry is missing')
+  const stage = page.locator('[data-slide-scene-stage="true"]')
+  const controllerWrapper = page.locator(`[data-global-layer-item="${controllerItemId}"]`)
+  await expect(stage).toBeVisible()
+  await expect(controllerWrapper).toBeVisible()
+  const [stageBounds, wrapperBounds] = await Promise.all([
+    stage.boundingBox(),
+    controllerWrapper.boundingBox(),
+  ])
+  if (!stageBounds || !wrapperBounds) throw new Error('sample Published geometry has no bounds')
+  const scaleX = stageBounds.width / slideCanvas.width
+  const scaleY = stageBounds.height / slideCanvas.height
+  const mapped = {
+    left: wrapperBounds.x - stageBounds.x,
+    top: wrapperBounds.y - stageBounds.y,
+    width: wrapperBounds.width,
+    height: wrapperBounds.height,
+  }
+  const expected = {
+    left: controllerFrame.x * scaleX,
+    top: controllerFrame.y * scaleY,
+    width: controllerFrame.width * scaleX,
+    height: controllerFrame.height * scaleY,
+  }
+  for (const key of ['left', 'top', 'width', 'height'] as const) {
+    expect(
+      Math.abs(mapped[key] - expected[key]),
+      `Published controller ${key} differs from the V9 authored frame`,
+    ).toBeLessThanOrEqual(PUBLISHED_FRAME_TOLERANCE_CSS_PX)
+  }
+
+  const controller = controllerWrapper.locator('.slide-native-teacher-controller')
   await expect(controller).toBeVisible()
   const nextButton = controller.locator(
     `[data-controller-button-id="${nextButtonId}"]`,
