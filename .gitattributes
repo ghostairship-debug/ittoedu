@@ -7,8 +7,6 @@
 package.json text eol=lf
 examples/sample-counter-component/manifest.json text eol=lf
 examples/sample-counter-component/runtime.js text eol=lf
-examples/photosynthesis-lab-component/manifest.json text eol=lf
-examples/photosynthesis-lab-component/runtime.js text eol=lf
 examples/render-host-benchmark/runtimes/phaser-runtime.js text eol=lf
 examples/render-host-benchmark/runtimes/three-runtime.entry.ts text eol=lf
 examples/render-host-benchmark/components/editable-table/manifest.json text eol=lf

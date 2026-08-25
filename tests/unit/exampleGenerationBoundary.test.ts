@@ -15,10 +15,12 @@ import {
   normalizeLineEndings,
 } from '../../scripts/exampleGenerationBoundary'
 import {
+  buildInteractiveLessonOutputs,
   checkInteractiveLessonOutputs,
   INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS,
   parseInteractiveLessonGenerationMode,
 } from '../../scripts/build-interactive-lesson'
+import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import {
   parseRenderHostBenchmarkGenerationMode,
 } from '../../scripts/build-render-host-benchmark'
@@ -88,6 +90,25 @@ describe('example generation boundary', () => {
   })
 
   it('checks tracked interactive lesson outputs without writing', async () => {
+    const outputs = await buildInteractiveLessonOutputs()
+    expect(Object.keys(outputs.tracked)).toEqual([
+      INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.lesson,
+    ])
+    const lesson = outputs.tracked[INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.lesson]
+    if (!lesson) throw new Error('Missing generated V9 lesson fixture')
+    const reopened = openCourseProjectArchive(lesson)
+    const slide = reopened.project.surfaces[0]
+    expect(reopened.project.schemaVersion).toBe(9)
+    expect(slide?.type).toBe('slide')
+    expect(slide?.type === 'slide' ? slide.scenes : []).toHaveLength(3)
+    expect(reopened.project.componentPackages).toEqual({})
+    expect(reopened.componentFiles).toEqual({})
+    expect(outputs.html).toContain('window.__H5_COURSE_PAYLOAD__=')
+    expect(outputs.html).toContain('"format":"h5course-published"')
+    expect(outputs.html).toContain('"formatVersion":2')
+    expect(outputs.html).toContain('"sourceSchemaVersion":9')
+    expect(outputs.html).not.toMatch(/window\.__H5_LESSON_PAYLOAD__\s*=/)
+
     await expectCheckDoesNotWrite(
       INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS,
       checkInteractiveLessonOutputs,

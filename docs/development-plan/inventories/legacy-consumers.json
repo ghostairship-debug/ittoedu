@@ -308,11 +308,6 @@
           "confirmed": [
             {
               "path": "package.json",
-              "symbol": "build:lesson-demo:fixture",
-              "use": "Runs a script that builds the Legacy ExportPayload standalone lesson."
-            },
-            {
-              "path": "package.json",
               "symbol": "build:render-benchmark:fixture",
               "use": "Runs the Legacy render-host payload builder."
             }
@@ -341,11 +336,6 @@
         },
         "buildFixtureOrRelease": {
           "confirmed": [
-            {
-              "path": "scripts/build-interactive-lesson.ts",
-              "symbol": "buildExportPayload",
-              "use": "Builds the lesson-demo fixture."
-            },
             {
               "path": "scripts/build-render-host-benchmark.ts",
               "symbol": "buildExportPayload",
@@ -1335,7 +1325,7 @@
       },
       "owner": "Tooling / Release",
       "status": "retained-compatibility",
-      "currentFact": "The product open path rejects V8; the separate V8 archive/tooling path remains only for the committed sample, photosynthesis lesson-demo, and render-host benchmark fixtures, portability checks, release verification, and focused archive tests.",
+      "currentFact": "The product open path rejects V8; the photosynthesis lesson-demo now uses a Course Project V9 archive and Published Course V2 offline HTML, while the separate V8 archive/tooling path remains for the committed sample and render-host benchmark fixtures, portability checks, release verification, and focused archive tests.",
       "evidence": [
         {
           "path": "src/renderer/project/courseProjectIo.ts",
@@ -1351,11 +1341,6 @@
           "path": "examples/render-host-benchmark/project.json",
           "symbol": "schemaVersion",
           "note": "Committed V8 benchmark source."
-        },
-        {
-          "path": "scripts/build-interactive-lesson.ts",
-          "symbol": "main",
-          "note": "Builds and checks the committed V8 photosynthesis lesson-demo fixture consumed by editor E2E."
         }
       ],
       "consumerCategories": {
@@ -1422,11 +1407,6 @@
               "use": "Builds examples/sample-project.h5lesson."
             },
             {
-              "path": "scripts/build-interactive-lesson.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds the lesson-demo fixture."
-            },
-            {
               "path": "scripts/build-render-host-benchmark.ts",
               "symbol": "createProjectArchive",
               "use": "Builds the V8 render-host benchmark."
@@ -1450,11 +1430,6 @@
               "path": "examples/sample-project.h5lesson",
               "symbol": "committed V8 archive",
               "use": "Release sample artifact."
-            },
-            {
-              "path": "examples/photosynthesis-interactive-lesson.h5lesson",
-              "symbol": "committed V8 archive",
-              "use": "Lesson-demo artifact built before editor E2E."
             },
             {
               "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
@@ -1487,11 +1462,6 @@
               "path": "tests/integration/renderHostBenchmark.test.ts",
               "symbol": "openProjectArchive",
               "use": "Asserts the retained benchmark is Project V8."
-            },
-            {
-              "path": "tests/e2e/editor.spec.ts",
-              "symbol": "photosynthesis-interactive-lesson.html",
-              "use": "Exercises the generated three-page offline lesson-demo behavior."
             }
           ],
           "unknowns": []
@@ -1522,9 +1492,13 @@
           {
             "path": "src/renderer/project/courseProjectArchive.ts",
             "symbol": "createCourseProjectArchive"
+          },
+          {
+            "path": "scripts/build-interactive-lesson.ts",
+            "symbol": "buildInteractiveLessonOutputs"
           }
         ],
-        "notes": "Do not delete retained tooling merely because V9 fixtures exist. Migrate each script/release assertion first or explicitly retain the benchmark."
+        "notes": "The photosynthesis lesson-demo and its browser behavior oracle use V9/V2. Do not delete the remaining retained tooling merely because that endpoint migrated; migrate each remaining script/release assertion first or explicitly retain the benchmark."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
@@ -1549,10 +1523,6 @@
             "symbol": "committed artifact"
           },
           {
-            "path": "examples/photosynthesis-interactive-lesson.h5lesson",
-            "symbol": "committed artifact"
-          },
-          {
             "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
             "symbol": "committed artifact"
           }
@@ -1564,8 +1534,7 @@
       "tests": [
         "tests/unit/projectArchive.test.ts",
         "tests/integration/renderHostBenchmark.test.ts",
-        "tests/e2e/render-host-benchmark.spec.ts",
-        "tests/e2e/editor.spec.ts"
+        "tests/e2e/render-host-benchmark.spec.ts"
       ],
       "stableSince": {
         "status": "not-applicable-retained-at-baseline",

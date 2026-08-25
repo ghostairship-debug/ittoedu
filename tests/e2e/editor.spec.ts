@@ -3269,22 +3269,22 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       lesson.on('pageerror', (error) => pageErrors.push(error.message))
       await lesson.goto(pathToFileURL(lessonHtmlPath).toString())
 
-      const canvas = lesson.locator('.lesson-canvas-host canvas')
+      const stage = lesson.locator('.slide-published-adapter')
       await expectCanvasPlayerScene(lesson, 0)
-      await canvas.waitFor()
+      await expect(stage.locator('[data-photosynthesis-page="1"]')).toBeVisible()
       const clickDesignPoint = async (x: number, y: number) => {
-        const bounds = await canvas.boundingBox()
-        if (!bounds) throw new Error('课例画布不可见')
+        const bounds = await stage.boundingBox()
+        if (!bounds) throw new Error('课例 Published V2 舞台不可见')
         await lesson.mouse.click(
           bounds.x + (x / 1280) * bounds.width,
           bounds.y + (y / 720) * bounds.height,
         )
       }
 
-      const firstInitial = await canvas.screenshot()
+      const firstInitial = await stage.screenshot()
       for (const y of [397, 477, 557]) await clickDesignPoint(253, y)
       await lesson.waitForTimeout(1_000)
-      const firstCompleted = await canvas.screenshot()
+      const firstCompleted = await stage.screenshot()
       expect(await averagePixelDifference(firstInitial, firstCompleted)).toBeGreaterThan(0.1)
       await lesson.screenshot({
         path: join(visualOutputDirectory, 'lesson-page-1-complete.png'),
@@ -3292,11 +3292,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
 
       await navigateCanvasPlayerByKeyboard(lesson, 'ArrowRight', 1)
-      const secondInitial = await canvas.screenshot()
+      await expect(stage.locator('[data-photosynthesis-page="2"]')).toBeVisible()
+      const secondInitial = await stage.screenshot()
       await clickDesignPoint(471, 402)
       await lesson.waitForTimeout(350)
       expect(
-        await averagePixelDifference(secondInitial, await canvas.screenshot()),
+        await averagePixelDifference(secondInitial, await stage.screenshot()),
       ).toBeGreaterThan(0.02)
       await lesson.screenshot({
         path: join(visualOutputDirectory, 'lesson-page-2-experiment.png'),
@@ -3304,6 +3305,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
 
       await navigateCanvasPlayerByKeyboard(lesson, 'ArrowRight', 2)
+      await expect(stage.locator('[data-photosynthesis-page="3"]')).toBeVisible()
       await clickDesignPoint(214, 538)
       await clickDesignPoint(286, 413)
       await lesson.waitForTimeout(450)
