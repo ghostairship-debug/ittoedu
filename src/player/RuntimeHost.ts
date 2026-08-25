@@ -307,6 +307,15 @@ function errorOf(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
+function removeAllArrayEntries(array: unknown, value: unknown): void {
+  if (!capturedArrayIsArray(array)) return
+  let index = array.indexOf(value)
+  while (index >= 0) {
+    array.splice(index, 1)
+    index = array.indexOf(value)
+  }
+}
+
 export class RuntimeHost {
   private readonly options: Omit<
     RuntimeHostOptions,
@@ -622,31 +631,163 @@ export class RuntimeHost {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
+    let firstFailure: Error | null = null
+    const recordFailure = (cause: unknown): void => {
+      firstFailure ??= errorOf(cause)
+    }
+    const attempt = (operation: () => void): void => {
+      try {
+        operation()
+      } catch (cause) {
+        recordFailure(cause)
+      }
+    }
+
     try {
       this.lifecycle?.destroy()
     } catch (error) {
+      // Preserve the existing lifecycle contract: authored destroy failures are
+      // reported, but do not become host teardown failures for other callers.
       console.error(`运行时“${this.options.label}”销毁失败`, error)
     }
     this.lifecycle = null
-    this.authoringRegistry?.destroy()
+    attempt(() => this.authoringRegistry?.destroy())
     this.authoringRegistry = null
-    for (const dispose of [...this.guardDisposers]) dispose()
+    const guardDisposers = [...this.guardDisposers]
     this.guardDisposers.clear()
-    this.scopedEvents.dispose()
-    this.localState.clear()
-    for (const object of this.looseObjects) {
-      if (object.active) object.destroy()
-    }
-    this.looseObjects.length = 0
-    if (this.underlayMount?.active) this.underlayMount.destroy(true)
-    if (this.overlayMount?.active) this.overlayMount.destroy(true)
-    this.underlayMount = null
-    this.overlayMount = null
-    this.underlayDom?.host.remove()
-    this.overlayDom?.host.remove()
+    for (const dispose of guardDisposers) attempt(dispose)
+    attempt(() => this.scopedEvents.dispose())
+    attempt(() => this.localState.clear())
+    this.destroyPhaserResources(recordFailure)
+    attempt(() => this.underlayDom?.host.remove())
+    attempt(() => this.overlayDom?.host.remove())
     this.underlayDom = null
     this.overlayDom = null
     this.capturePromises.clear()
+    if (firstFailure) throw firstFailure
+  }
+
+  private destroyPhaserResources(recordFailure: (cause: unknown) => void): void {
+    const underlayMount = this.underlayMount
+    const overlayMount = this.overlayMount
+    const looseObjects = this.looseObjects.splice(0)
+    this.underlayMount = null
+    this.overlayMount = null
+
+    const mounts = [underlayMount, overlayMount].filter(
+      (mount): mount is Phaser.GameObjects.Container => Boolean(mount),
+    )
+    const seen = new Set<Phaser.GameObjects.GameObject>()
+    const ownedObjects: Phaser.GameObjects.GameObject[] = []
+    const childrenOf = (
+      object: Phaser.GameObjects.GameObject,
+    ): Phaser.GameObjects.GameObject[] => {
+      try {
+        const list = Reflect.get(object, 'list')
+        return capturedArrayIsArray(list)
+          ? capturedArraySlice(list) as Phaser.GameObjects.GameObject[]
+          : []
+      } catch (cause) {
+        recordFailure(cause)
+        return []
+      }
+    }
+    const collectChildrenFirst = (object: Phaser.GameObjects.GameObject): void => {
+      if (seen.has(object) || mounts.includes(object as Phaser.GameObjects.Container)) return
+      seen.add(object)
+      for (const child of childrenOf(object)) collectChildrenFirst(child)
+      ownedObjects.push(object)
+    }
+    for (const mount of mounts) {
+      for (const child of childrenOf(mount)) collectChildrenFirst(child)
+    }
+    for (const object of looseObjects) collectChildrenFirst(object)
+
+    for (const object of ownedObjects) {
+      this.destroyDetachedPhaserObject(object, recordFailure)
+    }
+    for (const mount of mounts) {
+      this.destroyDetachedPhaserObject(mount, recordFailure)
+    }
+  }
+
+  private destroyDetachedPhaserObject(
+    object: Phaser.GameObjects.GameObject,
+    recordFailure: (cause: unknown) => void,
+  ): void {
+    const attempt = (operation: () => void): void => {
+      try {
+        operation()
+      } catch (cause) {
+        recordFailure(cause)
+      }
+    }
+    const scene = object.scene
+    const parent = object.parentContainer
+    if (parent) {
+      attempt(() => parent.remove(object, false))
+      attempt(() => removeAllArrayEntries(Reflect.get(parent, 'list'), object))
+      attempt(() => Reflect.set(object, 'parentContainer', null))
+    }
+
+    const displayList = object.displayList
+    attempt(() => {
+      const removeFromDisplayList = Reflect.get(object, 'removeFromDisplayList')
+      if (typeof removeFromDisplayList === 'function') {
+        Reflect.apply(removeFromDisplayList, object, [])
+      }
+    })
+    attempt(() => removeAllArrayEntries(
+      displayList ? Reflect.get(displayList, 'list') : undefined,
+      object,
+    ))
+    attempt(() => removeAllArrayEntries(
+      scene ? Reflect.get(scene.children, 'list') : undefined,
+      object,
+    ))
+    attempt(() => Reflect.set(object, 'displayList', null))
+
+    const updateList = scene?.sys.updateList as unknown as Record<string, unknown> | undefined
+    attempt(() => {
+      const removeFromUpdateList = Reflect.get(object, 'removeFromUpdateList')
+      if (typeof removeFromUpdateList === 'function') {
+        Reflect.apply(removeFromUpdateList, object, [])
+      }
+    })
+    if (updateList) {
+      attempt(() => {
+        const update = Reflect.get(updateList, 'update')
+        if (typeof update === 'function') Reflect.apply(update, updateList, [])
+      })
+    }
+
+    let destroyFailed = false
+    try {
+      object.destroy(true)
+    } catch (cause) {
+      destroyFailed = true
+      recordFailure(cause)
+    }
+    if (!destroyFailed) return
+
+    attempt(() => {
+      const gameObjects = Reflect.get(Phaser, 'GameObjects')
+      const GameObjectConstructor = Reflect.get(gameObjects, 'GameObject')
+      const prototype = Reflect.get(GameObjectConstructor, 'prototype')
+      const baseDestroy = Reflect.get(prototype, 'destroy')
+      if (typeof baseDestroy === 'function') Reflect.apply(baseDestroy, object, [true])
+    })
+    attempt(() => {
+      const removeAllListeners = Reflect.get(object, 'removeAllListeners')
+      if (typeof removeAllListeners === 'function') {
+        Reflect.apply(removeAllListeners, object, [])
+      }
+    })
+    attempt(() => Reflect.set(object, 'active', false))
+    attempt(() => Reflect.set(object, 'visible', false))
+    attempt(() => Reflect.set(object, 'scene', undefined))
+    attempt(() => Reflect.set(object, 'parentContainer', undefined))
+    attempt(() => Reflect.set(object, 'displayList', undefined))
   }
 
   private recordFailure(error: unknown): Error {

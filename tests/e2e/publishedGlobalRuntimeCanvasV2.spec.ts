@@ -85,6 +85,9 @@ const hostileGlobalHybridSource = `
       window.__publishedHostileGlobalCanvasApi2Probe = probe;
       probe.creates += 1;
       var game = ctx.phaser.scene.game;
+      window.__publishedHostileGlobalCanvasApi2Games =
+        window.__publishedHostileGlobalCanvasApi2Games || [];
+      window.__publishedHostileGlobalCanvasApi2Games.push(game);
       game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
         probe.coreDestroys += 1;
       });
@@ -96,10 +99,8 @@ const hostileGlobalHybridSource = `
       var object = ctx.phaser.scene.add.rectangle(0, 0, 48, 48, 0xdc2626, 0.4)
         .setOrigin(0, 0);
       ctx.phaser.root.add(object);
-      var originalDestroy = object.destroy.bind(object);
       object.destroy = function () {
         probe.gameObjectDestroys += 1;
-        originalDestroy();
         throw new Error('hostile global GameObject destroy failed intentionally');
       };
       return {
@@ -238,6 +239,25 @@ for (const delivery of [
         gameObjectDestroys: 1,
         coreDestroys: 1,
       })
+    await expect.poll(() => page.evaluate(() => ({
+      canvasConnected: window.__publishedHostileGlobalCanvasApi2Games?.[0]?.canvas.isConnected,
+      rendererGameReleased:
+        window.__publishedHostileGlobalCanvasApi2Games?.[0]?.renderer.game === null,
+      rendererCanvasReleased:
+        window.__publishedHostileGlobalCanvasApi2Games?.[0]?.renderer.gameCanvas === null,
+      rendererContextReleased:
+        window.__publishedHostileGlobalCanvasApi2Games?.[0]?.renderer.gameContext === null,
+      loopGameReleased: window.__publishedHostileGlobalCanvasApi2Games?.[0]?.loop.game === null,
+      loopCallbackReleased:
+        window.__publishedHostileGlobalCanvasApi2Games?.[0]?.loop.callback === null,
+    }))).toEqual({
+      canvasConnected: false,
+      rendererGameReleased: true,
+      rendererCanvasReleased: true,
+      rendererContextReleased: true,
+      loopGameReleased: true,
+      loopCallbackReleased: true,
+    })
     await expect(button).toHaveText('GLOBAL API2:1')
     await page.evaluate(() => window.__H5_LESSON_PLAYER__?.goToScene(2))
     await expect(page.locator(
@@ -272,6 +292,12 @@ for (const delivery of [
       .toMatchObject({ creates: 2, destroys: 1, coreDestroys: 1 })
     await expect(hostileMarker).toBeVisible()
     await expect.poll(() => page.evaluate(() => ({
+      hostileGames: window.__publishedHostileGlobalCanvasApi2Games?.length,
+      releasedGames: window.__publishedHostileGlobalCanvasApi2Games?.filter((game) => (
+        game.loop.game === null && game.renderer.game === null
+      )).length,
+    }))).toEqual({ hostileGames: 2, releasedGames: 1 })
+    await expect.poll(() => page.evaluate(() => ({
       loopGameReleased: window.__publishedGlobalCanvasApi2Games?.[0]?.loop.game === null,
       loopCallbackReleased: window.__publishedGlobalCanvasApi2Games?.[0]?.loop.callback === null,
     }))).toEqual({
@@ -290,6 +316,16 @@ for (const delivery of [
         gameObjectDestroys: 2,
         coreDestroys: 2,
       })
+    await expect.poll(() => page.evaluate(() => (
+      window.__publishedHostileGlobalCanvasApi2Games?.every((game) => (
+        !game.canvas.isConnected
+        && game.loop.game === null
+        && game.loop.callback === null
+        && game.renderer.game === null
+        && game.renderer.gameCanvas === null
+        && game.renderer.gameContext === null
+      ))
+    ))).toBe(true)
     await expect.poll(() => page.evaluate(() => ({
       canvasConnected: window.__publishedGlobalCanvasApi2Games?.[1]?.canvas.isConnected,
       loopGameReleased: window.__publishedGlobalCanvasApi2Games?.[1]?.loop.game === null,
@@ -319,5 +355,10 @@ declare global {
       loop: { game: unknown; callback: unknown }
     }>
     __publishedHostileGlobalCanvasApi2Probe?: Record<string, unknown>
+    __publishedHostileGlobalCanvasApi2Games?: Array<{
+      canvas: HTMLCanvasElement
+      loop: { game: unknown; callback: unknown }
+      renderer: { game: unknown; gameCanvas: unknown; gameContext: unknown }
+    }>
   }
 }

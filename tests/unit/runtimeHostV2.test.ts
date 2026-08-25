@@ -27,6 +27,8 @@ class FakeContainer {
   visible = true
   name = ''
   readonly children: FakeContainer[] = []
+  readonly list = this.children
+  parentContainer: FakeContainer | null = null
 
   setName(name: string): this {
     this.name = name
@@ -40,6 +42,14 @@ class FakeContainer {
 
   add(child: FakeContainer): this {
     this.children.push(child)
+    child.parentContainer = this
+    return this
+  }
+
+  remove(child: FakeContainer): this {
+    const index = this.children.indexOf(child)
+    if (index >= 0) this.children.splice(index, 1)
+    child.parentContainer = null
     return this
   }
 
@@ -176,6 +186,7 @@ afterEach(() => {
   delete window.CoursewareRuntime
   Reflect.deleteProperty(window, '__runtimeHostContext')
   Reflect.deleteProperty(window, '__runtimeLifecycleCalls')
+  Reflect.deleteProperty(window, '__runtimeHostTeardownCalls')
   document.body.replaceChildren()
   vi.restoreAllMocks()
 })
@@ -601,6 +612,76 @@ describe('RuntimeHost API 2', () => {
 
     host.destroy()
     expect(calls).toContain('destroy')
+    registry.dispose()
+  })
+
+  it('先脱离并逐对象清理 Phaser 子项，单个 destroy 直接抛错也不阻断其余层', () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create(ctx) {
+          const calls = window.__runtimeHostTeardownCalls = []
+          const hostile = {
+            active: true,
+            visible: true,
+            parentContainer: null,
+            displayList: null,
+            scene: null,
+            destroy() {
+              calls.push(['hostile', this.parentContainer === null])
+              throw new Error('hostile GameObject destroy failed intentionally')
+            }
+          }
+          const healthy = {
+            active: true,
+            visible: true,
+            parentContainer: null,
+            displayList: null,
+            scene: null,
+            destroy() { calls.push(['healthy', this.parentContainer === null]) }
+          }
+          const nested = ctx.phaser.scene.add.container()
+          ctx.phaser.root.add(nested)
+          nested.add(hostile)
+          nested.add(healthy)
+          return { destroy() { calls.push(['lifecycle', true]) } }
+        }
+      })
+    `
+    const { host, testEnvironment, registry } = createHost(runtime(2, 'phaser', source))
+
+    expect(() => host.destroy()).toThrow('hostile GameObject destroy failed intentionally')
+    expect(Reflect.get(window, '__runtimeHostTeardownCalls')).toEqual([
+      ['lifecycle', true],
+      ['hostile', true],
+      ['healthy', true],
+    ])
+    expect(testEnvironment.phaserUnderlay.children).toHaveLength(0)
+    expect(testEnvironment.phaserOverlay.children).toHaveLength(0)
+    expect(testEnvironment.sceneContainers.every((container) => !container.active)).toBe(true)
+    registry.dispose()
+  })
+
+  it('保持 authored lifecycle.destroy 只报告而不向普通 RuntimeHost caller 抛出', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create() {
+          return {
+            destroy() { throw new Error('authored lifecycle destroy failed intentionally') }
+          }
+        }
+      })
+    `
+    const { host, testEnvironment, registry } = createHost(runtime(2, 'hybrid', source))
+
+    expect(() => host.destroy()).not.toThrow()
+    expect(error).toHaveBeenCalledWith(
+      '运行时“测试运行时”销毁失败',
+      expect.objectContaining({ message: 'authored lifecycle destroy failed intentionally' }),
+    )
+    expect(testEnvironment.sceneContainers.every((container) => !container.active)).toBe(true)
     registry.dispose()
   })
 

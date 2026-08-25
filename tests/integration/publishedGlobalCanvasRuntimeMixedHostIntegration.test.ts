@@ -320,7 +320,12 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     } => entry.item.kind === 'runtime' && entry.item.layerItemId === 'global-api2-healthy')
     if (!healthy) throw new Error('missing healthy Published global Runtime')
     healthy.item.playbackInitialVisibility = 'hidden'
+    const hitNone = structuredClone(healthy)
+    hitNone.item.layerItemId = 'global-api2-hit-none'
+    hitNone.item.order = 8_500
+    hitNone.item.hitPolicy = 'pass-through'
     payload.globalLayerItems.push(
+      hitNone,
       interactionTrigger('global-runtime-enter', 9_001),
       interactionTrigger('global-runtime-exit', 9_002),
     )
@@ -335,6 +340,30 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
         'global-runtime-exit-rule',
         'global-runtime-exit',
         healthy.item.layerItemId,
+        'node.exit',
+      ),
+      visibilityRule(
+        'global-runtime-hit-none-enter-rule',
+        'global-runtime-enter',
+        hitNone.item.layerItemId,
+        'node.enter',
+      ),
+      visibilityRule(
+        'global-runtime-hit-none-exit-rule',
+        'global-runtime-exit',
+        hitNone.item.layerItemId,
+        'node.exit',
+      ),
+      visibilityRule(
+        'global-runtime-fallback-enter-rule',
+        'global-runtime-enter',
+        'global-api2-create-failure',
+        'node.enter',
+      ),
+      visibilityRule(
+        'global-runtime-fallback-exit-rule',
+        'global-runtime-exit',
+        'global-api2-create-failure',
         'node.exit',
       ),
     )
@@ -352,13 +381,18 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       if (index > 0) await session.goToLocation(locationId)
       const surfaceId = session.navigator.current!.surfaceId
       const wrapper = globalWrapper(container, surfaceId, healthy.item.layerItemId)
+      const hitNoneWrapper = globalWrapper(container, surfaceId, hitNone.item.layerItemId)
       const failed = globalWrapper(container, surfaceId, 'global-api2-create-failure')
 
       expect(wrapper.dataset.interactionVisibility).toBe('hidden')
       expect(wrapper.style.visibility).toBe('hidden')
       expect(wrapper.style.pointerEvents).toBe('none')
+      expect(hitNoneWrapper.dataset.interactionVisibility).toBe('hidden')
+      expect(hitNoneWrapper.dataset.publishedGlobalRuntimeHitPolicy).toBe('pass-through')
+      expect(hitNoneWrapper.style.pointerEvents).toBe('none')
       await vi.waitFor(() => {
         expect(failed.dataset.globalRuntimeState).toBe('fallback')
+        expect(failed.dataset.publishedGlobalRuntimeHitPolicy).toBe('auto')
         expect(failed.style.pointerEvents).toBe('none')
       })
 
@@ -367,6 +401,10 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
         expect(wrapper.dataset.interactionVisibility).toBe('visible')
         expect(wrapper.style.visibility).toBe('visible')
         expect(wrapper.style.pointerEvents).toBe('auto')
+        expect(hitNoneWrapper.dataset.interactionVisibility).toBe('visible')
+        expect(hitNoneWrapper.style.pointerEvents).toBe('none')
+        expect(failed.dataset.interactionVisibility).toBe('visible')
+        expect(failed.style.pointerEvents).toBe('none')
       })
 
       globalWrapper(container, surfaceId, 'global-runtime-exit').click()
@@ -374,6 +412,10 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
         expect(wrapper.dataset.interactionVisibility).toBe('hidden')
         expect(wrapper.style.visibility).toBe('hidden')
         expect(wrapper.style.pointerEvents).toBe('none')
+        expect(hitNoneWrapper.dataset.interactionVisibility).toBe('hidden')
+        expect(hitNoneWrapper.style.pointerEvents).toBe('none')
+        expect(failed.dataset.interactionVisibility).toBe('hidden')
+        expect(failed.style.pointerEvents).toBe('none')
       })
       expect(failed.style.pointerEvents).toBe('none')
     }
@@ -382,6 +424,8 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     const spatialWrapper = globalWrapper(container, spatialSurfaceId, healthy.item.layerItemId)
     globalWrapper(container, spatialSurfaceId, 'global-runtime-enter').click()
     await vi.waitFor(() => expect(spatialWrapper.style.pointerEvents).toBe('auto'))
+    expect(globalWrapper(container, spatialSurfaceId, hitNone.item.layerItemId)
+      .style.pointerEvents).toBe('none')
     expect(globalWrapper(container, spatialSurfaceId, 'global-api2-create-failure')
       .style.pointerEvents).toBe('none')
 
