@@ -8,7 +8,6 @@
   "scanRoots": [
     "AGENTS.md",
     "COURSEWARE_DEVELOPMENT_PLAN.md",
-    "PROJECT_COGNITION_INDEX.md",
     "README.md",
     "artifacts/contracts",
     "docs",

@@ -44,9 +44,9 @@
         "preview",
         "player"
       ],
-      "rationale": "Frozen P2 captures a real regression in cross-Surface try-run routing.",
+      "rationale": "The current Published V2 preview contract requires Mixed try-run routing to preserve the requested location and run mode.",
       "evidence": [
-        "docs/tasks/editor-1.0/P2_TRYRUN_LOCATION.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -64,9 +64,9 @@
         "media",
         "save"
       ],
-      "rationale": "Frozen Q7 defines the real Flow-specific file replacement carrier and write boundary.",
+      "rationale": "The current Flow carrier contract requires local-file replacement to preserve FlowMediaBlock ownership and the canonical resource transaction.",
       "evidence": [
-        "docs/tasks/editor-1.0/Q7_FLOW_FILE_REPLACE.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -85,9 +85,9 @@
         "controller",
         "player"
       ],
-      "rationale": "Frozen G3B/G3D protects the distinction between Flow paper and overlay layers.",
+      "rationale": "The current carrier contract protects the distinction between Flow paper blocks and overlay LayerItems.",
       "evidence": [
-        "docs/tasks/editor-1.0/G3B_WRAP_PAPERSPACE.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -106,9 +106,9 @@
         "preview",
         "player"
       ],
-      "rationale": "Frozen Q5 records the real Spatial video/runtime inconsistency.",
+      "rationale": "The current Spatial carrier and Published contracts require video/runtime URLs to preserve world ownership and delivery behavior.",
       "evidence": [
-        "docs/tasks/editor-1.0/Q5_SPATIAL_VIDEO.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -128,9 +128,9 @@
         "spatial",
         "player"
       ],
-      "rationale": "Frozen P8 is the real three-Surface Component API 4 integration.",
+      "rationale": "The current Component API 4 contract spans the distinct Slide, Flow and Spatial carriers.",
       "evidence": [
-        "docs/tasks/editor-1.0/P8_FLOW_SPATIAL_COMPONENTS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -190,9 +190,9 @@
         "flow",
         "spatial"
       ],
-      "rationale": "Frozen P7/Q1/Q2 and current invariants protect the one-global-controller owner.",
+      "rationale": "The current global-layer and teacher-controller invariants protect one persistent global controller owner.",
       "evidence": [
-        "docs/tasks/editor-1.0/P7_LAYER_CONTROLLER.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -256,7 +256,7 @@
       ],
       "rationale": "Current must-preserve rules require one Published V2 preview path.",
       "evidence": [
-        "docs/development-plan/90-appendix/00_CURRENT_MUST_PRESERVE.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -362,7 +362,7 @@
       ],
       "rationale": "DeveloperTab is an existing partial feature that must be retained while Store coupling falls.",
       "evidence": [
-        "docs/development-plan/20-modules/10_UI_COMPOSITION_AND_CODE_WORKSPACE.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -405,7 +405,7 @@
       ],
       "rationale": "IPC parity and close-before-save are explicit desktop hotspots.",
       "evidence": [
-        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -427,7 +427,7 @@
       ],
       "rationale": "ARCH-0B explicitly requires all three TypeScript projects and shared de-duplication.",
       "evidence": [
-        "docs/development-plan/10-knowledge-system/02_TS7_GENERATOR_AND_ADAPTER.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -447,7 +447,7 @@
       ],
       "rationale": "A shared IPC contract participates in all three compiler boundaries.",
       "evidence": [
-        "docs/development-plan/10-knowledge-system/04_QUERY_CONTEXT_PACK_AND_QUALITY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ],
       "dirtyInputs": [
         {

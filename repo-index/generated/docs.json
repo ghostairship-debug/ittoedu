@@ -5,7 +5,6 @@
         ".agents/skills/build-courseware-project/SKILL.md",
         ".agents/skills/orchestrate-courseware/SKILL.md",
         "COURSEWARE_DEVELOPMENT_PLAN.md",
-        "PROJECT_COGNITION_INDEX.md",
         "artifacts/ai-capabilities/index.json",
         "docs/contracts",
         "docs/development-plan/README.md"
@@ -15,23 +14,15 @@
     },
     {
       "links": [
-        "PRODUCT_DEEP_AUDIT_2026-08-24.md",
-        "docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md",
-        "docs/development-plan/40-development/00_SINGLE_MAINTAINER_AI_WORKFLOW.md",
-        "docs/development-plan/40-development/03_VALIDATION_STRATEGY.md",
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
         "docs/development-plan/README.md",
-        "docs/development-plan/TASK_BOARD.md"
+        "docs/development-plan/REPAIR_PLAN.md",
+        "docs/development-plan/TASK_BOARD.md",
+        "docs/development-plan/TASK_CARD_TEMPLATE.md",
+        "docs/development-plan/WORKING_PROTOCOL.md"
       ],
       "path": "COURSEWARE_DEVELOPMENT_PLAN.md",
-      "title": "IttoEdu 编辑器稳定化与模块解耦总纲"
-    },
-    {
-      "links": [
-        "COURSEWARE_DEVELOPMENT_PLAN.md",
-        "docs/development-plan/README.md"
-      ],
-      "path": "PROJECT_COGNITION_INDEX.md",
-      "title": "IttoEdu 当前项目认知入口"
+      "title": "IttoEdu 开发总纲"
     },
     {
       "links": [
@@ -45,48 +36,11 @@
         "docs/RUNTIME_AUTHORING.md",
         "docs/USER_GUIDE.md",
         "docs/development-plan/README.md",
-        "docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md",
-        "docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md",
         "examples/render-host-benchmark/README.md",
         "scripts/install-courseware-skills.ps1"
       ],
       "path": "README.md",
       "title": "互动课件编辑器"
-    },
-    {
-      "links": [
-        ".agents/skills/build-courseware-project/SKILL.md",
-        ".agents/skills/orchestrate-courseware/SKILL.md",
-        "artifacts/ai-capabilities/index.json",
-        "docs/COMPONENT_AUTHORING.md",
-        "docs/PUBLISHED_LESSON_V1.md",
-        "docs/RUNTIME_AUTHORING.md",
-        "docs/reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md",
-        "docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md",
-        "examples/render-host-benchmark/README.md"
-      ],
-      "path": "docs/AI_COURSEWARE_AUTHORING.md",
-      "title": "AI 互动课件创作与接入规范（历史背景）"
-    },
-    {
-      "links": [
-        ".agents/skills/build-courseware-project/SKILL.md",
-        ".agents/skills/orchestrate-courseware/SKILL.md",
-        "docs/AI_COURSEWARE_AUTHORING.md"
-      ],
-      "path": "docs/AI_COURSEWARE_ORCHESTRATION.md",
-      "title": "AI 互动课件通用创作编排规范"
-    },
-    {
-      "links": [
-        ".agents/skills/build-courseware-project/SKILL.md",
-        ".agents/skills/orchestrate-courseware/SKILL.md",
-        "COURSEWARE_DEVELOPMENT_PLAN.md",
-        "docs/reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md",
-        "docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md"
-      ],
-      "path": "docs/AI_COURSEWARE_SKILL_DESIGN.md",
-      "title": "AI 互动课件 Skill 设计与迁移说明（历史背景）"
     },
     {
       "links": [
@@ -100,14 +54,6 @@
       "title": "互动组件开发指南（V4）"
     },
     {
-      "links": [
-        "COURSEWARE_DEVELOPMENT_PLAN.md",
-        "docs/README.md"
-      ],
-      "path": "docs/INTERNAL_1_0_MILESTONE_0.md",
-      "title": "内部正式版 1.0：里程碑 0 冻结记录"
-    },
-    {
       "links": [],
       "path": "docs/PUBLISHED_LESSON_V1.md",
       "title": "PublishedLesson V1 发布格式"
@@ -117,33 +63,18 @@
         ".agents/skills/build-courseware-project/SKILL.md",
         ".agents/skills/orchestrate-courseware/SKILL.md",
         "COURSEWARE_DEVELOPMENT_PLAN.md",
-        "PROJECT_COGNITION_INDEX.md",
         "README.md",
         "artifacts/ai-capabilities/index.json",
-        "docs/AI_COURSEWARE_AUTHORING.md",
-        "docs/AI_COURSEWARE_ORCHESTRATION.md",
-        "docs/AI_COURSEWARE_SKILL_DESIGN.md",
         "docs/COMPONENT_AUTHORING.md",
-        "docs/INTERNAL_1_0_MILESTONE_0.md",
         "docs/PUBLISHED_LESSON_V1.md",
         "docs/RUNTIME_AUTHORING.md",
         "docs/USER_GUIDE.md",
         "docs/contracts/COURSE_PROJECT_V9.md",
         "docs/contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md",
         "docs/contracts/V9_COMPATIBILITY_POLICY.md",
-        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md",
-        "docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md",
-        "docs/development-plan/40-development/00_SINGLE_MAINTAINER_AI_WORKFLOW.md",
         "docs/development-plan/README.md",
-        "docs/reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md",
-        "docs/reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md",
-        "docs/reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md",
-        "docs/reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md",
-        "docs/reviews/FORMULA_AUTHORING_R0_DECISION_20260811.md",
-        "docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md",
-        "docs/reviews/UNIFIED_AUTHORING_BLUEPRINT_RFC_20260813.md",
-        "docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md",
-        "docs/tasks/editor-1.0/00_INDEX.md"
+        "docs/development-plan/REPAIR_PLAN.md",
+        "docs/development-plan/TASK_BOARD.md"
       ],
       "path": "docs/README.md",
       "title": "文档导航"
@@ -151,7 +82,6 @@
     {
       "links": [
         "artifacts/ai-capabilities/index.json",
-        "docs/reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md",
         "examples/render-host-benchmark/README.md",
         "src/shared/runtimeSchema.ts",
         "src/shared/runtimeTypes.ts"
@@ -165,10 +95,6 @@
         "docs/PUBLISHED_LESSON_V1.md",
         "docs/README.md",
         "docs/contracts",
-        "docs/reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md",
-        "docs/reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md",
-        "docs/reviews/UNIFIED_AUTHORING_BLUEPRINT_RFC_20260813.md",
-        "docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md",
         "examples/render-host-benchmark/README.md"
       ],
       "path": "docs/USER_GUIDE.md",
@@ -193,402 +119,43 @@
     },
     {
       "links": [],
-      "path": "docs/development-plan/00-foundation/00_READING_MATRIX.md",
-      "title": "文档阅读矩阵"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/00-foundation/01_AUTHORITY_ACTIVATION_AND_BASELINE.md",
-      "title": "权威关系、已激活路线与基线策略"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/00-foundation/02_CURRENT_FACTS_AND_STATUS.md",
-      "title": "当前仓库事实、成熟度与真实缺口"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/00-foundation/03_GOALS_PRINCIPLES_NON_GOALS.md",
-      "title": "目标、原则与非目标"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/00-foundation/04_TARGET_ARCHITECTURE_AND_DEPENDENCY_DAG.md",
-      "title": "目标架构、依赖 DAG 与目录方向"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/00-foundation/05_CAPABILITY_MODES_AND_CODE_WORKSPACE.md",
-      "title": "简洁编辑、专业编辑与现有 DeveloperTab"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/00-foundation/06_FEATURE_MATRIX.md",
-      "title": "Feature Matrix：当前状态、Canonical Carrier 与目标 Owner"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/10-knowledge-system/00_SCOPE_DECISION_AND_BOOTSTRAP.md",
-      "title": "项目知识系统：范围、裁决与索引前 Bootstrap"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/10-knowledge-system/01_DATA_MODEL_PROVENANCE_AND_FILES.md",
-      "title": "repo-index 数据模型、Provenance 与文件布局"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/10-knowledge-system/02_TS7_GENERATOR_AND_ADAPTER.md",
-      "title": "TypeScript 7 索引生成器与薄适配层"
-    },
-    {
-      "links": [
-        "docs/development-plan/10-knowledge-system/01_DATA_MODEL_PROVENANCE_AND_FILES.md#3-输入域与-hash-单一归属"
-      ],
-      "path": "docs/development-plan/10-knowledge-system/03_DETERMINISM_FRESHNESS_AND_GIT.md",
-      "title": "确定性、新鲜度与 Git 策略"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/10-knowledge-system/04_QUERY_CONTEXT_PACK_AND_QUALITY.md",
-      "title": "查询、Context Pack 与质量门禁"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/00_MODULE_MAP_AND_OWNERS.md",
-      "title": "模块地图、Owner 与跨切用例"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md",
-      "title": "Editor Core：状态分类、事务、历史与过期目标"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md",
-      "title": "App Shell、保存恢复、IPC、安全与主进程边界"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md",
-      "title": "Slide、Flow、Spatial 的 Carrier、Placement 与共同边界"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/04_COMPONENTS.md",
-      "title": "组件体系：Catalog、工程包、实例与 Authoring"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md",
-      "title": "Runtime、互动规则、动画模板与 Automation"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/06_MEDIA_ASSETS_AND_SIDECARS.md",
-      "title": "媒体、AssetMeta、Sidecar 与资源历史"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/07_GLOBAL_LAYERS_AND_TEACHER_CONTROLLER.md",
-      "title": "全局层、Surface 共享层、有效图层与教师控制器"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md",
-      "title": "Published Producer、Player、Try-run、Preview 与 Export"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/09_DIAGNOSTICS_AND_ANALYSIS.md",
-      "title": "结构诊断、作者分析、导出预检与错误呈现"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/10_UI_COMPOSITION_AND_CODE_WORKSPACE.md",
-      "title": "UI Composition、Workspace、Properties 与现有 DeveloperTab"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/20-modules/11_CURRENT_TO_TARGET_OWNER_MAP.md",
-      "title": "当前目录到目标 Owner 的迁移地图"
-    },
-    {
-      "links": [
-        "docs/development-plan/TASK_BOARD.md"
-      ],
-      "path": "docs/development-plan/30-execution/00_ROADMAP_AND_GATES.md",
-      "title": "稳定化路线、阶段门禁与停止权"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/01_ARCH_0A_GOVERNANCE_AND_REBASE.md",
-      "title": "ARCH-0A：治理、合法 V9 基线与事实重算"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/02_ARCH_0B_REPO_INDEX_MVP.md",
-      "title": "ARCH-0B：轻量 repo-index 与 Context Pack 安全门禁"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/03_ARCH_1_BOUNDARIES_AND_FIRST_VERTICAL_SLICE.md",
-      "title": "ARCH-1：无环边界与第一个完整纵切"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/04_ARCH_2_CROSS_SURFACE_FEATURES.md",
-      "title": "ARCH-2：跨 Surface 公共能力解耦"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/05_ARCH_3_SURFACE_MODULARIZATION.md",
-      "title": "ARCH-3：Slide、Flow、Spatial 纵向模块化"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/06_ARCH_4_DELIVERY_AND_LEGACY.md",
-      "title": "ARCH-4：Preview、Player、Export 与 Legacy consumer 迁移"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/07_ARCH_5_CLEANUP_AND_FINAL_ACCEPTANCE.md",
-      "title": "ARCH-5：证明后清理与最终结果复核"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/08_DEPENDENCIES_PARALLELISM_AND_HOTSPOTS.md",
-      "title": "依赖 DAG、三 Worker 并行与热点排他"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/30-execution/09_LEGACY_CLEANUP_AND_DELETION_PROOF.md",
-      "title": "Legacy consumer 台账与删除证明"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/40-development/00_SINGLE_MAINTAINER_AI_WORKFLOW.md",
-      "title": "一协调者 + 三智能体无人值守工作流"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/40-development/01_TASK_RISK_TIERS_AND_PROTOCOL.md",
-      "title": "任务风险、状态真相与可派发协议"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/40-development/02_FILE_FIREWALL_AND_CHANGE_BUDGET.md",
-      "title": "文件防火墙、读取权与变更预算"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/40-development/03_VALIDATION_STRATEGY.md",
-      "title": "最小充分验证策略"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/40-development/04_DONE_ROLLBACK_HANDOFF.md",
-      "title": "Done、自动回滚与证据交接"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/40-development/05_DOCUMENT_AND_INDEX_MAINTENANCE.md",
-      "title": "唯一真相、文档与索引维护"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/ADR_TEMPLATE.md",
-      "title": "ADR-XXX：标题"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/BASELINE_CAPTURE_TEMPLATE.md",
-      "title": "Pre-stabilization Baseline"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/HANDOFF_TEMPLATE.md",
-      "title": "Task Evidence Handoff"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/LEGACY_CONSUMER_RECORD_TEMPLATE.md",
-      "title": "Legacy Consumer Record"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/S0_SIMPLE_FIX_TASK_CARD_TEMPLATE.md",
-      "title": "S0 局部小修任务卡"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/S1_TASK_CARD_TEMPLATE.md",
-      "title": "S1 普通跨文件任务卡"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/50-templates/S2_MIGRATION_TASK_CARD_TEMPLATE.md",
-      "title": "S2 高风险迁移任务卡"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/90-appendix/00_CURRENT_MUST_PRESERVE.md",
-      "title": "Current Must Preserve：当前已经成立的硬约束"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/90-appendix/01_TARGET_AND_TRANSITIONAL_RULES.md",
-      "title": "Target Acceptance 与 Transitional Allowances"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/90-appendix/02_RISK_REGISTER.md",
-      "title": "风险登记册"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/90-appendix/03_GLOSSARY_AND_TERM_STATUS.md",
-      "title": "术语与状态"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/90-appendix/04_REVIEW_FINDINGS_DISPOSITION.md",
-      "title": "三份评估问题处理追踪"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/90-appendix/05_SOURCE_EVIDENCE_INDEX.md",
-      "title": "关键事实证据索引"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/PACKAGE_MANIFEST.md",
-      "title": "静态计划包文档清单、角色与完整性说明"
+      "path": "docs/development-plan/ARCHITECTURE_CONTRACT.md",
+      "title": "架构合同：什么不能坏"
     },
     {
       "links": [
         "COURSEWARE_DEVELOPMENT_PLAN.md",
-        "docs/development-plan/00-foundation/00_READING_MATRIX.md",
-        "docs/development-plan/10-knowledge-system/00_SCOPE_DECISION_AND_BOOTSTRAP.md",
-        "docs/development-plan/TASK_BOARD.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
+        "docs/development-plan/REPAIR_PLAN.md",
+        "docs/development-plan/TASK_BOARD.md",
+        "docs/development-plan/TASK_CARD_TEMPLATE.md",
+        "docs/development-plan/WORKING_PROTOCOL.md"
       ],
       "path": "docs/development-plan/README.md",
-      "title": "IttoEdu 架构稳定化、模块解耦与项目知识系统执行方案"
+      "title": "开发执行方案入口"
     },
     {
       "links": [],
-      "path": "docs/development-plan/REVISION_SUMMARY.md",
-      "title": "正式激活摘要与设计裁决"
+      "path": "docs/development-plan/REPAIR_PLAN.md",
+      "title": "工程修复开发方案（2026-08-25）"
     },
     {
       "links": [],
-      "path": "docs/development-plan/VALIDATION_REPORT.md",
-      "title": "最终计划整合验证报告"
+      "path": "docs/development-plan/TASK_CARD_TEMPLATE.md",
+      "title": "任务卡模板（S0 / S1 / S2 三合一）"
     },
     {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_0A_GATE_REPORT.md",
-      "title": "ARCH-0A Phase Gate Report"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_0B_GATE_REPORT.md",
-      "title": "ARCH-0B Project Knowledge Index Gate Report"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_0B_INDEX_QUALITY.md",
-      "title": "ARCH-0B Repo-index Golden Task Quality Baseline"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_0_BASELINE.md",
-      "title": "ARCH-0 Stabilization Baseline"
+      "links": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
+        "docs/development-plan/TASK_CARD_TEMPLATE.md"
+      ],
+      "path": "docs/development-plan/WORKING_PROTOCOL.md",
+      "title": "工作协议：任务、验证与热点"
     },
     {
       "links": [],
       "path": "docs/development-plan/baselines/ARCH_0_PERFORMANCE.md",
       "title": "ARCH-0 功能与性能基线"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_0_REPRESENTATIVE_PROJECTS.md",
-      "title": "ARCH-0 Course Project V9 代表工程基线"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_1_GATE_REPORT.md",
-      "title": "ARCH-1 Boundary and First Vertical Slice Gate Report"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_2_PHASE_GATE_REPORT.md",
-      "title": "ARCH-2 跨 Surface 公共能力最终阶段门报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_2_RESOURCE_SNAPSHOT_BASELINE.md",
-      "title": "ARCH-2 资源快照与跨 Surface 行为基线"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_2_W2A_GATE_REPORT.md",
-      "title": "ARCH-2 W2-A 资源安全阶段门"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_2_W2B1_GATE_REPORT.md",
-      "title": "ARCH-2 W2-B1 Runtime / Interaction 阶段门"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_2_W2B2_ADMISSION_REPORT.md",
-      "title": "ARCH-2 W2-B2 剩余候选域准入报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_3_ADMISSION_REPORT.md",
-      "title": "ARCH-3 Surface 模块化必要性准入报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_3_PHASE_GATE_REPORT.md",
-      "title": "ARCH-3 Surface 模块化阶段门报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_3_RE_ADMISSION_REPORT.md",
-      "title": "ARCH-3 剩余边二次准入报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_4_ADMISSION_REPORT.md",
-      "title": "ARCH-4 Delivery 与 Legacy consumer 必要性准入报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_4_PHASE_GATE_REPORT.md",
-      "title": "ARCH-4 Delivery 与 Legacy Consumer 阶段门报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md",
-      "title": "ARCH-5 删除必要性准入报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_5_FINAL_CANDIDATE_REPORT.md",
-      "title": "ARCH-5 最终候选与结果复核报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/ARCH_5_POST_AUDIT_FINAL_CANDIDATE_REPORT.md",
-      "title": "ARCH-5 审计后最终工程收口报告"
-    },
-    {
-      "links": [],
-      "path": "docs/development-plan/baselines/POST_AUDIT_STABILIZATION_CLOSURE_REPORT.md",
-      "title": "审计后稳定化收口报告"
     },
     {
       "links": [],

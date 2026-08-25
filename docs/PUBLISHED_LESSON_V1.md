@@ -83,4 +83,4 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 4. 所有素材 URL 在网页包根目录内，不能路径穿越；
 5. 编码前后的任意 Unicode JavaScript 代码单元完全一致；
 6. Player 能把 PublishedLesson 恢复为运行模型并实际注册组件；
-7. 当前 Project V8 作者态 `ExportPayload` 可作为内部预览和捕获输入；Project V1–V7 原始 Payload 必须明确拒绝。
+7. 仍在渐进退役的 V8-shaped `ExportPayload` 只可作为内部作者态预览和捕获输入，不是可打开或可保存的工程格式；Project V1–V8 `.h5lesson` 必须明确拒绝。

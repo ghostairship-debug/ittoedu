@@ -1,5 +1,5 @@
 /**
- * Review-only prototype for docs/reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md.
+ * Review-only prototype for the 2026-08-12 declarative course-state RFC retained in Git history.
  * It deliberately lives under tests and is not a persisted Project contract.
  */
 

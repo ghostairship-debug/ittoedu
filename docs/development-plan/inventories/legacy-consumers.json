@@ -1733,13 +1733,8 @@
       },
       "owner": "Diagnostics / Tooling",
       "status": "removed",
-      "currentFact": "ARCH-5 removed the entire isolated V8 archive-validation module at 3bcbebf after all nine exports had zero external consumers; current package validation remains on the Course Project V9 CLI.",
+      "currentFact": "ARCH-5 removed the entire isolated V8 archive-validation module at 3bcbebf after all nine exports had zero external consumers; current package validation remains on the Course Project V9 CLI. The pre-consolidation deletion gate is recoverable from Git history at a7d11e9:docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md.",
       "evidence": [
-        {
-          "path": "docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md",
-          "symbol": "validateProjectArchiveBytes",
-          "note": "Records the complete eight-category deletion gate and whole-module boundary."
-        },
         {
           "path": "scripts/validate-project.ts",
           "symbol": "validateCourseProjectArchiveBytes",

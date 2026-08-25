@@ -1105,7 +1105,7 @@ export async function generateAiCapabilityArtifacts(
       pptx: { interactivity: 'omitted', representation: 'native-plus-static-fallback' },
     },
     documentation: {
-      authoring: 'docs/AI_COURSEWARE_AUTHORING.md',
+      authoring: '.agents/skills/build-courseware-project/SKILL.md',
       runtime: 'docs/RUNTIME_AUTHORING.md',
       component: 'docs/COMPONENT_AUTHORING.md',
     },

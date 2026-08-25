@@ -83,7 +83,7 @@
         "tests/unit/publishedCourseNavigation.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -127,7 +127,7 @@
         "tests/unit/crossSurfaceResourceHistory.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md",
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
         "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
       ]
     },
@@ -233,7 +233,7 @@
         "tests/unit/v9SlideProductIntegration.test.tsx"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -294,7 +294,7 @@
         "tests/unit/flowProductIntegration.test.tsx"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -349,7 +349,7 @@
         "tests/unit/spatialPathPipeline.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -399,7 +399,7 @@
         "tests/integration/mediaLibraryImportRace.test.tsx"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/06_MEDIA_ASSETS_AND_SIDECARS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -467,7 +467,7 @@
         "tests/unit/publishedComponentMount.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/04_COMPONENTS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -519,7 +519,7 @@
         "tests/unit/surfaceRuntimeAuthoring.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -571,7 +571,7 @@
         "tests/unit/publishedInteractionController.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -627,7 +627,7 @@
         "tests/unit/teacherControllerRuntimeSession.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/07_GLOBAL_LAYERS_AND_TEACHER_CONTROLLER.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -680,7 +680,7 @@
         "tests/unit/projectPersistence.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -738,7 +738,7 @@
         "tests/unit/publishedCourseNavigation.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -788,7 +788,12 @@
         "tests/unit/webPackageExport.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ],
+      "terminology": [
+        "web",
+        "package",
+        "export"
       ]
     },
     {
@@ -929,7 +934,7 @@
         "tests/unit/projectHealthNavigation.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/09_DIAGNOSTICS_AND_ANALYSIS.md",
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
         "docs/development-plan/inventories/legacy-consumers.json"
       ]
     },
@@ -977,7 +982,7 @@
         "tests/unit/runtimeTargetEditSession.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/10_UI_COMPOSITION_AND_CODE_WORKSPACE.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -1029,7 +1034,7 @@
         "tests/unit/windowVisibility.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -1144,8 +1149,7 @@
         "tests/unit/repoIndexSemantic.test.ts"
       ],
       "evidence": [
-        "docs/development-plan/10-knowledge-system/01_DATA_MODEL_PROVENANCE_AND_FILES.md",
-        "docs/development-plan/10-knowledge-system/03_DETERMINISM_FRESHNESS_AND_GIT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     }
   ]

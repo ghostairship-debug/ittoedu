@@ -24,7 +24,7 @@
       "dependencyPolicyPhase": "current-and-forward",
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "evidence": [
-        "docs/development-plan/20-modules/00_MODULE_MAP_AND_OWNERS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -52,7 +52,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-1",
       "evidence": [
-        "docs/development-plan/20-modules/01_EDITOR_CORE_STATE_TRANSACTION_HISTORY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -87,7 +87,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-2",
       "evidence": [
-        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -117,7 +117,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-3",
       "evidence": [
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -147,7 +147,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-3",
       "evidence": [
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -177,7 +177,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-3",
       "evidence": [
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -205,7 +205,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-2",
       "evidence": [
-        "docs/development-plan/20-modules/06_MEDIA_ASSETS_AND_SIDECARS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -235,7 +235,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-2",
       "evidence": [
-        "docs/development-plan/20-modules/04_COMPONENTS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -264,7 +264,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-2",
       "evidence": [
-        "docs/development-plan/20-modules/05_RUNTIME_INTERACTIONS_AUTOMATION.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -294,7 +294,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-2",
       "evidence": [
-        "docs/development-plan/20-modules/07_GLOBAL_LAYERS_AND_TEACHER_CONTROLLER.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -324,7 +324,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-4",
       "evidence": [
-        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -352,7 +352,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-4",
       "evidence": [
-        "docs/development-plan/20-modules/08_PLAYER_PREVIEW_EXPORT.md",
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
         "docs/development-plan/inventories/legacy-consumers.json"
       ]
     },
@@ -381,7 +381,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-4",
       "evidence": [
-        "docs/development-plan/20-modules/09_DIAGNOSTICS_AND_ANALYSIS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -414,8 +414,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-3",
       "evidence": [
-        "docs/development-plan/20-modules/10_UI_COMPOSITION_AND_CODE_WORKSPACE.md",
-        "docs/development-plan/20-modules/11_CURRENT_TO_TARGET_OWNER_MAP.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -443,7 +442,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-2/ARCH-5",
       "evidence": [
-        "docs/development-plan/20-modules/02_APP_PERSISTENCE_IPC_SECURITY_RECOVERY.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -501,7 +500,7 @@
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
       "ownerReviewPhase": "ARCH-0B",
       "evidence": [
-        "docs/development-plan/30-execution/02_ARCH_0B_REPO_INDEX_MVP.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     }
   ]

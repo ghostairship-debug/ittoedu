@@ -55,8 +55,7 @@
       ],
       "forbiddenTop5": [
         "src/player/PlayerApp.ts",
-        "src/renderer/phaser/v9SlideHitAdapter.ts",
-        "docs/tasks/editor-1.0/P2_TRYRUN_LOCATION.md"
+        "src/renderer/phaser/v9SlideHitAdapter.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -241,8 +240,7 @@
       ],
       "forbiddenTop5": [
         "src/renderer/course/flowEditorCommands.ts",
-        "src/shared/projectHealth.ts",
-        "docs/tasks/editor-1.0/P7_LAYER_CONTROLLER.md"
+        "src/shared/projectHealth.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -375,8 +373,7 @@
       ],
       "forbiddenTop5": [
         "src/renderer/project/projectArchive.ts",
-        "src/player/PlayerApp.ts",
-        "docs/tasks/editor-1.0/T2_REMOVE_V8.md"
+        "src/player/PlayerApp.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -458,8 +455,7 @@
       ],
       "forbiddenTop5": [
         "src/renderer/ui/Workspace.tsx",
-        "src/player/PlayerScene.ts",
-        "docs/tasks/editor-1.0/T5_READ_MODEL.md"
+        "src/player/PlayerScene.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -525,7 +521,7 @@
         "tsconfig.electron.json",
         "tsconfig.e2e.json",
         "package.json",
-        "docs/development-plan/10-knowledge-system/02_TS7_GENERATOR_AND_ADAPTER.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ],
       "requiredTop15": [
         "vite.renderer.config.ts",
@@ -535,8 +531,7 @@
         "tests/setup.ts"
       ],
       "forbiddenTop5": [
-        "artifacts/ai-capabilities/index.json",
-        "docs/tasks/editor-1.0/T6_TYPECHECK.md"
+        "artifacts/ai-capabilities/index.json"
       ],
       "expected": {
         "confidence": "low",
@@ -561,8 +556,7 @@
       ],
       "forbiddenTop5": [
         "artifacts/ai-capabilities/index.json",
-        "src/player/surfaces/CoursePlayer.ts",
-        "docs/tasks/editor-1.0/T6_TYPECHECK.md"
+        "src/player/surfaces/CoursePlayer.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -587,8 +581,7 @@
       ],
       "forbiddenTop5": [
         "src/renderer/App.tsx",
-        "src/renderer/store/editorStore.ts",
-        "docs/tasks/editor-1.0/T2_REMOVE_V8.md"
+        "src/renderer/store/editorStore.ts"
       ],
       "expected": {
         "confidence": "high",
@@ -611,7 +604,6 @@
       ],
       "forbiddenTop5": [
         "src/renderer/App.tsx",
-        "docs/tasks/editor-1.0/T2_REMOVE_V8.md",
         "artifacts/ai-capabilities/index.json"
       ],
       "expected": {
@@ -633,7 +625,7 @@
         "tests/unit/componentCatalog.test.ts",
         "tests/unit/componentCatalogStatus.test.ts",
         "tests/unit/componentContentIntegrity.test.ts",
-        "docs/development-plan/20-modules/04_COMPONENTS.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ],
       "forbiddenTop5": [
         "src/renderer/ui/ComponentsTab.tsx",
@@ -655,7 +647,7 @@
         "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
       ],
       "requiredTop15": [
-        "docs/development-plan/20-modules/04_COMPONENTS.md",
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
         "src/shared/contracts/component-v4/schema.ts",
         "tests/unit/componentCatalogStatus.test.ts",
         "tests/unit/componentCatalog.test.ts",

@@ -103,7 +103,7 @@ describe('repo-index query and Context Pack', () => {
     expect(normalPaths).not.toContain('src/renderer/components/componentCatalogStatus.ts')
     expect(normalPaths).not.toContain('src/renderer/ui/ComponentsTab.tsx')
     expect(normalPaths.indexOf('tests/unit/playerComponentV4Render.test.ts')).toBeLessThan(
-      normalPaths.indexOf('docs/development-plan/20-modules/04_COMPONENTS.md'),
+      normalPaths.indexOf('docs/development-plan/ARCHITECTURE_CONTRACT.md'),
     )
 
     const text = engine.query({

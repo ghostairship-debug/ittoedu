@@ -20,7 +20,7 @@
       "statusClass": "current-must-preserve",
       "evidence": [
         "src/shared/contracts/course-project-v9/types.ts",
-        "docs/development-plan/20-modules/03_SURFACE_CARRIERS_AND_PLACEMENT.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -31,7 +31,7 @@
       "statusClass": "current-must-preserve",
       "evidence": [
         "src/player/surfaces/CoursePlayer.ts",
-        "docs/development-plan/90-appendix/00_CURRENT_MUST_PRESERVE.md"
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
       ]
     },
     {
@@ -41,7 +41,7 @@
       "origin": "semantic",
       "statusClass": "target-acceptance",
       "evidence": [
-        "docs/development-plan/10-knowledge-system/03_DETERMINISM_FRESHNESS_AND_GIT.md",
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
         "tests/unit/repoIndexGenerator.test.ts"
       ]
     }

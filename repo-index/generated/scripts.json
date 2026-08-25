@@ -160,11 +160,6 @@
     },
     {
       "category": "build",
-      "command": "npm --prefix ../courseware-cases run build:induction",
-      "name": "build:induction"
-    },
-    {
-      "category": "build",
       "command": "npm run build:player && npm run build:lesson-demo:fixture",
       "name": "build:lesson-demo"
     },
@@ -172,16 +167,6 @@
       "category": "build",
       "command": "tsx scripts/build-interactive-lesson.ts",
       "name": "build:lesson-demo:fixture"
-    },
-    {
-      "category": "build",
-      "command": "npm --prefix ../courseware-cases run build:math-motion-course",
-      "name": "build:math-motion-course"
-    },
-    {
-      "category": "build",
-      "command": "npm --prefix ../courseware-cases run build:math-motion-sample",
-      "name": "build:math-motion-sample"
     },
     {
       "category": "build",
@@ -237,16 +222,6 @@
       "category": "other",
       "command": "npm run build && electron-builder --win portable dir --x64",
       "name": "dist:win"
-    },
-    {
-      "category": "other",
-      "command": "npm --prefix ../courseware-cases run export:math-motion-course",
-      "name": "export:math-motion-course"
-    },
-    {
-      "category": "other",
-      "command": "npm --prefix ../courseware-cases run finalize:math-motion-course",
-      "name": "finalize:math-motion-course"
     },
     {
       "category": "build",
@@ -362,26 +337,6 @@
       "category": "check",
       "command": "tsx scripts/validate-project.ts",
       "name": "validate:course-project"
-    },
-    {
-      "category": "check",
-      "command": "npm --prefix ../courseware-cases run validate:induction",
-      "name": "validate:induction"
-    },
-    {
-      "category": "check",
-      "command": "npm --prefix ../courseware-cases run validate:math-motion-course",
-      "name": "validate:math-motion-course"
-    },
-    {
-      "category": "check",
-      "command": "npm --prefix ../courseware-cases run validate:math-motion-sample",
-      "name": "validate:math-motion-sample"
-    },
-    {
-      "category": "check",
-      "command": "npm --prefix ../courseware-cases run validate:math-motion-static",
-      "name": "validate:math-motion-static"
     },
     {
       "category": "check",

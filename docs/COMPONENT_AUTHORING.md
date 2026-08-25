@@ -1,6 +1,6 @@
 # 互动组件开发指南（V4）
 
-> **当前工程格式是 Course Project V9。** 下文若仍出现 Project V8，只表示组件实例曾随 V8 Native 形状一起保存；以 `src/shared/componentTypes.ts`、`componentSchema.ts` 和源码为准。
+> **当前工程格式是 Course Project V9。** 本文只描述当前 V9 可用边界；类型与协议真值以 `src/shared/componentTypes.ts`、`componentSchema.ts` 和源码为准。
 
 本文定义 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
@@ -54,9 +54,9 @@ global-controls.h5component
 
 约束：
 
-工程同时记录两种不同哈希：`sha256` 是最初选择的 `.h5component` ZIP 原始字节来源锁，`contentSha256` 是对全部安全相对路径和解包字节按稳定顺序、带长度边界计算的 canonical SHA-256。新 Project V8 归档必须包含 `contentSha256`；打开、保存或 headless 校验时任一嵌入文件被改动都会作为归档损坏拒绝。内容哈希不受 ZIP 压缩、条目顺序和时间戳影响，也不是数字签名、许可证或权属证明。
+工程同时记录两种不同哈希：`sha256` 是最初选择的 `.h5component` ZIP 原始字节来源锁，`contentSha256` 是对全部安全相对路径和解包字节按稳定顺序、带长度边界计算的 canonical SHA-256。新 Course Project V9 归档必须包含 `contentSha256`；打开、保存或 headless 校验时任一嵌入文件被改动都会作为归档损坏拒绝。内容哈希不受 ZIP 压缩、条目顺序和时间戳影响，也不是数字签名、许可证或权属证明。
 
-组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、离线网络规则、工程引用和四格式预检。当前四个 ittoedu 身份实验包虽然可重现构建并通过 V8 四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
+组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、Schema、当前已接线的结构性工程健康结果和四格式预检。REPAIR 完成前，该命令尚不能证明完整 V9 语义或 Runtime/Component 源码的离线网络合规；退出码 0 仍须由真实 Player、导出和外部请求检查补足。当前四个 ittoedu 身份实验包虽然可重现构建并通过历史四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
 
 - 单包不超过 50 MB；
 - 路径使用 `/`，不得有绝对路径、盘符、反斜线、`..` 或路径穿越；
@@ -383,7 +383,7 @@ ctx.presentation?.transitionTo('state_correct', {
 
 因此 DOM/hybrid 组件的 DOM 部分应按 overlay 内容设计。场景节点顺序或全局元素的 `layer: 'underlay'` 不能把这部分 DOM 压到 Canvas 后面；它们只对组件的 Phaser 代理/Phaser 部分保持 Canvas 内层级语义。必须位于原生节点背后的可复用视觉应使用 Phaser 组件，或把后景明确交给运行时 DOM underlay。
 
-编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Project V8 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、媒体管理和全部导出链路。
+编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Course Project V9 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、媒体管理和全部导出链路。
 
 Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVisible(false)` / `suspend()` 停止 RAF 和昂贵更新，在 `prepareCapture()` 主动渲染确定帧，在 `destroy()` 释放 geometry、material、texture、render target、renderer、监听和 RAF。加载任务通过 `ctx.capture.waitUntil()` 登记，并提供可理解的缩略图与可捕获静态画面。这样 3D 成本只由使用该组件的工程承担，不成为编辑器核心依赖。
 
@@ -406,7 +406,7 @@ Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVi
 - 隐藏时宿主关闭显示和输入，但不销毁内部状态。
 - 可通过 `ctx.scope === 'global'` 确认播放器挂载作用域，通过 `ctx.events` 订阅 `scene:enter` 更新常驻 HUD，通过 `ctx.courseState` 与场景运行时共享进度。
 
-全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Project V8 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
+全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Course Project V9 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
 
 若一个包声明同时支持两种作用域，其实现应根据可选 `ctx.scope` 正确适配两种生命周期；在字段缺失的编辑宿主中使用安全回退，不能直接解引用。
 
@@ -455,7 +455,7 @@ interface ComponentInstanceLifecycle {
 
 生命周期方法应可重复、安全调用。全局组件需特别防止把场景切换、隐藏或 suspend 误判为销毁或重新创建。宿主记录组件生命周期的首个失败并销毁失败挂载，后续捕获继续拒绝，不能因一次显隐或同步更新而“复活”为空白成功。`prepareCapture()` 抛错只使该组件实例产生可诊断占位，已经成功的组件快照继续保留，不应吞掉错误或让整批 PPTX 组件退化。
 
-组件自行创建的音频、视频或媒体流不会自动进入 Project V8 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
+组件自行创建的音频、视频或媒体流不会自动进入 Course Project V9 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
 
 场景状态切换不会销毁组件实例。宿主会在同一实例上调用 `resize()` 和 `updateProps()`，因此这两个方法必须真正刷新现有显示对象，不能要求通过重新执行 `create()` 才生效。
 
@@ -486,7 +486,7 @@ function loadProjectImage(assetId) {
 
 单 HTML 和网页包导出会把组件默认参数展平到实际实例 props，只发布运行必需的组件 ID、版本、API/渲染能力、编码执行逻辑和组件素材；组件包的 `manifest.json`、`editor.properties/pages`、变体、预设、说明、缩略图和独立原始 `runtime.js` 不进入发布物。执行逻辑在浏览器端仍可恢复和分析，这只是 [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 的轻量发布裁剪，不是代码加密或 DRM。
 
-外部组件节点与原生节点一样，可作为 Project V8 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
+外部组件节点与原生节点一样，可作为 Course Project V9 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
 
 内部点击、拖拽、动画状态推进和宿主动作只在 `preview` 生效。authoring 中即使组件代码创建了命中对象，宿主也会屏蔽输入并冻结动作；组件不得访问编辑器 DOM，也不得假定属性栏结构。
 
@@ -502,7 +502,7 @@ Editor 1.0.0 在专业模式独立“组件”页的“工程组件”列表把�
 
 “选择新包替换”只接受 manifest ID 相同的新包。替换前会校验新包的 `supportedScopes` 是否覆盖所有现有场景/全局实例；校验、解包或迁移失败时原工程保持不变，成功后所有实例版本统一更新。不同 ID 的组件不能借替换入口隐式迁移。
 
-专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Project V8 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
+专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Course Project V9 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
 
 “只读”只阻止直接覆盖原包，不阻止查看或复制已经交付的代码，也不替代许可证约束；创建副本前应确认组件授权允许修改和二次分发。可编辑副本是工程作者态能力，不是源码保密措施。`.h5lesson` 保存完整组件包；单 HTML/网页包虽会裁掉 manifest、编辑器字段和独立原始 `runtime.js`，浏览器仍需取得可恢复的执行逻辑。不要在组件或工程中存放密钥，并且不要把 PublishedLesson 裁剪描述为加密、不可逆向或 DRM。
 
@@ -520,9 +520,7 @@ Rename-Item global-controls.zip global-controls.h5component
 
 无缩略图或素材目录时从命令中移除。不要压缩外层项目目录。
 
-### 14.1 旗舰 V4 组件参考
-
-可选相邻课例仓 `../courseware-cases/high-school/physics/induction-not-field-but-change/examples/induction-lab-component/` 中的 `induction-lab-component` 是完整 V4 场景组件历史参考；该仓不属于当前核心仓，缺失时本段只作历史说明。它使用 `renderMode: "dom"` 和离线素材复用同一套磁体—闭合线圈—检流计装置，把全部文案放入 `props.content`，通过语义事件连接 Project V8 命名状态，并完整实现 `updateProps`、`resize`、显隐、暂停/恢复、确定帧捕获和销毁。同一课例目录的 `scripts/build-induction-lesson.ts` 展示组件嵌入工程与离线导出，`scripts/validate-induction-lesson.ts` 展示交付门禁。它是课例专属历史源码，不属于核心产品夹具或公共组件 catalog。
+### 14.1 当前仓库参考
 
 V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)，可用 `npm run build:render-benchmark` 重建。其 Playwright 压力段执行 25 轮、共 100 次定制场景切换和 25 次末页重播，并检查组件/运行时挂载、Canvas/WebGL、活动 RAF、控制台异常与外部请求。
 
@@ -559,5 +557,5 @@ V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照�
 - [ ] 捕获按实例产生确定帧；单实例失败只生成该实例占位，成功快照不会被后续失败清空，批量 Three/WebGL 组件不会同时创建捕获宿主。
 - [ ] Three.js 如有使用，仅打包在组件内；GLB、loader、纹理和解码器离线；RAF、WebGL 与 GPU 资源可暂停、可捕获、可销毁。
 - [ ] ZIP 路径安全、大小写一致，组件包不超过 50 MB。
-- [ ] 完整工程已运行 `npm run --silent validate:project -- <file.h5lesson>`；真实内嵌文件、引用、离线规则和四格式预检没有未处理的确定性错误。
+- [ ] 完整工程已运行 `npm run --silent validate:project -- <file.h5lesson>`；真实内嵌文件、Schema 与当前已接线的工程健康/四格式预检没有未处理的确定性错误，并已用真实 Player/导出确认无外部请求。
 - [ ] 工程检查没有阻断导出的组件错误；异常隔离与诊断报告路径可用。
