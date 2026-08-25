@@ -372,6 +372,53 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
   })
 
+  it('selects and edits a Slide surface row through its own stable owner scope', () => {
+    const project = structuredClone(v9ThreeLocationFixture())
+    const surface = project.surfaces.find((candidate) => candidate.id === 'surface-slide')
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const surfaceItemId = 'slide-surface-note'
+    surface.surfaceLayerItems.push(scoped(nativeText(surfaceItemId, 30, '表面说明')))
+    injectCandidate(project)
+
+    const before = selectEffectiveLayerProjection(useEditorStore.getState())!
+    const row = before.unifiedRows.find((candidate) => candidate.id === surfaceItemId)!
+    expect(row).toMatchObject({ owner: 'surface', ownerKey: 'surface:surface-slide' })
+    const address = row.authoringAddress
+
+    useEditorStore.getState().selectNode(surfaceItemId)
+
+    const selectedBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
+    expect(selectedBackend.getSession().scope).toBe('surface')
+    expect(selectedBackend.getSession().selection.selectionIds).toEqual([surfaceItemId])
+    expect(selectedBackend.makeTarget(surfaceItemId, 'item').authoringAddress).toBe(address)
+
+    const beforeEdit = selectedBackend.getSession()
+    useEditorStore.getState().updateNode(surfaceItemId, { name: '更新后的表面说明' })
+    const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
+    expect(afterEdit.history.present.surfaces.find((candidate) => candidate.id === 'surface-slide'))
+      .toMatchObject({
+        surfaceLayerItems: [expect.objectContaining({
+          item: expect.objectContaining({
+            layerItemId: surfaceItemId,
+            label: '更新后的表面说明',
+          }),
+        })],
+      })
+
+    useEditorStore.getState().undo()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide'))
+      .toMatchObject({
+        surfaceLayerItems: [expect.objectContaining({
+          item: expect.objectContaining({
+            layerItemId: surfaceItemId,
+            label: '表面说明',
+          }),
+        })],
+      })
+  })
+
   it('groupedVisualRows keeps one controller under 全局 and out of scene/surface/world', () => {
     const globalController = visualRow('teacher-controller-main', 'global', {
       isTeacherController: true,

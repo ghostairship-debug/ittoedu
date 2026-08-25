@@ -10647,7 +10647,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (backend) {
         if (patches.length === 0) return
         const snapshot = backend.getSnapshot()
-        if (get().editingScope === 'scene' && snapshot.stateId !== null) {
+        if (snapshot.scope === 'scene' && snapshot.stateId !== null) {
           runV9DocumentMutation((draft) => {
             for (const item of patches) {
               applySceneNodePatchToCourseOverride(
@@ -10663,6 +10663,42 @@ export const useEditorStore = create<EditorState>((set, get) => {
           return
         }
         const document = backend.getSession().history.present
+        if (snapshot.scope === 'surface') {
+          const updates = [] as Array<{
+            target: ReturnType<typeof commandTargetForRow>
+            patch: EffectiveLayerPropertyPatch
+          }>
+          for (const item of patches) {
+            const row = findCandidateLayerRow(get(), item.nodeId)
+            if (!row || row.owner !== 'surface') {
+              persistLayerCommand({
+                ok: false,
+                reason: '当前表面图层已失效，请重新选择。',
+                historyEntry: false,
+              })
+              return
+            }
+            const planned = spatialLayerPropertyPatch(
+              courseLayerItemToSceneNode(row.item),
+              item.patch,
+            )
+            if (!planned.ok) {
+              persistLayerCommand({
+                ok: false,
+                reason: planned.reason,
+                historyEntry: false,
+              })
+              return
+            }
+            updates.push({ target: commandTargetForRow(row), patch: planned.patch })
+          }
+          persistLayerCommand(patchEffectiveLayerItems(document, updates, {
+            expectedRevision: snapshot.revision,
+          }), {
+            statusMessage: `已更新 ${updates.length} 个图层属性`,
+          })
+          return
+        }
         const globalIds = new Set(
           document.globalLayerItems.map((entry) => entry.item.layerItemId),
         )
@@ -11170,12 +11206,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
               : [...previous, selectedNodeId]
             : [selectedNodeId]
         const row = selectedNodeId ? projection?.unifiedRows.find((item) => item.id === selectedNodeId) : null
-        const desiredScope = row
-          ? (scopeTokenForSelectingRow(projection!.scope, row).owner === 'global' ? 'global' : 'scene')
-          : backend.getSession().scope === 'global' ? 'global' : 'scene'
+        const selectedOwner = row
+          ? scopeTokenForSelectingRow(projection!.scope, row).owner
+          : backend.getSession().scope
+        const desiredScope = selectedOwner === 'global'
+          ? 'global'
+          : selectedOwner === 'surface'
+            ? 'surface'
+            : 'scene'
         let nextBackend = commitOpenCandidateContentEdit(selectedNodeIds)
         if (!nextBackend) return
-        if ((nextBackend.getSession().scope === 'global') !== (desiredScope === 'global')) {
+        if (nextBackend.getSession().scope !== desiredScope) {
           persistCandidateResult(nextBackend.setScope(desiredScope, {
             expectedRevision: nextBackend.getSnapshot().revision,
           }))

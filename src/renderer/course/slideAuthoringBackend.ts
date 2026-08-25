@@ -256,8 +256,8 @@ export function makeSlideAuthoringTarget(
   const authoringAddress = makeAuthoringAddress({
     projectId: session.history.present.id,
     scope: layer.source,
-    surfaceId: view.surfaceId,
-    sceneId: view.sceneId,
+    surfaceId: layer.source === 'global' ? undefined : view.surfaceId,
+    sceneId: layer.source === 'scene' ? view.sceneId : undefined,
     carrier: slideLayerCarrier(layer.item as LayerItem),
     layerItemId,
     field: field ?? defaultSlideAuthoringField(layer.item as LayerItem),
