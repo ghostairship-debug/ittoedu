@@ -15,9 +15,9 @@
 - Invalidating paths: all tracked product source, tests, fixtures, package/lockfile, TypeScript/Vite/Vitest/Playwright/Electron/build/release config, contracts, capability generator inputs/bundle, repo-index semantic/golden/generator/query/config and representative fixture manifest; expected pretest-owned generated benchmark bytes are admissible only when generated before and consumed by this exact V4
 - Task ID: `arch-5-final-07-post-audit-v4-performance-outcome`
 - Phase / wave: `ARCH-5 / post-audit final candidate`
-- Status: `claimed`
+- Status: `rolled-back`
 - Owner / Reviewer / Integrator: `Coordinator / independent pipeline-performance reviewer + independent representative-outcome reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25T11:09:48+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: repository/governance closure `1d4936d`; integrated product `23f2d00`; final Wave C spec `97d35a5`; clean tree before this claim.
 - Context: all implementation, wave and audit-closure tasks are terminal; this card freezes inputs and forbids in-place repair.
@@ -25,7 +25,7 @@
 - Depends on: `stab-audit-closure-gate` done at `1d4936d`.
 - Blocks: active goal completion.
 - Risk statement: a broad retry can hide a non-deterministic or candidate-specific failure, while a second package can detach performance and artifact evidence from the tested build. Each broad command is therefore allowed exactly once.
-- Retry count / last failure class: `1 governance-only / initial claim generation rejected an unrecognized validation-section heading; product/test inputs were unchanged and no V4 command had started`
+- Retry count / last failure class: `0 broad retries / the one allowed V4 attempt stopped in the complete Vitest suite with four failures; this candidate was never rerun`
 
 ## Product outcome
 
@@ -138,7 +138,11 @@ Size thresholds are the prior fixed candidate's portable/app.asar/first-party-ma
 
 ## Result evidence
 
-- Pending the exactly-once sequence and independent reviews.
+- The one allowed `npm run verify` started from candidate commit `c2d6e1c` and exited non-zero in the complete Vitest suite. Capability freshness passed and all TypeScript groups passed before the test failure.
+- Vitest completed with `250 / 254` files passing and `1,821 / 1,825` tests passing in `198.78s`; the four failures were confined to `globalLayerUi.test.tsx`, `editorFormattingUi.test.tsx`, `repoIndexGenerator.test.ts` and `coursewareAuthoringRunner.test.ts`.
+- Independent read-only diagnosis found two stale UI oracles, one exact-case repo-index timeout budget that was too small under full-suite contention, and one authoring-path test whose four sequential `tsx` child processes exceeded Vitest's outer timeout while also failing to reach two intended alias branches. No product regression or process hang was found.
+- The candidate stopped before E2E, packaging, performance sampling, artifact inspection or representative outcome review. None of those commands was run, and no final status is inferred from this failed candidate.
+- Repair ownership is split into four bounded successor cards. Product source remains unchanged; a new fixed candidate is required after those cards close.
 
 ## Ready checklist
 
