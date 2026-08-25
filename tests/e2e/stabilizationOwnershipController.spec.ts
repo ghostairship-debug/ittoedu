@@ -175,10 +175,12 @@ async function saveAs(
 
 async function saveCurrent(page: Page, projectPath: string): Promise<CourseProjectDocument> {
   const previousMtime = statSync(projectPath).mtimeMs
+  const saveButton = page.getByRole('button', { name: '保存（Ctrl+S）' })
   await page.waitForTimeout(25)
-  await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+  await saveButton.click()
   await expect.poll(() => statSync(projectPath).mtimeMs, { timeout: 15_000 })
     .toBeGreaterThan(previousMtime)
+  await expect(saveButton).toBeEnabled()
   return readProject(projectPath)
 }
 
@@ -680,13 +682,14 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       const controller = teacherController(baseline)
       const authored = { left: controller.frame.x, top: controller.frame.y }
       const baselineArchiveBytes = readFileSync(projectPath)
+
+      await openSlide(page)
       const undoBeforePreview = await page.getByRole('button', { name: '撤销（Ctrl+Z）' })
         .isEnabled()
       const redoBeforePreview = await page.getByRole('button', {
         name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
       }).isEnabled()
 
-      await openSlide(page)
       await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
       const preview = page.getByTestId('course-preview-overlay')
       const host = page.getByTestId('course-preview-host')
