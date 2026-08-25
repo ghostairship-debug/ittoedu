@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：17.3（2026-08-26：真实 V9 预览联网、Slide scene-local API 2 Published playback 与 photosynthesis V9/V2 行为 oracle 已完成产品实现和独立审查；当前只执行本批一次性 phase gate）
+> 计划版本：17.4（2026-08-26：固定候选 `7d17fed` 已通过完整 phase gate；当前按共享 Slide Published host 的单写入约束，先实现 RTP-04，再激活 CMP-03）
 >
 > 当前活动路线：第 5 节“工程修复与网络基础——Gate R0 → Wave 0–5”；详细证据与开工顺序见 [修复方案](docs/development-plan/REPAIR_PLAN.md)
 >
@@ -100,7 +100,7 @@
 - **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
 - **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
 
-本批三个互斥 S2 已按 photosynthesis V9/V2 oracle → Slide API 2 Published playback → 真实 V9 预览联网的顺序合入；独立 Reviewer 发现并关闭了 Phaser 核心销毁、overlay A→B 授权残留与跨文档迟到 IPC 三类 P1。任务卡已删除，当前只执行一次集成 phase gate。最新 consumer 审计已确认门后可准入 session-global API 2 Published playback：全局作者入口和 producer 已存在，缺口是跨已预挂载 Surface 的单实例 ownership/容器迁移；门通过前仍不建卡。API/CORS/捕获与 sample/benchmark/portability/release verifier 在真实前置未满足时继续只记录依赖。
+上一批三个互斥 S2 已按 photosynthesis V9/V2 oracle → Slide API 2 Published playback → 真实 V9 预览联网的顺序合入并通过固定候选 `7d17fed` phase gate；独立 Reviewer 发现并关闭了 Phaser 核心销毁、overlay A→B 授权残留与跨文档迟到 IPC 三类 P1。最新 consumer 审计确认 RTP-04 session-global API 2 Runtime 与 CMP-03 Slide Phaser Component 均 Ready；二者共享 Slide Published host，当前只激活 RTP-04，CMP-03 排队并在 RTP-04 合入后重置 baseline。网络/CORS/捕获因没有真实作者消费链继续 No-Ready。
 
 已删除/降级项：`HYG-02` 删除（8 处均为合法 unchanged guard）；`HYG-01/03/05` 降级或移出产品路线；`NAV-01` P2 登记。已完成治理项：`CAP-02`、`CAP-03`、`HYG-04`。
 
@@ -132,6 +132,6 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前卡统一放在 `docs/development-plan/tasks/repair/**`，完成即删除。
 
-当前任务板为空，表示本批产品实现已合入、正在执行一次 phase gate；不表示长期路线结束。门通过后先为已审计 Ready 的 session-global API 2 Published playback 建最小卡，其余纵切继续按 consumer 证据准入。
+当前任务板以 RTP-04 为 active、CMP-03 为 queued；两卡因共享 Slide Published host 严格串行。CMP-03 通过后再分别审计 sample、benchmark/portability/release 的最小 V9/V2 替代，不打包成“大清退”；其余纵切继续按 consumer 证据准入。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。

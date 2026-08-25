@@ -4,9 +4,9 @@
 >
 > 当前质量审计基线：`3780090`；Gate R0 文档/流程基线：`b967c96`。
 >
-> 当前批次编排基线：`ddab68b2173af79ba6d72922786303bc6f8c3bf0`。
+> 当前批次编排基线：`7d17fed384804e998e15ae21380ed98259acf897`。
 >
-> 状态：**Gate R0、Wave 0、网络合同、NET-E1/H1、RTP-01/02/03 与 V8-01/02 已完成产品实现和独立审查；当前执行本批唯一 phase gate，任务板暂为空**。门通过后才按最新 consumer 审计创建前置已满足的下一批卡。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**上一批固定候选 `7d17fed` 已通过完整 phase gate；当前 RTP-04 active、CMP-03 queued，并因共享 Slide Published host 严格串行**。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -126,6 +126,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 - **RTP-01（已完成）**：Slide scene-local API 3 DOM Runtime 已在当前位置试运行、整课预览、单 HTML 与网页包的 Published V2 路径真实运行。
 - **RTP-02（已完成）**：Flow 作者命令写入 `surfaceLayerItems` 的 surface-scoped API 3 DOM Runtime 已复用现有 Published mount，在四个 consumer 中真实运行；global/disabled 仍后备，失败实例立即销毁并隔离。
 - **RTP-03（已完成）**：教师通过真实 Slide runtime template/source/property authoring command 创建的 scene-local API 2 DOM/Phaser/hybrid 已在四个 Published consumer 执行；跨 generation、暂离/恢复、失败隔离与 Phaser Core `DESTROY` 已覆盖。宿主动作、presentation、节点解析、global/shared/Spatial/capture 仍不在该 partial slice 内。
+- **RTP-04（active）**：为 `globalLayerItems` 中 API 2 Runtime 建立 session-global 单实例 ownership；同一容器迁入当前 Slide/Flow/Spatial host 的既有 global wrapper，保留跨 Surface 状态、排序、命中与 restart/destroy 语义。
 
 ### Wave 2：Validation Report 与 Diagnostic Target
 
@@ -138,7 +139,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 - EXA-02 与 V8-01 已完成；经 consumer 查询确认没有 package、测试、发布或产品调用者的 incline-motion 全链已经删除；
 - **V8-02 已完成**：photosynthesis 用当前 V9 factory 生成三 Slide archive，并以 Published V2 离线 HTML保留三页导航、前两页像素变化、第三页指针操作与截图、零 HTTP(S) 与零 `pageerror` 的原行为门；专属 V8 archive/component chain 活引用为零；
-- sample、benchmark、portability 与 release verifier 仍有 Phaser Component/API 2/打包等活 consumer；最新审计确认它们都先依赖 Published Phaser Component parity，当前不删除；
+- **CMP-03（queued）**：Slide scene-local Component API 4 Phaser 的作者入口与 producer 已闭合，Published host 仍无条件 fallback；RTP-04 合入后在新 baseline 激活，完成后才分别准入 sample、benchmark、portability 与 release verifier 的替代/清退；
 - `verify-release.ts` 的 controller、DOM、navigation、Published oracle 全部改为 V9/V2；
 - 不用 V8→V9 migrate 兜底，不复活退役保真门；
 - 巨型生成物只有存在 fresh-checkout consumer 时才 tracked，否则转显式 build output。
@@ -153,39 +154,38 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 的产品提交和独立审查已经闭合，三张卡已删除；当前任务板为空只表示 Integrator 正在执行本批一次性 phase gate，不表示路线完成。SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的完整 Vitest、预构建、风险 Playwright、任务板、repo-index check/quality 门。当前 RTP-04 active、CMP-03 queued；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
-阶段门通过后才从最新审计中建立前置已满足的最小纵切。当前唯一已审计 Ready 候选是 `repair-rtp-04-published-global-api2-runtime`：全局开发面板与 producer 已能创建/发布 `globalLayerItems` API 2，真实失败面是所有 Surface host 预挂载时不能各自执行一份；实现只建立 session-global 单实例 ownership，并把同一内层容器迁入当前 host 的既有 global wrapper，保留 order/坐标/命中、跨 Surface 状态、restart/destroy 和失败隔离。global API 3、actions/events/nodes/capture/Component 不随卡开放。
+当前两项 Ready 纵切按共享热点串行：`repair-rtp-04-published-global-api2-runtime` 只建立 session-global API 2 ownership 与容器迁移；`repair-cmp-03-published-slide-phaser-component` 随后只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
-已知不准入事实：sample、benchmark/release 与 portability 均仍被 Published Phaser Component parity 阻塞；NET-C1 必须以真实 HTTP/WebSocket/媒体或捕获 consumer 定义结果；Validation Report/Diagnostic Target 仍需先裁决合同；Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
+已知不准入事实：sample、benchmark/release 与 portability 需等 CMP-03 通过后再逐项审计；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；Validation Report/Diagnostic Target 仍需先裁决合同；Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
 ## 6. 并发与集成安排
 
-### 6.1 当前批次收口
+### 6.1 上一批收口（已通过）
 
 1. 三条分支均从 `ddab68b` 派生，已按 **V8-02 → RTP-03 → NET-H1** 合入；独立 Reviewer 发现的 Phaser 核心销毁、overlay A→B lease 残留与同 frame 跨文档迟到 IPC 均已修复后复审通过。
 2. Integrator 删除任务卡，统一同步用户文档、能力声明、Legacy inventory、任务板与 repo-index；AI capabilities 与 repo-index 各只生成一次。
 3. 复用作者与 Reviewer 的 focused 证据；当前只补组合风险：Player bundle 刷新后的 benchmark 确定性、photosynthesis V9/V2 oracle、API 2 三 renderMode 三交付、真实 Electron preview network allow/deny/revoke 与 examples/fresh-checkout checks。
 4. 当前批次只跑一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、三条新增/改写定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。只有固定发布候选才追加完整 `npm run verify`、打包、性能与签名门。
-5. 组合门失败时只为精确失败面建 repair 卡或重开直接责任任务；通过后提交本批集成收口，再建立下一批卡。
+5. 固定候选 `7d17fed` 已通过上述门；唯一非产品失败是并发审计负载触发 repo-index 查询测试超时，取消并发后完整 259 files / 1868 tests 通过。
 
-### 6.2 本批产品实现并行（已收口）
+### 6.2 当前两卡串行实现
 
-本批三张卡从同一 baseline 建隔离 worktree，并在 `active` 前记录唯一 Owner：
+两张卡共享 Slide Published host，不并行写入：
 
 | Lane | Hotspot / 写入范围 | 并行约束 |
 |---|---|---|
-| NET-H1 | main/preload/IPC、App 与真实 V9 preview network policy | 唯一热点 writer；不得改 Schema、导出 CSP 或远程脚本策略 |
-| RTP-03 | Published API 2 mount、Slide Published adapter | 不写 main/preload、App、Flow/Spatial/global 或 Legacy `ExportPayload`/`PlayerApp` |
-| V8-02 | photosynthesis 精确生成脚本、fixture 与行为 oracle | 不写产品 archive/Player，不触碰 sample/benchmark/portability/release verifier |
+| RTP-04 | session owner、API 2 mount 与三个 Surface 的窄 mount-target port | active；不得顺带开放 API 3、actions/events/nodes/capture/Component |
+| CMP-03 | Component Phaser mount 与 Slide Published adapter | queued；RTP-04 合入后重置 baseline 再 active，不改其它 carrier 或 producer |
 
 计划、任务卡、`TASK_BOARD.md`、README/作者文档、共享 fixture/helper、能力与 repo-index 生成输出仍由 Integrator 单写。各 S2 作者只跑卡内 focused checks，独立 Reviewer 审 diff、失败路径与遗漏反例，不机械复跑作者命令。
 
-### 6.3 后续准入点（阶段门前不建卡）
+### 6.3 后续准入点
 
 - NET-H1 稳定后：以真实 HTTP/WebSocket consumer 准入 API 与 NET-C1；CORS/捕获必须给出明确 fallback 或诊断。
-- RTP-03 稳定后的审计已选择 global API 2 单实例 ownership 作为唯一 Ready 失败面；门通过后只建 RTP-04，Spatial、global API 3、Published capture 与非 Flow shared 继续不准入；benchmark 清退仍受 Component Phaser parity 约束。
-- V8-02 完成后：重新生成 Legacy consumer 事实，再分别决定 sample、benchmark/verify-release 与 portability 的 V9/V2 替代；不得打成一张“大清退”卡。
+- RTP-04 完成后只把 CMP-03 切为 active；Spatial、global API 3、Published capture 与非 Flow shared 继续不准入。
+- CMP-03 完成后重新生成 Legacy consumer 事实，再分别决定 sample、benchmark/verify-release 与 portability 的 V9/V2 替代；不得打成一张“大清退”卡。
 
 ## 7. 成功门槛
 
