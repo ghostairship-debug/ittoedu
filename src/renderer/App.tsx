@@ -455,6 +455,7 @@ export default function App() {
   const dirty = useEditorStore((state) => state.dirty)
   const project = useEditorStore((state) => state.project)
   const projectPath = useEditorStore((state) => state.projectPath)
+  const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const sidecarFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
@@ -1644,8 +1645,7 @@ export default function App() {
       if (leftover) enqueueSerial(coursePreviewMountChainRef, () => leftover.destroy())
       return
     }
-    const sources = activeCoursePublishSources()
-    if (!sources) {
+    if (!activeCourseDocument) {
       setCoursePreviewOpen(false)
       return
     }
@@ -1656,9 +1656,9 @@ export default function App() {
     })
     return beginSerializedSessionMount(coursePreviewMountChainRef, () => mountPublishedCourseTryRun({
       container: coursePreviewHost,
-      project: sources.project,
-      assetFiles: sources.assetFiles,
-      components: sources.components,
+      project: activeCourseDocument,
+      assetFiles: sidecarFiles,
+      components: componentPackages,
     }), {
       onReady: (session) => {
         coursePreviewFitRef.current?.()
@@ -1679,7 +1679,13 @@ export default function App() {
         coursePreviewSessionRef.current = null
       },
     })
-  }, [coursePreviewHost, coursePreviewOpen])
+  }, [
+    activeCourseDocument,
+    componentPackages,
+    coursePreviewHost,
+    coursePreviewOpen,
+    sidecarFiles,
+  ])
 
   useEffect(() => {
     if (!window.desktopAPI) return

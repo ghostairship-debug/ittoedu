@@ -1,20 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import { PreviewNetworkPolicy } from '@/main/previewNetworkPolicy'
 
+const DOCUMENT_A = { processId: 101, frameToken: 'document-a' }
+const DOCUMENT_B = { processId: 202, frameToken: 'document-b' }
+
+function activePolicy(): PreviewNetworkPolicy {
+  const policy = new PreviewNetworkPolicy()
+  policy.activateDocument(DOCUMENT_A)
+  return policy
+}
+
 describe('PreviewNetworkPolicy', () => {
   it('unions active leases and revokes them without removing base origins', () => {
-    const policy = new PreviewNetworkPolicy()
+    const policy = activePolicy()
     policy.replaceBaseOrigins(['http://127.0.0.1:5173', 'ws://127.0.0.1:5173'])
     policy.replacePreviewLease({
       leaseId: 'preview-a',
       connectOrigins: ['https://api.example.com', 'wss://live.example.com:8443'],
       remoteAssetUrls: ['https://cdn.example.com/course/image.png?rev=1'],
-    })
+    }, DOCUMENT_A)
     policy.replacePreviewLease({
       leaseId: 'preview-b',
       connectOrigins: ['https://b.example.com'],
       remoteAssetUrls: [],
-    })
+    }, DOCUMENT_A)
 
     expect(policy.allowsRequest('https://api.example.com/v1/data')).toBe(true)
     expect(policy.allowsRequest('wss://live.example.com:8443/socket')).toBe(true)
@@ -22,7 +31,7 @@ describe('PreviewNetworkPolicy', () => {
     expect(policy.allowsRequest('https://b.example.com/status')).toBe(true)
     expect(policy.allowsRequest('https://undeclared.example.com/')).toBe(false)
 
-    policy.releasePreviewLease('preview-a')
+    policy.releasePreviewLease('preview-a', DOCUMENT_A)
 
     expect(policy.allowsRequest('https://api.example.com/v1/data')).toBe(false)
     expect(policy.allowsRequest('wss://live.example.com:8443/socket')).toBe(false)
@@ -45,18 +54,18 @@ describe('PreviewNetworkPolicy', () => {
     'http://api.example.com',
     'wss://live.example.com/socket',
   ])('rejects non-contract connect origin %s atomically', (invalidOrigin) => {
-    const policy = new PreviewNetworkPolicy()
+    const policy = activePolicy()
     policy.replacePreviewLease({
       leaseId: 'preview-a',
       connectOrigins: ['https://safe.example.com'],
       remoteAssetUrls: [],
-    })
+    }, DOCUMENT_A)
 
     expect(() => policy.replacePreviewLease({
       leaseId: 'preview-a',
       connectOrigins: ['https://expanded.example.com', invalidOrigin],
       remoteAssetUrls: [],
-    })).toThrow()
+    }, DOCUMENT_A)).toThrow()
 
     expect(policy.allowsRequest('https://safe.example.com/data')).toBe(true)
     expect(policy.allowsRequest('https://expanded.example.com/data')).toBe(false)
@@ -67,20 +76,58 @@ describe('PreviewNetworkPolicy', () => {
     'https://user:secret@cdn.example.com/image.png',
     'https://*.example.com/image.png',
   ])('rejects invalid remote asset URL %s without expanding the lease', (invalidUrl) => {
-    const policy = new PreviewNetworkPolicy()
+    const policy = activePolicy()
     policy.replacePreviewLease({
       leaseId: 'preview-a',
       connectOrigins: [],
       remoteAssetUrls: ['https://safe-cdn.example.com/image.png'],
-    })
+    }, DOCUMENT_A)
 
     expect(() => policy.replacePreviewLease({
       leaseId: 'preview-a',
       connectOrigins: [],
       remoteAssetUrls: ['https://expanded.example.com/image.png', invalidUrl],
-    })).toThrow()
+    }, DOCUMENT_A)).toThrow()
 
     expect(policy.allowsRequest('https://safe-cdn.example.com/image.png')).toBe(true)
     expect(policy.allowsRequest('https://expanded.example.com/image.png')).toBe(false)
+  })
+
+  it('rejects an old document lease after navigation clear and after the next commit', () => {
+    const policy = activePolicy()
+    policy.replaceBaseOrigins(['http://127.0.0.1:5173'])
+    policy.replacePreviewLease({
+      leaseId: 'preview-a',
+      connectOrigins: ['https://a.example.com'],
+      remoteAssetUrls: [],
+    }, DOCUMENT_A)
+
+    policy.beginDocumentNavigation()
+
+    expect(policy.allowsRequest('https://a.example.com/data')).toBe(false)
+    expect(() => policy.replacePreviewLease({
+      leaseId: 'late-preview-a',
+      connectOrigins: ['https://late-a.example.com'],
+      remoteAssetUrls: [],
+    }, DOCUMENT_A)).toThrow(/active document/)
+    expect(policy.allowsRequest('https://late-a.example.com/data')).toBe(false)
+    expect(policy.allowsRequest('http://127.0.0.1:5173/base-probe')).toBe(true)
+
+    policy.activateDocument(DOCUMENT_B)
+
+    expect(() => policy.replacePreviewLease({
+      leaseId: 'later-preview-a',
+      connectOrigins: ['https://later-a.example.com'],
+      remoteAssetUrls: [],
+    }, DOCUMENT_A)).toThrow(/active document/)
+    policy.replacePreviewLease({
+      leaseId: 'preview-b',
+      connectOrigins: ['https://b.example.com'],
+      remoteAssetUrls: [],
+    }, DOCUMENT_B)
+    expect(() => policy.releasePreviewLease('preview-b', DOCUMENT_A))
+      .toThrow(/active document/)
+    expect(policy.allowsRequest('https://b.example.com/data')).toBe(true)
+    expect(policy.allowsRequest('https://later-a.example.com/data')).toBe(false)
   })
 })

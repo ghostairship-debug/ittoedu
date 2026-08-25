@@ -111,7 +111,7 @@ export async function createMainWindow(
     baseNetworkOrigins.add(websocketUrl.origin)
   }
   mainPreviewNetworkPolicy.replaceBaseOrigins(baseNetworkOrigins)
-  mainPreviewNetworkPolicy.clearPreviewLeases()
+  mainPreviewNetworkPolicy.beginDocumentNavigation()
   configureRestrictedSession(
     session.defaultSession,
     (url) => mainPreviewNetworkPolicy.allowsRequest(url),
@@ -211,16 +211,31 @@ export async function createMainWindow(
   })
 
   window.on('closed', () => {
-    mainPreviewNetworkPolicy.clearPreviewLeases()
+    mainPreviewNetworkPolicy.beginDocumentNavigation()
     appState.detachWindow(window)
   })
 
   window.webContents.on('render-process-gone', () => {
-    mainPreviewNetworkPolicy.clearPreviewLeases()
+    mainPreviewNetworkPolicy.beginDocumentNavigation()
   })
 
   window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) mainPreviewNetworkPolicy.clearPreviewLeases()
+    if (isMainFrame && !isInPlace) mainPreviewNetworkPolicy.beginDocumentNavigation()
+  })
+
+  window.webContents.on('did-frame-navigate', (
+    _event,
+    _url,
+    _httpResponseCode,
+    _httpStatusText,
+    isMainFrame,
+  ) => {
+    if (!isMainFrame) return
+    const mainFrame = window.webContents.mainFrame
+    mainPreviewNetworkPolicy.activateDocument({
+      processId: mainFrame.processId,
+      frameToken: mainFrame.frameToken,
+    })
   })
 
   window.once('ready-to-show', () => {

@@ -148,8 +148,9 @@ export function assertTrustedIpcSender(
   const mainFrame = event.sender.mainFrame
   const isMainFrame =
     senderFrame !== null &&
+    !senderFrame.detached &&
     senderFrame.processId === mainFrame.processId &&
-    senderFrame.routingId === mainFrame.routingId
+    senderFrame.frameToken === mainFrame.frameToken
 
   if (
     mainWindow === null ||

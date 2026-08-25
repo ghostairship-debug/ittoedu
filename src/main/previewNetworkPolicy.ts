@@ -4,6 +4,11 @@ export interface PreviewNetworkLeaseInput {
   remoteAssetUrls: readonly string[]
 }
 
+export interface PreviewNetworkDocumentOwner {
+  processId: number
+  frameToken: string
+}
+
 const CONNECT_PROTOCOLS = new Set(['https:', 'wss:'])
 const BASE_PROTOCOLS = new Set(['http:', 'https:', 'ws:', 'wss:'])
 
@@ -73,6 +78,7 @@ function previewOrigins(input: PreviewNetworkLeaseInput): Set<string> {
 export class PreviewNetworkPolicy {
   readonly #baseOrigins = new Set<string>()
   readonly #previewLeases = new Map<string, ReadonlySet<string>>()
+  #activeDocumentOwner: PreviewNetworkDocumentOwner | null = null
 
   replaceBaseOrigins(values: Iterable<string>): void {
     const next = new Set<string>()
@@ -83,7 +89,30 @@ export class PreviewNetworkPolicy {
     next.forEach((origin) => this.#baseOrigins.add(origin))
   }
 
-  replacePreviewLease(input: PreviewNetworkLeaseInput): void {
+  beginDocumentNavigation(): void {
+    this.#activeDocumentOwner = null
+    this.#previewLeases.clear()
+  }
+
+  activateDocument(owner: PreviewNetworkDocumentOwner): void {
+    if (
+      !Number.isInteger(owner.processId)
+      || owner.processId < 0
+      || owner.frameToken.length === 0
+    ) {
+      throw new Error('Preview network document owner is invalid')
+    }
+    this.#activeDocumentOwner = { ...owner }
+    // The committed document starts without leases, even if a navigation-start
+    // event raced an IPC queued by the document it replaced.
+    this.#previewLeases.clear()
+  }
+
+  replacePreviewLease(
+    input: PreviewNetworkLeaseInput,
+    owner: PreviewNetworkDocumentOwner,
+  ): void {
+    this.#assertActiveDocument(owner)
     if (!/^[A-Za-z0-9._:-]{1,160}$/.test(input.leaseId)) {
       throw new Error('Preview network lease id is invalid')
     }
@@ -92,7 +121,8 @@ export class PreviewNetworkPolicy {
     this.#previewLeases.set(input.leaseId, next)
   }
 
-  releasePreviewLease(leaseId: string): void {
+  releasePreviewLease(leaseId: string, owner: PreviewNetworkDocumentOwner): void {
+    this.#assertActiveDocument(owner)
     this.#previewLeases.delete(leaseId)
   }
 
@@ -108,6 +138,16 @@ export class PreviewNetworkPolicy {
       if (origins.has(origin)) return true
     }
     return false
+  }
+
+  #assertActiveDocument(owner: PreviewNetworkDocumentOwner): void {
+    if (
+      this.#activeDocumentOwner === null
+      || this.#activeDocumentOwner.processId !== owner.processId
+      || this.#activeDocumentOwner.frameToken !== owner.frameToken
+    ) {
+      throw new Error('Preview network policy source is not the active document')
+    }
   }
 
 }

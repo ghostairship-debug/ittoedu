@@ -37,7 +37,10 @@ import {
 import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
-import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
+import {
+  mainPreviewNetworkPolicy,
+  type PreviewNetworkDocumentOwner,
+} from './previewNetworkPolicy'
 
 interface IpcSuccess<T> {
   ok: true
@@ -189,6 +192,19 @@ function requireWindow(context: IpcContext): BrowserWindow {
     throw new Error('主窗口已经关闭。')
   }
   return window
+}
+
+function previewNetworkDocumentOwner(
+  event: IpcMainInvokeEvent,
+): PreviewNetworkDocumentOwner {
+  const frame = event.senderFrame
+  if (frame === null || frame.detached) {
+    throw new Error('Preview network policy source document is unavailable')
+  }
+  return {
+    processId: frame.processId,
+    frameToken: frame.frameToken,
+  }
 }
 
 function registerSafeHandler<T>(
@@ -618,9 +634,12 @@ export function registerIpcHandlers(context: IpcContext): void {
       message: '无法应用当前课件的网络声明。',
       suggestion: '请检查工程网络声明并重新打开预览。',
     },
-    (_event, args) => {
+    (event, args) => {
       const input = previewNetworkPolicySchema.parse(requireSingleArgument(args))
-      mainPreviewNetworkPolicy.replacePreviewLease(input)
+      mainPreviewNetworkPolicy.replacePreviewLease(
+        input,
+        previewNetworkDocumentOwner(event),
+      )
     },
   )
 
@@ -633,9 +652,12 @@ export function registerIpcHandlers(context: IpcContext): void {
       message: '无法撤销已关闭预览的网络声明。',
       suggestion: '请关闭当前工程或重启编辑器。',
     },
-    (_event, args) => {
+    (event, args) => {
       const input = previewNetworkReleaseSchema.parse(requireSingleArgument(args))
-      mainPreviewNetworkPolicy.releasePreviewLease(input.leaseId)
+      mainPreviewNetworkPolicy.releasePreviewLease(
+        input.leaseId,
+        previewNetworkDocumentOwner(event),
+      )
     },
   )
 

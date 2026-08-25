@@ -292,20 +292,69 @@ test('V9 current/full preview allows declared origins and revokes them per proje
       `${assetA.origin}/remote.png`,
     )).toBe(true)
     await expect(fetchSucceeded(page, `${api.origin}/declared-full`)).resolves.toBe(true)
+
+    const assetBBeforeOverlaySwitch = assetB.requests.length
+    await patchOpenDialog(app, projectBPath)
+    await page.keyboard.press('Control+O')
+    await expect(page).toHaveTitle(/NET H1 B/)
+    await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
+    await expect.poll(() => fullPreviewImages.evaluateAll(
+      (images, remoteUrl) => images.some(
+        (image) => (image as HTMLImageElement).src === remoteUrl,
+      ),
+      `${assetB.origin}/remote.png`,
+    )).toBe(true)
+    await expect.poll(() => assetB.requests.length).toBeGreaterThan(assetBBeforeOverlaySwitch)
+    const assetAAfterOverlaySwitch = assetA.requests.length
+    const apiAfterOverlaySwitch = api.requests.length
+    await expect(fetchSucceeded(page, `${assetA.origin}/project-a-after-overlay-switch`))
+      .resolves.toBe(false)
+    await expect(fetchSucceeded(page, `${api.origin}/project-a-api-after-overlay-switch`))
+      .resolves.toBe(false)
+    expect(assetA.requests).toHaveLength(assetAAfterOverlaySwitch)
+    expect(api.requests).toHaveLength(apiAfterOverlaySwitch)
+
     await page.getByTestId('course-preview-overlay')
       .getByRole('button', { name: '关闭预览' })
       .click()
     await expect(page.getByTestId('course-preview-overlay')).toHaveCount(0)
-    await expect.poll(() => fetchSucceeded(page, `${assetA.origin}/revoked-full`)).toBe(false)
+    await expect.poll(() => fetchSucceeded(page, `${assetB.origin}/revoked-full`)).toBe(false)
 
-    await openProject(app, page, projectBPath, 'NET H1 B')
-    const assetBBeforeProjectB = assetB.requests.length
     await startCurrentLocationPreview(page)
-    await expect.poll(() => assetB.requests.length).toBeGreaterThan(assetBBeforeProjectB)
+    const currentPreviewImages = page.getByTestId('course-try-run-host').locator('img')
+    await expect.poll(() => currentPreviewImages.evaluateAll(
+      (images, remoteUrl) => images.some(
+        (image) => (image as HTMLImageElement).src === remoteUrl,
+      ),
+      `${assetB.origin}/remote.png`,
+    )).toBe(true)
+    const assetBBeforeDeclaredCurrent = assetB.requests.length
+    await expect(fetchSucceeded(page, `${assetB.origin}/declared-current-b`)).resolves.toBe(true)
+    expect(assetB.requests).toHaveLength(assetBBeforeDeclaredCurrent + 1)
     const assetAAfterSwitch = assetA.requests.length
     await expect(fetchSucceeded(page, `${assetA.origin}/project-a-after-switch`)).resolves.toBe(false)
     expect(assetA.requests).toHaveLength(assetAAfterSwitch)
     await stopCurrentLocationPreview(page)
+
+    await page.evaluate((lateOrigin) => {
+      window.addEventListener('pagehide', () => {
+        const lateRequest = window.desktopAPI?.setPreviewNetworkPolicy({
+          leaseId: 'old-document-late-lease',
+          connectOrigins: [lateOrigin],
+          remoteAssetUrls: [],
+        })
+        window.name = 'old-document-late-invoke-sent'
+        void lateRequest?.catch(() => undefined)
+      }, { once: true })
+    }, assetA.origin)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    await expect(page.evaluate(() => window.name)).resolves
+      .toBe('old-document-late-invoke-sent')
+    const assetAAfterReload = assetA.requests.length
+    await expect(fetchSucceeded(page, `${assetA.origin}/old-document-after-reload`))
+      .resolves.toBe(false)
+    expect(assetA.requests).toHaveLength(assetAAfterReload)
 
     const baseProbeBefore = renderer.requests.filter((path) => path === '/base-probe').length
     await expect(fetchSucceeded(page, `${renderer.origin}/base-probe`)).resolves.toBe(true)
