@@ -4,6 +4,7 @@ import {
   getEffectiveCourseLayerOrder,
   type EffectiveCourseLayerItem,
 } from '../../shared/courseProjectModel'
+import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
   CourseSurfaceDocument,
@@ -114,6 +115,8 @@ export interface EffectiveLayerPropertyPatch {
   readonly playbackInitialVisibility?: LayerItem['playbackInitialVisibility']
   /** Whole-node text style only. Rich-text runs keep their dedicated edit command. */
   readonly nativeTextStyle?: Partial<TextNode['style']>
+  /** Sparse surface-owned Native content; the Course V9 schema validates the merge. */
+  readonly nativeData?: Record<string, unknown>
 }
 
 export interface EffectiveLayerPropertyUpdate {
@@ -394,6 +397,7 @@ const EFFECTIVE_LAYER_PROPERTY_KEYS = new Set<keyof EffectiveLayerPropertyPatch>
   'locked',
   'playbackInitialVisibility',
   'nativeTextStyle',
+  'nativeData',
 ])
 
 function validateFiniteProperty(value: number, label: string): void {
@@ -487,6 +491,30 @@ function normalizeEffectiveLayerPropertyPatch(
     ) as EffectiveLayerPropertyPatch['nativeTextStyle']
   }
 
+  let nativeData: EffectiveLayerPropertyPatch['nativeData']
+  let currentNativeData: Record<string, unknown> | null = null
+  let mergedNativeData: Record<string, unknown> | null = null
+  if (patch.nativeData !== undefined) {
+    if (source !== 'surface' || item.kind !== 'native' || isTeacherControllerLayerItem(item)) {
+      throw new Error('当前元素不支持原生内容属性')
+    }
+    if (
+      patch.nativeData === null ||
+      typeof patch.nativeData !== 'object' ||
+      Array.isArray(patch.nativeData)
+    ) {
+      throw new Error('原生内容属性无效')
+    }
+    nativeData = Object.fromEntries(
+      Object.entries(patch.nativeData).filter(([, value]) => value !== undefined),
+    )
+    currentNativeData = item.content.data as Record<string, unknown>
+    mergedNativeData = mergeCourseNativeData(
+      currentNativeData,
+      nativeData,
+    )
+  }
+
   const normalizedFrame = source === 'global' &&
     isTeacherControllerLayerItem(item) &&
     ((frame !== undefined && Object.keys(frame).length > 0) || patch.rotation !== undefined)
@@ -509,6 +537,7 @@ function normalizeEffectiveLayerPropertyPatch(
       ? { playbackInitialVisibility: patch.playbackInitialVisibility }
       : {}),
     ...(nativeTextStyle && Object.keys(nativeTextStyle).length > 0 ? { nativeTextStyle } : {}),
+    ...(nativeData && Object.keys(nativeData).length > 0 ? { nativeData } : {}),
   }
   const currentTextStyle = item.kind === 'native' && item.content.nativeType === 'text'
     ? item.content.data.style
@@ -528,7 +557,11 @@ function normalizeEffectiveLayerPropertyPatch(
       currentTextStyle !== null &&
       Object.entries(normalized.nativeTextStyle).some(
         ([key, value]) => currentTextStyle[key as keyof TextNode['style']] !== value,
-      ))
+      )) ||
+    (normalized.nativeData !== undefined &&
+      currentNativeData !== null &&
+      mergedNativeData !== null &&
+      JSON.stringify(mergedNativeData) !== JSON.stringify(currentNativeData))
   return { patch: normalized, changed }
 }
 
@@ -585,6 +618,15 @@ export function patchEffectiveLayerItems(
             throw new Error('当前元素不支持文字整节点样式')
           }
           Object.assign(located.item.content.data.style, patch.nativeTextStyle)
+        }
+        if (patch.nativeData !== undefined) {
+          if (located.item.kind !== 'native' || isTeacherControllerLayerItem(located.item)) {
+            throw new Error('当前元素不支持原生内容属性')
+          }
+          located.item.content.data = mergeCourseNativeData(
+            located.item.content.data as Record<string, unknown>,
+            patch.nativeData,
+          ) as typeof located.item.content.data
         }
       }
     }, `已更新 ${plans.filter((plan) => plan.changed).length} 个图层属性`, options)

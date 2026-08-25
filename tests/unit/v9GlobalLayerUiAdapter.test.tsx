@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -8,7 +8,7 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { createFormulaNode, createTeacherControllerNode } from '@/renderer/project/createProject'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
@@ -45,6 +45,7 @@ import {
   NodesTab,
 } from '@/renderer/ui/NodesTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { createSlideWorkspaceAuthoringController } from '@/renderer/ui/workspaceSlideAuthoring'
 
 /**
  * Proves R3-Z wiring of effective-layer display/write and controller authoring
@@ -390,7 +391,10 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const selectedBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
     expect(selectedBackend.getSession().scope).toBe('surface')
     expect(selectedBackend.getSession().selection.selectionIds).toEqual([surfaceItemId])
-    expect(selectedBackend.makeTarget(surfaceItemId, 'item').authoringAddress).toBe(address)
+    const canvasSelection = createSlideWorkspaceAuthoringController()
+      .selectFromLayerIds([surfaceItemId], VIEW)
+    if (canvasSelection.kind !== 'slide-authoring') throw new Error('expected V9 canvas')
+    expect(canvasSelection.targets?.[0]?.authoringAddress).toBe(address)
 
     const beforeEdit = selectedBackend.getSession()
     useEditorStore.getState().updateNode(surfaceItemId, { name: '更新后的表面说明' })
@@ -449,11 +453,21 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const selectedBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
     expect(selectedBackend.getSession().scope).toBe('surface')
     expect(selectedBackend.getSession().selection.stateId).toBe('state-explain')
-    expect(selectedBackend.makeTarget(surfaceItemId, 'item').authoringAddress).toBe(address)
+    const canvasSelection = createSlideWorkspaceAuthoringController()
+      .selectFromLayerIds([surfaceItemId], VIEW)
+    if (canvasSelection.kind !== 'slide-authoring') throw new Error('expected V9 canvas')
+    expect(canvasSelection.targets?.[0]?.authoringAddress).toBe(address)
     expect(selectEffectiveLayerProjection(useEditorStore.getState())!.scope.owner).toBe('surface')
 
     const beforeEdit = selectedBackend.getSession()
-    useEditorStore.getState().updateNode(surfaceItemId, { name: '命名状态下的表面说明', x: 120 })
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.queryByText('状态：讲解')).toBeNull()
+    expect(screen.getByTestId('slide-surface-base-editing-notice').textContent)
+      .toContain('不会创建命名状态覆盖')
+    expect(screen.queryByTestId('simple-entrance-animation')).toBeNull()
+    const nameInput = screen.getByLabelText('名称')
+    fireEvent.change(nameInput, { target: { value: '命名状态下的表面说明' } })
+    fireEvent.blur(nameInput)
     const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
     const editedSurface = afterEdit.history.present.surfaces
@@ -462,7 +476,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(editedSurface.surfaceLayerItems[0]!.item).toMatchObject({
       layerItemId: surfaceItemId,
       label: '命名状态下的表面说明',
-      frame: expect.objectContaining({ x: 120 }),
+      frame: expect.objectContaining({ x: 40 }),
     })
     // No named-state override is materialized for a surface-owned item.
     const editedScene = editedSurface.scenes.find((candidate) => candidate.id === 'scene-1')!
@@ -496,6 +510,82 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       layerItemId: surfaceItemId,
       label: '命名状态下的表面说明',
     })
+
+    act(() => useEditorStore.getState().selectNode(null))
+    expect(screen.getByTestId('slide-surface-properties-context')).toBeTruthy()
+    expect(screen.queryByLabelText('场景名称')).toBeNull()
+  })
+
+  it('commits visible surface Formula content controls to the base item', () => {
+    const project = structuredClone(v9ThreeLocationFixture())
+    const surface = project.surfaces.find((candidate) => candidate.id === 'surface-slide')
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const surfaceItemId = 'slide-surface-formula'
+    surface.surfaceLayerItems.push(scoped(sceneNodeToCourseLayerItem(createFormulaNode({
+      id: surfaceItemId,
+      name: '共享公式',
+      accessibleText: '原始描述',
+    }), 31) as NativeLayerItem))
+    const scene = surface.scenes.find((candidate) => candidate.id === 'scene-1')!
+    scene.presentation = {
+      initialStateId: 'state-initial',
+      states: [
+        { id: 'state-initial', name: '初始', layerItemOverrides: {} },
+        { id: 'state-explain', name: '讲解', layerItemOverrides: {} },
+      ],
+    }
+    injectCandidate(project)
+    useEditorStore.getState().setActivePresentationState('state-explain')
+    useEditorStore.getState().selectNode(surfaceItemId)
+
+    const beforeEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.getByTestId('formula-properties')).toBeTruthy()
+    expect(screen.queryByText('状态：讲解')).toBeNull()
+    expect(screen.getByTestId('slide-surface-base-editing-notice')).toBeTruthy()
+    const accessibleText = screen.getByLabelText('无障碍描述')
+    fireEvent.change(accessibleText, { target: { value: '命名状态下更新的共享公式' } })
+    fireEvent.blur(accessibleText)
+
+    const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
+    const editedSurface = afterEdit.history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide')
+    if (!editedSurface || editedSurface.type !== 'slide') throw new Error('expected Slide surface')
+    const edited = editedSurface.surfaceLayerItems
+      .find((entry) => entry.item.layerItemId === surfaceItemId)?.item
+    expect(edited?.kind).toBe('native')
+    if (!edited || edited.kind !== 'native' || edited.content.nativeType !== 'formula') {
+      throw new Error('expected surface Formula')
+    }
+    expect(edited.content.data.accessibleText).toBe('命名状态下更新的共享公式')
+    expect(editedSurface.scenes.find((candidate) => candidate.id === 'scene-1')
+      ?.presentation?.states.every((state) => !(surfaceItemId in state.layerItemOverrides)))
+      .toBe(true)
+
+    useEditorStore.getState().undo()
+    const undoneSurface = selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide')
+    if (!undoneSurface || undoneSurface.type !== 'slide') throw new Error('expected Slide surface')
+    const undone = undoneSurface.surfaceLayerItems
+      .find((entry) => entry.item.layerItemId === surfaceItemId)?.item
+    if (!undone || undone.kind !== 'native' || undone.content.nativeType !== 'formula') {
+      throw new Error('expected surface Formula')
+    }
+    expect(undone.content.data.accessibleText).toBe('原始描述')
+
+    useEditorStore.getState().redo()
+    const redoneSurface = selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.present.surfaces
+      .find((candidate) => candidate.id === 'surface-slide')
+    if (!redoneSurface || redoneSurface.type !== 'slide') throw new Error('expected Slide surface')
+    const redone = redoneSurface.surfaceLayerItems
+      .find((entry) => entry.item.layerItemId === surfaceItemId)?.item
+    if (!redone || redone.kind !== 'native' || redone.content.nativeType !== 'formula') {
+      throw new Error('expected surface Formula')
+    }
+    expect(redone.content.data.accessibleText).toBe('命名状态下更新的共享公式')
   })
 
   it('groupedVisualRows keeps one controller under 全局 and out of scene/surface/world', () => {

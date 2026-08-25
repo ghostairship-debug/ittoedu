@@ -2949,6 +2949,9 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
   const flowSession = useEditorStore((state) => state.flowSession)
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const slideAuthoringOwner = useEditorStore(
+    (state) => state.slideCandidateSnapshot?.scope ?? null,
+  )
   const editorMode = useEditorStore((state) => state.editorMode)
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
@@ -2961,6 +2964,12 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
   const editingNodes = useEditorStore(selectEditingNodes)
   const node = useEditorStore(selectSelectedNode)
   const spatialSession = useEditorStore((state) => state.spatialSession)
+  const propertiesOwner = !flowSession && !spatialSession && slideAuthoringOwner
+    ? slideAuthoringOwner
+    : editingScope
+  const isScenePropertiesOwner = propertiesOwner === 'scene'
+  const isGlobalPropertiesOwner = propertiesOwner === 'global'
+  const isSurfacePropertiesOwner = propertiesOwner === 'surface'
   const spatialGraphSelection = useEditorStore((state) => state.spatialGraphSelection)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedNodes = editingNodes.filter((item) => selectedNodeIds.includes(item.id))
@@ -3026,7 +3035,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
       <MultiSelectionProperties
         nodes={selectedNodes}
         spatialMode={Boolean(spatialSession)}
-        presentationContext={editingScope === 'scene'
+        presentationContext={isScenePropertiesOwner
           ? { scene, stateId: activePresentationStateId }
           : null}
       />
@@ -3046,7 +3055,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
   if (!node) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
-        {editingScope === 'global' ? (
+        {isGlobalPropertiesOwner ? (
           <>
             <section className="property-section global-layer-summary">
               <h3 className="property-title"><Globe2 size={14} />全局层</h3>
@@ -3119,6 +3128,17 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
           <FlowPageProperties session={flowSession} />
         ) : spatialSession ? (
           <SpatialPageProperties session={spatialSession} />
+        ) : isSurfacePropertiesOwner ? (
+          <section
+            className="property-section"
+            data-testid="slide-surface-properties-context"
+            role="status"
+          >
+            <h3 className="property-title"><Layers3 size={14} />表面共享层</h3>
+            <p className="property-hint">
+              此范围的元素由同一 Slide 表面的所有场景共享；请选择一个表面图层后编辑其基础值。
+            </p>
+          </section>
         ) : (
           <>
             <section className={`state-editing-notice${activePresentationState ? ' state-editing-notice--override' : ''}`}>
@@ -3207,7 +3227,19 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
   }
   return (
     <div className="properties-scroll" data-testid="properties-tab">
-      {editingScope === 'scene' && !spatialSession && !flowSession && (
+      {isSurfacePropertiesOwner && !spatialSession && !flowSession && (
+        <section
+          className="state-editing-notice"
+          data-testid="slide-surface-base-editing-notice"
+        >
+          <Layers3 size={15} />
+          <div>
+            <strong>表面共享基础值</strong>
+            <span>修改会影响此 Slide 表面的所有场景，不会创建命名状态覆盖。</span>
+          </div>
+        </section>
+      )}
+      {isScenePropertiesOwner && !spatialSession && !flowSession && (
         <section className={`state-editing-notice${activePresentationState ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
@@ -3234,14 +3266,14 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
         </section>
       )}
       <CommonNodeProperties node={node} update={update} />
-      {editingScope === 'scene' && editorMode === 'simple' && !spatialSession && (
+      {isScenePropertiesOwner && editorMode === 'simple' && !spatialSession && (
         <SimpleEntranceAnimationEditor
           scene={scene}
           node={node}
           activeStateId={activePresentationStateId}
         />
       )}
-      {(editingScope === 'global' ||
+      {(isGlobalPropertiesOwner ||
         Boolean(candidateGlobalLayerItems?.some((entry) => entry.item.layerItemId === node.id))) && (
         <GlobalLayerSettings nodeId={node.id} />
       )}
@@ -3277,12 +3309,12 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
           update={update}
           diagnostics={projectDiagnostics
             .filter((diagnostic) => (
-              editingScope === 'scene' &&
+              isScenePropertiesOwner &&
               diagnostic.sceneId === scene.id &&
               diagnostic.nodeId === node.id
             ))
             .map((diagnostic) => diagnostic.message)}
-          onOpenAutomation={editorMode === 'professional'
+          onOpenAutomation={editorMode === 'professional' && !isSurfacePropertiesOwner
             ? () => setActiveTab('automation')
             : undefined}
         />
@@ -3311,7 +3343,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
         </section>
       )}
       {editorMode === 'professional' &&
-        editingScope === 'global' &&
+        isGlobalPropertiesOwner &&
         !spatialSession &&
         !flowSession &&
         node.type !== 'teacher-controller' && (
@@ -3359,7 +3391,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
         </>
       )}
       {editorMode === 'professional' &&
-        editingScope === 'scene' &&
+        isScenePropertiesOwner &&
         !spatialSession &&
         !flowSession && (
         <InteractionEditor

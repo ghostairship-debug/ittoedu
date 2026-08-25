@@ -1017,6 +1017,57 @@ function spatialLayerPropertyPatch(
   }
 }
 
+const SLIDE_SURFACE_BASE_PROPERTY_KEYS = new Set([
+  'name',
+  'x',
+  'y',
+  'width',
+  'height',
+  'rotation',
+  'opacity',
+  'visible',
+  'locked',
+  'playbackInitialVisibility',
+])
+
+function slideSurfaceLayerPropertyPatch(
+  item: LayerItem,
+  node: SceneNode | null,
+  patch: DeepPartial<SceneNode>,
+): { readonly ok: true; readonly patch: EffectiveLayerPropertyPatch } |
+  { readonly ok: false; readonly reason: string } {
+  if (!node) return { ok: false, reason: '当前表面图层已失效，请重新选择。' }
+  const record = patch as Record<string, unknown>
+  const basePatch: Record<string, unknown> = {}
+  const nativeData: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (value === undefined) continue
+    if (SLIDE_SURFACE_BASE_PROPERTY_KEYS.has(key)) {
+      basePatch[key] = value
+      continue
+    }
+    if (key === 'id' || key === 'type' || key === 'component') {
+      return { ok: false, reason: `当前表面图层不支持属性“${key}”。` }
+    }
+    if (
+      item.kind !== 'native' ||
+      item.content.nativeType === 'teacher-controller'
+    ) {
+      return { ok: false, reason: `当前表面图层不支持原生内容属性“${key}”。` }
+    }
+    nativeData[key] = value
+  }
+  const common = spatialLayerPropertyPatch(node, basePatch as DeepPartial<SceneNode>)
+  if (!common.ok) return common
+  return {
+    ok: true,
+    patch: {
+      ...common.patch,
+      ...(Object.keys(nativeData).length > 0 ? { nativeData } : {}),
+    },
+  }
+}
+
 function spatialSelectionScopeForRow(
   session: SpatialAuthoringSession,
   row: EffectiveLayerProjectionRow,
@@ -10705,7 +10756,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
               })
               return
             }
-            const planned = spatialLayerPropertyPatch(
+            const planned = slideSurfaceLayerPropertyPatch(
+              row.item,
               courseLayerItemToSceneNode(row.item),
               item.patch,
             )
