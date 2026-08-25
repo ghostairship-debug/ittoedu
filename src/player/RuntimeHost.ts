@@ -527,18 +527,27 @@ export class RuntimeHost {
     } catch (error) {
       this.recordFailure(error)
       console.error(`运行时“${options.label}”启动失败`, error)
-      for (const dispose of [...this.guardDisposers]) dispose()
-      this.guardDisposers.clear()
-      this.scopedEvents.dispose()
-      this.authoringRegistry?.destroy()
-      this.authoringRegistry = null
-      this.underlayMount?.removeAll(true)
-      this.overlayMount?.removeAll(true)
-      for (const object of scene.children.list.slice()) {
-        if (!displayListBeforeCreate.has(object) && object.active) {
-          object.destroy()
+      const reportCleanupFailure = (cause: unknown): void => {
+        console.error(`运行时“${options.label}”启动失败后的清理失败`, cause)
+      }
+      const attemptCleanup = (operation: () => void): void => {
+        try {
+          operation()
+        } catch (cause) {
+          reportCleanupFailure(cause)
         }
       }
+      const guardDisposers = [...this.guardDisposers]
+      this.guardDisposers.clear()
+      for (const dispose of guardDisposers) attemptCleanup(dispose)
+      attemptCleanup(() => this.scopedEvents.dispose())
+      const authoringRegistry = this.authoringRegistry
+      this.authoringRegistry = null
+      attemptCleanup(() => authoringRegistry?.destroy())
+      attemptCleanup(() => this.looseObjects.push(
+        ...scene.children.list.filter((object) => !displayListBeforeCreate.has(object)),
+      ))
+      attemptCleanup(() => this.destroyPhaserResources(reportCleanupFailure))
       const message = options.environment.dom.overlay.ownerDocument.createElement('div')
       message.className = 'courseware-runtime-error'
       message.textContent = `互动运行时加载失败：${messageOf(error)}`

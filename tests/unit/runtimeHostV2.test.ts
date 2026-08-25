@@ -187,6 +187,7 @@ afterEach(() => {
   Reflect.deleteProperty(window, '__runtimeHostContext')
   Reflect.deleteProperty(window, '__runtimeLifecycleCalls')
   Reflect.deleteProperty(window, '__runtimeHostTeardownCalls')
+  Reflect.deleteProperty(window, '__runtimeHostCreateFailureProbe')
   document.body.replaceChildren()
   vi.restoreAllMocks()
 })
@@ -682,6 +683,58 @@ describe('RuntimeHost API 2', () => {
       expect.objectContaining({ message: 'authored lifecycle destroy failed intentionally' }),
     )
     expect(testEnvironment.sceneContainers.every((container) => !container.active)).toBe(true)
+    registry.dispose()
+  })
+
+  it('create 失败复用 children-first 清理且不让 hostile cleanup 掩盖原错误', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create(ctx) {
+          const rootChild = {
+            active: true,
+            visible: true,
+            parentContainer: null,
+            displayList: null,
+            scene: null,
+            destroy() { throw new Error('root child cleanup failed intentionally') }
+          }
+          const nested = ctx.phaser.scene.add.container()
+          ctx.phaser.root.add(nested)
+          nested.add(rootChild)
+          const loose = ctx.phaser.scene.add.container()
+          loose.destroy = function () {
+            throw new Error('loose scene object cleanup failed intentionally')
+          }
+          window.__runtimeHostCreateFailureProbe = { rootChild, loose }
+          throw new Error('runtime create failed intentionally')
+        }
+      })
+    `
+    const testEnvironment = createEnvironment()
+    const { host, registry } = createHost(
+      runtime(2, 'phaser', source),
+      testEnvironment,
+    )
+    const probe = Reflect.get(window, '__runtimeHostCreateFailureProbe') as {
+      rootChild: { active: boolean; parentContainer: unknown }
+      loose: { active: boolean; parentContainer: unknown }
+    }
+
+    expect(host.getFailure()?.message).toBe('runtime create failed intentionally')
+    expect(probe.rootChild).toMatchObject({ active: false, parentContainer: undefined })
+    expect(probe.loose).toMatchObject({ active: false, parentContainer: undefined })
+    expect(testEnvironment.phaserUnderlay.children).toHaveLength(0)
+    expect(testEnvironment.phaserOverlay.children).toHaveLength(0)
+    expect(error.mock.calls.filter(([message]) => (
+      message === '运行时“测试运行时”启动失败'
+    ))).toHaveLength(1)
+    expect(error).toHaveBeenCalledWith(
+      '运行时“测试运行时”启动失败',
+      expect.objectContaining({ message: 'runtime create failed intentionally' }),
+    )
+    expect(() => host.destroy()).not.toThrow()
     registry.dispose()
   })
 

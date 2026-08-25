@@ -118,6 +118,38 @@ const hostileGlobalHybridSource = `
   });
 `
 
+const hostileCreateGlobalHybridSource = `
+  CoursewareRuntime.define({
+    runtimeApiVersion: 2,
+    create(ctx) {
+      var probe = window.__publishedHostileCreateGlobalCanvasApi2Probe || {
+        creates: 0, attachedDestroys: 0, looseDestroys: 0, coreDestroys: 0
+      };
+      window.__publishedHostileCreateGlobalCanvasApi2Probe = probe;
+      probe.creates += 1;
+      var game = ctx.phaser.scene.game;
+      window.__publishedHostileCreateGlobalCanvasApi2Games =
+        window.__publishedHostileCreateGlobalCanvasApi2Games || [];
+      window.__publishedHostileCreateGlobalCanvasApi2Games.push(game);
+      game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
+        probe.coreDestroys += 1;
+      });
+      var attached = ctx.phaser.scene.add.rectangle(0, 0, 32, 32, 0x7c3aed, 0.4);
+      ctx.phaser.root.add(attached);
+      attached.destroy = function () {
+        probe.attachedDestroys += 1;
+        throw new Error('hostile create attached destroy failed intentionally');
+      };
+      var loose = ctx.phaser.scene.add.rectangle(40, 0, 32, 32, 0x9333ea, 0.4);
+      loose.destroy = function () {
+        probe.looseDestroys += 1;
+        throw new Error('hostile create loose destroy failed intentionally');
+      };
+      throw new Error('hostile create failed intentionally');
+    }
+  });
+`
+
 function writeFixture(): void {
   const fixture = createPublishedCanvasRuntimeV2Fixture([
     { itemId: 'global-api2-template', renderMode: 'hybrid', source: globalHybridSource },
@@ -160,11 +192,20 @@ function writeFixture(): void {
   hostileItem.runtime.source = hostileGlobalHybridSource
   hostileItem.order = 425
   hostileItem.frame = { mode: 'absolute', x: 460, y: 64, width: 280, height: 180 }
+  const hostileCreateItem = structuredClone(item)
+  hostileCreateItem.layerItemId = 'published-global-api2-create-hostile'
+  hostileCreateItem.label = 'Published hostile create global API2 hybrid'
+  hostileCreateItem.runtime.source = hostileCreateGlobalHybridSource
+  hostileCreateItem.order = 435
+  hostileCreateItem.frame = { mode: 'absolute', x: 760, y: 64, width: 280, height: 180 }
   project.globalLayerItems.push({
     item,
     visibility: { mode: 'all', locationIds: [] },
   }, {
     item: hostileItem,
+    visibility: { mode: 'all', locationIds: [] },
+  }, {
+    item: hostileCreateItem,
     visibility: { mode: 'all', locationIds: [] },
   })
   const sources = {
@@ -217,6 +258,31 @@ for (const delivery of [
       .toHaveCSS('z-index', '415')
     await expect(page.locator('[data-global-layer-item="published-global-api2-hybrid"]'))
       .toHaveCSS('pointer-events', 'auto')
+    const hostileCreateSlideWrapper = page.locator(
+      '[data-global-layer-item="published-global-api2-create-hostile"]',
+    )
+    await expect(hostileCreateSlideWrapper.locator('[data-runtime-fallback="true"]'))
+      .toHaveCount(1)
+    await expect(hostileCreateSlideWrapper).toHaveCSS('pointer-events', 'none')
+    await expect.poll(() => page.evaluate(() => (
+      window.__publishedHostileCreateGlobalCanvasApi2Probe
+    ))).toMatchObject({
+      creates: 1,
+      attachedDestroys: 1,
+      looseDestroys: 1,
+      coreDestroys: 1,
+    })
+    await expect.poll(() => page.evaluate(() => ({
+      games: window.__publishedHostileCreateGlobalCanvasApi2Games?.length,
+      released: window.__publishedHostileCreateGlobalCanvasApi2Games?.every((game) => (
+        !game.canvas.isConnected
+        && game.loop.game === null
+        && game.loop.callback === null
+        && game.renderer.game === null
+        && game.renderer.gameCanvas === null
+        && game.renderer.gameContext === null
+      )),
+    }))).toEqual({ games: 1, released: true })
     await button.click()
     await expect(button).toHaveText('GLOBAL API2:1')
 
@@ -231,6 +297,13 @@ for (const delivery of [
     await expect(hostileFlowWrapper.locator('[data-runtime-fallback="true"]')).toBeVisible()
     await expect(hostileFlowWrapper).toHaveCSS('pointer-events', 'none')
     await expect(hostileMarker).toHaveCount(0)
+    const hostileCreateFlowWrapper = page.locator(
+      '[data-flow-overlay-source="global"]'
+      + '[data-flow-overlay-item="published-global-api2-create-hostile"]',
+    )
+    await expect(hostileCreateFlowWrapper.locator('[data-runtime-fallback="true"]'))
+      .toHaveCount(1)
+    await expect(hostileCreateFlowWrapper).toHaveCSS('pointer-events', 'none')
     await expect.poll(() => page.evaluate(() => window.__publishedHostileGlobalCanvasApi2Probe))
       .toMatchObject({
         creates: 1,
@@ -291,6 +364,27 @@ for (const delivery of [
     await expect.poll(() => page.evaluate(() => window.__publishedGlobalCanvasApi2Probe))
       .toMatchObject({ creates: 2, destroys: 1, coreDestroys: 1 })
     await expect(hostileMarker).toBeVisible()
+    await expect(page.locator(
+      '[data-global-layer-item="published-global-api2-create-hostile"] '
+      + '[data-runtime-fallback="true"]',
+    )).toHaveCount(1)
+    await expect.poll(() => page.evaluate(() => (
+      window.__publishedHostileCreateGlobalCanvasApi2Probe
+    ))).toMatchObject({
+      creates: 2,
+      attachedDestroys: 2,
+      looseDestroys: 2,
+      coreDestroys: 2,
+    })
+    await expect.poll(() => page.evaluate(() => ({
+      games: window.__publishedHostileCreateGlobalCanvasApi2Games?.length,
+      released: window.__publishedHostileCreateGlobalCanvasApi2Games?.every((game) => (
+        !game.canvas.isConnected
+        && game.loop.game === null
+        && game.loop.callback === null
+        && game.renderer.game === null
+      )),
+    }))).toEqual({ games: 2, released: true })
     await expect.poll(() => page.evaluate(() => ({
       hostileGames: window.__publishedHostileGlobalCanvasApi2Games?.length,
       releasedGames: window.__publishedHostileGlobalCanvasApi2Games?.filter((game) => (
@@ -337,8 +431,15 @@ for (const delivery of [
     })
     await expect(button).toHaveCount(0)
     expect(errors.filter((message) => (
+      message.includes('published-global-api2-create-hostile')
+      && message.includes('启动失败')
+      && !message.includes('启动失败后的清理失败')
+    ))).toHaveLength(2)
+    expect(errors.filter((message) => (
       !message.includes('published-global-api2-hostile')
       && !message.includes('hostile global')
+      && !message.includes('published-global-api2-create-hostile')
+      && !message.includes('hostile create')
     ))).toEqual([])
   })
 }
@@ -356,6 +457,12 @@ declare global {
     }>
     __publishedHostileGlobalCanvasApi2Probe?: Record<string, unknown>
     __publishedHostileGlobalCanvasApi2Games?: Array<{
+      canvas: HTMLCanvasElement
+      loop: { game: unknown; callback: unknown }
+      renderer: { game: unknown; gameCanvas: unknown; gameContext: unknown }
+    }>
+    __publishedHostileCreateGlobalCanvasApi2Probe?: Record<string, unknown>
+    __publishedHostileCreateGlobalCanvasApi2Games?: Array<{
       canvas: HTMLCanvasElement
       loop: { game: unknown; callback: unknown }
       renderer: { game: unknown; gameCanvas: unknown; gameContext: unknown }
