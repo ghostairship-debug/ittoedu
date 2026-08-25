@@ -1,0 +1,9 @@
+# repair-rtp-03-published-slide-api2-runtime Slide scene-local API 2 Runtime 真实发布播放
+
+- Status / Owner: active / codex/repair-rtp-03
+- Risk / Hotspot: S2 / none
+- Outcome / Why now: 可见的工程“开发”工作台能在 Slide 场景创建、编辑并保存 `canvas-runtime` API 2，Published V2 也携带该源码；但 `SlidePublishedAdapter` 当前无条件显示 fallback，教师刚创建的 Phaser/DOM/hybrid Runtime 在当前位置、整课预览和三种互动交付中都不执行。
+- Write scope / Baseline: baseline `ddab68b2173af79ba6d72922786303bc6f8c3bf0`；仅允许写一个新建的 `src/player/surfaces/runtime/` API 2 Published mount 模块、`src/player/surfaces/slide/SlidePublishedAdapter.ts`，确有必要时窄改 `src/player/RuntimeHost.ts`、`src/player/RuntimeRegistry.ts` 或 `src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts` 的宿主无关复用边界，以及相关 unit/integration 与新建 `tests/e2e/publishedRuntimeCanvasV2.spec.ts`；禁止修改 Schema、Published producer、App/main/preload、Flow/Spatial/global host、capture/PDF/PPTX、Legacy `ExportPayload`/`PlayerApp`/`CourseRuntimeKernel`、其他两卡文件及 Integrator 独占的计划/能力/generated 输出。
+- Acceptance: fixture 必须通过真实 Slide runtime template authoring command 创建并修改 scene-local API 2；`dom`、`phaser`、`hybrid` 三种 renderMode 在 Slide 场景 `layerItems` 中执行真实源码，当前位置、整课预览、离线便携/在线轻量单 HTML 与网页包复用同一 Published host；场景/location generation 切换恰好销毁/重建，跨 Surface 暂离/返回按现有语义 suspend/resume，surface/course reset 与 session destroy 无 stale DOM、RAF、监听器或 Phaser 实例；注册/create/lifecycle 失败只回退该实例；`enabled:false`、globalLayer、surfaceLayer、Flow/Spatial、capture 继续不执行；不得接回 V8 payload/player 或把本纵切宣称成全 API 2 parity。
+- Focused validation: `npx vitest run tests/unit/runtimeHostV2.test.ts tests/unit/publishedCourseNavigation.test.ts <新增Slide API2 mount/integration测试>`; `npm run typecheck`; `npm run build:player && npx playwright test tests/e2e/publishedRuntimeCanvasV2.spec.ts`。
+- S2 safety / rollback: 只用内存/临时 V9 fixture，不改用户工程、Schema 或 producer；每个 Runtime 的错误与清理必须实例隔离，Phaser/DOM/hybrid 任一路失败不能使原生 Slide、教师控制器或导航失效；回滚起点为 baseline，若复用现有 RuntimeHost 必须改变 Legacy Player 行为或需要 global ownership/capture，停止并拆出前置而不扩大本卡。
