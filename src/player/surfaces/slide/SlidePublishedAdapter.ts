@@ -492,6 +492,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   readonly #executeTeacherControllerAction?: (
     action: TeacherControllerAction,
   ) => boolean | void | Promise<boolean | void>
+  readonly #replayScene?: () => Promise<boolean>
   readonly #deferTeacherControllerCourseReset: boolean
   #locationId: string
   #presentationStateId: string | undefined
@@ -525,6 +526,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
+      replayScene?: () => Promise<boolean>
       executeTeacherControllerAction?: (
         action: TeacherControllerAction,
       ) => boolean | void | Promise<boolean | void>
@@ -545,6 +547,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#onInteractionReady = options.onInteractionReady
     this.#teacherControllerSession = options.teacherControllerSession
       ?? new TeacherControllerRuntimeSessionStore()
+    this.#replayScene = options.replayScene
     this.#executeTeacherControllerAction = options.executeTeacherControllerAction
     this.#deferTeacherControllerCourseReset = options.deferTeacherControllerCourseReset === true
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
@@ -932,8 +935,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
       return
     }
     if (action.type === 'scene.replay') {
-      const current = locations[index] ?? locations.find((location) => location.id === this.#locationId)
-      if (current) await this.#navigateTo(current)
+      if (this.#replayScene) await this.#replayScene()
+      else {
+        const current = locations[index]
+          ?? locations.find((location) => location.id === this.#locationId)
+        if (current) await this.#navigateTo(current)
+      }
       return
     }
     if (action.type === 'scene.go') {

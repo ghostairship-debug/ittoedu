@@ -55,6 +55,8 @@ interface PublishedInteractionHostFactoryOptions {
   teacherControllerSession?: TeacherControllerRuntimeSessionStore
   /** Internal route for a controller course.restart action. */
   restartCourse?: () => Promise<boolean>
+  /** Internal route for a Slide controller scene.replay action. */
+  replayScene?: () => Promise<boolean>
   /** Mixed reset commits the shared controller authority only after all hosts reset. */
   deferTeacherControllerCourseReset?: boolean
 }
@@ -120,6 +122,7 @@ function createPublishedSurfaceHostInternal(
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
       teacherControllerSession: options.teacherControllerSession,
+      replayScene: options.replayScene,
       executeTeacherControllerAction: async (action) => {
         if (action.type !== 'course.restart' || !options.restartCourse) return false
         return options.restartCourse()
@@ -285,6 +288,20 @@ export class PublishedCourseSession {
     return this.navigator.goToIndex(index)
   }
 
+  /** Force-remount only the current location without adding a history entry. */
+  async replayScene(
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<boolean> {
+    const current = this.navigator.current
+    if (this.#destroyPromise || !current || signal.aborted) return false
+    await this.navigator.goToLocation(current.locationId, {
+      force: true,
+      recordHistory: false,
+      signal,
+    })
+    return true
+  }
+
   /** Narrow course-runtime restart entry used by delivery controller chrome. */
   async restartCourse(): Promise<boolean> {
     this.#globalRuntimeOwner?.restart()
@@ -433,6 +450,12 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   override restartCourse(): Promise<boolean> {
     return this.#restartCourse(new AbortController().signal)
+  }
+
+  override replayScene(
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<boolean> {
+    return this.#replayScene(signal)
   }
 
   override async destroy(): Promise<void> {
@@ -614,16 +637,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   }
 
   async #replayScene(signal: AbortSignal): Promise<boolean> {
-    const current = this.navigator.current
-    if (!current) return false
+    if (!this.navigator.current) return false
     if (!this.#claimTerminalNavigation(signal)) return false
     try {
-      await this.navigator.goToLocation(current.locationId, {
-        force: true,
-        recordHistory: false,
-        signal,
-      })
-      return true
+      return await super.replayScene(signal)
     } catch (error) {
       this.#releaseTerminalNavigationClaim()
       throw error
@@ -666,6 +683,9 @@ export function createPublishedCourseSession(
   const restartCourse = (): Promise<boolean> => (
     session?.restartCourse() ?? Promise.resolve(false)
   )
+  const replayScene = (): Promise<boolean> => (
+    session?.replayScene() ?? Promise.resolve(false)
+  )
   const hosts = playback.surfaces.map((surface) => createPublishedSurfaceHostInternal(
     playback,
     surface.id,
@@ -676,6 +696,7 @@ export function createPublishedCourseSession(
       globalInteractionVisibilityState,
       teacherControllerSession,
       restartCourse,
+      replayScene,
       deferTeacherControllerCourseReset: true,
       onInteractionInvalidated: (surfaceId) => {
         session?.handleInteractionHostInvalidated(surfaceId)

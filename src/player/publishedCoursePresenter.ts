@@ -32,6 +32,7 @@ export function attachPublishedCoursePresenter(
   const readIndex = () => readPublishedIndex(session)
   let escapeControls: TeacherEscapeControls | null = null
   let presenterInput: PlayerPresenterInput | null = null
+  let destroyed = false
 
   const goToIndex = (index: number): boolean => {
     if (index < 0 || index >= totalScenes) return false
@@ -40,6 +41,18 @@ export function attachPublishedCoursePresenter(
       escapeControls?.refresh()
     }).catch((error) => {
       console.error('课程翻页失败', error)
+    })
+    return true
+  }
+
+  const replayScene = (): boolean => {
+    if (destroyed) return false
+    void session.replayScene().then((replayed) => {
+      if (!replayed || destroyed) return
+      presenterInput?.setIndex(readIndex())
+      escapeControls?.refresh()
+    }).catch((error) => {
+      console.error('课程重播失败', error)
     })
     return true
   }
@@ -63,10 +76,7 @@ export function attachPublishedCoursePresenter(
         return { accepted: true, guardBlocked: false }
       },
       openScenePicker: () => undefined,
-      replay: () => {
-        goToIndex(readIndex())
-        return true
-      },
+      replay: replayScene,
       beginEvidenceClick: (event) => evidence.beginTeacherEscapeClick(event),
     })
   }
@@ -93,6 +103,7 @@ export function attachPublishedCoursePresenter(
   const bridge = {
     getCurrentSceneIndex: readIndex,
     goToScene: (index: number) => goToIndex(index),
+    replayScene,
     waitForCaptureReady: async () => {
       const deadline = Date.now() + 8_000
       while (Date.now() < deadline) {
@@ -112,6 +123,8 @@ export function attachPublishedCoursePresenter(
       return { renderedNodes }
     },
     destroy: () => {
+      if (destroyed) return
+      destroyed = true
       presenterInput?.destroy()
       escapeControls?.destroy()
       void session.destroy()
