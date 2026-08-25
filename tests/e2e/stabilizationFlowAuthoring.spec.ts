@@ -339,7 +339,7 @@ async function flowTextPoint(
     let textNode: Text | null = null
     while (walker.nextNode()) {
       const candidate = walker.currentNode as Text
-      if (remaining <= candidate.data.length) {
+      if (remaining < candidate.data.length) {
         textNode = candidate
         break
       }
