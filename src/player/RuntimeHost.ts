@@ -772,7 +772,7 @@ export class RuntimeHost {
 
     let destroyFailed = false
     try {
-      object.destroy(true)
+      object.destroy(false)
     } catch (cause) {
       destroyFailed = true
       recordFailure(cause)
@@ -784,7 +784,7 @@ export class RuntimeHost {
       const GameObjectConstructor = Reflect.get(gameObjects, 'GameObject')
       const prototype = Reflect.get(GameObjectConstructor, 'prototype')
       const baseDestroy = Reflect.get(prototype, 'destroy')
-      if (typeof baseDestroy === 'function') Reflect.apply(baseDestroy, object, [true])
+      if (typeof baseDestroy === 'function') Reflect.apply(baseDestroy, object, [false])
     })
     attempt(() => {
       const removeAllListeners = Reflect.get(object, 'removeAllListeners')

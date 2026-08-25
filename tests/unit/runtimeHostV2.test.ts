@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 
-vi.mock('phaser', () => ({ runtimeMarker: 'phaser-test-module' }))
+vi.mock('phaser', () => ({
+  runtimeMarker: 'phaser-test-module',
+  GameObjects: {
+    GameObject: class MockGameObject {
+      destroy(fromScene = false): void {
+        Reflect.set(this, 'baseDestroyFromScene', fromScene)
+        Reflect.set(this, 'active', false)
+        Reflect.set(this, 'visible', false)
+        Reflect.set(this, 'scene', undefined)
+        Reflect.set(this, 'parentContainer', undefined)
+      }
+    },
+  },
+}))
 
 import { CourseEventBus } from '@/player/CourseEventBus'
 import { CourseStateStore } from '@/player/CourseStateStore'
@@ -187,6 +200,7 @@ afterEach(() => {
   Reflect.deleteProperty(window, '__runtimeHostContext')
   Reflect.deleteProperty(window, '__runtimeLifecycleCalls')
   Reflect.deleteProperty(window, '__runtimeHostTeardownCalls')
+  Reflect.deleteProperty(window, '__runtimeHostTeardownObjects')
   Reflect.deleteProperty(window, '__runtimeHostCreateFailureProbe')
   document.body.replaceChildren()
   vi.restoreAllMocks()
@@ -616,7 +630,7 @@ describe('RuntimeHost API 2', () => {
     registry.dispose()
   })
 
-  it('先脱离并逐对象清理 Phaser 子项，单个 destroy 直接抛错也不阻断其余层', () => {
+  it('先脱离并以 fromScene=false 逐对象清理，hostile fallback 不阻断其余层', () => {
     const source = `
       CoursewareRuntime.define({
         runtimeApiVersion: 2,
@@ -628,8 +642,8 @@ describe('RuntimeHost API 2', () => {
             parentContainer: null,
             displayList: null,
             scene: null,
-            destroy() {
-              calls.push(['hostile', this.parentContainer === null])
+            destroy(fromScene) {
+              calls.push(['hostile', this.parentContainer === null, fromScene])
               throw new Error('hostile GameObject destroy failed intentionally')
             }
           }
@@ -639,8 +653,11 @@ describe('RuntimeHost API 2', () => {
             parentContainer: null,
             displayList: null,
             scene: null,
-            destroy() { calls.push(['healthy', this.parentContainer === null]) }
+            destroy(fromScene) {
+              calls.push(['healthy', this.parentContainer === null, fromScene])
+            }
           }
+          window.__runtimeHostTeardownObjects = { hostile, healthy }
           const nested = ctx.phaser.scene.add.container()
           ctx.phaser.root.add(nested)
           nested.add(hostile)
@@ -654,9 +671,15 @@ describe('RuntimeHost API 2', () => {
     expect(() => host.destroy()).toThrow('hostile GameObject destroy failed intentionally')
     expect(Reflect.get(window, '__runtimeHostTeardownCalls')).toEqual([
       ['lifecycle', true],
-      ['hostile', true],
-      ['healthy', true],
+      ['hostile', true, false],
+      ['healthy', true, false],
     ])
+    const teardownObjects = Reflect.get(window, '__runtimeHostTeardownObjects') as {
+      hostile: { baseDestroyFromScene?: boolean }
+      healthy: { baseDestroyFromScene?: boolean }
+    }
+    expect(teardownObjects.hostile.baseDestroyFromScene).toBe(false)
+    expect(teardownObjects.healthy.baseDestroyFromScene).toBeUndefined()
     expect(testEnvironment.phaserUnderlay.children).toHaveLength(0)
     expect(testEnvironment.phaserOverlay.children).toHaveLength(0)
     expect(testEnvironment.sceneContainers.every((container) => !container.active)).toBe(true)
