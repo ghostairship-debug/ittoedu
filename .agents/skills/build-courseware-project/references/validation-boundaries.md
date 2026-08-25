@@ -12,7 +12,7 @@
 
 ## 整课
 
-- `npm run --silent validate:course-project -- <file.h5lesson>`（Schema、包内文件、当前已接线的结构性工程健康结果与相关预检）；退出码 0 不代表完整 V9 语义或 Runtime/Component 源码离线网络合规已经证明；
+- `npm run --silent validate:course-project -- <file.h5lesson>`（Schema、包内文件、当前已接线的结构性工程健康结果与相关预检）；退出码 0 不代表完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致已经证明；
 - 编辑、Undo/Redo、保存、关闭、重开和恢复；
 - CoursePlayer：`SlidePublishedAdapter` / `FlowSurfaceHost` / `SpatialSurfaceHost` 的初始态、关键交互态、稳定结果、返回、重播与教师控制；无限画布核对自由逛与镜头巡游都可达，且组件/视频/控制器手势不被画布拖拽抢走；不要用 Phaser `PlayerApp` 冒充试运行；
 - 默认离线 HTML 自包含，并在真实浏览器中确认没有外部请求；其它格式按脚本要求检查保留、静态化、降级或省略；

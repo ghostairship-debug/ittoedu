@@ -73,7 +73,7 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 npm run --silent validate:course-project -- <project.h5lesson>
 ```
 
-`validate:project` 是同一入口。该命令当前只证明 Schema、包内文件和已经接线的结构性工程健康/预检项目；在 REPAIR 路线完成前，退出码 0 不代表完整 V9 语义或 Runtime/Component 源码离线网络合规已经证明。不要把 Project V8 写成当前格式，也不要把 Headless 绿色写成完整交付证据。
+`validate:project` 是同一入口。该命令当前只证明 Schema、包内文件和已经接线的结构性工程健康/预检项目；在 REPAIR 路线完成前，退出码 0 不代表完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致已经证明。不要把 Project V8 写成当前格式，也不要把 Headless 绿色写成完整交付证据。
 
 若当前产品没有对应命令或宿主，停止并报告产品缺口，不自造影子 Project DSL。
 

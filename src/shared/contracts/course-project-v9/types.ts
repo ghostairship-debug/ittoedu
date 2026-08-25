@@ -117,8 +117,9 @@ export interface CourseAssetMeta extends AssetMeta {
 
 /**
  * Course-level network declaration for Runtime/Component code.
- * The isolated Player allows only the declared exact origins and denies
- * anything undeclared; this contract carries origins only, never secrets.
+ * Supported preview/publish/export hosts derive network, CSP and diagnostics
+ * from these exact origins and deny undeclared access. This contract carries
+ * origins only, never secrets, and does not define host-local capabilities.
  */
 export interface CourseNetworkDeclaration {
   /**

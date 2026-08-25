@@ -8,9 +8,9 @@
 
 Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
 
-完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。REPAIR 完成前，该命令尚不能证明完整 V9 语义或 Runtime/Component 源码的离线网络合规；它不执行运行时代码或真实导出，Node 布局近似和退出码 0 都不能替代真实 Player、导出画面与外部请求检查。
+完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。REPAIR 完成前，该命令尚不能证明完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致；它不执行运行时代码或真实导出，Node 布局近似和退出码 0 都不能替代真实 Player、导出画面与外部请求检查。
 
-编辑器的“编辑状态”和“当前位置试运行”使用同一块 1280×720 画布，Player 是唯一视觉源。编辑状态在 Blob sandbox iframe 中使用隔离 authoring Player 创建场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。当前位置试运行在原画布位置切换为完整 playback Player，直接从当前场景和当前命名状态启动（基础场景使用当前场景初始状态）。两种状态都使用会话过滤；父窗口用临时 Blob URL 承载文档，素材以可转移缓冲区进入沙箱后由 iframe 创建本地 Blob URL，实例替换、关闭、重试或失败时分别回收。顶部“整课预览”仍在独立窗口中从第一场景初始状态开始。
+编辑器的“编辑状态”使用 1280×720 authoring Player 创建 API 2 场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。当前“当前位置试运行”、整课预览、单 HTML 与网页包走 Published V2 宿主，其中 Runtime 尚未真实执行，只呈现静态 fallback；活动修复从 Slide scene-local API 3 DOM playback 开始，不能把该纵切外推为 API 2、Flow/Spatial、全局/共享 scope 或捕获 parity。authoring iframe 仍使用会话过滤、临时 Blob 文档和可转移素材缓冲区，实例替换、关闭、重试或失败时分别回收。这里的 iframe 承担当前视觉合成、生命周期和会话竞态责任，不是可信 Runtime 必须永久继承的权限边界。
 
 Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩展。Blueprint、AI 局部 patch 和其他编辑器内 AI 接入延后到 2.0 以后；1.x 只预留版本化边界，不调用模型，也不允许运行时直接写工程 Store。
 
@@ -27,7 +27,7 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 
 整页少字的动画/特效/连续机制写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；稍复杂的局部互动（拖拽、配对、本地多步）制作 V4 组件，先匹配已有包，允许为本课新建。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
 
-编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史，试运行仍在隔离 Player 中执行。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由规则编排可编辑的结果。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；`scene-navigation` 统一经过导航守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
+编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。authoring 视觉仍在当前 iframe Player 中执行；Published V2 的试运行/整课预览/网页导出在 parity 纵切完成前只显示 fallback。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由规则编排可编辑的结果。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；`scene-navigation` 统一经过导航守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
 
 ## 2. `RuntimeDocument`
 
@@ -93,7 +93,7 @@ CoursewareRuntime.define({
 })
 ```
 
-`define()` 中的版本必须与 `RuntimeDocument.runtimeApiVersion` 一致。源码不能使用 `import`、`export` 或 `require`。需要第三方库时，先将依赖打包为同一普通浏览器脚本；不得依赖 Node.js、Electron、CDN、远程字体或远程 API。
+`define()` 中的版本必须与 `RuntimeDocument.runtimeApiVersion` 一致。源码不能使用 `import`、`export` 或 `require`。需要第三方库时，先将依赖打包为同一普通浏览器脚本，不运行时加载远程脚本；远程媒体/API 按工程声明。Runtime 若需要父页面、本地、桌面或其他宿主能力，应使用目标环境明确提供的稳定合同，不能假定每个预览、浏览器或导出宿主都有同一能力。
 
 ## 4. 当前公开上下文
 
@@ -609,18 +609,18 @@ interface RuntimeInstanceLifecycle {
 
 挂在已声明的 `ctx.phaser.underlay/overlay` 或 `ctx.dom.underlay/overlay` 内的对象会由宿主兜底销毁，但不能依赖兜底掩盖泄漏。单个运行时启动或生命周期方法失败时，宿主记录该实例的首个失败、销毁其挂载并保留其他内容可翻页；该实例后续捕获会继续拒绝，不能在隐藏/恢复或第二次捕获时被误判为成功。导出器只回退受影响的页面、运行时条目或图层，不静默生成空白，也不丢弃其他成功结果。
 
-## 15. 安全边界
+## 15. 信任与宿主边界
 
-运行时是可信本地代码。预览和捕获环境禁用 Node.js、Electron API、外部导航、下载、权限和网络，但这不是恶意 JavaScript 的绝对沙箱。
+Runtime 是经过审核的可信扩展。当前统一画布的 authoring 与 playback 位于不授予同源权限的 sandbox iframe；authoring 额外冻结宿主输入、动作、内置媒体、导航、呈现状态变化与课程状态写入，并且只通过带版本、会话和 revision 的目标快照与编辑器通信。这些是当前视觉合成与生命周期行为，不是把 Runtime 当作不可信代码的安全合同。
 
-统一画布不会把运行时放进 React 主窗口执行。authoring 与 playback 都位于不授予同源权限的 sandbox iframe；authoring 额外冻结宿主输入、动作、内置媒体、导航、呈现状态变化与课程状态写入，并且只通过带版本、会话和 revision 的只读目标快照与编辑器通信。运行时是可信代码，仍必须在 authoring/capture 上下文中停止自行创建的原生音频、外部计时和业务推进；`ctx.authoring` 不是安全沙箱，也不是工程写 API。
+运行时确需父页面、本地、桌面或其他能力时，应由目标宿主提供稳定接口或同宿主执行语义；网页与静态导出可以不提供桌面专属能力，但必须明确降级。运行时仍须在 authoring/capture 上下文中停止自行创建的原生音频、外部计时和业务推进；`ctx.authoring` 是编辑协议，不是任意工程写 API。
 
-不要存放密钥、账号、隐私数据或远程控制逻辑；不要尝试访问本机文件系统；只分发经审查的工程。
+不要持久化或导出密钥、账号、隐私数据；远程脚本仍不开放，只分发经审查的工程。
 
 ## 16. 发布检查清单
 
 - [ ] 选择 scene/global 作用域有明确理由，没有为形式而组件化。
-- [ ] `source` 同步且只注册一个 API 2 定义；API 1 输入明确拒绝；无模块语法和远程依赖。
+- [ ] `source` 同步且只注册一个 API 2 定义；API 1 输入明确拒绝；无模块语法或远程脚本，远程媒体/API 与工程声明一致。
 - [ ] 所有人工可见文字都来自 `content.values`，metadata 标签清楚。
 - [ ] 如开放统一画布编辑，定义显式使用 `authoringApiVersion: 1`；registered/DOM text 与 asset key 分别存在于 `content.values` / `assets`，目标边界、更新、注销和普通宿主无 `ctx.authoring` 时均正确。
 - [ ] 运行时内容/素材的画布修改共享语义明确：`scene.runtime` 由当前场景全部命名状态共享，`globalRuntime` 由整课共享；未声明 authoring 目标的 API 2 运行时仍正常显示并可从属性面板编辑。
@@ -637,7 +637,7 @@ interface RuntimeInstanceLifecycle {
 - [ ] local/course 状态边界符合重播和重开语义。
 - [ ] `resize/setVisible/suspend/resume` 与场景/全局生命周期相符；事件、守卫、监听、RAF、Tween、Timer、音频、WebGL 和 GPU 资源在销毁时清理。
 - [ ] `capture.waitUntil()` 不会永久阻塞；`prepareCapture()` 能为 Canvas/WebGL 主动渲染一个确定帧；实现没有私造多帧时间线或第二套捕获协议。
-- [ ] Three.js 如有使用，仅打包在该运行时内，GLB/纹理/loader 均离线，编辑器核心不承担 Three.js 依赖。
+- [ ] Three.js 如有使用，其执行库打包在该运行时内；GLB/纹理/loader 使用工程内资源或已声明远程交付，并有捕获/离线降级，编辑器核心不承担 Three.js 依赖。
 - [ ] 完整归档已运行 `npm run --silent validate:project -- <file.h5lesson>`；按 JSON 中的 Schema、当前已接线的结构性工程健康结果和四格式预检修复确定性错误，Node 近似布局、源码外联网络与真实像素另行复核。
 - [ ] 工程检查没有已检出的阻断错误；信息释放/视觉密度只作为只读复核线索；四种目标的 Export Preflight 已审阅，但不把报告存在当作完整覆盖证明；需要排障时另行导出异常诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。

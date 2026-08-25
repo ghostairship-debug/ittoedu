@@ -1,10 +1,10 @@
 # IttoEdu 开发总纲
 
-> 计划版本：16.0（2026-08-25：复核评估吸收结果；明确“桌面权限隔离、网络能力开放”的产品边界；任务卡进一步精简为 Ready 时才创建的 7 字段格式）
+> 计划版本：17.0（2026-08-25：Owner 确认 Runtime/Component 均为经审核的可信扩展，外部导入只是分发方式；取消基于错误信任前提的 SEC-01 blanket sandbox 路线）
 >
 > 当前活动路线：第 5 节“工程修复与网络基础——Gate R0 → Wave 0–5”；详细证据与开工顺序见 [修复方案](docs/development-plan/REPAIR_PLAN.md)
 >
-> 产品 Owner 决策现状：架构稳定化与 2026-08-24 审计的 29 项修复已收口为 owner-waived `engineering candidate`（打包与性能测量豁免，记录为未执行项）；教师 `accepted` 只保留为最终产品与发布结论。既有 V8 课例均为测试产物、没有内容迁移或兼容义务；尚存文件按真实 consumer 删除，必要验证只重建最小 V9 fixture。Runtime/Component 作者代码不得取得编辑器桌面权限，但远程图片、音视频与 API 是正式产品能力，不以“离线安全”为由一律封禁。
+> 产品 Owner 决策现状：架构稳定化与 2026-08-24 审计的 29 项修复已收口为 owner-waived `engineering candidate`（打包与性能测量豁免，记录为未执行项）；教师 `accepted` 只保留为最终产品与发布结论。既有 V8 课例均为测试产物、没有内容迁移或兼容义务；尚存文件按真实 consumer 删除，必要验证只重建最小 V9 fixture。Runtime/Component 均是经过审核的可信扩展，外部导入只是分发方式；不因“非内置”强制隔离或禁止宿主、父页面、本地与网络能力。
 
 本文件是仓库唯一长期开发总纲。详细规则统一在 [docs/development-plan/](docs/development-plan/README.md)：[架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)（什么不能坏）、[工作协议](docs/development-plan/WORKING_PROTOCOL.md)（怎么干活）、[任务卡模板](docs/development-plan/TASK_CARD_TEMPLATE.md)、[修复方案](docs/development-plan/REPAIR_PLAN.md)（当前路线的详细证据与批次）。历史阶段合同、审计报告、评估与已终态任务卡由 Git 历史保存，不再作为派工入口。
 
@@ -48,8 +48,8 @@
 - 当前编辑器内没有可见 AI、聊天、Provider 或网络调用；internal/reserved 接口不得宣称为可用工作流；编辑器内 AI 统一延后到 2.0 以后。
 - 教师控制器只在"全局层（全课）"持久化编辑；页面作者态 inert；运行态拖动只写 Session。不实现逐页/逐 location 控制器位置。
 - 打包分发当前不是交付目标；恢复打包时须随新的固定候选补齐打包、性能与签名证据。
-- 作者 Runtime/Component 代码按**低桌面权限代码**运行：不得看见 `desktopAPI`、Node、任意 Electron IPC、本地文件与保存/恢复能力；这不等于禁止联网。
-- 远程资源和 API 按工程声明开放。未声明的 origin 拒绝；已声明的 `https`/`wss` 可由隔离 Player 使用。远程脚本不随本轮开放，若确有 consumer 另立合同。
+- Runtime/Component 是经过审核的可信扩展。它们可按真实 consumer 需要使用当前宿主提供的父页面、本地、桌面或其他能力；实现优先走稳定宿主接口或同宿主执行语义，不建权限审批平台。不同导出/嵌入环境可用能力不同，不得把桌面专属能力伪装成通用网页承诺。
+- 远程资源和 API 按工程声明开放。精确 `https`/`wss` origin 声明服务于预览、发布、CSP、可移植性和诊断，不用来推导扩展代码不可信。远程脚本不随本轮开放，若确有 consumer 另立合同。
 - 单 HTML 导出至少区分：离线便携（资源内嵌、文件较大）与在线轻量（远程资源保留 URL、依赖网络）。模式是导出选择，不新增持久化 `projectMode`。
 - 静态 HTML 无法安全保存长期 API Key。AI Provider 凭证只能走服务端代理、运行时用户输入或短期限域 Token；不得写入工程、Published payload 或导出 HTML。
 - 其余现状硬约束（25 组 must preserve、模块 Owner、carrier 矩阵、棘轮）见 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)。
@@ -90,29 +90,31 @@
 
 唯一详细台账见 [修复方案](docs/development-plan/REPAIR_PLAN.md)。本节只记录依赖顺序和 Owner 已裁决边界，不复制任务状态。本轮仍不含 skill 重构、黄金样例、真实课例生产、声明式数据条件或行内公式；新增范围只有 Owner 已明确要求的远程资源、API 与轻量在线导出。V9 继续软冻结，网络字段只能走 additive 可选合同。
 
-- **Gate R0（已关闭）**：信任模型与网络方向已经裁决；计划与精简流程基线为 `b967c96`。初始任务的完成事实由 product commit 承载，当前状态只看任务板。
-- **Wave 0 安全、诚实契约与直接用户行为**：`CAP-01` 先移除未兑现的宽泛 `project-health` 声明；`SEC-01` 复用现有 sandbox Player/authoring bridge 隔离 `desktopAPI`，不把联网一并封死；并行修 `UI-01`、`CMP-01`、`EXP-01`。同一 Editor Store 热点上的 UI/CMP 串行。
+- **Gate R0（已关闭）**：网络方向和精简流程已经裁决；原基线 `b967c96` 中“外部作者代码=低权限代码”的信任前提已被 Owner 本次明确替代。初始任务的完成事实由 product commit 承载，当前状态只看任务板。
+- **Wave 0 契约诚实与直接用户行为**：`CAP-01` 移除了未兑现的宽泛 `project-health` 声明；`UI-01`、`CMP-01`、`EXP-01` 及其集成后补修已由 product commit 承载。`SEC-01` 基于错误信任前提，未合入产品代码并已取消。
 - **Wave 0 集成后质量补修（审计基线 `3780090`）**：`CAP-01` 维持关闭；`UI-01` 与 `EXA-02` 因原验收仍有反例而重开；新增 `EXP-02` 处理畸形 V9 的原生异常，新增 `CMP-02` 处理 Flow 组件使用位置的定位假成功。这些是现有 Wave 的完成质量补修，不另建新 Wave；四项在各自互斥范围内均已 Ready，CMP 若实证需要 Store 写入则停止并等待 UI 热点释放。
-- **Wave 1 网络基础纵切**：先完成远程资源交付与工程网络声明的 additive 合同；再按“在线轻量单 HTML → 隔离预览动态 origin → API 连接 → CORS/静态捕获降级”逐个用户行为实施。长期密钥不进入静态课件。
+- **Published Runtime parity（独立 S2 纵切）**：取消 SEC-01 后的宿主核对确认 Published V2 已携带 Runtime API 2/3 源码，但 Slide/Flow/Spatial 只渲染静态 fallback；首张 `repair-rtp-01` 只证明 Slide scene-local API 3 DOM playback，稳定后才按真实失败面扩到其他 carrier。不得用首张卡伪称 API 2、Flow/Spatial、全局/共享 scope 或捕获已完成，也不复活 sandbox 权限目标或接回 Legacy Player。
+- **Wave 1 网络基础纵切**：远程资源交付与工程网络声明的 additive 合同已落地；后续按“在线轻量单 HTML → 预览宿主动态 origin → API 连接 → CORS/静态捕获降级”逐个用户行为实施。长期密钥不进入静态课件。
 - **Wave 2 诊断合同**：Validation Report 与 Diagnostic Target 分别定约，再实现逐码 ledger。原“成功分支映射 17 码”控制流不可达，继续否决。
 - **Wave 3 V8 测试产物清退与真实发布门**：先解决生成物/fresh checkout，且生成与检查结果不得依赖 checkout 的 LF/CRLF 或 `core.autocrlf=true/false`；再删除全部 V8 课例内容。只有活测试或 verifier 所需内容才用产品工厂重建最小 V9 fixture，不迁移 photosynthesis、incline-motion 或 benchmark 的旧课例设计。
 - **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
-- **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须复用 SEC-01 的隔离边界与网络策略。
+- **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
 
 已删除/降级项：`HYG-02` 删除（8 处均为合法 unchanged guard）；`HYG-01/03/05` 降级或移出产品路线；`NAV-01` P2 登记。已完成治理项：`CAP-02`、`CAP-03`、`HYG-04`。
 
 ## 6. 当前路线成功门槛
 
-- 作者 Runtime/Component 代码可触达 `desktopAPI` 的执行路径：0（SEC-01 后）；
 - 能力索引声明与 CLI 实现不一致处：0；未兑现能力先收窄，完成实现后再恢复声明；
-- Wave 0 用户可达缺陷（surface 选择、组件删除/定位假成功、preflight 假绿、作者代码隔离）未闭合数：0；
+- Wave 0 用户可达缺陷（surface 选择、组件删除/定位假成功、preflight 假绿）未闭合数：0；
+- Runtime/Component 文档或新实现把“外部导入”误当“不可信代码”并强制低权限执行：0；
+- Published V2 在合法 Runtime carrier 上只画 fallback、没有执行真实 Runtime 的路径：按独立纵切逐项归零，不以单一 Slide slice 冒充全 carrier parity；
 - Slide surface 的 backend、projection、Store owner token 一致；命名状态下修改 surface 属性产生且只产生一次 canonical V9 commit，undo 后可恢复；
 - Schema-invalid V9 不进入不安全 source-facts 遍历，preflight/producer 共享 `project-schema-invalid` code 与首个 Zod issue path，抛出的原生 `TypeError`：0；合法 V9 的缺 metadata/bytes/component closure 仍保持共享稳定 code/path；
 - Flow 组件使用位置只有在所属 surface 的有效 location 已激活且 block 真实选中后才报告成功；无法解析的 Flow 使用位置假成功：0；
 - 连续两次 `pretest:e2e` 后 `git status --porcelain` 非空：0；fresh checkout 上 `npm test` 因缺生成物失败：0；`core.autocrlf=true/false` 两种 checkout 的生成结果字节漂移：0；
 - `verify:release` 在"GUI 打开示例"段失败：0（含 oracle 重写，不只换 opener）；
 - 在线轻量单 HTML 能保留声明的远程图片/音视频 URL，并生成最小必要 CSP；离线便携模式继续内嵌资源；
-- 隔离 Player 对已声明 `https`/`wss` origin 可联网、对未声明 origin 可重复拒绝，同时始终看不到 `desktopAPI`；
+- 预览与发布宿主按工程声明正确处理 `https`/`wss` origin，且不因网络策略破坏已明确提供的宿主能力；
 - 工程、Published payload 与导出 HTML 中长期 Provider Secret：0；
 - 网络静态诊断把“未声明访问”与“已声明远程依赖”分开，不再 blanket 禁止 `fetch` 或外链媒体；
 - 公开操作假成功（空 commit 后报成功、静默 no-op）：0；

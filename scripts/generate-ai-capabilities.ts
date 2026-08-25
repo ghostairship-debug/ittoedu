@@ -1026,8 +1026,8 @@ export async function generateAiCapabilityArtifacts(
       authoringModes: ['professional'],
       scopes: RUNTIME_SCOPES,
       exports: {
-        singleHtml: 'interactive',
-        webPackage: 'interactive',
+        singleHtml: 'static-fallback-only',
+        webPackage: 'static-fallback-only',
         pdf: 'captured-with-static-fallback',
         pptx: 'captured-per-runtime-with-static-fallback',
       },

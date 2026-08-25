@@ -19,7 +19,7 @@
     {
       "artifact": "artifacts/contracts/course-project-v9.schema.json",
       "name": "courseProjectDocumentSchema",
-      "sha256": "363ef8ee3dc3b258e8e89840a5cc8a691468c1ba6609bc651d6b0f4ee94ad799",
+      "sha256": "ad35a2158014c0e4c4398cf89095e979a31ae8c38a599a1fe1895677c8893f22",
       "sourceOfTruth": "src/shared/contracts/course-project-v9/schema.ts"
     },
     {

@@ -4,16 +4,16 @@
 >
 > 当前质量审计基线：`3780090`；Gate R0 文档/流程基线：`b967c96`。
 >
-> 状态：**Gate R0 已关闭；初始 Wave 0 实现已合入，质量复核发现 4 项 Ready 补修，当前状态只看任务板**。自动化结果仍只达到 `engineering candidate`。
+> 状态：**Gate R0 已关闭；初始 Wave 0、集成后质量补修与网络合同已合入。Owner 已取消基于错误信任前提的 SEC-01，当前状态只看任务板**。自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
 ## 1. Owner 已裁决的产品边界
 
 1. 既有 V8 课例均为测试产物，没有内容迁移、兼容或视觉保真义务。应删尽删；仍有真实测试/verifier consumer 时，仅用当前产品工厂重建最小 V9 fixture。
-2. Runtime/Component 作者代码不得取得编辑器桌面权限：无 `desktopAPI`、Node、任意 Electron IPC、本地文件、保存、恢复或导出能力。
-3. “低桌面权限”不等于“离线”。外链图片、音频、视频、HTTP API、WebSocket 与未来 AI API 是正式产品能力，应通过工程声明开放。
-4. 远程脚本暂不开放。Runtime/Component 执行代码仍随课件或组件包发布；远程媒体和 API 不因此受限。
+2. Runtime/Component 都是经过审核的可信扩展；外部导入只是组件/运行时的分发方式，不是不可信边界。
+3. 可信扩展可按真实 consumer 需要使用当前宿主明确提供的父页面、本地、桌面或网络能力。不得因为代码“非内置”就强制 opaque-origin sandbox；实现优先走稳定宿主接口或同宿主执行语义，不建权限审批平台。
+4. 外链图片、音频、视频、HTTP API、WebSocket 与未来 AI API 是正式产品能力。远程脚本暂不开放；Runtime/Component 已审核的执行代码仍随课件或组件包发布，避免运行时漂移。
 5. 单 HTML 有两种不同承诺：
    - **离线便携**：资源内嵌，文件较大；
    - **在线轻量**：保留远程资源 URL，文件较小且依赖网络。
@@ -23,24 +23,24 @@
 
 ## 2. 已核实的当前事实
 
-### 2.1 作者代码与桌面权限同上下文
+### 2.1 可信扩展的当前执行上下文
 
 - `src/player/RuntimeRegistry.ts:285-293` 与 `ComponentRegistry.ts:77-81` 使用 `new Function` 并传入当前 `window`；
-- `src/preload/index.ts:99-177` 在主 renderer 暴露完整 `desktopAPI`；
-- `Workspace.tsx:779/1361` 的 Published try-run 直接 mount 在主 renderer；
-- 编辑态已有 `sandbox="allow-scripts"` iframe、token-bound bootstrap 和 Player authoring patch 协议。
+- `src/preload/index.ts:99-177` 在主 renderer 通过 context bridge 提供 `desktopAPI`；
+- Published Component 的部分编辑/试运行路径直接 mount 在主 renderer，可使用该宿主真实提供的能力；
+- Slide 统一画布当前仍使用 `sandbox="allow-scripts"` iframe、token-bound bootstrap 和 Player authoring patch 协议。该 iframe 目前会阻断父页面/桌面能力，但其同时承担视觉合成、生命周期和会话竞态责任，不能因信任模型修正就无证据删除。
 
-因此 SEC-01 的最短路径是复用现有隔离 Player/bridge，让 try-run 不再在主 renderer 执行作者代码；不是新建一套 BrowserWindow、Provider 或通用权限平台。
+这些是当前宿主能力差异，不是“非内置代码获得桌面权限”的安全缺陷。SEC-01 的信任前提已被 Owner 推翻，不得合入其 blanket sandbox 实现。未来只在真实 Runtime/Component consumer 要求某项宿主能力时，针对该执行路径补稳定宿主接口或调整执行上下文。
 
-### 2.2 当前网络能力被四层封死
+### 2.2 网络声明合同已落地，交付与宿主尚未接线
 
-- V9 `AssetMeta` 只表达本地 `path/byteLength`，没有远程交付来源；
-- Published producer 对每个资产强制要求本地 bytes；
-- 单 HTML 与网页包 CSP 不允许远程 `img/media/connect`；
-- Electron preview partition 使用空 origin 集合，HTTP(S)/WS(S) 全部拦截；
-- 旧 `inspectSourceNetworkUse` 把 `fetch`、WebSocket 与外链媒体统一当作外部网络问题。
+- V9 `CourseAssetMeta.remote.url` 已能记录内嵌资产的 HTTPS 交付地址，`network.connectOrigins` 已能声明 Runtime/Component 使用的精确 `https`/`wss` origin；
+- Published producer 当前仍对每个资产要求本地 bytes，尚无在线轻量导出模式；
+- 单 HTML 与网页包当前 CSP 仍不允许远程 `img/media/connect`；
+- Electron preview partition 当前使用空 origin 集合，HTTP(S)/WS(S) 仍会被拦截；
+- 旧 `inspectSourceNetworkUse` 仍把 `fetch`、WebSocket 与外链媒体统一当作外部网络问题。
 
-这些机制与 Owner 最新方向冲突。后续诊断只能报告**未声明或不安全的访问**，不能 blanket 禁止网络。
+因此网络合同基础已经完成，后续只需按真实 consumer 接线交付、预览宿主与诊断。诊断只能报告**未声明或不安全的访问**，不能 blanket 禁止网络。
 
 ### 2.3 Wave 0 的真实用户缺陷
 
@@ -70,47 +70,47 @@
 
 本基线上 typecheck、generator checks 与全量 Vitest（255 files / 1822 tests）均通过；这些绿色结果没有覆盖上述反例，不能作为产品完成证据。未量化的组件 usage 扫描复杂度暂不建卡，只有出现可复现性能风险后再准入。
 
-## 3. 目标安全与网络模型
+## 3. 目标扩展与网络模型
 
-| 能力 | 作者 Runtime/Component | 执行规则 |
+| 能力 | 可信 Runtime/Component | 执行规则 |
 |---|---|---|
-| `desktopAPI`、Node、文件、任意 IPC | 禁止 | 隔离执行上下文，不能靠源码扫描代替 |
+| 宿主、父页面、本地或桌面能力 | 按真实 consumer 开放 | 由当前宿主显式提供稳定接口或同宿主执行语义；不同宿主能力可以不同 |
 | 外链图片/音频/视频 | 允许 | 资源记录声明 URL；Player/CSP 按声明放行 |
 | `fetch` / EventSource / WebSocket | 允许 | 工程声明精确 `https`/`wss` origin；未声明拒绝 |
-| 系统权限、下载、剪贴板、设备 | 默认禁止 | 有真实 consumer 时逐项新增窄能力 |
+| 系统权限、下载、剪贴板、设备 | 按真实 consumer 接入 | 逐项定义稳定宿主接口，不预建通用审批状态机 |
 | 远程脚本/import | 本轮禁止 | 执行代码继续随课件发布，避免供应链运行时漂移 |
 | 长期 Provider Secret | 禁止持久化/导出 | 代理、运行时输入或短期 Token |
 
 最小实现原则：
 
 - 资源 URL 是数据，不要求每个 Runtime 自己写加载器；
-- 工程网络声明是唯一 allowlist 事实，Electron 与导出 CSP 都从它派生；
-- 编辑器主 renderer 继续保持原网络边界，只有隔离 Player 获得课程声明的 origin；
+- 工程网络声明是预览、发布、CSP、可移植性与诊断的网络事实，Electron 宿主与导出 CSP 都从它派生；
+- 外部导入不降低扩展的信任等级；现有 iframe 若继续存在，是视觉合成、生命周期或竞态机制，不是必须继承的权限边界；
+- 桌面专属宿主能力不自动承诺给浏览器、网页包或单 HTML；各交付环境必须诚实说明可用能力；
 - 不建审批状态机、权限仪表盘或通用插件系统；
-- CORS 不可被本地代码绕过：仅播放可允许远程媒体；参与 Canvas、缩略图、PDF/PPTX 捕获时必须可验证 CORS，或使用本地 fallback/明确降级；
+- 浏览器路径不得伪造 CORS 成功：仅播放可允许远程媒体；参与 Canvas、缩略图、PDF/PPTX 捕获时必须可验证 CORS，或使用本地 fallback/明确降级。真实 consumer 若通过明确宿主接口取数，必须显式记录其桌面专属、可移植性与捕获降级语义；
 - 在线轻量导出失败时给出远程依赖清单，不伪装成离线产物。
 
 ## 4. 执行路线
 
-### Wave 0：安全、契约诚实与直接用户行为
+### Wave 0：契约诚实与直接用户行为
 
 | 项 | 结果 | 写入热点 |
 |---|---|---|
-| `CAP-01` | 立即移除/收窄未兑现的宽泛 `project-health` 声明；实现完成后再恢复 | 非热点 generated artifact |
-| `SEC-01` | try-run 作者代码进入现有 sandbox Player；`window.desktopAPI === undefined`；不把网络能力永久封死 | Workspace/Properties |
-| `UI-01` | 重开原卡：surface owner 在 backend/projection/Store/命名状态中一致，Properties 写入一次 canonical history 并可撤销 | Editor Store/History |
-| `CMP-01` | 删除事务与 V9 usage guard 已合入；完成事实由 product commit 承载 | Editor Store/History |
-| `CMP-02` | Flow 使用位置即使没有同 ID location，也必须路由到所属 surface 的有效 location 并选中 block，不能先报成功后静默 no-op | 非热点 UI；若需 Store 必须停卡重标 |
-| `EXP-01` | 合法 V9 的静态前置 parity 已合入；完成事实由 product commit 承载 | Published producer |
-| `EXP-02` | Schema-invalid V9 先走结构诊断，不进入不安全 raw source-facts 遍历 | Published producer |
-| `EXA-02` | 重开原卡：fresh checkout 的生成/check 对 LF/CRLF 与 `core.autocrlf` 稳定，lesson/render 边界有实际测试 | 测试/生成脚本 |
+| `CAP-01` | 已收窄未兑现的宽泛 `project-health` 声明 | 非热点 generated artifact |
+| `UI-01` | 已统一 surface owner 的 backend/projection/Store/命名状态写入与 undo | Editor Store/History |
+| `CMP-01` | 已修删除事务与 V9 usage guard | Editor Store/History |
+| `CMP-02` | 已修 Flow 使用位置的有效 location 激活与 block 选择，消除假成功 | 非热点 UI |
+| `EXP-01` | 已修合法 V9 的静态前置 parity | Published producer |
+| `EXP-02` | 已让 Schema-invalid V9 先走结构诊断，不进入不安全 raw source-facts 遍历 | Published producer |
+| `EXA-02` | 已固定 fresh checkout 的 LF/CRLF 生成边界并补直接测试 | 测试/生成脚本 |
 
 ### Wave 1：网络基础纵切
 
-1. **NET-R1 远程资源合同**：V9 以 additive 可选字段声明远程交付 URL，同时保留现有本地 bytes 作为作者缓存/离线来源；既有 V9 文件逐字节语义不变。真正 remote-only 作者资产以后按 consumer 再开，不用伪造 `path/byteLength`。
-2. **NET-P1 工程网络合同**：项目声明允许的 `https`/`wss` origins；禁止 wildcard、userinfo、非网络 scheme；凭证值不进入合同。
+1. **NET-R1 远程资源合同（已合入）**：V9 以 additive 可选字段声明远程交付 URL，同时保留现有本地 bytes 作为作者缓存/离线来源；既有 V9 文件逐字节语义不变。真正 remote-only 作者资产以后按 consumer 再开，不用伪造 `path/byteLength`。
+2. **NET-P1 工程网络合同（已合入）**：项目声明允许的 `https`/`wss` origins；禁止 wildcard、userinfo、非网络 scheme；凭证值不进入合同。
 3. **NET-E1 在线轻量单 HTML**：producer 在在线模式保留 remote URL，并从资源/连接声明生成最小 CSP；离线模式维持 data URL。
-4. **NET-H1 隔离预览联网**：隔离 Player 使用课程 origin 策略；主 renderer、文件/IPC 权限不随之开放。
+4. **NET-H1 预览宿主联网**：预览宿主使用课程 origin 策略，并保持该执行路径已经明确提供的宿主能力。
 5. **NET-C1 媒体与捕获降级**：播放、Canvas、缩略图、PDF/PPTX 分别给出可执行结果；CORS 不满足时使用本地 fallback 或明确报告。
 6. **NET-AI 边界**：只定义凭证与调用边界，不接入具体 AI Provider；长期密钥零持久化、零导出。
 
@@ -137,38 +137,25 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ### Wave 5：合成与旧投影退出
 
-`SEM-B3` 共享合成与三方契约测试 → 有证据的 Slide preflight parity → `PRJ-00A` 去冗余 → 测量后决定 `PRJ-00B` context-aware cache → `PRJ-01` 收窄 → `PRJ-02～05` 按用户行为拆分。任何统一宿主必须沿用 SEC/NET 的隔离与 origin 策略。
+`SEM-B3` 共享合成与三方契约测试 → 有证据的 Slide preflight parity → `PRJ-00A` 去冗余 → 测量后决定 `PRJ-00B` context-aware cache → `PRJ-01` 收窄 → `PRJ-02～05` 按用户行为拆分。任何统一宿主必须保留可信扩展语义、既有生命周期责任、真实宿主能力与工程 origin 策略。
 
 ## 5. 当前 Ready 任务
 
-任务状态仍只看自动生成的任务板。本次质量审计只创建或重开已经可复现、前置已满足的卡：
+任务状态仍只看自动生成的任务板。UI-01、EXA-02、EXP-02、CMP-02 与网络合同均已合入；完成事实由 product commit 和 Git 历史保存。SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项，也不保留任务卡。
 
-1. `repair-ui-01-slide-surface-owner-selection`
-2. `repair-exa-02-generation-boundary`
-3. `repair-exp-02-malformed-v9-source-diagnostics`
-4. `repair-cmp-02-component-usage-locate`
-5. `repair-sec-01-author-code-privilege-isolation`
-6. `network-contract-01-remote-dependencies`
+当前只有 `repair-rtp-01-published-slide-surface-runtime` 一项 Ready/active：先让 Slide 场景内 API 3 DOM Surface Runtime 在当前位置试运行、整课预览、单 HTML 与网页包共用的 Published V2 链路真实执行。该项是独立 Player parity 纵切，不属于 SEC，也不以隔离桌面权限为目标；API 2、Flow/Spatial、全局/共享 scope 与捕获 parity 不由本卡伪称完成。
 
-`CAP-01` 维持关闭；`CMP-01` 与 `EXP-01` 的已合入核心行为不重开，分别由更窄的 `CMP-02`、`EXP-02` 承担相邻反例。原任务完成事实继续由 Git 历史保存。
-
-Validation Report、Diagnostic Target、在线导出、隔离联网、CORS 捕获和 V8 删除卡都在前置完成后再创建。
+Validation Report、Diagnostic Target、在线轻量导出、预览宿主联网、CORS 捕获和 V8 删除卡都在前置完成且出现真实 consumer 后再创建。
 
 ## 6. 并发安排
 
-- 通道 A：SEC-01，限定 Workspace/隔离 Player，不预先写 main/preload 或 Published producer；
-- 通道 B：UI-01，独占 Editor Store/History，收口 surface owner 与命名状态写入；
-- 通道 C：EXP-02，独占 Published producer；
-- 通道 D：EXA-02，限定生成边界、EOL 规则与直接测试；
-- 通道 E：NET-R1/NET-P1 合同作为一个原子提交，避免同一 Schema 的两次串行往返。
-- 通道 F：CMP-02，只处理已复现的 Flow 定位 UI，可与 UI-01 并行；若实证必须写 Store，停卡并重标 `editor-store-history`，等待通道 B 释放热点。
-
-每个通道使用隔离 worktree。若 SEC-01 实证必须修改 main/preload、Published producer 或合同，先停止并重标 hotspot，不能越界写入。
+当前只有 Runtime parity 通道，独占 Published/Player 写入范围；不得写 Store、App、Workspace/Properties、合同或 main/preload。后续只为前置已满足、具有真实 consumer 的工作建卡，再按写入热点分配隔离 worktree；Store、App、Workspace/Properties、Published producer、合同、main/preload 与 generated index 继续保持单写入者。
 
 ## 7. 成功门槛
 
-- 作者代码可触达 `desktopAPI` 的路径：0；
-- 已声明远程资源/API 被 blanket 拦截：0；未声明 origin 可重复放行：0；
+- Runtime/Component 因“外部导入”被误判为不可信并强制低权限执行的路径：0；
+- Published V2 合法 Runtime 只显示静态 fallback、没有执行真实源码的适用宿主路径：按独立纵切逐项归零，首项为 Slide scene-local API 3 DOM playback；
+- 已声明远程资源/API 被 blanket 拦截：0；未声明 origin 被错误放行：0；
 - 长期 API Key 进入工程或导出物：0；
 - 能力索引与 CLI 实现不一致：0；
 - surface owner 在 backend/projection/Store/authoringAddress 中不一致：0；命名状态下 surface 属性修改缺 commit 或 undo：0；
@@ -182,9 +169,9 @@ Validation Report、Diagnostic Target、在线导出、隔离联网、CORS 捕�
 
 ## 8. 已否决路线
 
-- 把“不可信作者代码”等同于“禁止外部网络”；
-- 在主 renderer 中继续执行作者代码，仅靠 IPC sender 检查或源码正则防护；
-- 开放网络的同时暴露 `desktopAPI`、Node 或通用 IPC；
+- 仅因 Runtime/Component 来自外部导入，就把经过审核的扩展当作不可信代码；
+- 把 opaque-origin sandbox 固化为所有扩展都必须继承的权限边界，永久阻断真实需要的宿主、父页面或本地能力；
+- 在没有真实 consumer 的前提下预建权限审批平台或伪造全宿主能力 parity；
 - 把长期 AI/API Key 写入工程、组件、Published payload 或单 HTML；
 - 用 `connect-src *`、任意 wildcard origin 或远程脚本换取实现便利；
 - 在成功分支映射不存在的 17 个 Schema issue；
@@ -197,7 +184,7 @@ Validation Report、Diagnostic Target、在线导出、隔离联网、CORS 捕�
 
 ## 9. Gate R0 关闭证据
 
-1. 总纲、架构合同、网络边界和精简任务机制已形成固定提交 `b967c96`；
+1. 总纲、架构合同、网络边界和精简任务机制曾形成固定提交 `b967c96`；其中“外部作者代码=低权限代码”的信任前提已由 2026-08-25 Owner 最新裁决替代；
 2. Gate 关闭当时的首批 7 张卡均记录该基线，初始任务板为 `queued: 7`；完成事实与后续重开由 Git 历史记录，当前状态只看任务板；
 3. typecheck、14 项治理测试、合同/能力/任务板/repo-index freshness 与 repo-index quality 已通过；
 4. 后续实现只从任务板领取，不从 Wave 标题直接派工。

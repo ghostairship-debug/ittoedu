@@ -247,7 +247,7 @@
       "statusClass": "current-debt",
       "owner": "Runtime / Interactions",
       "currentFact": "Shared contracts and Player engines exist; authoring UI remains coupled to Store hotspots.",
-      "targetState": "Narrow authoring validators/commands and readonly isolated runtime consumers.",
+      "targetState": "Narrow authoring validators/commands and lifecycle-safe trusted runtime consumers with explicit host capabilities.",
       "entrypoints": [
         "src/player/RuntimeHost.ts",
         "src/player/InteractionEngine.ts"

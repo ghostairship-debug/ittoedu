@@ -145,4 +145,4 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 ### 7.2 课程网络声明（`network.connectOrigins`）
 - `network.connectOrigins?: string[]` 声明 Runtime/Component 代码允许连接的精确 origin（远程媒体、HTTP API、WebSocket、未来 AI API）。
 - 每个 origin 必须是规范化的精确 `https:`/`wss:` origin：字符串等于其 URL `origin`（小写 scheme/host、不写默认端口），拒绝 wildcard、userinfo、path/query/fragment 与其他 scheme；列表内不得重复。
-- 隔离 Player 只放行工程声明的 origin，未声明访问一律拒绝；远程脚本暂不开放。本节仅是声明合同，运行时放行与 CSP 派生由后续任务实现。
+- 预览、发布与导出宿主从工程声明派生允许的 origin，未声明访问一律拒绝；远程脚本暂不开放。本节只定义网络声明，不定义或禁止桌面、本地、父页面等宿主专属能力；运行时放行与 CSP 派生由后续任务实现。

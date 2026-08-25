@@ -41,14 +41,14 @@
 19. 作者与交付的有效域必须闭合：任何作者端允许保存的状态都必须被 Preview、统一画布、Published Player 和适用导出接受。
 20. 公开入口必须诚实：属性、复制、粘贴、重复、拖放和错误反馈要么真实改变唯一工程并进入正确历史，要么明确不可用；禁止静默 no-op、伪成功和底层校验 JSON 直出。
 
-### 执行权限与网络
+### 可信扩展与网络
 
-21. **作者代码低桌面权限、网络按声明开放**：
-   - 课件工程与组件包中的 Runtime/Component 代码不得看见 `desktopAPI`、Node、任意 Electron IPC、本地文件、保存/恢复或导出能力；
-   - 编辑态现有 opaque-origin sandbox iframe 是可复用边界；整课 try-run 仍在主 renderer 执行作者代码，是 SEC-01 待修缺口；
-   - 外链图片、音频、视频、`fetch`、EventSource 与 WebSocket 是正式能力，不因作者代码低权限而 blanket 禁止；隔离 Player 只放行工程声明的精确 `https`/`wss` origin；
-   - 远程脚本本轮不开放；长期 Provider Secret 不得持久化或写入 Published/导出物；
-   - 单 HTML 的离线便携与在线轻量是不同导出语义；任何宿主统一都必须同时复用桌面权限隔离和网络 origin 策略。
+21. **Runtime/Component 是可信扩展，宿主能力与交付语义显式区分**：
+   - 课件工程与组件包中的 Runtime/Component 代码均经审核；外部导入只是分发方式，不得据此把它们当作不可信代码；
+   - 扩展可按真实 consumer 需要使用当前宿主明确提供的父页面、本地、桌面或其他能力。优先使用稳定宿主接口或同宿主执行语义，不为此建权限审批平台；
+   - 现有 opaque-origin iframe 可继续承担视觉合成、生命周期和会话竞态隔离，但不是必须继承的信任/权限边界，也不得永久阻断已确认的宿主能力；
+   - 外链图片、音频、视频、`fetch`、EventSource 与 WebSocket 是正式能力。工程的精确 `https`/`wss` origin 声明用于预览、发布、CSP、可移植性和诊断，不用来推导扩展不可信；
+   - 远程脚本本轮不开放；长期 Provider Secret 不得持久化或写入 Published/导出物；单 HTML 的离线便携与在线轻量仍是不同导出语义。
 
 ### 工具与治理
 
@@ -57,7 +57,7 @@
 24. 自动化最多证明 engineering candidate；未经明确教师验收不得宣称 accepted/发布。
 25. 用户未提交修改不得被自动回退或覆盖。
 
-（第 1–20、22–25 组覆盖原 35 条语义，合并关系可由 Git 历史中的 `90-appendix/00_CURRENT_MUST_PRESERVE.md` 对照；第 21 组是 2026-08-25 评估新增的安全不变量。）
+（第 1–20、22–25 组覆盖原 35 条语义，合并关系可由 Git 历史中的 `90-appendix/00_CURRENT_MUST_PRESERVE.md` 对照；第 21 组已按 2026-08-25 Owner 最新信任模型裁决替代原低权限假设。）
 
 ## 3. 状态七分类与唯一工程真相
 
