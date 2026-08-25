@@ -515,7 +515,12 @@ describe('Project V8 global-layer editor UI', () => {
       name: '跳转到指定场景（高级）',
     }).length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getByLabelText('打开课件时默认折叠'))
+    const defaultCollapsedCheckbox = screen.getByLabelText<HTMLInputElement>(
+      '打开课件时默认折叠',
+    )
+    expect(defaultCollapsedCheckbox).toBeChecked()
+    fireEvent.click(defaultCollapsedCheckbox)
+    expect(defaultCollapsedCheckbox).not.toBeChecked()
     fireEvent.change(screen.getAllByLabelText('点击动作')[0]!, {
       target: { value: 'scene.go' },
     })
@@ -533,7 +538,7 @@ describe('Project V8 global-layer editor UI', () => {
     if (updated.type !== 'teacher-controller') throw new Error('缺少教师控制器')
     expect(updated).toMatchObject({
       collapsible: true,
-      defaultCollapsed: true,
+      defaultCollapsed: false,
     })
     expect(updated.buttons[0]?.action).toEqual({
       type: 'scene.go',
