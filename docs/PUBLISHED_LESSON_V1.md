@@ -57,6 +57,8 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 
 当前 CoursePlayer 对可执行 Runtime 的 Published playback 是明确的 partial slice：Slide `scene.layerItems` 中的 API 2 `canvas-runtime` 可按 DOM/Phaser/hybrid 执行；`globalLayerItems` 中的 API 2 由 Published session 持有唯一实例，并把同一容器迁入当前 Slide/Flow/Spatial global wrapper；Slide scene-local 与 Flow surface-local 的 API 3 DOM `surface-runtime` 也可执行。global API 3、其它 shared、Flow/Spatial scene-local API 2 与 capture 等未覆盖 carrier 仍使用后备。API 2 的宿主动作、presentation 与节点解析尚未接入，不得把“源码已携带”解释为完整宿主上下文 parity。三种互动交付与编辑器当前位置/整课预览复用同一 Published host。
 
+Component API 4 的 Published playback 同样按已验证切片声明：Slide `scene.layerItems` 中 scene-local Phaser component 会在当前位置试运行、整课预览、离线/在线单 HTML 与网页包中执行真实代码、素材、props、emit、frame/order、命中与 generation 生命周期。global/surface-shared、Flow/Spatial、hybrid 及静态 capture 仍需各自 consumer 证据，不得从这一切片外推。
+
 ## 两种互动发布物
 
 ### 单 HTML

@@ -484,6 +484,8 @@ function loadProjectImage(assetId) {
 
 组件在“编辑状态”画布中由隔离 authoring Player 以 `mode: 'edit'` 创建，显示与成品相同坐标和合成层级下的稳定视觉，同时禁止内部互动；在中央“当前位置试运行”、顶部“整课预览”和网页导出中使用 `mode: 'preview'`；静态捕获使用 `mode: 'capture'`，不得推进学生业务，只生成确定画面。当前位置试运行从当前场景/状态启动（基础场景回退当前场景初始状态），整课预览从第一场景初始状态启动。场景命名状态切换时不会重新执行 `create()`，而是在同一实例上调用 `resize()` / `updateProps()`，因此状态覆盖中的组件参数必须能即时反映。
 
+Published V2 当前已证明的 API 4 Phaser 播放切片是 Slide `scene.layerItems` 中的 scene-local component：当前位置试运行、整课预览、离线/在线单 HTML 与网页包执行相同包版本、props、素材、emit、frame/order、命中与 generation 生命周期。global/surface-shared、Flow/Spatial、hybrid 以及 PDF/PPTX capture 不由这一切片推导；这些 carrier 必须在各自真实 consumer 出现后单独验收。
+
 单 HTML 和网页包导出会把组件默认参数展平到实际实例 props，只发布运行必需的组件 ID、版本、API/渲染能力、编码执行逻辑和组件素材；组件包的 `manifest.json`、`editor.properties/pages`、变体、预设、说明、缩略图和独立原始 `runtime.js` 不进入发布物。执行逻辑在浏览器端仍可恢复和分析，这只是 [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 的轻量发布裁剪，不是代码加密或 DRM。
 
 外部组件节点与原生节点一样，可作为 Course Project V9 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。

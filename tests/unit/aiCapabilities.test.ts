@@ -97,6 +97,12 @@ describe('AI capability manifest generation', () => {
       }
       components: {
         packageAdmission: Record<string, unknown>
+        exports: { singleHtml: string; webPackage: string }
+        publishedPlayback: {
+          status: string
+          provenSlices: Array<Record<string, unknown>>
+          notCovered: string[]
+        }
       }
       assessmentEvaluators: Array<{
         id: string
@@ -196,6 +202,35 @@ describe('AI capability manifest generation', () => {
       releaseBlockersMustBeEmpty: true,
       licenseStatusMustBe: 'verified',
       maintainerMustBeAssigned: true,
+    })
+    expect(index.components.exports).toMatchObject({
+      singleHtml: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+      webPackage: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+    })
+    expect(index.components.publishedPlayback).toEqual({
+      status: 'partial',
+      provenSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderMode: 'phaser',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-component-api4-playback',
+        },
+      ],
+      notCovered: [
+        'phaser-global-or-surface-shared',
+        'phaser-flow-or-spatial',
+        'hybrid-published-parity',
+        'capture-pdf-or-pptx',
+        'component-event-or-host-actions-parity',
+      ],
     })
     expect(index.runtime.exports).toMatchObject({
       singleHtml: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',

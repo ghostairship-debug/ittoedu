@@ -6,7 +6,7 @@
 >
 > 当前批次编排基线：`7d17fed384804e998e15ae21380ed98259acf897`。
 >
-> 状态：**RTP-04 已完成产品实现与独立审查；CMP-03 已在最终集成 SHA `c6b3869` 上 active**。合法纯 Slide PDF raster 继续保留。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**CMP-03 已在累计产品 SHA `e61cd82` 上完成并获双重独立审查 PASS；V8-03 sample、V8-04 portability 与 V8-05A render-host V9/V2 benchmark 已并行 active**。合法纯 Slide PDF raster 继续保留。网络/CORS/捕获没有真实作者消费链，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -139,7 +139,10 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 - EXA-02 与 V8-01 已完成；经 consumer 查询确认没有 package、测试、发布或产品调用者的 incline-motion 全链已经删除；
 - **V8-02 已完成**：photosynthesis 用当前 V9 factory 生成三 Slide archive，并以 Published V2 离线 HTML保留三页导航、前两页像素变化、第三页指针操作与截图、零 HTTP(S) 与零 `pageerror` 的原行为门；专属 V8 archive/component chain 活引用为零；
-- **CMP-03（active）**：Slide scene-local Component API 4 Phaser 的作者入口与 producer 已闭合，Published host 仍无条件 fallback；当前 baseline 为 RTP-04 最终集成 SHA `c6b3869`，完成后才分别准入 sample、benchmark、portability 与 release verifier 的替代/清退；
+- **CMP-03 已完成**：Slide scene-local Component API 4 Phaser 通过真实包导入与 authoring command 创建，在当前位置试运行、整课预览、离线/在线单 HTML 与网页包复用同一 Published host；generation、replay/restart、暂停恢复、失败隔离与 Phaser Core teardown 已由 focused oracle 覆盖。该证据不扩展到 global/shared、Flow/Spatial、hybrid 或 capture；
+- **V8-03（active）**：用最小两页 Course Project V9 sample 与真实 Phaser counter component 替换 committed sample 的 V8 archive/oracle；只改 sample 专属 generator、artifact、测试与 release verifier 的 sample 段；
+- **V8-04（active）**：将 Windows portability verifier 改为自行创建、移动、重开并发布最小 V9 + Phaser component 工程；不触碰产品宿主或其它 fixture；
+- **V8-05A（active）**：并行新增并稳定 Native、API 2 Phaser、API 2 DOM+Three、API 4 DOM 与 API 4 Phaser 五路径 V9/V2 benchmark；旧 V8 artifact 暂与其并存，待 V8-06 迁移 release verifier 后再删除；
 - **LEG-005A 已完成**：PDF 预检后 source 消失现在明确报不可用且不进入 raster/write；不可达的 V8 payload + Runtime raster 已删除，正常纯 Slide raster、Mixed V2、PPTX capture、PDF preflight 与 LEG-005 的其余 active debt保留；
 - `verify-release.ts` 的 controller、DOM、navigation、Published oracle 全部改为 V9/V2；
 - 不用 V8→V9 migrate 兜底，不复活退役保真门；
@@ -155,11 +158,11 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的 phase gate；LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退。RTP-04 产品提交 `84c21bd` / `82bfa7e` / `9c51adb` / `876631c` / `c6b3869` 已通过独立审查，当前仅 CMP-03 active；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板。NET-H1、RTP-03 与 V8-02 已完成并通过固定候选 `7d17fed` 的 phase gate；LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退。RTP-04 已通过独立审查；CMP-03 产品提交 `2765c46` / `35e1abf` / `e61cd82` 在反例修复后获双重独立 PASS。当前 V8-03、V8-04、V8-05A 从 `e61cd82` 并行 active；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
 RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 RuntimeHost teardown 异常安全；CMP-03 只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
-已知不准入事实：sample、benchmark/release 与 portability 需等 CMP-03 通过后再逐项审计；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；Validation Report/Diagnostic Target 仍需先裁决合同；Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
+已知不准入事实：V8-06 release verifier 只能在 V8-05A 的 V9/V2 benchmark 行为门通过后准入，旧 V8 benchmark 不能提前删除；RTP-05 Published API 2 static capture 没有真实 V9 export capture consumer；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；Wave 4 的 reportVersion、schema-invalid 与 DiagnosticTarget 合同仍未裁决；Wave 5 等 Owner 先选择 SEM-B3 parity domain。Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
 ## 6. 并发与集成安排
 
@@ -173,20 +176,21 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 
 ### 6.2 当前实现编排
 
-CMP-03 已在 RTP-04 集成后获得 Slide Published host 单写入权：
+CMP-03 收口后，三个 V8 consumer 替代纵切从同一 `e61cd82` baseline 派生，写入范围互斥：
 
 | Lane | Hotspot / 写入范围 | 并行约束 |
 |---|---|---|
-| RTP-04 | session owner、API 2 mount、RuntimeHost teardown 与三个 Surface 的窄 mount-target port | completed；产品实现及 P1 反例修复已审查通过 |
-| CMP-03 | Component Phaser mount 与 Slide Published adapter | active；baseline `c6b3869`，不改其它 carrier 或 producer |
+| V8-03 | sample generator/artifact、sample 专属测试与 release verifier sample 段 | active；不改 benchmark、portability 或通用 release 行为 |
+| V8-04 | Windows portability verifier | active；不改产品宿主、sample、benchmark 或 release verifier |
+| V8-05A | render-host benchmark builder、新 V9/V2 artifact 与 focused integration/E2E | active；旧 V8 artifact 并存，不改 release verifier |
 
 计划、任务卡、`TASK_BOARD.md`、README/作者文档、共享 fixture/helper、能力与 repo-index 生成输出仍由 Integrator 单写。各 S2 作者只跑卡内 focused checks，独立 Reviewer 审 diff、失败路径与遗漏反例，不机械复跑作者命令。
 
 ### 6.3 后续准入点
 
 - NET-H1 稳定后：以真实 HTTP/WebSocket consumer 准入 API 与 NET-C1；CORS/捕获必须给出明确 fallback 或诊断。
-- RTP-04 完成后已只把 CMP-03 切为 active；Spatial scene-local API 2、global API 3、Published capture 与非 Flow shared 继续不准入。
-- CMP-03 完成后重新生成 Legacy consumer 事实，再分别决定 sample、benchmark/verify-release 与 portability 的 V9/V2 替代；不得打成一张“大清退”卡。
+- CMP-03 完成后只准入三条有现存 consumer 的 V9/V2 替代卡；Spatial scene-local API 2、global API 3、Published capture 与非 Flow shared 继续不准入。
+- V8-05A 通过后再以当前 benchmark 事实准入 V8-06 release verifier；V8-05B 的旧 V8 benchmark 删除必须等待 V8-06 consumer 全部切换，不提前建卡。
 
 ## 7. 成功门槛
 

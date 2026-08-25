@@ -1264,7 +1264,7 @@
       },
       "owner": "Tooling / Release",
       "status": "retained-compatibility",
-      "currentFact": "The product open path rejects V8; the photosynthesis lesson-demo now uses a Course Project V9 archive and Published Course V2 offline HTML, while the separate V8 archive/tooling path remains for the committed sample and render-host benchmark fixtures, portability checks, release verification, and focused archive tests.",
+      "currentFact": "The product open path rejects V8; photosynthesis already uses Course Project V9 and Published Course V2. Slide scene-local Phaser Component playback now unblocks three active, separate replacements for the committed sample, Windows portability verifier, and a side-by-side V9/V2 render-host benchmark. The old V8 benchmark remains an active release-verifier input until a later consumer switch; focused legacy archive tests are not removed by these fixture replacements.",
       "evidence": [
         {
           "path": "src/renderer/project/courseProjectIo.ts",

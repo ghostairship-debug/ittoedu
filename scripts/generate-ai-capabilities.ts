@@ -671,10 +671,12 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/player/PlayerApp.ts',
     'src/player/TeacherEscapeControls.ts',
     'src/player/surfaces/publishedDynamicHosts.ts',
+    'src/player/surfaces/publishedComponentMount.ts',
     'src/player/surfaces/flow/FlowSurfaceHost.ts',
     'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
     'src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts',
     'src/player/surfaces/slide/SlidePublishedAdapter.ts',
+    'src/player/surfaces/slide/publishedSlidePhaserComponentMount.ts',
     'src/shared/builtInComponentCatalog.ts',
     'src/shared/assessmentEvaluators.ts',
     'src/shared/componentCatalog.ts',
@@ -1049,10 +1051,38 @@ export async function generateAiCapabilityArtifacts(
         'ctx.editor.registerTextRegion',
       ],
     },
+    publishedPlayback: {
+      status: 'partial',
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderMode: 'phaser',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-component-api4-playback',
+        },
+      ],
+      notCovered: [
+        'phaser-global-or-surface-shared',
+        'phaser-flow-or-spatial',
+        'hybrid-published-parity',
+        'capture-pdf-or-pptx',
+        'component-event-or-host-actions-parity',
+      ],
+    },
     documentation: 'docs/COMPONENT_AUTHORING.md',
     sourceOfTruth: [
       'src/shared/componentSchema.ts',
       'src/shared/componentTypes.ts',
+      'src/player/surfaces/publishedComponentMount.ts',
+      'src/player/surfaces/slide/publishedSlidePhaserComponentMount.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     ],
   }))
   files.set('diagnostics.json', canonicalJson({
@@ -1159,9 +1189,34 @@ export async function generateAiCapabilityArtifacts(
       },
       authoringModes: ['professional'],
       scopes: ['manifest-dependent'],
+      publishedPlayback: {
+        status: 'partial',
+        provenSlices: [
+          {
+            surface: 'slide',
+            carrier: 'scene.layerItems',
+            scope: 'scene-local',
+            renderMode: 'phaser',
+            consumers: [
+              'current-location-try-run',
+              'whole-course-preview',
+              'single-html',
+              'web-package',
+            ],
+            behavior: 'interactive-component-api4-playback',
+          },
+        ],
+        notCovered: [
+          'phaser-global-or-surface-shared',
+          'phaser-flow-or-spatial',
+          'hybrid-published-parity',
+          'capture-pdf-or-pptx',
+          'component-event-or-host-actions-parity',
+        ],
+      },
       exports: {
-        singleHtml: 'interactive',
-        webPackage: 'interactive',
+        singleHtml: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+        webPackage: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
         pdf: 'isolated-static-capture',
         pptx: 'isolated-static-capture',
       },

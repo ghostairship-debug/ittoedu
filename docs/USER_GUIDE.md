@@ -136,7 +136,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 
 - 两种状态使用同一块 1280 × 720 舞台。切换只改变输入与运行权限，不改变画布坐标；
 - “编辑状态”使用隔离的 authoring Player 显示画面，并在上方叠加透明 Phaser 原生交互层。该透明层只负责选择、框选、移动、缩放和旋转，不重复绘制第二套视觉；教师控制器在编辑态只可排版，不会翻页或播放；
-- authoring Player 会冻结学生点击/拖拽、声明式互动、音频和视频播放、导航、状态推进及 `courseState` 写入。运行时与组件仍可创建稳定视觉，因此“看得见”不表示互动正在执行；只有能力索引已标记 playback 的 carrier 才能在“当前位置试运行”/“整课预览”验收真实行为。就 Runtime 而言，当前范围为 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM；全局 API 2 在一个会话内保持唯一实例并随 Slide/Flow/Spatial 导航迁移。API 2 的宿主动作、presentation 与节点解析仍未接线，V4 Component 依既有 Component playback 能力处理；
+- authoring Player 会冻结学生点击/拖拽、声明式互动、音频和视频播放、导航、状态推进及 `courseState` 写入。运行时与组件仍可创建稳定视觉，因此“看得见”不表示互动正在执行；只有能力索引已标记 playback 的 carrier 才能在“当前位置试运行”/“整课预览”验收真实行为。就 Runtime 而言，当前范围为 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM；全局 API 2 在一个会话内保持唯一实例并随 Slide/Flow/Spatial 导航迁移。API 2 的宿主动作、presentation 与节点解析仍未接线。就 Component 而言，当前明确证明的是 Slide scene-local API 4 Phaser；global/shared、Flow/Spatial、hybrid 与 capture 不随之开放；
 - “当前位置试运行”与“整课预览”使用 CoursePlayer + Published V2 宿主，从当前页或课程起始页真实运行。该状态不提供拖拽编辑；
 - 编辑状态中的场景/状态选择始终由编辑器决定，authoring Player 不会反向导航或覆盖选择。只有试运行中的场景和命名状态变化会同步高亮左侧场景与下方状态卡；
 - 顶部“整课预览”全屏打开同一块 1280 × 720（16:9 等比适配）舞台。编辑、当前位置试运行与整课预览共用这份逻辑画布；预览不再使用更矮的对话框改变缩放。
@@ -640,7 +640,7 @@ Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 �
 
 编辑器外部 AI 路径以两个仓库 Skill 为机器执行真相：`orchestrate-courseware` 先写出并确认中等详细的 `01-teaching-plan.md`，再写带表面、布局和逐步操作的 `02-presentation-script.md`；确认后 `build-courseware-project` 盘点资产、选择 Native / Runtime / Component，使用仓库真实 TypeScript API 增量构建或局部修补 Course Project V9，并做保存重开、Player 与导出验证。教师工作流不使用 Hash、审批状态机或 Evidence 清单。自动管线最多标记 `engineering candidate`，不能自行授予 `art candidate` 或 `accepted`。
 
-PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、V4 组件行为，以及 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 和 Flow surface-local API 3 DOM 的真实播放。这不代表 API 2 的完整宿主上下文、Flow/Spatial scene-local API 2、global API 3、未覆盖 surfaceLayerItems、捕获或 Runtime 事件/动作已实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局 API 2 Runtime；稳定画面应主动创作为场景状态，任意运行时代码不会被反向拆成可视化节点。
+PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、已证明的 Slide scene-local API 4 Phaser Component，以及 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 和 Flow surface-local API 3 DOM Runtime 的真实播放。这不代表 API 2 的完整宿主上下文、Flow/Spatial scene-local API 2、global API 3、未覆盖 shared carrier、其它 Component carrier、捕获或 Runtime 事件/动作已实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局 API 2 Runtime；稳定画面应主动创作为场景状态，任意运行时代码不会被反向拆成可视化节点。
 
 开发者可使用 [五路径渲染宿主基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js，以及 Component API 4 的 DOM 表格与 Phaser 仪表。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 
