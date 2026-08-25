@@ -62,6 +62,9 @@ const phaserSource = `
       probe.phaserCreates = (probe.phaserCreates || 0) + 1;
       probe.phaserContext = ctx.renderMode === 'phaser'
         && !!ctx.Phaser && !!ctx.phaser.scene && !('dom' in ctx);
+      ctx.phaser.scene.game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
+        probe.phaserCoreDestroys = (probe.phaserCoreDestroys || 0) + 1;
+      });
       var canvas = ctx.phaser.scene.game.canvas;
       canvas.dataset.publishedCanvasPhaserE2e = 'true';
       var panel = ctx.phaser.scene.add.rectangle(0, 0, ctx.width, ctx.height, 0x2563eb, 1)
@@ -95,6 +98,9 @@ const hybridSource = `
       probe.hybridCreates = (probe.hybridCreates || 0) + 1;
       probe.hybridContext = ctx.renderMode === 'hybrid'
         && !!ctx.Phaser && !!ctx.phaser.scene && !!ctx.dom.root && !!ctx.nodes;
+      ctx.phaser.scene.game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
+        probe.hybridCoreDestroys = (probe.hybridCoreDestroys || 0) + 1;
+      });
       var canvas = ctx.phaser.scene.game.canvas;
       canvas.dataset.publishedCanvasHybridPhaserE2e = 'true';
       var panel = ctx.phaser.scene.add.rectangle(0, 0, ctx.width, ctx.height, 0x7c3aed, 1)
@@ -215,6 +221,7 @@ for (const delivery of [
     await expect.poll(() => page.evaluate(() => window.__publishedCanvasApi2Probe))
       .toMatchObject({
         phaserDestroys: 1,
+        phaserCoreDestroys: 1,
         hybridCreates: 1,
         hybridContext: true,
       })
@@ -241,7 +248,16 @@ for (const delivery of [
     await expect(page.locator('[data-published-canvas-phaser-e2e="true"]'))
       .toBeVisible({ timeout: 15_000 })
     await expect.poll(() => page.evaluate(() => window.__publishedCanvasApi2Probe))
-      .toMatchObject({ hybridDestroys: 1, phaserCreates: 2 })
+      .toMatchObject({
+        hybridDestroys: 1,
+        hybridCoreDestroys: 1,
+        phaserCreates: 2,
+      })
+
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.destroy())
+    await expect.poll(() => page.evaluate(() => window.__publishedCanvasApi2Probe))
+      .toMatchObject({ phaserDestroys: 2, phaserCoreDestroys: 2 })
+    await expect(page.locator('[data-published-canvas-phaser-e2e="true"]')).toHaveCount(0)
 
     if (delivery.online) {
       const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]')

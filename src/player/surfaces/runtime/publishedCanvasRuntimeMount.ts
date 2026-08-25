@@ -273,7 +273,8 @@ export function mountPublishedCanvasRuntime(
     game = null
     if (!mountedGame) return
     try {
-      mountedGame.loop?.stop()
+      // Phaser completes Game.destroy() from the next public game-loop step.
+      // Stopping the loop first strands pendingDestroy and skips core cleanup.
       mountedGame.destroy(true)
     } catch (cause) {
       reportError(options, 'destroy', cause)
@@ -288,7 +289,6 @@ export function mountPublishedCanvasRuntime(
     runtimeHost = null
     registry?.dispose()
     if (initializingPhaser) {
-      game?.loop?.stop()
       targetWindow.queueMicrotask(destroyGame)
     } else destroyGame()
     host.remove()
