@@ -782,7 +782,7 @@ describe('Course Project V9 core contract', () => {
       path: 'assets/img.png',
       byteLength: 1_024,
     }
-    const withRemote = (remote: unknown): CourseProjectDocument => ({
+    const withRemote = (remote: unknown): unknown => ({
       ...minimalSlideProject(),
       assets: { 'asset-image-1': { ...asset, ...(remote === undefined ? {} : { remote }) } },
     })
@@ -802,9 +802,9 @@ describe('Course Project V9 core contract', () => {
   })
 
   it('accepts only normalized exact https/wss connect origins', () => {
-    const withOrigins = (connectOrigins: unknown): CourseProjectDocument => ({
+    const withOrigins = (connectOrigins: unknown): unknown => ({
       ...minimalSlideProject(),
-      network: { connectOrigins } as CourseProjectDocument['network'],
+      network: { connectOrigins },
     })
 
     for (const origin of [
