@@ -94,6 +94,7 @@ const reproducibleTimestamp = new Date('2026-08-13T00:00:00.000Z')
 const checks: VerificationCheck[] = []
 const portabilityComponentId = 'com.ittoedu.w3-portability-phaser-counter'
 const portabilityComponentItemId = 'component_w3_phaser_counter'
+const movedDeliveryDirectoryName = 'moved delivery 空格与中文'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -121,6 +122,36 @@ function assertTemporaryPath(
   assert(
     isWithin(isolatedRoot, candidate) && path.resolve(candidate) !== path.resolve(isolatedRoot),
     `${description} 不在 W3 临时隔离目录内：${candidate}`,
+  )
+}
+
+function assertMovedDeliveryPath(
+  isolatedRoot: string,
+  deliveryDirectory: string,
+  candidate: string,
+  description: string,
+): void {
+  assertTemporaryPath(isolatedRoot, candidate, description)
+  const relativeToIsolatedRoot = path.relative(isolatedRoot, candidate)
+  assert(
+    isWithin(deliveryDirectory, candidate),
+    `${description} 未落在带空格和 Unicode 的移动交付目录：${candidate}`,
+  )
+  assert(
+    relativeToIsolatedRoot === movedDeliveryDirectoryName ||
+      relativeToIsolatedRoot.startsWith(`${movedDeliveryDirectoryName}${path.sep}`),
+    `${description} 的实际相对路径未以移动交付目录开头：${relativeToIsolatedRoot}`,
+  )
+  assert(
+    movedDeliveryDirectoryName.includes(' ') && /[^\x00-\x7F]/.test(movedDeliveryDirectoryName),
+    '移动交付目录名称必须同时包含空格与 Unicode 字符',
+  )
+}
+
+function assertEvidencePath(candidate: string, description: string): void {
+  assert(
+    isWithin(evidenceDirectory, candidate) && path.resolve(candidate) !== path.resolve(evidenceDirectory),
+    `${description} 未落在 W3 持久 evidence 目录内：${candidate}`,
   )
 }
 
@@ -615,10 +646,11 @@ async function verifyDocumentationContract(): Promise<void> {
 async function buildAndVerifyMovedLesson(
   isolatedRoot: string,
 ): Promise<{
-  movedProjectPath: string
+  projectPathForApplication: string
   projectArtifact: Awaited<ReturnType<typeof collectFileArtifactEvidence>>
   htmlArtifact: Awaited<ReturnType<typeof collectFileArtifactEvidence>>
   webPackageArtifact: Awaited<ReturnType<typeof collectFileArtifactEvidence>>
+  webPackageDirectory: ReturnType<typeof summarizeDirectoryEvidence>
   offline: OfflineResult[]
 }> {
   const externalSourceDirectory = path.join(
@@ -626,7 +658,7 @@ async function buildAndVerifyMovedLesson(
     'external-component-library-to-disconnect',
   )
   const authoringDirectory = path.join(isolatedRoot, 'authoring-origin')
-  const deliveryDirectory = path.join(isolatedRoot, 'moved-delivery')
+  const deliveryDirectory = path.join(isolatedRoot, movedDeliveryDirectoryName)
   const movedWebDirectory = path.join(deliveryDirectory, 'web-package')
   for (const [candidate, description] of [
     [externalSourceDirectory, '临时组件源目录'],
@@ -636,6 +668,12 @@ async function buildAndVerifyMovedLesson(
   ] as const) {
     assertTemporaryPath(isolatedRoot, candidate, description)
   }
+  assertMovedDeliveryPath(
+    isolatedRoot,
+    deliveryDirectory,
+    deliveryDirectory,
+    '移动交付根目录',
+  )
   await Promise.all([
     fs.mkdir(externalSourceDirectory, { recursive: true }),
     fs.mkdir(authoringDirectory, { recursive: true }),
@@ -753,7 +791,12 @@ window.CoursewareComponent.define({
   await fs.writeFile(sourceProjectPath, initialArchive)
 
   const movedProjectPath = path.join(deliveryDirectory, 'moved-project.h5lesson')
-  assertTemporaryPath(isolatedRoot, movedProjectPath, '移动后的 V9 工程')
+  assertMovedDeliveryPath(
+    isolatedRoot,
+    deliveryDirectory,
+    movedProjectPath,
+    '移动后的 V9 工程',
+  )
   await fs.rename(sourceProjectPath, movedProjectPath)
   assertTemporaryPath(isolatedRoot, externalSourceDirectory, '待删除的临时组件源目录')
   await fs.rm(externalSourceDirectory, { recursive: true, force: true })
@@ -828,14 +871,34 @@ window.CoursewareComponent.define({
   }
   const html = buildPublishedCourseStandaloneHtml(sources, playerBundle)
   const htmlPath = path.join(deliveryDirectory, 'moved-offline.html')
-  assertTemporaryPath(isolatedRoot, htmlPath, '移动后的离线单 HTML')
+  assertMovedDeliveryPath(
+    isolatedRoot,
+    deliveryDirectory,
+    htmlPath,
+    '移动后的离线单 HTML',
+  )
   await fs.writeFile(htmlPath, html, 'utf8')
   const webFiles = buildPublishedCourseWebPackageFiles(sources, playerBundle)
   await writeWebPackageDirectory(movedWebDirectory, webFiles)
   const webArchive = buildPublishedCourseWebPackage(sources, playerBundle)
   const webArchivePath = path.join(deliveryDirectory, 'moved-web-package.zip')
-  assertTemporaryPath(isolatedRoot, webArchivePath, '移动后的网页包归档')
+  assertMovedDeliveryPath(
+    isolatedRoot,
+    deliveryDirectory,
+    movedWebDirectory,
+    '移动后的网页包目录',
+  )
+  assertMovedDeliveryPath(
+    isolatedRoot,
+    deliveryDirectory,
+    webArchivePath,
+    '移动后的网页包归档',
+  )
   await fs.writeFile(webArchivePath, webArchive)
+  pass(
+    '带空格与 Unicode 的移动交付路径',
+    `V9 工程、离线单 HTML、网页包目录与归档均位于 ${movedDeliveryDirectoryName}`,
+  )
 
   assert(!/https?:\/\//i.test(html), '移动后的单 HTML 含远程 URL')
   assertNoForbiddenPathReferences(
@@ -851,6 +914,56 @@ window.CoursewareComponent.define({
       [projectRoot, externalSourceDirectory, authoringDirectory],
     )
   }
+
+  const persistentProjectPath = path.join(
+    evidenceDirectory,
+    'moved-self-contained-v9.h5lesson',
+  )
+  const persistentHtmlPath = path.join(
+    evidenceDirectory,
+    'moved-offline-v9.html',
+  )
+  const persistentWebDirectory = path.join(
+    evidenceDirectory,
+    'moved-web-package-v9',
+  )
+  const persistentWebArchivePath = path.join(
+    evidenceDirectory,
+    'moved-web-package-v9.zip',
+  )
+  for (const [candidate, description] of [
+    [persistentProjectPath, '持久 V9 工程 evidence'],
+    [persistentHtmlPath, '持久离线单 HTML evidence'],
+    [persistentWebDirectory, '持久网页包目录 evidence'],
+    [persistentWebArchivePath, '持久网页包归档 evidence'],
+  ] as const) {
+    assertEvidencePath(candidate, description)
+  }
+  for (const [candidate, description] of [
+    [movedProjectPath, '待复制的临时 V9 工程'],
+    [htmlPath, '待复制的临时离线单 HTML'],
+    [movedWebDirectory, '待复制的临时网页包目录'],
+    [webArchivePath, '待复制的临时网页包归档'],
+  ] as const) {
+    assertMovedDeliveryPath(isolatedRoot, deliveryDirectory, candidate, description)
+  }
+  await Promise.all([
+    fs.copyFile(movedProjectPath, persistentProjectPath),
+    fs.copyFile(htmlPath, persistentHtmlPath),
+    fs.copyFile(webArchivePath, persistentWebArchivePath),
+    fs.cp(movedWebDirectory, persistentWebDirectory, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+    }),
+  ])
+  assert(
+    existsSync(persistentProjectPath) &&
+      existsSync(persistentHtmlPath) &&
+      existsSync(persistentWebArchivePath) &&
+      existsSync(path.join(persistentWebDirectory, 'index.html')),
+    '持久 portability evidence 复制后不完整',
+  )
 
   const browser = await chromium.launch({
     executablePath: systemEdgePath(),
@@ -880,16 +993,48 @@ window.CoursewareComponent.define({
     '单 HTML 与网页包均在 Edge file:// 打开，内嵌计数器响应点击，页错误/控制台错误/外部请求均为 0',
   )
 
-  const [projectArtifact, htmlArtifact, webPackageArtifact] = await Promise.all([
-    collectFileArtifactEvidence(movedProjectPath),
-    collectFileArtifactEvidence(htmlPath),
-    collectFileArtifactEvidence(webArchivePath),
-  ])
-  return {
-    movedProjectPath,
+  const [
+    movedProjectArtifact,
+    movedHtmlArtifact,
+    movedWebPackageArtifact,
     projectArtifact,
     htmlArtifact,
     webPackageArtifact,
+    movedWebPackageDirectory,
+    persistentWebPackageDirectory,
+  ] = await Promise.all([
+    collectFileArtifactEvidence(movedProjectPath),
+    collectFileArtifactEvidence(htmlPath),
+    collectFileArtifactEvidence(webArchivePath),
+    collectFileArtifactEvidence(persistentProjectPath),
+    collectFileArtifactEvidence(persistentHtmlPath),
+    collectFileArtifactEvidence(persistentWebArchivePath),
+    collectDirectoryEvidence(movedWebDirectory),
+    collectDirectoryEvidence(persistentWebDirectory),
+  ])
+  assert(
+    movedProjectArtifact.sizeBytes === projectArtifact.sizeBytes &&
+      movedProjectArtifact.sha256 === projectArtifact.sha256 &&
+      movedHtmlArtifact.sizeBytes === htmlArtifact.sizeBytes &&
+      movedHtmlArtifact.sha256 === htmlArtifact.sha256 &&
+      movedWebPackageArtifact.sizeBytes === webPackageArtifact.sizeBytes &&
+      movedWebPackageArtifact.sha256 === webPackageArtifact.sha256,
+    '持久 portability evidence 的文件副本与移动交付物不一致',
+  )
+  assertEquivalentDirectoryEvidence(movedWebPackageDirectory, persistentWebPackageDirectory)
+  const webPackageDirectory = summarizeDirectoryEvidence(
+    persistentWebPackageDirectory,
+  )
+  pass(
+    '持久 portability evidence',
+    `${path.basename(persistentProjectPath)}、${path.basename(persistentHtmlPath)}、${webPackageDirectory.fileCount} 个网页包文件均保存在 release/verification/w3-portability，且与移动交付物逐字节一致`,
+  )
+  return {
+    projectPathForApplication: movedProjectPath,
+    projectArtifact,
+    htmlArtifact,
+    webPackageArtifact,
+    webPackageDirectory,
     offline,
   }
 }
@@ -911,6 +1056,11 @@ async function main(): Promise<void> {
       assert(existsSync(requiredPath), `W3 验证缺少前置产物：${requiredPath}`)
     }
 
+    assert(
+      isWithin(releaseDirectory, evidenceDirectory) &&
+        path.resolve(evidenceDirectory) !== path.resolve(releaseDirectory),
+      `拒绝清理 release 根目录以外的 W3 evidence：${evidenceDirectory}`,
+    )
     await fs.rm(evidenceDirectory, { recursive: true, force: true })
     await fs.mkdir(evidenceDirectory, { recursive: true })
     isolatedRoot = await fs.mkdtemp(path.join(tmpdir(), 'ittoedu-w3-portability-'))
@@ -925,7 +1075,7 @@ async function main(): Promise<void> {
     const lesson = await buildAndVerifyMovedLesson(isolatedRoot)
     const movedApplication = await verifyMovedUnpackedApplication(
       isolatedRoot,
-      lesson.movedProjectPath,
+      lesson.projectPathForApplication,
     )
     const movedPortable = await verifyMovedPortableApplication(isolatedRoot)
 
@@ -946,9 +1096,35 @@ async function main(): Promise<void> {
         authoringOriginAbsentAfterMove: true,
         keptAfterRun: process.env.W3_KEEP_ISOLATED_WORKSPACE === '1',
       },
-      lesson,
-      movedApplication,
-      movedPortable,
+      lesson: {
+        movedDeliveryDirectory: {
+          name: movedDeliveryDirectoryName,
+          hasSpace: movedDeliveryDirectoryName.includes(' '),
+          hasUnicode: /[^\x00-\x7F]/.test(movedDeliveryDirectoryName),
+        },
+        projectArtifact: lesson.projectArtifact,
+        htmlArtifact: lesson.htmlArtifact,
+        webPackageArtifact: lesson.webPackageArtifact,
+        webPackageDirectory: lesson.webPackageDirectory,
+        offline: lesson.offline,
+      },
+      movedApplication: {
+        directory: movedApplication.directory,
+        screenshotPath: movedApplication.screenshotPath,
+        screenshotSha256: movedApplication.screenshotSha256,
+        isolation: {
+          appPathWithinCopiedApplication: true,
+          execPathWasCopiedExecutable: true,
+          cwdWasIsolated: true,
+          userDataWasIsolated: true,
+          configuredComponentDirectoryWasAbsent: true,
+        },
+      },
+      movedPortable: {
+        sourceSha256: movedPortable.sourceSha256,
+        movedSha256: movedPortable.movedSha256,
+        fileName: path.basename(movedPortable.movedPath),
+      },
       limitations: [
         '本验证在当前 Windows x64 主机的系统临时目录运行；它不能证明另一台全新 Windows 的环境、驱动、权限或安全软件行为。',
         'README/CMD/package scripts 的启动合同已静态核对，但没有在另一台无 node_modules 的机器上执行首次 npm ci。',
