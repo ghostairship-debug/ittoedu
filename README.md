@@ -73,7 +73,7 @@ npm test
 - 顶部“工程检查”显示当前已接线的结构、素材、交互、组件、运行时与静态兜底问题，并提供只读“信息释放”和“视觉密度”概览；当前 REPAIR 路线尚在消除 V9→V8 残缺投影造成的多 Surface、共享层、Flow/Spatial 交互和多 Runtime 盲区，因此“0 个问题”不等于整课语义完整；
 - 四种成品导出均先生成当前已接线的目标格式 Export Preflight，按错误、警告、说明列出已检出的结构问题、静态差异和启发式风险；REPAIR 完成前，V9 Runtime/Component 源码的外联网络合规和部分富排版检查仍不完整，报告存在不等于覆盖完整，离线结果须用真实浏览器和导出复核；
 - 关闭含未保存修改的窗口时明确提供“保存 / 不保存 / 取消”三种选择；保存过程中发生的新修改继续保持未保存状态，不会被错误标记为已保存；
-- 统一导出菜单：离线单 HTML、网页包、静态 PDF、对象级可编辑 PPTX；
+- 统一导出菜单：离线便携/在线轻量单 HTML、网页包、静态 PDF、对象级可编辑 PPTX；
 - 场景缩略图按 `thumbnailStateId` 绘制背景、原生元素和组件缩略图，并按层合成已启用场景/全局运行时登记的静态后备；组件未提供图片时显示带名称的后备框，已启用运行时未提供后备时显示“运行时”提示角标；
 - 大型课件缩略图延迟渲染、图片按场景加载和增量撤销历史。
 
@@ -228,10 +228,10 @@ Runtime/Component 都是经过审核的可信扩展，外部导入只是分发�
 - Player 进入场景时物化 `initialStateId`；状态切换原位更新同一节点/组件实例，不修改工程数据；
 - `scene.go` 可选携带 `targetStateId`，Player 在创建目标场景节点、运行时和组件前原子物化目标状态；状态引用无效时使用目标场景 `initialStateId`；
 - 预览、单 HTML 和网页包使用 `src/player/`；
-- 中央“当前位置试运行”使用最新工程从当前场景/状态启动；若正在编辑基础场景，则以该场景 `initialStateId` 启动。顶部“整课预览”始终在独立窗口从第一场景的初始状态开始；
+- 中央“当前位置试运行”使用最新工程从当前场景/状态启动；若正在编辑基础场景，则以该场景 `initialStateId` 启动。有 active V9 工程时，顶部“整课预览”在主 renderer 的全屏覆盖层中从第一场景初始状态开始；只有没有 active V9 source 的后备流程才打开独立预览窗口；
 - 文字、公式、图片、视频、图形或教师控制器增加新属性时，需要同时检查类型/Schema、默认创建、状态物化、透明几何代理、Player 渲染、素材引用、诊断和静态导出；
 - 外部组件在编辑模式中可整体变换；V4 使用显式公开属性，并自动显示所有 `props.content` 字符串；
-- 场景/全局运行时的 `content.values` 可由属性面板修改。Published V2 现已在 Slide 场景 `layerItems` 中真实执行 `surface-runtime` API 3 DOM：当前位置试运行、整课预览、单 HTML 和网页包均复用 `createPublishedCourseSession` 执行路径，并各自创建会话；`enabled: false` 不执行，单实例注册/创建失败只回退该图层。API 2、Flow/Spatial、global/surfaceLayer、Runtime 事件/宿主动作、静态捕获与网络/宿主本地能力仍不得借此宣称 parity；
+- 场景/全局运行时的 `content.values` 可由属性面板修改。Published V2 现已在 Slide 场景 `layerItems` 与 Flow `surfaceLayerItems` 中真实执行 `surface-runtime` API 3 DOM：当前位置试运行、整课预览、单 HTML 和网页包均复用 `createPublishedCourseSession` 执行路径，并各自创建会话；`enabled: false` 不执行，global scope 仍只显示后备，单实例注册、创建或生命周期失败只回退并销毁该实例。API 2、Spatial、globalLayerItems、Slide/Spatial surfaceLayerItems、Runtime 事件/宿主动作、静态捕获与网络/宿主本地能力仍不得借此宣称 parity；
 - 当前场景或全局运行时显式登记的 text/asset 目标可在对应编辑作用域原位修改；场景值由该场景全部命名状态共享，全局值由整课共享，均不生成 `presentation.nodeOverrides`；
 - 场景的 `interactions` 与课程级 `globalInteractions` 将可编辑节点、组件事件和带作用域的运行时事件映射到元素入场/退场、状态、导航和音视频动作；连续 `with-previous` 步骤同组并行，下一个 `after-previous` 等待整组完成；
 - 新工程的 `TeacherControllerNode` 位于全局画布。默认“场景目录”是 `scene.open-picker`，列出全部场景，选择后进入该场景初始状态；展开与选中不会写入场景状态。固定 `scene.go` 可为高级按钮配置目标场景与可选目标状态；
@@ -243,11 +243,11 @@ Runtime/Component 都是经过审核的可信扩展，外部导入只是分发�
 
 ## 导出链路
 
-选择单 HTML、网页包、PDF 或 PPTX 后，编辑器都会先为该目标生成当前已接线的 Export Preflight。报告统一包含 `error`、`warning`、`info` 三档以及可选的 `sceneId/stateId/nodeId/path` 定位信息；已检出的错误会阻断导出，静态格式差异与启发式问题作为人工复核线索。当前 V9 路径尚未完整接入 Runtime/Component 网络声明一致性检查和全部富排版分析，因此“无错误”只表示现有检查未发现阻断项，不能证明远程依赖、离线便携或静态捕获均可用。报告可保存为带 `reportVersion`、工程/格式信息和汇总结果的 JSON；它面向一次具体导出，不能代替真实浏览器外部请求检查、长期结构检查或异常诊断日志。
+选择单 HTML、网页包、PDF 或 PPTX 后，编辑器都会先为该目标生成当前已接线的 Export Preflight。报告统一包含 `error`、`warning`、`info` 三档以及可选的 `sceneId/stateId/nodeId/path` 定位信息；已检出的错误会阻断导出，静态格式差异与启发式问题作为人工复核线索。在线轻量单 HTML 会列出实际引用的远程素材，无法形成精确 CSP origin 的 wildcard 地址会在写盘前阻断；它不探测网络可达性。当前 V9 路径尚未完整接入 Runtime/Component 源码的网络声明一致性检查和全部富排版分析，因此“无错误”只表示现有检查未发现阻断项，不能证明 CORS、远端服务或静态捕获均可用。报告可保存为带 `reportVersion`、工程/格式信息和汇总结果的 JSON；它面向一次具体导出，不能代替真实浏览器外部请求检查、长期结构检查或异常诊断日志。
 
 | 格式 | 实现方式 | 交互 | 后续编辑 |
 | --- | --- | --- | --- |
-| 单 HTML | 当前版本把 PublishedLesson、素材和 Player Runtime 内联；后续增加“离线便携/在线轻量”导出选择 | 保留 | 不能从成品恢复工程；修改原 `.h5lesson` |
+| 单 HTML | 离线便携模式内联全部发布素材；在线轻量模式保留实际引用且声明了 `remote.url` 的工程素材地址，其余素材仍内联 | 保留 | 不能从成品恢复工程；修改原 `.h5lesson` |
 | 网页包 | ZIP 内分离 `index.html`、唯一 `course-data.js` 发布数据、Player 和运行素材 | 保留 | 不能从成品恢复工程；修改原 `.h5lesson` |
 | PDF | 使用实际 Player Runtime 捕获 Canvas、DOM、全局层与场景层，再由 Electron 打印 | 不保留 | 固定版式 |
 | PPTX | 原生节点逐对象生成；公式、组件和运行时按透明快照/`staticFallback` 静态化 | 不保留 | 原生对象可修改；公式等静态化内容只能整体调整 |
@@ -368,7 +368,7 @@ npm run verify
 - 不包含通用时间轴、关键帧/路径系统、节点连线式状态机、题库/成绩、多用户协作、云同步、模板市场和移动端编辑；编辑器提供事件驱动的入场/退场、顺序/并行步骤、表单式声明交互映射和稳定场景状态，复杂连续效果仍由可信运行时或组件实现；
 - PDF 为静态版式；
 - PPTX 为对象级素材导出，互动组件只保留其在 `capture` 模式经 `prepareCapture()` 生成的确定性静态快照；失败时使用带名称的诊断占位；
-- 当前单 HTML 和网页包仍是离线资源输出；网络基础完成后，在线轻量单 HTML 可依赖工程声明的远程媒体/API，离线便携模式继续内嵌资源；
+- 单 HTML 已明确提供离线便携与在线轻量两种选择：前者内嵌发布素材，后者保留实际引用的声明式远程素材 URL，并按工程 `connectOrigins` 生成精确 CSP；网页包仍使用相对本地资源；
 - 当前源码入口直接运行项目锁定的 Electron，不生成已签名安装包；请只从可信仓库获取源码和依赖锁文件。
 
 ## 源码 ZIP 说明

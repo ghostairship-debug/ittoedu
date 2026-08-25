@@ -134,6 +134,8 @@ describe('repo-index query and Context Pack', () => {
     )
   })
 
+  // Cold graph scans can overlap the full Vitest worker pool; cached-query latency
+  // retains its dedicated two-second product guard below.
   it('prioritizes exact symbol and path facts', () => {
     const engine = createEngine()
     const symbol = engine.query({
@@ -160,7 +162,7 @@ describe('repo-index query and Context Pack', () => {
     ])
     expect(path.associatedFeatures?.length).toBeGreaterThan(0)
     expect(path.relatedEdges.length).toBeGreaterThan(0)
-  })
+  }, 15_000)
 
   it('resolves a unique semantic terminology alias without fabricating a Symbol fact', () => {
     const result = createEngine().query({
@@ -260,7 +262,7 @@ describe('repo-index query and Context Pack', () => {
       'tsconfig.e2e.json',
       'src/main/ipc.ts',
     ]))
-  })
+  }, 15_000)
 
   it('keeps external Catalog and ambiguous free text low-confidence with Bootstrap fallback', () => {
     const engine = createEngine()

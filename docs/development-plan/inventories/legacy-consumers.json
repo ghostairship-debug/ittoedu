@@ -342,11 +342,6 @@
         "buildFixtureOrRelease": {
           "confirmed": [
             {
-              "path": "scripts/build-incline-motion-lesson.ts",
-              "symbol": "buildExportPayload",
-              "use": "Builds a Legacy standalone lesson artifact."
-            },
-            {
               "path": "scripts/build-interactive-lesson.ts",
               "symbol": "buildExportPayload",
               "use": "Builds the lesson-demo fixture."
@@ -437,7 +432,7 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'buildExportPayload' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 23
+            "observedMatches": 21
           }
         ],
         "requiredForRemoval": "Migrate or explicitly retain every authoring-preview, build, fixture, portability, test, generated artifact, and PlayerApp consumer."
@@ -1225,13 +1220,7 @@
           "unknowns": []
         },
         "buildFixtureOrRelease": {
-          "confirmed": [
-            {
-              "path": "scripts/build-incline-motion-lesson.ts",
-              "symbol": "collectProjectHealth",
-              "use": "Validates a Legacy build fixture before export."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
@@ -1296,7 +1285,7 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'collectProjectHealth' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 32
+            "observedMatches": 34
           }
         ],
         "requiredForRemoval": "Migrate App, panel, export, fixture, tests, and generated diagnostic-code provenance to V9 rules; exact references must be zero or split into a retained primitive."
@@ -1346,7 +1335,7 @@
       },
       "owner": "Tooling / Release",
       "status": "retained-compatibility",
-      "currentFact": "The product open path rejects V8; the separate V8 archive/tooling path remains only for the committed sample and render-host benchmark fixtures, portability checks, release verification, and focused archive tests.",
+      "currentFact": "The product open path rejects V8; the separate V8 archive/tooling path remains only for the committed sample, photosynthesis lesson-demo, and render-host benchmark fixtures, portability checks, release verification, and focused archive tests.",
       "evidence": [
         {
           "path": "src/renderer/project/courseProjectIo.ts",
@@ -1362,6 +1351,11 @@
           "path": "examples/render-host-benchmark/project.json",
           "symbol": "schemaVersion",
           "note": "Committed V8 benchmark source."
+        },
+        {
+          "path": "scripts/build-interactive-lesson.ts",
+          "symbol": "main",
+          "note": "Builds and checks the committed V8 photosynthesis lesson-demo fixture consumed by editor E2E."
         }
       ],
       "consumerCategories": {
@@ -1458,6 +1452,11 @@
               "use": "Release sample artifact."
             },
             {
+              "path": "examples/photosynthesis-interactive-lesson.h5lesson",
+              "symbol": "committed V8 archive",
+              "use": "Lesson-demo artifact built before editor E2E."
+            },
+            {
               "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
               "symbol": "committed V8 archive",
               "use": "Render-host benchmark artifact."
@@ -1488,6 +1487,11 @@
               "path": "tests/integration/renderHostBenchmark.test.ts",
               "symbol": "openProjectArchive",
               "use": "Asserts the retained benchmark is Project V8."
+            },
+            {
+              "path": "tests/e2e/editor.spec.ts",
+              "symbol": "photosynthesis-interactive-lesson.html",
+              "use": "Exercises the generated three-page offline lesson-demo behavior."
             }
           ],
           "unknowns": []
@@ -1545,6 +1549,10 @@
             "symbol": "committed artifact"
           },
           {
+            "path": "examples/photosynthesis-interactive-lesson.h5lesson",
+            "symbol": "committed artifact"
+          },
+          {
             "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
             "symbol": "committed artifact"
           }
@@ -1556,7 +1564,8 @@
       "tests": [
         "tests/unit/projectArchive.test.ts",
         "tests/integration/renderHostBenchmark.test.ts",
-        "tests/e2e/render-host-benchmark.spec.ts"
+        "tests/e2e/render-host-benchmark.spec.ts",
+        "tests/e2e/editor.spec.ts"
       ],
       "stableSince": {
         "status": "not-applicable-retained-at-baseline",

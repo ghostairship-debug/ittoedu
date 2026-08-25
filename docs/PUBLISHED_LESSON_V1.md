@@ -59,7 +59,9 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 
 ### 单 HTML
 
-- PublishedLesson V1、素材和 Player 全部内联；
+- 离线便携模式把 PublishedLesson V1、全部发布素材和 Player 内联；
+- 在线轻量模式只把实际引用且声明 `remote.url` 的工程素材保留为原 HTTPS URL；未声明远程地址的工程素材与全部组件素材仍内联；
+- 在线轻量 CSP 只加入实际远程图片/媒体/字体的精确 origin 与工程 `network.connectOrigins`，不允许 wildcard hostname 或远程脚本；
 - 发布 JSON 整体使用 Base64 装入 HTML；
 - 不含 `.h5lesson`、`project.json` 或组件包目录。
 
@@ -71,13 +73,13 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 - `assets/` 中的工程运行素材
 - `component-assets/` 中的组件运行素材
 
-网页包不再同时保存 `course.json` 和离线回退副本，也不生成组件 `manifest.json` 或 `runtime.js`。唯一数据脚本同时支持静态服务器和 `file://` 双击打开。
+网页包不再同时保存 `course.json` 和离线回退副本，也不生成组件 `manifest.json` 或 `runtime.js`。工程与组件素材继续使用包内相对路径，唯一数据脚本同时支持静态服务器和 `file://` 双击打开；在线轻量单 HTML 的远程投影不会改变网页包语义。
 
 ## 验收门禁
 
 发布相关测试必须同时验证：
 
-1. 单 HTML 与网页包产生相同的 PublishedLesson 语义；
+1. 离线便携单 HTML 与网页包产生相同的 PublishedLesson 内容语义，仅素材 URL 载体不同；在线轻量单 HTML 只允许合同声明的远程投影差异；
 2. 发布数据不含工程包装、工程时间、组件包结构和编辑器字段；
 3. 网页包只有一份发布数据，不含组件源码/manifest 重复文件和源码映射；
 4. 所有素材 URL 在网页包根目录内，不能路径穿越；

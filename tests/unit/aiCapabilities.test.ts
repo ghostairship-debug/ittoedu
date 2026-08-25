@@ -112,6 +112,14 @@ describe('AI capability manifest generation', () => {
         output: string
         constraints: string[]
       }
+      runtime: { exports: { singleHtml: string; webPackage: string } }
+      exportSurfaces: {
+        singleHtml: {
+          resources: string
+          modes: { offlinePortable: string; onlineLightweight: string }
+          networkPolicy: string
+        }
+      }
     }>(first.files, 'index.json')
     expect(first.indexBytes).toBeLessThanOrEqual(AI_CAPABILITY_INDEX_MAX_BYTES)
     expect(first.indexBytes).toBe(canonicalJsonByteLength(index))
@@ -176,6 +184,19 @@ describe('AI capability manifest generation', () => {
       releaseBlockersMustBeEmpty: true,
       licenseStatusMustBe: 'verified',
       maintainerMustBeAssigned: true,
+    })
+    expect(index.runtime.exports).toMatchObject({
+      singleHtml: 'partial:slide-scene-and-flow-surface-runtime-api3-dom-interactive',
+      webPackage: 'partial:slide-scene-and-flow-surface-runtime-api3-dom-interactive',
+    })
+    expect(index.exportSurfaces.singleHtml).toEqual({
+      interactivity: 'preserved',
+      resources: 'selectable-inline-or-declared-remote',
+      modes: {
+        offlinePortable: 'all-published-assets-inline',
+        onlineLightweight: 'referenced-project-assets-with-remote-url-remote-others-inline',
+      },
+      networkPolicy: 'exact-declared-origins-no-remote-script',
     })
     expect(index.headlessBuild).toEqual({
       language: 'typescript',
@@ -605,6 +626,12 @@ describe('AI capability manifest generation', () => {
       publishedPlayback: {
         status: string
         supportedSlice: { consumers: string[] }
+        supportedSlices: Array<{
+          surface: string
+          carrier: string
+          scope: string
+          consumers: string[]
+        }>
         notCovered: string[]
       }
     }>(generated.files, 'schemas/runtime-api3.json')
@@ -625,13 +652,25 @@ describe('AI capability manifest generation', () => {
     })
     expect(surfaceRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
       'canvas-runtime-api2',
-      'flow-or-spatial',
-      'globalLayerItems-or-surfaceLayerItems',
+      'spatial',
+      'globalLayerItems-or-non-flow-surfaceLayerItems',
       'runtime.event-or-host-actions',
       'cross-surface-courseState-or-presentation',
       'capture-pdf-or-pptx',
       'network-or-host-local-capabilities',
     ]))
+    expect(surfaceRuntime.publishedPlayback.supportedSlices).toEqual([
+      expect.objectContaining({
+        surface: 'slide',
+        carrier: 'scene.layerItems',
+        scope: 'scene-local',
+      }),
+      expect.objectContaining({
+        surface: 'flow',
+        carrier: 'surfaceLayerItems',
+        scope: 'surface-local',
+      }),
+    ])
     const interactions = parseFile<{
       contract: string
       protocolVersion: number

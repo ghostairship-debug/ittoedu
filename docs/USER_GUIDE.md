@@ -2,7 +2,7 @@
 
 本指南适用于 **互动课件编辑器（Windows x64）**，当前工程格式为 Course Project V9（`schemaVersion: 9`）。详细合同见 [docs/contracts/](contracts/)。产品由 **ittoedu** 开发，英文名为 **ittoedu Courseware Editor**。Course Project V9 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；简单点击/切场/播媒体用原生节点与声明式交互；稍复杂的局部互动用组件（可复用或为本课新建）；整页动画、特效与连续机制用场景/世界运行时。包版本号已是 `1.0.0`，V9 Schema 已软冻结；未获教师验收前不宣称 Editor 1.0 已发布。
 
-文档同步基线：**2026-08-18**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
+文档同步基线：**2026-08-26**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
 
 ## 1. 启动编辑器
 
@@ -87,7 +87,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 
 工程文件包含课件数据、素材、自由运行时和工程组件。移动到另一台电脑时，只需复制 `.h5lesson` 文件。运行时和组件都属于可执行代码，只打开可信来源工程。
 
-当前自动化已验证：把唯一外部组件源删除后，移动的 `.h5lesson` 仍可重开、修改、重存并从归档恢复组件；移动后的单 HTML 与完整网页包也可通过 `file://` 离线运行。该结果来自同一 Windows 主机的隔离目录（2026-08-13 验证，记录存于 Git 历史），只证明自包含与路径独立，不等于已经在另一台干净电脑上完成人工验收。
+当前自动化已验证：把唯一外部组件源删除后，移动的 `.h5lesson` 仍可重开、修改、重存并从归档恢复组件；移动后的离线便携单 HTML 与完整网页包也可通过 `file://` 离线运行。在线轻量单 HTML 会保留声明的远程依赖，不属于这项离线便携证明。该结果来自同一 Windows 主机的隔离目录（2026-08-13 验证，记录存于 Git 历史），只证明自包含与路径独立，不等于已经在另一台干净电脑上完成人工验收。
 
 ### 3.5 自动恢复
 
@@ -136,7 +136,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 
 - 两种状态使用同一块 1280 × 720 舞台。切换只改变输入与运行权限，不改变画布坐标；
 - “编辑状态”使用隔离的 authoring Player 显示画面，并在上方叠加透明 Phaser 原生交互层。该透明层只负责选择、框选、移动、缩放和旋转，不重复绘制第二套视觉；教师控制器在编辑态只可排版，不会翻页或播放；
-- authoring Player 会冻结学生点击/拖拽、声明式互动、音频和视频播放、导航、状态推进及 `courseState` 写入。运行时与组件仍可创建稳定视觉，因此“看得见”不表示互动正在执行；只有能力索引已标记 playback 的 carrier 才能在“当前位置试运行”/“整课预览”验收真实行为。就 Runtime 而言，当前范围仅为 Slide 场景 `layerItems` 内的 API 3 DOM Surface Runtime；V4 Component 依既有 Component playback 能力处理；
+- authoring Player 会冻结学生点击/拖拽、声明式互动、音频和视频播放、导航、状态推进及 `courseState` 写入。运行时与组件仍可创建稳定视觉，因此“看得见”不表示互动正在执行；只有能力索引已标记 playback 的 carrier 才能在“当前位置试运行”/“整课预览”验收真实行为。就 Runtime 而言，当前范围仅为 Slide 场景 `layerItems` 与 Flow `surfaceLayerItems` 内的 API 3 DOM Surface Runtime；V4 Component 依既有 Component playback 能力处理；
 - “当前位置试运行”与“整课预览”使用 CoursePlayer + Published V2 宿主，从当前页或课程起始页真实运行。该状态不提供拖拽编辑；
 - 编辑状态中的场景/状态选择始终由编辑器决定，authoring Player 不会反向导航或覆盖选择。只有试运行中的场景和命名状态变化会同步高亮左侧场景与下方状态卡；
 - 顶部“整课预览”全屏打开同一块 1280 × 720（16:9 等比适配）舞台。编辑、当前位置试运行与整课预览共用这份逻辑画布；预览不再使用更矮的对话框改变缩放。
@@ -347,7 +347,7 @@ V4 DOM/hybrid 组件有一个明确例外：它的 DOM 部分位于固定组件 
 
 ### 9.4 场景与全局运行时文字
 
-Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开发”面板写入运行时。API 2 canvas Runtime 严格声明 `dom`、`phaser` 或 `hybrid`；API 3 surface Runtime 使用 DOM，旧 API 1 会得到“不受支持”诊断。属性栏会显示运行时登记的全部 `content.values` 文案并保存到工程与 Published payload；Published V2 当前只对 Slide 场景 `layerItems` 的 `surface-runtime` API 3 DOM 在试运行、整课预览、单 HTML 与网页包中执行真实互动。其他 Runtime carrier 仍按 fallback/占位处理，修改 `renderMode` 不会自动转换 DOM/Phaser 实现。
+Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开发”面板写入运行时。API 2 canvas Runtime 严格声明 `dom`、`phaser` 或 `hybrid`；API 3 surface Runtime 使用 DOM，旧 API 1 会得到“不受支持”诊断。属性栏会显示运行时登记的全部 `content.values` 文案并保存到工程与 Published payload；Published V2 当前对 Slide 场景 `layerItems` 和 Flow `surfaceLayerItems` 的 `surface-runtime` API 3 DOM 在试运行、整课预览、单 HTML 与网页包中执行真实互动。Flow global scope、API 2、Spatial、globalLayerItems 与非 Flow 的 surfaceLayerItems 仍按 fallback/占位处理，修改 `renderMode` 不会自动转换 DOM/Phaser 实现。
 
 场景或全局运行时如果显式启用 Runtime Authoring V1，还可把文字或图片区域开放到对应画布作用域：文字目标必须对应 `content.values` 中已有的键，图片目标必须对应 `assets` 中已有的绑定。编辑状态下双击目标即可原位修改文字或选择替换图片；`ctx.authoring` 不提供原始 Store，修改由宿主转成 canonical command/history。`scene.runtime` 的内容由当前场景的基础及全部命名状态共享，`globalRuntime` 的内容由整课共享，均不会生成某个状态专属覆盖。
 
@@ -486,7 +486,7 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 
 “重播本页”只重建当前场景的原生节点、场景组件和场景运行时；统一全局层、全局运行时和课程进度状态保留。“重开课程”会清空课程状态，重建全局/场景作用域并回到第一场景。两者语义不同。
 
-关闭整课预览窗口不会修改工程。预览内容由主进程内存中的受控协议提供，窗口关闭时释放，不会把当前课件写成临时 HTML 文件。
+关闭整课预览覆盖层不会修改工程。有 active V9 工程时，当前 Published V2 数据直接在主 renderer 内存中挂载并随覆盖层释放，不会把课件写成临时 HTML 文件；只有没有 active V9 source 的后备流程才使用独立预览窗口。
 
 ## 14. 导出单 HTML、网页包、PPTX 和 PDF
 
@@ -497,28 +497,30 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 - “信息释放”按每个场景/状态的现有可见性与声明式交互，列出初始可见、分步显示和没有可达揭示路径的隐藏节点。运行时、媒体、组件和翻页笔事件只按“可能发生”处理，因此它不是一次真实授课模拟；
 - “视觉密度”按可见对象数、文字字符数、累计包围盒面积和显著重叠对数生成 0–100 启发式分数及低/中/高分档。它不理解教学重点、留白意图或视觉质量，不会单独阻断导出。
 
-当真正选择单 HTML、网页包、PDF 或 PPTX 时，编辑器还会生成该格式当前已接线的“导出预检”。报告分为“错误 / 警告 / 说明”：已检出的确定性错误必须返回编辑并修复；只有警告和说明时，可阅读静态化差异及启发式风险后确认继续。REPAIR 完成前，V9 Runtime/Component 的实际网络使用与工程声明一致性以及部分富排版检查尚未完整接入，报告存在不等于覆盖完整；离线 HTML/网页包仍须在真实浏览器中检查外部请求。未引用素材只产生一条数量/字节聚合说明；这不表示 `.h5lesson` 会自动裁剪素材。可定位项目会跳到对应场景、状态或节点；“保存报告”会另存包含报告版本、工程/目标格式、生成时间、稳定诊断 code、问题定位字段和汇总的 JSON，便于复现同一次导出决定。
+当真正选择单 HTML、网页包、PDF 或 PPTX 时，编辑器还会生成该格式当前已接线的“导出预检”。报告分为“错误 / 警告 / 说明”：已检出的确定性错误必须返回编辑并修复；只有警告和说明时，可阅读静态化差异及启发式风险后确认继续。在线轻量单 HTML 会列出实际引用的远程素材；不能形成精确 HTTPS origin 的地址会阻断，但预检不会探测远端是否可达或是否允许 CORS。REPAIR 完成前，V9 Runtime/Component 源码的实际网络使用与工程声明一致性以及部分富排版检查尚未完整接入，报告存在不等于覆盖完整；离线便携单 HTML/网页包应在真实浏览器中确认没有意外外联，在线轻量单 HTML 应核对预期远程请求、可达性和 CORS。未引用素材只产生一条数量/字节聚合说明；这不表示 `.h5lesson` 会自动裁剪素材。可定位项目会跳到对应场景、状态或节点；“保存报告”会另存包含报告版本、工程/目标格式、生成时间、稳定诊断 code、问题定位字段和汇总的 JSON，便于复现同一次导出决定。
 
 “导出诊断报告”与上述两种检查用途不同：它导出主进程、编辑器、预览和组件的本地异常日志及版本/平台信息，不包含课件素材内容，适合在崩溃、预览或组件异常时交给开发者排查。它不是课件内容清单，也不会自动修复问题。
 
-开发者或 AI 也可在仓库终端执行 `npm run --silent validate:project -- <file.h5lesson>`。stdout 只输出稳定 JSON，包含 Schema issues 路径、当前已接线的结构性工程健康结果和单 HTML/网页包/PDF/PPTX 四份预检；退出码 0 表示这些已接线检查没有 error，不表示完整 V9 语义或实际网络使用与工程声明一致已经证明。退出码 1 表示工程可读但已检出 error，2 表示参数、文件、归档或 Schema 无法校验。命令不会启动窗口、执行真实导出或改写文件；Node 近似布局和 Headless 绿色都必须由真实 Player、导出画面及外部请求检查补足。
+开发者或 AI 也可在仓库终端执行 `npm run --silent validate:project -- <file.h5lesson>`。stdout 只输出稳定 JSON，包含 Schema issues 路径、当前已接线的结构性工程健康结果和默认离线便携单 HTML、网页包、PDF、PPTX 四份预检；当前 CLI 不执行在线轻量模式的 remote URL/CSP 检查。退出码 0 表示这些已接线检查没有 error，不表示完整 V9 语义或实际网络使用与工程声明一致已经证明。退出码 1 表示工程可读但已检出 error，2 表示参数、文件、归档或 Schema 无法校验。命令不会启动窗口、执行真实导出或改写文件；Node 近似布局和 Headless 绿色都必须由真实 Player、导出画面及外部请求检查补足。
 
 | 格式 | 生成方式 | 保留互动 | 后续编辑 | 推荐用途 |
 | --- | --- | --- | --- | --- |
-| 单 HTML | 单向编译的发布数据、素材和 Player 全部内联 | 是，含声音和视频 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 小中型课件、最方便的单文件传递 |
+| 离线便携单 HTML | 单向编译的发布数据、素材和 Player 全部内联 | 是，含声音和视频 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 需要无网络传递的小中型课件 |
+| 在线轻量单 HTML | 实际引用且声明 `remote.url` 的工程素材保留 HTTPS 地址，其他素材和 Player 内联 | 是，依赖网络的素材/API 需另验 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 已部署远程媒体、希望减小文件体积的课件 |
 | 网页包 | ZIP 内分离 `index.html`、唯一发布数据、Player 和运行素材 | 是，含声音和视频 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 大型课件、视频或资源较多、静态网站部署 |
 | PDF | 捕获 Canvas、DOM、全局层和场景层的 16:9 合成画面 | 否 | 不可拆分编辑 | 打印、审阅、归档 |
 | PPTX | 原生节点逐对象导出，公式、组件、运行时、着重号文字和左起竖排文字静态化 | 否 | 普通原生文字/图形/图片可编辑；公式等静态化内容整体调整 | 素材提取、二次排版、汇报整合 |
 
 ### 14.1 导出单 HTML
 
-1. 单击顶部“导出”→“单 HTML”。
-2. 选择文件名和保存位置。
-3. 在系统浏览器中双击 `.html`，逐页检查布局和组件交互。
+1. 单击顶部“导出”，选择“离线便携单 HTML”或“在线轻量单 HTML”。
+2. 阅读导出预检；在线轻量模式会列出实际远程素材，非精确 HTTPS 地址会阻断。
+3. 选择文件名和保存位置。
+4. 在系统浏览器中双击 `.html`，逐页检查布局和组件交互；在线轻量模式还要检查远程请求、CORS 和断网结果。
 
-HTML 不需要同目录资源、服务器或网络，移动课件时只需复制这一个文件。文件内 CSP 会阻止网络连接，因此组件不应依赖在线 API、CDN 或远程素材。单 HTML 使用 PublishedLesson V1，不包含可直接导入的 Course Project V9、历史记录、编辑器字段、组件 manifest 或独立原始 `runtime.js`；互动执行代码仍会以可恢复的编码形式随成品交付，因此不能把它视为加密或 DRM。
+离线便携模式不需要同目录资源、服务器或网络，移动课件时只需复制这一个文件；全部发布素材使用 Data URL，CSP 不开放远程 origin。在线轻量模式仍是一个文件，但会保留实际引用且声明了 `remote.url` 的工程素材 HTTPS 地址，并把工程 `network.connectOrigins` 写入精确 CSP；未声明远程地址的工程素材与全部组件素材继续内联，远程脚本不开放。它不探测远端可达性或绕过 CORS，也不能保存长期 API Key。两种单 HTML 都使用 PublishedLesson V1，不包含可直接导入的 Course Project V9、历史记录、编辑器字段、组件 manifest 或独立原始 `runtime.js`；互动执行代码仍会以可恢复的编码形式随成品交付，因此不能把它视为加密或 DRM。
 
-预计文件超过 50 MB 时，编辑器会显示体积、解释启动和内存风险，并推荐改用网页包；可以在未超过 256 MB 时选择继续。超过 256 MB 后必须改用网页包。视频在单 HTML 中会转成 Base64，体积还会额外膨胀并提高启动峰值内存，因此只要包含较大的视频，即使尚未触发硬限制，也建议优先网页包。
+预计文件超过 50 MB 时，编辑器会显示体积、解释启动和内存风险，并推荐改用网页包；可以在未超过 256 MB 时选择继续。超过 256 MB 后必须改用网页包。没有 `remote.url` 的视频在两种单 HTML 中都会转成 Base64；已声明且实际引用的视频只有在线轻量模式会保留远程 URL。体积与离线可用性需要按最终模式分别验收。
 
 ### 14.2 导出网页包
 
@@ -601,7 +603,7 @@ macOS 风格的 `Command` 组合在代码中有兼容处理，但 Editor 1.0.0 �
 - 编辑器与预览窗口禁止任意外部导航和新窗口；远程媒体/API 只按工程声明与宿主策略开放，下载和设备能力只在出现真实 consumer 后逐项接入。
 - 中央统一画布的 authoring / playback Player 文档使用临时 Blob URL，并位于不授予同源权限的 sandbox iframe；工程与组件素材通过可转移二进制缓冲区进入沙箱，再由 iframe 创建同源 Blob URL。主进程仅允许编辑器主窗口中的同源派生 Blob 子框架导航，主框架与独立预览窗口仍拒绝 Blob 和外部导航。编辑器只接受当前会话的 Player 消息；实例替换、关闭或失败时，父窗口撤销文档 URL，iframe 在卸载时撤销素材 URL。authoring 状态还冻结互动、媒体、导航与课程状态写入；这些机制解决视觉合成、生命周期与状态竞态，不是可信 Runtime/Component 必须永久继承的权限边界。
 - `.h5lesson`、最近工程列表和自动恢复副本保存在本机；单 HTML、网页包、PDF、PPTX 仅写入用户在系统对话框中选择的位置。
-- 导出的单 HTML 与网页包都限制网络连接，但其中的可信运行时和组件代码仍可控制课件页面自身。
+- 离线便携单 HTML 不开放外部 origin；网页包只允许包内资源及部署后的同源连接，不开放外部 origin；在线轻量单 HTML 只放行远程素材的精确 HTTPS origin 与工程声明的 `https`/`wss` `connectOrigins`，远程脚本仍禁止。三者中的可信运行时和组件代码都可控制课件页面自身。
 - `.h5lesson` 的自由运行时和 `.h5component` 都是可执行代码，不等同于普通图片素材；本产品只接收已经审核的 Runtime/Component，格式校验本身不替代该审核。
 
 ## 17. 常见错误处理
@@ -638,7 +640,7 @@ Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 �
 
 编辑器外部 AI 路径以两个仓库 Skill 为机器执行真相：`orchestrate-courseware` 先写出并确认中等详细的 `01-teaching-plan.md`，再写带表面、布局和逐步操作的 `02-presentation-script.md`；确认后 `build-courseware-project` 盘点资产、选择 Native / Runtime / Component，使用仓库真实 TypeScript API 增量构建或局部修补 Course Project V9，并做保存重开、Player 与导出验证。教师工作流不使用 Hash、审批状态机或 Evidence 清单。自动管线最多标记 `engineering candidate`，不能自行授予 `art candidate` 或 `accepted`。
 
-PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、V4 组件行为，以及 Slide 场景 `layerItems` 中 `surface-runtime` API 3 DOM 的真实播放。这不代表 API 2、Flow/Spatial、global/surfaceLayer、捕获或 Runtime 事件/动作已实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局组件，但不会把任意运行时代码反向拆成可视化节点；稳定画面应主动创作为场景状态。
+PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、V4 组件行为，以及 Slide 场景 `layerItems` 和 Flow `surfaceLayerItems` 中 `surface-runtime` API 3 DOM 的真实播放。这不代表 API 2、Spatial、globalLayerItems、非 Flow 的 surfaceLayerItems、捕获或 Runtime 事件/动作已实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局组件，但不会把任意运行时代码反向拆成可视化节点；稳定画面应主动创作为场景状态。
 
 开发者可使用 [五路径渲染宿主基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js，以及 Component API 4 的 DOM 表格与 Phaser 仪表。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 

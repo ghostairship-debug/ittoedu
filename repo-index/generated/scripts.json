@@ -17,10 +17,6 @@
       "role": "project-tool"
     },
     {
-      "path": "scripts/build-incline-motion-lesson.ts",
-      "role": "project-tool"
-    },
-    {
       "path": "scripts/build-interactive-lesson.ts",
       "role": "project-tool"
     },
