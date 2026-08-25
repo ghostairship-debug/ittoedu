@@ -1,8 +1,6 @@
 import type { PublishedCourseV2Payload } from '../shared/publishedCourseTypes'
-import { HostEvidenceRecorder } from './HostEvidenceRecorder'
 import { PlayerApp } from './PlayerApp'
 import { PlayerPresenterInput } from './PlayerPresenterInput'
-import { TeacherEscapeControls } from './TeacherEscapeControls'
 import type { PublishedCourseSession } from './surfaces/publishedDynamicHosts'
 
 function readPublishedIndex(session: PublishedCourseSession): number {
@@ -15,7 +13,7 @@ function readPublishedIndex(session: PublishedCourseSession): number {
 
 /**
  * Delivery Presenter for Published Course V2: expose the existing Player
- * scene-index bridge, teacher escape controls, and keyboard navigation
+ * scene-index bridge and keyboard navigation
  * without switching the package back to Project V8 `__H5_LESSON_PAYLOAD__`.
  */
 export function attachPublishedCoursePresenter(
@@ -25,20 +23,16 @@ export function attachPublishedCoursePresenter(
 ): void {
   const totalScenes = Math.max(1, session.listCatalog().length)
   const presenter = payload.playback.presenter
-  const evidence = new HostEvidenceRecorder()
-  const stage = root
-  stage.style.position = stage.style.position || 'relative'
 
   const readIndex = () => readPublishedIndex(session)
-  let escapeControls: TeacherEscapeControls | null = null
   let presenterInput: PlayerPresenterInput | null = null
   let destroyed = false
+  let replayPending = false
 
   const goToIndex = (index: number): boolean => {
     if (index < 0 || index >= totalScenes) return false
     void session.goToIndex(index).then(() => {
       presenterInput?.setIndex(index)
-      escapeControls?.refresh()
     }).catch((error) => {
       console.error('课程翻页失败', error)
     })
@@ -46,39 +40,17 @@ export function attachPublishedCoursePresenter(
   }
 
   const replayScene = (): boolean => {
-    if (destroyed) return false
+    if (destroyed || replayPending || !session.canReplayScene()) return false
+    replayPending = true
     void session.replayScene().then((replayed) => {
       if (!replayed || destroyed) return
       presenterInput?.setIndex(readIndex())
-      escapeControls?.refresh()
     }).catch((error) => {
       console.error('课程重播失败', error)
+    }).finally(() => {
+      replayPending = false
     })
     return true
-  }
-
-  if (presenter.enabled) {
-    escapeControls = new TeacherEscapeControls({
-      stage,
-      totalScenes,
-      getCurrentIndex: readIndex,
-      getCurrentSceneId: () => session.getProgress().locationId,
-      getCurrentStateId: () => null,
-      navigate: (direction) => {
-        const currentIndex = readIndex()
-        const targetIndex = direction === 'previous'
-          ? currentIndex - 1
-          : currentIndex + 1
-        if (targetIndex < 0 || targetIndex >= totalScenes) {
-          return { accepted: false, guardBlocked: false }
-        }
-        goToIndex(targetIndex)
-        return { accepted: true, guardBlocked: false }
-      },
-      openScenePicker: () => undefined,
-      replay: replayScene,
-      beginEvidenceClick: (event) => evidence.beginTeacherEscapeClick(event),
-    })
   }
 
   if (payload.playback.keyboardNavigation || presenter.enabled) {
@@ -126,7 +98,6 @@ export function attachPublishedCoursePresenter(
       if (destroyed) return
       destroyed = true
       presenterInput?.destroy()
-      escapeControls?.destroy()
       void session.destroy()
     },
   }

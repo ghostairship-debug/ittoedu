@@ -251,6 +251,8 @@ export class PublishedCourseSession {
   readonly #globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null
   #slots: HTMLElement[] = []
   #destroyPromise: Promise<void> | null = null
+  #publicReplayAbortController: AbortController | null = null
+  #publicReplaySettlement: Promise<boolean> | null = null
 
   constructor(
     player: CoursePlayer,
@@ -288,12 +290,59 @@ export class PublishedCourseSession {
     return this.navigator.goToIndex(index)
   }
 
+  /** Synchronous acceptance guard for the public Slide replay entry. */
+  canReplayScene(): boolean {
+    return this.#publicReplayAbortController === null
+      && this.canForceReplayCurrentLocation()
+      && this.navigator.current?.kind === 'slide'
+  }
+
   /** Force-remount only the current location without adding a history entry. */
-  async replayScene(
+  replayScene(
     signal: AbortSignal = new AbortController().signal,
   ): Promise<boolean> {
+    if (!this.canReplayScene() || signal.aborted) return Promise.resolve(false)
+    const abortController = new AbortController()
+    const abortFromCaller = () => abortController.abort()
+    signal.addEventListener('abort', abortFromCaller, { once: true })
+    this.#publicReplayAbortController = abortController
+
+    let replay: Promise<boolean>
+    try {
+      replay = this.performPublicReplay(abortController.signal)
+    } catch (error) {
+      replay = Promise.reject(error)
+    }
+
+    let settlement: Promise<boolean>
+    settlement = replay.catch((error: unknown) => {
+      if (abortController.signal.aborted) return false
+      throw error
+    }).finally(() => {
+      signal.removeEventListener('abort', abortFromCaller)
+      if (this.#publicReplayAbortController === abortController) {
+        this.#publicReplayAbortController = null
+      }
+      if (this.#publicReplaySettlement === settlement) {
+        this.#publicReplaySettlement = null
+      }
+    })
+    this.#publicReplaySettlement = settlement
+    return settlement
+  }
+
+  protected performPublicReplay(signal: AbortSignal): Promise<boolean> {
+    return this.forceReplayCurrentLocation(signal)
+  }
+
+  /** Internal all-surface primitive retained for authored Interaction replay. */
+  protected canForceReplayCurrentLocation(): boolean {
+    return !this.#destroyPromise && this.navigator.current !== null
+  }
+
+  protected async forceReplayCurrentLocation(signal: AbortSignal): Promise<boolean> {
     const current = this.navigator.current
-    if (this.#destroyPromise || !current || signal.aborted) return false
+    if (!this.canForceReplayCurrentLocation() || !current || signal.aborted) return false
     await this.navigator.goToLocation(current.locationId, {
       force: true,
       recordHistory: false,
@@ -359,11 +408,20 @@ export class PublishedCourseSession {
 
   async destroy(): Promise<void> {
     if (this.#destroyPromise) return this.#destroyPromise
-    this.#destroyPromise = this.#runDestroy()
+    const replaySettlement = this.#publicReplaySettlement
+    this.#publicReplayAbortController?.abort()
+    this.#destroyPromise = this.#runDestroy(replaySettlement)
     return this.#destroyPromise
   }
 
-  async #runDestroy(): Promise<void> {
+  async #runDestroy(replaySettlement: Promise<boolean> | null): Promise<void> {
+    if (replaySettlement) {
+      try {
+        await replaySettlement
+      } catch {
+        // A failed accepted replay must settle before, but cannot block, teardown.
+      }
+    }
     this.#globalRuntimeOwner?.destroy()
     await this.player.destroy()
     for (const slot of this.#slots) slot.remove()
@@ -452,10 +510,14 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     return this.#restartCourse(new AbortController().signal)
   }
 
-  override replayScene(
-    signal: AbortSignal = new AbortController().signal,
-  ): Promise<boolean> {
-    return this.#replayScene(signal)
+  override canReplayScene(): boolean {
+    return !this.#interactionDestroyStarted
+      && !this.#terminalNavigationClaimed
+      && super.canReplayScene()
+  }
+
+  protected override performPublicReplay(signal: AbortSignal): Promise<boolean> {
+    return this.#forceReplayCurrentLocation(signal)
   }
 
   override async destroy(): Promise<void> {
@@ -637,10 +699,18 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   }
 
   async #replayScene(signal: AbortSignal): Promise<boolean> {
-    if (!this.navigator.current) return false
+    if (
+      this.#interactionDestroyStarted
+      || this.#terminalNavigationClaimed
+      || !this.canForceReplayCurrentLocation()
+    ) return false
+    return this.#forceReplayCurrentLocation(signal)
+  }
+
+  async #forceReplayCurrentLocation(signal: AbortSignal): Promise<boolean> {
     if (!this.#claimTerminalNavigation(signal)) return false
     try {
-      return await super.replayScene(signal)
+      return await this.forceReplayCurrentLocation(signal)
     } catch (error) {
       this.#releaseTerminalNavigationClaim()
       throw error

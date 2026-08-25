@@ -886,7 +886,16 @@ export class SlidePublishedAdapter implements SurfaceHost {
         wrap.style.top = `${item.frame.y + next.offset.dy}px`
       },
       onAction: (action) => {
-        void this.#handleControllerAction(action)
+        void this.#handleControllerAction(action).catch((cause) => {
+          const message = cause instanceof Error ? cause.message : String(cause)
+          this.#services?.reportDiagnostic?.({
+            surfaceId: this.id,
+            phase: 'execute',
+            severity: 'error',
+            message: `教师控制器动作“${action.type}”执行失败：${message}`,
+            cause,
+          })
+        })
       },
       getInteractive: () => this.#active,
     })

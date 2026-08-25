@@ -133,9 +133,9 @@ vi.mock('phaser', () => {
 })
 
 import { CourseEventBus } from '../../src/player/CourseEventBus'
-import { HostEvidenceRecorder } from '../../src/player/HostEvidenceRecorder'
 import { attachPublishedCoursePresenter } from '../../src/player/publishedCoursePresenter'
 import { CoursePlayer } from '../../src/player/surfaces/CoursePlayer'
+import type { SurfaceDiagnostic } from '../../src/player/surfaces/SurfaceHost'
 import { SlidePublishedAdapter } from '../../src/player/surfaces/slide/SlidePublishedAdapter'
 import { mountPublishedSlidePhaserComponent } from '../../src/player/surfaces/slide/publishedSlidePhaserComponentMount'
 import {
@@ -375,7 +375,6 @@ afterEach(() => {
   delete window.__publishedPhaserComponentV4Games
   delete window.__slideReplayRuntimeProbe
   Reflect.deleteProperty(window, '__H5_LESSON_PLAYER__')
-  Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
 })
 
 describe('Published Slide Phaser Component API 4 host', () => {
@@ -739,11 +738,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     ))).toBe(true)
   })
 
-  it('forces one location generation for authored, bridge, and escape replay without history', async () => {
-    Object.defineProperty(Element.prototype, 'scrollIntoView', {
-      configurable: true,
-      value: vi.fn(),
-    })
+  it('forces one location generation for authored and bridge replay without history', async () => {
     const fixture = createPublishedPhaserComponentV2Fixture()
     const project = structuredClone(fixture.project)
     const slide = project.surfaces.find((surface) => surface.id === fixture.slideSurfaceId)
@@ -790,12 +785,13 @@ describe('Published Slide Phaser Component API 4 host', () => {
       clientHeight: { configurable: true, value: 720 },
     })
     document.body.appendChild(root)
-    const diagnostics: string[] = []
+    const diagnostics: SurfaceDiagnostic[] = []
     const session = createPublishedCourseSession(payload, {
       services: {
-        reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic.message),
+        reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
       },
     })
+    expect(session.canReplayScene()).toBe(false)
     expect(await session.replayScene()).toBe(false)
     const aborted = new AbortController()
     aborted.abort()
@@ -806,9 +802,9 @@ describe('Published Slide Phaser Component API 4 host', () => {
     await session.navigator.back()
     expect(session.getProgress().locationId).toBe(initialLocationId)
     expect(session.navigator.canGoBack).toBe(false)
-    vi.spyOn(HostEvidenceRecorder.prototype, 'beginTeacherEscapeClick')
-      .mockReturnValue(() => undefined)
+    expect(session.canReplayScene()).toBe(true)
     attachPublishedCoursePresenter(root, session, payload)
+    expect(root.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
     const bridge = window.__H5_LESSON_PLAYER__
     if (!bridge) throw new Error('expected Published presenter bridge')
 
@@ -850,37 +846,41 @@ describe('Published Slide Phaser Component API 4 host', () => {
     await expectProbeGeneration(2, 1)
     expectLocationUnchanged()
 
-    controllerButton(replayButtonId).click()
+    const authoredReplay = controllerButton(replayButtonId)
+    authoredReplay.click()
+    authoredReplay.click()
     generation = await expectFreshReplayGeneration(root, generation)
     await expectProbeGeneration(3, 2)
     expectLocationUnchanged()
 
     expect(bridge.replayScene()).toBe(true)
+    expect(session.canReplayScene()).toBe(false)
+    expect(bridge.replayScene()).toBe(false)
     generation = await expectFreshReplayGeneration(root, generation)
     await expectProbeGeneration(4, 3)
     expectLocationUnchanged()
-
-    const escapeReplay = root.querySelector<HTMLButtonElement>(
-      '[data-testid="teacher-escape-replay"]',
-    )
-    if (!escapeReplay) throw new Error('expected teacher escape replay control')
-    escapeReplay.click()
-    generation = await expectFreshReplayGeneration(root, generation)
-    await expectProbeGeneration(5, 4)
-    expectLocationUnchanged()
+    await vi.waitFor(() => expect(session.canReplayScene()).toBe(true))
 
     const replayFailure = new Error('replay failed intentionally')
     const goToLocation = vi.spyOn(session.navigator, 'goToLocation')
       .mockRejectedValueOnce(replayFailure)
-    await expect(session.replayScene()).rejects.toBe(replayFailure)
+    controllerButton(replayButtonId).click()
+    await vi.waitFor(() => expect(diagnostics).toContainEqual({
+      surfaceId: fixture.slideSurfaceId,
+      phase: 'execute',
+      severity: 'error',
+      message: '教师控制器动作“scene.replay”执行失败：replay failed intentionally',
+      cause: replayFailure,
+    }))
     goToLocation.mockRestore()
     expectLocationUnchanged()
+    expect(session.canReplayScene()).toBe(true)
     generation = await (async () => {
       const previous = generation
       expect(await session.replayScene()).toBe(true)
       return expectFreshReplayGeneration(root, previous)
     })()
-    await expectProbeGeneration(6, 5)
+    await expectProbeGeneration(5, 4)
     expectLocationUnchanged()
 
     controllerButton(nextButtonId).click()
@@ -890,12 +890,131 @@ describe('Published Slide Phaser Component API 4 host', () => {
     await session.goToLocation(initialLocationId)
     generation = await currentReplayGeneration(root)
 
-    bridge.destroy()
-    await session.destroy()
+    await session.goToLocation(fixture.flowLocationId)
+    expect(session.navigator.current).toMatchObject({
+      kind: 'flow',
+      locationId: fixture.flowLocationId,
+    })
+    expect(session.canReplayScene()).toBe(false)
+    expect(await session.replayScene()).toBe(false)
+    expect(bridge.replayScene()).toBe(false)
+    expect(session.navigator.current?.locationId).toBe(fixture.flowLocationId)
+
+    await session.goToLocation(initialLocationId)
+    generation = await currentReplayGeneration(root)
+    const componentCreatesBeforeDestroy = Number(
+      window.__publishedPhaserComponentV4Probe?.creates ?? 0,
+    )
+    const runtimeCreatesBeforeDestroy = Number(window.__slideReplayRuntimeProbe?.creates ?? 0)
+    const gamesBeforeDestroy = globalThis.__fakePublishedPhaserGames?.length ?? 0
+    const cancelledReplay = session.replayScene()
+    expect(session.canReplayScene()).toBe(false)
+    const destroying = session.destroy()
+    expect(await cancelledReplay).toBe(false)
+    await destroying
     await flushTeardown()
+    expect(Number(window.__publishedPhaserComponentV4Probe?.creates ?? 0))
+      .toBe(componentCreatesBeforeDestroy)
+    expect(Number(window.__slideReplayRuntimeProbe?.creates ?? 0))
+      .toBe(runtimeCreatesBeforeDestroy)
+    expect(globalThis.__fakePublishedPhaserGames).toHaveLength(gamesBeforeDestroy)
+    expect(globalThis.__fakePublishedPhaserGames?.every((game) => (
+      game.destroyed
+      && !game.canvas.isConnected
+      && game.loop.game === null
+      && game.loop.callback === null
+    ))).toBe(true)
+    expect(session.canReplayScene()).toBe(false)
     expect(bridge.replayScene()).toBe(false)
     expect(await session.replayScene()).toBe(false)
+    bridge.destroy()
+    expect(bridge.replayScene()).toBe(false)
     expect(generation.componentCanvas.isConnected).toBe(false)
     expect(generation.runtimeCanvas.isConnected).toBe(false)
+  })
+
+  it('waits for a replay already inside activation before destroying its fresh generation', async () => {
+    const fixture = createPublishedPhaserComponentV2Fixture()
+    const project = structuredClone(fixture.project)
+    const slide = project.surfaces.find((surface) => surface.id === fixture.slideSurfaceId)
+    if (!slide || slide.type !== 'slide') throw new Error('expected Slide fixture')
+    const firstScene = slide.scenes[0]!
+    firstScene.layerItems.push(replayRuntimeItem(
+      Math.max(...firstScene.layerItems.map((item) => item.order)) + 10,
+    ))
+    const payload = buildPublishedCourseV2Payload({
+      project: courseProjectDocumentSchema.parse(project),
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+    })
+    const root = document.createElement('div')
+    Object.defineProperties(root, {
+      clientWidth: { configurable: true, value: 1280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.appendChild(root)
+    const session = createPublishedCourseSession(payload)
+    await session.mount(root)
+    const initialLocationId = session.getProgress().locationId
+    await session.goToIndex(1)
+    await session.navigator.back()
+    const previous = await currentReplayGeneration(root)
+    const componentCreatesBeforeReplay = Number(
+      window.__publishedPhaserComponentV4Probe?.creates ?? 0,
+    )
+    const runtimeCreatesBeforeReplay = Number(window.__slideReplayRuntimeProbe?.creates ?? 0)
+
+    let releaseActivation!: () => void
+    const activationGate = new Promise<void>((resolve) => {
+      releaseActivation = resolve
+    })
+    let reportActivationStarted!: () => void
+    const activationStarted = new Promise<void>((resolve) => {
+      reportActivationStarted = resolve
+    })
+    const originalActivateSurface = session.player.activateSurface.bind(session.player)
+    const activateSurface = vi.spyOn(session.player, 'activateSurface')
+      .mockImplementation(async (surfaceId) => {
+        reportActivationStarted()
+        await activationGate
+        return originalActivateSurface(surfaceId)
+      })
+
+    const replay = session.replayScene()
+    await activationStarted
+    expect(previous.componentCanvas.isConnected).toBe(true)
+    expect(previous.runtimeCanvas.isConnected).toBe(true)
+    const destroying = session.destroy()
+    let destroySettled = false
+    void destroying.then(
+      () => { destroySettled = true },
+      () => { destroySettled = true },
+    )
+    await flushTeardown()
+    expect(destroySettled).toBe(false)
+    expect(session.canReplayScene()).toBe(false)
+
+    releaseActivation()
+    expect(await replay).toBe(true)
+    await destroying
+    await flushTeardown()
+
+    expect(activateSurface).toHaveBeenCalledWith(fixture.slideSurfaceId)
+    expect(session.getProgress()).toMatchObject({
+      index: 0,
+      locationId: initialLocationId,
+    })
+    expect(session.navigator.canGoBack).toBe(false)
+    expect(Number(window.__publishedPhaserComponentV4Probe?.creates ?? 0))
+      .toBe(componentCreatesBeforeReplay + 1)
+    expect(Number(window.__slideReplayRuntimeProbe?.creates ?? 0))
+      .toBe(runtimeCreatesBeforeReplay + 1)
+    expect(globalThis.__fakePublishedPhaserGames?.every((game) => (
+      game.destroyed
+      && !game.canvas.isConnected
+      && game.loop.game === null
+      && game.loop.callback === null
+    ))).toBe(true)
+    expect(root.querySelector('canvas')).toBeNull()
   })
 })
