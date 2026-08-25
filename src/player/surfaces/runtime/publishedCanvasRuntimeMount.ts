@@ -273,9 +273,17 @@ export function mountPublishedCanvasRuntime(
     game = null
     if (!mountedGame) return
     try {
-      // Phaser completes Game.destroy() from the next public game-loop step.
-      // Stopping the loop first strands pendingDestroy and skips core cleanup.
+      // Phaser's public destroy() only marks pendingDestroy. Complete it from
+      // the public step() entry point after this stack/frame, so teardown does
+      // not depend on a Runtime leaving TimeStep running, awake, or started.
       mountedGame.destroy(true)
+      targetWindow.queueMicrotask(() => {
+        try {
+          mountedGame.step(mountedGame.getTime(), 0)
+        } catch (cause) {
+          reportError(options, 'destroy', cause)
+        }
+      })
     } catch (cause) {
       reportError(options, 'destroy', cause)
     }

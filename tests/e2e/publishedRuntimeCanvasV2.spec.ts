@@ -62,10 +62,14 @@ const phaserSource = `
       probe.phaserCreates = (probe.phaserCreates || 0) + 1;
       probe.phaserContext = ctx.renderMode === 'phaser'
         && !!ctx.Phaser && !!ctx.phaser.scene && !('dom' in ctx);
-      ctx.phaser.scene.game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
+      var game = ctx.phaser.scene.game;
+      var games = window.__publishedCanvasApi2Games || [];
+      window.__publishedCanvasApi2Games = games;
+      games.push(game);
+      game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
         probe.phaserCoreDestroys = (probe.phaserCoreDestroys || 0) + 1;
       });
-      var canvas = ctx.phaser.scene.game.canvas;
+      var canvas = game.canvas;
       canvas.dataset.publishedCanvasPhaserE2e = 'true';
       var panel = ctx.phaser.scene.add.rectangle(0, 0, ctx.width, ctx.height, 0x2563eb, 1)
         .setOrigin(0, 0);
@@ -78,7 +82,11 @@ const phaserSource = `
           value ? probe.phaserVisibleTrue = (probe.phaserVisibleTrue || 0) + 1
             : probe.phaserVisibleFalse = (probe.phaserVisibleFalse || 0) + 1;
         },
-        suspend() { probe.phaserSuspends = (probe.phaserSuspends || 0) + 1; },
+        suspend() {
+          probe.phaserSuspends = (probe.phaserSuspends || 0) + 1;
+          game.loop.stop();
+          probe.phaserStopped = !game.loop.started && !game.loop.running;
+        },
         resume() { probe.phaserResumes = (probe.phaserResumes || 0) + 1; },
         destroy() {
           probe.phaserDestroys = (probe.phaserDestroys || 0) + 1;
@@ -98,10 +106,14 @@ const hybridSource = `
       probe.hybridCreates = (probe.hybridCreates || 0) + 1;
       probe.hybridContext = ctx.renderMode === 'hybrid'
         && !!ctx.Phaser && !!ctx.phaser.scene && !!ctx.dom.root && !!ctx.nodes;
-      ctx.phaser.scene.game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
+      var game = ctx.phaser.scene.game;
+      var games = window.__publishedCanvasApi2Games || [];
+      window.__publishedCanvasApi2Games = games;
+      games.push(game);
+      game.events.once(ctx.Phaser.Core.Events.DESTROY, function () {
         probe.hybridCoreDestroys = (probe.hybridCoreDestroys || 0) + 1;
       });
-      var canvas = ctx.phaser.scene.game.canvas;
+      var canvas = game.canvas;
       canvas.dataset.publishedCanvasHybridPhaserE2e = 'true';
       var panel = ctx.phaser.scene.add.rectangle(0, 0, ctx.width, ctx.height, 0x7c3aed, 1)
         .setOrigin(0, 0);
@@ -254,9 +266,23 @@ for (const delivery of [
         phaserCreates: 2,
       })
 
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.goToScene(3))
+    await expect.poll(() => page.evaluate(() => window.__publishedCanvasApi2Probe))
+      .toMatchObject({ phaserSuspends: 1, phaserStopped: true })
     await page.evaluate(() => window.__H5_LESSON_PLAYER__?.destroy())
     await expect.poll(() => page.evaluate(() => window.__publishedCanvasApi2Probe))
       .toMatchObject({ phaserDestroys: 2, phaserCoreDestroys: 2 })
+    await expect.poll(() => page.evaluate(() => (
+      window.__publishedCanvasApi2Games ?? []
+    ).map((game) => ({
+      canvasConnected: game.canvas.isConnected,
+      loopGameReleased: game.loop.game === null,
+      loopCallbackReleased: game.loop.callback === null,
+    })))).toEqual([
+      { canvasConnected: false, loopGameReleased: true, loopCallbackReleased: true },
+      { canvasConnected: false, loopGameReleased: true, loopCallbackReleased: true },
+      { canvasConnected: false, loopGameReleased: true, loopCallbackReleased: true },
+    ])
     await expect(page.locator('[data-published-canvas-phaser-e2e="true"]')).toHaveCount(0)
 
     if (delivery.online) {
@@ -274,5 +300,9 @@ for (const delivery of [
 declare global {
   interface Window {
     __publishedCanvasApi2Probe?: Record<string, unknown>
+    __publishedCanvasApi2Games?: Array<{
+      canvas: HTMLCanvasElement
+      loop: { game: unknown; callback: unknown }
+    }>
   }
 }
