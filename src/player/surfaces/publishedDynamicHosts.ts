@@ -778,6 +778,15 @@ class FlowPublishedAdapter implements SurfaceHost {
         getStateLabel: () => null,
       },
       executeTeacherControllerAction: (action) => this.#executeControllerAction(action),
+      reportRuntimeError: (itemId, phase, error) => {
+        this.#services?.reportDiagnostic?.({
+          surfaceId: this.id,
+          phase: 'mount',
+          severity: 'error',
+          message: `Runtime“${itemId}”${phase}失败：${error.message}`,
+          cause: error,
+        })
+      },
     })
   }
 
@@ -788,6 +797,10 @@ class FlowPublishedAdapter implements SurfaceHost {
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
     return this.#host.getPublishedInteractionSurfacePort()
+  }
+
+  preparePublishedLocation(locationId: string, forced: boolean): void {
+    this.#host.preparePublishedLocation(locationId, forced)
   }
 
   async activate(): Promise<void> {
@@ -803,8 +816,7 @@ class FlowPublishedAdapter implements SurfaceHost {
   }
 
   async reset(scope: SurfaceResetScope): Promise<void> {
-    this.#host.resetTeacherControllerSession(scope)
-    await this.#host.setLocationId(this.#startLocationId)
+    await this.#host.reset(scope, this.#startLocationId)
   }
 
   async capture(_request: SurfaceCaptureRequest): Promise<SurfaceCapture> {

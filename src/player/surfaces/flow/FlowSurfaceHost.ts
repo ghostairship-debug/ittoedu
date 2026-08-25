@@ -22,6 +22,7 @@ import type {
   PublishedFlowSurface,
   PublishedLayerItem,
   PublishedNativeLayerItem,
+  PublishedRuntimeLayerItem,
   PublishedScopedLayerItem,
 } from '../../../shared/publishedCourseTypes'
 import {
@@ -60,6 +61,20 @@ import {
   type PublishedInteractionNodeState,
 } from '../../interactions/PublishedDomInteractionSurfacePort'
 import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
+import {
+  createPublishedSurfaceRuntimeSession,
+  mountPublishedSurfaceRuntime,
+  type PublishedSurfaceRuntimeMountHandle,
+} from '../runtime/publishedSurfaceRuntimeMount'
+
+type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
+
+interface FlowRuntimeHandleRecord {
+  handle: PublishedSurfaceRuntimeMountHandle | null
+  wrap: HTMLElement
+  item: PublishedRuntimeLayerItem
+  retired: boolean
+}
 
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
@@ -88,6 +103,12 @@ export interface FlowSurfaceHostOptions {
   onInteractionInvalidated?: () => void
   /** Published-session generation hook fired after an active interaction DOM is ready. */
   onInteractionReady?: () => void
+  /** Published-session diagnostic bridge; a failed Runtime never fails its Flow host. */
+  reportRuntimeError?: (
+    itemId: string,
+    phase: FlowRuntimeFailurePhase,
+    error: Error,
+  ) => void
 }
 
 export interface FlowHostAudioSession {
@@ -121,6 +142,15 @@ export class FlowSurfaceHost {
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
+  #runtimeHandles: FlowRuntimeHandleRecord[] = []
+  #deferredRuntimeMounts: Array<{
+    wrap: HTMLElement
+    item: PublishedRuntimeLayerItem
+  }> = []
+  readonly #runtimeSession = createPublishedSurfaceRuntimeSession()
+  #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #completedActiveResetLocationId: string | null = null
   #active = false
   #queue: Promise<void> = Promise.resolve()
 
@@ -176,6 +206,13 @@ export class FlowSurfaceHost {
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
     return this.#interactionPort
+  }
+
+  /** Published navigator hint used to avoid resuming a stale Flow generation. */
+  preparePublishedLocation(locationId: string, forced: boolean): void {
+    resolveFlowLocation(this.#playback, locationId)
+    this.#completedActiveResetLocationId = null
+    this.#preparedRuntimeActivation = { locationId, forced }
   }
 
   setTocOpen(open: boolean): void {
@@ -239,14 +276,37 @@ export class FlowSurfaceHost {
   }
 
   async activate(): Promise<void> {
+    const wasInactive = !this.#active
+    const preparedActivation = this.#preparedRuntimeActivation
+    this.#preparedRuntimeActivation = null
     this.#active = true
     if (this.#root) this.#root.hidden = false
+    this.#pendingRuntimeActivation = null
+    if (wasInactive) {
+      if (preparedActivation !== null) {
+        this.#pendingRuntimeActivation = preparedActivation
+      } else if (this.#runtimeHandles.length > 0) {
+        for (const record of [...this.#runtimeHandles]) {
+          record.handle?.setVisible(true)
+          if (!record.retired) record.handle?.resume()
+        }
+      } else {
+        this.#mountDeferredRuntimes()
+      }
+    }
     this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
+    this.#completedActiveResetLocationId = null
+    for (const record of [...this.#runtimeHandles]) {
+      record.handle?.setVisible(false)
+      if (!record.retired) record.handle?.suspend()
+    }
     if (this.#root) this.#root.hidden = true
   }
 
@@ -255,21 +315,27 @@ export class FlowSurfaceHost {
   }
 
   setLocationId(locationId: string): Promise<void> {
+    return this.#enqueue(async () => this.#applyLocation(locationId))
+  }
+
+  reset(scope: 'surface' | 'course', startLocationId: string): Promise<void> {
     return this.#enqueue(async () => {
-      const location = resolveFlowLocation(this.#playback, locationId)
-      this.#invalidateInteractions()
-      this.#interactionPort?.resetLocalVisibility()
-      this.#locationId = location.id
-      this.#surfaceId = location.surfaceId
-      if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
-      this.#render()
-      this.#applyShellLayout()
-      this.#scrollToAnchor(
-        location.blockId
-          ? flowRuntimeTocAnchorId(location.blockId)
-          : flowRuntimeTocPageAnchorId(location.surfaceId),
-      )
-      this.#restoreInteractionsIfActive()
+      this.resetTeacherControllerSession(scope)
+      if (scope === 'course') this.#runtimeSession.resetCourse()
+      const preparedReset = this.#preparedRuntimeActivation
+      const resetWasActive = this.#active
+      this.#applyLocation(startLocationId)
+      if (
+        resetWasActive
+        && preparedReset?.forced
+        && preparedReset.locationId === startLocationId
+      ) {
+        this.#completedActiveResetLocationId = startLocationId
+      } else if (!resetWasActive && preparedReset?.locationId === startLocationId) {
+        // Course reset may rebuild the suspended start host before it is activated.
+        // Keep the navigator hint so activation does not execute then rebuild it twice.
+        this.#preparedRuntimeActivation = preparedReset
+      }
     })
   }
 
@@ -313,8 +379,10 @@ export class FlowSurfaceHost {
       this.#interactionPort?.destroy()
       this.#interactionPort = null
       this.#interactionNodes.clear()
+      this.#destroyRuntimeHandles()
       this.#destroyComponentHandles()
       this.#destroyController()
+      this.#runtimeSession.destroy()
       this.#toc?.destroy()
       this.#toc = null
       this.#root?.remove()
@@ -323,6 +391,9 @@ export class FlowSurfaceHost {
       this.#overlay = null
       this.#container = null
       this.#active = false
+      this.#preparedRuntimeActivation = null
+      this.#pendingRuntimeActivation = null
+      this.#completedActiveResetLocationId = null
     })
   }
 
@@ -346,6 +417,129 @@ export class FlowSurfaceHost {
       }
     }
     this.#componentHandles = []
+  }
+
+  #destroyRuntimeHandles(): void {
+    this.#deferredRuntimeMounts = []
+    const records = [...this.#runtimeHandles]
+    this.#runtimeHandles = []
+    for (const record of records) this.#retireRuntimeHandle(record)
+  }
+
+  #retireRuntimeHandle(record: FlowRuntimeHandleRecord): boolean {
+    if (record.retired) return false
+    record.retired = true
+    const index = this.#runtimeHandles.indexOf(record)
+    if (index >= 0) this.#runtimeHandles.splice(index, 1)
+    try {
+      record.handle?.destroy()
+    } catch (error) {
+      console.error('Flow Surface Runtime 销毁失败', error)
+    }
+    return true
+  }
+
+  #mountRuntime(wrap: HTMLElement, item: PublishedRuntimeLayerItem): void {
+    wrap.replaceChildren()
+    wrap.dataset.flowRuntimeState = 'playback'
+    wrap.style.pointerEvents = item.hitPolicy === 'auto' ? 'auto' : 'none'
+    const record: FlowRuntimeHandleRecord = {
+      handle: null,
+      wrap,
+      item,
+      retired: false,
+    }
+    const handle = mountPublishedSurfaceRuntime(wrap, {
+      instanceId: item.layerItemId,
+      runtime: item.runtime,
+      width: item.frame.width,
+      height: item.frame.height,
+      visible: this.#active,
+      resolveAsset: (assetId) => resolvePlaybackAssetUrl(
+        this.#playback,
+        assetId,
+        this.#options.resolveAsset,
+      ),
+      session: this.#runtimeSession,
+      fallbackText: firstVisibleRuntimeText(item.runtime.content.values)
+        ?? item.runtime.protocol,
+      reportError: (phase, error) => {
+        if (phase === 'lifecycle' && this.#retireRuntimeHandle(record)) {
+          this.#showRuntimeFallback(record.wrap, record.item)
+        }
+        this.#options.reportRuntimeError?.(item.layerItemId, phase, error)
+      },
+    })
+    record.handle = handle
+    if (!handle.ok) {
+      wrap.dataset.flowRuntimeState = 'fallback'
+      wrap.style.pointerEvents = 'none'
+    }
+    if (record.retired) handle.destroy()
+    else this.#runtimeHandles.push(record)
+  }
+
+  #showRuntimeFallback(wrap: HTMLElement, item: PublishedRuntimeLayerItem): void {
+    const fallbackWrap = renderStaticOverlayItem(
+      wrap.ownerDocument,
+      { item, source: 'surface' },
+      (assetId) => resolvePlaybackAssetUrl(
+        this.#playback,
+        assetId,
+        this.#options.resolveAsset,
+      ),
+      { interactive: false },
+    )
+    wrap.replaceChildren(...fallbackWrap.childNodes)
+    wrap.dataset.flowRuntimeState = 'fallback'
+    wrap.style.pointerEvents = 'none'
+  }
+
+  #mountDeferredRuntimes(): void {
+    const deferred = this.#deferredRuntimeMounts
+    this.#deferredRuntimeMounts = []
+    for (const { wrap, item } of deferred) {
+      if (!wrap.isConnected || !this.#root?.contains(wrap)) continue
+      this.#mountRuntime(wrap, item)
+    }
+  }
+
+  #applyLocation(locationId: string): void {
+    const location = resolveFlowLocation(this.#playback, locationId)
+    const completedResetLocationId = this.#completedActiveResetLocationId
+    this.#completedActiveResetLocationId = null
+    this.#preparedRuntimeActivation = null
+    const sameLocation = location.id === this.#locationId
+      && location.surfaceId === this.#surfaceId
+    const pendingActivation = this.#pendingRuntimeActivation
+    this.#pendingRuntimeActivation = null
+    if (completedResetLocationId === location.id && sameLocation) return
+    if (
+      pendingActivation?.locationId === location.id
+      && !pendingActivation.forced
+      && sameLocation
+    ) {
+      if (this.#runtimeHandles.length > 0) {
+        for (const record of [...this.#runtimeHandles]) {
+          record.handle?.setVisible(true)
+          if (!record.retired) record.handle?.resume()
+        }
+      } else this.#mountDeferredRuntimes()
+      return
+    }
+    this.#invalidateInteractions()
+    this.#interactionPort?.resetLocalVisibility()
+    this.#locationId = location.id
+    this.#surfaceId = location.surfaceId
+    if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
+    this.#render()
+    this.#applyShellLayout()
+    this.#scrollToAnchor(
+      location.blockId
+        ? flowRuntimeTocAnchorId(location.blockId)
+        : flowRuntimeTocPageAnchorId(location.surfaceId),
+    )
+    this.#restoreInteractionsIfActive()
   }
 
   #enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -404,8 +598,10 @@ export class FlowSurfaceHost {
 
   #render(): void {
     if (!this.#root || !this.#overlay) return
+    this.#pendingRuntimeActivation = null
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
+    this.#destroyRuntimeHandles()
     this.#destroyComponentHandles()
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
     const article = renderFlowArticle(surface, {
@@ -475,6 +671,18 @@ export class FlowSurfaceHost {
         },
       )
       overlay.appendChild(wrap)
+      if (isExecutableFlowSurfaceRuntime(entry)) {
+        wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
+        wrap.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
+        if (this.#active) this.#mountRuntime(wrap, entry.item)
+        else {
+          wrap.dataset.flowRuntimeState = 'deferred'
+          this.#deferredRuntimeMounts.push({ wrap, item: entry.item })
+        }
+      } else if (entry.item.kind === 'runtime') {
+        wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
+        wrap.dataset.flowRuntimeState = entry.item.runtime.enabled ? 'fallback' : 'disabled'
+      }
       this.#registerInteractionNode(wrap, entry.item, entry.source)
     }
   }
@@ -739,6 +947,26 @@ function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
     || item.content.nativeType === 'shape'
 }
 
+function isExecutableFlowSurfaceRuntime(
+  entry: { item: PublishedLayerItem; source: 'global' | 'surface' },
+): entry is { item: PublishedRuntimeLayerItem; source: 'surface' } {
+  return entry.source === 'surface'
+    && entry.item.kind === 'runtime'
+    && entry.item.runtime.enabled
+    && entry.item.runtime.protocol === 'surface-runtime'
+    && entry.item.runtime.runtimeApiVersion === 3
+    && entry.item.runtime.renderMode === 'dom'
+}
+
+function firstVisibleRuntimeText(values: Readonly<Record<string, string>>): string | undefined {
+  const preferred = ['title', 'label', 'text', 'heading', 'name']
+  for (const key of preferred) {
+    const value = values[key]?.trim()
+    if (value) return value
+  }
+  return Object.values(values).map((value) => value.trim()).find(Boolean)
+}
+
 function renderStaticOverlayItem(
   dom: Document,
   entry: { item: PublishedLayerItem; source: 'global' | 'surface' },
@@ -842,7 +1070,32 @@ function renderStaticOverlayItem(
       image.style.height = '100%'
       image.style.objectFit = 'contain'
       wrap.appendChild(image)
+      return wrap
     }
+  }
+  if (entry.item.kind === 'runtime') {
+    const label = dom.createElement('div')
+    label.className = 'published-surface-runtime-fallback'
+    label.dataset.runtimeInstanceId = entry.item.layerItemId
+    label.dataset.runtimeFallback = 'true'
+    label.textContent = firstVisibleRuntimeText(entry.item.runtime.content.values)
+      ?? entry.item.runtime.protocol
+    Object.assign(label.style, {
+      boxSizing: 'border-box',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+      height: '100%',
+      overflow: 'hidden',
+      padding: '12px 16px',
+      pointerEvents: 'none',
+      background: '#0f766e',
+      color: '#ffffff',
+      font: 'bold 16px "Microsoft YaHei", sans-serif',
+      textAlign: 'center',
+    })
+    wrap.appendChild(label)
   }
   return wrap
 }
