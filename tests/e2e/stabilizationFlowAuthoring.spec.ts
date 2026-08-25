@@ -204,7 +204,9 @@ function prepareWaveCArchive(projectPath: string): void {
   overlay.layerItemId = 'wave-c-overlay'
   overlay.label = 'Wave C 浮层'
   overlay.order = 100
-  overlay.frame = { ...overlay.frame, x: 36, y: 24, width: 240, height: 135 }
+  // Keep the viewport-pinned overlay visible for the layer/z-order assertion,
+  // but outside the paper's central authoring hit area used by the real drag.
+  overlay.frame = { ...overlay.frame, x: 1760, y: 960, width: 120, height: 80 }
 
   const blocks: FlowBlock[] = [
     structuredClone(originalHeading),
@@ -369,12 +371,13 @@ async function selectRealTextRange(
 }> {
   const start = await flowTextPoint(editor, startOffset, 'start')
   const end = await flowTextPoint(editor, endCharacterOffset, 'end')
+  const hitTargets = await page.evaluate((points) => points.map((point) => (
+    document.elementFromPoint(point.x, point.y)?.closest('[data-testid="flow-inline-editor"]') !== null
+  )), [start, end])
+  expect(hitTargets).toEqual([true, true])
   await page.mouse.move(start.x, start.y)
   await page.mouse.down()
-  // A two-character range needs only two native pointer moves. More sub-pixel
-  // steps repeatedly cross the collapsed/range boundary and make this short
-  // drag unlike a real coalesced mouse gesture in Electron.
-  await page.mouse.move(end.x, end.y, { steps: 2 })
+  await page.mouse.move(end.x, end.y, { steps: 12 })
   await page.mouse.up()
   return page.evaluate(() => {
     const element = document.querySelector<HTMLElement>('[data-testid="flow-inline-editor"]')
