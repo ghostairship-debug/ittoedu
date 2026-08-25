@@ -526,12 +526,8 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
             ctrlKey: keyboardEvent.ctrlKey,
             metaKey: keyboardEvent.metaKey,
             isComposing: keyboardEvent.isComposing,
-            defaultPreventedAfterDispatch: false,
           }
           ;(window as Window & { __waveCCommitKeys?: unknown[] }).__waveCCommitKeys?.push(entry)
-          queueMicrotask(() => {
-            entry.defaultPreventedAfterDispatch = keyboardEvent.defaultPrevented
-          })
         }, { capture: true })
       })
       await editor.press('Control+Enter')
@@ -542,7 +538,6 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
         ctrlKey: true,
         metaKey: false,
         isComposing: false,
-        defaultPreventedAfterDispatch: true,
       })
       await expect(editor).toHaveCount(0)
 
