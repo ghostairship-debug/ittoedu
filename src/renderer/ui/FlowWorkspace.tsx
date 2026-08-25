@@ -256,10 +256,12 @@ export function FlowInlineRichTextEditor({
         onKeyAction(event)
         if (event.key === 'Escape') {
           event.preventDefault()
+          event.stopPropagation()
           finishedRef.current = true
           onCancel()
         } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
           event.preventDefault()
+          event.stopPropagation()
           finishedRef.current = true
           onCommit()
         }
@@ -315,9 +317,11 @@ function FlowPlainStringEditor({
       if (composingRef.current || event.nativeEvent.isComposing) return
       if (event.key === 'Escape') {
         event.preventDefault()
+        event.stopPropagation()
         onCancel()
       } else if (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey)) {
         event.preventDefault()
+        event.stopPropagation()
         onCommit()
       }
     },

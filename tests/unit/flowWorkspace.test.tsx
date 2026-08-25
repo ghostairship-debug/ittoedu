@@ -377,7 +377,7 @@ describe('FlowWorkspace paper', () => {
   it('keeps toolbar commands inside the selected text range event boundary', () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], { focus: 'text', textRange: { blockId: 'p-body', start: 0, end: 4 } })
-    const { onSelectionChange, onTextEditChange } = renderPaper(project, selection)
+    const { onProjectChange, onSelectionChange, onTextEditChange } = renderPaper(project, selection)
     const block = screen.getByTestId('flow-block-p-body')
     const toolbar = screen.getByTestId('flow-block-context-toolbar')
     expect(block?.contains(toolbar)).toBe(true)
@@ -394,8 +394,132 @@ describe('FlowWorkspace paper', () => {
         runs: [{ start: 0, end: 4, style: { bold: true } }],
       },
     })
-    expect(screen.getByTestId('flow-inline-editor')).toBeInTheDocument()
+    const editor = screen.getByTestId('flow-inline-editor')
+    expect(editor).toBeInTheDocument()
     expect(screen.getByLabelText('局部加粗')).toHaveAttribute('aria-pressed', 'true')
+
+    onProjectChange.mockClear()
+    onSelectionChange.mockClear()
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+
+    expect(onProjectChange).toHaveBeenCalledTimes(1)
+    const committed = onProjectChange.mock.calls[0]?.[0]
+    const surface = committed?.nextDocument?.surfaces.find((entry) => entry.id === 'flow')
+    const paragraph = surface?.type === 'flow'
+      ? surface.blocks.find((block) => block.id === 'p-body')
+      : undefined
+    expect(committed?.historyEntry).toBeTruthy()
+    expect(paragraph).toMatchObject({
+      type: 'paragraph',
+      text: '阅读任务',
+      runs: [{ start: 0, end: 4, style: { bold: true } }],
+    })
+    expect(onSelectionChange).toHaveBeenCalledTimes(1)
+    expect(onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+      selectedBlockId: 'p-body',
+      focus: 'block',
+    })
+    expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
+  })
+
+  it('cancels rich inline editing once without bubbling Escape into block deselection', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 4 },
+    })
+    const { onProjectChange, onSelectionChange } = renderPaper(project, selection)
+
+    fireEvent.keyDown(screen.getByTestId('flow-inline-editor'), { key: 'Escape' })
+
+    expect(onProjectChange).not.toHaveBeenCalled()
+    expect(onSelectionChange).toHaveBeenCalledTimes(1)
+    expect(onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+      selectedBlockId: 'p-body',
+      focus: 'block',
+    })
+    expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
+  })
+
+  it('isolates terminal commit and cancel keys for plain input and textarea editors', () => {
+    const scenarios: Array<{
+      block: FlowBlock
+      nextValue: string
+      commitKey: { key: string; ctrlKey?: boolean }
+      readValue: (block: FlowBlock) => string | undefined
+    }> = [
+      {
+        block: { id: 'code-terminal', type: 'code', code: 'const value = 1' },
+        nextValue: 'const value = 2',
+        commitKey: { key: 'Enter', ctrlKey: true },
+        readValue: (block) => block.type === 'code' ? block.code : undefined,
+      },
+      {
+        block: {
+          id: 'section-terminal',
+          type: 'section',
+          title: '旧标题',
+          collapsedByDefault: false,
+          blocks: [],
+        },
+        nextValue: '新标题',
+        commitKey: { key: 'Enter' },
+        readValue: (block) => block.type === 'section' ? block.title : undefined,
+      },
+    ]
+
+    for (const scenario of scenarios) {
+      const project = createFlowProject()
+      const flow = project.surfaces.find((surface) => surface.id === 'flow')
+      if (!flow || flow.type !== 'flow') throw new Error('expected Flow surface')
+      flow.blocks.push(scenario.block)
+      syncFlowCourseLocations(project, 'flow')
+      const selection = selectFlowEditorBlocks(project, 'h1', [scenario.block.id], {
+        focus: 'text',
+        textRange: { blockId: scenario.block.id, start: 0, end: 0 },
+      })
+      const committedRender = renderPaper(project, selection)
+      const editor = screen.getByTestId('flow-inline-plain-editor')
+      fireEvent.change(editor, { target: { value: scenario.nextValue } })
+      committedRender.onProjectChange.mockClear()
+      committedRender.onSelectionChange.mockClear()
+
+      fireEvent.keyDown(editor, scenario.commitKey)
+
+      expect(committedRender.onProjectChange).toHaveBeenCalledTimes(1)
+      const result = committedRender.onProjectChange.mock.calls[0]?.[0]
+      const nextFlow = result?.nextDocument?.surfaces.find((surface) => surface.id === 'flow')
+      const nextBlock = nextFlow?.type === 'flow'
+        ? nextFlow.blocks.find((block) => block.id === scenario.block.id)
+        : undefined
+      expect(result?.historyEntry).toBeTruthy()
+      expect(nextBlock && scenario.readValue(nextBlock)).toBe(scenario.nextValue)
+      expect(committedRender.onSelectionChange).toHaveBeenCalledTimes(1)
+      expect(committedRender.onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+        selectedBlockId: scenario.block.id,
+        focus: 'block',
+      })
+      expect(screen.queryByTestId('flow-inline-plain-editor')).toBeNull()
+      committedRender.unmount()
+
+      const cancelledRender = renderPaper(project, selection)
+      fireEvent.change(screen.getByTestId('flow-inline-plain-editor'), {
+        target: { value: scenario.nextValue },
+      })
+      cancelledRender.onProjectChange.mockClear()
+      cancelledRender.onSelectionChange.mockClear()
+
+      fireEvent.keyDown(screen.getByTestId('flow-inline-plain-editor'), { key: 'Escape' })
+
+      expect(cancelledRender.onProjectChange).not.toHaveBeenCalled()
+      expect(cancelledRender.onSelectionChange).toHaveBeenCalledTimes(1)
+      expect(cancelledRender.onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+        selectedBlockId: scenario.block.id,
+        focus: 'block',
+      })
+      expect(screen.queryByTestId('flow-inline-plain-editor')).toBeNull()
+      cancelledRender.unmount()
+    }
   })
 
   it('reserves the complete below-toolbar footprint before neighboring blocks', () => {
