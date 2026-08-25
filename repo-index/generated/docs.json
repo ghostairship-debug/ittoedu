@@ -582,6 +582,11 @@
     },
     {
       "links": [],
+      "path": "docs/development-plan/baselines/POST_AUDIT_STABILIZATION_CLOSURE_REPORT.md",
+      "title": "审计后稳定化收口报告"
+    },
+    {
+      "links": [],
       "path": "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md",
       "title": "ARCH-0A Feature / Writer / Consumer / Owner Ledger"
     },

@@ -1,15 +1,15 @@
 {
   "configHash": "sha256:103c4aa469a7d4606a4ec4b55a58527a273dd720788840c2d98c5dd3925a3f47",
   "contractCount": 26,
-  "docCount": 95,
-  "edgeCount": 16335,
-  "fileCount": 736,
+  "docCount": 96,
+  "edgeCount": 16820,
+  "fileCount": 743,
   "generatorVersion": 1,
-  "inputCount": 736,
+  "inputCount": 743,
   "inputDomainCounts": {
     "config": 4,
     "semantic": 4,
-    "source": 709,
+    "source": 716,
     "tool": 19
   },
   "parser": {
@@ -19,24 +19,24 @@
   "pathFormat": "repository-relative-posix",
   "projects": [
     {
-      "fileCount": 117,
+      "fileCount": 120,
       "path": "tsconfig.e2e.json"
     },
     {
-      "fileCount": 90,
+      "fileCount": 91,
       "path": "tsconfig.electron.json"
     },
     {
-      "fileCount": 600,
+      "fileCount": 604,
       "path": "tsconfig.json"
     }
   ],
   "schemaVersion": 1,
   "scriptCount": 86,
   "semanticHash": "sha256:7cc63bde011aef3bf931014bbf3cf19ee6c74f813b1a1e38394a23f95f24523f",
-  "sourceTreeHash": "sha256:c880c5ec53e98247b4528791b5e8c69da05262d241bc8067901c2c339e4567c1",
-  "symbolCount": 6604,
-  "testCount": 1887,
+  "sourceTreeHash": "sha256:de2e434aa44a8f09adeea2cfe50e4545f4e751221e453baae15903799a06840e",
+  "symbolCount": 6832,
+  "testCount": 1945,
   "textNormalization": "utf8-no-bom-lf",
   "toolHash": "sha256:2c71dbb7ec310f0e6621efdce8be00fb10125a0957376bd2039b684aa8191ba6"
 }

@@ -45,10 +45,10 @@ After a Spatial edit, switching to Slide and returning to that Spatial surface p
 - Forbidden write: Slide/Flow command refactor, second history/project copy, camera persistence, owner/clipboard behavior, App/save recovery, contracts, dependencies and generated files.
 - Hotspot lock and order: `Store/History` has one writer, `Stabilization Integrator`; serialize with other Store cards by lock, not additional product dependencies.
 - Acceptance:
-  - [ ] Spatial edit→Slide→same Spatial→undo/redo removes/restores exactly that edit on one revision/history sequence.
-  - [ ] Returning with stale Surface state cannot overwrite a later canonical edit.
-  - [ ] The same integration spec proves camera pan/zoom creates no canonical history, revision or save diff.
-  - [ ] Save/reopen preserves content and intentionally starts a new editor history session.
+  - [x] Spatial edit→Slide→same Spatial→undo/redo removes/restores exactly that edit on one revision/history sequence.
+  - [x] Returning with stale Surface state cannot overwrite a later canonical edit.
+  - [x] The same integration spec proves camera pan/zoom creates no canonical history, revision or save diff.
+  - [x] Save/reopen preserves content and intentionally starts a new editor history session.
 
 ## Minimal validation
 
@@ -59,7 +59,8 @@ After a Spatial edit, switching to Slide and returning to that Spatial surface p
 
 - Start point: Wave A gate commit.
 - Product/integration commit and rollback: canonical history/session integration `3a73bdc` plus reviewer repair `2e6be4f`; both are independently revertible and never introduce a second project/history.
-- Result evidence: at `2e6be4f`, the named integration spec passed `2/2` and proves one history across Spatial→Slide→Spatial, fresh session/selection/generation/home camera, camera zero document/history/archive write, equal-revision stale-session rejection, exact multi-edit undo/redo, Spatial/Flow legacy component metadata+payload stack alignment, and archive reopen with content/payload preserved but editor/resource history empty. Direct validation passed `8 files / 50 tests`, complete typecheck and diff check; after repair the independent Canonical History Reviewer returned `APPROVE`. Outcome remains `engineering candidate` pending Wave B browser evidence.
+- Result evidence: at `2e6be4f`, the named integration spec passed `2/2` and proves one history across Spatial→Slide→Spatial, fresh session/selection/generation/home camera, camera zero document/history/archive write, equal-revision stale-session rejection, exact multi-edit undo/redo, Spatial/Flow legacy component metadata+payload stack alignment, and archive reopen with content/payload preserved but editor/resource history empty. Direct validation passed `8 files / 50 tests`, complete typecheck and diff check; after repair the independent Canonical History Reviewer returned `APPROVE`. At that checkpoint the outcome remained `engineering candidate` pending the Wave B browser evidence recorded below.
+- Wave B fulfillment: at product candidate `58c1e45` with gate-spec checkpoint `d051c37`, the refreshed `mixedCrossSurfaceHistory.test.tsx` passed `2/2`, then the single real Electron gate passed `1/1` in `5.1m`. Its third compound group proved Spatial→Slide→same Spatial undo/redo against one canonical document, Session-only camera movement and save/reopen history reset. Later closure-candidate changes through product `23f2d00` are confined to Flow UI interaction paths outside this card's Invalidating paths, so this Wave B evidence remains reusable.
 - Outcome conclusion boundary: V2 establishes at most `engineering candidate`; Wave B owns browser integration.
 - Stop condition: camera product-policy change, App/save ownership or contract change requires re-scope.
 - Semantic index impact: `canonical-update`
