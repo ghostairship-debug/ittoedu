@@ -253,7 +253,8 @@ function createIsolatedDomMount(
   parent: HTMLElement,
   label: string,
 ): IsolatedDomMount {
-  const host = document.createElement('div')
+  const dom = parent.ownerDocument
+  const host = dom.createElement('div')
   host.className = 'lesson-runtime-mount'
   host.dataset.runtimeLabel = label
   Object.assign(host.style, {
@@ -265,7 +266,7 @@ function createIsolatedDomMount(
     pointerEvents: 'none',
   })
   const shadow = host.attachShadow({ mode: 'open' })
-  const style = document.createElement('style')
+  const style = dom.createElement('style')
   style.textContent = `
     :host { position: absolute; inset: 0; display: block; pointer-events: none; }
     *, *::before, *::after { box-sizing: border-box; }
@@ -291,7 +292,7 @@ function createIsolatedDomMount(
       pointer-events: none;
     }
   `
-  const root = document.createElement('div')
+  const root = dom.createElement('div')
   root.className = 'courseware-runtime-root'
   shadow.append(style, root)
   parent.append(host)
@@ -529,7 +530,7 @@ export class RuntimeHost {
           object.destroy()
         }
       }
-      const message = document.createElement('div')
+      const message = options.environment.dom.overlay.ownerDocument.createElement('div')
       message.className = 'courseware-runtime-error'
       message.textContent = `互动运行时加载失败：${messageOf(error)}`
       this.ensureOverlayDom().root.append(message)
@@ -612,6 +613,10 @@ export class RuntimeHost {
       this.recordFailure(error)
       console.error(`运行时“${this.options.label}”恢复失败`, error)
     }
+  }
+
+  getFailure(): Error | null {
+    return this.failure
   }
 
   destroy(): void {

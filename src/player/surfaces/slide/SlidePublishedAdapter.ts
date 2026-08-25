@@ -44,6 +44,10 @@ import {
   type PublishedSurfaceRuntimeMountHandle,
 } from '../runtime/publishedSurfaceRuntimeMount'
 import {
+  mountPublishedCanvasRuntime,
+  type PublishedCanvasRuntimeMountHandle,
+} from '../runtime/publishedCanvasRuntimeMount'
+import {
   PublishedDomInteractionSurfacePort,
   PublishedInteractionVisibilityState,
   type PublishedInteractionNodeHandle,
@@ -191,6 +195,17 @@ function isPublishedSlideSurfaceRuntime(item: PublishedLayerItem): boolean {
     && item.runtime.renderMode === 'dom'
 }
 
+function isPublishedSlideCanvasRuntime(item: PublishedLayerItem): boolean {
+  return item.kind === 'runtime'
+    && item.runtime.enabled
+    && item.runtime.protocol === 'canvas-runtime'
+    && item.runtime.runtimeApiVersion === 2
+}
+
+function isPublishedSlidePlayableRuntime(item: PublishedLayerItem): boolean {
+  return isPublishedSlideSurfaceRuntime(item) || isPublishedSlideCanvasRuntime(item)
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -317,7 +332,7 @@ function appendLayerNode(
     || (
       source === 'scene'
       && item.hitPolicy !== 'pass-through'
-      && isPublishedSlideSurfaceRuntime(item)
+      && isPublishedSlidePlayableRuntime(item)
     )
     ? 'auto'
     : 'none'
@@ -386,7 +401,7 @@ function appendLayerNode(
     wrap.dataset.slideRuntimeKind = item.runtime.protocol
     if (!item.runtime.enabled) {
       wrap.dataset.slideRuntimeState = 'disabled'
-    } else if (source === 'scene' && isPublishedSlideSurfaceRuntime(item) && options?.mountRuntime) {
+    } else if (source === 'scene' && isPublishedSlidePlayableRuntime(item) && options?.mountRuntime) {
       wrap.dataset.slideRuntimeState = 'playback'
       options.mountRuntime(wrap, item)
     } else {
@@ -463,7 +478,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #services: SurfacePlayerServices | null = null
   #controllers: TeacherControllerDom[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
-  #runtimeHandles: PublishedSurfaceRuntimeMountHandle[] = []
+  #runtimeHandles: Array<
+    PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle
+  > = []
   readonly #runtimeSession = createPublishedSurfaceRuntimeSession()
   #muted = false
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
@@ -955,7 +972,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
           wrap.style.pointerEvents = 'none'
           return
         }
-        const handle = mountPublishedSurfaceRuntime(wrap, {
+        const markFailure = () => {
+          wrap.dataset.slideFallbackKind = 'runtime'
+          wrap.dataset.slideRuntimeState = 'fallback'
+          wrap.style.pointerEvents = 'none'
+        }
+        const mountOptions = {
           instanceId: item.layerItemId,
           runtime: item.runtime,
           width: item.frame.width,
@@ -966,6 +988,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
           fallbackText: firstVisibleText(item.runtime.content.values)
             ?? item.runtime.protocol,
           reportError: (phase, error) => {
+            markFailure()
             this.#services?.reportDiagnostic?.({
               surfaceId: this.id,
               phase: 'mount',
@@ -974,12 +997,14 @@ export class SlidePublishedAdapter implements SurfaceHost {
               cause: error,
             })
           },
-        })
-        if (!handle.ok) {
-          wrap.dataset.slideFallbackKind = 'runtime'
-          wrap.dataset.slideRuntimeState = 'fallback'
-          wrap.style.pointerEvents = 'none'
-        }
+        } satisfies Parameters<typeof mountPublishedSurfaceRuntime>[1]
+        const handle = isPublishedSlideCanvasRuntime(item)
+          ? mountPublishedCanvasRuntime(wrap, {
+              ...mountOptions,
+              sceneId: scene.id,
+            })
+          : mountPublishedSurfaceRuntime(wrap, mountOptions)
+        if (!handle.ok) markFailure()
         this.#runtimeHandles.push(handle)
       },
     }

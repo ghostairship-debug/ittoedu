@@ -243,6 +243,7 @@ function isRuntimeDefinition(value: unknown): value is RuntimeDefinition {
 }
 
 export class RuntimeRegistry {
+  private readonly targetWindow: Window
   private readonly globalApi = Object.freeze({
     define: (definition: RuntimeDefinition): void => {
       this.defineDuringLoad(definition)
@@ -255,14 +256,18 @@ export class RuntimeRegistry {
   private loadingLabel: string | null = null
   private installed = false
 
+  constructor(targetWindow: Window = window) {
+    this.targetWindow = targetWindow
+  }
+
   install(): void {
     if (this.installed) return
-    this.previousGlobalApi = window.CoursewareRuntime
+    this.previousGlobalApi = this.targetWindow.CoursewareRuntime
     this.previousGlobalWasOwnProperty = Object.prototype.hasOwnProperty.call(
-      window,
+      this.targetWindow,
       'CoursewareRuntime',
     )
-    window.CoursewareRuntime = this.globalApi
+    this.targetWindow.CoursewareRuntime = this.globalApi
     this.installed = true
   }
 
@@ -282,7 +287,11 @@ export class RuntimeRegistry {
 
     try {
       const safeLabel = label.replace(/[\r\n]/g, '_')
-      const execute = new Function(
+      const RealmFunction = Reflect.get(this.targetWindow, 'Function')
+      if (typeof RealmFunction !== 'function') {
+        throw new Error('运行时宿主缺少 Function 构造器')
+      }
+      const execute = RealmFunction(
         'window',
         'CoursewareRuntime',
         `"use strict";\n${runtimeSource}\n//# sourceURL=h5lesson-runtime://${safeLabel}/runtime.js`,
@@ -290,7 +299,7 @@ export class RuntimeRegistry {
         runtimeWindow: Window,
         runtimeApi: typeof this.globalApi,
       ) => void
-      execute(window, this.globalApi)
+      execute(this.targetWindow, this.globalApi)
 
       if (!this.definitionDuringLoad) {
         throw new Error('没有同步调用 CoursewareRuntime.define')
@@ -314,11 +323,11 @@ export class RuntimeRegistry {
   }
 
   dispose(): void {
-    if (this.installed && window.CoursewareRuntime === this.globalApi) {
+    if (this.installed && this.targetWindow.CoursewareRuntime === this.globalApi) {
       if (this.previousGlobalWasOwnProperty) {
-        window.CoursewareRuntime = this.previousGlobalApi
+        this.targetWindow.CoursewareRuntime = this.previousGlobalApi
       } else {
-        delete window.CoursewareRuntime
+        delete this.targetWindow.CoursewareRuntime
       }
     }
 
