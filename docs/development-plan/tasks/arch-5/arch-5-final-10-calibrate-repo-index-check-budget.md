@@ -14,9 +14,9 @@
 - Invalidating paths: `tests/unit/repoIndexGenerator.test.ts`; repo-index generator, input inventory, TypeScript project discovery or Vitest worker policy
 - Task ID: `arch-5-final-10-calibrate-repo-index-check-budget`
 - Phase / wave: `ARCH-5 / post-audit candidate repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Repo-index Test Owner / none / Coordinator`
-- Claimed at / released at: `2026-08-25T11:10:25+08:00 / not released`
+- Claimed at / released at: `2026-08-25T11:10:25+08:00 / 2026-08-25T11:34:59+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `d1566af`; candidate 07 is rolled back and the tree is clean.
 - Context: exact-case test-budget change only; generator behavior and global worker policy are frozen.
@@ -43,8 +43,8 @@ The deterministic repo-index check remains behaviorally identical while its exac
 
 ## Acceptance
 
-- [ ] Only the affected test's timeout changes from `15_000` to `45_000`.
-- [ ] The exact focused test and diff check pass.
+- [x] Only the affected test's timeout changes from `15_000` to `45_000`.
+- [x] The exact focused test and diff check pass.
 
 ## Validation
 
@@ -57,4 +57,5 @@ The deterministic repo-index check remains behaviorally identical while its exac
 
 ## Result evidence
 
-- Pending focused implementation and validation.
+- Test commit `a42ddba` changes only the exact temporary-directory case budget from `15_000` to `45_000`; generator code and global worker policy are unchanged.
+- Exact focused validation passed `1 / 1` test (`5` skipped) in `6.24s`, with `4.57s` spent in the two intentional full scans; `git diff --check` passed.

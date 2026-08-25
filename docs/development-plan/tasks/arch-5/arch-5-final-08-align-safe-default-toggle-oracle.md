@@ -14,9 +14,9 @@
 - Invalidating paths: `tests/unit/globalLayerUi.test.tsx`; teacher-controller defaults, Properties checkbox behavior or persistence code
 - Task ID: `arch-5-final-08-align-safe-default-toggle-oracle`
 - Phase / wave: `ARCH-5 / post-audit candidate repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `UI Test Owner / none / Coordinator`
-- Claimed at / released at: `2026-08-25T11:10:25+08:00 / not released`
+- Claimed at / released at: `2026-08-25T11:10:25+08:00 / 2026-08-25T11:34:59+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `d1566af`; candidate 07 is rolled back and the tree is clean.
 - Context: test-only repair; product defaults and UI behavior are frozen.
@@ -43,10 +43,10 @@ The unit contract proves that a new teacher controller starts collapsed and that
 
 ## Acceptance
 
-- [ ] The test asserts the initial checkbox is checked.
-- [ ] The retained click is asserted to make the checkbox unchecked.
-- [ ] The stored controller expectation is `defaultCollapsed: false` after that explicit override.
-- [ ] The exact focused test and diff check pass.
+- [x] The test asserts the initial checkbox is checked.
+- [x] The retained click is asserted to make the checkbox unchecked.
+- [x] The stored controller expectation is `defaultCollapsed: false` after that explicit override.
+- [x] The exact focused test and diff check pass.
 
 ## Validation
 
@@ -59,4 +59,5 @@ The unit contract proves that a new teacher controller starts collapsed and that
 
 ## Result evidence
 
-- Pending focused implementation and validation.
+- Test commit `f5ca015` changes only `globalLayerUi.test.tsx`: the checkbox is asserted checked before the retained click, unchecked afterward, and the stored controller is asserted `defaultCollapsed: false`.
+- Exact focused validation passed `1 / 1` test (`6` skipped) in `3.24s`; `git diff --check` passed. Product source and persisted data were unchanged.

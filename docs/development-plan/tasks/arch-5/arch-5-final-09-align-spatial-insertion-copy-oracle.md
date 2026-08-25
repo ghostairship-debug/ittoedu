@@ -14,9 +14,9 @@
 - Invalidating paths: `tests/unit/editorFormattingUi.test.tsx`; `src/renderer/ui/ElementsTab.tsx`; Spatial insertion-scope derivation
 - Task ID: `arch-5-final-09-align-spatial-insertion-copy-oracle`
 - Phase / wave: `ARCH-5 / post-audit candidate repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Spatial UI Test Owner / none / Coordinator`
-- Claimed at / released at: `2026-08-25T11:10:25+08:00 / not released`
+- Claimed at / released at: `2026-08-25T11:10:25+08:00 / 2026-08-25T11:34:59+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `d1566af`; candidate 07 is rolled back and the tree is clean.
 - Context: test-only freshness repair; the approved owner-aware product copy is frozen.
@@ -35,6 +35,7 @@ The unit contract matches the approved owner-aware Spatial global-scope guidance
 ### Allowed write
 
 - `tests/unit/editorFormattingUi.test.tsx`
+- `docs/development-plan/tasks/stabilization/stab-cross-01-surface-aware-insertion-affordance.md` for the missed invalidation/freshness citation only
 - this card and generated task board
 
 ### Forbidden write
@@ -43,9 +44,9 @@ The unit contract matches the approved owner-aware Spatial global-scope guidance
 
 ## Acceptance
 
-- [ ] The global-scope hint expects the current complete switch-to-world sentence.
-- [ ] Existing disabled, unavailable and zero-write assertions remain intact.
-- [ ] The exact focused test and diff check pass.
+- [x] The global-scope hint expects the current complete switch-to-world sentence.
+- [x] Existing disabled, unavailable and zero-write assertions remain intact.
+- [x] The exact focused test and diff check pass.
 
 ## Validation
 
@@ -58,4 +59,6 @@ The unit contract matches the approved owner-aware Spatial global-scope guidance
 
 ## Result evidence
 
-- Pending focused implementation and validation.
+- Test commit `9fa0181` updates only the stale global-scope sentence to `无限画布全局层暂不支持插入元素；请切换到无限画布世界层。`; all disabled-entry, unavailable-carrier and zero-write assertions remain intact.
+- Exact focused validation passed `1 / 1` test (`19` skipped) in `2.95s`; `git diff --check` passed. Product source and persisted data were unchanged.
+- This repair also records the previously missed `59f5fdc` invalidation of `stab-cross-01`: its current evidence now cites the owner-aware product and this fresh oracle instead of relying only on the pre-owner-aware `a6fdba4` test bytes.

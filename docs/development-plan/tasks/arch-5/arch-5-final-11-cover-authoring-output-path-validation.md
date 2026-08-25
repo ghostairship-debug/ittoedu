@@ -15,9 +15,9 @@
 - Invalidating paths: `tests/unit/coursewareAuthoringRunner.test.ts`; `scripts/run-courseware-authoring.ts` argument parsing/path identity/extension validation; Node stream mocking behavior
 - Task ID: `arch-5-final-11-cover-authoring-output-path-validation`
 - Phase / wave: `ARCH-5 / post-audit candidate repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Authoring Runner Test Owner / independent path-validation reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25T11:10:25+08:00 / not released`
+- Claimed at / released at: `2026-08-25T11:10:25+08:00 / 2026-08-25T11:34:59+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `d1566af`; candidate 07 is rolled back and the tree is clean.
 - Context: test-only repair using the already exported CLI entry point; implementation is frozen.
@@ -44,12 +44,12 @@ The authoring CLI unit contract rapidly and explicitly rejects report/inventory 
 
 ## Acceptance
 
-- [ ] The case calls exported `runCoursewareAuthoringCli` directly with all four valid delivery baseline paths.
-- [ ] Each of four invalid variants returns `2` and emits its intended exact alias or extension diagnostic.
-- [ ] The inventory bytes remain identical after every invalid invocation.
-- [ ] Stream interception is restored even if an assertion fails.
-- [ ] Focused test, TypeScript check and diff check pass.
-- [ ] One independent reviewer approves without rerunning the broad suite.
+- [x] The case calls exported `runCoursewareAuthoringCli` directly with all four valid delivery baseline paths.
+- [x] Each of four invalid variants returns `2` and emits its intended exact alias or extension diagnostic.
+- [x] The inventory bytes remain identical after every invalid invocation.
+- [x] Stream interception is restored even if an assertion fails.
+- [x] Focused test, TypeScript check and diff check pass.
+- [x] One independent reviewer approves without rerunning the broad suite.
 
 ## Validation
 
@@ -63,4 +63,7 @@ The authoring CLI unit contract rapidly and explicitly rejects report/inventory 
 
 ## Result evidence
 
-- Pending focused implementation, validation and independent review.
+- Test commit `0ed7f1f` replaces four sequential `tsx` subprocess launches with direct calls to the already exported `runCoursewareAuthoringCli`. All four valid delivery baselines are present, so same-path alias, hard-link alias, HTML extension and report extension branches are each reached and asserted with return code `2` and their exact diagnostic.
+- Inventory bytes are checked after every variant; the `stderr` spy is restored in `finally`. The separate real Electron authoring round-trip test remains unchanged.
+- Exact focused validation passed `1 / 1` test (`2` skipped) in `1.23s`, with `50ms` test execution versus about `50s` in the failed V4 contention case. `npx tsc --noEmit` and `git diff --check` passed.
+- The independent path-validation Reviewer returned `APPROVE`: all four branches are reachable, validation occurs before Electron launch, stream isolation is safe, inventory preservation is explicit and real Electron coverage was not weakened.
