@@ -1,6 +1,6 @@
 # repair-v8-01-remove-incline-chain 删除无 consumer 的 incline-motion V8 全链
 
-- Status / Owner: queued /
+- Status / Owner: active / codex/repair-v8-01
 - Risk / Hotspot: S2 / none
 - Outcome / Why now: EXA-02 已完成；incline-motion 的 V8 课例、组件源码/包和孤立生成脚本没有 package、测试、发布或产品 consumer，继续保留只制造已退役课例与 V8 archive/export 假依赖。
 - Write scope / Baseline: baseline `a1ccc9cc0703d1e4d323baa21d256921c7360879`；仅允许删除 `scripts/build-incline-motion-lesson.ts`、`examples/incline-motion-3d-component/**`、`examples/incline-motion-3d.h5component`、`examples/incline-motion-3d-lesson.h5lesson`，并更新 `docs/development-plan/inventories/legacy-consumers.json` 中 LEG-008 对应的当前 confirmed endpoint/fact/evidence（保留 historical baseline/startingCounts）；禁止修改产品 archive/export/Player、其他示例、迁移旧内容或写 Integrator 独占的计划/能力/generated 输出。

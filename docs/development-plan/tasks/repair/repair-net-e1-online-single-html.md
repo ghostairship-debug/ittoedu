@@ -1,6 +1,6 @@
 # repair-net-e1-online-single-html 在线轻量单 HTML
 
-- Status / Owner: queued /
+- Status / Owner: active / codex/repair-net-e1
 - Risk / Hotspot: S2 / published-producer, app-save-recovery
 - Outcome / Why now: 教师可在现有导出入口明确选择“离线便携”或“在线轻量”单 HTML；当前 producer 始终把资产转成 Data URL，CSP 也只允许 data/blob，导致已合入的 `remote.url` 与 `network.connectOrigins` 没有交付 consumer。
 - Write scope / Baseline: baseline `a1ccc9cc0703d1e4d323baa21d256921c7360879`；仅允许写 `src/renderer/export/course/buildPublishedCourse.ts`、`src/renderer/export/course/buildCoursePackages.ts`、`src/renderer/App.tsx`、`src/renderer/export/exportPreflight.ts`、`src/renderer/ui/TopToolbar.tsx`、至多一个新建的单 HTML 模式选择 UI 文件，以及 `tests/unit/coursePackageExport.test.ts`、`tests/unit/buildPublishedCourseV2.test.ts`、`tests/unit/exportMenuUi.test.tsx`、`tests/integration/courseExportPreflightApp.test.tsx`、新建 `tests/e2e/publishedOnlineSingleHtml.spec.ts`；禁止修改共享 fixture/helper、V9/Published Schema、main/preload、网页包语义、远程脚本策略及 Integrator 独占的计划/能力/generated 输出。

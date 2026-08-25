@@ -1,6 +1,6 @@
 # repair-rtp-02-published-flow-surface-runtime Flow 共享层 Surface Runtime 真实运行
 
-- Status / Owner: queued /
+- Status / Owner: active / codex/repair-rtp-02
 - Risk / Hotspot: S2 / none
 - Outcome / Why now: 现有 Flow 作者命令默认把 `protocol: 'surface-runtime'`、API 3、DOM Runtime 写入当前 Flow `surfaceLayerItems`，但 Published `FlowSurfaceHost` 只画静态后备；RTP-01 已提供可复用的同 realm mount/session，当前四个 Published consumer 应执行真实 code。
 - Write scope / Baseline: baseline `a1ccc9cc0703d1e4d323baa21d256921c7360879`；仅允许写 `src/player/surfaces/flow/FlowSurfaceHost.ts`、为 Flow lifecycle/diagnostic 接线所必需的 `src/player/surfaces/publishedDynamicHosts.ts`、现有通用接口确实不足时窄改 `src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts`，以及 `tests/unit/flowSurfaceHost.test.ts`、`tests/unit/publishedCourseNavigation.test.ts`、新建 `tests/integration/publishedRuntimeFlowHostIntegration.test.ts`、新建 `tests/e2e/publishedRuntimeFlowV2.spec.ts`；禁止修改共享 fixture/helper、Schema、Published producer、App、Slide/Spatial host、Legacy `PlayerApp`/`CourseRuntimeKernel`、main/preload、NET-E1 文件及 Integrator 独占的计划/能力/generated 输出。
