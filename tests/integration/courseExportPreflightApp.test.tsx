@@ -9,6 +9,8 @@ const legacyPreflight = vi.hoisted(() => ({
   called: vi.fn<(...args: unknown[]) => void>(),
 }))
 
+const sizeProbe = vi.hoisted(() => ({ forceWarning: false }))
+
 vi.mock('../../src/renderer/export/exportPreflight', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/export/exportPreflight')>()
   return {
@@ -17,6 +19,16 @@ vi.mock('../../src/renderer/export/exportPreflight', async (importOriginal) => {
       legacyPreflight.called(...args)
       return actual.collectExportPreflight(...args)
     },
+  }
+})
+
+vi.mock('../../src/renderer/export/exportSize', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/export/exportSize')>()
+  return {
+    ...actual,
+    utf8ByteLength: (value: string) => sizeProbe.forceWarning
+      ? actual.SINGLE_HTML_WARNING_BYTES + 1
+      : actual.utf8ByteLength(value),
   }
 })
 
@@ -42,7 +54,10 @@ vi.mock('../../src/renderer/ui/RightSidebar', () => ({
 
 vi.mock('../../src/renderer/ui/TopToolbar', () => ({
   TopToolbar: (props: {
-    onExport(format: 'single-html' | 'web-package'): void
+    onExport(
+      format: 'single-html' | 'web-package',
+      singleHtmlMode?: 'offline-portable' | 'online-lightweight',
+    ): void
   }) => (
     <div>
       <button
@@ -51,6 +66,13 @@ vi.mock('../../src/renderer/ui/TopToolbar', () => ({
         onClick={() => props.onExport('single-html')}
       >
         HTML
+      </button>
+      <button
+        type="button"
+        data-testid="export-single-html-online"
+        onClick={() => props.onExport('single-html', 'online-lightweight')}
+      >
+        ONLINE HTML
       </button>
       <button
         type="button"
@@ -149,6 +171,35 @@ function loadCourseWithMissingBackgroundBytes() {
   return project
 }
 
+function loadCourseWithRemoteBackground(
+  remoteUrl = 'https://cdn.example.com/course/hero.png?v=2',
+) {
+  const project = createBlankCourseProject({
+    now: NOW,
+    includeDefaultController: false,
+    controls: 'none',
+  })
+  const bytes = new Uint8Array([1, 2, 3, 4])
+  project.assets.hero = {
+    id: 'hero',
+    filename: 'hero.png',
+    mimeType: 'image/png',
+    kind: 'image',
+    path: 'assets/hero.png',
+    byteLength: bytes.byteLength,
+    width: 100,
+    height: 100,
+    remote: { url: remoteUrl },
+  }
+  project.network = { connectOrigins: ['https://api.example.com'] }
+  const slide = project.surfaces.find((surface) => surface.type === 'slide')
+  if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+  slide.scenes[0]!.backgroundAssetId = 'hero'
+  useEditorStore.getState().loadCourseProject(project, null, { hero: bytes }, {})
+  useEditorStore.getState().activateCourseLocation(project.startLocationId)
+  return project
+}
+
 function savedReport(api: AppDesktopApi) {
   const input = api.exportBinary.mock.calls[0]?.[0]
   if (!input) throw new Error('expected saved preflight report')
@@ -169,6 +220,7 @@ beforeEach(() => {
     disconnect() {}
   })
   legacyPreflight.called.mockClear()
+  sizeProbe.forceWarning = false
 })
 
 afterEach(() => {
@@ -221,5 +273,54 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
       code: 'asset-bytes-missing',
       severity: 'error',
     }))
+  })
+
+  it('keeps online-lightweight mode through preflight and the large HTML confirmation', async () => {
+    loadCourseWithRemoteBackground()
+    const api = appApi()
+    window.desktopAPI = api
+    sizeProbe.forceWarning = true
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html-online'))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    expect(screen.getByText('online-remote-asset')).toBeVisible()
+    expect(screen.getByText(/https:\/\/cdn\.example\.com\/course\/hero\.png\?v=2/))
+      .toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 文件较大',
+    })).toBeVisible()
+    expect(api.exportHtml).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /仍导出单 HTML/ }))
+
+    await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
+    const html = api.exportHtml.mock.calls[0]?.[0]?.html as string | undefined
+    expect(html).toContain('img-src data: blob: https://cdn.example.com')
+    expect(html).toContain('connect-src data: blob: https://api.example.com')
+    expect(html).toContain('https:\\x2F\\x2Fcdn.example.com/course/hero.png?v=2')
+    expect(html).not.toContain('data:image/png;base64')
+  })
+
+  it('blocks a wildcard online remote URL before exportHtml is called', async () => {
+    loadCourseWithRemoteBackground('https://*/course/hero.png')
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html-online'))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    expect(screen.getByText('online-remote-url-invalid')).toBeVisible()
+    expect(screen.getByText(/wildcard.*https:\/\/\*\/course\/hero\.png/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: '继续导出' }))
+      .not.toBeInTheDocument()
+    expect(api.exportHtml).not.toHaveBeenCalled()
   })
 })

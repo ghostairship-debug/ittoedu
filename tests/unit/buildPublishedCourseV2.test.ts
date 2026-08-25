@@ -513,6 +513,29 @@ describe('Published Course V2 producer', () => {
     expect(Object.keys(published.components)).toEqual(['component.quiz@4.0.0'])
   })
 
+  it('exposes validated V9 remote delivery metadata to an opt-in asset projection', () => {
+    const sources = mixedSources()
+    sources.project.assets['slide-image']!.remote = {
+      url: 'https://media.example.com/course/slide-image.png?revision=3',
+    }
+    sources.project.assets.unused!.remote = {
+      url: 'https://media.example.com/course/unused.png',
+    }
+
+    const published = buildPublishedCourseV2Payload(sources, {
+      projectAssetUrl(_assetId, metadata) {
+        return metadata.remote?.url
+      },
+    })
+
+    expect(published.assets['slide-image']?.url)
+      .toBe('https://media.example.com/course/slide-image.png?revision=3')
+    expect(published.assets['flow-image']?.url).toMatch(/^data:image\/png;base64,/)
+    expect(published.assets).not.toHaveProperty('unused')
+    expect(published.components['component.quiz@4.0.0']?.assets.icon?.url)
+      .toMatch(/^data:image\/png;base64,/)
+  })
+
   it('copies Flow blocks and Spatial world data without claiming host playback', () => {
     const published = buildPublishedCourseV2Payload(mixedSources())
     const flow = published.surfaces.find((surface) => surface.type === 'flow')

@@ -14,6 +14,7 @@ import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageFiles,
   collectCoursePackageExportPreflight,
+  OnlineSingleHtmlDeliveryError,
 } from '@/renderer/export/course/buildCoursePackages'
 
 const NOW = '2026-08-17T12:00:00.000Z'
@@ -47,6 +48,66 @@ function mixedSources(): CoursePublishSources {
   return {
     project,
     assetFiles: {},
+    components: {},
+  }
+}
+
+function onlineSources(): CoursePublishSources {
+  const project = createBlankCourseProject({
+    now: NOW,
+    includeDefaultController: false,
+    controls: 'none',
+  })
+  const hero = new Uint8Array([1, 2, 3, 4])
+  const narration = new Uint8Array([5, 6, 7])
+  const unused = new Uint8Array([8, 9])
+  project.assets = {
+    hero: {
+      id: 'hero',
+      filename: 'hero.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/hero.png',
+      byteLength: hero.byteLength,
+      remote: { url: 'https://z-assets.example.com/course/hero.png?version=2' },
+    },
+    narration: {
+      id: 'narration',
+      filename: 'narration.mp3',
+      mimeType: 'audio/mpeg',
+      kind: 'audio',
+      path: 'assets/narration.mp3',
+      byteLength: narration.byteLength,
+      remote: { url: 'https://a-media.example.com/audio/narration.mp3' },
+    },
+    unused: {
+      id: 'unused',
+      filename: 'unused.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/unused.png',
+      byteLength: unused.byteLength,
+      remote: { url: 'https://unused.example.com/never-requested.png' },
+    },
+  }
+  project.network = {
+    connectOrigins: ['wss://z-realtime.example.com:8443', 'https://api.example.com'],
+  }
+  project.media.audio.sounds.narration = {
+    id: 'narration',
+    name: '旁白',
+    assetId: 'narration',
+    channel: 'narration',
+    defaultVolume: 1,
+    defaultLoop: false,
+  }
+  const slide = project.surfaces.find((surface) => surface.type === 'slide')
+  if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+  slide.scenes[0]!.backgroundAssetId = 'hero'
+  courseProjectDocumentSchema.parse(project)
+  return {
+    project,
+    assetFiles: { hero, narration, unused },
     components: {},
   }
 }
@@ -112,6 +173,163 @@ describe('course package export', () => {
       expect(path.includes(':')).toBe(false)
       expect(path.startsWith('/')).toBe(false)
     }
+  })
+
+  it('distinguishes offline-portable and online-lightweight standalone HTML without changing web packages', () => {
+    const sources = onlineSources()
+    const defaultOffline = buildCoursePackages(sources, 'standalone-html', PLAYER_BUNDLE)
+    const explicitOffline = buildCoursePackages(sources, 'standalone-html', {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'offline-portable',
+    })
+    const online = buildCoursePackages(sources, 'standalone-html', {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'online-lightweight',
+    })
+
+    expect(defaultOffline.payload).toEqual(explicitOffline.payload)
+    expect(defaultOffline.payload.assets.hero?.url).toMatch(/^data:image\/png;base64,/)
+    expect(defaultOffline.payload.assets.narration?.url).toMatch(/^data:audio\/mpeg;base64,/)
+    expect(online.payload.assets.hero?.url)
+      .toBe('https://z-assets.example.com/course/hero.png?version=2')
+    expect(online.payload.assets.narration?.url)
+      .toBe('https://a-media.example.com/audio/narration.mp3')
+    expect(online.payload.assets).not.toHaveProperty('unused')
+
+    const onlineHtml = strFromU8(online.files['index.html']!)
+    expect(onlineHtml).toContain('img-src data: blob: https://z-assets.example.com')
+    expect(onlineHtml).toContain('media-src data: blob: https://a-media.example.com')
+    expect(onlineHtml).toContain('font-src data:')
+    expect(onlineHtml).toContain(
+      'connect-src data: blob: https://api.example.com wss://z-realtime.example.com:8443',
+    )
+    expect(onlineHtml).not.toContain('https://unused.example.com')
+    expect(onlineHtml.match(/script-src[^;]*/)?.[0]).not.toContain('https://')
+    expect(onlineHtml.match(/Content-Security-Policy" content="([^"]+)/)?.[1]).not.toContain('*')
+
+    const webFiles = buildPublishedCourseWebPackageFiles(sources, {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'online-lightweight',
+    })
+    const webData = strFromU8(webFiles['course-data.js']!)
+    const webIndex = strFromU8(webFiles['index.html']!)
+    expect(webData).toContain('./assets/')
+    expect(webData).not.toContain('z-assets.example.com')
+    expect(webData).not.toContain('a-media.example.com')
+    expect(webIndex).toContain("connect-src 'self'")
+  })
+
+  it('lists only actual online remote dependencies in stable preflight order', () => {
+    const sources = onlineSources()
+    const online = collectCoursePackageExportPreflight(
+      sources.project,
+      'standalone-html',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+      { singleHtmlMode: 'online-lightweight' },
+    )
+    const offline = collectCoursePackageExportPreflight(
+      sources.project,
+      'standalone-html',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+      { singleHtmlMode: 'offline-portable' },
+    )
+
+    expect(online.summary).toMatchObject({ error: 0, info: 2, canExport: true })
+    expect(online.items.map((item) => item.message)).toEqual([
+      '在线轻量单 HTML 将依赖远程素材：https://a-media.example.com/audio/narration.mp3',
+      '在线轻量单 HTML 将依赖远程素材：https://z-assets.example.com/course/hero.png?version=2',
+    ])
+    expect(offline.items).toEqual([])
+  })
+
+  it('blocks an actual wildcard remote URL online before producing CSP while offline stays embedded', () => {
+    const sources = onlineSources()
+    sources.project.assets.hero!.remote = {
+      url: 'https://*.example.com/course/hero.png',
+    }
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'standalone-html',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+      { singleHtmlMode: 'online-lightweight' },
+    )
+
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'online-remote-url-invalid',
+      path: ['assets', 'hero', 'remote', 'url'],
+      message: expect.stringContaining('https://*.example.com/course/hero.png'),
+    }))
+    expect(() => buildPublishedCourseStandaloneHtml(sources, {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'online-lightweight',
+    })).toThrow(OnlineSingleHtmlDeliveryError)
+
+    const offline = buildPublishedCourseStandaloneHtml(sources, PLAYER_BUNDLE)
+    expect(offline).toContain('img-src data: blob:;')
+    expect(offline).not.toContain('*.example.com')
+  })
+
+  it('lists an uppercase HTTPS dependency and normalizes its exact CSP origin', () => {
+    const sources = onlineSources()
+    sources.project.assets.hero!.remote = {
+      url: 'HTTPS://CDN.EXAMPLE.COM/Course/Hero.png?Revision=7',
+    }
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'standalone-html',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+      { singleHtmlMode: 'online-lightweight' },
+    )
+    const online = buildCoursePackages(sources, 'standalone-html', {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'online-lightweight',
+    })
+    const html = strFromU8(online.files['index.html']!)
+
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'info',
+      code: 'online-remote-asset',
+      message: expect.stringContaining('HTTPS://CDN.EXAMPLE.COM/Course/Hero.png?Revision=7'),
+    }))
+    expect(report.summary.canExport).toBe(true)
+    expect(online.payload.assets.hero?.url)
+      .toBe('HTTPS://CDN.EXAMPLE.COM/Course/Hero.png?Revision=7')
+    expect(html).toContain('img-src data: blob: https://cdn.example.com')
+  })
+
+  it('keeps remote dependency info when local bytes are missing', () => {
+    const sources = onlineSources()
+    const { hero: _missing, ...remainingAssetFiles } = sources.assetFiles
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'standalone-html',
+      { assetFiles: remainingAssetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+      { singleHtmlMode: 'online-lightweight' },
+    )
+
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'asset-bytes-missing',
+      path: ['assets', 'hero'],
+    }))
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'info',
+      code: 'online-remote-asset',
+      message: expect.stringContaining('https://z-assets.example.com/course/hero.png?version=2'),
+    }))
   })
 
   it('reports missing publish resources in Chinese preflight before export', () => {

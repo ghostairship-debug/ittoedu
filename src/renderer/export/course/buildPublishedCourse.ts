@@ -11,6 +11,7 @@ import type {
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import type {
   ComponentLayerItem,
+  CourseAssetMeta,
   CourseProjectDocument,
   CourseSurfaceDocument,
   FlowBlock,
@@ -53,9 +54,9 @@ export interface BuildPublishedCourseOptions {
   /** Defaults to a Data URL, which is suitable for a standalone HTML file. */
   projectAssetUrl?: (
     assetId: string,
-    meta: AssetMeta,
+    meta: CourseAssetMeta,
     bytes: Uint8Array,
-  ) => string
+  ) => string | undefined
   /** Defaults to a Data URL, which is suitable for a standalone HTML file. */
   componentAssetUrl?: (
     componentKey: string,

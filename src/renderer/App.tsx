@@ -30,6 +30,7 @@ import {
   buildPublishedCourseWebPackageAsync,
   collectCoursePackageExportPreflight,
   type CoursePackagePreflightReport,
+  type SingleHtmlExportMode,
 } from './export/course/buildCoursePackages'
 import { buildCoursePptx } from './export/course/buildCoursePptx'
 import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
@@ -435,8 +436,13 @@ export default function App() {
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [exportPreflightReport, setExportPreflightReport] =
     useState<ExportPreflightReport | null>(null)
+  const [pendingSingleHtmlMode, setPendingSingleHtmlMode] =
+    useState<SingleHtmlExportMode | null>(null)
   const saveInFlightRef = useRef(false)
-  const pendingLargeHtmlRef = useRef<string | null>(null)
+  const pendingLargeHtmlRef = useRef<{
+    html: string
+    mode: SingleHtmlExportMode
+  } | null>(null)
   const recoveryRevisionRef = useRef(0)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
     RecoverySnapshot,
@@ -1205,10 +1211,22 @@ export default function App() {
     }, '组件目录刷新失败。')
   }, [run])
 
-  const buildHtml = useCallback(() => {
+  const buildHtml = useCallback((
+    singleHtmlMode: SingleHtmlExportMode = 'offline-portable',
+  ) => {
     const sources = activeCoursePublishSources()
     if (sources) {
-      return buildPublishedCourseStandaloneHtml(sources, loadPlayerBundle())
+      return buildPublishedCourseStandaloneHtml(sources, {
+        playerBundle: loadPlayerBundle(),
+        singleHtmlMode,
+      })
+    }
+    if (singleHtmlMode === 'online-lightweight') {
+      throw new UserFacingError(
+        '在线轻量导出不可用',
+        '当前编辑会话没有可发布的 Course Project V9 文档。',
+        '请先重建当前课程会话，再重新选择“在线轻量单 HTML”。',
+      )
     }
     const state = useEditorStore.getState()
     const preview = projectCandidatePreviewDocument(state)
@@ -1235,26 +1253,34 @@ export default function App() {
     }, '预览窗口创建失败。请关闭其他预览窗口后重试。')
   }, [buildHtml, run])
 
-  const writeSingleHtml = useCallback(async (html: string) => {
+  const writeSingleHtml = useCallback(async (
+    html: string,
+    mode: SingleHtmlExportMode,
+  ) => {
     const state = useEditorStore.getState()
     const title = selectActiveCourseProjectDocument(state)?.title ?? state.project.title
     const result = await desktopApi().exportHtml({
       suggestedName: `${title}.html`,
       html,
     })
-    if (result) state.setStatus(`单 HTML 已导出到 ${result.path}`)
+    if (result) {
+      const label = mode === 'online-lightweight' ? '在线轻量单 HTML' : '离线便携单 HTML'
+      state.setStatus(`${label}已导出到 ${result.path}`)
+    }
   }, [])
 
-  const handleExportHtml = useCallback(() => {
+  const handleExportHtml = useCallback((
+    mode: SingleHtmlExportMode = 'offline-portable',
+  ) => {
     void run(async () => {
-      const html = buildHtml()
+      const html = buildHtml(mode)
       const byteLength = utf8ByteLength(html)
       if (byteLength > SINGLE_HTML_WARNING_BYTES) {
-        pendingLargeHtmlRef.current = html
+        pendingLargeHtmlRef.current = { html, mode }
         setLargeHtmlByteLength(byteLength)
         return
       }
-      await writeSingleHtml(html)
+      await writeSingleHtml(html, mode)
     }, '导出失败。请检查磁盘空间并重试。')
   }, [buildHtml, run, writeSingleHtml])
 
@@ -1433,11 +1459,16 @@ export default function App() {
     }, 'DOCX 导出失败。请先新增流式讲义页面后重试。')
   }, [run])
 
-  const handleExport = useCallback((format: ExportFormat) => {
+  const handleExport = useCallback((
+    format: ExportFormat,
+    singleHtmlMode: SingleHtmlExportMode = 'offline-portable',
+  ) => {
     if (format === 'docx') {
       handleExportDocx()
       return
     }
+    const requestedSingleHtmlMode = format === 'single-html' ? singleHtmlMode : null
+    setPendingSingleHtmlMode(requestedSingleHtmlMode)
     const state = useEditorStore.getState()
     const sources = activeCoursePublishSources()
     if (!sources) {
@@ -1461,6 +1492,8 @@ export default function App() {
         components: sources.components,
       },
       loadPlayerBundle(),
+      new Date(),
+      { singleHtmlMode: requestedSingleHtmlMode ?? undefined },
     )
     if (format === 'single-html' || format === 'web-package') {
       setExportPreflightReport(coursePackagePreflightToExportReport(
@@ -1484,8 +1517,10 @@ export default function App() {
   const continuePreflightExport = useCallback(() => {
     const report = exportPreflightReport
     if (!report?.summary.canExport) return
+    const singleHtmlMode = pendingSingleHtmlMode ?? 'offline-portable'
     setExportPreflightReport(null)
-    if (report.target === 'single-html') handleExportHtml()
+    setPendingSingleHtmlMode(null)
+    if (report.target === 'single-html') handleExportHtml(singleHtmlMode)
     else if (report.target === 'web-package') handleExportWebPackage()
     else if (report.target === 'pptx') handleExportPptx()
     else handleExportPdf()
@@ -1495,6 +1530,7 @@ export default function App() {
     handleExportPdf,
     handleExportPptx,
     handleExportWebPackage,
+    pendingSingleHtmlMode,
   ])
 
   const locatePreflightItem = useCallback((item: ExportPreflightItem) => {
@@ -1511,6 +1547,7 @@ export default function App() {
     state.setActiveTab('properties')
     state.setStatus(`已定位导出预检问题：${item.message}`)
     setExportPreflightReport(null)
+    setPendingSingleHtmlMode(null)
   }, [])
 
   const saveExportPreflightReport = useCallback(() => {
@@ -1941,7 +1978,10 @@ export default function App() {
       />
       <ExportPreflightDialog
         report={exportPreflightReport}
-        onCancel={() => setExportPreflightReport(null)}
+        onCancel={() => {
+          setExportPreflightReport(null)
+          setPendingSingleHtmlMode(null)
+        }}
         onContinue={continuePreflightExport}
         onLocate={locatePreflightItem}
         onSaveReport={saveExportPreflightReport}
@@ -1956,11 +1996,11 @@ export default function App() {
           handleExportWebPackage()
         }}
         onContinueSingleHtml={() => {
-          const html = pendingLargeHtmlRef.current
+          const pending = pendingLargeHtmlRef.current
           clearLargeHtmlWarning()
-          if (!html) return
+          if (!pending) return
           void run(
-            () => writeSingleHtml(html),
+            () => writeSingleHtml(pending.html, pending.mode),
             '单 HTML 导出失败。请改用网页包或检查磁盘空间。',
           )
         }}

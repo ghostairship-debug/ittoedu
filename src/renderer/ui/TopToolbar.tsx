@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { ProjectHealthSummary } from '../../shared/projectHealth'
 import { APP_NAME } from '../../shared/constants'
+import type { SingleHtmlExportMode } from '../export/course/buildCoursePackages'
 import { useEditorStore, selectActiveCourseProjectDocument } from '../store/editorStore'
 
 interface TopToolbarProps {
@@ -35,7 +36,7 @@ interface TopToolbarProps {
   healthSummary: ProjectHealthSummary
   onOpenHealth(): void
   onPreview(): void
-  onExport(format: ExportFormat): void
+  onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
 }
 
 export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
@@ -393,11 +394,24 @@ export function TopToolbar({
             className="export-menu__item"
             onClick={(event) => {
               event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('single-html')
+              onExport('single-html', 'offline-portable')
             }}
           >
             <FileDown size={18} />
-            <span><strong>单 HTML</strong><small>一个文件，适合小中型离线课件</small></span>
+            <span><strong>离线便携单 HTML</strong><small>资源全部内嵌，无网络也能使用，文件较大</small></span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-single-html-online"
+            className="export-menu__item"
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('single-html', 'online-lightweight')
+            }}
+          >
+            <FileDown size={18} />
+            <span><strong>在线轻量单 HTML</strong><small>保留已声明的远程素材地址，文件较小但依赖网络</small></span>
           </button>
           <button
             type="button"
