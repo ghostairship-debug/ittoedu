@@ -7,21 +7,33 @@ import type {
   ComponentCreateContextV4Phaser,
   ComponentManifest,
 } from '../src/shared/componentTypes'
-import type { ProjectDocument } from '../src/shared/projectTypes'
 import { componentManifestSchema } from '../src/shared/componentSchema'
+import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
+import type { CourseProjectDocument } from '../src/shared/courseProjectTypes'
 import {
-  createExternalComponentNode,
-  createProject,
-  createShapeNode,
-  createScene,
-  createTextNode,
-} from '../src/renderer/project/createProject'
+  addCourseScene,
+  type CourseLocationCommandResult,
+} from '../src/renderer/course/courseLocationCommands'
 import {
-  createProjectArchive,
-  openProjectArchive,
-} from '../src/renderer/project/projectArchive'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+  openSlideAuthoringSession,
+  type SlideAuthoringSession,
+} from '../src/renderer/course/slideAuthoringBackend'
+import type { SlideCommandResult } from '../src/renderer/course/slideEditorCommands'
+import {
+  addSlideComponentLayer,
+  addSlideTextLayer,
+  readSlideComponentLayer,
+} from '../src/renderer/course/v9SlideContentCommands'
+import {
+  importComponentPackage,
+  parseComponentPackageFiles,
+} from '../src/renderer/components/importComponentPackage'
 import { executeComponentRuntime } from '../src/renderer/components/executeComponentRuntime'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '../src/renderer/project/courseProjectArchive'
+import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
 import {
   checkTrackedExampleOutputs,
   normalizeLineEndings,
@@ -75,6 +87,21 @@ function deterministicIdFactory(): () => string {
   return () => String(++sequence).padStart(3, '0')
 }
 
+function requireCourseProject(result: CourseLocationCommandResult): {
+  project: CourseProjectDocument
+  activatedLocationId: string
+} {
+  if (!result.ok) throw new Error(result.reason)
+  return result
+}
+
+function requireSlideSession(result: SlideCommandResult): SlideAuthoringSession {
+  if (!result.ok || !result.nextSession) {
+    throw new Error(result.reason ?? '示例 Slide 命令执行失败')
+  }
+  return result.nextSession
+}
+
 async function readComponentSources(): Promise<{
   manifest: ComponentManifest
   manifestBytes: Uint8Array
@@ -110,131 +137,151 @@ async function readComponentSources(): Promise<{
 function buildSampleProject(
   manifest: ComponentManifest,
   componentMetadata: ReturnType<typeof importComponentPackage>['metadata'],
-): ProjectDocument {
-  const idFactory = deterministicIdFactory()
-  const project = createProject({
+): CourseProjectDocument {
+  let project = createBlankCourseProject({
     id: 'project_sample_courseware',
     title: '示例互动课件',
     now: reproducibleTimestamp,
-    idFactory,
+    idFactory: deterministicIdFactory(),
   })
 
-  const firstScene = project.scenes[0]!
-  firstScene.id = 'scene_sample_intro'
-  firstScene.name = '欢迎'
-  firstScene.backgroundColor = '#ffffff'
-  firstScene.nodes = [
-    createShapeNode('rounded-rectangle', {
-      id: 'shape_intro_card',
-      name: '蓝色矩形卡片',
-      x: 150,
-      y: 150,
-      width: 980,
-      height: 420,
-      style: {
-        fillColor: '#2563eb',
-        borderColor: '#1d4ed8',
-        borderWidth: 3,
-        cornerRadius: 28,
-      },
-    }),
-    createTextNode({
-      id: 'text_intro_title',
-      name: '主标题',
-      x: 240,
-      y: 260,
-      width: 800,
-      height: 90,
-      text: '交互式课件编辑器',
-      style: {
-        fontSize: 64,
-        color: '#ffffff',
-        align: 'center',
-      },
-    }),
-    createTextNode({
-      id: 'text_intro_subtitle',
-      name: '副标题',
-      x: 290,
-      y: 372,
-      width: 700,
-      height: 60,
-      text: '双击文字即可修改',
-      style: {
-        fontSize: 34,
-        color: '#dbeafe',
-        align: 'center',
-      },
-    }),
-  ]
+  const slide = project.surfaces[0]
+  if (!slide || slide.type !== 'slide') {
+    throw new Error('V9 工厂未创建默认 Slide surface')
+  }
+  const firstLocation = project.locations.find(
+    (location) => location.kind === 'slide-scene' && location.surfaceId === slide.id,
+  )
+  if (!firstLocation) throw new Error('V9 工厂未创建默认 Slide location')
 
-  const secondScene = createScene({
-    id: 'scene_sample_component',
-    name: '互动组件',
-    backgroundColor: '#f3f4f6',
+  const added = requireCourseProject(addCourseScene(project, {
+    surfaceId: slide.id,
+    title: '互动组件',
+    now: reproducibleTimestamp.toISOString(),
+    expectedRevision: project.revision,
+  }))
+  project = structuredClone(added.project)
+
+  // addCourseScene intentionally owns ID allocation. Normalize only the fixture's
+  // newly authored location so repeated builds remain byte-for-byte reproducible.
+  const secondLocation = project.locations.find(
+    (location) => location.id === added.activatedLocationId,
+  )
+  if (!secondLocation || secondLocation.kind !== 'slide-scene') {
+    throw new Error('新建 Slide location 不可用')
+  }
+  const secondSlide = project.surfaces.find((surface) => surface.id === slide.id)
+  if (!secondSlide || secondSlide.type !== 'slide') {
+    throw new Error('新建 Slide surface 不可用')
+  }
+  const secondScene = secondSlide.scenes.find(
+    (scene) => scene.id === secondLocation.sceneId,
+  )
+  if (!secondScene) throw new Error('新建 Slide scene 不可用')
+  secondLocation.id = 'scene_sample_component'
+  secondLocation.sceneId = 'scene_sample_component'
+  secondLocation.label = '示例互动课件 · 互动组件'
+  secondScene.id = 'scene_sample_component'
+
+  project.componentPackages[manifest.id] = structuredClone(componentMetadata)
+  project = courseProjectDocumentSchema.parse(project)
+
+  let introSession = openSlideAuthoringSession(project, {
+    locationId: firstLocation.id,
   })
-  secondScene.nodes = [
-    createTextNode({
-      id: 'text_component_hint',
-      name: '操作提示',
-      x: 240,
-      y: 92,
-      width: 800,
-      height: 64,
-      text: '拖动组件，调整课件布局',
-      style: {
-        fontSize: 42,
-        color: '#1f2937',
-        align: 'center',
-      },
-    }),
-    createExternalComponentNode({
-      id: 'component_sample_counter',
-      name: manifest.name,
-      x: 400,
-      y: 220,
-      width: manifest.defaultSize.width,
-      height: manifest.defaultSize.height,
-      component: {
-        packageId: manifest.id,
-        version: manifest.version,
-      },
-      props: structuredClone(manifest.defaultProps),
-    }),
-  ]
-  project.scenes.push(secondScene)
-  project.componentPackages[manifest.id] = componentMetadata
-  return project
+  introSession = requireSlideSession(addSlideTextLayer(introSession, {
+    id: 'text_intro_title',
+    label: '主标题',
+    text: '交互式课件编辑器',
+    x: 240,
+    y: 260,
+  }, { now: reproducibleTimestamp.toISOString() }))
+  introSession = requireSlideSession(addSlideTextLayer(introSession, {
+    id: 'text_intro_subtitle',
+    label: '副标题',
+    text: '双击文字即可修改',
+    x: 290,
+    y: 372,
+  }, { now: reproducibleTimestamp.toISOString() }))
+  project = introSession.history.present
+
+  let componentSession = openSlideAuthoringSession(project, {
+    locationId: secondLocation.id,
+  })
+  componentSession = requireSlideSession(addSlideTextLayer(componentSession, {
+    id: 'text_component_hint',
+    label: '操作提示',
+    text: '拖动组件，调整课件布局',
+    x: 240,
+    y: 92,
+  }, { now: reproducibleTimestamp.toISOString() }))
+  componentSession = requireSlideSession(addSlideComponentLayer(componentSession, {
+    packageId: manifest.id,
+    manifest,
+    id: 'component_sample_counter',
+    label: manifest.name,
+    x: 400,
+    y: 220,
+    width: manifest.defaultSize.width,
+    height: manifest.defaultSize.height,
+    props: structuredClone(manifest.defaultProps),
+  }, { now: reproducibleTimestamp.toISOString() }))
+  const authored = readSlideComponentLayer(componentSession, 'component_sample_counter')
+  if (
+    authored.component.packageId !== manifest.id ||
+    authored.component.version !== manifest.version ||
+    authored.frame.x !== 400 ||
+    authored.frame.y !== 220
+  ) {
+    throw new Error('Slide component authoring command 产物不匹配')
+  }
+  return courseProjectDocumentSchema.parse(componentSession.history.present)
 }
 
-function validateGeneratedProject(project: ProjectDocument): void {
-  if (project.scenes.length !== 2) {
-    throw new Error('示例工程必须包含两个场景')
+function validateGeneratedProject(project: CourseProjectDocument): void {
+  const slide = project.surfaces[0]
+  if (
+    project.schemaVersion !== 9 ||
+    project.surfaces.length !== 1 ||
+    !slide ||
+    slide.type !== 'slide' ||
+    slide.scenes.length !== 2 ||
+    project.locations.length !== 2
+  ) {
+    throw new Error('示例工程必须是两页 Slide 的 Course Project V9')
   }
-  const firstTexts = project.scenes[0]!.nodes
-    .filter((node) => node.type === 'text')
-    .map((node) => node.text)
+  const controller = project.globalLayerItems.find(
+    (entry) => entry.item.kind === 'native' &&
+      entry.item.content.nativeType === 'teacher-controller',
+  )
+  if (!controller || controller.visibility.mode !== 'all' || project.playback.controls !== 'canvas') {
+    throw new Error('示例工程未保留 V9 工厂的默认全局教师控制器')
+  }
+  const firstTexts = slide.scenes[0]!.layerItems.flatMap((item) =>
+    item.kind === 'native' && item.content.nativeType === 'text'
+      ? [item.content.data.text]
+      : [])
   if (
     !firstTexts.includes('交互式课件编辑器') ||
-    !firstTexts.includes('双击文字即可修改') ||
-    !project.scenes[0]!.nodes.some(
-      (node) =>
-        node.type === 'shape' && node.shapeType === 'rounded-rectangle',
-    )
+    !firstTexts.includes('双击文字即可修改')
   ) {
-    throw new Error('示例工程场景 1 内容不完整')
+    throw new Error('示例工程第 1 页内容不完整')
   }
   if (
-    !project.scenes[1]!.nodes.some(
-      (node) => node.type === 'text' && node.text === '拖动组件，调整课件布局',
+    !slide.scenes[1]!.layerItems.some(
+      (item) => item.kind === 'native' &&
+        item.content.nativeType === 'text' &&
+        item.content.data.text === '拖动组件，调整课件布局',
     ) ||
-    !project.scenes[1]!.nodes.some(
-      (node) =>
-        node.type === 'external-component' &&
-        node.component.packageId === 'com.example.sample-counter',
+    !slide.scenes[1]!.layerItems.some(
+      (item) => item.kind === 'component' &&
+        item.component.packageId === 'com.example.sample-counter',
     )
   ) {
-    throw new Error('示例工程场景 2 内容不完整')
+    throw new Error('示例工程第 2 页内容不完整')
+  }
+  if (!project.componentPackages['com.example.sample-counter']) {
+    throw new Error('示例工程未登记计数器组件包')
   }
 }
 
@@ -397,7 +444,7 @@ export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutpu
     importedComponent.manifest,
     importedComponent.metadata,
   )
-  const projectArchive = createProjectArchive({
+  const projectArchive = createCourseProjectArchive({
     project,
     assetFiles: {},
     componentFiles: {
@@ -407,9 +454,11 @@ export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutpu
     mtime: reproducibleTimestamp,
   })
 
-  const reopened = openProjectArchive(projectArchive)
+  const reopened = openCourseProjectArchive(projectArchive)
   validateGeneratedProject(reopened.project)
-  importComponentPackage(componentArchive, {
+  const reopenedComponentFiles = reopened.componentFiles[importedComponent.key]
+  if (!reopenedComponentFiles) throw new Error('重开的 V9 工程缺少内嵌组件字节')
+  parseComponentPackageFiles(reopenedComponentFiles, {
     expectedId: importedComponent.manifest.id,
     expectedVersion: importedComponent.manifest.version,
   })

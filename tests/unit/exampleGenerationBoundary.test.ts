@@ -24,6 +24,7 @@ import { openCourseProjectArchive } from '../../src/renderer/project/courseProje
 import {
   parseRenderHostBenchmarkGenerationMode,
 } from '../../scripts/build-render-host-benchmark'
+import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
 
 const projectRoot = path.resolve(__dirname, '..', '..')
 const examplesDirectory = path.join(projectRoot, 'examples')
@@ -76,6 +77,50 @@ describe('example generation boundary', () => {
       const repeated = second[relativePath]
       if (!expected || !repeated) throw new Error(`Missing generated output ${relativePath}`)
       expect(equalBytes(expected, repeated)).toBe(true)
+    }
+
+    const projectBytes = first[SAMPLE_EXAMPLE_OUTPUT_PATHS.project]
+    const componentBytes = first[SAMPLE_EXAMPLE_OUTPUT_PATHS.component]
+    if (!projectBytes || !componentBytes) throw new Error('Missing generated sample archives')
+    const reopened = openCourseProjectArchive(projectBytes)
+    const slide = reopened.project.surfaces[0]
+    const slideLocations = reopened.project.locations.filter(
+      (location) => location.kind === 'slide-scene',
+    )
+    expect(reopened.project.schemaVersion).toBe(9)
+    expect(reopened.project.playback.controls).toBe('canvas')
+    expect(reopened.project.globalLayerItems).toEqual([
+      expect.objectContaining({
+        item: expect.objectContaining({
+          kind: 'native',
+          content: expect.objectContaining({ nativeType: 'teacher-controller' }),
+        }),
+        visibility: { mode: 'all', locationIds: [] },
+      }),
+    ])
+    expect(slide?.type).toBe('slide')
+    expect(slide?.type === 'slide' ? slide.scenes : []).toHaveLength(2)
+    expect(slideLocations).toHaveLength(2)
+    expect(reopened.project.componentPackages['com.example.sample-counter'])
+      .toMatchObject({ packageId: 'com.example.sample-counter', version: '4.0.0' })
+    const secondScene = slide?.type === 'slide' ? slide.scenes[1] : undefined
+    expect(secondScene?.layerItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        layerItemId: 'component_sample_counter',
+        kind: 'component',
+        component: {
+          packageId: 'com.example.sample-counter',
+          version: '4.0.0',
+        },
+      }),
+    ]))
+
+    const imported = importComponentPackage(componentBytes)
+    const embeddedFiles = reopened.componentFiles[imported.key]
+    expect(embeddedFiles).toBeDefined()
+    expect(Object.keys(embeddedFiles ?? {}).sort()).toEqual(Object.keys(imported.files).sort())
+    for (const [relativePath, bytes] of Object.entries(imported.files)) {
+      expect(equalBytes(embeddedFiles?.[relativePath] ?? new Uint8Array(), bytes)).toBe(true)
     }
 
     const before = await snapshotTrackedOutputs(SAMPLE_EXAMPLE_OUTPUT_PATHS)
