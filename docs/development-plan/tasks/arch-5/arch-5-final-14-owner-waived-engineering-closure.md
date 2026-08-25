@@ -15,9 +15,9 @@
 - Invalidating paths: all product source, tests, representative fixtures, contracts/schema, capability inputs/bundle, package/lockfile, build/test config, the three adopted generated examples, plan/audit disposition files, repo-index generator/config/semantic/golden inputs
 - Task ID: `arch-5-final-14-owner-waived-engineering-closure`
 - Phase / wave: `ARCH-5 / final engineering closure`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Coordinator / independent completion-evidence reviewer + independent outcome-boundary reviewer / Coordinator`
-- Claimed at / released at: `2026-08-25T12:28:32+08:00 / not released`
+- Claimed at / released at: `2026-08-25T12:28:32+08:00 / 2026-08-25T12:38:38+08:00`
 - Worktree / branch: `shared root / codex/architecture-stabilization`
 - Baseline HEAD: `ce6b9b6`; generated-output product boundary `941e936`; exact V4 source/test candidate `64abba2`; underlying product `23f2d00`.
 - Context: no package or release artifact will be produced. The closure status is at most `engineering candidate`.
@@ -45,14 +45,14 @@ The stabilization program closes with an evidence-backed Course Project V9 engin
 
 ## Acceptance
 
-- [ ] The report records the 29/29 audit disposition, final V4 counts, exact generated-output adoption and representative fixture hashes.
-- [ ] The report separately states pipeline and visible outcome status, and never claims package, performance, signing, release readiness, art acceptance or teacher acceptance.
-- [ ] Inline formula, advanced video and advanced image remain explicitly deferred with their alternatives and quantified reopen conditions.
-- [ ] The user's packaging cancellation is recorded as a scope waiver, not a passing package result.
-- [ ] Task board has no claimed task after closure and all implementation/decision work has a terminal disposition.
-- [ ] Repo-index is generated once after final report/task state and passes freshness and golden quality checks.
-- [ ] Contracts, task board, repo-index and diff exact-state checks pass.
-- [ ] Two independent reviewers approve their distinct evidence surfaces without rerunning product suites or packaging.
+- [x] The report records the 29/29 audit disposition, final V4 counts, exact generated-output adoption and representative fixture hashes.
+- [x] The report separately states pipeline and visible outcome status, and never claims package, performance, signing, release readiness, art acceptance or teacher acceptance.
+- [x] Inline formula, advanced video and advanced image remain explicitly deferred with their alternatives and quantified reopen conditions.
+- [x] The user's packaging cancellation is recorded as a scope waiver, not a passing package result.
+- [x] Task board has no claimed task after closure and all implementation/decision work has a terminal disposition.
+- [x] Repo-index is generated once after final report/task state and passes freshness and golden quality checks.
+- [x] Contracts, task board, repo-index and diff exact-state checks pass.
+- [x] Two independent reviewers approve their distinct evidence surfaces without rerunning product suites or packaging.
 
 ## Validation
 
@@ -69,4 +69,7 @@ The stabilization program closes with an evidence-backed Course Project V9 engin
 
 ## Result evidence
 
-- Pending report, final generated indexes, exact checks and independent reviews.
+- Final report `docs/development-plan/baselines/ARCH_5_POST_AUDIT_FINAL_CANDIDATE_REPORT.md` records the exact product/test/generated chain, `29/29` terminal mapping, V4 counts, fixture hashes, three deferred decisions and the user's package waiver. It caps the outcome at `engineering candidate` and explicitly leaves packaged artifact, performance, signing, art, acceptance and release readiness unclaimed.
+- The completion-evidence Reviewer returned `APPROVE`: audit IDs/counts, the `115`-card terminal projection, linear commit chain, V4 figures, generated blobs and representative fixture hashes all match; no implementation or decision work remains unhandled.
+- The outcome-boundary Reviewer returned `APPROVE`: the three deferred alternatives/thresholds match their decision cards, the package cancellation is an Owner scope waiver rather than a pass, and no art/accepted/release claim is made.
+- The final task board projects `107 done / 4 wave-validated / 4 rolled-back / 0 claimed`. The canonical repo-index was generated exactly once after report/card/board stabilization; contracts, task-board freshness, repo-index freshness/quality, representative hashes and diff hygiene passed without another product suite or package.
