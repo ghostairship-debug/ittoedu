@@ -15,9 +15,9 @@
 - Invalidating paths: `src/renderer/ui/FlowBlockContextToolbar.tsx`; `src/renderer/ui/FlowWorkspace.tsx`; `tests/unit/flowWorkspace.test.tsx`; `tests/e2e/stabilizationFlowAuthoring.spec.ts`
 - Task ID: `stab-flow-13-toolbar-command-hit-isolation`
 - Phase / wave: `post-audit stabilization / C-flow-authoring repair`
-- Status: `claimed`
+- Status: `done`
 - Owner / Reviewer / Integrator: `Flow Toolbar Repair Worker / independent Flow interaction reviewer / Stabilization Integrator`
-- Claimed at / released at: `2026-08-25 / not released`
+- Claimed at / released at: `2026-08-25 / 2026-08-25`
 - Worktree / branch: `shared integration workspace; Integrator is the sole Flow toolbar writer / codex/architecture-stabilization`
 - Baseline HEAD: Wave C spec/failure diagnosis `953553e`; unchanged product bytes `0999b1c`.
 - Context: exact-source Bootstrap covers `FlowBlockContextToolbar`, block-frame click selection, the focused workspace test and Wave C trace.
@@ -25,7 +25,7 @@
 - Depends on: `stab-flow-04-stable-context-toolbar`; `stab-flow-09-toolbar-neighbor-hit-isolation`
 - Blocks: `stab-wave-c-flow-authoring`
 - Risk statement: stopping the command click too early could suppress the button command; stopping it too late lets the block click rewrite selection and commit the edit.
-- Retry count / last failure class: `0 / product defect reproduced by isolated Wave C toolbar click`
+- Retry count / last failure class: `0 / focused product repair passed; V2 fulfillment remains with Wave C`
 
 ## Product outcome
 
@@ -36,9 +36,9 @@ Clicking a Flow context-toolbar command applies only that command and preserves 
 - Allowed write: one event-boundary repair in `FlowBlockContextToolbar.tsx`, one focused regression assertion in `flowWorkspace.test.tsx`, this task card and generated task-board state.
 - Forbidden write: Flow contracts/schema, text/run command semantics, Properties, Player/export, media, Wave C spec, dependencies or unrelated refactors.
 - Acceptance:
-  - [ ] Toolbar command `click` reaches the intended button handler and does not reach the outer Flow block `onClick`.
-  - [ ] A range-only bold command keeps the selection in text/range mode and remains local to the selected run.
-  - [ ] Existing pointer-down focus preservation, toolbar geometry, document/history behavior and accessible names remain unchanged.
+  - [x] Toolbar command `click` reaches the intended button handler and does not reach the outer Flow block `onClick`.
+  - [x] A range-only bold command keeps the selection in text/range mode and remains local to the selected run.
+  - [x] Existing pointer-down focus preservation, toolbar geometry, document/history behavior and accessible names remain unchanged.
 - No new abstraction: use the toolbar root as the existing event boundary.
 
 ## Minimal validation
@@ -51,8 +51,10 @@ Clicking a Flow context-toolbar command applies only that command and preserves 
 ## Result and rollback
 
 - Start evidence: product commit `0999b1c`; Wave C gate/fixture checkpoint `953553e`.
-- Product commit: pending.
-- Result evidence: pending.
+- Product commit: `d6c95fc`.
+- Result evidence: the existing toolbar root now stops the React `click` only in bubble phase, after the child command handler and before the containing Flow block selection handler. The focused regression sends the original `mouseDown` plus `click` sequence and proves `onSelectionChange=0`, the editor and `局部加粗` control remain live, and the command produces exactly one bold run over range `0..4`. `flowWorkspace.test.tsx` passed `15/15`; renderer and E2E TypeScript checks plus `git diff --check` passed. The independent Flow interaction reviewer concluded `APPROVE`: pointer-down capture, focus preservation, geometry, command semantics and accessible names are unchanged. The separately owned Wave C rerun remains the V2 fulfillment.
+- Pipeline status: pass at product commit `d6c95fc`.
+- Outcome status: `engineering candidate`; the exact unintended block-selection side effect is removed, while the composed Flow outcome remains pending Wave C.
 - Outcome boundary: V1 proves command-hit isolation only; the three-behavior Flow authoring outcome remains owned by Wave C.
 - Rollback: revert the narrow product commit; no contract, migration or persisted byte changes are involved.
 - Semantic index impact: none
