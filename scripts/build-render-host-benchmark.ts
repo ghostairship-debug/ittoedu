@@ -27,6 +27,7 @@ import {
 } from '../src/renderer/project/projectArchive'
 import {
   checkTrackedExampleOutputs,
+  normalizeLineEndings,
   type GeneratedExampleOutputs,
 } from './exampleGenerationBoundary'
 
@@ -68,7 +69,7 @@ async function loadThreePackageMetadata(): Promise<ThreePackageMetadata> {
   const [rootPackageText, installedPackageText, licenseText] = await Promise.all([
     fs.readFile(rootPackageJsonPath, 'utf8'),
     fs.readFile(installedThreePackageJsonPath, 'utf8'),
-    fs.readFile(installedThreeLicensePath, 'utf8'),
+    fs.readFile(installedThreeLicensePath, 'utf8').then(normalizeLineEndings),
   ])
   const rootPackage = JSON.parse(rootPackageText) as unknown
   const installedPackage = JSON.parse(installedPackageText) as unknown
@@ -466,6 +467,7 @@ async function loadComponent(
   const manifestText = await fs.readFile(path.join(directory, 'manifest.json'), 'utf8')
   const manifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
   const runtimeSource = await fs.readFile(path.join(directory, manifest.entry), 'utf8')
+    .then(normalizeLineEndings)
   validateComponentDefinition(runtimeSource, manifest)
   const files: Record<string, Uint8Array> = {
     'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
@@ -516,7 +518,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
   ] = await Promise.all([
     loadThreePackageMetadata(),
     bundleThreeRuntime(),
-    fs.readFile(path.join(runtimeDirectory, 'phaser-runtime.js'), 'utf8'),
+    fs.readFile(path.join(runtimeDirectory, 'phaser-runtime.js'), 'utf8').then(normalizeLineEndings),
     fs.readFile(playerBundlePath, 'utf8').catch((error: unknown) => {
       throw new Error('缺少 dist-player/player.iife.js；请先运行 npm run build:player', { cause: error })
     }),

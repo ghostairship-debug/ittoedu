@@ -1,3 +1,6 @@
+// @vitest-environment node
+// 本文件会嵌套执行 vite 打包（esbuild）；jsdom 的 TextEncoder 破坏 esbuild 的
+// Uint8Array invariant，因此必须在 node 环境下运行。
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +11,11 @@ import { projectDocumentSchema } from '../../src/shared/projectSchema'
 import type { ProjectDocument } from '../../src/shared/projectTypes'
 import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
 import { openProjectArchive } from '../../src/renderer/project/projectArchive'
+import {
+  checkRenderHostBenchmarkOutputs,
+  RENDER_HOST_BENCHMARK_OUTPUT_PATHS,
+} from '../../scripts/build-render-host-benchmark'
+import { equalBytes } from '../../scripts/exampleGenerationBoundary'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(testDirectory, '..', '..')
@@ -171,6 +179,23 @@ beforeAll(async () => {
 })
 
 describe('render host benchmark fixture', () => {
+  it('regenerates all tracked outputs deterministically and checks them without writing', async () => {
+    const snapshot = async () => new Map(await Promise.all(
+      Object.values(RENDER_HOST_BENCHMARK_OUTPUT_PATHS).map(
+        async (relativePath) => [relativePath, new Uint8Array(await fs.readFile(
+          path.join(exampleDirectory, relativePath),
+        ))] as const,
+      ),
+    ))
+    const before = await snapshot()
+    await checkRenderHostBenchmarkOutputs()
+    const after = await snapshot()
+    expect([...after.keys()].sort()).toEqual([...before.keys()].sort())
+    for (const [relativePath, bytes] of before) {
+      expect(equalBytes(after.get(relativePath)!, bytes)).toBe(true)
+    }
+  }, 120_000)
+
   it('is a complete Project V8 document with one scene for each route', () => {
     expect(project.schemaVersion).toBe(8)
     expect(project.scenes.map(({ id }) => id)).toEqual([

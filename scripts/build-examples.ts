@@ -24,6 +24,7 @@ import { importComponentPackage } from '../src/renderer/components/importCompone
 import { executeComponentRuntime } from '../src/renderer/components/executeComponentRuntime'
 import {
   checkTrackedExampleOutputs,
+  normalizeLineEndings,
   type GeneratedExampleOutputs,
 } from './exampleGenerationBoundary'
 
@@ -85,7 +86,7 @@ async function readComponentSources(): Promise<{
 
   const [manifestText, runtimeText] = await Promise.all([
     fs.readFile(manifestPath, 'utf8'),
-    fs.readFile(runtimePath, 'utf8'),
+    fs.readFile(runtimePath, 'utf8').then(normalizeLineEndings),
   ])
   const manifestResult = componentManifestSchema.safeParse(
     JSON.parse(manifestText) as unknown,

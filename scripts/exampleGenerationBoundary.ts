@@ -3,6 +3,12 @@ import path from 'node:path'
 
 export type GeneratedExampleOutputs = Readonly<Record<string, Uint8Array>>
 
+// 生成器把 checkout 文本原样嵌入产物前必须先归一化换行，
+// 否则 Windows core.autocrlf=true 的 fresh checkout 会改变 tracked fixture 字节。
+export function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
 export function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength
     && left.every((value, index) => value === right[index])

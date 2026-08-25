@@ -1,0 +1,27 @@
+# 示例生成器读取的文本输入与生成的文本输出固定 LF，
+# 保证 Windows core.autocrlf=true 的 fresh checkout 与 LF checkout 生成字节一致。
+# 仅覆盖 scripts/build-examples.ts、scripts/build-interactive-lesson.ts、
+# scripts/build-render-host-benchmark.ts 实际读取的文本输入及三组 *_OUTPUT_PATHS 文本输出。
+
+# 生成器读取的文本输入
+package.json text eol=lf
+examples/sample-counter-component/manifest.json text eol=lf
+examples/sample-counter-component/runtime.js text eol=lf
+examples/photosynthesis-lab-component/manifest.json text eol=lf
+examples/photosynthesis-lab-component/runtime.js text eol=lf
+examples/render-host-benchmark/runtimes/phaser-runtime.js text eol=lf
+examples/render-host-benchmark/runtimes/three-runtime.entry.ts text eol=lf
+examples/render-host-benchmark/components/editable-table/manifest.json text eol=lf
+examples/render-host-benchmark/components/editable-table/runtime.js text eol=lf
+examples/render-host-benchmark/components/editable-table/thumbnail.svg text eol=lf
+examples/render-host-benchmark/components/phaser-meter/manifest.json text eol=lf
+examples/render-host-benchmark/components/phaser-meter/runtime.js text eol=lf
+examples/render-host-benchmark/components/phaser-meter/thumbnail.svg text eol=lf
+
+# RENDER_HOST_BENCHMARK_OUTPUT_PATHS 文本输出（SAMPLE/LESSON 两组输出均为二进制，由 git 自动识别）
+examples/render-host-benchmark/runtimes/three-runtime.js text eol=lf
+examples/render-host-benchmark/assets/phaser-runtime-fallback.svg text eol=lf
+examples/render-host-benchmark/assets/three-runtime-fallback.svg text eol=lf
+examples/render-host-benchmark/project.json text eol=lf
+examples/render-host-benchmark/render-host-benchmark.html text eol=lf
+examples/render-host-benchmark/THIRD_PARTY_NOTICES.md text eol=lf

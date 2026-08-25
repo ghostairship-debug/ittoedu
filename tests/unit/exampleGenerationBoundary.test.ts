@@ -12,8 +12,11 @@ import {
 import {
   checkTrackedExampleOutputs,
   equalBytes,
+  normalizeLineEndings,
 } from '../../scripts/exampleGenerationBoundary'
 import {
+  checkInteractiveLessonOutputs,
+  INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS,
   parseInteractiveLessonGenerationMode,
 } from '../../scripts/build-interactive-lesson'
 import {
@@ -23,6 +26,31 @@ import {
 const projectRoot = path.resolve(__dirname, '..', '..')
 const examplesDirectory = path.join(projectRoot, 'examples')
 const tempRoots: string[] = []
+
+async function snapshotTrackedOutputs(
+  outputPaths: Readonly<Record<string, string>>,
+): Promise<ReadonlyMap<string, Uint8Array>> {
+  const entries = await Promise.all(Object.values(outputPaths).map(
+    async (relativePath) => [relativePath, new Uint8Array(await readFile(
+      path.join(examplesDirectory, relativePath),
+    ))] as const,
+  ))
+  return new Map(entries)
+}
+
+async function expectCheckDoesNotWrite(
+  outputPaths: Readonly<Record<string, string>>,
+  runCheck: () => Promise<void>,
+): Promise<void> {
+  const before = await snapshotTrackedOutputs(outputPaths)
+  await runCheck()
+  const after = await snapshotTrackedOutputs(outputPaths)
+  for (const [relativePath, bytes] of before) {
+    const afterBytes = after.get(relativePath)
+    expect(afterBytes).toBeDefined()
+    expect(equalBytes(bytes, afterBytes!)).toBe(true)
+  }
+}
 
 afterEach(async () => {
   while (tempRoots.length > 0) {
@@ -48,23 +76,28 @@ describe('example generation boundary', () => {
       expect(equalBytes(expected, repeated)).toBe(true)
     }
 
-    const before = await Promise.all(Object.values(SAMPLE_EXAMPLE_OUTPUT_PATHS).map(
-      async (relativePath) => [relativePath, new Uint8Array(await readFile(
-        path.join(examplesDirectory, relativePath),
-      ))] as const,
-    ))
+    const before = await snapshotTrackedOutputs(SAMPLE_EXAMPLE_OUTPUT_PATHS)
     await checkSampleExampleOutputs()
-    const after = await Promise.all(Object.values(SAMPLE_EXAMPLE_OUTPUT_PATHS).map(
-      async (relativePath) => [relativePath, new Uint8Array(await readFile(
-        path.join(examplesDirectory, relativePath),
-      ))] as const,
-    ))
+    const after = await snapshotTrackedOutputs(SAMPLE_EXAMPLE_OUTPUT_PATHS)
 
     for (const [relativePath, bytes] of before) {
-      const afterBytes = after.find(([candidate]) => candidate === relativePath)?.[1]
+      const afterBytes = after.get(relativePath)
       expect(afterBytes).toBeDefined()
       expect(equalBytes(bytes, afterBytes!)).toBe(true)
     }
+  })
+
+  it('checks tracked interactive lesson outputs without writing', async () => {
+    await expectCheckDoesNotWrite(
+      INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS,
+      checkInteractiveLessonOutputs,
+    )
+  }, 60_000)
+
+  it('normalizes CRLF and lone CR line endings before embedding text', () => {
+    expect(normalizeLineEndings('a\r\nb\nc\rd')).toBe('a\nb\nc\nd')
+    expect(normalizeLineEndings('a\nb')).toBe('a\nb')
+    expect(normalizeLineEndings('')).toBe('')
   })
 
   it('reports missing and stale fixtures without creating or changing them', async () => {

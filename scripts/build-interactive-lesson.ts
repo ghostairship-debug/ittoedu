@@ -22,6 +22,7 @@ import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
 import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
 import {
   checkTrackedExampleOutputs,
+  normalizeLineEndings,
   type GeneratedExampleOutputs,
 } from './exampleGenerationBoundary'
 
@@ -213,7 +214,7 @@ export interface InteractiveLessonOutputs {
 export async function buildInteractiveLessonOutputs(): Promise<InteractiveLessonOutputs> {
   const [manifestText, runtimeText] = await Promise.all([
     fs.readFile(path.join(sourceDirectory, 'manifest.json'), 'utf8'),
-    fs.readFile(path.join(sourceDirectory, 'runtime.js'), 'utf8'),
+    fs.readFile(path.join(sourceDirectory, 'runtime.js'), 'utf8').then(normalizeLineEndings),
   ])
   const parsedManifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
   const thumbnail = await sharp(Buffer.from(thumbnailSvg)).png({ compressionLevel: 9 }).toBuffer()
