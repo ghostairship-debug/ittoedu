@@ -1,5 +1,5 @@
 {"bytes":6721,"contentHash":"sha256:518e063a5fdd5ff378fed2f0df22176c9b342e1c4b1f102f3e935e33ecf936e6","domain":"source","path":"AGENTS.md"}
-{"bytes":16851,"contentHash":"sha256:31db4db08baa24e07b537c5d72ea0e14f0bbe2302d36e12c16b0c5af24d208b3","domain":"source","path":"COURSEWARE_DEVELOPMENT_PLAN.md"}
+{"bytes":17033,"contentHash":"sha256:565e9f90fe63ca180bbb82dd71319a17d64dfa2eff7f1021e631ef68769e9c98","domain":"source","path":"COURSEWARE_DEVELOPMENT_PLAN.md"}
 {"bytes":52472,"contentHash":"sha256:f5b3fd59e89378d3ef73fe0249393ebe46488cb9b5408aa71748a59ba125ea1d","domain":"source","path":"README.md"}
 {"bytes":930,"contentHash":"sha256:fd64376344ce1a4dcee00f3c459ee205782b39dcde210cc9a381d76ce160d8d1","domain":"source","path":"artifacts/contracts/contract-manifest.json"}
 {"bytes":41488,"contentHash":"sha256:a7fe39008c272023a7fbc104011f3fe2cc3a9adcf2a44a9a8239989c10409c43","domain":"source","path":"docs/COMPONENT_AUTHORING.md"}
@@ -12,7 +12,7 @@
 {"bytes":5128,"contentHash":"sha256:ba03516e5a1cf0a707ef1d5e3a13a06acb2d02a95e350d540ddf9722b2d576a3","domain":"source","path":"docs/contracts/V9_COMPATIBILITY_POLICY.md"}
 {"bytes":13714,"contentHash":"sha256:5e5373ac05a6ad68bf7424cc10b3bb81ada18dbb9b636bda0af89c4343da6ef8","domain":"source","path":"docs/development-plan/ARCHITECTURE_CONTRACT.md"}
 {"bytes":4036,"contentHash":"sha256:1298ae29365ffc4f2c23da504750099bf8930acc55966927014b86c000d6bb24","domain":"source","path":"docs/development-plan/README.md"}
-{"bytes":22890,"contentHash":"sha256:e1295bbd43b26358327b68da646feb952e9144223850390d891fd9238df27555","domain":"source","path":"docs/development-plan/REPAIR_PLAN.md"}
+{"bytes":23166,"contentHash":"sha256:f0095cd9b234055b93d2b6774b81c1f757ff13a2cb2727d2e367f8380a69f94b","domain":"source","path":"docs/development-plan/REPAIR_PLAN.md"}
 {"bytes":2006,"contentHash":"sha256:5d983de662c75c662159bfe039abfc5c8f5164f9d701a77029d06fe4c598d006","domain":"source","path":"docs/development-plan/TASK_CARD_TEMPLATE.md"}
 {"bytes":14212,"contentHash":"sha256:882f39aa378bfbc5c60dfd5507add50761990d46e96644c0eafbfbefc9db445f","domain":"source","path":"docs/development-plan/WORKING_PROTOCOL.md"}
 {"bytes":9682,"contentHash":"sha256:6185b110757b6cdda7fc9608024b41c76dbee9d654aa85afa4b61f11d7ff7632","domain":"source","path":"docs/development-plan/baselines/ARCH_0_PERFORMANCE.md"}
@@ -662,7 +662,7 @@
 {"bytes":14489,"contentHash":"sha256:3f323564df5105adeb47e70edd1839dfbf99877b1a4bae5b084d3cc1f6dc82bc","domain":"source","path":"tests/unit/v9MediaAudioCommands.test.ts"}
 {"bytes":8038,"contentHash":"sha256:d06c83030e86f01e0876452fb286033da1582208f391a89fdca17014e1877e72","domain":"source","path":"tests/unit/v9MediaTabAdapter.test.tsx"}
 {"bytes":17887,"contentHash":"sha256:9d090d70793b5bab9de317353800f5e9dfbc56f848f28f21904e523030d74829","domain":"source","path":"tests/unit/v9SlideActionCommands.test.ts"}
-{"bytes":9259,"contentHash":"sha256:c8805e338e06af059da738f9063b891a43b628874272bdedd8a14c3160a3f236","domain":"source","path":"tests/unit/v9SlideBackendSelection.test.ts"}
+{"bytes":12239,"contentHash":"sha256:e2e68caa62a67ed9ba2bf4e0a2ada3df93911c8d189d3a4b0572f3f6db28a654","domain":"source","path":"tests/unit/v9SlideBackendSelection.test.ts"}
 {"bytes":22599,"contentHash":"sha256:1c2ac92714240de5228dacb0c238dbefb1f763eeb62727334acae9107cc00869","domain":"source","path":"tests/unit/v9SlideContentCommands.test.ts"}
 {"bytes":19449,"contentHash":"sha256:f1fa16629edddcd9eb2dc2777819b8d7bf730065facb68df4f6afa926f558bcd","domain":"source","path":"tests/unit/v9SlideDomain.test.ts"}
 {"bytes":14185,"contentHash":"sha256:5926061816b7660dd1b115f3db52d0fd18f221a1376d7f3805c06004f801424d","domain":"source","path":"tests/unit/v9SlideProductIntegration.test.tsx"}
