@@ -292,6 +292,7 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     await waitFor(() => {
       expect(useEditorStore.getState().errorMessage).toBe(EXPECTED_UNAVAILABLE_ERROR)
     })
+    expect(useEditorStore.getState().statusMessage).not.toBe('正在渲染 PDF 页面…')
     expect(printArtifacts.calls).not.toHaveBeenCalled()
     expect(sceneRenderers.legacy).not.toHaveBeenCalled()
     expect(api.exportPdf).not.toHaveBeenCalled()

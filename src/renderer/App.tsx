@@ -1350,9 +1350,9 @@ export default function App() {
   const handleExportPdf = useCallback(() => {
     void run(async () => {
       const state = useEditorStore.getState()
-      state.setStatus('正在渲染 PDF 页面…')
       const sources = activeCoursePublishSources()
       if (sources) {
+        state.setStatus('正在渲染 PDF 页面…')
         const published = buildPublishedCourseV2Payload(sources)
         const artifacts = await buildCoursePrintArtifacts(published, {
           resolveAssetBytes: (assetId) => {
