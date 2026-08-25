@@ -1,6 +1,8 @@
 # 渲染宿主过渡基准
 
-这是一份可重复生成、完全离线的课件工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Course Project V9 JSON 根据内容职责选择最小的渲染增强层。组件路径统一使用 Component API 4，并分别覆盖 DOM 与 Phaser 渲染面。生成脚本若仍写出 `schemaVersion: 8`，属于待 T2/T4 收口的夹具，不是产品仍在写 V8。
+这是一份可重复生成、完全离线的课件工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Course Project V9 JSON 根据内容职责选择最小的渲染增强层。组件路径统一使用 Component API 4，并分别覆盖 DOM 与 Phaser 渲染面。
+
+当前目录并存两代交付：`project-v9.json`、`render-host-benchmark-v9.h5lesson`、`published-v2.json` 与 `render-host-benchmark-v2.html` 是当前 V9 / Published V2 基准；无后缀的 Project V8 文件仍由 release verifier 消费，作为冻结兼容输入保持原字节与原行为，不代表产品继续创作 V8。
 
 基准刻意把五类能力分成五页，便于直接比较编辑边界、运行时能力、组件复用价值和兼容成本。
 
@@ -18,7 +20,10 @@
 render-host-benchmark/
 ├── README.md
 ├── THIRD_PARTY_NOTICES.md
+├── THIRD_PARTY_NOTICES_V9.md
 ├── project.json
+├── project-v9.json
+├── published-v2.json
 ├── runtimes/
 │   ├── phaser-runtime.js
 │   ├── three-runtime.entry.ts
@@ -30,7 +35,9 @@ render-host-benchmark/
 ├── render-host-editable-table.h5component
 ├── render-host-phaser-meter.h5component
 ├── render-host-benchmark.h5lesson
-└── render-host-benchmark.html
+├── render-host-benchmark.html
+├── render-host-benchmark-v9.h5lesson
+└── render-host-benchmark-v2.html
 ```
 
 `three-runtime.entry.ts` 在构建时从精确锁定的开发依赖 Three.js `0.185.1` 导入，Vite 把两者卷成一个不含 `import` / `export` / `require` 的 IIFE。该 IIFE 直接注册 `CoursewareRuntime.define(...)`，再被内联到 `project.json`、`.h5lesson` 和单 HTML。编辑器和 Player 源码不导入 Three.js，没有 3D 的课件不付费。
@@ -54,11 +61,11 @@ npx playwright test tests/e2e/render-host-benchmark.spec.ts
 1. 核对安装的 Three.js 必须与 `package.json` 中精确版本 `0.185.1` 一致且许可证为 MIT，再与 3D 入口打成 IIFE，并确认源码小于 2 MiB、不含外部模块语法；
 2. 执行 Phaser / Three runtime 的注册段，确认均注册 Runtime API 2；
 3. 解析 V4 DOM 和 V4 Phaser manifest，并执行两份组件注册段；
-4. 用当前 Project Schema 校验完整 Project V8 JSON；
-5. 生成 `.h5lesson` 后重新解压打开，核对五页、两份 runtime 和两份组件；
-6. 使用当前 Player Bundle 生成不依赖网络的单 HTML。
+4. 使用真实 V9 factory、Slide authoring command 与组件 import API 生成五页 Course Project V9；
+5. 生成 V9 `.h5lesson` 后用当前 archive API 重新打开，核对五页、两份 runtime 和两份组件；
+6. 用 Published V2 producer 和当前 Player Bundle 生成不依赖网络的 V2 JSON 与单 HTML，同时校验冻结的 V8 文件未被改写。
 
-Three.js 的 MIT 许可证和版本信息位于 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。转发生成产物时应同时保留该通知。
+Three.js 的 MIT 许可证和版本信息分别位于 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 与 [`THIRD_PARTY_NOTICES_V9.md`](THIRD_PARTY_NOTICES_V9.md)。转发对应生成产物时应同时保留通知。
 
 ## 实际互动验收
 

@@ -2,6 +2,7 @@
 // 本文件会嵌套执行 vite 打包（esbuild）；jsdom 的 TextEncoder 破坏 esbuild 的
 // Uint8Array invariant，因此必须在 node 环境下运行。
 import { promises as fs } from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -9,8 +10,13 @@ import { componentManifestSchema } from '../../src/shared/componentSchema'
 import type { ComponentManifest } from '../../src/shared/componentTypes'
 import { projectDocumentSchema } from '../../src/shared/projectSchema'
 import type { ProjectDocument } from '../../src/shared/projectTypes'
+import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
+import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
+import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
+import type { PublishedCourseV2Payload } from '../../src/shared/publishedCourseTypes'
 import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
 import { openProjectArchive } from '../../src/renderer/project/projectArchive'
+import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import {
   checkRenderHostBenchmarkOutputs,
   RENDER_HOST_BENCHMARK_OUTPUT_PATHS,
@@ -33,6 +39,15 @@ let phaserMeterManifest: ComponentManifest
 let tableRuntime = ''
 let phaserMeterRuntime = ''
 let declaredThreeVersion = ''
+
+const frozenV8ArtifactHashes = {
+  'render-host-benchmark.h5lesson': '8beb9feab7858df6f66db7b49c5090b8bed47b2ce0c2f76d4ffd0b47857a2ca9',
+  'render-host-editable-table.h5component': 'fd695aef3bb5416c1c4d5e9555b3475da2dedeba45445cf6b73637b9558cd234',
+  'render-host-phaser-meter.h5component': 'b77013e2620c60e43c303390c5580138005c30d82fec628c2e8a7539f1420d3d',
+  'render-host-benchmark.html': '921139e13625b666e6ea39db6434d8d987ddbf49817060047c23a0caec487636',
+  'project.json': 'fcee1f76fdd83f4f1bf7f24316ce6ddc8e52b259ae840179fa52835dd28cb93d',
+  'THIRD_PARTY_NOTICES.md': 'a10971d922496b85d213d177d4fd8fd6e3391998a3b66fba3b09f18e43933e2b',
+} as const
 
 async function readJson(filePath: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown
@@ -360,5 +375,124 @@ describe('render host benchmark fixture', () => {
     expect(notice).toContain('https://github.com/mrdoob/three.js')
     expect(notice).toContain('The MIT License')
     expect(notice).toContain('runtimes/three-runtime.js')
+  })
+
+  it('keeps every frozen Project V8 release artifact byte-identical', async () => {
+    for (const [relativePath, expectedHash] of Object.entries(frozenV8ArtifactHashes)) {
+      const bytes = await fs.readFile(path.join(exampleDirectory, relativePath))
+      expect(createHash('sha256').update(bytes).digest('hex'), relativePath).toBe(expectedHash)
+    }
+  })
+
+  it('authors a reopenable five-page Course Project V9 through the current carriers', async () => {
+    const [projectValue, archiveBytes] = await Promise.all([
+      readJson(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.projectV9)),
+      fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.lessonV9)),
+    ])
+    const projectV9: CourseProjectDocument = courseProjectDocumentSchema.parse(projectValue)
+    const reopened = openCourseProjectArchive(archiveBytes)
+    expect(reopened.project).toEqual(projectV9)
+    expect(projectV9.schemaVersion).toBe(9)
+    expect(projectV9.id).toBe('project_render_host_benchmark_v9')
+    expect(projectV9.revision).toBeGreaterThan(10)
+    expect(projectV9.locations.map(({ id }) => id)).toEqual([
+      'scene_native_nodes_v9',
+      'scene_runtime_phaser_v9',
+      'scene_runtime_three_v9',
+      'scene_component_v4_dom_v9',
+      'scene_component_v4_phaser_v9',
+    ])
+    expect(projectV9.startLocationId).toBe('scene_native_nodes_v9')
+    expect(projectV9.globalLayerItems).toHaveLength(1)
+    expect(projectV9.globalLayerItems[0]?.item.kind).toBe('native')
+
+    const surface = projectV9.surfaces[0]
+    expect(surface?.type).toBe('slide')
+    if (!surface || surface.type !== 'slide') throw new Error('V9 benchmark lost its Slide surface')
+    expect(surface.scenes).toHaveLength(5)
+    const [native, phaser, three, table, meter] = surface.scenes
+    expect(native?.layerItems.map(({ layerItemId }) => layerItemId)).toEqual([
+      'native_click_target_v9',
+      'native_click_probe_v9',
+    ])
+    expect(native?.interactions).toContainEqual(expect.objectContaining({
+      id: 'native_click_rule_v9',
+      trigger: { type: 'node.click', nodeId: 'native_click_target_v9' },
+    }))
+    expect(phaser?.layerItems).toContainEqual(expect.objectContaining({
+      kind: 'runtime',
+      layerItemId: 'phaser_runtime_instance_v9',
+      runtime: expect.objectContaining({
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        renderMode: 'phaser',
+      }),
+    }))
+    expect(three?.layerItems).toContainEqual(expect.objectContaining({
+      kind: 'runtime',
+      layerItemId: 'three_runtime_instance_v9',
+      runtime: expect.objectContaining({
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        renderMode: 'dom',
+        source: threeBundle.trim(),
+      }),
+    }))
+    expect(table?.layerItems).toContainEqual(expect.objectContaining({
+      kind: 'component',
+      layerItemId: 'table_component_instance',
+      component: { packageId: tableManifest.id, version: tableManifest.version },
+    }))
+    expect(meter?.layerItems).toContainEqual(expect.objectContaining({
+      kind: 'component',
+      layerItemId: 'phaser_meter_component_instance',
+      component: { packageId: phaserMeterManifest.id, version: phaserMeterManifest.version },
+    }))
+    expect(Object.keys(reopened.componentFiles).sort()).toEqual([
+      `${tableManifest.id}@${tableManifest.version}`,
+      `${phaserMeterManifest.id}@${phaserMeterManifest.version}`,
+    ].sort())
+    const embeddedManifest = (key: string) => componentManifestSchema.parse(JSON.parse(
+      new TextDecoder().decode(reopened.componentFiles[key]!['manifest.json']!),
+    ) as unknown)
+    expect(embeddedManifest(`${tableManifest.id}@${tableManifest.version}`).renderMode).toBe('dom')
+    expect(embeddedManifest(`${phaserMeterManifest.id}@${phaserMeterManifest.version}`).renderMode)
+      .toBe('phaser')
+  })
+
+  it('ships the same five routes as a Published Course V2 standalone', async () => {
+    const [payloadValue, html, notice] = await Promise.all([
+      readJson(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.publishedV2)),
+      fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.htmlV2), 'utf8'),
+      fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.noticesV9), 'utf8'),
+    ])
+    const payload: PublishedCourseV2Payload = publishedCourseV2Schema.parse(payloadValue)
+    expect(payload).toMatchObject({
+      format: 'h5course-published',
+      formatVersion: 2,
+      sourceSchemaVersion: 9,
+      courseId: 'project_render_host_benchmark_v9',
+    })
+    expect(payload.locations).toHaveLength(5)
+    expect(Object.keys(payload.components).sort()).toEqual([
+      `${tableManifest.id}@${tableManifest.version}`,
+      `${phaserMeterManifest.id}@${phaserMeterManifest.version}`,
+    ].sort())
+    const surface = payload.surfaces[0]
+    expect(surface?.type).toBe('slide')
+    if (!surface || surface.type !== 'slide') throw new Error('Published V2 lost its Slide surface')
+    expect(surface.scenes).toHaveLength(5)
+    const runtimeModes = surface.scenes.flatMap(({ layerItems }) => layerItems).flatMap((item) =>
+      item.kind === 'runtime' ? [[item.runtime.runtimeApiVersion, item.runtime.renderMode]] : [])
+    expect(runtimeModes).toEqual([
+        [2, 'phaser'],
+        [2, 'dom'],
+      ])
+    expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
+    expect(html).not.toContain('window.__H5_LESSON_PAYLOAD__=')
+    expect(html).not.toMatch(/<script[^>]+src=/i)
+    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*|'self')/i)
+    expect(notice).toContain(`## Three.js ${declaredThreeVersion}`)
+    expect(notice).toContain('render-host-benchmark-v2.html')
   })
 })

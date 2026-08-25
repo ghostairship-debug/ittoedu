@@ -18,13 +18,40 @@ import type {
   TextNode,
 } from '../src/shared/projectTypes'
 import type { RuntimeDocument } from '../src/shared/runtimeTypes'
+import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
+import type {
+  CourseProjectDocument,
+  CourseRuntimeDefinition,
+} from '../src/shared/courseProjectTypes'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+import { addCourseScene } from '../src/renderer/course/courseLocationCommands'
+import {
+  openSlideAuthoringSession,
+  type SlideAuthoringSession,
+} from '../src/renderer/course/slideAuthoringBackend'
+import type { SlideCommandResult } from '../src/renderer/course/slideEditorCommands'
+import {
+  addSlideComponentLayer,
+  addSlideRuntimeLayer,
+  addSlideShapeLayer,
+  addSlideTextLayer,
+  upsertSlideInteractionRule,
+} from '../src/renderer/course/v9SlideContentCommands'
 import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
 import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
+import {
+  buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseV2Payload,
+} from '../src/renderer/export/course'
 import {
   createProjectArchive,
   openProjectArchive,
 } from '../src/renderer/project/projectArchive'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '../src/renderer/project/courseProjectArchive'
+import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
 import {
   checkTrackedExampleOutputs,
   normalizeLineEndings,
@@ -51,6 +78,11 @@ export const RENDER_HOST_BENCHMARK_OUTPUT_PATHS = {
   lesson: 'render-host-benchmark.h5lesson',
   html: 'render-host-benchmark.html',
   notices: 'THIRD_PARTY_NOTICES.md',
+  projectV9: 'project-v9.json',
+  publishedV2: 'published-v2.json',
+  lessonV9: 'render-host-benchmark-v9.h5lesson',
+  htmlV2: 'render-host-benchmark-v2.html',
+  noticesV9: 'THIRD_PARTY_NOTICES_V9.md',
 } as const
 const reproducibleTimestamp = new Date('2026-07-23T00:00:00.000Z')
 const timestamp = reproducibleTimestamp.toISOString()
@@ -507,12 +539,275 @@ function headerNodes(
   ]
 }
 
+const v9SceneIds = [
+  'scene_native_nodes_v9',
+  'scene_runtime_phaser_v9',
+  'scene_runtime_three_v9',
+  'scene_component_v4_dom_v9',
+  'scene_component_v4_phaser_v9',
+] as const
+
+function requireCourseLocationResult(
+  result: ReturnType<typeof addCourseScene>,
+  label: string,
+): CourseProjectDocument {
+  if (!result.ok) throw new Error(`${label}失败：${result.reason}`)
+  return result.project
+}
+
+function requireSlideCommand(
+  result: SlideCommandResult,
+  label: string,
+): SlideAuthoringSession {
+  if (!result.ok || !result.nextSession) {
+    throw new Error(`${label}失败：${result.reason ?? '命令未返回下一会话'}`)
+  }
+  return result.nextSession
+}
+
+function canonicalizeBenchmarkSceneIds(
+  input: CourseProjectDocument,
+): CourseProjectDocument {
+  const project = structuredClone(input)
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide' || surface.scenes.length !== v9SceneIds.length) {
+    throw new Error('V9 基准必须恰好包含一个五页 Slide 表面')
+  }
+  const replacements = new Map<string, string>()
+  surface.scenes.forEach((scene, index) => {
+    const nextId = v9SceneIds[index]
+    if (!nextId) throw new Error('V9 基准场景 ID 缺失')
+    replacements.set(scene.id, nextId)
+    scene.id = nextId
+    scene.name = [
+      '01 纯原生节点',
+      '02 API2 Phaser 运行时',
+      '03 API2 Three.js 运行时',
+      '04 V4 DOM 表格组件',
+      '05 V4 Phaser 仪表组件',
+    ][index]!
+    scene.backgroundColor = ['#071a2b', '#020617', '#0f172a', '#052e2b', '#1e1b4b'][index]!
+  })
+  project.locations.forEach((location) => {
+    if (location.kind !== 'slide-scene') return
+    const nextId = replacements.get(location.sceneId)
+    if (!nextId) return
+    const priorId = location.id
+    location.sceneId = nextId
+    if (location.stateId === undefined && priorId === [...replacements.entries()]
+      .find(([, replacement]) => replacement === nextId)?.[0]) {
+      location.id = nextId
+    }
+  })
+  project.startLocationId = replacements.get(project.startLocationId) ?? project.startLocationId
+  return courseProjectDocumentSchema.parse(project)
+}
+
+function courseRuntimeDefinition(
+  source: string,
+  renderMode: CourseRuntimeDefinition['renderMode'],
+  content: RuntimeDocument['content'],
+  fallbackAssetId: string,
+): CourseRuntimeDefinition {
+  return {
+    protocol: 'canvas-runtime',
+    runtimeApiVersion: 2,
+    enabled: true,
+    renderMode,
+    source,
+    content: structuredClone(content),
+    assets: {},
+    staticFallback: { assetId: fallbackAssetId, coverage: 'scene' },
+  }
+}
+
+function exitOnEventRule(input: {
+  id: string
+  trigger: { type: 'node.click'; nodeId: string }
+  targetId: string
+}) {
+  return {
+    id: input.id,
+    name: '基准交互确认',
+    enabled: true,
+    trigger: input.trigger,
+    conditions: [],
+    actions: [{
+      id: `${input.id}_exit`,
+      start: 'after-previous' as const,
+      delayMs: 0,
+      action: {
+        type: 'node.exit' as const,
+        nodeId: input.targetId,
+        durationMs: 0,
+        easing: 'linear' as const,
+        effect: 'none' as const,
+      },
+    }],
+  }
+}
+
+function buildV9ThirdPartyNotice({ version, licenseText }: ThreePackageMetadata): string {
+  return `# Third-party notices for the V9 / Published V2 benchmark
+
+The generated files \`project-v9.json\`, \`published-v2.json\`,
+\`render-host-benchmark-v9.h5lesson\`, and \`render-host-benchmark-v2.html\`
+contain a bundled copy of Three.js through the scene-local API 2 DOM Runtime.
+
+## Three.js ${version}
+
+- Project: https://threejs.org/
+- Source repository: https://github.com/mrdoob/three.js
+- License: MIT
+
+${licenseText.trim()}\n`
+}
+
+function authorSlidePage(
+  project: CourseProjectDocument,
+  locationId: string,
+  author: (session: SlideAuthoringSession) => SlideAuthoringSession,
+): CourseProjectDocument {
+  const session = openSlideAuthoringSession(project, {
+    locationId,
+    sessionId: `render-host-benchmark-${locationId}`,
+  })
+  return author(session).history.present
+}
+
+function buildV9BenchmarkProject(input: {
+  phaserRuntimeSource: string
+  threeRuntimeSource: string
+  projectAssets: ProjectDocument['assets']
+  tableComponent: LoadedComponent
+  phaserMeterComponent: LoadedComponent
+}): CourseProjectDocument {
+  let id = 0
+  let project = createBlankCourseProject({
+    id: 'project_render_host_benchmark_v9',
+    title: 'Course Project V9 渲染宿主完整基准',
+    now: timestamp,
+    idFactory: () => `benchmark_${String(++id).padStart(2, '0')}`,
+  })
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('V9 factory 未创建 Slide 表面')
+  for (const title of [
+    '02 API2 Phaser 运行时',
+    '03 API2 Three.js 运行时',
+    '04 V4 DOM 表格组件',
+    '05 V4 Phaser 仪表组件',
+  ]) {
+    project = requireCourseLocationResult(addCourseScene(project, {
+      surfaceId: surface.id,
+      title,
+      now: timestamp,
+    }), `创建“${title}”`)
+  }
+  project = canonicalizeBenchmarkSceneIds(project)
+  project = courseProjectDocumentSchema.parse({
+    ...project,
+    assets: structuredClone(input.projectAssets),
+    componentPackages: {
+      [input.tableComponent.data.manifest.id]: input.tableComponent.data.metadata,
+      [input.phaserMeterComponent.data.manifest.id]: input.phaserMeterComponent.data.metadata,
+    },
+  })
+
+  project = authorSlidePage(project, v9SceneIds[0], (initial) => {
+    let session = requireSlideCommand(addSlideShapeLayer(initial, {
+      shapeType: 'rounded-rectangle',
+      id: 'native_click_target_v9',
+      x: 250,
+      y: 180,
+      label: '点击隐藏确认文字',
+    }, { now: timestamp }), '添加 Native 点击图形')
+    session = requireSlideCommand(addSlideTextLayer(session, {
+      id: 'native_click_probe_v9',
+      text: 'Native click ready',
+      x: 540,
+      y: 250,
+      label: 'Native 点击确认文字',
+    }, { now: timestamp }), '添加 Native 确认文字')
+    return requireSlideCommand(upsertSlideInteractionRule(session, exitOnEventRule({
+      id: 'native_click_rule_v9',
+      trigger: { type: 'node.click', nodeId: 'native_click_target_v9' },
+      targetId: 'native_click_probe_v9',
+    }), { now: timestamp }), '添加 Native 点击交互')
+  })
+
+  project = authorSlidePage(project, v9SceneIds[1], (initial) =>
+    requireSlideCommand(addSlideRuntimeLayer(initial, {
+      id: 'phaser_runtime_instance_v9',
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 720,
+      label: 'API2 Phaser 场景运行时',
+      runtime: courseRuntimeDefinition(
+        input.phaserRuntimeSource,
+        'phaser',
+        phaserContent,
+        'asset_phaser_runtime_fallback',
+      ),
+    }, { now: timestamp }), '添加 API2 Phaser Runtime'))
+
+  project = authorSlidePage(project, v9SceneIds[2], (initial) =>
+    requireSlideCommand(addSlideRuntimeLayer(initial, {
+      id: 'three_runtime_instance_v9',
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 720,
+      label: 'API2 DOM Three.js 场景运行时',
+      runtime: courseRuntimeDefinition(
+        input.threeRuntimeSource,
+        'dom',
+        threeContent,
+        'asset_three_runtime_fallback',
+      ),
+    }, { now: timestamp }), '添加 API2 DOM Three.js Runtime'))
+
+  project = authorSlidePage(project, v9SceneIds[3], (initial) =>
+    requireSlideCommand(addSlideComponentLayer(initial, {
+      packageId: input.tableComponent.data.manifest.id,
+      manifest: input.tableComponent.data.manifest,
+      id: 'table_component_instance',
+      x: 70,
+      y: 148,
+      width: 1140,
+      height: 420,
+      label: 'V4 DOM 可编辑对比表',
+      props: {
+        content: {
+          title: '课件渲染路径选型表',
+          caption: '实例文案已覆盖默认值；教师可继续在属性面板修改。',
+        },
+      },
+    }, { now: timestamp }), '添加 API4 DOM Component'))
+
+  project = authorSlidePage(project, v9SceneIds[4], (initial) =>
+    requireSlideCommand(addSlideComponentLayer(initial, {
+      packageId: input.phaserMeterComponent.data.manifest.id,
+      manifest: input.phaserMeterComponent.data.manifest,
+      id: 'phaser_meter_component_instance',
+      x: 280,
+      y: 156,
+      width: 720,
+      height: 390,
+      label: 'V4 Phaser 交互仪表',
+      props: { content: { centerLabel: 'V4 OK' } },
+    }, { now: timestamp }), '添加 API4 Phaser Component'))
+
+  return courseProjectDocumentSchema.parse(project)
+}
+
 export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampleOutputs> {
   const [
     threePackageMetadata,
     threeRuntimeSource,
     phaserRuntimeSource,
     playerBundle,
+    frozenLegacyHtml,
     tableComponent,
     phaserMeterComponent,
   ] = await Promise.all([
@@ -522,6 +817,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     fs.readFile(playerBundlePath, 'utf8').catch((error: unknown) => {
       throw new Error('缺少 dist-player/player.iife.js；请先运行 npm run build:player', { cause: error })
     }),
+    fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html)),
     loadComponent('editable-table'),
     loadComponent('phaser-meter'),
   ])
@@ -768,7 +1064,49 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
   }
 
   const payload = buildExportPayload({ project, assets: assetFiles, components })
-  const html = buildStandaloneHtml(payload, { playerBundle })
+  const regeneratedLegacyHtml = buildStandaloneHtml(payload, { playerBundle })
+  if (!regeneratedLegacyHtml.includes('window.__H5_LESSON_PAYLOAD__=')) {
+    throw new Error('当前 Player 无法生成 Project V8 standalone')
+  }
+
+  const projectV9 = buildV9BenchmarkProject({
+    phaserRuntimeSource,
+    threeRuntimeSource,
+    projectAssets,
+    tableComponent,
+    phaserMeterComponent,
+  })
+  const courseSources = {
+    project: projectV9,
+    assetFiles,
+    components: {
+      [tableComponent.data.key]: tableComponent.data,
+      [phaserMeterComponent.data.key]: phaserMeterComponent.data,
+    },
+  }
+  const componentFilesV9 = {
+    [tableComponent.data.key]: tableComponent.data.files,
+    [phaserMeterComponent.data.key]: phaserMeterComponent.data.files,
+  }
+  const lessonV9 = createCourseProjectArchive({
+    project: projectV9,
+    assetFiles,
+    componentFiles: componentFilesV9,
+  }, { mtime: reproducibleTimestamp })
+  const reopenedV9 = openCourseProjectArchive(lessonV9)
+  const reopenedSlide = reopenedV9.project.surfaces[0]
+  if (
+    reopenedV9.project.schemaVersion !== 9 ||
+    reopenedV9.project.locations.length !== 5 ||
+    !reopenedSlide ||
+    reopenedSlide.type !== 'slide' ||
+    reopenedSlide.scenes.length !== 5 ||
+    Object.keys(reopenedV9.componentFiles).length !== 2
+  ) {
+    throw new Error('生成后的 V9 基准 .h5lesson 重新打开校验失败')
+  }
+  const publishedV2 = buildPublishedCourseV2Payload(courseSources)
+  const htmlV2 = buildPublishedCourseStandaloneHtml(courseSources, { playerBundle })
   return {
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.threeRuntime]: strToU8(threeRuntimeSource),
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.phaserFallback]: assetFiles.asset_phaser_runtime_fallback!,
@@ -779,9 +1117,20 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
       `${JSON.stringify(project, null, 2)}\n`,
     ),
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.lesson]: lessonArchive,
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html]: strToU8(html),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html]: frozenLegacyHtml,
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.notices]: strToU8(
       buildThreeThirdPartyNotice(threePackageMetadata),
+    ),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.projectV9]: strToU8(
+      `${JSON.stringify(projectV9, null, 2)}\n`,
+    ),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.publishedV2]: strToU8(
+      `${JSON.stringify(publishedV2, null, 2)}\n`,
+    ),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.lessonV9]: lessonV9,
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.htmlV2]: strToU8(htmlV2),
+    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.noticesV9]: strToU8(
+      buildV9ThirdPartyNotice(threePackageMetadata),
     ),
   }
 }
