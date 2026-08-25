@@ -1,4 +1,5 @@
 import { _electron as electron, chromium } from '@playwright/test'
+import { strToU8, zipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
@@ -9,23 +10,31 @@ import { promisify } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Browser, ElectronApplication, Page } from 'playwright'
 import packageJson from '../package.json'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
-import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
-import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
-import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
 import {
-  buildWebPackageFilesFromProject,
-  buildWebPackageFromProjectAsync,
-} from '../src/renderer/export/buildWebPackage'
+  importComponentPackage,
+  parseComponentPackageFiles,
+} from '../src/renderer/components/importComponentPackage'
 import {
-  createExternalComponentNode,
-  createProject,
-  createTextNode,
-} from '../src/renderer/project/createProject'
+  buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseWebPackage,
+  buildPublishedCourseWebPackageFiles,
+} from '../src/renderer/export/course/buildCoursePackages'
 import {
-  createProjectArchive,
-  openProjectArchive,
-} from '../src/renderer/project/projectArchive'
+  addSlideComponentLayer,
+  readSlideComponentLayer,
+} from '../src/renderer/course/v9SlideContentCommands'
+import {
+  openSlideAuthoringSession,
+  type SlideAuthoringSession,
+} from '../src/renderer/course/slideAuthoringBackend'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+  type CourseProjectArchiveData,
+} from '../src/renderer/project/courseProjectArchive'
+import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
+import type { ComponentPackageData, ComponentManifest } from '../src/shared/componentTypes'
+import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
 import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
 import {
   APP_EXECUTABLE_NAME,
@@ -74,11 +83,6 @@ const sourcePortableExecutable = path.join(
   releaseDirectory,
   `${APP_EXECUTABLE_NAME}-portable-${packageJson.version}.exe`,
 )
-const sampleComponentPath = path.join(
-  projectRoot,
-  'examples',
-  'sample-counter.h5component',
-)
 const playerBundlePath = path.join(projectRoot, 'dist-player', 'player.iife.js')
 const evidenceDirectory = path.join(
   releaseDirectory,
@@ -88,6 +92,8 @@ const evidenceDirectory = path.join(
 const reportPath = path.join(evidenceDirectory, 'report.json')
 const reproducibleTimestamp = new Date('2026-08-13T00:00:00.000Z')
 const checks: VerificationCheck[] = []
+const portabilityComponentId = 'com.ittoedu.w3-portability-phaser-counter'
+const portabilityComponentItemId = 'component_w3_phaser_counter'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -104,6 +110,17 @@ function isWithin(root: string, candidate: string): boolean {
     relative !== '..' &&
     !relative.startsWith(`..${path.sep}`) &&
     !path.isAbsolute(relative)
+  )
+}
+
+function assertTemporaryPath(
+  isolatedRoot: string,
+  candidate: string,
+  description: string,
+): void {
+  assert(
+    isWithin(isolatedRoot, candidate) && path.resolve(candidate) !== path.resolve(isolatedRoot),
+    `${description} 不在 W3 临时隔离目录内：${candidate}`,
   )
 }
 
@@ -187,16 +204,15 @@ async function verifyOfflinePage(
     await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__), undefined, {
       timeout: 45_000,
     })
-    const canvas = page.locator('.lesson-canvas-host canvas')
+    const canvas = page.locator(
+      `[data-published-phaser-component="${portabilityComponentItemId}"]`,
+    )
     await canvas.waitFor({ timeout: 45_000 })
     const bounds = await canvas.boundingBox()
     assert(bounds, `${label} 未渲染 Player 画布`)
 
     const before = await canvas.screenshot()
-    await page.mouse.click(
-      bounds.x + (760 / 1280) * bounds.width,
-      bounds.y + (458 / 720) * bounds.height,
-    )
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
     await page.waitForTimeout(300)
     const after = await canvas.screenshot()
     assert(
@@ -353,13 +369,13 @@ async function verifyMovedUnpackedApplication(
       .filter({ hasText: 'W3 可移植性隔离课件（移动后重存）' })
       .waitFor({ timeout: 30_000 })
     assert(
-      await page.locator('.scene-item').count() === 1,
+      await page.locator('[data-testid^="scene-item-"]').count() === 1,
       '移动工程在复制后的目录版中场景数量错误',
     )
     await page.getByRole('button', { name: '专业' }).click()
     await page.getByRole('tab', { name: '组件', exact: true }).click()
     await page
-      .getByTestId('component-com.example.sample-counter')
+      .getByTestId(`component-${portabilityComponentId}`)
       .waitFor({ timeout: 20_000 })
 
     assert(pageErrors.length === 0, pageErrors.join('；'))
@@ -579,7 +595,8 @@ async function verifyDocumentationContract(): Promise<void> {
     '双击入口未按文档执行锁定依赖、生产构建和 Electron 启动',
   )
   assert(
-    packageJson.scripts.start === 'npm run build:desktop && electron .' &&
+    packageJson.scripts.start ===
+      'npm run build:desktop && cross-env VITE_DEV_SERVER_URL= electron .' &&
       packageJson.scripts['build:desktop'] ===
         'npm run build:player && npm run build:renderer && npm run build:electron',
     'package.json 的 npm start/build:desktop 与文档不一致',
@@ -611,6 +628,14 @@ async function buildAndVerifyMovedLesson(
   const authoringDirectory = path.join(isolatedRoot, 'authoring-origin')
   const deliveryDirectory = path.join(isolatedRoot, 'moved-delivery')
   const movedWebDirectory = path.join(deliveryDirectory, 'web-package')
+  for (const [candidate, description] of [
+    [externalSourceDirectory, '临时组件源目录'],
+    [authoringDirectory, '临时作者目录'],
+    [deliveryDirectory, '临时交付目录'],
+    [movedWebDirectory, '临时网页包目录'],
+  ] as const) {
+    assertTemporaryPath(isolatedRoot, candidate, description)
+  }
   await Promise.all([
     fs.mkdir(externalSourceDirectory, { recursive: true }),
     fs.mkdir(authoringDirectory, { recursive: true }),
@@ -619,9 +644,54 @@ async function buildAndVerifyMovedLesson(
 
   const externalComponentPath = path.join(
     externalSourceDirectory,
-    'only-source-w3-counter.h5component',
+    'only-source-w3-phaser-counter.h5component',
   )
-  await fs.copyFile(sampleComponentPath, externalComponentPath)
+  assertTemporaryPath(isolatedRoot, externalComponentPath, '临时外部组件源')
+  const componentManifest: ComponentManifest = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    id: portabilityComponentId,
+    name: 'W3 Phaser 移植计数器',
+    version: '1.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 360, height: 210 },
+    minSize: { width: 120, height: 80 },
+    preserveAspectRatio: false,
+    supportedScopes: ['scene'],
+    renderMode: 'phaser',
+    assets: {},
+    defaultProps: { label: '移动后计数' },
+  }
+  const componentRuntime = `
+window.CoursewareComponent.define({
+  id: '${portabilityComponentId}',
+  runtimeApiVersion: 4,
+  create(ctx) {
+    let count = 0
+    const panel = ctx.phaser.scene.add.rectangle(0, 0, ctx.width, ctx.height, 0x0f766e, 1)
+      .setOrigin(0, 0).setInteractive()
+    const label = ctx.phaser.scene.add.text(28, 82, String(ctx.props.label) + ': ' + count, {
+      fontFamily: 'Arial', fontSize: '30px', color: '#ffffff'
+    })
+    const onHit = () => {
+      count += 1
+      label.setText(String(ctx.props.label) + ': ' + count)
+    }
+    panel.on('pointerup', onHit)
+    ctx.phaser.root.add([panel, label])
+    return {
+      resize(width, height) { panel.setSize(width, height) },
+      updateProps(props) { label.setText(String(props.label) + ': ' + count) },
+      destroy() { panel.off('pointerup', onHit) },
+    }
+  },
+})
+`
+  const externalComponentBytes = zipSync({
+    'manifest.json': strToU8(JSON.stringify(componentManifest)),
+    'runtime.js': strToU8(componentRuntime),
+  })
+  await fs.writeFile(externalComponentPath, externalComponentBytes)
   const componentBytes = Uint8Array.from(await fs.readFile(externalComponentPath))
   const packageSha256 = sha256Bytes(componentBytes).toLocaleLowerCase('en-US')
   const imported = importComponentPackage(componentBytes, {
@@ -632,7 +702,7 @@ async function buildAndVerifyMovedLesson(
     },
   })
 
-  const project = createProject({
+  let project = createBlankCourseProject({
     id: 'project_w3_windows_portability',
     title: 'W3 可移植性隔离课件',
     now: reproducibleTimestamp,
@@ -643,38 +713,36 @@ async function buildAndVerifyMovedLesson(
       return () => `w3_${String(++sequence).padStart(3, '0')}`
     })(),
   })
-  const scene = project.scenes[0]!
-  scene.id = 'scene_w3_component'
-  scene.name = '断开源目录后的组件'
-  scene.nodes = [
-    createTextNode({
-      id: 'text_w3_title',
-      name: '验证标题',
-      x: 240,
-      y: 80,
-      width: 800,
-      height: 72,
-      text: '工程移动后仍由内嵌组件运行',
-      style: { fontSize: 40, color: '#0f172a', align: 'center' },
-    }),
-    createExternalComponentNode({
-      id: 'component_w3_counter',
-      name: imported.manifest.name,
-      x: 400,
-      y: 220,
-      width: imported.manifest.defaultSize.width,
-      height: imported.manifest.defaultSize.height,
-      component: {
-        packageId: imported.manifest.id,
-        version: imported.manifest.version,
-      },
-      props: structuredClone(imported.manifest.defaultProps),
-    }),
-  ]
-  project.componentPackages[imported.key] = imported.metadata
+  project = structuredClone(project)
+  project.componentPackages[imported.manifest.id] = structuredClone(imported.metadata)
+  project = courseProjectDocumentSchema.parse(project)
+  const session = openSlideAuthoringSession(project)
+  const authored = addSlideComponentLayer(session, {
+    packageId: imported.manifest.id,
+    manifest: imported.manifest,
+    id: portabilityComponentItemId,
+    x: 460,
+    y: 255,
+    width: imported.manifest.defaultSize.width,
+    height: imported.manifest.defaultSize.height,
+    props: { label: '移动后计数' },
+  }, { now: reproducibleTimestamp.toISOString() })
+  assert(
+    authored.ok && authored.nextSession !== undefined,
+    `Slide component authoring command failed: ${authored.reason ?? 'unknown'}`,
+  )
+  const authoredSession: SlideAuthoringSession = authored.nextSession
+  const authoredLayer = readSlideComponentLayer(authoredSession, portabilityComponentItemId)
+  assert(
+    authoredLayer.component.packageId === imported.manifest.id &&
+      authoredLayer.component.version === imported.manifest.version,
+    'Slide component authoring command did not retain the imported V9 package identity',
+  )
+  project = authoredSession.history.present
 
   const sourceProjectPath = path.join(authoringDirectory, 'source-project.h5lesson')
-  const initialArchive = createProjectArchive(
+  assertTemporaryPath(isolatedRoot, sourceProjectPath, '待移动的 V9 工程')
+  const initialArchive = createCourseProjectArchive(
     {
       project,
       assetFiles: {},
@@ -685,17 +753,29 @@ async function buildAndVerifyMovedLesson(
   await fs.writeFile(sourceProjectPath, initialArchive)
 
   const movedProjectPath = path.join(deliveryDirectory, 'moved-project.h5lesson')
+  assertTemporaryPath(isolatedRoot, movedProjectPath, '移动后的 V9 工程')
   await fs.rename(sourceProjectPath, movedProjectPath)
+  assertTemporaryPath(isolatedRoot, externalSourceDirectory, '待删除的临时组件源目录')
   await fs.rm(externalSourceDirectory, { recursive: true, force: true })
   assert(!existsSync(externalSourceDirectory), '临时外部组件源目录未真正删除')
   assert(!existsSync(sourceProjectPath), '工程仍留在原作者目录，未完成移动')
 
   const movedArchive = Uint8Array.from(await fs.readFile(movedProjectPath))
-  const reopened = openProjectArchive(movedArchive)
-  const reopenedComponents = componentPackagesFromArchive(
-    reopened.project,
-    reopened.componentFiles,
+  const reopened = openCourseProjectArchive(movedArchive)
+  const componentsFromArchive = (
+    archive: CourseProjectArchiveData,
+  ): Record<string, ComponentPackageData> => Object.fromEntries(
+    Object.entries(archive.project.componentPackages).map(([key, metadata]) => {
+      const componentKey = `${metadata.packageId}@${metadata.version}`
+      const files = archive.componentFiles[componentKey]
+      assert(files, `工程归档缺少组件文件：${componentKey}`)
+      return [key, parseComponentPackageFiles(files, {
+        expectedId: metadata.packageId,
+        expectedVersion: metadata.version,
+      })]
+    }),
   )
+  const reopenedComponents = componentsFromArchive(reopened)
   const embedded = reopenedComponents[imported.manifest.id]
   assert(embedded, '删除外部组件源后，工程未恢复内嵌组件')
   assert(
@@ -710,24 +790,21 @@ async function buildAndVerifyMovedLesson(
 
   reopened.project.title = 'W3 可移植性隔离课件（移动后重存）'
   reopened.project.updatedAt = '2026-08-13T00:01:00.000Z'
-  const resavedArchive = createProjectArchive(reopened, {
+  const resavedArchive = createCourseProjectArchive(reopened, {
     mtime: reproducibleTimestamp,
   })
   await fs.writeFile(movedProjectPath, resavedArchive)
-  const finalArchive = openProjectArchive(
+  const finalArchive = openCourseProjectArchive(
     Uint8Array.from(await fs.readFile(movedProjectPath)),
   )
-  const finalComponents = componentPackagesFromArchive(
-    finalArchive.project,
-    finalArchive.componentFiles,
-  )
+  const finalComponents = componentsFromArchive(finalArchive)
   assert(
     finalArchive.project.title === 'W3 可移植性隔离课件（移动后重存）',
     '移动工程重存后未保留修改',
   )
   assert(finalComponents[imported.manifest.id], '移动工程重存后丢失内嵌组件')
   assertNoForbiddenPathReferences(
-    '移动后 Project V8',
+    '移动后 Course Project V9',
     JSON.stringify(finalArchive.project),
     [projectRoot, externalSourceDirectory, authoringDirectory],
   )
@@ -744,32 +821,20 @@ async function buildAndVerifyMovedLesson(
   )
 
   const playerBundle = await fs.readFile(playerBundlePath, 'utf8')
-  const payload = buildExportPayload({
+  const sources = {
     project: finalArchive.project,
     assetFiles: finalArchive.assetFiles,
     components: finalComponents,
-  })
-  const html = buildStandaloneHtml(payload, playerBundle)
+  }
+  const html = buildPublishedCourseStandaloneHtml(sources, playerBundle)
   const htmlPath = path.join(deliveryDirectory, 'moved-offline.html')
+  assertTemporaryPath(isolatedRoot, htmlPath, '移动后的离线单 HTML')
   await fs.writeFile(htmlPath, html, 'utf8')
-  const webFiles = buildWebPackageFilesFromProject(
-    {
-      project: finalArchive.project,
-      assetFiles: finalArchive.assetFiles,
-      components: finalComponents,
-    },
-    playerBundle,
-  )
+  const webFiles = buildPublishedCourseWebPackageFiles(sources, playerBundle)
   await writeWebPackageDirectory(movedWebDirectory, webFiles)
-  const webArchive = await buildWebPackageFromProjectAsync(
-    {
-      project: finalArchive.project,
-      assetFiles: finalArchive.assetFiles,
-      components: finalComponents,
-    },
-    playerBundle,
-  )
+  const webArchive = buildPublishedCourseWebPackage(sources, playerBundle)
   const webArchivePath = path.join(deliveryDirectory, 'moved-web-package.zip')
+  assertTemporaryPath(isolatedRoot, webArchivePath, '移动后的网页包归档')
   await fs.writeFile(webArchivePath, webArchive)
 
   assert(!/https?:\/\//i.test(html), '移动后的单 HTML 含远程 URL')
@@ -786,19 +851,6 @@ async function buildAndVerifyMovedLesson(
       [projectRoot, externalSourceDirectory, authoringDirectory],
     )
   }
-
-  await fs.mkdir(evidenceDirectory, { recursive: true })
-  const persistentProjectPath = path.join(
-    evidenceDirectory,
-    'moved-self-contained.h5lesson',
-  )
-  const persistentHtmlPath = path.join(evidenceDirectory, 'moved-offline.html')
-  const persistentWebPath = path.join(evidenceDirectory, 'moved-web-package.zip')
-  await Promise.all([
-    fs.copyFile(movedProjectPath, persistentProjectPath),
-    fs.copyFile(htmlPath, persistentHtmlPath),
-    fs.copyFile(webArchivePath, persistentWebPath),
-  ])
 
   const browser = await chromium.launch({
     executablePath: systemEdgePath(),
@@ -829,9 +881,9 @@ async function buildAndVerifyMovedLesson(
   )
 
   const [projectArtifact, htmlArtifact, webPackageArtifact] = await Promise.all([
-    collectFileArtifactEvidence(persistentProjectPath),
-    collectFileArtifactEvidence(persistentHtmlPath),
-    collectFileArtifactEvidence(persistentWebPath),
+    collectFileArtifactEvidence(movedProjectPath),
+    collectFileArtifactEvidence(htmlPath),
+    collectFileArtifactEvidence(webArchivePath),
   ])
   return {
     movedProjectPath,
@@ -854,7 +906,6 @@ async function main(): Promise<void> {
     for (const requiredPath of [
       sourceUnpackedExecutable,
       sourcePortableExecutable,
-      sampleComponentPath,
       playerBundlePath,
     ]) {
       assert(existsSync(requiredPath), `W3 验证缺少前置产物：${requiredPath}`)
@@ -864,6 +915,10 @@ async function main(): Promise<void> {
     await fs.mkdir(evidenceDirectory, { recursive: true })
     isolatedRoot = await fs.mkdtemp(path.join(tmpdir(), 'ittoedu-w3-portability-'))
     assert(!isWithin(projectRoot, isolatedRoot), '隔离工作区意外位于源码仓库内')
+    assert(
+      isWithin(tmpdir(), isolatedRoot),
+      `隔离工作区不在系统临时目录内：${isolatedRoot}`,
+    )
     console.log(`W3 隔离工作区：${isolatedRoot}`)
 
     await verifyDocumentationContract()
@@ -922,6 +977,10 @@ async function main(): Promise<void> {
       .catch(() => undefined)
 
     if (isolatedRoot && process.env.W3_KEEP_ISOLATED_WORKSPACE !== '1') {
+      assert(
+        isWithin(tmpdir(), isolatedRoot),
+        `拒绝删除系统临时目录以外的 W3 隔离工作区：${isolatedRoot}`,
+      )
       const removed = await removeDirectoryWithRetries(isolatedRoot)
       if (!removed) console.warn(`警告：未能清理隔离工作区 ${isolatedRoot}`)
     }
