@@ -17,11 +17,11 @@
 - Invalidating paths: PRODUCT_DEEP_AUDIT_2026-08-24.md; src/shared/contracts/course-project-v9/types.ts; src/shared/contracts/course-project-v9/schema.ts; src/shared/contracts/published-course-v2/types.ts; src/shared/contracts/published-course-v2/schema.ts; docs/development-plan/tasks/stabilization/stab-flow-12-image-editing-contract-decision.md
 - Task ID: stab-flow-12-image-editing-contract-decision
 - Phase / wave: post-audit stabilization / E-contract-performance
-- Status: product-decision
+- Status: `done`
 - Owner / Reviewer / Integrator: Product Owner / independent image-contract reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: decision-only
-- Baseline HEAD: record when deciding
+- Claimed at / released at: `2026-08-25T09:13:09+08:00 / 2026-08-25T09:13:09+08:00`
+- Worktree / branch: `shared root, decision-only / codex/architecture-stabilization`
+- Baseline HEAD: `70397bf`
 - Context: compare FLOW-05 advanced image requests with current FlowMediaBlock
 - Freshness / relevant dirty inputs: re-read the invalidating paths before recording a decision
 - Depends on: none
@@ -40,14 +40,22 @@ Product Owner 对 Flow 高级图片编辑字段只作批准、拒绝或延后裁
 - 当前替代目标：基础图片作者能力继续走 flow-08；需要自由构图时使用 Slide 自由节点或预先处理资产，但不得把 Flow 图片静默改成 Slide carrier。
 - 退出条件：拒绝则保持当前合同；延后则写明真实课件需求数量、替代路径失败或导出一致性边界成熟等重开信号。
 
+## Product Owner decision — 2026-08-25
+
+- Decision: `deferred`。
+- Rationale: 可保存重开的 crop/focal 不是低风险画布样式。它需要先确定裁切坐标、焦点、object-fit/aspect 与素材替换的稳定语义，再贯穿 strict V9、Published V2、编辑器即时反馈、真实 Player 和各导出目标；当前直接实现属于中高难度、跨合同与渲染一致性风险。
+- Existing alternatives: 继续使用 flow-08 的预览、替换、alt、题注和基础布局；可预先处理图片资产，需要自由构图时显式使用 Slide 自由节点，不把 Flow 图片静默转换 carrier。
+- Quantified reopen condition: 至少 `3` 份真实课件需要保存重开后仍一致的 crop/focal，并有评审记录证明预处理资产与显式 Slide 自由节点都不可接受；同时必须先定义 Editor/Player/导出的一致性矩阵、素材替换语义和不支持目标的降级策略，再另建 contract implementation 与 consumer integration 卡。
+- Contract boundary: 本决定不新增图片字段，不改变 Flow 文档流 carrier，也不授权用 Slide 行为冒充 Flow 高级图片编辑。
+
 ## Scope, acceptance and forbidden work
 
 - Allowed write: 仅本任务卡中的决定记录。
 - Forbidden write: 所有产品代码、contracts/schema、Published producer、Editor/Player/export、测试文件、依赖、generated、任何预造实现卡或测试路径。
 - Acceptance:
-  - [ ] 明确记录批准、拒绝或延后三者之一及理由。
-  - [ ] 记录首个 consumer、替代目标、退出/重开条件和 Editor/Player/export 一致性边界。
-  - [ ] 若批准，明确另建精确的 contract implementation 与 consumer integration 卡；本卡不得领取编码。
+  - [x] 明确记录 `deferred` 及理由。
+  - [x] 记录首个 consumer、替代目标、量化重开条件和 Editor/Player/export 一致性边界。
+  - [x] 本次未批准实现；未来只有满足重开条件后才可另建精确的 contract implementation 与 consumer integration 卡。
 
 ## Minimal validation
 
@@ -56,10 +64,11 @@ Product Owner 对 Flow 高级图片编辑字段只作批准、拒绝或延后裁
 
 ## Result and rollback
 
-- Decision: pending Product Owner；仅允许填入 approved / rejected / deferred 之一及理由。
-- Result evidence: pending；完成时记录 audit revision、product commit 与 Reviewer 结论。
-- Outcome boundary: 本卡只证明产品裁决已完整记录，不证明高级图片合同或 UI 已实现。
+- Decision: `deferred`；Product Owner 于 `2026-08-25` 授权对高难度或高风险项先延后，本项因跨合同、素材语义与多渲染目标一致性风险满足该条件。
+- Result evidence: audit revision `5c512f9`；最新相关产品实现基线 `58c1e45`；独立 decision-scope Reviewer 复核当前 FlowMediaBlock 与 Published V2 producer/Player/export 边界后 `APPROVE`。
+- Pipeline status: 仅完成 V0 静态合同核对与本卡 `git diff --check`；未运行产品测试，也未产生产品提交。
+- Outcome status: 高级图片 crop/focal 等能力仍未实现；flow-08 基础图片能力、资产预处理与显式 Slide 自由节点替代路径保持不变。
+- Outcome boundary: 本卡只证明产品裁决、替代路径与重开门槛已完整记录，不证明高级图片合同或 UI 已实现，也不把 `deferred` 计为功能完成。
 - Rollback: 决定记录可单独 revert；未来合同/consumer 由各自独立提交回滚。
 - Semantic index impact: none until a later approved contract task lands
 - Generated refresh: none
-

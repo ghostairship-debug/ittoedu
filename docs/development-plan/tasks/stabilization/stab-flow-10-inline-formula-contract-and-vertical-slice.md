@@ -17,11 +17,11 @@
 - Invalidating paths: PRODUCT_DEEP_AUDIT_2026-08-24.md; src/shared/contracts/course-project-v9/types.ts; src/shared/contracts/course-project-v9/schema.ts; src/shared/contracts/published-course-v2/types.ts; src/shared/contracts/published-course-v2/schema.ts; docs/development-plan/tasks/stabilization/stab-flow-10-inline-formula-contract-and-vertical-slice.md
 - Task ID: stab-flow-10-inline-formula-contract-and-vertical-slice
 - Phase / wave: post-audit stabilization / E-contract-performance
-- Status: product-decision
+- Status: `done`
 - Owner / Reviewer / Integrator: Product Owner / independent contract-scope reviewer / Coordinator
-- Claimed at / released at: — / —
-- Worktree / branch: decision-only
-- Baseline HEAD: record when deciding
+- Claimed at / released at: `2026-08-25T09:13:09+08:00 / 2026-08-25T09:13:09+08:00`
+- Worktree / branch: `shared root, decision-only / codex/architecture-stabilization`
+- Baseline HEAD: `70397bf`
 - Context: compare FLOW-12 with current V9 and Published V2 contracts
 - Freshness / relevant dirty inputs: re-read the invalidating paths before recording a decision
 - Depends on: none
@@ -41,14 +41,22 @@ Product Owner 对“Flow 正文内联公式”只作一个可执行裁决：批�
 - 当前替代目标：继续使用独立公式块，并允许纯文本/Unicode 公式满足低复杂度内容。
 - 退出条件：拒绝则关闭该方向；延后则必须写明可量化的重开信号，例如多个真实课件无法接受独立公式块且现有替代路径验证失败。
 
+## Product Owner decision — 2026-08-25
+
+- Decision: `deferred`。
+- Rationale: 这不是低难度、低风险的小修。诚实的行内公式需要同时定义 strict V9 与 Published V2 的 additive 语义，并贯穿 contenteditable atom、选区删除、复制粘贴、撤销、保存重开、真实 Player、可访问文本、打印和 PPTX；在当前稳定化阶段直接实现会扩大合同与多 consumer 风险。
+- Existing alternatives: 继续使用独立 `FlowFormulaBlock`；低复杂度表达可使用纯文本或 Unicode。两种替代都不得被描述为可编辑、可访问的行内公式语义。
+- Quantified reopen condition: 至少 `3` 份真实课件分别出现不可接受的“文字—公式—文字”正文需求，并有评审记录证明独立公式块与纯文本/Unicode 都无法满足；届时先按最新源码另建一张 additive contract 卡和一张 consumer integration 卡，预先覆盖稳定 ID/AST/a11y、编辑历史、保存重开、Player、打印和 PPTX。
+- Contract boundary: 本决定不新增字段、不改变 V9/Published V2 语义，也不授权实现或预造测试路径。
+
 ## Scope, acceptance and forbidden work
 
 - Allowed write: 仅本任务卡中的决定记录。
 - Forbidden write: 所有产品代码、contracts/schema、Published producer、Editor/Player/export、测试文件、依赖、generated、任何预造实现卡或测试路径。
 - Acceptance:
-  - [ ] 明确记录批准、拒绝或延后三者之一及理由。
-  - [ ] 记录首个 consumer、替代目标、退出/重开条件和合同兼容边界。
-  - [ ] 若批准，明确下一步是基于最新源码另建精确的 contract implementation 与 consumer integration 卡，而不是领取本卡编码。
+  - [x] 明确记录 `deferred` 及理由。
+  - [x] 记录首个 consumer、替代目标、量化重开条件和合同兼容边界。
+  - [x] 本次未批准实现；未来只有满足重开条件后才可另建精确的 contract implementation 与 consumer integration 卡。
 
 ## Minimal validation
 
@@ -57,10 +65,11 @@ Product Owner 对“Flow 正文内联公式”只作一个可执行裁决：批�
 
 ## Result and rollback
 
-- Decision: pending Product Owner；仅允许填入 approved / rejected / deferred 之一及理由。
-- Result evidence: pending；完成时记录 audit revision、product commit 与 Reviewer 结论。
-- Outcome boundary: 本卡只证明产品裁决已完整记录，不证明合同或功能已经实现。
+- Decision: `deferred`；Product Owner 于 `2026-08-25` 授权对高难度或高风险项先延后，本项因跨合同与多 consumer 风险满足该条件。
+- Result evidence: audit revision `5c512f9`；最新相关产品实现基线 `58c1e45`；独立 decision-scope Reviewer 复核当前 FlowRichText / FlowFormulaBlock 与 Published V2 边界后 `APPROVE`。
+- Pipeline status: 仅完成 V0 静态合同核对与本卡 `git diff --check`；未运行产品测试，也未产生产品提交。
+- Outcome status: 行内公式仍未实现；当前可交付能力仍是独立公式块与低复杂度纯文本/Unicode 替代。
+- Outcome boundary: 本卡只证明产品裁决、替代路径与重开门槛已完整记录，不证明合同或功能已经实现，也不把 `deferred` 计为功能完成。
 - Rollback: 决定记录可单独 revert；若未来实现已开始，必须由其独立任务和提交处理，不能通过本卡回滚产品代码。
 - Semantic index impact: none until a later approved contract task lands
 - Generated refresh: none
-
