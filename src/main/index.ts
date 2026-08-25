@@ -4,11 +4,6 @@ import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
 import {
-  cleanupPreviewFiles,
-  closeAllPreviewWindows,
-} from './previewWindow'
-import {
-  clearPreviewDocuments,
   installEditorProtocol,
   registerPrivilegedSchemes,
 } from './protocols'
@@ -102,9 +97,6 @@ app
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
 
-    await cleanupPreviewFiles().catch((error) => {
-      console.error('启动时清理预览临时文件失败', error)
-    })
     installEditorProtocol(session.defaultSession)
     registerIpcHandlers({
       getMainWindow: () => mainWindow,
@@ -127,11 +119,6 @@ app
     )
     app.quit()
   })
-
-app.on('before-quit', () => {
-  closeAllPreviewWindows()
-  clearPreviewDocuments()
-})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

@@ -23,7 +23,6 @@ import type {
 import type { AssetKind } from '../shared/projectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
-import { buildStandaloneHtml } from './export/buildStandaloneHtml'
 import { buildPublishedCourseV2Payload } from './export/course/buildPublishedCourse'
 import {
   buildPublishedCourseStandaloneHtml,
@@ -35,7 +34,6 @@ import {
 import { buildCoursePptx } from './export/course/buildCoursePptx'
 import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
 import { buildFlowDocx, uniqueFlowDocxFilename } from './export/course/flowDocx'
-import { buildWebPackageFromProjectAsync } from './export/buildWebPackage'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
@@ -137,6 +135,21 @@ function activeCoursePublishSources() {
     assetFiles: selectMediaAssetFiles(state),
     components: state.componentPackages,
   }
+}
+
+type CourseDeliveryTarget = 'full-preview' | 'single-html' | 'web-package'
+
+function courseDeliveryUnavailable(target: CourseDeliveryTarget): UserFacingError {
+  const title = target === 'full-preview'
+    ? '整课预览不可用'
+    : target === 'single-html'
+      ? '单 HTML 导出不可用'
+      : '网页包导出不可用'
+  return new UserFacingError(
+    title,
+    '当前编辑会话没有可发布的 Course Project V9 文档。',
+    '请新建或重新打开受支持的课程工程后再试。',
+  )
 }
 
 function isSlideOnlyCourseProject(project: CourseProjectDocument): boolean {
@@ -1216,43 +1229,24 @@ export default function App() {
     singleHtmlMode: SingleHtmlExportMode = 'offline-portable',
   ) => {
     const sources = activeCoursePublishSources()
-    if (sources) {
-      return buildPublishedCourseStandaloneHtml(sources, {
-        playerBundle: loadPlayerBundle(),
-        singleHtmlMode,
-      })
-    }
-    if (singleHtmlMode === 'online-lightweight') {
-      throw new UserFacingError(
-        '在线轻量导出不可用',
-        '当前编辑会话没有可发布的 Course Project V9 文档。',
-        '请先重建当前课程会话，再重新选择“在线轻量单 HTML”。',
-      )
-    }
-    const state = useEditorStore.getState()
-    const preview = projectCandidatePreviewDocument(state)
-    const payload = buildExportPayload({
-      project: preview?.project ?? state.project,
-      assetFiles: preview?.assetFiles ?? selectMediaAssetFiles(state),
-      components: state.componentPackages,
+    if (!sources) throw courseDeliveryUnavailable('single-html')
+    return buildPublishedCourseStandaloneHtml(sources, {
+      playerBundle: loadPlayerBundle(),
+      singleHtmlMode,
     })
-    return buildStandaloneHtml(payload, loadPlayerBundle())
   }, [])
 
   const handlePreview = useCallback(() => {
     void run(async () => {
-      if (activeCoursePublishSources()) {
-        setCoursePreviewFeedback({
-          kind: 'loading',
-          title: '正在准备整课预览',
-          message: '正在载入 CoursePlayer…',
-        })
-        setCoursePreviewOpen(true)
-        return
-      }
-      await desktopApi().openPreview({ html: buildHtml() })
-    }, '预览窗口创建失败。请关闭其他预览窗口后重试。')
-  }, [buildHtml, run])
+      if (!activeCoursePublishSources()) throw courseDeliveryUnavailable('full-preview')
+      setCoursePreviewFeedback({
+        kind: 'loading',
+        title: '正在准备整课预览',
+        message: '正在载入 CoursePlayer…',
+      })
+      setCoursePreviewOpen(true)
+    }, '整课预览不可用。请重新打开课程工程后重试。')
+  }, [run])
 
   const writeSingleHtml = useCallback(async (
     html: string,
@@ -1290,15 +1284,9 @@ export default function App() {
       const state = useEditorStore.getState()
       state.setStatus('正在生成网页包…')
       const sources = activeCoursePublishSources()
-      const bytes = sources
-        ? await buildPublishedCourseWebPackageAsync(sources, loadPlayerBundle())
-        : await buildWebPackageFromProjectAsync({
-          project: projectCandidatePreviewDocument(state)?.project ?? state.project,
-          assetFiles: projectCandidatePreviewDocument(state)?.assetFiles
-            ?? selectMediaAssetFiles(state),
-          components: state.componentPackages,
-        }, loadPlayerBundle())
-      const title = sources?.project.title ?? state.project.title
+      if (!sources) throw courseDeliveryUnavailable('web-package')
+      const bytes = await buildPublishedCourseWebPackageAsync(sources, loadPlayerBundle())
+      const title = sources.project.title
       const result = await desktopApi().exportWebPackage({
         suggestedName: `${title}-网页包.zip`,
         bytes,
@@ -1473,6 +1461,13 @@ export default function App() {
     const state = useEditorStore.getState()
     const sources = activeCoursePublishSources()
     if (!sources) {
+      if (format === 'single-html' || format === 'web-package') {
+        setPendingSingleHtmlMode(null)
+        void run(async () => {
+          throw courseDeliveryUnavailable(format)
+        }, '课程交付不可用。请重新打开课程工程后重试。')
+        return
+      }
       const base = collectExportPreflight(
         state.project,
         format,
@@ -1513,7 +1508,7 @@ export default function App() {
       },
     )
     setExportPreflightReport(mergeCoursePackagePreflight(base, v9))
-  }, [handleExportDocx])
+  }, [handleExportDocx, run])
 
   const continuePreflightExport = useCallback(() => {
     const report = exportPreflightReport

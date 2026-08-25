@@ -26,7 +26,6 @@ import {
   writeWebPackageFile,
 } from './fileDialogs'
 import { exportPdfFromHtml } from './pdfExport'
-import { openPreviewWindow } from './previewWindow'
 import {
   clearRecoveryProject,
   listRecentProjects,
@@ -121,12 +120,6 @@ const webPackageSchema = z
       (bytes) => bytes.byteLength > 0 && bytes.byteLength <= 512 * 1024 * 1024,
       '网页包大小无效',
     ),
-  })
-  .strict()
-
-const previewSchema = z
-  .object({
-    html: z.string().min(1).max(256 * 1024 * 1024),
   })
   .strict()
 
@@ -611,21 +604,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       const input = htmlSchema.parse(requireSingleArgument(args))
       return exportPdfFromHtml(requireWindow(context), input.suggestedName, input.html)
-    },
-  )
-
-  registerSafeHandler(
-    IPC_CHANNELS.openPreview,
-    context,
-    {
-      code: 'PREVIEW_FAILED',
-      title: '预览创建失败',
-      message: '无法打开课件预览窗口。',
-      suggestion: '请重试；如果问题持续出现，请重新启动编辑器。',
-    },
-    async (_event, args) => {
-      const input = previewSchema.parse(requireSingleArgument(args))
-      await openPreviewWindow(input.html, requireWindow(context))
     },
   )
 

@@ -270,7 +270,6 @@ function componentApi(options: {
     peekProjectArchive: vi.fn(async () => null),
     exportBinary: vi.fn(async () => null),
     exportPdf: vi.fn(async () => null),
-    openPreview: vi.fn(async () => undefined),
     setPreviewNetworkPolicy: vi.fn(async () => undefined),
     releasePreviewNetworkPolicy: vi.fn(async () => undefined),
     confirmDiscardChanges: vi.fn(async () => 'discard' as const),

@@ -28,7 +28,6 @@ const IPC_CHANNELS = {
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
-  openPreview: 'preview:open',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
@@ -146,7 +145,6 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   exportWebPackage: (input) => invoke(IPC_CHANNELS.exportWebPackage, input),
   exportBinary: (input) => invoke(IPC_CHANNELS.exportBinary, input),
   exportPdf: (input) => invoke(IPC_CHANNELS.exportPdf, input),
-  openPreview: (input) => invoke(IPC_CHANNELS.openPreview, input),
   setPreviewNetworkPolicy: (input) => invoke(IPC_CHANNELS.setPreviewNetworkPolicy, {
     ...input,
     documentToken: requirePreviewNetworkDocumentToken(),

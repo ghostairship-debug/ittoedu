@@ -123,7 +123,6 @@ export interface DesktopAPI {
     suggestedName: string
     html: string
   }): Promise<{ path: string } | null>
-  openPreview(input: { html: string }): Promise<void>
   setPreviewNetworkPolicy(input: PreviewNetworkPolicyInput): Promise<void>
   releasePreviewNetworkPolicy(input: { leaseId: string }): Promise<void>
   confirmDiscardChanges(): Promise<'discard' | 'cancel'>
@@ -163,7 +162,6 @@ export const IPC_CHANNELS = {
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
-  openPreview: 'preview:open',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',

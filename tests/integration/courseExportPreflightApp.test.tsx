@@ -11,6 +11,78 @@ const legacyPreflight = vi.hoisted(() => ({
 
 const sizeProbe = vi.hoisted(() => ({ forceWarning: false }))
 
+const publishSourceProbe = vi.hoisted(() => ({ forceUnavailable: false }))
+
+const deliveryProbe = vi.hoisted(() => ({
+  legacyStandalone: vi.fn(),
+  legacyWebPackage: vi.fn(),
+  publishedStandalone: vi.fn(),
+  publishedWebPackage: vi.fn(),
+}))
+
+const publishedPreviewProbe = vi.hoisted(() => ({
+  mount: vi.fn(async (_input: unknown) => ({
+    destroy: async () => undefined,
+  })),
+}))
+
+vi.mock('../../src/renderer/store/editorStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/store/editorStore')>()
+  return {
+    ...actual,
+    selectActiveCourseProjectDocument: (
+      state: Parameters<typeof actual.selectActiveCourseProjectDocument>[0],
+    ) => publishSourceProbe.forceUnavailable
+      ? null
+      : actual.selectActiveCourseProjectDocument(state),
+  }
+})
+
+vi.mock('../../src/renderer/export/buildStandaloneHtml', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/export/buildStandaloneHtml')>()
+  return {
+    ...actual,
+    buildStandaloneHtml: (...args: Parameters<typeof actual.buildStandaloneHtml>) => {
+      deliveryProbe.legacyStandalone(...args)
+      return actual.buildStandaloneHtml(...args)
+    },
+  }
+})
+
+vi.mock('../../src/renderer/export/buildWebPackage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/export/buildWebPackage')>()
+  return {
+    ...actual,
+    buildWebPackageFromProjectAsync: (
+      ...args: Parameters<typeof actual.buildWebPackageFromProjectAsync>
+    ) => {
+      deliveryProbe.legacyWebPackage(...args)
+      return actual.buildWebPackageFromProjectAsync(...args)
+    },
+  }
+})
+
+vi.mock('../../src/renderer/export/course/buildCoursePackages', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../src/renderer/export/course/buildCoursePackages')
+  >()
+  return {
+    ...actual,
+    buildPublishedCourseStandaloneHtml: (
+      ...args: Parameters<typeof actual.buildPublishedCourseStandaloneHtml>
+    ) => {
+      deliveryProbe.publishedStandalone(...args)
+      return actual.buildPublishedCourseStandaloneHtml(...args)
+    },
+    buildPublishedCourseWebPackageAsync: (
+      ...args: Parameters<typeof actual.buildPublishedCourseWebPackageAsync>
+    ) => {
+      deliveryProbe.publishedWebPackage(...args)
+      return actual.buildPublishedCourseWebPackageAsync(...args)
+    },
+  }
+})
+
 vi.mock('../../src/renderer/export/exportPreflight', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/export/exportPreflight')>()
   return {
@@ -54,12 +126,20 @@ vi.mock('../../src/renderer/ui/RightSidebar', () => ({
 
 vi.mock('../../src/renderer/ui/TopToolbar', () => ({
   TopToolbar: (props: {
+    onPreview(): void
     onExport(
       format: 'single-html' | 'web-package',
       singleHtmlMode?: 'offline-portable' | 'online-lightweight',
     ): void
   }) => (
     <div>
+      <button
+        type="button"
+        data-testid="preview-full-course"
+        onClick={() => props.onPreview()}
+      >
+        PREVIEW
+      </button>
       <button
         type="button"
         data-testid="export-single-html"
@@ -96,9 +176,7 @@ vi.mock('../../src/renderer/export/renderSceneImages', () => ({
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
-  mountPublishedCourseTryRun: vi.fn(async () => ({
-    destroy: async () => undefined,
-  })),
+  mountPublishedCourseTryRun: publishedPreviewProbe.mount,
 }))
 
 import App from '../../src/renderer/App'
@@ -137,7 +215,6 @@ function appApi(): AppDesktopApi {
     peekProjectArchive: vi.fn(async () => null),
     exportBinary: vi.fn(async () => null),
     exportPdf: vi.fn(async () => null),
-    openPreview: vi.fn(async () => undefined),
     setPreviewNetworkPolicy: vi.fn(async () => undefined),
     releasePreviewNetworkPolicy: vi.fn(async () => undefined),
     confirmDiscardChanges: vi.fn(async () => 'discard' as const),
@@ -168,6 +245,17 @@ function loadCourseWithMissingBackgroundBytes() {
   const slide = project.surfaces.find((surface) => surface.type === 'slide')
   if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
   slide.scenes[0]!.backgroundAssetId = 'hero'
+  useEditorStore.getState().loadCourseProject(project, null, {}, {})
+  useEditorStore.getState().activateCourseLocation(project.startLocationId)
+  return project
+}
+
+function loadBlankCourse() {
+  const project = createBlankCourseProject({
+    now: NOW,
+    includeDefaultController: false,
+    controls: 'none',
+  })
   useEditorStore.getState().loadCourseProject(project, null, {}, {})
   useEditorStore.getState().activateCourseLocation(project.startLocationId)
   return project
@@ -223,6 +311,15 @@ beforeEach(() => {
   })
   legacyPreflight.called.mockClear()
   sizeProbe.forceWarning = false
+  publishSourceProbe.forceUnavailable = false
+  deliveryProbe.legacyStandalone.mockClear()
+  deliveryProbe.legacyWebPackage.mockClear()
+  deliveryProbe.publishedStandalone.mockClear()
+  deliveryProbe.publishedWebPackage.mockClear()
+  publishedPreviewProbe.mount.mockClear()
+  publishedPreviewProbe.mount.mockImplementation(async (_input: unknown) => ({
+    destroy: async () => undefined,
+  }))
 })
 
 afterEach(() => {
@@ -234,6 +331,54 @@ afterEach(() => {
 })
 
 describe('ARCH-4 V9 HTML/Web export preflight', () => {
+  it('opens full preview through the renderer Published V2 session', async () => {
+    const project = loadBlankCourse()
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('preview-full-course'))
+
+    expect(await screen.findByRole('dialog', { name: '整课预览' })).toBeVisible()
+    await waitFor(() => expect(publishedPreviewProbe.mount).toHaveBeenCalledOnce())
+    expect(publishedPreviewProbe.mount.mock.calls[0]?.[0]).toMatchObject({
+      project: {
+        id: project.id,
+        schemaVersion: 9,
+      },
+    })
+    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['preview-full-course', '整课预览不可用'],
+    ['export-single-html', '单 HTML 导出不可用'],
+    ['export-web-package', '网页包导出不可用'],
+  ] as const)('reports source-null as unavailable for %s without a Legacy fallback', async (
+    button,
+    title,
+  ) => {
+    loadBlankCourse()
+    publishSourceProbe.forceUnavailable = true
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId(button))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(title)
+    expect(alert).toHaveTextContent('当前编辑会话没有可发布的 Course Project V9 文档')
+    expect(screen.queryByTestId('course-preview-overlay')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(publishedPreviewProbe.mount).not.toHaveBeenCalled()
+    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
+    expect(deliveryProbe.legacyWebPackage).not.toHaveBeenCalled()
+    expect(legacyPreflight.called).not.toHaveBeenCalled()
+    expect(api.exportHtml).not.toHaveBeenCalled()
+    expect(api.exportWebPackage).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['single-html', '单 HTML', 'export-single-html'],
     ['web-package', '网页包', 'export-web-package'],
@@ -277,6 +422,32 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     }))
   })
 
+  it.each([
+    ['export-single-html', '单 HTML 导出不可用'],
+    ['export-web-package', '网页包导出不可用'],
+  ] as const)('fails explicitly when V9 sources disappear after %s preflight', async (
+    button,
+    title,
+  ) => {
+    loadBlankCourse()
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId(button))
+    expect(await screen.findByRole('alertdialog')).toBeVisible()
+
+    publishSourceProbe.forceUnavailable = true
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(title)
+    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
+    expect(deliveryProbe.legacyWebPackage).not.toHaveBeenCalled()
+    expect(api.exportHtml).not.toHaveBeenCalled()
+    expect(api.exportWebPackage).not.toHaveBeenCalled()
+  })
+
   it('keeps online-lightweight mode through preflight and the large HTML confirmation', async () => {
     loadCourseWithRemoteBackground()
     const api = appApi()
@@ -301,11 +472,31 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     fireEvent.click(screen.getByRole('button', { name: /仍导出单 HTML/ }))
 
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
+    expect(deliveryProbe.publishedStandalone).toHaveBeenCalledOnce()
+    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
     const html = api.exportHtml.mock.calls[0]?.[0]?.html as string | undefined
     expect(html).toContain('img-src data: blob: https://cdn.example.com')
     expect(html).toContain('connect-src data: blob: https://api.example.com')
     expect(html).toContain('https:\\x2F\\x2Fcdn.example.com/course/hero.png?v=2')
     expect(html).not.toContain('data:image/png;base64')
+  })
+
+  it('exports a Web package only through the Published V2 producer', async () => {
+    loadBlankCourse()
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-web-package'))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '网页包 导出预检',
+    })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+
+    await waitFor(() => expect(api.exportWebPackage).toHaveBeenCalledOnce())
+    expect(deliveryProbe.publishedWebPackage).toHaveBeenCalledOnce()
+    expect(deliveryProbe.legacyWebPackage).not.toHaveBeenCalled()
   })
 
   it('blocks a wildcard online remote URL before exportHtml is called', async () => {
