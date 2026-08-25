@@ -149,9 +149,12 @@ export function mountPublishedSlidePhaserComponent(
   const destroyLifecycle = (): void => {
     const mountedLifecycle = lifecycle
     lifecycle = undefined
-    if (mountedLifecycle) mountedLifecycle.destroy()
-    resources?.dispose()
+    const mountedResources = resources
     resources = null
+    // Close the host event scope before authored teardown so a destroy hook
+    // cannot emit or retain subscriptions beyond its owning generation.
+    mountedResources?.dispose()
+    if (mountedLifecycle) mountedLifecycle.destroy()
   }
 
   const showFallbackOnce = (): void => {

@@ -505,6 +505,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #controllers: TeacherControllerDom[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
   #phaserComponentHandles: PublishedComponentMountHandle[] = []
+  #deferredPhaserComponentMounts: Array<() => void> = []
   #runtimeHandles: Array<
     PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle
   > = []
@@ -646,6 +647,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
+    if (wasInactive && this.#deferredPhaserComponentMounts.length > 0) {
+      const deferredMounts = this.#deferredPhaserComponentMounts.splice(0)
+      for (const mount of deferredMounts) mount()
+    }
     if (
       wasInactive
       && (this.#runtimeHandles.length > 0 || this.#phaserComponentHandles.length > 0)
@@ -785,6 +790,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   #destroyComponents(): void {
+    this.#deferredPhaserComponentMounts = []
     for (const handle of this.#componentHandles) {
       try {
         handle.destroy()
@@ -1026,48 +1032,54 @@ export class SlidePublishedAdapter implements SurfaceHost {
         wrap: HTMLElement,
         item: Extract<PublishedLayerItem, { kind: 'component' }>,
       ) => {
+        const mountPlayback = () => {
+          if (!this.#active) return
+          const markFailure = () => {
+            wrap.dataset.slideFallbackKind = 'component'
+            wrap.dataset.slideComponentState = 'fallback'
+            wrap.style.pointerEvents = 'none'
+          }
+          wrap.dataset.slideComponentState = 'playback'
+          const handle = mountPublishedSlidePhaserComponent(wrap, {
+            container: wrap,
+            componentId: item.component.packageId,
+            version: item.component.version,
+            instanceId: item.layerItemId,
+            width: item.frame.width,
+            height: item.frame.height,
+            props: item.props,
+            staticFallbackAssetId: item.staticFallbackAssetId,
+            components: this.#payload.components,
+            resolveAsset: this.#resolveAsset,
+            mode: 'preview',
+            scope: 'scene',
+            sceneId: scene.id,
+            interactive: true,
+            events: this.#runtimeSession.events,
+            courseState: this.#runtimeSession.courseState,
+            reportError: (phase, error) => {
+              markFailure()
+              this.#services?.reportDiagnostic?.({
+                surfaceId: this.id,
+                phase: 'mount',
+                severity: 'error',
+                message: `Component“${item.layerItemId}”${phase}失败：${error.message}`,
+                cause: error,
+              })
+            },
+          })
+          if (!handle.ok) markFailure()
+          this.#componentHandles.push(handle)
+          this.#phaserComponentHandles.push(handle)
+        }
         if (!this.#active) {
           wrap.dataset.slideComponentState = 'deferred'
-          wrap.style.pointerEvents = 'none'
+          this.#deferredPhaserComponentMounts.push(() => {
+            if (this.#root?.contains(wrap) === true) mountPlayback()
+          })
           return
         }
-        const markFailure = () => {
-          wrap.dataset.slideFallbackKind = 'component'
-          wrap.dataset.slideComponentState = 'fallback'
-          wrap.style.pointerEvents = 'none'
-        }
-        wrap.dataset.slideComponentState = 'playback'
-        const handle = mountPublishedSlidePhaserComponent(wrap, {
-          container: wrap,
-          componentId: item.component.packageId,
-          version: item.component.version,
-          instanceId: item.layerItemId,
-          width: item.frame.width,
-          height: item.frame.height,
-          props: item.props,
-          staticFallbackAssetId: item.staticFallbackAssetId,
-          components: this.#payload.components,
-          resolveAsset: this.#resolveAsset,
-          mode: 'preview',
-          scope: 'scene',
-          sceneId: scene.id,
-          interactive: true,
-          events: this.#runtimeSession.events,
-          courseState: this.#runtimeSession.courseState,
-          reportError: (phase, error) => {
-            markFailure()
-            this.#services?.reportDiagnostic?.({
-              surfaceId: this.id,
-              phase: 'mount',
-              severity: 'error',
-              message: `Component“${item.layerItemId}”${phase}失败：${error.message}`,
-              cause: error,
-            })
-          },
-        })
-        if (!handle.ok) markFailure()
-        this.#componentHandles.push(handle)
-        this.#phaserComponentHandles.push(handle)
+        mountPlayback()
       },
       mountRuntime: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => {
         if (!this.#active) {

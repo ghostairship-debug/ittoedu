@@ -21,6 +21,10 @@ vi.mock('phaser', () => {
     emit(name: string, ...args: unknown[]) {
       for (const listener of [...(this.listeners.get(name) ?? [])]) listener(...args)
     }
+    listenerCount(name?: string) {
+      if (name !== undefined) return this.listeners.get(name)?.length ?? 0
+      return [...this.listeners.values()].reduce((count, entries) => count + entries.length, 0)
+    }
   }
   const chain = () => {
     const events = new FakeEvents()
@@ -100,7 +104,15 @@ vi.mock('phaser', () => {
       const fakeState = globalThis as unknown as { __fakePublishedPhaserGames?: unknown[] }
       fakeState.__fakePublishedPhaserGames ??= []
       fakeState.__fakePublishedPhaserGames.push(this)
-      Reflect.get(config.scene, 'create').call(config.scene)
+      const boot = () => Reflect.get(config.scene, 'create').call(config.scene)
+      const bootState = globalThis as unknown as {
+        __deferPublishedPhaserBoot?: boolean
+        __deferredPublishedPhaserBoots?: Array<() => void>
+      }
+      if (bootState.__deferPublishedPhaserBoot) {
+        bootState.__deferredPublishedPhaserBoots ??= []
+        bootState.__deferredPublishedPhaserBoots.push(boot)
+      } else boot()
     }
     getTime() { return 1 }
   }
@@ -113,6 +125,7 @@ vi.mock('phaser', () => {
 })
 
 import { CourseEventBus } from '../../src/player/CourseEventBus'
+import { CoursePlayer } from '../../src/player/surfaces/CoursePlayer'
 import { mountPublishedSlidePhaserComponent } from '../../src/player/surfaces/slide/publishedSlidePhaserComponentMount'
 import {
   createPublishedCourseSession,
@@ -128,6 +141,10 @@ import {
 
 interface FakeGameProbe {
   canvas: HTMLCanvasElement
+  events: {
+    once(name: string, listener: () => void): unknown
+    listenerCount(name?: string): number
+  }
   destroy: ReturnType<typeof vi.fn>
   step: ReturnType<typeof vi.fn>
   loop: { game: unknown; callback: unknown; started: boolean; running: boolean }
@@ -136,6 +153,8 @@ interface FakeGameProbe {
 
 declare global {
   var __fakePublishedPhaserGames: FakeGameProbe[] | undefined
+  var __deferPublishedPhaserBoot: boolean | undefined
+  var __deferredPublishedPhaserBoots: Array<() => void> | undefined
   interface Window {
     __publishedPhaserUnitProbe?: Record<string, unknown>
     __publishedPhaserLifecycleProbe?: Record<string, number>
@@ -200,7 +219,10 @@ function runtime(version: string): string {
           setVisible(value) { probe.visible = value; },
           suspend() { probe.suspends = (probe.suspends || 0) + 1; ctx.phaser.scene.game.loop.stop(); },
           resume() { probe.resumes = (probe.resumes || 0) + 1; },
-          destroy() { probe.destroys = (probe.destroys || 0) + 1; }
+          destroy() {
+            probe.destroys = (probe.destroys || 0) + 1;
+            ctx.emit('unit:stale-destroy', { version: '${version}' });
+          }
         };
       }
     });
@@ -225,6 +247,8 @@ async function flushTeardown(): Promise<void> {
 afterEach(() => {
   document.body.replaceChildren()
   delete globalThis.__fakePublishedPhaserGames
+  delete globalThis.__deferPublishedPhaserBoot
+  delete globalThis.__deferredPublishedPhaserBoots
   delete window.__publishedPhaserUnitProbe
   delete window.__publishedPhaserLifecycleProbe
   delete window.__publishedPhaserComponentV4Probe
@@ -285,6 +309,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     handle.destroy()
     handle.destroy()
     await flushTeardown()
+    expect(emitted).toEqual([{ eventName: 'unit:ready', payload: { version: 'v2' } }])
     expect(events.listenerCount()).toBe(0)
     expect(window.__publishedPhaserUnitProbe).toMatchObject({ destroys: 1, coreDestroys: 1 })
     expect(globalThis.__fakePublishedPhaserGames).toHaveLength(1)
@@ -408,6 +433,43 @@ describe('Published Slide Phaser Component API 4 host', () => {
     expect(game.destroyed).toBe(true)
   })
 
+  it('does not create a zombie when a replaced Slide generation finishes Phaser boot late', async () => {
+    globalThis.__deferPublishedPhaserBoot = true
+    const fixture = createPublishedPhaserComponentV2Fixture()
+    const payload = buildPublishedCourseV2Payload({
+      project: fixture.project,
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const host = createPublishedSurfaceHost(payload, fixture.slideSurfaceId)
+    const player = new CoursePlayer([host], { services: services() })
+    expect(await player.mountSurface(fixture.slideSurfaceId, container)).toEqual({ ok: true })
+    expect(await player.activateSurface(fixture.slideSurfaceId)).toEqual({ ok: true })
+
+    await vi.waitFor(() => expect(globalThis.__fakePublishedPhaserGames).toHaveLength(1))
+    const game = globalThis.__fakePublishedPhaserGames![0]!
+    const coreDestroy = vi.fn()
+    game.events.once('destroy', coreDestroy)
+    await host.setLocationId?.(fixture.slideLocationIds[1])
+    await flushTeardown()
+    for (const boot of globalThis.__deferredPublishedPhaserBoots?.splice(0) ?? []) boot()
+    await flushTeardown()
+
+    expect(window.__publishedPhaserComponentV4Probe).toBeUndefined()
+    expect(coreDestroy).toHaveBeenCalledOnce()
+    expect(game.destroy).toHaveBeenCalledOnce()
+    expect(game.step).toHaveBeenCalledOnce()
+    expect(game.canvas.isConnected).toBe(false)
+    expect(game.events.listenerCount()).toBe(0)
+    expect(container.querySelector(
+      `[data-slide-layer-item="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+    )).toBeNull()
+    expect(container.querySelector('.published-component-fallback')).toBeNull()
+    await player.destroy()
+  })
+
   it('routes the materialized scene item for current-location and whole-course preview consumers', async () => {
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       configurable: true,
@@ -423,14 +485,16 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const currentRoot = document.createElement('div')
     document.body.appendChild(currentRoot)
     const currentHost = createPublishedSurfaceHost(payload, fixture.slideSurfaceId)
-    await currentHost.mount({
-      surfaceId: fixture.slideSurfaceId,
-      container: currentRoot,
-      services: services(),
-      signal: new AbortController().signal,
-    })
-    await currentHost.activate()
-    await currentHost.setLocationId?.(fixture.slideLocationIds[0])
+    const currentPlayer = new CoursePlayer([currentHost], { services: services() })
+    expect(await currentPlayer.mountSurface(fixture.slideSurfaceId, currentRoot))
+      .toEqual({ ok: true })
+    expect(currentRoot.querySelector<HTMLElement>(
+      `[data-slide-layer-item="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+    )?.dataset.slideComponentState).toBe('deferred')
+    expect(currentRoot.querySelector(
+      `[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+    )).toBeNull()
+    expect(await currentPlayer.activateSurface(fixture.slideSurfaceId)).toEqual({ ok: true })
     await vi.waitFor(() => expect(currentRoot.querySelector(
       `[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
     )).not.toBeNull())
@@ -455,7 +519,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       '[data-slide-layer-item="published-phaser-order-sentinel"]',
     )?.style.zIndex).toBe(String(sentinelOrder))
     expect(Number(componentOrder)).toBeLessThan(Number(sentinelOrder))
-    await currentHost.destroy()
+    await currentPlayer.destroy()
     await flushTeardown()
 
     const courseRoot = document.createElement('div')
