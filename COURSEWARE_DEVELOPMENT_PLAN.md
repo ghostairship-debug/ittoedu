@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：19.0（2026-08-26：整合开发效率审计；repo-index 降级为可选本地缓存；冻结无真实需求的诊断扩展与投影重构；只保留三个有当前证据的 Ready 任务）
+> 计划版本：20.0（2026-08-26：第 5 节三张 Ready 卡全部交付并合入；ARCH-0 红灯归零、repo-index 降为可选本地缓存、能力索引证据收窄；活动路线收口，无 Ready 卡，剩余问题按证据分档待定级）
 >
 > 当前活动路线：第 5 节“审计收口与生产减负”；可领取工作只看 [任务板](docs/development-plan/TASK_BOARD.md) 与对应任务卡
 >
@@ -103,26 +103,46 @@
 - **存在过度设计**：`W4-C1` 已交付 30 个诊断码且 CLI 有真实 consumer，保留并冻结；`W4-C2` 没有当前可复现失败，撤出活动路线。`PRJ-00B`、`PRJ-01`、`PRJ-02`、`PRJ-03`、`PRJ-04` 只有阶段名称和设想，没有当前失败/consumer/验收，全部取消预排；`PRJ-05` 仅在真实预览失败或 Owner 新决定时从当前事实重新建卡。
 - **存在过度验证**：上一阶段多次串行执行作者检查、独立 Reviewer、集成复查、文档同步与索引刷新；同一风险面被重复覆盖。72 项单 worker E2E、完整 `verify`、重复生成/检查不再作为每张卡的认真度证明。审计判断，长耗时主要来自串行编排、重复审查、文档/索引循环，而不是本轮实现本身天然需要十几小时。
 
-### 5.2 当前唯一产品红灯
+### 5.2 前一批产品红灯（已消除）
 
-`npx vitest run tests/integration/architectureBaselineFlows.test.tsx --reporter=verbose` 在基线为 1/5 失败：三个固定 V9 archive 都因合成 Component metadata 缺少完整 provenance 产生 `component-package-hash-missing` warning；报告仍为 `valid=true`、`canExport=true`、error 0。修复只补 deterministic fixture provenance，不改 collector、finding code/severity、Schema、CLI、导出或性能逻辑；若做不到，任务必须 blocked，而不是扩大范围把 warning 隐藏掉。
+基线 `442d4e1` 上 `npx vitest run tests/integration/architectureBaselineFlows.test.tsx` 为 1/5 失败：三个固定 V9 archive 因合成 Component metadata 缺少完整 provenance 产生 `component-package-hash-missing` warning。已按"只补 deterministic fixture provenance"修复：`sha256` 对整包 `.h5component` 字节计算、`contentSha256` 保持内容 hash、两者不混用，并由单测钉死该区分。三个 archive 现为 `valid=true`、error 0、warning 0、`canExport=true`，双构建字节确定。collector、finding code/severity、Schema、CLI、导出与性能逻辑未改。
 
-### 5.3 唯一 Ready 工作
+### 5.3 本批交付（三张卡已合入并删卡）
 
-1. [`repair-arch0-fixture-component-provenance`](docs/development-plan/tasks/repair/repair-arch0-fixture-component-provenance.md)：修复上述红灯，先恢复固定架构基线的 warning 0。
-2. [`tooling-repo-index-optional`](docs/development-plan/tasks/repair/tooling-repo-index-optional.md)：按 S2 删除 tracked cache、golden/quality consumer 与默认门，保留可选手动生成/查询。
-3. [`tooling-capability-evidence-scope`](docs/development-plan/tasks/repair/tooling-capability-evidence-scope.md)：只缩小能力索引证据输入，保持其他能力制品逐字节不变。
+1. `repair-arch0-fixture-component-provenance`（S1）：消除上述红灯。
+2. `tooling-repo-index-optional`（S2 / 热点 generated-index）：`repo-index/generated/**`、`golden-tasks/**`、`evaluateGoldenTasks.ts` 与其唯一测试 consumer 已删除，`repo:index:quality` 与 CI 的 freshness/quality 门已移除，净删约 31,440 行；`repo:index`、`repo:index:check`、`repo:context` 与 `repo-index/semantic/**` 保留为显式手动导航。独立 Reviewer 裁决 `APPROVE WITH FOLLOW-UP`：`.github` 唯一 workflow 经独立核验成立，workflow outputs 无悬空引用，semantic 全部 208 条路径引用有效，提交可干净 revert。
+3. `tooling-capability-evidence-scope`（S1）：`sourceEvidence()` 的 sources 由 57 收窄至 25，`artifacts/ai-capabilities/**` 除 `generation-evidence.json` 外逐字节不变。
 
-三张卡写入范围互斥，可由不同写入者并行；`tooling-repo-index-optional` 涉及旧路径删除，必须独立 Reviewer 审查 consumer 与回滚。三张卡完成后不自动恢复 W4/PRJ/NET/RTP 占位路线，也不再进行同类全仓审计；只有新的可复现失败、真实 consumer 或量化维护成本证据才能创建下一张实现卡。
+不自动恢复 W4/PRJ/NET/RTP 占位路线，也不再进行同类全仓审计；只有新的可复现失败、真实 consumer 或量化维护成本证据才能创建下一张实现卡。
 
-## 6. 当前路线成功门槛
+### 5.4 收口后已核实的剩余问题（未立项，待 Owner 定级）
 
-- ARCH-0 三个固定 V9 archive 均 `valid=true`、error 0、warning 0、`canExport=true`，保存重开行为不变，重复构建字节确定；
-- `git ls-files repo-index/generated` 为空，缓存被 ignore；默认 package/CI 不再执行 repo-index freshness、golden 或 quality 门；从缺失缓存开始，显式 `repo:index` 与一次精确 `repo:context -- --path ... --size small` 可用且不弄脏工作树；
-- `artifacts/ai-capabilities` 继续可供 Builder 消费；除 `generation-evidence.json` 外的能力制品字节不变，来源清单只含直接生成输入并明确排除 broad main/preload/Player/producer 文件；
-- W4-C1 的 30 个诊断码、V9 Schema、CLI/Player/Export 行为与教师能力无变化；页面不新增控制器，也不恢复独立教师逃生控件；
-- 每张实现卡只执行卡内 1–3 条 focused checks；Reviewer 无新风险不复跑同命令；本批不因文档或可选索引变化执行完整 E2E、完整 build、`verify`、打包、性能或签名门；
-- 未由当前失败、真实 consumer 或量化收益支撑的新增抽象、缓存、诊断码、任务卡和验证平台：0。
+按不变量 15 分档，均为只读核实结果，**不得**据此自行建卡：
+
+**A. 有可复现事实偏差**
+
+- 能力索引 provenance 对合同实现失明：收窄后的 25 项里有 11 项是 1 行 barrel（`src/shared/interactionSchema.ts` 等，`export * from './contracts/...'`），真正生成产物字节的 `src/shared/contracts/**` 一项都不在清单内。改 `src/shared/contracts/interaction-v1/schema.ts` 会改变 `schemas/interactions.json`（约 43 KB，占产物近半）而 25 个 sha256 全不变。基线 57 项清单同样零 `src/shared/contracts` 命中，**属既有缺陷，非本次收窄引入**。命中不变量 13，清单增删须 Owner 裁决。
+- `artifacts/ai-capabilities/diagnostics.json` 顶层并列两套互不兼容的诊断码：V8 的 `projectHealth` / `projectedProjectHealthForExport`（各 47 码）与 V9 的 `courseProjectValidation.projectHealth`（27 码），仅靠一行 `legacyRegistryScope` 字符串区分。
+- `docs/development-plan/inventories/legacy-consumers.json` 的 LEG-007 `currentFact` 已过期：仍称有 legacy validator 共用该 collector，但 `src/renderer/project/validateProjectArchive.ts` 已随 LEG-010 删除。
+
+**B. 有真实 consumer 诉求**
+
+- V8 项目健康仍是编辑器 GUI 的唯一诊断源（`App.tsx`、`ProjectHealthPanel.tsx`、`exportPreflight.ts` 消费 1216 行 V8 `collectProjectHealth`），而 V9 的 27 码 `collectCourseProjectHealth` 只有 CLI 一个消费者——教师所见与 CLI 报告是两套码（= active-debt LEG-006、LEG-007）。
+- 纯 Slide V9 工程的 PPTX/PDF 导出仍绕 V8 投影（LEG-004、LEG-005）。
+- 判题能力接了运行时未接交互：`RuntimeHost` 已挂 `ctx.assessment.evaluate` 并记证据，但 `INTERACTION_CONDITION_TYPES` 仍只有 `presentation.in` / `scene.in`，无判题分支，零课例使用。
+
+**C. 文字口径落差（无代码 consumer）**
+
+- `repo-index/semantic/features.json` 与 `modules.json` 仍有 golden 时代措辞；`docs/development-plan/ARCHITECTURE_CONTRACT.md` 的 repo-index freshness 不变量表述与"缓存不再 tracked"存在落差；`REPAIR_PLAN.md` 的相关行属历史证据，按协议第 9 节应保留不改。
+
+## 6. 当前路线成功门槛（本批达成情况）
+
+- ✅ ARCH-0 三个固定 V9 archive 均 `valid=true`、error 0、warning 0、`canExport=true`，保存重开断言通过，重复构建字节确定；
+- ✅ `git ls-files repo-index/generated` 为空且缓存被 ignore；默认 package/CI 不再执行 repo-index freshness、golden 或 quality 门；从缺失缓存开始 `repo:index` 可重建、`repo:context -- --path ... --size small` 返回可读上下文且不弄脏工作树；
+- ✅ `artifacts/ai-capabilities` 继续可供 Builder 消费；除 `generation-evidence.json` 外能力制品逐字节不变，来源清单已排除 broad main/preload/Player/producer 文件。**但**"只含直接生成输入"仅部分达成——见 5.4 A 的 barrel 失明反例；
+- ✅ V9 Schema、CLI/Player/Export 行为与教师能力无变化；页面不新增控制器，也未恢复独立教师逃生控件；
+- ✅ 每张实现卡只执行卡内 focused checks；Reviewer 只补作者未覆盖的 CI/YAML 与任务板风险面，未复跑作者命令；本批未执行完整 E2E、完整 build、`verify`、打包、性能或签名门。集成层在合并 SHA 上补跑一次 `typecheck` 与一次 `vitest run` 作为组合风险验证；
+- ✅ 未由当前失败、真实 consumer 或量化收益支撑的新增抽象、缓存、诊断码、任务卡和验证平台：0。
 
 ## 7. 当前路线之外的方向
 
@@ -132,6 +152,6 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前卡统一放在 `docs/development-plan/tasks/repair/**`，完成即删除。
 
-当前任务板应为 3 张 queued 卡，对应第 5.3 节。执行者只需读取本总纲的不变量、自己的任务卡及卡中点名的源码/测试，不得通读旧 Wave 后自行补范围。优先修复 ARCH-0 当前红灯；另两张工具任务因写入范围互斥可并行，但 generated-index 始终只有一个 writer。完成三张卡后暂停并报告剩余真实问题与时间估算；不得自动继续 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1 或其它 carrier 扩展。
+当前任务板为 0 张卡：第 5 节三张 Ready 卡已全部交付、合入并删卡，活动路线收口。**当前没有 Ready 工作**。第 5.4 节的剩余问题是只读核实结果，未立项；建卡前须由 Owner 就 A 档反例（尤其能力索引 provenance 清单增删）与 B 档 consumer 诉求先行定级。执行者只读本总纲的不变量、自己的任务卡及卡中点名的源码/测试，不得通读旧 Wave 后自行补范围。不得自动继续 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1 或其它 carrier 扩展。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。
