@@ -22,6 +22,7 @@ jobs:
       governance_tests: ${{ steps.scope.outputs.governance_tests }}
       task_board_check: ${{ steps.scope.outputs.task_board_check }}
       capability_check: ${{ steps.scope.outputs.capability_check }}
+      renderer_fonts: ${{ steps.scope.outputs.renderer_fonts }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
       head_sha: ${{ steps.scope.outputs.head_sha }}
     steps:
@@ -109,8 +110,11 @@ jobs:
             # Own case: `vite*.ts` is swallowed by the product-test case above, and
             # the one line keeping font slices out of `data:` URIs lives there. No
             # Vitest suite runs a renderer build, so nothing else sees it break.
+            # This workflow is in the list because the gate's first version never
+            # ran: the flag reached `$GITHUB_OUTPUT` but was missing from the job's
+            # `outputs:` map, so the condition read an empty string and skipped.
             case "$file" in
-              vite*.ts|src/shared/fonts/*|scripts/check-renderer-font-assets.ts|package.json|package-lock.json)
+              vite*.ts|src/shared/fonts/*|scripts/check-renderer-font-assets.ts|package.json|package-lock.json|.github/workflows/check-contracts.yml)
                 renderer_fonts=true
                 ;;
             esac
