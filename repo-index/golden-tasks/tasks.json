@@ -463,8 +463,8 @@
     {
       "id": "GT-022",
       "milestone": "extended-25",
-      "title": "Retained V8 release fixtures",
-      "queryText": "为什么产品只打开 V9，但 verify-release 和 render-host benchmark 仍消费 Project V8？哪些可迁移、哪些必须显式保留？",
+      "title": "Retained V8 test tooling after V9/V2 release migration",
+      "queryText": "产品只打开 V9，verify-release 与 render-host 已切到 V9/V2，为什么仍保留 Project V8 archive adapter 和测试 factory？如何防止它们重新接回产品或发布链？",
       "request": {
         "mode": "feature",
         "value": "legacy-release",
@@ -475,7 +475,7 @@
         "save",
         "player"
       ],
-      "rationale": "LEG-008/009 prevent deleting retained tooling merely because its name contains V8.",
+      "rationale": "LEG-008/009 prove product/release V8 consumers are zero while keeping isolated archive, payload and rejection tests explicit.",
       "evidence": [
         "docs/development-plan/inventories/legacy-consumers.json"
       ]

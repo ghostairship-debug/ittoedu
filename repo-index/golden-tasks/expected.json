@@ -567,8 +567,8 @@
       "mustHitTop5": [
         "src/renderer/project/projectArchive.ts",
         "scripts/verify-release.ts",
-        "scripts/build-examples.ts",
-        "examples/render-host-benchmark/project.json",
+        "scripts/build-render-host-benchmark.ts",
+        "tests/helpers/projectV8.ts",
         "src/renderer/project/courseProjectIo.ts"
       ],
       "requiredTop15": [

@@ -35,6 +35,7 @@
   "generationCommand": "npm run generate:contracts",
   "humanDocs": [
     "docs/contracts/COURSE_PROJECT_V9.md",
+    "docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md",
     "docs/contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md",
     "docs/contracts/V9_COMPATIBILITY_POLICY.md"
   ],

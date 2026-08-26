@@ -36,6 +36,7 @@
         "docs/PUBLISHED_LESSON_V1.md",
         "docs/RUNTIME_AUTHORING.md",
         "docs/USER_GUIDE.md",
+        "docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md",
         "docs/development-plan/README.md",
         "examples/render-host-benchmark/README.md",
         "scripts/install-courseware-skills.ps1"
@@ -107,6 +108,11 @@
       ],
       "path": "docs/contracts/COURSE_PROJECT_V9.md",
       "title": "Course Project V9 工程合同说明"
+    },
+    {
+      "links": [],
+      "path": "docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md",
+      "title": "Course Project Validation Report V1"
     },
     {
       "links": [],

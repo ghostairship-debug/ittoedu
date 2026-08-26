@@ -1040,7 +1040,7 @@
     {
       "schemaVersion": 1,
       "id": "feature:legacy-release",
-      "name": "Legacy Delivery and Release Consumers",
+      "name": "Retained V8 Tooling after V9/V2 Release Migration",
       "aliases": [
         "legacy-release",
         "V8 benchmark",
@@ -1055,16 +1055,16 @@
         "module:tooling-release",
         "module:export-delivery"
       ],
-      "currentFact": "V8 archive/export paths remain in no-source delivery, fixtures, benchmarks and release verification.",
-      "targetState": "Each consumer is migrated, explicitly retained, or removed only with zero-reference proof.",
-      "removalPhase": "ARCH-4/ARCH-5",
-      "reviewGate": "Canonical legacy-consumers.json record reaches exact zero or retained compatibility is approved.",
+      "currentFact": "The product open path rejects V8, and committed sample, portability, render-host and release-verifier consumers now use V9/V2. V8 archive adapters and the test factory remain only for isolated round-trip, corruption, Legacy payload and format-rejection tests.",
+      "targetState": "Keep retained V8 compatibility isolated until each adapter or focused test has a measured replacement; never reconnect it to product open or release verification.",
+      "removalPhase": "REPAIR-W3 release migration complete; retained tests are evidence-gated",
+      "reviewGate": "LEG-008/009 retain exact non-product consumers, and product/release V8 references stay at zero.",
       "highSignalFiles": [
-        "scripts/build-examples.ts",
-        "examples/render-host-benchmark/project.json",
+        "src/renderer/project/projectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
-        "scripts/validate-project.ts",
-        "package.json",
+        "tests/helpers/projectV8.ts",
+        "scripts/verify-release.ts",
+        "scripts/build-render-host-benchmark.ts",
         "docs/contracts/V9_COMPATIBILITY_POLICY.md"
       ],
       "highSignalTests": [
@@ -1076,8 +1076,8 @@
       ],
       "canonicalFiles": [
         "src/renderer/project/projectArchive.ts",
-        "src/renderer/export/buildExportPayload.ts",
-        "src/player/PlayerApp.ts",
+        "src/renderer/project/courseProjectIo.ts",
+        "tests/helpers/projectV8.ts",
         "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "entrypoints": [
