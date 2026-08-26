@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：18.0（2026-08-26：CMP-03 Slide scene-local Component API 4 Phaser 已合入并双重独立审查通过；V8 sample、portability 与 render-host V9/V2 基准三个替代纵切已并行激活）
+> 计划版本：18.1（2026-08-26：Wave 3 的 V9/V2 consumer 替代、release verifier 切换与旧 V8 benchmark 清退已经闭环；W4-C1 V9 全工程诊断和 PRJ-00A 去冗余已合入并通过独立审查；本批收口后暂停）
 >
 > 当前活动路线：第 5 节“工程修复与网络基础——Gate R0 → Wave 0–5”；详细证据与开工顺序见 [修复方案](docs/development-plan/REPAIR_PLAN.md)
 >
@@ -46,7 +46,7 @@
 - 作者工程：Course Project V9（软冻结；additive 可选字段独立合同提交并保持 `.strict()`）；发布：Published Course V2；Runtime API 2/3；Component API 4；Interaction Protocol V1。
 - 不恢复 V8 `.h5lesson` 导入，不借内部重构创建 V10。
 - 当前编辑器内没有可见 AI、聊天、Provider 或网络调用；internal/reserved 接口不得宣称为可用工作流；编辑器内 AI 统一延后到 2.0 以后。
-- 教师控制器只在"全局层（全课）"持久化编辑；页面作者态 inert；运行态拖动只写 Session。不实现逐页/逐 location 控制器位置。
+- 教师控制器只在"全局层（全课）"持久化编辑；页面作者态 inert；运行态拖动只写 Session；运行态可见的教师入口也只有这个工程内全局控制器，不再叠加独立的“逃生控件”。不实现逐页/逐 location 控制器位置。
 - 打包分发当前不是交付目标；恢复打包时须随新的固定候选补齐打包、性能与签名证据。
 - Runtime/Component 是经过审核的可信扩展。它们可按真实 consumer 需要使用当前宿主提供的父页面、本地、桌面或其他能力；实现优先走稳定宿主接口或同宿主执行语义，不建权限审批平台。不同导出/嵌入环境可用能力不同，不得把桌面专属能力伪装成通用网页承诺。
 - 远程资源和 API 按工程声明开放。精确 `https`/`wss` origin 声明服务于预览、发布、CSP、可移植性和诊断，不用来推导扩展代码不可信。远程脚本不随本轮开放，若确有 consumer 另立合同。
@@ -69,7 +69,7 @@
 11. **作者与交付的有效域必须闭合**：作者端允许保存的状态必须被 Preview、统一画布、Published Player 和适用导出接受。
 12. **公开入口必须诚实**：禁止静默 no-op、伪成功和底层校验 JSON 直出。
 13. **面向 AI 的契约必须诚实**：能力索引声明的检查、文档路由和能力状态必须与实现一致。
-14. **控制器作者范围唯一**：页面 inert、全局层唯一持久化入口、运行态只写 Session。
+14. **控制器作者与运行入口唯一**：页面 inert、全局层唯一持久化入口、运行态只写 Session；不得再渲染与全局控制器重合的独立教师逃生控件。
 
 ---
 
@@ -95,10 +95,10 @@
 - **Wave 0 集成后质量补修（审计基线 `3780090`）**：`CAP-01` 维持关闭；`UI-01`、`EXA-02`、`EXP-02` 与 `CMP-02` 已由各自 product commit 收口，完成事实见 Git 历史与当前修复方案，不再以过期的 Ready 文案派工。
 - **Published Runtime parity（独立 S2 纵切）**：RTP-01/02 已证明 Slide scene-local 与 Flow surface-local API 3 DOM playback；RTP-03 又接通教师可从开发工作台真实创建的 Slide scene-local API 2 DOM/Phaser/hybrid，并覆盖跨 generation、暂离/恢复、失败隔离及 Phaser 核心资源销毁。API 2 的宿主动作、presentation 与节点解析仍是明确的 partial context；Spatial、global scope、非 Flow 共享层与捕获继续按真实 consumer 逐项准入，不接回 Legacy Player。
 - **Wave 1 网络基础纵切**：远程资源交付、工程网络声明、在线轻量单 HTML 与真实 V9 当前位置/整课预览联网均已落地。预览只投影实际 Published 引用的远程工程素材，main session 以可撤销 lease 精确裁决 origin，并以每文档随机 capability 拒绝 reload 前旧文档迟到的 set/release；静态 CSP 不开放远程脚本，CORS/TLS 仍由浏览器执行。后续只按真实 HTTP/WebSocket 与捕获 consumer 准入 API/CORS 降级；长期密钥不进入静态课件。
-- **Wave 2 诊断合同**：Validation Report 与 Diagnostic Target 分别定约，再实现逐码 ledger。原“成功分支映射 17 码”控制流不可达，继续否决。
-- **Wave 3 V8 测试产物清退与真实发布门**：生成物/fresh checkout 前置已经关闭；无 consumer 的 incline-motion 全链已删除，photosynthesis 也已由三 Slide Course Project V9 archive + Published V2 离线交互 oracle 替代并删除专属旧组件链。CMP-03 已解除真实 Phaser Component 发布播放前置；sample、portability 与 render-host V9/V2 benchmark 正按互斥 consumer 分三条纵切替换。旧 V8 benchmark 在 release verifier 切换前继续作为并行输入保留，不迁移旧课例设计。
-- **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
-- **Wave 5 合成与旧投影退出（条件准入）**：`SEM-B3` 已统一 membership/materialization/background/order；`SEM-B4A` 又以同一组 shape-neutral Slide 视觉规则证明可表示纯 Slide 子域的 V8/V9 预检 parity，并将 surface shared、同 scene 多 location scope、精确 state、playback hidden 与稳定顺序/背景差值固定为反例棘轮。下一步才是 `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05`；宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
+- **Wave 2 诊断合同（已完成）**：Validation Report V1、ID-based Diagnostic Target 与逐码 ledger 已落地；Schema-invalid 固定为 unreadable / `projectHealth:null` / exit 2，不再尝试不可达的“成功分支映射 17 码”。
+- **Wave 3 V8 测试产物清退与真实发布门（已完成）**：sample 已改为两页 Course Project V9 + Phaser Component，Windows portability verifier 已自行创建/移动/重开/发布 V9 工程，render-host 已覆盖 Native、API 2 Phaser、API 2 DOM+Three、API 4 DOM 与 API 4 Phaser 五路径 V9/V2 行为。release verifier 只读取 V9/V2，旧 V8 benchmark 六个专属产物及其 consumer 已删除；仅保留与产品 V8 导入无关的隔离 archive/parser/rejection 测试工具链。
+- **Wave 4 V9 全工程诊断**：`W4-C1` 已把 Runtime / Interaction / Component / Controller-Media 共 30 个 active code 接入 `collectCourseProjectHealth` 和 CLI，并明确排除 17 个 V8-only、Schema-shadow 或 archive-shadow code；共享/全局层与 state/location 可见性统一复用 `composeCourseProjectLocation`。下一步 `W4-C2` 只补 network declaration parity：已声明 origin 合法，未声明访问、危险 scheme、Secret 字面量和捕获不确定性才报告；现有 GUI 不另建产品。
+- **Wave 5 合成与旧投影退出（条件准入）**：`SEM-B3` 已统一 membership/materialization/background/order；`SEM-B4A` 已证明 shape-neutral Slide 视觉规则可表示纯 Slide 子域的 V8/V9 预检 parity；`PRJ-00A` 已移除构建后立即丢弃的 preview layer projection，并保持 commit/undo/redo/切页行为一致。恢复后先做 `PRJ-00B` 量化测量，只有可复现收益才实现 context-aware cache，再进入 `PRJ-01` 收窄与 `PRJ-02～05` 按用户行为拆分。宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
 
 上一批三个互斥 S2 已按 photosynthesis V9/V2 oracle → Slide API 2 Published playback → 真实 V9 预览联网的顺序合入并通过固定候选 `7d17fed` phase gate；独立 Reviewer 发现并关闭了 Phaser 核心销毁、overlay A→B 授权残留与跨文档迟到 IPC 三类 P1。RTP-04 又以 session owner 接通 `globalLayerItems` API 2 单实例播放，并在审查中补齐三 Surface 命中组合、lifecycle/create 双重异常下的 Phaser Core teardown，以及普通 Runtime 卸载的 `fromScene=false` 语义。CMP-03 的三次产品提交已合入 `e61cd82`；两名独立 Reviewer 先后关闭标准 mount→activate 空白、过期 emit、late boot zombie、prepared 旧 generation 与 Flow→restart 重复创建等 P1/P2 后，对最终累计提交双重 PASS。`f3fd31f` 的正常 V9 生命周期表征解锁并完成 LEG-003，LEG-005A 随后删除 PDF source-null Runtime raster；网络/CORS/捕获因没有真实作者消费链继续 No-Ready。
 
@@ -133,6 +133,6 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前卡统一放在 `docs/development-plan/tasks/repair/**`，完成即删除。
 
-当前任务板有三个互斥 active：V8-03 sample V9、V8-04 portability V9、V8-05A render-host V9/V2 benchmark。RTP-04 与 CMP-03 已关闭；global API 3、API 2 actions/events/nodes/capture、其它 shared Runtime/Component carrier 仍不随之开放。V8-05A 只新增并稳定 V9/V2 benchmark，旧 V8 benchmark 在 V8-06 release verifier 切换完成前保留；其余纵切继续按 consumer 证据准入。
+当前任务板为 0 张 active 卡。本批已完成 Wave 3 全链清退、W4-C1、SEM-B3/B4A 与 PRJ-00A，并在权威文档和生成索引恢复一致后暂停。恢复时按 `W4-C2` network declaration parity → `PRJ-00B` 测量裁决 → `PRJ-01` → 有证据的 `PRJ-02～05` 顺序推进；RTP-05、NET-C1、global API 3、API 2 actions/events/nodes/capture 与其它 carrier 仍须真实 consumer 才准入。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。
