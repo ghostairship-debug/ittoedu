@@ -13,7 +13,6 @@ import {
   parseComponentPackageFiles,
 } from '../src/renderer/components/importComponentPackage'
 import { openCourseProjectArchive } from '../src/renderer/project/courseProjectArchive'
-import { openProjectArchive } from '../src/renderer/project/projectArchive'
 import {
   APP_EXECUTABLE_NAME,
   APP_PRODUCT_NAME,
@@ -23,6 +22,7 @@ import type {
   CourseProjectDocument,
   LayerFrame,
 } from '../src/shared/courseProjectTypes'
+import { publishedCourseV2Schema } from '../src/shared/publishedCourseSchema'
 import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
 import {
   assertExpectedAsarPackage,
@@ -88,19 +88,19 @@ const renderHostBenchmarkDirectory = path.join(
 )
 const renderHostBenchmarkProject = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-benchmark.h5lesson',
+  'render-host-benchmark-v9.h5lesson',
 )
-const renderHostBenchmarkTable = path.join(
+const renderHostBenchmarkPublished = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-editable-table.h5component',
-)
-const renderHostBenchmarkPhaserMeter = path.join(
-  renderHostBenchmarkDirectory,
-  'render-host-phaser-meter.h5component',
+  'published-v2.json',
 )
 const renderHostBenchmarkHtml = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-benchmark.html',
+  'render-host-benchmark-v2.html',
+)
+const renderHostBenchmarkNotices = path.join(
+  renderHostBenchmarkDirectory,
+  'THIRD_PARTY_NOTICES_V9.md',
 )
 const exportedHtml = path.join(
   verificationDirectory,
@@ -873,12 +873,14 @@ async function main(): Promise<void> {
   )
   const requiredFiles = [
     path.join(projectRoot, 'README.md'),
+    path.join(projectRoot, 'docs', 'README.md'),
     path.join(projectRoot, 'docs', 'USER_GUIDE.md'),
     path.join(projectRoot, 'docs', 'COMPONENT_AUTHORING.md'),
-    path.join(projectRoot, 'docs', 'AI_COURSEWARE_AUTHORING.md'),
     path.join(projectRoot, 'docs', 'RUNTIME_AUTHORING.md'),
+    path.join(projectRoot, '.agents', 'skills', 'orchestrate-courseware', 'SKILL.md'),
+    path.join(projectRoot, '.agents', 'skills', 'build-courseware-project', 'SKILL.md'),
     path.join(renderHostBenchmarkDirectory, 'README.md'),
-    path.join(renderHostBenchmarkDirectory, 'THIRD_PARTY_NOTICES.md'),
+    renderHostBenchmarkNotices,
     path.join(projectRoot, 'package-lock.json'),
   ]
   for (const requiredFile of requiredFiles) {
@@ -887,7 +889,7 @@ async function main(): Promise<void> {
   }
   pass(
     '发布配套文件',
-    'README、AI 创作规范、自由运行时/组件指南、渲染基准及 package-lock.json 均存在',
+    'README、AI 编排/构建 Skills、自由运行时/组件指南、V9/V2 渲染基准及 package-lock.json 均存在',
   )
 
   const [projectBytes, componentBytes] = await Promise.all([
@@ -922,47 +924,132 @@ async function main(): Promise<void> {
     'Course Project V9 与内嵌 Component API 4 包均通过正式解析器校验',
   )
 
-  const [benchmarkBytes, tableBytes, phaserMeterBytes, benchmarkHtml] =
+  const [benchmarkBytes, publishedBenchmarkJson, benchmarkHtml, benchmarkNotices] =
     await Promise.all([
       fs.readFile(renderHostBenchmarkProject),
-      fs.readFile(renderHostBenchmarkTable),
-      fs.readFile(renderHostBenchmarkPhaserMeter),
+      fs.readFile(renderHostBenchmarkPublished, 'utf8'),
       fs.readFile(renderHostBenchmarkHtml, 'utf8'),
+      fs.readFile(renderHostBenchmarkNotices, 'utf8'),
     ])
-  const benchmarkProject = openProjectArchive(Uint8Array.from(benchmarkBytes))
-  const benchmarkTable = importComponentPackage(Uint8Array.from(tableBytes))
-  const benchmarkPhaserMeter = importComponentPackage(Uint8Array.from(phaserMeterBytes))
+  const benchmarkProject = openCourseProjectArchive(Uint8Array.from(benchmarkBytes))
+  const publishedBenchmark = publishedCourseV2Schema.parse(
+    JSON.parse(publishedBenchmarkJson) as unknown,
+  )
+  const expectedBenchmarkLocationIds = [
+    'scene_native_nodes_v9',
+    'scene_runtime_phaser_v9',
+    'scene_runtime_three_v9',
+    'scene_component_v4_dom_v9',
+    'scene_component_v4_phaser_v9',
+  ]
   assert(
-    benchmarkProject.project.schemaVersion === 8 &&
-      benchmarkProject.project.scenes.length === 5,
-    '渲染宿主基准必须是五场景 Project V8 工程',
+    benchmarkProject.project.schemaVersion === 9 &&
+      benchmarkProject.project.locations.map(({ id }) => id).join('\n') ===
+        expectedBenchmarkLocationIds.join('\n'),
+    '渲染宿主基准必须是五页 Course Project V9 工程',
   )
   assert(
-    benchmarkProject.project.scenes[1]?.runtime?.runtimeApiVersion === 2 &&
-      benchmarkProject.project.scenes[1]?.runtime?.renderMode === 'phaser' &&
-      benchmarkProject.project.scenes[2]?.runtime?.runtimeApiVersion === 2 &&
-      benchmarkProject.project.scenes[2]?.runtime?.renderMode === 'dom',
-    '渲染宿主基准缺少 API 2 Phaser / Three-DOM 运行时',
+    benchmarkProject.project.globalLayerItems.filter(
+      ({ item, visibility }) => item.kind === 'native' &&
+        item.content.nativeType === 'teacher-controller' &&
+        item.visible && visibility.mode === 'all',
+    ).length === 1,
+    '渲染宿主 V9 基准必须只有一个全局教师控制器入口',
+  )
+  sampleControllerTarget(benchmarkProject.project)
+  const benchmarkSlide = benchmarkProject.project.surfaces[0]
+  assert(
+    benchmarkSlide?.type === 'slide' && benchmarkSlide.scenes.length === 5,
+    '渲染宿主 V9 基准必须包含单一五场景 Slide surface',
+  )
+  const benchmarkLayerItems = benchmarkSlide.scenes.flatMap(({ layerItems }) => layerItems)
+  assert(
+    benchmarkLayerItems.some((item) => item.kind === 'native') &&
+      benchmarkLayerItems.filter((item) => item.kind === 'component').length === 2,
+    '渲染宿主 V9 基准缺少 Native 或双 Component 路径',
+  )
+  const benchmarkRuntimeModes = benchmarkLayerItems.flatMap((item) =>
+    item.kind === 'runtime'
+      ? [`${item.runtime.runtimeApiVersion}:${item.runtime.renderMode}`]
+      : [],
   )
   assert(
-    benchmarkTable.manifest.schemaVersion === 4 &&
-      benchmarkTable.manifest.renderMode === 'dom',
-    '渲染宿主基准缺少 V4 DOM 组件',
+    benchmarkRuntimeModes.join('\n') === ['2:phaser', '2:dom'].join('\n'),
+    '渲染宿主 V9 基准缺少 API 2 Phaser / Three-DOM 运行时路径',
+  )
+  const embeddedBenchmarkComponents = Object.values(
+    benchmarkProject.project.componentPackages,
+  ).map((metadata) => {
+    const key = `${metadata.packageId}@${metadata.version}`
+    const files = benchmarkProject.componentFiles[key]
+    assert(files, `渲染宿主 V9 基准缺少内嵌组件包 ${key}`)
+    return parseComponentPackageFiles(files, {
+      expectedId: metadata.packageId,
+      expectedVersion: metadata.version,
+    })
+  })
+  assert(
+    embeddedBenchmarkComponents.length === 2 &&
+      embeddedBenchmarkComponents.every(({ manifest }) => manifest.schemaVersion === 4) &&
+      embeddedBenchmarkComponents.map(({ manifest }) => manifest.renderMode)
+        .sort().join('\n') === ['dom', 'phaser'].join('\n'),
+    '渲染宿主 V9 基准缺少内嵌 Component API 4 DOM / Phaser 包',
   )
   assert(
-    benchmarkPhaserMeter.manifest.schemaVersion === 4 &&
-      benchmarkPhaserMeter.manifest.renderMode === 'phaser',
-    '渲染宿主基准缺少 V4 Phaser 组件',
+    publishedBenchmark.formatVersion === 2 &&
+      publishedBenchmark.sourceSchemaVersion === 9 &&
+      publishedBenchmark.courseId === benchmarkProject.project.id &&
+      publishedBenchmark.locations.map(({ id }) => id).join('\n') ===
+        expectedBenchmarkLocationIds.join('\n'),
+    '渲染宿主 Published Course V2 与 V9 五页工程不一致',
+  )
+  const publishedSlide = publishedBenchmark.surfaces[0]
+  assert(
+    publishedSlide?.type === 'slide' && publishedSlide.scenes.length === 5,
+    '渲染宿主 Published Course V2 缺少五场景 Slide surface',
+  )
+  const publishedLayerItems = publishedSlide.scenes.flatMap(({ layerItems }) => layerItems)
+  const publishedRuntimeModes = publishedLayerItems.flatMap((item) =>
+    item.kind === 'runtime'
+      ? [`${item.runtime.runtimeApiVersion}:${item.runtime.renderMode}`]
+      : [],
   )
   assert(
-    benchmarkHtml.includes('connect-src data: blob:') &&
+    publishedLayerItems.some((item) => item.kind === 'native') &&
+      publishedRuntimeModes.join('\n') === ['2:phaser', '2:dom'].join('\n') &&
+      publishedLayerItems.filter((item) => item.kind === 'component').length === 2,
+    '渲染宿主 Published Course V2 未保留 Native、双 Runtime 与双 Component 五路径',
+  )
+  assert(
+    Object.values(publishedBenchmark.components).map(({ renderMode }) => renderMode)
+      .sort().join('\n') === ['dom', 'phaser'].join('\n'),
+    '渲染宿主 Published Course V2 缺少 Component API 4 DOM / Phaser 包',
+  )
+  assert(
+    publishedBenchmark.globalLayerItems.filter(
+      ({ item, visibility }) => item.kind === 'native' &&
+        item.content.nativeType === 'teacher-controller' &&
+        item.visible && visibility.mode === 'all',
+    ).length === 1,
+    '渲染宿主 Published Course V2 缺少唯一全局教师控制器入口',
+  )
+  assert(
+    benchmarkHtml.includes('window.__H5_COURSE_PAYLOAD__=') &&
+      !benchmarkHtml.includes('window.__H5_LESSON_PAYLOAD__=') &&
+      benchmarkHtml.includes('connect-src data: blob:') &&
       !/connect-src[^;]*(?:https?:|\*|'self')/i.test(benchmarkHtml) &&
       !/<script[^>]+src=/i.test(benchmarkHtml),
-    '渲染宿主基准单 HTML 不是自包含离线成品',
+    '渲染宿主 Published Course V2 单 HTML 不是自包含离线成品',
+  )
+  assert(
+    benchmarkNotices.includes('## Three.js ') &&
+      benchmarkNotices.includes('render-host-benchmark-v2.html') &&
+      benchmarkNotices.includes('The MIT License'),
+    '渲染宿主 V9/V2 第三方声明缺少 Three.js 来源或许可证',
   )
   pass(
     '渲染宿主基准',
-    'Project V8、Runtime API 2 Phaser/Three 与 Component API 4 DOM/Phaser 产物均通过正式解析器',
+    'Course Project V9、Published Course V2、Runtime API 2 Phaser/Three 与 Component API 4 DOM/Phaser 均通过正式解析器',
   )
 
   await verifyPortableStartup()
@@ -982,6 +1069,10 @@ async function main(): Promise<void> {
           appAsar: appAsarArtifact,
           sampleProject,
           sampleComponent,
+          renderHostBenchmarkProject,
+          renderHostBenchmarkPublished,
+          renderHostBenchmarkHtml,
+          renderHostBenchmarkNotices,
           exportedHtml,
           exportedPdf,
           exportedPptx,
