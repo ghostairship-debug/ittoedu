@@ -3083,7 +3083,15 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       }
 
       const standaloneHtml = readFileSync(formulaHtmlPath, 'utf8')
-      expect(standaloneHtml).not.toMatch(/https?:\/\//i)
+      // Offline portability is about references the document would fetch, not
+      // about the characters `http` appearing anywhere. A formula now embeds the
+      // math font, and OFL requires shipping its notice verbatim — that text
+      // carries the licence URLs inside an HTML comment, which nothing loads.
+      // So assert on the reference forms instead of the bare substring.
+      expect(
+        standaloneHtml.replace(/<!--[\s\S]*?-->/gu, ''),
+        '离线便携单 HTML 的注释之外不应出现任何 http(s) 地址',
+      ).not.toMatch(/https?:\/\//iu)
       const webArchive = unzipSync(
         new Uint8Array(readFileSync(formulaWebPackagePath)),
       )
