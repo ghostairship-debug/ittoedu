@@ -25,6 +25,8 @@ describe('assertNoRemoteUrlReferences', () => {
     for (const html of [
       '<script src="https://cdn.example.com/p.js"></script>',
       '<img src="http://example.com/a.png">',
+      '<img src="HTTPS://cdn.example.com/a.png">',
+      '<img src="Http://cdn.example.com/b.png">',
       '<style>@font-face{src:url(https://fonts.example.com/a.woff2)}</style>',
     ]) {
       expect(() => assertNoRemoteUrlReferences(html, '单 HTML'), html).toThrow(/含有远程 URL/u)

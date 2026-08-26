@@ -79,4 +79,18 @@ describe('Scoped Validation 的作用域标志接线', () => {
       expect(workflow, `renderer_fonts 应当由 ${path} 触发`).toContain(path)
     }
   })
+
+  it('routes filesystem-scanning regressions to the tests that own them', () => {
+    for (const [changedPath, owningTest] of [
+      ['scripts/*.ts', 'tests/unit/nodeExportHostFontWiring.test.ts'],
+      [
+        '.github/workflows/check-contracts.yml',
+        'tests/unit/scopedValidationWorkflow.test.ts',
+      ],
+      ['vendor/fonts/*/LICENSE', 'tests/unit/bundledFonts.test.ts'],
+    ] as const) {
+      expect(workflow, `${changedPath} 应触发 ${owningTest}`).toContain(changedPath)
+      expect(workflow, `${changedPath} 应触发 ${owningTest}`).toContain(owningTest)
+    }
+  })
 })

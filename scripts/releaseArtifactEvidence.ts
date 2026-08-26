@@ -103,7 +103,7 @@ export function assertExpectedAsarPackage(
 export function assertNoRemoteUrlReferences(html: string, label: string): void {
   const fetchable = html.replace(/<!--[\s\S]*?-->/gu, '')
   const found = [...new Set(
-    [...fetchable.matchAll(/https?:\/\/[^\s"'<)]+/gu)].map((match) => match[0]),
+    [...fetchable.matchAll(/https?:\/\/[^\s"'<)]+/giu)].map((match) => match[0]),
   )]
   if (found.length > 0) {
     throw new Error(`${label} 含有远程 URL：${found.slice(0, 5).join('、')}`)

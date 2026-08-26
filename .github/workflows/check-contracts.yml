@@ -96,6 +96,9 @@ jobs:
                   product_full=true
                 fi
                 ;;
+              .github/workflows/check-contracts.yml|vendor/fonts/*/LICENSE)
+                product_tests=true
+                ;;
             esac
             case "$file" in
               docs/development-plan/TASK_BOARD.md|docs/development-plan/tasks/*/*.md|scripts/generate-task-board.ts|tests/unit/taskBoardGenerator.test.ts)
@@ -223,6 +226,16 @@ jobs:
                     ;;
                   tests/e2e/*)
                     continue
+                    ;;
+                  .github/workflows/check-contracts.yml)
+                    printf '%s\n' 'tests/unit/scopedValidationWorkflow.test.ts'
+                    ;;
+                  vendor/fonts/*/LICENSE)
+                    printf '%s\n' 'tests/unit/bundledFonts.test.ts'
+                    ;;
+                  scripts/*.ts)
+                    printf '%s\n' "$file"
+                    printf '%s\n' 'tests/unit/nodeExportHostFontWiring.test.ts'
                     ;;
                   src/*|tests/*|scripts/*)
                     printf '%s\n' "$file"

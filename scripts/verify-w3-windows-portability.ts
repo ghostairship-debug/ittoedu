@@ -55,6 +55,7 @@ import {
   collectDirectoryEvidence,
   summarizeDirectoryEvidence,
 } from './windowsPortabilityEvidence'
+import { windowsSourceLaunchContractIssues } from './windowsSourceLaunchContract'
 
 interface VerificationCheck {
   name: string
@@ -633,12 +634,10 @@ async function verifyDocumentationContract(): Promise<void> {
       /node_modules\\electron\\dist\\electron\.exe/i.test(launcher),
     '双击入口未按文档执行锁定依赖、生产构建和 Electron 启动',
   )
+  const sourceLaunchIssues = windowsSourceLaunchContractIssues(packageJson.scripts)
   assert(
-    packageJson.scripts.start ===
-      'npm run build:desktop && cross-env VITE_DEV_SERVER_URL= electron .' &&
-      packageJson.scripts['build:desktop'] ===
-        'npm run build:player && npm run build:renderer && npm run build:electron',
-    'package.json 的 npm start/build:desktop 与文档不一致',
+    sourceLaunchIssues.length === 0,
+    `package.json 的 npm start/build:desktop 与文档不一致：${sourceLaunchIssues.join('；')}`,
   )
   const parsedLockfile = JSON.parse(lockfile) as { lockfileVersion?: number }
   assert(

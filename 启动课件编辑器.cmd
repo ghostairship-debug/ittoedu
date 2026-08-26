@@ -3,6 +3,7 @@ setlocal
 
 cd /d "%~dp0"
 set "VITE_DEV_SERVER_URL="
+set "ELECTRON_RUN_AS_NODE="
 
 if not exist "package.json" goto invalid_root
 
