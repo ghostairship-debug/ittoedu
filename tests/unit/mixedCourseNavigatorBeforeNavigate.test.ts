@@ -352,6 +352,21 @@ describe('MixedCourseNavigator onBeforeNavigate', () => {
     expect(navigator.hasPendingNavigation).toBe(false)
   })
 
+  it('internally handles an ignored rejection and still drains pending navigation', async () => {
+    const player = new RecordingPlayer()
+    const navigator = new MixedCourseNavigator(course, player)
+    await navigator.start()
+
+    // Intentionally retain no caller-side rejection handler.
+    void navigator.goToLocation('missing-location')
+    expect(navigator.hasPendingNavigation).toBe(true)
+    await navigator.goToLocation('slide-two')
+    await Promise.resolve()
+
+    expect(navigator.current?.locationId).toBe('slide-two')
+    expect(navigator.hasPendingNavigation).toBe(false)
+  })
+
   it('rejects an aborted queued request before its navigation lifecycle begins', async () => {
     const player = new RecordingPlayer()
     let holdNext = false

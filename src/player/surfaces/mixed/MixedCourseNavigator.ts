@@ -166,10 +166,11 @@ export class MixedCourseNavigator {
   #enqueue<T>(work: () => Promise<T>): Promise<T> {
     this.#pendingNavigationCount += 1
     const result = this.#queue.then(work, work)
-    this.#queue = result.then(() => undefined, () => undefined)
-    return result.finally(() => {
+    const tracked = result.finally(() => {
       this.#pendingNavigationCount -= 1
     })
+    this.#queue = tracked.then(() => undefined, () => undefined)
+    return tracked
   }
 
   constructor(
@@ -261,7 +262,7 @@ export class MixedCourseNavigator {
     return this.goToLocation(location.id)
   }
 
-  async goToLocation(
+  goToLocation(
     locationId: string,
     options: MixedNavigationRequestOptions = {},
   ): Promise<MixedNavigationState> {
