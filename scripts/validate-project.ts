@@ -24,6 +24,7 @@ import {
   RUNTIME_API_VERSION,
 } from '../src/shared/constants'
 import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
+import { collectCourseProjectHealth } from '../src/shared/courseProjectHealth'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
@@ -698,11 +699,13 @@ export function validateCourseProjectArchiveBytes(
     archive.project,
     collectProtocolIssues(archive.project, archive),
   )
+  const v9ProjectHealth = collectCourseProjectHealth(archive.project, archive)
   const healthItems = [
     ...v8Fields,
     ...migrationMarkers,
     ...stableIdIssues,
     ...protocolIssues,
+    ...v9ProjectHealth,
   ]
   const healthSummary = summarizeFindings(healthItems)
   const exportPreflight = collectExportReports(archive)

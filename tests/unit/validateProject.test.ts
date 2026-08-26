@@ -335,6 +335,64 @@ describe('headless Course Project V9 validation', () => {
     ])
   })
 
+  it('consumes V9-native project health findings with stable targets and exit 1', () => {
+    const source = blankArchiveData()
+    const scene = slideScene(source.project)
+    const runtime: RuntimeLayerItem = {
+      layerItemId: 'health-runtime',
+      label: '健康检查 Runtime',
+      frame: { mode: 'absolute', x: 0, y: 0, width: 320, height: 180 },
+      order: nextLayerOrder(source.project),
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'surface',
+      playbackInitialVisibility: 'inherit',
+      kind: 'runtime',
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: true,
+        renderMode: 'dom',
+        source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
+        content: { values: {} },
+        assets: {},
+        nodeBindings: { missing: 'missing-layer-item' },
+      },
+    }
+    scene.layerItems.push(runtime)
+
+    const report = validateCourseProjectArchiveBytes(
+      createCourseProjectArchive(source),
+      'v9-health.h5lesson',
+    )
+
+    expect(report.schema.valid).toBe(true)
+    expect(report.status).toBe('invalid')
+    expect(courseProjectValidationExitCode(report)).toBe(1)
+    expect(report.projectHealth?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime-node-reference-missing',
+        layerItemId: runtime.layerItemId,
+        target: {
+          version: 1,
+          kind: 'layer-item',
+          owner: 'scene',
+          projectId: source.project.id,
+          surfaceId: source.project.surfaces[0]!.id,
+          sceneId: scene.id,
+          layerItemId: runtime.layerItemId,
+        },
+      }),
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'runtime-static-fallback-missing',
+      }),
+    ]))
+  })
+
   it('returns exit 1 for leftover V9 migration markers', () => {
     const report = validateCourseProjectArchiveBytes(
       migrationMarkerArchive(),

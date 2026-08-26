@@ -1,6 +1,6 @@
 # Course Project Validation Report V1
 
-本文冻结 `npm run --silent validate:course-project -- <project.h5lesson>` 当前已经公开的机器可读报告。权威实现是 `scripts/validate-project.ts`；稳定诊断 target、fatal code 与 finding code ledger 的权威定义是 `src/shared/courseProjectValidationDiagnostics.ts`。本合同不修改 Course Project V9 或 Published Course V2 Schema，也不承诺完整的 V9 工程健康分析。
+本文冻结 `npm run --silent validate:course-project -- <project.h5lesson>` 当前已经公开的机器可读报告。权威实现是 `scripts/validate-project.ts`；稳定诊断 target、fatal code 与 finding code ledger 的权威定义是 `src/shared/courseProjectValidationDiagnostics.ts`。CLI 只在 V9 Schema 与 archive 打开成功后调用 V9-native `collectCourseProjectHealth`，其四域实现位于 `src/shared/courseProjectHealth/`。本合同不修改 Course Project V9 或 Published Course V2 Schema，也不承诺网络 declaration parity 或完整的 V9 工程健康分析。
 
 ## 1. 版本与顶层形状
 
@@ -19,7 +19,7 @@ stableIds, migrationMarkers, summary, fatal
 - `measurement`: `{ mode, note }`，说明浏览器 Canvas 或确定性 Node 后备测量。
 - `schema`: `{ valid, schemaVersion, issues }`；每个 issue 为 `{ path, code, message }`，其中 `code` 来自当前 Zod issue code，不另造第二套枚举。
 - `project`: Schema 合法时提供工程 ID、标题及 location/surface/asset/component 数量。
-- `projectHealth`: Schema 合法时提供当前已接线的结构性 finding 与汇总；它不是宽泛的全工程健康承诺。
+- `projectHealth`: Schema 合法时提供既有结构性 guards，加上 Runtime / Interaction / Component / Controller-Media 四域 V9-native finding 与汇总；它不是宽泛的全工程健康承诺。
 - `exportPreflight`: Schema 合法时固定包含 `single-html`、`web-package`、`pdf`、`pptx` 四个目标报告。
 - `protocols`: Schema 合法时报告当前 project/published/runtime/component/interaction 版本。
 - `stableIds`: Schema 合法时报告现有 stable-ID guard 的结果。
@@ -62,7 +62,7 @@ V1 finding 的既有字段保持不变：
 severity, code, message, path?, surfaceId?, layerItemId?
 ```
 
-本合同只 additive 增加可选的 `target?: DiagnosticTargetV1`。不得删除或重写既有 `path`、metadata、code、message、severity，也不得改变 finding 数量或顺序。target 只在成功解析出 Schema 合法的 `CourseProjectDocument` 后生成；无法精确定位时使用 project target。
+本合同只 additive 增加可选的 `target?: DiagnosticTargetV1`。target enrichment 本身不得删除或重写既有 `path`、metadata、code、message、severity，也不得重排既有 finding；新四域 finding 固定追加在原结构性 guards 之后，并作为一个新增集合按 severity / path / code / message 确定序排列。target 只在成功解析出 Schema 合法的 `CourseProjectDocument` 后生成；无法精确定位时使用 project target。
 
 所有 target 都包含：
 
@@ -98,27 +98,81 @@ severity, code, message, path?, surfaceId?, layerItemId?
 | --- | --- | --- |
 | `asset-byte-length-mismatch` | archive-shadowed | archive 打开先校验素材字节长度 |
 | `asset-bytes-missing` | archive-shadowed | archive 打开先要求全部声明素材字节 |
+| `asset-kind-mismatch` | active | 已存在素材仍可能被图片、音频、视频或静态兜底字段以错误 kind 引用 |
 | `asset-metadata-missing` | schema-shadowed | V9 Schema 先校验素材引用闭包 |
+| `asset-reference-missing` | active | 状态 `nativeData` 覆盖与 manifest 声明的组件图片 props 不属于 Schema 直连引用闭包 |
+| `asset-unused` | active | 仅在没有 Runtime/Component 可执行 consumer 时报告，避免猜测动态 `projectAssetUrl` |
 | `component-asset-bytes-missing` | archive-shadowed | 组件包解析先校验 manifest 素材 |
 | `component-bytes-missing` | archive-shadowed | archive 打开先要求并解析组件包 |
 | `component-hash-mismatch` | archive-shadowed | archive 打开先校验组件内容哈希 |
 | `component-manifest-identity-mismatch` | archive-shadowed | archive 打开先校验 manifest ID/版本 |
 | `component-metadata-missing` | schema-shadowed | V9 Schema 先校验组件引用闭包 |
+| `component-package-hash-missing` | active | 原始选取包 `sha256` 是区别于必填 `contentSha256` 的可选 provenance |
+| `component-package-source-missing` | active | `sourceLabel` 是可选 V9 provenance |
+| `component-package-unused` | active | 从四类 layer owner 与嵌套 Flow component block 推导使用情况 |
 | `component-protocol` | archive-shadowed | archive 组件解析先执行 Component API 4 校验 |
+| `component-thumbnail-missing` | active | `thumbnailPath` 在 V9 component metadata 中可选 |
+| `controller-required-for-canvas` | active | `controls=canvas` 但没有交付时可见的全局 V9 教师控制器 |
+| `controller-scene-target-missing` | active | 教师控制器 `scene.go` 的课程位置/内容目标未由 Schema 交叉校验 |
+| `controller-state-target-missing` | active | 教师控制器的 Slide `targetStateId` 未由 Schema 交叉校验 |
+| `controller-visible-while-disabled` | active | `controls=none` 可与交付时可见的全局控制器并存 |
 | `duplicate-stable-id` | active | 不同 surface owner 间的重复 layer item ID 可由现有 guard 报告 |
+| `global-interaction-state-target-partial` | active | 全局 `presentation.set` 目标可只存在于部分可能的 Slide 场景 |
+| `information-release-hidden-self-trigger` | active | Slide 元素可初始隐藏且只靠点击自身显示 |
+| `information-release-hidden-unreachable` | active | Slide 元素可初始隐藏且没有可达声明式显示路径 |
+| `interaction-action-reference-missing` | active | `animation.completed.actionId` 未由 Schema 交叉校验 |
+| `interaction-animation-self-loop` | active | 合法规则可由自己的 motion action completion 重新触发 |
+| `interaction-enter-target-initially-visible` | active | 合法 `node.enter` 目标可在动作前已显示 |
+| `interaction-node-type-mismatch` | active | Schema 校验 layer 存在，但不校验 Component/Video 触发器和动作的目标类型 |
+| `interaction-scene-reference-missing` | active | 互动 `scene.go` 的 Slide scene 目标未由 Schema 交叉校验 |
+| `interaction-state-reference-missing` | active | presentation 触发器、条件与动作的 state 引用未由 Schema 交叉校验 |
+| `looping-video-ended-unreachable` | active | 循环视频无法自然到达 `video.ended` |
 | `migration-marker` | schema-shadowed | 旧 frame/runtime 判别器先被 V9 Schema 拒绝 |
 | `online-remote-asset` | upstream-filtered | CLI 以 offline-portable 默认调用单 HTML preflight |
 | `online-remote-url-invalid` | upstream-filtered | CLI 不请求 online-lightweight preflight |
 | `player-bundle-empty` | upstream-filtered | CLI 传入非空 sentinel bundle 并显式过滤该 code |
+| `presenter-command-unhandled` | active | authored-command 模式可缺少 next/previous handler |
+| `presenter-f5-browser-reserved` | active | 合法 additional binding 可使用浏览器保留的 F5 |
+| `presenter-rules-bypassed` | active | scene-navigation 策略会绕过已启用 presenter.command 规则 |
+| `presenter-rules-disabled` | active | presenter 输入关闭时仍可存在已启用规则 |
 | `project-schema-invalid` | schema-shadowed | Schema-invalid 直接返回 unreadable，exportPreflight 为 null |
+| `runtime-node-reference-missing` | active | V9 `nodeBindings` 的工程 layer-item 目标未由 Schema 校验；不推导尚未成文的 owner 可见性限制 |
 | `runtime-protocol` | schema-shadowed | Runtime protocol/API 判别器先由 V9 Schema 校验 |
+| `runtime-static-fallback-missing` | active | enabled V9 Runtime 可合法省略 `staticFallback` |
+| `scene-id-duplicate` | active | Schema 只在单个 Slide surface 内保证 scene ID 唯一 |
+| `sound-id-mismatch` | active | Schema 不要求 sound record key 等于内部 `SoundDefinition.id` |
 | `static-export-info` | upstream-filtered | 当前被调用的 asset audit 没有 info 生产者 |
 | `static-export-interactions-omitted` | active | 含互动的合法 V9 在 PDF/PPTX 预检中产生 |
 | `static-export-preflight` | schema-shadowed | 已知无页/非法 source 输入先被 V9 Schema 拒绝；catch 仅为防御后备 |
 | `static-export-warning` | archive-shadowed | 当前 asset warning 前已有 archive/source 字节门 |
 | `v8-field` | schema-shadowed | strict V9 Schema 先拒绝 V8 根字段 |
+| `video-click-interaction-conflict` | active | 视频内置点击区可覆盖声明式 `node.click` |
 
 机器可读版本位于 `artifacts/ai-capabilities/diagnostics.json#/courseProjectValidation/findingCodes`。加入新的诊断域或 code 必须先有真实 producer，再更新 shared ledger、聚焦测试、本合同与 AI capability 生成物；不得用预造 ledger 冒充四域规则已经实现。
+
+四域 collector 都只读 `CourseProjectDocument` 与 `openCourseProjectArchive` 已打开的 asset/component files，不经过 V8 `ProjectDocument` 投影：
+
+- Runtime：global / surface / Slide scene / Spatial world carrier 的静态兜底与工程级 `nodeBindings` 稳定 ID 存在性；
+- Interaction：Slide-local 与 global rules 的类型、action/state/scene 引用、动画循环、入场可见性及信息释放可达性；Flow/Spatial 仅通过真实存在的 global interaction layer 引用参与，不伪造 surface-local rule 字段；
+- Component：V9 metadata provenance、缩略图以及四类 layer owner / 嵌套 Flow block 的 package usage；
+- Controller-Media：混合课程位置导航、全局控制器一致性、presenter、音视频、素材 kind、状态覆盖与 manifest image prop 引用。
+
+未迁移的旧 V8 project-health code 精确为：
+
+```text
+asset-reference-analysis-incomplete,
+component-package-missing, component-version-missing,
+controller-button-id-duplicate,
+global-node-id-duplicate, global-visibility-scene-reference-missing,
+initial-state-reference-missing,
+interaction-action-id-duplicate, interaction-navigation-not-terminal,
+interaction-node-reference-missing, interaction-rule-id-duplicate,
+interaction-sound-reference-missing,
+node-id-duplicate, scene-required, state-id-duplicate,
+state-node-reference-missing, thumbnail-state-reference-missing
+```
+
+这些 code 不进入 active ledger：V9 不存在的 `scenes/globalLayer/globalRuntime` 规则被省略；重复 rule/action/button/state/layer ID、terminal navigation、直连 layer/sound/component/位置引用及状态 override owner 引用由 Schema 遮蔽；缺少组件执行上下文、组件身份、协议、hash 与文件缺失由 archive 遮蔽。Runtime/Component 源码 URL、Secret、危险 scheme、CORS 与 network declaration parity 属于后续独立网络诊断，不在本版扫描或推断。
 
 ## 5. 兼容与非承诺
 
