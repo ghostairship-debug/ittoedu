@@ -1,12 +1,15 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import {
   ARCHITECTURE_BASELINE_FIXTURE_IDS,
   ARCHITECTURE_BASELINE_FIXTURE_MTIME,
   ARCHITECTURE_BASELINE_FIXTURE_SPECS,
+  ARCHITECTURE_BASELINE_FIXTURE_ZIP_MTIME,
   ARCHITECTURE_BASELINE_OUTPUT_DIRECTORY,
   buildArchitectureBaselineFixtureOutputs,
   type ArchitectureBaselineFixtureId,
@@ -15,6 +18,107 @@ import { componentContentSha256 } from '../../src/shared/componentContentIntegri
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { CourseProjectDocument, FlowBlock } from '../../src/shared/courseProjectTypes'
 import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const FIXTURE_MODULE_URL = pathToFileURL(
+  resolve(REPO_ROOT, 'scripts', 'build-architecture-baseline-fixtures.ts'),
+).href
+
+/** Resolves the tsx entry point from its manifest rather than a `dist/` guess. */
+function resolveTsxCli(): string {
+  const packageRoot = resolve(REPO_ROOT, 'node_modules', 'tsx')
+  const { bin } = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
+    bin?: string | Record<string, string>
+  }
+  const entry = typeof bin === 'string' ? bin : bin?.tsx
+  if (!entry) throw new Error('Could not resolve the tsx CLI entry point')
+  return resolve(packageRoot, entry)
+}
+
+const TSX_CLI = resolveTsxCli()
+
+/**
+ * fflate encodes ZIP DOS timestamps from the *local* calendar fields of the
+ * supplied mtime, so an absolute-instant mtime re-encodes differently in every
+ * timezone: the inner `.h5component` bytes change, its provenance `sha256`
+ * changes inside `project.json`, and the outer `.h5lesson` DEFLATE output
+ * changes with it. This probe rebuilds everything inside a child process so the
+ * host timezone can actually be swapped, then reports byte digests plus the
+ * provenance hashes recorded in `project.json`.
+ */
+const TIMEZONE_PROBE_PROGRAM = [
+  'const fixtures = await import(process.env.ARCH0_FIXTURE_MODULE_URL)',
+  'const built = fixtures.buildArchitectureBaselineFixtureOutputs()',
+  "const { createHash } = await import('node:crypto')",
+  "const { unzipSync } = await import('fflate')",
+  'const outputs = {}',
+  'for (const [name, bytes] of Object.entries(built.outputs)) {',
+  '  outputs[name] = {',
+  '    byteLength: bytes.byteLength,',
+  "    sha256: createHash('sha256').update(bytes).digest('hex'),",
+  '  }',
+  '}',
+  'const provenance = {}',
+  'for (const fixture of built.manifest.fixtures) {',
+  '  const files = unzipSync(built.outputs[fixture.filename])',
+  "  const project = JSON.parse(new TextDecoder().decode(files['project.json']))",
+  '  provenance[fixture.id] = Object.values(project.componentPackages).map((meta) => ({',
+  '    sha256: meta.sha256,',
+  '    contentSha256: meta.contentSha256,',
+  '    importedAt: meta.importedAt,',
+  '  }))',
+  '}',
+  'console.log(JSON.stringify({ outputs, provenance }))',
+].join('\n')
+
+interface TimezoneProbeResult {
+  outputs: Record<string, { byteLength: number; sha256: string }>
+  provenance: Record<
+    string,
+    Array<{ sha256?: string; contentSha256: string; importedAt?: string }>
+  >
+}
+
+function buildFixturesInTimezone(timezone: string): TimezoneProbeResult {
+  const stdout = execFileSync(
+    process.execPath,
+    [TSX_CLI, '--input-type=module', '--eval', TIMEZONE_PROBE_PROGRAM],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, TZ: timezone, ARCH0_FIXTURE_MODULE_URL: FIXTURE_MODULE_URL },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  )
+  const payload = stdout.split('\n').map((line) => line.trim()).filter(Boolean).at(-1)
+  if (!payload) throw new Error(`Timezone probe produced no output for TZ=${timezone}`)
+  return JSON.parse(payload) as TimezoneProbeResult
+}
+
+function probeResultFromLocalBuild(): TimezoneProbeResult {
+  const built = buildArchitectureBaselineFixtureOutputs()
+  const outputs: TimezoneProbeResult['outputs'] = {}
+  for (const [name, bytes] of Object.entries(built.outputs)) {
+    outputs[name] = {
+      byteLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    }
+  }
+  const provenance: TimezoneProbeResult['provenance'] = {}
+  for (const fixture of built.manifest.fixtures) {
+    const files = unzipSync(built.outputs[fixture.filename] as Uint8Array)
+    const project = JSON.parse(
+      new TextDecoder().decode(files['project.json']),
+    ) as CourseProjectDocument
+    provenance[fixture.id] = Object.values(project.componentPackages).map((meta) => ({
+      sha256: meta.sha256,
+      contentSha256: meta.contentSha256,
+      importedAt: meta.importedAt,
+    }))
+  }
+  return { outputs, provenance }
+}
 
 function bytesFor(
   id: ArchitectureBaselineFixtureId,
@@ -94,6 +198,33 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
       .toEqual(first.manifest.fixtures.map((fixture) => fixture.filename))
   })
 
+  it('rebuilds identical bytes and provenance hashes under UTC and Asia/Shanghai', () => {
+    const utc = buildFixturesInTimezone('UTC')
+    const shanghai = buildFixturesInTimezone('Asia/Shanghai')
+
+    expect(shanghai).toEqual(utc)
+    // Anchor both child runs to the committed bytes so they cannot drift
+    // together: the first test already pins the in-process build to disk.
+    expect(utc).toEqual(probeResultFromLocalBuild())
+
+    expect(Object.keys(utc.outputs).sort()).toEqual([
+      'flow-heavy.h5lesson',
+      'manifest.json',
+      'mixed-spatial.h5lesson',
+      'slide-heavy.h5lesson',
+    ])
+    for (const [id, entries] of Object.entries(utc.provenance)) {
+      expect(entries).toHaveLength(1)
+      const [meta] = entries
+      if (!meta) throw new Error(`Fixture ${id} recorded no component provenance`)
+      // The ZIP timestamp changed, the recorded business instant must not.
+      expect(meta.importedAt).toBe(ARCHITECTURE_BASELINE_FIXTURE_MTIME)
+      expect(meta.sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(meta.contentSha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(meta.sha256).not.toBe(meta.contentSha256)
+    }
+  }, 180_000)
+
   it('records complete, deterministic provenance for the synthetic component package', () => {
     const packageId = 'com.ittoedu.baseline.evidence-panel'
     const packageKey = `${packageId}@4.0.0`
@@ -107,10 +238,12 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
       const packageFiles = archive.componentFiles[packageKey]
       if (!packageFiles) throw new Error(`Fixture ${id} carries no ${packageKey} files`)
       // Provenance hashes the reproducible raw `.h5component` bytes, while
-      // `contentSha256` stays the packaging-independent content digest.
+      // `contentSha256` stays the packaging-independent content digest. The raw
+      // bytes must be re-zipped with the timezone-stable ZIP timestamp, not the
+      // business instant recorded in `importedAt`.
       const packageBytes = zipSync({ ...packageFiles }, {
         level: 6,
-        mtime: ARCHITECTURE_BASELINE_FIXTURE_MTIME,
+        mtime: ARCHITECTURE_BASELINE_FIXTURE_ZIP_MTIME,
       })
       expect(metadata.sha256).toBe(createHash('sha256').update(packageBytes).digest('hex'))
       expect(metadata.contentSha256).toBe(componentContentSha256(packageFiles))
