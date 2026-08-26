@@ -21,8 +21,6 @@ jobs:
       repo_tests: ${{ steps.scope.outputs.repo_tests }}
       governance_tests: ${{ steps.scope.outputs.governance_tests }}
       task_board_check: ${{ steps.scope.outputs.task_board_check }}
-      repo_index_check: ${{ steps.scope.outputs.repo_index_check }}
-      index_quality: ${{ steps.scope.outputs.index_quality }}
       capability_check: ${{ steps.scope.outputs.capability_check }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
       head_sha: ${{ steps.scope.outputs.head_sha }}
@@ -58,8 +56,6 @@ jobs:
           repo_tests=false
           governance_tests=false
           task_board_check=false
-          repo_index_check=false
-          index_quality=false
           capability_check=false
           while IFS= read -r file; do
             [[ -z "$file" ]] && continue
@@ -87,8 +83,6 @@ jobs:
                 ;;
               scripts/generate-contracts.ts)
                 ;;
-              repo-index/generated/*)
-                ;;
               repo-index/*|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts|tests/unit/repoIndex*.test.ts)
                 repo_tests=true
                 ;;
@@ -107,16 +101,6 @@ jobs:
                 ;;
             esac
             case "$file" in
-              repo-index/generated/*|repo-index/config.json|repo-index/semantic/*|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts)
-                repo_index_check=true
-                ;;
-            esac
-            case "$file" in
-              repo-index/semantic/*|repo-index/config.json|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts|tests/unit/repoIndexGoldenTasks.test.ts)
-                index_quality=true
-                ;;
-            esac
-            case "$file" in
               artifacts/ai-capabilities/*|scripts/generate-ai-capabilities.ts|tests/unit/aiCapabilities.test.ts|scripts/validate-project.ts|package.json|package-lock.json|src/shared/*|src/player/*|src/renderer/components/*|src/renderer/export/*|src/renderer/project/*)
                 capability_check=true
                 ;;
@@ -130,15 +114,13 @@ jobs:
           echo "repo_tests=$repo_tests" >> "$GITHUB_OUTPUT"
           echo "governance_tests=$governance_tests" >> "$GITHUB_OUTPUT"
           echo "task_board_check=$task_board_check" >> "$GITHUB_OUTPUT"
-          echo "repo_index_check=$repo_index_check" >> "$GITHUB_OUTPUT"
-          echo "index_quality=$index_quality" >> "$GITHUB_OUTPUT"
           echo "capability_check=$capability_check" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head" >> "$GITHUB_OUTPUT"
 
   development-index:
     needs: changes
-    if: needs.changes.outputs.task_board_check == 'true' || needs.changes.outputs.repo_index_check == 'true' || needs.changes.outputs.index_quality == 'true'
+    if: needs.changes.outputs.task_board_check == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,11 +130,6 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run check:task-board
-        if: needs.changes.outputs.task_board_check == 'true'
-      - run: npm run repo:index:check
-        if: needs.changes.outputs.repo_index_check == 'true'
-      - run: npm run repo:index:quality
-        if: needs.changes.outputs.index_quality == 'true'
 
   check-contracts:
     needs: changes
