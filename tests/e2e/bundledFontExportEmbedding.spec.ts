@@ -14,9 +14,11 @@
  * font-related console output is asserted with its arguments resolved rather
  * than collapsed to a preview.
  *
- * What this found: the math family embeds; the text family never does, and the
- * export says so only in a warning. The `test.fail()` case below states the
- * mechanism and keeps the requirement asserted until it is fixed.
+ * What this found on 2026-08-26: the math family embedded, the text family
+ * never did, and the export reported that only in a warning. Unit tests could
+ * not have caught it — the break was in how the renderer build emits the faces,
+ * so it existed only in a packaged build. The cause is fixed and the case below
+ * now guards it.
  *
  * Expectations are derived from the build's own inputs — the family constants,
  * the descriptors `vite.renderer.config.ts` resolves, and the vendored license
@@ -121,21 +123,6 @@ function faceBlocks(html: string): string[] {
  */
 const FONT_DIAGNOSTIC_PATTERN =
   /内置字体|woff2|font-face|Failed to decode downloaded font|OTS parsing/i
-
-/**
- * The console signature of the known text-family defect, so the other tests can
- * exclude exactly it and stay strict about everything else.
- *
- * Two shapes, both produced on every export of every session: Chromium's own
- * CSP refusal of the three inlined `data:` faces, and our warning naming the
- * family it therefore dropped. Delete this together with the `test.fail()` case.
- */
-function isKnownTextFamilyDefect(line: string): boolean {
-  return line.includes(BUNDLED_TEXT_FONT_FAMILY) || (
-    line.includes('data:font/woff2') &&
-    /connect-src|Content Security Policy/i.test(line)
-  )
-}
 
 interface Diagnostics {
   consoleLines: string[]
@@ -561,15 +548,13 @@ test.describe('导出物内嵌内置字体（真实 Electron）', () => {
         consoleLines: diagnostics.consoleLines,
       })
 
-      // The text family's own defect is owned by the `test.fail()` case below
-      // and fires on every export; anything else means this path broke.
-      const unrelatedDiagnostics = (await fontDiagnostics(diagnostics))
-        .filter((line) => !isKnownTextFamilyDefect(line))
+      // No font diagnostic is acceptable here. A dropped family is reported only
+      // as a warning while the export still succeeds, so console silence is the
+      // only signal that the bytes actually made it in.
+      const fontConsole = await fontDiagnostics(diagnostics)
       expect.soft(
-        unrelatedDiagnostics,
-        `渲染进程输出了与文字字族缺陷无关的字体 console 信息：\n${
-          unrelatedDiagnostics.join('\n')
-        }`,
+        fontConsole,
+        `渲染进程输出了字体 console 信息：\n${fontConsole.join('\n')}`,
       ).toEqual([])
       expect.soft(diagnostics.pageErrors).toEqual([])
       expect.soft(diagnostics.externalRequests).toEqual([])
@@ -607,32 +592,20 @@ test.describe('导出物内嵌内置字体（真实 Electron）', () => {
     }
   })
 
-  // KNOWN DEFECT — reproduced on 2026-08-26, `d36e519`. Remove `test.fail()`
-  // together with the fix; Playwright turns the suite red the moment this
-  // starts passing.
+  // Regression guard for the defect this spec found on 2026-08-26 at `d36e519`,
+  // fixed by pinning `build.assetsInlineLimit` to never inline woff2:
+  //   1. Three of the text family's 101 slices were under Vite's default 4096
+  //      byte inline limit, so the build emitted them as `data:` URLs.
+  //   2. The byte source reads faces with `fetch()`, governed by `connect-src`,
+  //      which the editor shell declares without `data:` — those three failed.
+  //      (`font-src` does allow `data:`, so the same slices still rendered, and
+  //      nothing looked wrong inside the editor.)
+  //   3. The family is all-or-nothing, so three failures dropped all 101.
+  //   4. The drop was a `console.warn`; the export still succeeded.
   //
-  // The text family never reaches an export, and the export never says so:
-  //   1. `@fontsource-variable/noto-sans-sc` ships 101 slices. Three of them
-  //      (`noto-sans-sc-4/97/98-wght-normal.woff2`, 2–3.8 KB) fall under Vite's
-  //      default `build.assetsInlineLimit` of 4096, so the renderer build
-  //      inlines them as `data:font/woff2;base64,…` instead of emitting files.
-  //      `virtual:bundled-fonts` therefore hands three `data:` URLs to the byte
-  //      source alongside 98 `courseware-editor://` ones.
-  //   2. `installFetchBundledFontEmbedSource` reads every face with `fetch()`.
-  //      `fetch` is governed by `connect-src`, and the editor shell declares
-  //      `connect-src 'self' blob: https: wss:` (`index.html`) — no `data:`. The
-  //      three reads fail with `TypeError: Failed to fetch`. (`font-src` does
-  //      allow `data:`, which is why the same slices load fine for rendering.)
-  //   3. `loadFamily` awaits `Promise.all` over the family's faces, so those
-  //      three rejections drop all 101, by the module's own "all faces or none"
-  //      rule.
-  //   4. `loadAllFamilies` reports the drop with `console.warn` and never
-  //      throws, so the export completes and the lesson ships without the font.
-  //
-  // The warning fires on the first export of every session regardless of the
-  // project, because `loadAllFamilies` loads all families, not the used ones.
+  // Renderable but unreadable, and silent. If any face is ever inlined again,
+  // the face count below drops to zero and this test fails.
   test('用了内置文字字族的工程：该字族应当整族嵌入', async () => {
-    test.fail()
     test.setTimeout(300_000)
     const launched = await launchEditor()
     const { app, page, diagnostics } = launched
@@ -720,15 +693,13 @@ test.describe('导出物内嵌内置字体（真实 Electron）', () => {
       expect.soft(faceBlocks(html)).toEqual([])
       expect.soft(diagnostics.pageErrors).toEqual([])
       expect.soft(diagnostics.externalRequests).toEqual([])
-      // Same exclusion as the formula case: the text family's defect fires on
-      // every first export, whatever the project declares.
-      const unrelatedDiagnostics = (await fontDiagnostics(diagnostics))
-        .filter((line) => !isKnownTextFamilyDefect(line))
+      // A project that declares no bundled family must still produce no font
+      // diagnostic: the byte source loads every family on first export, so a
+      // silent failure would surface here even when nothing gets embedded.
+      const fontConsole = await fontDiagnostics(diagnostics)
       expect.soft(
-        unrelatedDiagnostics,
-        `渲染进程输出了与文字字族缺陷无关的字体 console 信息：\n${
-          unrelatedDiagnostics.join('\n')
-        }`,
+        fontConsole,
+        `渲染进程输出了字体 console 信息：\n${fontConsole.join('\n')}`,
       ).toEqual([])
     } finally {
       await closeEditor(app, launched.userDataPath)

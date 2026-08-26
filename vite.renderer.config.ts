@@ -75,6 +75,12 @@ export default defineConfig({
     outDir: 'dist-renderer',
     emptyOutDir: true,
     sourcemap: true,
+    // Bundled font faces must stay as emitted files. The export path reads their
+    // bytes with `fetch()`, which `connect-src` governs, and the editor CSP does
+    // not allow `data:` there — an inlined slice is renderable but unreadable,
+    // and the all-or-nothing family rule turns one inlined slice into a silently
+    // unembedded family. Only fonts are exempted so other assets keep inlining.
+    assetsInlineLimit: (filePath) => (/\.woff2?$/iu.test(filePath) ? false : undefined),
   },
   server: {
     host: '127.0.0.1',
