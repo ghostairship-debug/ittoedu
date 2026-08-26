@@ -23,3 +23,7 @@ examples/render-host-benchmark/assets/three-runtime-fallback.svg text eol=lf
 examples/render-host-benchmark/project.json text eol=lf
 examples/render-host-benchmark/render-host-benchmark.html text eol=lf
 examples/render-host-benchmark/THIRD_PARTY_NOTICES.md text eol=lf
+examples/render-host-benchmark/project-v9.json text eol=lf
+examples/render-host-benchmark/published-v2.json text eol=lf
+examples/render-host-benchmark/render-host-benchmark-v2.html text eol=lf
+examples/render-host-benchmark/THIRD_PARTY_NOTICES_V9.md text eol=lf

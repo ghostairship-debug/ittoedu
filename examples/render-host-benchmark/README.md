@@ -2,7 +2,7 @@
 
 这是一份可重复生成、完全离线的课件工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Course Project V9 JSON 根据内容职责选择最小的渲染增强层。组件路径统一使用 Component API 4，并分别覆盖 DOM 与 Phaser 渲染面。
 
-当前目录并存两代交付：`project-v9.json`、`render-host-benchmark-v9.h5lesson`、`published-v2.json` 与 `render-host-benchmark-v2.html` 是当前 V9 / Published V2 基准；无后缀的 Project V8 文件仍由 release verifier 消费，作为冻结兼容输入保持原字节与原行为，不代表产品继续创作 V8。
+当前目录并存两代交付：`project-v9.json`、`render-host-benchmark-v9.h5lesson`、`published-v2.json` 与 `render-host-benchmark-v2.html` 是当前 V9 / Published V2 基准，也是 release verifier 的唯一基准输入；无后缀的 Project V8 文件只作为冻结兼容输入临时保留到 V8-05B 清理，不代表产品继续创作 V8。
 
 基准刻意把五类能力分成五页，便于直接比较编辑边界、运行时能力、组件复用价值和兼容成本。
 
@@ -69,7 +69,7 @@ Three.js 的 MIT 许可证和版本信息分别位于 [`THIRD_PARTY_NOTICES.md`]
 
 ## 实际互动验收
 
-以下步骤只以当前 V9 / Published V2 产物为验收入口；`render-host-benchmark.h5lesson` 与 `render-host-benchmark.html` 仅作为 release verifier 使用的冻结 V8 兼容输入，不参与当前产品验收。
+以下步骤只以当前 V9 / Published V2 产物为验收入口；release verifier 已不再读取 `render-host-benchmark.h5lesson` 与 `render-host-benchmark.html`，这两份冻结 V8 兼容输入只临时保留到 V8-05B 清理，不参与当前产品验收。
 
 1. 用编辑器打开 `render-host-benchmark-v9.h5lesson`，确认左侧有五个场景，且第一页只有可直接选择的原生节点。
 2. 第二页进入“当前位置试运行”，点击轨道左/右侧；确认行星相位改变、状态文字更新。
