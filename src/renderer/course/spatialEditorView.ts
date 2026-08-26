@@ -1,4 +1,7 @@
-import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
+import {
+  composeCourseProjectLocation,
+  type CourseLayerComposition,
+} from '../../shared/courseLayerComposition'
 import { makeAuthoringAddress, type AuthoringCarrier } from '../../shared/authoringAddress'
 import type {
   CourseProjectDocument,
@@ -7,7 +10,6 @@ import type {
   SpatialCameraPose,
   SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import { compareStableStrings } from '../../shared/stableOrder'
 import {
   createStageViewportTransform,
   type StagePoint,
@@ -128,6 +130,14 @@ function layerView(
   }
 }
 
+/** Spatial read-model adapter. Camera/semantic visibility remains outside composition. */
+export function composeSpatialEditorLocation(input: {
+  readonly project: CourseProjectDocument
+  readonly locationId: string
+}): CourseLayerComposition<LayerItem> {
+  return composeCourseProjectLocation({ ...input, stateId: null })
+}
+
 /**
  * Read-only Spatial projection. Omits path/relation/semantic-zoom symbols so
  * R5-A snapshots stay valid before R5-C exists.
@@ -136,24 +146,12 @@ export function buildSpatialEditorView(input: BuildSpatialEditorViewInput): Spat
   const { project, locationId } = input
   const { surface, frame } = resolveSpatialSurface(project, locationId)
 
-  const layers = [
-    ...project.globalLayerItems.map((entry) => layerView(
-      structuredClone(entry.item),
-      'global',
-      isCourseLayerVisibleAtLocation(entry, locationId),
-    )),
-    ...surface.surfaceLayerItems.map((entry) => layerView(
-      structuredClone(entry.item),
-      'surface',
-      isCourseLayerVisibleAtLocation(entry, locationId),
-    )),
-    ...surface.world.layerItems.map((item) => layerView(
-      structuredClone(item),
-      'world',
-      true,
-    )),
-  ].sort((left, right) => left.item.order - right.item.order ||
-    compareStableStrings(left.selectionId, right.selectionId))
+  const composition = composeSpatialEditorLocation({ project, locationId })
+  const layers = composition.entries.map((entry) => layerView(
+    entry.item,
+    entry.source as SpatialEditorLayerScope,
+    entry.applicable,
+  ))
 
   return deepFreeze({
     projectId: project.id,

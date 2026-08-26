@@ -1,18 +1,17 @@
-import { isGlobalLayerItemVisible } from '../../globalLayerVisibility'
+import {
+  composePublishedCourseLocation,
+  type CourseLayerComposition,
+} from '../../../shared/courseLayerComposition'
 import type {
   CourseLocation,
-  LayerItemOverride,
   NativeElementContent,
 } from '../../../shared/courseProjectTypes'
-import { mergeCourseNativeData } from '../../../shared/courseProjectSchema'
 import type { TeacherControllerAction } from '../../../shared/projectTypes'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
   PublishedNativeLayerItem,
   PublishedRuntimeLayerItem,
-  PublishedScopedLayerItem,
-  PublishedSlidePresentationState,
   PublishedSlideScene,
   PublishedSlideSurface,
 } from '../../../shared/publishedCourseTypes'
@@ -68,13 +67,6 @@ function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Paylo
   return structuredClone(payload)
 }
 
-function isScopedVisible(entry: PublishedScopedLayerItem, locationId: string): boolean {
-  return isGlobalLayerItemVisible(
-    { visibility: { mode: entry.visibility.mode, sceneIds: entry.visibility.locationIds } },
-    locationId,
-  )
-}
-
 function findSlideSurface(
   payload: PublishedCourseV2Payload,
   surfaceId: string,
@@ -116,6 +108,19 @@ function resolveSlideLocation(
     }
   }
   throw new Error(`找不到 Slide 位置：${locationId}`)
+}
+
+/** Exact-state Published adapter; initial-state selection remains in navigation. */
+export function composePublishedSlideLocation(input: {
+  readonly payload: PublishedCourseV2Payload
+  readonly locationId: string
+  readonly stateId: string | null
+}): CourseLayerComposition<PublishedLayerItem> {
+  return composePublishedCourseLocation({
+    course: input.payload,
+    locationId: input.locationId,
+    stateId: input.stateId,
+  })
 }
 
 function firstKeyedString(value: unknown, keys: readonly string[]): string | undefined {
@@ -211,81 +216,6 @@ function isPublishedSlideCanvasRuntime(item: PublishedLayerItem): boolean {
 
 function isPublishedSlidePlayableRuntime(item: PublishedLayerItem): boolean {
   return isPublishedSlideSurfaceRuntime(item) || isPublishedSlideCanvasRuntime(item)
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function mergeComponentProps(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = structuredClone(base)
-  for (const [key, value] of Object.entries(patch)) {
-    const previous = result[key]
-    result[key] = isPlainRecord(value) && isPlainRecord(previous)
-      ? mergeComponentProps(previous, value)
-      : structuredClone(value)
-  }
-  return result
-}
-
-function applyPublishedLayerOverride(
-  source: PublishedLayerItem,
-  override: LayerItemOverride | undefined,
-): PublishedLayerItem {
-  const item = structuredClone(source)
-  if (!override) return item
-  if (override.frame) item.frame = { ...item.frame, ...override.frame, mode: 'absolute' }
-  if (override.order !== undefined) item.order = override.order
-  if (override.visible !== undefined) item.visible = override.visible
-  if (override.rotation !== undefined) item.rotation = override.rotation
-  if (override.opacity !== undefined) item.opacity = override.opacity
-  if (override.hitPolicy !== undefined) item.hitPolicy = override.hitPolicy
-  if (override.playbackInitialVisibility !== undefined) {
-    item.playbackInitialVisibility = override.playbackInitialVisibility
-  }
-  if (item.kind === 'native' && override.nativeData) {
-    const content = item.content as typeof item.content & { data: Record<string, unknown> }
-    content.data = mergeCourseNativeData(
-      content.data,
-      override.nativeData,
-    ) as typeof content.data
-  }
-  if (item.kind === 'component' && override.componentProps) {
-    item.props = mergeComponentProps(item.props, override.componentProps)
-  }
-  return item
-}
-
-function materializePublishedSceneItems(
-  items: readonly PublishedLayerItem[],
-  state: PublishedSlidePresentationState | undefined,
-): PublishedLayerItem[] {
-  const materialized = items.map((item) => (
-    applyPublishedLayerOverride(item, state?.layerItemOverrides[item.layerItemId])
-  ))
-  if (!state?.layerItemOrder) return materialized
-
-  const byId = new Map(materialized.map((item) => [item.layerItemId, item]))
-  const seen = new Set<string>()
-  const ordered: PublishedLayerItem[] = []
-  for (const id of state.layerItemOrder) {
-    const item = byId.get(id)
-    if (!item || seen.has(id)) continue
-    seen.add(id)
-    ordered.push(item)
-  }
-  ordered.push(...materialized
-    .filter((item) => !seen.has(item.layerItemId))
-    .sort((left, right) => left.order - right.order
-      || (left.layerItemId < right.layerItemId ? -1 : left.layerItemId > right.layerItemId ? 1 : 0)))
-  const orderSlots = materialized.map((item) => item.order).sort((left, right) => left - right)
-  ordered.forEach((item, index) => {
-    item.order = orderSlots[index]!
-  })
-  return ordered
 }
 
 function publishedInteractionOwnership(
@@ -1025,14 +955,13 @@ export class SlidePublishedAdapter implements SurfaceHost {
     const surface = findSlideSurface(this.#payload, this.id)
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
     const scene = sceneOf(surface, location)
-    const presentationState = scene.presentation?.states.find(
-      (state) => state.id === this.#presentationStateId,
-    )
-    const sceneItems = materializePublishedSceneItems(scene.layerItems, presentationState)
-    const backgroundColor = presentationState?.backgroundColor ?? scene.backgroundColor
-    const backgroundAssetId = presentationState?.backgroundAssetId !== undefined
-      ? presentationState.backgroundAssetId
-      : scene.backgroundAssetId
+    const composition = composePublishedSlideLocation({
+      payload: this.#payload,
+      locationId: location.id,
+      stateId: this.#presentationStateId ?? null,
+    })
+    const backgroundColor = composition.background!.color
+    const backgroundAssetId = composition.background!.assetId
     const backgroundAssetUrl = backgroundAssetId
       ? this.#resolveAsset(backgroundAssetId)
       : undefined
@@ -1157,43 +1086,19 @@ export class SlidePublishedAdapter implements SurfaceHost {
         this.#runtimeHandles.push(handle)
       },
     }
-    for (const item of sceneItems) {
-      const wrap = appendLayerNode(
-        root.ownerDocument,
-        stage,
-        item,
-        'scene',
-        this.#resolveAsset,
-        mountController,
-        layerOptions,
-      )
-      if (wrap) this.#registerInteractionNode(wrap, item, 'scene')
-    }
-    for (const entry of this.#payload.globalLayerItems) {
-      if (!isScopedVisible(entry, location.id)) continue
+    for (const entry of composition.entries) {
+      if (!entry.mounted) continue
+      const source = entry.source as 'scene' | 'surface' | 'global'
       const wrap = appendLayerNode(
         root.ownerDocument,
         stage,
         entry.item,
-        'global',
+        source,
         this.#resolveAsset,
         mountController,
         layerOptions,
       )
-      if (wrap) this.#registerInteractionNode(wrap, entry.item, 'global')
-    }
-    for (const entry of surface.surfaceLayerItems) {
-      if (!isScopedVisible(entry, location.id)) continue
-      const wrap = appendLayerNode(
-        root.ownerDocument,
-        stage,
-        entry.item,
-        'surface',
-        this.#resolveAsset,
-        mountController,
-        layerOptions,
-      )
-      if (wrap) this.#registerInteractionNode(wrap, entry.item, 'surface')
+      if (wrap) this.#registerInteractionNode(wrap, entry.item, source)
     }
     this.#interactionPort?.refreshNodes(
       this.#interactionNodes.values(),

@@ -12,6 +12,10 @@ import type {
 } from './projectTypes'
 import { compareStableStrings } from './stableOrder'
 import { makeAuthoringAddress } from './authoringAddress'
+import {
+  compareCourseLayerItems,
+  composeCourseProjectLocation,
+} from './courseLayerComposition'
 import { courseProjectDocumentSchema } from './courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -117,18 +121,13 @@ export function isCanonicalLayerOrder(
 export function getEffectiveLayerOrder<T extends Pick<LayerItemBase, 'layerItemId' | 'order'>>(
   items: ReadonlyArray<T>,
 ): T[] {
-  return [...items].sort((left, right) =>
-    left.order - right.order || compareStableStrings(left.layerItemId, right.layerItemId),
-  )
+  return [...items].sort(compareCourseLayerItems)
 }
 
 export function getEffectiveScopedLayerOrder<T extends ScopedLayerItem>(
   items: ReadonlyArray<T>,
 ): T[] {
-  return [...items].sort((left, right) =>
-    left.item.order - right.item.order ||
-    compareStableStrings(left.item.layerItemId, right.item.layerItemId),
-  )
+  return [...items].sort((left, right) => compareCourseLayerItems(left.item, right.item))
 }
 
 export interface EffectiveCourseLayerItem {
@@ -157,27 +156,13 @@ export function getEffectiveCourseLayerOrder(input: {
   if (!location || location.surfaceId !== surface.id) {
     throw new Error(`Location ${input.locationId} does not belong to surface ${surface.id}`)
   }
-  const scoped = (
-    entries: readonly ScopedLayerItem[],
-    source: EffectiveCourseLayerItem['source'],
-  ): EffectiveCourseLayerItem[] => entries
-    .filter((entry) => isCourseLayerVisibleAtLocation(entry, input.locationId))
-    .map((entry) => ({ item: entry.item, source }))
-  const effective: EffectiveCourseLayerItem[] = [
-    ...scoped(input.project.globalLayerItems, 'global'),
-    ...scoped(surface.surfaceLayerItems, 'surface'),
-  ]
-  if (surface.type === 'slide' && location.kind === 'slide-scene') {
-    const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
-    if (!scene) throw new Error(`Unknown Slide scene: ${location.sceneId}`)
-    effective.push(...scene.layerItems.map((item) => ({ item, source: 'scene' as const })))
-  } else if (surface.type === 'spatial-2d') {
-    effective.push(...surface.world.layerItems.map((item) => ({ item, source: 'world' as const })))
-  }
-  return effective.sort((left, right) =>
-    left.item.order - right.item.order ||
-    compareStableStrings(left.item.layerItemId, right.item.layerItemId),
-  )
+  return composeCourseProjectLocation({
+    project: input.project,
+    locationId: location.id,
+    stateId: null,
+  }).entries
+    .filter((entry) => entry.applicable)
+    .map(({ item, source }) => ({ item, source }))
 }
 
 export function reindexLayerItems<T extends LayerItem>(items: ReadonlyArray<T>): T[] {

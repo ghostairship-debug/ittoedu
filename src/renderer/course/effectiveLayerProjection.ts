@@ -1,14 +1,12 @@
 import {
-  getEffectiveCourseLayerOrder,
-  isCourseLayerVisibleAtLocation,
-} from '../../shared/courseProjectModel'
-import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
+  composeCourseProjectLocation,
+  type CourseLayerComposition,
+} from '../../shared/courseLayerComposition'
 import type {
   CourseProjectDocument,
   CourseSurfaceType,
   FlowBlock,
   LayerItem,
-  LayerItemOverride,
   LocationVisibility,
   NativeLayerItem,
   ScopedLayerItem,
@@ -368,66 +366,30 @@ export function projectEffectiveLayers(
     stateId,
   })
 
-  const sceneItems = scene
-    ? materializeSceneItems(scene.layerItems, state)
-    : []
-  const worldItems = surface.type === 'spatial-2d'
-    ? surface.world.layerItems.map((item) => structuredClone(item))
-    : []
-
-  const rows = [
-    ...project.globalLayerItems.map((entry) => toRow({
+  const composition = composeEffectiveLayerLocation({ project, locationId, stateId })
+  const rows = composition.entries.map((entry) => {
+    const scoped = entry.source === 'global'
+      ? project.globalLayerItems.find((candidate) => candidate.item.layerItemId === entry.item.layerItemId)
+      : entry.source === 'surface'
+        ? surface.surfaceLayerItems.find((candidate) => candidate.item.layerItemId === entry.item.layerItemId)
+        : undefined
+    return toRow({
       project,
       viewing,
-      item: structuredClone(entry.item),
-      owner: 'global',
-      scoped: entry,
+      item: entry.item,
+      owner: entry.source,
+      scoped,
       state,
       selected: selected.has(entry.item.layerItemId),
       locationId,
       sceneId: scene?.id ?? null,
-    })),
-    ...surface.surfaceLayerItems.map((entry) => toRow({
-      project,
-      viewing,
-      item: structuredClone(entry.item),
-      owner: 'surface',
-      scoped: entry,
-      state,
-      selected: selected.has(entry.item.layerItemId),
-      locationId,
-      sceneId: scene?.id ?? null,
-    })),
-    ...sceneItems.map((item) => toRow({
-      project,
-      viewing,
-      item,
-      owner: 'scene',
-      scoped: undefined,
-      state,
-      selected: selected.has(item.layerItemId),
-      locationId,
-      sceneId: scene?.id ?? null,
-    })),
-    ...worldItems.map((item) => toRow({
-      project,
-      viewing,
-      item,
-      owner: 'world',
-      scoped: undefined,
-      state,
-      selected: selected.has(item.layerItemId),
-      locationId,
-      sceneId: null,
-    })),
-  ].sort(compareProjectionRows)
+      visibleAtLocation: entry.applicable,
+    })
+  }).sort(compareProjectionRows)
 
-  const engine = getEffectiveCourseLayerOrder({
-    project,
-    surfaceId: surface.id,
-    locationId,
-  })
-  const compositedIds = new Set(engine.map((entry) => entry.item.layerItemId))
+  const compositedIds = new Set(composition.entries
+    .filter((entry) => entry.applicable)
+    .map((entry) => entry.item.layerItemId))
   const sceneOnlyRows = rows.filter((row) => (
     row.owner === 'scene' && !row.isTeacherController
   ))
@@ -447,6 +409,15 @@ export function projectEffectiveLayers(
   })
 }
 
+/** Exact-state adapter for the unified renderer layer projection. */
+export function composeEffectiveLayerLocation(input: {
+  readonly project: CourseProjectDocument
+  readonly locationId: string
+  readonly stateId: string | null
+}): CourseLayerComposition<LayerItem> {
+  return composeCourseProjectLocation(input)
+}
+
 function resolveNamedState(
   scene: SlideSurfaceDocument['scenes'][number] | undefined,
   stateId: string | null,
@@ -455,84 +426,6 @@ function resolveNamedState(
   const state = scene.presentation?.states.find((candidate) => candidate.id === stateId)
   if (!state) throw new Error(`找不到 Slide 状态：${stateId}`)
   return state
-}
-
-function applyLayerItemOverride(
-  source: LayerItem,
-  override: LayerItemOverride | undefined,
-): LayerItem {
-  const item = structuredClone(source)
-  if (!override) return item
-  if (override.label !== undefined) item.label = override.label
-  if (override.frame) item.frame = { ...item.frame, ...override.frame }
-  if (override.order !== undefined) item.order = override.order
-  if (override.visible !== undefined) item.visible = override.visible
-  if (override.locked !== undefined) item.locked = override.locked
-  if (override.rotation !== undefined) item.rotation = override.rotation
-  if (override.opacity !== undefined) item.opacity = override.opacity
-  if (override.hitPolicy !== undefined) item.hitPolicy = override.hitPolicy
-  if (override.playbackInitialVisibility !== undefined) {
-    item.playbackInitialVisibility = override.playbackInitialVisibility
-  }
-  if (item.kind === 'native' && override.nativeData) {
-    item.content.data = mergeCourseNativeData(
-      item.content.data as Record<string, unknown>,
-      override.nativeData,
-    ) as typeof item.content.data
-  }
-  if (item.kind === 'component' && override.componentProps) {
-    item.props = mergePlainRecords(item.props, override.componentProps)
-  }
-  return item
-}
-
-function mergePlainRecords(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = structuredClone(base)
-  for (const [key, value] of Object.entries(patch)) {
-    const previous = result[key]
-    result[key] = value !== null && previous !== null &&
-      typeof value === 'object' && typeof previous === 'object' &&
-      !Array.isArray(value) && !Array.isArray(previous)
-      ? mergePlainRecords(
-          previous as Record<string, unknown>,
-          value as Record<string, unknown>,
-        )
-      : structuredClone(value)
-  }
-  return result
-}
-
-function materializeSceneItems(
-  items: readonly LayerItem[],
-  state: SlidePresentationState | undefined,
-): LayerItem[] {
-  const materialized = items.map((item) => (
-    applyLayerItemOverride(item, state?.layerItemOverrides[item.layerItemId])
-  ))
-  if (!state?.layerItemOrder) return materialized
-
-  const byId = new Map(materialized.map((item) => [item.layerItemId, item]))
-  const seen = new Set<string>()
-  const ordered: LayerItem[] = []
-  for (const id of state.layerItemOrder) {
-    const item = byId.get(id)
-    if (!item || seen.has(id)) continue
-    seen.add(id)
-    ordered.push(item)
-  }
-  ordered.push(...materialized
-    .filter((item) => !seen.has(item.layerItemId))
-    .sort((left, right) => left.order - right.order ||
-      compareStableStrings(left.layerItemId, right.layerItemId)))
-
-  const orderSlots = materialized.map((item) => item.order).sort((left, right) => left - right)
-  ordered.forEach((item, index) => {
-    item.order = orderSlots[index]!
-  })
-  return ordered
 }
 
 function toRow(input: {
@@ -545,14 +438,13 @@ function toRow(input: {
   readonly selected: boolean
   readonly locationId: string
   readonly sceneId: string | null
+  readonly visibleAtLocation: boolean
 }): EffectiveLayerProjectionRow {
   const { item, owner, scoped, state, viewing } = input
   const stateOverrideApplied = owner === 'scene' &&
     Boolean(state?.layerItemOverrides[item.layerItemId])
   const source: EffectiveLayerSource = stateOverrideApplied ? 'state' : owner
-  const visibleAtLocation = scoped
-    ? isCourseLayerVisibleAtLocation(scoped, input.locationId)
-    : true
+  const visibleAtLocation = input.visibleAtLocation
   const scopeToken = scopeTokenForSelectingRow(viewing, {
     scopeToken: createCourseAuthoringScope({
       owner,

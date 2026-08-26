@@ -1,12 +1,12 @@
-import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
-import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
+import {
+  composeCourseProjectLocation,
+  type CourseLayerComposition,
+} from '../../shared/courseLayerComposition'
 import type {
   CourseProjectDocument,
   LayerItem,
-  SlidePresentationState,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import { compareStableStrings } from '../../shared/stableOrder'
 
 export type DeepReadonly<T> =
   T extends (...args: never[]) => unknown ? T :
@@ -55,25 +55,6 @@ export interface SlideEditorView {
   readonly layers: readonly SlideEditorLayerView[]
 }
 
-function deepMergeComponentProps(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = structuredClone(base)
-  for (const [key, value] of Object.entries(patch)) {
-    const previous = result[key]
-    result[key] = value !== null && previous !== null &&
-      typeof value === 'object' && typeof previous === 'object' &&
-      !Array.isArray(value) && !Array.isArray(previous)
-      ? deepMergeComponentProps(
-          previous as Record<string, unknown>,
-          value as Record<string, unknown>,
-        )
-      : structuredClone(value)
-  }
-  return result
-}
-
 export interface BuildSlideEditorViewInput {
   readonly project: CourseProjectDocument
   readonly locationId: string
@@ -90,62 +71,6 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
     Object.freeze(value)
   }
   return value as DeepReadonly<T>
-}
-
-function materializeSceneItem(
-  source: LayerItem,
-  state: SlidePresentationState | undefined,
-): LayerItem {
-  const item = structuredClone(source)
-  const override = state?.layerItemOverrides[source.layerItemId]
-  if (!override) return item
-  if (override.label !== undefined) item.label = override.label
-  if (override.frame) item.frame = { ...item.frame, ...override.frame }
-  if (override.order !== undefined) item.order = override.order
-  if (override.visible !== undefined) item.visible = override.visible
-  if (override.locked !== undefined) item.locked = override.locked
-  if (override.rotation !== undefined) item.rotation = override.rotation
-  if (override.opacity !== undefined) item.opacity = override.opacity
-  if (override.hitPolicy !== undefined) item.hitPolicy = override.hitPolicy
-  if (override.playbackInitialVisibility !== undefined) {
-    item.playbackInitialVisibility = override.playbackInitialVisibility
-  }
-  if (item.kind === 'native' && override.nativeData) {
-    item.content.data = mergeCourseNativeData(
-      item.content.data as Record<string, unknown>,
-      override.nativeData,
-    ) as typeof item.content.data
-  }
-  if (item.kind === 'component' && override.componentProps) {
-    item.props = deepMergeComponentProps(item.props, override.componentProps)
-  }
-  return item
-}
-
-function materializeSceneItems(
-  items: readonly LayerItem[],
-  state: SlidePresentationState | undefined,
-): LayerItem[] {
-  const materialized = items.map((item) => materializeSceneItem(item, state))
-  if (!state?.layerItemOrder) return materialized
-
-  const byId = new Map(materialized.map((item) => [item.layerItemId, item]))
-  const seen = new Set<string>()
-  const ordered: LayerItem[] = []
-  for (const id of state.layerItemOrder) {
-    const item = byId.get(id)
-    if (!item || seen.has(id)) continue
-    seen.add(id)
-    ordered.push(item)
-  }
-  ordered.push(...materialized
-    .filter((item) => !seen.has(item.layerItemId))
-    .sort((left, right) => left.order - right.order ||
-      compareStableStrings(left.layerItemId, right.layerItemId)))
-
-  const orderSlots = materialized.map((item) => item.order).sort((left, right) => left - right)
-  ordered.forEach((item, index) => { item.order = orderSlots[index]! })
-  return materialized
 }
 
 function resolveSlide(
@@ -173,41 +98,39 @@ function resolveSlide(
 function layerView(
   item: LayerItem,
   source: SlideEditorLayerScope,
-  scopedVisible: boolean,
+  applicable: boolean,
+  mounted: boolean,
 ): SlideEditorLayerView {
   const readonlyItem = deepFreeze(item)
   return {
     source,
-    scopedVisible,
-    effectiveVisible: scopedVisible && readonlyItem.visible,
+    scopedVisible: applicable,
+    effectiveVisible: mounted,
     selectionId: readonlyItem.layerItemId,
     item: readonlyItem,
   }
+}
+
+/** Exact-state adapter used by renderer read models and parity tests. */
+export function composeSlideEditorLocation(input: {
+  readonly project: CourseProjectDocument
+  readonly locationId: string
+  readonly stateId: string | null
+}): CourseLayerComposition<LayerItem> {
+  return composeCourseProjectLocation(input)
 }
 
 export function buildSlideEditorView(input: BuildSlideEditorViewInput): SlideEditorView {
   const { project, locationId } = input
   const { location, surface, scene } = resolveSlide(project, locationId)
   const stateId = input.stateId === undefined ? (location.stateId ?? null) : input.stateId
-  const state = stateId === null
-    ? undefined
-    : scene.presentation?.states.find((candidate) => candidate.id === stateId)
-  if (stateId !== null && !state) throw new Error(`找不到 Slide 状态：${stateId}`)
-
-  const layers = [
-    ...project.globalLayerItems.map((entry) => layerView(
-      structuredClone(entry.item),
-      'global',
-      isCourseLayerVisibleAtLocation(entry, locationId),
-    )),
-    ...surface.surfaceLayerItems.map((entry) => layerView(
-      structuredClone(entry.item),
-      'surface',
-      isCourseLayerVisibleAtLocation(entry, locationId),
-    )),
-    ...materializeSceneItems(scene.layerItems, state).map((item) => layerView(item, 'scene', true)),
-  ].sort((left, right) => left.item.order - right.item.order ||
-    compareStableStrings(left.selectionId, right.selectionId))
+  const composition = composeSlideEditorLocation({ project, locationId, stateId })
+  const layers = composition.entries.map((entry) => layerView(
+    entry.item,
+    entry.source as SlideEditorLayerScope,
+    entry.applicable,
+    entry.mounted,
+  ))
 
   const presentation = scene.presentation
     ? {
@@ -234,10 +157,8 @@ export function buildSlideEditorView(input: BuildSlideEditorViewInput): SlideEdi
     sceneId: scene.id,
     sceneName: scene.name,
     canvas: { ...surface.canvas },
-    backgroundColor: state?.backgroundColor ?? scene.backgroundColor,
-    backgroundAssetId: state?.backgroundAssetId === undefined
-      ? scene.backgroundAssetId
-      : state.backgroundAssetId,
+    backgroundColor: composition.background!.color,
+    backgroundAssetId: composition.background!.assetId,
     presentation,
     layers,
   })

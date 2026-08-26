@@ -1,4 +1,8 @@
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
+import {
+  composePublishedCourseLocation,
+  type CourseLayerComposition,
+} from '../../../shared/courseLayerComposition'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
 import {
   FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
@@ -9,7 +13,6 @@ import {
 import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
-import { isGlobalLayerItemVisible } from '../../globalLayerVisibility'
 import {
   TeacherControllerDom,
   stageBoundsFromElement,
@@ -23,7 +26,6 @@ import type {
   PublishedLayerItem,
   PublishedNativeLayerItem,
   PublishedRuntimeLayerItem,
-  PublishedScopedLayerItem,
 } from '../../../shared/publishedCourseTypes'
 import {
   FLOW_LOGICAL_CANVAS,
@@ -650,7 +652,7 @@ export class FlowSurfaceHost {
     const overlay = this.#overlay
     const article = this.#article
     if (!overlay || !article) return
-    const entries = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const scrollTop = article.scrollTop
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) continue
@@ -667,7 +669,7 @@ export class FlowSurfaceHost {
     if (!overlay) return
     this.#destroyController()
     overlay.replaceChildren()
-    const entries = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const scrollTop = this.#article?.scrollTop ?? 0
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
@@ -793,7 +795,7 @@ export class FlowSurfaceHost {
     const controller = this.#controller
     if (!controller) return
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
-    const item = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const item = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
       .map((entry) => entry.item)
       .find(isPublishedTeacherController)
     if (!item || item.content.nativeType !== 'teacher-controller') return
@@ -940,33 +942,33 @@ function createFlowHostAudioSession(defaultMuted: boolean): FlowHostAudioSession
   }
 }
 
-function visibleOverlayEntries(
+export function composePublishedFlowLocation(input: {
+  readonly playback: FlowPublishedPlaybackDocument
+  readonly locationId: string
+}): CourseLayerComposition<PublishedLayerItem> {
+  return composePublishedCourseLocation({
+    course: input.playback,
+    locationId: input.locationId,
+    stateId: null,
+  })
+}
+
+export function publishedFlowOverlayEntries(
   playback: FlowPublishedPlaybackDocument,
   surface: PublishedFlowSurface,
   locationId: string,
 ): Array<{ item: PublishedLayerItem; source: 'global' | 'surface' }> {
-  const entries: Array<{ item: PublishedLayerItem; source: 'global' | 'surface'; order: number }> = []
-  const push = (list: readonly PublishedScopedLayerItem[], source: 'global' | 'surface') => {
-    for (const entry of list) {
-      if (!isPublishedScopedVisible(entry, locationId)) continue
-      // Playback-hidden nodes stay mounted so Interaction V1 node.enter can reveal them.
-      // Authored visible:false and location scope remain hard renderer boundaries.
-      if (!entry.item.visible) continue
-      entries.push({ item: entry.item, source, order: entry.item.order })
-    }
+  const composition = composePublishedFlowLocation({ playback, locationId })
+  if (composition.surfaceId !== surface.id) {
+    throw new Error(`Flow composition surface mismatch: ${composition.surfaceId}`)
   }
-  push(playback.globalLayerItems, 'global')
-  push(surface.surfaceLayerItems, 'surface')
-  return entries
-    .sort((left, right) => left.order - right.order || left.item.layerItemId.localeCompare(right.item.layerItemId))
-    .map(({ item, source }) => ({ item, source }))
-}
-
-function isPublishedScopedVisible(entry: PublishedScopedLayerItem, locationId: string): boolean {
-  return isGlobalLayerItemVisible(
-    { visibility: { mode: entry.visibility.mode, sceneIds: entry.visibility.locationIds } },
-    locationId,
-  )
+  // Playback-hidden nodes stay mounted so Interaction V1 node.enter can reveal them.
+  return composition.entries
+    .filter((entry) => entry.mounted)
+    .map((entry) => ({
+      item: entry.item,
+      source: entry.source as 'global' | 'surface',
+    }))
 }
 
 function isPublishedTeacherController(

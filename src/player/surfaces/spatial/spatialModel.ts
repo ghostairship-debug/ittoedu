@@ -5,6 +5,10 @@ import type {
   SpatialRelationDocument,
   SpatialSemanticZoomRule,
 } from '../../../shared/courseProjectTypes'
+import {
+  composePublishedCourseLocation,
+  type CourseLayerComposition,
+} from '../../../shared/courseLayerComposition'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
@@ -331,6 +335,18 @@ export function collectSpatialPlaybackEntries(
   input: PublishedSpatialRuntimeInput,
   locationId: string | null,
 ): SpatialPlaybackEntry[] {
+  if (locationId !== null) {
+    return composePublishedSpatialLocation({ input, locationId }).entries
+      .filter((entry) => entry.mounted)
+      .map((entry) => ({
+        item: entry.item,
+        source: entry.source as SpatialLayerSource,
+        coordinateSpace: spatialPlaybackCoordinateSpace(
+          entry.source as SpatialLayerSource,
+          entry.item,
+        ),
+      }))
+  }
   const entries: SpatialPlaybackEntry[] = [
     ...input.globalLayerItems
       .filter((entry) => (
@@ -362,6 +378,22 @@ export function collectSpatialPlaybackEntries(
     left.item.order - right.item.order ||
     left.item.layerItemId.localeCompare(right.item.layerItemId)
   ))
+}
+
+/** Valid-location Published adapter; camera and semantic culling stay outside this domain. */
+export function composePublishedSpatialLocation(input: {
+  readonly input: PublishedSpatialRuntimeInput
+  readonly locationId: string
+}): CourseLayerComposition<PublishedLayerItem> {
+  return composePublishedCourseLocation({
+    course: {
+      locations: input.input.locations,
+      globalLayerItems: input.input.globalLayerItems,
+      surfaces: [input.input.surface],
+    },
+    locationId: input.locationId,
+    stateId: null,
+  })
 }
 
 function worldRectIntersects(
