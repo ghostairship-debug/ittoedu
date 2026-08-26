@@ -18,6 +18,8 @@
 
 纯调查、重复确认、没有 consumer 的预备抽象、仅为改变任务状态而改文档，都不是生产单元。领取和关闭本身不产生独立提交。
 
+实现立项至少满足一项：存在可复现失败、存在真实 consumer、或能用当前数据量化维护/复杂度下降。Wave 名称、架构愿景、“以后可能需要”和为了让索引/测试自证更完整，都不能单独立项。调查结果若不能改变实现、裁决或验收，立即停止调查。
+
 ## 2. 风险分级（唯一维度）
 
 | 级别 | 典型范围 | 建卡 | Reviewer | 默认验证 |
@@ -43,6 +45,8 @@ S0 硬边界（任一不满足升 S1；命中触发器升 S2）：不命中热�
 完成后**删除卡文件**（一并入实质提交或波次收口提交）；完成事实由 product commit/提交组与 CI 记录承载，不设 done 状态、不做关闭提交。focused checks 通过只表示实现候选完成，不自动等于 wave outcome 或 `accepted`。
 
 **卡片最多 7 项字段**，见 [TASK_CARD_TEMPLATE.md](TASK_CARD_TEMPLATE.md)。`Write scope / Baseline` 是并发边界，所有建卡任务必填。已删除且不得恢复的表单：Policy version、Task class、Necessity/skip condition 固定表单、Complexity delta、Validation ceiling/budget、Reviewer budget、Dependencies/Blocks、claimed/released 时间、worktree/branch、context hash、retry count、固定格式 Evidence reuse / Invalidating paths / Ready checklist / 四态防火墙。必要信息写入 Outcome / Why now 或 Write scope。
+
+交接给较弱执行模型时，仍不增加字段；在现有字段内写清当前失败证据、允许与禁止写入路径、越界停止条件、确定性验收及 1–3 条精确检查。执行者只读卡片点名的源码/测试和相关合同，不从 Wave 标题猜测范围。
 
 **跨会话 S2 真锁例外**：协调器无法持久保存 owner 与热点锁时，修改前持久化一条 `active + owner + baseline + hotspot` 记录（最多一个开始协调提交）。这是防并发写坏的真实锁，不是领取仪式。
 
@@ -73,7 +77,7 @@ Schema、用户数据迁移、安全权限、导出语义和最终发布结论�
 
 热点清单（同一时间每项只有一个写入者）：Editor Store / History；App lifecycle / save / recovery；Workspace / Properties；Published producer；contracts / Schema；main / preload；generated repo-index。非 owner 禁写但可读。
 
-generated index 每波最多统一生成并提交一次。分支、worktree 或运行时中的 owner 是并发事实，不用领取提交重复表达。
+tracked generated index 只有存在 fresh-checkout、产品运行时或自动化真实 consumer 时才统一生成并提交；否则必须是 ignored、可缺省的显式 build output。repo-index 属于后者，只在确有导航收益时手动生成；分支、worktree 或运行时中的 owner 是并发事实，不用领取提交重复表达。
 
 ## 6. 验证去重（唯一执行原则）
 
@@ -89,6 +93,8 @@ generated index 每波最多统一生成并提交一次。分支、worktree 或�
 
 同一 SHA 上更高覆盖度的通过结果可替代较低覆盖度证据。可复用证据至少含：来源 product commit/SHA、完整命令与结果、相关环境、实际覆盖的行为/风险、失效条件。S1 直接用 commit 描述 + CI 状态；S2 与门留下可持久读取的简短记录。复用必须证明来源 commit 是当前候选祖先，且其后变化未命中依赖闭包。
 
+同一生成器、同一输入、同一输出在一次写入命令或 focused test 已完成生成与字节/语义比较后，不立即追加同义 `--check`。只有 `--check` 证明不同属性、验证未提交状态，或属于后续独立 CI 门时才执行。Hash/字节比较只用于制品身份或确定性本身属于合同时，不代替行为验证。
+
 **证据失效条件**（出现才重跑）：product source / 相关 test / 夹具 / 测试或构建配置 / lockfile 变化；公共合同或真实 consumer 依赖闭包变化；release/example 生成器、main/preload/IPC 等上游输入改变被验证产物；执行环境变化；上次结果失败/超时/可疑/flaky；diff 命中该验证明确覆盖的 invalidator；集成后出现新组合风险。
 
 纯治理文档、评估报告、任务板状态或不参与产品/自动化输入的索引刷新，未命中相关 invalidator 时不使产品验证失效。但本仓库的合同、skill、能力索引、示例/发布生成输入会被程序或 Agent 消费——不能笼统把 `docs`/`generated` 视为无害，必须沿真实依赖闭包判断。
@@ -101,7 +107,7 @@ Flaky：原命令重跑一次；可复现由当前任务修；随机则隔离建
 
 ## 7. Git 与任务板
 
-保留的提交：product commit / 紧凑提交组；必须与合同/迁移同步落地的安全文档或测试；每波最多一次 generated/index 更新；阶段结束确有长期价值的计划更新。
+保留的提交：product commit / 紧凑提交组；必须与合同/迁移同步落地的安全文档或测试；有真实 consumer 的 tracked generated 更新；阶段结束确有长期价值的计划更新。可重建的本地导航缓存不提交。
 
 取消的提交：领取提交；终态/关闭提交；仅刷新任务板派生字段的提交；逐卡索引提交。任务元数据确需更新时与实质变更同一提交，或波次收口时集中一次。
 
@@ -111,7 +117,7 @@ Flaky：原命令重跑一次；可复现由当前任务修；随机则隔离建
 
 **Done**：行为按验收条件可观察；写入范围与热点未越界；focused checks 绿且描述行为而非文件存在；可整体回滚。**不算完成**：Facade 只 re-export 整个 Store；新模块仍 deep import 上帝文件；只移动代码未降低 owner 混乱；测试只断言文件存在；迁移期间双写两份真相。
 
-**最小阅读**：S0/S1 只读请求上下文 + 精确源码/测试；S2 补 [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md) 相关节与必要合同。开发导航用 `npm run repo:context`（feature/symbol/path/changed 优先，自由文本兜底；低置信或 stale 时直接读源码与合同）。默认不读历史任务、整个 `editorStore.ts`、全部 E2E；超大文件按"导入区 → 目标符号 → 直接调用者 → 目标测试"顺序读。
+**最小阅读**：S0/S1 只读请求上下文 + 精确源码/测试；S2 补 [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md) 相关节与必要合同。默认用直接源码、合同和目标测试定位；只有能减少阅读量时才显式生成并使用 `npm run repo:context`，低置信、缺缓存或 stale 直接回到源码。默认不读历史任务、整个 `editorStore.ts`、全部 E2E；超大文件按"导入区 → 目标符号 → 直接调用者 → 目标测试"顺序读。
 
 ## 9. Legacy 与删除
 
@@ -137,5 +143,5 @@ Flaky：原命令重跑一次；可复现由当前任务修；随机则隔离建
 ## 12. 落地状态与后续流程改进
 
 - 切片 A（本协议 + 7 字段 Ready 模板 + 三态生成器与测试同步）已随 2026-08-25 流程更新落地。
-- 切片 B（验证基建去重）作为可领取的流程改进项：拆分 `prepare:e2e` 与 `test:e2e:run`（局部调试复用构建产物）；测试准备不再无条件改写 tracked examples（与 EXA-02/03 合流）；CI 用 merge-base 三点差异 + 可单测的 diff classifier；对 Player/导出/Electron 改动增加按路径触发的 E2E/build job；展开去重 `verify`/`dist:win`/`verify:release` 嵌套；repo-index 生成一次、freshness 与 quality 复用同一产物。
-- 量化验收（试运行一轮 S0/S1/S2 后核对）：S0/S1 治理专用提交 0；卡字段 ≤7；同 SHA 同命令无理由重复 0；Reviewer 无新增风险理由的重复验证 0；完整门只出现在真实集成/发布门；热点重叠写入 0；治理操作耗时 S1 中位 ≤5 分钟、S2 ≤15 分钟。
+- 原“切片 B”总括路线取消，不把验证去重再建设成平台。当前只执行已有证据支持的 repo-index 减负卡；`prepare:e2e` 拆分、diff classifier、按路径 CI 与 `verify` 嵌套重构均须各自先有稳定复现与量化收益，再单独建卡。
+- 量化验收（试运行一轮 S0/S1/S2 后核对）：S0/S1 治理专用提交 0；卡字段 ≤7；同 SHA 同命令无理由重复 0；生成后立即同义 `--check` 0；Reviewer 无新增风险理由的重复验证 0；完整门只出现在真实集成/发布门；热点重叠写入 0；治理操作耗时 S1 中位 ≤5 分钟、S2 ≤15 分钟。

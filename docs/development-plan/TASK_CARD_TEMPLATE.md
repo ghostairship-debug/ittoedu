@@ -23,5 +23,7 @@
 - `Hotspot` 从固定枚举中选（可多个，逗号分隔，非热点写 `none`）；生成器校验同一热点标签不得出现在两张 `active` 卡上——这是并发护栏，不是仪式。
 - `active` 必须有 Owner；owner 是并发事实，不需要领取提交。
 - 未满足前置时不要创建 queued 卡；执行中才出现阻断时改为 `blocked`，并在 Outcome 写明原因、解除条件和下一决策者。
+- 为较弱执行模型或跨会话交接建卡时，不新增字段：在 `Outcome` 写当前可复现证据，在 `Write scope` 同时写允许路径、禁止路径和越界停止条件，在 `Acceptance` 写确定结果，在 `Focused validation` 只列 1–3 条直接证明结果的检查。阶段名称、未来设想和“顺便重构”不是任务范围。
+- 同一生成器与输入已经由写入命令或 focused test 完成生成和字节/语义比较时，不再紧接同义 `--check`；Reviewer 默认审 diff、反例和证据缺口，不机械复跑作者命令。
 - 文件放在 `docs/development-plan/tasks/<wave>/<task-id>.md`，task-id 用小写稳定 ID。
 - 任务板由 `npm run generate:task-board` 从卡生成（当前活跃任务摘要），只在任务集合实质变化时更新。

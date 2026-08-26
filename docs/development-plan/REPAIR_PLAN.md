@@ -1,12 +1,14 @@
-# 工程修复与网络基础方案
+# 工程修复与网络基础方案（已确认事实）
 
 > 日期：2026-08-26
 >
+> 本文件只保存已合入修复、Owner 边界和历史门证据，不再提供当前开工顺序。当前路线只看根目录 `COURSEWARE_DEVELOPMENT_PLAN.md` 第 5 节、自动任务板与三张 Ready 卡。
+>
 > 当前质量审计基线：`3780090`；Gate R0 文档/流程基线：`b967c96`。
 >
-> 当前批次产品集成基线：`bae1856`（W4-C1 合入；权威文档与生成索引在其后统一收口）。
+> 历史批次产品集成基线：`bae1856`（W4-C1 合入；后续事实以源码与产品提交为准）。
 >
-> 状态：**Wave 3 已完成 V9/V2 consumer 替代、release verifier 切换和旧 V8 benchmark 清退；W4-C1 与 PRJ-00A 已合入并通过独立审查；当前任务板为 0，本批在文档/生成索引收口后暂停**。合法纯 Slide PDF raster 继续保留。RTP-05 与 NET-C1 仍缺真实作者 consumer，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
+> 状态：**Wave 3、W4-C1 与 PRJ-00A 的完成事实保留；2026-08-26 效率审计后，本文件中的后续 Wave 占位不再派工**。合法纯 Slide PDF raster 继续保留。RTP-05 与 NET-C1 仍缺真实作者 consumer，继续 No-Ready。Owner 已取消基于错误信任前提的 SEC-01；自动化结果仍只达到 `engineering candidate`。
 >
 > 排除范围：skill 重构、黄金样例、真实课例生产、声明式数据条件、行内公式和具体 AI Provider 接入。本方案只建设修复项以及未来远程媒体/API/AI 都依赖的网络基础。
 
@@ -152,28 +154,28 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ### Wave 4：V9 全工程诊断
 
-`W4-C1` 已按 Runtime / Interaction / Component / Controller-Media 拆分 `collectCourseProjectHealth`，以 30 个 active code 接入 `validate-project` CLI，并明确省略 17 个 V8-only、Schema-shadow 或 archive-shadow code。共享/全局视频、信息释放和 Runtime 资产消费均按 location/state 调用 `composeCourseProjectLocation`，finding 去重保留不同 message 与精确数组元素 target。`W4-C2` 再把网络源码分析改成 declaration parity：已声明 origin 是合法依赖，未声明访问、危险 scheme、Secret 字面量和捕获不确定性才产生 finding。新启发式先 warning；GUI 不另建产品。
+`W4-C1` 已按 Runtime / Interaction / Component / Controller-Media 拆分 `collectCourseProjectHealth`，以 30 个 active code 接入 `validate-project` CLI，并明确省略 17 个 V8-only、Schema-shadow 或 archive-shadow code。共享/全局视频、信息释放和 Runtime 资产消费均按 location/state 调用 `composeCourseProjectLocation`，finding 去重保留不同 message 与精确数组元素 target。该实现已有 CLI consumer，保留并冻结。原 `W4-C2` 只有网络诊断设想、没有当前可复现失败，已从活动路线取消；未来若出现真实 declaration parity 缺陷，应按当时输入重新建卡，不沿用本段派工。
 
 ### Wave 5：合成与旧投影退出
 
-`SEM-B3` 共享合成与三方契约测试已完成；`SEM-B4A` 又从现有 GUI PDF/PPTX 富预检中抽出 shape-neutral Slide 视觉规则，保持 V8 report item-for-item 不变，新增只读 V9 adapter 并以 `composeCourseProjectLocation` 证明可表示子域零差异及五类精确反例 delta。`PRJ-00A` 已删除 V8 preview 构造中生成后立即丢弃的 effective layer projection，commit/undo/redo/新增页/切页的 V8 preview 与 V9 effective projection 保持一致。恢复后先以 `PRJ-00B` 测量决定是否有必要实现 context-aware cache，再进入 `PRJ-01` 收窄与 `PRJ-02～05` 按用户行为拆分。任何统一宿主必须保留可信扩展语义、既有生命周期责任、真实宿主能力与工程 origin 策略。
+`SEM-B3` 共享合成与三方契约测试已完成；`SEM-B4A` 又从现有 GUI PDF/PPTX 富预检中抽出 shape-neutral Slide 视觉规则，保持 V8 report item-for-item 不变，新增只读 V9 adapter 并以 `composeCourseProjectLocation` 证明可表示子域零差异及五类精确反例 delta。`PRJ-00A` 已删除 V8 preview 构造中生成后立即丢弃的 effective layer projection，commit/undo/redo/新增页/切页的 V8 preview 与 V9 effective projection 保持一致。效率审计确认 `PRJ-00B`、`PRJ-01`、`PRJ-02～04` 没有当前失败、consumer 或验收，取消预排；`PRJ-05` 只在真实预览失败或 Owner 新决定时重新准入。任何未来统一宿主仍须保留可信扩展语义、既有生命周期责任、真实宿主能力与工程 origin 策略。
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板，当前为 0 张 active 卡。NET-H1、RTP-03 与 V8-02 已通过固定候选 `7d17fed` phase gate；RTP-04、CMP-03、V8-03/04/05A/06/05B、SEM-B3/B4A、W4-C1 与 PRJ-00A 均已有产品提交和对应 focused/独立审查证据。LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板；2026-08-26 审计后只有 ARCH-0 fixture、repo-index 减负、能力证据收窄三张 queued 卡。NET-H1、RTP-03 与 V8-02 已通过固定候选 `7d17fed` phase gate；RTP-04、CMP-03、V8-03/04/05A/06/05B、SEM-B3/B4A、W4-C1 与 PRJ-00A 均已有产品提交和对应 focused/独立审查证据。LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
 RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 RuntimeHost teardown 异常安全；CMP-03 只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
-已知不准入事实：RTP-05 Published API 2 static capture 没有真实 V9 export capture consumer；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；W4-C1 不包含 network declaration parity；SEM-B4A 只建立可表示纯 Slide 视觉子域 parity，不代表 App/PDF/PPTX consumer 已转换，也不允许删除 `collectExportPreflight`、LEG-006/007 或其真实投影 consumer。Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
+已知不准入事实：RTP-05 Published API 2 static capture 没有真实 V9 export capture consumer；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；W4-C1 不包含 network declaration parity，但这本身不是缺陷或任务；SEM-B4A 只建立可表示纯 Slide 视觉子域 parity，不代表 App/PDF/PPTX consumer 已转换，也不允许删除 `collectExportPreflight`、LEG-006/007 或其真实投影 consumer。Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
 ## 6. 并发与集成安排
 
 ### 6.1 上一批收口（已通过）
 
 1. 三条分支均从 `ddab68b` 派生，已按 **V8-02 → RTP-03 → NET-H1** 合入；独立 Reviewer 发现的 Phaser 核心销毁、overlay A→B lease 残留与同 frame 跨文档迟到 IPC 均已修复后复审通过。
-2. Integrator 删除任务卡，统一同步用户文档、能力声明、Legacy inventory、任务板与 repo-index；AI capabilities 与 repo-index 各只生成一次。
+2. Integrator 当时删除任务卡并统一同步用户文档、能力声明、Legacy inventory、任务板与 repo-index；这是历史记录，不再作为当前阶段的生成要求。
 3. 复用作者与 Reviewer 的 focused 证据；当前只补组合风险：Player bundle 刷新后的 benchmark 确定性、photosynthesis V9/V2 oracle、API 2 三 renderMode 三交付、真实 Electron preview network allow/deny/revoke 与 examples/fresh-checkout checks。
-4. 当前批次只跑一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、三条新增/改写定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。只有固定发布候选才追加完整 `npm run verify`、打包、性能与签名门。
+4. 该历史批次只跑过一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、三条新增/改写定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。后两项已被本次审计判定为不应继续作为默认门；此处只保存当时证据。
 5. 固定候选 `7d17fed` 已通过上述门；唯一非产品失败是并发审计负载触发 repo-index 查询测试超时，取消并发后完整 259 files / 1868 tests 通过。
 
 ### 6.2 本批实现编排（已收口）
@@ -181,14 +183,13 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 - Wave 3 依次完成 sample V9、Windows portability V9、五路径 render-host V9/V2、release verifier 切换和旧 V8 benchmark 删除；旧产物删除前先由同一 V9/V2 oracle 证明行为替代。
 - W4-C1 在 Validation Report V1 / Diagnostic Target 合同上实现 30 个 active code；独立 Reviewer 的 shared/global 漏扫、finding 去重与 disabled Runtime 反例均修复后复审 PASS。
 - SEM-B3/B4A 先固定共享合成与 Slide 视觉 parity，PRJ-00A 再只移除被立即丢弃的冗余计算；Store 行为由独立 Reviewer 复核 PASS。
-- Integrator 单写权威计划、任务板、能力索引与 repo-index。本批完成这些一致性门后暂停，不创建未来依赖卡。
+- Integrator 当时单写权威计划、任务板与两个索引；本次审计已把 repo-index 从 tracked 一致性门降为可选本地缓存。
 
-### 6.3 后续准入点
+### 6.3 当前准入方式
 
-- 恢复后的首项是 W4-C2 network declaration parity；只报告未声明访问、危险 scheme、Secret 字面量和捕获不确定性，不把合法声明的远程依赖当错误。
-- W4-C2 后先做 PRJ-00B 性能测量；没有可复现收益就关闭 cache 候选，存在收益才实现带 location/surface/scope/state/edit context 的缓存，再进入 PRJ-01 与按真实 consumer 拆分的 PRJ-02～05。
+- 可领取项只看根计划第 5.3 节的三张 Ready 卡；W4-C2 与 PRJ-00B～05 不再从本文件恢复。
 - 只有出现真实 HTTP/WebSocket 或远程 Published capture consumer 才准入 NET-C1；RTP-05、Spatial scene-local API 2、global API 3、Published capture 与非 Flow shared 同样继续按 consumer 证据准入。
-- 剩余实现合入后才固定最终候选并运行一次完整集成、E2E、`verify`、打包/性能/签名与真实产品复核；当前自动化结果不得提前称为发布结论。
+- 每个新实现项都必须重新给出可复现失败、真实 consumer 或量化收益，以及 1–3 条最小检查；完整集成、E2E、`verify`、打包/性能/签名只属于固定发布候选，不随普通恢复自动执行。
 
 ## 7. 成功门槛
 
@@ -201,7 +202,7 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 - Flow 组件 usage 定位在未激活所属 surface 的有效 location、未选中 block 时报告成功：0；
 - Schema-invalid V9 的 preflight/producer 泄漏原生 `TypeError`：0；同一输入的 `project-schema-invalid` code/首个 Zod issue path 漂移：0；合法 V9 静态前置的 shared code/path 漂移：0；
 - 连续两次测试准备造成 tracked 工作树漂移：0；LF/CRLF 或 `core.autocrlf=true/false` 导致 fixture 字节漂移：0；
-- 已确认无 consumer 的旧课例链残留：0；仍有 consumer 的两个 V8 `.h5lesson` 只按替代 oracle 就绪顺序逐项清退；
+- 已确认无 consumer 的旧课例链残留：0；产品不再打开或导入 V8 `.h5lesson`，只保留与产品兼容承诺无关的隔离 archive/parser/rejection 测试工具；
 - 新增语义码直接以 error 回归阻断既有离线便携或网页包导出：0；新在线轻量模式的专属 blocker 不计作既有路径回归；
 - 热点并行写冲突：0；
 - 自动化最多声明 `engineering candidate`。

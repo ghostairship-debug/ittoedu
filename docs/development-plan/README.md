@@ -11,7 +11,7 @@
 | [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md) | 什么不能坏/本轮必须兑现：25 组架构不变量、状态七分类、模块 Owner、carrier、可信扩展宿主能力与声明式网络边界 |
 | [WORKING_PROTOCOL.md](WORKING_PROTOCOL.md) | 怎么干活（精简生产模式）：默认直达路径、S0/S1/S2、三态任务卡、Reviewer 风险触发器、并发三层、验证同 SHA 去重、Done 定义、Legacy 删除八问 |
 | [TASK_CARD_TEMPLATE.md](TASK_CARD_TEMPLATE.md) | 7 字段 Ready 任务卡模板，仅 S2/并发/热点/跨会话需要（与 `scripts/generate-task-board.ts` 同步） |
-| [REPAIR_PLAN.md](REPAIR_PLAN.md) | 当前活动路线：工程修复、可信 Runtime/Component 宿主边界、远程资源/API 基础、V8 测试产物清退与投影退出 |
+| [REPAIR_PLAN.md](REPAIR_PLAN.md) | 已确认的工程修复事实、Owner 边界与历史 phase-gate 证据；不再派工 |
 | [TASK_BOARD.md](TASK_BOARD.md) | 生成的活跃任务摘要（`npm run generate:task-board`，不可手改；完成即删卡） |
 | `tasks/` | 建卡任务的卡文件；当前修复波使用 `tasks/repair/` |
 | `inventories/legacy-consumers.json` | Legacy consumer 台账（被 repo-index semantic 与测试消费，删除状态唯一真相） |
@@ -31,7 +31,7 @@
 - 不删除或禁用已有高级编辑能力；隐藏能力必须可发现、可保存、可撤销。
 - `globalLayerItems`、`surfaceLayerItems`、教师控制器和三种 Surface 能力保留。
 - 自动化最多证明 `engineering candidate`；真实视觉、互动和教师确认决定 `art candidate` / `accepted`。
-- repo-index 不进入产品运行时，不建图数据库、向量库、Watcher 或常驻服务。
+- repo-index 不进入产品运行时，只是可缺省、可重建的本地导航缓存；默认直接读源码/合同/目标测试，不跟踪缓存，不设 golden/quality/freshness 产品门，也不建图数据库、向量库、Watcher 或常驻服务。
 - 不借重构扩建重型平台或第二份数据真相；Owner 已明确准入的远程资源/API 只做最小纵切，不预建 Provider 插件框架；不在缺少真实行为或 consumer 证据时大拆 `editorStore.ts` / `Workspace.tsx` / `PropertiesTab.tsx`。
 
 ## 历史纪要
