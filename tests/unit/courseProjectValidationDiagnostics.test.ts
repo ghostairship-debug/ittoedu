@@ -77,6 +77,52 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
     })
   })
 
+  it('resolves a nested Flow block from the schema stable-id path', () => {
+    const { project } = projectWithSceneLayer()
+    project.surfaces.push({
+      id: 'diagnostic-flow',
+      title: '诊断讲义',
+      type: 'flow',
+      backgroundColor: '#ffffff',
+      surfaceLayerItems: [],
+      layout: { readingWidth: 760, wideContentWidth: 1120 },
+      blocks: [{
+        id: 'flow-section',
+        type: 'section',
+        title: '诊断小节',
+        collapsedByDefault: false,
+        blocks: [{ id: 'flow-section-note', type: 'paragraph', text: '嵌套正文' }],
+      }],
+    })
+
+    expect(resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+      path: ['surfaces', 1, 'blocks', 'flow-section-note', 'text'],
+    })).toEqual({
+      version: 1,
+      kind: 'flow-block',
+      projectId: project.id,
+      surfaceId: 'diagnostic-flow',
+      blockId: 'flow-section-note',
+    })
+  })
+
+  it('falls back to project when layer metadata is ambiguous', () => {
+    const { project, surface, item } = projectWithSceneLayer()
+    project.globalLayerItems.push({
+      item: structuredClone(item),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+
+    expect(resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+      layerItemId: item.layerItemId,
+      surfaceId: surface.id,
+    })).toEqual({
+      version: 1,
+      kind: 'project',
+      projectId: project.id,
+    })
+  })
+
   it('enumerates the complete report code surface with honest reachability', () => {
     expect(COURSE_PROJECT_VALIDATION_FATAL_CODES).toEqual([
       'archive-invalid',

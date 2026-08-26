@@ -279,6 +279,21 @@ function flowBlockFromPath(
   blocks: readonly FlowBlock[],
   path: ReadonlyArray<string | number>,
 ): FlowBlock | undefined {
+  const findUniqueById = (
+    candidates: readonly FlowBlock[],
+    blockId: string,
+  ): FlowBlock | undefined => {
+    const matches: FlowBlock[] = []
+    const visit = (entries: readonly FlowBlock[]): void => {
+      for (const entry of entries) {
+        if (entry.id === blockId) matches.push(entry)
+        if (entry.type === 'section') visit(entry.blocks)
+      }
+    }
+    visit(candidates)
+    return matches.length === 1 ? matches[0] : undefined
+  }
+
   let current = blocks
   let selected: FlowBlock | undefined
   for (let index = 0; index < path.length; index += 1) {
@@ -287,7 +302,7 @@ function flowBlockFromPath(
     selected = typeof key === 'number'
       ? current[pathIndex(key) ?? -1]
       : typeof key === 'string'
-        ? current.find((block) => block.id === key)
+        ? findUniqueById(current, key)
         : undefined
     if (!selected) return undefined
     current = selected.type === 'section' ? selected.blocks : []
@@ -433,6 +448,7 @@ export function resolveSchemaValidCourseProjectDiagnosticTarget(
   if (hint.layerItemId) {
     const matches = layerTargetsById(project, hint.layerItemId)
     if (matches.length === 1) return matches[0]!
+    if (matches.length > 1) return projectTarget(project)
   }
   if (hint.surfaceId) {
     const surface = project.surfaces.find((candidate) => candidate.id === hint.surfaceId)
