@@ -40,6 +40,12 @@ export type PlayerAuthoringTarget =
       kind: 'scene-order'
       scope: 'scene'
     }
+  | {
+      kind: 'runtime-content'
+      scope: PlayerAuthoringScope
+      nodeId: string
+      key: string
+    }
 
 export type PlayerAuthoringPatch =
   | {
@@ -67,6 +73,11 @@ export type PlayerAuthoringPatch =
       action: NodeMotionAction
       delayMs: number
     }
+  | {
+      kind: 'runtime-content'
+      target: Extract<PlayerAuthoringTarget, { kind: 'runtime-content' }>
+      value: string
+    }
 
 export interface PlayerAuthoringPatchCommand {
   type: typeof PLAYER_AUTHORING_MESSAGE_TYPES.patch
@@ -87,12 +98,22 @@ export const PLAYER_AUTHORING_CAPABILITIES = Object.freeze([
   'component-targets',
 ] as const)
 
+/** Published V2 additionally supports transient Runtime content repainting. */
+export const PUBLISHED_AUTHORING_CAPABILITIES = Object.freeze([
+  ...PLAYER_AUTHORING_CAPABILITIES,
+  'runtime-content',
+] as const)
+
+export type PlayerAuthoringCapabilities =
+  | typeof PLAYER_AUTHORING_CAPABILITIES
+  | typeof PUBLISHED_AUTHORING_CAPABILITIES
+
 export interface PlayerAuthoringReadyMessage {
   type: typeof PLAYER_AUTHORING_MESSAGE_TYPES.ready
   protocolVersion: typeof PLAYER_AUTHORING_PROTOCOL_VERSION
   sessionId: string
   context: PlayerAuthoringContext
-  capabilities: typeof PLAYER_AUTHORING_CAPABILITIES
+  capabilities: PlayerAuthoringCapabilities
 }
 
 export interface PlayerAuthoringAckMessage {
@@ -176,24 +197,44 @@ const sceneOrderTargetSchema = z.object({
   kind: z.literal('scene-order'),
   scope: z.literal('scene'),
 }).strict()
+const runtimeContentTargetSchema = z.object({
+  kind: z.literal('runtime-content'),
+  scope: z.enum(['scene', 'global']),
+  nodeId: identifier,
+  key: identifier,
+}).strict()
 const targetSchema = z.discriminatedUnion('kind', [
   nativeTargetSchema,
   sceneBackgroundTargetSchema,
   sceneOrderTargetSchema,
+  runtimeContentTargetSchema,
 ])
 
+const legacyCapabilitiesSchema = z.tuple([
+  z.literal('native-node'),
+  z.literal('scene-background'),
+  z.literal('scene-order'),
+  z.literal('node-motion-preview'),
+  z.literal('runtime-targets'),
+  z.literal('component-targets'),
+])
+const publishedCapabilitiesSchema = z.tuple([
+  z.literal('native-node'),
+  z.literal('scene-background'),
+  z.literal('scene-order'),
+  z.literal('node-motion-preview'),
+  z.literal('runtime-targets'),
+  z.literal('component-targets'),
+  z.literal('runtime-content'),
+])
 const readySchema = z.object({
   type: z.literal(PLAYER_AUTHORING_MESSAGE_TYPES.ready),
   protocolVersion: z.literal(PLAYER_AUTHORING_PROTOCOL_VERSION),
   sessionId: identifier,
   context: contextSchema,
-  capabilities: z.tuple([
-    z.literal('native-node'),
-    z.literal('scene-background'),
-    z.literal('scene-order'),
-    z.literal('node-motion-preview'),
-    z.literal('runtime-targets'),
-    z.literal('component-targets'),
+  capabilities: z.union([
+    legacyCapabilitiesSchema,
+    publishedCapabilitiesSchema,
   ]),
   /** The sandbox bridge adds this transport token to every Player message. */
   token: identifier.optional(),
@@ -233,6 +274,11 @@ const patchSchema = z.discriminatedUnion('kind', [
     target: nativeTargetSchema,
     action: nodeMotionActionSchema,
     delayMs: z.number().finite().min(0).max(60_000),
+  }).strict(),
+  z.object({
+    kind: z.literal('runtime-content'),
+    target: runtimeContentTargetSchema,
+    value: z.string().max(1_000_000),
   }).strict(),
 ])
 
@@ -303,7 +349,7 @@ export function parsePlayerAuthoringPatchCommand(
   }
 }
 
-/** Validates the complete authoring handshake, including all V1 capabilities. */
+/** Validates the complete authoring handshake against one declared host capability set. */
 export function parsePlayerAuthoringReadyMessage(
   value: unknown,
 ): PlayerAuthoringReadyParseResult {
@@ -328,7 +374,12 @@ function authoringTargetsEqual(
   return actual.kind === expected.kind &&
     actual.scope === expected.scope &&
     (actual.kind !== 'native-node' ||
-      (expected.kind === 'native-node' && actual.nodeId === expected.nodeId))
+      (expected.kind === 'native-node' && actual.nodeId === expected.nodeId)) &&
+    (actual.kind !== 'runtime-content' || (
+      expected.kind === 'runtime-content'
+      && actual.nodeId === expected.nodeId
+      && actual.key === expected.key
+    ))
 }
 
 /** Only the exact ACK for the snapshot's final command opens the edit canvas. */

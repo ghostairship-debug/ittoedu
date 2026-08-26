@@ -82,6 +82,46 @@ function nativeText(
   }
 }
 
+function teacherController(layerItemId: string, order: number, targetId: string): NativeLayerItem {
+  return {
+    layerItemId,
+    label: '教师控制',
+    frame: { mode: 'absolute', x: 40, y: 140, width: 260, height: 100 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'teacher-controller',
+      data: {
+        title: '教师控制',
+        showSceneProgress: true,
+        compact: false,
+        collapsible: true,
+        defaultCollapsed: false,
+        buttons: [{
+          id: 'go-target',
+          label: '前往镜头',
+          visible: true,
+          action: { type: 'scene.go', sceneId: targetId },
+        }],
+        style: {
+          backgroundColor: '#ffffff',
+          backgroundOpacity: 1,
+          accentColor: '#2563eb',
+          textColor: '#172033',
+          cornerRadius: 8,
+        },
+        includeInStaticExports: false,
+      },
+    },
+  }
+}
+
 function scoped(item: NativeLayerItem): ScopedLayerItem {
   return { item, visibility: { mode: 'all', locationIds: [] } }
 }
@@ -259,6 +299,52 @@ describe('Spatial camera project data vs session pan/zoom', () => {
     const lastClose = deleteSpatialCameraFrameInSession(lastHome.nextSession!, closeUpId, { now: NOW })
     expect(lastClose.ok).toBe(false)
     expect(lastClose.reason).toMatch(/至少需要一个镜头画面/)
+  })
+
+  it('repairs location guards, scoped visibility, and controller aliases when deleting a frame', () => {
+    let session = openSession()
+    session = addSpatialCameraFrameFromSession(session, {
+      id: 'camera-remove',
+      name: '待删镜头',
+      now: NOW,
+    }).nextSession!
+    const project = structuredClone(session.history.present)
+    project.courseState = [{ key: 'ready', valueType: 'boolean', defaultValue: false }]
+    project.navigationGuards = [{
+      id: 'guard-from-camera-remove',
+      effect: 'block',
+      fromLocationIds: ['camera-remove'],
+      toLocationIds: [HOME_FRAME_ID],
+      match: 'all',
+      conditions: [{ type: 'compare', key: 'ready', operator: 'eq', value: false }],
+      message: '请先完成',
+    }]
+    project.globalLayerItems.push(
+      scoped(teacherController('camera-controller', 60, 'camera-remove')),
+      {
+        item: nativeText('camera-only-note', 70),
+        visibility: { mode: 'include', locationIds: ['camera-remove'] },
+      },
+    )
+    session = openSpatialAuthoringSession(courseProjectDocumentSchema.parse(project), {
+      locationId: HOME_FRAME_ID,
+      sessionId: 'spatial-camera-reference-cleanup',
+    })
+
+    const deleted = deleteSpatialCameraFrameInSession(session, 'camera-remove', { now: NOW })
+    const next = deleted.nextSession!.history.present
+
+    expect(deleted.ok).toBe(true)
+    expect(next.navigationGuards).toEqual([])
+    expect(next.globalLayerItems.map((entry) => entry.item.layerItemId))
+      .not.toContain('camera-only-note')
+    const controller = next.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'camera-controller',
+    )?.item
+    expect(controller?.kind === 'native' && controller.content.nativeType === 'teacher-controller'
+      ? controller.content.data.buttons.map((button) => button.action.type)
+      : []).toEqual(['scene.next'])
+    expect(courseProjectDocumentSchema.parse(next)).toEqual(next)
   })
 
   it('G2: fit-to-window restores home camera; AABB fit is a separate session command', () => {

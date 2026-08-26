@@ -16,6 +16,10 @@ import {
 import { deleteEffectiveLayerItem } from './effectiveLayerCommands'
 import { commitCourseProjectMutation } from './courseProjectMutation'
 import {
+  controllerTargetIdsForLocations,
+  repairRemovedCourseReferences,
+} from './courseReferenceCleanup'
+import {
   FLOW_GLOBAL_STRUCTURE_REASON,
   FLOW_LAST_HEADING_REASON,
   FLOW_LAST_LOCATION_REASON,
@@ -28,7 +32,6 @@ import {
   mergeFlowRichText,
   regenerateFlowIdentities,
   removeBlocksById,
-  repairFlowReferences,
   resolveFlowBlock,
   sliceFlowRichText,
   stableFlowId,
@@ -342,23 +345,26 @@ export function deleteFlowEditorBlocks(
   const blocked = staleOrGlobal(document, options)
   if (blocked) return blocked
   if (targets.length === 0) return failCommand('没有可删除的选择')
-  const deletedIds = new Set<string>()
+  const deletedIdsBySurface = new Map<string, Set<string>>()
   try {
     for (const target of targets) {
       const source = resolveFlowBlock(document, target)
+      const deletedIds = deletedIdsBySurface.get(target.surfaceId) ?? new Set<string>()
       collectFlowBlockIds(source.block).forEach((id) => deletedIds.add(id))
+      deletedIdsBySurface.set(target.surfaceId, deletedIds)
     }
   } catch (error) {
     return failCommand(error instanceof Error ? error.message : '无法删除 Flow 块')
   }
-  const locationIdsToRemove = new Set(
-    document.locations
-      .filter((location) => location.kind === 'flow-block' && deletedIds.has(location.blockId))
-      .map((location) => location.id),
-  )
+  const removedFlowLocations = document.locations.filter((location) => (
+    location.kind === 'flow-block'
+    && deletedIdsBySurface.get(location.surfaceId)?.has(location.blockId)
+  ))
+  const removedLocationIds = new Set(removedFlowLocations.map((location) => location.id))
+  const removedControllerTargetIds = controllerTargetIdsForLocations(removedFlowLocations)
   if (
     document.locations.length > 0 &&
-    document.locations.every((location) => locationIdsToRemove.has(location.id))
+    document.locations.every((location) => removedLocationIds.has(location.id))
   ) {
     return failCommand(FLOW_LAST_LOCATION_REASON)
   }
@@ -370,7 +376,7 @@ export function deleteFlowEditorBlocks(
   }
   for (const [surfaceId] of bySurface) {
     const surface = flowSurfaceIn(document, surfaceId)
-    if (wouldLeaveSurfaceWithoutAnchor(surface, deletedIds)) {
+    if (wouldLeaveSurfaceWithoutAnchor(surface, deletedIdsBySurface.get(surfaceId)!)) {
       return failCommand(FLOW_LAST_HEADING_REASON)
     }
   }
@@ -389,7 +395,10 @@ export function deleteFlowEditorBlocks(
       syncFlowCourseLocations(draft, surfaceId)
     }
     if (draft.locations.length === 0) throw new Error(FLOW_LAST_LOCATION_REASON)
-    repairFlowReferences(draft, new Set([...deletedIds, ...locationIdsToRemove]))
+    repairRemovedCourseReferences(draft, {
+      removedLocationIds,
+      removedControllerTargetIds,
+    })
   }, '已删除当前选择', options)
 }
 

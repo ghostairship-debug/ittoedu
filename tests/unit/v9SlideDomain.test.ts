@@ -120,6 +120,46 @@ function sceneComponent(layerItemId: string, order: number): ComponentLayerItem 
   }
 }
 
+function teacherController(layerItemId: string, order: number, targetId: string): NativeLayerItem {
+  return {
+    layerItemId,
+    label: '教师控制',
+    frame: { mode: 'absolute', x: 40, y: 40, width: 260, height: 100 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'teacher-controller',
+      data: {
+        title: '教师控制',
+        showSceneProgress: true,
+        compact: false,
+        collapsible: true,
+        defaultCollapsed: false,
+        buttons: [{
+          id: 'go-target',
+          label: '前往场景',
+          visible: true,
+          action: { type: 'scene.go', sceneId: targetId },
+        }],
+        style: {
+          backgroundColor: '#ffffff',
+          backgroundOpacity: 1,
+          accentColor: '#2563eb',
+          textColor: '#172033',
+          cornerRadius: 8,
+        },
+        includeInStaticExports: false,
+      },
+    },
+  }
+}
+
 function v9SlideFixture(): CourseProjectDocument {
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
@@ -343,6 +383,90 @@ describe('V9 Slide domain', () => {
     expect(renameSlideScene(initial, 'scene-1', '   ').historyEntry).toBe(false)
     expect(renameSlideScene(initial, 'scene-1', '场景 1').nextSession?.history.present)
       .toBe(initial.history.present)
+  })
+
+  it('separates deleted Slide scene, controller alias, and layer-item reference domains', () => {
+    const initial = openSlideAuthoringSession(v9SlideFixture())
+    const added = requireSession(addSlideScene(initial, { now: NOW }))
+    const removedSceneId = activeSceneId(added)
+    const project = structuredClone(added.history.present)
+    const slide = slideSurface(project)
+    const removedScene = slide.scenes.find((scene) => scene.id === removedSceneId)
+    const keptScene = slide.scenes.find((scene) => scene.id !== removedSceneId)
+    const flow = project.surfaces.find((surface) => surface.id === 'surface-flow')
+    const flowLocation = project.locations.find((location) => location.id === 'location-flow')
+    if (!removedScene || !keptScene || !flow || flow.type !== 'flow') {
+      throw new Error('expected mixed Slide/Flow fixture')
+    }
+    if (!flowLocation || flowLocation.kind !== 'flow-block') {
+      throw new Error('expected Flow location')
+    }
+    const flowHeading = flow.blocks[0]
+    if (!flowHeading || flowHeading.type !== 'heading') throw new Error('expected Flow heading')
+    flowHeading.id = removedSceneId
+    flowLocation.blockId = removedSceneId
+    removedScene.layerItems.push(
+      nativeText('removed-node', 1, '待删元素'),
+      nativeText('same-layer-id', 2, '同名元素'),
+    )
+    keptScene.layerItems.push(nativeText('same-layer-id', 3, '保留的同名元素'))
+    project.globalLayerItems.push(scoped(teacherController(
+      'controller-kept-by-flow-alias',
+      60,
+      removedSceneId,
+    )))
+    project.globalInteractions = [
+      {
+        id: 'drop-slide-scene-reference',
+        enabled: true,
+        trigger: { type: 'presenter.command', command: 'next' },
+        conditions: [{ type: 'scene.in', sceneIds: [removedSceneId] }],
+        actions: [{
+          id: 'drop-slide-scene-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+      {
+        id: 'drop-removed-layer-reference',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: 'removed-node' },
+        conditions: [],
+        actions: [{
+          id: 'drop-removed-layer-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+      {
+        id: 'keep-same-layer-id',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: 'same-layer-id' },
+        conditions: [],
+        actions: [{
+          id: 'keep-same-layer-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+    ]
+    const session = openSlideAuthoringSession(courseProjectDocumentSchema.parse(project))
+
+    const deleted = requireSession(deleteSlideScene(session, removedSceneId, { now: NOW }))
+
+    expect(deleted.history.present.globalInteractions.map((rule) => rule.id))
+      .toEqual(['keep-same-layer-id'])
+    const controller = deleted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'controller-kept-by-flow-alias',
+    )?.item
+    expect(controller?.kind === 'native' && controller.content.nativeType === 'teacher-controller'
+      ? controller.content.data.buttons[0]?.action
+      : undefined).toEqual({ type: 'scene.go', sceneId: removedSceneId })
+    expect(courseProjectDocumentSchema.parse(deleted.history.present))
+      .toEqual(deleted.history.present)
   })
 
   it('keeps base state distinct from named-state overrides and commits state commands once', () => {

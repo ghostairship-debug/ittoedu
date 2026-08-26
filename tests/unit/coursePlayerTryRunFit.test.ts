@@ -1,8 +1,29 @@
 import { describe, expect, it, vi } from 'vitest'
+
+const publishedSessionProbe = vi.hoisted(() => ({
+  calls: [] as Array<{ payload: unknown; options: unknown }>,
+  sessions: [] as Array<{ mounts: number; destroys: number }>,
+}))
+
+vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({
+  createPublishedCourseSession(payload: unknown, options: unknown) {
+    publishedSessionProbe.calls.push({ payload, options })
+    const probe = { mounts: 0, destroys: 0 }
+    publishedSessionProbe.sessions.push(probe)
+    return {
+      async mount() { probe.mounts += 1 },
+      async destroy() { probe.destroys += 1 },
+    }
+  },
+}))
+
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import {
   buildPublishedCourseTryRunPayload,
+  fitPublishedCourseHostForMode,
   fitPublishedCourseStage,
+  mountPublishedCourseAuthoring,
+  mountPublishedCourseTryRun,
   waitForHostLayout,
 } from '@/renderer/ui/coursePlayerTryRun'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
@@ -53,6 +74,21 @@ describe('fitPublishedCourseStage', () => {
     expect(adapter.style.left).toBe('0px')
     expect(adapter.style.top).toBe('0px')
   })
+
+  it('leaves the canonical authoring stage to the Workspace transform', () => {
+    const host = document.createElement('div')
+    const adapter = document.createElement('section')
+    adapter.className = 'slide-published-adapter'
+    host.append(adapter)
+    mockClientSize(host, 960, 640)
+
+    fitPublishedCourseHostForMode(host, 'authoring')
+
+    expect(adapter.style.transform).toBe('')
+    expect(adapter.style.left).toBe('')
+    expect(adapter.style.top).toBe('')
+    expect(adapter.dataset.stageFitScale).toBeUndefined()
+  })
 })
 
 describe('waitForHostLayout', () => {
@@ -77,7 +113,7 @@ describe('waitForHostLayout', () => {
 })
 
 describe('buildPublishedCourseTryRunPayload', () => {
-  it('projects only referenced remote project assets while keeping local assets in memory', () => {
+  it('embeds referenced local bytes even when project assets retain remote metadata', () => {
     const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'multi-asset')!
     const project = structuredClone(fixture.data.project)
     project.assets.photo.remote = { url: 'https://cdn.example.com/photo.png?rev=2' }
@@ -99,10 +135,89 @@ describe('buildPublishedCourseTryRunPayload', () => {
       components: {},
     })
 
-    expect(published.assets.photo?.url).toBe('https://cdn.example.com/photo.png?rev=2')
+    expect(published.assets.photo?.url).toMatch(/^data:image\/png;base64,/)
     expect(published.assets.diagram?.url).toMatch(/^data:image\/png;base64,/)
     expect(published.assets.clip?.url).toMatch(/^data:video\/mp4;base64,/)
     expect(published.assets.voice?.url).toMatch(/^data:audio\/mpeg;base64,/)
     expect(published.assets.unused).toBeUndefined()
+  })
+})
+
+describe('mountPublishedCourseTryRun', () => {
+  it('shares local asset URLs while leasing only explicit playback origins', async () => {
+    publishedSessionProbe.calls.length = 0
+    publishedSessionProbe.sessions.length = 0
+    const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'multi-asset')!
+    const project = structuredClone(fixture.data.project)
+    const remoteUrl = 'https://cdn.example.com/photo.png?rev=3'
+    project.assets.photo.remote = { url: remoteUrl }
+    project.network = { connectOrigins: ['https://api.example.com'] }
+    const container = document.createElement('div')
+    mockClientSize(container, 1280, 720)
+    const setPreviewNetworkPolicy = vi.fn(async (_input: {
+      leaseId: string
+      connectOrigins: string[]
+      remoteAssetUrls: string[]
+    }) => undefined)
+    const releasePreviewNetworkPolicy = vi.fn(async (_input: {
+      leaseId: string
+    }) => undefined)
+    const previousDesktopApi = Object.getOwnPropertyDescriptor(window, 'desktopAPI')
+    Object.defineProperty(window, 'desktopAPI', {
+      configurable: true,
+      value: { setPreviewNetworkPolicy, releasePreviewNetworkPolicy },
+    })
+
+    try {
+      const playback = await mountPublishedCourseTryRun({
+        container,
+        project,
+        assetFiles: fixture.data.assetFiles,
+        components: {},
+      })
+      expect(setPreviewNetworkPolicy).toHaveBeenCalledOnce()
+      expect(setPreviewNetworkPolicy).toHaveBeenCalledWith(expect.objectContaining({
+        connectOrigins: ['https://api.example.com'],
+        remoteAssetUrls: [],
+      }))
+      const playbackPhotoUrl = (publishedSessionProbe.calls[0]!.payload as {
+        assets: Record<string, { url: string }>
+      }).assets.photo?.url
+      expect(playbackPhotoUrl).toMatch(/^data:image\/png;base64,/)
+      const leaseId = setPreviewNetworkPolicy.mock.calls[0]![0].leaseId
+
+      await playback.destroy()
+      expect(releasePreviewNetworkPolicy).toHaveBeenCalledOnce()
+      expect(releasePreviewNetworkPolicy).toHaveBeenCalledWith({ leaseId })
+
+      const authoring = await mountPublishedCourseAuthoring({
+        container,
+        project,
+        assetFiles: fixture.data.assetFiles,
+        components: {},
+        sessionId: 'authoring-after-preview',
+        scope: 'scene',
+        stateId: null,
+      })
+      expect(setPreviewNetworkPolicy).toHaveBeenCalledTimes(1)
+      const authoringPhotoUrl = (publishedSessionProbe.calls[1]!.payload as {
+        assets: Record<string, { url: string }>
+      }).assets.photo?.url
+      expect(authoringPhotoUrl).toMatch(/^data:image\/png;base64,/)
+      expect(authoringPhotoUrl).toBe(playbackPhotoUrl)
+
+      await authoring.destroy()
+      expect(releasePreviewNetworkPolicy).toHaveBeenCalledTimes(1)
+      expect(publishedSessionProbe.sessions).toEqual([
+        { mounts: 1, destroys: 1 },
+        { mounts: 1, destroys: 1 },
+      ])
+    } finally {
+      if (previousDesktopApi) {
+        Object.defineProperty(window, 'desktopAPI', previousDesktopApi)
+      } else {
+        Reflect.deleteProperty(window, 'desktopAPI')
+      }
+    }
   })
 })

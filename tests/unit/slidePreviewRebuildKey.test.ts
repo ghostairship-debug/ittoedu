@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { SceneNode } from '@/shared/projectTypes'
+import type {
+  CourseRuntimeDefinition,
+  RuntimeLayerItem,
+  ScopedLayerItem,
+} from '@/shared/courseProjectTypes'
+import type { ExternalComponentNode, SceneNode } from '@/shared/projectTypes'
 import {
   buildSlidePreviewRebuildKey,
   slidePreviewComponentPackageFingerprint,
@@ -8,9 +13,9 @@ import {
 } from '@/renderer/ui/workspaceSlidePreviewRebuild'
 
 /**
- * Proves Slide isolated-Player rebuild keys follow scene/global/asset/package
+ * Proves Slide Published authoring rebuild keys follow scene/global/asset/package
  * structure, not `project` / `componentPackages` / `assetFiles` object identity.
- * Does not prove Workspace, Electron, or a live iframe.
+ * Does not prove Workspace, Electron, or a live browser host.
  */
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -33,6 +38,50 @@ function scene(
     })),
     presentation: { states: [{ id: `${id}-state` }] },
     runtime: { runtimeApiVersion: 2 as const, source: 'runtime-a' },
+  }
+}
+
+function runtime(
+  overrides: Partial<CourseRuntimeDefinition> = {},
+): CourseRuntimeDefinition {
+  return {
+    protocol: 'canvas-runtime',
+    runtimeApiVersion: 2,
+    enabled: true,
+    renderMode: 'dom',
+    source: 'runtime-a',
+    content: {
+      values: { title: '初始标题' },
+      metadata: { title: { label: '标题' } },
+    },
+    assets: { hero: { assetId: 'asset-photo' } },
+    nodeBindings: { anchor: 'n1' },
+    staticFallback: { assetId: 'asset-photo', coverage: 'scene' },
+    ...overrides,
+  }
+}
+
+function globalRuntime(
+  runtimeDefinition: ReturnType<typeof runtime>,
+  overrides: Partial<RuntimeLayerItem> = {},
+): ScopedLayerItem & { item: RuntimeLayerItem } {
+  return {
+    item: {
+      layerItemId: 'runtime-global',
+      label: '全局运行时',
+      frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+      order: 1,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'surface',
+      playbackInitialVisibility: 'inherit',
+      kind: 'runtime',
+      runtime: runtimeDefinition,
+      ...overrides,
+    },
+    visibility: { mode: 'all', locationIds: [] },
   }
 }
 
@@ -61,6 +110,7 @@ function input(
       },
     },
     candidateGlobals: null,
+    candidateLocalItems: null,
     candidateAssets: null,
     sidecarFileIds: ['asset-photo'],
     componentPackages: {
@@ -151,6 +201,248 @@ describe('buildSlidePreviewRebuildKey', () => {
     ).not.toBe(baseline)
   })
 
+  it('keeps patchable Runtime values in one authoring host but rebuilds for other Runtime changes', () => {
+    const baselineRuntime = runtime()
+    const baseline = buildSlidePreviewRebuildKey(input({
+      scene: { ...scene('scene-1'), runtime: baselineRuntime },
+    }))
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        runtime: runtime({
+          content: {
+            values: { title: '作者补写的新标题' },
+            metadata: { title: { label: '标题' } },
+          },
+        }),
+      },
+    }))).toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        runtime: runtime({
+          content: {
+            values: { title: '初始标题', extra: '新增目标' },
+            metadata: { title: { label: '标题' } },
+          },
+        }),
+      },
+    }))).not.toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        runtime: runtime({
+          content: {
+            values: { title: '初始标题' },
+            metadata: { title: { label: '改名后的标题' } },
+          },
+        }),
+      },
+    }))).not.toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        runtime: runtime({ source: 'runtime-b' }),
+      },
+    }))).not.toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        runtime: runtime({ assets: { hero: { assetId: 'asset-other' } } }),
+      },
+    }))).not.toBe(baseline)
+
+    for (const structuralRuntime of [
+      runtime({ protocol: 'surface-runtime', runtimeApiVersion: 3 }),
+      runtime({ enabled: false }),
+      runtime({ renderMode: 'hybrid' }),
+      runtime({ nodeBindings: { anchor: 'n-other' } }),
+      runtime({ staticFallback: { assetId: 'asset-other', coverage: 'scene' } }),
+    ]) {
+      expect(buildSlidePreviewRebuildKey(input({
+        scene: { ...scene('scene-1'), runtime: structuralRuntime },
+      }))).not.toBe(baseline)
+    }
+  })
+
+  it('applies the Runtime values exception to global authoring only and keeps run mode complete', () => {
+    const initialRuntime = runtime()
+    const changedValues = runtime({
+      content: {
+        values: { title: '全局新标题' },
+        metadata: { title: { label: '标题' } },
+      },
+    })
+    const authoringBaseline = buildSlidePreviewRebuildKey(input({
+      candidateGlobals: [globalRuntime(initialRuntime)],
+      globalRuntime: initialRuntime,
+    }))
+    expect(buildSlidePreviewRebuildKey(input({
+      candidateGlobals: [globalRuntime(changedValues)],
+      globalRuntime: changedValues,
+    }))).toBe(authoringBaseline)
+
+    const runBaseline = buildSlidePreviewRebuildKey(input({
+      canvasMode: 'run',
+      candidateGlobals: [globalRuntime(initialRuntime)],
+      globalRuntime: initialRuntime,
+    }))
+    expect(buildSlidePreviewRebuildKey(input({
+      canvasMode: 'run',
+      candidateGlobals: [globalRuntime(changedValues)],
+      globalRuntime: changedValues,
+    }))).not.toBe(runBaseline)
+
+    for (const structuralLayerChange of [
+      { frame: { mode: 'absolute' as const, x: 24, y: 0, width: 1280, height: 720 } },
+      { order: 2 },
+      { visible: false },
+    ]) {
+      expect(buildSlidePreviewRebuildKey(input({
+        candidateGlobals: [globalRuntime(initialRuntime, structuralLayerChange)],
+        globalRuntime: initialRuntime,
+      }))).not.toBe(authoringBaseline)
+    }
+  })
+
+  it('keeps local Runtime text patches incremental but rebuilds for its V9 carrier structure', () => {
+    const item = globalRuntime(runtime()).item
+    const local = {
+      owner: 'scene' as const,
+      item: { ...item, layerItemId: 'runtime-scene' },
+    }
+    const baseline = buildSlidePreviewRebuildKey(input({
+      candidateLocalItems: [local],
+    }))
+
+    expect(buildSlidePreviewRebuildKey(input({
+      candidateLocalItems: [{
+        ...local,
+        item: {
+          ...local.item,
+          runtime: runtime({
+            content: {
+              values: { title: '原位更新' },
+              metadata: { title: { label: '标题' } },
+            },
+          }),
+        },
+      }],
+    }))).toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      candidateLocalItems: [{
+        ...local,
+        item: {
+          ...local.item,
+          frame: { ...local.item.frame, x: 32 },
+        },
+      }],
+    }))).not.toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      candidateLocalItems: [{
+        owner: 'surface',
+        item: local.item,
+        visibility: { mode: 'only', locationIds: ['location-1'] },
+      }],
+    }))).not.toBe(baseline)
+  })
+
+  it('ignores patchable local node order but keeps component carrier and package code identity', () => {
+    const first: ExternalComponentNode = {
+      id: 'component-a',
+      name: '组件',
+      type: 'external-component',
+      x: 100,
+      y: 120,
+      width: 480,
+      height: 280,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: 'inherit',
+      component: { packageId: 'pkg-clock', version: '1.0.0' },
+      props: { title: '初始标题' },
+    }
+    const second = {
+      id: 'text-b',
+      type: 'text' as const,
+    }
+    const changedComponent: ExternalComponentNode = {
+      ...first,
+      x: 260,
+      width: 620,
+      rotation: 12,
+      visible: false,
+      props: { title: '作者改写后的标题' },
+    }
+    const baseline = buildSlidePreviewRebuildKey(input({
+      scene: { ...scene('scene-1'), nodes: [first, second] },
+      componentPackages: {
+        'pkg-clock': {
+          manifest: { id: 'pkg-clock', version: '1.0.0' },
+          files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
+        },
+      },
+    }))
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: { ...scene('scene-1'), nodes: [second, first] },
+      componentPackages: {
+        'pkg-clock': {
+          manifest: { id: 'pkg-clock', version: '1.0.0' },
+          files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
+        },
+      },
+    }))).toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        nodes: [changedComponent, second],
+      },
+      componentPackages: {
+        'pkg-clock': {
+          manifest: { id: 'pkg-clock', version: '1.0.0' },
+          files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
+        },
+      },
+    }))).toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: {
+        ...scene('scene-1'),
+        nodes: [{
+          ...first,
+          component: { packageId: 'pkg-clock', version: '2.0.0' },
+        }, second],
+      },
+      componentPackages: {
+        'pkg-clock': {
+          manifest: { id: 'pkg-clock', version: '1.0.0' },
+          files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
+        },
+      },
+    }))).not.toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
+      scene: { ...scene('scene-1'), nodes: [first, second] },
+      componentPackages: {
+        'pkg-clock': {
+          manifest: { id: 'pkg-clock', version: '1.0.0' },
+          files: { 'runtime.js': Uint8Array.of(1, 2, 4) },
+        },
+      },
+    }))).not.toBe(baseline)
+  })
+
   it('does not stringify the whole project in run mode', () => {
     const structured = {
       canvasMode: 'run' as const,
@@ -179,7 +471,7 @@ describe('buildSlidePreviewRebuildKey', () => {
     expect(leftKey).toContain('"currentSceneId":"scene-1"')
   })
 
-  it('ignores controller frame, rotation, and editingScope so overlay preview does not remount the isolated Player', () => {
+  it('patches controller frame/rotation/visibility without remounting on authoring scope selection', () => {
     const controller = (frame: { x: number; y: number }, rotation: number) => ({
       item: {
         layerItemId: 'teacher-controller',
@@ -220,6 +512,10 @@ describe('buildSlidePreviewRebuildKey', () => {
       candidateGlobals: [controller({ x: 190, y: 638 }, 0)],
     }))
     expect(buildSlidePreviewRebuildKey(input({
+      candidateGlobals: [controller({ x: 240, y: 600 }, 12)],
+    }))).toBe(baseline)
+
+    expect(buildSlidePreviewRebuildKey(input({
       editingScope: 'global',
       candidateGlobals: [controller({ x: 240, y: 600 }, 12)],
     }))).toBe(baseline)
@@ -228,6 +524,12 @@ describe('buildSlidePreviewRebuildKey', () => {
     hidden.item.visible = false
     expect(buildSlidePreviewRebuildKey(input({
       candidateGlobals: [hidden],
+    }))).toBe(baseline)
+
+    const reordered = controller({ x: 190, y: 638 }, 0)
+    reordered.item.order = 2
+    expect(buildSlidePreviewRebuildKey(input({
+      candidateGlobals: [reordered],
     }))).not.toBe(baseline)
   })
 })

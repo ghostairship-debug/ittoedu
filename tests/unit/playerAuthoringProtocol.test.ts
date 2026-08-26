@@ -3,6 +3,7 @@ import {
   PLAYER_AUTHORING_CAPABILITIES,
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,
+  PUBLISHED_AUTHORING_CAPABILITIES,
   isPlayerAuthoringSnapshotAck,
   parsePlayerAuthoringPatchCommand,
   parsePlayerAuthoringReadyMessage,
@@ -46,10 +47,18 @@ describe('Player authoring protocol', () => {
     expect(PLAYER_AUTHORING_CAPABILITIES).toContain('runtime-targets')
     expect(PLAYER_AUTHORING_CAPABILITIES).toContain('component-targets')
     expect(PLAYER_AUTHORING_CAPABILITIES).toContain('node-motion-preview')
+    expect(PLAYER_AUTHORING_CAPABILITIES).not.toContain('runtime-content')
+    expect(PUBLISHED_AUTHORING_CAPABILITIES).toEqual([
+      ...PLAYER_AUTHORING_CAPABILITIES,
+      'runtime-content',
+    ])
   })
 
-  it('validates the complete ready context and V1 capability contract', () => {
+  it('validates the complete ready context and both declared V1 host capability sets', () => {
     expect(parsePlayerAuthoringReadyMessage(ready()).ok).toBe(true)
+    expect(parsePlayerAuthoringReadyMessage(ready({
+      capabilities: [...PUBLISHED_AUTHORING_CAPABILITIES],
+    })).ok).toBe(true)
     expect(parsePlayerAuthoringReadyMessage(ready({
       context: { sceneId: '', stateId: 'state-a' },
     })).ok).toBe(false)
@@ -117,6 +126,44 @@ describe('Player authoring protocol', () => {
     if (!result.ok) return
     expect(result.command.patch.kind).toBe('native-node')
     expect(result.command.revision).toBe(3)
+  })
+
+  it('accepts a bounded Runtime content patch with an exact stable target', () => {
+    const result = parsePlayerAuthoringPatchCommand({
+      ...command(),
+      patch: {
+        kind: 'runtime-content',
+        target: {
+          kind: 'runtime-content',
+          scope: 'global',
+          nodeId: 'runtime-a',
+          key: 'title',
+        },
+        value: '更新后的标题',
+      },
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const barrier = playerAuthoringSnapshotBarrierForCommand(result.command)
+    expect(isPlayerAuthoringSnapshotAck({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.ack,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: result.command.sessionId,
+      requestId: result.command.requestId,
+      revision: result.command.revision,
+      context: result.command.context,
+      target: result.command.patch.target,
+    }, barrier)).toBe(true)
+    expect(isPlayerAuthoringSnapshotAck({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.ack,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: result.command.sessionId,
+      requestId: result.command.requestId,
+      revision: result.command.revision,
+      context: result.command.context,
+      target: { ...result.command.patch.target, key: 'subtitle' },
+    }, barrier)).toBe(false)
   })
 
   it('rejects partial nodes, unsupported versions, and unknown envelope fields', () => {

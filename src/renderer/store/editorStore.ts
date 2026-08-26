@@ -310,6 +310,11 @@ import {
   reorderCourseSurfaces as applyReorderCourseSurfaces,
   type CourseLocationCommandResult,
 } from '../course/courseLocationCommands'
+import {
+  executeCourseLogicAuthoringCommand,
+  type CourseLogicAuthoringCommand,
+  type CourseLogicAuthoringResult,
+} from '../course/courseLogicAuthoringCommands'
 import type {
   CourseEditorDropdownAction,
   CourseEditorPrimaryAction,
@@ -831,6 +836,18 @@ function locationIdsToSceneIds(
   })
 }
 
+function projectGlobalVisibilityToSlides(
+  document: SlideAuthoringSession['history']['present'],
+  visibility: LocationVisibility,
+): GlobalLayerVisibility | null {
+  if (visibility.mode === 'all') return { mode: 'all', sceneIds: [] }
+  const sceneIds = locationIdsToSceneIds(document, visibility.locationIds)
+  if (sceneIds.length > 0) return { mode: visibility.mode, sceneIds }
+  return visibility.mode === 'exclude'
+    ? { mode: 'all', sceneIds: [] }
+    : null
+}
+
 function sceneIdsToLocationIds(
   document: CourseProjectDocument,
   sceneIds: readonly string[],
@@ -876,14 +893,12 @@ export function projectCandidatePreviewDocument(
   const sidecar = state.slideCandidateSidecar ?? emptyCourseAssetSidecar()
   const globalLayer = document.globalLayerItems.flatMap((entry) => {
     const node = courseLayerItemToSceneNode(entry.item)
-    if (!node) return []
+    const visibility = projectGlobalVisibilityToSlides(document, entry.visibility)
+    if (!node || !visibility) return []
     return [{
       node,
       layer: 'overlay' as const,
-      visibility: {
-        mode: entry.visibility.mode,
-        sceneIds: locationIdsToSceneIds(document, entry.visibility.locationIds),
-      },
+      visibility,
     }]
   })
   const runtimes = attachProjectedRuntimes(document, ui.scenes)
@@ -1874,6 +1889,9 @@ export interface EditorState {
     ruleId: string,
     patch: Partial<Omit<InteractionRule, 'id'>>,
   ): InteractionAuthoringCommitResult
+  applyCourseLogicAuthoringCommand(
+    command: CourseLogicAuthoringCommand,
+  ): CourseLogicAuthoringResult
   addInteractionRule(sceneId: string, rule: InteractionRule): void
   updateInteractionRule(sceneId: string, ruleId: string, rule: InteractionRule): void
   deleteInteractionRule(sceneId: string, ruleId: string): void
@@ -4125,13 +4143,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
 
     let expectedOwner: 'global' | 'scene'
-    let projectedItemId: string | undefined
+    const projectedItemId = session.nodeId
+    if (!projectedItemId) return null
     if (session.scope === 'global') {
       if (projection.surfaceType !== 'slide') return null
       expectedOwner = 'global'
-      projectedItemId = document.globalLayerItems.find(
-        (entry) => entry.item.kind === 'runtime',
-      )?.item.layerItemId
     } else {
       const location = document.locations.find(
         (candidate) => candidate.id === projection.locationId,
@@ -4146,15 +4162,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         || surface.type !== 'slide'
         || session.sceneId !== location.sceneId
       ) {
-        // The current authoring iframe only projects Slide scene/global Runtime.
+        // The current Published authoring host only projects Slide scene/global Runtime.
         return null
       }
       expectedOwner = 'scene'
-      projectedItemId = surface.scenes.find(
-        (scene) => scene.id === location.sceneId,
-      )?.layerItems.find((item) => item.kind === 'runtime')?.layerItemId
     }
-    if (!projectedItemId) return null
 
     const row = projection.unifiedRows.find((candidate) => (
       candidate.owner === expectedOwner
@@ -4762,13 +4774,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return null
     }
     let expectedOwner: 'global' | 'scene'
-    let projectedItemId: string | undefined
+    const projectedItemId = session.nodeId
+    if (!projectedItemId) return null
     if (session.scope === 'global') {
       if (projection.surfaceType !== 'slide') return null
       expectedOwner = 'global'
-      projectedItemId = document.globalLayerItems.find(
-        (entry) => entry.item.kind === 'runtime',
-      )?.item.layerItemId
     } else {
       const location = document.locations.find(
         (candidate) => candidate.id === projection.locationId,
@@ -4783,15 +4793,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         || surface.type !== 'slide'
         || session.sceneId !== location.sceneId
       ) {
-        // The current authoring iframe only projects Slide scene/global Runtime.
+        // The current Published authoring host only projects Slide scene/global Runtime.
         return null
       }
       expectedOwner = 'scene'
-      projectedItemId = surface.scenes.find(
-        (scene) => scene.id === location.sceneId,
-      )?.layerItems.find((item) => item.kind === 'runtime')?.layerItemId
     }
-    if (!projectedItemId) return null
     const row = projection.unifiedRows.find((candidate) => (
       candidate.owner === expectedOwner
       && candidate.id === projectedItemId
@@ -4971,7 +4977,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 
   const persistCourseProjectCommand = (
-    result: CourseLocationCommandResult,
+    result: CourseLocationCommandResult | CourseLogicAuthoringResult,
     extra: { statusMessage?: string | null } = {},
   ) => {
     if (!result.ok) {
@@ -8767,6 +8773,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
         '未使用素材已删除',
       )
       return true
+    },
+
+    applyCourseLogicAuthoringCommand(command) {
+      const document = activeCourseDocument(get())
+      if (!document) {
+        const reason = '当前没有可编辑的 Course Project V9 作者会话。'
+        const result: CourseLogicAuthoringResult = {
+          ok: false,
+          code: 'invalid-document',
+          reason,
+          historyEntry: false,
+        }
+        set({ errorMessage: reason, statusMessage: null })
+        return result
+      }
+      const result = executeCourseLogicAuthoringCommand(document, command, {
+        now: new Date().toISOString(),
+      })
+      persistCourseProjectCommand(result, {
+        statusMessage: result.ok ? result.statusMessage : undefined,
+      })
+      return result
     },
 
     applyInteractionTemplateAtTarget(target, template) {

@@ -22,6 +22,13 @@ const sceneRenderers = vi.hoisted(() => ({
   legacy: vi.fn(),
 }))
 
+const publishedCapture = vi.hoisted(() => ({
+  create: vi.fn(),
+  captureScene: vi.fn(),
+  captureLayer: vi.fn(),
+  destroy: vi.fn(),
+}))
+
 vi.mock('../../src/renderer/store/editorStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/store/editorStore')>()
   return {
@@ -98,6 +105,10 @@ vi.mock('../../src/renderer/export/renderSceneImages', () => ({
   renderProjectSceneImages: sceneRenderers.legacy,
 }))
 
+vi.mock('../../src/renderer/export/course/publishedSlideCapture', () => ({
+  createPublishedSlideCaptureSession: publishedCapture.create,
+}))
+
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
   mountPublishedCourseTryRun: vi.fn(async () => ({
@@ -110,8 +121,8 @@ import App from '../../src/renderer/App'
 const NOW = '2026-08-24T00:00:00.000Z'
 const TEST_IMAGE = 'data:image/png;base64,AA=='
 const EXPECTED_COMPLETENESS_ERROR =
-  'PDF 导出不完整：未生成覆盖当前课程全部表面的 PDF 打印内容。\n' +
-  '请检查混合打印计划后重试；为避免遗漏 Flow 或 Spatial 内容，本次未回退到旧版 Slide 快照。'
+  'PDF 导出不完整：Published Course V2 未生成覆盖当前课程全部表面的 PDF 打印内容。\n' +
+  '请检查导出预检与混合打印计划后重试；本次不会回退到旧版 V8 Slide 快照。'
 const EXPECTED_UNAVAILABLE_ERROR =
   'PDF 导出不可用：当前编辑会话没有可发布的 Course Project V9 文档。\n' +
   '请新建或重新打开受支持的课程工程后再试。'
@@ -206,6 +217,14 @@ beforeEach(() => {
   printArtifacts.omitPdfHtml = false
   publishSourceProbe.forceUnavailable = false
   sceneRenderers.legacy.mockReset().mockResolvedValue([TEST_IMAGE])
+  publishedCapture.captureScene.mockReset().mockResolvedValue(TEST_IMAGE)
+  publishedCapture.captureLayer.mockReset().mockResolvedValue(TEST_IMAGE)
+  publishedCapture.destroy.mockReset().mockResolvedValue(undefined)
+  publishedCapture.create.mockReset().mockResolvedValue({
+    captureScene: publishedCapture.captureScene,
+    captureLayer: publishedCapture.captureLayer,
+    destroy: publishedCapture.destroy,
+  })
 })
 
 afterEach(() => {
@@ -298,7 +317,7 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     expect(api.exportPdf).not.toHaveBeenCalled()
   })
 
-  it('retains the existing raster fallback for a pure-Slide course', async () => {
+  it('captures a pure-Slide course through the inert Published host without V8 raster', async () => {
     const project = createBlankCourseProject({
       now: NOW,
       includeDefaultController: false,
@@ -312,8 +331,10 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     await continuePdfExport()
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
-    expect(sceneRenderers.legacy).toHaveBeenCalledOnce()
-    expect(sceneRenderers.legacy.mock.calls[0]?.[2]).toBe(1.5)
+    expect(publishedCapture.create).toHaveBeenCalledOnce()
+    expect(publishedCapture.captureScene).toHaveBeenCalledOnce()
+    expect(publishedCapture.destroy).toHaveBeenCalledOnce()
+    expect(sceneRenderers.legacy).not.toHaveBeenCalled()
     expect(api.exportPdf.mock.calls[0]?.[0].html).toContain(TEST_IMAGE)
   })
 })

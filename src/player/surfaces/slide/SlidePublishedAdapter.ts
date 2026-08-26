@@ -6,7 +6,32 @@ import type {
   CourseLocation,
   NativeElementContent,
 } from '../../../shared/courseProjectTypes'
-import type { TeacherControllerAction } from '../../../shared/projectTypes'
+import type {
+  ExternalComponentNode,
+  ImageNode,
+  SceneNode,
+  ShapeNode,
+  TeacherControllerAction,
+} from '../../../shared/projectTypes'
+import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
+import { renderImageNodeCanvas } from '../../../shared/imageEffects'
+import type {
+  PlayerAuthoringContext,
+  PlayerAuthoringErrorCode,
+  PlayerAuthoringPatch,
+} from '../../../shared/playerAuthoringProtocol'
+import type { NodeMotionAction } from '../../../shared/interactionTypes'
+import type {
+  ComponentHostActions,
+  ComponentAuthoringTargetUpdate,
+  ComponentPackageData,
+} from '../../../shared/componentTypes'
+import type {
+  CourseStateStore as CourseStateStoreContract,
+  RuntimeAuthoringTargetUpdate,
+  RuntimeHostActions,
+  RuntimePresentationApi,
+} from '../../../shared/runtimeTypes'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
@@ -35,6 +60,7 @@ import {
   extractPublishedComponentManifest,
   findComponentPackageSource,
   mountPublishedComponent,
+  type PublishedComponentPackageSource,
   type PublishedComponentMountHandle,
 } from '../publishedComponentMount'
 import { mountPublishedSlidePhaserComponent } from './publishedSlidePhaserComponentMount'
@@ -43,6 +69,7 @@ import { paintPublishedFormula } from '../publishedFormula'
 import {
   createPublishedSurfaceRuntimeSession,
   mountPublishedSurfaceRuntime,
+  type PublishedSurfaceRuntimeSession,
   type PublishedSurfaceRuntimeMountHandle,
 } from '../runtime/publishedSurfaceRuntimeMount'
 import {
@@ -62,6 +89,41 @@ import {
   type PublishedInteractionNodeState,
 } from '../../interactions/PublishedDomInteractionSurfacePort'
 import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
+import type { PublishedAuthoringPatchSurface } from '../publishedAuthoringSession'
+import {
+  mapRuntimeAuthoringTargetsToLayer,
+  mergePublishedAuthoringNode,
+  publishedComponentAuthoringNode,
+  type PublishedSlideAuthoringPatchResult,
+} from './publishedSlideAuthoringPatch'
+import {
+  capturePublishedSlidePng,
+  registerPublishedCaptureResource,
+  type PublishedSlideCaptureLayer,
+} from '../publishedCapture'
+import type { CourseStateStore } from '../../CourseStateStore'
+import {
+  PublishedCarrierSideEffectGate,
+  type PublishedCarrierSideEffects,
+} from '../publishedCourseState'
+
+export interface SlidePublishedAuthoringOptions {
+  readonly stateId: string | null
+  /** Surface-scoped items keep the V8-compatible local `scene` wire scope. */
+  readonly scope: 'scene' | 'surface' | 'global'
+  /**
+   * Ephemeral editor-side packages retain the Component V4 editor schema.
+   * They are never written into the Published V2 payload.
+   */
+  readonly componentPackages?: Readonly<Record<string, ComponentPackageData>>
+  readonly onRuntimeTargetsChanged?: (
+    update: Readonly<RuntimeAuthoringTargetUpdate>,
+  ) => void
+  readonly onComponentTargetsChanged?: (
+    update: Readonly<ComponentAuthoringTargetUpdate>,
+  ) => void
+  readonly courseState?: CourseStateStoreContract
+}
 
 function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
   return structuredClone(payload)
@@ -169,21 +231,37 @@ function appendFallbackImage(wrap: HTMLElement, url: string, alt: string): void 
 function applyNativeTextStyle(
   wrap: HTMLElement,
   data: Extract<NativeElementContent, { nativeType: 'text' }>['data'],
+  frame: PublishedLayerItem['frame'],
 ): void {
-  paintPublishedNativeText(wrap, data)
+  paintPublishedNativeText(wrap, data, frame)
 }
 
-function applyVisibleTextFallback(wrap: HTMLElement, text: string): void {
-  wrap.style.boxSizing = 'border-box'
-  wrap.style.display = 'flex'
-  wrap.style.alignItems = 'center'
-  wrap.style.justifyContent = 'center'
-  wrap.style.padding = '12px 16px'
-  wrap.style.overflow = 'hidden'
-  wrap.style.background = '#0f766e'
-  wrap.style.color = '#ffffff'
-  wrap.style.font = 'bold 22px "Microsoft YaHei", sans-serif'
-  wrap.textContent = text
+function appendVisibleTextFallback(
+  wrap: HTMLElement,
+  instanceId: string,
+  text: string,
+): void {
+  const fallback = wrap.ownerDocument.createElement('div')
+  fallback.className = 'published-surface-runtime-fallback'
+  fallback.dataset.runtimeInstanceId = instanceId
+  fallback.dataset.runtimeFallback = 'true'
+  fallback.textContent = text
+  Object.assign(fallback.style, {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    padding: '12px 16px',
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    background: '#0f766e',
+    color: '#ffffff',
+    font: 'bold 22px "Microsoft YaHei", sans-serif',
+    textAlign: 'center',
+  })
+  wrap.appendChild(fallback)
 }
 
 function isPublishedTeacherController(
@@ -236,6 +314,241 @@ function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
     || item.content.nativeType === 'shape'
 }
 
+function paintPublishedNativeLayerItem(
+  wrap: HTMLElement,
+  item: PublishedNativeLayerItem,
+  resolveAsset: (assetId: string) => string | undefined,
+  mountTeacherController?: (wrap: HTMLElement, item: PublishedNativeLayerItem) => void,
+  staticCapture = false,
+): void {
+  wrap.dataset.nativeType = item.content.nativeType
+  if (isPublishedTeacherController(item)) {
+    mountTeacherController?.(wrap, item)
+    return
+  }
+  if (item.content.nativeType === 'text') {
+    applyNativeTextStyle(wrap, item.content.data, item.frame)
+    return
+  }
+  if (item.content.nativeType === 'video') {
+    if (staticCapture) {
+      Object.assign(wrap.style, {
+        overflow: 'hidden',
+        background: '#0b1120',
+      })
+      const posterId = item.content.data.poster.mode === 'image'
+        ? item.content.data.poster.assetId
+        : undefined
+      const posterUrl = posterId ? resolveAsset(posterId) : undefined
+      if (posterUrl) {
+        const poster = wrap.ownerDocument.createElement('img')
+        poster.src = posterUrl
+        poster.alt = ''
+        Object.assign(poster.style, {
+          width: '100%',
+          height: '100%',
+          objectFit: item.content.data.fit,
+        })
+        wrap.appendChild(poster)
+      } else {
+        const url = resolveAsset(item.content.data.assetId)
+        if (url) {
+          const video = wrap.ownerDocument.createElement('video')
+          video.src = url
+          video.muted = true
+          video.preload = 'auto'
+          Object.assign(video.style, {
+            width: '100%',
+            height: '100%',
+            objectFit: item.content.data.fit,
+          })
+          const targetTime = item.content.data.poster.mode === 'video-frame'
+            ? item.content.data.poster.time
+            : item.content.data.startTime
+          const ready = new Promise<void>((resolve, reject) => {
+            let settled = false
+            const finish = (action: () => void) => {
+              if (settled) return
+              settled = true
+              video.removeEventListener('loadedmetadata', seek)
+              video.removeEventListener('loadeddata', complete)
+              video.removeEventListener('seeked', complete)
+              video.removeEventListener('error', fail)
+              action()
+            }
+            const complete = () => finish(() => {
+              video.pause()
+              resolve()
+            })
+            const fail = () => finish(() => reject(new Error(
+              `视频“${item.layerItemId}”的静态封面无法解码`,
+            )))
+            const seek = () => {
+              try {
+                video.currentTime = Math.max(0, targetTime)
+                if (
+                  video.readyState >= 2
+                  && Math.abs(video.currentTime - Math.max(0, targetTime)) < 0.001
+                ) {
+                  complete()
+                }
+              } catch (cause) {
+                finish(() => reject(cause))
+              }
+            }
+            video.addEventListener('loadedmetadata', seek)
+            video.addEventListener('loadeddata', complete)
+            video.addEventListener('seeked', complete)
+            video.addEventListener('error', fail)
+            if (video.readyState >= 1) seek()
+          })
+          registerPublishedCaptureResource(wrap, {
+            waitForCaptureReady: () => ready,
+          })
+          wrap.appendChild(video)
+        }
+      }
+      const play = wrap.ownerDocument.createElement('span')
+      play.textContent = '▶'
+      Object.assign(play.style, {
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        transform: 'translate(-50%, -50%)',
+        color: '#f8fafc',
+        font: '48px/1 sans-serif',
+      })
+      wrap.appendChild(play)
+      return
+    }
+    const url = resolveAsset(item.content.data.assetId)
+    if (!url) return
+    const video = wrap.ownerDocument.createElement('video')
+    video.controls = true
+    video.src = url
+    video.style.width = '100%'
+    video.style.height = '100%'
+    video.style.objectFit = 'contain'
+    video.style.pointerEvents = 'auto'
+    wrap.appendChild(video)
+    return
+  }
+  if (item.content.nativeType === 'formula') {
+    wrap.style.boxSizing = 'border-box'
+    wrap.style.overflow = 'hidden'
+    paintPublishedFormula(wrap, {
+      formulaId: item.content.data.formulaId,
+      accessibleText: item.content.data.accessibleText,
+      ast: item.content.data.ast,
+      style: item.content.data.style,
+      width: Math.max(1, item.frame.width),
+      height: Math.max(1, item.frame.height),
+    })
+    return
+  }
+  if (item.content.nativeType === 'shape') {
+    const canvas = wrap.ownerDocument.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(item.frame.width))
+    canvas.height = Math.max(1, Math.round(item.frame.height))
+    Object.assign(canvas.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+    })
+    const context = canvas.getContext('2d')
+    if (context) {
+      const node = {
+        ...structuredClone(item.content.data),
+        id: item.layerItemId,
+        name: item.layerItemId,
+        type: 'shape',
+        x: 0,
+        y: 0,
+        width: item.frame.width,
+        height: item.frame.height,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        locked: false,
+        playbackInitialVisibility: item.playbackInitialVisibility,
+      } satisfies ShapeNode
+      renderShapeCanvas(context, node, canvas.width, canvas.height)
+    }
+    wrap.appendChild(canvas)
+    return
+  }
+  if (item.content.nativeType === 'image') {
+    const url = resolveAsset(item.content.data.assetId)
+    if (!url) return
+    const image = wrap.ownerDocument.createElement('img')
+    image.alt = ''
+    image.hidden = true
+    const pending = wrap.ownerDocument.createElement('canvas')
+    pending.width = Math.max(1, Math.round(item.frame.width))
+    pending.height = Math.max(1, Math.round(item.frame.height))
+    Object.assign(pending.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+    })
+    wrap.append(image, pending)
+
+    const node: ImageNode = {
+      id: item.layerItemId,
+      name: item.layerItemId,
+      type: 'image',
+      x: 0,
+      y: 0,
+      width: item.frame.width,
+      height: item.frame.height,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: item.playbackInitialVisibility,
+      ...structuredClone(item.content.data),
+    }
+    const showImageFallback = (): void => {
+      if (pending.parentElement !== wrap || image.parentElement !== wrap) return
+      pending.remove()
+      image.hidden = false
+      Object.assign(image.style, {
+        display: 'block',
+        width: '100%',
+        height: '100%',
+        objectFit: node.fit,
+      })
+    }
+    const render = (): void => {
+      if (pending.parentElement !== wrap || image.parentElement !== wrap) return
+      try {
+        const rendered = renderImageNodeCanvas(
+          image,
+          image.naturalWidth,
+          image.naturalHeight,
+          node,
+          item.frame.width,
+          item.frame.height,
+          Math.min(2, wrap.ownerDocument.defaultView?.devicePixelRatio || 1),
+        )
+        Object.assign(rendered.style, {
+          display: 'block',
+          width: '100%',
+          height: '100%',
+        })
+        rendered.setAttribute('aria-hidden', 'true')
+        pending.replaceWith(rendered)
+      } catch {
+        showImageFallback()
+      }
+    }
+    image.addEventListener('load', render, { once: true })
+    image.addEventListener('error', showImageFallback, { once: true })
+    image.src = url
+    if (image.complete && image.naturalWidth > 0) render()
+  }
+}
+
 function appendLayerNode(
   dom: Document,
   parent: HTMLElement,
@@ -244,9 +557,22 @@ function appendLayerNode(
   resolveAsset: (assetId: string) => string | undefined,
   mountTeacherController?: (wrap: HTMLElement, item: PublishedNativeLayerItem) => void,
   options?: {
-    components?: PublishedCourseV2Payload['components']
+    components?: Readonly<Record<string, PublishedComponentPackageSource>>
     interactive?: boolean
+    includeInvisible?: boolean
+    staticCapture?: boolean
+    courseState?: CourseStateStoreContract
+    componentActions?: Readonly<ComponentHostActions>
+    presentation?: RuntimePresentationApi
+    authoring?: SlidePublishedAuthoringOptions
+    sceneId?: string
     mountComponent?: (handle: PublishedComponentMountHandle) => void
+    registerComponentRemount?: (
+      mount: (
+        item: Extract<PublishedLayerItem, { kind: 'component' }>,
+      ) => PublishedComponentMountHandle,
+    ) => void
+    deferComponentMount?: (mount: () => void) => void
     mountPhaserComponent?: (
       wrap: HTMLElement,
       item: Extract<PublishedLayerItem, { kind: 'component' }>,
@@ -254,7 +580,7 @@ function appendLayerNode(
     mountRuntime?: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => void
   },
 ): HTMLElement | null {
-  if (!item.visible) return null
+  if (!item.visible && !options?.includeInvisible) return null
   const wrap = dom.createElement('div')
   wrap.dataset.slideLayerItem = item.layerItemId
   wrap.dataset.layerSource = source
@@ -268,60 +594,40 @@ function appendLayerNode(
   wrap.style.opacity = String(item.opacity)
   wrap.style.transform = `rotate(${item.rotation}deg)`
   wrap.style.transformOrigin = 'center center'
-  wrap.style.pointerEvents = isPublishedInteractiveLayer(item)
+  wrap.style.pointerEvents = options?.interactive === false
+    ? 'none'
+    : isPublishedInteractiveLayer(item)
     || item.kind === 'component'
     || (
       source === 'scene'
       && item.hitPolicy !== 'pass-through'
       && isPublishedSlidePlayableRuntime(item)
     )
-    ? 'auto'
-    : 'none'
+      ? 'auto'
+      : 'none'
   wrap.style.zIndex = String(item.order)
-  if (item.playbackInitialVisibility === 'hidden') {
+  if (!item.visible) {
     wrap.style.visibility = 'hidden'
     wrap.style.pointerEvents = 'none'
     wrap.setAttribute('aria-hidden', 'true')
   }
-  if (item.kind === 'native') wrap.dataset.nativeType = item.content.nativeType
-  if (isPublishedTeacherController(item)) {
-    mountTeacherController?.(wrap, item)
-  } else if (item.kind === 'native' && item.content.nativeType === 'text') {
-    applyNativeTextStyle(wrap, item.content.data)
-  } else if (item.kind === 'native' && item.content.nativeType === 'video') {
-    const url = resolveAsset(item.content.data.assetId)
-    if (url) {
-      const video = dom.createElement('video')
-      video.controls = true
-      video.src = url
-      video.style.width = '100%'
-      video.style.height = '100%'
-      video.style.objectFit = 'contain'
-      video.style.pointerEvents = 'auto'
-      wrap.appendChild(video)
-    }
-  } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
-    wrap.style.boxSizing = 'border-box'
-    wrap.style.overflow = 'hidden'
-    paintPublishedFormula(wrap, {
-      formulaId: item.content.data.formulaId,
-      accessibleText: item.content.data.accessibleText,
-      ast: item.content.data.ast,
-      style: item.content.data.style,
-      width: Math.max(1, item.frame.width),
-      height: Math.max(1, item.frame.height),
-    })
-  } else if (item.kind === 'native' && item.content.nativeType === 'image') {
-    const url = resolveAsset(item.content.data.assetId)
-    if (url) {
-      const image = dom.createElement('img')
-      image.src = url
-      image.alt = ''
-      image.style.width = '100%'
-      image.style.height = '100%'
-      image.style.objectFit = 'contain'
-      wrap.appendChild(image)
-    }
+  if (
+    !options?.authoring
+    && !options?.staticCapture
+    && item.playbackInitialVisibility === 'hidden'
+  ) {
+    wrap.style.visibility = 'hidden'
+    wrap.style.pointerEvents = 'none'
+    wrap.setAttribute('aria-hidden', 'true')
+  }
+  if (item.kind === 'native') {
+    paintPublishedNativeLayerItem(
+      wrap,
+      item,
+      resolveAsset,
+      mountTeacherController,
+      options?.staticCapture === true,
+    )
   } else if (item.kind === 'component') {
     wrap.dataset.slideFallbackKind = 'component'
     const packageSource = findComponentPackageSource(
@@ -329,35 +635,87 @@ function appendLayerNode(
       item.component.packageId,
       item.component.version,
     )
-    let scenePhaser = false
-    if (source === 'scene' && packageSource !== undefined) {
+    const componentScope = source === 'global' ? 'global' : 'scene'
+    let phaserComponent = false
+    if (packageSource !== undefined) {
       const manifest = extractPublishedComponentManifest(packageSource)
-      scenePhaser = manifest.renderMode === 'phaser'
-        && manifest.supportedScopes.includes('scene')
+      phaserComponent = manifest.renderMode === 'phaser'
+        && manifest.supportedScopes.includes(componentScope)
     }
-    if (scenePhaser && options?.mountPhaserComponent) {
+    if (phaserComponent && options?.mountPhaserComponent) {
       options.mountPhaserComponent(wrap, item)
     } else {
-      const handle = mountPublishedComponent(wrap, {
-        container: wrap,
-        componentId: item.component.packageId,
-        version: item.component.version,
-        instanceId: item.layerItemId,
-        width: item.frame.width,
-        height: item.frame.height,
-        props: item.props,
-        staticFallbackAssetId: item.staticFallbackAssetId,
-        components: options?.components,
-        resolveAsset,
-        interactive: options?.interactive ?? true,
-      })
-      options?.mountComponent?.(handle)
+      const mountInstance = (
+        nextItem: Extract<PublishedLayerItem, { kind: 'component' }> = item,
+      ): PublishedComponentMountHandle => {
+        const handle = mountPublishedComponent(wrap, {
+          container: wrap,
+          componentId: nextItem.component.packageId,
+          version: nextItem.component.version,
+          instanceId: nextItem.layerItemId,
+          width: nextItem.frame.width,
+          height: nextItem.frame.height,
+          props: nextItem.props,
+          staticFallbackAssetId: nextItem.staticFallbackAssetId,
+          components: options?.components,
+          resolveAsset,
+          interactive: options?.interactive ?? true,
+          ...(options?.courseState ? { courseState: options.courseState } : {}),
+          ...(!options?.staticCapture && !options?.authoring && options?.componentActions
+            ? { actions: options.componentActions }
+            : {}),
+          ...(!options?.staticCapture && !options?.authoring && options?.presentation
+            ? { presentation: options.presentation }
+            : {}),
+          ...(options?.staticCapture
+            ? {
+                mode: 'capture' as const,
+                scope: source === 'global' ? 'global' as const : 'scene' as const,
+                ...(source !== 'global' && options.sceneId
+                  ? { sceneId: options.sceneId }
+                  : {}),
+                interactive: false,
+              }
+            : options?.authoring && (
+            source === 'global'
+            || source === (options.authoring.scope === 'surface' ? 'surface' : 'scene')
+          )
+            ? {
+                mode: 'edit' as const,
+                scope: source === 'global' ? 'global' as const : 'scene' as const,
+                ...(source !== 'global' && options.sceneId
+                  ? { sceneId: options.sceneId }
+                  : {}),
+                ...(options.authoring.courseState
+                  ? { courseState: options.authoring.courseState }
+                  : {}),
+                authoring: {
+                  node: publishedComponentAuthoringNode(nextItem),
+                  onTargetsChanged: options.authoring.onComponentTargetsChanged
+                    ?? (() => undefined),
+                },
+              }
+            : {}),
+        })
+        options?.mountComponent?.(handle)
+        return handle
+      }
+      options?.registerComponentRemount?.(mountInstance)
+      if (options?.deferComponentMount) options.deferComponentMount(() => mountInstance())
+      else mountInstance()
     }
   } else if (item.kind === 'runtime') {
     wrap.dataset.slideRuntimeKind = item.runtime.protocol
     if (!item.runtime.enabled) {
       wrap.dataset.slideRuntimeState = 'disabled'
-    } else if (source === 'scene' && isPublishedSlidePlayableRuntime(item) && options?.mountRuntime) {
+    } else if (
+      isPublishedSlidePlayableRuntime(item)
+      && options?.mountRuntime
+      && (
+        source === 'scene'
+        || (source === 'surface' && options.authoring?.scope === 'surface')
+      )
+    ) {
       wrap.dataset.slideRuntimeState = 'playback'
       options.mountRuntime(wrap, item)
     } else {
@@ -369,14 +727,13 @@ function appendLayerNode(
       if (url) {
         appendFallbackImage(wrap, url, 'runtime 后备')
       } else {
-        applyVisibleTextFallback(
+        appendVisibleTextFallback(
           wrap,
+          item.layerItemId,
           firstVisibleText(item.runtime.content.values) ?? item.runtime.protocol,
         )
       }
     }
-  } else {
-    wrap.dataset.slideFallbackKind = item.kind
   }
   parent.appendChild(wrap)
   return wrap
@@ -405,11 +762,33 @@ function exactPresentationStateId(
   return stateId
 }
 
+type SlideRenderedLayerSource = 'scene' | 'surface' | 'global'
+
+interface SlideRenderedLayerRecord {
+  item: PublishedLayerItem
+  readonly source: SlideRenderedLayerSource
+  readonly applicable: boolean
+  readonly wrap: HTMLElement
+  componentHandle?: PublishedComponentMountHandle
+  runtimeHandle?: PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle
+  remountComponent?: (
+    item: Extract<PublishedLayerItem, { kind: 'component' }>,
+  ) => Promise<void>
+  remountRuntime?: (item: PublishedRuntimeLayerItem) => Promise<void>
+}
+
+function renderedLayerKey(
+  source: SlideRenderedLayerSource,
+  layerItemId: string,
+): string {
+  return `${source}:${layerItemId}`
+}
+
 /**
  * Minimal Published Course V2 Slide adapter. It is not PlayerApp and does not
  * project Flow/Spatial through buildStandaloneHtml.
  */
-export class SlidePublishedAdapter implements SurfaceHost {
+export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPatchSurface {
   readonly kind = 'slide' as const
   readonly id: string
   readonly #payload: PublishedCourseV2Payload
@@ -424,6 +803,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
   ) => boolean | void | Promise<boolean | void>
   readonly #replayScene?: () => Promise<boolean>
   readonly #deferTeacherControllerCourseReset: boolean
+  readonly #authoring: SlidePublishedAuthoringOptions | null
+  readonly #staticCapture: boolean
+  readonly #includeGlobalLayerItemsForStaticCapture: boolean
+  readonly #authoringContext: PlayerAuthoringContext | null
   #locationId: string
   #presentationStateId: string | undefined
   #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
@@ -436,15 +819,28 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #controllers: TeacherControllerDom[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
   #phaserComponentHandles: PublishedComponentMountHandle[] = []
-  #deferredPhaserComponentMounts: Array<() => void> = []
+  #deferredCarrierMounts: Array<() => void> = []
   #runtimeHandles: Array<
     PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle
   > = []
-  readonly #runtimeSession = createPublishedSurfaceRuntimeSession()
+  readonly #runtimeSession: PublishedSurfaceRuntimeSession
+  readonly #carrierSideEffects: PublishedCarrierSideEffectGate
+  #carrierEffects: PublishedCarrierSideEffects
+  readonly #runtimeActions?: Readonly<RuntimeHostActions>
+  readonly #componentActions?: Readonly<ComponentHostActions>
   #muted = false
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
+  #renderedLayers = new Map<string, SlideRenderedLayerRecord>()
+  #authoringMotionTimers = new Map<string, number>()
+  #authoringMotionControllers = new Map<string, AbortController>()
+  #authoringRuntimeGeneration = 0
+  #authoringRuntimeRevision = 0
+  #authoringRuntimeTargets = new Map<
+    string,
+    Readonly<{ order: number; update: RuntimeAuthoringTargetUpdate }>
+  >()
 
   constructor(
     payload: PublishedCourseV2Payload,
@@ -461,6 +857,12 @@ export class SlidePublishedAdapter implements SurfaceHost {
         action: TeacherControllerAction,
       ) => boolean | void | Promise<boolean | void>
       deferTeacherControllerCourseReset?: boolean
+      authoring?: SlidePublishedAuthoringOptions
+      staticCapture?: boolean
+      includeGlobalLayerItemsForStaticCapture?: boolean
+      courseState?: CourseStateStore
+      runtimeActions?: Readonly<RuntimeHostActions>
+      componentActions?: Readonly<ComponentHostActions>
     } = {},
   ) {
     this.#payload = clonePayload(payload)
@@ -481,14 +883,172 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#executeTeacherControllerAction = options.executeTeacherControllerAction
     this.#deferTeacherControllerCourseReset = options.deferTeacherControllerCourseReset === true
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
-    this.#presentationStateId = presentationStateIdForLocation(
-      sceneOf(findSlideSurface(this.#payload, this.id), location),
-      location,
-    )
+    const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
+    this.#authoring = options.authoring ?? null
+    this.#staticCapture = options.staticCapture === true
+    this.#runtimeSession = createPublishedSurfaceRuntimeSession(options.courseState)
+    this.#runtimeActions = options.runtimeActions
+    this.#componentActions = options.componentActions
+    this.#carrierSideEffects = new PublishedCarrierSideEffectGate({
+      courseState: this.#runtimeSession.courseState,
+      runtimeActions: this.#runtimeActions,
+      componentActions: this.#componentActions,
+    })
+    this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
+    this.#includeGlobalLayerItemsForStaticCapture =
+      options.includeGlobalLayerItemsForStaticCapture === true
+    this.#authoringContext = this.#authoring
+      ? { sceneId: scene.id, stateId: this.#authoring.stateId }
+      : null
+    this.#presentationStateId = this.#authoring
+      ? this.#authoring.stateId === null
+        ? undefined
+        : exactPresentationStateId(scene, this.#authoring.stateId)
+      : presentationStateIdForLocation(scene, location)
   }
 
   getLocationId(): string {
     return this.#locationId
+  }
+
+  getAuthoringContext(): PlayerAuthoringContext {
+    if (!this.#authoringContext) {
+      throw new Error('当前 Slide Published 宿主不是作者模式。')
+    }
+    return { ...this.#authoringContext }
+  }
+
+  async applyAuthoringPatch(
+    context: PlayerAuthoringContext,
+    patch: PlayerAuthoringPatch,
+  ): Promise<PublishedSlideAuthoringPatchResult> {
+    const expected = this.#authoringContext
+    if (!expected) {
+      return this.#authoringFailure(
+        'unsupported-host-mode',
+        '当前 Slide Published 宿主不是统一画布编辑宿主。',
+      )
+    }
+    if (context.sceneId !== expected.sceneId) {
+      return this.#authoringFailure('scene-mismatch', '编辑命令不属于当前 Slide 场景。')
+    }
+    if (context.stateId !== expected.stateId) {
+      return this.#authoringFailure('state-mismatch', '编辑命令不属于当前 Slide 呈现状态。')
+    }
+
+    if (patch.kind === 'preview-node-motion') {
+      if (patch.target.nodeId !== patch.action.nodeId) {
+        return this.#authoringFailure('target-mismatch', '动画预览目标与动作节点不一致。')
+      }
+      const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      if (!record || !this.#previewAuthoringMotion(record, patch.action, patch.delayMs)) {
+        return this.#authoringFailure(
+          'target-not-found',
+          `当前 Published 宿主中无法预览节点“${patch.target.nodeId}”的动画。`,
+        )
+      }
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'scene-background') {
+      if (patch.backgroundAssetId && !this.#resolveAsset(patch.backgroundAssetId)) {
+        return this.#authoringFailure(
+          'asset-missing',
+          `场景背景素材“${patch.backgroundAssetId}”无法解析。`,
+        )
+      }
+      this.#applyBackground(patch.backgroundColor, patch.backgroundAssetId ?? null)
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'scene-order') {
+      const records = [...this.#renderedLayers.values()]
+        .filter((record) => (
+          record.source === this.#localAuthoringSource()
+          && (record.item.kind === 'native' || record.item.kind === 'component')
+        ))
+        .sort((left, right) => left.item.order - right.item.order)
+      const expectedIds = records.map((record) => record.item.layerItemId)
+      const provided = new Set(patch.nodeIds)
+      if (
+        patch.nodeIds.length !== expectedIds.length
+        || provided.size !== patch.nodeIds.length
+        || expectedIds.some((id) => !provided.has(id))
+      ) {
+        return this.#authoringFailure(
+          'target-mismatch',
+          '节点层级必须完整包含当前场景的全部可编辑节点，且不能重复。',
+        )
+      }
+      const slots = records.map((record) => record.item.order)
+      const byId = new Map(records.map((record) => [record.item.layerItemId, record]))
+      patch.nodeIds.forEach((id, index) => {
+        const record = byId.get(id)!
+        record.item = { ...record.item, order: slots[index]! }
+        record.wrap.style.zIndex = String(slots[index]!)
+      })
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'runtime-content') {
+      const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      if (!record || record.item.kind !== 'runtime') {
+        return this.#authoringFailure(
+          'target-not-found',
+          `当前 Published 宿主中不存在 Runtime“${patch.target.nodeId}”。`,
+        )
+      }
+      if (!Object.prototype.hasOwnProperty.call(
+        record.item.runtime.content.values,
+        patch.target.key,
+      )) {
+        return this.#authoringFailure(
+          'target-mismatch',
+          `Runtime“${patch.target.nodeId}”不再声明文字键“${patch.target.key}”。`,
+        )
+      }
+      const item: PublishedRuntimeLayerItem = {
+        ...record.item,
+        runtime: {
+          ...record.item.runtime,
+          content: {
+            ...record.item.runtime.content,
+            values: {
+              ...record.item.runtime.content.values,
+              [patch.target.key]: patch.value,
+            },
+          },
+        },
+      }
+      if (!record.remountRuntime) {
+        return this.#authoringFailure(
+          'update-failed',
+          `Runtime“${patch.target.nodeId}”没有可重建的作者实例。`,
+        )
+      }
+      // Runtime content is snapshotted into ctx.content during create(). ACK
+      // only after this one carrier has rebuilt and completed its async boot.
+      await record.remountRuntime(item)
+      record.item = item
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.target.nodeId !== patch.node.id) {
+      return this.#authoringFailure('target-mismatch', '编辑目标 ID 与完整节点 ID 不一致。')
+    }
+    const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+    if (!record) {
+      return this.#authoringFailure(
+        'target-not-found',
+        `当前 Published 宿主中不存在节点“${patch.node.id}”。`,
+      )
+    }
+    const merged = mergePublishedAuthoringNode(record.item, patch.node)
+    if (!merged.ok) return merged
+    const assetFailure = this.#validateAuthoringNodeAssets(patch.node)
+    if (assetFailure) return assetFailure
+    await this.#updateAuthoringRecord(record, merged.item)
+    return { ok: true, target: patch.target }
   }
 
   /** Published navigator hint used to avoid resuming a stale scene before setLocationId(). */
@@ -564,6 +1124,11 @@ export class SlidePublishedAdapter implements SurfaceHost {
     root.style.height = '720px'
     root.style.overflow = 'hidden'
     root.style.transformOrigin = '0 0'
+    if (this.#authoring || this.#staticCapture) {
+      root.inert = true
+      root.style.pointerEvents = 'none'
+      root.dataset.hostMode = this.#authoring ? 'authoring' : 'capture'
+    }
     root.hidden = !this.#active
     context.container.appendChild(root)
     this.#root = root
@@ -580,42 +1145,32 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
-    const canMaterializeCurrentGeneration = preparedActivation === null
-      || (
-        preparedActivation.locationId === this.#locationId
-        && !preparedActivation.forced
-      )
-    if (
-      wasInactive
-      && canMaterializeCurrentGeneration
-      && this.#deferredPhaserComponentMounts.length > 0
-    ) {
-      const deferredMounts = this.#deferredPhaserComponentMounts.splice(0)
-      for (const mount of deferredMounts) mount()
+    if (!(wasInactive && preparedActivation !== null)) {
+      this.#carrierSideEffects.activate()
     }
-    if (
-      wasInactive
-      && (this.#runtimeHandles.length > 0 || this.#phaserComponentHandles.length > 0)
-    ) {
+    if (wasInactive) {
       if (preparedActivation !== null) {
         this.#pendingRuntimeActivation = preparedActivation
       } else {
+        this.#mountDeferredCarriers()
         for (const handle of this.#runtimeHandles) {
           handle.setVisible(true)
           handle.resume()
         }
-        for (const handle of this.#phaserComponentHandles) {
+        for (const handle of this.#componentHandles) {
           handle.setVisible(true)
           handle.resume()
         }
       }
     }
+    if (this.#pendingRuntimeActivation !== null) return
     this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    this.#carrierSideEffects.suspend()
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
     this.#completedActiveResetLocationId = null
@@ -623,7 +1178,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
       handle.setVisible(false)
       handle.suspend()
     }
-    for (const handle of this.#phaserComponentHandles) {
+    for (const handle of this.#componentHandles) {
       handle.setVisible(false)
       handle.suspend()
     }
@@ -663,14 +1218,49 @@ export class SlidePublishedAdapter implements SurfaceHost {
     }
   }
 
-  async capture(_request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
-    return {
-      format: 'json',
-      content: JSON.stringify({
-        surfaceId: this.id,
-        locationId: this.#locationId,
-      }),
+  async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    const root = this.#root
+    if (!root) throw new Error('Slide Published 宿主尚未挂载')
+    const allMatches = [...this.#renderedLayers.values()].filter((record) => (
+      request.layerItemId === undefined
+      || record.item.layerItemId === request.layerItemId
+    ))
+    if (request.layerItemId && allMatches.length === 0) {
+      throw new Error(`当前 Published 位置中不存在图层“${request.layerItemId}”`)
     }
+    if (request.layerItemId && allMatches.length > 1) {
+      throw new Error(`当前 Published 位置中图层 ID“${request.layerItemId}”不唯一`)
+    }
+    const records = allMatches.filter((record) => this.#isStaticCaptureRecord(record))
+    if (request.layerItemId && records.length === 0) {
+      throw new Error(
+        `图层“${request.layerItemId}”在当前位置不可见，或已被静态导出策略排除`,
+      )
+    }
+    const ordered = records.sort((left, right) => (
+      left.item.order - right.item.order
+      || left.item.layerItemId.localeCompare(right.item.layerItemId)
+    ))
+    const itemCapture = request.layerItemId !== undefined
+    const layers: PublishedSlideCaptureLayer[] = ordered.map((record) => ({
+      element: record.wrap,
+      x: itemCapture ? 0 : record.item.frame.x,
+      y: itemCapture ? 0 : record.item.frame.y,
+      width: record.item.frame.width,
+      height: record.item.frame.height,
+      rotation: itemCapture ? 0 : record.item.rotation,
+      opacity: itemCapture ? 1 : record.item.opacity,
+    }))
+    const width = itemCapture ? ordered[0]!.item.frame.width : 1280
+    const height = itemCapture ? ordered[0]!.item.frame.height : 720
+    const content = await capturePublishedSlidePng({
+      root,
+      width,
+      height,
+      layers,
+      transparentBackground: itemCapture,
+    })
+    return { format: 'data-url', content, width, height }
   }
 
   async setLocationId(locationId: string): Promise<void> {
@@ -687,20 +1277,26 @@ export class SlidePublishedAdapter implements SurfaceHost {
       && presentationStateId === this.#presentationStateId
     const pendingActivation = this.#pendingRuntimeActivation
     this.#pendingRuntimeActivation = null
+    if (pendingActivation !== null) this.#carrierSideEffects.activate()
     if (completedResetLocationId === locationId && sameLocation) return
     if (
       pendingActivation?.locationId === locationId
       && !pendingActivation.forced
       && sameLocation
     ) {
-      for (const handle of this.#runtimeHandles) {
-        handle.setVisible(true)
-        handle.resume()
+      if (this.#deferredCarrierMounts.length > 0) {
+        this.#mountDeferredCarriers()
+      } else {
+        for (const handle of this.#runtimeHandles) {
+          handle.setVisible(true)
+          handle.resume()
+        }
+        for (const handle of this.#componentHandles) {
+          handle.setVisible(true)
+          handle.resume()
+        }
       }
-      for (const handle of this.#phaserComponentHandles) {
-        handle.setVisible(true)
-        handle.resume()
-      }
+      this.#restoreInteractionsIfActive()
       return
     }
     this.#invalidateInteractions()
@@ -712,10 +1308,13 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async destroy(): Promise<void> {
+    this.#cancelAllAuthoringMotions()
     this.#invalidateInteractions()
+    this.#carrierSideEffects.destroy()
     this.#interactionPort?.destroy()
     this.#interactionPort = null
     this.#interactionNodes.clear()
+    this.#renderedLayers.clear()
     this.#destroyRuntimes()
     this.#destroyComponents()
     this.#destroyControllers()
@@ -729,6 +1328,203 @@ export class SlidePublishedAdapter implements SurfaceHost {
     this.#services = null
   }
 
+  #isStaticCaptureRecord(record: SlideRenderedLayerRecord): boolean {
+    if (!record.applicable || !record.item.visible) return false
+    if (
+      record.source === 'global'
+      && !this.#includeGlobalLayerItemsForStaticCapture
+    ) return false
+    if (isPublishedTeacherController(record.item)) {
+      return record.item.content.data.includeInStaticExports
+    }
+    return true
+  }
+
+  #authoringFailure(
+    code: PlayerAuthoringErrorCode,
+    message: string,
+  ): PublishedSlideAuthoringPatchResult {
+    return { ok: false, code, message }
+  }
+
+  #authoringRecord(
+    scope: 'scene' | 'global',
+    nodeId: string,
+  ): SlideRenderedLayerRecord | null {
+    const source = scope === 'global' ? 'global' : this.#localAuthoringSource()
+    return this.#renderedLayers.get(renderedLayerKey(source, nodeId)) ?? null
+  }
+
+  #localAuthoringSource(): Extract<SlideRenderedLayerSource, 'scene' | 'surface'> {
+    return this.#authoring?.scope === 'surface' ? 'surface' : 'scene'
+  }
+
+  #validateAuthoringNodeAssets(
+    node: SceneNode,
+  ): Extract<PublishedSlideAuthoringPatchResult, { ok: false }> | null {
+    const assetIds: string[] = []
+    if (node.type === 'image') assetIds.push(node.assetId)
+    if (node.type === 'video') {
+      assetIds.push(node.assetId)
+      if (node.poster.assetId) assetIds.push(node.poster.assetId)
+    }
+    const missing = assetIds.find((assetId) => !this.#resolveAsset(assetId))
+    return missing
+      ? {
+          ok: false,
+          code: 'asset-missing',
+          message: `节点“${node.name}”的素材“${missing}”无法解析。`,
+        }
+      : null
+  }
+
+  #applyBackground(color: string, assetId: string | null): void {
+    const root = this.#root
+    if (!root) return
+    const url = assetId ? this.#resolveAsset(assetId) : undefined
+    root.style.backgroundColor = color
+    root.style.backgroundImage = url ? `url(${JSON.stringify(url)})` : 'none'
+    root.style.backgroundPosition = 'center'
+    root.style.backgroundRepeat = 'no-repeat'
+    root.style.backgroundSize = 'cover'
+  }
+
+  #applyRecordFrame(record: SlideRenderedLayerRecord): void {
+    const { item, wrap } = record
+    wrap.style.left = `${item.frame.x}px`
+    wrap.style.top = `${item.frame.y}px`
+    wrap.style.width = `${item.frame.width}px`
+    wrap.style.height = `${item.frame.height}px`
+    wrap.style.opacity = String(item.opacity)
+    wrap.style.transform = `rotate(${item.rotation}deg)`
+    wrap.style.zIndex = String(item.order)
+    const visible = this.#isRenderedLayerVisible(record)
+    wrap.style.visibility = visible ? 'visible' : 'hidden'
+    wrap.style.pointerEvents = this.#authoring ? 'none' : wrap.style.pointerEvents
+    if (visible) wrap.removeAttribute('aria-hidden')
+    else wrap.setAttribute('aria-hidden', 'true')
+  }
+
+  #isRenderedLayerVisible(record: SlideRenderedLayerRecord): boolean {
+    if (!record.item.visible) return false
+    if (
+      this.#authoring
+      && record.source === 'global'
+      && this.#authoring.scope === 'global'
+    ) return true
+    return record.applicable
+  }
+
+  async #updateAuthoringRecord(
+    record: SlideRenderedLayerRecord,
+    item: PublishedLayerItem,
+  ): Promise<void> {
+    this.#cancelAuthoringMotion(item.layerItemId)
+    if (item.kind === 'component') {
+      if (!record.remountComponent) {
+        throw new Error(`Component“${item.layerItemId}”没有可重建的作者实例。`)
+      }
+      await record.remountComponent(item)
+      record.item = item
+      this.#applyRecordFrame(record)
+    } else if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
+      record.item = item
+      this.#applyRecordFrame(record)
+      this.#remountAuthoringControllers()
+    } else if (item.kind === 'native') {
+      record.item = item
+      this.#applyRecordFrame(record)
+      record.wrap.replaceChildren()
+      paintPublishedNativeLayerItem(record.wrap, item, this.#resolveAsset)
+    } else {
+      record.item = item
+      this.#applyRecordFrame(record)
+    }
+    this.#refreshInteractionNodesFromRecords()
+  }
+
+  #remountAuthoringControllers(): void {
+    this.#destroyControllers()
+    for (const record of this.#renderedLayers.values()) {
+      if (!isPublishedTeacherController(record.item)) continue
+      record.wrap.replaceChildren()
+      this.#mountTeacherController(record.wrap, record.item)
+    }
+  }
+
+  #refreshInteractionNodesFromRecords(): void {
+    this.#interactionNodes.clear()
+    for (const record of this.#renderedLayers.values()) {
+      this.#registerInteractionNode(
+        record.wrap,
+        record.item,
+        record.source,
+        record.applicable,
+      )
+    }
+    this.#interactionPort?.refreshNodes(
+      this.#interactionNodes.values(),
+      ++this.#interactionGeneration,
+    )
+    if (this.#authoring) this.#interactionPort?.setActive(true)
+  }
+
+  #previewAuthoringMotion(
+    record: SlideRenderedLayerRecord,
+    action: NodeMotionAction,
+    delayMs: number,
+  ): boolean {
+    const root = this.#root
+    const port = this.#interactionPort
+    const targetWindow = root?.ownerDocument.defaultView
+    if (!root || !port || !targetWindow || !root.contains(record.wrap)) return false
+    this.#cancelAuthoringMotion(action.nodeId)
+    const start = () => {
+      this.#authoringMotionTimers.delete(action.nodeId)
+      if (!this.#root?.contains(record.wrap)) return
+      const controller = new AbortController()
+      this.#authoringMotionControllers.set(action.nodeId, controller)
+      const result = port.executeNodeMotion(action, {
+        ruleId: 'authoring-preview',
+        stepId: `authoring-preview:${action.nodeId}`,
+        signal: controller.signal,
+        restartFromBeginning: true,
+      })
+      void Promise.resolve(result).then((completed) => {
+        if (this.#authoringMotionControllers.get(action.nodeId) !== controller) return
+        const restore = () => this.#cancelAuthoringMotion(action.nodeId)
+        if (completed !== false && action.type === 'node.exit') {
+          const timer = targetWindow.setTimeout(restore, 240)
+          this.#authoringMotionTimers.set(action.nodeId, timer)
+        } else restore()
+      }, () => this.#cancelAuthoringMotion(action.nodeId))
+    }
+    const delay = Math.max(0, Math.min(60_000, delayMs))
+    if (delay === 0) start()
+    else {
+      this.#authoringMotionTimers.set(action.nodeId, targetWindow.setTimeout(start, delay))
+    }
+    return true
+  }
+
+  #cancelAuthoringMotion(nodeId: string): void {
+    const targetWindow = this.#root?.ownerDocument.defaultView
+    const timer = this.#authoringMotionTimers.get(nodeId)
+    if (timer !== undefined && targetWindow) targetWindow.clearTimeout(timer)
+    this.#authoringMotionTimers.delete(nodeId)
+    this.#authoringMotionControllers.get(nodeId)?.abort()
+    this.#authoringMotionControllers.delete(nodeId)
+    this.#interactionPort?.resetLocalVisibility()
+  }
+
+  #cancelAllAuthoringMotions(): void {
+    const ids = new Set([
+      ...this.#authoringMotionTimers.keys(),
+      ...this.#authoringMotionControllers.keys(),
+    ])
+    ids.forEach((id) => this.#cancelAuthoringMotion(id))
+  }
+
   #invalidateInteractions(): void {
     this.#onInteractionInvalidated?.()
     this.#interactionPort?.setActive(false)
@@ -736,12 +1532,16 @@ export class SlidePublishedAdapter implements SurfaceHost {
 
   #restoreInteractionsIfActive(): void {
     if (!this.#active || !this.#interactionPort || !this.#root) return
+    if (this.#authoring) {
+      this.#interactionPort.setActive(true)
+      return
+    }
     this.#interactionPort.setActive(true)
     this.#onInteractionReady?.()
   }
 
   #destroyComponents(): void {
-    this.#deferredPhaserComponentMounts = []
+    this.#deferredCarrierMounts = []
     for (const handle of this.#componentHandles) {
       try {
         handle.destroy()
@@ -751,6 +1551,29 @@ export class SlidePublishedAdapter implements SurfaceHost {
     }
     this.#componentHandles = []
     this.#phaserComponentHandles = []
+  }
+
+  #mountDeferredCarriers(): void {
+    const mounts = this.#deferredCarrierMounts
+    this.#deferredCarrierMounts = []
+    for (const mount of mounts) mount()
+  }
+
+  #publishAuthoringRuntimeTargets(sceneId: string): void {
+    const publish = this.#authoring?.onRuntimeTargetsChanged
+    if (!publish) return
+    publish(Object.freeze({
+      revision: ++this.#authoringRuntimeRevision,
+      scope: 'scene' as const,
+      sceneId,
+      targets: Object.freeze(
+        [...this.#authoringRuntimeTargets.entries()]
+          .sort(([leftId, left], [rightId, right]) => (
+            left.order - right.order || leftId.localeCompare(rightId, 'en')
+          ))
+          .flatMap(([, entry]) => entry.update.targets),
+      ),
+    }))
   }
 
   #destroyRuntimes(): void {
@@ -827,12 +1650,13 @@ export class SlidePublishedAdapter implements SurfaceHost {
           })
         })
       },
-      getInteractive: () => this.#active,
+      getInteractive: () => this.#active && !this.#authoring && !this.#staticCapture,
     })
     this.#controllers.push(controller)
   }
 
   async #handleControllerAction(action: TeacherControllerAction): Promise<void> {
+    if (this.#authoring) return
     if (this.#executeTeacherControllerAction) {
       const handled = await this.#executeTeacherControllerAction(action)
       if (handled !== false) {
@@ -898,10 +1722,29 @@ export class SlidePublishedAdapter implements SurfaceHost {
     }))
   }
 
+  #publishedPresentationApi(
+    scene: PublishedSlideScene,
+    actions: Readonly<RuntimeHostActions> | undefined = this.#runtimeActions,
+  ): RuntimePresentationApi {
+    return {
+      current: () => this.#presentationStateId ?? null,
+      states: () => Object.freeze((scene.presentation?.states ?? []).map((state) => (
+        Object.freeze({ id: state.id, name: state.name })
+      ))),
+      setState: (stateId) => (
+        actions?.goToScene(scene.id, stateId) ?? false
+      ),
+      transitionTo: (stateId) => (
+        actions?.goToScene(scene.id, stateId) ?? false
+      ),
+    }
+  }
+
   #registerInteractionNode(
     wrap: HTMLElement,
     item: PublishedLayerItem,
     source: PublishedInteractionNodeSource,
+    applicable = true,
   ): void {
     if (this.#interactionNodes.has(item.layerItemId)) return
     const authoredPointerEvents = wrap.style.pointerEvents || 'none'
@@ -920,7 +1763,11 @@ export class SlidePublishedAdapter implements SurfaceHost {
       ),
       canBindClick: () => canBindPublishedNativeClick(item),
       canRunMotion: () => true,
-      authoredVisible: () => item.playbackInitialVisibility !== 'hidden',
+      authoredVisible: () => item.visible && (
+        this.#authoring
+          ? source !== 'global' || applicable || this.#authoring.scope === 'global'
+          : item.playbackInitialVisibility !== 'hidden'
+      ),
       applyInteractionState: (state: PublishedInteractionNodeState) => {
         const visible = state.visible
         wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
@@ -946,9 +1793,15 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #render(): void {
     const root = this.#root
     if (!root) return
+    this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
+    const carrierEffects = this.#carrierEffects
+    const authoringRuntimeGeneration = ++this.#authoringRuntimeGeneration
+    this.#authoringRuntimeTargets.clear()
     this.#pendingRuntimeActivation = null
+    this.#cancelAllAuthoringMotions()
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
+    this.#renderedLayers.clear()
     this.#destroyRuntimes()
     this.#destroyComponents()
     this.#destroyControllers()
@@ -985,125 +1838,323 @@ export class SlidePublishedAdapter implements SurfaceHost {
     const mountController = (wrap: HTMLElement, item: PublishedNativeLayerItem) => {
       this.#mountTeacherController(wrap, item)
     }
-    const layerOptions = {
-      components: this.#payload.components,
-      interactive: this.#active,
-      mountComponent: (handle: PublishedComponentMountHandle) => {
-        this.#componentHandles.push(handle)
-      },
-      mountPhaserComponent: (
-        wrap: HTMLElement,
-        item: Extract<PublishedLayerItem, { kind: 'component' }>,
-      ) => {
-        const mountPlayback = () => {
-          if (!this.#active) return
-          const markFailure = () => {
-            wrap.dataset.slideFallbackKind = 'component'
-            wrap.dataset.slideComponentState = 'fallback'
-            wrap.style.pointerEvents = 'none'
-          }
-          wrap.dataset.slideComponentState = 'playback'
-          const handle = mountPublishedSlidePhaserComponent(wrap, {
-            container: wrap,
-            componentId: item.component.packageId,
-            version: item.component.version,
-            instanceId: item.layerItemId,
-            width: item.frame.width,
-            height: item.frame.height,
-            props: item.props,
-            staticFallbackAssetId: item.staticFallbackAssetId,
-            components: this.#payload.components,
-            resolveAsset: this.#resolveAsset,
-            mode: 'preview',
-            scope: 'scene',
-            sceneId: scene.id,
-            interactive: true,
-            events: this.#runtimeSession.events,
-            courseState: this.#runtimeSession.courseState,
-            reportError: (phase, error) => {
-              markFailure()
-              this.#services?.reportDiagnostic?.({
-                surfaceId: this.id,
-                phase: 'mount',
-                severity: 'error',
-                message: `Component“${item.layerItemId}”${phase}失败：${error.message}`,
-                cause: error,
-              })
-            },
-          })
-          if (!handle.ok) markFailure()
-          this.#componentHandles.push(handle)
-          this.#phaserComponentHandles.push(handle)
-        }
-        if (!this.#active) {
-          wrap.dataset.slideComponentState = 'deferred'
-          this.#deferredPhaserComponentMounts.push(() => {
-            if (this.#root?.contains(wrap) === true) mountPlayback()
-          })
-          return
-        }
-        mountPlayback()
-      },
-      mountRuntime: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => {
-        if (!this.#active) {
-          wrap.dataset.slideRuntimeState = 'deferred'
-          wrap.style.pointerEvents = 'none'
-          return
-        }
-        const markFailure = () => {
-          wrap.dataset.slideFallbackKind = 'runtime'
-          wrap.dataset.slideRuntimeState = 'fallback'
-          wrap.style.pointerEvents = 'none'
-        }
-        const mountOptions = {
-          instanceId: item.layerItemId,
-          runtime: item.runtime,
-          width: item.frame.width,
-          height: item.frame.height,
-          visible: this.#active,
-          resolveAsset: this.#resolveAsset,
-          session: this.#runtimeSession,
-          fallbackText: firstVisibleText(item.runtime.content.values)
-            ?? item.runtime.protocol,
-          reportError: (phase, error) => {
-            markFailure()
-            this.#services?.reportDiagnostic?.({
-              surfaceId: this.id,
-              phase: 'mount',
-              severity: 'error',
-              message: `Runtime“${item.layerItemId}”${phase}失败：${error.message}`,
-              cause: error,
-            })
-          },
-        } satisfies Parameters<typeof mountPublishedSurfaceRuntime>[1]
-        const handle = isPublishedSlideCanvasRuntime(item)
-          ? mountPublishedCanvasRuntime(wrap, {
-              ...mountOptions,
-              sceneId: scene.id,
-            })
-          : mountPublishedSurfaceRuntime(wrap, mountOptions)
-        if (!handle.ok) markFailure()
-        this.#runtimeHandles.push(handle)
-      },
-    }
+    if (this.#authoring) this.#publishAuthoringRuntimeTargets(scene.id)
     for (const entry of composition.entries) {
-      if (!entry.mounted) continue
       const source = entry.source as 'scene' | 'surface' | 'global'
+      const authoringSnapshotNode = this.#authoring !== null
+        && (source === this.#localAuthoringSource() || source === 'global')
+        && (entry.item.kind === 'native' || entry.item.kind === 'component')
+      const localCarrierAuthoring = this.#authoring !== null
+        && source === this.#localAuthoringSource()
+      const authoringRuntime = this.#authoring !== null
+        && entry.item.kind === 'runtime'
+        && (
+          source === this.#localAuthoringSource()
+          || (
+            source === 'global'
+            && (entry.applicable || this.#authoring.scope === 'global')
+          )
+        )
+      if (!entry.mounted && !authoringSnapshotNode && !authoringRuntime) continue
+
+      const effectivelyVisible = entry.item.visible && (
+        entry.applicable
+        || (
+          this.#authoring !== null
+          && source === 'global'
+          && this.#authoring.scope === 'global'
+        )
+      )
+      const renderedItem: PublishedLayerItem = effectivelyVisible === entry.item.visible
+        ? entry.item
+        : { ...entry.item, visible: effectivelyVisible }
+      let record: SlideRenderedLayerRecord | null = null
+      let mountedComponentHandle: PublishedComponentMountHandle | undefined
+      let mountedRuntimeHandle:
+        | PublishedSurfaceRuntimeMountHandle
+        | PublishedCanvasRuntimeMountHandle
+        | undefined
+      let registeredComponentMount: ((
+        item: Extract<PublishedLayerItem, { kind: 'component' }>,
+      ) => PublishedComponentMountHandle) | undefined
+      let remountComponent: ((
+        item: Extract<PublishedLayerItem, { kind: 'component' }>,
+      ) => Promise<void>) | undefined
+      let remountRuntime: ((item: PublishedRuntimeLayerItem) => Promise<void>) | undefined
+      let runtimeMountRevision = 0
+      const rememberComponentHandle = (
+        handle: PublishedComponentMountHandle,
+        phaser = false,
+      ): void => {
+        mountedComponentHandle = handle
+        if (record) record.componentHandle = handle
+        this.#componentHandles.push(handle)
+        if (phaser) this.#phaserComponentHandles.push(handle)
+      }
+      const rememberRuntimeHandle = (
+        handle: PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle,
+      ): void => {
+        mountedRuntimeHandle = handle
+        if (record) record.runtimeHandle = handle
+        this.#runtimeHandles.push(handle)
+      }
       const wrap = appendLayerNode(
         root.ownerDocument,
         stage,
-        entry.item,
+        renderedItem,
         source,
         this.#resolveAsset,
         mountController,
-        layerOptions,
+        {
+          components: this.#authoring?.componentPackages ?? this.#payload.components,
+          interactive: !this.#authoring && !this.#staticCapture,
+          includeInvisible: this.#authoring !== null,
+          staticCapture: this.#staticCapture,
+          ...(carrierEffects.courseState
+            ? { courseState: carrierEffects.courseState }
+            : {}),
+          ...(!this.#authoring && !this.#staticCapture && carrierEffects.componentActions
+            ? { componentActions: carrierEffects.componentActions }
+            : {}),
+          ...(!this.#authoring && !this.#staticCapture
+            ? { presentation: this.#publishedPresentationApi(scene, carrierEffects.runtimeActions) }
+            : {}),
+          ...(this.#authoring
+            ? { authoring: this.#authoring, sceneId: scene.id }
+            : {}),
+          mountComponent: (handle) => rememberComponentHandle(handle),
+          registerComponentRemount: (mount) => {
+            registeredComponentMount = mount
+          },
+          ...(!this.#active && !this.#authoring && !this.#staticCapture
+            ? {
+                deferComponentMount: (mount: () => void) => {
+                  this.#deferredCarrierMounts.push(mount)
+                },
+              }
+            : {}),
+          mountPhaserComponent: (componentWrap, item) => {
+            const componentScope: 'scene' | 'global' = source === 'global' ? 'global' : 'scene'
+            const componentCarrierAuthoring = this.#authoring !== null
+              && (source === 'global' || localCarrierAuthoring)
+            const mountInstance = (
+              nextItem: Extract<PublishedLayerItem, { kind: 'component' }> = item,
+            ): PublishedComponentMountHandle => {
+              const markFailure = () => {
+                componentWrap.dataset.slideFallbackKind = 'component'
+                componentWrap.dataset.slideComponentState = 'fallback'
+                componentWrap.style.pointerEvents = 'none'
+              }
+              componentWrap.dataset.slideComponentState = this.#authoring
+                ? 'authoring'
+                : 'playback'
+              const handle = mountPublishedSlidePhaserComponent(componentWrap, {
+                container: componentWrap,
+                componentId: nextItem.component.packageId,
+                version: nextItem.component.version,
+                instanceId: nextItem.layerItemId,
+                width: nextItem.frame.width,
+                height: nextItem.frame.height,
+                props: nextItem.props,
+                staticFallbackAssetId: nextItem.staticFallbackAssetId,
+                components: this.#authoring?.componentPackages ?? this.#payload.components,
+                resolveAsset: this.#resolveAsset,
+                mode: this.#authoring
+                  ? componentCarrierAuthoring ? 'edit' : 'capture'
+                  : this.#staticCapture ? 'capture' : 'preview',
+                scope: componentScope,
+                ...(componentScope === 'scene' ? { sceneId: scene.id } : {}),
+                interactive: !this.#authoring && !this.#staticCapture,
+                events: this.#runtimeSession.events,
+                courseState: this.#authoring?.courseState
+                  ?? carrierEffects.courseState,
+                ...(!this.#authoring && !this.#staticCapture && carrierEffects.componentActions
+                  ? { actions: carrierEffects.componentActions }
+                  : {}),
+                ...(!this.#authoring && !this.#staticCapture
+                  ? { presentation: this.#publishedPresentationApi(scene, carrierEffects.runtimeActions) }
+                  : {}),
+                ...(componentCarrierAuthoring && this.#authoring
+                  ? {
+                      authoring: {
+                        node: publishedComponentAuthoringNode(nextItem),
+                        onTargetsChanged: this.#authoring.onComponentTargetsChanged
+                          ?? (() => undefined),
+                      },
+                    }
+                  : {}),
+                reportError: (phase, error) => {
+                  markFailure()
+                  this.#services?.reportDiagnostic?.({
+                    surfaceId: this.id,
+                    phase: 'mount',
+                    severity: 'error',
+                    message: `Component“${nextItem.layerItemId}”${phase}失败：${error.message}`,
+                    cause: error,
+                  })
+                },
+              })
+              if (!handle.ok) markFailure()
+              rememberComponentHandle(handle, true)
+              return handle
+            }
+            registeredComponentMount = mountInstance
+            if (!this.#active && !this.#authoring) {
+              componentWrap.dataset.slideComponentState = 'deferred'
+              this.#deferredCarrierMounts.push(() => {
+                if (this.#root?.contains(componentWrap) === true) mountInstance()
+              })
+              return
+            }
+            mountInstance()
+          },
+          mountRuntime: (runtimeWrap, item) => {
+            const mountInstance = (
+              nextItem: PublishedRuntimeLayerItem,
+            ): PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle => {
+              const mountRevision = ++runtimeMountRevision
+              const isCurrentMount = () => (
+                authoringRuntimeGeneration === this.#authoringRuntimeGeneration
+                && mountRevision === runtimeMountRevision
+              )
+              const markFailure = () => {
+                runtimeWrap.dataset.slideFallbackKind = 'runtime'
+                runtimeWrap.dataset.slideRuntimeState = 'fallback'
+                runtimeWrap.style.pointerEvents = 'none'
+              }
+              const mountOptions = {
+                instanceId: nextItem.layerItemId,
+                runtime: nextItem.runtime,
+                width: nextItem.frame.width,
+                height: nextItem.frame.height,
+                visible: this.#active || this.#authoring !== null,
+                resolveAsset: this.#resolveAsset,
+                session: this.#runtimeSession,
+                fallbackText: firstVisibleText(nextItem.runtime.content.values)
+                  ?? nextItem.runtime.protocol,
+                ...(carrierEffects.courseState
+                  ? { courseState: carrierEffects.courseState }
+                  : {}),
+                ...(!this.#authoring && !this.#staticCapture && carrierEffects.runtimeActions
+                  ? { actions: carrierEffects.runtimeActions }
+                  : {}),
+                ...(!this.#authoring && !this.#staticCapture
+                  ? { presentation: this.#publishedPresentationApi(scene, carrierEffects.runtimeActions) }
+                  : {}),
+                ...(localCarrierAuthoring && this.#authoring
+                  ? {
+                      mode: 'authoring' as const,
+                      courseState: this.#authoring.courseState
+                        ?? carrierEffects.courseState,
+                      authoring: {
+                        scope: 'scene' as const,
+                        sceneId: scene.id,
+                        onTargetsChanged: (
+                          update: Readonly<RuntimeAuthoringTargetUpdate>,
+                        ) => {
+                          if (!isCurrentMount()) return
+                          const mapped = mapRuntimeAuthoringTargetsToLayer(update, nextItem)
+                          if (mapped.targets.length > 0) {
+                            this.#authoringRuntimeTargets.set(nextItem.layerItemId, {
+                              order: nextItem.order,
+                              update: mapped,
+                            })
+                          } else this.#authoringRuntimeTargets.delete(nextItem.layerItemId)
+                          this.#publishAuthoringRuntimeTargets(scene.id)
+                        },
+                      },
+                    }
+                  : this.#authoring || this.#staticCapture
+                    ? { mode: 'capture' as const }
+                    : {}),
+                reportError: (phase, error) => {
+                  if (!isCurrentMount()) return
+                  if (phase !== 'destroy') {
+                    markFailure()
+                    if (this.#authoringRuntimeTargets.delete(nextItem.layerItemId)) {
+                      this.#publishAuthoringRuntimeTargets(scene.id)
+                    }
+                  }
+                  this.#services?.reportDiagnostic?.({
+                    surfaceId: this.id,
+                    phase: 'mount',
+                    severity: 'error',
+                    message: `Runtime“${nextItem.layerItemId}”${phase}失败：${error.message}`,
+                    cause: error,
+                  })
+                },
+              } satisfies Parameters<typeof mountPublishedSurfaceRuntime>[1]
+              runtimeWrap.dataset.slideRuntimeState = localCarrierAuthoring
+                ? 'authoring'
+                : this.#authoring || this.#staticCapture ? 'capture' : 'playback'
+              const handle = isPublishedSlideCanvasRuntime(nextItem)
+                ? mountPublishedCanvasRuntime(runtimeWrap, {
+                    ...mountOptions,
+                    sceneId: scene.id,
+                  })
+                : mountPublishedSurfaceRuntime(runtimeWrap, mountOptions)
+              if (!handle.ok) markFailure()
+              rememberRuntimeHandle(handle)
+              return handle
+            }
+            remountRuntime = async (nextItem) => {
+              runtimeMountRevision += 1
+              if (this.#authoringRuntimeTargets.delete(nextItem.layerItemId)) {
+                this.#publishAuthoringRuntimeTargets(scene.id)
+              }
+              const previous = mountedRuntimeHandle
+              if (previous) {
+                const index = this.#runtimeHandles.indexOf(previous)
+                if (index >= 0) this.#runtimeHandles.splice(index, 1)
+                previous.destroy()
+              }
+              mountedRuntimeHandle = undefined
+              if (record) delete record.runtimeHandle
+              runtimeWrap.replaceChildren()
+              const handle = mountInstance(nextItem)
+              await handle.waitForReady()
+            }
+            if (!this.#active && !this.#authoring && !this.#staticCapture) {
+              runtimeWrap.dataset.slideRuntimeState = 'deferred'
+              this.#deferredCarrierMounts.push(() => {
+                if (this.#root?.contains(runtimeWrap) === true) mountInstance(item)
+              })
+            } else mountInstance(item)
+          },
+        },
       )
-      if (wrap) this.#registerInteractionNode(wrap, entry.item, source)
+      if (!wrap) continue
+      if (registeredComponentMount) {
+        const mountComponent = registeredComponentMount
+        remountComponent = async (nextItem) => {
+          const previous = mountedComponentHandle
+          if (previous) {
+            const index = this.#componentHandles.indexOf(previous)
+            if (index >= 0) this.#componentHandles.splice(index, 1)
+            const phaserIndex = this.#phaserComponentHandles.indexOf(previous)
+            if (phaserIndex >= 0) this.#phaserComponentHandles.splice(phaserIndex, 1)
+            previous.destroy()
+          }
+          mountedComponentHandle = undefined
+          if (record) delete record.componentHandle
+          wrap.replaceChildren()
+          const handle = mountComponent(nextItem)
+          await handle.waitForReady()
+        }
+      }
+      record = {
+        item: entry.item,
+        source,
+        applicable: entry.applicable,
+        wrap,
+        ...(mountedComponentHandle ? { componentHandle: mountedComponentHandle } : {}),
+        ...(mountedRuntimeHandle ? { runtimeHandle: mountedRuntimeHandle } : {}),
+        ...(remountComponent ? { remountComponent } : {}),
+        ...(remountRuntime ? { remountRuntime } : {}),
+      }
+      this.#renderedLayers.set(renderedLayerKey(source, entry.item.layerItemId), record)
     }
-    this.#interactionPort?.refreshNodes(
-      this.#interactionNodes.values(),
-      ++this.#interactionGeneration,
-    )
+    this.#refreshInteractionNodesFromRecords()
   }
 }
 

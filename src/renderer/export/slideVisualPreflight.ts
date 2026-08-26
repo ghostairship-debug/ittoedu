@@ -731,7 +731,7 @@ export function collectCourseProjectSlideVisualPreflightItems(
   )))
 }
 
-/** Headless V9 adapter; it is intentionally not wired into GUI/export consumers yet. */
+/** Shared V9 adapter consumed by GUI/export preflight and headless checks. */
 export function collectCourseProjectSlideVisualPreflight(
   project: CourseProjectDocument,
   target: SlideVisualPreflightTarget,

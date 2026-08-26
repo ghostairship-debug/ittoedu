@@ -13,8 +13,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type {
   ComponentAuthoringTextTarget,
   ComponentPackageData,
-  ExportPayload,
 } from '../../shared/componentTypes'
+import { getComponentPropValue } from '../../shared/componentProps'
 import type {
   ExternalComponentNode,
   FormulaNode,
@@ -31,9 +31,9 @@ import {
   playerAuthoringSnapshotBarrierForCommand,
   type PlayerAuthoringPatch,
   type PlayerAuthoringPatchCommand,
+  type PlayerAuthoringHostMessage,
   type PlayerAuthoringSnapshotBarrier,
   type PlayerComponentAuthoringTargetsMessage,
-  type PlayerHostMode,
   type PlayerRuntimeAuthoringTargetsMessage,
 } from '../../shared/playerAuthoringProtocol'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
@@ -53,7 +53,6 @@ import {
   sidecarFileIdsFrom,
 } from './workspaceSlidePreviewRebuild'
 import {
-  projectCandidatePreviewDocument,
   selectActiveScene,
   selectEditingNodes,
   selectMediaAssetFiles,
@@ -72,33 +71,8 @@ import { PublishedFormulaPaint } from './PublishedFormulaPaint'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
-  findPresentationState,
   materializeScene,
 } from '../../shared/presentation'
-import { buildStandaloneHtml } from '../export/buildStandaloneHtml'
-import {
-  collectBundledFontFamiliesInUse,
-  prepareBundledFontEmbedding,
-} from '../export/bundledFontEmbedding'
-import { loadPlayerBundle } from '../export/loadPlayerBundle'
-import {
-  createRuntimePreviewBlobResources,
-  type RuntimePreviewBlobResources,
-} from '../preview/runtimePreviewDocument'
-import {
-  createRuntimePreviewPayloadResources,
-  type RuntimePreviewAssetTransfer,
-  type RuntimePreviewPayloadResources,
-} from '../preview/runtimePreviewPayload'
-import {
-  releaseRuntimePreviewResources,
-  stopRuntimePreviewFrame,
-  type ActiveRuntimePreviewResources,
-} from '../preview/runtimePreviewLifecycle'
-import {
-  isCurrentRuntimePreviewBootstrapMessage,
-  isCurrentRuntimePreviewPlayerMessage,
-} from '../preview/runtimePreviewProtocol'
 import {
   clientToWorld,
   createStageViewportTransform,
@@ -126,7 +100,11 @@ import { type SpatialEditorWorldTransform } from '../course/spatialEditorCommand
 import { fitSpatialSessionToHomeCamera } from '../course/spatialCameraCommands'
 import { mountSpatialLocationTryRun } from './spatialLocationTryRun'
 import { mountFlowLocationTryRun } from './flowLocationTryRun'
-import { mountPublishedCourseTryRun, attachPublishedCourseStageFit } from './coursePlayerTryRun'
+import {
+  mountPublishedCourseAuthoring,
+  mountPublishedCourseTryRun,
+  attachPublishedCourseStageFit,
+} from './coursePlayerTryRun'
 import {
   beginSerializedSessionMount,
   enqueueSerial,
@@ -234,8 +212,6 @@ function pointInsideSceneNode(
   return node.visible && pointInsideRotatedBounds(point, node, node.rotation)
 }
 
-const RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS = 12_000
-
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (
     target instanceof HTMLInputElement ||
@@ -274,6 +250,9 @@ function sanitizeRuntimeAuthoringTargets(
       typeof candidate.targetId !== 'string' ||
       !candidate.targetId ||
       candidate.targetId.length > 256 ||
+      typeof candidate.nodeId !== 'string' ||
+      !candidate.nodeId ||
+      candidate.nodeId.length > 256 ||
       typeof candidate.key !== 'string' ||
       !candidate.key ||
       candidate.key.length > 256
@@ -290,7 +269,7 @@ function sanitizeRuntimeAuthoringTargets(
     if (right <= left || bottom <= top) continue
     sanitized.push(Object.freeze({
       ...candidate,
-      targetId: `${hostKey}:${candidate.targetId}`,
+      targetId: `${hostKey}:${candidate.nodeId}:${candidate.targetId}`,
       ...(typeof candidate.label === 'string'
         ? { label: candidate.label.slice(0, 120) }
         : { label: undefined }),
@@ -1454,8 +1433,8 @@ export function Workspace({
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
   // Do not key these hosts by locationId/generation. R6-Z did, and every tree
-  // click (including the current page) remounted Phaser + the isolated Player,
-  // flashing the "隔离页面已连接，正在启动 Player…" overlay in edit mode.
+  // click (including the current page) remounted Phaser and the visual host,
+  // flashing the startup overlay in edit mode.
   // Surface kind already switches the component type; same-surface scene
   // changes go through activateScene / host subscriptions.
   if (spatialSession) {
@@ -1494,37 +1473,24 @@ function SlideLocationWorkspace({
   const stageViewportRef = useRef<HTMLDivElement>(null)
   const gameHostRef = useRef<HTMLDivElement>(null)
   const gameRef = useRef<EditorGameHandle | null>(null)
-  const runtimeFrameRef = useRef<HTMLIFrameElement>(null)
-  const lastParentFocusRef = useRef<HTMLElement | null>(null)
-  const authoringFocusRecoveryTimerRef = useRef<number | null>(null)
-  const retiredPreviewResourcesRef = useRef(new Set<{
-    document: RuntimePreviewBlobResources | null
-    payload: RuntimePreviewPayloadResources | null
-    timer: number
-  }>())
-  const activePreviewResourcesRef =
-    useRef<ActiveRuntimePreviewResources | null>(null)
+  const publishedAuthoringHostRef = useRef<HTMLDivElement>(null)
+  const publishedAuthoringSessionRef = useRef<PublishedCourseSession | null>(null)
+  const publishedAuthoringMountChainRef = useRef(Promise.resolve())
+  const publishedAuthoringInitRef = useRef<{
+    token: string
+    initialSceneId: string
+    initialStateId: string | null
+    editingScope: 'scene' | 'global'
+  } | null>(null)
   const previousSceneRef = useRef<SceneDocument | null>(null)
   const previousComponentPackagesRef = useRef<
     Record<string, ComponentPackageData> | null
   >(null)
-  const previewInitRef = useRef<{
-    token: string
-    payload: ExportPayload
-    assetTransfers: RuntimePreviewAssetTransfer[]
-    playerBundle: string
-    initialSceneId: string
-    initialStateId: string | null
-    editingScope: 'scene' | 'global'
-    hostMode: PlayerHostMode
-    bootstrapSent: boolean
-  } | null>(null)
   const authoringReadyRef = useRef(false)
   const authoringRevisionRef = useRef(0)
   const authoringSnapshotBarrierRef =
     useRef<PlayerAuthoringSnapshotBarrier | null>(null)
-  const lastRuntimeTargetsRevisionRef = useRef(-1)
-  const lastComponentTargetsRevisionRef = useRef(-1)
+  const lastAuthoringTargetsRevisionRef = useRef(-1)
   const pendingAuthoringNodesRef = useRef(new Map<string, {
     scope: 'scene' | 'global'
     node: SceneNode
@@ -1538,9 +1504,7 @@ function SlideLocationWorkspace({
     string,
     ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
   >())
-  const previewStartupTimerRef = useRef<number | null>(null)
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFeedback, setPreviewFeedback] = useState<RuntimePreviewFeedback>(null)
   const [previewRetryRevision, setPreviewRetryRevision] = useState(0)
   const [acknowledgedPreviewGeneration, setAcknowledgedPreviewGeneration] =
@@ -1601,6 +1565,7 @@ function SlideLocationWorkspace({
     (state) => state.componentPackages,
   )
   const useCoursePlayerTryRun = Boolean(courseDocument && canvasMode === 'run')
+  const usePublishedAuthoring = Boolean(courseDocument && canvasMode === 'edit')
   const tryRunMountKey = useMemo(() => {
     if (!courseDocument) return null
     return JSON.stringify({
@@ -1618,9 +1583,20 @@ function SlideLocationWorkspace({
     (state) => state.project.globalLayer,
   )
   const globalLayer = useMemo(() => {
-    const preview = projectCandidatePreviewDocument(useEditorStore.getState())
-    return preview?.project.globalLayer ?? v8GlobalLayer
-  }, [candidateDocument, candidateSidecar, v8GlobalLayer])
+    if (!courseDocument) return v8GlobalLayer
+    return courseDocument.globalLayerItems.flatMap((entry) => {
+      const node = courseLayerItemToSceneNode(entry.item)
+      return node
+        ? [{
+            node,
+            layer: 'overlay' as const,
+            // Global-scope authoring intentionally lists every stored item.
+            // Published V2 remains the authority for location applicability.
+            visibility: { mode: 'all' as const, sceneIds: [] },
+          }]
+        : []
+    })
+  }, [courseDocument, v8GlobalLayer])
   const selectedNode = useEditorStore(selectSelectedNode)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const editingTextNodeId = useEditorStore(
@@ -1683,20 +1659,49 @@ function SlideLocationWorkspace({
     pan: { x: view.x, y: view.y },
   }), [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
   const previewRebuildKey = useMemo(
-    () => buildSlidePreviewRebuildKey({
-      canvasMode,
-      editingScope,
-      activePresentationStateId,
-      scene,
-      scenes: project.scenes,
-      globalLayer: project.globalLayer,
-      globalRuntime: project.globalRuntime ?? null,
-      assets: project.assets,
-      candidateGlobals: candidateDocument?.globalLayerItems ?? null,
-      candidateAssets: candidateDocument?.assets ?? null,
-      sidecarFileIds: sidecarFileIdsFrom(candidateSidecar?.files, assetFiles),
-      componentPackages,
-    }),
+    () => {
+      const activeCandidateLocation = candidateDocument?.locations.find((location) => (
+        location.id === courseLocationId && location.kind === 'slide-scene'
+      ))
+      const activeCandidateSurface = activeCandidateLocation
+        ? candidateDocument?.surfaces.find((surface) => (
+            surface.id === activeCandidateLocation.surfaceId && surface.type === 'slide'
+          ))
+        : undefined
+      const activeCandidateScene = activeCandidateLocation?.kind === 'slide-scene'
+        && activeCandidateSurface?.type === 'slide'
+        ? activeCandidateSurface.scenes.find((candidate) => (
+            candidate.id === activeCandidateLocation.sceneId
+          ))
+        : undefined
+      return buildSlidePreviewRebuildKey({
+        canvasMode,
+        editingScope,
+        activePresentationStateId,
+        scene,
+        scenes: project.scenes,
+        globalLayer: project.globalLayer,
+        globalRuntime: project.globalRuntime ?? null,
+        assets: project.assets,
+        candidateGlobals: candidateDocument?.globalLayerItems ?? null,
+        candidateLocalItems: activeCandidateSurface?.type === 'slide' && activeCandidateScene
+          ? [
+              ...activeCandidateScene.layerItems.map((item) => ({
+                owner: 'scene' as const,
+                item,
+              })),
+              ...activeCandidateSurface.surfaceLayerItems.map((entry) => ({
+                owner: 'surface' as const,
+                item: entry.item,
+                visibility: entry.visibility,
+              })),
+            ]
+          : null,
+        candidateAssets: candidateDocument?.assets ?? null,
+        sidecarFileIds: sidecarFileIdsFrom(candidateSidecar?.files, assetFiles),
+        componentPackages,
+      })
+    },
     [
       activePresentationStateId,
       assetFiles,
@@ -1704,6 +1709,7 @@ function SlideLocationWorkspace({
       candidateSidecar,
       canvasMode,
       componentPackages,
+      courseLocationId,
       editingScope,
       project,
       scene,
@@ -1721,46 +1727,6 @@ function SlideLocationWorkspace({
     hasPreviewFeedback: previewFeedback !== null,
     generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
   })
-
-  useEffect(() => {
-    const rememberParentFocus = (event: FocusEvent) => {
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        target !== runtimeFrameRef.current
-      ) {
-        lastParentFocusRef.current = target
-      }
-    }
-    const recoverFromAuthoringFrameFocus = () => {
-      if (authoringFocusRecoveryTimerRef.current !== null) {
-        window.clearTimeout(authoringFocusRecoveryTimerRef.current)
-      }
-      authoringFocusRecoveryTimerRef.current = window.setTimeout(() => {
-        authoringFocusRecoveryTimerRef.current = null
-        const frame = runtimeFrameRef.current
-        const previous = lastParentFocusRef.current
-        if (
-          useEditorStore.getState().canvasMode === 'edit' &&
-          frame &&
-          window.document.activeElement === frame &&
-          previous?.isConnected
-        ) {
-          previous.focus({ preventScroll: true })
-        }
-      }, 0)
-    }
-    window.document.addEventListener('focusin', rememberParentFocus, true)
-    window.addEventListener('blur', recoverFromAuthoringFrameFocus)
-    return () => {
-      window.document.removeEventListener('focusin', rememberParentFocus, true)
-      window.removeEventListener('blur', recoverFromAuthoringFrameFocus)
-      if (authoringFocusRecoveryTimerRef.current !== null) {
-        window.clearTimeout(authoringFocusRecoveryTimerRef.current)
-        authoringFocusRecoveryTimerRef.current = null
-      }
-    }
-  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1819,46 +1785,12 @@ function SlideLocationWorkspace({
     }
   }, [])
 
-  const clearRuntimePreviewStartupTimer = useCallback(() => {
-    if (previewStartupTimerRef.current === null) return
-    window.clearTimeout(previewStartupTimerRef.current)
-    previewStartupTimerRef.current = null
-  }, [])
-
-  const revokeRetiredPreviewResources = useCallback(() => {
-    for (const resources of retiredPreviewResourcesRef.current) {
-      window.clearTimeout(resources.timer)
-      resources.document?.revoke()
-      resources.payload?.revoke()
-    }
-    retiredPreviewResourcesRef.current.clear()
-  }, [])
-
-  const retirePreviewResources = useCallback((
-    documentResources: RuntimePreviewBlobResources | null,
-    payloadResources: RuntimePreviewPayloadResources | null,
-  ) => {
-    if (!documentResources && !payloadResources) return
-    const resources = {
-      document: documentResources,
-      payload: payloadResources,
-      timer: 0,
-    }
-    resources.timer = window.setTimeout(() => {
-      resources.document?.revoke()
-      resources.payload?.revoke()
-      retiredPreviewResourcesRef.current.delete(resources)
-    }, 10_000)
-    retiredPreviewResourcesRef.current.add(resources)
-  }, [])
-
-  const failRuntimePreview = useCallback((token: string, message: string) => {
-    if (previewInitRef.current?.token !== token) return
-    previewInitRef.current = null
+  const failPublishedAuthoring = useCallback((token: string, message: string) => {
+    if (publishedAuthoringInitRef.current?.token !== token) return
+    publishedAuthoringInitRef.current = null
     authoringReadyRef.current = false
     authoringSnapshotBarrierRef.current = null
     setAcknowledgedPreviewGeneration(null)
-    clearRuntimePreviewStartupTimer()
     if (authoringFrameRef.current !== null) {
       window.cancelAnimationFrame(authoringFrameRef.current)
       authoringFrameRef.current = null
@@ -1866,63 +1798,39 @@ function SlideLocationWorkspace({
     pendingAuthoringNodesRef.current.clear()
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
-    lastRuntimeTargetsRevisionRef.current = -1
-    lastComponentTargetsRevisionRef.current = -1
+    lastAuthoringTargetsRevisionRef.current = -1
     setRuntimeTargets([])
     setComponentTargets([])
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(null)
     setHoveredAuthoringTargetId(null)
     setReplacingRuntimeAssetTargetId(null)
-    stopRuntimePreviewFrame(runtimeFrameRef.current)
-    setPreviewUrl(null)
-    activePreviewResourcesRef.current = releaseRuntimePreviewResources(
-      activePreviewResourcesRef.current,
-      token,
-    )
     setPreviewFeedback({
       kind: 'error',
       title: '统一画布启动失败',
       message,
     })
-  }, [clearRuntimePreviewStartupTimer])
+  }, [])
 
   const retryRuntimePreview = useCallback(() => {
     setPreviewFeedback({
       kind: 'loading',
       title: '正在重新准备画布',
-      message: '正在重新创建隔离播放器…',
+      message: '正在重新创建 Published 编辑宿主…',
     })
     setPreviewRetryRevision((revision) => revision + 1)
   }, [])
 
-  const syncRuntimePreview = useCallback(() => {
-    const target = runtimeFrameRef.current?.contentWindow
-    if (!target) return
-    target.postMessage({
-      type: 'courseware-editor:set-scene',
-      sceneId: scene.id,
-    }, '*')
-    if (activePresentationStateId !== null) {
-      target.postMessage({
-        type: 'courseware-editor:set-presentation-state',
-        sceneId: scene.id,
-        stateId: activePresentationStateId,
-      }, '*')
-    }
-  }, [activePresentationStateId, scene.id])
-
   const postAuthoringPatch = useCallback((patch: PlayerAuthoringPatch) => {
-    const init = previewInitRef.current
-    const target = runtimeFrameRef.current?.contentWindow
+    const init = publishedAuthoringInitRef.current
+    const session = publishedAuthoringSessionRef.current
     if (
-      !target ||
       !init ||
-      init.hostMode !== 'authoring' ||
+      !session ||
       !authoringReadyRef.current
     ) {
       if (init && authoringSnapshotBarrierRef.current) {
-        failRuntimePreview(
+        failPublishedAuthoring(
           init.token,
           '编辑画布在初始同步期间失去连接。请重新载入画布。',
         )
@@ -1945,10 +1853,17 @@ function SlideLocationWorkspace({
       patch,
     }
     try {
-      target.postMessage(command, '*')
+      void session.applyAuthoringCommand(command).catch((error) => {
+        failPublishedAuthoring(
+          command.sessionId,
+          error instanceof Error
+            ? `编辑画布更新失败：${error.message}`
+            : '编辑画布更新失败。',
+        )
+      })
     } catch {
       if (authoringSnapshotBarrierRef.current) {
-        failRuntimePreview(
+        failPublishedAuthoring(
           init.token,
           '编辑画布在初始同步期间无法继续发送更新。请重新载入画布。',
         )
@@ -1963,7 +1878,7 @@ function SlideLocationWorkspace({
         playerAuthoringSnapshotBarrierForCommand(command)
     }
     return command
-  }, [failRuntimePreview])
+  }, [failPublishedAuthoring])
 
   useEffect(() => onElementAnimationPreviewRequested(({ action, delayMs }) => {
     const store = useEditorStore.getState()
@@ -2059,15 +1974,23 @@ function SlideLocationWorkspace({
       currentScene,
       editorState.activePresentationStateId,
     )
+    const localNodes = selectSlideAuthoringBackend(editorState)?.getSnapshot().scope === 'surface'
+      ? selectEditingNodes(editorState)
+      : materialized.nodes
     if (authoringFrameRef.current !== null) {
       window.cancelAnimationFrame(authoringFrameRef.current)
       authoringFrameRef.current = null
     }
     pendingAuthoringNodesRef.current.clear()
-    const preview = projectCandidatePreviewDocument(editorState)
-    const globalItems = preview?.project.globalLayer ?? editorState.project.globalLayer
+    const currentCourse = selectActiveCourseProjectDocument(editorState)
+    const globalItems = currentCourse
+      ? currentCourse.globalLayerItems.flatMap((entry) => {
+          const node = courseLayerItemToSceneNode(entry.item)
+          return node ? [{ node }] : []
+        })
+      : editorState.project.globalLayer
     const patches: PlayerAuthoringPatch[] = [
-      ...materialized.nodes.map((node): PlayerAuthoringPatch => ({
+      ...localNodes.map((node): PlayerAuthoringPatch => ({
         kind: 'native-node',
         target: { kind: 'native-node', scope: 'scene', nodeId: node.id },
         node,
@@ -2090,7 +2013,7 @@ function SlideLocationWorkspace({
       {
         kind: 'scene-order',
         target: { kind: 'scene-order', scope: 'scene' },
-        nodeIds: materialized.nodes.map((node) => node.id),
+        nodeIds: localNodes.map((node) => node.id),
       },
     ]
     let lastCommand: PlayerAuthoringPatchCommand | null = null
@@ -2108,6 +2031,208 @@ function SlideLocationWorkspace({
     }
     pendingAuthoringNodesRef.current.clear()
   }, [])
+
+  const handlePublishedAuthoringMessage = useCallback((
+    message: PlayerAuthoringHostMessage,
+  ) => {
+    const init = publishedAuthoringInitRef.current
+    if (!init || message.sessionId !== init.token) return
+    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
+      if (authoringReadyRef.current) return
+      const parsed = parsePlayerAuthoringReadyMessage(message)
+      if (!parsed.ok) {
+        failPublishedAuthoring(
+          init.token,
+          `编辑画布握手无效：${parsed.message}。请重新载入画布。`,
+        )
+        return
+      }
+      if (
+        parsed.ready.context.sceneId !== init.initialSceneId ||
+        parsed.ready.context.stateId !== init.initialStateId
+      ) {
+        failPublishedAuthoring(
+          init.token,
+          '编辑画布返回了不一致的场景或状态。请重新载入画布。',
+        )
+        return
+      }
+      authoringReadyRef.current = true
+      setPreviewFeedback({
+        kind: 'loading',
+        title: '正在同步编辑画布',
+        message: 'Published 宿主已启动，正在应用当前画面的完整快照…',
+      })
+      const lastCommand = syncCompleteAuthoringSnapshot()
+      if (!lastCommand) {
+        failPublishedAuthoring(
+          init.token,
+          '当前画面的完整快照未能发送。请重新载入画布。',
+        )
+        return
+      }
+      authoringSnapshotBarrierRef.current =
+        playerAuthoringSnapshotBarrierForCommand(lastCommand)
+      return
+    }
+    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack) {
+      const barrier = authoringSnapshotBarrierRef.current
+      if (!barrier || !isPlayerAuthoringSnapshotAck(message, barrier)) return
+      if (pendingAuthoringNodesRef.current.size > 0) {
+        if (authoringFrameRef.current !== null) {
+          window.cancelAnimationFrame(authoringFrameRef.current)
+        }
+        flushAuthoringNodePatches()
+        return
+      }
+      authoringSnapshotBarrierRef.current = null
+      setAcknowledgedPreviewGeneration(previewGeneration)
+      setPreviewFeedback(null)
+      return
+    }
+    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets) {
+      if (message.revision <= lastAuthoringTargetsRevisionRef.current) return
+      lastAuthoringTargetsRevisionRef.current = message.revision
+      const hostKey = `${message.update.scope}:${message.update.sceneId ?? ''}`
+      runtimeTargetsByHostRef.current.set(
+        hostKey,
+        sanitizeRuntimeAuthoringTargets(message.update, hostKey),
+      )
+      setRuntimeTargets([...runtimeTargetsByHostRef.current.values()].flat())
+      return
+    }
+    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets) {
+      if (message.revision <= lastAuthoringTargetsRevisionRef.current) return
+      lastAuthoringTargetsRevisionRef.current = message.revision
+      const hostKey = [
+        message.update.scope,
+        message.update.sceneId ?? '',
+        message.update.nodeId,
+      ].join(':')
+      componentTargetsByHostRef.current.set(
+        hostKey,
+        sanitizeComponentAuthoringTargets(message.update, hostKey),
+      )
+      setComponentTargets([...componentTargetsByHostRef.current.values()].flat())
+      return
+    }
+    if (message.type !== PLAYER_AUTHORING_MESSAGE_TYPES.error) return
+    if (authoringSnapshotBarrierRef.current) {
+      failPublishedAuthoring(
+        init.token,
+        `初始画面同步失败：${message.message}。请重新载入画布。`,
+      )
+      return
+    }
+    useEditorStore.getState().setStatus(`画布同步未应用：${message.message}`)
+  }, [
+    failPublishedAuthoring,
+    flushAuthoringNodePatches,
+    previewGeneration,
+    syncCompleteAuthoringSnapshot,
+  ])
+
+  useEffect(() => {
+    const container = publishedAuthoringHostRef.current
+    if (!usePublishedAuthoring || !container) {
+      const leftover = publishedAuthoringSessionRef.current
+      publishedAuthoringSessionRef.current = null
+      publishedAuthoringInitRef.current = null
+      if (leftover) {
+        enqueueSerial(publishedAuthoringMountChainRef, () => leftover.destroy())
+      }
+      return
+    }
+
+    const editorState = useEditorStore.getState()
+    const document = selectActiveCourseProjectDocument(editorState)
+    const locationId = selectActiveCourseLocationId(editorState)
+    if (!document || !locationId) {
+      setPreviewFeedback({
+        kind: 'error',
+        title: '统一画布创建失败',
+        message: '当前 Slide 场景没有可用的 V9 Published 位置。',
+      })
+      return
+    }
+    authoringReadyRef.current = false
+    authoringRevisionRef.current = 0
+    authoringSnapshotBarrierRef.current = null
+    lastAuthoringTargetsRevisionRef.current = -1
+    runtimeTargetsByHostRef.current.clear()
+    componentTargetsByHostRef.current.clear()
+    setRuntimeTargets([])
+    setComponentTargets([])
+    setAcknowledgedPreviewGeneration(null)
+    setPreviewFeedback({
+      kind: 'loading',
+      title: '正在准备编辑画布',
+      message: '正在挂载 Published V2 编辑宿主…',
+    })
+    const token = crypto.randomUUID()
+    const activeScene = selectActiveScene(editorState)
+    const authoringScope = selectSlideAuthoringBackend(editorState)?.getSnapshot().scope
+      ?? editorState.editingScope
+    publishedAuthoringInitRef.current = {
+      token,
+      initialSceneId: activeScene.id,
+      initialStateId: editorState.activePresentationStateId,
+      editingScope: editorState.editingScope,
+    }
+
+    return beginSerializedSessionMount(
+      publishedAuthoringMountChainRef,
+      () => mountPublishedCourseAuthoring({
+        container,
+        project: document,
+        assetFiles: selectMediaAssetFiles(editorState),
+        components: editorState.componentPackages,
+        locationId,
+        sessionId: token,
+        scope: authoringScope,
+        stateId: editorState.activePresentationStateId,
+        onSessionCreated: (session) => {
+          if (publishedAuthoringInitRef.current?.token === token) {
+            publishedAuthoringSessionRef.current = session
+          }
+        },
+        onMessage: handlePublishedAuthoringMessage,
+      }),
+      {
+        onReady: (session) => {
+          if (publishedAuthoringInitRef.current?.token !== token) return
+          publishedAuthoringSessionRef.current = session
+          container.dataset.coursePlayerReady = 'true'
+        },
+        onError: (error) => {
+          console.error('Published 编辑宿主启动失败', error)
+          failPublishedAuthoring(
+            token,
+            error instanceof Error ? error.message : 'Published 编辑宿主未能完成启动。',
+          )
+        },
+        onCleanup: () => {
+          container.dataset.coursePlayerReady = 'false'
+          if (publishedAuthoringInitRef.current?.token === token) {
+            publishedAuthoringInitRef.current = null
+          }
+          publishedAuthoringSessionRef.current = null
+          authoringReadyRef.current = false
+          authoringSnapshotBarrierRef.current = null
+          runtimeTargetsByHostRef.current.clear()
+          componentTargetsByHostRef.current.clear()
+          setRuntimeTargets([])
+          setComponentTargets([])
+          setAcknowledgedPreviewGeneration(null)
+        },
+      },
+    )
+  }, [
+    failPublishedAuthoring,
+    handlePublishedAuthoringMessage,
+    previewGeneration,
+    usePublishedAuthoring,
+  ])
 
   useEffect(() => {
     const container = courseTryRunRef.current
@@ -2172,455 +2297,6 @@ function SlideLocationWorkspace({
       console.error('CoursePlayer 试运行跳转失败', error)
     })
   }, [courseLocationId, tryRunEpoch, useCoursePlayerTryRun])
-
-  useEffect(() => {
-    if (useCoursePlayerTryRun) {
-      setPreviewUrl(null)
-      setPreviewFeedback(null)
-      return
-    }
-    clearRuntimePreviewStartupTimer()
-    authoringReadyRef.current = false
-    authoringRevisionRef.current = 0
-    authoringSnapshotBarrierRef.current = null
-    setAcknowledgedPreviewGeneration(null)
-    lastRuntimeTargetsRevisionRef.current = -1
-    lastComponentTargetsRevisionRef.current = -1
-    if (authoringFrameRef.current !== null) {
-      window.cancelAnimationFrame(authoringFrameRef.current)
-      authoringFrameRef.current = null
-    }
-    pendingAuthoringNodesRef.current.clear()
-    runtimeTargetsByHostRef.current.clear()
-    componentTargetsByHostRef.current.clear()
-    setRuntimeTargets([])
-    setComponentTargets([])
-    setActiveRuntimeTextSession(null)
-    setActiveComponentTextSession(null)
-
-    let blobResources: RuntimePreviewBlobResources | null = null
-    let payloadResources: RuntimePreviewPayloadResources | null = null
-    let token: string | null = null
-    // Runs synchronously up to its single conditional `await`, so the token and
-    // the payload resources the cleanup below reasons about are still assigned
-    // in the effect's own tick. A project that declares no bundled family never
-    // reaches that await and is built exactly as it was before.
-    const startRuntimePreview = async () => {
-      try {
-        const editorState = useEditorStore.getState()
-        const initialScene = selectActiveScene(editorState)
-        const hostMode: PlayerHostMode = canvasMode === 'edit'
-          ? 'authoring'
-          : 'playback'
-        const initialStateId = hostMode === 'authoring'
-          ? editorState.activePresentationStateId
-          : editorState.activePresentationStateId ??
-            ensureScenePresentation(initialScene).initialStateId
-        const previewSource = projectCandidatePreviewDocument(editorState)
-        payloadResources = createRuntimePreviewPayloadResources({
-          project: previewSource?.project ?? editorState.project,
-          assetFiles: previewSource?.assetFiles ?? editorState.assetFiles,
-          components: editorState.componentPackages,
-        })
-        const ownedPayloadResources = payloadResources
-        const payload = payloadResources.payload
-        const playerBundle = loadPlayerBundle()
-        const currentToken = crypto.randomUUID()
-        token = currentToken
-        previewInitRef.current = {
-          token: currentToken,
-          payload,
-          assetTransfers: payloadResources.assetTransfers,
-          playerBundle,
-          initialSceneId: initialScene.id,
-          initialStateId,
-          editingScope: editorState.editingScope,
-          hostMode,
-          bootstrapSent: false,
-        }
-        // The canvas installs the bundled families at startup and both export
-        // commands await these bytes before they build, so this preview — which
-        // builds its document with the very same `buildStandaloneHtml` — has to
-        // await them too. Without it a lesson's formulas render in STIX Two Math
-        // on the canvas and in whatever the machine substitutes here. The gate is
-        // the export path's own rule, applied to the payload this preview is
-        // about to build, so a project that names no bundled family keeps the
-        // byte-identical, single-tick build it has today.
-        if (collectBundledFontFamiliesInUse(payload).length > 0) {
-          setPreviewFeedback({
-            kind: 'loading',
-            title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
-            message: '正在准备内置字体…',
-          })
-          await prepareBundledFontEmbedding()
-          if (previewInitRef.current?.token !== currentToken) {
-            // A newer session — or this effect's cleanup — took over while the
-            // bytes loaded. Nothing here ever reached an iframe, so release what
-            // this run allocated and leave every shared ref to its owner.
-            ownedPayloadResources.revoke()
-            return
-          }
-        }
-        // Past the expiry check nothing awaits again, so this run still owns the
-        // preview through the end of the block — including the catch below.
-        blobResources = createRuntimePreviewBlobResources(
-          buildStandaloneHtml(payload, playerBundle),
-          currentToken,
-        )
-        activePreviewResourcesRef.current = {
-          token: currentToken,
-          document: blobResources,
-          payload: payloadResources,
-        }
-        setPreviewUrl(blobResources.documentUrl)
-        setPreviewFeedback({
-          kind: 'loading',
-          title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
-          message: '正在载入隔离 Player…',
-        })
-        previewStartupTimerRef.current = window.setTimeout(() => {
-          failRuntimePreview(
-            currentToken,
-            '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前工程的运行时或组件。',
-          )
-        }, RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS)
-      } catch (error) {
-        if (token) {
-          activePreviewResourcesRef.current = releaseRuntimePreviewResources(
-            activePreviewResourcesRef.current,
-            token,
-          )
-        }
-        blobResources?.revoke()
-        blobResources = null
-        payloadResources?.revoke()
-        payloadResources = null
-        previewInitRef.current = null
-        setAcknowledgedPreviewGeneration(null)
-        const message = error instanceof Error ? error.message : String(error)
-        setPreviewUrl(null)
-        setPreviewFeedback({
-          kind: 'error',
-          title: '统一画布创建失败',
-          message,
-        })
-      }
-    }
-    void startRuntimePreview()
-
-    return () => {
-      clearRuntimePreviewStartupTimer()
-      if (token && previewInitRef.current?.token === token) {
-        previewInitRef.current = null
-      }
-      const activeResources = activePreviewResourcesRef.current
-      if (token && activeResources?.token === token) {
-        activePreviewResourcesRef.current = null
-        retirePreviewResources(
-          activeResources.document,
-          activeResources.payload,
-        )
-      }
-      blobResources = null
-      payloadResources = null
-    }
-  }, [
-    canvasMode,
-    clearRuntimePreviewStartupTimer,
-    failRuntimePreview,
-    previewRebuildKey,
-    previewRetryRevision,
-    retirePreviewResources,
-    useCoursePlayerTryRun,
-  ])
-
-  useEffect(() => () => revokeRetiredPreviewResources(), [
-    revokeRetiredPreviewResources,
-  ])
-
-  useEffect(() => {
-    if (canvasMode === 'run' && !useCoursePlayerTryRun) syncRuntimePreview()
-  }, [canvasMode, syncRuntimePreview, useCoursePlayerTryRun])
-
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== runtimeFrameRef.current?.contentWindow) return
-      const message = event.data as {
-        type?: unknown
-        token?: unknown
-        protocolVersion?: unknown
-        sessionId?: unknown
-        revision?: unknown
-        message?: unknown
-        code?: unknown
-        update?: PlayerRuntimeAuthoringTargetsMessage['update'] |
-          PlayerComponentAuthoringTargetsMessage['update']
-        detail?: {
-          sceneId?: unknown
-          stateId?: unknown
-          presentationStateId?: unknown
-        }
-      } | null
-      if (!message || typeof message.type !== 'string') return
-      if (
-        isCurrentRuntimePreviewBootstrapMessage(
-          message,
-          previewInitRef.current?.token,
-          'courseware-preview-bootstrap:ready',
-        )
-      ) {
-        const init = previewInitRef.current
-        if (!init || init.bootstrapSent) return
-        setPreviewFeedback({
-          kind: 'loading',
-          title: init.hostMode === 'authoring'
-            ? '正在启动编辑画布'
-            : '正在启动当前位置试运行',
-          message: '隔离页面已连接，正在启动 Player…',
-        })
-        const target = runtimeFrameRef.current?.contentWindow
-        if (!target) return
-        init.bootstrapSent = true
-        try {
-          target.postMessage({
-            type: 'courseware-preview-bootstrap:init',
-            ...init,
-          }, '*', init.assetTransfers.map((asset) => asset.bytes))
-        } catch (error) {
-          init.bootstrapSent = false
-          failRuntimePreview(
-            init.token,
-            error instanceof Error
-              ? `素材传输失败：${error.message}`
-              : '素材传输失败。',
-          )
-        }
-        return
-      }
-      if (
-        isCurrentRuntimePreviewBootstrapMessage(
-          message,
-          previewInitRef.current?.token,
-          'courseware-preview-bootstrap:error',
-        )
-      ) {
-        const token = previewInitRef.current?.token
-        if (!token) return
-        failRuntimePreview(
-          token,
-          typeof message.message === 'string' && message.message.trim()
-            ? message.message
-            : '播放器脚本执行失败。',
-        )
-        return
-      }
-      if (
-        message.type.startsWith('courseware-player:') &&
-        !isCurrentRuntimePreviewPlayerMessage(
-          message,
-          previewInitRef.current?.token,
-        )
-      ) {
-        return
-      }
-      if (message.type === 'courseware-player:ready') {
-        if (canvasMode === 'run') {
-          clearRuntimePreviewStartupTimer()
-          setPreviewFeedback(null)
-        }
-        return
-      }
-      if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
-        const init = previewInitRef.current
-        if (!init || init.hostMode !== 'authoring') return
-        if (authoringReadyRef.current) return
-        const parsed = parsePlayerAuthoringReadyMessage(event.data)
-        if (!parsed.ok) {
-          failRuntimePreview(
-            init.token,
-            `编辑画布握手无效：${parsed.message}。请重新载入画布。`,
-          )
-          return
-        }
-        if (
-          parsed.ready.sessionId !== init.token ||
-          parsed.ready.context.sceneId !== init.initialSceneId ||
-          parsed.ready.context.stateId !== init.initialStateId
-        ) {
-          failRuntimePreview(
-            init.token,
-            '编辑画布返回了不一致的场景或状态。请重新载入画布。',
-          )
-          return
-        }
-        authoringReadyRef.current = true
-        setPreviewFeedback({
-          kind: 'loading',
-          title: '正在同步编辑画布',
-          message: 'Player 已启动，正在应用当前画面的完整快照…',
-        })
-        const lastCommand = syncCompleteAuthoringSnapshot()
-        if (!lastCommand) {
-          failRuntimePreview(
-            init.token,
-            '当前画面的完整快照未能发送。请重新载入画布。',
-          )
-          return
-        }
-        authoringSnapshotBarrierRef.current =
-          playerAuthoringSnapshotBarrierForCommand(lastCommand)
-        return
-      }
-      if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack) {
-        const barrier = authoringSnapshotBarrierRef.current
-        if (!barrier) return
-        if (!isPlayerAuthoringSnapshotAck(event.data, barrier)) return
-        if (pendingAuthoringNodesRef.current.size > 0) {
-          if (authoringFrameRef.current !== null) {
-            window.cancelAnimationFrame(authoringFrameRef.current)
-          }
-          flushAuthoringNodePatches()
-          return
-        }
-        authoringSnapshotBarrierRef.current = null
-        clearRuntimePreviewStartupTimer()
-        setAcknowledgedPreviewGeneration(previewGeneration)
-        setPreviewFeedback(null)
-        return
-      }
-      if (
-        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets &&
-        message.protocolVersion === PLAYER_AUTHORING_PROTOCOL_VERSION &&
-        message.sessionId === previewInitRef.current?.token &&
-        typeof message.revision === 'number' &&
-        Number.isSafeInteger(message.revision) &&
-        message.revision > lastRuntimeTargetsRevisionRef.current &&
-        message.update &&
-        typeof message.update.scope === 'string' &&
-        Array.isArray(message.update.targets)
-      ) {
-        lastRuntimeTargetsRevisionRef.current = message.revision
-        const hostKey = `${message.update.scope}:${message.update.sceneId ?? ''}`
-        runtimeTargetsByHostRef.current.set(
-          hostKey,
-          sanitizeRuntimeAuthoringTargets(
-            message.update as PlayerRuntimeAuthoringTargetsMessage['update'],
-            hostKey,
-          ),
-        )
-        setRuntimeTargets(
-          [...runtimeTargetsByHostRef.current.values()].flat(),
-        )
-        return
-      }
-      if (
-        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets &&
-        message.protocolVersion === PLAYER_AUTHORING_PROTOCOL_VERSION &&
-        message.sessionId === previewInitRef.current?.token &&
-        typeof message.revision === 'number' &&
-        Number.isSafeInteger(message.revision) &&
-        message.revision > lastComponentTargetsRevisionRef.current &&
-        message.update &&
-        typeof message.update.scope === 'string' &&
-        'nodeId' in message.update &&
-        typeof message.update.nodeId === 'string' &&
-        Array.isArray(message.update.targets)
-      ) {
-        lastComponentTargetsRevisionRef.current = message.revision
-        const hostKey = [
-          message.update.scope,
-          message.update.sceneId ?? '',
-          message.update.nodeId,
-        ].join(':')
-        componentTargetsByHostRef.current.set(
-          hostKey,
-          sanitizeComponentAuthoringTargets(
-            message.update as PlayerComponentAuthoringTargetsMessage['update'],
-            hostKey,
-          ),
-        )
-        setComponentTargets(
-          [...componentTargetsByHostRef.current.values()].flat(),
-        )
-        return
-      }
-      if (
-        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.error &&
-        message.protocolVersion === PLAYER_AUTHORING_PROTOCOL_VERSION &&
-        message.sessionId === previewInitRef.current?.token
-      ) {
-        const token = previewInitRef.current?.token
-        if (token && authoringSnapshotBarrierRef.current) {
-          failRuntimePreview(
-            token,
-            typeof message.message === 'string'
-              ? `初始画面同步失败：${message.message}。请重新载入画布。`
-              : '初始画面同步失败。请重新载入画布。',
-          )
-          return
-        }
-        useEditorStore.getState().setStatus(
-          typeof message.message === 'string'
-            ? `画布同步未应用：${message.message}`
-            : '画布同步未应用，请重试。',
-        )
-        return
-      }
-      if (
-        canvasMode === 'run' &&
-        message.type === 'courseware-player:scene-change' &&
-        typeof message.detail?.sceneId === 'string'
-      ) {
-        const nextScene = useEditorStore.getState().project.scenes.find(
-          (item) => item.id === message.detail?.sceneId,
-        )
-        if (!nextScene) return
-        const reportedStateId = typeof message.detail?.presentationStateId === 'string' &&
-          findPresentationState(nextScene, message.detail.presentationStateId)
-          ? message.detail.presentationStateId
-          : ensureScenePresentation(nextScene).initialStateId
-        useEditorStore.setState((state) => ({
-          ...state,
-          activeSceneId: nextScene.id,
-          activePresentationStateId: reportedStateId,
-          editingScope: 'scene',
-          selectedNodeId: null,
-          selectedNodeIds: [],
-          editingTextNodeId: null,
-          textEditSession: null,
-          statusMessage: `当前位置试运行：${nextScene.name}`,
-        }))
-      } else if (
-        canvasMode === 'run' &&
-        message.type === 'courseware-player:presentation-change' &&
-        typeof message.detail?.stateId === 'string'
-      ) {
-        const stateId = message.detail.stateId
-        const current = selectActiveScene(useEditorStore.getState())
-        if (
-          typeof message.detail.sceneId === 'string' &&
-          message.detail.sceneId !== current.id
-        ) {
-          return
-        }
-        if (!findPresentationState(current, stateId)) return
-        useEditorStore.setState({
-          activePresentationStateId: stateId,
-          statusMessage: `试运行状态：${findPresentationState(current, stateId)?.name ?? stateId}`,
-        })
-      }
-    }
-    window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [
-    canvasMode,
-    clearRuntimePreviewStartupTimer,
-    failRuntimePreview,
-    flushAuthoringNodePatches,
-    previewGeneration,
-    syncCompleteAuthoringSnapshot,
-    syncRuntimePreview,
-  ])
 
   const document = useMemo<SceneDocument>(() => {
     if (editingScope === 'scene') {
@@ -2692,7 +2368,8 @@ function SlideLocationWorkspace({
       return document.nodes.some((node) => (
         node.id === target.nodeId &&
         node.type === 'external-component' &&
-        node.visible
+        node.visible &&
+        !node.locked
       ))
     }),
     [componentTargets, document.nodes, editingScope, scene.id],
@@ -2783,7 +2460,9 @@ function SlideLocationWorkspace({
       const store = useEditorStore.getState()
       const nodes = selectEditingNodes(store)
       const visibleComponentNodeIds = new Set(nodes.flatMap((node) => (
-        node.type === 'external-component' && node.visible ? [node.id] : []
+        node.type === 'external-component' && node.visible && !node.locked
+          ? [node.id]
+          : []
       )))
       return {
         projectId: store.project.id,
@@ -2878,13 +2557,32 @@ function SlideLocationWorkspace({
     store.updateNode(result.nodeId, {
       props: result.props,
     })
+    const updatedNode = selectEditingNodes(useEditorStore.getState()).find(
+      (node): node is ExternalComponentNode => (
+        node.id === result.nodeId && node.type === 'external-component'
+      ),
+    )
+    if (
+      !updatedNode
+      || updatedNode.locked
+      || getComponentPropValue(updatedNode.props, session.key) !== value
+    ) {
+      store.setStatus(
+        updatedNode?.locked
+          ? '组件已锁定，未写入文字修改'
+          : '组件文字未写入，请重新选择后重试',
+      )
+      setActiveComponentTextSession(null)
+      return
+    }
+    queueAuthoringNodePatch(session.scope, updatedNode)
     store.setStatus(
       session.stateId === null || session.scope === 'global'
         ? '已更新组件文字'
         : '已更新当前演示状态中的组件文字',
     )
     setActiveComponentTextSession(null)
-  }, [currentComponentTextEditContext])
+  }, [currentComponentTextEditContext, queueAuthoringNodePatch])
 
   const beginRuntimeTextEdit = useCallback((
     target: Readonly<RuntimeAuthoringTarget>,
@@ -2949,8 +2647,21 @@ function SlideLocationWorkspace({
     } else {
       store.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
     }
+    if (committed.ok && committed.status === 'updated') {
+      const target = session.courseTarget.courseTarget
+      postAuthoringPatch({
+        kind: 'runtime-content',
+        target: {
+          kind: 'runtime-content',
+          scope: target.owner === 'global' ? 'global' : 'scene',
+          nodeId: target.itemId,
+          key: session.courseTarget.contentKey,
+        },
+        value,
+      })
+    }
     setActiveRuntimeTextSession(null)
-  }, [currentRuntimeTargetEditContext])
+  }, [currentRuntimeTargetEditContext, postAuthoringPatch])
 
   const replaceRuntimeAsset = useCallback(async (
     target: Readonly<RuntimeAuthoringTarget>,
@@ -3779,36 +3490,14 @@ function SlideLocationWorkspace({
             transition: 'none',
           }}
         >
-          {previewUrl && !useCoursePlayerTryRun && (
-            <iframe
-              ref={runtimeFrameRef}
-              className="runtime-preview-frame"
-              title={canvasMode === 'edit' ? '统一编辑画布' : '当前位置试运行'}
-              sandbox="allow-scripts"
-              inert={canvasMode === 'edit'}
-              tabIndex={canvasMode === 'edit' ? -1 : undefined}
-              aria-hidden={canvasMode === 'edit' ? true : undefined}
-              onFocus={() => {
-                if (canvasMode !== 'edit') return
-                if (authoringFocusRecoveryTimerRef.current !== null) {
-                  window.clearTimeout(authoringFocusRecoveryTimerRef.current)
-                }
-                authoringFocusRecoveryTimerRef.current = window.setTimeout(() => {
-                  authoringFocusRecoveryTimerRef.current = null
-                  const previous = lastParentFocusRef.current
-                  if (
-                    window.document.activeElement === runtimeFrameRef.current &&
-                    previous?.isConnected
-                  ) {
-                    previous.focus({ preventScroll: true })
-                  }
-                }, 0)
-              }}
-              src={previewUrl}
-              onError={() => {
-                const token = previewInitRef.current?.token
-                if (token) failRuntimePreview(token, '隔离预览页面无法载入。')
-              }}
+          {usePublishedAuthoring && (
+            <div
+              ref={publishedAuthoringHostRef}
+              className="runtime-preview-frame published-authoring-host"
+              data-testid="published-authoring-host"
+              title="统一编辑画布"
+              inert
+              aria-hidden="true"
             />
           )}
           <div
@@ -3949,7 +3638,7 @@ function SlideLocationWorkspace({
               </div>
             </div>
           )}
-          {!previewUrl && !previewFeedback && !useCoursePlayerTryRun && (
+          {!previewFeedback && !useCoursePlayerTryRun && !usePublishedAuthoring && (
             <div className="runtime-preview-loading" role="status" aria-live="polite">
               <div className="runtime-preview-loading__panel">
                 <LoaderCircle

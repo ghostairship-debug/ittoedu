@@ -611,7 +611,11 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     const container = document.createElement('div')
     const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
     await host.mount(container)
+    expect(container.querySelector('.published-component-mount')).toBeNull()
+    host.preparePublishedLocation('loc-detail', false)
     await host.activate()
+    expect(container.querySelector('.published-component-mount')).toBeNull()
+    await host.setLocationId('loc-detail')
 
     // World component in foreignObject
     const worldItem = container.querySelector('[data-layer-item-id="world-comp-1"]')
@@ -630,6 +634,14 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     expect(hudMount).not.toBeNull()
     const hudCard = hudMount?.shadowRoot?.querySelector('.spatial-interactive-card')
     expect(hudCard?.textContent).toBe('HUD组件')
+
+    host.preparePublishedLocation('loc-detail', true)
+    await host.setLocationId('loc-detail')
+    const replayedWorldMount = container.querySelector(
+      '[data-layer-item-id="world-comp-1"] .published-component-mount',
+    )
+    expect(replayedWorldMount).not.toBeNull()
+    expect(replayedWorldMount).not.toBe(worldMount)
 
     await host.destroy()
   })

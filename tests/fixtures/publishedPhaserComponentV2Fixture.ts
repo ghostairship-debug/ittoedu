@@ -55,6 +55,16 @@ window.CoursewareComponent.define({
     var label = ctx.phaser.scene.add.text(24, 24, String(ctx.props.label) + ':0', {
       fontFamily: 'Arial', fontSize: '30px', color: '#ffffff'
     });
+    var disposeLabelEditor = ctx.editor
+      ? ctx.editor.registerTextRegion({
+          key: 'label',
+          label: 'Phaser 标题',
+          maxLength: 40,
+          getBounds: function () {
+            return { x: 20, y: 18, width: Math.max(80, ctx.width - 40), height: 42 };
+          }
+        })
+      : function () {};
     var onHit = function () {
       count += 1;
       label.setText(String(ctx.props.label) + ':' + count);
@@ -89,6 +99,7 @@ window.CoursewareComponent.define({
       },
       destroy() {
         probe.destroys = (probe.destroys || 0) + 1;
+        disposeLabelEditor();
         panel.off('pointerup', onHit);
         delete game.canvas.dataset.publishedPhaserComponentV4E2e;
       }
@@ -137,6 +148,9 @@ function manifest(version = '4.0.0'): ComponentManifest {
     renderMode: 'phaser',
     assets: { badge: 'assets/badge.svg' },
     defaultProps: { label: '导入默认', projectAssetId: 'fixture-project-asset' },
+    editor: {
+      properties: [{ key: 'label', label: 'Phaser 标题', type: 'text', maxLength: 40 }],
+    },
   }
 }
 

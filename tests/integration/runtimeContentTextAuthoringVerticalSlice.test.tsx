@@ -29,7 +29,36 @@ import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,
 } from '@/shared/playerAuthoringProtocol'
+import type { PlayerAuthoringHostMessage } from '@/shared/playerAuthoringProtocol'
 import type { RuntimeAuthoringTarget } from '@/shared/runtimeTypes'
+
+const publishedAuthoringHarness = vi.hoisted(() => ({
+  latestRevision: -1,
+  onMessage: null as ((message: PlayerAuthoringHostMessage) => void) | null,
+}))
+
+vi.mock('@/renderer/ui/coursePlayerTryRun', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/ui/coursePlayerTryRun')>()
+  return {
+    ...actual,
+    mountPublishedCourseAuthoring: (
+      input: Parameters<typeof actual.mountPublishedCourseAuthoring>[0],
+    ) => {
+      publishedAuthoringHarness.onMessage = input.onMessage
+        ? (message: PlayerAuthoringHostMessage) => {
+            if ('revision' in message && typeof message.revision === 'number') {
+              publishedAuthoringHarness.latestRevision = Math.max(
+                publishedAuthoringHarness.latestRevision,
+                message.revision,
+              )
+            }
+            input.onMessage?.(message)
+          }
+        : null
+      return actual.mountPublishedCourseAuthoring(input)
+    },
+  }
+})
 
 vi.mock('@/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => '/* Runtime content text vertical slice Player bundle */',
@@ -409,6 +438,7 @@ function discoverySession(
     scope: source.owner === 'global' ? 'global' : 'scene',
     sceneId: useEditorStore.getState().activeSceneId,
     targetId,
+    nodeId: source.itemId,
     kind: 'text',
     key: CONTENT_KEY,
   }
@@ -496,14 +526,19 @@ let targetRevision = 0
 async function publishRuntimeTextTarget(input: {
   readonly scope: 'scene' | 'global'
   readonly sceneId: string
+  readonly nodeId: string
   readonly targetId?: string
   readonly targets?: readonly RuntimeAuthoringTarget[]
 }): Promise<void> {
-  const frame = await screen.findByTitle('统一编辑画布') as HTMLIFrameElement
-  if (!frame.contentWindow) throw new Error('Preview iframe has no contentWindow')
-  targetRevision += 1
+  await screen.findByTestId('published-authoring-host')
+  await waitFor(() => expect(publishedAuthoringHarness.onMessage).not.toBeNull())
+  targetRevision = Math.max(
+    targetRevision + 1,
+    publishedAuthoringHarness.latestRevision + 1,
+  )
   const target: RuntimeAuthoringTarget = {
     targetId: input.targetId ?? `runtime:${input.scope}:text-target`,
+    nodeId: input.nodeId,
     scope: input.scope,
     ...(input.scope === 'scene' ? { sceneId: input.sceneId } : {}),
     kind: 'text',
@@ -516,22 +551,18 @@ async function publishRuntimeTextTarget(input: {
     bounds: { x: 100, y: 90, width: 320, height: 48 },
   }
   await act(async () => {
-    window.dispatchEvent(new MessageEvent('message', {
-      source: frame.contentWindow,
-      data: {
-        type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
-        token: PREVIEW_TOKEN,
-        protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
-        sessionId: PREVIEW_TOKEN,
+    publishedAuthoringHarness.onMessage?.({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: PREVIEW_TOKEN,
+      revision: targetRevision,
+      update: {
         revision: targetRevision,
-        update: {
-          revision: targetRevision,
-          scope: input.scope,
-          ...(input.scope === 'scene' ? { sceneId: input.sceneId } : {}),
-          targets: input.targets ?? [target],
-        },
+        scope: input.scope,
+        ...(input.scope === 'scene' ? { sceneId: input.sceneId } : {}),
+        targets: input.targets ?? [target],
       },
-    }))
+    })
   })
 }
 
@@ -550,6 +581,8 @@ function installWorkspaceWriteSpies() {
 
 beforeEach(() => {
   targetRevision = 0
+  publishedAuthoringHarness.latestRevision = -1
+  publishedAuthoringHarness.onMessage = null
   vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(PREVIEW_TOKEN)
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:runtime-content-preview')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
@@ -784,6 +817,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
       await publishRuntimeTextTarget({
         scope: source.owner === 'global' ? 'global' : 'scene',
         sceneId: useEditorStore.getState().activeSceneId,
+        nodeId: source.itemId,
       })
       const label = source.owner === 'global' ? '全局课程标题' : '场景课程标题'
       const button = await screen.findByRole('button', {
@@ -820,7 +854,12 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
       />,
     )
     const sceneId = useEditorStore.getState().activeSceneId
-    await publishRuntimeTextTarget({ scope: 'scene', sceneId, targetId: 'runtime:text:original' })
+    await publishRuntimeTextTarget({
+      scope: 'scene',
+      sceneId,
+      nodeId: source.itemId,
+      targetId: 'runtime:text:original',
+    })
     fireEvent.click(await screen.findByRole('button', {
       name: '场景课程标题，双击编辑文字',
     }))
@@ -829,6 +868,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
 
     const replacement: RuntimeAuthoringTarget = {
       targetId: 'runtime:text:replacement',
+      nodeId: source.itemId,
       scope: 'scene',
       sceneId,
       kind: 'text',
@@ -842,6 +882,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
     await publishRuntimeTextTarget({
       scope: 'scene',
       sceneId,
+      nodeId: source.itemId,
       targets: [replacement],
     })
 

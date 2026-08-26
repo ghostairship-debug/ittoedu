@@ -4,7 +4,7 @@
 
 本文定义 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
-文档同步基线：**2026-08-18**。生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
+文档同步基线：**2026-08-27**。生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
 
 产品发布者是 ittoedu。ittoedu 自有组件命名空间为 `com.ittoedu.*`；第三方作者必须使用自己控制的反向域名，文档中的 `com.example.*` 仅为示例，不能据此冒用 ittoedu 身份。
 
@@ -12,7 +12,7 @@
 
 组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions。整页或整块世界的动画、特效与连续耦合机制使用画布或 surface 运行时，少放可教文字。稍复杂的局部互动（拖拽、配对、本地多步控件）使用 Component API 4：先匹配已有包，允许为本课新建。不要用场景运行时去仿一个局部控件。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
 
-中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布。编辑状态由当前隔离 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过本文的显式文字目标向宿主描述“哪一段 Props 可在何处编辑”，不能借 authoring 协议访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。该 iframe 是当前合成与生命周期实现，不是把外部导入组件视为不可信代码的产品边界。
+中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布，并在同一 Renderer 文档中使用 Published V2 宿主，不再通过 authoring iframe 合成。编辑状态由 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过带 session/revision 的版本化 direct patch / ACK / error / target 协议向宿主描述“哪一段 Props 可在何处编辑”，不能借 authoring 协议访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。
 
 该目标桥是确定性的人工 authoring 协议，不包含 Blueprint、AI 局部 patch 或模型调用。全部编辑器内 AI 接入延后到 2.0 以后；1.x 仅保留可选、版本化的能力边界。
 
@@ -24,7 +24,7 @@
 
 ### 0.1 当前组件来源
 
-组件目录状态以当次生成的 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 和 `component-catalog.snapshot.json` 为准；本次同步为 `catalogStatus: available`、`packageCount: 4`。以后目录不可用或包数变化，只表示当时没有对应目录包可浏览，**不是** Flow/Spatial/Slide 试运行不能挂组件（P8 已合入），也不是禁止为本课导入或新建 `.h5component`。
+组件目录状态以当次生成的 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 和 `component-catalog.snapshot.json` 为准；本次同步为 `catalogStatus: available`、`packageCount: 4`。以后目录不可用或包数变化，只表示当时没有对应目录包可浏览，不是禁止为本课导入或新建 `.h5component`。当前已验证的互动播放载体是 Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM Component，以及 Slide scene 的 Phaser Component；目录可用性不扩大这个边界。
 
 当外部目录可用时，ittoedu 自有实验包预期仍是：
 
@@ -44,7 +44,7 @@
 `.h5component` 本质是 ZIP，根目录必须直接包含 `manifest.json` 和 manifest 指定的入口：
 
 ```text
-global-controls.h5component
+scene-controls.h5component
 ├── manifest.json
 ├── runtime.js
 ├── thumbnail.png          # 可选
@@ -72,11 +72,11 @@ global-controls.h5component
   "schemaVersion": 4,
   "runtimeApiVersion": 4,
   "renderMode": "dom",
-  "supportedScopes": ["global"],
-  "id": "com.example.global-controls",
-  "name": "全局课程控制条",
+  "supportedScopes": ["scene"],
+  "id": "com.example.scene-controls",
+  "name": "场景课程控制条",
   "version": "4.0.0",
-  "description": "跨场景持续存在的课程控制条",
+  "description": "当前场景内的课程控制条",
   "entry": "runtime.js",
   "thumbnail": "thumbnail.png",
   "defaultSize": { "width": 1060, "height": 74 },
@@ -93,7 +93,7 @@ global-controls.h5component
         "restart": "重开课程"
       },
       "status": {
-        "ready": "控制条跨场景保持",
+        "ready": "控制条已就绪",
         "replayed": "已重播当前场景"
       }
     },
@@ -122,7 +122,7 @@ global-controls.h5component
 - `defaultSize`、`minSize` 和 `preserveAspectRatio` 定义实例变换边界。
 - `thumbnail` 可选，但所有面向交付的可视组件都应提供；路径必须指向包内 PNG、JPG、WebP、GIF 或 SVG。
 
-只有 `supportedScopes` 包含 `global` 的 V4 组件能添加到全局层。统一全局层也直接接收原生文字、图片、图形、视频和教师控制器；这些原生元素不需要组件 manifest。
+只有 `supportedScopes` 包含 `global` 的 V4 组件能添加到全局层。这是 Schema 与作者放置准入，不代表当前播放宿主已提供 session-global 实例与生命周期，实际边界见第 8、12 节。统一全局层也直接接收原生文字、图片、图形、视频和教师控制器；这些原生元素不需要组件 manifest。
 
 V4 的 `renderMode` 是能力声明，不是自动转换开关：改成 `dom` 不会把 Phaser 对象变成 HTML，改成 `phaser` 也不会把表格或 CSS 布局转换成 Canvas。字段、入口代码和验收必须一起修改。选择原则：密集文字、表格、表单和可访问控件偏 DOM；粒子、碰撞、精灵和高频程序动画偏 Phaser；确实需要两者协作才使用 `hybrid`。
 
@@ -211,7 +211,7 @@ var removeTitleRegion = ctx.editor?.registerTextRegion({
 
 规则：
 
-- `ctx.editor` 是隔离 authoring Player 在 `mode: 'edit'` 可能提供的可选扩展，必须判空；当前位置试运行、整课预览、普通 preview/capture 和成品 Player 不提供该桥；
+- `ctx.editor` 是同 Renderer 文档 Published authoring Player 在 `mode: 'edit'` 可能提供的可选扩展，必须判空；当前位置试运行、整课预览、普通 preview/capture 和成品 Player 不提供该桥；
 - 返回函数用于提前注销区域；组件销毁时宿主也会清理仍登记的区域；
 - `getBounds()` 可随组件内部运动返回最新位置，但必须是有限数值、正宽高和组件本地坐标；Phaser / Canvas 内部布局或运动改变边界后调用 `ctx.editor?.invalidate()`，宿主会合并刷新且销毁后的调用安全无效；
 - `key` 必须能解析为字符串，并对应 `editor.properties` 中的 `text` / `textarea` 或宿主递归发现的 `props.content` 文字；
@@ -243,7 +243,7 @@ defaultProps → variant props → preset props → instance props
 
 ```js
 window.CoursewareComponent.define({
-  id: 'com.example.global-controls',
+  id: 'com.example.scene-controls',
   runtimeApiVersion: 4,
 
   create(ctx) {
@@ -344,18 +344,19 @@ interface ComponentCreateContextHybrid extends ComponentCreateContextBase {
 - DOM 对象加入 `ctx.dom.root`，Phaser 可见对象加入 `ctx.phaser.root`；
 - `dom` 模式不存在 `ctx.phaser`，`phaser` 模式不存在 `ctx.dom`，只有 `hybrid` 同时提供两者；
 - `mode === 'edit'` 表示组件正由统一画布的 authoring Player 渲染；宿主同时屏蔽组件输入并冻结宿主动作、内置媒体、导航和课程状态，组件自身也不得绕过这些边界创建原生媒体或推进学生业务；`capture` 只产生确定静态画面；
-- `editor` 仅由隔离 authoring Player 按需提供，必须判空；它只登记画布文字命中区，不是编辑器 DOM、工程 Store 或通用 patch 入口；
+- `editor` 仅由同文档 Published authoring Player 按需提供，必须判空；它只登记画布文字命中区，不是编辑器 DOM、工程 Store 或通用 patch 入口；
 - `props` 已合并默认值和实例值；
 - `actions` 在预览和互动网页导出中工作，在编辑画布中返回 `false`；捕获模式不得主动导航或推进状态；
-- V4 的 `scope` 始终存在；Player 还提供生命周期作用域的可选 `events`、课程级 `courseState` 和场景 `presentation`，这些可选值仍需按类型判空；
-- `events` 订阅在组件销毁时由宿主自动解除，组件仍可保存 disposer 并显式清理；
-- `courseState` 普通翻页和重播保留，`restartCourse()` 时清空；只可存纯数据；
+- `scope` 是 V4 上下文字段；当前已验证的互动播放载体都是本地作用域，不得从全局层可见挂载推导 `ctx.scope === 'global'` 已成立；
+- `events`、`courseState` 和 `presentation` 都是宿主按载体提供的可选能力，必须分别判空；通用 DOM carrier 当前不提供 `ctx.events`，`ctx.presentation` 只在 Slide 载体提供；
+- 宿主提供 `events` 时，订阅会在组件销毁时由宿主自动解除，组件仍可保存 disposer 并显式清理；
+- `courseState` 普通翻页和重播保留，`restartCourse()` 时重置为 Course Project V9 中声明的默认值，不是无条件清空；只可存纯数据；
 - `emit()` 在 Player 中包装为 `component:event`，并同时派发兼容的浏览器事件。
 - 异步字体、图片、GLB、纹理或解码器初始化必须用 `capture.waitUntil()` 登记，Promise 必须可确定结束。
 
 旧包不能只把 manifest 数字改成 4：离线迁移时应先把入口改为 `ctx.phaser`/`ctx.dom`，补齐 `supportedScopes`、`renderMode`、生命周期和捕获合同，再用当前导入器做真实交互与静态捕获验收。修改 `renderMode` 不会自动转换现有实现。
 
-V4 组件可以直接订阅 `scene:enter`、读取/写入课程状态并与运行时协作：
+宿主提供对应可选能力时，V4 组件可订阅 `scene:enter`、读取/写入课程状态并与 Slide 呈现状态协作：
 
 ```js
 var removeSceneListener = ctx.events?.on('scene:enter', function (event) {
@@ -375,7 +376,7 @@ ctx.presentation?.transitionTo('state_correct', {
 })
 ```
 
-`events/courseState/presentation` 必须判空，`scope` 可直接使用。组件没有独立 `localState` 和导航守卫；复杂课程规则、跨组件编排和导航约束仍优先放在 `globalRuntime`。组件可直接切换稳定场景状态，也可通过 `emit()` 上报高层事件交给运行时协调。
+`events/courseState/presentation` 必须各自判空；上例不代表三者会在同一 carrier 中同时存在。通用 DOM carrier 没有 `ctx.events`，非 Slide carrier 没有 `ctx.presentation`。组件没有独立 `localState` 和导航守卫；复杂课程规则、跨组件编排和导航约束仍优先放在 `globalRuntime`。组件只能在 `presentation` 存在时切换稳定 Slide 场景状态，也可通过 `emit()` 上报高层事件交给运行时协调。
 
 ### 7.1 渲染平面与真 3D
 
@@ -387,28 +388,24 @@ ctx.presentation?.transitionTo('state_correct', {
 
 Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVisible(false)` / `suspend()` 停止 RAF 和昂贵更新，在 `prepareCapture()` 主动渲染确定帧，在 `destroy()` 释放 geometry、material、texture、render target、renderer、监听和 RAF。加载任务通过 `ctx.capture.waitUntil()` 登记，并提供可理解的缩略图与可捕获静态画面。这样 3D 成本只由使用该组件的工程承担，不成为编辑器核心依赖。
 
-## 8. 场景组件与全局组件
+## 8. 本地组件与全局层组件
 
-### 场景组件
+### 已验证的本地播放载体
 
-- 随场景渲染；
-- 离开场景和重播本页时销毁；
-- 适合题型、实验、动画模块和场景内工具；
-- V4 manifest 必须包含 `supportedScopes: ['scene']` 或同时包含两种作用域。
+- DOM Component 支持 Slide `scene.layerItems` / `surfaceLayerItems`、Flow block / `surfaceLayerItems`、Spatial world / `surfaceLayerItems`；
+- Phaser Component 只支持 Slide `scene.layerItems`；`hybrid` 尚不在已验证的互动播放切片内；
+- 本地组件随所在 carrier 渲染，离开 carrier 或重播时可销毁并重建，适合题型、实验、动画模块和局部工具；
+- manifest 必须包含 `supportedScopes: ['scene']` 或同时声明两种作用域。
 
-### 全局组件
+### 全局层组件的当前边界
 
-- 播放器启动时创建一次；
-- 普通翻页和重播本页时保持同一实例；
-- `restartCourse()` 时销毁并重建；
-- 可声明 `underlay` 或 `overlay`；Phaser 部分遵循该层级，DOM/hybrid 的 DOM 部分仍位于固定组件 DOM 平面；
-- 可见范围为 `all`、`include` 或 `exclude`，引用稳定场景 ID；
-- 隐藏时宿主关闭显示和输入，但不销毁内部状态。
-- 可通过 `ctx.scope === 'global'` 确认播放器挂载作用域，通过 `ctx.events` 订阅 `scene:enter` 更新常驻 HUD，通过 `ctx.courseState` 与场景运行时共享进度。
+V9 Schema 和作者界面允许把声明 `supportedScopes: ['global']` 的组件放入 `globalLayerItems`，并配置 `underlay` / `overlay` 与 `all` / `include` / `exclude` 可见范围。当前宿主能显示这类组件，但这只是可见挂载，不是已完成的全局播放合同：
 
-全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Course Project V9 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
+- 通用 Component 播放宿主没有 session-global owner，也没有保证向该挂载传入 `ctx.scope === 'global'`；
+- 切换 location、重播或重建当前宿主时可以销毁并重建组件，不保证跨页保留同一实例或其内部状态；
+- 因此不得依赖全局组件实现跨页计时、积分、导航或常驻 HUD，也不得从可见结果推导 `ctx.events` 或全局作用域已可用。
 
-若一个包声明同时支持两种作用域，其实现应根据可选 `ctx.scope` 正确适配两种生命周期；在字段缺失的编辑宿主中使用安全回退，不能直接解引用。
+普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；跨页课程状态使用宿主 `courseState`，复杂课程规则和全局生命周期使用 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。若包同时声明两种作用域，仍必须对 `ctx.scope/events/courseState/presentation` 做宿主能力判断，不能把 manifest 声明当作实际宿主保证。
 
 ## 9. 宿主动作
 
@@ -424,9 +421,9 @@ function branch() {
 }
 ```
 
-动作返回同步 `boolean`：目标不存在、越过首页/末页、当前页重入或导航守卫阻止时可能为 `false`。`goToScene(sceneId, targetStateId?)` 可原子进入目标场景的指定命名状态；省略或状态引用失效时进入目标场景初始状态。同场景调用可只切换状态；若导航守卫把请求重定向到另一个场景，原请求的目标状态不会套用到重定向场景。
+动作返回同步 `boolean`：目标不存在、越过首页/末页或当前页无法重入时可能为 `false`。`goToScene()` 的跨 location 请求以及 `nextScene()` / `previousScene()` 会进入顶层 navigation guard；`replayScene()` 是同 location 重播，不经过导航守卫；`restartCourse()` 明确绕过守卫。`goToScene(sceneId, targetStateId?)` 可原子进入目标场景的指定命名状态；省略或状态引用失效时进入目标场景初始状态。同场景调用可只切换状态；若导航守卫把跨 location 请求重定向到另一个场景，原请求的目标状态不会套用到重定向场景。
 
-`replayScene()` 只重建当前场景作用域，不重建全局组件；`restartCourse()` 会重建全局组件并从第一场景开始。不要混用。
+`replayScene()` 重建当前场景作用域；`restartCourse()` 从第一场景开始，并把 `courseState` 重置为工程声明的默认值。当前 global Component 没有可依赖的 session-global 生命周期，不得依赖“重播不重建全局实例”或“只有重开才重建”。
 
 ## 10. 生命周期
 
@@ -450,14 +447,14 @@ interface ComponentInstanceLifecycle {
 - `setEditorState`：切换编辑器内部预览页面；
 - `setVisible`：全局可见范围或宿主显隐改变时关闭/恢复显示和输入，不销毁业务状态；
 - `suspend` / `resume`：暂停/恢复 RAF、物理、媒体和昂贵更新，不把暂停时长补算成一大帧；
-- `prepareCapture`：宿主会先排空此前登记的资源任务，再由此 hook 把 DOM/Canvas/WebGL 推进并渲染到确定的最终静态帧；hook 内同步登记的任务必须在异步最终绘制完成后才 resolve，宿主随后立即复制该实例 Canvas/WebGL 帧，再准备下一个实例；PPTX 组件捕获按实例依次创建隔离 Player，避免大量 Three/WebGL 组件同时占用上下文；
+- `prepareCapture`：宿主会先排空此前登记的资源任务，再由此 hook 把 DOM/Canvas/WebGL 推进并渲染到确定的最终静态帧；hook 内同步登记的任务必须在异步最终绘制完成后才 resolve，宿主随后立即复制该实例 Canvas/WebGL 帧，再准备下一个实例；PPTX 组件捕获按实例依次创建独立 payload/session/root，避免大量 Three/WebGL 组件同时占用上下文；
 - `destroy`：解除监听，停止 Timer、Tween、RAF 和音频，释放组件自己的引用、纹理和 GPU 资源。
 
-生命周期方法应可重复、安全调用。全局组件需特别防止把场景切换、隐藏或 suspend 误判为销毁或重新创建。宿主记录组件生命周期的首个失败并销毁失败挂载，后续捕获继续拒绝，不能因一次显隐或同步更新而“复活”为空白成功。`prepareCapture()` 抛错只使该组件实例产生可诊断占位，已经成功的组件快照继续保留，不应吞掉错误或让整批 PPTX 组件退化。
+生命周期方法应可重复、安全调用。本地组件必须正确处理显隐、suspend/resume、location/replay 导致的销毁与重建；全局层组件同样不能假定实例会跨页存活。宿主记录组件生命周期的首个失败并销毁失败挂载，不能因一次显隐或同步更新而“复活”为空白成功。PPTX 中单实例 `prepareCapture()` 抛错会进入该实例的 `staticFallback` / 可见占位链，已经成功的组件快照继续保留，不应吞掉错误或让整批 PPTX 组件退化。
 
 组件自行创建的音频、视频或媒体流不会自动进入 Course Project V9 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
 
-场景状态切换不会销毁组件实例。宿主会在同一实例上调用 `resize()` 和 `updateProps()`，因此这两个方法必须真正刷新现有显示对象，不能要求通过重新执行 `create()` 才生效。
+命名场景状态切换可以改变有效组件集合或挂载 generation，因此可能销毁并重建组件。若同一实例被保留，宿主则可在原实例上调用 `resize()` 和 `updateProps()`。组件必须同时支持这两条路径：更新方法能刷新现有显示对象，`create()` / `destroy()` 也能完整重建与清理，不得把实例身份持续作为业务前提。
 
 ## 11. 图片加载
 
@@ -482,9 +479,9 @@ function loadProjectImage(assetId) {
 
 编辑模式中，组件由 Player 作为唯一视觉源显示；透明 Phaser 层只负责组件节点的整体选择、移动、缩放和旋转。属性栏可编辑 `props.content` 和公开字段。V4 全局组件可与全局原生元素一起在统一“全局层”中编辑位置、层级和可见范围。
 
-组件在“编辑状态”画布中由隔离 authoring Player 以 `mode: 'edit'` 创建，显示与成品相同坐标和合成层级下的稳定视觉，同时禁止内部互动；在中央“当前位置试运行”、顶部“整课预览”和网页导出中使用 `mode: 'preview'`；静态捕获使用 `mode: 'capture'`，不得推进学生业务，只生成确定画面。当前位置试运行从当前场景/状态启动（基础场景回退当前场景初始状态），整课预览从第一场景初始状态启动。场景命名状态切换时不会重新执行 `create()`，而是在同一实例上调用 `resize()` / `updateProps()`，因此状态覆盖中的组件参数必须能即时反映。
+组件在“编辑状态”画布中由同 Renderer 文档的 Published authoring Player 以 `mode: 'edit'` 创建，显示与成品相同坐标和合成层级下的稳定视觉，同时禁止内部互动；在中央“当前位置试运行”、顶部“整课预览”和网页导出中使用 `mode: 'preview'`；静态捕获使用 `mode: 'capture'`，不得推进学生业务，只生成确定画面。当前位置试运行从当前场景/状态启动（基础场景回退当前场景初始状态），整课预览从第一场景初始状态启动。命名状态切换可能保留实例并调用 `resize()` / `updateProps()`，也可能因有效层或 generation 变化而重挂组件；状态覆盖参数必须即时反映，同时不得依赖实例身份不变。
 
-Published V2 当前已证明的 API 4 Phaser 播放切片是 Slide `scene.layerItems` 中的 scene-local component：当前位置试运行、整课预览、离线/在线单 HTML 与网页包执行相同包版本、props、素材、emit、frame/order、命中与 generation 生命周期。global/surface-shared、Flow/Spatial、hybrid 以及 PDF/PPTX capture 不由这一切片推导；这些 carrier 必须在各自真实 consumer 出现后单独验收。
+Published V2 当前已证明的 API 4 互动播放切片是：DOM 的 Slide scene/surface、Flow block/surface、Spatial world/surface 本地 carrier，以及 Phaser 的 Slide scene-local carrier。当前位置试运行、整课预览、离线/在线单 HTML 与网页包在这些切片内使用发布包版本、props、素材与宿主生命周期。`hybrid`、global Component 的 session-global scope/lifetime、Flow/Spatial Phaser 与非上述 carrier 不在已验证切片内；可见挂载不等于这些合同已成立。
 
 单 HTML 和网页包导出会把组件默认参数展平到实际实例 props，只发布运行必需的组件 ID、版本、API/渲染能力、编码执行逻辑和组件素材；组件包的 `manifest.json`、`editor.properties/pages`、变体、预设、说明、缩略图和独立原始 `runtime.js` 不进入发布物。执行逻辑在浏览器端仍可恢复和分析，这只是 [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 的轻量发布裁剪，不是代码加密或 DRM。
 
@@ -494,9 +491,13 @@ Published V2 当前已证明的 API 4 Phaser 播放切片是 Slide `scene.layerI
 
 V4 保证所有 `props.content` 文字可在属性栏编辑；画布原位编辑是可选扩展，组件必须通过 DOM `data-courseware-edit-key` 或 `ctx.editor.registerTextRegion()` 显式登记。未登记不影响属性栏、预览或导出。
 
-PDF/PPTX 不执行组件互动或声音。可视组件应提供可理解的稳定编辑预览和静态结果；视频型定制组件需要明确海报/占位方案。内置 `TeacherControllerNode` 默认不进入静态导出，而自定义组件是否应出现在静态成品中由组件视觉和导出捕获结果决定。
+PDF/PPTX 成品不执行组件互动或声音；部分 Slide 链路会在导出时以 `mode: 'capture'` 执行组件以生成静态像素。当前精确边界是：
 
-DOM 静态捕获支持常规背景、边框、文字、图片、表单值和 Canvas/WebGL 快照，但不承诺复现所有伪元素、滤镜、混合模式、遮罩或特殊 CSS。组件作者必须实测 PDF/PPTX；必要时在 `capture` 模式提供更简单的确定画面，或把关键视觉绘制到可捕获 Canvas。
+- 纯 Slide PDF 按真实 Published 页捕获，包含 DOM Component 的 scene/surface/global 可见实例与 Phaser Component 的 Slide scene 实例；此处对 global DOM 的 `capture` 挂载只证明静态视觉，不证明播放期 session-global 生命周期。页内必需资源或捕获失败会让该页捕获失败，不会被吞掉或冒充成透明成功图。
+- PPTX 对纯 Slide 以及 Mixed 中的 Slide 片段，可按项捕获 DOM scene/surface 和 Phaser scene Component；global DOM Component 只在纯 Slide PPTX 中捕获。单项失败先使用作者 `staticFallback`，否则输出带组件身份的可见占位，不影响此前成功的快照。
+- Flow 没有 PPTX 动态组件捕获；纯 Flow/Spatial 和 Mixed PDF、以及 PPTX 中的非 Slide 表面，不执行 Component Runtime，使用作者静态后备或可见身份标签。
+
+DOM 静态捕获支持常规背景、边框、文字、图片、表单值、单层线性渐变和逐资源 Canvas/WebGL 快照，但不承诺复现伪元素、滤镜、混合模式、遮罩或复杂 CSS。组件作者必须在实际目标表面与格式中验收；必要时在 `capture` 模式提供更简单的确定画面，或把关键视觉绘制到可捕获 Canvas。
 
 ## 13. 组件包管理与故障隔离
 
@@ -508,7 +509,7 @@ Editor 1.0.0 在专业模式独立“组件”页的“工程组件”列表把�
 
 “只读”只阻止直接覆盖原包，不阻止查看或复制已经交付的代码，也不替代许可证约束；创建副本前应确认组件授权允许修改和二次分发。可编辑副本是工程作者态能力，不是源码保密措施。`.h5lesson` 保存完整组件包；单 HTML/网页包虽会裁掉 manifest、编辑器字段和独立原始 `runtime.js`，浏览器仍需取得可恢复的执行逻辑。不要在组件或工程中存放密钥，并且不要把 PublishedLesson 裁剪描述为加密、不可逆向或 DRM。
 
-组件创建、属性更新、尺寸/可见性/暂停更新、捕获准备和销毁必须可隔离失败。单个实例异常会进入本地诊断日志并保留其他页面/组件运行；静态导出也只回退该实例，不能清空此前成功快照或阻断后续实例。作者排障时先运行“工程检查”确认包和引用，再导出不含课件素材内容的诊断报告。
+组件创建、属性更新、尺寸/可见性/暂停更新、捕获准备和销毁必须可诊断。互动 Player 中的单实例异常会进入本地诊断日志，其他组件继续运行；PPTX 按项捕获会只回退失败实例，不清空此前成功快照或阻断后续实例。纯 Slide PDF 是页级 Published 捕获，其必需资源/捕获错误按页传播，不伪造透明成功页。作者排障时先运行“工程检查”确认包和引用，再导出不含课件素材内容的诊断报告。
 
 ## 14. 打包
 
@@ -516,8 +517,8 @@ Editor 1.0.0 在专业模式独立“组件”页的“工程组件”列表把�
 
 ```powershell
 Compress-Archive -Path manifest.json,runtime.js,thumbnail.png,assets `
-  -DestinationPath global-controls.zip -Force
-Rename-Item global-controls.zip global-controls.h5component
+  -DestinationPath scene-controls.zip -Force
+Rename-Item scene-controls.zip scene-controls.h5component
 ```
 
 无缩略图或素材目录时从命令中移除。不要压缩外层项目目录。
@@ -528,7 +529,7 @@ V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照�
 
 ## 15. 信任与宿主边界
 
-Component 是经过审核的可信扩展，不是普通图片；外部导入只表示组件没有内置进产品，不会自动降低信任等级。当前 authoring iframe、主窗口和网页导出提供的能力并不完全相同，这属于宿主事实，而不是“外部组件必须低权限”的合同。
+Component 是经过审核的可信扩展，不是普通图片；外部导入只表示组件没有内置进产品，不会自动降低信任等级。Slide authoring 与 playback 当前使用同 Renderer 文档的 Published V2 宿主；它与整课预览、网页导出和各静态捕获目标所提供的能力仍可能不同。这些是宿主事实，而不是“外部组件必须低权限”的合同。
 
 组件确需父页面、本地、桌面或其他宿主能力时，应使用该环境明确提供的稳定接口或同宿主执行语义；没有该能力的网页/导出环境必须明确降级，不能伪造 parity。发布前仍要审查入口和素材；不要持久化或导出密钥、账号、隐私数据，也不要运行时加载远程脚本。
 
@@ -546,17 +547,17 @@ Component 是经过审核的可信扩展，不是普通图片；外部导入只�
 - [ ] DOM/Phaser 对象只使用声明能力；没有依赖跨 DOM/Canvas 平面的逐对象交错，也没有把修改 `renderMode` 当作自动代码转换。
 - [ ] 统一画布的编辑模式只显示稳定视觉和显式目标，不响应组件输入、媒体、导航或课程状态推进；预览模式交互正常。
 - [ ] 可视组件提供离线缩略图；缩略图缺失/损坏时名称后备可读，场景缩略图不会空白。
-- [ ] 场景/全局生命周期、隐藏输入、重播和重开已验证。
+- [ ] 已按实际目标 carrier 验证本地生命周期、隐藏输入、重播和重开；未把 global Component 可见挂载误写为 session-global scope/lifetime。
 - [ ] 外层 `node.enter` / `node.exit` 与组件内部动画责任不重叠；业务触发、顺序/并行/延迟、完成事件与静态稳定帧正确。
 - [ ] 组件包使用统计正确；同 ID 替换、作用域不兼容回滚、引用中禁止删除和无引用安全删除已验证。
 - [ ] 需要代码修改时创建新 ID/版本的工程内可编辑副本，未直接覆盖第三方包；副本变更可撤销并通过 manifest/runtime 校验。
 - [ ] 未重复实现可由 `VideoNode`、声音库/声道、`TeacherControllerNode` 或声明式交互完成的一等能力；自建媒体能响应静音并完整清理。
-- [ ] 必需 `scope` 使用正确；`events/courseState/presentation` 均做可选检查；事件订阅、课程状态和场景状态切换语义已验证。
+- [ ] `scope/events/courseState/presentation` 均按 carrier 做能力检查；通用 DOM 无 `events`、非 Slide 无 `presentation`、restart 恢复声明默认值，命名状态可重挂组件的语义均已验证。
 - [ ] 需要跨场景指定状态时使用 `goToScene(sceneId, targetStateId)`，并验证状态失效回退与导航守卫重定向。
 - [ ] 组件事件可被全局运行时接收，复杂导航规则未塞进组件私有全局变量。
 - [ ] 离线便携单 HTML/网页包不产生外部请求；在线轻量目标只访问工程声明的远程依赖，PDF/PPTX 静态化与捕获降级结果已检查。
 - [ ] 发布物未携带作者态 manifest/编辑器字段或重复 `runtime.js`，同时已明确执行逻辑可恢复、不构成源码保密或 DRM。
-- [ ] 捕获按实例产生确定帧；单实例失败只生成该实例占位，成功快照不会被后续失败清空，批量 Three/WebGL 组件不会同时创建捕获宿主。
+- [ ] PPTX 按实例产生确定帧，单实例失败按 `staticFallback` / 可见占位回退，成功快照不会被后续失败清空，批量 Three/WebGL 组件不会同时创建捕获宿主；纯 Slide PDF 页级失败不伪装成透明成功页。
 - [ ] Three.js 如有使用，其执行库打包在组件内；GLB、纹理和解码器使用包内资源或工程已声明的远程交付，并有捕获/离线降级；RAF、WebGL 与 GPU 资源可暂停、可捕获、可销毁。
 - [ ] ZIP 路径安全、大小写一致，组件包不超过 50 MB。
 - [ ] 完整工程已运行 `npm run --silent validate:project -- <file.h5lesson>`；真实内嵌文件、Schema 与当前已接线的工程健康/四格式预检没有未处理的确定性错误，并已用真实 Player/导出确认实际网络使用与工程声明一致。

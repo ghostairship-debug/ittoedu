@@ -433,6 +433,7 @@ function discoverySession(
     scope: source.owner === 'global' ? 'global' : 'scene',
     sceneId: state.activeSceneId,
     targetId,
+    nodeId: source.itemId,
     kind: 'asset',
     key: BINDING_KEY,
   }

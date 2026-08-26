@@ -2,6 +2,21 @@ import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { TeacherControllerAction } from '../../shared/projectTypes'
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
+import type {
+  ComponentHostActions,
+  ComponentPackageData,
+} from '../../shared/componentTypes'
+import type { RuntimeHostActions } from '../../shared/runtimeTypes'
+import {
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+  type PlayerAuthoringAckMessage,
+  type PlayerAuthoringErrorMessage,
+  type PlayerAuthoringHostMessage,
+  type PlayerHostMode,
+} from '../../shared/playerAuthoringProtocol'
+import { CourseStateStore } from '../CourseStateStore'
+import { createPlayerComponentHostActions } from '../componentHostActions'
 import { TeacherControllerRuntimeSessionStore } from '../teacherControllerRuntimeSession'
 import { PublishedInteractionController } from '../interactions/PublishedInteractionController'
 import {
@@ -22,9 +37,20 @@ import {
   type MixedNavigationTransition,
   type MixedNavigationState,
 } from './mixed/MixedCourseNavigator'
-import { SlidePublishedAdapter } from './slide/SlidePublishedAdapter'
+import {
+  SlidePublishedAdapter,
+  type SlidePublishedAuthoringOptions,
+} from './slide/SlidePublishedAdapter'
 import { SpatialSurfaceHost } from './spatial/SpatialSurfaceHost'
 import { PublishedGlobalCanvasRuntimeOwner } from './runtime/publishedGlobalCanvasRuntimeOwner'
+import {
+  PublishedAuthoringSessionCoordinator,
+  type PublishedAuthoringPatchSurface,
+} from './publishedAuthoringSession'
+import {
+  findPublishedNavigationBlock,
+  resetPublishedCourseState,
+} from './publishedCourseState'
 import type {
   SurfaceCapture,
   SurfaceCaptureRequest,
@@ -42,6 +68,10 @@ export interface CreatePublishedDynamicHostsOptions {
   viewport?: { width: number; height: number }
   resolveAsset?: (assetId: string) => string | undefined
   playbackPathId?: string | null
+  /** Internal deterministic export host; keeps authored interactions inert. */
+  staticCapture?: boolean
+  /** Pure Slide compatibility policy. Mixed/static callers leave this false. */
+  includeGlobalLayerItemsForStaticCapture?: boolean
 }
 
 interface PublishedInteractionHostFactoryOptions {
@@ -59,16 +89,32 @@ interface PublishedInteractionHostFactoryOptions {
   replayScene?: () => Promise<boolean>
   /** Mixed reset commits the shared controller authority only after all hosts reset. */
   deferTeacherControllerCourseReset?: boolean
+  /** One mutable Published playback store shared by every executable carrier. */
+  courseState?: CourseStateStore
+  runtimeActions?: Readonly<RuntimeHostActions>
+  componentActions?: Readonly<ComponentHostActions>
 }
 
 type CreatePublishedSurfaceHostOptions = CreatePublishedDynamicHostsOptions
   & PublishedInteractionHostFactoryOptions
+  & {
+    authoring?: SlidePublishedAuthoringOptions
+  }
 
 export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHostsOptions {
   /** Ephemeral session start; never mutates the caller's Published payload. */
   initialLocationId?: string
   services?: Partial<SurfacePlayerServices>
   onFailure?: CoursePlayerOptions['onFailure']
+  /** Internal direct same-document authoring host. Published V2 stays immutable. */
+  authoring?: {
+    sessionId: string
+    scope: 'scene' | 'surface' | 'global'
+    stateId: string | null
+    /** Transient full manifests used only by the same-document authoring host. */
+    componentPackages?: Readonly<Record<string, ComponentPackageData>>
+    onMessage?: (message: PlayerAuthoringHostMessage) => void
+  }
 }
 
 /**
@@ -128,6 +174,13 @@ function createPublishedSurfaceHostInternal(
         return options.restartCourse()
       },
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
+      courseState: options.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
+      ...(options.authoring ? { authoring: options.authoring } : {}),
+      staticCapture: options.staticCapture,
+      includeGlobalLayerItemsForStaticCapture:
+        options.includeGlobalLayerItemsForStaticCapture,
     })
   }
   if (kind === 'flow') {
@@ -139,7 +192,11 @@ function createPublishedSurfaceHostInternal(
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
       teacherControllerSession: options.teacherControllerSession,
       restartCourse: options.restartCourse,
+      replayScene: options.replayScene,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
+      courseState: options.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
     })
   }
   return new SpatialPublishedAdapter(
@@ -155,7 +212,11 @@ function createPublishedSurfaceHostInternal(
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
       teacherControllerSession: options.teacherControllerSession,
       restartCourse: options.restartCourse,
+      replayScene: options.replayScene,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
+      courseState: options.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
     },
   )
 }
@@ -175,15 +236,45 @@ export function createPublishedSurfaceHosts(
 
 function defaultCourseStateServices(
   payload: PublishedCourseV2Payload,
+  courseState: CourseStateStore,
 ): SurfacePlayerServices {
-  const state = new Map<string, unknown>()
   return {
     navigate: () => undefined,
-    getCourseState: (key) => state.get(key),
-    setCourseState: (key, value) => {
-      state.set(key, value)
-    },
+    getCourseState: (key) => courseState.get(key),
+    setCourseState: (key, value) => courseState.set(key, value),
     resolveAsset: (assetId) => payload.assets[assetId]?.url,
+  }
+}
+
+class FrozenPublishedCourseStateStore extends CourseStateStore {
+  constructor(declarations: PublishedCourseV2Payload['courseState']) {
+    super()
+    for (const declaration of declarations) {
+      super.set(declaration.key, structuredClone(declaration.defaultValue))
+    }
+  }
+
+  override set(_key: string, _value: unknown): void {}
+
+  override delete(_key: string): void {}
+
+  override clear(): void {}
+}
+
+function unsupportedPublishedAuthoringMessage(
+  value: unknown,
+): PlayerAuthoringErrorMessage {
+  const candidate = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {}
+  return {
+    type: PLAYER_AUTHORING_MESSAGE_TYPES.error,
+    protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+    ...(typeof candidate.sessionId === 'string' ? { sessionId: candidate.sessionId } : {}),
+    ...(typeof candidate.requestId === 'string' ? { requestId: candidate.requestId } : {}),
+    ...(typeof candidate.revision === 'number' ? { revision: candidate.revision } : {}),
+    code: 'unsupported-host-mode',
+    message: '当前 Published 会话不是统一画布编辑宿主。',
   }
 }
 
@@ -249,21 +340,36 @@ export class PublishedCourseSession {
   readonly navigator: MixedCourseNavigator
   readonly #hosts: readonly SurfaceHost[]
   readonly #globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null
+  readonly #authoringCoordinator: PublishedAuthoringSessionCoordinator | null
   #slots: HTMLElement[] = []
   #destroyPromise: Promise<void> | null = null
   #publicReplayAbortController: AbortController | null = null
   #publicReplaySettlement: Promise<boolean> | null = null
+  #navigationFeedback: HTMLElement | null = null
 
   constructor(
     player: CoursePlayer,
     navigator: MixedCourseNavigator,
     hosts: readonly SurfaceHost[],
     globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null = null,
+    authoringCoordinator: PublishedAuthoringSessionCoordinator | null = null,
   ) {
     this.player = player
     this.navigator = navigator
     this.#hosts = hosts
     this.#globalRuntimeOwner = globalRuntimeOwner
+    this.#authoringCoordinator = authoringCoordinator
+  }
+
+  getHostMode(): PlayerHostMode {
+    return this.#authoringCoordinator ? 'authoring' : 'playback'
+  }
+
+  applyAuthoringCommand(
+    value: unknown,
+  ): Promise<PlayerAuthoringAckMessage | PlayerAuthoringErrorMessage> {
+    return this.#authoringCoordinator?.apply(value)
+      ?? Promise.resolve(unsupportedPublishedAuthoringMessage(value))
   }
 
   listCatalog(): MixedCatalogEntry[] {
@@ -354,11 +460,13 @@ export class PublishedCourseSession {
 
   /** Narrow course-runtime restart entry used by delivery controller chrome. */
   async restartCourse(): Promise<boolean> {
-    this.#globalRuntimeOwner?.restart()
+    this.#globalRuntimeOwner?.prepareRestart()
     try {
       await this.navigator.resetCourse()
+      this.#globalRuntimeOwner?.finishRestart(true)
       return true
     } catch (error) {
+      this.#globalRuntimeOwner?.finishRestart(false)
       const currentSurfaceId = this.navigator.current?.surfaceId
       if (currentSurfaceId) this.#globalRuntimeOwner?.moveTo(currentSurfaceId)
       throw error
@@ -383,18 +491,47 @@ export class PublishedCourseSession {
       const mounted = await this.player.mountSurface(host.id, slot)
       if (!mounted.ok) throw mounted.failure?.error ?? new Error(`Failed to mount ${host.id}`)
     }
+    if (!this.#authoringCoordinator) {
+      const feedback = container.ownerDocument.createElement('div')
+      feedback.dataset.publishedNavigationFeedback = 'true'
+      feedback.setAttribute('role', 'alert')
+      feedback.setAttribute('aria-live', 'assertive')
+      feedback.hidden = true
+      Object.assign(feedback.style, {
+        position: 'absolute',
+        left: '50%',
+        bottom: '28px',
+        transform: 'translateX(-50%)',
+        zIndex: '30',
+        maxWidth: 'min(720px, calc(100% - 48px))',
+        boxSizing: 'border-box',
+        padding: '10px 16px',
+        borderRadius: '10px',
+        background: 'rgba(15, 23, 42, 0.94)',
+        color: '#f8fafc',
+        font: '600 16px/1.5 "Microsoft YaHei", sans-serif',
+        textAlign: 'center',
+        pointerEvents: 'none',
+      })
+      container.appendChild(feedback)
+      this.#navigationFeedback = feedback
+    }
     this.#globalRuntimeOwner?.mount(container.ownerDocument)
     await this.navigator.start()
-    this.syncActiveSlot(this.navigator.current?.surfaceId ?? this.#hosts[0]?.id ?? '')
+    const activeSurfaceId = this.navigator.current?.surfaceId ?? this.#hosts[0]?.id ?? ''
+    this.syncActiveSlot(activeSurfaceId)
+    if (activeSurfaceId) this.#globalRuntimeOwner?.moveTo(activeSurfaceId)
+    this.#authoringCoordinator?.markReady()
   }
 
   syncActiveSlot(surfaceId: string): void {
     for (const slot of this.#slots) {
       const active = slot.dataset.courseSurfaceSlot === surfaceId
       slot.style.visibility = active ? 'visible' : 'hidden'
-      slot.style.pointerEvents = active ? 'auto' : 'none'
+      slot.style.pointerEvents = active && !this.#authoringCoordinator ? 'auto' : 'none'
       slot.style.zIndex = active ? '1' : '0'
-      if (active) slot.removeAttribute('aria-hidden')
+      slot.inert = this.#authoringCoordinator !== null
+      if (active && !this.#authoringCoordinator) slot.removeAttribute('aria-hidden')
       else slot.setAttribute('aria-hidden', 'true')
     }
   }
@@ -403,14 +540,40 @@ export class PublishedCourseSession {
     this.#globalRuntimeOwner?.moveTo(surfaceId)
   }
 
-  protected restartPublishedGlobalRuntimes(): void {
-    this.#globalRuntimeOwner?.restart()
+  protected preparePublishedGlobalRuntimeRestart(): void {
+    this.#globalRuntimeOwner?.prepareRestart()
+  }
+
+  protected finishPublishedGlobalRuntimeRestart(committed: boolean): void {
+    this.#globalRuntimeOwner?.finishRestart(committed)
+  }
+
+  protected showNavigationFeedback(message: string, surfaceId: string): void {
+    const feedback = this.#navigationFeedback
+    if (feedback) {
+      feedback.textContent = message
+      feedback.hidden = false
+    }
+    const target = feedback?.parentElement
+    const CustomEventConstructor = target?.ownerDocument.defaultView?.CustomEvent
+    if (target && CustomEventConstructor) {
+      target.dispatchEvent(new CustomEventConstructor('courseware:navigation-blocked', {
+        detail: Object.freeze({ message, surfaceId }),
+      }))
+    }
+  }
+
+  protected clearNavigationFeedback(): void {
+    if (!this.#navigationFeedback) return
+    this.#navigationFeedback.hidden = true
+    this.#navigationFeedback.textContent = ''
   }
 
   async destroy(): Promise<void> {
     if (this.#destroyPromise) return this.#destroyPromise
     const replaySettlement = this.#publicReplaySettlement
     this.#publicReplayAbortController?.abort()
+    this.#authoringCoordinator?.destroy()
     this.#destroyPromise = this.#runDestroy(replaySettlement)
     return this.#destroyPromise
   }
@@ -425,6 +588,8 @@ export class PublishedCourseSession {
     }
     this.#globalRuntimeOwner?.destroy()
     await this.player.destroy()
+    this.#navigationFeedback?.remove()
+    this.#navigationFeedback = null
     for (const slot of this.#slots) slot.remove()
     this.#slots = []
   }
@@ -435,6 +600,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   readonly #hostsById: ReadonlyMap<string, SurfaceHost>
   readonly #payload: PublishedCourseV2Payload
   readonly #services: SurfacePlayerServices
+  readonly #courseState: CourseStateStore
+  readonly #staticCapture: boolean
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   readonly #interactionSessionPort: PublishedInteractionSessionPort
   #globalInteractionController: PublishedInteractionController | null = null
@@ -442,6 +609,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #terminalNavigationClaimed = false
   #terminalNavigationInvalidated = false
   #interactionDestroyStarted = false
+  #navigationGuardsBypassed = false
 
   constructor(
     player: CoursePlayer,
@@ -451,11 +619,15 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     services: SurfacePlayerServices,
     globalInteractionVisibilityState: PublishedInteractionVisibilityState,
     globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner,
+    courseState: CourseStateStore,
+    staticCapture: boolean,
   ) {
     super(player, navigator, hosts, globalRuntimeOwner)
     this.#hostsById = new Map(hosts.map((host) => [host.id, host]))
     this.#payload = payload
     this.#services = services
+    this.#courseState = courseState
+    this.#staticCapture = staticCapture
     this.#globalInteractionVisibilityState = globalInteractionVisibilityState
     this.#interactionSessionPort = {
       currentSceneId: () => this.#currentSlideSceneId(),
@@ -467,6 +639,75 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       replayScene: (signal) => this.#replayScene(signal),
       restartCourse: (signal) => this.#restartCourse(signal),
     }
+  }
+
+  assertNavigationAllowed(transition: MixedNavigationTransition): void {
+    if (
+      this.#staticCapture
+      || this.#navigationGuardsBypassed
+      || !transition.current
+      || transition.current.locationId === transition.next.locationId
+    ) return
+    const guard = this.#navigationBlockFor(transition.next.locationId)
+    if (!guard) return
+    this.#reportNavigationBlock(guard.message, transition.next.surfaceId)
+    throw new Error(guard.message)
+  }
+
+  requestHostGoToScene(sceneId: string, targetStateId?: string): boolean {
+    if (!this.#canAcceptHostAction()) return false
+    const location = this.#slideLocationForScene(sceneId)
+    if (!location) return false
+    const current = this.navigator.current
+    if (targetStateId === undefined && current?.locationId === location.id) return false
+    const targetHost = interactionCapableHost(this.#hostsById.get(location.surfaceId))
+    if (
+      !targetHost?.validatePublishedPresentationState
+      || !targetHost.validatePublishedPresentationState(location.id, targetStateId)
+    ) return false
+    if (!this.#acceptNavigationTarget(location.id, location.surfaceId)) return false
+    this.#launchHostAction(
+      'goToScene',
+      this.#goToScene(sceneId, targetStateId, new AbortController().signal),
+    )
+    return true
+  }
+
+  requestHostNextScene(): boolean {
+    if (!this.#canAcceptHostAction()) return false
+    const current = this.navigator.current
+    const target = current ? this.navigator.listCatalog()[current.index + 1] : undefined
+    if (!target || !this.#acceptNavigationTarget(target.id, target.surfaceId)) return false
+    this.#launchHostAction('nextScene', this.#nextScene(new AbortController().signal))
+    return true
+  }
+
+  requestHostPreviousScene(): boolean {
+    if (!this.#canAcceptHostAction()) return false
+    const current = this.navigator.current
+    const target = current ? this.navigator.listCatalog()[current.index - 1] : undefined
+    if (!target || !this.#acceptNavigationTarget(target.id, target.surfaceId)) return false
+    this.#launchHostAction('previousScene', this.#previousScene(new AbortController().signal))
+    return true
+  }
+
+  requestHostReplayScene(): boolean {
+    if (!this.#canAcceptHostAction() || !this.canForceReplayCurrentLocation()) return false
+    this.#launchHostAction('replayScene', this.#replayScene(new AbortController().signal))
+    return true
+  }
+
+  replayCurrentLocationFromController(): Promise<boolean> {
+    if (!this.#canAcceptHostAction() || !this.canForceReplayCurrentLocation()) {
+      return Promise.resolve(false)
+    }
+    return this.#replayScene(new AbortController().signal)
+  }
+
+  requestHostRestartCourse(): boolean {
+    if (!this.#canAcceptHostAction() || !this.navigator.current) return false
+    this.#launchHostAction('restartCourse', this.#restartCourse(new AbortController().signal))
+    return true
   }
 
   /** Navigator callback: every real/forced navigation invalidates the old generation. */
@@ -502,6 +743,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (this.#interactionDestroyStarted) return
     this.#terminalNavigationClaimed = false
     this.#terminalNavigationInvalidated = false
+    this.clearNavigationFeedback()
     this.syncActiveSlot(state.surfaceId)
     this.movePublishedGlobalRuntimes(state.surfaceId)
     this.#mountInteractionControllers()
@@ -600,6 +842,53 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     return location?.kind === 'slide-scene' ? location.sceneId : null
   }
 
+  #canAcceptHostAction(): boolean {
+    return !this.#staticCapture
+      && !this.#interactionDestroyStarted
+      && !this.#terminalNavigationClaimed
+      && !this.navigator.hasPendingNavigation
+      && this.navigator.current !== null
+  }
+
+  #navigationBlockFor(toLocationId: string) {
+    const fromLocationId = this.navigator.current?.locationId ?? null
+    if (fromLocationId === null || fromLocationId === toLocationId) return null
+    return findPublishedNavigationBlock(
+      this.#payload.navigationGuards,
+      this.#courseState,
+      { fromLocationId, toLocationId },
+    )
+  }
+
+  #acceptNavigationTarget(toLocationId: string, surfaceId: string): boolean {
+    const guard = this.#navigationBlockFor(toLocationId)
+    if (!guard) return true
+    this.#reportNavigationBlock(guard.message, surfaceId)
+    return false
+  }
+
+  #reportNavigationBlock(message: string, surfaceId: string): void {
+    this.showNavigationFeedback(message, surfaceId)
+    this.#services.reportDiagnostic?.({
+      surfaceId,
+      phase: 'execute',
+      severity: 'warning',
+      message,
+    })
+  }
+
+  #launchHostAction(label: string, action: Promise<boolean>): void {
+    void action.catch((error: unknown) => {
+      this.#services.reportDiagnostic?.({
+        surfaceId: this.navigator.current?.surfaceId ?? 'published-course',
+        phase: 'execute',
+        severity: 'error',
+        message: `Published 宿主动作“${label}”失败。`,
+        cause: error,
+      })
+    })
+  }
+
   #slideLocationForScene(sceneId: string): Extract<CourseLocation, { kind: 'slide-scene' }> | null {
     const current = this.navigator.current
       ? this.#locationById(this.navigator.current.locationId)
@@ -615,6 +904,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (
       this.#interactionDestroyStarted
       || this.#terminalNavigationClaimed
+      || this.navigator.hasPendingNavigation
       || signal.aborted
     ) return false
     // Claim synchronously so another local/global listener from the same click
@@ -720,18 +1010,130 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   async #restartCourse(signal: AbortSignal): Promise<boolean> {
     if (!this.navigator.current || !this.#claimTerminalNavigation(signal)) return false
-    this.restartPublishedGlobalRuntimes()
+    this.#navigationGuardsBypassed = true
+    this.preparePublishedGlobalRuntimeRestart()
     try {
       await this.navigator.resetCourse({ signal })
+      this.finishPublishedGlobalRuntimeRestart(true)
       this.#globalInteractionVisibilityState.reset()
       return true
     } catch (error) {
+      this.finishPublishedGlobalRuntimeRestart(false)
       const currentSurfaceId = this.navigator.current?.surfaceId
       if (currentSurfaceId) this.movePublishedGlobalRuntimes(currentSurfaceId)
       this.#releaseTerminalNavigationClaim()
       throw error
+    } finally {
+      this.#navigationGuardsBypassed = false
     }
   }
+}
+
+function createPublishedAuthoringCourseSession(
+  playback: PublishedCourseV2Payload,
+  options: PublishedCourseSessionOptions & {
+    authoring: NonNullable<PublishedCourseSessionOptions['authoring']>
+  },
+): PublishedCourseSession {
+  const location = playback.locations.find((candidate) => (
+    candidate.id === playback.startLocationId
+  ))
+  if (!location || location.kind !== 'slide-scene') {
+    throw new Error('Published 统一编辑宿主只能挂载明确的 Slide 场景位置。')
+  }
+  const surface = playback.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (!surface || surface.type !== 'slide') {
+    throw new Error(`Published 位置 ${location.id} 不属于 Slide surface。`)
+  }
+
+  // The authoring host is a single-location view. Keeping unrelated Mixed
+  // hosts alive would reintroduce hidden dual rendering and authoring targets.
+  playback.locations = [location]
+  playback.surfaces = [surface]
+  const frozenCourseState = new FrozenPublishedCourseStateStore(playback.courseState)
+  const resolveAsset = options.resolveAsset
+    ?? options.services?.resolveAsset
+    ?? ((assetId: string) => playback.assets[assetId]?.url)
+  const services: SurfacePlayerServices = {
+    ...defaultCourseStateServices(playback, frozenCourseState),
+    ...options.services,
+    navigate: () => undefined,
+    getCourseState: (key) => frozenCourseState.get(key),
+    setCourseState: () => undefined,
+    resolveAsset,
+  }
+  const teacherControllerSession = new TeacherControllerRuntimeSessionStore()
+  let coordinator: PublishedAuthoringSessionCoordinator | null = null
+  const host = createPublishedSurfaceHostInternal(playback, surface.id, {
+    viewport: options.viewport,
+    resolveAsset,
+    playbackPathId: options.playbackPathId,
+    teacherControllerSession,
+    courseState: frozenCourseState,
+    authoring: {
+      stateId: options.authoring.stateId,
+      scope: options.authoring.scope,
+      ...(options.authoring.componentPackages
+        ? { componentPackages: options.authoring.componentPackages }
+        : {}),
+      courseState: frozenCourseState,
+      onRuntimeTargetsChanged: (update) => coordinator?.publishRuntimeTargets(update),
+      onComponentTargetsChanged: (update) => coordinator?.publishComponentTargets(update),
+    },
+  }) as SlidePublishedAdapter
+  const player = new CoursePlayer([host], {
+    services,
+    onFailure: options.onFailure,
+  })
+  const mixedNavigator = new MixedCourseNavigator(
+    mixedCourseDefinitionFromPublished(playback),
+    player,
+  )
+  const globalRuntimeOwner = new PublishedGlobalCanvasRuntimeOwner({
+    payload: playback,
+    hosts: [host],
+    services,
+    resolveAsset,
+    authoring: {
+      courseState: frozenCourseState,
+      onTargetsChanged: (update) => coordinator?.publishRuntimeTargets(update),
+    },
+    courseState: frozenCourseState,
+  })
+  const authoringSurface: PublishedAuthoringPatchSurface = {
+    getAuthoringContext: () => host.getAuthoringContext(),
+    applyAuthoringPatch: async (context, patch) => {
+      if (patch.kind !== 'runtime-content' || patch.target.scope !== 'global') {
+        return host.applyAuthoringPatch(context, patch)
+      }
+      if (await globalRuntimeOwner.applyAuthoringContentValue(
+        patch.target.nodeId,
+        patch.target.key,
+        patch.value,
+      )) {
+        return { ok: true, target: patch.target }
+      }
+      return {
+        ok: false,
+        code: 'update-failed',
+        message: '全局 Runtime 作者目标已失效，无法原位更新。',
+      }
+    },
+  }
+  coordinator = new PublishedAuthoringSessionCoordinator({
+    sessionId: options.authoring.sessionId,
+    surface: authoringSurface,
+    ...(options.authoring.onMessage
+      ? { onMessage: options.authoring.onMessage }
+      : {}),
+  })
+  return new PublishedCourseSession(
+    player,
+    mixedNavigator,
+    [host],
+    globalRuntimeOwner,
+    coordinator,
+  )
 }
 
 export function createPublishedCourseSession(
@@ -739,6 +1141,9 @@ export function createPublishedCourseSession(
   options: PublishedCourseSessionOptions = {},
 ): PublishedCourseSession {
   const playback = structuredClone(payload)
+  if (options.authoring && options.staticCapture) {
+    throw new Error('Published 作者宿主不能同时作为静态捕获宿主。')
+  }
   if (options.initialLocationId !== undefined) {
     const initialLocation = playback.locations.find((location) => (
       location.id === options.initialLocationId
@@ -748,15 +1153,35 @@ export function createPublishedCourseSession(
     }
     playback.startLocationId = initialLocation.id
   }
+  if (options.authoring) {
+    return createPublishedAuthoringCourseSession(playback, {
+      ...options,
+      authoring: options.authoring,
+    })
+  }
   const globalInteractionVisibilityState = new PublishedInteractionVisibilityState()
   const teacherControllerSession = new TeacherControllerRuntimeSessionStore()
+  const courseState: CourseStateStore = options.staticCapture
+    ? new FrozenPublishedCourseStateStore(playback.courseState)
+    : new CourseStateStore()
+  if (!options.staticCapture) resetPublishedCourseState(courseState, playback.courseState)
   let session: PublishedInteractionCourseSession | null = null
   const restartCourse = (): Promise<boolean> => (
     session?.restartCourse() ?? Promise.resolve(false)
   )
   const replayScene = (): Promise<boolean> => (
-    session?.replayScene() ?? Promise.resolve(false)
+    session?.replayCurrentLocationFromController() ?? Promise.resolve(false)
   )
+  const componentActions = createPlayerComponentHostActions({
+    goToSceneById: (sceneId, targetStateId) => (
+      session?.requestHostGoToScene(sceneId, targetStateId) ?? false
+    ),
+    nextScene: () => session?.requestHostNextScene() ?? false,
+    previousScene: () => session?.requestHostPreviousScene() ?? false,
+    replayScene: () => session?.requestHostReplayScene() ?? false,
+    restartCourse: () => session?.requestHostRestartCourse() ?? false,
+  })
+  const runtimeActions: Readonly<RuntimeHostActions> = componentActions
   const hosts = playback.surfaces.map((surface) => createPublishedSurfaceHostInternal(
     playback,
     surface.id,
@@ -769,6 +1194,11 @@ export function createPublishedCourseSession(
       restartCourse,
       replayScene,
       deferTeacherControllerCourseReset: true,
+      courseState,
+      ...(!options.staticCapture ? { runtimeActions, componentActions } : {}),
+      staticCapture: options.staticCapture,
+      includeGlobalLayerItemsForStaticCapture:
+        options.includeGlobalLayerItemsForStaticCapture,
       onInteractionInvalidated: (surfaceId) => {
         session?.handleInteractionHostInvalidated(surfaceId)
       },
@@ -778,8 +1208,10 @@ export function createPublishedCourseSession(
     },
   ))
   const services: SurfacePlayerServices = {
-    ...defaultCourseStateServices(playback),
+    ...defaultCourseStateServices(playback, courseState),
     ...options.services,
+    getCourseState: (key) => courseState.get(key),
+    setCourseState: (key, value) => courseState.set(key, value),
     resolveAsset: options.resolveAsset
       ?? options.services?.resolveAsset
       ?? ((assetId) => playback.assets[assetId]?.url),
@@ -793,10 +1225,14 @@ export function createPublishedCourseSession(
     player,
     {
       onBeforeNavigate: (transition) => {
+        session?.assertNavigationAllowed(transition)
         session?.handleBeforeNavigation(transition)
       },
       onNavigate: (state) => {
         session?.handleNavigation(state)
+      },
+      onBeforeResetCourse: () => {
+        resetPublishedCourseState(courseState, playback.courseState)
       },
       onResetCourse: () => {
         teacherControllerSession.resetCourse()
@@ -813,6 +1249,9 @@ export function createPublishedCourseSession(
     hosts,
     services,
     resolveAsset: services.resolveAsset,
+    staticCapture: options.staticCapture,
+    courseState,
+    ...(!options.staticCapture ? { runtimeActions } : {}),
   })
   session = new PublishedInteractionCourseSession(
     player,
@@ -822,6 +1261,8 @@ export function createPublishedCourseSession(
     services,
     globalInteractionVisibilityState,
     globalRuntimeOwner,
+    courseState,
+    options.staticCapture === true,
   )
   return session
 }
@@ -870,6 +1311,7 @@ class FlowPublishedAdapter implements SurfaceHost {
   readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
   readonly #restartCourse?: () => Promise<boolean>
+  readonly #replayScene?: () => Promise<boolean>
   #services: SurfacePlayerServices | null = null
 
   constructor(
@@ -883,13 +1325,18 @@ class FlowPublishedAdapter implements SurfaceHost {
       onInteractionReady?: () => void
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
       restartCourse?: () => Promise<boolean>
+      replayScene?: () => Promise<boolean>
       deferTeacherControllerCourseReset?: boolean
+      courseState?: CourseStateStore
+      runtimeActions?: Readonly<RuntimeHostActions>
+      componentActions?: Readonly<ComponentHostActions>
     },
   ) {
     this.id = surfaceId
     this.#payload = payload
     this.#startLocationId = options.locationId
     this.#restartCourse = options.restartCourse
+    this.#replayScene = options.replayScene
     this.#host = new FlowSurfaceHost(payload, {
       surfaceId,
       locationId: options.locationId,
@@ -899,6 +1346,9 @@ class FlowPublishedAdapter implements SurfaceHost {
       onInteractionReady: options.onInteractionReady,
       teacherControllerSession: options.teacherControllerSession,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
+      courseState: options.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -914,6 +1364,15 @@ class FlowPublishedAdapter implements SurfaceHost {
           phase: 'mount',
           severity: 'error',
           message: `Runtime“${itemId}”${phase}失败：${error.message}`,
+          cause: error,
+        })
+      },
+      reportActionError: (action, error) => {
+        this.#services?.reportDiagnostic?.({
+          surfaceId: this.id,
+          phase: 'execute',
+          severity: 'error',
+          message: `教师控制器动作“${action.type}”执行失败：${error.message}`,
           cause: error,
         })
       },
@@ -980,6 +1439,9 @@ class FlowPublishedAdapter implements SurfaceHost {
     if (action.type === 'course.restart' && this.#restartCourse) {
       return this.#restartCourse()
     }
+    if (action.type === 'scene.replay' && this.#replayScene) {
+      return this.#replayScene()
+    }
     const target = publishedControllerNavigationTarget(action, {
       locations: this.#payload.locations,
       currentLocationId: this.#host.locationId,
@@ -1008,6 +1470,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
   readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
   readonly #restartCourse?: () => Promise<boolean>
+  readonly #replayScene?: () => Promise<boolean>
   #services: SurfacePlayerServices | null = null
 
   constructor(
@@ -1023,13 +1486,18 @@ class SpatialPublishedAdapter implements SurfaceHost {
       onInteractionReady?: () => void
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
       restartCourse?: () => Promise<boolean>
+      replayScene?: () => Promise<boolean>
       deferTeacherControllerCourseReset?: boolean
+      courseState?: CourseStateStore
+      runtimeActions?: Readonly<RuntimeHostActions>
+      componentActions?: Readonly<ComponentHostActions>
     },
   ) {
     this.id = surfaceId
     this.#payload = payload
     this.#startLocationId = options.startLocationId
     this.#restartCourse = options.restartCourse
+    this.#replayScene = options.replayScene
     this.#host = SpatialSurfaceHost.fromPublishedCourse(payload, options.viewport, {
       surfaceId,
       locationId: options.startLocationId,
@@ -1041,6 +1509,9 @@ class SpatialPublishedAdapter implements SurfaceHost {
       onInteractionReady: options.onInteractionReady,
       teacherControllerSession: options.teacherControllerSession,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
+      courseState: options.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -1050,6 +1521,15 @@ class SpatialPublishedAdapter implements SurfaceHost {
         getStateLabel: () => null,
       },
       executeTeacherControllerAction: (action) => this.#executeControllerAction(action),
+      reportActionError: (action, error) => {
+        this.#services?.reportDiagnostic?.({
+          surfaceId: this.id,
+          phase: 'execute',
+          severity: 'error',
+          message: `教师控制器动作“${action.type}”执行失败：${error.message}`,
+          cause: error,
+        })
+      },
     })
   }
 
@@ -1068,6 +1548,10 @@ class SpatialPublishedAdapter implements SurfaceHost {
     return this.#host.getPublishedGlobalRuntimeMountTarget(itemId)
   }
 
+  preparePublishedLocation(locationId: string, forced: boolean): void {
+    this.#host.preparePublishedLocation(locationId, forced)
+  }
+
   async activate(): Promise<void> {
     await this.#host.activate()
   }
@@ -1082,6 +1566,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
 
   async reset(scope: SurfaceResetScope): Promise<void> {
     this.#host.resetTeacherControllerSession(scope)
+    this.#host.preparePublishedLocation(this.#startLocationId, true)
     await this.#host.setLocationId(this.#startLocationId)
   }
 
@@ -1111,6 +1596,9 @@ class SpatialPublishedAdapter implements SurfaceHost {
   async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
     if (action.type === 'course.restart' && this.#restartCourse) {
       return this.#restartCourse()
+    }
+    if (action.type === 'scene.replay' && this.#replayScene) {
+      return this.#replayScene()
     }
     const target = publishedControllerNavigationTarget(action, {
       locations: this.#payload.locations,

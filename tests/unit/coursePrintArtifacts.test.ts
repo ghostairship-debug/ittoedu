@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   addCourseFlowPage,
   addCourseSpatialPage,
@@ -9,6 +10,7 @@ import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPub
 import {
   buildCourseExportPageList,
   buildCoursePrintArtifacts,
+  composePublishedSlideStaticPage,
   renderPublishedSpatialFrameSvg,
   SPATIAL_EXPORT_VIEWPORT,
 } from '@/renderer/export/course/buildCoursePrintArtifacts'
@@ -20,6 +22,7 @@ import {
   renderFlowPrintHtml,
 } from '@/renderer/export/course/flowPrintPlan'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createTextNode } from '@/renderer/project/createProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 
@@ -104,17 +107,23 @@ describe('buildCoursePrintArtifacts', () => {
     expect(viewport.height).not.toBe(720)
     expect(svg).toContain('data-spatial-viewport="1120x760"')
 
+    const includeGlobalLayerItems: Array<boolean | undefined> = []
     const result = await buildCoursePrintArtifacts(published, {
       resolveAssetBytes: (assetId) => ({
         bytes: ASSET_BYTES,
         mimeType: published.assets[assetId]?.mimeType ?? 'application/octet-stream',
       }),
+      captureSlideScene: (input) => {
+        includeGlobalLayerItems.push(input.includeGlobalLayerItems)
+        return 'data:image/png;base64,AA=='
+      },
     })
 
     expect(buildCourseExportPageList(published).length).toBeGreaterThan(0)
     expect(result.files.some((file) => file.kind === 'flow-print-html')).toBe(true)
     expect(result.files.some((file) => file.kind === 'docx')).toBe(true)
     expect(result.report.some((item) => item.message.includes('全局图层'))).toBe(true)
+    expect(includeGlobalLayerItems).toEqual([false])
 
     const mixedHtml = new TextDecoder().decode(
       result.files.find((file) => file.kind === 'flow-print-html')!.bytes,
@@ -188,22 +197,54 @@ describe('buildCoursePrintArtifacts', () => {
     expect(spatialPdf).toContain('<img src="data:image/svg+xml')
     expect(spatialPdf).not.toContain('course-spatial-print-page')
 
+    const slideProject = createBlankCourseProject({ now: NOW, includeDefaultController: true })
+    const controllerId = slideProject.globalLayerItems[0]?.item.layerItemId
+    if (!controllerId) throw new Error('expected global teacher controller')
+    const globalText = sceneNodeToCourseLayerItem(createTextNode({
+      id: 'global-print-text',
+      text: '纯 Slide 全局页脚',
+      x: 48,
+      y: 650,
+      width: 360,
+      height: 44,
+    }), 900)
+    slideProject.globalLayerItems.push({
+      item: globalText,
+      visibility: { mode: 'include', locationIds: [slideProject.startLocationId] },
+    })
     const slide = buildPublishedCourseV2Payload({
-      project: createBlankCourseProject({ now: NOW }),
+      project: slideProject,
       assetFiles: {},
       components: {},
     })
     const slideResult = await buildCoursePrintArtifacts(slide)
     expect(slideResult.files.some((file) => file.kind === 'pdf-html')).toBe(false)
+    const slidePrintHtml = new TextDecoder().decode(
+      slideResult.files.find((file) => file.kind === 'flow-print-html')!.bytes,
+    )
+    expect(slidePrintHtml).toContain('纯 Slide 全局页脚')
+    expect(slidePrintHtml).toContain(globalText.layerItemId)
+    expect(slidePrintHtml).not.toContain(controllerId)
 
+    const captureGlobalFlags: Array<boolean | undefined> = []
+    const captureLocationIds: Array<string | undefined> = []
     const capturedSlideResult = await buildCoursePrintArtifacts(slide, {
-      captureSlideScene: () => 'data:image/png;base64,AA==',
+      captureSlideScene: (input) => {
+        captureGlobalFlags.push(input.includeGlobalLayerItems)
+        captureLocationIds.push(input.locationId)
+        return 'data:image/png;base64,AA=='
+      },
     })
     const capturedSlidePdf = new TextDecoder().decode(
       capturedSlideResult.files.find((file) => file.kind === 'pdf-html')!.bytes,
     )
     expect(capturedSlidePdf).toContain('<img src="data:image/png;base64,AA=="')
     expect(capturedSlidePdf).not.toContain('course-slide-print-page')
+    expect(captureGlobalFlags).toEqual([true])
+    expect(captureLocationIds).toEqual([slide.startLocationId])
+    expect(capturedSlideResult.report.some((item) => (
+      item.message.includes('默认不写入 PDF')
+    ))).toBe(false)
   })
 
   it('returns Chinese reasons for missing assets without throwing', async () => {
@@ -216,5 +257,135 @@ describe('buildCoursePrintArtifacts', () => {
     expect(result.report.some((item) => (
       item.severity === 'error' && item.message.includes('缺少可离线引用')
     ))).toBe(true)
+  })
+
+  it('uses the first course-order location for each exported Slide scene', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const original = published.locations.find((location) => location.kind === 'slide-scene')
+    if (!original || original.kind !== 'slide-scene') throw new Error('expected Slide location')
+    published.locations.unshift({ ...structuredClone(original), id: 'course-order-first-location' })
+
+    const pages = buildCourseExportPageList(published)
+    expect(pages.find((page) => page.kind === 'slide-scene')?.locationId)
+      .toBe('course-order-first-location')
+    const capturedLocationIds: string[] = []
+    await buildCoursePrintArtifacts(published, {
+      captureSlideScene: ({ locationId }) => {
+        capturedLocationIds.push(locationId)
+        return 'data:image/png;base64,AA=='
+      },
+    })
+    expect(capturedLocationIds).toEqual(['course-order-first-location'])
+  })
+
+  it('reuses canonical named-state overrides and order slots for Slide static composition', () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
+    if (!surface || surface.type !== 'slide' || !surface.scenes[0]) {
+      throw new Error('expected Slide fixture')
+    }
+    const first = sceneNodeToCourseLayerItem(createTextNode({
+      id: 'state-first',
+      text: '基础文字',
+      x: 80,
+      y: 80,
+      width: 320,
+      height: 80,
+    }), 10)
+    const second = sceneNodeToCourseLayerItem(createTextNode({
+      id: 'state-second',
+      text: '第二层',
+      x: 120,
+      y: 120,
+      width: 320,
+      height: 80,
+    }), 30)
+    const scene = surface.scenes[0]
+    scene.layerItems = [first, second]
+    scene.presentation = {
+      initialStateId: 'state_export',
+      states: [{
+        id: 'state_export',
+        name: '导出状态',
+        layerItemOverrides: {
+          [first.layerItemId]: { nativeData: { text: '状态覆盖文字' } },
+        },
+        layerItemOrder: [second.layerItemId, first.layerItemId],
+      }],
+    }
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const publishedSurface = published.surfaces.find((candidate) => candidate.type === 'slide')
+    const location = published.locations.find((candidate) => candidate.kind === 'slide-scene')
+    if (
+      !publishedSurface
+      || publishedSurface.type !== 'slide'
+      || !location
+      || location.kind !== 'slide-scene'
+    ) throw new Error('expected Published Slide fixture')
+    const publishedScene = publishedSurface.scenes.find(
+      (candidate) => candidate.id === location.sceneId,
+    )
+    if (!publishedScene) throw new Error('expected Published Slide scene')
+
+    const composition = composePublishedSlideStaticPage(
+      published,
+      publishedSurface,
+      publishedScene,
+      { includeGlobalLayerItems: false, locationId: location.id },
+    )
+
+    expect(composition.items.map((item) => [item.layerItemId, item.order])).toEqual([
+      [second.layerItemId, 10],
+      [first.layerItemId, 30],
+    ])
+    const materializedFirst = composition.items.find(
+      (item) => item.layerItemId === first.layerItemId,
+    )
+    expect(materializedFirst?.kind).toBe('native')
+    if (materializedFirst?.kind !== 'native' || materializedFirst.content.nativeType !== 'text') {
+      throw new Error('expected materialized text')
+    }
+    expect(materializedFirst.content.data.text).toBe('状态覆盖文字')
+  })
+
+  it('reports a Slide print-plan scene that has no concrete course location', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    published.locations = []
+
+    const result = await buildCoursePrintArtifacts(published)
+    const page = result.pages.find((candidate) => candidate.kind === 'slide-scene')
+    expect(page?.locationId).toBeUndefined()
+    expect(result.report).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      pageId: page?.id,
+      message: expect.stringContaining('没有课程位置'),
+    }))
+    expect(result.files.some((file) => file.kind === 'pdf-html')).toBe(false)
   })
 })

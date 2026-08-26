@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import {
   addCourseFlowPage,
@@ -16,6 +17,7 @@ import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
+import { createTextNode } from '@/renderer/project/createProject'
 
 const NOW = '2026-08-17T12:00:00.000Z'
 
@@ -250,6 +252,64 @@ describe('courseLocationCommands', () => {
     expect(last.reason).toBe(COURSE_LAST_LOCATION_REASON)
     expect(last.project).toBe(project)
     expect(courseProjectDocumentSchema.parse(project)).toEqual(project)
+  })
+
+  it('repairs scene and layer references when deleting an entire Slide surface', () => {
+    let project = createBlankCourseProject({ now: NOW })
+    const slideId = slideSurfaceId(project)
+    const slide = project.surfaces.find((surface) => surface.id === slideId)
+    const scene = slide?.type === 'slide' ? slide.scenes[0] : undefined
+    if (!scene) throw new Error('expected Slide scene')
+    const removedSceneId = scene.id
+    scene.layerItems.push(sceneNodeToCourseLayerItem(createTextNode({
+      id: 'removed-slide-node',
+      name: '待删元素',
+      text: '待删元素',
+    }), 10))
+    project.globalInteractions = [
+      {
+        id: 'drop-deleted-scene',
+        enabled: true,
+        trigger: { type: 'presenter.command', command: 'next' },
+        conditions: [{ type: 'scene.in', sceneIds: [removedSceneId] }],
+        actions: [{
+          id: 'drop-deleted-scene-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+      {
+        id: 'drop-deleted-node',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: 'removed-slide-node' },
+        conditions: [],
+        actions: [{
+          id: 'drop-deleted-node-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+    ]
+    project = courseProjectDocumentSchema.parse(project)
+    const flowAdded = addCourseFlowPage(project, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(flowAdded.ok).toBe(true)
+    if (!flowAdded.ok) throw new Error(flowAdded.reason)
+
+    const deleted = deleteCourseSurface(flowAdded.project, slideId, {
+      now: NOW,
+      expectedRevision: flowAdded.project.revision,
+    })
+
+    expect(deleted.ok).toBe(true)
+    if (!deleted.ok) throw new Error(deleted.reason)
+    expect(deleted.project.globalInteractions).toEqual([])
+    expect(deleted.project.surfaces.some((surface) => surface.id === slideId)).toBe(false)
+    expect(courseProjectDocumentSchema.parse(deleted.project)).toEqual(deleted.project)
   })
 
   it('does not delete a whole Flow page through deleteCourseLocation on a heading', () => {

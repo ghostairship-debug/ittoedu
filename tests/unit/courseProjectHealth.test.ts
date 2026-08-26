@@ -365,6 +365,8 @@ describe('V9-native Course Project health', () => {
       'interaction-node-type-mismatch',
       'interaction-scene-reference-missing',
       'interaction-state-reference-missing',
+      'published-interaction-condition-unsupported',
+      'published-interaction-trigger-unsupported',
     ]))
     expect(findings.every(({ target }) => target.version === 1)).toBe(true)
     expect(findings).not.toContainEqual(expect.objectContaining({
@@ -526,6 +528,8 @@ describe('V9-native Course Project health', () => {
       'controller-required-for-canvas',
       'controller-scene-target-missing',
       'looping-video-ended-unreachable',
+      'published-interaction-click-unbindable',
+      'published-interaction-trigger-unsupported',
       'sound-id-mismatch',
       'video-click-interaction-conflict',
     ]))
@@ -670,7 +674,10 @@ describe('V9-native Course Project health', () => {
       layerItemId: surfaceVideo.layerItemId,
       message: expect.stringContaining('2 条元素单击规则'),
     }))
-    expect(findings).not.toContainEqual(expect.objectContaining({
+    expect(findings.filter(({ code }) => (
+      code === 'video-click-interaction-conflict'
+      || code === 'looping-video-ended-unreachable'
+    ))).not.toContainEqual(expect.objectContaining({
       layerItemId: excludedVideo.layerItemId,
     }))
     expect(findings).toContainEqual(expect.objectContaining({
@@ -725,6 +732,98 @@ describe('V9-native Course Project health', () => {
       ['stateIds', 0],
       ['stateIds', 1],
     ])
+  })
+
+  it('reports the unsupported Published interaction slice without blocking V9 export', () => {
+    const project = blankProject()
+    const { scene } = slide(project)
+    const unbindable = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'owned-click-target',
+      name: '自身手势目标',
+    }), 0)
+    unbindable.hitPolicy = 'surface'
+    scene.layerItems.push(unbindable)
+    project.courseState.push({
+      key: 'ready',
+      valueType: 'boolean',
+      defaultValue: false,
+    })
+    project.navigationGuards.push({
+      id: 'ready-guard',
+      effect: 'block',
+      toLocationIds: [project.startLocationId],
+      match: 'all',
+      conditions: [{
+        type: 'compare',
+        key: 'ready',
+        operator: 'eq',
+        value: false,
+      }],
+      message: '尚未就绪',
+    })
+    scene.interactions.push(
+      {
+        id: 'unsupported-trigger',
+        enabled: true,
+        trigger: { type: 'scene.enter' },
+        conditions: [],
+        actions: [{
+          id: 'unsupported-trigger-next',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+      {
+        id: 'unsupported-condition-and-action',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: unbindable.layerItemId },
+        conditions: [{
+          type: 'presentation.in',
+          stateIds: [scene.presentation!.initialStateId],
+        }],
+        actions: [{
+          id: 'unsupported-state-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'presentation.set',
+            stateId: scene.presentation!.initialStateId,
+          },
+        }],
+      },
+      {
+        id: 'disabled-unsupported-trigger',
+        enabled: false,
+        trigger: { type: 'scene.enter' },
+        conditions: [],
+        actions: [{
+          id: 'disabled-next',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+    )
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    const findings = collectCourseProjectInteractionHealth(project, EMPTY_FILES)
+      .filter(({ code }) => code.startsWith('published-'))
+    expect(new Set(findings.map(({ code }) => code))).toEqual(new Set([
+      'published-interaction-action-unsupported',
+      'published-interaction-click-unbindable',
+      'published-interaction-condition-unsupported',
+      'published-interaction-trigger-unsupported',
+    ]))
+    expect(findings.every(({ severity }) => severity === 'warning')).toBe(true)
+    expect(findings.filter(
+      ({ code }) => code === 'published-interaction-trigger-unsupported',
+    )).toHaveLength(1)
+    expect(findings).toContainEqual(expect.objectContaining({
+      code: 'published-interaction-click-unbindable',
+      layerItemId: unbindable.layerItemId,
+      target: expect.objectContaining({ kind: 'layer-item', owner: 'scene' }),
+    }))
   })
 
   it('deduplicates only findings with the same complete diagnostic identity', () => {
@@ -956,6 +1055,9 @@ describe('V9-native Course Project health', () => {
       'information-release-hidden-self-trigger',
       'information-release-hidden-unreachable',
       'interaction-animation-self-loop',
+      'published-interaction-action-unsupported',
+      'published-interaction-click-unbindable',
+      'published-interaction-trigger-unsupported',
       'scene-id-duplicate',
     ]))
     expect(findings.filter(

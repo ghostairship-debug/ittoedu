@@ -9,6 +9,12 @@ import type {
   SlideSceneDocument,
 } from '../courseProjectTypes'
 import {
+  isPublishedInteractionActionSupported,
+  isPublishedInteractionClickBindable,
+  isPublishedInteractionConditionSupported,
+  isPublishedInteractionTriggerSupported,
+} from '../publishedInteractionSupport'
+import {
   allLayerVisits,
   courseProjectComposedLayerPath,
   effectiveLayerItem,
@@ -27,6 +33,13 @@ interface RuleScope {
   possibleScenes: SlideSceneDocument[]
   projectScenes: readonly SlideSceneDocument[]
 }
+
+interface IndexedLayerItem {
+  item: LayerItem
+  path: Array<string | number>
+}
+
+type LayerItemIndex = ReadonlyMap<string, IndexedLayerItem[]>
 
 function itemMatchesExpectedType(
   item: LayerItem,
@@ -112,7 +125,7 @@ function addStateReferenceFinding(
 
 function checkTypedNodeReference(
   drafts: CourseProjectHealthFindingDraft[],
-  itemsById: ReadonlyMap<string, LayerItem[]>,
+  itemsById: LayerItemIndex,
   rule: InteractionRule,
   nodeId: string,
   expected: 'component' | 'video',
@@ -121,7 +134,10 @@ function checkTypedNodeReference(
   const matches = itemsById.get(nodeId) ?? []
   // Missing ids are rejected by V9 Schema. Ambiguous ids are handled by the
   // stable-id guard; this collector must not guess which owner will win.
-  if (matches.length !== 1 || itemMatchesExpectedType(matches[0]!, expected)) return
+  if (
+    matches.length !== 1
+    || itemMatchesExpectedType(matches[0]!.item, expected)
+  ) return
   drafts.push({
     severity: 'error',
     code: 'interaction-node-type-mismatch',
@@ -134,7 +150,7 @@ function checkTypedNodeReference(
 function checkAction(
   projectScenes: readonly SlideSceneDocument[],
   drafts: CourseProjectHealthFindingDraft[],
-  itemsById: ReadonlyMap<string, LayerItem[]>,
+  itemsById: LayerItemIndex,
   rule: InteractionRule,
   action: InteractionActionPayload,
   scope: RuleScope,
@@ -217,7 +233,7 @@ function targetInitiallyVisibleForRule(
 function checkRules(
   projectScenes: readonly SlideSceneDocument[],
   drafts: CourseProjectHealthFindingDraft[],
-  itemsById: ReadonlyMap<string, LayerItem[]>,
+  itemsById: LayerItemIndex,
   rules: readonly InteractionRule[],
   baseScope: Omit<RuleScope, 'possibleScenes' | 'projectScenes'>,
 ): void {
@@ -236,6 +252,34 @@ function checkRules(
     }
     const triggerPath = [...rulePath, 'trigger']
     const trigger = rule.trigger
+    if (rule.enabled && !isPublishedInteractionTriggerSupported(trigger.type)) {
+      drafts.push({
+        severity: 'warning',
+        code: 'published-interaction-trigger-unsupported',
+        message: `交互规则“${rule.name ?? rule.id}”使用触发器“${trigger.type}”，当前 Published 播放不会执行该规则。`,
+        path: triggerPath,
+      })
+    }
+    if (rule.enabled && trigger.type === 'node.click') {
+      const matches = itemsById.get(trigger.nodeId) ?? []
+      if (
+        matches.length === 1
+        && !isPublishedInteractionClickBindable(matches[0]!.item)
+      ) {
+        const match = matches[0]!
+        drafts.push({
+          severity: 'warning',
+          code: 'published-interaction-click-unbindable',
+          message: `交互规则“${rule.name ?? rule.id}”点击的元素“${match.item.label}”由自身手势或非自动命中策略占用，当前 Published 播放无法绑定这次点击。`,
+          // This finding is repaired on the clicked carrier, not on the rule.
+          // Keeping its canonical layer path also lets DiagnosticTarget retain
+          // the stable owner instead of collapsing the interaction path to a
+          // scene-level target.
+          path: match.path,
+          layerItemId: trigger.nodeId,
+        })
+      }
+    }
     if (trigger.type === 'component.event') {
       checkTypedNodeReference(
         drafts,
@@ -284,23 +328,40 @@ function checkRules(
     }
 
     rule.conditions.forEach((condition, conditionIndex) => {
+      const conditionPath = [...rulePath, 'conditions', conditionIndex]
+      if (rule.enabled && !isPublishedInteractionConditionSupported(condition.type)) {
+        drafts.push({
+          severity: 'warning',
+          code: 'published-interaction-condition-unsupported',
+          message: `交互规则“${rule.name ?? rule.id}”使用条件“${condition.type}”，当前 Published 播放不会执行该规则。`,
+          path: conditionPath,
+        })
+      }
       if (condition.type !== 'presentation.in') return
       condition.stateIds.forEach((stateId, stateIndex) => addStateReferenceFinding(
         drafts,
         rule,
         stateId,
         scope,
-        [...rulePath, 'conditions', conditionIndex, 'stateIds', stateIndex],
+        [...conditionPath, 'stateIds', stateIndex],
       ))
     })
 
     rule.actions.forEach((step, actionIndex) => {
       const actionPath = [...rulePath, 'actions', actionIndex, 'action']
+      if (rule.enabled && !isPublishedInteractionActionSupported(step.action.type)) {
+        drafts.push({
+          severity: 'warning',
+          code: 'published-interaction-action-unsupported',
+          message: `交互规则“${rule.name ?? rule.id}”使用动作“${step.action.type}”，当前 Published 播放会跳过该动作。`,
+          path: actionPath,
+        })
+      }
       checkAction(projectScenes, drafts, itemsById, rule, step.action, scope, actionPath)
       if (step.action.type !== 'node.enter' || trigger.type === 'node.activated') return
       const matches = itemsById.get(step.action.nodeId) ?? []
       if (matches.length !== 1) return
-      const target = matches[0]!
+      const target = matches[0]!.item
       const targetNodeId = step.action.nodeId
       const hiddenEarlier = rule.actions.slice(0, actionIndex).some((earlier) => (
         earlier.action.type === 'node.exit'
@@ -466,10 +527,10 @@ export function collectCourseProjectInteractionHealth(
     path: ['surfaces'],
   }))
 
-  const itemsById = new Map<string, LayerItem[]>()
-  allLayerVisits(project).forEach(({ item }) => {
+  const itemsById = new Map<string, IndexedLayerItem[]>()
+  allLayerVisits(project).forEach(({ item, path }) => {
     const matches = itemsById.get(item.layerItemId) ?? []
-    matches.push(item)
+    matches.push({ item, path })
     itemsById.set(item.layerItemId, matches)
   })
   const projectScenes = scenes.map(({ scene }) => scene)

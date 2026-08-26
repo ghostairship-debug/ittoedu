@@ -99,6 +99,7 @@ function componentNodeForTarget(
       node.id === nodeId &&
       node.type === 'external-component' &&
       node.visible &&
+      !node.locked &&
       node.component.packageId === componentId &&
       (componentVersion === undefined ||
         node.component.version === componentVersion)

@@ -567,7 +567,15 @@ describe('FlowSurfaceHost playback controller and video', () => {
       },
     ]
 
-    const { host, container } = await mountHost(course)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const host = new FlowSurfaceHost(course)
+    await host.mount(container)
+    expect(container.querySelector('.published-component-mount')).toBeNull()
+    host.preparePublishedLocation('loc-h2', false)
+    await host.activate()
+    expect(container.querySelector('.published-component-mount')).toBeNull()
+    await host.setLocationId('loc-h2')
 
     // Paper block component
     const blockEl = container.querySelector('[data-flow-block-id="flow-comp-block"]')

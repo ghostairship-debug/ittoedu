@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   addCourseFlowPage,
   addCourseScene,
@@ -574,6 +574,182 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
     expect(container.querySelector('[data-published-runtime-button]')).toBeNull()
     expect(fixture.project).toEqual(projectBefore)
     expect(payload).toEqual(payloadBefore)
+    frame.remove()
+  })
+
+  it('shares declared course state with Runtime actions and enforces navigation guards', async () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 3,
+        create(ctx) {
+          var state = window.__publishedHostActionProbe || {
+            creates: 0,
+            initialValues: [],
+            blockedAccepted: null,
+            allowedAccepted: null
+          };
+          window.__publishedHostActionProbe = state;
+          state.creates += 1;
+          state.initialValues.push(ctx.courseState.get('ready'));
+          var blocked = document.createElement('button');
+          blocked.dataset.runtimeBlockedNext = 'true';
+          blocked.onclick = function () {
+            state.blockedAccepted = ctx.actions.nextScene();
+          };
+          var allowed = document.createElement('button');
+          allowed.dataset.runtimeAllowedNext = 'true';
+          allowed.onclick = function () {
+            ctx.courseState.set('ready', true);
+            state.allowedAccepted = ctx.actions.nextScene();
+          };
+          ctx.dom.root.append(blocked, allowed);
+          return { destroy() { blocked.remove(); allowed.remove(); } };
+        }
+      });
+    `
+    const fixture = projectWithRuntimeItems([
+      runtimeItem('surface-runtime-actions', 1, source),
+    ])
+    fixture.project.courseState = [{
+      key: 'ready',
+      valueType: 'boolean',
+      defaultValue: false,
+    }]
+    fixture.project.navigationGuards = [{
+      id: 'ready-before-next',
+      effect: 'block',
+      fromLocationIds: [fixture.firstLocationId],
+      toLocationIds: [fixture.secondLocationId],
+      match: 'all',
+      conditions: [{
+        type: 'compare',
+        key: 'ready',
+        operator: 'eq',
+        value: false,
+      }],
+      message: '请先完成当前任务',
+    }]
+    const payload = buildPublishedCourseV2Payload({
+      project: courseProjectDocumentSchema.parse(fixture.project),
+      assetFiles: {},
+      components: {},
+    })
+    const diagnostics: string[] = []
+    const { frame, container, view } = mountDocument()
+    const session = createPublishedCourseSession(payload, {
+      services: {
+        reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic.message),
+      },
+    })
+    sessions.push(session)
+    await session.mount(container)
+
+    container.querySelector<HTMLButtonElement>('[data-runtime-blocked-next]')?.click()
+    expect(Reflect.get(view, '__publishedHostActionProbe')).toMatchObject({
+      creates: 1,
+      initialValues: [false],
+      blockedAccepted: false,
+    })
+    expect(session.navigator.current?.locationId).toBe(fixture.firstLocationId)
+    expect(diagnostics).toContain('请先完成当前任务')
+    const feedback = container.querySelector<HTMLElement>(
+      '[data-published-navigation-feedback="true"]',
+    )
+    expect(feedback?.hidden).toBe(false)
+    expect(feedback?.textContent).toBe('请先完成当前任务')
+
+    container.querySelector<HTMLButtonElement>('[data-runtime-allowed-next]')?.click()
+    expect(Reflect.get(view, '__publishedHostActionProbe')).toMatchObject({
+      allowedAccepted: true,
+    })
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(fixture.secondLocationId)
+    })
+    expect(feedback?.hidden).toBe(true)
+
+    await session.restartCourse()
+    expect(session.navigator.current?.locationId).toBe(fixture.firstLocationId)
+    expect(Reflect.get(view, '__publishedHostActionProbe')).toMatchObject({
+      creates: 2,
+      initialValues: [false, false],
+    })
+    frame.remove()
+  })
+
+  it('keeps static capture state frozen while enumerating guarded locations', async () => {
+    const firstRuntimeSource = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 3,
+        create(ctx) {
+          window.__publishedStaticStateProbe = [ctx.courseState.get('ready')];
+          ctx.courseState.set('ready', true);
+          window.__publishedStaticStateProbe.push(ctx.courseState.get('ready'));
+          return { destroy() {} };
+        }
+      });
+    `
+    const secondRuntimeSource = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 3,
+        create(ctx) {
+          window.__publishedStaticStateProbe.push(ctx.courseState.get('ready'));
+          return { destroy() {} };
+        }
+      });
+    `
+    const fixture = projectWithRuntimeItems([
+      runtimeItem('static-state-writer', 1, firstRuntimeSource),
+    ])
+    fixture.project.courseState = [{
+      key: 'ready',
+      valueType: 'boolean',
+      defaultValue: false,
+    }]
+    fixture.project.navigationGuards = [{
+      id: 'guarded-static-page',
+      effect: 'block',
+      fromLocationIds: [fixture.firstLocationId],
+      toLocationIds: [fixture.secondLocationId],
+      match: 'all',
+      conditions: [{
+        type: 'compare',
+        key: 'ready',
+        operator: 'eq',
+        value: false,
+      }],
+      message: '运行态仍应阻止进入',
+    }]
+    const secondLocation = fixture.project.locations.find((location) => (
+      location.id === fixture.secondLocationId && location.kind === 'slide-scene'
+    ))
+    const slide = fixture.project.surfaces.find((surface) => (
+      secondLocation
+      && surface.id === secondLocation.surfaceId
+      && surface.type === 'slide'
+    ))
+    const secondScene = slide?.type === 'slide' && secondLocation?.kind === 'slide-scene'
+      ? slide.scenes.find((scene) => scene.id === secondLocation.sceneId)
+      : undefined
+    if (!secondScene) throw new Error('expected second Slide scene')
+    secondScene.layerItems = [runtimeItem('static-state-reader', 1, secondRuntimeSource)]
+    const payload = buildPublishedCourseV2Payload({
+      project: courseProjectDocumentSchema.parse(fixture.project),
+      assetFiles: {},
+      components: {},
+    })
+    const { frame, container, view } = mountDocument()
+    const session = createPublishedCourseSession(payload, { staticCapture: true })
+    sessions.push(session)
+    await session.mount(container)
+    await vi.waitFor(() => {
+      expect(Reflect.get(view, '__publishedStaticStateProbe')).toEqual([false, false])
+    })
+
+    await session.goToLocation(fixture.secondLocationId)
+    expect(session.navigator.current?.locationId).toBe(fixture.secondLocationId)
+    await vi.waitFor(() => {
+      expect(Reflect.get(view, '__publishedStaticStateProbe')).toEqual([false, false, false])
+    })
     frame.remove()
   })
 

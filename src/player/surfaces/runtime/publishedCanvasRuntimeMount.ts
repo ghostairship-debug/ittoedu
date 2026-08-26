@@ -1,6 +1,7 @@
 import type * as PhaserTypes from 'phaser'
 import type { PublishedRuntimeLayerItem } from '../../../shared/publishedCourseTypes'
 import type {
+  CourseStateStore as CourseStateStoreContract,
   RuntimeDocument,
   RuntimeHostActions,
   RuntimePresentationApi,
@@ -8,7 +9,12 @@ import type {
 import type { RuntimeHost, RuntimeMountEnvironment } from '../../RuntimeHost'
 import type { RuntimeRegistry } from '../../RuntimeRegistry'
 import { decodePublishedCode } from '../../publishedLesson'
+import type {
+  PublishedRuntimeAuthoringMountOptions,
+} from './publishedSurfaceRuntimeAuthoringTargets'
+import { applyPublishedRuntimeAuthoringText } from './publishedSurfaceRuntimeAuthoringTargets'
 import type { PublishedSurfaceRuntimeSession } from './publishedSurfaceRuntimeMount'
+import { registerPublishedCaptureResource } from '../publishedCapture'
 
 type PublishedCanvasRuntime = PublishedRuntimeLayerItem['runtime']
 type FailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
@@ -16,6 +22,10 @@ type FailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 export interface PublishedCanvasRuntimeMountHandle {
   readonly ok: boolean
   readonly element: HTMLElement
+  applyAuthoringContentValue(key: string, value: string): boolean
+  waitForReady(): Promise<void>
+  waitForCaptureReady(): Promise<void>
+  restoreAfterCapture(): void
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -30,8 +40,11 @@ export interface PublishedCanvasRuntimeMountOptions {
   width: number
   height: number
   visible: boolean
+  mode?: 'playback' | 'authoring' | 'capture'
   resolveAsset(assetId: string): string | undefined
   session: PublishedSurfaceRuntimeSession
+  authoring?: PublishedRuntimeAuthoringMountOptions
+  courseState?: CourseStateStoreContract
   fallbackText?: string
   actions?: Readonly<RuntimeHostActions>
   presentation?: RuntimePresentationApi
@@ -136,6 +149,34 @@ function createFallback(
   return fallback
 }
 
+function failedHandle(
+  owner: HTMLElement,
+  element: HTMLElement,
+  cause: unknown,
+): PublishedCanvasRuntimeMountHandle {
+  let destroyed = false
+  const failure = normalizeError(cause)
+  const handle: PublishedCanvasRuntimeMountHandle = {
+    ok: false,
+    element,
+    applyAuthoringContentValue: () => false,
+    waitForReady: () => Promise.reject(failure),
+    waitForCaptureReady: () => Promise.reject(failure),
+    restoreAfterCapture() {},
+    setVisible() {},
+    suspend() {},
+    resume() {},
+    destroy() {
+      if (destroyed) return
+      destroyed = true
+      unregisterCapture()
+      element.remove()
+    },
+  }
+  const unregisterCapture = registerPublishedCaptureResource(owner, handle)
+  return handle
+}
+
 function publishedRuntimeDocument(
   runtime: PublishedCanvasRuntime,
   instanceId: string,
@@ -183,7 +224,8 @@ function createDomOnlyEnvironment(
 /**
  * Mounts one Published V2 canvas-runtime API 2 instance. Scene-local callers
  * own their generation; the Published course session owns global instances.
- * Capture and API 3 callers do not route through this module.
+ * API 3 callers do not route through this module. Capture callers await the
+ * same API 2 RuntimeHost lifecycle before reading its Canvas/DOM layers.
  */
 export function mountPublishedCanvasRuntime(
   container: HTMLElement,
@@ -192,32 +234,17 @@ export function mountPublishedCanvasRuntime(
   const targetWindow = container.ownerDocument.defaultView
   if (!targetWindow) {
     const error = reportError(options, 'register', new Error('Canvas Runtime 挂载文档没有可执行 Window'))
-    void error
     const fallback = createFallback(container, options)
-    return {
-      ok: false,
-      element: fallback,
-      setVisible() {},
-      suspend() {},
-      resume() {},
-      destroy: () => fallback.remove(),
-    }
+    return failedHandle(container, fallback, error)
   }
 
   let runtime: RuntimeDocument
   try {
     runtime = publishedRuntimeDocument(options.runtime, options.instanceId)
   } catch (cause) {
-    reportError(options, 'register', cause)
+    const error = reportError(options, 'register', cause)
     const fallback = createFallback(container, options)
-    return {
-      ok: false,
-      element: fallback,
-      setVisible() {},
-      suspend() {},
-      resume() {},
-      destroy: () => fallback.remove(),
-    }
+    return failedHandle(container, fallback, error)
   }
 
   const dom = container.ownerDocument
@@ -269,6 +296,30 @@ export function mountPublishedCanvasRuntime(
   let visible = options.visible
   let suspended = !options.visible
   let initializingPhaser = false
+  let capturePrepared = false
+  let captureFailure: Error | null = null
+  let bootSettled = false
+  let resolveBoot!: () => void
+  let rejectBoot!: (error: Error) => void
+  const bootReady = new Promise<void>((resolve, reject) => {
+    resolveBoot = resolve
+    rejectBoot = reject
+  })
+  void bootReady.catch(() => undefined)
+  const settleBootReady = (): void => {
+    if (bootSettled) return
+    bootSettled = true
+    resolveBoot()
+  }
+  const settleBootFailure = (cause: unknown): Error => {
+    const error = normalizeError(cause)
+    captureFailure ??= error
+    if (!bootSettled) {
+      bootSettled = true
+      rejectBoot(error)
+    }
+    return error
+  }
 
   const destroyGame = (): void => {
     const mountedGame = game
@@ -317,7 +368,7 @@ export function mountPublishedCanvasRuntime(
   const quarantine = (phase: Exclude<FailurePhase, 'destroy'>, cause: unknown): void => {
     if (destroyed || quarantined) return
     quarantined = true
-    reportError(options, phase, cause)
+    reportError(options, phase, settleBootFailure(cause))
     destroyRuntimeHost()
     disposeRegistry()
     if (initializingPhaser) {
@@ -342,25 +393,31 @@ export function mountPublishedCanvasRuntime(
       let nextHost: RuntimeHost | null = null
       let constructionFailure: unknown
       try {
+        const authoring = options.mode === 'authoring' ? options.authoring : undefined
         nextHost = new RuntimeHostConstructor({
           registry: activeRegistry,
           runtime,
           label: options.instanceId,
-          scope: options.scope ?? 'scene',
-          mode: 'preview',
-          sceneId: options.sceneId,
+          scope: authoring?.scope ?? options.scope ?? 'scene',
+          mode: options.mode === 'authoring' || options.mode === 'capture'
+            ? 'capture'
+            : 'preview',
+          sceneId: authoring?.sceneId ?? options.sceneId,
           width: options.width,
           height: options.height,
           environment,
           actions: options.actions ?? inertActions,
           events: options.session.events,
-          courseState: options.session.courseState,
+          courseState: options.courseState ?? options.session.courseState,
           assetUrl: (assetId) => {
             const url = options.resolveAsset(assetId)
             if (!url) throw new Error(`Canvas Runtime 素材“${assetId}”无法解析`)
             return url
           },
           registerNavigationGuard: () => () => undefined,
+          ...(authoring
+            ? { authoring: { onTargetsChanged: authoring.onTargetsChanged } }
+            : {}),
         })
       } catch (cause) {
         constructionFailure = cause
@@ -384,6 +441,7 @@ export function mountPublishedCanvasRuntime(
       if (!visible) nextHost.setVisible(false)
       if (suspended) nextHost.suspend()
       checkLifecycleFailure()
+      if (!quarantined) settleBootReady()
     } catch (cause) {
       const error = normalizeError(cause)
       quarantine(startupFailurePhase(error), error)
@@ -453,12 +511,76 @@ export function mountPublishedCanvasRuntime(
     quarantine('create', cause)
   })
 
-  return {
+  let unregisterCapture: () => void = () => undefined
+  const handle: PublishedCanvasRuntimeMountHandle = {
     get ok() {
       return !quarantined
     },
     get element() {
       return fallback ?? host
+    },
+    applyAuthoringContentValue(key: string, value: string) {
+      if (
+        options.mode !== 'authoring'
+        || destroyed
+        || quarantined
+        || !Object.prototype.hasOwnProperty.call(options.runtime.content.values, key)
+      ) return false
+      options.runtime.content.values[key] = value
+      runtime.content.values[key] = value
+      return applyPublishedRuntimeAuthoringText(host, key, value)
+    },
+    async waitForReady() {
+      if (captureFailure) throw captureFailure
+      if (destroyed) throw new Error(`Canvas Runtime“${options.instanceId}”已销毁`)
+      await bootReady
+      if (captureFailure) throw captureFailure
+      if (!runtimeHost || quarantined) {
+        throw captureFailure ?? new Error(`Canvas Runtime“${options.instanceId}”未完成启动`)
+      }
+    },
+    async waitForCaptureReady() {
+      if (captureFailure) throw captureFailure
+      if (destroyed) throw new Error(`Canvas Runtime“${options.instanceId}”已销毁`)
+      await bootReady
+      if (captureFailure) throw captureFailure
+      const mountedHost = runtimeHost
+      if (!mountedHost || quarantined) {
+        throw captureFailure ?? new Error(`Canvas Runtime“${options.instanceId}”未完成启动`)
+      }
+      if (capturePrepared) return
+      capturePrepared = true
+      try {
+        if (!suspended) mountedHost.suspend()
+        await mountedHost.waitForCaptureReady()
+        const failure = mountedHost.getFailure()
+        if (failure) throw failure
+      } catch (cause) {
+        captureFailure = normalizeError(cause)
+        reportError(options, 'lifecycle', captureFailure)
+        if (!suspended) {
+          try {
+            mountedHost.resume()
+            checkLifecycleFailure()
+          } catch (restoreCause) {
+            quarantine('lifecycle', restoreCause)
+          }
+        }
+        capturePrepared = false
+        throw captureFailure
+      }
+    },
+    restoreAfterCapture() {
+      if (!capturePrepared || destroyed || quarantined) return
+      capturePrepared = false
+      if (!suspended) {
+        try {
+          runtimeHost?.resume()
+          checkLifecycleFailure()
+        } catch (cause) {
+          quarantine('lifecycle', cause)
+        }
+      }
     },
     setVisible(nextVisible: boolean) {
       if (destroyed || quarantined) return
@@ -493,6 +615,8 @@ export function mountPublishedCanvasRuntime(
     destroy() {
       if (destroyed) return
       destroyed = true
+      settleBootFailure(new Error(`Canvas Runtime“${options.instanceId}”在捕获就绪前已销毁`))
+      unregisterCapture()
       destroyRuntimeHost()
       disposeRegistry()
       destroyGame()
@@ -502,4 +626,6 @@ export function mountPublishedCanvasRuntime(
       host.remove()
     },
   }
+  unregisterCapture = registerPublishedCaptureResource(container, handle)
+  return handle
 }

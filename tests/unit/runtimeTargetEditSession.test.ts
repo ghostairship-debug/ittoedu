@@ -13,6 +13,7 @@ function target(
 ): RuntimeAuthoringTarget {
   return {
     targetId: 'runtime:scene:registered:1',
+    nodeId: 'runtime-layer-one',
     scope: 'scene',
     sceneId: 'scene-one',
     kind: 'text',
@@ -62,6 +63,7 @@ describe('Runtime text/asset edit session', () => {
         scope: 'scene',
         sceneId: 'scene-one',
         targetId: liveTarget.targetId,
+        nodeId: liveTarget.nodeId,
         kind: liveTarget.kind,
         key: liveTarget.key,
       },
@@ -96,6 +98,7 @@ describe('Runtime text/asset edit session', () => {
 
   it.each([
     ['target id', target({ targetId: 'runtime:scene:registered:replacement' })],
+    ['node id', target({ nodeId: 'runtime-layer-two' })],
     ['kind', target({ kind: 'asset' })],
     ['key', target({ key: 'subtitle' })],
   ] as const)('rejects a target whose %s changed', (_label, replacement) => {

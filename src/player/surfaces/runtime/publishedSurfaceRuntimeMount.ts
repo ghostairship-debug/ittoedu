@@ -17,6 +17,15 @@ import { CourseEventBus } from '../../CourseEventBus'
 import { CourseStateStore } from '../../CourseStateStore'
 import { decodePublishedCode } from '../../publishedLesson'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
+import {
+  PublishedCaptureBarrier,
+  registerPublishedCaptureResource,
+} from '../publishedCapture'
+import {
+  applyPublishedRuntimeAuthoringText,
+  PublishedSurfaceRuntimeAuthoringTargets,
+  type PublishedRuntimeAuthoringMountOptions,
+} from './publishedSurfaceRuntimeAuthoringTargets'
 
 type PublishedSurfaceRuntime = PublishedRuntimeLayerItem['runtime']
 
@@ -30,6 +39,10 @@ export interface PublishedSurfaceRuntimeSession {
 export interface PublishedSurfaceRuntimeMountHandle {
   readonly ok: boolean
   readonly element: HTMLElement
+  applyAuthoringContentValue(key: string, value: string): boolean
+  waitForReady(): Promise<void>
+  waitForCaptureReady(): Promise<void>
+  restoreAfterCapture(): void
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -42,8 +55,11 @@ export interface PublishedSurfaceRuntimeMountOptions {
   width: number
   height: number
   visible: boolean
+  mode?: 'playback' | 'authoring' | 'capture'
   resolveAsset(assetId: string): string | undefined
   session: PublishedSurfaceRuntimeSession
+  authoring?: PublishedRuntimeAuthoringMountOptions
+  courseState?: CourseStateStoreContract
   fallbackText?: string
   actions?: Readonly<RuntimeHostActions>
   presentation?: RuntimePresentationApi
@@ -384,20 +400,32 @@ function createFallback(
   return fallback
 }
 
-function failedHandle(element: HTMLElement): PublishedSurfaceRuntimeMountHandle {
+function failedHandle(
+  element: HTMLElement,
+  owner: HTMLElement,
+  cause: unknown,
+): PublishedSurfaceRuntimeMountHandle {
   let destroyed = false
-  return {
+  const failure = cause instanceof Error ? cause : new Error(String(cause))
+  const handle: PublishedSurfaceRuntimeMountHandle = {
     ok: false,
     element,
+    applyAuthoringContentValue: () => false,
+    waitForReady: () => Promise.reject(failure),
+    waitForCaptureReady: () => Promise.reject(failure),
+    restoreAfterCapture() {},
     setVisible() {},
     suspend() {},
     resume() {},
     destroy() {
       if (destroyed) return
       destroyed = true
+      unregisterCapture()
       element.remove()
     },
   }
+  const unregisterCapture = registerPublishedCaptureResource(owner, handle)
+  return handle
 }
 
 function isLifecycle(value: unknown): value is SurfaceRuntimeInstanceLifecycle {
@@ -406,21 +434,24 @@ function isLifecycle(value: unknown): value is SurfaceRuntimeInstanceLifecycle {
     && typeof Reflect.get(value, 'destroy') === 'function'
 }
 
-export function createPublishedSurfaceRuntimeSession(): PublishedSurfaceRuntimeSession {
+export function createPublishedSurfaceRuntimeSession(
+  sharedCourseState?: CourseStateStore,
+): PublishedSurfaceRuntimeSession {
   const events = new CourseEventBus()
-  const courseState = new CourseStateStore()
+  const courseState = sharedCourseState ?? new CourseStateStore()
+  const ownsCourseState = sharedCourseState === undefined
   let destroyed = false
   return {
     events,
     courseState,
     resetCourse() {
-      if (!destroyed) courseState.clear()
+      if (!destroyed && ownsCourseState) courseState.clear()
     },
     destroy() {
       if (destroyed) return
       destroyed = true
       events.dispose()
-      courseState.clear()
+      if (ownsCourseState) courseState.clear()
     },
   }
 }
@@ -443,7 +474,7 @@ export function mountPublishedSurfaceRuntime(
     )
   } catch (cause) {
     reportError(options, 'register', cause)
-    return failedHandle(createFallback(container, options))
+    return failedHandle(createFallback(container, options), container, cause)
   }
 
   const host = container.ownerDocument.createElement('div')
@@ -477,10 +508,26 @@ export function mountPublishedSurfaceRuntime(
     ]),
   ))
   const events = new ScopedRuntimeEvents(options.session.events)
-  const courseState = createRealmCourseStateStore(targetWindow, options.session.courseState)
+  const courseState = createRealmCourseStateStore(
+    targetWindow,
+    options.courseState ?? options.session.courseState,
+  )
+  const publishedMode = options.mode ?? 'playback'
+  const surfaceMode = publishedMode === 'authoring' ? 'inspect' : publishedMode
+  const authoringTargets = publishedMode === 'authoring' && options.authoring
+    ? new PublishedSurfaceRuntimeAuthoringTargets({
+        root,
+        width: options.width,
+        height: options.height,
+        content: options.runtime.content,
+        assets: options.runtime.assets,
+        authoring: options.authoring,
+      })
+    : null
+  const captureBarrier = new PublishedCaptureBarrier()
   const context: SurfaceRuntimeCreateContext = {
     runtimeApiVersion: 3,
-    mode: 'playback',
+    mode: surfaceMode,
     width: options.width,
     height: options.height,
     content: Object.freeze({
@@ -516,13 +563,14 @@ export function mountPublishedSurfaceRuntime(
     events,
     capture: Object.freeze({
       waitUntil(promise: Promise<unknown>) {
+        captureBarrier.waitUntil(promise)
         void Promise.resolve(promise).catch((cause) => {
           reportError(options, 'lifecycle', cause)
         })
       },
     }),
     dom: { root },
-    authoring: playbackAuthoring,
+    authoring: authoringTargets ?? playbackAuthoring,
     emit(eventName: string, payload?: unknown) {
       events.emit('runtime:event', {
         scope: 'scene',
@@ -541,7 +589,7 @@ export function mountPublishedSurfaceRuntime(
       throw new Error('Surface Runtime create() 必须返回含 destroy() 的生命周期对象')
     }
     lifecycle = created
-    lifecycle.setMode?.('playback')
+    lifecycle.setMode?.(surfaceMode)
     lifecycle.resize?.(options.width, options.height)
     lifecycle.setVisible?.(options.visible)
     if (!options.visible) lifecycle.suspend?.()
@@ -555,46 +603,106 @@ export function mountPublishedSurfaceRuntime(
     } catch (destroyCause) {
       reportError(options, 'destroy', destroyCause)
     }
+    authoringTargets?.destroy()
+    captureBarrier.destroy()
     events.dispose()
     host.remove()
-    return failedHandle(createFallback(container, options))
+    return failedHandle(createFallback(container, options), container, cause)
   }
 
   let quarantined = false
+  let capturePrepared = false
+  let captureFailure: Error | null = null
+  let suspended = !options.visible
   const invoke = (operation: () => void): void => {
     if (quarantined || instanceDestroyed) return
     try {
       operation()
     } catch (cause) {
       quarantined = true
-      reportError(options, 'lifecycle', cause)
+      captureFailure = reportError(options, 'lifecycle', cause)
+      captureBarrier.fail(captureFailure)
     }
   }
 
-  return {
+  let unregisterCapture: () => void = () => undefined
+  const handle: PublishedSurfaceRuntimeMountHandle = {
     ok: true,
     element: host,
+    applyAuthoringContentValue(key: string, value: string) {
+      if (
+        options.mode !== 'authoring'
+        || instanceDestroyed
+        || !Object.prototype.hasOwnProperty.call(options.runtime.content.values, key)
+      ) return false
+      options.runtime.content.values[key] = value
+      const updated = applyPublishedRuntimeAuthoringText(host, key, value)
+      authoringTargets?.invalidate()
+      return updated
+    },
+    async waitForReady() {
+      if (captureFailure) throw captureFailure
+      if (instanceDestroyed) throw new Error(`Surface Runtime“${options.instanceId}”已销毁`)
+      if (quarantined) {
+        throw captureFailure ?? new Error(`Surface Runtime“${options.instanceId}”未完成启动`)
+      }
+    },
+    async waitForCaptureReady() {
+      if (captureFailure) throw captureFailure
+      if (instanceDestroyed) throw new Error(`Surface Runtime“${options.instanceId}”已销毁`)
+      if (capturePrepared) return
+      capturePrepared = true
+      try {
+        if (!suspended) lifecycle.suspend?.()
+        lifecycle.setMode?.('capture')
+        await captureBarrier.waitForReady(() => lifecycle.prepareCapture?.())
+      } catch (cause) {
+        captureFailure = captureBarrier.fail(cause)
+        reportError(options, 'lifecycle', captureFailure)
+        try {
+          lifecycle.setMode?.(surfaceMode)
+          if (!suspended) lifecycle.resume?.()
+        } catch (restoreCause) {
+          reportError(options, 'lifecycle', restoreCause)
+        }
+        capturePrepared = false
+        throw captureFailure
+      }
+    },
+    restoreAfterCapture() {
+      if (!capturePrepared || instanceDestroyed) return
+      capturePrepared = false
+      invoke(() => lifecycle.setMode?.(surfaceMode))
+      if (!suspended) invoke(() => lifecycle.resume?.())
+    },
     setVisible(visible: boolean) {
       invoke(() => lifecycle.setVisible?.(visible))
     },
     suspend() {
+      suspended = true
       invoke(() => lifecycle.suspend?.())
     },
     resume() {
+      suspended = false
       invoke(() => lifecycle.resume?.())
     },
     destroy() {
       if (instanceDestroyed) return
       instanceDestroyed = true
+      unregisterCapture()
+      captureBarrier.destroy()
       try {
         lifecycle.destroy()
       } catch (cause) {
         reportError(options, 'destroy', cause)
       } finally {
+        authoringTargets?.destroy()
         events.dispose()
         root.replaceChildren()
         host.remove()
       }
     },
   }
+  unregisterCapture = registerPublishedCaptureResource(container, handle)
+  return handle
 }

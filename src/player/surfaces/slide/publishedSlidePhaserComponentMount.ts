@@ -1,6 +1,7 @@
 import type * as PhaserTypes from 'phaser'
 import { tryCreateComponentLifecycle } from '../../../shared/componentLifecycleGuard'
 import { mergeComponentProps, resolveComponentEditorState } from '../../../shared/componentProps'
+import type { ExternalComponentNode } from '../../../shared/projectTypes'
 import { ComponentRegistry } from '../../ComponentRegistry'
 import {
   createPublishedComponentContextResources,
@@ -12,6 +13,7 @@ import {
   type PublishedComponentMountOptions,
   type ResolvedPublishedComponent,
 } from '../publishedComponentMount'
+import { registerPublishedCaptureResource } from '../publishedCapture'
 
 let sceneSequence = 0
 let phaserModulePromise: Promise<typeof import('phaser')> | null = null
@@ -24,30 +26,39 @@ function loadPhaser(): Promise<typeof import('phaser')> {
 function failedHandle(
   container: HTMLElement,
   options: PublishedComponentMountOptions,
+  cause: unknown = new Error(`Phaser 组件“${options.componentId}”未能启动`),
 ): PublishedComponentMountHandle {
   const fallback = createPublishedComponentFallbackElement(container, options)
   container.appendChild(fallback)
   let destroyed = false
-  return {
+  const failure = cause instanceof Error ? cause : new Error(String(cause))
+  const handle: PublishedComponentMountHandle = {
     ok: false,
     instanceId: options.instanceId ?? options.componentId,
     componentId: options.componentId,
     element: fallback,
+    waitForReady: () => Promise.reject(failure),
+    waitForCaptureReady: () => Promise.reject(failure),
+    restoreAfterCapture() {},
     resize() {},
     updateProps() {},
+    updateAuthoringNode() {},
     setVisible() {},
     suspend() {},
     resume() {},
     destroy() {
       if (destroyed) return
       destroyed = true
+      unregisterCapture()
       fallback.remove()
     },
   }
+  const unregisterCapture = registerPublishedCaptureResource(container, handle)
+  return handle
 }
 
 /**
- * Owns one scene-local Published V2 Component API 4 Phaser instance. The
+ * Owns one Published V2 Component API 4 Phaser instance on a Slide layer. The
  * authored Slide wrapper remains authoritative for frame, rotation, opacity,
  * order and hit routing; this host owns only the component-local renderer.
  */
@@ -62,24 +73,29 @@ export function mountPublishedSlidePhaserComponent(
       'register',
       new Error('Published Phaser Component 挂载文档没有可执行 Window'),
     )
-    return failedHandle(container, options)
+    return failedHandle(
+      container,
+      options,
+      new Error('Published Phaser Component 挂载文档没有可执行 Window'),
+    )
   }
 
   const registry = options.registry ?? new ComponentRegistry()
   const ownsRegistry = options.registry === undefined
+  const scope = options.scope ?? 'scene'
   let resolved: ResolvedPublishedComponent
   try {
     resolved = resolvePublishedComponent(options, registry)
     if (
       resolved.manifest.renderMode !== 'phaser'
-      || !resolved.manifest.supportedScopes.includes('scene')
+      || !resolved.manifest.supportedScopes.includes(scope)
     ) {
-      throw new Error(`组件“${resolved.manifest.id}”未声明 Phaser 渲染面`)
+      throw new Error(`组件“${resolved.manifest.id}”未声明 ${scope} Phaser 渲染面`)
     }
   } catch (cause) {
     reportPublishedComponentError(options, 'register', cause)
     if (ownsRegistry) registry.dispose()
-    return failedHandle(container, options)
+    return failedHandle(container, options, cause)
   }
   if (ownsRegistry) registry.dispose()
 
@@ -124,6 +140,31 @@ export function mountPublishedSlidePhaserComponent(
   let currentWidth = options.width
   let currentHeight = options.height
   let currentProps = options.props ?? {}
+  let currentAuthoringNode = options.authoring?.node
+  let capturePrepared = false
+  let captureFailure: Error | null = null
+  let bootSettled = false
+  let resolveBoot!: () => void
+  let rejectBoot!: (error: Error) => void
+  const bootReady = new Promise<void>((resolve, reject) => {
+    resolveBoot = resolve
+    rejectBoot = reject
+  })
+  void bootReady.catch(() => undefined)
+  const settleBootReady = (): void => {
+    if (bootSettled) return
+    bootSettled = true
+    resolveBoot()
+  }
+  const settleBootFailure = (cause: unknown): Error => {
+    const error = cause instanceof Error ? cause : new Error(String(cause))
+    captureFailure ??= error
+    if (!bootSettled) {
+      bootSettled = true
+      rejectBoot(error)
+    }
+    return error
+  }
 
   const destroyGame = (): void => {
     const mountedGame = game
@@ -151,6 +192,8 @@ export function mountPublishedSlidePhaserComponent(
     lifecycle = undefined
     const mountedResources = resources
     resources = null
+    // Revoke editor targets before authored teardown can retain or mutate them.
+    mountedResources?.destroyAuthoringTargets()
     // Close the host event scope before authored teardown so a destroy hook
     // cannot emit or retain subscriptions beyond its owning generation.
     mountedResources?.dispose()
@@ -169,7 +212,8 @@ export function mountPublishedSlidePhaserComponent(
   ): void => {
     if (destroyed || quarantined) return
     quarantined = true
-    reportPublishedComponentError(options, phase, cause)
+    const error = settleBootFailure(cause)
+    reportPublishedComponentError(options, phase, error)
     destroyLifecycle()
     if (initializingPhaser) targetWindow.queueMicrotask(destroyGame)
     else destroyGame()
@@ -201,8 +245,17 @@ export function mountPublishedSlidePhaserComponent(
               width: currentWidth,
               height: currentHeight,
               props: currentProps,
-              mode: 'preview',
-              scope: 'scene',
+              mode: options.mode ?? 'preview',
+              scope,
+              sceneId: scope === 'scene' ? options.sceneId : undefined,
+              ...(options.authoring && currentAuthoringNode
+                ? {
+                    authoring: {
+                      ...options.authoring,
+                      node: currentAuthoringNode,
+                    },
+                  }
+                : {}),
             },
             resolved,
           )
@@ -232,11 +285,13 @@ export function mountPublishedSlidePhaserComponent(
             return
           }
           lifecycle = creation.lifecycle
-          lifecycle.setMode?.('preview')
+          lifecycle.setMode?.(options.mode ?? 'preview')
           lifecycle.resize?.(currentWidth, currentHeight)
+          resources.updateAuthoringSize(currentWidth, currentHeight)
           lifecycle.setVisible?.(visible)
           appliedVisibility = visible
           if (suspended) lifecycle.suspend?.()
+          settleBootReady()
         } catch (cause) {
           quarantine('create', cause)
         } finally {
@@ -271,7 +326,8 @@ export function mountPublishedSlidePhaserComponent(
     quarantine('create', cause)
   })
 
-  return {
+  let unregisterCapture: () => void = () => undefined
+  const handle: PublishedComponentMountHandle = {
     get ok() {
       return !quarantined
     },
@@ -283,19 +339,71 @@ export function mountPublishedSlidePhaserComponent(
     get element() {
       return fallback ?? host
     },
+    async waitForReady() {
+      if (captureFailure) throw captureFailure
+      if (destroyed) throw new Error(`Phaser 组件“${instanceId}”已销毁`)
+      await bootReady
+      if (captureFailure) throw captureFailure
+      if (!lifecycle || !resources || quarantined) {
+        throw captureFailure ?? new Error(`Phaser 组件“${instanceId}”未完成启动`)
+      }
+    },
+    async waitForCaptureReady() {
+      if (captureFailure) throw captureFailure
+      if (destroyed) throw new Error(`Phaser 组件“${instanceId}”已销毁`)
+      await bootReady
+      if (captureFailure) throw captureFailure
+      if (!lifecycle || !resources) {
+        throw new Error(`Phaser 组件“${instanceId}”未完成启动`)
+      }
+      if (capturePrepared) return
+      capturePrepared = true
+      if (!suspended) lifecycle.suspend?.()
+      lifecycle.setMode?.('capture')
+      try {
+        await resources.waitForCaptureReady(() => lifecycle?.prepareCapture?.())
+      } catch (cause) {
+        captureFailure = cause instanceof Error ? cause : new Error(String(cause))
+        lifecycle?.setMode?.(options.mode ?? 'preview')
+        if (!suspended) lifecycle?.resume?.()
+        capturePrepared = false
+        throw captureFailure
+      }
+    },
+    restoreAfterCapture() {
+      if (!capturePrepared || !lifecycle) return
+      capturePrepared = false
+      lifecycle.setMode?.(options.mode ?? 'preview')
+      if (!suspended) lifecycle.resume?.()
+    },
     resize(width: number, height: number) {
       if (destroyed || quarantined) return
       currentWidth = width
       currentHeight = height
+      if (currentAuthoringNode) {
+        currentAuthoringNode = { ...currentAuthoringNode, width, height }
+      }
       if (game) game.scale.resize(Math.max(1, Math.ceil(width)), Math.max(1, Math.ceil(height)))
       lifecycle?.resize?.(width, height)
+      resources?.updateAuthoringSize(width, height)
+      resources?.invalidateAuthoringTargets()
     },
     updateProps(props: Record<string, unknown>) {
       if (destroyed || quarantined) return
       currentProps = props
+      if (currentAuthoringNode) {
+        currentAuthoringNode = { ...currentAuthoringNode, props }
+      }
       const merged = mergeComponentProps(resolved.manifest, props)
       lifecycle?.updateProps?.(merged)
       lifecycle?.setEditorState?.(resolveComponentEditorState(resolved.manifest, merged))
+      resources?.updateAuthoringProps(props)
+      resources?.invalidateAuthoringTargets()
+    },
+    updateAuthoringNode(node: ExternalComponentNode) {
+      if (destroyed || quarantined) return
+      currentAuthoringNode = node
+      resources?.updateAuthoringNode(node)
     },
     setVisible(nextVisible: boolean) {
       if (destroyed || quarantined) return
@@ -317,6 +425,8 @@ export function mountPublishedSlidePhaserComponent(
     destroy() {
       if (destroyed) return
       destroyed = true
+      settleBootFailure(new Error(`Phaser 组件“${instanceId}”在捕获就绪前已销毁`))
+      unregisterCapture()
       destroyLifecycle()
       destroyGame()
       fallback?.remove()
@@ -325,4 +435,6 @@ export function mountPublishedSlidePhaserComponent(
       host.remove()
     },
   }
+  unregisterCapture = registerPublishedCaptureResource(container, handle)
+  return handle
 }

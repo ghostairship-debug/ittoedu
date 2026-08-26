@@ -1,4 +1,5 @@
 import type { MixedPrintEntry } from '../../../shared/courseProjectTypes'
+import { composePublishedCourseLocation } from '../../../shared/courseLayerComposition'
 import type {
   PublishedCourseSurface,
   PublishedCourseV2Payload,
@@ -6,13 +7,11 @@ import type {
   PublishedLayerItem,
   PublishedNativeLayerItem,
   PublishedSlideScene,
+  PublishedSlidePresentationState,
   PublishedSlideSurface,
   PublishedSpatialSurface,
 } from '../../../shared/publishedCourseTypes'
-import {
-  isPublishedScopedVisible,
-  spatialRuntimeCameraFromPose,
-} from '../../../player/surfaces/spatial/spatialModel'
+import { spatialRuntimeCameraFromPose } from '../../../player/surfaces/spatial/spatialModel'
 import { buildPdfPrintHtml } from '../buildPptx'
 import {
   buildFlowDocx,
@@ -36,6 +35,8 @@ export interface CourseExportPage {
   surfaceId: string
   title: string
   sceneId?: string
+  /** Concrete course-order location that supplies Slide state and visibility. */
+  locationId?: string
   cameraFrameId?: string
 }
 
@@ -63,6 +64,10 @@ export interface BuildCoursePrintArtifactsOptions {
     surface: PublishedSlideSurface
     scene: PublishedSlideScene
     page: CourseExportPage
+    /** Stable location used for state and scoped-global visibility. */
+    locationId: string
+    /** True only for pure-Slide delivery; the capture host owns global compositing. */
+    includeGlobalLayerItems: boolean
   }) => string | Promise<string>
 }
 
@@ -137,12 +142,18 @@ export function buildCourseExportPageList(
       for (const sceneId of entry.sceneIds) {
         const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
         if (!scene) continue
+        const location = published.locations.find((candidate) => (
+          candidate.kind === 'slide-scene'
+          && candidate.surfaceId === surface.id
+          && candidate.sceneId === scene.id
+        ))
         pages.push({
           id: `${entry.id}:${sceneId}`,
           kind: 'slide-scene',
           surfaceId: surface.id,
           title: scene.name,
           sceneId,
+          ...(location ? { locationId: location.id } : {}),
         })
       }
       continue
@@ -183,12 +194,64 @@ export function isTeacherControllerPublishedItem(
   return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
 }
 
-/** Global layers and teacher controllers are viewport HUD by default and stay out of files. */
+/** Teacher controllers stay out unless the author explicitly enables static export. */
 export function shouldOmitPublishedItemFromStaticExport(item: PublishedLayerItem): boolean {
   if (isTeacherControllerPublishedItem(item)) {
     return !item.content.data.includeInStaticExports
   }
   return false
+}
+
+export function isPureSlidePublishedCourse(
+  published: PublishedCourseV2Payload,
+): boolean {
+  return published.locations.every((location) => location.kind === 'slide-scene')
+    && published.surfaces.every((surface) => surface.type === 'slide')
+}
+
+export interface PublishedSlideStaticComposition {
+  locationId: string
+  state?: PublishedSlidePresentationState
+  items: PublishedLayerItem[]
+}
+
+/** Shared static composition for a Published Slide page. */
+export function composePublishedSlideStaticPage(
+  published: PublishedCourseV2Payload,
+  surface: PublishedSlideSurface,
+  scene: PublishedSlideScene,
+  options: { includeGlobalLayerItems: boolean; locationId: string },
+): PublishedSlideStaticComposition {
+  const location = published.locations.find((candidate) => (
+    candidate.id === options.locationId
+    && candidate.kind === 'slide-scene'
+    && candidate.surfaceId === surface.id
+    && candidate.sceneId === scene.id
+  ))
+  if (!location || location.kind !== 'slide-scene') {
+    throw new Error(`Published Slide 页“${scene.name}”找不到位置“${options.locationId}”`)
+  }
+  const locationId = location.id
+  const stateId = location.stateId ?? scene.presentation?.initialStateId ?? null
+  const state = scene.presentation?.states.find((candidate) => candidate.id === stateId)
+  const composition = composePublishedCourseLocation({
+    course: published,
+    locationId,
+    stateId,
+  })
+  const items = composition.entries
+    .filter((entry) => (
+      entry.applicable
+      && entry.mounted
+      && (options.includeGlobalLayerItems || entry.source !== 'global')
+      && !shouldOmitPublishedItemFromStaticExport(entry.item)
+    ))
+    .map((entry) => entry.item)
+  return {
+    locationId,
+    ...(state ? { state } : {}),
+    items,
+  }
 }
 
 function resolvePublishedAssetUrl(
@@ -258,24 +321,15 @@ function buildSlideScenePrintHtml(
   published: PublishedCourseV2Payload,
   surface: PublishedSlideSurface,
   scene: PublishedSlideScene,
+  locationId: string,
+  includeGlobalLayerItems: boolean,
 ): string {
-  const location = published.locations.find((candidate) => (
-    candidate.kind === 'slide-scene' &&
-    candidate.surfaceId === surface.id &&
-    candidate.sceneId === scene.id
-  ))
-  const locationId = location?.id ?? scene.id
-  const state = scene.presentation?.states.find(
-    (candidate) => candidate.id === scene.presentation?.initialStateId,
+  const { items, state } = composePublishedSlideStaticPage(
+    published,
+    surface,
+    scene,
+    { includeGlobalLayerItems, locationId },
   )
-  const items = [
-    ...surface.surfaceLayerItems
-      .filter((entry) => isPublishedScopedVisible(entry.visibility, locationId))
-      .map((entry) => entry.item),
-    ...scene.layerItems,
-  ]
-    .filter((item) => item.visible && !shouldOmitPublishedItemFromStaticExport(item))
-    .sort((left, right) => left.order - right.order || left.layerItemId.localeCompare(right.layerItemId))
   const body = items.map((item) => {
     if (item.kind === 'native' && item.content.nativeType === 'text') {
       return `<p data-layer-item-id="${escapeHtml(item.layerItemId)}" style="position:absolute;left:${item.frame.x}px;top:${item.frame.y}px;width:${item.frame.width}px;height:${item.frame.height}px;margin:0">${escapeHtml(item.content.data.text)}</p>`
@@ -345,7 +399,7 @@ function resolveMixedPrintPageLayout(
 function buildMixedPrintDocumentHtml(
   published: PublishedCourseV2Payload,
   pages: readonly CourseExportPage[],
-  options: BuildCoursePrintArtifactsOptions,
+  includeGlobalLayerItems: boolean,
 ): string {
   const resolveAsset = (assetId: string) => resolvePublishedAssetUrl(published, assetId)
   const sections: string[] = []
@@ -355,7 +409,17 @@ function buildMixedPrintDocumentHtml(
     if (page.kind === 'slide-scene' && surface.type === 'slide' && page.sceneId) {
       const scene = surface.scenes.find((candidate) => candidate.id === page.sceneId)
       if (!scene) continue
-      sections.push(buildSlideScenePrintHtml(published, surface, scene))
+      if (!page.locationId) {
+        sections.push(`<section class="page course-slide-print-page" data-scene-id="${escapeHtml(scene.id)}"><p>Slide 场景“${escapeHtml(scene.name)}”缺少课程位置，无法确定静态状态。</p></section>`)
+        continue
+      }
+      sections.push(buildSlideScenePrintHtml(
+        published,
+        surface,
+        scene,
+        page.locationId,
+        includeGlobalLayerItems,
+      ))
       continue
     }
     if (page.kind === 'spatial-frame' && surface.type === 'spatial-2d') {
@@ -446,6 +510,7 @@ export async function buildCoursePrintArtifacts(
   const warnings: string[] = []
   const files: CoursePrintArtifactFile[] = []
   const pages = buildCourseExportPageList(published)
+  const pureSlide = isPureSlidePublishedCourse(published)
   if (pages.length === 0) {
     pushReport(report, {
       severity: 'error',
@@ -456,8 +521,17 @@ export async function buildCoursePrintArtifacts(
 
   auditCourseExportFonts(published, report)
   auditCourseExportAssets(published, report, options.resolveAssetBytes)
+  for (const page of pages) {
+    if (page.kind === 'slide-scene' && !page.locationId) {
+      pushReport(report, {
+        severity: 'error',
+        message: `Slide 场景“${page.title}”没有课程位置，无法确定导出状态与图层可见性。`,
+        pageId: page.id,
+      })
+    }
+  }
 
-  if (published.globalLayerItems.length > 0) {
+  if (published.globalLayerItems.length > 0 && !pureSlide) {
     pushReport(report, {
       severity: 'info',
       message: '全局图层与教师控制器默认不写入 PDF/DOCX 文件。',
@@ -472,9 +546,17 @@ export async function buildCoursePrintArtifacts(
     if (page.kind === 'slide-scene' && surface.type === 'slide' && page.sceneId) {
       const scene = surface.scenes.find((candidate) => candidate.id === page.sceneId)
       if (!scene) continue
+      if (!page.locationId) continue
       try {
         const captured = options.captureSlideScene
-          ? await options.captureSlideScene({ published, surface, scene, page })
+          ? await options.captureSlideScene({
+              published,
+              surface,
+              scene,
+              page,
+              locationId: page.locationId,
+              includeGlobalLayerItems: pureSlide,
+            })
           : undefined
         if (captured?.startsWith('data:image/')) {
           pdfImages.push(captured)
@@ -516,7 +598,7 @@ export async function buildCoursePrintArtifacts(
     }
   }
 
-  const mixedHtml = buildMixedPrintDocumentHtml(published, pages, options)
+  const mixedHtml = buildMixedPrintDocumentHtml(published, pages, pureSlide)
   const mixedBytes = new TextEncoder().encode(mixedHtml)
   auditExportSize(mixedBytes, '混合打印 HTML', report)
   files.push({
@@ -528,8 +610,6 @@ export async function buildCoursePrintArtifacts(
 
   const imageCoverageComplete = pdfImagePageIds.length === pages.length
     && pages.every((page, index) => pdfImagePageIds[index] === page.id)
-  const pureSlide = published.locations.every((location) => location.kind === 'slide-scene')
-    && published.surfaces.every((surface) => surface.type === 'slide')
   if (imageCoverageComplete || !pureSlide) {
     const pdfHtml = imageCoverageComplete
       ? buildPdfPrintHtml(published.title, pdfImages)

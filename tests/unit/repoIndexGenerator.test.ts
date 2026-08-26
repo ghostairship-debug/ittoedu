@@ -277,9 +277,9 @@ describe('deterministic repo-index generator', () => {
       }))
       expect(edges).toContainEqual(expect.objectContaining({
         kind: 'imports',
-        from: 'file:src/renderer/preview/runtimePreviewDocument.ts',
-        to: 'file:src/renderer/preview/runtimePreviewBootstrap.js',
-        specifier: './runtimePreviewBootstrap.js?raw',
+        from: 'file:src/renderer/export/bundledFontEmbedSourceFetch.ts',
+        to: 'file:vendor/fonts/noto-sans-sc/LICENSE',
+        specifier: '../../../vendor/fonts/noto-sans-sc/LICENSE?raw',
         resolved: true,
       }))
       expect(edges).toContainEqual(expect.objectContaining({

@@ -24,9 +24,18 @@ import {
   mergeComponentProps,
   resolveComponentEditorState,
 } from '../../shared/componentProps'
+import type { ExternalComponentNode } from '../../shared/projectTypes'
 import { ComponentRegistry } from '../ComponentRegistry'
+import {
+  ComponentAuthoringTargetRegistry,
+  type ComponentAuthoringTargetsChangedHandler,
+} from '../ComponentAuthoringTargetRegistry'
 import { createPlayerComponentHostActions } from '../componentHostActions'
 import { decodePublishedCode } from '../publishedLesson'
+import {
+  PublishedCaptureBarrier,
+  registerPublishedCaptureResource,
+} from './publishedCapture'
 
 export type PublishedComponentPackageSource =
   | PublishedCourseComponent
@@ -41,7 +50,7 @@ export interface PublishedComponentMountOptions {
   height: number
   props?: Record<string, unknown>
   staticFallbackAssetId?: string
-  components?: Record<string, PublishedComponentPackageSource>
+  components?: Readonly<Record<string, PublishedComponentPackageSource>>
   resolveAsset?: (assetId: string) => string | undefined
   registry?: ComponentRegistry
   mode?: 'preview' | 'edit' | 'capture'
@@ -53,6 +62,10 @@ export interface PublishedComponentMountOptions {
   courseState?: ComponentCreateContextV4['courseState']
   presentation?: ComponentCreateContextV4['presentation']
   emit?: (eventName: string, payload?: unknown) => void
+  authoring?: {
+    node: ExternalComponentNode
+    onTargetsChanged: ComponentAuthoringTargetsChangedHandler
+  }
   reportError?: (
     phase: 'register' | 'create' | 'lifecycle' | 'destroy',
     error: Error,
@@ -65,8 +78,12 @@ export interface PublishedComponentMountHandle {
   readonly componentId: string
   readonly lifecycle?: GuardedComponentInstanceLifecycle
   readonly element: HTMLElement
+  waitForReady(): Promise<void>
+  waitForCaptureReady(): Promise<void>
+  restoreAfterCapture(): void
   resize(width: number, height: number): void
   updateProps(props: Record<string, unknown>): void
+  updateAuthoringNode(node: ExternalComponentNode): void
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -86,6 +103,13 @@ export type PublishedComponentContextBase = Omit<
 
 export interface PublishedComponentContextResources {
   readonly context: PublishedComponentContextBase
+  waitForCaptureReady(prepareCapture?: () => void | Promise<void>): Promise<void>
+  updateAuthoringNode(node: ExternalComponentNode): void
+  updateAuthoringSize(width: number, height: number): void
+  updateAuthoringProps(props: Record<string, unknown>): void
+  invalidateAuthoringTargets(): void
+  destroyAuthoringTargets(): void
+  destroyCapture(): void
   dispose(): void
 }
 
@@ -96,7 +120,7 @@ export function getSharedComponentRegistry(): ComponentRegistry {
 }
 
 export function findComponentPackageSource(
-  components: Record<string, PublishedComponentPackageSource> | undefined,
+  components: Readonly<Record<string, PublishedComponentPackageSource>> | undefined,
   componentId: string,
   version?: string,
 ): PublishedComponentPackageSource | undefined {
@@ -309,6 +333,7 @@ export function createPublishedComponentContextResources(
   container: HTMLElement,
   options: PublishedComponentMountOptions,
   resolved: Pick<ResolvedPublishedComponent, 'source' | 'manifest'>,
+  domRoot?: HTMLElement,
 ): PublishedComponentContextResources {
   const { source, manifest } = resolved
   const instanceId = options.instanceId ?? options.componentId
@@ -325,6 +350,18 @@ export function createPublishedComponentContextResources(
     restartCourse: () => false,
   })
   const eventScope = scopedComponentEvents(options.events)
+  const captureBarrier = new PublishedCaptureBarrier()
+  let authoringNode = options.authoring?.node
+  const authoringTargets = authoringNode && options.authoring
+    ? new ComponentAuthoringTargetRegistry({
+        manifest,
+        node: authoringNode,
+        scope: options.scope ?? 'scene',
+        ...(options.sceneId ? { sceneId: options.sceneId } : {}),
+        ...(domRoot ? { domRoot } : {}),
+        onTargetsChanged: options.authoring.onTargetsChanged,
+      })
+    : null
   let disposed = false
 
   const assetUrl = (assetKey: string): string => {
@@ -375,11 +412,40 @@ export function createPublishedComponentContextResources(
       assetUrl,
       projectAssetUrl,
       emit,
-      capture: { waitUntil: () => {} },
+      capture: { waitUntil: (promise) => captureBarrier.waitUntil(promise) },
+      ...(authoringTargets ? { editor: authoringTargets } : {}),
+    },
+    waitForCaptureReady: (prepareCapture) => captureBarrier.waitForReady(prepareCapture),
+    updateAuthoringNode(node: ExternalComponentNode) {
+      if (!authoringTargets) return
+      authoringTargets.update(node)
+      authoringNode = node
+    },
+    updateAuthoringSize(width: number, height: number) {
+      if (!authoringNode || !authoringTargets) return
+      const nextNode = { ...authoringNode, width, height }
+      authoringTargets.update(nextNode)
+      authoringNode = nextNode
+    },
+    updateAuthoringProps(props: Record<string, unknown>) {
+      if (!authoringNode || !authoringTargets) return
+      const nextNode = { ...authoringNode, props }
+      authoringTargets.update(nextNode)
+      authoringNode = nextNode
+    },
+    invalidateAuthoringTargets() {
+      authoringTargets?.invalidate()
+    },
+    destroyAuthoringTargets() {
+      authoringTargets?.destroy()
+    },
+    destroyCapture() {
+      captureBarrier.destroy()
     },
     dispose() {
       if (disposed) return
       disposed = true
+      captureBarrier.destroy()
       eventScope.dispose()
     },
   }
@@ -388,24 +454,33 @@ export function createPublishedComponentContextResources(
 function failedHandle(
   element: HTMLElement,
   options: PublishedComponentMountOptions,
+  cause: unknown = new Error(`组件“${options.componentId}”未能启动`),
 ): PublishedComponentMountHandle {
   let destroyed = false
-  return {
+  const failure = cause instanceof Error ? cause : new Error(String(cause))
+  const handle: PublishedComponentMountHandle = {
     ok: false,
     instanceId: options.instanceId ?? options.componentId,
     componentId: options.componentId,
     element,
+    waitForReady: () => Promise.reject(failure),
+    waitForCaptureReady: () => Promise.reject(failure),
+    restoreAfterCapture() {},
     resize() {},
     updateProps() {},
+    updateAuthoringNode() {},
     setVisible() {},
     suspend() {},
     resume() {},
     destroy() {
       if (destroyed) return
       destroyed = true
+      unregisterCapture()
       element.remove()
     },
   }
+  const unregisterCapture = registerPublishedCaptureResource(options.container, handle)
+  return handle
 }
 
 export function mountPublishedComponent(
@@ -414,19 +489,25 @@ export function mountPublishedComponent(
 ): PublishedComponentMountHandle {
   const instanceId = options.instanceId ?? options.componentId
   const pkg = findComponentPackageSource(options.components, options.componentId, options.version)
-  const isCapture = options.mode === 'capture'
-
-  if (!pkg || isCapture) {
+  if (!pkg) {
     const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return failedHandle(fallbackEl, options)
+    return failedHandle(
+      fallbackEl,
+      options,
+      new Error(`组件“${options.componentId}”的 Published 包不存在`),
+    )
   }
 
   const manifest = extractPublishedComponentManifest(pkg)
   if (manifest.renderMode === 'phaser') {
     const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return failedHandle(fallbackEl, options)
+    return failedHandle(
+      fallbackEl,
+      options,
+      new Error(`组件“${manifest.id}”不能在 DOM Published 宿主中捕获`),
+    )
   }
 
   const registry = options.registry ?? sharedComponentRegistry
@@ -446,7 +527,11 @@ export function mountPublishedComponent(
   if (!definition) {
     const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return failedHandle(fallbackEl, options)
+    return failedHandle(
+      fallbackEl,
+      options,
+      new Error(`组件“${manifest.id}”没有可执行的 Published 定义`),
+    )
   }
 
   const dom = container.ownerDocument
@@ -479,6 +564,7 @@ export function mountPublishedComponent(
     container,
     options,
     { source: pkg, manifest },
+    root,
   )
   const mode = options.mode ?? 'preview'
 
@@ -495,46 +581,91 @@ export function mountPublishedComponent(
 
   if (!creation.ok) {
     reportPublishedComponentError(options, 'create', creation.failure.error)
+    resources.destroyAuthoringTargets()
     resources.dispose()
     host.remove()
     const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return failedHandle(fallbackEl, options)
+    return failedHandle(fallbackEl, options, creation.failure.error)
   }
 
   const lifecycle = creation.lifecycle
   lifecycle.setMode?.(mode)
   lifecycle.resize?.(options.width, options.height)
+  resources.updateAuthoringSize(options.width, options.height)
   lifecycle.setVisible?.(true)
 
-  return {
+  let suspended = false
+  let capturePrepared = false
+  let destroyed = false
+  let unregisterCapture: () => void = () => undefined
+  const handle: PublishedComponentMountHandle = {
     ok: true,
     instanceId,
     componentId: manifest.id,
     lifecycle,
     element: host,
+    async waitForReady() {
+      if (destroyed) throw new Error(`组件“${instanceId}”已销毁`)
+    },
+    async waitForCaptureReady() {
+      if (capturePrepared) return
+      capturePrepared = true
+      if (!suspended) lifecycle.suspend?.()
+      lifecycle.setMode?.('capture')
+      try {
+        await resources.waitForCaptureReady(() => lifecycle.prepareCapture?.())
+      } catch (cause) {
+        lifecycle.setMode?.(mode)
+        if (!suspended) lifecycle.resume?.()
+        capturePrepared = false
+        throw cause
+      }
+    },
+    restoreAfterCapture() {
+      if (!capturePrepared) return
+      capturePrepared = false
+      lifecycle.setMode?.(mode)
+      if (!suspended) lifecycle.resume?.()
+    },
     resize(w: number, h: number) {
       lifecycle.resize?.(w, h)
+      resources.updateAuthoringSize(w, h)
+      resources.invalidateAuthoringTargets()
     },
     updateProps(nextProps: Record<string, unknown>) {
       const merged = mergeComponentProps(manifest, nextProps)
       lifecycle.updateProps?.(merged)
       const nextState = resolveComponentEditorState(manifest, merged)
       lifecycle.setEditorState?.(nextState)
+      resources.updateAuthoringProps(nextProps)
+      resources.invalidateAuthoringTargets()
+    },
+    updateAuthoringNode(node: ExternalComponentNode) {
+      resources.updateAuthoringNode(node)
     },
     setVisible(visible: boolean) {
       lifecycle.setVisible?.(visible)
     },
     suspend() {
+      suspended = true
       lifecycle.suspend?.()
     },
     resume() {
+      suspended = false
       lifecycle.resume?.()
     },
     destroy() {
+      if (destroyed) return
+      destroyed = true
+      resources.destroyAuthoringTargets()
+      unregisterCapture()
+      resources.destroyCapture()
       lifecycle.destroy()
       resources.dispose()
       host.remove()
     },
   }
+  unregisterCapture = registerPublishedCaptureResource(container, handle)
+  return handle
 }

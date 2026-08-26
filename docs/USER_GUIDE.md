@@ -2,7 +2,7 @@
 
 本指南适用于 **互动课件编辑器（Windows x64）**，当前工程格式为 Course Project V9（`schemaVersion: 9`）。详细合同见 [docs/contracts/](contracts/)。产品由 **ittoedu** 开发，英文名为 **ittoedu Courseware Editor**。Course Project V9 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；简单点击/切场/播媒体用原生节点与声明式交互；稍复杂的局部互动用组件（可复用或为本课新建）；整页动画、特效与连续机制用场景/世界运行时。包版本号已是 `1.0.0`，V9 Schema 已软冻结；未获教师验收前不宣称 Editor 1.0 已发布。
 
-文档同步基线：**2026-08-26**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
+文档同步基线：**2026-08-27**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
 
 ## 1. 启动编辑器
 
@@ -28,7 +28,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 
 1. 顶部工具栏：两种模式都保留新建、打开、保存、撤销、重做、模式切换、“整课预览”和统一“导出”；简洁模式把最近工程、另存为和工程检查收进“更多”，专业模式直接显示这些入口。组件导入只位于右侧“组件”页，不在顶栏提供重复入口。
 2. 左侧场景列表：顶部固定“全局层”，其下可查看缩略图，选择、新建、复制、重命名、删除和排序场景。
-3. 中央工作区：始终显示同一个 1280 × 720 画布，可在“编辑状态”和“当前位置试运行”之间切换；画面不会换到另一块预览区。编辑状态可选择、框选、移动、缩放和旋转原生节点。无限画布在编辑态即可平移/缩放会话镜头（写入 home 或镜头画面才持久化）；当前位置试运行与整课预览里仍可自由逛世界，同时可用镜头画面、路径和下一步巡游。拖画布不只限于空白：只要该处没有被组件、运行时、视频控件或教师控制器占用，就可以拖拽平移、滚轮缩放，且只改会话、不写回工程。
+3. 中央工作区：始终显示同一个 1280 × 720 画布，可在“编辑状态”和“当前位置试运行”之间切换；画面不会换到另一块预览区。Slide 的两种状态在同一 Renderer 文档中使用同一套 Published V2 Slide 宿主；Flow / Spatial 保持各自的专用作者面。编辑状态可选择、框选、移动、缩放和旋转原生节点。无限画布在编辑态即可平移/缩放会话镜头（写入 home 或镜头画面才持久化）；当前位置试运行与整课预览里仍可自由逛世界，同时可用镜头画面、路径和下一步巡游。拖画布不只限于空白：只要该处没有被组件、运行时、视频控件或教师控制器占用，就可以拖拽平移、滚轮缩放，且只改会话、不写回工程。
 4. 右侧面板：
    - “元素”是原生元素添加与媒体管理入口，不再保留重复的“素材”一级 Tab；“常用”提供文字、公式、图片、视频、声音和全部图形快捷入口，“媒体”可批量导入、管理和复用图片、视频与声音，专业模式再显示“控制与全局”；
    - “组件”只在专业模式显示：提供“打开内置组件库”“导入外部组件”和合并管理能力后的“工程组件”列表；
@@ -135,10 +135,12 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 ### 4.2 编辑状态与当前位置试运行
 
 - 两种状态使用同一块 1280 × 720 舞台。切换只改变输入与运行权限，不改变画布坐标；
-- “编辑状态”使用隔离的 authoring Player 显示画面，并在上方叠加透明 Phaser 原生交互层。该透明层只负责选择、框选、移动、缩放和旋转，不重复绘制第二套视觉；教师控制器在编辑态只可排版，不会翻页或播放；
-- authoring Player 会冻结学生点击/拖拽、声明式互动、音频和视频播放、导航、状态推进及 `courseState` 写入。运行时与组件仍可创建稳定视觉，因此“看得见”不表示互动正在执行；只有能力索引已标记 playback 的 carrier 才能在“当前位置试运行”/“整课预览”验收真实行为。就 Runtime 而言，当前范围为 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM；全局 API 2 在一个会话内保持唯一实例并随 Slide/Flow/Spatial 导航迁移。API 2 的宿主动作、presentation 与节点解析仍未接线。就 Component 而言，当前明确证明的是 Slide scene-local API 4 Phaser；global/shared、Flow/Spatial、hybrid 与 capture 不随之开放；
-- “当前位置试运行”与“整课预览”使用 CoursePlayer + Published V2 宿主，从当前页或课程起始页真实运行。该状态不提供拖拽编辑；
-- 编辑状态中的场景/状态选择始终由编辑器决定，authoring Player 不会反向导航或覆盖选择。只有试运行中的场景和命名状态变化会同步高亮左侧场景与下方状态卡；
+- Slide“编辑状态”直接挂载同文档 Published V2 authoring 宿主，并在上方叠加透明 Phaser 原生交互层。该透明层只负责选择、框选、移动、缩放和旋转，不重复绘制第二套视觉；Flow / Spatial 的编辑状态继续使用专用作者面；
+- authoring 模式只显示当前 Slide 的稳定合成画面，并冻结学生点击/拖拽、宿主与教师控制器动作、声明式互动、音视频、导航、演示者输入、呈现推进及 `courseState` 写入。它通过带 session/revision 的版本化 direct ready/patch/ACK/error/target 协议更新画面与 Runtime/Component 编辑目标，也不允许扩展直接改写 Store；
+- “当前位置试运行”与“整课预览”使用 CoursePlayer + Published V2 playback，从当前页或课程起始页真实运行。Published 会话会按声明初始化 `courseState` 默认值，并把已支持 Runtime/Component carrier 的 go/next/previous、重播和重开动作接回同一会话。顶层 `block` 守卫只检查跨 location 的 go/next/previous；replay 不离开当前 location 且不经守卫，restart 明确绕过守卫、回到课程起点并把 `courseState` 重置为声明默认值。声明式 `interactions` 仍没有 `courseState` 条件或写动作；
+- 当前 Runtime playback 范围为 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM；全局 API 2 在一个会话内保持唯一实例并随 Slide/Flow/Spatial 导航迁移。Slide scene-local API 2/3 的 `presentation` 已接线；API 2 `nodes`、Slide scene 以外的 `presentation` 和动态 Runtime 导航守卫仍未覆盖；
+- Component API 4 已证明的互动 playback 是 Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM carrier，以及 Slide scene Phaser carrier；这些本地 carrier 接通共享课程状态和宿主动作。manifest 的 `supportedScopes` 只有 `scene` / `global`，`surface` 是 carrier 不是 manifest scope。global Component 当前只证明可见挂载，不承诺 `global` scope 上下文、跨 location 单实例或内部状态保留；hybrid 也不宣称完整 parity；
+- 编辑状态中的场景/状态选择始终由编辑器决定，authoring 宿主不会反向导航或覆盖选择。只有试运行中的场景和命名状态变化会同步高亮左侧场景与下方状态卡；
 - 顶部“整课预览”全屏打开同一块 1280 × 720（16:9 等比适配）舞台。编辑、当前位置试运行与整课预览共用这份逻辑画布；预览不再使用更矮的对话框改变缩放。
 
 ## 5. 添加元素与复用素材
@@ -184,6 +186,17 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 同一条规则在上一次尚未完成时再次触发，Player 会取消旧运行并从新触发点重启，避免同一规则的延迟和动画无限叠加。
 
 本编排能力不是通用关键帧或路径时间轴。连续路径、物理、粒子或算法动画继续由组件或自由运行时完成。
+
+### 5.3 专业模式的课程状态与导航守卫
+
+“互动与动画”中的“专业：课程状态与导航守卫”是整课级作者入口，在 Slide、Flow 与 Spatial 工程中都可使用：
+
+1. 在“课程状态声明”新增布尔、数字、文字或空值状态，并设置整课启动默认值；
+2. 修改状态键时，编辑器会同步所有导航守卫条件；仍被守卫引用的状态不能直接删除，需先调整守卫；
+3. 在“导航守卫”选择所有来源或指定来源位置、一个或多个目标位置、`all` / `any` 匹配方式，以及“存在/不存在”或按类型比较的条件；
+4. 填写导航被阻止时的教师可读提示，再保存守卫。
+
+每次保存都是一条可撤销操作，并在进入 Store 前解析完整 Course Project V9；陈旧修订、重复 ID、失效位置/状态引用、非法比较和空条件都不会静默写入。Published playback 会把这些状态默认值共享给当前受支持的 Runtime/Component carrier。顶层 `block` 守卫只在 go/next/previous 实际跨 location 时执行；replay 不执行守卫，restart 绕过守卫并把课程状态重置为声明默认值。普通声明式 `interactions` 仍没有课程状态条件或写值动作。
 
 ## 6. 文本与富文本
 
@@ -235,7 +248,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 
 无障碍描述默认从公式结构自动生成，并在公式提交时同步更新。作者也可改为自定义读法；此后修改公式不会覆盖自定义内容，界面会要求复核，也可随时恢复自动描述。Formula ID 和递归 AST 仍是工程、AI 定位和导出的唯一事实；原始 AST 只在专业“开发”面板的选中对象诊断/受控 JSON 入口中出现。当前线性输入是与七类公式 AST 对齐的受限子集，不代表支持任意 LaTeX、矩阵或多行方程。
 
-编辑画布、整课预览、场景缩略图、单 HTML、网页包和 PDF 共用同一个公式渲染模块，排版规则一致；编辑画布虽运行在独立文档中，但会按课件实际使用的内置字族补齐 font-face，公式按内置 `STIX Two Math` 显示，不再回退到系统数学字体（Windows 上曾表现为 Cambria Math）。公式结构、样式和无障碍文本可进入场景状态覆盖，并随撤销、重做、保存和重新打开保持。若“工程检查”提示公式内容超出节点边界，应增大公式框或减小字号后再导出。
+编辑画布、整课预览、场景缩略图、单 HTML、网页包和 PDF 共用同一个公式渲染模块，排版规则一致；Slide 编辑画布与 playback 宿主位于同一 Renderer 文档，并使用同一组内置 font-face。公式按内置 `STIX Two Math` 显示，不再回退到系统数学字体（Windows 上曾表现为 Cambria Math）。公式结构、样式和无障碍文本可进入场景状态覆盖，并随撤销、重做、保存和重新打开保持。若“工程检查”提示公式内容超出节点边界，应增大公式框或减小字号后再导出。
 
 PPTX 会把每个公式导出为独立透明图片，同时在对象元数据中保留 Formula ID 和无障碍文本。公式对象可以整体移动、缩放、复制或删除，但不能在 PowerPoint 中继续编辑分子、分母、根式、上下标或 AST；需要改公式时应回到 `.h5lesson`。
 
@@ -303,17 +316,17 @@ Editor 1.0.0 内置以下图形：
 
 内置库的“通用组件”固定优先，其他学科只在 catalog 实际含有相应元数据时动态出现。搜索名称、用途或标签不会改写工程；同一包在分类和版本结果中会按 package ID 去重。与当前发行版审核摘要一致只证明 catalog 的发行身份与完整性，不产生更高的运行权限；外部导入只是另一种分发方式，已审核包与目录包使用相同执行语义。新外部包直接校验并加入，不再逐包弹窗；会覆盖已用代码的更新、替换及同 ID/版本哈希异常继续接受显式门禁。已经嵌入工程的精确组件可反复实例化，不再读取目录或重复提醒。
 
-编辑模式始终可以把 V4 组件作为整体选择、移动、缩放和旋转。组件可显式公开文字、长文本、数字、开关、颜色、选项和工程图片，提供页面、变体和预设，并自动把 `props.content` 中所有文字显示在“属性”面板；manifest 必须声明场景/全局作用域和 DOM、Phaser 或 hybrid 渲染能力。当前四个内置实验组件还将所有可编辑稳定可见文字登记为画布目标。Component API 1–3 旧包会被明确拒绝。
+编辑模式始终可以把 V4 组件作为整体选择、移动、缩放和旋转。组件可显式公开文字、长文本、数字、开关、颜色、选项和工程图片，提供页面、变体和预设，并自动把 `props.content` 中所有文字显示在“属性”面板；manifest 必须用 `supportedScopes` 声明 `scene` / `global` 作用域，并声明 DOM、Phaser 或 hybrid 渲染能力。Slide/Flow/Spatial 中的 `surface` 是实例所在的宿主 carrier，不是 manifest 的第三种 scope。当前四个内置实验组件还将所有可编辑稳定可见文字登记为画布目标。Component API 1–3 旧包会被明确拒绝。
 
-组件由统一画布中的 authoring Player 直接显示。左侧场景缩略图优先绘制组件包 `manifest.thumbnail` 指定的图片；组件未提供缩略图或图片解码失败时，编辑器会绘制带组件名称的边框后备框，因此组件不会再从缩略图中无声消失。编辑状态冻结组件互动，只保留稳定视觉与显式编辑目标；真实互动仍需在“当前位置试运行”或“整课预览”窗口验收。
+Slide 组件由同一 Renderer 文档中的 Published V2 authoring 宿主直接显示，Flow / Spatial 继续由各自的专用作者面显示。左侧场景缩略图优先绘制组件包 `manifest.thumbnail` 指定的图片；组件未提供缩略图或图片解码失败时，编辑器会绘制带组件名称的边框后备框，因此组件不会再从缩略图中无声消失。编辑状态冻结组件互动，只保留稳定视觉与显式编辑目标；真实互动仍需在“当前位置试运行”或“整课预览”验收。
 
-V4 预设会显示在对应“工程组件”卡片下，可点击或拖入画布。组件内部按钮、拖拽、动画和场景跳转只在预览、单 HTML 与网页包中运行。组件可以控制指定场景跳转、上一页、下一页、重播本页和重开课件。
+V4 预设会显示在对应“工程组件”卡片下，可点击或拖入画布。组件内部按钮、拖拽、动画和场景跳转只在预览、单 HTML 与网页包的受支持 carrier 中运行。本地 DOM carrier 与 Slide scene Phaser carrier 可以控制指定场景跳转、上一页、下一页、重播本页和重开课件；global Component 不能用可见挂载推导这些完整会话语义。
 
 ### 9.1 组件画布文字编辑
 
 组件作者可以显式开放稳定文字区域。编辑状态下双击已登记区域，会在该区域上显示轻量输入框，直接修改组件实例 Props；单行文字按 Enter 提交，多行文字按 `Ctrl+Enter` 提交，按 `Esc` 取消。修改支持撤销/重做，处于命名状态时写入当前状态覆盖。试运行、整课预览和成品播放器不会出现编辑命中区。
 
-宿主不会猜测组件画面中的文字。DOM 组件只有带 `data-courseware-edit-key="content.title"` 的元素可命中；Phaser/hybrid 组件只有通过可选、仅编辑态的 `ctx.editor.registerTextRegion({ key, getBounds })` 登记的区域可命中。Component API 4 上下文可能在隔离 authoring Player 中看到这一可选字段，组件必须判空；当前位置试运行、整课预览、普通 preview、capture 和成品 Player 均不提供 `ctx.editor`。`key` 还必须对应 manifest 已公开的 `text` / `textarea` 字段或有效 `props.content` 字符串。
+宿主不会猜测组件画面中的文字。DOM 组件只有带 `data-courseware-edit-key="content.title"` 的元素可命中；Phaser/hybrid 组件只有通过可选、仅编辑态的 `ctx.editor.registerTextRegion({ key, getBounds })` 登记的区域可命中。Component API 4 上下文只可能在 Published V2 authoring 模式中看到这一可选字段，组件必须判空；当前位置试运行、整课预览、普通 preview、capture 和成品 Player 均不提供 `ctx.editor`。`key` 还必须对应 manifest 已公开的 `text` / `textarea` 字段或有效 `props.content` 字符串。
 
 未登记区域仍把组件作为整体选择，并可在“属性”中修改公开文字，不会报错或改变播放行为。协议细节见 [组件开发指南](COMPONENT_AUTHORING.md)。
 
@@ -343,21 +356,21 @@ V4 预设会显示在对应“工程组件”卡片下，可点击或拖入画�
 
 V4 DOM/hybrid 组件有一个明确例外：它的 DOM 部分位于固定组件 DOM 平面，整体在 Phaser Canvas 上方，因此不能靠选择 `underlay` 压到原生 Canvas 节点背后；`underlay/overlay` 仍控制它的 Phaser 代理/Phaser 部分。确需 Canvas 后景的组件应使用 Phaser 渲染，或由运行时 DOM underlay 承载后景。
 
-播放器只创建一份全局元素，普通翻页和重播本页时不会重建。隐藏元素会关闭显示和输入；全局组件的内部状态也会保留，只有“重开课程”才销毁并重建整个全局作用域。
+全局原生元素和教师控制器具有跨场景会话语义，隐藏时会关闭显示和输入。global Component 虽可在对应页面可见挂载，当前没有对等的全局单实例会话所有者；不得依赖 `ctx.scope === 'global'`、普通翻页/replay 后保留内部状态，或只有 restart 才重建的生命周期。
 
 ### 9.4 场景与全局运行时文字
 
-Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开发”面板写入运行时。API 2 canvas Runtime 严格声明 `dom`、`phaser` 或 `hybrid`；API 3 surface Runtime 使用 DOM，旧 API 1 会得到“不受支持”诊断。属性栏会显示运行时登记的全部 `content.values` 文案并保存到工程与 Published payload；Published V2 当前在试运行、整课预览、离线/在线单 HTML 与网页包中执行 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM。全局 API 2 在单个会话中只创建一次并随 Slide/Flow/Spatial 当前页迁移；Flow/Spatial scene-local API 2、global API 3 与其它 shared carrier 仍按 fallback/占位处理。API 2 的 actions、presentation 和 nodes 仍是 partial context，修改 `renderMode` 不会自动转换 DOM/Phaser 实现。
+Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开发”面板写入运行时。API 2 canvas Runtime 严格声明 `dom`、`phaser` 或 `hybrid`；API 3 surface Runtime 使用 DOM，旧 API 1 会得到“不受支持”诊断。属性栏会显示运行时登记的全部 `content.values` 文案并保存到工程与 Published payload；Published V2 当前在试运行、整课预览、离线/在线单 HTML 与网页包中执行 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM。全局 API 2 在单个会话中只创建一次并随 Slide/Flow/Spatial 当前页迁移；Flow/Spatial scene-local API 2、global API 3 与其它 shared carrier 仍按 fallback/占位处理。已支持 carrier 的 Runtime host actions 接入同一 Published 导航/重播/重开会话；Slide scene-local API 2/3 `presentation` 已接线，API 2 `nodes`、Slide scene 以外的 `presentation` 与动态 Runtime 导航守卫仍是 partial context。修改 `renderMode` 不会自动转换 DOM/Phaser 实现。
 
 场景或全局运行时如果显式启用 Runtime Authoring V1，还可把文字或图片区域开放到对应画布作用域：文字目标必须对应 `content.values` 中已有的键，图片目标必须对应 `assets` 中已有的绑定。编辑状态下双击目标即可原位修改文字或选择替换图片；`ctx.authoring` 不提供原始 Store，修改由宿主转成 canonical command/history。`scene.runtime` 的内容由当前场景的基础及全部命名状态共享，`globalRuntime` 的内容由整课共享，均不会生成某个状态专属覆盖。
 
-没有声明 authoring 版本或目标的 API 2 运行时仍由 Player 完整显示，不会变成空框，也不会自动扫描像素推断可编辑内容；其文字、素材绑定和源码继续从“属性”或专业“开发”面板修改。Runtime Authoring V1 是 API 2 上独立、可选的编辑扩展。
+没有声明 authoring 版本或目标的 API 2 运行时仍由 Published 宿主显示其稳定视觉，不会变成空框，也不会自动扫描像素推断可编辑内容；其文字、素材绑定和源码继续从“属性”或专业“开发”面板修改。Runtime Authoring V1 是 API 2 上独立、可选的编辑扩展。
 
 题目、答错、答对、完成等稳定画面应使用场景状态和可编辑元素；场景运行时负责判定、事件、过渡和瞬态效果，并切换这些状态。跨场景一次性规则可以由全局运行时实现，不必包装成组件。不得把整页稳定 UI 只放进自由运行时；人工可见文字仍必须登记并可编辑。
 
 地球、太阳系、立体几何等真 3D 可以由具体运行时或 V4 组件携带 Three.js 实现，不要求编辑器核心内置 Three.js。程序化的一次性 3D 可直接使用运行时；带模型、较大或可复用的 3D 默认把离线 GLB 放进 V4 组件包。当前“媒体”管理还没有独立“模型”类型，不能把 GLB 当图片导入；没有 3D 的课件不会承担该能力。教师仍通过运行时 `content.values` 或组件 `props.content`/公开参数修改允许编辑的内容。
 
-组件包含经过审核的可信 JavaScript；外部导入只是分发方式，不代表低权限或不可信。当前各执行宿主提供的能力不同：authoring iframe 没有父页面/桌面能力，部分试运行路径与桌面宿主同上下文；课程确需本地、父页面或桌面能力时，应通过明确宿主合同接入，并为不具备该能力的网页导出提供清楚的降级。不要导入未经审核、来源不明的组件。
+组件包含经过审核的可信 JavaScript；外部导入只是分发方式，不代表低权限或不可信。Slide authoring 与 playback 位于同一 Renderer 文档，但 authoring 的宿主动作和课程状态写入仍被主动冻结；同文档不等于取得任意 Store、文件或桌面能力。课程确需本地、父页面或桌面能力时，应通过明确宿主合同接入，并为不具备该能力的网页导出提供清楚的降级。不要导入未经审核、来源不明的组件。
 
 组件包不得超过 50 MB，根目录必须包含 `manifest.json` 和 manifest 指定的普通 JavaScript 入口。制作组件请参阅 [组件开发指南](COMPONENT_AUTHORING.md)。
 
@@ -370,7 +383,7 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 - 当前规则 JSON：继续使用标准 `trigger / conditions / actions` 结构，规则 ID 不可更改；
 - 所选组件的 manifest/runtime：导入的第三方组件默认只读；只有在场景“基础”或全局层单击“创建可编辑副本”，编辑器才会生成带明确来源标记的新包 ID/版本、保留原包，并把当前实例切换到工程内副本。命名状态只能覆盖组件 Props，不能替换组件包，需先返回“基础”。副本通过包路径、入口、缩略图、素材、运行时 API、注册身份和现有实例作用域校验后，才允许修改 manifest/runtime。
 
-应用成功的运行时、对象、规则和可编辑组件修改都会进入工程撤销历史。“开发”面板在编辑/校验源码时不会执行它；实际试运行由当前目标宿主执行，现有路径可能是画布 iframe，也可能与桌面 Renderer 同宿主。面板本身不提供文件系统浏览、Shell、依赖安装或编辑器源码修改；课程扩展需要宿主能力时，应走明确宿主合同，而不是把开发面板改成通用 IDE。组件/运行时源码也不承诺保密：工程作者态本来就包含这些代码，互动成品中的执行逻辑可被有技术能力的人恢复和分析。
+应用成功的运行时、对象、规则和可编辑组件修改都会进入工程撤销历史。“开发”面板在编辑/校验源码时不会执行它；Slide 的稳定作者视觉与实际试运行都由同文档 Published V2 宿主按各自模式执行，Flow / Spatial 则保留专用作者面。面板本身不提供文件系统浏览、Shell、依赖安装或编辑器源码修改；课程扩展需要宿主能力时，应走明确宿主合同，而不是把开发面板改成通用 IDE。组件/运行时源码也不承诺保密：工程作者态本来就包含这些代码，互动成品中的执行逻辑可被有技术能力的人恢复和分析。
 
 第三方组件的“只读”只防止在当前工程中直接覆盖原包，不阻止查看或复制已经交付给用户的代码，也不替代组件许可证。创建可编辑副本前应确认授权允许修改和二次分发。
 
@@ -481,18 +494,18 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 - 开启键盘导航时，左/右方向键仍可切换上一/下一场景。
 - 在属性栏启用“翻页笔 PageUp/PageDown”后，无修饰键的 PageDown/PageUp 分别代表前进/后退；还可检测并登记精确的附加按键与修饰键组合。选择“相邻场景导航”时直接翻页并在首尾边界提示；选择“只触发作者规则”时只分发对应的 `presenter.command`，没有匹配规则就提示且不自动翻页。输入框、就地文字编辑、选择框、滑块、组件显式键盘捕获区和打开的模态层不会被翻页笔抢键；长按与短时间硬件抖动不会重复触发。
 - 调整窗口大小：课件保持 16:9 等比适配。
-- 声明式交互、视频和互动组件：按工程配置响应点击、音视频事件、状态切换、拖拽或其他交互。
+- 当前已接线的声明式交互、视频和受支持组件 carrier 会按工程配置响应点击、音视频事件、状态切换、拖拽或其他交互；能力索引列为未覆盖的 trigger、condition、action 或 carrier 不会因打开整课预览自动取得 parity。
 - 元素入场/退场在对应规则触发器发生后执行；顺序、并行、延迟和完成事件均按工程步骤语义运行。复杂运行时/组件动画按各自逻辑运行。
 
-“重播本页”只重建当前场景的原生节点、场景组件和场景运行时；统一全局层、全局运行时和课程进度状态保留。“重开课程”会清空课程状态，重建全局/场景作用域并回到第一场景。两者语义不同。
+“重播本页”只重建当前场景的原生节点、本地场景组件和场景运行时；课程进度状态、全局原生元素、教师控制器和 session-global API 2 Runtime 保留。global Component 当前不承诺单实例或 replay 后内部状态保留。“重开课程”会明确绕过守卫，把课程状态重置为 V9 声明的默认值，重建受支持的全局/场景作用域并回到第一 location。两者语义不同。
 
-关闭整课预览覆盖层不会修改工程。当前 Published V2 数据直接在主 renderer 内存中挂载并随覆盖层释放，不会把课件写成临时 HTML 文件；实际引用且声明 `remote.url` 的远程工程素材与 `network.connectOrigins` 会在预览期间取得精确 origin lease，关闭预览、切换工程或跨文档导航即撤销。未声明 origin 仍被拒绝，CORS/TLS 不会被绕过，远程脚本不开放。异常缺失活动 Course Project V9 时会明确报告整课预览不可用，不生成 V8 课件或打开独立窗口。
+关闭整课预览覆盖层不会修改工程。当前 Published V2 数据直接在主 renderer 内存中挂载并随覆盖层释放，不会把课件写成临时 HTML 文件；工程素材必须已有保存字节，编辑状态与当前位置/整课预览统一把这些字节内联为 data URL，不会因为元数据存在 `remote.url` 就改走网络，远程-only 素材仍会被当前 producer 拒绝。显式 `network.connectOrigins` 等实际连接需求会在预览期间取得精确 origin lease，关闭预览、切换工程或跨文档导航即撤销；未声明 origin 仍被拒绝，CORS/TLS 不会被绕过，远程脚本不开放。异常缺失活动 Course Project V9 时会明确报告整课预览不可用，不生成 V8 课件或打开独立窗口。
 
 ## 14. 导出单 HTML、网页包、PPTX 和 PDF
 
 单击顶部“导出”后选择格式。四种格式的关键区别：
 
-导出前建议先运行“工程检查”：专业模式可直接单击顶部入口，简洁模式从“更多”打开。当前面板会显示已经接线的结构、素材、交互、组件、运行时与静态兜底检查；但它仍可能漏掉 `surfaceLayerItems`、非当前 Surface、Flow/Spatial 交互和同场景后续 Runtime，因此“0 个问题”不能视为整课语义完整——这是长期边界，不会随某条路线完成而解除。未引用素材以 `asset-unused` 信息项列出；检查本身不会修改工程。现有可定位项可跳到相关场景、状态、元素或面板，无法可靠定位的项目应保留明确路径而不是伪造跳转。面板上方还提供两个只读审阅摘要：
+导出前建议先运行“工程检查”：专业模式可直接单击顶部入口，简洁模式从“更多”打开。当前面板直接读取 Course Project V9 的 locations、surfaces、统一图层、交互、组件、运行时和素材事实，不再以 V8 投影充当当前工程诊断；诊断项使用稳定 V9 target，可定位时跳到对应 location、surface、scene、flow block 或 layer item，无法可靠定位时保留明确路径而不伪造跳转。Runtime/Component 源码网络行为、真实像素和部分富排版仍需另行检查，因此“0 个问题”不能视为整课语义完整。未引用素材以 `asset-unused` 信息项列出；检查本身不会修改工程。面板上方还提供两个只读审阅摘要：
 
 - “信息释放”按每个场景/状态的现有可见性与声明式交互，列出初始可见、分步显示和没有可达揭示路径的隐藏节点。运行时、媒体、组件和翻页笔事件只按“可能发生”处理，因此它不是一次真实授课模拟；
 - “视觉密度”按可见对象数、文字字符数、累计包围盒面积和显著重叠对数生成 0–100 启发式分数及低/中/高分档。它不理解教学重点、留白意图或视觉质量，不会单独阻断导出。
@@ -506,10 +519,10 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 | 格式 | 生成方式 | 保留互动 | 后续编辑 | 推荐用途 |
 | --- | --- | --- | --- | --- |
 | 离线便携单 HTML | 单向编译的发布数据、素材和 Player 全部内联 | 是，含声音和视频 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 需要无网络传递的小中型课件 |
-| 在线轻量单 HTML | 实际引用且声明 `remote.url` 的工程素材保留 HTTPS 地址，其他素材和 Player 内联 | 是，依赖网络的素材/API 需另验 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 已部署远程媒体、希望减小文件体积的课件 |
+| 在线轻量单 HTML | 实际引用且声明 `remote.url` 的工程素材保留 HTTPS 地址，其他素材和 Player 内联；构建时仍要求每个被引用素材具有工程内保存字节 | 是，依赖网络的素材/API 需另验 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 已部署远程媒体、希望减小文件体积的课件 |
 | 网页包 | ZIP 内分离 `index.html`、唯一发布数据、Player 和运行素材 | 是，含声音和视频 | 不能恢复工程；回到原 `.h5lesson` 编辑 | 大型课件、视频或资源较多、静态网站部署 |
-| PDF | 捕获 Canvas、DOM、全局层和场景层的 16:9 合成画面 | 否 | 不可拆分编辑 | 打印、审阅、归档 |
-| PPTX | 原生节点逐对象导出，公式、组件、运行时、着重号文字和左起竖排文字静态化 | 否 | 普通原生文字/图形/图片可编辑；公式等静态化内容整体调整 | 素材提取、二次排版、汇报整合 |
+| PDF | 纯 Slide 逐 location 捕获真实 Published 页面；Mixed/Flow/Spatial 使用各自语义打印或静态表达 | 否 | 不可拆分编辑 | 打印、审阅、归档 |
+| PPTX | Slide 原生节点逐对象导出，Runtime/Component 逐实例捕获；Spatial 以镜头 SVG 表达，Flow 不映射 PPTX | 否 | 普通原生文字/图形/图片可编辑；公式等静态化内容整体调整 | 素材提取、二次排版、汇报整合 |
 
 ### 14.1 导出单 HTML
 
@@ -518,7 +531,7 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 3. 选择文件名和保存位置。
 4. 在系统浏览器中双击 `.html`，逐页检查布局和组件交互；在线轻量模式还要检查远程请求、CORS 和断网结果。
 
-离线便携模式不需要同目录资源、服务器或网络，移动课件时只需复制这一个文件；全部发布素材使用 Data URL，CSP 不开放远程 origin。在线轻量模式仍是一个文件，但会保留实际引用且声明了 `remote.url` 的工程素材 HTTPS 地址，并把工程 `network.connectOrigins` 写入精确 CSP；未声明远程地址的工程素材与全部组件素材继续内联，远程脚本不开放。它不探测远端可达性或绕过 CORS，也不能保存长期 API Key。两种单 HTML 都使用 PublishedLesson V1，不包含可直接导入的 Course Project V9、历史记录、编辑器字段、组件 manifest 或独立原始 `runtime.js`；互动执行代码仍会以可恢复的编码形式随成品交付，因此不能把它视为加密或 DRM。
+离线便携模式不需要同目录资源、服务器或网络，移动课件时只需复制这一个文件；全部发布素材使用 Data URL，CSP 不开放远程 origin。在线轻量模式仍是一个文件，但会保留实际引用且声明了 `remote.url` 的工程素材 HTTPS 地址，并把工程 `network.connectOrigins` 写入精确 CSP；未声明远程地址的工程素材与全部组件素材继续内联，远程脚本不开放。两种构建都要求每个被引用的工程素材具有已保存字节；只有 `remote.url` 而无工程字节的 remote-only 素材会被 producer 拒绝。在线轻量不探测远端可达性或绕过 CORS，也不能保存长期 API Key。两种单 HTML 都使用 PublishedLesson V1，不包含可直接导入的 Course Project V9、历史记录、编辑器字段、组件 manifest 或独立原始 `runtime.js`；互动执行代码仍会以可恢复的编码形式随成品交付，因此不能把它视为加密或 DRM。
 
 预计文件超过 50 MB 时，编辑器会显示体积、解释启动和内存风险，并推荐改用网页包；可以在未超过 256 MB 时选择继续。超过 256 MB 后必须改用网页包。没有 `remote.url` 的视频在两种单 HTML 中都会转成 Base64；已声明且实际引用的视频只有在线轻量模式会保留远程 URL。体积与离线可用性需要按最终模式分别验收。
 
@@ -536,7 +549,7 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 2. 等待全部场景渲染。
 3. 选择保存位置并打开 `.pdf` 检查。
 
-PDF 每个场景一页，页面为 Player 的静态合成画面，按固定 DOM underlay、Phaser Canvas、组件 DOM/WebGL、DOM overlay、场景层和全局层捕获。运行时/组件会先逐实例执行捕获准备、等待已登记的有限加载任务，并立即冻结各自 Canvas/WebGL 最终帧。Player 已成功启动后，某一场景捕获失败只让该页改用带诊断信息的静态后备，其余页面继续使用真实捕获；只有捕获宿主无法初始化时才对全部页面统一后备。声明式交互、声音和元素入场/退场不会保留；`playbackInitialVisibility: 'hidden'` 不应用，节点按作者稳定可见性捕获。视频保持封面或首帧，不会播放。画布内教师控制器默认不进入静态导出，除非节点明确启用静态导出。
+纯 Slide PDF 按课程 location 顺序逐页建立独立、惰性的 Published 捕获 generation，页面包含 scene/surface layer 以及纯 Slide global layer，并按固定 DOM underlay、Phaser Canvas、组件 DOM/WebGL 和 DOM overlay 合成。运行时/组件会执行捕获准备、等待已登记的有限加载任务，并在继续等待后续实例前立即冻结各自 Canvas/WebGL 最终帧；任一资源或页面捕获失败都会记录具体原因并使导出明确失败，不返回透明空图冒充成功，也不改用旧静态页面后备。Mixed PDF 不启动 Slide 动态实例，而是把 Slide 写成静态 HTML composition，Flow 使用语义打印计划，Spatial 按镜头输出 SVG；纯 Flow/Spatial 也不执行动态 Runtime/Component。声明式交互、声音和元素入场/退场不会保留；`playbackInitialVisibility: 'hidden'` 不应用，节点按作者稳定可见性处理。视频保持封面或首帧，不会播放。画布内教师控制器默认不进入静态导出，只有节点明确启用静态导出时才进入纯 Slide 捕获。
 
 当前静态导出捕获的是作者/组件通过 `capture.waitUntil()` 与 `prepareCapture()` 准备好的一个确定帧，不会自动抽取动画全过程。动态过程多帧捕获仍是研究项；在时间点、帧数、输出形式和真实课例需求得到验证前，编辑器不会另加第二套捕获时间线。
 
@@ -554,9 +567,9 @@ PPTX 使用 16:9 宽屏版式，每个场景一张幻灯片，并按编辑器中
 - 图片导出为独立图片对象，裁剪、圆角、翻转和羽化效果会合成进该图片；
 - 视频导出为带文件名的静态视频封面/占位，不保留播放、声音和时间事件；
 - 画布内教师控制器默认省略；显式启用 `includeInStaticExports` 时只保留静态外观，按钮不工作；
-- 互动组件按实例依次创建隔离捕获 Player，导出为独立的透明静态图片，可移动、删除、复制和重新排版，但暂不保留点击、拖拽、动画等行为；单个实例失败只为该实例生成诊断占位，已经成功的组件快照继续保留；
-- 当前场景可见的全局原生文字、图片和图形继续按独立对象导出；其中着重号文字和左起竖排文字遵循上述图片保真规则，全局组件按独立静态图片导出；
-- 场景/全局运行时会优先由隐藏 Player 捕获实际 underlay/overlay 透明快照；失败按场景/全局运行时条目和图层单独记录，只回退对应条目，不清空其他成功快照。捕获失败或未产生可见结果时才使用工程登记的静态后备画面。`runtime-layer` 只叠加运行时层，`full-scene` 会用整页后备覆盖显示；实际快照和后备都不可用时会显示占位并报告，不能保留互动；
+- Slide 互动组件按实例创建独立 Published generation 并导出为透明静态图片，可移动、删除、复制和重新排版，但不保留点击、拖拽、动画等行为；Slide scene/surface DOM 与 Slide scene-scope Phaser 使用真实实例捕获，单个实例失败后只对该实例使用作者静态后备或诊断占位，已经成功的快照继续保留；
+- 当前场景可见的全局原生文字、图片和图形继续按独立对象导出；其中着重号文字和左起竖排文字遵循上述图片保真规则。纯 Slide 的 global Component 只在静态导出语义下捕获当页可见外观，不证明 playback 的 global scope/session lifetime；
+- Slide scene API 2 canvas Runtime 与 API 3 DOM Runtime 会优先由隐藏 Published host 捕获单项透明快照；失败按 Runtime 条目记录，只回退该项，不清空其他成功快照。捕获失败或未产生有效图片时使用工程登记的静态后备；实际快照和后备都不可用时显示可选择占位并报告。纯 Slide 才纳入 global API 2 动态层，Mixed Slide 不重复合成 global；Slide surface Runtime 不执行真实捕获，Spatial Runtime/Component 只使用静态后备或 SVG 占位，Flow 不执行动态实例也不映射 PPTX；
 - 隐藏节点不导出，场景背景写入幻灯片背景，不会额外生成一张覆盖全页的静态截图。
 
 PPTX 的定位是提取素材和继续排版，而不是高保真静态归档。实时 Player 的运行时 underlay、Phaser Canvas、组件 DOM/WebGL、运行时 overlay 使用固定平面；导入 PPTX 后这些视觉会变成独立图片并按对象顺序放置，因此混合渲染器的固定平面关系不保证逐像素复现。需要完全固定画面时请导出 PDF；需要保留互动时请导出单 HTML 或网页包。
@@ -564,7 +577,7 @@ PPTX 的定位是提取素材和继续排版，而不是高保真静态归档。
 ### 14.5 导出检查建议
 
 - 小中型互动交付可选单 HTML；含大视频、大量声音或其他资源密集内容时优先网页包；打印或固定版式选择 PDF；在 PowerPoint 中继续编辑时选择 PPTX。
-- PDF 固定 Player 的静态合成画面；PPTX 中普通原生节点可继续编辑，公式、着重号文字、左起竖排文字和互动组件只保留静态快照，场景/全局运行时优先使用实际捕获层并在失败时回退到 `staticFallback`。
+- 纯 Slide PDF 固定真实 Published 页面，页面资源失败会明确失败而不改用静态页；Mixed/Flow/Spatial PDF 使用各自静态表达。PPTX 中普通原生节点可继续编辑，公式、着重号文字、左起竖排文字和互动组件只保留静态快照；只有上述受支持的 Slide Runtime/Component 条目优先真实捕获，失败时按单项回退到 `staticFallback` 或可见占位。
 - 大量高分辨率图片和视频会增加导出时间、文件体积和内存占用。含大视频时直接优先网页包；单 HTML 出现体积警告时改用网页包，其他导出失败时再压缩素材或删除未使用素材。
 
 ## 15. 快捷键与操作修饰键
@@ -601,7 +614,7 @@ macOS 风格的 `Command` 组合在代码中有兼容处理，但 Editor 1.0.0 �
 
 - 编辑器 Renderer 没有不受限的 Node.js、文件系统或 Shell 入口；桌面操作通过 Preload 暴露的冻结 API，并继续校验 IPC 参数、路径和文件类型。可信扩展若与该宿主同上下文，可以使用宿主明确提供的能力；这不是外部导入造成的安全缺口。
 - 编辑器主框架禁止任意外部导航和新窗口；远程媒体/API 只按工程声明与宿主策略开放，下载和设备能力只在出现真实 consumer 后逐项接入。
-- 中央统一画布的 authoring / playback Player 文档使用临时 Blob URL，并位于不授予同源权限的 sandbox iframe；工程与组件素材通过可转移二进制缓冲区进入沙箱，再由 iframe 创建同源 Blob URL。主进程仅允许编辑器主窗口中的同源派生 Blob 子框架导航，主框架仍拒绝 Blob 和外部导航。编辑器只接受当前会话的 Player 消息；实例替换、关闭或失败时，父窗口撤销文档 URL，iframe 在卸载时撤销素材 URL。authoring 状态还冻结互动、媒体、导航与课程状态写入；这些机制解决视觉合成、生命周期与状态竞态，不是可信 Runtime/Component 必须永久继承的权限边界。
+- Slide authoring / playback 使用主 Renderer 文档中的 Published V2 宿主。authoring 状态主动冻结互动、媒体、宿主动作、导航与课程状态写入，并用带 session/revision 的版本化 direct patch/ACK/error/target 协议隔离陈旧更新；这是一条作者职责边界，不把可信 Runtime/Component 重新定义为不可信代码。Flow / Spatial 专用作者面与镜头语义保持不变。
 - `.h5lesson`、最近工程列表和自动恢复副本保存在本机；单 HTML、网页包、PDF、PPTX 仅写入用户在系统对话框中选择的位置。
 - 离线便携单 HTML 不开放外部 origin；网页包只允许包内资源及部署后的同源连接，不开放外部 origin；在线轻量单 HTML 只放行远程素材的精确 HTTPS origin 与工程声明的 `https`/`wss` `connectOrigins`，远程脚本仍禁止。三者中的可信运行时和组件代码都可控制课件页面自身。
 - `.h5lesson` 的自由运行时和 `.h5component` 都是可执行代码，不等同于普通图片素材；本产品只接收已经审核的 Runtime/Component，格式校验本身不替代该审核。
@@ -636,11 +649,11 @@ macOS 风格的 `Command` 组合在代码中有兼容处理，但 Editor 1.0.0 �
 
 Editor 1.0.0 不提供通用关键帧/路径时间轴、节点连线式状态机、内置题库/成绩系统、多人协作、云存储、模板市场、组件热重载、移动端编辑、任意网页导入、DOM/Phaser/Three 自动代码转换或视频文件导出。当前一等公式覆盖行、标记、运算符、分数、根式、上下标和围栏，并提供受限线性输入、结构模板和实时预览；尚不支持任意 LaTeX、矩阵、向量、分段函数、多行对齐、空间光标或虚拟数学键盘。编辑器提供事件驱动的元素入场/退场、顺序/并行步骤、表单式场景/全局交互、声音库和可编辑视频节点；可信运行时和组件负责复杂连续动画与业务互动，Three.js 如需使用只随具体内容打包。
 
-Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 以后。1.x 的统一画布只提供版本化、可校验的 authoring patch 与显式目标边界，不会调用模型、自动理解画面或替用户修改工程。Unified Authoring Blueprint 仍是未评审的研究提案（2026-08-13，存于 Git 历史），不是当前产品能力；AI 可在编辑器外通过当前 Skill 和可复现脚本生成完整 `.h5lesson`。
+Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 以后。1.x 的 Slide 统一画布只提供版本化、可校验的 direct authoring patch / ACK / error / target 与显式目标边界，不会调用模型、自动理解画面或替用户修改工程。Unified Authoring Blueprint 仍是未评审的研究提案（2026-08-13，存于 Git 历史），不是当前产品能力；AI 可在编辑器外通过当前 Skill 和可复现脚本生成完整 `.h5lesson`。
 
 编辑器外部 AI 路径以两个仓库 Skill 为机器执行真相：`orchestrate-courseware` 先写出并确认中等详细的 `01-teaching-plan.md`，再写带表面、布局和逐步操作的 `02-presentation-script.md`；确认后 `build-courseware-project` 盘点资产、选择 Native / Runtime / Component，使用仓库真实 TypeScript API 增量构建或局部修补 Course Project V9，并做保存重开、Player 与导出验证。教师工作流不使用 Hash、审批状态机或 Evidence 清单。自动管线最多标记 `engineering candidate`，不能自行授予 `art candidate` 或 `accepted`。
 
-PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、已证明的 Slide scene-local API 4 Phaser Component，以及 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 和 Flow surface-local API 3 DOM Runtime 的真实播放。这不代表 API 2 的完整宿主上下文、Flow/Spatial scene-local API 2、global API 3、未覆盖 shared carrier、其它 Component carrier、捕获或 Runtime 事件/动作已实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局 API 2 Runtime；稳定画面应主动创作为场景状态，任意运行时代码不会被反向拆成可视化节点。
+PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM Component、Slide scene Phaser Component，以及 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 和 Flow surface-local API 3 DOM Runtime 的真实播放。global Component 只证明可见挂载，不具有已证明的 global scope/session lifetime。Published 会话会初始化已声明的 `courseState` 默认值，并把受支持 Runtime/Component carrier 的宿主导航与重播/重开动作接回会话；守卫只检查跨 location 的 go/next/previous，replay 不检查，restart 绕过守卫并重置状态默认值。声明式 `interactions` 仍不能按 `courseState` 判断或写值。Slide scene Runtime API 2/3 的 `presentation` 已接线；API 2 `nodes`、Slide scene 以外的 `presentation`、动态 Runtime 守卫、Flow/Spatial scene-local API 2、global API 3、未覆盖 shared carrier、Component hybrid、声明式 Runtime/Component 事件触发或 Flow/Spatial 动态静态捕获仍未实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局 API 2 Runtime；稳定画面应主动创作为场景状态，任意运行时代码不会被反向拆成可视化节点。
 
 开发者可使用 [五路径渲染宿主基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js，以及 Component API 4 的 DOM 表格与 Phaser 仪表。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 

@@ -138,7 +138,7 @@ Flow carrier 被统一层抹平；Core 循环依赖；第二套导航/状态真�
 ## 9. 开发基础设施不变量
 
 - `artifacts/ai-capabilities/`（回答"课件生成能做什么"）与 `repo-index/`（回答"开发修改该读什么"）不得合并为一份真相；两者都不进产品运行时。
-- repo-index 严格产物禁止写入 HEAD、时间戳、用户名或绝对路径；新鲜度只由 source/semantic/config/tool 四域 hash + schemaVersion + generatorVersion 判定；相同输入连续生成必须逐字节一致。
+- repo-index 是显式按需生成、可缺省且不 tracked 的本地导航缓存，不是默认 CI 门；生成时仍禁止写入 HEAD、时间戳、用户名或绝对路径，其缓存新鲜度只由 source/semantic/config/tool 四域 hash + schemaVersion + generatorVersion 判定，相同输入连续生成必须逐字节一致。
 - 不引入第二套 TypeScript 编译器或 ts-morph；索引只维持 TS7 `unstable/sync` 薄适配层。
 - 热点文件清单（Editor Store/History、App 保存恢复、Workspace/Properties、Published producer、contracts/Schema、main/preload、generated repo-index）是热点锁的锁对象；文件大小只是风险信号，不是机械拆分门禁。
 

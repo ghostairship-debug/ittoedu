@@ -32,6 +32,71 @@ function mountDocument(): { frame: HTMLIFrameElement; container: HTMLElement; vi
   return { frame, container, view }
 }
 
+function installStaticCaptureHarness(view: Window): void {
+  const FrameHTMLElement = Reflect.get(view, 'HTMLElement') as typeof HTMLElement
+  const FrameCanvas = Reflect.get(view, 'HTMLCanvasElement') as typeof HTMLCanvasElement
+  Object.defineProperty(FrameHTMLElement.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value(this: HTMLElement): DOMRect {
+      const width = Number.parseFloat(this.style.width) || 100
+      const height = Number.parseFloat(this.style.height) || 100
+      const left = Number.parseFloat(this.style.left) || 0
+      const top = Number.parseFloat(this.style.top) || 0
+      return {
+        x: left,
+        y: top,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        width,
+        height,
+        toJSON: () => ({}),
+      } as DOMRect
+    },
+  })
+  Object.defineProperty(FrameCanvas.prototype, 'getContext', {
+    configurable: true,
+    value(this: HTMLCanvasElement, type: string): CanvasRenderingContext2D | null {
+      if (type !== '2d') return null
+      return {
+        canvas: this,
+        globalAlpha: 1,
+        fillStyle: '#000000',
+        strokeStyle: '#000000',
+        lineWidth: 1,
+        font: '',
+        textAlign: 'left',
+        textBaseline: 'alphabetic',
+        direction: 'ltr',
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        save() {},
+        restore() {},
+        scale() {},
+        fillRect() {},
+        strokeRect() {},
+        beginPath() {},
+        rect() {},
+        roundRect() {},
+        clip() {},
+        stroke() {},
+        translate() {},
+        rotate() {},
+        fillText() {},
+        drawImage() {},
+        createLinearGradient() {
+          return { addColorStop() {} } as CanvasGradient
+        },
+      } as unknown as CanvasRenderingContext2D
+    },
+  })
+  Object.defineProperty(FrameCanvas.prototype, 'toDataURL', {
+    configurable: true,
+    value: () => 'data:image/png;base64,AA==',
+  })
+}
+
 function runtimeShadowNode(
   container: HTMLElement,
   itemId: string,
@@ -357,6 +422,7 @@ describe('Published V2 Slide scene canvas-runtime API 2 playback', () => {
       components: {},
     })
     const { frame, container, view } = mountDocument()
+    installStaticCaptureHarness(view)
     const session = createPublishedCourseSession(payload, {
       initialLocationId: fixture.flowLocationId,
     })
@@ -364,10 +430,18 @@ describe('Published V2 Slide scene canvas-runtime API 2 playback', () => {
     await session.mount(container)
 
     expect(Reflect.get(view, '__captureInactiveApi2')).toBeUndefined()
+    const slideSlot = container.querySelector<HTMLElement>(
+      `[data-course-surface-slot="${fixture.slideSurfaceId}"]`,
+    )
+    const slideRoot = slideSlot?.querySelector<HTMLElement>('.slide-published-adapter')
+    expect(slideSlot?.style.visibility).toBe('hidden')
+    expect(slideRoot?.hidden).toBe(true)
     expect((await session.player.captureSurface(fixture.slideSurfaceId, {
       purpose: 'authoring',
     })).ok).toBe(true)
     expect(Reflect.get(view, '__captureInactiveApi2')).toBeUndefined()
+    expect(slideSlot?.style.visibility).toBe('hidden')
+    expect(slideRoot?.hidden).toBe(true)
     frame.remove()
   })
 })

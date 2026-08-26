@@ -259,6 +259,11 @@ export type RuntimeAuthoringTargetSource = 'registered' | 'dom'
 export interface RuntimeAuthoringTarget {
   /** Stable for the lifetime of the registered region or DOM element. */
   targetId: string
+  /**
+   * Stable Published layer-item owner. RuntimeHost-local registries omit it;
+   * Published surface adapters add it before aggregating multiple carriers.
+   */
+  nodeId?: string
   scope: RuntimeScope
   sceneId?: string
   kind: 'text' | 'asset'

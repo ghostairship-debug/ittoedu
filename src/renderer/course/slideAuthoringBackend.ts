@@ -44,6 +44,10 @@ import {
   deleteCourseLocation,
   syncStartLocationToFirstLocation,
 } from './courseLocationCommands'
+import {
+  controllerTargetIdsForLocations,
+  repairRemovedCourseReferences,
+} from './courseReferenceCleanup'
 
 export type {
   SlideAuthoringHistory,
@@ -1498,48 +1502,6 @@ function mutateDuplicateSlideScene(
   }, now)
 }
 
-function removeDeletedLocationVisibility(
-  entries: ScopedLayerItem[],
-  deletedLocationIds: ReadonlySet<string>,
-): void {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index]!
-    if (entry.visibility.mode === 'all') continue
-    entry.visibility.locationIds = entry.visibility.locationIds.filter(
-      (locationId) => !deletedLocationIds.has(locationId),
-    )
-    if (entry.visibility.locationIds.length > 0) continue
-    if (entry.visibility.mode === 'include') entries.splice(index, 1)
-    else entry.visibility = { mode: 'all', locationIds: [] }
-  }
-}
-
-function removeSceneGoControllerButtonList(
-  buttons: TeacherControllerButton[],
-  sceneId: string,
-): TeacherControllerButton[] {
-  const remaining = buttons.filter((button) =>
-    button.action.type !== 'scene.go' || button.action.sceneId !== sceneId,
-  )
-  if (remaining.length === 0) {
-    remaining.push({
-      id: stableId('teacher-button'),
-      action: { type: 'scene.next' },
-      label: '下一场景',
-      visible: true,
-    })
-  }
-  return remaining
-}
-
-function removeSceneGoControllerButtons(item: LayerItem, sceneId: string): void {
-  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
-  item.content.data.buttons = removeSceneGoControllerButtonList(
-    item.content.data.buttons,
-    sceneId,
-  )
-}
-
 function updateTeacherControllerStateOverrides(
   scene: SlideSceneDocument,
   update: (buttons: TeacherControllerButton[]) => TeacherControllerButton[],
@@ -1553,51 +1515,6 @@ function updateTeacherControllerStateOverrides(
   })
 }
 
-function removeSceneReferencesFromInteractions(
-  interactions: InteractionRule[],
-  sceneId: string,
-): InteractionRule[] {
-  const removedActionIds = new Set<string>()
-  let remaining = interactions.flatMap((rule) => {
-    let impossibleSceneCondition = false
-    rule.conditions.forEach((condition) => {
-      if (condition.type !== 'scene.in') return
-      condition.sceneIds = condition.sceneIds.filter((id) => id !== sceneId)
-      if (condition.sceneIds.length === 0) impossibleSceneCondition = true
-    })
-
-    const keptActions = rule.actions.filter((step) => {
-      const removed = step.action.type === 'scene.go' && step.action.sceneId === sceneId
-      if (removed) removedActionIds.add(step.id)
-      return !removed
-    })
-    if (impossibleSceneCondition || keptActions.length === 0) {
-      rule.actions.forEach((step) => removedActionIds.add(step.id))
-      return []
-    }
-    rule.actions = keptActions
-    rule.actions[0]!.start = 'after-previous'
-    return [rule]
-  })
-
-  let removedDependentRule = true
-  while (removedDependentRule) {
-    removedDependentRule = false
-    remaining = remaining.flatMap((rule) => {
-      if (
-        rule.trigger.type !== 'animation.completed' ||
-        !removedActionIds.has(rule.trigger.actionId)
-      ) {
-        return [rule]
-      }
-      rule.actions.forEach((step) => removedActionIds.add(step.id))
-      removedDependentRule = true
-      return []
-    })
-  }
-  return remaining
-}
-
 function mutateDeleteSlideScene(
   project: CourseProjectDocument,
   surfaceId: string,
@@ -1609,42 +1526,22 @@ function mutateDeleteSlideScene(
     const sceneIndex = surface.scenes.findIndex((scene) => scene.id === sceneId)
     if (sceneIndex < 0) throw new Error(`找不到 Slide 场景：${sceneId}`)
     if (surface.scenes.length <= 1) throw new Error('课件至少需要一张幻灯片')
-    const deletedLocationIds = new Set(draft.locations.flatMap((location) =>
+    const removedLocations = draft.locations.filter((location) =>
       location.kind === 'slide-scene' &&
       location.surfaceId === surfaceId &&
       location.sceneId === sceneId
-        ? [location.id]
-        : [],
+    )
+    const deletedLocationIds = new Set(removedLocations.map((location) => location.id))
+    const removedLayerItemIds = new Set(surface.scenes[sceneIndex]!.layerItems.map(
+      (item) => item.layerItemId,
     ))
     surface.scenes.splice(sceneIndex, 1)
     draft.locations = draft.locations.filter((location) => !deletedLocationIds.has(location.id))
-
-    removeDeletedLocationVisibility(draft.globalLayerItems, deletedLocationIds)
-    draft.surfaces.forEach((candidate) => {
-      removeDeletedLocationVisibility(candidate.surfaceLayerItems, deletedLocationIds)
-      candidate.surfaceLayerItems.forEach((entry) => removeSceneGoControllerButtons(entry.item, sceneId))
-      if (candidate.type === 'slide') {
-        candidate.scenes.forEach((scene) => {
-          scene.layerItems.forEach((item) => removeSceneGoControllerButtons(item, sceneId))
-          updateTeacherControllerStateOverrides(
-            scene,
-            (buttons) => removeSceneGoControllerButtonList(buttons, sceneId),
-          )
-          scene.interactions = removeSceneReferencesFromInteractions(scene.interactions, sceneId)
-        })
-      } else if (candidate.type === 'spatial-2d') {
-        candidate.world.layerItems.forEach((item) => removeSceneGoControllerButtons(item, sceneId))
-      }
-    })
-    draft.globalLayerItems.forEach((entry) => removeSceneGoControllerButtons(entry.item, sceneId))
-    draft.globalInteractions = removeSceneReferencesFromInteractions(draft.globalInteractions, sceneId)
-    draft.navigationGuards = draft.navigationGuards.flatMap((guard) => {
-      if (guard.fromLocationIds) {
-        guard.fromLocationIds = guard.fromLocationIds.filter((id) => !deletedLocationIds.has(id))
-        if (guard.fromLocationIds.length === 0) return []
-      }
-      guard.toLocationIds = guard.toLocationIds.filter((id) => !deletedLocationIds.has(id))
-      return guard.toLocationIds.length > 0 ? [guard] : []
+    repairRemovedCourseReferences(draft, {
+      removedLocationIds: deletedLocationIds,
+      removedInteractionSceneIds: new Set([sceneId]),
+      removedControllerTargetIds: controllerTargetIdsForLocations(removedLocations),
+      removedLayerItemIds,
     })
 
     if (deletedLocationIds.has(draft.startLocationId)) {

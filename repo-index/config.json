@@ -23,9 +23,12 @@
     "tsconfig.json",
     "vite.player.config.ts",
     "vite.renderer.config.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vendor/fonts/noto-sans-sc/LICENSE",
+    "vendor/fonts/stix-two-math/LICENSE"
   ],
   "includeExtensions": [
+    "",
     ".cjs",
     ".css",
     ".html",

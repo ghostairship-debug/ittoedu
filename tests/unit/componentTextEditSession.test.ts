@@ -174,6 +174,21 @@ describe('component canvas text edit session', () => {
     )).toEqual({ ok: false, reason: 'target-invalid' })
   })
 
+  it('锁定组件不启动文字会话，编辑中锁定也拒绝提交', () => {
+    expect(beginComponentTextEditSession(
+      textTarget(),
+      context({ nodes: [componentNode({ locked: true })] }),
+    )).toEqual({ ok: false, reason: 'target-invalid' })
+
+    const started = beginComponentTextEditSession(textTarget(), context())
+    if (!started.ok) throw new Error('会话未启动')
+    expect(resolveComponentTextEdit(
+      started.session,
+      '不应写入锁定组件',
+      context({ nodes: [componentNode({ locked: true })] }),
+    )).toEqual({ ok: false, reason: 'target-invalid' })
+  })
+
   it('只为当前有效的公开文字字段生成 props 补丁', () => {
     const started = beginComponentTextEditSession(textTarget(), context())
     if (!started.ok) throw new Error('会话未启动')

@@ -10,8 +10,20 @@ import {
 } from '../../player/surfaces/publishedStageFit'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
+import type { PlayerAuthoringHostMessage } from '../../shared/playerAuthoringProtocol'
 
 export { attachPublishedCourseStageFit, fitPublishedCourseStage }
+
+export function fitPublishedCourseHostForMode(
+  container: HTMLElement,
+  mode: 'playback' | 'authoring',
+): void {
+  // The authoring host already occupies the canonical 1280×720 stage and
+  // follows Workspace's single stage transform. A second letterbox here would
+  // move the Published pixels without moving the sibling authoring targets.
+  if (mode === 'authoring') return
+  fitPublishedCourseStage(container)
+}
 
 let previewNetworkLeaseSequence = 0
 
@@ -25,9 +37,7 @@ export function buildPublishedCourseTryRunPayload(input: {
   assetFiles: Readonly<Record<string, Uint8Array>>
   components: Readonly<Record<string, ComponentPackageData>>
 }): PublishedCourseV2Payload {
-  return buildPublishedCourseV2Payload(input, {
-    projectAssetUrl: (_assetId, metadata) => metadata.remote?.url,
-  })
+  return buildPublishedCourseV2Payload(input)
 }
 
 function previewRemoteAssetUrls(published: PublishedCourseV2Payload): string[] {
@@ -63,7 +73,7 @@ export async function waitForHostLayout(
   }
 }
 
-export async function mountPublishedCourseTryRun(input: {
+export interface PublishedCourseMountInput {
   container: HTMLElement
   project: CourseProjectDocument
   assetFiles: Readonly<Record<string, Uint8Array>>
@@ -72,14 +82,32 @@ export async function mountPublishedCourseTryRun(input: {
   playbackPathId?: string | null
   width?: number
   height?: number
-}): Promise<PublishedCourseSession> {
-  const published = buildPublishedCourseTryRunPayload({
+  authoring?: {
+    sessionId: string
+    scope: 'scene' | 'surface' | 'global'
+    stateId: string | null
+    onMessage?: (message: PlayerAuthoringHostMessage) => void
+  }
+  onSessionCreated?: (session: PublishedCourseSession) => void
+}
+
+export async function mountPublishedCourseTryRun(
+  input: PublishedCourseMountInput,
+): Promise<PublishedCourseSession> {
+  const publishSources = {
     project: input.project,
     assetFiles: input.assetFiles,
     components: input.components,
-  })
-  const remoteAssetUrls = previewRemoteAssetUrls(published)
-  const connectOrigins = input.project.network?.connectOrigins ?? []
+  }
+  // Authoring and playback consume the same locally embedded Published
+  // payload. Network declarations remain a playback-preview lease, derived
+  // only from URLs that actually survived publishing plus explicit origins.
+  const playback = input.authoring === undefined
+  const published = buildPublishedCourseTryRunPayload(publishSources)
+  const remoteAssetUrls = playback ? previewRemoteAssetUrls(published) : []
+  const connectOrigins = playback
+    ? input.project.network?.connectOrigins ?? []
+    : []
   const networkRequired = remoteAssetUrls.length > 0 || connectOrigins.length > 0
   const leaseId = nextPreviewNetworkLeaseId()
   const desktop = window.desktopAPI
@@ -115,9 +143,23 @@ export async function mountPublishedCourseTryRun(input: {
     session = createPublishedCourseSession(published, {
       playbackPathId: input.playbackPathId,
       ...(input.locationId ? { initialLocationId: input.locationId } : {}),
+      ...(input.authoring
+        ? {
+            authoring: {
+              ...input.authoring,
+              // Component editor schemas are authoring-only sidecar data and
+              // deliberately remain outside the Published Course V2 contract.
+              componentPackages: input.components,
+            },
+          }
+        : {}),
     })
+    input.onSessionCreated?.(session)
     await session.mount(input.container)
-    fitPublishedCourseStage(input.container)
+    fitPublishedCourseHostForMode(
+      input.container,
+      input.authoring ? 'authoring' : 'playback',
+    )
 
     const destroySession = session.destroy.bind(session)
     session.destroy = async (): Promise<void> => {
@@ -136,4 +178,30 @@ export async function mountPublishedCourseTryRun(input: {
     }
     throw error
   }
+}
+
+export function mountPublishedCourseAuthoring(
+  input: Omit<PublishedCourseMountInput, 'authoring'> & {
+    sessionId: string
+    scope: 'scene' | 'surface' | 'global'
+    stateId: string | null
+    onMessage?: (message: PlayerAuthoringHostMessage) => void
+  },
+): Promise<PublishedCourseSession> {
+  const {
+    sessionId,
+    scope,
+    stateId,
+    onMessage,
+    ...mountInput
+  } = input
+  return mountPublishedCourseTryRun({
+    ...mountInput,
+    authoring: {
+      sessionId,
+      scope,
+      stateId,
+      ...(onMessage ? { onMessage } : {}),
+    },
+  })
 }

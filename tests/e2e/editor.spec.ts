@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ElectronApplication, Page } from 'playwright'
+import type { ElectronApplication, Locator, Page } from 'playwright'
 import sharp from 'sharp'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
@@ -46,6 +46,28 @@ const globalRuntimeAuthoringProjectPath = join(
 const globalRuntimeAuthoringImportedPath = join(
   outputDir,
   'global-runtime-authoring-imported.h5lesson',
+)
+const publishedHostAcceptanceProjectPath = join(
+  outputDir,
+  'published-host-acceptance.h5lesson',
+)
+const publishedHostAcceptanceHtmlPath = join(
+  outputDir,
+  'published-host-acceptance.html',
+)
+const mixedCourseProjectFixturePath = join(
+  root,
+  'tests',
+  'fixtures',
+  'course-project-v9',
+  'mixed.h5lesson',
+)
+const teacherControllerCourseProjectFixturePath = join(
+  root,
+  'tests',
+  'fixtures',
+  'course-project-v9',
+  'global-layer-teacher-controller.h5lesson',
 )
 const imageProjectPath = join(outputDir, 'image-roundtrip.h5lesson')
 const formulaProjectPath = join(outputDir, 'formula-roundtrip.h5lesson')
@@ -247,6 +269,64 @@ async function expectCoursePlayerTryRunReady(page: Page): Promise<void> {
   await expect(host.locator('.slide-published-adapter')).toBeVisible()
   await expect(host.locator('[data-slide-scene-stage]')).toBeVisible()
   await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
+}
+
+async function expectPublishedAuthoringReady(page: Page): Promise<Locator> {
+  const host = page.getByTestId('published-authoring-host')
+  await expect(host).toBeVisible({ timeout: 15_000 })
+  await expect(host).toHaveAttribute('data-course-player-ready', 'true', {
+    timeout: 15_000,
+  })
+  await expect.poll(() => host.evaluate((element) => (
+    element instanceof HTMLElement && element.inert
+  ))).toBe(true)
+  await expect(page.locator('iframe[title="统一编辑画布"]')).toHaveCount(0)
+  await expect(page.locator('.runtime-preview-loading')).toHaveCount(0, {
+    timeout: 15_000,
+  })
+  await expect(host.locator('.slide-published-adapter')).toBeVisible()
+  return host
+}
+
+interface PublishedTextMetrics {
+  fontSize: number
+  lineHeight: number
+  lineCount: number
+  clientWidth: number
+  clientHeight: number
+  scrollWidth: number
+  scrollHeight: number
+}
+
+async function publishedTextMetrics(
+  host: Locator,
+  layerItemId: string,
+): Promise<PublishedTextMetrics> {
+  const text = host.locator(
+    `[data-slide-layer-item="${layerItemId}"][data-native-type="text"]`,
+  )
+  await expect(text).toBeVisible({ timeout: 15_000 })
+  return text.evaluate((element) => {
+    const style = getComputedStyle(element)
+    const range = element.ownerDocument.createRange()
+    range.selectNodeContents(element)
+    const lineTops: number[] = []
+    for (const rect of Array.from(range.getClientRects())) {
+      if (rect.width <= 0 || rect.height <= 0) continue
+      if (!lineTops.some((top) => Math.abs(top - rect.top) < 0.75)) {
+        lineTops.push(rect.top)
+      }
+    }
+    return {
+      fontSize: Number.parseFloat(style.fontSize),
+      lineHeight: Number.parseFloat(style.lineHeight),
+      lineCount: lineTops.length,
+      clientWidth: element.clientWidth,
+      clientHeight: element.clientHeight,
+      scrollWidth: element.scrollWidth,
+      scrollHeight: element.scrollHeight,
+    }
+  })
 }
 
 async function launchEditor(options: {
@@ -680,6 +760,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       globalNativeProjectPath,
       globalRuntimeAuthoringProjectPath,
       globalRuntimeAuthoringImportedPath,
+      publishedHostAcceptanceProjectPath,
+      publishedHostAcceptanceHtmlPath,
       imageProjectPath,
       formulaProjectPath,
       formulaHtmlPath,
@@ -789,6 +871,115 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         componentFiles: {},
       }, { mtime: '2026-08-18T12:00:00.000Z' }),
     )
+    const publishedHostAcceptanceProject = createBlankCourseProject({
+      id: 'project_published_host_acceptance',
+      title: 'Published 宿主验收',
+      now: '2026-08-18T12:00:00.000Z',
+    })
+    const acceptanceSlide = publishedHostAcceptanceProject.surfaces.find(
+      (surface) => surface.type === 'slide',
+    )
+    if (
+      !acceptanceSlide ||
+      acceptanceSlide.type !== 'slide' ||
+      !acceptanceSlide.scenes[0]
+    ) {
+      throw new Error('Published 宿主验收工程缺少 Slide 场景')
+    }
+    acceptanceSlide.scenes[0].layerItems.push({
+      layerItemId: 'e2e-auto-shrink-text',
+      label: '自动缩小验收文字',
+      kind: 'native',
+      frame: {
+        mode: 'absolute',
+        x: 160,
+        y: 180,
+        width: 420,
+        height: 96,
+      },
+      order: nextUnifiedLayerOrder(publishedHostAcceptanceProject),
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      content: {
+        nativeType: 'text',
+        data: {
+          text: '自动缩小必须让这段较长中文在同一个窄文本框内完整显示并保持真实行数一致',
+          runs: [],
+          style: {
+            fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+            fontSize: 52,
+            color: '#172033',
+            bold: false,
+            italic: false,
+            underline: false,
+            strike: false,
+            emphasis: false,
+            highlightColor: null,
+            align: 'left',
+            verticalAlign: 'top',
+            writingMode: 'horizontal',
+            lineSpacing: 1,
+            letterSpacing: 0,
+            padding: 6,
+            overflow: 'shrink',
+            backgroundColor: '#ffffff',
+            backgroundOpacity: 0,
+            cornerRadius: 0,
+          },
+        },
+      },
+    })
+    acceptanceSlide.scenes[0].layerItems.push({
+      layerItemId: 'e2e-stix-formula',
+      label: '内置数学字体验收公式',
+      kind: 'native',
+      frame: {
+        mode: 'absolute',
+        x: 660,
+        y: 180,
+        width: 360,
+        height: 120,
+      },
+      order: nextUnifiedLayerOrder(publishedHostAcceptanceProject),
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      content: {
+        nativeType: 'formula',
+        data: {
+          formulaId: 'e2e-stix-formula',
+          accessibleText: 'x 的平方加一',
+          ast: {
+            type: 'row',
+            children: [
+              {
+                type: 'script',
+                base: { type: 'token', value: 'x' },
+                superscript: { type: 'token', value: '2' },
+              },
+              { type: 'operator', value: '+' },
+              { type: 'token', value: '1' },
+            ],
+          },
+          style: { fontSize: 42, color: '#172033', align: 'center' },
+        },
+      },
+    })
+    writeFileSync(
+      publishedHostAcceptanceProjectPath,
+      createCourseProjectArchive({
+        project: courseProjectDocumentSchema.parse(publishedHostAcceptanceProject),
+        assetFiles: {},
+        componentFiles: {},
+      }, { mtime: '2026-08-18T12:00:00.000Z' }),
+    )
     rmSync(webPackageDirectory, { recursive: true, force: true })
   })
 
@@ -834,44 +1025,37 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(
         simpleMotion.getByRole('button', { name: '淡入' }),
       ).toHaveAttribute('aria-pressed', 'true')
-      const authoringFrame = page.frames().find((frame) => (
-        frame !== page.mainFrame() && frame.url().startsWith('blob:')
-      ))
-      if (!authoringFrame) throw new Error('统一编辑 Player iframe 未创建')
-      const readTextMotionFrame = () => authoringFrame.evaluate(() => {
-        const player = window.__H5_LESSON_PLAYER__
-        const handle = player?.playerScene?.renderedNodes?.find(
-          (item) => item.type === 'text',
-        )
-        const target = handle?.motionRoot ?? handle?.root
-        return target
-          ? {
-              x: target.x,
-              y: target.y,
-              alpha: target.alpha,
-              scaleX: target.scaleX,
-              scaleY: target.scaleY,
-              visible: target.visible,
-            }
-          : null
+      const authoringHost = await expectPublishedAuthoringReady(page)
+      const authoringText = authoringHost.locator(
+        '[data-slide-layer-item][data-native-type="text"]',
+      ).first()
+      await expect(authoringText).toBeVisible()
+      const readTextMotionFrame = () => authoringText.evaluate((element) => {
+        const style = getComputedStyle(element)
+        const bounds = element.getBoundingClientRect()
+        return {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          opacity: Number.parseFloat(style.opacity),
+          visibility: style.visibility,
+        }
       })
       const stableMotionFrame = await readTextMotionFrame()
-      if (!stableMotionFrame) throw new Error('文字动画视觉节点未创建')
       await simpleMotion.getByRole('button', { name: '预览' }).click()
-      await expect.poll(async () => (await readTextMotionFrame())?.alpha ?? 1, {
+      await expect.poll(async () => (await readTextMotionFrame()).opacity, {
         timeout: 2_000,
         intervals: [20, 30, 50],
-      }).toBeLessThan(stableMotionFrame.alpha * 0.9)
+      }).toBeLessThan(stableMotionFrame.opacity * 0.9)
       await expect.poll(async () => {
         const frame = await readTextMotionFrame()
-        return frame && stableMotionFrame
-          ? Math.abs(frame.alpha - stableMotionFrame.alpha) < 0.05 &&
-              frame.x === stableMotionFrame.x &&
-              frame.y === stableMotionFrame.y &&
-              frame.scaleX === stableMotionFrame.scaleX &&
-              frame.scaleY === stableMotionFrame.scaleY &&
-              frame.visible === stableMotionFrame.visible
-          : false
+        return Math.abs(frame.opacity - stableMotionFrame.opacity) < 0.05 &&
+          frame.x === stableMotionFrame.x &&
+          frame.y === stableMotionFrame.y &&
+          frame.width === stableMotionFrame.width &&
+          frame.height === stableMotionFrame.height &&
+          frame.visibility === stableMotionFrame.visibility
       }, { timeout: 10_000 }).toBe(true)
 
       await clickCanvasTryRun(page)
@@ -989,28 +1173,227 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     }
   })
 
+  test('Published 统一宿主：自动缩小在编辑与试运行中保持真实排版一致', async () => {
+    test.setTimeout(90_000)
+    expect(existsSync(publishedHostAcceptanceProjectPath)).toBe(true)
+    const { app, page, pageErrors, consoleErrors, externalRequests } =
+      await launchEditor()
+    try {
+      await page.evaluate(() => {
+        const target = window as Window & {
+          __coursewareE2eCanvasFonts?: string[]
+        }
+        target.__coursewareE2eCanvasFonts = []
+        const originalFillText = CanvasRenderingContext2D.prototype.fillText
+        CanvasRenderingContext2D.prototype.fillText = function (...args): void {
+          target.__coursewareE2eCanvasFonts!.push(this.font)
+          originalFillText.apply(this, args)
+        }
+      })
+      await patchDialogs(app, {
+        projectOpen: publishedHostAcceptanceProjectPath,
+        htmlSave: publishedHostAcceptanceHtmlPath,
+      })
+      await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+
+      const authoringHost = await expectPublishedAuthoringReady(page)
+      await expect(authoringHost.locator('[data-published-formula="e2e-stix-formula"] canvas'))
+        .toHaveCount(1)
+      await expect.poll(() => page.evaluate(async () => {
+        await document.fonts.ready
+        return document.fonts.check('16px "STIX Two Math"')
+      })).toBe(true)
+      await expect.poll(() => page.evaluate(() => (
+        (window as Window & { __coursewareE2eCanvasFonts?: string[] })
+          .__coursewareE2eCanvasFonts?.some((font) => font.includes('STIX Two Math'))
+          ?? false
+      ))).toBe(true)
+      const authoringMetrics = await publishedTextMetrics(
+        authoringHost,
+        'e2e-auto-shrink-text',
+      )
+      expect(authoringMetrics.fontSize).toBeLessThan(52)
+      expect(authoringMetrics.fontSize).toBeGreaterThanOrEqual(8)
+      expect(authoringMetrics.lineCount).toBeGreaterThan(1)
+      expect(authoringMetrics.scrollWidth).toBeLessThanOrEqual(
+        authoringMetrics.clientWidth + 1,
+      )
+      expect(authoringMetrics.scrollHeight).toBeLessThanOrEqual(
+        authoringMetrics.clientHeight + 1,
+      )
+
+      await page.getByTestId('export-menu-trigger').click()
+      await page.getByTestId('export-single-html').click()
+      const htmlPreflight = page.getByRole('alertdialog', {
+        name: '单 HTML 导出预检',
+      })
+      await expect(htmlPreflight).toContainText('0 个错误')
+      await htmlPreflight.getByRole('button', { name: '继续导出' }).click()
+      await expect.poll(
+        () => existsSync(publishedHostAcceptanceHtmlPath)
+          ? statSync(publishedHostAcceptanceHtmlPath).size
+          : 0,
+      ).toBeGreaterThan(1_000)
+
+      await clickCanvasTryRun(page)
+      await expectCoursePlayerTryRunReady(page)
+      const playbackMetrics = await publishedTextMetrics(
+        page.getByTestId('course-try-run-host'),
+        'e2e-auto-shrink-text',
+      )
+      expect(playbackMetrics).toEqual(authoringMetrics)
+
+      await page.evaluate(() => {
+        (window as Window & { __coursewareE2eCanvasFonts?: string[] })
+          .__coursewareE2eCanvasFonts = []
+      })
+      await page.getByRole('group', { name: '画布模式' })
+        .getByRole('button', { name: '编辑状态', exact: true })
+        .click()
+      const authoringAfterExport = await expectPublishedAuthoringReady(page)
+      await expect(authoringAfterExport.locator(
+        '[data-published-formula="e2e-stix-formula"] canvas',
+      )).toHaveCount(1)
+      await expect.poll(() => page.evaluate(() => (
+        (window as Window & { __coursewareE2eCanvasFonts?: string[] })
+          .__coursewareE2eCanvasFonts?.some((font) => font.includes('STIX Two Math'))
+          ?? false
+      ))).toBe(true)
+      expect(await publishedTextMetrics(
+        authoringAfterExport,
+        'e2e-auto-shrink-text',
+      )).toEqual(authoringMetrics)
+
+      expect(pageErrors).toEqual([])
+      expect(consoleErrors).toEqual([])
+      expect(externalRequests).toEqual([])
+    } finally {
+      await closeEditor(app)
+    }
+  })
+
+  test('Published authoring 保持 inert：教师控制器点击不导航', async () => {
+    expect(existsSync(teacherControllerCourseProjectFixturePath)).toBe(true)
+    const { app, page, pageErrors, consoleErrors, externalRequests } =
+      await launchEditor()
+    try {
+      await patchDialogs(app, {
+        projectOpen: teacherControllerCourseProjectFixturePath,
+      })
+      await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      const host = await expectPublishedAuthoringReady(page)
+      const adapter = host.locator('.slide-published-adapter')
+      await expect(adapter).toHaveAttribute('data-location-id', 'location-scene-1')
+      const controllerLayer = host.locator(
+        '[data-global-layer-item="teacher-controller-main"]',
+      )
+      const nextButton = controllerLayer.locator(
+        '[data-controller-button-id="next"]',
+      )
+      await expect(nextButton).toBeVisible()
+      await expect(controllerLayer).toHaveCSS('pointer-events', 'none')
+
+      // Dispatching the DOM click exercises the controller's own authoring
+      // guard even though the inert host prevents a physical pointer from
+      // reaching it. A forced Playwright click would only test Playwright's
+      // actionability bypass, not the product's handler.
+      await nextButton.dispatchEvent('click')
+      await expect(adapter).toHaveAttribute('data-location-id', 'location-scene-1')
+      await expect(host).toHaveAttribute('data-course-player-ready', 'true')
+      await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
+
+      expect(pageErrors).toEqual([])
+      expect(consoleErrors).toEqual([])
+      expect(externalRequests).toEqual([])
+    } finally {
+      await closeEditor(app)
+    }
+  })
+
+  test('Mixed 全局元素仅 Flow 可见后切回 Slide 仍可编辑', async () => {
+    test.setTimeout(90_000)
+    expect(existsSync(mixedCourseProjectFixturePath)).toBe(true)
+    const { app, page, pageErrors, consoleErrors, externalRequests } =
+      await launchEditor()
+    try {
+      await patchDialogs(app, { projectOpen: mixedCourseProjectFixturePath })
+      await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await expectPublishedAuthoringReady(page)
+
+      await page.getByTestId('global-layer-entry').click()
+      await page.getByRole('tab', { name: '图层' }).click()
+      const globalBannerRow = page.locator('.node-item').filter({
+        hasText: 'global-banner',
+      })
+      await expect(globalBannerRow).toHaveCount(1)
+      await globalBannerRow.locator('.node-name').click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      await page.getByLabel('场景可见范围').selectOption('include')
+      await page.getByTestId('location-visibility-location-flow').check()
+      await expect(page.getByTestId('location-visibility-location-flow'))
+        .toBeChecked()
+      await expect(page.getByTestId('location-visibility-location-slide'))
+        .not.toBeChecked()
+
+      const flowNode = page.locator(
+        '.course-page-tree__node[data-kind="flow-heading"]',
+      ).filter({ hasText: '讲义标题' })
+      const slideNode = page.locator(
+        '.course-page-tree__node[data-kind="slide-scene"]',
+      ).filter({ hasText: '演示页' })
+      await flowNode.locator('.course-page-tree__label').click()
+      await expect(flowNode.locator('.course-page-tree__label'))
+        .toHaveAttribute('aria-current', 'page')
+      await expect(page.getByTestId('published-authoring-host')).toHaveCount(0)
+
+      await slideNode.locator('.course-page-tree__label').click()
+      const returnedHost = await expectPublishedAuthoringReady(page)
+      await expect(returnedHost.locator(
+        '[data-global-layer-item="global-banner"]',
+      )).toHaveCSS('visibility', 'hidden')
+      await expect(returnedHost.locator(
+        '[data-slide-layer-item="slide-title"][data-native-type="text"]',
+      )).toBeVisible()
+
+      await page.getByRole('tab', { name: '图层' }).click()
+      const slideTitleRow = page.locator('.node-item').filter({
+        hasText: 'slide-title',
+      })
+      await expect(slideTitleRow).toHaveCount(1)
+      await slideTitleRow.locator('.node-name').click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      const xField = commonNodeField(page, 'X')
+      const initialX = Number(await xField.inputValue())
+      await xField.fill(String(initialX + 16))
+      await xField.press('Enter')
+      await expect.poll(async () => Number(await xField.inputValue()))
+        .toBe(initialX + 16)
+      await expect(returnedHost).toHaveAttribute('data-course-player-ready', 'true')
+      await expect(returnedHost.locator(
+        '[data-slide-layer-item="slide-title"]',
+      )).toHaveCSS('left', `${initialX + 16}px`)
+
+      expect(pageErrors).toEqual([])
+      expect(consoleErrors).toEqual([])
+      expect(externalRequests).toEqual([])
+    } finally {
+      await closeEditor(app)
+    }
+  })
+
   test('Player 与编辑交互层在 100%、150% 和重置后保持同位', async () => {
     test.setTimeout(90_000)
     const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
-      const playerFrame = page.locator('.runtime-preview-frame')
-      await expect(playerFrame).toHaveAttribute('src', /^blob:/)
-      const initialFrameSrc = await playerFrame.getAttribute('src')
+      const playerFrame = await expectPublishedAuthoringReady(page)
       await addText(page)
-      await expect.poll(() => playerFrame.getAttribute('src')).not.toBe(
-        initialFrameSrc,
-      )
+      await expect(playerFrame).toHaveAttribute('data-course-player-ready', 'true')
       await expect(page.locator('.runtime-preview-loading')).toHaveCount(0, {
         timeout: 15_000,
       })
-      await expect.poll(async () => {
-        const currentSrc = await playerFrame.getAttribute('src')
-        const frame = page.frames().find((candidate) => candidate.url() === currentSrc)
-        return frame?.evaluate(() => (
-          window.__H5_LESSON_PLAYER__?.playerScene?.renderedNodes
-            ?.some((handle) => handle.type === 'text') ?? false
-        )) ?? false
-      }).toBe(true)
+      await expect(
+        playerFrame.locator('[data-slide-layer-item][data-native-type="text"]'),
+      ).not.toHaveCount(0)
       await page.getByRole('tab', { name: '属性' }).click()
       const initialNodeBounds = {
         x: Number(await commonNodeField(page, 'X').inputValue()),
@@ -1130,26 +1513,47 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         name: '全局标题，双击编辑文字',
       })
       await expect(target).toBeVisible({ timeout: 15_000 })
-      const playerFrame = page.locator('iframe[title="统一编辑画布"]')
-      const authoringFrame = page.frames().find((frame) => (
-        frame !== page.mainFrame() && frame.url().startsWith('blob:')
-      ))
-      if (!authoringFrame) throw new Error('统一编辑 Player iframe 未创建')
+      const initialGlobalTargetHandle = await target.elementHandle()
+      if (!initialGlobalTargetHandle) throw new Error('全局运行时作者目标不可见')
+      const playerFrame = await expectPublishedAuthoringReady(page)
+      const initialPublishedHostHandle = await playerFrame.elementHandle()
+      if (!initialPublishedHostHandle) throw new Error('Published 作者宿主不可见')
+      const runtimeVisualText = (
+        source: 'global' | 'scene',
+        editKey: string,
+      ) => (
+        playerFrame.evaluate((root, input) => {
+          const layer = root.querySelector<HTMLElement>(
+            `[data-layer-source="${input.source}"][data-slide-runtime-kind]`,
+          )
+          const mounts = layer
+            ? Array.from(layer.querySelectorAll<HTMLElement>('.lesson-runtime-mount'))
+            : []
+          return mounts
+            .map((mount) => mount.shadowRoot?.querySelector<HTMLElement>(
+              `[data-courseware-edit-key="${input.editKey}"]`,
+            ))
+            .find((candidate): candidate is HTMLElement => Boolean(candidate))
+            ?.textContent ?? null
+        }, { source, editKey })
+      )
       const runtimeVisualAlignmentError = async (
-        runtimeLabel: string,
+        source: 'global' | 'scene',
         editKey: string,
         authoringTarget: typeof target,
       ) => {
-        const [frameBounds, targetBounds, inner] = await Promise.all([
-          playerFrame.boundingBox(),
+        const [targetBounds, inner] = await Promise.all([
           authoringTarget.boundingBox(),
-          authoringFrame.evaluate(({ runtimeLabel: label, editKey: key }) => {
-            const mounts = Array.from(
-              document.querySelectorAll<HTMLElement>('.lesson-runtime-mount'),
-            ).filter((candidate) => candidate.dataset.runtimeLabel?.startsWith(label))
+          playerFrame.evaluate((root, input) => {
+            const layer = root.querySelector<HTMLElement>(
+              `[data-layer-source="${input.source}"][data-slide-runtime-kind]`,
+            )
+            const mounts = layer
+              ? Array.from(layer.querySelectorAll<HTMLElement>('.lesson-runtime-mount'))
+              : []
             const element = mounts
               .map((mount) => mount.shadowRoot?.querySelector<HTMLElement>(
-                `[data-courseware-edit-key="${key}"]`,
+                `[data-courseware-edit-key="${input.editKey}"]`,
               ))
               .find((candidate): candidate is HTMLElement => Boolean(candidate))
             if (!element) return null
@@ -1159,25 +1563,21 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
               y: bounds.y,
               width: bounds.width,
               height: bounds.height,
-              viewportWidth: document.documentElement.clientWidth,
-              viewportHeight: document.documentElement.clientHeight,
             }
-          }, { runtimeLabel, editKey }),
+          }, { source, editKey }),
         ])
-        if (!frameBounds || !targetBounds || !inner) {
+        if (!targetBounds || !inner) {
           return Number.POSITIVE_INFINITY
         }
-        const scaleX = frameBounds.width / inner.viewportWidth
-        const scaleY = frameBounds.height / inner.viewportHeight
         return Math.max(
-          Math.abs(targetBounds.x - (frameBounds.x + inner.x * scaleX)),
-          Math.abs(targetBounds.y - (frameBounds.y + inner.y * scaleY)),
-          Math.abs(targetBounds.width - inner.width * scaleX),
-          Math.abs(targetBounds.height - inner.height * scaleY),
+          Math.abs(targetBounds.x - inner.x),
+          Math.abs(targetBounds.y - inner.y),
+          Math.abs(targetBounds.width - inner.width),
+          Math.abs(targetBounds.height - inner.height),
         )
       }
       const globalAlignmentError = () => runtimeVisualAlignmentError(
-        '全局运行时',
+        'global',
         'title',
         target,
       )
@@ -1228,6 +1628,17 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         .fill('全局画布新标题')
       await editor.getByRole('textbox', { name: '全局标题' }).press('Enter')
       await expect(editor).toHaveCount(0)
+      await expect.poll(() => runtimeVisualText('global', 'title'))
+        .toBe('全局画布新标题')
+      await expect(target).toHaveCount(1)
+      await target.focus()
+      await target.press('Enter')
+      await expect(editor.getByRole('textbox', { name: '全局标题' }))
+        .toHaveValue('全局画布新标题')
+      await editor.getByRole('textbox', { name: '全局标题' }).press('Escape')
+      await expect(editor).toHaveCount(0)
+      expect(await initialPublishedHostHandle.evaluate((element) => element.isConnected))
+        .toBe(true)
 
       await page.getByRole('button', {
         name: '打开场景“欢迎”；缩略图使用状态“初始”',
@@ -1236,7 +1647,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         name: '场景标题，双击编辑文字',
       })
       await expect(sceneTextTarget).toBeVisible({ timeout: 15_000 })
-      await expect.poll(() => authoringFrame.evaluate(
+      await expect(target).toHaveCount(0)
+      expect(await initialGlobalTargetHandle.evaluate((element) => element.isConnected))
+        .toBe(false)
+      await expect.poll(() => page.evaluate(
         () => window.__e2eSceneAuthoringProbe ?? null,
       )).toEqual({
         mode: 'capture',
@@ -1245,7 +1659,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         stateAfterWrite: undefined,
       })
       await expect.poll(() => runtimeVisualAlignmentError(
-        '场景运行时',
+        'scene',
         'title',
         sceneTextTarget,
       )).toBeLessThan(1)
@@ -1256,6 +1670,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         .fill('场景画布新标题')
       await editor.getByRole('textbox', { name: '场景标题' }).press('Enter')
       await expect(editor).toHaveCount(0)
+      await expect.poll(() => runtimeVisualText('scene', 'title'))
+        .toBe('场景画布新标题')
+      await expect(sceneTextTarget).toHaveCount(1)
 
       const sceneAssetTarget = page.getByRole('button', {
         name: '场景主视觉，双击替换图片',
@@ -1269,6 +1686,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(page.locator('.status-bar')).toContainText(
         '已替换运行时图片',
       )
+      await expect(sceneAssetTarget).toHaveCount(1)
+      await expect(playerFrame).toHaveAttribute('data-course-player-ready', 'true')
 
       await page.getByRole('button', { name: '另存为' }).click()
       await expect.poll(() => {
@@ -1319,11 +1738,14 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
         .toHaveCount(0)
+      await expectPublishedAuthoringReady(page)
       await page.getByTestId('global-layer-entry').click()
       const reopenedGlobalTarget = page.getByRole('button', {
         name: '全局标题，双击编辑文字',
       })
       await expect(reopenedGlobalTarget).toBeVisible({ timeout: 15_000 })
+      await expect.poll(() => runtimeVisualText('global', 'title'))
+        .toBe('全局画布新标题')
       await reopenedGlobalTarget.focus()
       await reopenedGlobalTarget.press('Enter')
       await expect(editor.getByRole('textbox', { name: '全局标题' }))
@@ -1338,6 +1760,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         name: '场景标题，双击编辑文字',
       })
       await expect(reopenedSceneTextTarget).toBeVisible({ timeout: 15_000 })
+      await expect(reopenedGlobalTarget).toHaveCount(0)
+      await expect.poll(() => runtimeVisualText('scene', 'title'))
+        .toBe('场景画布新标题')
       await reopenedSceneTextTarget.focus()
       await reopenedSceneTextTarget.press('Enter')
       await expect(editor.getByRole('textbox', { name: '场景标题' }))
@@ -1669,11 +2094,22 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       const gestureSteps = backgroundE2e === '1' ? 4 : 20
 
-      await expect(
-        page.getByRole('button', { name: '组件标题，双击编辑组件文字' }),
-      ).toHaveCount(1)
-      const titlePoint = designPoint(470, 252)
-      await page.mouse.dblclick(titlePoint.x, titlePoint.y, { delay: 40 })
+      const componentAuthoringHost = await expectPublishedAuthoringReady(page)
+      const componentAuthoringHostHandle = await componentAuthoringHost.elementHandle()
+      if (!componentAuthoringHostHandle) throw new Error('组件 Published 作者宿主不可见')
+      const componentTarget = page.getByRole('button', {
+        name: '组件标题，双击编辑组件文字',
+      })
+      await expect(componentTarget).toHaveCount(1)
+      const initialComponentTargetHandle = await componentTarget.elementHandle()
+      if (!initialComponentTargetHandle) throw new Error('组件作者目标不可见')
+      const initialTargetBounds = await componentTarget.boundingBox()
+      if (!initialTargetBounds) throw new Error('组件作者目标不可见')
+      await page.mouse.dblclick(
+        initialTargetBounds.x + initialTargetBounds.width / 2,
+        initialTargetBounds.y + initialTargetBounds.height / 2,
+        { delay: 40 },
+      )
       const canvasTextEditor = page.getByTestId('canvas-plain-text-editor')
       await expect(canvasTextEditor).toBeVisible()
       await canvasTextEditor.getByRole('textbox', { name: '组件标题' })
@@ -1682,6 +2118,14 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         .press('Enter')
       await expect(canvasTextEditor).toHaveCount(0)
       await expect(componentTitle).toHaveValue('画布内积分器')
+      await expect(componentTarget).toHaveCount(1)
+      await componentTarget.focus()
+      await componentTarget.press('Enter')
+      await expect(canvasTextEditor.getByRole('textbox', { name: '组件标题' }))
+        .toHaveValue('画布内积分器')
+      await canvasTextEditor.getByRole('textbox', { name: '组件标题' })
+        .press('Escape')
+      await expect(canvasTextEditor).toHaveCount(0)
 
       const dragStart = designPoint(460, 270)
       const dragEnd = designPoint(520, 310)
@@ -1697,6 +2141,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       const movedY = Number(await commonNodeField(page, 'Y').inputValue())
       expect(movedX).toBeGreaterThan(400)
       expect(movedY).toBeGreaterThan(220)
+      const movedTargetBounds = await componentTarget.boundingBox()
+      if (!movedTargetBounds) throw new Error('移动后的组件作者目标不可见')
+      expect(movedTargetBounds.x).toBeGreaterThan(initialTargetBounds.x + 20)
+      expect(movedTargetBounds.y).toBeGreaterThan(initialTargetBounds.y + 10)
 
       const resizeStart = designPoint(movedX + 480, movedY + 280)
       const resizeEnd = designPoint(movedX + 560, movedY + 327)
@@ -1711,11 +2159,20 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       const resizedHeight = Number(await commonNodeField(page, '高').inputValue())
       expect(resizedWidth).toBeGreaterThan(480)
       expect(resizedHeight).toBeGreaterThan(280)
+      const resizedTargetBounds = await componentTarget.boundingBox()
+      if (!resizedTargetBounds) throw new Error('缩放后的组件作者目标不可见')
+      expect(resizedTargetBounds.width).toBeGreaterThan(movedTargetBounds.width)
+      await expect(componentTarget).toHaveCount(1)
+      expect(await componentAuthoringHostHandle.evaluate((element) => element.isConnected))
+        .toBe(true)
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(componentProjectPath)).toBe(true)
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await expectPublishedAuthoringReady(page)
+      expect(await initialComponentTargetHandle.evaluate((element) => element.isConnected))
+        .toBe(false)
       await page.getByRole('tab', { name: '图层' }).click()
       await expect(authoredLayerRows(page)).toHaveCount(1)
       await authoredLayerRows(page).locator('.node-name').click()
@@ -1726,6 +2183,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(commonNodeField(page, '高')).toHaveValue(String(resizedHeight))
       await expect(page.getByLabel('组件标题', { exact: true })).toHaveValue('画布内积分器')
       await expect(page.getByLabel('初始数值', { exact: true })).toHaveValue('7')
+      await expect(componentTarget).toHaveCount(1)
+      const reopenedTargetBounds = await componentTarget.boundingBox()
+      if (!reopenedTargetBounds) throw new Error('重开后的组件作者目标不可见')
+      expect(reopenedTargetBounds.width).toBeCloseTo(resizedTargetBounds.width, 0)
 
       const { overlay: previewOverlay, adapter: previewAdapter } =
         await openCoursePreviewOverlay(page)
@@ -1953,10 +2414,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       throw new Error('Runtime API 2 导出夹具缺少 Slide 场景')
     }
     const scene = firstScene.scenes[0]
+    const globalRuntimeLayerId = `runtime-global-${project.id}`
+    const sceneRuntimeLayerId = `runtime-${scene.id}`
     let nextOrder = nextUnifiedLayerOrder(project)
     project.globalLayerItems.push({
       item: makeLegacyDomRuntimeLayer({
-        layerItemId: `runtime-global-${project.id}`,
+        layerItemId: globalRuntimeLayerId,
         label: '全局运行时',
         order: nextOrder,
         source: globalRuntimeSource,
@@ -1966,7 +2429,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     })
     nextOrder += 1
     scene.layerItems.push(makeLegacyDomRuntimeLayer({
-      layerItemId: `runtime-${scene.id}`,
+      layerItemId: sceneRuntimeLayerId,
       label: '场景运行时',
       order: nextOrder,
       source: sceneRuntimeSource,
@@ -2030,7 +2493,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     if (!globalComponent) {
       throw new Error('Runtime API 2 导出夹具缺少全局组件')
     }
-    const globalObjectName = `${globalComponent.item.label} · ${globalComponent.item.layerItemId}`
+    const globalComponentSnapshotName = `${globalComponent.item.layerItemId} · 实际运行快照`
+    const globalRuntimeSnapshotName = `${globalRuntimeLayerId} · 实际运行快照`
+    const sceneRuntimeSnapshotName = `${sceneRuntimeLayerId} · 实际运行快照`
     const {
       app,
       page,
@@ -2060,8 +2525,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(pdfPreflight).toBeVisible()
       await expect(pdfPreflight).toContainText('0 个错误')
       await pdfPreflight.getByRole('button', { name: '继续导出' }).click()
-      // The native save path becomes visible as soon as the writer opens it.
-      // Wait for the complete multi-page payload instead of racing a partial PDF.
+      // Published capture and Chromium printing both precede the save writer.
+      // Wait for the complete multi-page payload instead of racing any stage.
       await expect.poll(
         () => existsSync(runtimeApi2ExportPdfPath)
           ? statSync(runtimeApi2ExportPdfPath).size
@@ -2097,13 +2562,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       )
       expect(consoleWarnings).toEqual([])
       expect(slide1).toContain('PPTX 原生文字仍可编辑')
-      expect(slide1).toContain('全局自由运行时 · 顶层实际播放器快照')
-      expect(slide1).toContain(
-        '场景自由运行时“场景 1” · 底层实际播放器快照',
-      )
-      expect(slide1).not.toContain(globalObjectName)
-      expect(slide2).toContain(globalObjectName)
-      expect(slide2).toContain('全局自由运行时 · 顶层实际播放器快照')
+      expect(slide1).toContain(globalRuntimeSnapshotName)
+      expect(slide1).toContain(sceneRuntimeSnapshotName)
+      expect(slide1).not.toContain(globalComponentSnapshotName)
+      expect(slide2).toContain(globalComponentSnapshotName)
+      expect(slide2).toContain(globalRuntimeSnapshotName)
+      expect(slide2).not.toContain(sceneRuntimeSnapshotName)
       expect(slide1).not.toContain('静态导出警告')
       expect(slide2).not.toContain('静态导出警告')
       expect(pageErrors).toEqual([])

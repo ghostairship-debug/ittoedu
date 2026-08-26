@@ -6,6 +6,7 @@ import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,
 } from '../../src/shared/playerAuthoringProtocol'
+import type { PlayerAuthoringHostMessage } from '../../src/shared/playerAuthoringProtocol'
 import type { RuntimeAuthoringTarget } from '../../src/shared/runtimeTypes'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
@@ -16,6 +17,36 @@ import {
   useEditorStore,
 } from '../../src/renderer/store/editorStore'
 import { readCourseProjectV9FixtureArchive } from '../fixtures/course-project-v9'
+
+const publishedAuthoringHarness = vi.hoisted(() => ({
+  latestRevision: -1,
+  onMessage: null as ((message: PlayerAuthoringHostMessage) => void) | null,
+}))
+
+vi.mock('../../src/renderer/ui/coursePlayerTryRun', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../src/renderer/ui/coursePlayerTryRun')
+  >()
+  return {
+    ...actual,
+    mountPublishedCourseAuthoring: (
+      input: Parameters<typeof actual.mountPublishedCourseAuthoring>[0],
+    ) => {
+      publishedAuthoringHarness.onMessage = input.onMessage
+        ? (message: PlayerAuthoringHostMessage) => {
+            if ('revision' in message && typeof message.revision === 'number') {
+              publishedAuthoringHarness.latestRevision = Math.max(
+                publishedAuthoringHarness.latestRevision,
+                message.revision,
+              )
+            }
+            input.onMessage?.(message)
+          }
+        : null
+      return actual.mountPublishedCourseAuthoring(input)
+    },
+  }
+})
 
 vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => '/* Runtime asset replacement race Player bundle */',
@@ -210,11 +241,15 @@ let targetMessageRevision = 0
 async function publishRuntimeAssetTarget(
   sceneId = FIRST_SCENE_ID,
 ): Promise<HTMLButtonElement> {
-  const frame = await screen.findByTitle('统一编辑画布') as HTMLIFrameElement
-  if (!frame.contentWindow) throw new Error('preview iframe has no contentWindow')
-  targetMessageRevision += 1
+  await screen.findByTestId('published-authoring-host')
+  await waitFor(() => expect(publishedAuthoringHarness.onMessage).not.toBeNull())
+  targetMessageRevision = Math.max(
+    targetMessageRevision + 1,
+    publishedAuthoringHarness.latestRevision + 1,
+  )
   const target: RuntimeAuthoringTarget = {
     targetId: 'runtime-race-hero',
+    nodeId: RUNTIME_ITEM_ID,
     scope: 'scene',
     sceneId,
     kind: 'asset',
@@ -225,22 +260,18 @@ async function publishRuntimeAssetTarget(
     bounds: { x: 900, y: 460, width: 160, height: 160 },
   }
   await act(async () => {
-    window.dispatchEvent(new MessageEvent('message', {
-      source: frame.contentWindow,
-      data: {
-        type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
-        token: PREVIEW_TOKEN,
-        protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
-        sessionId: PREVIEW_TOKEN,
+    publishedAuthoringHarness.onMessage?.({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: PREVIEW_TOKEN,
+      revision: targetMessageRevision,
+      update: {
         revision: targetMessageRevision,
-        update: {
-          revision: targetMessageRevision,
-          scope: 'scene',
-          sceneId,
-          targets: [target],
-        },
+        scope: 'scene',
+        sceneId,
+        targets: [target],
       },
-    }))
+    })
   })
   return screen.findByRole('button', {
     name: '场景主视觉，双击替换图片',
@@ -285,6 +316,8 @@ function expectBypassImportUnused(spies: ReturnType<typeof installWriteSpies>) {
 
 beforeEach(() => {
   targetMessageRevision = 0
+  publishedAuthoringHarness.latestRevision = -1
+  publishedAuthoringHarness.onMessage = null
   vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(PREVIEW_TOKEN)
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:runtime-race-preview')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)

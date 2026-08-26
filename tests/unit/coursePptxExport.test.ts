@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { unzipSync } from 'fflate'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import type { PublishedLayerItem } from '@/shared/publishedCourseTypes'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   addCourseFlowPage,
+  addCourseSlidePage,
   addCourseSpatialPage,
 } from '@/renderer/course/courseLocationCommands'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
@@ -12,6 +15,7 @@ import {
 } from '@/renderer/export/course/buildCoursePrintArtifacts'
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createTextNode } from '@/renderer/project/createProject'
 
 const NOW = '2026-08-17T12:00:00.000Z'
 const ASSET_BYTES = new Uint8Array([1, 2, 3, 4])
@@ -45,6 +49,37 @@ function mixedPublishedFixture() {
     components: {},
   })
   return { project, published }
+}
+
+function pureSlidePublishedFixture() {
+  let project = createBlankCourseProject({ now: NOW, includeDefaultController: true })
+  const secondPage = addCourseSlidePage(project, {
+    now: NOW,
+    expectedRevision: project.revision,
+  })
+  if (!secondPage.ok) throw new Error(secondPage.reason)
+  project = secondPage.project
+  const controllerId = project.globalLayerItems[0]?.item.layerItemId
+  if (!controllerId) throw new Error('expected global teacher controller')
+  const globalText = sceneNodeToCourseLayerItem(createTextNode({
+    id: 'global-editable-text',
+    name: '全局可编辑文字',
+    text: '全局可编辑页脚',
+    x: 48,
+    y: 650,
+    width: 420,
+    height: 48,
+  }), 900)
+  project.globalLayerItems.push({
+    item: globalText,
+    visibility: { mode: 'include', locationIds: [project.startLocationId] },
+  })
+  const published = buildPublishedCourseV2Payload({
+    project,
+    assetFiles: {},
+    components: {},
+  })
+  return { published, controllerId, globalTextId: globalText.layerItemId }
 }
 
 describe('buildCourseExportPageList', () => {
@@ -103,6 +138,81 @@ describe('buildCoursePptx', () => {
     expect(spatialSvg).toContain('<svg xmlns="http://www.w3.org/2000/svg"')
     expect(spatialSvg).toContain(`data-spatial-frame="${spatialPage!.cameraFrameId ?? 'home'}"`)
     expect(spatialSvg).toContain('data-spatial-viewport=')
+  })
+
+  it('composes visible pure-Slide globals while omitting the static-disabled controller', async () => {
+    const { published, controllerId, globalTextId } = pureSlidePublishedFixture()
+    const base = {
+      frame: { mode: 'absolute' as const, x: 520, y: 520, width: 260, height: 100 },
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto' as const,
+      playbackInitialVisibility: 'inherit' as const,
+    }
+    const component: PublishedLayerItem = {
+      ...base,
+      layerItemId: 'global-component-static',
+      order: 901,
+      kind: 'component',
+      component: { packageId: 'component.quiz', version: '4.0.0' },
+      props: {},
+    }
+    const runtime: PublishedLayerItem = {
+      ...base,
+      layerItemId: 'global-runtime-static',
+      order: 902,
+      kind: 'runtime',
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: true,
+        renderMode: 'dom',
+        code: { encoding: 'base64-utf16le', data: '' },
+        content: { values: {} },
+        assets: {},
+      },
+    }
+    published.globalLayerItems.push(
+      {
+        item: component,
+        visibility: { mode: 'include', locationIds: [published.startLocationId] },
+      },
+      {
+        item: runtime,
+        visibility: { mode: 'include', locationIds: [published.startLocationId] },
+      },
+    )
+    const capturedIds: string[] = []
+    const capturedLocationIds: string[] = []
+    const result = await buildCoursePptx(published, {
+      captureDynamicItem: ({ item, locationId }) => {
+        capturedIds.push(item.layerItemId)
+        capturedLocationIds.push(locationId)
+        return undefined
+      },
+    })
+
+    const archive = unzipSync(result.bytes)
+    const slideXml = Object.entries(archive)
+      .filter(([name]) => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'))
+      .map(([, bytes]) => new TextDecoder().decode(bytes))
+      .join('\n')
+    expect(slideXml).toContain('全局可编辑页脚')
+    expect(Object.entries(archive)
+      .filter(([name]) => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'))
+      .map(([, bytes]) => new TextDecoder().decode(bytes))
+      .filter((xml) => xml.includes('全局可编辑页脚'))).toHaveLength(1)
+    expect(slideXml).toContain(globalTextId)
+    expect(slideXml).not.toContain(controllerId)
+    expect(slideXml).toContain(component.layerItemId)
+    expect(slideXml).toContain(runtime.layerItemId)
+    expect(capturedIds).toEqual([component.layerItemId, runtime.layerItemId])
+    expect(capturedLocationIds).toEqual([
+      published.startLocationId,
+      published.startLocationId,
+    ])
+    expect(result.report.some((item) => item.message.includes('默认不写入 PPTX'))).toBe(false)
   })
 
   it('reports missing asset bytes in Chinese without throwing', async () => {

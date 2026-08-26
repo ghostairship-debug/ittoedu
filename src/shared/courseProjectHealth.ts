@@ -16,6 +16,7 @@ import {
 import type {
   CourseProjectHealthArchiveFiles,
   CourseProjectHealthFinding,
+  CourseProjectHealthSeverity,
 } from './courseProjectHealth/types'
 import type { CourseProjectDocument } from './courseProjectTypes'
 
@@ -39,4 +40,30 @@ export function collectCourseProjectHealth(
     ...collectCourseProjectComponentHealth(project, archiveFiles),
     ...collectCourseProjectControllerMediaHealth(project, archiveFiles),
   ])
+}
+
+export interface CourseProjectHealthSummary {
+  error: number
+  warning: number
+  info: number
+  total: number
+  canExport: boolean
+}
+
+export function summarizeCourseProjectHealth(
+  findings: readonly Pick<CourseProjectHealthFinding, 'severity'>[],
+): CourseProjectHealthSummary {
+  const summary: Record<CourseProjectHealthSeverity, number> & {
+    total: number
+    canExport: boolean
+  } = {
+    error: 0,
+    warning: 0,
+    info: 0,
+    total: findings.length,
+    canExport: true,
+  }
+  findings.forEach(({ severity }) => { summary[severity] += 1 })
+  summary.canExport = summary.error === 0
+  return summary
 }

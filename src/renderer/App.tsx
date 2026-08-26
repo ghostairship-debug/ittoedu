@@ -12,6 +12,10 @@ import {
   RECOMMENDED_SCENE_NODES,
 } from '../shared/constants'
 import { toUserMessage, UserFacingError } from '../shared/errors'
+import {
+  collectCourseProjectHealth,
+  summarizeCourseProjectHealth,
+} from '../shared/courseProjectHealth'
 import type { CourseProjectDocument } from '../shared/courseProjectTypes'
 import type {
   BatchFileRejection,
@@ -22,19 +26,19 @@ import type {
 } from '../shared/ipcTypes'
 import type { AssetKind } from '../shared/projectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
-import { buildExportPayload } from './export/buildExportPayload'
 import { buildPublishedCourseV2Payload } from './export/course/buildPublishedCourse'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageAsync,
-  collectCoursePackageExportPreflight,
-  type CoursePackagePreflightReport,
   type SingleHtmlExportMode,
 } from './export/course/buildCoursePackages'
 import { buildCoursePptx } from './export/course/buildCoursePptx'
-import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
+import {
+  buildCoursePrintArtifacts,
+  isPureSlidePublishedCourse,
+} from './export/course/buildCoursePrintArtifacts'
 import { buildFlowDocx, uniqueFlowDocxFilename } from './export/course/flowDocx'
-import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
+import { createPublishedSlideCaptureSession } from './export/course/publishedSlideCapture'
 import { prepareBundledFontEmbedding } from './export/bundledFontEmbedding'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
@@ -42,12 +46,12 @@ import {
   utf8ByteLength,
 } from './export/exportSize'
 import {
+  collectCourseProjectExportPreflight,
   collectExportPreflight,
   type ExportPreflightItem,
   type ExportPreflightReport,
 } from './export/exportPreflight'
 import { loadPlayerBundle } from './export/loadPlayerBundle'
-import { renderProjectSceneImages } from './export/renderSceneImages'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -81,7 +85,6 @@ import {
 } from './project/v9AssetAdapter'
 import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
 import {
-  projectCandidatePreviewDocument,
   selectActiveCourseProjectDocument,
   selectActiveScene,
   selectEditingNodes,
@@ -107,6 +110,7 @@ import { attachPublishedCourseStageFit, mountPublishedCourseTryRun } from './ui/
 import { beginSerializedSessionMount, enqueueSerial } from './ui/serializedSessionMount'
 import type { PublishedCourseSession } from '../player/surfaces/publishedDynamicHosts'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
+import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
 import { planCatalogBatchJoin } from './components/componentLibraryModel'
 
@@ -138,7 +142,7 @@ function activeCoursePublishSources() {
   }
 }
 
-type CourseDeliveryTarget = 'full-preview' | 'single-html' | 'web-package' | 'pdf'
+type CourseDeliveryTarget = 'full-preview' | 'single-html' | 'web-package' | 'pdf' | 'pptx'
 
 function courseDeliveryUnavailable(target: CourseDeliveryTarget): UserFacingError {
   const title = target === 'full-preview'
@@ -147,75 +151,14 @@ function courseDeliveryUnavailable(target: CourseDeliveryTarget): UserFacingErro
       ? '单 HTML 导出不可用'
       : target === 'web-package'
         ? '网页包导出不可用'
-        : 'PDF 导出不可用'
+        : target === 'pptx'
+          ? 'PPTX 导出不可用'
+          : 'PDF 导出不可用'
   return new UserFacingError(
     title,
     '当前编辑会话没有可发布的 Course Project V9 文档。',
     '请新建或重新打开受支持的课程工程后再试。',
   )
-}
-
-function isSlideOnlyCourseProject(project: CourseProjectDocument): boolean {
-  return project.locations.every((location) => location.kind === 'slide-scene')
-    && project.surfaces.every((surface) => surface.type === 'slide')
-}
-
-function mapCoursePackagePreflightItems(
-  target: ExportPreflightReport['target'],
-  report: CoursePackagePreflightReport,
-): ExportPreflightItem[] {
-  return report.items.map((item) => ({
-    severity: item.severity,
-    code: item.code as ExportPreflightItem['code'],
-    message: item.message,
-    target,
-    ...(item.path ? { path: item.path } : {}),
-  }))
-}
-
-function coursePackagePreflightToExportReport(
-  target: 'single-html' | 'web-package',
-  project: CourseProjectDocument,
-  report: CoursePackagePreflightReport,
-): ExportPreflightReport {
-  return {
-    reportVersion: 1,
-    projectId: project.id,
-    schemaVersion: project.schemaVersion,
-    target,
-    generatedAt: report.generatedAt,
-    items: mapCoursePackagePreflightItems(target, report),
-    summary: { ...report.summary },
-  }
-}
-
-function mergeCoursePackagePreflight(
-  base: ExportPreflightReport,
-  extra: CoursePackagePreflightReport,
-): ExportPreflightReport {
-  const mapped = mapCoursePackagePreflightItems(base.target, extra)
-  const items = [...base.items]
-  for (const item of mapped) {
-    if (items.some((existing) => existing.code === item.code && existing.message === item.message)) {
-      continue
-    }
-    items.push(item)
-  }
-  if (
-    (base.target === 'pptx' || base.target === 'pdf') &&
-    !items.some((item) => item.message.includes('全局图层与教师控制器'))
-  ) {
-    items.push({
-      severity: 'info',
-      code: 'static-export-controller-omitted',
-      message: '全局图层与教师控制器默认不写入 PPTX/PDF/DOCX 文件。',
-      target: base.target,
-    })
-  }
-  const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: true }
-  for (const item of items) summary[item.severity] += 1
-  summary.canExport = summary.error === 0
-  return { ...base, items, summary }
 }
 
 function decodeUtf8(bytes: Uint8Array): string {
@@ -485,13 +428,20 @@ export default function App() {
   const activeScene = useEditorStore(selectActiveScene)
   const errorMessage = useEditorStore((state) => state.errorMessage)
   const statusMessage = useEditorStore((state) => state.statusMessage)
-  const projectHealthDiagnostics = useMemo(
-    () => collectProjectHealth(project, componentPackages),
-    [project, componentPackages],
+  const courseProjectHealthDiagnostics = useMemo(
+    () => activeCourseDocument
+      ? collectCourseProjectHealth(activeCourseDocument, {
+          assetFiles: sidecarFiles,
+          componentFiles: componentPackagesToArchiveFiles(componentPackages),
+        })
+      : null,
+    [activeCourseDocument, componentPackages, sidecarFiles],
   )
   const projectHealthSummary = useMemo(
-    () => summarizeProjectHealth(projectHealthDiagnostics),
-    [projectHealthDiagnostics],
+    () => courseProjectHealthDiagnostics
+      ? summarizeCourseProjectHealth(courseProjectHealthDiagnostics)
+      : summarizeProjectHealth(collectProjectHealth(project, componentPackages)),
+    [componentPackages, courseProjectHealthDiagnostics, project],
   )
 
   const setError = useEditorStore((state) => state.setError)
@@ -1309,47 +1259,46 @@ export default function App() {
       const state = useEditorStore.getState()
       state.setStatus('正在生成可编辑 PPTX 对象…')
       const sources = activeCoursePublishSources()
-      const preview = projectCandidatePreviewDocument(state)
-      const slideOnlyCourse = Boolean(
-        sources
-        && preview
-        && isSlideOnlyCourseProject(sources.project),
-      )
-      if (sources && !slideOnlyCourse) {
-        const published = buildPublishedCourseV2Payload(sources)
-        const built = await buildCoursePptx(published)
-        if (built.bytes.byteLength === 0) {
-          throw new Error(built.report.map((item) => item.message).join('\n') || '未能生成 PPTX')
-        }
-        const result = await desktopApi().exportBinary({
-          suggestedName: `${sources.project.title}.pptx`,
-          extension: 'pptx',
-          bytes: built.bytes,
+      if (!sources) throw courseDeliveryUnavailable('pptx')
+      const published = buildPublishedCourseV2Payload(sources)
+      const hasSlide = published.locations.some((location) => location.kind === 'slide-scene')
+      const captureSession = hasSlide
+        ? await createPublishedSlideCaptureSession(published, {
+            includeGlobalLayerItems: isPureSlidePublishedCourse(published),
+          })
+        : null
+      let built: Awaited<ReturnType<typeof buildCoursePptx>>
+      try {
+        built = await buildCoursePptx(published, {
+          ...(captureSession
+            ? {
+                captureDynamicItem: async ({ surface, scene, locationId, item }) => {
+                  return captureSession.captureLayer({
+                    surface,
+                    scene,
+                    locationId,
+                    layerItemId: item.layerItemId,
+                  })
+                },
+              }
+            : {}),
         })
-        if (result) {
-          const notes = built.warnings.length > 0
-            ? `；${built.warnings.length} 项内容已按导出说明处理`
-            : ''
-          state.setStatus(`PPTX 已导出 ${built.slideCount} 页到 ${result.path}${notes}`)
-        }
-        return
+      } finally {
+        await captureSession?.destroy()
       }
-      const assetFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
-      const payload = buildExportPayload({
-        project: preview?.project ?? state.project,
-        assetFiles,
-        components: state.componentPackages,
-      })
-      const bytes = await buildPptx(payload, assetFiles)
+      if (built.bytes.byteLength === 0) {
+        throw new Error(built.report.map((item) => item.message).join('\n') || '未能生成 PPTX')
+      }
       const result = await desktopApi().exportBinary({
-        suggestedName: `${state.project.title}.pptx`,
+        suggestedName: `${sources.project.title}.pptx`,
         extension: 'pptx',
-        bytes,
+        bytes: built.bytes,
       })
       if (result) {
-        state.setStatus(
-          `PPTX 已导出到 ${result.path}（可编辑对象保持独立；需保真的内容按预检说明静态化）`,
-        )
+        const notes = built.warnings.length > 0
+          ? `；${built.warnings.length} 项内容已按导出说明处理`
+          : ''
+        state.setStatus(`PPTX 已导出 ${built.slideCount} 页到 ${result.path}${notes}`)
       }
     }, 'PPTX 导出失败。请减少大图片数量后重试。')
   }, [run])
@@ -1361,15 +1310,33 @@ export default function App() {
       if (sources) {
         state.setStatus('正在渲染 PDF 页面…')
         const published = buildPublishedCourseV2Payload(sources)
-        const artifacts = await buildCoursePrintArtifacts(published, {
-          resolveAssetBytes: (assetId) => {
-            const meta = sources.project.assets[assetId]
-            const bytes = sources.assetFiles[assetId]
-            return meta && bytes
-              ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
-              : undefined
-          },
-        })
+        const pureSlide = isPureSlidePublishedCourse(published)
+        const captureSession = pureSlide
+          ? await createPublishedSlideCaptureSession(published, {
+              includeGlobalLayerItems: true,
+            })
+          : null
+        let artifacts: Awaited<ReturnType<typeof buildCoursePrintArtifacts>>
+        try {
+          artifacts = await buildCoursePrintArtifacts(published, {
+            resolveAssetBytes: (assetId) => {
+              const meta = sources.project.assets[assetId]
+              const bytes = sources.assetFiles[assetId]
+              return meta && bytes
+                ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
+                : undefined
+            },
+            ...(captureSession
+              ? {
+                  captureSlideScene: ({ surface, scene, locationId }) => (
+                    captureSession.captureScene({ surface, scene, locationId })
+                  ),
+                }
+              : {}),
+          })
+        } finally {
+          await captureSession?.destroy()
+        }
         const pdfFile = artifacts.files.find((file) => file.kind === 'pdf-html')
         if (pdfFile) {
           const result = await desktopApi().exportPdf({
@@ -1384,28 +1351,11 @@ export default function App() {
           }
           return
         }
-        if (!isSlideOnlyCourseProject(sources.project)) {
-          throw new UserFacingError(
-            'PDF 导出不完整',
-            '未生成覆盖当前课程全部表面的 PDF 打印内容。',
-            '请检查混合打印计划后重试；为避免遗漏 Flow 或 Spatial 内容，本次未回退到旧版 Slide 快照。',
-          )
-        }
-        const preview = projectCandidatePreviewDocument(state)
-        const rasterFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
-        const rasterProject = preview?.project ?? state.project
-        const images = await renderProjectSceneImages(rasterProject, rasterFiles, 1.5)
-        const result = await desktopApi().exportPdf({
-          suggestedName: `${sources.project.title}.pdf`,
-          html: buildPdfPrintHtml(sources.project.title, images),
-        })
-        if (result) {
-          const notes = artifacts.warnings.length > 0
-            ? `；${artifacts.warnings.length} 项内容已按导出说明处理`
-            : ''
-          state.setStatus(`PDF 已导出到 ${result.path}${notes}`)
-        }
-        return
+        throw new UserFacingError(
+          'PDF 导出不完整',
+          'Published Course V2 未生成覆盖当前课程全部表面的 PDF 打印内容。',
+          '请检查导出预检与混合打印计划后重试；本次不会回退到旧版 V8 Slide 快照。',
+        )
       }
       throw courseDeliveryUnavailable('pdf')
     }, 'PDF 导出失败。请减少大图片数量后重试。')
@@ -1476,35 +1426,21 @@ export default function App() {
       setExportPreflightReport(base)
       return
     }
-    const delivery = format === 'web-package' ? 'web-package' : 'standalone-html'
-    const v9 = collectCoursePackageExportPreflight(
+    setExportPreflightReport(collectCourseProjectExportPreflight(
       sources.project,
-      delivery,
+      format,
       {
         assetFiles: sources.assetFiles,
         components: sources.components,
       },
-      loadPlayerBundle(),
       new Date(),
-      { singleHtmlMode: requestedSingleHtmlMode ?? undefined },
-    )
-    if (format === 'single-html' || format === 'web-package') {
-      setExportPreflightReport(coursePackagePreflightToExportReport(
-        format,
-        sources.project,
-        v9,
-      ))
-      return
-    }
-    const base = collectExportPreflight(
-      state.project,
-      format,
       {
-        assetFiles: selectMediaAssetFiles(state),
-        components: state.componentPackages,
+        playerBundle: loadPlayerBundle(),
+        ...(requestedSingleHtmlMode
+          ? { singleHtmlMode: requestedSingleHtmlMode }
+          : {}),
       },
-    )
-    setExportPreflightReport(mergeCoursePackagePreflight(base, v9))
+    ))
   }, [handleExportDocx, run])
 
   const continuePreflightExport = useCallback(() => {
@@ -1528,6 +1464,26 @@ export default function App() {
 
   const locatePreflightItem = useCallback((item: ExportPreflightItem) => {
     const state = useEditorStore.getState()
+    const courseProject = selectActiveCourseProjectDocument(state)
+    if (courseProject && item.diagnosticTarget) {
+      const route = resolveCourseProjectDiagnosticTargetRoute(
+        courseProject,
+        item.diagnosticTarget,
+        item.code,
+        item.path,
+      )
+      if (route.locationId) state.activateCourseLocation(route.locationId)
+      state.setEditingScope(route.scope)
+      if (route.layerItemId) state.selectNode(route.layerItemId)
+      if (route.tab === 'automation' || route.tab === 'components') {
+        state.setEditorMode('professional')
+      }
+      state.setActiveTab(route.tab)
+      state.setStatus(`已定位导出预检问题：${item.message}`)
+      setExportPreflightReport(null)
+      setPendingSingleHtmlMode(null)
+      return
+    }
     const globalNode = item.nodeId
       ? state.project.globalLayer.some(({ node }) => node.id === item.nodeId)
       : false

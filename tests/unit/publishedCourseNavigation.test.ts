@@ -5,6 +5,12 @@ import { addCourseFlowPage, addCourseScene, addCourseSpatialPage } from '@/rende
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createFormulaNode } from '@/renderer/project/createProject'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { courseLayerItemToSceneNode } from '@/renderer/store/slideEditorProjection'
+import {
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+  type PlayerAuthoringHostMessage,
+} from '@/shared/playerAuthoringProtocol'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
   createPublishedCourseSession,
@@ -436,6 +442,69 @@ describe('published course Mixed navigation', () => {
     expect(math?.dataset.formulaFallback).toBeUndefined()
     expect(math?.textContent).toBe('')
     vi.restoreAllMocks()
+    container.remove()
+  })
+
+  it('mounts one inert Published authoring location and ACKs a hidden Mixed global patch', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const slideLocations = payload.locations.filter((location) => location.kind === 'slide-scene')
+    const targetLocation = slideLocations[1]
+    if (!targetLocation || targetLocation.kind !== 'slide-scene') {
+      throw new Error('expected a second Slide location')
+    }
+    const messages: PlayerAuthoringHostMessage[] = []
+    const session = createPublishedCourseSession(payload, {
+      initialLocationId: targetLocation.id,
+      authoring: {
+        sessionId: 'published-authoring-session',
+        scope: 'scene',
+        stateId: null,
+        onMessage: (message) => messages.push(message),
+      },
+    })
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    expect(session.getHostMode()).toBe('authoring')
+    expect(session.listCatalog().map((entry) => entry.id)).toEqual([targetLocation.id])
+    const slot = container.querySelector<HTMLElement>('[data-course-surface-slot]')
+    expect(slot?.inert).toBe(true)
+    expect(slot?.style.pointerEvents).toBe('none')
+    expect(messages.some((message) => (
+      message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready
+      && message.context.sceneId === targetLocation.sceneId
+    ))).toBe(true)
+
+    const global = project.globalLayerItems.find((entry) => entry.item.layerItemId === 'global-note')
+    const node = global ? courseLayerItemToSceneNode(global.item) : null
+    if (!node) throw new Error('expected projected global note')
+    const hiddenWrap = container.querySelector<HTMLElement>('[data-global-layer-item="global-note"]')
+    expect(hiddenWrap).not.toBeNull()
+    expect(hiddenWrap?.style.visibility).toBe('hidden')
+
+    const response = await session.applyAuthoringCommand({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: 'published-authoring-session',
+      requestId: 'move-global-note',
+      revision: 1,
+      context: { sceneId: targetLocation.sceneId, stateId: null },
+      patch: {
+        kind: 'native-node',
+        target: { kind: 'native-node', scope: 'global', nodeId: node.id },
+        node: { ...node, x: 123 },
+      },
+    })
+    expect(response.type).toBe(PLAYER_AUTHORING_MESSAGE_TYPES.ack)
+    expect(hiddenWrap?.style.left).toBe('123px')
+    expect(hiddenWrap?.style.visibility).toBe('hidden')
     container.remove()
   })
 

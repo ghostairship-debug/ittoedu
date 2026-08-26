@@ -212,6 +212,25 @@ describe('paintPublishedNativeText', () => {
     expect(wrap.style.writingMode).toBe('vertical-rl')
   })
 
+  it('uses the shared text layout analysis to shrink within the published frame', () => {
+    const wrap = document.createElement('div')
+    const data = createTextData({
+      text: 'A long line of published text that cannot fit at the authored size',
+      style: {
+        fontSize: 32,
+        lineSpacing: 0,
+        letterSpacing: 0,
+        padding: 0,
+        overflow: 'shrink',
+      },
+    })
+
+    paintPublishedNativeText(wrap, data, { width: 120, height: 24 })
+
+    expect(wrap.style.fontSize).toBe('8px')
+    expect(wrap.style.lineHeight).toBe('9.76px')
+  })
+
   it('renders published text runs through SlidePublishedAdapter mount', async () => {
     const payload: PublishedCourseV2Payload = {
       format: 'h5course-published',
@@ -332,4 +351,3 @@ describe('paintPublishedNativeText', () => {
     await adapter.destroy()
   })
 })
-

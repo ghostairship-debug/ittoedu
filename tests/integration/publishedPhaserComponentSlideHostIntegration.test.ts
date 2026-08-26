@@ -143,8 +143,18 @@ import {
   createPublishedSurfaceHost,
 } from '../../src/player/surfaces/publishedDynamicHosts'
 import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+import { mountPublishedCourseAuthoring } from '../../src/renderer/ui/coursePlayerTryRun'
+import type {
+  ComponentAuthoringTargetUpdate,
+  ComponentPackageData,
+} from '../../src/shared/componentTypes'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
+import {
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  type PlayerAuthoringHostMessage,
+} from '../../src/shared/playerAuthoringProtocol'
+import type { ExternalComponentNode } from '../../src/shared/projectTypes'
 import type { PublishedCourseComponent } from '../../src/shared/publishedCourseTypes'
 import {
   createPublishedPhaserComponentV2Fixture,
@@ -178,6 +188,7 @@ declare global {
 }
 
 const SLIDE_REPLAY_RUNTIME_ITEM_ID = 'slide-replay-api2-runtime'
+const PHASER_GENERATION_WAIT_TIMEOUT_MS = 5_000
 
 const SLIDE_REPLAY_RUNTIME_SOURCE = `
 CoursewareRuntime.define({
@@ -236,15 +247,35 @@ interface PhaserReplayGeneration {
   runtimeGame: FakeGameProbe
 }
 
-async function currentReplayGeneration(root: HTMLElement): Promise<PhaserReplayGeneration> {
-  await vi.waitFor(() => {
+interface PhaserReplaySession {
+  destroy(): Promise<void>
+}
+
+async function withReplaySessionFailureCleanup<T>(
+  session: PhaserReplaySession,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation()
+  } catch (error) {
+    await Promise.allSettled([session.destroy()])
+    await flushTeardown()
+    throw error
+  }
+}
+
+async function currentReplayGeneration(
+  root: HTMLElement,
+  session: PhaserReplaySession,
+): Promise<PhaserReplayGeneration> {
+  await withReplaySessionFailureCleanup(session, () => vi.waitFor(() => {
     expect(root.querySelector(
       `canvas[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
     )).not.toBeNull()
     expect(root.querySelector(
       `[data-canvas-runtime-phaser="${SLIDE_REPLAY_RUNTIME_ITEM_ID}"] canvas`,
     )).not.toBeNull()
-  })
+  }, { timeout: PHASER_GENERATION_WAIT_TIMEOUT_MS }))
   const componentCanvas = root.querySelector<HTMLCanvasElement>(
     `canvas[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
   )!
@@ -264,8 +295,9 @@ async function currentReplayGeneration(root: HTMLElement): Promise<PhaserReplayG
 async function expectFreshReplayGeneration(
   root: HTMLElement,
   previous: PhaserReplayGeneration,
+  session: PhaserReplaySession,
 ): Promise<PhaserReplayGeneration> {
-  await vi.waitFor(() => {
+  await withReplaySessionFailureCleanup(session, () => vi.waitFor(() => {
     expect(previous.componentCanvas.isConnected).toBe(false)
     expect(previous.runtimeCanvas.isConnected).toBe(false)
     expect(root.querySelector(
@@ -274,10 +306,10 @@ async function expectFreshReplayGeneration(
     expect(root.querySelector(
       `[data-canvas-runtime-phaser="${SLIDE_REPLAY_RUNTIME_ITEM_ID}"] canvas`,
     )).not.toBe(previous.runtimeCanvas)
-  })
+  }, { timeout: PHASER_GENERATION_WAIT_TIMEOUT_MS }))
   expect(previous.componentGame.destroyed).toBe(true)
   expect(previous.runtimeGame.destroyed).toBe(true)
-  return currentReplayGeneration(root)
+  return currentReplayGeneration(root, session)
 }
 
 function encode(source: string): { encoding: 'base64-utf16le'; data: string } {
@@ -320,6 +352,8 @@ function runtime(version: string): string {
         var probe = window.__publishedPhaserUnitProbe = {
           creates: ((previousProbe && previousProbe.creates) || 0) + 1,
           version: '${version}',
+          scope: ctx.scope,
+          sceneId: ctx.sceneId,
           context: ctx.renderMode === 'phaser' && !!ctx.phaser.Phaser
             && !!ctx.phaser.scene && !!ctx.phaser.root
             && !('dom' in ctx) && !('Phaser' in ctx) && !('root' in ctx) && !('editor' in ctx),
@@ -348,6 +382,85 @@ function runtime(version: string): string {
   `
 }
 
+function authoringPhaserComponent(): ComponentPackageData {
+  return {
+    manifest: {
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
+      id: PUBLISHED_PHASER_COMPONENT_ID,
+      name: 'Phaser authoring component',
+      version: '1.0.0',
+      entry: 'runtime.js',
+      defaultSize: { width: 360, height: 210 },
+      minSize: { width: 100, height: 60 },
+      preserveAspectRatio: false,
+      supportedScopes: ['scene'],
+      renderMode: 'phaser',
+      assets: {},
+      defaultProps: { label: '初始文字' },
+      editor: {
+        properties: [{ key: 'label', label: '文字', type: 'text' }],
+      },
+    },
+    runtimeSource: `
+      window.CoursewareComponent.define({
+        id: '${PUBLISHED_PHASER_COMPONENT_ID}',
+        runtimeApiVersion: 4,
+        create(ctx) {
+          var width = ctx.width;
+          var probe = window.__publishedPhaserUnitProbe = {
+            hasEditor: !!ctx.editor,
+            destroys: 0
+          };
+          ctx.editor.registerTextRegion({
+            key: 'label',
+            getBounds: function () {
+              return { x: 10, y: 12, width: width / 2, height: 24 };
+            }
+          });
+          return {
+            setMode(mode) { probe.mode = mode; },
+            resize(nextWidth) {
+              width = nextWidth;
+              ctx.editor.invalidate();
+            },
+            updateProps(props) { probe.props = props; },
+            destroy() { probe.destroys += 1; }
+          };
+        }
+      });
+    `,
+    files: {},
+  }
+}
+
+function authoringComponentNode(
+  overrides: Partial<ExternalComponentNode> = {},
+): ExternalComponentNode {
+  return {
+    id: 'phaser-authoring-instance',
+    name: 'Phaser authoring instance',
+    type: 'external-component',
+    x: 100,
+    y: 80,
+    width: 360,
+    height: 210,
+    rotation: 0,
+    opacity: 1,
+    visible: true,
+    playbackInitialVisibility: 'inherit',
+    locked: false,
+    component: { packageId: PUBLISHED_PHASER_COMPONENT_ID, version: '1.0.0' },
+    props: { label: '初始文字' },
+    ...overrides,
+  }
+}
+
+async function flushAuthoringTargets(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 function services() {
   return {
     navigate: vi.fn(),
@@ -356,6 +469,60 @@ function services() {
     resolveAsset: vi.fn((assetId: string) => `asset:${assetId}`),
     reportDiagnostic: vi.fn(),
   }
+}
+
+function installPublishedCaptureHarness(): void {
+  const context = {
+    imageSmoothingEnabled: false,
+    imageSmoothingQuality: 'low',
+    globalAlpha: 1,
+    fillStyle: '#000000',
+    strokeStyle: '#000000',
+    lineWidth: 1,
+    font: '',
+    textAlign: 'left',
+    textBaseline: 'alphabetic',
+    direction: 'ltr',
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    rect: vi.fn(),
+    roundRect: vi.fn(),
+    clip: vi.fn(),
+    fillRect: vi.fn(),
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+    drawImage: vi.fn(),
+    scale: vi.fn(),
+    translate: vi.fn(),
+    rotate: vi.fn(),
+    createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+  } as unknown as CanvasRenderingContext2D
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+    .mockReturnValue('data:image/png;base64,R0xPQkFM')
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const element = this as HTMLElement
+    const styledWidth = Number.parseFloat(element.style?.width ?? '')
+    const styledHeight = Number.parseFloat(element.style?.height ?? '')
+    const width = Number.isFinite(styledWidth)
+      ? styledWidth
+      : element instanceof HTMLCanvasElement ? element.width : 1
+    const height = Number.isFinite(styledHeight)
+      ? styledHeight
+      : element instanceof HTMLCanvasElement ? element.height : 1
+    return {
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      width,
+      height,
+      toJSON: () => ({}),
+    } as DOMRect
+  })
 }
 
 async function flushTeardown(): Promise<void> {
@@ -440,6 +607,123 @@ describe('Published Slide Phaser Component API 4 host', () => {
     expect(game.canvas.isConnected).toBe(false)
     expect(game.loop.game).toBeNull()
     expect(game.loop.callback).toBeNull()
+  })
+
+  it('wires Phaser authoring targets and revokes them before teardown', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const component = authoringPhaserComponent()
+    const node = authoringComponentNode()
+    const updates: Array<Readonly<ComponentAuthoringTargetUpdate>> = []
+    const handle = mountPublishedSlidePhaserComponent(container, {
+      container,
+      componentId: PUBLISHED_PHASER_COMPONENT_ID,
+      version: '1.0.0',
+      instanceId: node.id,
+      width: node.width,
+      height: node.height,
+      props: node.props,
+      components: { [PUBLISHED_PHASER_COMPONENT_ID]: component },
+      mode: 'edit',
+      scope: 'scene',
+      sceneId: 'scene-one',
+      authoring: {
+        node,
+        onTargetsChanged: (update) => updates.push(update),
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(window.__publishedPhaserUnitProbe).toMatchObject({
+        hasEditor: true,
+        mode: 'edit',
+      })
+    })
+    await flushAuthoringTargets()
+    expect(updates.at(-1)).toMatchObject({
+      scope: 'scene',
+      sceneId: 'scene-one',
+      nodeId: node.id,
+      targets: [{ key: 'label', bounds: { x: 110, y: 92, width: 180, height: 24 } }],
+    })
+
+    handle.resize(400, 220)
+    await flushAuthoringTargets()
+    expect(updates.at(-1)?.targets[0]?.bounds.width).toBe(200)
+
+    handle.updateProps({ label: 7 })
+    await flushAuthoringTargets()
+    expect(updates.at(-1)?.targets).toEqual([])
+
+    handle.updateAuthoringNode(authoringComponentNode({
+      x: 420,
+      width: 400,
+      height: 220,
+      props: { label: '恢复文字' },
+    }))
+    await flushAuthoringTargets()
+    expect(updates.at(-1)?.targets[0]?.bounds.x).toBe(430)
+
+    handle.destroy()
+    expect(updates.at(-1)?.targets).toEqual([])
+    await flushTeardown()
+    expect(window.__publishedPhaserUnitProbe).toMatchObject({ destroys: 1 })
+  })
+
+  it('routes full component manifests through the transient Published authoring sidecar', async () => {
+    const fixture = createPublishedPhaserComponentV2Fixture()
+    const published = buildPublishedCourseV2Payload({
+      project: fixture.project,
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+    })
+    const publishedComponent = published.components[
+      `${PUBLISHED_PHASER_COMPONENT_ID}@4.0.0`
+    ]
+    expect(publishedComponent).toBeDefined()
+    expect(publishedComponent).not.toHaveProperty('editor')
+
+    const container = document.createElement('div')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 1280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.appendChild(container)
+    const messages: PlayerAuthoringHostMessage[] = []
+    const session = await mountPublishedCourseAuthoring({
+      container,
+      project: fixture.project,
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+      locationId: fixture.slideLocationIds[0],
+      sessionId: 'phaser-component-sidecar-authoring',
+      scope: 'scene',
+      stateId: null,
+      onMessage: (message) => messages.push(message),
+    })
+
+    try {
+      await vi.waitFor(() => {
+        const updates = messages.flatMap((message) => (
+          message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets
+            ? [message.update]
+            : []
+        ))
+        expect(updates.at(-1)).toMatchObject({
+          scope: 'scene',
+          nodeId: PUBLISHED_PHASER_COMPONENT_ITEM_ID,
+          targets: [{
+            key: 'label',
+            label: 'Phaser 标题',
+            source: 'registered',
+            bounds: { x: 143, y: 105, width: 320, height: 42 },
+          }],
+        })
+      })
+    } finally {
+      await session.destroy()
+      await flushTeardown()
+    }
   })
 
   it('quarantines one lifecycle failure into one fallback and still completes stopped-loop teardown', async () => {
@@ -589,6 +873,74 @@ describe('Published Slide Phaser Component API 4 host', () => {
     )).toBeNull()
     expect(container.querySelector('.published-component-fallback')).toBeNull()
     await player.destroy()
+  })
+
+  it('mounts and captures a global Phaser component with global scope', async () => {
+    installPublishedCaptureHarness()
+    const fixture = createPublishedPhaserComponentV2Fixture()
+    const payload = buildPublishedCourseV2Payload({
+      project: fixture.project,
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+    })
+    const slide = payload.surfaces.find((surface) => surface.id === fixture.slideSurfaceId)
+    if (!slide || slide.type !== 'slide') throw new Error('expected Slide payload')
+    const scene = slide.scenes[0]!
+    const componentIndex = scene.layerItems.findIndex((item) => (
+      item.layerItemId === PUBLISHED_PHASER_COMPONENT_ITEM_ID
+    ))
+    if (componentIndex < 0) throw new Error('expected Phaser component item')
+    const [globalComponentItem] = scene.layerItems.splice(componentIndex, 1)
+    if (!globalComponentItem) throw new Error('expected Phaser component item')
+    payload.globalLayerItems.push({
+      item: globalComponentItem,
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const componentKey = `${PUBLISHED_PHASER_COMPONENT_ID}@4.0.0`
+    const component = payload.components[componentKey]
+    if (!component) throw new Error('expected Published Phaser component')
+    payload.components[componentKey] = {
+      ...component,
+      scopes: ['global'],
+      code: encode(runtime('global-scope')),
+    }
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const host = new SlidePublishedAdapter(payload, fixture.slideSurfaceId, {
+      staticCapture: true,
+      includeGlobalLayerItemsForStaticCapture: true,
+    })
+    const player = new CoursePlayer([host], { services: services() })
+    try {
+      expect(await player.mountSurface(fixture.slideSurfaceId, container)).toEqual({ ok: true })
+      expect(await player.activateSurface(fixture.slideSurfaceId)).toEqual({ ok: true })
+      await vi.waitFor(() => expect(window.__publishedPhaserUnitProbe).toMatchObject({
+        version: 'global-scope',
+        scope: 'global',
+        mode: 'capture',
+      }))
+      expect(window.__publishedPhaserUnitProbe?.sceneId).toBeUndefined()
+      expect(container.querySelector(
+        `[data-global-layer-item="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"] `
+        + `[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+      )).not.toBeNull()
+      expect(container.querySelector('.published-component-fallback')).toBeNull()
+
+      expect(await player.captureSurface(fixture.slideSurfaceId, {
+        purpose: 'export',
+        layerItemId: PUBLISHED_PHASER_COMPONENT_ITEM_ID,
+      })).toMatchObject({
+        ok: true,
+        value: {
+          format: 'data-url',
+          content: 'data:image/png;base64,R0xPQkFM',
+        },
+      })
+    } finally {
+      await player.destroy()
+      await flushTeardown()
+    }
   })
 
   it('waits for prepared noncurrent and forced locations before materializing deferred Phaser', async () => {
@@ -863,7 +1215,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       }
     }
 
-    let generation = await currentReplayGeneration(root)
+    let generation = await currentReplayGeneration(root, session)
     expect(diagnostics).toEqual([])
     await expectProbeGeneration(2, 1)
     expectLocationUnchanged()
@@ -871,14 +1223,14 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const authoredReplay = controllerButton(replayButtonId)
     authoredReplay.click()
     authoredReplay.click()
-    generation = await expectFreshReplayGeneration(root, generation)
+    generation = await expectFreshReplayGeneration(root, generation, session)
     await expectProbeGeneration(3, 2)
     expectLocationUnchanged()
 
     expect(bridge.replayScene()).toBe(true)
     expect(session.canReplayScene()).toBe(false)
     expect(bridge.replayScene()).toBe(false)
-    generation = await expectFreshReplayGeneration(root, generation)
+    generation = await expectFreshReplayGeneration(root, generation, session)
     await expectProbeGeneration(4, 3)
     expectLocationUnchanged()
     await vi.waitFor(() => expect(session.canReplayScene()).toBe(true))
@@ -900,7 +1252,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     generation = await (async () => {
       const previous = generation
       expect(await session.replayScene()).toBe(true)
-      return expectFreshReplayGeneration(root, previous)
+      return expectFreshReplayGeneration(root, previous, session)
     })()
     await expectProbeGeneration(5, 4)
     expectLocationUnchanged()
@@ -920,7 +1272,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     })
     pendingSlideNavigation.restore()
     await session.goToLocation(initialLocationId)
-    generation = await currentReplayGeneration(root)
+    generation = await currentReplayGeneration(root, session)
 
     const pendingFlowNavigation = deferNextActivation()
     const flowNavigation = session.goToLocation(fixture.flowLocationId)
@@ -944,7 +1296,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     expect(session.navigator.current?.locationId).toBe(fixture.flowLocationId)
 
     await session.goToLocation(initialLocationId)
-    generation = await currentReplayGeneration(root)
+    generation = await currentReplayGeneration(root, session)
     const componentCreatesBeforeDestroy = Number(
       window.__publishedPhaserComponentV4Probe?.creates ?? 0,
     )
@@ -1001,7 +1353,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const initialLocationId = session.getProgress().locationId
     await session.goToIndex(1)
     await session.navigator.back()
-    const previous = await currentReplayGeneration(root)
+    const previous = await currentReplayGeneration(root, session)
     const componentCreatesBeforeReplay = Number(
       window.__publishedPhaserComponentV4Probe?.creates ?? 0,
     )

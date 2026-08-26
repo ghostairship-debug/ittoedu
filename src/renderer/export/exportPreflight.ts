@@ -1,4 +1,13 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
+import { collectCourseProjectHealth } from '../../shared/courseProjectHealth'
+import type {
+  CourseProjectDocument,
+  FlowBlock,
+} from '../../shared/courseProjectTypes'
+import {
+  resolveSchemaValidCourseProjectDiagnosticTarget,
+  type DiagnosticTargetV1,
+} from '../../shared/courseProjectValidationDiagnostics'
 import type { ProjectDocument } from '../../shared/projectTypes'
 import {
   collectProjectHealth,
@@ -8,6 +17,19 @@ import type { ExportPreflightCode } from '../../shared/diagnosticCodes'
 import { collectUnusedProjectAssetIds } from '../../shared/assetReferences'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { compareStableStrings } from '../../shared/stableOrder'
+import { buildPublishedCourseV2Payload } from './course/buildPublishedCourse'
+import {
+  collectCoursePackageExportPreflight,
+  type CoursePackagePreflightItem,
+  type SingleHtmlExportMode,
+} from './course/buildCoursePackages'
+import {
+  auditCourseExportAssets,
+  buildCourseExportPageList,
+  type CourseExportReportItem,
+} from './course/buildCoursePrintArtifacts'
+import { componentPackagesToArchiveFiles } from '../components/componentPackageStore'
+import { collectCourseProjectSlideVisualPreflightItems } from './slideVisualPreflight'
 import { collectProjectDocumentSlideVisualPreflightItems } from './slideVisualPreflight'
 
 export type ExportPreflightTarget =
@@ -23,9 +45,15 @@ export interface ExportPreflightResources {
 
 export interface ExportPreflightItem {
   severity: ProjectHealthSeverity
-  code: ExportPreflightCode
+  code:
+    | ExportPreflightCode
+    | CoursePackagePreflightItem['code']
+    | 'static-export-preflight'
+    | 'static-export-warning'
+    | 'static-export-info'
   message: string
   target: ExportPreflightTarget
+  diagnosticTarget?: DiagnosticTargetV1
   sceneId?: string
   stateId?: string
   nodeId?: string
@@ -95,6 +123,8 @@ function stableItemKey(item: ExportPreflightItem): string {
     item.sceneId ?? '',
     item.stateId ?? '',
     item.nodeId ?? '',
+    JSON.stringify(item.diagnosticTarget ?? null),
+    JSON.stringify(item.path ?? []),
     item.message,
   ].join('\0')
 }
@@ -104,6 +134,254 @@ function summarize(items: readonly ExportPreflightItem[]): ExportPreflightReport
   items.forEach(({ severity }) => { summary[severity] += 1 })
   summary.canExport = summary.error === 0
   return summary
+}
+
+export interface CourseProjectExportPreflightOptions {
+  playerBundle?: string
+  singleHtmlMode?: SingleHtmlExportMode
+}
+
+function courseSlideFindingTarget(
+  project: CourseProjectDocument,
+  finding: {
+    path?: ReadonlyArray<string | number>
+    sceneId?: string
+    nodeId?: string
+  },
+): DiagnosticTargetV1 {
+  const resolved = resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+    ...(finding.path ? { path: finding.path } : {}),
+    ...(finding.nodeId ? { layerItemId: finding.nodeId } : {}),
+  })
+  if (resolved.kind !== 'project' || !finding.sceneId) return resolved
+  const matches = project.surfaces.flatMap((surface) => (
+    surface.type === 'slide' && surface.scenes.some((scene) => scene.id === finding.sceneId)
+      ? [surface]
+      : []
+  ))
+  if (matches.length !== 1) return resolved
+  return {
+    version: 1,
+    kind: 'scene',
+    projectId: project.id,
+    surfaceId: matches[0]!.id,
+    sceneId: finding.sceneId,
+  }
+}
+
+function mapCourseExportAuditItem(item: CourseExportReportItem): {
+  severity: CourseExportReportItem['severity']
+  code: 'static-export-preflight' | 'static-export-warning' | 'static-export-info'
+  message: string
+  path?: ReadonlyArray<string | number>
+} {
+  const code = item.severity === 'error'
+    ? 'static-export-preflight'
+    : item.severity === 'warning'
+      ? 'static-export-warning'
+      : 'static-export-info'
+  return {
+    severity: item.severity,
+    code,
+    message: item.message,
+    ...(item.assetId ? { path: ['assets', item.assetId] } : {}),
+  }
+}
+
+/**
+ * Current Course Project V9 GUI preflight. It consumes the same V9 document,
+ * source bytes, semantic health collector and Published producer gates as the
+ * headless validator; no Project V8 projection participates in this report.
+ */
+export function collectCourseProjectExportPreflight(
+  project: CourseProjectDocument,
+  target: ExportPreflightTarget,
+  resources: ExportPreflightResources,
+  now = new Date(),
+  options: CourseProjectExportPreflightOptions = {},
+): ExportPreflightReport {
+  const itemMap = new Map<string, ExportPreflightItem>()
+  const add = (item: Omit<ExportPreflightItem, 'target'>): void => {
+    const complete = { ...item, target }
+    itemMap.set(stableItemKey(complete), complete)
+  }
+  const projectDiagnosticTarget = resolveSchemaValidCourseProjectDiagnosticTarget(project, {})
+  const health = collectCourseProjectHealth(project, {
+    assetFiles: resources.assetFiles,
+    componentFiles: componentPackagesToArchiveFiles(resources.components),
+  })
+  health.forEach((finding) => add({
+    severity: finding.severity,
+    code: `project-health:${finding.code}` as const,
+    message: finding.message,
+    path: finding.path,
+    diagnosticTarget: finding.target,
+  }))
+
+  const delivery = target === 'web-package' ? 'web-package' : 'standalone-html'
+  const packageReport = collectCoursePackageExportPreflight(
+    project,
+    delivery,
+    resources,
+    options.playerBundle ?? '',
+    now,
+    target === 'single-html' && options.singleHtmlMode
+      ? { singleHtmlMode: options.singleHtmlMode }
+      : {},
+  )
+  packageReport.items.forEach((item) => add({
+    severity: item.severity,
+    code: item.code,
+    message: item.message,
+    ...(item.path ? { path: item.path } : {}),
+    diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+      ...(item.path ? { path: item.path } : {}),
+    }),
+  }))
+
+  collectCourseProjectSlideVisualPreflightItems(project, target).forEach((item) => add({
+    severity: item.severity,
+    code: item.code,
+    message: item.message,
+    ...(item.path ? { path: item.path } : {}),
+    ...(item.sceneId ? { sceneId: item.sceneId } : {}),
+    ...(item.stateId ? { stateId: item.stateId } : {}),
+    ...(item.nodeId ? { nodeId: item.nodeId } : {}),
+    diagnosticTarget: courseSlideFindingTarget(project, {
+      ...(item.path ? { path: item.path } : {}),
+      ...(item.sceneId ? { sceneId: item.sceneId } : {}),
+      ...(item.nodeId ? { nodeId: item.nodeId } : {}),
+    }),
+  }))
+
+  if (target === 'pdf' || target === 'pptx') {
+    const sourceBlocked = packageReport.items.some((item) => (
+      item.severity === 'error' && item.code !== 'player-bundle-empty'
+    ))
+    if (!sourceBlocked) {
+      try {
+        const published = buildPublishedCourseV2Payload({ project, ...resources })
+        const auditItems: CourseExportReportItem[] = []
+        auditCourseExportAssets(published, auditItems, (assetId) => {
+          const metadata = project.assets[assetId]
+          const bytes = resources.assetFiles[assetId]
+          return metadata && bytes
+            ? { filename: metadata.filename, mimeType: metadata.mimeType, bytes }
+            : undefined
+        })
+        auditItems.forEach((item) => {
+          const mapped = mapCourseExportAuditItem(item)
+          add({
+            ...mapped,
+            diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+              ...(mapped.path ? { path: mapped.path } : {}),
+            }),
+          })
+        })
+        if (buildCourseExportPageList(published).length === 0) {
+          add({
+            severity: 'error',
+            code: 'static-export-preflight',
+            message: '当前 Course Project V9 没有可导出的 PDF/PPTX 页面。',
+            diagnosticTarget: projectDiagnosticTarget,
+          })
+        }
+      } catch (error) {
+        add({
+          severity: 'error',
+          code: 'static-export-preflight',
+          message: error instanceof Error ? error.message : 'Published Course V2 预检失败。',
+          diagnosticTarget: projectDiagnosticTarget,
+        })
+      }
+    }
+
+    const interactionCount = project.globalInteractions.length
+      + project.surfaces.reduce((count, surface) => (
+        count + (surface.type === 'slide'
+          ? surface.scenes.reduce((sceneCount, scene) => sceneCount + scene.interactions.length, 0)
+          : 0)
+      ), 0)
+    if (interactionCount > 0) {
+      add({
+        severity: 'info',
+        code: 'static-export-interactions-omitted',
+        message: `${target.toUpperCase()} 为静态格式，${interactionCount} 条声明式交互不会保留。`,
+        diagnosticTarget: projectDiagnosticTarget,
+      })
+    }
+
+    const layerItems = [
+      ...project.globalLayerItems.map(({ item }) => item),
+      ...project.surfaces.flatMap((surface) => [
+        ...surface.surfaceLayerItems.map(({ item }) => item),
+        ...(surface.type === 'slide'
+          ? surface.scenes.flatMap((scene) => scene.layerItems)
+          : surface.type === 'spatial-2d'
+            ? surface.world.layerItems
+            : []),
+      ]),
+    ]
+    const videoCount = layerItems.filter((item) => (
+      item.kind === 'native' && item.content.nativeType === 'video'
+    )).length
+    const omittedControllerCount = layerItems.filter((item) => (
+      item.kind === 'native'
+      && item.content.nativeType === 'teacher-controller'
+      && !item.content.data.includeInStaticExports
+    )).length
+    const flowMediaKinds: Array<'audio' | 'video'> = []
+    const visitFlowBlocks = (blocks: readonly FlowBlock[]): void => {
+      blocks.forEach((block) => {
+        if (block.type === 'section') visitFlowBlocks(block.blocks)
+        else if (block.type === 'media' && block.mediaKind !== 'image') {
+          flowMediaKinds.push(block.mediaKind)
+        }
+      })
+    }
+    project.surfaces.forEach((surface) => {
+      if (surface.type === 'flow') visitFlowBlocks(surface.blocks)
+    })
+    const staticVideoCount = videoCount
+      + flowMediaKinds.filter((kind) => kind === 'video').length
+    const staticAudioCount = Object.keys(project.media.audio.sounds).length
+      + flowMediaKinds.filter((kind) => kind === 'audio').length
+    if (staticAudioCount > 0) add({
+      severity: 'info',
+      code: 'static-export-audio-omitted',
+      message: `${target.toUpperCase()} 为静态格式，声音不会播放。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+    if (staticVideoCount > 0) add({
+      severity: 'info',
+      code: 'static-export-video-poster',
+      message: `${target.toUpperCase()} 中的 ${staticVideoCount} 个视频只保留封面或静态占位。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+    if (omittedControllerCount > 0) add({
+      severity: 'info',
+      code: 'static-export-controller-omitted',
+      message: `${omittedControllerCount} 个教师控制器按作者设置从静态导出中省略。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+
+  const items = [...itemMap.values()].sort((left, right) => {
+    const severityOrder = { error: 0, warning: 1, info: 2 }
+    return severityOrder[left.severity] - severityOrder[right.severity]
+      || compareStableStrings(left.code, right.code)
+      || compareStableStrings(JSON.stringify(left.diagnosticTarget ?? null), JSON.stringify(right.diagnosticTarget ?? null))
+      || compareStableStrings(left.message, right.message)
+  })
+  return {
+    reportVersion: 1,
+    projectId: project.id,
+    schemaVersion: project.schemaVersion,
+    target,
+    generatedAt: now.toISOString(),
+    items,
+    summary: summarize(items),
+  }
 }
 
 export function collectExportPreflight(

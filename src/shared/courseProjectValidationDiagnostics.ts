@@ -312,6 +312,30 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'Schema-invalid projects return unreadable before semantic or export sections are constructed.',
   },
   {
+    code: 'published-interaction-action-unsupported',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Enabled V9 interaction rules can contain action families outside the current Published playback slice.',
+  },
+  {
+    code: 'published-interaction-click-unbindable',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Published node.click binding is limited to auto-hit native text, image, formula and shape layer items.',
+  },
+  {
+    code: 'published-interaction-condition-unsupported',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Enabled V9 interaction rules can contain condition families outside the current Published playback slice.',
+  },
+  {
+    code: 'published-interaction-trigger-unsupported',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Enabled V9 interaction rules can contain trigger families outside the current Published playback slice.',
+  },
+  {
     code: 'runtime-node-reference-missing',
     status: 'active',
     sections: ['projectHealth'],

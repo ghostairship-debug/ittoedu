@@ -7,11 +7,7 @@ import type {
   PublishedSlideSurface,
   PublishedSpatialSurface,
 } from '../../../shared/publishedCourseTypes'
-import type { LayerItemOverride } from '../../../shared/courseProjectTypes'
 import type { SceneNode } from '../../../shared/projectTypes'
-import {
-  isPublishedScopedVisible,
-} from '../../../player/surfaces/spatial/spatialModel'
 import {
   pptxColor,
   pptxNodePosition,
@@ -32,8 +28,9 @@ import {
   auditCourseExportAssets,
   auditCourseExportFonts,
   buildCourseExportPageList,
+  composePublishedSlideStaticPage,
+  isPureSlidePublishedCourse,
   renderPublishedSpatialFrameSvg,
-  shouldOmitPublishedItemFromStaticExport,
   SPATIAL_EXPORT_VIEWPORT,
   type CourseExportPage,
   type CourseExportReportItem,
@@ -44,6 +41,7 @@ export interface BuildCoursePptxOptions {
     published: PublishedCourseV2Payload
     surface: PublishedSlideSurface
     scene: PublishedSlideScene
+    locationId: string
     item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' }>
   }) => string | undefined | Promise<string | undefined>
   onWarning?(message: string): void
@@ -70,57 +68,6 @@ function resolvePublishedAssetData(
 ): string | undefined {
   const url = published.assets[assetId]?.url
   return url?.startsWith('data:') ? url : undefined
-}
-
-function applyPublishedOverride(
-  item: PublishedLayerItem,
-  overrides: Record<string, LayerItemOverride>,
-): PublishedLayerItem {
-  const override = overrides[item.layerItemId]
-  if (!override) return structuredClone(item)
-  const next = structuredClone(item)
-  if (override.frame) next.frame = { ...next.frame, ...override.frame }
-  if (override.visible !== undefined) next.visible = override.visible
-  if (override.rotation !== undefined) next.rotation = override.rotation
-  if (override.opacity !== undefined) next.opacity = override.opacity
-  if (next.kind === 'component' && override.componentProps) {
-    next.props = { ...next.props, ...override.componentProps }
-  }
-  return next
-}
-
-function slideSceneItems(
-  published: PublishedCourseV2Payload,
-  surface: PublishedSlideSurface,
-  scene: PublishedSlideScene,
-): PublishedLayerItem[] {
-  const location = published.locations.find((candidate) => (
-    candidate.kind === 'slide-scene' &&
-    candidate.surfaceId === surface.id &&
-    candidate.sceneId === scene.id
-  ))
-  const locationId = location?.id ?? scene.id
-  const state = scene.presentation?.states.find(
-    (candidate) => candidate.id === scene.presentation?.initialStateId,
-  )
-  const overrides = state?.layerItemOverrides ?? {}
-  const items = [
-    ...surface.surfaceLayerItems
-      .filter((entry) => isPublishedScopedVisible(entry.visibility, locationId))
-      .map((entry) => structuredClone(entry.item)),
-    ...scene.layerItems.map((item) => applyPublishedOverride(item, overrides)),
-  ]
-    .filter((item) => !shouldOmitPublishedItemFromStaticExport(item))
-    .sort((left, right) => left.order - right.order || left.layerItemId.localeCompare(right.layerItemId))
-  if (state?.layerItemOrder) {
-    const orderMap = new Map(state.layerItemOrder.map((id, index) => [id, index]))
-    items.forEach((item) => {
-      const order = orderMap.get(item.layerItemId)
-      if (order !== undefined) item.order = order
-    })
-    items.sort((left, right) => left.order - right.order || left.layerItemId.localeCompare(right.layerItemId))
-  }
-  return items
 }
 
 function nativeSceneNode(item: PublishedNativeLayerItem): SceneNode {
@@ -256,6 +203,8 @@ async function addSlideScenePage(
   published: PublishedCourseV2Payload,
   surface: PublishedSlideSurface,
   scene: PublishedSlideScene,
+  page: CourseExportPage & { locationId: string },
+  includeGlobalLayerItems: boolean,
   options: BuildCoursePptxOptions,
   report: CourseExportReportItem[],
 ): Promise<string[]> {
@@ -265,9 +214,13 @@ async function addSlideScenePage(
   }
   const slide = pptx.addSlide()
   const sceneWarnings: string[] = []
-  const state = scene.presentation?.states.find(
-    (candidate) => candidate.id === scene.presentation?.initialStateId,
+  const composition = composePublishedSlideStaticPage(
+    published,
+    surface,
+    scene,
+    { includeGlobalLayerItems, locationId: page.locationId },
   )
+  const { state } = composition
   slide.background = { color: pptxColor(state?.backgroundColor ?? scene.backgroundColor, 'FFFFFF') }
   const backgroundAssetId = state?.backgroundAssetId === undefined
     ? scene.backgroundAssetId
@@ -288,24 +241,29 @@ async function addSlideScenePage(
       pushReport(report, {
         severity: 'warning',
         message: `场景“${scene.name}”背景素材缺失。`,
-        pageId: scene.id,
+        pageId: page.id,
         assetId: backgroundAssetId,
       })
     }
   }
-  for (const item of slideSceneItems(published, surface, scene)) {
-    if (!item.visible) continue
+  for (const item of composition.items) {
     if (item.kind === 'native') {
       await addNativeItem(slide, item, published, scale, sceneWarnings)
       continue
     }
     let captured: string | undefined
     try {
-      captured = await options.captureDynamicItem?.({ published, surface, scene, item })
+      captured = await options.captureDynamicItem?.({
+        published,
+        surface,
+        scene,
+        locationId: page.locationId,
+        item,
+      })
     } catch (cause) {
       const message = `${item.kind} “${item.layerItemId}”实例快照失败：${cause instanceof Error ? cause.message : String(cause)}`
       sceneWarnings.push(message)
-      pushReport(report, { severity: 'warning', message, pageId: scene.id })
+      pushReport(report, { severity: 'warning', message, pageId: page.id })
     }
     if (captured?.startsWith('data:image/')) {
       addImage(slide, item, captured, scale, '实际运行快照')
@@ -334,7 +292,7 @@ function addSpatialFramePage(
   surface: PublishedSpatialSurface,
   page: CourseExportPage,
   report: CourseExportReportItem[],
-): void {
+): boolean {
   const { svg, viewport } = renderPublishedSpatialFrameSvg(
     surface,
     page.cameraFrameId,
@@ -346,7 +304,7 @@ function addSpatialFramePage(
       message: 'Spatial 无限画布被错误裁成 1280×720，已跳过该 PPTX 页。',
       pageId: page.id,
     })
-    return
+    return false
   }
   const slide = pptx.addSlide()
   slide.background = { color: 'FFFFFF' }
@@ -374,9 +332,10 @@ function addSpatialFramePage(
     altText: `${page.title}（Spatial 镜头 ${viewport.width}×${viewport.height}）`,
   })
   slide.addNotes(`Spatial 镜头 ${page.cameraFrameId ?? 'home'}，视口 ${viewport.width}×${viewport.height}，未把无限 world 裁成单张 1280×720。`)
+  return true
 }
 
-/** Build PPTX bytes from Published Course V2 page list. Global/HUD layers stay out by default. */
+/** Build PPTX bytes from Published Course V2 page list. */
 export async function buildCoursePptx(
   published: PublishedCourseV2Payload,
   options: BuildCoursePptxOptions = {},
@@ -384,6 +343,7 @@ export async function buildCoursePptx(
   const report: CourseExportReportItem[] = []
   const warnings: string[] = []
   const pages = buildCourseExportPageList(published)
+  const pureSlide = isPureSlidePublishedCourse(published)
   const slidePages = pages.filter((page) => page.kind === 'slide-scene')
   const spatialPages = pages.filter((page) => page.kind === 'spatial-frame')
   const flowPages = pages.filter((page) => page.kind === 'flow-document')
@@ -399,7 +359,7 @@ export async function buildCoursePptx(
   auditCourseExportFonts(published, report)
   auditCourseExportAssets(published, report)
 
-  if (published.globalLayerItems.length > 0) {
+  if (published.globalLayerItems.length > 0 && !pureSlide) {
     pushReport(report, {
       severity: 'info',
       message: '全局图层与教师控制器默认不写入 PPTX 文件。',
@@ -421,6 +381,7 @@ export async function buildCoursePptx(
   pptx.title = published.title
   pptx.subject = 'Course Project V9 可编辑兼容导出'
   pptx.theme = { headFontFace: 'Microsoft YaHei', bodyFontFace: 'Microsoft YaHei' }
+  let slideCount = 0
 
   for (const page of slidePages) {
     const surface = published.surfaces.find((candidate): candidate is PublishedSlideSurface => (
@@ -429,7 +390,25 @@ export async function buildCoursePptx(
     if (!surface || !page.sceneId) continue
     const scene = surface.scenes.find((candidate) => candidate.id === page.sceneId)
     if (!scene) continue
-    warnings.push(...await addSlideScenePage(pptx, published, surface, scene, options, report))
+    if (!page.locationId) {
+      pushReport(report, {
+        severity: 'error',
+        message: `Slide 场景“${scene.name}”没有课程位置，无法确定 PPTX 状态与图层可见性。`,
+        pageId: page.id,
+      })
+      continue
+    }
+    warnings.push(...await addSlideScenePage(
+      pptx,
+      published,
+      surface,
+      scene,
+      { ...page, locationId: page.locationId },
+      pureSlide,
+      options,
+      report,
+    ))
+    slideCount += 1
   }
 
   for (const page of spatialPages) {
@@ -437,10 +416,9 @@ export async function buildCoursePptx(
       candidate.id === page.surfaceId && candidate.type === 'spatial-2d'
     ))
     if (!surface) continue
-    addSpatialFramePage(pptx, published, surface, page, report)
+    if (addSpatialFramePage(pptx, published, surface, page, report)) slideCount += 1
   }
 
-  const slideCount = slidePages.length + spatialPages.length
   if (slideCount === 0) {
     pushReport(report, {
       severity: 'error',

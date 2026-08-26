@@ -81,6 +81,8 @@ export interface MixedCoursePlayerPort {
 export interface MixedCourseNavigatorOptions {
   onBeforeNavigate?: (transition: MixedNavigationTransition) => void | Promise<void>
   onNavigate?: (state: MixedNavigationState) => void | Promise<void>
+  /** Reset shared session state before hosts recreate their executable carriers. */
+  onBeforeResetCourse?: () => void | Promise<void>
   onResetCourse?: () => void | Promise<void>
 }
 
@@ -156,6 +158,7 @@ export class MixedCourseNavigator {
   readonly #player: MixedCoursePlayerPort
   readonly #onBeforeNavigate?: MixedCourseNavigatorOptions['onBeforeNavigate']
   readonly #onNavigate?: MixedCourseNavigatorOptions['onNavigate']
+  readonly #onBeforeResetCourse?: MixedCourseNavigatorOptions['onBeforeResetCourse']
   readonly #onResetCourse?: MixedCourseNavigatorOptions['onResetCourse']
   readonly #locationMap: Map<string, MixedLocationEntry>
   #current: MixedLocationEntry | null = null
@@ -192,6 +195,7 @@ export class MixedCourseNavigator {
     this.#player = player
     this.#onBeforeNavigate = options.onBeforeNavigate
     this.#onNavigate = options.onNavigate
+    this.#onBeforeResetCourse = options.onBeforeResetCourse
     this.#onResetCourse = options.onResetCourse
   }
 
@@ -320,6 +324,7 @@ export class MixedCourseNavigator {
       assertNavigationNotAborted(options.signal)
       const target = this.#startLocation()
       await this.#notifyBeforeNavigate(target, true)
+      await this.#onBeforeResetCourse?.()
       const results = await this.#player.resetCourse()
       const failed = results.find((result) => !result.ok)
       if (failed) throw failed.failure?.error ?? new Error('Course reset failed')

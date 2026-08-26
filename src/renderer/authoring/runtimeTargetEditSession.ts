@@ -25,6 +25,8 @@ export interface RuntimeTargetEditSession {
   /** The active editor scene, including for a globally scoped Runtime. */
   readonly sceneId: string
   readonly targetId: string
+  /** Published Runtime layer item; absent only for a standalone RuntimeHost. */
+  readonly nodeId?: string
   readonly kind: RuntimeAuthoringTarget['kind']
   readonly key: string
 }
@@ -72,6 +74,7 @@ export function runtimeTargetMatchesEditSession(
   session: Readonly<RuntimeTargetEditSession>,
 ): boolean {
   return target.targetId === session.targetId &&
+    target.nodeId === session.nodeId &&
     target.scope === session.scope &&
     (target.scope === 'global' || target.sceneId === session.sceneId) &&
     target.kind === session.kind &&
@@ -91,6 +94,7 @@ export function beginRuntimeTargetEditSession(
       scope: context.scope,
       sceneId: context.sceneId,
       targetId: target.targetId,
+      ...(target.nodeId === undefined ? {} : { nodeId: target.nodeId }),
       kind: target.kind,
       key: target.key,
     })
@@ -105,6 +109,7 @@ export function beginRuntimeTargetEditSession(
       scope: context.scope,
       sceneId: context.sceneId,
       targetId: target.targetId,
+      ...(target.nodeId === undefined ? {} : { nodeId: target.nodeId }),
       kind: target.kind,
       key: target.key,
     }),

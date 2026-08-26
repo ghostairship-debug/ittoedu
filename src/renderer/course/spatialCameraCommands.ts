@@ -26,6 +26,10 @@ import {
   type SpatialSessionCamera,
 } from './spatialEditorView'
 import { selectSpatialEditorLayers, spatialSurfaceIn } from './spatialEditorCommands'
+import {
+  controllerTargetIdsForLocations,
+  repairRemovedCourseReferences,
+} from './courseReferenceCleanup'
 
 export interface SpatialCameraPoseInput {
   x: number
@@ -216,16 +220,17 @@ export function deleteSpatialCameraFrame(
     draftSurface.camera.frames.splice(index, 1)
     const remainingFrameIds = new Set(draftSurface.camera.frames.map((frame) => frame.id))
 
-    const removedLocationIds = new Set(
-      draft.locations
-        .filter((location) =>
-          location.kind === 'spatial-camera' &&
-          location.surfaceId === surfaceId &&
-          location.cameraFrameId === frameId,
-        )
-        .map((location) => location.id),
+    const removedLocations = draft.locations.filter((location) =>
+      location.kind === 'spatial-camera' &&
+      location.surfaceId === surfaceId &&
+      location.cameraFrameId === frameId,
     )
+    const removedLocationIds = new Set(removedLocations.map((location) => location.id))
     draft.locations = draft.locations.filter((location) => !removedLocationIds.has(location.id))
+    repairRemovedCourseReferences(draft, {
+      removedLocationIds,
+      removedControllerTargetIds: controllerTargetIdsForLocations(removedLocations),
+    })
 
     if (
       removedLocationIds.has(draft.startLocationId) ||

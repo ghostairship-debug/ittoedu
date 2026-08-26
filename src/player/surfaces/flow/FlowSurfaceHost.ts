@@ -11,7 +11,13 @@ import {
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
 import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
+import type { ComponentHostActions } from '../../../shared/componentTypes'
+import type {
+  CourseStateStore as CourseStateStoreContract,
+  RuntimeHostActions,
+} from '../../../shared/runtimeTypes'
 import type { CourseAudioApi } from '../../AudioManager'
+import type { CourseStateStore } from '../../CourseStateStore'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
 import {
   TeacherControllerDom,
@@ -66,12 +72,17 @@ import type { PublishedInteractionSurfacePort } from '../../interactions/Publish
 import {
   createPublishedSurfaceRuntimeSession,
   mountPublishedSurfaceRuntime,
+  type PublishedSurfaceRuntimeSession,
   type PublishedSurfaceRuntimeMountHandle,
 } from '../runtime/publishedSurfaceRuntimeMount'
 import {
   isPublishedGlobalCanvasRuntimePointerItem,
   setPublishedGlobalCanvasRuntimeInteractionVisibility,
 } from '../runtime/publishedGlobalCanvasRuntimePointer'
+import {
+  PublishedCarrierSideEffectGate,
+  type PublishedCarrierSideEffects,
+} from '../publishedCourseState'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -95,6 +106,12 @@ export interface FlowSurfaceHostOptions {
   initialTocOpen?: boolean
   resolveAsset?: (assetId: string) => string | undefined
   components?: Record<string, PublishedComponentPackageSource>
+  /** Published playback session state shared across every surface host. */
+  courseState?: CourseStateStore
+  /** Playback-only navigation actions exposed to API 3 Runtime instances. */
+  runtimeActions?: Readonly<RuntimeHostActions>
+  /** Playback-only navigation actions exposed to Component API 4 instances. */
+  componentActions?: Readonly<ComponentHostActions>
   audio?: Pick<CourseAudioApi, 'muted' | 'setMuted' | 'toggleMuted'>
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
@@ -115,6 +132,7 @@ export interface FlowSurfaceHostOptions {
     phase: FlowRuntimeFailurePhase,
     error: Error,
   ) => void
+  reportActionError?: (action: TeacherControllerAction, error: Error) => void
 }
 
 export interface FlowHostAudioSession {
@@ -149,11 +167,10 @@ export class FlowSurfaceHost {
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #runtimeHandles: FlowRuntimeHandleRecord[] = []
-  #deferredRuntimeMounts: Array<{
-    wrap: HTMLElement
-    item: PublishedRuntimeLayerItem
-  }> = []
-  readonly #runtimeSession = createPublishedSurfaceRuntimeSession()
+  #deferredCarrierMounts: Array<() => void> = []
+  readonly #runtimeSession: PublishedSurfaceRuntimeSession
+  readonly #carrierSideEffects: PublishedCarrierSideEffectGate
+  #carrierEffects: PublishedCarrierSideEffects
   #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
   #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
   #completedActiveResetLocationId: string | null = null
@@ -166,6 +183,13 @@ export class FlowSurfaceHost {
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
     this.#options = { ...options }
+    this.#runtimeSession = createPublishedSurfaceRuntimeSession(options.courseState)
+    this.#carrierSideEffects = new PublishedCarrierSideEffectGate({
+      courseState: this.#runtimeSession.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
+    })
+    this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
     this.#teacherControllerSession = options.teacherControllerSession
       ?? new TeacherControllerRuntimeSessionStore()
     this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
@@ -297,18 +321,27 @@ export class FlowSurfaceHost {
     this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
+    if (!(wasInactive && preparedActivation !== null)) {
+      this.#carrierSideEffects.activate()
+    }
     if (wasInactive) {
       if (preparedActivation !== null) {
         this.#pendingRuntimeActivation = preparedActivation
-      } else if (this.#runtimeHandles.length > 0) {
-        for (const record of [...this.#runtimeHandles]) {
-          record.handle?.setVisible(true)
-          if (!record.retired) record.handle?.resume()
-        }
       } else {
-        this.#mountDeferredRuntimes()
+        if (this.#deferredCarrierMounts.length > 0) this.#mountDeferredCarriers()
+        else {
+          for (const record of [...this.#runtimeHandles]) {
+            record.handle?.setVisible(true)
+            if (!record.retired) record.handle?.resume()
+          }
+          for (const handle of this.#componentHandles) {
+            handle.setVisible(true)
+            handle.resume()
+          }
+        }
       }
     }
+    if (this.#pendingRuntimeActivation !== null) return
     this.#syncTeacherControllerSession()
     this.#restoreInteractionsIfActive()
   }
@@ -316,12 +349,17 @@ export class FlowSurfaceHost {
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    this.#carrierSideEffects.suspend()
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
     this.#completedActiveResetLocationId = null
     for (const record of [...this.#runtimeHandles]) {
       record.handle?.setVisible(false)
       if (!record.retired) record.handle?.suspend()
+    }
+    for (const handle of this.#componentHandles) {
+      handle.setVisible(false)
+      handle.suspend()
     }
     if (this.#root) this.#root.hidden = true
   }
@@ -392,6 +430,7 @@ export class FlowSurfaceHost {
   destroy(): Promise<void> {
     return this.#enqueue(async () => {
       this.#invalidateInteractions()
+      this.#carrierSideEffects.destroy()
       this.#interactionPort?.destroy()
       this.#interactionPort = null
       this.#interactionNodes.clear()
@@ -425,6 +464,7 @@ export class FlowSurfaceHost {
   }
 
   #destroyComponentHandles(): void {
+    this.#deferredCarrierMounts = []
     for (const handle of this.#componentHandles) {
       try {
         handle.destroy()
@@ -436,7 +476,6 @@ export class FlowSurfaceHost {
   }
 
   #destroyRuntimeHandles(): void {
-    this.#deferredRuntimeMounts = []
     const records = [...this.#runtimeHandles]
     this.#runtimeHandles = []
     for (const record of records) this.#retireRuntimeHandle(record)
@@ -477,6 +516,12 @@ export class FlowSurfaceHost {
         this.#options.resolveAsset,
       ),
       session: this.#runtimeSession,
+      ...(this.#carrierEffects.courseState
+        ? { courseState: this.#carrierEffects.courseState }
+        : {}),
+      ...(this.#carrierEffects.runtimeActions
+        ? { actions: this.#carrierEffects.runtimeActions }
+        : {}),
       fallbackText: firstVisibleRuntimeText(item.runtime.content.values)
         ?? item.runtime.protocol,
       reportError: (phase, error) => {
@@ -511,13 +556,10 @@ export class FlowSurfaceHost {
     wrap.style.pointerEvents = 'none'
   }
 
-  #mountDeferredRuntimes(): void {
-    const deferred = this.#deferredRuntimeMounts
-    this.#deferredRuntimeMounts = []
-    for (const { wrap, item } of deferred) {
-      if (!wrap.isConnected || !this.#root?.contains(wrap)) continue
-      this.#mountRuntime(wrap, item)
-    }
+  #mountDeferredCarriers(): void {
+    const deferred = this.#deferredCarrierMounts
+    this.#deferredCarrierMounts = []
+    for (const mount of deferred) mount()
   }
 
   #applyLocation(locationId: string): void {
@@ -529,18 +571,27 @@ export class FlowSurfaceHost {
       && location.surfaceId === this.#surfaceId
     const pendingActivation = this.#pendingRuntimeActivation
     this.#pendingRuntimeActivation = null
+    if (pendingActivation !== null) this.#carrierSideEffects.activate()
     if (completedResetLocationId === location.id && sameLocation) return
     if (
       pendingActivation?.locationId === location.id
       && !pendingActivation.forced
       && sameLocation
     ) {
-      if (this.#runtimeHandles.length > 0) {
+      if (this.#deferredCarrierMounts.length > 0) {
+        this.#mountDeferredCarriers()
+      } else {
         for (const record of [...this.#runtimeHandles]) {
           record.handle?.setVisible(true)
           if (!record.retired) record.handle?.resume()
         }
-      } else this.#mountDeferredRuntimes()
+        for (const handle of this.#componentHandles) {
+          handle.setVisible(true)
+          handle.resume()
+        }
+      }
+      this.#syncTeacherControllerSession()
+      this.#restoreInteractionsIfActive()
       return
     }
     this.#invalidateInteractions()
@@ -618,6 +669,7 @@ export class FlowSurfaceHost {
 
   #render(): void {
     if (!this.#root || !this.#overlay) return
+    this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
     this.#pendingRuntimeActivation = null
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
@@ -629,7 +681,20 @@ export class FlowSurfaceHost {
       components: this.#components,
       resolveAsset: this.#options.resolveAsset,
       dom: this.#root.ownerDocument,
-      interactive: this.#active,
+      interactive: true,
+      ...(this.#carrierEffects.courseState
+        ? { courseState: this.#carrierEffects.courseState }
+        : {}),
+      ...(this.#carrierEffects.componentActions
+        ? { componentActions: this.#carrierEffects.componentActions }
+        : {}),
+      ...(!this.#active
+        ? {
+            deferComponentMount: (mount: () => void) => {
+              this.#deferredCarrierMounts.push(mount)
+            },
+          }
+        : {}),
       onMountComponent: (handle) => {
         this.#componentHandles.push(handle)
       },
@@ -683,7 +748,20 @@ export class FlowSurfaceHost {
         (assetId) => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
         {
           components: this.#components,
-          interactive: this.#active,
+          interactive: true,
+          ...(this.#carrierEffects.courseState
+            ? { courseState: this.#carrierEffects.courseState }
+            : {}),
+          ...(this.#carrierEffects.componentActions
+            ? { componentActions: this.#carrierEffects.componentActions }
+            : {}),
+          ...(!this.#active
+            ? {
+                deferComponentMount: (mount: () => void) => {
+                  this.#deferredCarrierMounts.push(mount)
+                },
+              }
+            : {}),
           scrollTop,
           onMountComponent: (handle) => {
             this.#componentHandles.push(handle)
@@ -697,7 +775,9 @@ export class FlowSurfaceHost {
         if (this.#active) this.#mountRuntime(wrap, entry.item)
         else {
           wrap.dataset.flowRuntimeState = 'deferred'
-          this.#deferredRuntimeMounts.push({ wrap, item: entry.item })
+          this.#deferredCarrierMounts.push(() => {
+            if (this.#root?.contains(wrap) === true) this.#mountRuntime(wrap, entry.item)
+          })
         }
       } else if (entry.item.kind === 'runtime') {
         wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
@@ -773,7 +853,10 @@ export class FlowSurfaceHost {
         frameEl.style.top = `${frame.y + next.offset.dy}px`
       },
       onAction: (action) => {
-        void this.#handleControllerAction(action)
+        void this.#handleControllerAction(action).catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause))
+          this.#options.reportActionError?.(action, error)
+        })
       },
       getInteractive: () => this.#active,
     })
@@ -837,6 +920,7 @@ export class FlowSurfaceHost {
   }
 
   async #handleControllerAction(action: TeacherControllerAction): Promise<void> {
+    if (!this.#active) return
     if (this.#options.executeTeacherControllerAction) {
       const handled = await this.#options.executeTeacherControllerAction(action)
       if (handled !== false) {
@@ -1024,7 +1108,10 @@ function renderStaticOverlayItem(
   options?: {
     components?: Record<string, PublishedComponentPackageSource>
     interactive?: boolean
+    courseState?: CourseStateStoreContract
+    componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    deferComponentMount?: (mount: () => void) => void
     scrollTop?: number
   },
 ): HTMLElement {
@@ -1091,20 +1178,27 @@ function renderStaticOverlayItem(
     return wrap
   }
   if (entry.item.kind === 'component') {
-    const handle = mountPublishedComponent(wrap, {
-      container: wrap,
-      componentId: entry.item.component.packageId,
-      version: entry.item.component.version,
-      instanceId: entry.item.layerItemId,
-      width: entry.item.frame.width,
-      height: entry.item.frame.height,
-      props: entry.item.props,
-      staticFallbackAssetId: entry.item.staticFallbackAssetId,
-      components: options?.components,
-      resolveAsset,
-      interactive: options?.interactive ?? true,
-    })
-    options?.onMountComponent?.(handle)
+    const componentItem = entry.item
+    const mountInstance = () => {
+      const handle = mountPublishedComponent(wrap, {
+        container: wrap,
+        componentId: componentItem.component.packageId,
+        version: componentItem.component.version,
+        instanceId: componentItem.layerItemId,
+        width: componentItem.frame.width,
+        height: componentItem.frame.height,
+        props: componentItem.props,
+        staticFallbackAssetId: componentItem.staticFallbackAssetId,
+        components: options?.components,
+        resolveAsset,
+        interactive: options?.interactive ?? true,
+        ...(options?.courseState ? { courseState: options.courseState } : {}),
+        ...(options?.componentActions ? { actions: options.componentActions } : {}),
+      })
+      options?.onMountComponent?.(handle)
+    }
+    if (options?.deferComponentMount) options.deferComponentMount(mountInstance)
+    else mountInstance()
     return wrap
   }
   const fallback = entry.item.kind === 'runtime'
@@ -1158,7 +1252,10 @@ function renderFlowArticle(
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
     interactive?: boolean
+    courseState?: CourseStateStoreContract
+    componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    deferComponentMount?: (mount: () => void) => void
   },
 ): HTMLElement {
   const { dom } = options
@@ -1273,7 +1370,10 @@ function renderBlockDom(
     readingWidth?: number
     wideContentWidth?: number
     interactive?: boolean
+    courseState?: CourseStateStoreContract
+    componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    deferComponentMount?: (mount: () => void) => void
   },
 ): void {
   const dom = parent.ownerDocument
@@ -1506,20 +1606,26 @@ function renderBlockDom(
         figure.style.width = '100%'
         figure.style.float = 'none'
       }
-      const handle = mountPublishedComponent(figure, {
-        container: figure,
-        componentId: block.component.packageId,
-        version: block.component.version,
-        instanceId: block.id,
-        width: options.readingWidth ?? 760,
-        height: 320,
-        props: block.props,
-        staticFallbackAssetId: block.staticFallbackAssetId,
-        components: options.components,
-        resolveAsset: (assetId) => resolvePlaybackAssetUrl(options.playback, assetId, options.resolveAsset),
-        interactive: options.interactive ?? true,
-      })
-      options.onMountComponent?.(handle)
+      const mountInstance = () => {
+        const handle = mountPublishedComponent(figure, {
+          container: figure,
+          componentId: block.component.packageId,
+          version: block.component.version,
+          instanceId: block.id,
+          width: options.readingWidth ?? 760,
+          height: 320,
+          props: block.props,
+          staticFallbackAssetId: block.staticFallbackAssetId,
+          components: options.components,
+          resolveAsset: (assetId) => resolvePlaybackAssetUrl(options.playback, assetId, options.resolveAsset),
+          interactive: options.interactive ?? true,
+          ...(options.courseState ? { courseState: options.courseState } : {}),
+          ...(options.componentActions ? { actions: options.componentActions } : {}),
+        })
+        options.onMountComponent?.(handle)
+      }
+      if (options.deferComponentMount) options.deferComponentMount(mountInstance)
+      else mountInstance()
       parent.appendChild(figure)
       return
     }

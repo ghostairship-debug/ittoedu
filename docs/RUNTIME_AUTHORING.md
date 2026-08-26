@@ -4,13 +4,17 @@
 
 本文主要定义 `scene.runtime` / 画布运行时与 `globalRuntime` 的 Runtime API 2 创作协议；API 1 会在当前入口得到明确拒绝。Course Project V9 还允许图层承载 `surface-runtime` API 3；当前发布执行实现了 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM 四个 playback 纵切。组件协议是另一套独立版本体系。
 
-文档同步基线：**2026-08-26**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，且 host actions、presentation 与节点解析仍是明确的 partial context；API 3 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
+文档同步基线：**2026-08-27**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，并把这些已支持 carrier 的 host actions 接回同一会话。Slide scene-local API 2/3 已接通 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` 为 inert，当前 Published `nodes` 解析为空，动态 Runtime 导航守卫也为 inert。API 3 playback 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
 
 Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
 
-完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。该命令不能证明完整 V9 语义，也不能证明 Runtime/Component 实际网络使用与工程声明一致；这是长期边界而非等某条路线完成就会解除的临时状态——工程可以合法声明当前播放执行并不读取的必填字段（`courseState`、`navigationGuards`），这类“声明了但不会生效”的偏差不产生任何 error 或 warning。它不执行运行时代码或真实导出，Node 布局近似和退出码 0 都不能替代真实 Player、导出画面与外部请求检查。
+完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。Published V2 playback 会按 V9 `courseState` 声明初始化默认值，并在跨 location 的 `go` / `next` / `previous` 前执行顶层声明式 `navigationGuards` 的 `block` 语义；同位置状态切换与 replay 不经过守卫，restart 会绕过守卫并恢复声明默认值。校验命令只验证这些引用与类型，不会真的运行课程状态变化、导航路径、Runtime/Component 源码或真实导出。声明式 `interactions` 仍不能读取或写入 `courseState`，Runtime/Component 实际网络使用与工程声明一致性、Node 近似布局和真实像素也需另行复核；退出码 0 不能替代真实 Published playback、导出画面与外部请求检查。
 
-编辑器的“编辑状态”使用 1280×720 authoring Player 创建 API 2 场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。“当前位置试运行”、整课预览、单 HTML 与网页包均复用 `createPublishedCourseSession` 执行路径并各自创建会话。Slide 场景 `layerItems` 与 `globalLayerItems` 内的 enabled `canvas-runtime` API 2 会按 `dom`、`phaser` 或 `hybrid` 执行真实源码；全局项在单个 Published session 中只创建一次，同一内层容器随 Slide/Flow/Spatial 导航迁移，普通换页保留实例与内部状态，restart 才销毁重建。Slide 场景与 Flow `surfaceLayerItems` 内的 `surface-runtime` API 3 DOM 也执行真实可点击 DOM，Flow 仅接受 `source: 'surface'`。`enabled: false`、global API 3 与未覆盖 carrier 继续显示后备；注册、创建、生命周期或 Phaser 核心销毁失败会完成 best-effort 清理并只回退该实例。Slide scene-local API 2 换场景会销毁旧 generation，Flow API 3 换 location 会重建；暂时切到其他 surface 时按 SurfaceHost `suspend()` / `resume()` 保留实例。API 2 的 actions/presentation/node resolution、Flow/Spatial scene-local、非 Flow surfaceLayerItems、捕获与宿主本地能力仍未由这些纵切覆盖。远程素材与 `connectOrigins` 在主 renderer 预览中按工程声明和实际 Published 引用建立可撤销 lease，但这不等于所有 Runtime API 或静态捕获已经具备网络 parity。authoring iframe 仍使用会话过滤、临时 Blob 文档和可转移素材缓冲区；它承担当前视觉合成、生命周期和会话竞态责任，不是可信 Runtime 必须永久继承的权限边界。
+Slide 的“编辑状态”和“当前位置试运行”现在都在主 Renderer 文档内挂载 Published V2 Slide 宿主。authoring 模式只挂载当前 Slide 位置并创建 Runtime/Component 的真实稳定视觉；其学生输入、宿主与教师控制器动作、声明式互动、音视频、导航、演示者输入、呈现推进和 `courseState` 写入全部冻结，透明 Phaser 层只负责 Native 选择与几何操作。现有带 session/revision 的 ready、patch、ACK/error、Runtime target 与 Component target 协议继续作为唯一作者边界，并在同文档内以直接调用/回调传递；Runtime 不能借 `ctx.authoring` 写 Store。Flow / Spatial 保留各自专用作者面和镜头语义。
+
+“当前位置试运行”、整课预览、单 HTML 与网页包均复用 `createPublishedCourseSession` 执行路径并各自创建 playback 会话。Slide 场景 `layerItems` 与 `globalLayerItems` 内的 enabled `canvas-runtime` API 2 会按 `dom`、`phaser` 或 `hybrid` 执行真实源码；全局项在单个 Published session 中只创建一次，同一内层容器随 Slide/Flow/Spatial 导航迁移，普通换页保留实例与内部状态，restart 才销毁重建。Slide 场景与 Flow `surfaceLayerItems` 内的 `surface-runtime` API 3 DOM 也执行真实可点击 DOM，Flow 仅接受 `source: 'surface'`。已支持 carrier 的 Runtime/Component host actions 走同一会话的场景跳转、上一页、下一页、重播与重开路径；会话从声明初始化 `courseState` 默认值，并仅在跨 location 的 `go` / `next` / `previous` 前执行顶层声明式 `block` 守卫。
+
+`enabled: false`、global API 3 与未覆盖 carrier 继续显示后备；注册、创建、生命周期或 Phaser 核心销毁失败会完成 best-effort 清理并只回退该实例。Slide scene-local API 2 换场景会销毁旧 generation，Flow API 3 换 location 会重建；暂时切到其他 surface 时按 SurfaceHost `suspend()` / `resume()` 保留实例。Slide scene-local API 2/3 的 `presentation` 已接通；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。Flow/Spatial scene-local、非 Flow surfaceLayerItems、完整静态捕获与稳定宿主本地能力仍未由这些纵切完整覆盖。主 Renderer 的当前位置与整课预览使用工程内已保存素材字节；当前只有显式 `network.connectOrigins` 建立可撤销 playback lease，但这不等于所有 Runtime API 或静态捕获已经具备网络 parity。
 
 Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩展。Blueprint、AI 局部 patch 和其他编辑器内 AI 接入延后到 2.0 以后；1.x 只预留版本化边界，不调用模型，也不允许运行时直接写工程 Store。
 
@@ -23,11 +27,11 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 | 类型 | 典型用途 | 普通翻页 | 重播本页 | 重开课件 |
 | --- | --- | --- | --- | --- |
 | `scene.runtime` | 当前场景独有的动画、拖拽、判定、DOM 界面、原生节点绑定 | 销毁 | 销毁并重建 | 销毁并随首场景重建 |
-| `globalRuntime` | 跨场景状态、事件协调、导航守卫、常驻 HUD 或课程级效果 | 保留 | 保留 | 销毁并重建 |
+| `globalRuntime` | 跨场景状态、事件协调、常驻 HUD 或课程级效果 | 保留 | 保留 | 销毁并重建 |
 
 整页少字的动画/特效/连续机制写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；稍复杂的局部互动（拖拽、配对、本地多步）制作 V4 组件，先匹配已有包，允许为本课新建。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
 
-编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。authoring 视觉仍在当前 iframe Player 中执行；Published V2 只对 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 开放真实 playback，其他 carrier/host context 仍显示 fallback、空实现或占位，不得借这些纵切验收全 parity。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由规则编排可编辑的结果。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；`scene-navigation` 统一经过导航守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
+编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。Slide authoring 视觉由同文档 Published V2 authoring 模式执行；Published playback 只对 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 开放真实执行，其他 carrier/host context 仍显示 fallback、空实现或占位，不得借这些纵切验收全 parity。Slide scene-local API 2/3 的 `presentation` 已接通；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航；这些声明式规则仍不能以 `courseState` 为条件或写入它。当前 Published 声明式互动执行器只接通 `node.click`，不能把 Runtime/Component 自定义事件写成已落地的可视化规则纵切。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；跨 location 的 `scene-navigation` 经过顶层声明式 `block` 守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
 
 ## 2. `RuntimeDocument`
 
@@ -201,19 +205,14 @@ interface RuntimeCreateContextHybrid extends RuntimeCreateContextBase {
 
 API 2 的联合类型是能力边界，不是类型提示：`dom` 模式不存在 `ctx.Phaser`、`ctx.phaser` 或 `ctx.nodes`，`phaser` 模式不存在 `ctx.dom`/`ctx.domRoot`。需要同时操作原生节点句柄和 DOM 时使用 `hybrid`。迁移历史源码时必须先盘点实际依赖，再选择最小的 `renderMode`。
 
-需要作为行为验收证据的自动判定，必须向 `assessment.evaluate`
-传入已批准的 `responseId`；省略它仅保留向后兼容调用，不会形成
-evidence-grade 候选。需要作为 `ACT-*` 证据的可见动作，应在实际 DOM
-事件处理器内调用 `ctx.evidence.recordAction({ ..., event })`。宿主只接受浏览器
-正在分发的 `isTrusted` 事件；`new Event(...)`、`dispatchEvent(...)` 或事后重用事件
-都会被拒绝。
-
-Player 还会在 Runtime 挂载前开启独立的宿主证据会话，并以
-`[courseware-host-evidence-v1] ` 前缀输出严格 JSON。`session-start` 的
-`sequence` 固定为 `0`；后续 `assessment-evaluated` 与 `action-recorded`
-共用同一个 `sessionId` 和无间断递增的 `sequence`。两类记录的
-写入口仍只由 `PlayerApp` 私有持有的 `HostEvidenceRecorder` 与 Runtime
-宿主桥接，不会暴露记录器本身。
+`assessment.evaluate` 与 `ctx.evidence.recordAction()` 属于 Runtime API 2
+协议，但证据是否持久化取决于具体宿主。独立 `PlayerApp` 会在 Runtime
+挂载前开启宿主证据会话，并以 `[courseware-host-evidence-v1] ` 前缀输出严格
+JSON；其中 `session-start` 的 `sequence` 为 `0`，后续记录共用同一个
+`sessionId` 和递增 `sequence`。当前同文档 Published V2 会话没有挂接或持久化
+这套 `HostEvidenceRecorder`，因此即使传入 `responseId`，也不能把 Published
+播放中的调用宣称为 evidence-grade 记录。可见动作仍只能使用浏览器正在分发的
+`isTrusted` 事件；合成事件或事后重用事件不会成为可信动作证据。
 
 ## 5. 所有人工可见文字
 
@@ -274,7 +273,7 @@ CoursewareRuntime.define({
 })
 ```
 
-`authoringApiVersion` 属于 `CoursewareRuntime.define()` 的定义，不写入 `RuntimeDocument`，也不改变 `runtimeApiVersion`。只有定义声明 V1、宿主处于隔离 authoring 状态且不是普通 preview/capture 时，`ctx.authoring` 才存在。
+`authoringApiVersion` 属于 `CoursewareRuntime.define()` 的定义，不写入 `RuntimeDocument`，也不改变 `runtimeApiVersion`。只有定义声明 V1、宿主处于 Published V2 authoring 模式且不是普通 preview/capture 时，`ctx.authoring` 才存在。
 
 目标约束：
 
@@ -285,7 +284,7 @@ CoursewareRuntime.define({
 - 目标快照是只读、会话局部的数据。运行时拿不到工程写权限，编辑器提交后重建/同步运行时文档；旧会话或过期 revision 不得覆盖新实例；
 - `content.values` 与 `assets` 位于整个 `RuntimeDocument`，不属于 `scene.presentation`，也不生成状态专属覆盖；
 - `scene.runtime` 目标只在当前场景编辑作用域出现，画布修改由该场景基础及全部命名状态共享，界面必须明确提示“所有状态共享”；
-- `globalRuntime` 目标只在“全局层”编辑作用域出现，画布修改由整课共享。未声明 `authoringApiVersion` 的 API 2 运行时和没有目标的区域仍由 Player 正常显示，并继续从属性/开发面板编辑；宿主不得用空框替换、扫描像素或根据 DOM 文本猜测数据键。
+- `globalRuntime` 目标只在“全局层”编辑作用域出现，画布修改由整课共享。未声明 `authoringApiVersion` 的 API 2 运行时和没有目标的区域仍由 Published authoring 宿主显示稳定视觉，并继续从属性/开发面板编辑；宿主不得用空框替换、扫描像素或根据 DOM 文本猜测数据键。
 
 Runtime Authoring V1 不等于 AI patch。未来 Blueprint 或 AI 能力必须使用新的版本化协议和明确授权接入，不能复用本扩展偷偷修改源码或工程结构。
 
@@ -381,7 +380,7 @@ const onActivate = () => {
 }
 ```
 
-Player 会在同一批根对象上原位更新文字、图片、图形、视频、教师控制器、组件 props、显隐、几何、层级和背景，并发布 `presentation:change`。这既保留组件生命周期与临时交互状态，也让最终稳定画面仍能在编辑画布、状态条和缩略图中修改。`setState()` / `transitionTo()` 返回同步 `boolean`；状态 ID 不存在或已经处于目标状态时返回 `false`。
+Slide scene-local `presentation` 会物化作者稳定状态并发布 `presentation:change`；Native 文字、图片、图形、视频、教师控制器及背景按当前根对象更新。Component 在状态物化时可能重挂载，不能依赖其临时交互状态跨状态切换保留。`setState()` / `transitionTo()` 返回同步 `boolean`；状态 ID 不存在或已经处于目标状态时返回 `false`。全局 API 2 与 Flow surface-local API 3 的 Published `presentation` 当前 inert。
 
 Course Project V9 不把动画时机存在节点上。可枚举的入场/退场是 `interactions` / `globalInteractions` 的 `node.enter` / `node.exit` 动作，由点击、场景/状态进入、节点激活、音视频/组件/运行时事件、`presenter.command` 或指定动画完成触发。每步可立即、淡化、滑动或缩放，并设置时长、缓动、局部延迟和顺序/并行关系。正常完成的动画按步骤 ID 发出 `animation.completed`；被新动画、状态基线更新或作用域销毁取消时不发。统一 `PresenterInput` 已把 PageUp/PageDown 和项目附加按键转换为前进/后退命令；`authored-command` 策略只分发显式作者规则，没有匹配规则时不隐式翻页，`scene-navigation` 策略仍统一经过导航守卫。
 
@@ -391,9 +390,9 @@ Project `designTokens` 是作者态的最小字体/色板词汇，`ImageNode.saf
 
 `playbackInitialVisibility: 'hidden'` 只表示互动 Player 开始时先隐藏等待入场。入场/退场只改变 Player 瞬态可见性和输入，不写回节点 `visible`、不调用 `presentation.setState()`。编辑画布、缩略图、PDF/PPTX 按作者稳定可见性显示。运行时不应为同一可枚举节奏重复实现 Tween；只有路径、关键帧、物理、粒子或算法动画继续属于运行时/组件。
 
-运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。编辑状态由 authoring Player 显示运行时真实稳定视觉；只有显式登记的 text/asset 区域可原位编辑。学生互动和瞬态业务只能在对应 carrier 的 Published playback parity 落地后，才用“当前位置试运行”或“整课预览”验收；当前包含 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM。API 2 若依赖 actions、presentation 或 nodes，仍必须等待对应宿主能力接线后验收。
+运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。Slide 编辑状态由同文档 Published V2 authoring 模式显示运行时真实稳定视觉；只有显式登记的 text/asset 区域可原位编辑。学生互动和瞬态业务只能在对应 carrier 的 Published playback parity 落地后，才用“当前位置试运行”或“整课预览”验收；当前包含 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM。Slide scene-local API 2/3 可使用 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。
 
-API 2 的 `phaser` / `hybrid` 上下文中，`ctx.nodes.get('actual_node_id')` 可直接按节点 ID 查询，用于当前工程中尚未声明 authoring target 的一次性互动或临时诊断；新创作仍不应在 `source` 中硬编码节点 ID。
+在明确提供 `nodes` 能力的 API 2 宿主中，`phaser` / `hybrid` 上下文可用 `ctx.nodes.get('actual_node_id')` 按节点 ID 查询；当前 Published carrier 不能从 host actions 接线推导出完整 `nodes` parity。即使目标宿主提供该能力，新创作仍不应在 `source` 中硬编码节点 ID。
 
 具备 `nodes` 能力的全局运行时可解析当前已挂载的全局层节点（文字、图片、图形、视频、教师控制器或组件）以及当前场景节点，但应容忍场景切换时场景节点暂时不存在。
 
@@ -436,7 +435,7 @@ interface CourseStateStore {
 ```
 
 - `localState` 属于当前运行时挂载；场景离开、重播或重进后清空；
-- `courseState` 普通翻页和重播时保留，重开课件时清空；
+- `courseState` 普通翻页和重播时保留，重开课件时恢复 V9 声明的默认值；
 - 状态读写会克隆数据，不能保存函数、DOM、Phaser 对象、平台对象或循环引用；
 - 不要把视图对象塞进状态；状态保存业务事实，视图在 `create()` 中从状态重建。
 
@@ -446,7 +445,7 @@ ctx.localState.set('attempts', attempts)
 ctx.courseState.set('challengePassed', true)
 ```
 
-当前只有 Runtime/Component 上下文可以直接读写 `courseState`，声明式 `interactions` 还没有课程状态条件、动作或导航守卫语法。曾有一份声明式课程状态与导航守卫 RFC（2026-08-12，现存于 Git 历史），仍是未批准提案；最小内存原型未进入生产代码，也没有改变 API 2 或导出合同。不要在当前工程中生成 RFC 示例字段。
+Published playback 会先按 Course Project V9 / Published V2 的 `courseState` 声明初始化默认值；Runtime/Component 上下文可直接读写这份会话状态。顶层 `navigationGuards` 是独立、已冻结的声明式 `block` 守卫：它可用 `exists` / `compare` 条件读取课程状态，并阻止跨 location 的 `go` / `next` / `previous`，但不能重定向、执行动作或写状态。同位置状态切换与 replay 不经过守卫；restart 绕过守卫并恢复声明默认值。场景/全局 `interactions` 仍没有 `courseState` 条件或写动作，也不能把守卫内嵌进普通规则。曾有一份更广的声明式课程状态 RFC（2026-08-12，现存于 Git 历史），仍是未批准提案；不要在当前工程中生成该 RFC 的示例字段。
 
 ## 10. 事件
 
@@ -474,17 +473,19 @@ ctx.events.listenerCount(eventName?)
 | `state:change` | `{ scope, sceneId?, type, key?, value? }`，具体变更字段按操作而定 |
 | `navigation:blocked` | `{ fromSceneId?, toSceneId, reason }` |
 
-`ctx.emit('completed', data)` 会发出带当前 `scope/sceneId` 的 `runtime:event`。场景的声明式规则可按 `scope: 'scene' | 'global'` 和 `eventName` 接收：`scene` 来源还会校验当前场景 ID，`global` 来源则允许当前场景规则响应常驻全局运行时。组件的 `ctx.emit()` 会进入 `component:event`。因此复杂运行时可只计算“是否完成”并发出语义事件，把状态切换、声音、视频和导航继续留在可视化规则中。
+`ctx.emit('completed', data)` 会在当前 Runtime host 的事件总线上发出带 `scope/sceneId` 的 `runtime:event`；组件的 `ctx.emit()` 对应 `component:event`。当前 Published 的全局 Runtime 与局部 Runtime 不共享同一条事件总线，而且声明式互动执行器只接通 `node.click`，尚未把 Runtime/Component 自定义事件接入状态、媒体或导航规则。因此这些事件可供同一 host 内代码订阅，但不能宣称为已落地的可视化规则纵切。
 
 宿主会在运行时销毁时解除通过当前 `ctx.events` 建立的订阅；仍建议保存 disposer 并在 `destroy()` 中显式调用，使责任清楚。
 
 ## 11. 导航与守卫
 
-所有跳转必须使用 `ctx.actions`。`goToScene(sceneId, targetStateId?)` 使用稳定场景 ID，可选原子进入目标场景的指定命名状态，不能用可变页码。省略目标状态或引用失效时进入目标场景 `initialStateId`；同场景调用可直接切换状态。Player 在创建目标节点、组件和运行时前完成状态物化，不会先闪现初始状态。导航守卫若重定向到另一个场景，原请求的 `targetStateId` 不会被套用到重定向场景。
+所有跳转必须使用 `ctx.actions`。`goToScene(sceneId, targetStateId?)` 使用稳定场景 ID，可选原子进入目标场景的指定命名状态，不能用可变页码。省略目标状态或引用失效时进入目标场景 `initialStateId`；同场景调用可直接切换状态。已支持 Published carrier 的 `goToScene`、上一页、下一页、重播和重开 actions 进入同一会话协调路径；authoring 模式中的这些动作全部 inert。Published playback 在创建目标节点、组件和运行时前完成状态物化，不会先闪现初始状态。
 
 画布内 `TeacherControllerNode` 也走同一宿主动作路径。默认 `scene.open-picker` 按钮展开全部场景，选择后调用不带状态的 `goToScene(sceneId)`；目录展开、当前项高亮与焦点只是 Player 临时 UI，不写入工程、命名状态或 `courseState`。固定 `scene.go(sceneId, targetStateId?)` 仅作为确有固定分支需求时的高级按钮动作。运行时不应另建一套不可编辑导航栏。
 
-全局或场景运行时可以注册同步导航守卫：
+Course Project V9 顶层 `navigationGuards` 是当前 Published 会话执行的声明式守卫。它按稳定 `fromLocationIds` / `toLocationIds` 选中跨 location 的 `go` / `next` / `previous`，用 `match: 'all' | 'any'` 组合 `courseState` 条件，且 `effect` 只能是 `block`；命中时阻止跳转并使用作者消息说明原因，不能重定向或执行代码。同位置状态切换与 replay 不检查它；restart 绕过它并恢复声明默认值。
+
+Runtime API 2 还定义了 `ctx.navigation.guard()` 动态守卫。以下能力保留在完整作者协议中，但当前 Published carrier 的动态守卫注册仍是 partial context；只有目标宿主的能力索引明确开放时才可依赖：
 
 ```js
 const removeGuard = ctx.navigation.guard(({ fromSceneId, toSceneId }) => {
@@ -495,13 +496,13 @@ const removeGuard = ctx.navigation.guard(({ fromSceneId, toSceneId }) => {
 })
 ```
 
-守卫返回：
+动态守卫返回：
 
 - `false`：阻止；
 - 字符串：重定向到该场景 ID；
 - `true` 或 `undefined`：允许。
 
-守卫是同步的。需要确认框时，先由运行时完成异步 UI 交互，再调用动作；不要在守卫中返回 Promise。销毁时应调用 disposer。
+动态守卫是同步的。需要确认框时，先由运行时完成异步 UI 交互，再调用动作；不要在守卫中返回 Promise。销毁时应调用 disposer。不要把它与顶层只允许 `block` 的 V9 `navigationGuards` 混为一套语法。
 
 ## 12. 重播与重开
 
@@ -511,7 +512,7 @@ const removeGuard = ctx.navigation.guard(({ fromSceneId, toSceneId }) => {
 
 1. 离开并销毁当前场景；
 2. 销毁全局运行时和统一全局层；
-3. 清空导航守卫与 `courseState`；
+3. 解除动态 Runtime 守卫登记，并把 `courseState` 重置为 V9 声明的默认值；
 4. 重建全局作用域；
 5. 从第一场景开始。
 
@@ -543,11 +544,11 @@ return {
 
 当前协议的输出是一个可重复的确定帧，不是动画采样时间线。动态过程多帧捕获仍是研究项：在真实课例证明需要并冻结采样时间、帧数、状态副作用和目标格式之前，不增加第二套 hook，也不允许运行时通过多个永不收敛的 `waitUntil()` 模拟帧序列。需要展示过程时，互动 HTML 继续运行真实动画；静态格式使用获批的确定帧或 `staticFallback`。
 
-捕获失败按最小单元传播，不能用空画面伪装成功：Player 已成功启动后，PDF 某一场景失败时只让该页使用静态后备；PPTX 某一运行时条目或 underlay/overlay 图层失败时只回退该项，已经成功的场景和图层快照继续保留。只有 Player/捕获宿主本身无法初始化时，才允许批次级后备，并必须报告原因。
+捕获失败按最小单元传播，不能用空画面伪装成功：纯 Slide PDF 的某一页资源失败会让该页捕获明确失败并记录原因，不返回透明成功图；PPTX 某一 Runtime/Component 实例失败时只回退该项，已经成功的实例快照继续保留。捕获宿主无法初始化时必须报告具体原因，不能静默切回旧 V8 快照。
 
 PDF/PPTX 不执行互动、声音或元素入场/退场，也不应用 `playbackInitialVisibility: 'hidden'`；静态结果按作者稳定可见性显示。PDF 使用视频海报；PPTX 为视频生成标明文件名的静态占位。画布教师控制器默认不进入静态成品，只有节点的 `includeInStaticExports` 为 `true` 时保留；即使保留也不展开场景目录。
 
-`staticFallback` 同时服务编辑器缩略图和静态导出：缩略图直接合成已启用场景/全局运行时登记的后备，不执行源码；PPTX 导出器则先在透明隐藏 Player 中运行当前工程并分别捕获实际 underlay/overlay 运行时层，只有实际快照失败或未产生可见结果时才使用作者后备。普通文字、图形和图片仍保持原生 PowerPoint 对象。后备静态化方式如下：
+`staticFallback` 同时服务编辑器缩略图和静态导出：缩略图直接合成已启用场景/全局运行时登记的后备，不执行源码；PPTX 导出器则为 Slide 中每个可见 Runtime/Component 建立独立、惰性的 Published generation，捕获成功后立即销毁，只有该实例失败或未返回有效图片时才使用作者后备。普通文字、图形和图片仍保持原生 PowerPoint 对象。纯 Slide 才把 global 动态层纳入静态输出；Mixed Slide 不重复合成 global。Spatial 只使用镜头 SVG 与 Runtime/Component 静态后备或可见占位，Flow 不执行动态实例也不映射 PPTX。后备静态化方式如下：
 
 - `coverage: 'runtime-layer'`：叠加一张透明运行时层，保留原生节点可编辑；
 - `coverage: 'full-scene'`：在该运行时自身层级先清除已经合成的下方内容，再以整页后备铺满画布；
@@ -556,7 +557,7 @@ PDF/PPTX 不执行互动、声音或元素入场/退场，也不应用 `playback
 
 实际快照与 `staticFallback` 都不可用时，导出器会写入可见警告占位，不能静默省略运行时视觉。`capture.waitUntil()` 只等待确定能结束的初始化任务；循环动画不会被“等到结束”。
 
-DOM 捕获覆盖常规背景、边框、文字、图片、表单值和 Canvas/WebGL 快照，但不等价于完整浏览器截图引擎。复杂伪元素、滤镜、混合模式、遮罩或特殊 CSS 必须实测 PDF/PPTX；不稳定时改用可捕获 Canvas 表达，或提供由同一内容数据生成的 `staticFallback`。
+DOM 捕获覆盖常规背景与单层 `linear-gradient`、边框、圆角裁剪、文字、图片、input/textarea/select 当前值、slot 分配节点/后备子树和 Canvas/WebGL 冻帧，但不等价于完整浏览器截图引擎。复杂伪元素、滤镜、混合模式、遮罩或多层/特殊 CSS 必须实测 PDF/PPTX；不稳定时改用可捕获 Canvas 表达，或提供由同一内容数据生成的 `staticFallback`。
 
 导出前“工程检查”会检查运行时素材绑定、节点绑定、静态后备、交互引用和跨场景目标，并提供只读信息释放与视觉密度概览；后两者只是可达性近似和启发式分数。选择任一成品格式后还会生成目标专属 Export Preflight，使用 `error/warning/info`：错误阻断，警告与说明可由人确认继续；可定位项携带场景/状态/节点信息，完整报告可保存为 JSON。运行时、预览或组件异常还会写入本地轮转诊断日志，可导出不含课件素材内容的文本报告。工程检查、导出预检和异常诊断日志用途不同，不能互相替代。
 
@@ -587,7 +588,7 @@ interface RuntimeInstanceLifecycle {
 
 ## 15. 信任与宿主边界
 
-Runtime 是经过审核的可信扩展。当前统一画布的 authoring 与 playback 位于不授予同源权限的 sandbox iframe；authoring 额外冻结宿主输入、动作、内置媒体、导航、呈现状态变化与课程状态写入，并且只通过带版本、会话和 revision 的目标快照与编辑器通信。这些是当前视觉合成与生命周期行为，不是把 Runtime 当作不可信代码的安全合同。
+Runtime 是经过审核的可信扩展。Slide authoring 与 playback 位于主 Renderer 的同一文档，并复用同一套 Published V2 Slide 宿主；authoring 额外冻结宿主输入与动作、内置媒体、导航、演示者输入、呈现状态变化和课程状态写入。带版本、session 和 revision 的 ready、patch、ACK/error 与目标快照仍是作者协议，并通过同文档直接调用/回调传递。它限制作者态职责和陈旧更新，不是把 Runtime 当作不可信代码的安全合同。
 
 运行时确需父页面、本地、桌面或其他能力时，应由目标宿主提供稳定接口或同宿主执行语义；网页与静态导出可以不提供桌面专属能力，但必须明确降级。运行时仍须在 authoring/capture 上下文中停止自行创建的原生音频、外部计时和业务推进；`ctx.authoring` 是编辑协议，不是任意工程写 API。
 
@@ -617,7 +618,7 @@ Runtime 是经过审核的可信扩展。当前统一画布的 authoring 与 pla
 - [ ] 完整归档已运行 `npm run --silent validate:project -- <file.h5lesson>`；按 JSON 中的 Schema、当前已接线的结构性工程健康结果和四格式预检修复确定性错误，Node 近似布局、源码外联网络与真实像素另行复核。
 - [ ] 工程检查没有已检出的阻断错误；信息释放/视觉密度只作为只读复核线索；四种目标的 Export Preflight 已审阅，但不把报告存在当作完整覆盖证明；需要排障时另行导出异常诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。
-- [ ] 编辑状态与当前位置试运行使用同一 1280×720 Player 视觉边界；authoring 冻结互动、媒体、导航和课程状态，透明 Phaser 层没有造成位置偏移或重复视觉。
+- [ ] Slide 编辑状态与当前位置试运行使用同文档 Published V2 Slide 宿主和同一 1280×720 视觉边界；authoring 冻结互动、宿主动作、媒体、导航、演示者输入和课程状态写入，direct patch/ACK/target 的 session/revision 语义正确，透明 Phaser 层没有造成位置偏移或重复视觉；Flow / Spatial 专用作者面未被改写。
 - [ ] 自动化 Electron 验证保持主窗口始终隐藏，不调用 `show()` 或抢占桌面；只在显式可视调试命令中显示窗口。
 
 API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。其规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。该基准不替代真实课件的命名呈现状态设计。

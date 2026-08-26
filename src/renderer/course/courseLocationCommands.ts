@@ -11,6 +11,10 @@ import type {
 } from '../../shared/courseProjectTypes'
 import { createBlankFlowSurface } from './flowDocumentModel'
 import {
+  controllerTargetIdsForLocations,
+  repairRemovedCourseReferences,
+} from './courseReferenceCleanup'
+import {
   LAYER_REJECT_STALE_REVISION,
   rejectIfStaleDocument,
 } from './globalLayerCommands'
@@ -360,8 +364,30 @@ function deleteSurfaceFromDraft(
   surfaceId: string,
   preferredLocationId?: string,
 ): string {
+  const removedSurface = draft.surfaces.find((surface) => surface.id === surfaceId)
+  if (!removedSurface) throw new Error(`找不到课程页面：${surfaceId}`)
+  const removedLocations = draft.locations.filter((location) => location.surfaceId === surfaceId)
+  const removedLocationIds = new Set(removedLocations.map((location) => location.id))
+  const removedLayerItemIds = new Set(
+    removedSurface.surfaceLayerItems.map((entry) => entry.item.layerItemId),
+  )
+  if (removedSurface.type === 'slide') {
+    removedSurface.scenes.forEach((scene) => (
+      scene.layerItems.forEach((item) => removedLayerItemIds.add(item.layerItemId))
+    ))
+  } else if (removedSurface.type === 'spatial-2d') {
+    removedSurface.world.layerItems.forEach((item) => removedLayerItemIds.add(item.layerItemId))
+  }
   draft.surfaces = draft.surfaces.filter((surface) => surface.id !== surfaceId)
-  draft.locations = draft.locations.filter((location) => location.surfaceId !== surfaceId)
+  draft.locations = draft.locations.filter((location) => !removedLocationIds.has(location.id))
+  repairRemovedCourseReferences(draft, {
+    removedLocationIds,
+    ...(removedSurface.type === 'slide'
+      ? { removedInteractionSceneIds: new Set(removedSurface.scenes.map((scene) => scene.id)) }
+      : {}),
+    removedControllerTargetIds: controllerTargetIdsForLocations(removedLocations),
+    removedLayerItemIds,
+  })
   if (draft.mixedPrintPlan) {
     draft.mixedPrintPlan.entries = draft.mixedPrintPlan.entries.filter(
       (entry) => entry.surfaceId !== surfaceId,
@@ -391,15 +417,23 @@ function deleteSlideSceneFromDraft(
   }
   const sceneIndex = surface.scenes.findIndex((scene) => scene.id === sceneId)
   if (sceneIndex < 0) throw new Error(`找不到 Slide 场景：${sceneId}`)
-  const deletedLocationIds = new Set(draft.locations.flatMap((location) =>
+  const removedLocations = draft.locations.filter((location) =>
     location.kind === 'slide-scene' &&
     location.surfaceId === surfaceId &&
     location.sceneId === sceneId
-      ? [location.id]
-      : [],
+  )
+  const deletedLocationIds = new Set(removedLocations.map((location) => location.id))
+  const removedLayerItemIds = new Set(surface.scenes[sceneIndex]!.layerItems.map(
+    (item) => item.layerItemId,
   ))
   surface.scenes.splice(sceneIndex, 1)
   draft.locations = draft.locations.filter((location) => !deletedLocationIds.has(location.id))
+  repairRemovedCourseReferences(draft, {
+    removedLocationIds: deletedLocationIds,
+    removedInteractionSceneIds: new Set([sceneId]),
+    removedControllerTargetIds: controllerTargetIdsForLocations(removedLocations),
+    removedLayerItemIds,
+  })
   if (deletedLocationIds.has(draft.startLocationId)) {
     const fallbackScene = surface.scenes[Math.max(0, sceneIndex - 1)] ?? surface.scenes[0]
     const fallback = fallbackScene && draft.locations.find((location) =>
@@ -445,14 +479,17 @@ function deleteSpatialCameraFromDraft(
   const frameIndex = surface.camera.frames.findIndex((frame) => frame.id === frameId)
   if (frameIndex < 0) throw new Error('找不到镜头画面，请刷新后重试')
   surface.camera.frames.splice(frameIndex, 1)
-  const removedLocationIds = new Set(draft.locations.flatMap((location) =>
+  const removedLocations = draft.locations.filter((location) =>
     location.kind === 'spatial-camera' &&
     location.surfaceId === surfaceId &&
     location.cameraFrameId === frameId
-      ? [location.id]
-      : [],
-  ))
+  )
+  const removedLocationIds = new Set(removedLocations.map((location) => location.id))
   draft.locations = draft.locations.filter((location) => !removedLocationIds.has(location.id))
+  repairRemovedCourseReferences(draft, {
+    removedLocationIds,
+    removedControllerTargetIds: controllerTargetIdsForLocations(removedLocations),
+  })
   if (removedLocationIds.has(draft.startLocationId)) {
     draft.startLocationId = draft.locations.find((location) =>
       location.kind === 'spatial-camera' && location.surfaceId === surfaceId,

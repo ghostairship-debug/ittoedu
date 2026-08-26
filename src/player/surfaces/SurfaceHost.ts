@@ -28,6 +28,8 @@ export interface SurfaceCaptureRequest {
   purpose: 'thumbnail' | 'export' | 'authoring'
   /** Named camera/frame/state selected by the author. */
   frameId?: string
+  /** Capture one authored layer at its unrotated frame size for staticization. */
+  layerItemId?: string
   width?: number
   height?: number
 }

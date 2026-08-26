@@ -24,14 +24,12 @@
  * `ArrayBuffer`, and a session that never exports must not pay for it.
  * Installation touches the network zero times; the first
  * `prepareBundledFontEmbedding()` is what fetches, and it caches for the
- * session. Both export commands await it, and so does the runtime preview —
- * the preview reuses `buildStandaloneHtml` for a blob document, which is a
- * separate `Document` that never inherits the editor's injected faces, so
- * without that await the canvas and the preview would render different fonts.
+ * session. Export commands await it before producing self-contained files.
+ * The Slide authoring host now lives in the editor document and therefore uses
+ * the same already-installed font faces without a second embedding path.
  *
  * A build that still never prepares resolves to no fonts and stays exactly as
- * small as it is today; the preview only awaits when the project actually
- * declares a bundled family.
+ * small as it is today.
  */
 import notoSansScLicense from '../../../vendor/fonts/noto-sans-sc/LICENSE?raw'
 import stixTwoMathLicense from '../../../vendor/fonts/stix-two-math/LICENSE?raw'

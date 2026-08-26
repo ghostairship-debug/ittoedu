@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { collectExportPreflight } from '@/renderer/export/exportPreflight'
+import {
+  collectCourseProjectExportPreflight,
+  collectExportPreflight,
+} from '@/renderer/export/exportPreflight'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createImageNode,
   createProject,
@@ -9,6 +13,53 @@ import {
 const emptyResources = { assetFiles: {}, components: {} }
 
 describe('export preflight', () => {
+  it('projects only V9 health findings with stable targets for a current course', () => {
+    const project = createBlankCourseProject({
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    surface.scenes[0]!.interactions.push({
+      id: 'missing-animation-action',
+      enabled: true,
+      trigger: { type: 'animation.completed', actionId: 'missing-action' },
+      conditions: [],
+      actions: [{
+        id: 'continue',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'scene.next' },
+      }],
+    })
+
+    const report = collectCourseProjectExportPreflight(
+      project,
+      'single-html',
+      emptyResources,
+      new Date('2026-08-27T00:00:00.000Z'),
+      { playerBundle: '/* player */' },
+    )
+
+    expect(report).toMatchObject({
+      projectId: project.id,
+      schemaVersion: 9,
+      target: 'single-html',
+      generatedAt: '2026-08-27T00:00:00.000Z',
+    })
+    expect(report.items).toContainEqual(expect.objectContaining({
+      code: 'project-health:interaction-action-reference-missing',
+      diagnosticTarget: {
+        version: 1,
+        kind: 'scene',
+        projectId: project.id,
+        surfaceId: surface.id,
+        sceneId: surface.scenes[0]!.id,
+      },
+    }))
+    expect(report.items.map(({ code }) => code)).not.toContain('project-health:v8-field')
+  })
+
   it('aggregates unused assets without changing publishing semantics', () => {
     const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.first = {

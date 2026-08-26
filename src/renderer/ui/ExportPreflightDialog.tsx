@@ -84,7 +84,7 @@ export function ExportPreflightDialog({
         </header>
         <div className="export-preflight__list" aria-label="导出预检问题">
           {report.items.map((item, index) => {
-            const locatable = Boolean(item.sceneId || item.nodeId)
+            const locatable = Boolean(item.diagnosticTarget || item.sceneId || item.nodeId)
             return (
               <article
                 className={`export-preflight__item is-${item.severity}`}

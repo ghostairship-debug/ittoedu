@@ -1,8 +1,8 @@
 # IttoEdu 开发总纲
 
-> 计划版本：22.0（2026-08-26：Owner 修订**不变量 15**——把"可复现失败"从唯一硬门降级为准入依据之一，补入"已完成论证的架构性偏差"与"Owner 决定"；据此重新立项 `host-unify-authoring-preview`（编辑画布与试运行统一到同一套 Published 宿主），任务板 1 张 queued 卡。原两项远端 CI 红灯的根因——打包时区依赖与示例缩略图字体依赖——已于同日修复；能力索引来源清单已手工修到 37 项仍有遗漏，其余 A/B 档事实偏差与 consumer 诉求仍待 Owner 定级）
+> 计划版本：23.0（2026-08-27：Owner 以当前对话明确要求结合本总纲与根目录评估修复全部问题、完成全部任务。宿主统一、产品归档时区、Published 课程状态/导航、作者命令、V9 诊断、纯 Slide 静态捕获、能力索引事实与 provenance、发布验证及文档口径已组成一个固定工程候选；Course Project V9 / Published Course V2 Schema 未变。当前工作状态只看自动任务板，不在本行复制卡片数量。）
 >
-> 第 5 节“审计收口与生产减负”的审计阶段已收口；该节此后只保留当前 Ready 任务与 5.4 节剩余 Owner 裁决入口，不再作为待执行路线。可领取工作只看 [任务板](docs/development-plan/TASK_BOARD.md) 与对应任务卡
+> 第 5 节“审计收口与生产减负”的审计与 2026-08-27 Owner 收口均已结束；该节只保存当前结果和历史立项证据，不再作为待执行路线。可领取工作只看 [任务板](docs/development-plan/TASK_BOARD.md) 与对应任务卡
 >
 > 产品 Owner 决策现状：架构稳定化与 2026-08-24 审计的 29 项修复已收口为 owner-waived `engineering candidate`（打包与性能测量豁免，记录为未执行项）；教师 `accepted` 只保留为最终产品与发布结论。既有 V8 课例均为测试产物、没有内容迁移或兼容义务；尚存文件按真实 consumer 删除，必要验证只重建最小 V9 fixture。Runtime/Component 均是经过审核的可信扩展，外部导入只是分发方式；不因“非内置”强制隔离或禁止宿主、父页面、本地与网络能力。
 
@@ -40,7 +40,7 @@
 - 单 HTML 同时提供离线便携与在线轻量两种明确语义，不用“单文件”暗示必然离线；
 - 软件内部重复状态、重复路径和无消费者旧实现持续减少。
 
-本产品是 AI-native 轻量课件编辑器：工程/语义检查的主要消费者是 AI（CLI 与无界面链路），人类可视化诊断面板不再投入增强（Owner 裁决，2026-08-25）。
+本产品是 AI-native 轻量课件编辑器：工程/语义检查的主要消费者是 AI（CLI 与无界面链路）；教师可视化面板只复用同一 V9 collector 提供必要定位和导出判断，不另建第二套诊断平台。
 
 ## 2. 当前产品与协议边界
 
@@ -101,7 +101,7 @@
 ### 5.1 审计结论与裁决
 
 - **repo-index 有有限导航价值，但当前实现已成为维护负担**：9 个 tracked 生成文件约 13.41 MiB、约 29,200 行；其专用核心与测试约 6,226 行，连同 semantic/golden 超过 9,000 行；约 70 个提交触及该系统，其中 56 个刷新生成物，近期样本约 21% diff 行来自索引。它没有产品运行时 consumer，`repo-index/contexts/` 也没有能证明查询改变实现决策的留存结果。裁决是保留显式 `repo:index` / `repo:context` 的可选导航能力，移除 tracked cache、golden/quality 自证循环和默认 CI freshness 门；不新建 watcher、数据库、自动缓存或另一套质量平台。
-- **能力索引不是同一类负担**：`artifacts/ai-capabilities` 约 102 KiB，Builder 直接消费，必须保留。当前只收窄 `generation-evidence.json` 的来源清单到生成器、正式合同/Schema/常量/诊断 ledger 与 catalog audit 等直接输入；不改变能力声明，不把广泛 main/preload/Player/producer 文件继续当生成依据。
+- **能力索引不是同一类负担**：`artifacts/ai-capabilities` 体量小且由 Builder 直接消费，必须保留。`generation-evidence.json` 现在从生成器与两份可执行 Schema authority roots 自动遍历本地模块闭包；运行实现只作为能力事实来源列在相应条目，不冒充生成字节 provenance。
 - **存在过度设计**：`W4-C1` 已交付 30 个诊断码且 CLI 有真实 consumer，保留并冻结；`W4-C2` 没有当前可复现失败，撤出活动路线。`PRJ-00B`、`PRJ-01`、`PRJ-02`、`PRJ-03`、`PRJ-04` 只有阶段名称和设想，没有当前失败/consumer/验收，全部取消预排；`PRJ-05` 仅在真实预览失败或 Owner 新决定时从当前事实重新建卡——**该条件已于 2026-08-26 同时满足**（真实预览失败见 5.4 A0 第 2、3 条；Owner 决定见不变量 15 的变更起因），已按当前源码事实重新建卡为 `host-unify-authoring-preview`，未沿用 PRJ-05 编号与旧文案。
 - **存在过度验证**：上一阶段多次串行执行作者检查、独立 Reviewer、集成复查、文档同步与索引刷新；同一风险面被重复覆盖。72 项单 worker E2E、完整 `verify`、重复生成/检查不再作为每张卡的认真度证明。审计判断，长耗时主要来自串行编排、重复审查、文档/索引循环，而不是本轮实现本身天然需要十几小时。
 
@@ -113,17 +113,28 @@
 
 1. `repair-arch0-fixture-component-provenance`（S1）：消除上述红灯。
 2. `tooling-repo-index-optional`（S2 / 热点 generated-index）：`repo-index/generated/**`、`golden-tasks/**`、`evaluateGoldenTasks.ts` 与其唯一测试 consumer 已删除，`repo:index:quality` 与 CI 的 freshness/quality 门已移除，净删约 31,440 行；`repo:index`、`repo:index:check`、`repo:context` 与 `repo-index/semantic/**` 保留为显式手动导航。独立 Reviewer 裁决 `APPROVE WITH FOLLOW-UP`：`.github` 唯一 workflow 经独立核验成立，workflow outputs 无悬空引用，semantic 全部 208 条路径引用有效，提交可干净 revert。
-3. `tooling-capability-evidence-scope`（S1）：`sourceEvidence()` 的 sources 由 57 先收窄至 25，`artifacts/ai-capabilities/**` 除 `generation-evidence.json` 外逐字节不变。**当前清单是 37 项**——同日两次后续修复把漏掉的真实生成输入补了回来：`87d2af5` 补入 11 个 `src/shared/contracts/**` 合同实现，`c2442c2` 再补入 `src/renderer/project/archivePath.ts` 的值依赖。这两次修复消除了收口时记录的"provenance 对合同实现失明"反例，但清单仍靠手工维护，仍有已核实的遗漏（见 5.4 A 第 1 条）。
+3. `tooling-capability-evidence-scope`（S1）：早期先把 sources 由 57 收窄并补齐合同实现；2026-08-27 的 Owner 收口进一步删除手工清单，改为传递模块闭包，因此不再以某个固定文件数量作为正确性指标（见 5.4 当前结果）。
 
 不自动恢复 W4/PRJ/NET/RTP 占位路线，也不再进行同类全仓审计；创建下一张实现卡仍须先满足不变量 15 的任一条准入依据（新的可复现失败、真实 consumer、量化维护成本、已完成论证的架构性偏差，或 Owner 决定）。
 
-### 5.4 收口后已核实的剩余问题（除 A0 外未立项，待 Owner 定级）
+### 5.4 2026-08-27 Owner 指令的收口结果
 
-按不变量 15 分档，均为只读核实结果。**除 A0 已由 Owner 立项外，其余不得据此自行建卡。**
+当前对话中的 `/goal` 构成不变量 15 的明确 Owner 决定。本轮在不修改 V9 / Published V2 Schema 的前提下完成：
+
+- Slide 编辑状态与当前位置试运行改为同 Renderer 文档、同 Published V2 Slide 宿主；作者态冻结互动、媒体、导航和状态写入，旧 V8 `ExportPayload` / Blob iframe / `PlayerApp` 作者预览主路径及其无 consumer 模块已删除。Published 原生文字复用既有排版分析，自动缩小、内置字体和保存素材字节在作者/试运行/网页发布间使用同一事实；合法 Mixed 工程只把 global 显示于 Flow 后切回 Slide 仍走正常作者宿主。
+- 现有版本化 authoring 协议继续承担 direct ready / patch / ACK / error / revision / stale-session；Runtime API 2/3 与 Component API 4 的显式目标接入 Published registry，原位内容修改只重建被修改的动态 carrier，不让扩展直接写 Store。
+- Published playback 初始化 V9 `courseState` 默认值，并把一份状态 Store、受 active generation 约束的 Runtime/Component 导航动作和顶层声明式 `navigationGuards` 共享到已支持的 Slide/Flow/Spatial carriers；重播保留，重开恢复声明默认值，静态/authoring carrier 冻结副作用。专业“互动与动画”提供状态/守卫新增、修改、改名同步、安全删除和 all/any 条件 GUI；每次提交解析完整 V9 文档并进入各表面的既有撤销历史。页面、场景、Flow 锚点与 Spatial 镜头删除共用按 location / Slide scene / controller target / layer item 分域的引用清理，空守卫与同名跨域误删不再产生非法工程。
+- V9 CLI、编辑器工程检查和 Export Preflight 共用当前 V9 health collector，并对 Published 不支持的 trigger/condition/action/click carrier 给出稳定 warning；全局互动问题会定位到全局“互动与动画”，不会误切到场景范围。能力索引公开同一份 partial playback 事实、课程逻辑作者能力和远程-only 素材限制，不再用 `full-rule-authoring` 或静默 `valid/warning 0` 暗示全部规则都会播放。
+- 纯 Slide PDF 按真实 location 惰性逐页捕获 Published host；Slide PPTX 保留可编辑 Native，并逐 Runtime/Component 实例建立隔离 generation 捕获，失败明确回退作者后备或可见占位。Mixed PDF、Flow 与 Spatial 继续诚实使用静态 composition、语义打印计划或镜头 SVG，不宣称执行未覆盖动态实例。DOM painter 已覆盖单层线性渐变、表单当前值、slot 组合树与圆角裁剪；复杂伪元素、filter/blend/mask 仍明确列为画面复核边界。
+- 能力索引 provenance 从手工文件表改为生成器与两份 Schema authority roots 的本地模块传递闭包（含 type-only edge）；两个 `schemas/*.json` 明确标为 Builder 能力摘要而非校验 Schema；V8 registry 与 V9 诊断结构分区。产品 DOCX/课程包 ZIP 使用共享的跨时区安全时间；Windows 启动、W3 文档合同、离线 URL 大小写与 scoped gate 缺口已由前置产品提交修复。
+
+声明式 Interaction Protocol V1 仍不新增 `courseState` 条件/写动作或判题分支；复杂分支由现已接线的 Runtime/Component 状态与导航动作承担，索引和诊断会阻止 AI 把未播放规则误当能力。Component hybrid、Published `nodes`、全局 API 2 / Flow surface-local API 3 的 `presentation`、动态 Runtime 守卫、Mixed PDF 动态 Slide 捕获及 Flow/Spatial 动态静态捕获仍是明确的非承诺边界，不是本批未关闭任务；Slide scene-local API 2/3 的 `presentation` 已接通。
+
+> 下列 A0/A/B/C 文字只保存 2026-08-26 的立项证据与当时源码快照；上面的收口结果才是当前事实。不得从下列历史描述重新派工，精确能力以源码和 `artifacts/ai-capabilities/index.json` 为准。
 
 收口时记录的两项 A 档已在同日修复，只作留档、不再待处置：能力索引 provenance 对合同实现失明（`87d2af5` 把 11 个 `src/shared/contracts/**` 合同实现补入来源清单，改 `src/shared/contracts/interaction-v1/schema.ts` 现在会改变清单里的 sha256）；`docs/development-plan/inventories/legacy-consumers.json` 的 LEG-007 `currentFact` 过期（已改写为 `src/renderer/project/validateProjectArchive.ts` 随 LEG-010 删除后的事实）。
 
-**A0. 编辑画布与试运行的渲染分裂（2026-08-26 核实；Owner 已立项，见 [host-unify-authoring-preview](docs/development-plan/tasks/host-unification/host-unify-authoring-preview.md)）**
+**A0. 编辑画布与试运行的渲染分裂（2026-08-26 立项证据；已按本节当前结果收口）**
 
 以下五条同源，行号以 `9c39f69` 复核为准；`src/renderer/ui/Workspace.tsx` 近期被高频改写，其位置以文中符号名为准而非行号。这一簇正是不变量 15 修订的起因：它在 2026-08-25 被完整论证并批过方案，次日以"没有当前可复现失败"撤项，而下面第 2、3 条就是当时被认为不存在的那个失败。
 
@@ -156,24 +167,26 @@
 
 - `repo-index/semantic/features.json` 与 `modules.json` 仍有 golden 时代措辞；`docs/development-plan/ARCHITECTURE_CONTRACT.md` 的 repo-index freshness 不变量表述与"缓存不再 tracked"存在落差；`REPAIR_PLAN.md` 的相关行属历史证据，按协议第 9 节应保留不改。
 
-## 6. 当前路线成功门槛（本批达成情况）
+## 6. 前一工具治理批次成功门槛（历史达成情况）
+
+本节只记录第 5.3 节三张工具治理卡合入时的门槛，不描述第 5.4 节本轮产品交付；当前产品事实与验证结论以后者为准。
 
 - ✅ ARCH-0 三个固定 V9 archive 均 `valid=true`、error 0、warning 0、`canExport=true`，保存重开断言通过，重复构建字节确定；
 - ✅ `git ls-files repo-index/generated` 为空且缓存被 ignore；默认 package/CI 不再执行 repo-index freshness、golden 或 quality 门；从缺失缓存开始 `repo:index` 可重建、`repo:context -- --path ... --size small` 返回可读上下文且不弄脏工作树；
-- ✅ `artifacts/ai-capabilities` 继续可供 Builder 消费；除 `generation-evidence.json` 外能力制品逐字节不变，来源清单已排除 broad main/preload/Player/producer 文件。**但**"只含直接生成输入"仍未完全达成——清单已由手工修到 37 项，`src/shared/projectSchema.ts` 这条真实值依赖仍缺，见 5.4 A 第 1 条；
-- ✅ V9 Schema、CLI/Player/Export 行为与教师能力无变化；页面不新增控制器，也未恢复独立教师逃生控件；
+- ✅ `artifacts/ai-capabilities` 继续可供 Builder 消费；provenance 已由三个稳定 authority entrypoints 自动派生完整本地模块闭包，不再维护手工 37 项清单；Course Project / Published Course 两份 JSON 明确是 Builder 能力摘要并指向可执行 Zod authority，不再冒充由 Schema 派生的校验合同；
+- ✅ 该工具治理批次未改变 V9 Schema、CLI/Player/Export 行为与教师能力；页面未新增控制器，也未恢复独立教师逃生控件；
 - ✅ 每张实现卡只执行卡内 focused checks；Reviewer 只补作者未覆盖的 CI/YAML 与任务板风险面，未复跑作者命令；本批未执行完整 E2E、完整 build、`verify`、打包、性能或签名门。集成层在合并 SHA 上补跑一次 `typecheck` 与一次 `vitest run` 作为组合风险验证；
 - ✅ 未由当前失败、真实 consumer 或量化收益支撑的新增抽象、缓存、诊断码、任务卡和验证平台：0；
 - ✅ **原两项远端 CI 红灯的根因已于同日修复**：打包时间戳的本地时区依赖由 `7600c67` 修复（共享助手 + 三时区回归断言），示例缩略图的系统字体依赖由 `7d588ee` 修复（改为手工维护的输入资产），`3c60ec8` 另补了产品测试前先构建 player bundle。根因是合并前的本地验证跑在 UTC+8 且已装微软雅黑的 Windows 机器上，没有暴露这两项。CI 的最终结论以实际运行为准，本文不代为宣告绿灯。
 
 ## 7. 当前路线之外的方向
 
-skill 重构、黄金样例、真实课例生产、声明式数据条件与编辑器内 AI 交互仍由 Owner 另行启动。Wave 1 只建设这些未来能力都需要的网络、资源和凭证边界，不接入具体模型或 Provider。表达能力类合同继续由真实 consumer 证据准入。
+skill 重构、黄金样例、真实课例生产、声明式 Interaction Protocol V1 的 `courseState` 条件/写动作与判题分支，以及编辑器内 AI 交互仍由 Owner 另行启动。Wave 1 只建设这些未来能力都需要的网络、资源和凭证边界，不接入具体模型或 Provider。表达能力类合同继续由真实 consumer 证据准入。
 
 ## 8. 当前状态与领取入口
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。新建卡统一放在 `docs/development-plan/tasks/<wave>/`，完成即删除（Git 不跟踪空目录）。
 
-当前任务板为 **1 张 queued 卡**：`host-unify-authoring-preview`（S2，编辑画布与试运行统一到同一套 Published 宿主），由产品 Owner 于 2026-08-26 依修订后的不变量 15（已完成论证的架构性偏差 + Owner 决定）重新立项，当前失败证据见 5.4 A0。第 5 节原三张 Ready 卡已全部交付、合入并删卡。除该卡外，第 5.4 节 A / B / C 档的剩余问题都是只读核实结果，仍未立项；建卡前须由 Owner 就 A 档反例（尤其能力索引 provenance 清单增删）与 B 档 consumer 诉求（尤其真实用户导出的负数年份缺陷与声明式表达合同）先行定级，不得据此自行改 fixture、脚本或门禁。执行者只读本总纲的不变量、自己的任务卡及卡中点名的源码/测试，不得通读旧 Wave 后自行补范围。不得自动继续 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1 或其它 carrier 扩展。
+`host-unify-authoring-preview` 与本轮同一 Owner 指令覆盖的 5.4 A/B/C 已按 5.4 当前结果收口；完成卡随候选删除，当前精确 Ready 状态只看自动任务板。以后不得从本节保留的 2026-08-26 立项证据自动恢复 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1、Interaction V2/Schema 扩展或其它 carrier 扩面；新的实现仍须重新满足不变量 15，并从当时源码事实建立最小验收。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。

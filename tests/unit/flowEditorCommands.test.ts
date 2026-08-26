@@ -396,6 +396,115 @@ describe('Flow editor commands', () => {
     expect(wipe.reason === FLOW_LAST_HEADING_REASON || wipe.reason === FLOW_LAST_LOCATION_REASON).toBe(true)
   })
 
+  it('cleans only references owned by deleted Flow anchors and visibility-pruned layers', () => {
+    const project = createFlowProject()
+    const removedLocation = project.locations.find((location) => (
+      location.kind === 'flow-block' && location.blockId === 'sec-2'
+    ))
+    if (!removedLocation) throw new Error('expected sec-2 location')
+    project.surfaces.push({
+      id: 'slide-same-name',
+      title: '同名场景',
+      type: 'slide',
+      canvas: { width: 1280, height: 720 },
+      surfaceLayerItems: [],
+      scenes: [{
+        id: 'p-runs',
+        name: '同名场景',
+        backgroundColor: '#ffffff',
+        layerItems: [],
+        interactions: [],
+      }],
+    })
+    project.locations.push({
+      id: 'slide-location',
+      label: '同名场景',
+      kind: 'slide-scene',
+      surfaceId: 'slide-same-name',
+      sceneId: 'p-runs',
+    })
+    project.mixedPrintPlan = {
+      pageSize: 'A4',
+      orientation: 'auto',
+      entries: [
+        { id: 'print-flow', kind: 'flow-document', surfaceId: 'flow' },
+        {
+          id: 'print-slide',
+          kind: 'slide-scenes',
+          surfaceId: 'slide-same-name',
+          sceneIds: ['p-runs'],
+        },
+      ],
+    }
+    const removedOverlay = {
+      ...overlayItem('removed-with-location', 30),
+      visibility: { mode: 'include' as const, locationIds: [removedLocation.id] },
+    }
+    project.globalLayerItems.push(removedOverlay)
+    project.courseState = [{ key: 'ready', valueType: 'boolean', defaultValue: false }]
+    project.navigationGuards = [
+      {
+        id: 'guard-from-removed',
+        effect: 'block',
+        fromLocationIds: [removedLocation.id],
+        toLocationIds: ['h1'],
+        match: 'all',
+        conditions: [{ type: 'compare', key: 'ready', operator: 'eq', value: false }],
+        message: '请先完成',
+      },
+      {
+        id: 'guard-to-removed',
+        effect: 'block',
+        fromLocationIds: ['h1'],
+        toLocationIds: [removedLocation.id],
+        match: 'all',
+        conditions: [{ type: 'compare', key: 'ready', operator: 'eq', value: false }],
+        message: '不能进入',
+      },
+    ]
+    project.globalInteractions = [
+      {
+        id: 'drop-pruned-layer-trigger',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: 'removed-with-location' },
+        conditions: [],
+        actions: [{
+          id: 'drop-pruned-layer-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+      {
+        id: 'keep-same-name-slide',
+        enabled: true,
+        trigger: { type: 'presenter.command', command: 'next' },
+        conditions: [],
+        actions: [{
+          id: 'keep-same-name-slide-action',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.go', sceneId: 'p-runs' },
+        }],
+      },
+    ]
+
+    const deleted = deleteFlowEditorBlocks(courseProjectDocumentSchema.parse(project), [
+      target('p-runs'),
+      target('sec-2'),
+    ], { now: NOW })
+
+    expectHistory(deleted)
+    expect(deleted.nextDocument!.navigationGuards).toEqual([])
+    expect(deleted.nextDocument!.globalLayerItems.map((entry) => entry.item.layerItemId))
+      .not.toContain('removed-with-location')
+    expect(deleted.nextDocument!.globalInteractions.map((rule) => rule.id))
+      .toEqual(['keep-same-name-slide'])
+    expect(deleted.nextDocument!.surfaces.some((surface) => (
+      surface.type === 'slide' && surface.scenes.some((scene) => scene.id === 'p-runs')
+    ))).toBe(true)
+  })
+
   it('cut/copy/paste/duplicate keep structure and asset references, regenerating ids', () => {
     const project = createFlowProject()
     const copied = copyFlowEditorBlocks(project, [target('media-1')])

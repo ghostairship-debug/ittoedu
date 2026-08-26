@@ -29,10 +29,17 @@ import {
   COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
 } from '../../src/shared/courseProjectValidationDiagnostics'
 import {
+  NATIVE_EXPORT_PREFLIGHT_CODES,
+  PROJECT_HEALTH_CODES,
+} from '../../src/shared/diagnosticCodes'
+import {
   INTERACTION_ACTION_TYPES,
   INTERACTION_CONDITION_TYPES,
   INTERACTION_TRIGGER_TYPES,
 } from '../../src/shared/interactionTypes'
+import {
+  PUBLISHED_INTERACTION_PLAYBACK_SUPPORT,
+} from '../../src/shared/publishedInteractionSupport'
 import { PUBLISHED_COURSE_VERSION } from '../../src/shared/publishedCourseTypes'
 import { SURFACE_RUNTIME_API_VERSION } from '../../src/shared/surfaceRuntimeTypes'
 
@@ -40,70 +47,11 @@ const expectedCatalogPackageCount = 4
 const siblingCatalogAvailable = existsSync(
   path.join(process.cwd(), '..', 'courseware-components', 'catalog.json'),
 )
-/**
- * The exact, narrow provenance input set: files the generator reads or imports,
- * plus the contracts whose declared text the artifacts quote. Order matches the
- * generator's declaration order.
- */
-const expectedSourceEvidencePaths = [
-  'package.json',
+const expectedProvenanceEntrypoints = [
   'scripts/generate-ai-capabilities.ts',
-  'scripts/validate-project.ts',
-  'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
-  'src/renderer/components/importComponentPackage.ts',
-  'src/renderer/project/archivePath.ts',
-  'src/renderer/export/exportSize.ts',
-  'src/player/HostEvidenceRecorder.ts',
-  'src/shared/assessmentEvaluators.ts',
-  'src/shared/builtInComponentCatalog.ts',
-  'src/shared/componentCatalog.ts',
-  'src/shared/componentContentIntegrity.ts',
-  'src/shared/componentSchema.ts',
-  'src/shared/contracts/component-v4/schema.ts',
-  'src/shared/componentTypes.ts',
-  'src/shared/contracts/component-v4/types.ts',
-  'src/shared/constants.ts',
   'src/shared/courseProjectSchema.ts',
-  'src/shared/contracts/course-project-v9/schema.ts',
-  'src/shared/courseProjectTypes.ts',
-  'src/shared/contracts/course-project-v9/types.ts',
-  'src/shared/courseProjectValidationDiagnostics.ts',
-  'src/shared/diagnosticCodes.ts',
-  'src/shared/interactionSchema.ts',
-  'src/shared/contracts/interaction-v1/schema.ts',
-  'src/shared/interactionTypes.ts',
-  'src/shared/contracts/interaction-v1/types.ts',
   'src/shared/publishedCourseSchema.ts',
-  'src/shared/contracts/published-course-v2/schema.ts',
-  'src/shared/publishedCourseTypes.ts',
-  'src/shared/contracts/published-course-v2/types.ts',
-  'src/shared/runtimeSchema.ts',
-  'src/shared/contracts/runtime/schema.ts',
-  'src/shared/runtimeTypes.ts',
-  'src/shared/contracts/runtime/types.ts',
-  'src/shared/surfaceRuntimeTypes.ts',
-  'src/shared/contracts/runtime/surface.ts',
 ]
-/**
- * Every `src/shared/*.ts` contract entry is a one-line barrel whose sole content
- * is `export * from './contracts/...'`. Recording only the barrel would let an
- * edit to the contract implementation change the generated artifact bytes while
- * every recorded source hash stayed identical — provenance would then claim the
- * inputs were unchanged. Both halves of each pair must be traced.
- */
-const contractBarrelReexportTargets = [
-  ['src/shared/componentSchema.ts', 'src/shared/contracts/component-v4/schema.ts'],
-  ['src/shared/componentTypes.ts', 'src/shared/contracts/component-v4/types.ts'],
-  ['src/shared/courseProjectSchema.ts', 'src/shared/contracts/course-project-v9/schema.ts'],
-  ['src/shared/courseProjectTypes.ts', 'src/shared/contracts/course-project-v9/types.ts'],
-  ['src/shared/interactionSchema.ts', 'src/shared/contracts/interaction-v1/schema.ts'],
-  ['src/shared/interactionTypes.ts', 'src/shared/contracts/interaction-v1/types.ts'],
-  ['src/shared/publishedCourseSchema.ts', 'src/shared/contracts/published-course-v2/schema.ts'],
-  ['src/shared/publishedCourseTypes.ts', 'src/shared/contracts/published-course-v2/types.ts'],
-  ['src/shared/runtimeSchema.ts', 'src/shared/contracts/runtime/schema.ts'],
-  ['src/shared/runtimeTypes.ts', 'src/shared/contracts/runtime/types.ts'],
-  ['src/shared/surfaceRuntimeTypes.ts', 'src/shared/contracts/runtime/surface.ts'],
-] as const
 const expectedCurrentProtocols = {
   project: COURSE_PROJECT_SCHEMA_VERSION,
   publishedCourse: PUBLISHED_COURSE_VERSION,
@@ -151,11 +99,16 @@ describe('AI capability manifest generation', () => {
 
     expect([...second.files.entries()]).toEqual([...first.files.entries()])
     const index = parseFile<{
-      nodes: Array<{ type: string }>
+      nodes: Array<{ type: string; schema: string; schemaRole: string }>
+      publishedCourse: string
+      publishedCourseRole: string
+      publishedCourseValidationAuthority: string
       interactions: {
         triggerTypes: string[]
         conditionTypes: string[]
         actionTypes: string[]
+        publishedPlayback: Record<string, unknown>
+        courseLogicAuthoring: Record<string, string>
       }
       validation: {
         command: string
@@ -172,10 +125,11 @@ describe('AI capability manifest generation', () => {
       }
       components: {
         packageAdmission: Record<string, unknown>
-        exports: { singleHtml: string; webPackage: string }
+        exports: { singleHtml: string; webPackage: string; pdf: string; pptx: string }
         publishedPlayback: {
           status: string
           provenSlices: Array<Record<string, unknown>>
+          staticExport: Record<string, string>
           notCovered: string[]
         }
       }
@@ -193,13 +147,17 @@ describe('AI capability manifest generation', () => {
         output: string
         constraints: string[]
       }
-      runtime: { exports: { singleHtml: string; webPackage: string } }
+      runtime: {
+        exports: { singleHtml: string; webPackage: string; pdf: string; pptx: string }
+      }
       exportSurfaces: {
         singleHtml: {
           resources: string
           modes: { offlinePortable: string; onlineLightweight: string }
           networkPolicy: string
         }
+        pdf: { interactivity: string; representation: string }
+        pptx: { interactivity: string; representation: string }
       }
       previewSurfaces: {
         host: string
@@ -220,9 +178,30 @@ describe('AI capability manifest generation', () => {
       ...COURSE_NATIVE_TYPES,
     ])
     expect(index.nodes.map((entry) => entry.type)).not.toContain('external-component')
+    expect(index.nodes.every((entry) =>
+      entry.schema.includes('#/nativeTypeSchemas/') &&
+      entry.schemaRole === 'builder-capability-summary',
+    )).toBe(true)
+    expect(index.publishedCourse).toBe('schemas/published-course-v2.json')
+    expect(index.publishedCourseRole).toBe('builder-capability-summary')
+    expect(index.publishedCourseValidationAuthority).toBe(
+      'src/shared/publishedCourseSchema.ts#publishedCourseV2Schema',
+    )
     expect(index.interactions.triggerTypes).toEqual(INTERACTION_TRIGGER_TYPES)
     expect(index.interactions.conditionTypes).toEqual(INTERACTION_CONDITION_TYPES)
     expect(index.interactions.actionTypes).toEqual(INTERACTION_ACTION_TYPES)
+    expect(index.interactions.publishedPlayback).toEqual(
+      PUBLISHED_INTERACTION_PLAYBACK_SUPPORT,
+    )
+    expect(index.interactions.courseLogicAuthoring).toEqual({
+      courseState: 'professional-gui-and-undoable-commands',
+      navigationGuards: 'professional-gui-and-undoable-commands',
+      commitValidation: 'full-course-project-v9-schema',
+    })
+    expect(parseFile<{ publishedPlayback: Record<string, unknown> }>(
+      first.files,
+      'schemas/interactions.json',
+    ).publishedPlayback).toEqual(PUBLISHED_INTERACTION_PLAYBACK_SUPPORT)
     expect(index.assessmentEvaluators).toEqual([
       expect.objectContaining({
         id: 'EVAL-finite-choice-v1',
@@ -286,7 +265,15 @@ describe('AI capability manifest generation', () => {
     )
 
     const diagnostics = parseFile<{
-      legacyRegistryScope: string
+      artifactVersion: number
+      legacyV8: {
+        scope: string
+        registryVersion: number
+        projectHealth: string[]
+        nativeExportPreflight: string[]
+        projectedProjectHealthForExport: string[]
+        sourceOfTruth: string
+      }
       courseProjectValidation: {
         reportVersion: number
         target: {
@@ -304,7 +291,21 @@ describe('AI capability manifest generation', () => {
         contract: string
       }
     }>(first.files, 'diagnostics.json')
-    expect(diagnostics.legacyRegistryScope).toContain('not the active Course Project V9 CLI')
+    expect(diagnostics.artifactVersion).toBe(2)
+    expect(diagnostics.legacyV8).toEqual({
+      scope: expect.stringContaining('not the active Course Project V9 CLI'),
+      registryVersion: 1,
+      projectHealth: PROJECT_HEALTH_CODES.filter(
+        (code) => !code.startsWith('published-interaction-'),
+      ),
+      nativeExportPreflight: NATIVE_EXPORT_PREFLIGHT_CODES,
+      projectedProjectHealthForExport: PROJECT_HEALTH_CODES
+        .filter((code) => !code.startsWith('published-interaction-'))
+        .map((code) => `project-health:${code}`),
+      sourceOfTruth: 'src/shared/diagnosticCodes.ts',
+    })
+    expect(diagnostics).not.toHaveProperty('projectHealth')
+    expect(diagnostics).not.toHaveProperty('nativeExportPreflight')
     expect(diagnostics.courseProjectValidation).toEqual({
       reportVersion: 1,
       target: {
@@ -359,12 +360,32 @@ describe('AI capability manifest generation', () => {
       maintainerMustBeAssigned: true,
     })
     expect(index.components.exports).toMatchObject({
-      singleHtml: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
-      webPackage: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+      singleHtml: 'partial:local-dom-carriers-plus-slide-scene-phaser-interactive; global-component-session-lifetime-not-covered',
+      webPackage: 'partial:local-dom-carriers-plus-slide-scene-phaser-interactive; global-component-session-lifetime-not-covered',
+      pdf: 'pure-slide-real-published-capture; other-surfaces-static-fallback-or-label',
+      pptx: 'slide-real-published-capture-with-authored-fallback-or-visible-placeholder; global-only-in-pure-slide',
     })
     expect(index.components.publishedPlayback).toEqual({
       status: 'partial',
       provenSlices: [
+        {
+          surfaces: ['slide', 'flow', 'spatial-2d'],
+          carriers: [
+            'slide:scene.layerItems/surfaceLayerItems',
+            'flow:blocks/surfaceLayerItems',
+            'spatial-2d:world.layerItems/surfaceLayerItems',
+          ],
+          scope: 'local-only',
+          renderMode: 'dom',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-component-api4-playback',
+          services: 'shared-courseState; active-carrier host actions; cross-location go-next-previous guarded; replay same-location; restart bypasses guards and resets defaults',
+        },
         {
           surface: 'slide',
           carrier: 'scene.layerItems',
@@ -377,35 +398,54 @@ describe('AI capability manifest generation', () => {
             'web-package',
           ],
           behavior: 'interactive-component-api4-playback',
+          services: 'shared-courseState; active-carrier host actions; cross-location go-next-previous guarded; replay same-location; restart bypasses guards and resets defaults',
         },
       ],
+      staticExport: {
+        pdf: 'pure-slide-page-capture-runs-dom-scene-surface-global-and-phaser-scene; mixed-flow-spatial-use-static-fallback-or-label',
+        pptx: 'slide-dom-scene-surface-and-phaser-scene-real-item-capture; global-dom-only-in-pure-slide; failure-uses-authored-fallback-or-visible-placeholder',
+      },
       notCovered: [
+        'global-component-session-lifetime-and-scope-parity',
+        'dom-ctx.events-course-bus',
+        'presentation-outside-slide',
         'phaser-global-or-surface-shared',
         'phaser-flow-or-spatial',
         'hybrid-published-parity',
-        'capture-pdf-or-pptx',
-        'component-event-or-host-actions-parity',
+        'mixed-pdf-slide-dynamic-capture',
+        'flow-or-spatial-dynamic-capture-pdf-or-pptx',
+        'declarative-component.event-trigger',
       ],
     })
     expect(index.runtime.exports).toMatchObject({
       singleHtml: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
       webPackage: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
+      pdf: 'pure-slide-real-published-page-capture; mixed-slide-static-composition; flow-spatial-static-representation',
+      pptx: 'enabled-slide-scene-api2-api3-real-item-capture; enabled-global-api2-only-in-pure-slide; authored-fallback-or-visible-placeholder-otherwise',
     })
     expect(index.exportSurfaces.singleHtml).toEqual({
       interactivity: 'preserved',
       resources: 'selectable-inline-or-declared-remote',
       modes: {
         offlinePortable: 'all-published-assets-inline',
-        onlineLightweight: 'referenced-project-assets-with-remote-url-remote-others-inline',
+        onlineLightweight: 'referenced-project-assets-with-remote-url-remote-others-inline; saved-bytes-required-at-build-even-for-remote-delivery',
       },
       networkPolicy: 'exact-declared-origins-no-remote-script',
+    })
+    expect(index.exportSurfaces.pdf).toEqual({
+      interactivity: 'omitted',
+      representation: 'pure-slide-published-capture-plus-mixed-flow-spatial-static-rendering',
+    })
+    expect(index.exportSurfaces.pptx).toEqual({
+      interactivity: 'omitted',
+      representation: 'slide-native-editable-plus-published-dynamic-capture-with-explicit-fallback',
     })
     expect(index.previewSurfaces).toEqual({
       host: 'main-renderer-published-v2',
       consumers: ['current-location-try-run', 'whole-course-preview'],
       resources: {
-        remoteProjectAssets: 'actual-published-references-with-https-remote-url',
-        localProjectAssets: 'inline-data-url',
+        remoteProjectAssets: 'remote-only-project-assets-not-supported-by-current-producer',
+        localProjectAssets: 'required-saved-bytes-inline-data-url-in-authoring-and-preview',
         componentAssets: 'inline-data-url',
       },
       networkPolicy: {
@@ -825,19 +865,52 @@ describe('AI capability manifest generation', () => {
 
     const project = parseFile<{
       contract: string
+      artifactKind: string
+      isValidationSchema: boolean
       protocolVersion: number
-      root: { properties: { schemaVersion: { const: number } } }
+      validationAuthority: {
+        kind: string
+        module: string
+        export: string
+        relationship: string
+      }
       nativeTypes: string[]
     }>(generated.files, 'schemas/course-project-v9.json')
     expect(project.contract).toBe('Course Project V9')
+    expect(project.artifactKind).toBe('builder-capability-summary')
+    expect(project.isValidationSchema).toBe(false)
+    expect(project).not.toHaveProperty('sourceOfTruth')
+    expect(project).not.toHaveProperty('root')
     expect(project.protocolVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
-    expect(project.root.properties.schemaVersion.const).toBe(COURSE_PROJECT_SCHEMA_VERSION)
+    expect(project.validationAuthority).toEqual({
+      kind: 'executable-zod-schema',
+      module: 'src/shared/courseProjectSchema.ts',
+      export: 'courseProjectDocumentSchema',
+      relationship: 'referenced-not-derived',
+    })
     expect(project.nativeTypes).toEqual([...COURSE_NATIVE_TYPES])
     expect(project.nativeTypes).not.toContain('external-component')
     const published = parseFile<{
+      artifactKind: string
+      isValidationSchema: boolean
       formatVersion: number
+      validationAuthority: {
+        kind: string
+        module: string
+        export: string
+        relationship: string
+      }
     }>(generated.files, 'schemas/published-course-v2.json')
+    expect(published.artifactKind).toBe('builder-capability-summary')
+    expect(published.isValidationSchema).toBe(false)
+    expect(published).not.toHaveProperty('sourceOfTruth')
     expect(published.formatVersion).toBe(PUBLISHED_COURSE_VERSION)
+    expect(published.validationAuthority).toEqual({
+      kind: 'executable-zod-schema',
+      module: 'src/shared/publishedCourseSchema.ts',
+      export: 'publishedCourseV2Schema',
+      relationship: 'referenced-not-derived',
+    })
     const canvasRuntime = parseFile<{
       runtimeApiVersion: number
       publishedPlayback: {
@@ -852,6 +925,8 @@ describe('AI capability manifest generation', () => {
           lifetime?: string
         }>
         notCovered: string[]
+        sharedServices: Record<string, string>
+        staticExport: Record<string, string>
       }
     }>(generated.files, 'schemas/runtime-api2.json')
     expect(canvasRuntime.publishedPlayback).toMatchObject({
@@ -887,12 +962,25 @@ describe('AI capability manifest generation', () => {
     expect(canvasRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
       'surfaceLayerItems',
       'flow-or-spatial-scene-local',
-      'runtime.event-or-host-actions',
-      'node-resolution-or-presentation',
-      'scene-local-cross-surface-courseState',
-      'capture-pdf-or-pptx',
-      'host-local-capabilities',
+      'declarative-runtime.event-trigger',
+      'dynamic-runtime-navigation.guard',
+      'global-local-runtime-shared-event-bus',
+      'published-assessment-evidence-persistence',
+      'node-resolution',
+      'presentation-outside-slide-scene',
+      'mixed-pdf-slide-dynamic-capture',
+      'flow-or-spatial-dynamic-capture-pdf-or-pptx',
+      'no-stable-host-local-interface-and-cross-export-network-parity',
     ]))
+    expect(canvasRuntime.publishedPlayback.sharedServices).toEqual({
+      courseState: 'declared-defaults-shared-across-active-published-carriers',
+      hostActions: 'go-next-previous-cross-location-guarded; replay-same-location; restart-bypasses-guards-and-resets-defaults',
+    })
+    expect(canvasRuntime.publishedPlayback.staticExport).toEqual({
+      slideScene: 'enabled-api2-pptx-real-item-capture-and-pure-slide-pdf-page-capture',
+      global: 'enabled-api2-real-capture-in-pure-slide-static-exports-only',
+      flowAndSpatialDynamicCarriers: 'not-covered',
+    })
     const surfaceRuntime = parseFile<{
       runtimeApiVersion: number
       protocol: string
@@ -906,6 +994,8 @@ describe('AI capability manifest generation', () => {
           consumers: string[]
         }>
         notCovered: string[]
+        sharedServices: Record<string, string>
+        staticExport: Record<string, string>
       }
     }>(generated.files, 'schemas/runtime-api3.json')
     expect(surfaceRuntime).toMatchObject({
@@ -926,10 +1016,11 @@ describe('AI capability manifest generation', () => {
     expect(surfaceRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
       'spatial',
       'globalLayerItems-or-non-flow-surfaceLayerItems',
-      'runtime.event-or-host-actions',
-      'cross-surface-courseState-or-presentation',
-      'capture-pdf-or-pptx',
-      'network-or-host-local-capabilities',
+      'declarative-runtime.event-trigger',
+      'presentation-outside-slide-scene',
+      'mixed-pdf-slide-dynamic-capture',
+      'flow-or-spatial-dynamic-capture-pdf-or-pptx',
+      'stable-host-local-interfaces-and-cross-export-network-parity',
     ]))
     expect(surfaceRuntime.publishedPlayback.supportedSlices).toEqual([
       expect.objectContaining({
@@ -943,6 +1034,14 @@ describe('AI capability manifest generation', () => {
         scope: 'surface-local',
       }),
     ])
+    expect(surfaceRuntime.publishedPlayback.sharedServices).toEqual({
+      courseState: 'declared-defaults-shared-across-active-published-carriers',
+      hostActions: 'go-next-previous-cross-location-guarded; replay-same-location; restart-bypasses-guards-and-resets-defaults',
+    })
+    expect(surfaceRuntime.publishedPlayback.staticExport).toEqual({
+      slideScene: 'enabled-api3-pptx-real-item-capture-and-pure-slide-pdf-page-capture',
+      flowAndSpatialDynamicCarriers: 'not-covered',
+    })
     const interactions = parseFile<{
       contract: string
       protocolVersion: number
@@ -995,6 +1094,11 @@ describe('AI capability manifest generation', () => {
           runtimeApiVersion: { const: number }
         }
       }
+      publishedPlayback: {
+        supportedSlices: Array<Record<string, unknown>>
+        staticExport: Record<string, string>
+        notCovered: string[]
+      }
     }>(generated.files, 'schemas/component-api4.json')
     expect(component.manifestSchema.properties.schemaVersion.const).toBe(
       COMPONENT_SCHEMA_VERSION,
@@ -1002,6 +1106,20 @@ describe('AI capability manifest generation', () => {
     expect(component.manifestSchema.properties.runtimeApiVersion.const).toBe(
       COMPONENT_RUNTIME_API_VERSION,
     )
+    expect(component.publishedPlayback.supportedSlices).toEqual(
+      parseFile<{
+        components: {
+          publishedPlayback: { provenSlices: Array<Record<string, unknown>> }
+        }
+      }>(generated.files, 'index.json').components.publishedPlayback.provenSlices,
+    )
+    expect(component.publishedPlayback.notCovered).toContain(
+      'global-component-session-lifetime-and-scope-parity',
+    )
+    expect(component.publishedPlayback.staticExport).toEqual({
+      pdf: 'pure-slide-page-capture-runs-dom-scene-surface-global-and-phaser-scene; mixed-flow-spatial-use-static-fallback-or-label',
+      pptx: 'slide-dom-scene-surface-and-phaser-scene-real-item-capture; global-dom-only-in-pure-slide; failure-uses-authored-fallback-or-visible-placeholder',
+    })
   }, 15_000)
 
   it('records source traceability without an index/evidence self-hash cycle', async () => {
@@ -1036,6 +1154,12 @@ describe('AI capability manifest generation', () => {
       generator: string
       generatedAt: null
       inputs: {
+        sourceDiscovery: {
+          kind: string
+          entrypoints: string[]
+          aliases: Record<string, string>
+          includesTypeOnlyEdges: boolean
+        }
         sourceFiles: Array<{ path: string; sha256: string }>
         componentCatalog: {
           status: string
@@ -1057,30 +1181,33 @@ describe('AI capability manifest generation', () => {
     expect(evidence.output).toHaveProperty('index.json')
     expect(evidence.output).not.toHaveProperty('generation-evidence.json')
     expect(evidence.hashScope).toContain('不记录 generation-evidence.json 自身哈希')
+    expect(evidence.inputs.sourceDiscovery).toEqual({
+      kind: 'transitive-local-module-closure',
+      entrypoints: expectedProvenanceEntrypoints,
+      aliases: { '@/': 'src/' },
+      includesTypeOnlyEdges: true,
+    })
     const tracedSources = evidence.inputs.sourceFiles.map((entry) => entry.path)
-    expect(tracedSources).toEqual(expectedSourceEvidencePaths)
+    expect(tracedSources).toEqual(
+      [...new Set(tracedSources)].sort((left, right) =>
+        left.localeCompare(right, 'en'),
+      ),
+    )
     for (const entry of evidence.inputs.sourceFiles) {
       expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
     }
 
-    // A barrel is only an import path; the contract implementation it re-exports
-    // is what decides the generated bytes. Tracing the barrel alone would let an
-    // implementation edit move the artifacts while every recorded hash stayed the
-    // same. Assert the declared pairing is real, then assert both halves are traced.
-    for (const [barrel, implementation] of contractBarrelReexportTargets) {
-      const barrelSource = await fs.readFile(
-        path.join(process.cwd(), ...barrel.split('/')),
-        'utf8',
-      )
-      const reexportTarget = implementation
-        .replace(/^src\/shared\//, './')
-        .replace(/\.ts$/, '')
-      expect(barrelSource.trim(), `${barrel} must re-export ${implementation}`)
-        .toBe(`export * from '${reexportTarget}'`)
-      expect(tracedSources, `${barrel} must be source evidence`).toContain(barrel)
-      expect(tracedSources, `${implementation} must be source evidence`)
-        .toContain(implementation)
+    for (const entrypoint of expectedProvenanceEntrypoints) {
+      expect(tracedSources, `${entrypoint} must be source evidence`)
+        .toContain(entrypoint)
     }
+    // These are transitive dependencies that the former hand-maintained list
+    // repeatedly missed. The closure must follow barrels and nested schemas.
+    expect(tracedSources).toContain('src/shared/contracts/course-project-v9/schema.ts')
+    expect(tracedSources).toContain('src/shared/contracts/published-course-v2/schema.ts')
+    expect(tracedSources).toContain('src/shared/projectSchema.ts')
+    expect(tracedSources).toContain('src/shared/projectTypes.ts')
+    expect(tracedSources).toContain('src/renderer/project/archivePath.ts')
 
     // Broad producer implementations carry described behaviour, not generation
     // input bytes; listing them churned the evidence on unrelated edits.
@@ -1102,7 +1229,6 @@ describe('AI capability manifest generation', () => {
       'src/renderer/project/createCourseProject.ts',
       'src/renderer/project/courseProjectArchive.ts',
       'src/renderer/ui/coursePlayerTryRun.ts',
-      'src/shared/projectSchema.ts',
       'src/renderer/project/createProject.ts',
       'src/renderer/project/projectArchive.ts',
       'src/renderer/project/validateProjectArchive.ts',
@@ -1114,15 +1240,7 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources.filter((entry) => entry.startsWith('src/preload/'))).toEqual([])
     expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/export/course/')))
       .toEqual([])
-    // Project producers are excluded, but archivePath is a value dependency of
-    // importComponentPackage: its helpers decide whether a catalog package
-    // imports, and therefore the bytes of component-catalog.snapshot.json.
-    expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/project/')))
-      .toEqual(['src/renderer/project/archivePath.ts'])
-    // The player host is excluded except for the evidence recorder, whose
-    // constants are imported and published in schemas/runtime-api2.json.
-    expect(tracedSources.filter((entry) => entry.startsWith('src/player/')))
-      .toEqual(['src/player/HostEvidenceRecorder.ts'])
+    expect(tracedSources).toContain('src/player/HostEvidenceRecorder.ts')
 
     // Narrowing provenance inputs must not weaken catalog or output hashes.
     expect(evidence.inputs.componentCatalog).toEqual({
@@ -1151,9 +1269,19 @@ describe('AI capability manifest generation', () => {
       )
     }
 
-    const project = parseFile<{ sourceOfTruth: string }>(
+    const project = parseFile<{
+      validationAuthority: { module: string; relationship: string }
+      capabilitySources: string[]
+    }>(
       generated.files,
       'schemas/course-project-v9.json',
+    )
+    const published = parseFile<{
+      validationAuthority: { module: string; relationship: string }
+      capabilitySources: string[]
+    }>(
+      generated.files,
+      'schemas/published-course-v2.json',
     )
     const interactions = parseFile<{ sourceOfTruth: string[] }>(
       generated.files,
@@ -1167,7 +1295,7 @@ describe('AI capability manifest generation', () => {
       generated.files,
       'schemas/component-api4.json',
     )
-    const diagnostics = parseFile<{ sourceOfTruth: string }>(
+    const diagnostics = parseFile<{ legacyV8: { sourceOfTruth: string } }>(
       generated.files,
       'diagnostics.json',
     )
@@ -1175,14 +1303,36 @@ describe('AI capability manifest generation', () => {
       generated.files,
       'limits.json',
     )
-    expect(project.sourceOfTruth).toBe('src/shared/courseProjectSchema.ts')
+    expect(project.validationAuthority).toMatchObject({
+      module: 'src/shared/courseProjectSchema.ts',
+      relationship: 'referenced-not-derived',
+    })
+    expect(project.capabilitySources).toContain('src/shared/courseProjectTypes.ts')
+    expect(published.validationAuthority).toMatchObject({
+      module: 'src/shared/publishedCourseSchema.ts',
+      relationship: 'referenced-not-derived',
+    })
+    expect(published.capabilitySources).toContain('src/shared/publishedCourseTypes.ts')
     expect(interactions.sourceOfTruth).toEqual([
       'src/shared/interactionTypes.ts',
       'src/shared/interactionSchema.ts',
+      'src/shared/publishedInteractionSupport.ts',
+      'src/player/interactions/PublishedInteractionController.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
     ])
     expect(runtime.sourceOfTruth).toContain('src/shared/runtimeSchema.ts')
     expect(component.sourceOfTruth).toContain('src/shared/componentSchema.ts')
-    expect(diagnostics.sourceOfTruth).toBe('src/shared/diagnosticCodes.ts')
+    expect(component.sourceOfTruth).toEqual(expect.arrayContaining([
+      'src/player/surfaces/flow/FlowSurfaceHost.ts',
+      'src/player/surfaces/spatial/SpatialSurfaceHost.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
+      'src/player/surfaces/publishedCourseState.ts',
+      'src/player/surfaces/publishedCapture.ts',
+      'src/renderer/export/course/publishedSlideCapture.ts',
+      'src/renderer/export/course/buildCoursePptx.ts',
+      'src/renderer/export/course/buildCoursePrintArtifacts.ts',
+    ]))
+    expect(diagnostics.legacyV8.sourceOfTruth).toBe('src/shared/diagnosticCodes.ts')
     expect(limits.sourceOfTruth).toContain('src/shared/constants.ts')
   }, 15_000)
 

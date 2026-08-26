@@ -586,11 +586,12 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       await expect(page.locator('[data-testid^="component-package-"]'))
         .toHaveCount(expectedPackageCount)
 
-      // The visible editing renderer is the same isolated Player used at
-      // runtime, hosted in the sandboxed authoring iframe. The legacy Phaser
-      // canvas in the parent is only the hit-proxy/selection layer.
-      const editorHost = page.frameLocator('iframe[title="统一编辑画布"]')
-        .locator('.lesson-component-mount--scene[data-courseware-component-root]')
+      // The visible editing renderer is the same Published host used at
+      // runtime. The Phaser canvas is only the hit-proxy/selection layer.
+      const editorHost = page.getByTestId('published-authoring-host')
+        .locator(
+          '.published-component-mount[data-component-instance-id][data-component-package-id]',
+        )
       for (const [index, entry] of matrixCases.entries()) {
         const projectComponent = page.getByTestId(`component-${entry.packageId}`)
         await expect(projectComponent).toContainText(`v${entry.version}`)
@@ -793,8 +794,9 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       expect(slidePaths).toHaveLength(expectedPackageCount)
       for (const slidePath of slidePaths) {
         const xml = new TextDecoder().decode(pptx[slidePath])
-        expect(xml).toContain('互动组件')
-        expect(xml).toContain('静态导出提示')
+        expect(xml).toContain('<p:pic>')
+        expect(xml).toContain('实际运行快照')
+        expect(xml).not.toContain('静态导出提示')
       }
 
       const browser = await launchHeadlessBrowser()

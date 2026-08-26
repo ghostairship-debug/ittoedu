@@ -502,6 +502,13 @@ export class PlayerScene extends Phaser.Scene {
       return { ok: true, target: patch.target }
     }
 
+    if (patch.kind === 'runtime-content') {
+      return this.authoringFailure(
+        'unsupported-host-mode',
+        'Project V8 Player 不支持 Course Project V9 Runtime 内容更新。',
+      )
+    }
+
     if (patch.target.nodeId !== patch.node.id) {
       return this.authoringFailure(
         'target-mismatch',

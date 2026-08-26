@@ -21,6 +21,7 @@ import {
   SceneAutomationEditor,
   type RevealSequenceTemplateIntent,
 } from './InteractionEditor'
+import { CourseLogicAuthoringPanel } from './CourseLogicAuthoringPanel'
 
 type AvailableInteractionAuthoringView =
   | AvailableLocalInteractionAuthoringView
@@ -64,6 +65,7 @@ export function AutomationTab() {
   const scene = useEditorStore(selectActiveScene)
   const editingNodes = useEditorStore(selectEditingNodes)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const editorMode = useEditorStore((state) => state.editorMode)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const activeLocationId = useEditorStore(selectActiveCourseLocationId)
@@ -92,6 +94,9 @@ export function AutomationTab() {
   )
   const updateInteractionRuleAtTarget = useEditorStore(
     (state) => state.updateInteractionRuleAtTarget,
+  )
+  const applyCourseLogicAuthoringCommand = useEditorStore(
+    (state) => state.applyCourseLogicAuthoringCommand,
   )
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
@@ -146,6 +151,13 @@ export function AutomationTab() {
     )
   }
 
+  const courseLogicPanel = editorMode === 'professional' ? (
+    <CourseLogicAuthoringPanel
+      project={courseProject}
+      onCommand={applyCourseLogicAuthoringCommand}
+    />
+  ) : null
+
   if (authoringView.availability === 'unavailable') {
     return (
       <div className="properties-scroll" data-testid="automation-tab">
@@ -158,6 +170,7 @@ export function AutomationTab() {
           <p>当前 Flow 或 Spatial 页面没有本地互动规则载体。</p>
           <p className="property-hint">切换到“全局”范围可编辑整课共享规则；Slide 页面仍可编辑场景规则。</p>
         </section>
+        {courseLogicPanel}
       </div>
     )
   }
@@ -226,6 +239,7 @@ export function AutomationTab() {
           <h2>互动与动画</h2>
           <p>用“当—如果—就”组织行为。点击交互在属性中维护，其他事件规则集中在这里。</p>
         </section>
+        {courseLogicPanel}
         <SceneAutomationEditor
           {...sharedProps}
           sourceScope="global"
@@ -259,6 +273,7 @@ export function AutomationTab() {
         <h2>互动与动画</h2>
         <p>先从模板开始，再用“当—如果—就”微调。这里不重复显示元素单击规则。</p>
       </section>
+      {courseLogicPanel}
       {diagnostics.length > 0 ? (
         <section
           className="property-section automation-diagnostics"

@@ -37,7 +37,6 @@ import {
   findFlowBlockRecursive,
   flowSurfaceIn,
   removeBlocksById,
-  repairFlowReferences,
   stableFlowId,
   syncFlowCourseLocations,
   walkFlowBlocks,
@@ -665,7 +664,6 @@ export function convertFlowMediaBlockToOverlay(
     })
     surface.blocks = removeBlocksById(surface.blocks, new Set([blockId]))
     syncFlowCourseLocations(draft, page.surfaceId)
-    repairFlowReferences(draft, new Set([blockId]))
     appendOverlayItem(draft, { source: 'surface', surfaceId: page.surfaceId }, item)
     return [item.layerItemId]
   }, '已改为页面浮层')
@@ -774,7 +772,6 @@ export function convertFlowComponentBlockToOverlay(
     item.staticFallbackAssetId = found.block.staticFallbackAssetId
     surface.blocks = removeBlocksById(surface.blocks, new Set([block.id]))
     syncFlowCourseLocations(draft, page.surfaceId)
-    repairFlowReferences(draft, new Set([block.id]))
     appendOverlayItem(draft, { source: 'surface', surfaceId: page.surfaceId }, item)
     return [item.layerItemId]
   }, '已改为页面浮层')

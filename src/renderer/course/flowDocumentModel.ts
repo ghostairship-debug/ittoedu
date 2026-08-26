@@ -10,9 +10,7 @@ import type {
   FlowParagraphBlock,
   FlowRichText,
   FlowSurfaceDocument,
-  LayerItem,
 } from '../../shared/courseProjectTypes'
-import type { InteractionRule } from '../../shared/interactionTypes'
 
 export const BLANK_FLOW_HEADING_PLACEHOLDER = '无标题'
 export const DEFAULT_FLOW_LAYOUT = {
@@ -358,87 +356,6 @@ export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
     next.blocks = next.blocks.map(regenerateFlowIdentities)
   }
   return next
-}
-
-function removeDeletedLocationVisibility(
-  entries: Array<{ visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] } }>,
-  deletedLocationIds: ReadonlySet<string>,
-): void {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index]!
-    if (entry.visibility.mode === 'all') continue
-    entry.visibility.locationIds = entry.visibility.locationIds.filter(
-      (locationId) => !deletedLocationIds.has(locationId),
-    )
-    if (entry.visibility.locationIds.length > 0) continue
-    if (entry.visibility.mode === 'include') entries.splice(index, 1)
-    else entry.visibility = { mode: 'all', locationIds: [] }
-  }
-}
-
-function removeSceneGoFromController(item: LayerItem, deletedIds: ReadonlySet<string>): void {
-  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
-  const remaining = item.content.data.buttons.filter((button) =>
-    button.action.type !== 'scene.go' || !deletedIds.has(button.action.sceneId),
-  )
-  item.content.data.buttons = remaining.length > 0
-    ? remaining
-    : [{
-        id: stableFlowId('teacher-button'),
-        action: { type: 'scene.next' },
-        label: '下一场景',
-        visible: true,
-      }]
-}
-
-function repairInteractionRules(
-  rules: InteractionRule[],
-  deletedIds: ReadonlySet<string>,
-): InteractionRule[] {
-  return rules.flatMap((rule) => {
-    if (rule.trigger.type === 'node.click' && deletedIds.has(rule.trigger.nodeId)) return []
-    if (rule.trigger.type === 'node.activated' && deletedIds.has(rule.trigger.nodeId)) return []
-    let impossible = false
-    rule.conditions.forEach((condition) => {
-      if (condition.type !== 'scene.in') return
-      condition.sceneIds = condition.sceneIds.filter((id) => !deletedIds.has(id))
-      if (condition.sceneIds.length === 0) impossible = true
-    })
-    const keptActions = rule.actions.filter((step) =>
-      !(step.action.type === 'scene.go' && deletedIds.has(step.action.sceneId)),
-    )
-    if (impossible || keptActions.length === 0) return []
-    keptActions[0]!.start = 'after-previous'
-    return [{ ...rule, actions: keptActions }]
-  })
-}
-
-export function repairFlowReferences(
-  project: CourseProjectDocument,
-  deletedIds: ReadonlySet<string>,
-): void {
-  project.navigationGuards = project.navigationGuards.flatMap((guard) => {
-    const toLocationIds = guard.toLocationIds.filter((id) => !deletedIds.has(id))
-    if (toLocationIds.length === 0) return []
-    return [{
-      ...guard,
-      toLocationIds,
-      fromLocationIds: guard.fromLocationIds?.filter((id) => !deletedIds.has(id)),
-    }]
-  })
-  project.globalInteractions = repairInteractionRules(project.globalInteractions, deletedIds)
-  removeDeletedLocationVisibility(project.globalLayerItems, deletedIds)
-  project.globalLayerItems.forEach((entry) => removeSceneGoFromController(entry.item, deletedIds))
-  project.surfaces.forEach((surface) => {
-    removeDeletedLocationVisibility(surface.surfaceLayerItems, deletedIds)
-    surface.surfaceLayerItems.forEach((entry) => removeSceneGoFromController(entry.item, deletedIds))
-    if (surface.type === 'slide') {
-      surface.scenes.forEach((scene) => {
-        scene.interactions = repairInteractionRules(scene.interactions, deletedIds)
-        scene.layerItems.forEach((item) => removeSceneGoFromController(item, deletedIds))
-      })
-    }
-  })
 }
 
 export function removeBlocksById(blocks: FlowBlock[], deletedIds: ReadonlySet<string>): FlowBlock[] {

@@ -115,11 +115,12 @@ function globalProbeSource(): string {
       create(ctx) {
         var probe = window.__publishedGlobalApi2Probe || {
           creates: 0, destroys: 0, suspends: 0, resumes: 0,
-          visibleFalse: 0, visibleTrue: 0, scopes: []
+          visibleFalse: 0, visibleTrue: 0, scopes: [], contexts: []
         };
         window.__publishedGlobalApi2Probe = probe;
         probe.creates += 1;
         probe.scopes.push(ctx.scope);
+        probe.contexts.push({ courseState: ctx.courseState, actions: ctx.actions });
         var count = 0;
         var button = document.createElement('button');
         button.dataset.publishedGlobalApi2Button = 'true';
@@ -436,6 +437,11 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
 
   it('moves one instance through Slide, Flow and Spatial wrappers and rebuilds only on restart', async () => {
     const fixture = mixedGlobalRuntimeProject()
+    fixture.project.courseState = [{
+      key: 'restart-probe',
+      valueType: 'string',
+      defaultValue: 'default',
+    }]
     const payload = buildPublishedCourseV2Payload({
       project: fixture.project,
       assetFiles: {},
@@ -496,6 +502,8 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     expect(slideWrapper.style.top).toBe('56px')
     expect(slideWrapper.style.zIndex).toBe('410')
     expect(slideWrapper.style.pointerEvents).toBe('auto')
+    expect(slideWrapper.style.padding).toBe('')
+    expect(slideWrapper.querySelector('[data-runtime-fallback="true"]')).toBeNull()
     expect(slideWrapper.dataset.globalRuntimeState).toBe('playback')
     button.click()
     expect(button.textContent).toBe('global:1')
@@ -585,7 +593,37 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       destroys: 0,
     })
 
-    await session.restartCourse()
+    const beforeRestartProbe = Reflect.get(view, '__publishedGlobalApi2Probe') as {
+      contexts: Array<{
+        courseState: {
+          get(key: string): unknown
+          set(key: string, value: unknown): void
+        }
+        actions: { nextScene(): boolean }
+      }>
+    }
+    const staleContext = beforeRestartProbe.contexts.at(-1)!
+    staleContext.courseState.set('restart-probe', 'before-restart')
+    expect(staleContext.courseState.get('restart-probe')).toBe('before-restart')
+
+    const resetCourse = session.player.resetCourse.bind(session.player)
+    let releaseReset: () => void = () => {}
+    const resetGate = new Promise<void>((resolve) => {
+      releaseReset = resolve
+    })
+    const resetSpy = vi.spyOn(session.player, 'resetCourse').mockImplementation(async () => {
+      await resetGate
+      return resetCourse()
+    })
+    const restart = session.restartCourse()
+    await vi.waitFor(() => expect(resetSpy).toHaveBeenCalledTimes(1))
+    expect(staleContext.courseState.get('restart-probe')).toBe('default')
+    staleContext.courseState.set('restart-probe', 'stale-write')
+    expect(staleContext.courseState.get('restart-probe')).toBe('default')
+    expect(staleContext.actions.nextScene()).toBe(false)
+    releaseReset()
+    await restart
+    resetSpy.mockRestore()
     const immediateRestartInner = globalWrapper(
       container,
       slideSurfaceId,
@@ -610,6 +648,14 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     expect(restartedInner).not.toBe(inner)
     expect(restartedButton).not.toBe(button)
     expect(restartedButton?.textContent).toBe('global:0')
+    const restartedProbe = Reflect.get(view, '__publishedGlobalApi2Probe') as {
+      contexts: Array<{ courseState: { get(key: string): unknown; set(key: string, value: unknown): void } }>
+    }
+    const restartedContext = restartedProbe.contexts.at(-1)!
+    expect(restartedContext).not.toBe(staleContext)
+    expect(restartedContext.courseState.get('restart-probe')).toBe('default')
+    restartedContext.courseState.set('restart-probe', 'fresh-write')
+    expect(restartedContext.courseState.get('restart-probe')).toBe('fresh-write')
 
     const controllerFrame = globalWrapper(container, slideSurfaceId, fixture.controllerId)
     const controllerRestart = controllerFrame.querySelector<HTMLButtonElement>(

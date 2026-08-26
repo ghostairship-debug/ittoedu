@@ -750,7 +750,7 @@ function slideHeavyArchive(): CourseProjectArchiveData {
       canvas: { width: 1280, height: 720 },
       surfaceLayerItems: [scoped(
         nativeText('slide-surface-watermark', 20, 'Slide Surface', {
-          mode: 'absolute', x: 1010, y: 20, width: 220, height: 42,
+          mode: 'absolute', x: 1010, y: 20, width: 220, height: 52,
         }),
         { mode: 'include', locationIds: ['slide-location-intro', 'slide-location-evidence'] },
       )],

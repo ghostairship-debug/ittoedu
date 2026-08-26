@@ -98,8 +98,21 @@ describe('ARCH-0 representative functional baseline', () => {
     for (const id of ['slide-heavy', 'flow-heavy', 'mixed-spatial'] as const) {
       const input = fixture(id)
       const report = validateCourseProjectArchiveBytes(input.bytes, input.filename)
+      const expectedHealthWarningCodes = id === 'slide-heavy'
+        ? new Set([
+            'published-interaction-action-unsupported',
+            'published-interaction-trigger-unsupported',
+          ])
+        : new Set<string>()
       expect(report.status).toBe('valid')
-      expect(report.summary).toMatchObject({ error: 0, warning: 0, canExport: true })
+      expect(report.summary).toMatchObject({
+        error: 0,
+        warning: expectedHealthWarningCodes.size,
+        canExport: true,
+      })
+      expect(new Set(report.projectHealth?.items
+        .filter(({ severity }) => severity === 'warning')
+        .map(({ code }) => code))).toEqual(expectedHealthWarningCodes)
 
       const saved = createCourseProjectArchive(input.archive, { mtime: FIXED_TIME })
       const reopened = openCourseProjectArchive(saved)

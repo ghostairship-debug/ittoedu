@@ -12,7 +12,7 @@ import { createServer as createHttpsServer } from 'node:https'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { AddressInfo } from 'node:net'
-import type { ElectronApplication, Page } from 'playwright'
+import type { ElectronApplication, Locator, Page } from 'playwright'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
@@ -24,6 +24,10 @@ const certificateDirectory = join(root, 'tests', 'fixtures', 'network')
 const certificate = readFileSync(join(certificateDirectory, 'localhost-cert.pem'))
 const privateKey = readFileSync(join(certificateDirectory, 'localhost-key.pem'))
 const LOCALHOST_CERTIFICATE_SPKI = 'DNIiwZV2/2dxPciQIn3bHbi8UyIs3pJdIXVDYExz9K4='
+const PROJECT_B_IMAGE_BYTES = Uint8Array.from(Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=',
+  'base64',
+))
 
 type NodeServer = ReturnType<typeof createHttpServer>
 
@@ -127,11 +131,14 @@ function writeRemoteProject(input: {
   remoteAssetOrigin: string
   connectOrigin?: string
   unusedRemoteOrigin: string
+  localPhotoBytes?: Uint8Array
 }): void {
   const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'multi-asset')!
   const project: CourseProjectDocument = structuredClone(fixture.data.project)
+  const localPhotoBytes = input.localPhotoBytes ?? fixture.data.assetFiles.photo!
   project.id = input.projectId
   project.title = input.title
+  project.assets.photo.byteLength = localPhotoBytes.byteLength
   project.assets.photo.remote = { url: `${input.remoteAssetOrigin}/remote.png` }
   project.assets.unused = {
     ...structuredClone(project.assets.photo),
@@ -146,7 +153,8 @@ function writeRemoteProject(input: {
     project,
     assetFiles: {
       ...fixture.data.assetFiles,
-      unused: fixture.data.assetFiles.photo!,
+      photo: localPhotoBytes,
+      unused: localPhotoBytes,
     },
     componentFiles: {},
   })
@@ -203,6 +211,19 @@ async function stopCurrentLocationPreview(page: Page): Promise<void> {
   await expect(host.locator('[data-course-surface-slot]')).toHaveCount(0)
 }
 
+async function expectOnlyLocalDataImages(images: Locator, expectedSource: string): Promise<void> {
+  await expect.poll(() => images.evaluateAll((entries, source) => {
+    const urls = entries.map((image) => (image as HTMLImageElement).src)
+    return urls.length > 0
+      && urls.every((url) => url.startsWith('data:image/png;base64,'))
+      && urls.includes(source)
+  }, expectedSource)).toBe(true)
+}
+
+function remoteImageRequestCount(server: RunningServer): number {
+  return server.requests.filter((path) => path === '/remote.png').length
+}
+
 function removeRunRoot(runRoot: string): void {
   const absolute = resolve(runRoot)
   const temporaryRoot = resolve(tmpdir())
@@ -220,7 +241,7 @@ function removeRunRoot(runRoot: string): void {
   rmSync(absolute, { recursive: true, force: true })
 }
 
-test('V9 current/full preview allows declared origins and revokes them per project', async () => {
+test('V9 current/full preview embeds local assets and leases declared origins per project', async () => {
   test.setTimeout(90_000)
   const runRoot = mkdtempSync(join(tmpdir(), `courseware-net-h1-${process.pid}-`))
   const renderer = await startRendererServer()
@@ -243,7 +264,9 @@ test('V9 current/full preview allows declared origins and revokes them per proje
     projectId: 'network-project-b',
     title: 'NET H1 B',
     remoteAssetOrigin: assetB.origin,
+    connectOrigin: assetB.origin,
     unusedRemoteOrigin: assetA.origin,
+    localPhotoBytes: PROJECT_B_IMAGE_BYTES,
   })
 
   let app: ElectronApplication | null = null
@@ -268,9 +291,17 @@ test('V9 current/full preview allows declared origins and revokes them per proje
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
 
     await openProject(app, page, projectAPath, 'NET H1 A')
+    const projectAPhotoDataUrl = `data:image/png;base64,${Buffer.from(
+      fixture.data.assetFiles.photo!,
+    ).toString('base64')}`
+    const projectBPhotoDataUrl = `data:image/png;base64,${Buffer.from(
+      PROJECT_B_IMAGE_BYTES,
+    ).toString('base64')}`
+    const assetARemoteBeforeCurrent = remoteImageRequestCount(assetA)
     await startCurrentLocationPreview(page)
-    await expect.poll(() => assetA.requests.filter((path) => path === '/remote.png').length)
-      .toBeGreaterThan(0)
+    const currentPreviewAImages = page.getByTestId('course-try-run-host').locator('img')
+    await expectOnlyLocalDataImages(currentPreviewAImages, projectAPhotoDataUrl)
+    expect(remoteImageRequestCount(assetA)).toBe(assetARemoteBeforeCurrent)
     await expect(fetchSucceeded(page, `${api.origin}/declared-current`)).resolves.toBe(true)
     const assetBBeforeDenied = assetB.requests.length
     await expect(fetchSucceeded(page, `${assetB.origin}/undeclared-current`)).resolves.toBe(false)
@@ -285,26 +316,21 @@ test('V9 current/full preview allows declared origins and revokes them per proje
     await page.getByTitle('全屏 16:9 整课预览').click()
     await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
     const fullPreviewImages = page.getByTestId('course-preview-host').locator('img')
-    await expect.poll(() => fullPreviewImages.evaluateAll(
-      (images, remoteUrl) => images.some(
-        (image) => (image as HTMLImageElement).src === remoteUrl,
-      ),
-      `${assetA.origin}/remote.png`,
-    )).toBe(true)
+    const assetARemoteBeforeFull = remoteImageRequestCount(assetA)
+    await expectOnlyLocalDataImages(fullPreviewImages, projectAPhotoDataUrl)
+    expect(remoteImageRequestCount(assetA)).toBe(assetARemoteBeforeFull)
     await expect(fetchSucceeded(page, `${api.origin}/declared-full`)).resolves.toBe(true)
 
-    const assetBBeforeOverlaySwitch = assetB.requests.length
+    const assetBRemoteBeforeOverlaySwitch = remoteImageRequestCount(assetB)
     await patchOpenDialog(app, projectBPath)
     await page.keyboard.press('Control+O')
     await expect(page).toHaveTitle(/NET H1 B/)
     await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
-    await expect.poll(() => fullPreviewImages.evaluateAll(
-      (images, remoteUrl) => images.some(
-        (image) => (image as HTMLImageElement).src === remoteUrl,
-      ),
-      `${assetB.origin}/remote.png`,
-    )).toBe(true)
-    await expect.poll(() => assetB.requests.length).toBeGreaterThan(assetBBeforeOverlaySwitch)
+    await expectOnlyLocalDataImages(fullPreviewImages, projectBPhotoDataUrl)
+    expect(remoteImageRequestCount(assetB)).toBe(assetBRemoteBeforeOverlaySwitch)
+    const assetBBeforeDeclaredFull = assetB.requests.length
+    await expect(fetchSucceeded(page, `${assetB.origin}/declared-full-b`)).resolves.toBe(true)
+    expect(assetB.requests).toHaveLength(assetBBeforeDeclaredFull + 1)
     const assetAAfterOverlaySwitch = assetA.requests.length
     const apiAfterOverlaySwitch = api.requests.length
     await expect(fetchSucceeded(page, `${assetA.origin}/project-a-after-overlay-switch`))
@@ -320,14 +346,11 @@ test('V9 current/full preview allows declared origins and revokes them per proje
     await expect(page.getByTestId('course-preview-overlay')).toHaveCount(0)
     await expect.poll(() => fetchSucceeded(page, `${assetB.origin}/revoked-full`)).toBe(false)
 
+    const assetBRemoteBeforeCurrent = remoteImageRequestCount(assetB)
     await startCurrentLocationPreview(page)
     const currentPreviewImages = page.getByTestId('course-try-run-host').locator('img')
-    await expect.poll(() => currentPreviewImages.evaluateAll(
-      (images, remoteUrl) => images.some(
-        (image) => (image as HTMLImageElement).src === remoteUrl,
-      ),
-      `${assetB.origin}/remote.png`,
-    )).toBe(true)
+    await expectOnlyLocalDataImages(currentPreviewImages, projectBPhotoDataUrl)
+    expect(remoteImageRequestCount(assetB)).toBe(assetBRemoteBeforeCurrent)
     const assetBBeforeDeclaredCurrent = assetB.requests.length
     await expect(fetchSucceeded(page, `${assetB.origin}/declared-current-b`)).resolves.toBe(true)
     expect(assetB.requests).toHaveLength(assetBBeforeDeclaredCurrent + 1)

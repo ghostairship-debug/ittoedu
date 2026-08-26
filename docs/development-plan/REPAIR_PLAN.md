@@ -2,7 +2,7 @@
 
 > 日期：2026-08-26
 >
-> 本文件只保存已合入修复、Owner 边界和历史门证据，不再提供当前开工顺序。当前路线只看根目录 `COURSEWARE_DEVELOPMENT_PLAN.md` 第 5 节与自动任务板；该路线已收口，当前没有 Ready 卡。
+> 本文件只保存已合入修复、Owner 边界和历史门证据，不再提供当前开工顺序。当前路线与可领取状态只看根目录 `COURSEWARE_DEVELOPMENT_PLAN.md` 第 5 节和自动任务板，本文件不复制会随交付变化的 Ready 数量。
 >
 > 当前质量审计基线：`3780090`；Gate R0 文档/流程基线：`b967c96`。
 >
@@ -187,7 +187,7 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 
 ### 6.3 当前准入方式
 
-- 当前没有可领取项；W4-C2 与 PRJ-00B～05 不再从本文件恢复。
+- 当前是否有可领取项只看自动任务板；W4-C2 与 PRJ-00B～05 不再从本文件恢复。
 - 只有出现真实 HTTP/WebSocket 或远程 Published capture consumer 才准入 NET-C1；RTP-05、Spatial scene-local API 2、global API 3、Published capture 与非 Flow shared 同样继续按 consumer 证据准入。
 - 每个新实现项都必须重新给出可复现失败、真实 consumer 或量化收益，以及 1–3 条最小检查；完整集成、E2E、`verify`、打包/性能/签名只属于固定发布候选，不随普通恢复自动执行。
 

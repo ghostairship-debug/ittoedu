@@ -735,8 +735,15 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
           })
           await page.goto(pathToFileURL(exported.path).toString())
           await expect(page.locator('.slide-published-adapter')).toBeVisible({ timeout: 15_000 })
+          const nextButton = page.locator('[data-controller-button-id="next"]')
+          await expect(nextButton).toHaveText('下一场景', { timeout: 15_000 })
           for (let index = 0; index < 3; index += 1) {
-            await page.getByRole('button', { name: '下一页', exact: true }).click()
+            const bounds = await nextButton.boundingBox()
+            if (!bounds) throw new Error('Exported player next-scene button has no bounds')
+            await page.mouse.click(
+              bounds.x + bounds.width / 2,
+              bounds.y + bounds.height / 2,
+            )
           }
           await expect.poll(() => (
             page.locator('.slide-published-adapter').getAttribute('data-location-id')

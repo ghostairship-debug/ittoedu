@@ -1,6 +1,11 @@
 import type { SpatialPathDash } from '../../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import type { TeacherControllerAction } from '../../../shared/projectTypes'
+import type { ComponentHostActions } from '../../../shared/componentTypes'
+import type {
+  CourseStateStore as CourseStateStoreContract,
+  RuntimeHostActions,
+} from '../../../shared/runtimeTypes'
 import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
 import type {
   PublishedCourseV2Payload,
@@ -62,6 +67,10 @@ import {
   isPublishedGlobalCanvasRuntimePointerItem,
   setPublishedGlobalCanvasRuntimeInteractionVisibility,
 } from '../runtime/publishedGlobalCanvasRuntimePointer'
+import {
+  PublishedCarrierSideEffectGate,
+  type PublishedCarrierSideEffects,
+} from '../publishedCourseState'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -98,6 +107,12 @@ export interface SpatialSurfaceHostOptions {
   deferTeacherControllerCourseReset?: boolean
   resolveAsset?: (assetId: string) => string | undefined
   components?: Record<string, PublishedComponentPackageSource>
+  /** Published playback session state shared across every surface host. */
+  courseState?: CourseStateStoreContract
+  /** Playback-only actions retained for the Spatial Runtime host boundary. */
+  runtimeActions?: Readonly<RuntimeHostActions>
+  /** Playback-only navigation actions exposed to Component API 4 instances. */
+  componentActions?: Readonly<ComponentHostActions>
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
     item: PublishedNativeLayerItem,
@@ -108,6 +123,7 @@ export interface SpatialSurfaceHostOptions {
   onInteractionInvalidated?: () => void
   /** Published-session generation hook fired after an active interaction record set is ready. */
   onInteractionReady?: () => void
+  reportActionError?: (action: TeacherControllerAction, error: Error) => void
 }
 
 type TeacherControllerNativeItem = PublishedNativeLayerItem & {
@@ -119,6 +135,8 @@ interface SpatialHostRecord {
   wrapper: HTMLElement | SVGGElement
   controllerDom: TeacherControllerDom | null
   componentHandle: PublishedComponentMountHandle | null
+  componentEffects: PublishedCarrierSideEffects | null
+  deferredComponentMount: (() => void) | null
 }
 
 function safeColor(value: string | undefined, fallback: string): string {
@@ -160,7 +178,10 @@ function createWorldItem(
   options?: {
     components?: Record<string, PublishedComponentPackageSource>
     interactive?: boolean
+    courseState?: CourseStateStoreContract
+    componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    deferComponentMount?: (mount: () => void) => void
   },
 ): SVGGElement {
   const group = dom.createElementNS(SVG_NS, 'g')
@@ -235,20 +256,26 @@ function createWorldItem(
     foreign.appendChild(holder)
     group.appendChild(foreign)
     group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
-    const handle = mountPublishedComponent(holder, {
-      container: holder,
-      componentId: item.component.packageId,
-      version: item.component.version,
-      instanceId: item.layerItemId,
-      width: frame.width,
-      height: frame.height,
-      props: item.props,
-      staticFallbackAssetId: item.staticFallbackAssetId,
-      components: options?.components,
-      resolveAsset,
-      interactive: options?.interactive ?? true,
-    })
-    options?.onMountComponent?.(handle)
+    const mountInstance = () => {
+      const handle = mountPublishedComponent(holder, {
+        container: holder,
+        componentId: item.component.packageId,
+        version: item.component.version,
+        instanceId: item.layerItemId,
+        width: frame.width,
+        height: frame.height,
+        props: item.props,
+        staticFallbackAssetId: item.staticFallbackAssetId,
+        components: options?.components,
+        resolveAsset,
+        interactive: options?.interactive ?? true,
+        ...(options?.courseState ? { courseState: options.courseState } : {}),
+        ...(options?.componentActions ? { actions: options.componentActions } : {}),
+      })
+      options?.onMountComponent?.(handle)
+    }
+    if (options?.deferComponentMount) options.deferComponentMount(mountInstance)
+    else mountInstance()
   } else {
     if (item.kind === 'runtime') {
       group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'runtime')
@@ -361,7 +388,10 @@ function createViewportHud(
     components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     interactive?: boolean
+    courseState?: CourseStateStoreContract
+    componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    deferComponentMount?: (mount: () => void) => void
   },
 ): HTMLElement {
   const root = dom.createElement('div')
@@ -375,20 +405,26 @@ function createViewportHud(
     pointerEvents: 'auto',
   })
   if (item.kind === 'component') {
-    const handle = mountPublishedComponent(root, {
-      container: root,
-      componentId: item.component.packageId,
-      version: item.component.version,
-      instanceId: item.layerItemId,
-      width: item.frame.width,
-      height: item.frame.height,
-      props: item.props,
-      staticFallbackAssetId: item.staticFallbackAssetId,
-      components: options?.components,
-      resolveAsset: options?.resolveAsset,
-      interactive: options?.interactive ?? true,
-    })
-    options?.onMountComponent?.(handle)
+    const mountInstance = () => {
+      const handle = mountPublishedComponent(root, {
+        container: root,
+        componentId: item.component.packageId,
+        version: item.component.version,
+        instanceId: item.layerItemId,
+        width: item.frame.width,
+        height: item.frame.height,
+        props: item.props,
+        staticFallbackAssetId: item.staticFallbackAssetId,
+        components: options?.components,
+        resolveAsset: options?.resolveAsset,
+        interactive: options?.interactive ?? true,
+        ...(options?.courseState ? { courseState: options.courseState } : {}),
+        ...(options?.componentActions ? { actions: options.componentActions } : {}),
+      })
+      options?.onMountComponent?.(handle)
+    }
+    if (options?.deferComponentMount) options.deferComponentMount(mountInstance)
+    else mountInstance()
     root.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
     return root
   }
@@ -449,6 +485,9 @@ export class SpatialSurfaceHost {
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #active = false
+  readonly #carrierSideEffects: PublishedCarrierSideEffectGate
+  #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
 
   static fromPublishedCourse(
     course: PublishedCourseV2Payload,
@@ -496,6 +535,11 @@ export class SpatialSurfaceHost {
     this.#muted = options.initialMuted ?? false
     this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
       ?? new PublishedInteractionVisibilityState()
+    this.#carrierSideEffects = new PublishedCarrierSideEffectGate({
+      courseState: options.courseState,
+      runtimeActions: options.runtimeActions,
+      componentActions: options.componentActions,
+    })
   }
 
   get camera(): SpatialRuntimeCamera | null {
@@ -533,6 +577,14 @@ export class SpatialSurfaceHost {
       || record.wrapper.namespaceURI !== 'http://www.w3.org/1999/xhtml'
     ) return null
     return record.wrapper as HTMLElement
+  }
+
+  /** Published navigator hint used to avoid resuming a stale Spatial generation. */
+  preparePublishedLocation(locationId: string, forced: boolean): void {
+    // Resolve before the navigator releases the current surface so an invalid
+    // target cannot mutate either host.
+    enterSpatialRuntimeLocation(this.#session, locationId)
+    this.#preparedRuntimeActivation = { locationId, forced }
   }
 
   resetTeacherControllerSession(scope: 'surface' | 'course'): void {
@@ -576,6 +628,7 @@ export class SpatialSurfaceHost {
     root.dataset.spatialViewportHeight = String(camera.viewportHeight)
     root.dataset.worldBoundsMode = this.#session.input.surface.world.bounds.mode
     root.tabIndex = 0
+    root.hidden = !this.#active
     root.setAttribute('role', 'region')
     root.setAttribute('aria-label', `${this.#session.input.surface.title} 空间探索`)
     const bg = resolveCourseSurfaceBackgroundColor(this.#session.input.surface.backgroundColor)
@@ -632,7 +685,7 @@ export class SpatialSurfaceHost {
     this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
     this.#gestureDisposer = attachSpatialPlaybackCameraGestures({
       root,
-      isActive: () => this.#session.active && !this.#destroyed,
+      isActive: () => this.#active && this.#session.active && !this.#destroyed,
       getCamera: () => this.#session.camera,
       setCamera: (camera) => {
         void this.setRuntimeCamera(camera)
@@ -645,36 +698,53 @@ export class SpatialSurfaceHost {
   }
 
   async activate(): Promise<void> {
+    const wasInactive = !this.#active
+    const preparedActivation = this.#preparedRuntimeActivation
+    this.#preparedRuntimeActivation = null
+    this.#active = true
+    if (this.#root) this.#root.hidden = false
+    this.#pendingRuntimeActivation = null
+    if (wasInactive && preparedActivation !== null) {
+      // The navigator activates a surface before assigning its target
+      // location. Keep the suspended generation inert until that assignment.
+      this.#pendingRuntimeActivation = preparedActivation
+      return
+    }
+    this.#carrierSideEffects.activate()
     if (!this.#session.active) {
       this.#session = reopenSpatialRuntimeSession(this.#session)
     }
-    this.#active = true
-    if (this.#root) this.#root.hidden = false
     this.#updateWorldTransform()
     this.#reconcileRecords()
+    this.#resumeComponentCarriers()
     this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    this.#carrierSideEffects.suspend()
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
     this.#session = leaveSpatialRuntimeLocation(this.#session)
+    for (const record of this.#records.values()) {
+      record.componentHandle?.setVisible(false)
+      record.componentHandle?.suspend()
+    }
     if (this.#root) this.#root.hidden = true
   }
 
   async resume(): Promise<void> {
-    this.#session = reopenSpatialRuntimeSession(this.#session)
-    this.#active = true
-    if (this.#root) this.#root.hidden = false
-    this.#updateWorldTransform()
-    this.#reconcileRecords()
-    this.#restoreInteractionsIfActive()
+    return this.activate()
   }
 
   async destroy(): Promise<void> {
     if (this.#destroyed) return
     this.#invalidateInteractions()
     this.#active = false
+    this.#carrierSideEffects.destroy()
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
     this.#interactionPort?.destroy()
     this.#interactionPort = null
     this.#interactionNodes.clear()
@@ -684,6 +754,7 @@ export class SpatialSurfaceHost {
     this.#audioDisposer?.()
     this.#audioDisposer = null
     for (const record of this.#records.values()) {
+      record.componentEffects?.retire()
       record.controllerDom?.destroy()
       record.componentHandle?.destroy()
     }
@@ -726,8 +797,22 @@ export class SpatialSurfaceHost {
   }
 
   async setLocationId(locationId: string): Promise<void> {
+    const preparedActivation = this.#preparedRuntimeActivation
+    const pendingActivation = this.#pendingRuntimeActivation
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
+    const activation = pendingActivation?.locationId === locationId
+      ? pendingActivation
+      : preparedActivation?.locationId === locationId
+        ? preparedActivation
+        : null
     const nextSession = enterSpatialRuntimeLocation(this.#session, locationId)
-    this.#commitLocationGeneration(nextSession)
+    if (pendingActivation !== null) this.#carrierSideEffects.activate()
+    this.#commitLocationGeneration(
+      nextSession,
+      activation?.forced === true,
+      pendingActivation !== null,
+    )
   }
 
   async setPlaybackPath(playbackPathId: string | null): Promise<void> {
@@ -754,14 +839,40 @@ export class SpatialSurfaceHost {
     this.#options.onInteractionReady?.()
   }
 
-  #commitLocationGeneration(nextSession: SpatialRuntimeSession): void {
+  #resumeComponentCarriers(): void {
+    for (const record of this.#records.values()) {
+      const mount = record.deferredComponentMount
+      record.deferredComponentMount = null
+      if (mount) mount()
+      record.componentHandle?.setVisible(true)
+      record.componentHandle?.resume()
+    }
+  }
+
+  #commitLocationGeneration(
+    nextSession: SpatialRuntimeSession,
+    replaceCarriers = false,
+    resumeCarriers = false,
+  ): void {
     this.#invalidateInteractions()
     this.#interactionPort?.resetLocalVisibility()
+    if (replaceCarriers) this.#destroyRecords()
     this.#session = nextSession
     this.#updateWorldTransform()
     this.#reconcileRecords()
+    if (resumeCarriers) this.#resumeComponentCarriers()
     this.#refreshControllers()
     this.#restoreInteractionsIfActive()
+  }
+
+  #destroyRecords(): void {
+    for (const record of this.#records.values()) {
+      record.componentEffects?.retire()
+      record.controllerDom?.destroy()
+      record.componentHandle?.destroy()
+      record.wrapper.remove()
+    }
+    this.#records.clear()
   }
 
   #requireCamera(): SpatialRuntimeCamera {
@@ -853,6 +964,7 @@ export class SpatialSurfaceHost {
     const nextIds = new Set(entries.map((entry) => entry.item.layerItemId))
     for (const [id, record] of [...this.#records.entries()]) {
       if (nextIds.has(id)) continue
+      record.componentEffects?.retire()
       record.controllerDom?.destroy()
       record.componentHandle?.destroy()
       record.wrapper.remove()
@@ -968,9 +1080,41 @@ export class SpatialSurfaceHost {
   #createRecord(entry: SpatialPlaybackEntry): SpatialHostRecord {
     const dom = this.#world!.ownerDocument
     const viewport = isSpatialViewportPlaybackItem(entry.source, entry.item)
+    let record: SpatialHostRecord | null = null
     let componentHandle: PublishedComponentMountHandle | null = null
+    let deferredComponentMount: (() => void) | null = null
+    const componentEffects = entry.item.kind === 'component'
+      ? this.#carrierSideEffects.createScope(() => (
+          record === null
+          || this.#records.get(entry.item.layerItemId) === record
+        ))
+      : null
     const onMountComponent = (handle: PublishedComponentMountHandle) => {
-      componentHandle = handle
+      if (record) record.componentHandle = handle
+      else componentHandle = handle
+    }
+    const deferComponent = !this.#active && componentEffects
+      ? (mount: () => void) => {
+          const deferred = () => {
+            if (componentEffects.active()) mount()
+          }
+          if (record) record.deferredComponentMount = deferred
+          else deferredComponentMount = deferred
+        }
+      : undefined
+    const finish = (
+      wrapper: HTMLElement | SVGGElement,
+      controllerDom: TeacherControllerDom | null,
+    ): SpatialHostRecord => {
+      record = {
+        entry,
+        wrapper,
+        controllerDom,
+        componentHandle,
+        componentEffects,
+        deferredComponentMount,
+      }
+      return record
     }
     if (viewport) {
       const wrapper = dom.createElement('div')
@@ -1007,11 +1151,18 @@ export class SpatialSurfaceHost {
         wrapper.appendChild(createViewportHud(dom, entry.item, {
           components: this.#components,
           resolveAsset: this.#resolveAsset,
-          interactive: this.#session.active,
+          interactive: true,
+          ...(componentEffects?.courseState
+            ? { courseState: componentEffects.courseState }
+            : {}),
+          ...(componentEffects?.componentActions
+            ? { componentActions: componentEffects.componentActions }
+            : {}),
           onMountComponent,
+          ...(deferComponent ? { deferComponentMount: deferComponent } : {}),
         }))
       }
-      return { entry, wrapper, controllerDom, componentHandle }
+      return finish(wrapper, controllerDom)
     }
     if (entry.item.kind === 'native' && entry.item.content.nativeType === 'video') {
       const url = this.#resolveAsset(entry.item.content.data.assetId)
@@ -1019,12 +1170,19 @@ export class SpatialSurfaceHost {
       wrapper.dataset.layerSource = entry.source
       const gestureOwner = spatialGestureOwner(entry.item)
       if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
-      return { entry, wrapper, controllerDom: null, componentHandle: null }
+      return finish(wrapper, null)
     }
     const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
       components: this.#components,
-      interactive: this.#session.active,
+      interactive: true,
+      ...(componentEffects?.courseState
+        ? { courseState: componentEffects.courseState }
+        : {}),
+      ...(componentEffects?.componentActions
+        ? { componentActions: componentEffects.componentActions }
+        : {}),
       onMountComponent,
+      ...(deferComponent ? { deferComponentMount: deferComponent } : {}),
     })
     wrapper.dataset.spatialLayerRecord = 'true'
     wrapper.dataset.layerItemId = entry.item.layerItemId
@@ -1033,7 +1191,7 @@ export class SpatialSurfaceHost {
     wrapper.dataset.coordinateSpace = 'world'
     const gestureOwner = spatialGestureOwner(entry.item)
     if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
-    return { entry, wrapper, controllerDom: null, componentHandle }
+    return finish(wrapper, null)
   }
 
   #applyRecord(record: SpatialHostRecord): void {
@@ -1101,7 +1259,10 @@ export class SpatialSurfaceHost {
         if (record) this.#applyRecord(record)
       },
       onAction: (action) => {
-        void this.#handleTeacherControllerAction(action, item)
+        void this.#handleTeacherControllerAction(action, item).catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause))
+          this.#options.reportActionError?.(action, error)
+        })
       },
       getInteractive: () => this.#session.active && (this.#options.playbackControls ?? 'canvas') === 'canvas',
     })
@@ -1149,6 +1310,7 @@ export class SpatialSurfaceHost {
     action: TeacherControllerAction,
     item: PublishedNativeLayerItem,
   ): Promise<void> {
+    if (!this.#active) return
     if (this.#options.executeTeacherControllerAction) {
       const handled = await this.#options.executeTeacherControllerAction(action, item)
       if (handled !== false) {
@@ -1166,9 +1328,10 @@ export class SpatialSurfaceHost {
     } else if (action.type === 'scene.previous') {
       await this.goPrevious()
     } else if (action.type === 'scene.replay') {
-      this.#commitLocationGeneration(reopenSpatialRuntimeSession(this.#session))
+      this.#commitLocationGeneration(reopenSpatialRuntimeSession(this.#session), true)
     } else if (action.type === 'course.restart') {
       this.#teacherControllerSession.resetCourse()
+      this.preparePublishedLocation(this.#session.input.startLocationId, true)
       await this.setLocationId(this.#session.input.startLocationId)
     } else if (action.type === 'audio.toggle-mute') {
       this.#muted = !this.#muted
