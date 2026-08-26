@@ -298,7 +298,7 @@ PPTX 映射规则：
 | `npm run build:desktop` | 只构建可由根目录入口直接启动的三个生产目录 |
 | `npm run generate:ai-capabilities` | 从权威 Schema、协议常量、诊断注册表和受校验组件目录生成分层 AI 能力契约 |
 | `npm run check:ai-capabilities` | 只读检查能力内容、来源证据和 16 KiB 索引门禁；内容或证据任一过期都会失败，不自动写文件 |
-| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取 Course Project V9，向 stdout 输出 [Validation Report V1](docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md)；Schema-invalid 保持 unreadable/exit 2、六个语义分区为 null，Schema 合法 finding 可附只含稳定 V9 ID 的 target。精确 code 可达性见机器 ledger；0 只表示现有检查无 error，不代表完整 V9 语义或实际网络使用与工程声明一致已证明 |
+| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取 Course Project V9，向 stdout 输出 [Validation Report V1](docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md)；Schema-invalid 保持 unreadable/exit 2、六个语义分区为 null。Schema 合法后追加只读的 V9-native Runtime / Interaction / Component / Controller-Media health，finding 带只含稳定 V9 ID 的 target。精确 code 可达性见机器 ledger；0 只表示现有检查无 error，不代表网络 declaration parity、像素或真实互动已证明 |
 | `npm run generate:contracts` | 从 Zod 生成 `artifacts/contracts/` |
 | `npm run check:contracts` | 检查合同快照与源码一致 |
 | `npm run build` | 先检查 AI 能力契约，再执行类型检查、测试并构建全部生产产物 |
@@ -311,7 +311,7 @@ PPTX 映射规则：
 
 机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它提供当前工程协议、Runtime API 2、Component API 4、互动、诊断和导出面的低成本索引；`build-courseware-project` 先核对该索引及生成证据，需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。索引本身不是编辑器内 AI、自动课件生成器或工作流。能力索引 `protocols.project` 为 9。外部组件 catalog 的审核摘要缺失、目录缺失或包完整性不匹配时，核心契约仍可生成，但组件目录能力必须明确标记为 `unavailable`/降级；这不定义已审核外部导入组件的执行权限。当前快照中的四个包仍全部是 `experimental`，许可和维护人阻断没有被能力索引解除。
 
-外部 Builder 的最低闭环是“读取已确认教学文件与 Capability → 使用仓库真实 TypeScript API 生成 Course Project V9 → 校验 → 按稳定绑定局部修正 → 重开、Player、四格式与视觉证据 → 人工验收”。`validate:project` 命令本身不启动 Electron、不执行真实导出、不改写工程；当前 `projectHealth` 以结构性检查为主，V9 语义与源码外联网络检查仍按 REPAIR 路线补齐。Node 下文字/公式布局使用公开标注的确定性近似测量，最终像素裁切、互动与离线外部请求必须以真实编辑器、Player 或导出复核。自动闭环最多给出 `engineering candidate`，不得用 Headless 通过代替这些证据或人类验收。
+外部 Builder 的最低闭环是“读取已确认教学文件与 Capability → 使用仓库真实 TypeScript API 生成 Course Project V9 → 校验 → 按稳定绑定局部修正 → 重开、Player、四格式与视觉证据 → 人工验收”。`validate:project` 命令本身不启动 Electron、不执行真实导出、不改写工程；当前 `projectHealth` 已直接覆盖 V9 的 Runtime、Interaction、Component 与 Controller-Media 四域，但不扫描可执行源码，也不判断 URL/Secret/CORS 或 network declaration parity。Node 下文字/公式布局使用公开标注的确定性近似测量，最终像素裁切、互动与离线外部请求必须以真实编辑器、Player 或导出复核。自动闭环最多给出 `engineering candidate`，不得用 Headless 通过代替这些证据或人类验收。
 
 E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口保持 `BrowserWindow.isVisible() === false`，不会调用 `show()`、出现在任务栏或抢占焦点；透明、离屏坐标与关闭后台渲染节流只是额外防护和稳定性设置。生产构建/制品验证中的自动启动也显式使用同一环境变量。正常 `npm start`、开发启动和双击入口不读取该测试默认值，仍会照常显示窗口。常规验证不得使用可视 E2E；只有开发者明确需要观察单个故障时才手工运行 `npm run test:e2e:visible`。
 

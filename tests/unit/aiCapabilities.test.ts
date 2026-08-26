@@ -208,6 +208,7 @@ describe('AI capability manifest generation', () => {
         'pptx-preflight',
         'stable-ids',
         'no-v8-fields-or-migration-markers',
+        'v9-project-health-runtime-interaction-component-controller-media',
       ],
       exitCodes: {
         valid: 0,
@@ -216,7 +217,9 @@ describe('AI capability manifest generation', () => {
       },
       execution: 'node-only-no-electron-no-export-no-write',
     })
-    expect(index.validation.checks).not.toContain('project-health')
+    expect(index.validation.checks).toContain(
+      'v9-project-health-runtime-interaction-component-controller-media',
+    )
 
     const diagnostics = parseFile<{
       legacyRegistryScope: string
@@ -232,6 +235,7 @@ describe('AI capability manifest generation', () => {
         fatalCodes: string[]
         schemaIssueCodes: string
         findingCodes: unknown[]
+        projectHealth: Record<string, unknown>
         sourceOfTruth: string
         contract: string
       }
@@ -249,6 +253,36 @@ describe('AI capability manifest generation', () => {
       fatalCodes: COURSE_PROJECT_VALIDATION_FATAL_CODES,
       schemaIssueCodes: 'zod-issue-code',
       findingCodes: COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+      projectHealth: {
+        collector: 'collectCourseProjectHealth',
+        input: 'schema-valid-course-project-v9-plus-opened-archive-files',
+        ordering: 'severity-path-code-message',
+        target: 'required-diagnostic-target-v1',
+        readOnly: true,
+        domains: [
+          {
+            id: 'runtime',
+            collector: 'collectCourseProjectRuntimeHealth',
+            source: 'src/shared/courseProjectHealth/runtime.ts',
+          },
+          {
+            id: 'interaction',
+            collector: 'collectCourseProjectInteractionHealth',
+            source: 'src/shared/courseProjectHealth/interaction.ts',
+          },
+          {
+            id: 'component',
+            collector: 'collectCourseProjectComponentHealth',
+            source: 'src/shared/courseProjectHealth/component.ts',
+          },
+          {
+            id: 'controller-media',
+            collector: 'collectCourseProjectControllerMediaHealth',
+            source: 'src/shared/courseProjectHealth/controllerMedia.ts',
+          },
+        ],
+        networkDeclarationParity: 'deferred',
+      },
       sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
       contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
     })
@@ -950,6 +984,13 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).toEqual(expect.arrayContaining([
       'src/shared/courseProjectSchema.ts',
       'src/shared/courseProjectTypes.ts',
+      'src/shared/courseProjectHealth.ts',
+      'src/shared/courseProjectHealth/component.ts',
+      'src/shared/courseProjectHealth/controllerMedia.ts',
+      'src/shared/courseProjectHealth/internal.ts',
+      'src/shared/courseProjectHealth/interaction.ts',
+      'src/shared/courseProjectHealth/runtime.ts',
+      'src/shared/courseProjectHealth/types.ts',
       'src/shared/courseProjectValidationDiagnostics.ts',
       'src/shared/publishedCourseSchema.ts',
       'src/shared/publishedCourseTypes.ts',
