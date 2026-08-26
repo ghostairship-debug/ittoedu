@@ -20,6 +20,7 @@ import { openCourseProjectArchive } from '../../src/renderer/project/courseProje
 import {
   checkRenderHostBenchmarkOutputs,
   RENDER_HOST_BENCHMARK_OUTPUT_PATHS,
+  RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
 } from '../../scripts/build-render-host-benchmark'
 import { equalBytes } from '../../scripts/exampleGenerationBoundary'
 
@@ -44,7 +45,9 @@ const frozenV8ArtifactHashes = {
   'render-host-benchmark.h5lesson': '8beb9feab7858df6f66db7b49c5090b8bed47b2ce0c2f76d4ffd0b47857a2ca9',
   'render-host-editable-table.h5component': 'fd695aef3bb5416c1c4d5e9555b3475da2dedeba45445cf6b73637b9558cd234',
   'render-host-phaser-meter.h5component': 'b77013e2620c60e43c303390c5580138005c30d82fec628c2e8a7539f1420d3d',
-  'render-host-benchmark.html': '921139e13625b666e6ea39db6434d8d987ddbf49817060047c23a0caec487636',
+  // Reviewed prerequisite 95a49d9 removed legacy teacher-escape chrome; this
+  // is the rebased frozen input, not V8-05A accepting fixture drift.
+  'render-host-benchmark.html': '3ba5198ed855caadf97d719c4e078dc5be2507fc9cd9bf5a978e68b1f12d633c',
   'project.json': 'fcee1f76fdd83f4f1bf7f24316ce6ddc8e52b259ae840179fa52835dd28cb93d',
   'THIRD_PARTY_NOTICES.md': 'a10971d922496b85d213d177d4fd8fd6e3391998a3b66fba3b09f18e43933e2b',
 } as const
@@ -330,6 +333,7 @@ describe('render host benchmark fixture', () => {
     })
     expect(phaserMeterRuntime).toContain('ctx.phaser.scene')
     expect(phaserMeterRuntime).toContain('ctx.phaser.root')
+    expect(phaserMeterRuntime).not.toContain('__renderHostPhaserMeterGenerationProbe')
 
     expect(executeComponentRegistration(tableRuntime)).toMatchObject({
       id: tableManifest.id,
@@ -446,18 +450,32 @@ describe('render host benchmark fixture', () => {
     expect(meter?.layerItems).toContainEqual(expect.objectContaining({
       kind: 'component',
       layerItemId: 'phaser_meter_component_instance',
-      component: { packageId: phaserMeterManifest.id, version: phaserMeterManifest.version },
+      component: {
+        packageId: phaserMeterManifest.id,
+        version: RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
+      },
     }))
+    expect(projectV9.componentPackages[phaserMeterManifest.id]?.version)
+      .toBe(RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION)
     expect(Object.keys(reopened.componentFiles).sort()).toEqual([
       `${tableManifest.id}@${tableManifest.version}`,
-      `${phaserMeterManifest.id}@${phaserMeterManifest.version}`,
+      `${phaserMeterManifest.id}@${RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION}`,
     ].sort())
     const embeddedManifest = (key: string) => componentManifestSchema.parse(JSON.parse(
       new TextDecoder().decode(reopened.componentFiles[key]!['manifest.json']!),
     ) as unknown)
     expect(embeddedManifest(`${tableManifest.id}@${tableManifest.version}`).renderMode).toBe('dom')
-    expect(embeddedManifest(`${phaserMeterManifest.id}@${phaserMeterManifest.version}`).renderMode)
-      .toBe('phaser')
+    const embeddedMeterKey =
+      `${phaserMeterManifest.id}@${RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION}`
+    const embeddedMeter = embeddedManifest(embeddedMeterKey)
+    expect(embeddedMeter).toMatchObject({
+      id: phaserMeterManifest.id,
+      version: RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
+      renderMode: 'phaser',
+    })
+    expect(new TextDecoder().decode(
+      reopened.componentFiles[embeddedMeterKey]![embeddedMeter.entry]!,
+    )).toContain('__renderHostPhaserMeterGenerationProbe')
   })
 
   it('ships the same five routes as a Published Course V2 standalone', async () => {
@@ -476,12 +494,31 @@ describe('render host benchmark fixture', () => {
     expect(payload.locations).toHaveLength(5)
     expect(Object.keys(payload.components).sort()).toEqual([
       `${tableManifest.id}@${tableManifest.version}`,
-      `${phaserMeterManifest.id}@${phaserMeterManifest.version}`,
+      `${phaserMeterManifest.id}@${RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION}`,
     ].sort())
+    expect(payload.components[
+      `${phaserMeterManifest.id}@${RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION}`
+    ]).toMatchObject({
+      id: phaserMeterManifest.id,
+      version: RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
+      apiVersion: 4,
+      scopes: ['scene'],
+      renderMode: 'phaser',
+    })
     const surface = payload.surfaces[0]
     expect(surface?.type).toBe('slide')
     if (!surface || surface.type !== 'slide') throw new Error('Published V2 lost its Slide surface')
     expect(surface.scenes).toHaveLength(5)
+    expect(surface.scenes.flatMap(({ layerItems }) => layerItems)).toContainEqual(
+      expect.objectContaining({
+        kind: 'component',
+        layerItemId: 'phaser_meter_component_instance',
+        component: {
+          packageId: phaserMeterManifest.id,
+          version: RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
+        },
+      }),
+    )
     const runtimeModes = surface.scenes.flatMap(({ layerItems }) => layerItems).flatMap((item) =>
       item.kind === 'runtime' ? [[item.runtime.runtimeApiVersion, item.runtime.renderMode]] : [])
     expect(runtimeModes).toEqual([

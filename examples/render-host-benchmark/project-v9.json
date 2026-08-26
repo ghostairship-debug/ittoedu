@@ -39,12 +39,12 @@
     },
     "com.example.render-host-phaser-meter": {
       "packageId": "com.example.render-host-phaser-meter",
-      "version": "4.0.0",
+      "version": "4.0.0-v9-probe.1",
       "name": "V4 Phaser 交互仪表",
-      "manifestPath": "components/com.example.render-host-phaser-meter@4.0.0/manifest.json",
-      "runtimePath": "components/com.example.render-host-phaser-meter@4.0.0/runtime.js",
-      "thumbnailPath": "components/com.example.render-host-phaser-meter@4.0.0/thumbnail.svg",
-      "contentSha256": "30c70804b8860bc402ae3532b9492adca3324d49a759ab675863b5862ef55d3a"
+      "manifestPath": "components/com.example.render-host-phaser-meter@4.0.0-v9-probe.1/manifest.json",
+      "runtimePath": "components/com.example.render-host-phaser-meter@4.0.0-v9-probe.1/runtime.js",
+      "thumbnailPath": "components/com.example.render-host-phaser-meter@4.0.0-v9-probe.1/thumbnail.svg",
+      "contentSha256": "835405b26535c7967011b0f0a1cf481f60b829af8e0329d0d3988f5cfb8bd8c5"
     }
   },
   "designTokens": {
@@ -627,7 +627,7 @@
               "kind": "component",
               "component": {
                 "packageId": "com.example.render-host-phaser-meter",
-                "version": "4.0.0"
+                "version": "4.0.0-v9-probe.1"
               },
               "props": {
                 "content": {

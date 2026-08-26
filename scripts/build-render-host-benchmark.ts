@@ -87,6 +87,7 @@ export const RENDER_HOST_BENCHMARK_OUTPUT_PATHS = {
 const reproducibleTimestamp = new Date('2026-07-23T00:00:00.000Z')
 const timestamp = reproducibleTimestamp.toISOString()
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024
+export const RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION = '4.0.0-v9-probe.1'
 
 interface ThreePackageMetadata {
   version: string
@@ -492,14 +493,44 @@ interface LoadedComponent {
   archive: Uint8Array
 }
 
+function withPhaserMeterGenerationProbe(source: string): string {
+  const createMarker = '      var scene = ctx.phaser.scene'
+  const destroyMarker = `        destroy: function () {
+          hit.off('pointerdown', onActivate)`
+  if (!source.includes(createMarker) || !source.includes(destroyMarker)) {
+    throw new Error('V9 Phaser 仪表 generation probe 注入点缺失')
+  }
+  return source
+    .replace(createMarker, `      var generationProbe = window.__renderHostPhaserMeterGenerationProbe
+      if (!generationProbe) {
+        generationProbe = { creates: 0, destroys: 0 }
+        window.__renderHostPhaserMeterGenerationProbe = generationProbe
+      }
+      generationProbe.creates += 1
+${createMarker}`)
+    .replace(destroyMarker, `        destroy: function () {
+          generationProbe.destroys += 1
+          hit.off('pointerdown', onActivate)`)
+}
+
 async function loadComponent(
   directoryName: string,
+  options: {
+    version?: string
+    transformRuntimeSource?: (source: string) => string
+  } = {},
 ): Promise<LoadedComponent> {
   const directory = path.join(componentRoot, directoryName)
   const manifestText = await fs.readFile(path.join(directory, 'manifest.json'), 'utf8')
-  const manifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
-  const runtimeSource = await fs.readFile(path.join(directory, manifest.entry), 'utf8')
-    .then(normalizeLineEndings)
+  const sourceManifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
+  const manifest = componentManifestSchema.parse({
+    ...sourceManifest,
+    version: options.version ?? sourceManifest.version,
+  })
+  const runtimeSource = (options.transformRuntimeSource ?? ((source) => source))(await fs.readFile(
+    path.join(directory, manifest.entry),
+    'utf8',
+  ).then(normalizeLineEndings))
   validateComponentDefinition(runtimeSource, manifest)
   const files: Record<string, Uint8Array> = {
     'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
@@ -810,6 +841,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     frozenLegacyHtml,
     tableComponent,
     phaserMeterComponent,
+    phaserMeterComponentV9,
   ] = await Promise.all([
     loadThreePackageMetadata(),
     bundleThreeRuntime(),
@@ -820,6 +852,10 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html)),
     loadComponent('editable-table'),
     loadComponent('phaser-meter'),
+    loadComponent('phaser-meter', {
+      version: RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
+      transformRuntimeSource: withPhaserMeterGenerationProbe,
+    }),
   ])
 
   assertOfflineBundle(phaserRuntimeSource, 'Phaser 场景运行时')
@@ -832,6 +868,14 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     phaserMeterComponent.data.manifest.renderMode !== 'phaser'
   ) {
     throw new Error('交互仪表必须是 V4 Phaser 组件')
+  }
+  if (
+    phaserMeterComponentV9.data.manifest.id !== phaserMeterComponent.data.manifest.id ||
+    phaserMeterComponentV9.data.manifest.version !==
+      RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION ||
+    phaserMeterComponentV9.data.manifest.renderMode !== 'phaser'
+  ) {
+    throw new Error('V9 generation probe 必须保持 Phaser 仪表组件合同身份')
   }
 
   const generatedAssets = {
@@ -1074,19 +1118,19 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     threeRuntimeSource,
     projectAssets,
     tableComponent,
-    phaserMeterComponent,
+    phaserMeterComponent: phaserMeterComponentV9,
   })
   const courseSources = {
     project: projectV9,
     assetFiles,
     components: {
       [tableComponent.data.key]: tableComponent.data,
-      [phaserMeterComponent.data.key]: phaserMeterComponent.data,
+      [phaserMeterComponentV9.data.key]: phaserMeterComponentV9.data,
     },
   }
   const componentFilesV9 = {
     [tableComponent.data.key]: tableComponent.data.files,
-    [phaserMeterComponent.data.key]: phaserMeterComponent.data.files,
+    [phaserMeterComponentV9.data.key]: phaserMeterComponentV9.data.files,
   }
   const lessonV9 = createCourseProjectArchive({
     project: projectV9,
@@ -1107,6 +1151,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
   }
   const publishedV2 = buildPublishedCourseV2Payload(courseSources)
   const htmlV2 = buildPublishedCourseStandaloneHtml(courseSources, { playerBundle })
+    .replace(/^[\t ]+(?=\r?$)/gm, '')
   return {
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.threeRuntime]: strToU8(threeRuntimeSource),
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.phaserFallback]: assetFiles.asset_phaser_runtime_fallback!,

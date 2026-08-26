@@ -58,6 +58,7 @@ async function phaserTexts(page: Page): Promise<string[]> {
 async function screenshotLogicalCanvasRegion(
   canvas: Locator,
   region: { x: number; y: number; width: number; height: number },
+  logicalSize = { width: 1280, height: 720 },
 ): Promise<Buffer> {
   const image = sharp(await canvas.screenshot())
   const metadata = await image.metadata()
@@ -65,10 +66,10 @@ async function screenshotLogicalCanvasRegion(
     throw new Error('Canvas screenshot has no dimensions')
   }
   return image.extract({
-    left: Math.floor(region.x / 1280 * metadata.width),
-    top: Math.floor(region.y / 720 * metadata.height),
-    width: Math.max(1, Math.floor(region.width / 1280 * metadata.width)),
-    height: Math.max(1, Math.floor(region.height / 720 * metadata.height)),
+    left: Math.floor(region.x / logicalSize.width * metadata.width),
+    top: Math.floor(region.y / logicalSize.height * metadata.height),
+    width: Math.max(1, Math.floor(region.width / logicalSize.width * metadata.width)),
+    height: Math.max(1, Math.floor(region.height / logicalSize.height * metadata.height)),
   }).png().toBuffer()
 }
 
@@ -110,6 +111,7 @@ test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主
   try {
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' })
     await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
+    await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
     await expect.poll(() => page.evaluate(() =>
       window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
     )).toBe(0)
@@ -242,6 +244,7 @@ test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主
       replays: 25,
     }))
     expect(stress.rafCount).toBeLessThanOrEqual(stableRafCount + 2)
+    await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
 
     await page.screenshot({
       path: join(visualOutputDirectory, 'render-host-benchmark-final.png'),
@@ -348,6 +351,7 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
   try {
     await page.goto(pathToFileURL(htmlV2Path).href, { waitUntil: 'load' })
     await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
+    await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
     await waitForLocation('scene_native_nodes_v9')
     await expect.poll(() => page.evaluate(() =>
       window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
@@ -436,6 +440,9 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
 
     await goToScene(page, 4)
     await waitForLocation('scene_component_v4_phaser_v9')
+    const meterWrapper = page.locator(
+      '[data-slide-layer-item="phaser_meter_component_instance"]',
+    )
     const meterCanvas = page.locator(
       '[data-slide-layer-item="phaser_meter_component_instance"] canvas[data-published-phaser-component]',
     )
@@ -444,12 +451,24 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
     const meterBounds = await meterCanvas.boundingBox()
     if (!meterBounds) throw new Error('Published V2 Phaser Component canvas is not visible')
     const meterBefore = await meterCanvas.screenshot()
+    const meterStatusRegion = { x: 110, y: 330, width: 500, height: 44 }
+    const meterStatusBefore = await screenshotLogicalCanvasRegion(
+      meterCanvas,
+      meterStatusRegion,
+      { width: 720, height: 390 },
+    )
     await meterCanvas.click({
       position: { x: meterBounds.width * 0.5, y: meterBounds.height * 0.58 },
     })
     await page.waitForTimeout(50)
     const meterAfter = await meterCanvas.screenshot()
     expect(meterAfter.equals(meterBefore)).toBe(false)
+    const meterStatusAfter = await screenshotLogicalCanvasRegion(
+      meterCanvas,
+      meterStatusRegion,
+      { width: 720, height: 390 },
+    )
+    expect(meterStatusAfter.equals(meterStatusBefore)).toBe(false)
     const stableRafCount = await page.evaluate(() =>
       window.__renderHostActiveRafCount?.() ?? 0,
     )
@@ -461,67 +480,125 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
       return counts.created - counts.lost
     })
 
-    const stress = await page.evaluate(async () => {
-      const player = window.__H5_LESSON_PLAYER__
-      if (!player) throw new Error('Published V2 Player is not initialized')
-      const ids = [
-        'scene_native_nodes_v9',
-        'scene_runtime_phaser_v9',
-        'scene_runtime_three_v9',
-        'scene_component_v4_dom_v9',
-        'scene_component_v4_phaser_v9',
-      ]
-      const waitUntil = async (accept: () => boolean, label: string): Promise<void> => {
-        const deadline = performance.now() + 8_000
-        while (!accept()) {
-          if (performance.now() >= deadline) throw new Error(`Timed out waiting for ${label}`)
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+    const stressLocationIds = [
+      'scene_native_nodes_v9',
+      'scene_runtime_phaser_v9',
+      'scene_runtime_three_v9',
+      'scene_component_v4_dom_v9',
+      'scene_component_v4_phaser_v9',
+    ]
+    let switches = 0
+    let replays = 0
+    let replayResetObserved = false
+    for (let round = 0; round < 25; round += 1) {
+      await expect.poll(() => page.evaluate(() => {
+        const probe = Reflect.get(window, '__renderHostPhaserMeterGenerationProbe') as
+          | { creates?: unknown; destroys?: unknown }
+          | undefined
+        return typeof probe?.creates === 'number'
+          && typeof probe.destroys === 'number'
+          && probe.creates === probe.destroys + 1
+      })).toBe(true)
+      const generationBefore = await page.evaluate(() => {
+        const probe = Reflect.get(window, '__renderHostPhaserMeterGenerationProbe') as
+          | { creates?: unknown; destroys?: unknown }
+          | undefined
+        if (typeof probe?.creates !== 'number' || typeof probe.destroys !== 'number') {
+          throw new Error('Phaser meter generation probe is unavailable')
         }
+        return { creates: probe.creates, destroys: probe.destroys }
+      })
+      const oldWrapper = await meterWrapper.elementHandle()
+      const oldCanvas = await meterCanvas.elementHandle()
+      if (!oldWrapper || !oldCanvas) {
+        throw new Error(`stress replay ${round} old host generation missing`)
       }
-      const go = async (index: number): Promise<void> => {
-        if (!player.goToScene(index)) throw new Error(`stress scene ${index} failed`)
-        await waitUntil(() => (
-          player.getCurrentSceneIndex() === index &&
-          document.querySelector<HTMLElement>('.slide-published-adapter')?.dataset.locationId === ids[index]
-        ), `scene ${index}`)
+      const oldCanvasParent = await oldCanvas.evaluateHandle((canvas) => canvas.parentElement)
+      expect(await page.evaluate(() => (
+        window.__H5_LESSON_PLAYER__?.replayScene() === true
+      ))).toBe(true)
+      await expect.poll(() => oldWrapper.evaluate((wrapper) => wrapper.isConnected)).toBe(false)
+      await expect.poll(() => oldCanvasParent.evaluate((parent) => (
+        parent?.isConnected ?? false
+      ))).toBe(false)
+      await expect.poll(() => page.evaluate(() => {
+        const probe = Reflect.get(window, '__renderHostPhaserMeterGenerationProbe') as
+          | { creates?: unknown; destroys?: unknown }
+          | undefined
+        return typeof probe?.creates === 'number' && typeof probe.destroys === 'number'
+          ? { creates: probe.creates, destroys: probe.destroys }
+          : null
+      })).toEqual({
+        creates: generationBefore.creates + 1,
+        destroys: generationBefore.destroys + 1,
+      })
+      await expect(meterWrapper).toBeVisible()
+      await expect(meterCanvas).toBeVisible()
+      const newWrapper = await meterWrapper.elementHandle()
+      const newCanvas = await meterCanvas.elementHandle()
+      if (!newWrapper || !newCanvas) {
+        throw new Error(`stress replay ${round} new host generation missing`)
       }
-      let switches = 0
-      let replays = 0
-      for (let round = 0; round < 25; round += 1) {
-        for (const index of [1, 2, 3, 4]) {
-          await go(index)
-          switches += 1
-        }
-        let replay = document.querySelector<HTMLButtonElement>(
-          '.slide-native-teacher-controller [data-controller-button-id="teacher_button_benchmark_06"]',
+      const newCanvasParent = await newCanvas.evaluateHandle((canvas) => canvas.parentElement)
+      expect(await oldWrapper.evaluate(
+        (wrapper, replacement) => wrapper === replacement,
+        newWrapper,
+      )).toBe(false)
+      expect(await oldCanvasParent.evaluate(
+        (parent, replacement) => parent === replacement,
+        newCanvasParent,
+      )).toBe(false)
+      await expect.poll(() => page.evaluate(() => ({
+        index: window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
+        locationId: document.querySelector<HTMLElement>(
+          '.slide-published-adapter',
+        )?.dataset.locationId ?? null,
+      }))).toEqual({
+        index: 4,
+        locationId: stressLocationIds[4],
+      })
+      if (round === 0) {
+        await page.waitForTimeout(50)
+        const meterStatusReset = await screenshotLogicalCanvasRegion(
+          meterCanvas,
+          meterStatusRegion,
+          { width: 720, height: 390 },
         )
-        if (!replay) {
-          document.querySelector<HTMLButtonElement>(
-            '.slide-native-teacher-controller [data-teacher-controller-collapse="true"]',
-          )?.click()
-          replay = document.querySelector<HTMLButtonElement>(
-            '.slide-native-teacher-controller [data-controller-button-id="teacher_button_benchmark_06"]',
-          )
-        }
-        if (!replay) throw new Error(`stress replay ${round} control missing`)
-        replay.click()
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-        replays += 1
+        expect(meterStatusReset.equals(meterStatusBefore)).toBe(true)
+        expect(meterStatusReset.equals(meterStatusAfter)).toBe(false)
+        replayResetObserved = true
       }
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      replays += 1
+
+      for (const index of [1, 2, 3, 4]) {
+        await goToScene(page, index)
+        await waitForLocation(stressLocationIds[index]!)
+        if (index === 4) await expect(meterCanvas).toBeVisible()
+        switches += 1
+      }
+    }
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve())
+    }))
+    expect(replayResetObserved).toBe(true)
+    const stress = await page.evaluate(() => {
       const webglCounts = Reflect.get(window, '__renderHostWebGlCounts') as
         | (() => { created: number; lost: number })
         | undefined
+      const meterGenerations = Reflect.get(window, '__renderHostPhaserMeterGenerationProbe') as
+        | { creates: number; destroys: number }
+        | undefined
       return {
-        index: player.getCurrentSceneIndex(),
+        index: window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
         rafCount: window.__renderHostActiveRafCount?.() ?? 0,
         runtimeMounts: document.querySelectorAll('.published-canvas-runtime-mount').length,
         componentMounts: document.querySelectorAll('.published-component-mount').length,
         phaserComponentMounts: document.querySelectorAll('.published-slide-phaser-component-mount').length,
         canvases: document.querySelectorAll('canvas').length,
         webgl: webglCounts?.() ?? { created: 0, lost: 0 },
-        switches,
-        replays,
+        meterGenerations: meterGenerations
+          ? { ...meterGenerations }
+          : { creates: -1, destroys: -1 },
       }
     })
     expect(stress).toEqual(expect.objectContaining({
@@ -530,12 +607,13 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
       componentMounts: 0,
       phaserComponentMounts: 1,
       canvases: 1,
-      switches: 100,
-      replays: 25,
+      meterGenerations: { creates: 51, destroys: 50 },
     }))
+    expect({ switches, replays }).toEqual({ switches: 100, replays: 25 })
     expect(stress.webgl.lost).toBeGreaterThanOrEqual(26)
     expect(stress.webgl.created - stress.webgl.lost).toBe(stableWebglOutstanding)
     expect(stress.rafCount).toBeLessThanOrEqual(stableRafCount + 2)
+    await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
     expect(pageErrors).toEqual([])
     expect(consoleErrors).toEqual([])
     expect(externalRequests).toEqual([])
