@@ -11,6 +11,9 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
+// Teaches the export builders where this host's font bytes are. Without it the
+// measured export sizes would omit whatever fonts a real export embeds.
+import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,

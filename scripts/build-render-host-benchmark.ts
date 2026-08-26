@@ -12,6 +12,9 @@ import type {
   CourseRuntimeDefinition,
 } from '../src/shared/courseProjectTypes'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+// Teaches the export builders where this host's font bytes are. Without it the
+// generated artifacts silently ship without the bundled families they ask for.
+import '../src/renderer/export/bundledFontEmbedSourceNode'
 import { addCourseScene } from '../src/renderer/course/courseLocationCommands'
 import {
   openSlideAuthoringSession,

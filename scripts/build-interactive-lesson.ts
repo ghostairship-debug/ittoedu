@@ -11,6 +11,9 @@ import {
   PUBLISHED_COURSE_FORMAT,
   PUBLISHED_COURSE_VERSION,
 } from '../src/shared/publishedCourseTypes'
+// Teaches the export builders where this host's font bytes are. Without it the
+// generated lesson silently ships without the bundled families it asks for.
+import '../src/renderer/export/bundledFontEmbedSourceNode'
 import { buildPublishedCourseStandaloneHtml } from '../src/renderer/export/course/buildCoursePackages'
 import { buildPublishedCourseV2Payload } from '../src/renderer/export/course/buildPublishedCourse'
 import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'

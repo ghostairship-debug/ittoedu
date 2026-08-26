@@ -11,6 +11,9 @@ import type {
 } from '../src/shared/courseProjectTypes'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../src/main/componentCatalogScanner'
 import { componentPackagesToArchiveFiles } from '../src/renderer/components/componentPackageStore'
+// Teaches the export builders where this host's font bytes are. Without it the
+// generated artifacts silently ship without the bundled families they ask for.
+import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   importComponentPackage,
   type ImportedComponentPackage,

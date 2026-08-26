@@ -33,6 +33,8 @@
     "check:contracts": "tsx scripts/generate-contracts.ts --check",
     "generate:task-board": "tsx scripts/generate-task-board.ts",
     "check:task-board": "tsx scripts/generate-task-board.ts --check",
+    "check:renderer-fonts": "tsx scripts/check-renderer-font-assets.ts",
+    "test:renderer-fonts": "npm run build:player && npm run build:renderer && npm run check:renderer-fonts",
     "repo:index": "tsx scripts/generate-repo-index.ts",
     "repo:index:check": "tsx scripts/generate-repo-index.ts --check",
     "repo:context": "tsx scripts/query-repo-index.ts",

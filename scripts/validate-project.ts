@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
+// Teaches the export builders where this host's font bytes are. Without it the
+// headless validator would report export sizes a real export never produces.
+import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   collectCoursePackageExportPreflight,
   type CoursePackagePreflightItem,

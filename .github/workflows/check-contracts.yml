@@ -57,6 +57,7 @@ jobs:
           governance_tests=false
           task_board_check=false
           capability_check=false
+          renderer_fonts=false
           while IFS= read -r file; do
             [[ -z "$file" ]] && continue
             case "$file" in
@@ -105,6 +106,14 @@ jobs:
                 capability_check=true
                 ;;
             esac
+            # Own case: `vite*.ts` is swallowed by the product-test case above, and
+            # the one line keeping font slices out of `data:` URIs lives there. No
+            # Vitest suite runs a renderer build, so nothing else sees it break.
+            case "$file" in
+              vite*.ts|src/shared/fonts/*|scripts/check-renderer-font-assets.ts|package.json|package-lock.json)
+                renderer_fonts=true
+                ;;
+            esac
           done <<< "$changed"
 
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -115,6 +124,7 @@ jobs:
           echo "governance_tests=$governance_tests" >> "$GITHUB_OUTPUT"
           echo "task_board_check=$task_board_check" >> "$GITHUB_OUTPUT"
           echo "capability_check=$capability_check" >> "$GITHUB_OUTPUT"
+          echo "renderer_fonts=$renderer_fonts" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head" >> "$GITHUB_OUTPUT"
 
@@ -156,6 +166,22 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run typecheck
+
+  # The only gate that runs a renderer build. Deliberately narrow: it exists so a
+  # reintroduced `assetsInlineLimit` regression cannot ship green, not to move the
+  # Electron font E2E into every commit.
+  renderer-fonts:
+    needs: changes
+    if: needs.changes.outputs.renderer_fonts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:renderer-fonts
 
   test:
     needs: changes
