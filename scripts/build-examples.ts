@@ -2,7 +2,6 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs } from 'node:fs'
 import { strToU8, zipSync } from 'fflate'
-import sharp from 'sharp'
 import type {
   ComponentCreateContextV4Phaser,
   ComponentManifest,
@@ -44,12 +43,25 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
 const examplesDirectory = path.join(projectRoot, 'examples')
-const componentSourceDirectory = path.join(
-  examplesDirectory,
-  'sample-counter-component',
-)
-export const SAMPLE_EXAMPLE_OUTPUT_PATHS = {
+/**
+ * 手工维护的输入资产：生成器只读取它们，从不写回，`--check` 也不直接比对它们。
+ *
+ * `thumbnail.png` 曾经是生成产物——用 sharp/libvips 现场栅格化下面那段内联
+ * SVG——同时又被要求与已提交字节逐字节相同。这两个要求不可能同时成立：SVG 里的
+ * `<text>` 依赖宿主字体（`Microsoft YaHei` / `Arial`），Linux CI 上根本没有这两个
+ * 字体；即便把字体也一起装上，hinting 与抗锯齿默认值仍来自操作系统，图形库升级
+ * 本身还会再改一次输出。所以这张图降级为输入，与 manifest、runtime 同级。
+ *
+ * 这不削弱验证：它照旧被打包进下面两份归档，而那两份归档继续逐字节比对，
+ * 图变了一样会被发现。真正放弃的只是"用命令重画这张图"，而它从仓库第一次提交
+ * 至今没有改过。
+ */
+export const SAMPLE_EXAMPLE_INPUT_PATHS = {
+  manifest: 'sample-counter-component/manifest.json',
+  runtime: 'sample-counter-component/runtime.js',
   thumbnail: 'sample-counter-component/thumbnail.png',
+} as const
+export const SAMPLE_EXAMPLE_OUTPUT_PATHS = {
   component: 'sample-counter.h5component',
   project: 'sample-project.h5lesson',
 } as const
@@ -58,33 +70,37 @@ const reproducibleTimestamp = new Date('2026-07-20T00:00:00.000Z')
 /** 只用于 ZIP 封装的时间戳，与上面的业务时刻分开。 */
 const archiveZipMtime = createTimezoneStableZipMtime(reproducibleTimestamp.toISOString())
 
-const thumbnailSvg = String.raw`
-<svg xmlns="http://www.w3.org/2000/svg" width="480" height="280" viewBox="0 0 480 280">
-  <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="480" y2="280">
-      <stop stop-color="#f8fafc"/>
-      <stop offset="1" stop-color="#dbeafe"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f172a" flood-opacity=".18"/>
-    </filter>
-  </defs>
-  <rect width="480" height="280" rx="28" fill="#e2e8f0"/>
-  <g filter="url(#shadow)">
-    <rect x="18" y="14" width="444" height="246" rx="22" fill="url(#background)" stroke="#bfdbfe" stroke-width="2"/>
-    <rect x="18" y="14" width="10" height="246" rx="5" fill="#2563eb"/>
-  </g>
-  <text x="48" y="58" fill="#0f172a" font-family="Microsoft YaHei, sans-serif" font-size="25" font-weight="700">课堂计数器</text>
-  <text x="48" y="87" fill="#64748b" font-family="Microsoft YaHei, sans-serif" font-size="15">点击按钮改变数值</text>
-  <text x="240" y="170" text-anchor="middle" fill="#1d4ed8" font-family="Arial, sans-serif" font-size="72" font-weight="700">0</text>
-  <rect x="80" y="201" width="88" height="40" rx="12" fill="#ef4444"/>
-  <rect x="196" y="201" width="88" height="40" rx="12" fill="#475569"/>
-  <rect x="312" y="201" width="88" height="40" rx="12" fill="#2563eb"/>
-  <text x="124" y="230" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="28" font-weight="700">−</text>
-  <text x="240" y="228" text-anchor="middle" fill="white" font-family="Microsoft YaHei, sans-serif" font-size="16" font-weight="700">归零</text>
-  <text x="356" y="231" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="29" font-weight="700">+</text>
-</svg>
-`
+/*
+ * `sample-counter-component/thumbnail.png` 的来源记录——**不参与构建**。
+ * 这段 SVG 是当年那张图的画法，保留下来是为了让手工更新缩略图时有起点可查。
+ * 它不再被栅格化：改动这里不会改动任何产物，要换图就直接换那张 PNG。
+ *
+ * <svg xmlns="http://www.w3.org/2000/svg" width="480" height="280" viewBox="0 0 480 280">
+ *   <defs>
+ *     <linearGradient id="background" x1="0" y1="0" x2="480" y2="280">
+ *       <stop stop-color="#f8fafc"/>
+ *       <stop offset="1" stop-color="#dbeafe"/>
+ *     </linearGradient>
+ *     <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+ *       <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f172a" flood-opacity=".18"/>
+ *     </filter>
+ *   </defs>
+ *   <rect width="480" height="280" rx="28" fill="#e2e8f0"/>
+ *   <g filter="url(#shadow)">
+ *     <rect x="18" y="14" width="444" height="246" rx="22" fill="url(#background)" stroke="#bfdbfe" stroke-width="2"/>
+ *     <rect x="18" y="14" width="10" height="246" rx="5" fill="#2563eb"/>
+ *   </g>
+ *   <text x="48" y="58" fill="#0f172a" font-family="Microsoft YaHei, sans-serif" font-size="25" font-weight="700">课堂计数器</text>
+ *   <text x="48" y="87" fill="#64748b" font-family="Microsoft YaHei, sans-serif" font-size="15">点击按钮改变数值</text>
+ *   <text x="240" y="170" text-anchor="middle" fill="#1d4ed8" font-family="Arial, sans-serif" font-size="72" font-weight="700">0</text>
+ *   <rect x="80" y="201" width="88" height="40" rx="12" fill="#ef4444"/>
+ *   <rect x="196" y="201" width="88" height="40" rx="12" fill="#475569"/>
+ *   <rect x="312" y="201" width="88" height="40" rx="12" fill="#2563eb"/>
+ *   <text x="124" y="230" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="28" font-weight="700">−</text>
+ *   <text x="240" y="228" text-anchor="middle" fill="white" font-family="Microsoft YaHei, sans-serif" font-size="16" font-weight="700">归零</text>
+ *   <text x="356" y="231" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="29" font-weight="700">+</text>
+ * </svg>
+ */
 
 function deterministicIdFactory(): () => string {
   let sequence = 0
@@ -112,12 +128,15 @@ async function readComponentSources(): Promise<{
   runtimeBytes: Uint8Array
   thumbnailBytes: Uint8Array
 }> {
-  const manifestPath = path.join(componentSourceDirectory, 'manifest.json')
-  const runtimePath = path.join(componentSourceDirectory, 'runtime.js')
+  const inputPath = (relativePath: string): string =>
+    path.join(examplesDirectory, relativePath)
 
-  const [manifestText, runtimeText] = await Promise.all([
-    fs.readFile(manifestPath, 'utf8'),
-    fs.readFile(runtimePath, 'utf8').then(normalizeLineEndings),
+  const [manifestText, runtimeText, thumbnail] = await Promise.all([
+    fs.readFile(inputPath(SAMPLE_EXAMPLE_INPUT_PATHS.manifest), 'utf8'),
+    fs.readFile(inputPath(SAMPLE_EXAMPLE_INPUT_PATHS.runtime), 'utf8')
+      .then(normalizeLineEndings),
+    // 二进制输入，原样使用：不解码、不重新编码、不归一化换行。
+    fs.readFile(inputPath(SAMPLE_EXAMPLE_INPUT_PATHS.thumbnail)),
   ])
   const manifestResult = componentManifestSchema.safeParse(
     JSON.parse(manifestText) as unknown,
@@ -126,15 +145,11 @@ async function readComponentSources(): Promise<{
     throw new Error(`示例组件 manifest 无效：${manifestResult.error.message}`)
   }
 
-  const thumbnail = await sharp(Buffer.from(thumbnailSvg))
-    .png({ compressionLevel: 9 })
-    .toBuffer()
-
   return {
     manifest: manifestResult.data,
     manifestBytes: strToU8(`${JSON.stringify(manifestResult.data, null, 2)}\n`),
     runtimeBytes: strToU8(runtimeText),
-    thumbnailBytes: Uint8Array.from(thumbnail),
+    thumbnailBytes: new Uint8Array(thumbnail),
   }
 }
 
@@ -468,7 +483,6 @@ export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutpu
   })
 
   return {
-    [SAMPLE_EXAMPLE_OUTPUT_PATHS.thumbnail]: source.thumbnailBytes,
     [SAMPLE_EXAMPLE_OUTPUT_PATHS.component]: componentArchive,
     [SAMPLE_EXAMPLE_OUTPUT_PATHS.project]: projectArchive,
   }
@@ -486,7 +500,7 @@ async function refreshSampleExampleOutputs(): Promise<void> {
   const outputs = await buildSampleExampleOutputs()
   await Promise.all(Object.entries(outputs).map(([relativePath, bytes]) =>
     fs.writeFile(path.join(examplesDirectory, relativePath), bytes)))
-  console.log('已刷新计数器示例组件、工程和缩略图')
+  console.log('已刷新计数器示例组件和工程；缩略图是输入资产，不在刷新范围内')
 }
 
 export type SampleExampleGenerationMode = 'refresh' | 'check'

@@ -11,6 +11,7 @@ import {
   buildSampleExampleOutputs,
   checkSampleExampleOutputs,
   parseSampleExampleGenerationMode,
+  SAMPLE_EXAMPLE_INPUT_PATHS,
   SAMPLE_EXAMPLE_OUTPUT_PATHS,
 } from '../../scripts/build-examples'
 import {
@@ -154,7 +155,6 @@ describe('example generation boundary', () => {
     expect(Object.keys(first).sort()).toEqual([
       SAMPLE_EXAMPLE_OUTPUT_PATHS.component,
       SAMPLE_EXAMPLE_OUTPUT_PATHS.project,
-      SAMPLE_EXAMPLE_OUTPUT_PATHS.thumbnail,
     ].sort())
 
     for (const relativePath of Object.keys(first)) {
@@ -217,6 +217,37 @@ describe('example generation boundary', () => {
       expect(afterBytes).toBeDefined()
       expect(equalBytes(bytes, afterBytes!)).toBe(true)
     }
+  })
+
+  it('carries the counter thumbnail as an input asset instead of regenerating it', async () => {
+    const thumbnailPath = SAMPLE_EXAMPLE_INPUT_PATHS.thumbnail
+    // 组件包内的条目名就是这张图的文件名，由输入路径推出，避免两处各写一份。
+    const thumbnailName = path.posix.basename(thumbnailPath)
+
+    // 这张 PNG 曾经是生成产物：现场栅格化一段带 `<text>` 的 SVG，却又要求与已提交
+    // 字节逐字节相同。栅格化的输出取决于宿主字体、字体 hinting/抗锯齿的系统默认值
+    // 和图形库版本，所以那两个要求不可能同时成立。它现在是输入：不在产物集合里，
+    // `--refresh` 不会重写它，`--check` 也不会拿它跟一份重画的图比对。
+    const outputs = await buildSampleExampleOutputs()
+    expect(Object.values(SAMPLE_EXAMPLE_OUTPUT_PATHS)).not.toContain(thumbnailPath)
+    expect(Object.keys(outputs)).not.toContain(thumbnailPath)
+
+    // 降级为输入并没有放弃对它的验证：它仍原样嵌进下面两份归档，而这两份归档继续
+    // 逐字节比对已提交字节，所以改动这张图照样会让 `--check` 失败。
+    const trackedThumbnail = new Uint8Array(
+      await readFile(path.join(examplesDirectory, thumbnailPath)),
+    )
+    expect(trackedThumbnail.byteLength).toBeGreaterThan(0)
+
+    const componentBytes = outputs[SAMPLE_EXAMPLE_OUTPUT_PATHS.component]
+    const projectBytes = outputs[SAMPLE_EXAMPLE_OUTPUT_PATHS.project]
+    if (!componentBytes || !projectBytes) throw new Error('Missing generated sample archives')
+    const imported = importComponentPackage(componentBytes)
+    expect(equalBytes(imported.files[thumbnailName] ?? new Uint8Array(), trackedThumbnail))
+      .toBe(true)
+    const embedded = openCourseProjectArchive(projectBytes).componentFiles[imported.key]
+    expect(equalBytes(embedded?.[thumbnailName] ?? new Uint8Array(), trackedThumbnail))
+      .toBe(true)
   })
 
   it('checks tracked interactive lesson outputs without writing', async () => {
