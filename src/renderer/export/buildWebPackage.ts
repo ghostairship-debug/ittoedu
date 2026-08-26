@@ -7,6 +7,13 @@ import type { ProjectDocument } from '../../shared/projectTypes'
 import type { PublishedLessonPayload } from '../../shared/publishedLessonTypes'
 import { componentPackageKey } from '../project/archivePath'
 import {
+  bundledFontNoticeMarkdown,
+  bundledFontPackageFiles,
+  bundledFontRelativeUrlCss,
+  resolveEmbeddedBundledFonts,
+  withBundledFontCss,
+} from './bundledFontEmbedding'
+import {
   buildPublishedLessonPayload,
   collectPublishedComponentKeys,
   collectPublishedProjectAssetIds,
@@ -91,6 +98,10 @@ body {
 }
 
 `.trim()
+
+/** Archive directory of the embedded faces, and its path seen from the CSS. */
+const PLAYER_FONT_DIRECTORY = 'player/fonts'
+const PLAYER_FONT_URL_PREFIX = './fonts'
 
 const EXTENSIONS_BY_MIME_TYPE: Readonly<Record<string, string>> = {
   'image/png': 'png',
@@ -294,13 +305,34 @@ function finishWebPackageFiles(
     .replace(/\u2029/g, '\\u2029')
   const courseData = `window.__H5_LESSON_PAYLOAD__=${serialized};\n`
 
+  // Only the bundled families this lesson declares, written as sibling files
+  // next to the stylesheet that references them. `font-src 'self' data:` is
+  // already in the package CSP.
+  const fonts = resolveEmbeddedBundledFonts(packagedPayload)
+  for (const [path, bytes] of Object.entries(
+    bundledFontPackageFiles(fonts, PLAYER_FONT_DIRECTORY),
+  )) {
+    addFile(files, path, bytes)
+  }
+
   // Keep one canonical payload. A JS data file works both over HTTP and when
   // teachers double-click index.html via file://, where fetch(course.json) is
   // commonly blocked by browser origin rules.
   addFile(files, 'course-data.js', strToU8(courseData))
   addFile(files, 'player/player.iife.js', strToU8(playerBundle))
-  addFile(files, 'player/player.css', strToU8(PLAYER_STYLES))
+  addFile(
+    files,
+    'player/player.css',
+    strToU8(withBundledFontCss(
+      PLAYER_STYLES,
+      bundledFontRelativeUrlCss(fonts, PLAYER_FONT_URL_PREFIX),
+    )),
+  )
   addFile(files, 'index.html', strToU8(buildIndexHtml(packagedPayload, lang)))
+
+  // OFL 1.1 only allows shipping the bytes together with their notices.
+  const notices = bundledFontNoticeMarkdown(fonts, PLAYER_FONT_DIRECTORY)
+  if (notices !== '') addFile(files, 'THIRD_PARTY_NOTICES.md', strToU8(notices))
   return files
 }
 

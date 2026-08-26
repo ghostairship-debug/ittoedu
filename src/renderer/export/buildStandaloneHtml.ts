@@ -2,6 +2,12 @@ import type { ExportPayload } from '../../shared/componentTypes'
 import type { PublishedLessonPayload } from '../../shared/publishedLessonTypes'
 import { jsonToBase64 } from './base64'
 import {
+  bundledFontDataUrlCss,
+  bundledFontNoticeHtmlComment,
+  resolveEmbeddedBundledFonts,
+  withBundledFontCss,
+} from './bundledFontEmbedding'
+import {
   buildPublishedLessonPayload,
   isPublishedLessonPayload,
 } from './buildPublishedLesson'
@@ -140,6 +146,10 @@ export function buildStandaloneHtml(
     `window.__H5_LESSON_PAYLOAD__=${JSON.stringify(encodedPayload)};`,
   )
   const safePlayerBundle = escapeScriptContents(playerBundle)
+  // Only the bundled families this lesson declares, carried as `data:` URIs so
+  // the file stays offline-portable. `font-src data:` is already in the CSP.
+  const fonts = resolveEmbeddedBundledFonts(published)
+  const styles = withBundledFontCss(PLAYER_STYLES, bundledFontDataUrlCss(fonts))
 
   return `<!doctype html>
 <html lang="${escapeHtmlText(lang)}">
@@ -148,7 +158,7 @@ export function buildStandaloneHtml(
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src data: blob:; worker-src blob:">
   <title>${escapeHtmlText(published.title)}</title>
-  <style>${PLAYER_STYLES}</style>
+  <style>${styles}</style>${bundledFontNoticeHtmlComment(fonts)}
 </head>
 <body>
   <div id="lesson-root" aria-label="${escapeHtmlText(published.title)}"></div>

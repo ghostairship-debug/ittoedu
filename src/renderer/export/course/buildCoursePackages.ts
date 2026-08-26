@@ -8,6 +8,15 @@ import type {
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import {
+  bundledFontDataUrlCss,
+  bundledFontNoticeHtmlComment,
+  bundledFontNoticeMarkdown,
+  bundledFontPackageFiles,
+  bundledFontRelativeUrlCss,
+  resolveEmbeddedBundledFonts,
+  withBundledFontCss,
+} from '../bundledFontEmbedding'
+import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
   collectPublishedCourseSourceIssues,
@@ -97,6 +106,10 @@ body{overflow:hidden;background:#f8fafc}
 .slide-surface{position:relative;margin:auto;overflow:hidden;transform-origin:top left;background:#fff}
 .course-player-error{display:grid;width:100%;height:100%;place-items:center;padding:32px;color:#991b1b;background:#fef2f2;text-align:center}
 `.trim()
+
+/** Archive directory of the embedded faces, and its path seen from the CSS. */
+const PLAYER_FONT_DIRECTORY = 'player/fonts'
+const PLAYER_FONT_URL_PREFIX = './fonts'
 
 const EXTENSIONS: Readonly<Record<string, string>> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif',
@@ -451,6 +464,10 @@ export function buildPublishedCourseStandaloneHtml(
   const contentSecurityPolicy = normalized.singleHtmlMode === 'online-lightweight'
     ? onlineStandaloneCsp(sources, payload)
     : OFFLINE_STANDALONE_CSP
+  // Only the bundled families this course declares, carried as `data:` URIs
+  // because a single file has no sibling to point at. Both single-HTML modes
+  // already allow `font-src data:`.
+  const fonts = resolveEmbeddedBundledFonts(payload)
   return `<!doctype html>
 <html lang="${escapeHtml(normalized.lang)}">
 <head>
@@ -458,7 +475,7 @@ export function buildPublishedCourseStandaloneHtml(
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">
   <title>${escapeHtml(payload.title)}</title>
-  <style>${COURSE_PLAYER_CSS}</style>
+  <style>${withBundledFontCss(COURSE_PLAYER_CSS, bundledFontDataUrlCss(fonts))}</style>${bundledFontNoticeHtmlComment(fonts)}
 </head>
 <body>
   <div id="course-root" aria-label="${escapeHtml(payload.title)}"></div>
@@ -488,10 +505,29 @@ function buildPublishedCourseWebPackageBundle(
       return `./${path}`
     },
   })
+  // Only the bundled families this course declares, written as sibling files
+  // next to the stylesheet that references them. `font-src 'self' data:` is
+  // already in the package CSP.
+  const fonts = resolveEmbeddedBundledFonts(payload)
+  for (const [path, bytes] of Object.entries(
+    bundledFontPackageFiles(fonts, PLAYER_FONT_DIRECTORY),
+  )) {
+    addFile(files, path, bytes)
+  }
   addFile(files, 'course-data.js', strToU8(`${serializedAssignment(payload)}\n`))
   addFile(files, 'player/player.iife.js', strToU8(normalized.playerBundle))
-  addFile(files, 'player/player.css', strToU8(COURSE_PLAYER_CSS))
+  addFile(
+    files,
+    'player/player.css',
+    strToU8(withBundledFontCss(
+      COURSE_PLAYER_CSS,
+      bundledFontRelativeUrlCss(fonts, PLAYER_FONT_URL_PREFIX),
+    )),
+  )
   addFile(files, 'index.html', strToU8(packageIndex(payload, normalized.lang)))
+  // OFL 1.1 only allows shipping the bytes together with their notices.
+  const notices = bundledFontNoticeMarkdown(fonts, PLAYER_FONT_DIRECTORY)
+  if (notices !== '') addFile(files, 'THIRD_PARTY_NOTICES.md', strToU8(notices))
   return { files, payload }
 }
 
