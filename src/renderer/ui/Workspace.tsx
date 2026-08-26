@@ -76,6 +76,10 @@ import {
   materializeScene,
 } from '../../shared/presentation'
 import { buildStandaloneHtml } from '../export/buildStandaloneHtml'
+import {
+  collectBundledFontFamiliesInUse,
+  prepareBundledFontEmbedding,
+} from '../export/bundledFontEmbedding'
 import { loadPlayerBundle } from '../export/loadPlayerBundle'
 import {
   createRuntimePreviewBlobResources,
@@ -2197,79 +2201,112 @@ function SlideLocationWorkspace({
     let blobResources: RuntimePreviewBlobResources | null = null
     let payloadResources: RuntimePreviewPayloadResources | null = null
     let token: string | null = null
-    try {
-      const editorState = useEditorStore.getState()
-      const initialScene = selectActiveScene(editorState)
-      const hostMode: PlayerHostMode = canvasMode === 'edit'
-        ? 'authoring'
-        : 'playback'
-      const initialStateId = hostMode === 'authoring'
-        ? editorState.activePresentationStateId
-        : editorState.activePresentationStateId ??
-          ensureScenePresentation(initialScene).initialStateId
-      const previewSource = projectCandidatePreviewDocument(editorState)
-      payloadResources = createRuntimePreviewPayloadResources({
-        project: previewSource?.project ?? editorState.project,
-        assetFiles: previewSource?.assetFiles ?? editorState.assetFiles,
-        components: editorState.componentPackages,
-      })
-      const payload = payloadResources.payload
-      const playerBundle = loadPlayerBundle()
-      const currentToken = crypto.randomUUID()
-      token = currentToken
-      previewInitRef.current = {
-        token: currentToken,
-        payload,
-        assetTransfers: payloadResources.assetTransfers,
-        playerBundle,
-        initialSceneId: initialScene.id,
-        initialStateId,
-        editingScope: editorState.editingScope,
-        hostMode,
-        bootstrapSent: false,
-      }
-      blobResources = createRuntimePreviewBlobResources(
-        buildStandaloneHtml(payload, playerBundle),
-        currentToken,
-      )
-      activePreviewResourcesRef.current = {
-        token: currentToken,
-        document: blobResources,
-        payload: payloadResources,
-      }
-      setPreviewUrl(blobResources.documentUrl)
-      setPreviewFeedback({
-        kind: 'loading',
-        title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
-        message: '正在载入隔离 Player…',
-      })
-      previewStartupTimerRef.current = window.setTimeout(() => {
-        failRuntimePreview(
+    // Runs synchronously up to its single conditional `await`, so the token and
+    // the payload resources the cleanup below reasons about are still assigned
+    // in the effect's own tick. A project that declares no bundled family never
+    // reaches that await and is built exactly as it was before.
+    const startRuntimePreview = async () => {
+      try {
+        const editorState = useEditorStore.getState()
+        const initialScene = selectActiveScene(editorState)
+        const hostMode: PlayerHostMode = canvasMode === 'edit'
+          ? 'authoring'
+          : 'playback'
+        const initialStateId = hostMode === 'authoring'
+          ? editorState.activePresentationStateId
+          : editorState.activePresentationStateId ??
+            ensureScenePresentation(initialScene).initialStateId
+        const previewSource = projectCandidatePreviewDocument(editorState)
+        payloadResources = createRuntimePreviewPayloadResources({
+          project: previewSource?.project ?? editorState.project,
+          assetFiles: previewSource?.assetFiles ?? editorState.assetFiles,
+          components: editorState.componentPackages,
+        })
+        const ownedPayloadResources = payloadResources
+        const payload = payloadResources.payload
+        const playerBundle = loadPlayerBundle()
+        const currentToken = crypto.randomUUID()
+        token = currentToken
+        previewInitRef.current = {
+          token: currentToken,
+          payload,
+          assetTransfers: payloadResources.assetTransfers,
+          playerBundle,
+          initialSceneId: initialScene.id,
+          initialStateId,
+          editingScope: editorState.editingScope,
+          hostMode,
+          bootstrapSent: false,
+        }
+        // The canvas installs the bundled families at startup and both export
+        // commands await these bytes before they build, so this preview — which
+        // builds its document with the very same `buildStandaloneHtml` — has to
+        // await them too. Without it a lesson's formulas render in STIX Two Math
+        // on the canvas and in whatever the machine substitutes here. The gate is
+        // the export path's own rule, applied to the payload this preview is
+        // about to build, so a project that names no bundled family keeps the
+        // byte-identical, single-tick build it has today.
+        if (collectBundledFontFamiliesInUse(payload).length > 0) {
+          setPreviewFeedback({
+            kind: 'loading',
+            title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
+            message: '正在准备内置字体…',
+          })
+          await prepareBundledFontEmbedding()
+          if (previewInitRef.current?.token !== currentToken) {
+            // A newer session — or this effect's cleanup — took over while the
+            // bytes loaded. Nothing here ever reached an iframe, so release what
+            // this run allocated and leave every shared ref to its owner.
+            ownedPayloadResources.revoke()
+            return
+          }
+        }
+        // Past the expiry check nothing awaits again, so this run still owns the
+        // preview through the end of the block — including the catch below.
+        blobResources = createRuntimePreviewBlobResources(
+          buildStandaloneHtml(payload, playerBundle),
           currentToken,
-          '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前工程的运行时或组件。',
         )
-      }, RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS)
-    } catch (error) {
-      if (token) {
-        activePreviewResourcesRef.current = releaseRuntimePreviewResources(
-          activePreviewResourcesRef.current,
-          token,
-        )
+        activePreviewResourcesRef.current = {
+          token: currentToken,
+          document: blobResources,
+          payload: payloadResources,
+        }
+        setPreviewUrl(blobResources.documentUrl)
+        setPreviewFeedback({
+          kind: 'loading',
+          title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
+          message: '正在载入隔离 Player…',
+        })
+        previewStartupTimerRef.current = window.setTimeout(() => {
+          failRuntimePreview(
+            currentToken,
+            '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前工程的运行时或组件。',
+          )
+        }, RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS)
+      } catch (error) {
+        if (token) {
+          activePreviewResourcesRef.current = releaseRuntimePreviewResources(
+            activePreviewResourcesRef.current,
+            token,
+          )
+        }
+        blobResources?.revoke()
+        blobResources = null
+        payloadResources?.revoke()
+        payloadResources = null
+        previewInitRef.current = null
+        setAcknowledgedPreviewGeneration(null)
+        const message = error instanceof Error ? error.message : String(error)
+        setPreviewUrl(null)
+        setPreviewFeedback({
+          kind: 'error',
+          title: '统一画布创建失败',
+          message,
+        })
       }
-      blobResources?.revoke()
-      blobResources = null
-      payloadResources?.revoke()
-      payloadResources = null
-      previewInitRef.current = null
-      setAcknowledgedPreviewGeneration(null)
-      const message = error instanceof Error ? error.message : String(error)
-      setPreviewUrl(null)
-      setPreviewFeedback({
-        kind: 'error',
-        title: '统一画布创建失败',
-        message,
-      })
     }
+    void startRuntimePreview()
 
     return () => {
       clearRuntimePreviewStartupTimer()
