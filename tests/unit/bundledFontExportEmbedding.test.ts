@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { strFromU8 } from 'fflate'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
@@ -11,6 +11,15 @@ import {
   BUNDLED_MATH_FONT_FAMILY,
   BUNDLED_TEXT_FONT_FAMILY,
 } from '@/shared/fonts/bundledFontFamilies'
+import {
+  assembleBundledFontManifest,
+  type BundledFontManifest,
+} from '@/shared/fonts/bundledFontManifest'
+import {
+  bundledFontFaceSpecifiers,
+  resolveBundledFontDescriptors,
+} from '@/shared/fonts/bundledFontSources'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { ExportPayload } from '@/shared/componentTypes'
 import type { CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
 import { buildStandaloneHtml } from '@/renderer/export/buildStandaloneHtml'
@@ -22,9 +31,12 @@ import {
 import {
   collectBundledFontFamiliesInUse,
   parseCssFontStack,
+  prepareBundledFontEmbedding,
+  registerBundledFontEmbedPreparer,
   registerBundledFontEmbedSource,
 } from '@/renderer/export/bundledFontEmbedding'
 import { resolveEmbeddableBundledFonts } from '@/renderer/export/bundledFontEmbedSourceNode'
+import { installFetchBundledFontEmbedSource } from '@/renderer/export/bundledFontEmbedSourceFetch'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createFormulaNode,
@@ -41,6 +53,7 @@ const repoRoot = resolve(__dirname, '..', '..')
 /** Importing the Node byte source registers it; restore it after opt-out tests. */
 afterEach(() => {
   registerBundledFontEmbedSource(resolveEmbeddableBundledFonts)
+  registerBundledFontEmbedPreparer(null)
 })
 
 function stableIds(): () => string {
@@ -107,6 +120,7 @@ function courseTextItem(fontFamily: string): NativeLayerItem {
 function courseProject(options: {
   nodeFontFamily?: string
   tokenFontFamily?: string
+  formula?: boolean
 } = {}): CourseProjectDocument {
   const project = createBlankCourseProject({
     now: NOW,
@@ -117,13 +131,29 @@ function courseProject(options: {
   if (options.tokenFontFamily !== undefined) {
     project.designTokens.fonts[0]!.fontFamily = options.tokenFontFamily
   }
-  if (options.nodeFontFamily !== undefined) {
+  if (options.nodeFontFamily !== undefined || options.formula === true) {
     const slide = project.surfaces.find((surface) => surface.type === 'slide')
     if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
-    slide.scenes[0]!.layerItems.push(courseTextItem(options.nodeFontFamily))
+    if (options.nodeFontFamily !== undefined) {
+      slide.scenes[0]!.layerItems.push(courseTextItem(options.nodeFontFamily))
+    }
+    if (options.formula === true) {
+      slide.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(
+        createFormulaNode({ x: 20, y: 20, idFactory: stableIds() }),
+        200,
+      ))
+    }
   }
   courseProjectDocumentSchema.parse(project)
   return project
+}
+
+function formulaLessonPayload(): ExportPayload {
+  const payload = lessonPayload()
+  payload.project.scenes[0]!.nodes.push(
+    createFormulaNode({ x: 20, y: 20, idFactory: stableIds() }),
+  )
+  return payload
 }
 
 function courseSources(project: CourseProjectDocument): CoursePublishSources {
@@ -183,14 +213,30 @@ describe('bundled font declaration scanning', () => {
     })).toEqual([])
   })
 
-  it('never claims the math family from a formula node', () => {
-    // `STIX Two Math` lives in the formula renderer's own chain, never in an
-    // authored declaration, so the Owner's rule leaves it unembedded.
-    const payload = lessonPayload()
-    payload.project.scenes[0]!.nodes.push(
-      createFormulaNode({ x: 20, y: 20, idFactory: stableIds() }),
-    )
-    expect(collectBundledFontFamiliesInUse(payload.project)).toEqual([])
+  it('claims the math family from a formula node on either project shape', () => {
+    // The formula chain is a module constant, never a document property, so the
+    // node's presence has to stand in for a declaration.
+    expect(collectBundledFontFamiliesInUse(formulaLessonPayload().project))
+      .toEqual([BUNDLED_MATH_FONT_FAMILY])
+    expect(collectBundledFontFamiliesInUse(courseProject({ formula: true })))
+      .toEqual([BUNDLED_MATH_FONT_FAMILY])
+    // Both families when the same project also declares the text one.
+    expect(collectBundledFontFamiliesInUse(
+      courseProject({ formula: true, nodeFontFamily: NOTO_STACK }),
+    )).toEqual([BUNDLED_TEXT_FONT_FAMILY, BUNDLED_MATH_FONT_FAMILY])
+  })
+
+  it('reads `formula` only from the two node discriminants', () => {
+    // Otherwise any authored string could quietly add 403 KB to an export.
+    expect(collectBundledFontFamiliesInUse({ type: 'formula' }))
+      .toEqual([BUNDLED_MATH_FONT_FAMILY])
+    expect(collectBundledFontFamiliesInUse({ nativeType: 'formula' }))
+      .toEqual([BUNDLED_MATH_FONT_FAMILY])
+    expect(collectBundledFontFamiliesInUse({
+      kind: 'formula',
+      label: 'formula',
+      text: 'formula',
+    })).toEqual([])
   })
 })
 
@@ -361,11 +407,219 @@ describe('web package links the declared family as sibling files', () => {
   })
 })
 
+describe('a formula carries the math face and nothing more', () => {
+  const stixNotice = () => readFileSync(
+    join(repoRoot, 'vendor/fonts/stix-two-math/LICENSE'),
+    'utf8',
+  ).trimEnd()
+
+  it('adds exactly one face to a single HTML, plus its OFL notice', () => {
+    for (const html of [
+      buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE),
+      buildPublishedCourseStandaloneHtml(
+        courseSources(courseProject({ formula: true })),
+        PLAYER_BUNDLE,
+      ),
+    ]) {
+      const blocks = faceBlocks(html)
+      expect(blocks).toHaveLength(1)
+      expect(blocks[0]).toContain(`font-family: '${BUNDLED_MATH_FONT_FAMILY}'`)
+      expect(blocks[0]).toContain('src: url(data:font/woff2;base64,')
+      expect(blocks[0]).toContain('font-weight: 400;')
+      // The math face answers for every code point it has a glyph for.
+      expect(blocks[0]).not.toContain('unicode-range')
+      // The default body chain is untouched, so no text slice may ride along.
+      expect(html).not.toContain(`font-family: '${BUNDLED_TEXT_FONT_FAMILY}'`)
+      expect(html).not.toContain('noto-sans-sc')
+      expect(html).toContain('@fontsource/stix-two-math')
+      expect(html).toContain(stixNotice())
+    }
+  })
+
+  it('adds exactly one woff2 to a web package, plus its OFL notice', () => {
+    for (const files of [
+      buildWebPackageFiles(formulaLessonPayload(), PLAYER_BUNDLE),
+      buildPublishedCourseWebPackageFiles(
+        courseSources(courseProject({ formula: true })),
+        PLAYER_BUNDLE,
+      ),
+    ]) {
+      const fontPaths = woff2Paths(files)
+      expect(fontPaths).toHaveLength(1)
+      expect(fontPaths[0]).toBe('player/fonts/stix-two-math-latin-400-normal.woff2')
+      expect(files[fontPaths[0]!]!.byteLength).toBeGreaterThan(0)
+
+      const css = strFromU8(files['player/player.css']!)
+      expect(faceBlocks(css)).toHaveLength(1)
+      expect(css).toContain('./fonts/stix-two-math-latin-400-normal.woff2')
+
+      const notices = strFromU8(files['THIRD_PARTY_NOTICES.md']!)
+      expect(notices).toContain(`## ${BUNDLED_MATH_FONT_FAMILY}`)
+      expect(notices).toContain('- Package: @fontsource/stix-two-math')
+      expect(notices).toContain(stixNotice())
+      expect(notices).not.toContain(`## ${BUNDLED_TEXT_FONT_FAMILY}`)
+    }
+  })
+
+  it('is what the formula renderer actually asks for first', () => {
+    // Otherwise the export would embed a face nothing renders with.
+    const renderer = readFileSync(join(repoRoot, 'src/shared/formulaRenderer.ts'), 'utf8')
+    expect(renderer).toContain('`"${BUNDLED_MATH_FONT_FAMILY}", "Cambria Math"')
+  })
+})
+
+describe('the editor renderer reads its own font bytes', () => {
+  /** The manifest shape `virtual:bundled-fonts` produces at build time. */
+  function rendererManifest(): BundledFontManifest {
+    const descriptors = resolveBundledFontDescriptors(join(repoRoot, 'node_modules'))
+    return assembleBundledFontManifest(
+      descriptors,
+      bundledFontFaceSpecifiers(descriptors).map(
+        (specifier) => `./assets/${specifier.slice(specifier.lastIndexOf('/') + 1)}`,
+      ),
+    )
+  }
+
+  /**
+   * Stands in for `courseware-editor://app/assets/<face>.woff2`.
+   *
+   * Duck-typed rather than a real `Response` so the test states exactly which
+   * two members the production code may rely on.
+   */
+  function recordingFetch(urls: string[]): (url: string) => Promise<Response> {
+    return async (url) => {
+      urls.push(url)
+      const file = url.slice(url.lastIndexOf('/') + 1)
+      const bytes = readFileSync(join(
+        repoRoot,
+        'node_modules',
+        file.startsWith('stix-two-math')
+          ? `@fontsource/stix-two-math/files/${file}`
+          : `@fontsource-variable/noto-sans-sc/files/${file}`,
+      ))
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ),
+      } as unknown as Response
+    }
+  }
+
+  it('registers without reading a byte, then embeds once prepared', async () => {
+    const course = courseSources(courseProject({ nodeFontFamily: NOTO_STACK }))
+    // The Node byte source is the proven path; the fetch path has to land on
+    // exactly the same product, or the two hosts disagree about a lesson.
+    const expected = buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE)
+    expect(expected).toContain('data:font/woff2')
+
+    const urls: string[] = []
+    installFetchBundledFontEmbedSource({
+      manifest: rendererManifest(),
+      fetchResource: recordingFetch(urls),
+    })
+    // Installation is the whole cost of a session that never exports.
+    expect(urls).toEqual([])
+    expect(buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE))
+      .not.toContain('@font-face')
+
+    await prepareBundledFontEmbedding()
+
+    expect(urls).toHaveLength(102)
+    expect(urls.every((url) => url.startsWith('./assets/'))).toBe(true)
+    expect(buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE)).toBe(expected)
+  })
+
+  it('caches for the session, so a second export reads nothing', async () => {
+    const urls: string[] = []
+    installFetchBundledFontEmbedSource({
+      manifest: rendererManifest(),
+      fetchResource: recordingFetch(urls),
+    })
+    await prepareBundledFontEmbedding()
+    await prepareBundledFontEmbedding()
+    expect(urls).toHaveLength(102)
+
+    const html = buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE)
+    expect(faceBlocks(html)).toHaveLength(1)
+    expect(html).toContain('data:font/woff2;base64,')
+  })
+
+  it('keeps exporting when the bytes cannot be read, and retries next time', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const urls: string[] = []
+    let failing = true
+    installFetchBundledFontEmbedSource({
+      manifest: rendererManifest(),
+      fetchResource: async (url) => {
+        if (failing) throw new Error('protocol unavailable')
+        return recordingFetch(urls)(url)
+      },
+    })
+
+    await prepareBundledFontEmbedding()
+    // A failed read degrades typography; it never fails the export.
+    expect(buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE))
+      .not.toContain('@font-face')
+    expect(warn).toHaveBeenCalled()
+
+    failing = false
+    await prepareBundledFontEmbedding()
+    expect(faceBlocks(buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE)))
+      .toHaveLength(1)
+    warn.mockRestore()
+  })
+
+  it('embeds nothing when a family has no license copy to ship with it', async () => {
+    // OFL 1.1 §2 only allows shipping the bytes together with the notice.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    installFetchBundledFontEmbedSource({
+      manifest: rendererManifest(),
+      fetchResource: recordingFetch([]),
+      licenseTexts: {},
+    })
+    await prepareBundledFontEmbedding()
+    expect(buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE))
+      .not.toContain('@font-face')
+    warn.mockRestore()
+  })
+
+  it('is what the editor entry point installs', () => {
+    // The wiring lives in an entry point no unit test can execute, so its one
+    // line is asserted as text: without it the properties panel's "导出时嵌入"
+    // label is a promise the export button does not keep.
+    const main = readFileSync(join(repoRoot, 'src/renderer/main.tsx'), 'utf8')
+    expect(main).toContain('installFetchBundledFontEmbedSource({ manifest: BUNDLED_FONT_MANIFEST })')
+
+    // And the export commands are what await the lazy read.
+    const app = readFileSync(join(repoRoot, 'src/renderer/App.tsx'), 'utf8')
+    const html = app.indexOf('const handleExportHtml')
+    const web = app.indexOf('const handleExportWebPackage')
+    const pptx = app.indexOf('const handleExportPptx')
+    expect(app.indexOf('await prepareBundledFontEmbedding()', html)).toBeLessThan(web)
+    expect(app.indexOf('await prepareBundledFontEmbedding()', web)).toBeLessThan(pptx)
+  })
+})
+
 describe('font embedding boundary', () => {
   // The renderer runs sandboxed and its bundle cannot resolve `node:fs`, so a
   // static path from an export builder to the Node byte source would fail the
-  // browser build outright.
-  const forbidden = ['bundledFontEmbedSourceNode', 'node:fs', 'virtual:bundled-fonts']
+  // browser build outright. The reverse costs just as much: the fetch source
+  // resolves assets through Vite, which the six `scripts/*.ts` hosts cannot.
+  const forbidden = [
+    'bundledFontEmbedSourceNode',
+    'bundledFontEmbedSourceFetch',
+    'node:fs',
+    'virtual:bundled-fonts',
+  ]
+
+  /** The two byte sources are the only host-specific modules in the directory. */
+  const byteSources = [
+    'bundledFontEmbedSourceNode.ts',
+    'bundledFontEmbedSourceFetch.ts',
+  ]
 
   function sourceFiles(directory: string): string[] {
     const result: string[] = []
@@ -380,15 +634,27 @@ describe('font embedding boundary', () => {
     return result
   }
 
+  function builderFiles(): string[] {
+    return sourceFiles('src/renderer/export')
+      .filter((path) => !byteSources.some((name) => path.endsWith(name)))
+  }
+
   it('keeps the export builders free of filesystem and bundler coupling', () => {
-    const violations = sourceFiles('src/renderer/export')
-      .filter((path) => !path.endsWith('bundledFontEmbedSourceNode.ts'))
-      .flatMap((path) => {
-        const text = readFileSync(path, 'utf8')
-        return forbidden
-          .filter((needle) => text.includes(`'${needle}'`) || text.includes(`"${needle}"`))
-          .map((needle) => `${relative(repoRoot, path).replaceAll('\\', '/')} -> ${needle}`)
-      })
+    const violations = builderFiles().flatMap((path) => {
+      const text = readFileSync(path, 'utf8')
+      return forbidden
+        .filter((needle) => text.includes(`'${needle}'`) || text.includes(`"${needle}"`))
+        .map((needle) => `${relative(repoRoot, path).replaceAll('\\', '/')} -> ${needle}`)
+    })
+    expect(violations).toEqual([])
+  })
+
+  it('keeps bundler asset queries inside the byte sources', () => {
+    // `?raw` / `?url` / `?inline` are Vite-only specifiers; a builder carrying
+    // one stops loading under `tsx`.
+    const violations = builderFiles()
+      .filter((path) => /\?(?:raw|url|inline)['"]/.test(readFileSync(path, 'utf8')))
+      .map((path) => relative(repoRoot, path).replaceAll('\\', '/'))
     expect(violations).toEqual([])
   })
 })

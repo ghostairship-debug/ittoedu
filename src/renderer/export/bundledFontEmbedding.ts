@@ -1,5 +1,5 @@
 /**
- * Embedding the bundled fonts a project actually declares into export products.
+ * Embedding the bundled fonts a project actually uses into export products.
  *
  * Why the export path has to declare the faces itself: the Player is built as a
  * single IIFE and Vite's library mode inlines every asset it imports as base64,
@@ -8,21 +8,26 @@
  * only loads faces its host document declares (`ensureBundledFonts`), and the
  * host document is what this module writes.
  *
- * The selection rule is the Owner's: a bundled family is embedded only when the
- * project declares it in a font stack. Two consequences are intentional.
- *   - The default project keeps the Microsoft YaHei chain, declares no bundled
- *     family, and therefore produces byte-identical exports.
- *   - `STIX Two Math` is hard-coded in the formula renderer's own chain and
- *     never appears in an authored declaration, so it is never embedded. Formula
- *     glyphs stay machine-dependent until the Owner decides otherwise.
+ * A bundled family is embedded on either of two triggers.
+ *   - The project declares it in a font stack. The default project keeps the
+ *     Microsoft YaHei chain, declares no bundled family, and therefore still
+ *     produces byte-identical exports.
+ *   - The project contains a formula node. `STIX Two Math` heads the formula
+ *     renderer's chain (`MATH_FONT_FAMILY`) and that chain is a module constant,
+ *     never a document property, so no declaration walk can ever find it. The
+ *     node's presence is the declaration.
  *
  * This module is pure and import-safe in every host: it pulls in no font bytes,
  * no `node:` builtin and no bundler-specific module. The bytes arrive through
  * `registerBundledFontEmbedSource`, which keeps the filesystem out of the
- * renderer bundle (see `bundledFontEmbedSourceNode.ts`).
+ * renderer bundle (see `bundledFontEmbedSourceNode.ts` for the Node host and
+ * `bundledFontEmbedSourceFetch.ts` for the sandboxed editor).
  */
 import { bytesToDataUrl } from './base64'
-import { BUNDLED_FONT_FAMILIES } from '../../shared/fonts/bundledFontFamilies'
+import {
+  BUNDLED_FONT_FAMILIES,
+  BUNDLED_MATH_FONT_FAMILY,
+} from '../../shared/fonts/bundledFontFamilies'
 import { buildBundledFontFaceCss } from '../../shared/fonts/bundledFontFaceCss'
 import type {
   BundledFontFaceDescriptor,
@@ -48,11 +53,25 @@ export type BundledFontEmbedSource = (
   families: readonly string[],
 ) => readonly EmbeddableBundledFont[]
 
+/**
+ * Brings a byte source into a state where its synchronous resolution can answer.
+ *
+ * Every export builder is synchronous — the products are strings and byte maps
+ * assembled in one pass — so a host whose bytes only arrive asynchronously has
+ * nowhere to await inside the build. This is that await, hoisted out to the
+ * export command (see `prepareBundledFontEmbedding`).
+ */
+export type BundledFontEmbedPreparer = () => Promise<void>
+
 const BUNDLED_FAMILY_BY_LOWERCASE = new Map(
   BUNDLED_FONT_FAMILIES.map((family) => [family.toLowerCase(), family]),
 )
 
+/** Node discriminants that mean "a formula is rendered here". */
+const FORMULA_DISCRIMINANT_KEYS = new Set(['type', 'nativeType'])
+
 let embedSource: BundledFontEmbedSource | null = null
+let embedPreparer: BundledFontEmbedPreparer | null = null
 
 /**
  * Install the byte source used by every export from now on.
@@ -66,6 +85,34 @@ export function registerBundledFontEmbedSource(
   source: BundledFontEmbedSource | null,
 ): void {
   embedSource = source
+}
+
+/** Install the warm-up step `prepareBundledFontEmbedding` runs from now on. */
+export function registerBundledFontEmbedPreparer(
+  preparer: BundledFontEmbedPreparer | null,
+): void {
+  embedPreparer = preparer
+}
+
+/**
+ * Warm the registered byte source, so the next synchronous export can embed.
+ *
+ * Export commands await this before they build. Hosts whose source is already
+ * synchronous register no preparer and get an immediately resolved promise, so
+ * the call is free for them.
+ *
+ * Never rejects. A host that cannot read its font bytes must still produce a
+ * valid — if machine-dependent — lesson rather than fail the export, which is
+ * the same policy as having no source registered at all. The preparer is
+ * expected to report its own failures; this only guards against one escaping.
+ */
+export async function prepareBundledFontEmbedding(): Promise<void> {
+  if (embedPreparer === null) return
+  try {
+    await embedPreparer()
+  } catch (error) {
+    console.warn('内置字体字节准备失败，导出将不嵌入内置字体', error)
+  }
 }
 
 /**
@@ -100,7 +147,7 @@ export function parseCssFontStack(value: string): string[] {
 }
 
 /**
- * Every bundled family the payload declares, in manifest order.
+ * Every bundled family the payload needs, in manifest order.
  *
  * The walk keys on the `fontFamily` property name rather than on a list of
  * document paths, so it covers a text node's `style.fontFamily`, a run-level
@@ -108,6 +155,13 @@ export function parseCssFontStack(value: string): string[] {
  * any component prop that names a font — without having to be taught each new
  * surface. Only object graphs are traversed, so the base64 asset payloads cost
  * nothing.
+ *
+ * The math family cannot be found that way and needs the second rule. A formula
+ * carries no font of its own — `FormulaNode.style` is `fontSize/color/align` —
+ * because the renderer's chain is one module constant shared by the editor, the
+ * Player, the PPTX rasterizer and the PDF. So the node itself is the trigger:
+ * `type: 'formula'` for a V8 lesson node, `nativeType: 'formula'` for a V9
+ * layer item, both of which survive into the published payloads.
  */
 export function collectBundledFontFamiliesInUse(value: unknown): string[] {
   const found = new Set<string>()
@@ -133,6 +187,10 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
           const bundled = BUNDLED_FAMILY_BY_LOWERCASE.get(name.toLowerCase())
           if (bundled) found.add(bundled)
         }
+        continue
+      }
+      if (entry === 'formula' && FORMULA_DISCRIMINANT_KEYS.has(key)) {
+        found.add(BUNDLED_MATH_FONT_FAMILY)
         continue
       }
       if (typeof entry === 'object' && entry !== null) pending.push(entry)

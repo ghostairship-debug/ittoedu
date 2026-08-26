@@ -1,4 +1,5 @@
 import type { FormulaAstNode, FormulaNode } from './projectTypes'
+import { BUNDLED_MATH_FONT_FAMILY } from './fonts/bundledFontFamilies'
 import {
   resolveLayoutMeasureContext,
   type LayoutMeasureContext,
@@ -30,7 +31,23 @@ interface FormulaBox {
   draw(context: CanvasRenderingContext2D, x: number, baseline: number): void
 }
 
-const MATH_FONT_FAMILY = '"Cambria Math", "STIX Two Math", "Times New Roman", serif'
+/**
+ * The bundled math family comes first so authoring shows what students see.
+ *
+ * `Cambria Math` ships with Windows, which is what teachers author on, while a
+ * student on a tablet, a phone or a Mac has no math font at all and gets the
+ * face this project embeds into the export. Leaving Cambria first therefore made
+ * the authoring preview disagree with every delivered lesson by construction —
+ * different glyph shapes, different advance widths, and so different line breaks
+ * in the frozen canvas measurement. Naming the bundled family first makes the
+ * editor, the Player, the PPTX rasterization and the PDF all measure against the
+ * one face the export carries.
+ *
+ * The system math fonts stay on as fallbacks: they are what keeps a formula
+ * legible on a host where the bundled face failed to load.
+ */
+const MATH_FONT_FAMILY =
+  `"${BUNDLED_MATH_FONT_FAMILY}", "Cambria Math", "Times New Roman", serif`
 
 function formulaPadding(fontSize: number): number {
   return Math.max(6, fontSize * 0.18)

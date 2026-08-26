@@ -35,6 +35,7 @@ import { buildCoursePptx } from './export/course/buildCoursePptx'
 import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
 import { buildFlowDocx, uniqueFlowDocxFilename } from './export/course/flowDocx'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
+import { prepareBundledFontEmbedding } from './export/bundledFontEmbedding'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
   SINGLE_HTML_WARNING_BYTES,
@@ -1270,6 +1271,11 @@ export default function App() {
     mode: SingleHtmlExportMode = 'offline-portable',
   ) => {
     void run(async () => {
+      // The builders are synchronous, so the bundled font bytes have to be in
+      // hand before the build starts; this is the only await that can put them
+      // there. Free after the first export of a session, and free in any host
+      // whose byte source is already synchronous.
+      await prepareBundledFontEmbedding()
       const html = buildHtml(mode)
       const byteLength = utf8ByteLength(html)
       if (byteLength > SINGLE_HTML_WARNING_BYTES) {
@@ -1287,6 +1293,7 @@ export default function App() {
       state.setStatus('正在生成网页包…')
       const sources = activeCoursePublishSources()
       if (!sources) throw courseDeliveryUnavailable('web-package')
+      await prepareBundledFontEmbedding()
       const bytes = await buildPublishedCourseWebPackageAsync(sources, loadPlayerBundle())
       const title = sources.project.title
       const result = await desktopApi().exportWebPackage({
