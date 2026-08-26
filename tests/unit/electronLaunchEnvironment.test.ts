@@ -1,35 +1,55 @@
-import { describe, expect, it } from 'vitest'
-import { assertElectronCanLaunchAsApp } from '../../scripts/electronLaunchEnvironment'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { prepareElectronLaunchEnvironment } from '../../scripts/electronLaunchEnvironment'
 
-describe('assertElectronCanLaunchAsApp', () => {
-  it('passes when nothing is holding Electron back', () => {
-    expect(() => assertElectronCanLaunchAsApp({})).not.toThrow()
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+/** The warning is expected on every clearing path; keep it out of the report. */
+function silenceWarning(): void {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+}
+
+describe('prepareElectronLaunchEnvironment', () => {
+  it('leaves a clean environment untouched', () => {
+    const environment = { PATH: '/usr/bin' }
+    expect(prepareElectronLaunchEnvironment(environment)).toEqual([])
+    expect(environment).toEqual({ PATH: '/usr/bin' })
   })
 
-  it('names the variable and how to clear it', () => {
-    // The message is the whole point: Playwright only reports "Process failed to
-    // launch!", so this text is the one place the reason can be stated.
-    expect(() => assertElectronCanLaunchAsApp({ ELECTRON_RUN_AS_NODE: '1' }))
-      .toThrow(/ELECTRON_RUN_AS_NODE/u)
-    expect(() => assertElectronCanLaunchAsApp({ ELECTRON_RUN_AS_NODE: '1' }))
-      .toThrow(/unset ELECTRON_RUN_AS_NODE/u)
-  })
-
-  it('treats the values a shell uses for "off" as absent', () => {
-    // `ELECTRON_RUN_AS_NODE=` and `=0` both leave electron.exe an app, so
-    // refusing to launch on them would block a usable environment.
-    for (const value of ['', '0']) {
-      expect(() => assertElectronCanLaunchAsApp({ ELECTRON_RUN_AS_NODE: value }), value)
-        .not.toThrow()
+  it('removes the variable at every value that degrades Electron', () => {
+    // Measured against the pinned Electron 43.1.1: unset reports v43.1.1, while
+    // '', '0', '1' and 'false' all report Node's v24.18.0. Presence is what
+    // breaks the launch, so the shell conventions for "off" have to be removed
+    // too -- treating them as absent was a false negative in the only check
+    // between a sandboxed shell and an unreadable launch failure.
+    for (const value of ['', '0', '1', 'false']) {
+      silenceWarning()
+      const environment: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: value, PATH: '/usr/bin' }
+      expect(prepareElectronLaunchEnvironment(environment), JSON.stringify(value))
+        .toEqual(['ELECTRON_RUN_AS_NODE'])
+      expect(environment, JSON.stringify(value)).toEqual({ PATH: '/usr/bin' })
+      expect('ELECTRON_RUN_AS_NODE' in environment, JSON.stringify(value)).toBe(false)
     }
   })
 
-  it('reads the real environment when given none', () => {
-    // Production callers pass nothing; this is that path, asserted against
-    // whatever this process actually has rather than a fixture.
-    const blocked = process.env.ELECTRON_RUN_AS_NODE
-    const expectation = expect(() => assertElectronCanLaunchAsApp())
-    if (blocked !== undefined && blocked !== '' && blocked !== '0') expectation.toThrow()
-    else expectation.not.toThrow()
+  it('says what it removed, so the repair is not silent', () => {
+    silenceWarning()
+    prepareElectronLaunchEnvironment({ ELECTRON_RUN_AS_NODE: '1' })
+    expect(console.warn).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(console.warn).mock.calls[0]![0]).toContain('ELECTRON_RUN_AS_NODE')
+  })
+
+  it('is idempotent, so entry points may each call it', () => {
+    silenceWarning()
+    const environment: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' }
+    expect(prepareElectronLaunchEnvironment(environment)).toEqual(['ELECTRON_RUN_AS_NODE'])
+    expect(prepareElectronLaunchEnvironment(environment)).toEqual([])
+  })
+
+  it('defaults to this process, which is what production callers use', () => {
+    silenceWarning()
+    prepareElectronLaunchEnvironment()
+    expect(process.env.ELECTRON_RUN_AS_NODE).toBeUndefined()
   })
 })

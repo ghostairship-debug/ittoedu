@@ -83,6 +83,33 @@ export function assertExpectedAsarPackage(
   }
 }
 
+/**
+ * Assert an offline single HTML fetches nothing remote.
+ *
+ * Offline portability is about references the document would load, not about the
+ * characters `http` appearing anywhere in it. A lesson using a bundled family
+ * embeds the font and, as OFL 1.1 §2 requires, the licence verbatim — and that
+ * text carries `http://scripts.sil.org/OFL` and the foundry's URL. They sit
+ * inside an HTML comment, which nothing fetches, so a whole-file search reports
+ * a remote dependency that does not exist. Measured on an export declaring the
+ * bundled Chinese family: 101 `@font-face`, zero remote loads, and the bare
+ * search failing.
+ *
+ * Lives here because both release verifiers need it and the same check already
+ * had to be fixed once in `tests/e2e/editor.spec.ts` (`a4dd298`) while these two
+ * copies were missed. One implementation is what keeps the third copy from
+ * drifting.
+ */
+export function assertNoRemoteUrlReferences(html: string, label: string): void {
+  const fetchable = html.replace(/<!--[\s\S]*?-->/gu, '')
+  const found = [...new Set(
+    [...fetchable.matchAll(/https?:\/\/[^\s"'<)]+/gu)].map((match) => match[0]),
+  )]
+  if (found.length > 0) {
+    throw new Error(`${label} 含有远程 URL：${found.slice(0, 5).join('、')}`)
+  }
+}
+
 export async function collectFileArtifactEvidence(
   filePath: string,
 ): Promise<FileArtifactEvidence> {

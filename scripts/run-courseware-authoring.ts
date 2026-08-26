@@ -1,5 +1,5 @@
 import { _electron as electron, chromium, type ElectronApplication, type Page } from '@playwright/test'
-import { assertElectronCanLaunchAsApp } from './electronLaunchEnvironment'
+import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
 import { createHash } from 'node:crypto'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import {
@@ -1007,7 +1007,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
   const deliveries = {} as AuthoringReceipt['exporter']['deliveries']
   // Before the launch, so an inherited `ELECTRON_RUN_AS_NODE` is named here
   // instead of surfacing as Playwright's contentless "Process failed to launch!".
-  assertElectronCanLaunchAsApp()
+  prepareElectronLaunchEnvironment()
   try {
     app = await electron.launch({
       args: [

@@ -1,5 +1,5 @@
 import { _electron as electron, chromium } from '@playwright/test'
-import { assertElectronCanLaunchAsApp } from './electronLaunchEnvironment'
+import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
 import { unzipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, promises as fs } from 'node:fs'
@@ -28,6 +28,7 @@ import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
 import {
   assertExpectedAsarPackage,
   assertExpectedWindowsVersion,
+  assertNoRemoteUrlReferences,
   collectFileArtifactEvidence,
   readAsarPackageMetadata,
   readWindowsVersionEvidence,
@@ -403,7 +404,7 @@ async function launchPackagedEditor(
     '无法清理上一次目录版验证的临时用户目录',
   )
   await fs.mkdir(unpackedProfileDirectory, { recursive: true })
-  assertElectronCanLaunchAsApp()
+  prepareElectronLaunchEnvironment()
   const application = await electron.launch({
     executablePath,
     args: [`--user-data-dir=${unpackedProfileDirectory}`],
@@ -649,7 +650,7 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     assert(existsSync(exportedHtml), '目录版 GUI 未生成导出 HTML')
     const html = await fs.readFile(exportedHtml, 'utf8')
     assert(html.startsWith('<!doctype html>'), '导出内容不是完整 HTML')
-    assert(!/https?:\/\//i.test(html), '导出 HTML 含有远程 URL')
+    assertNoRemoteUrlReferences(html, '导出 HTML')
     assert(
       !html.includes('data-testid="top-toolbar"'),
       '导出 HTML 不应包含编辑器 GUI',

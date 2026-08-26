@@ -1,5 +1,5 @@
 import { _electron as electron, chromium } from '@playwright/test'
-import { assertElectronCanLaunchAsApp } from './electronLaunchEnvironment'
+import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
 import { strToU8, zipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -45,7 +45,10 @@ import {
   APP_PRODUCT_NAME,
   APP_VERSION,
 } from '../src/shared/constants'
-import { collectFileArtifactEvidence } from './releaseArtifactEvidence'
+import {
+  assertNoRemoteUrlReferences,
+  collectFileArtifactEvidence,
+} from './releaseArtifactEvidence'
 import {
   assertEquivalentDirectoryEvidence,
   assertNoForbiddenPathReferences,
@@ -329,7 +332,7 @@ async function verifyMovedUnpackedApplication(
   )
 
   await fs.mkdir(profileDirectory, { recursive: true })
-  assertElectronCanLaunchAsApp()
+  prepareElectronLaunchEnvironment()
   const application = await electron.launch({
     executablePath: movedExecutable,
     cwd: isolatedRoot,
@@ -905,7 +908,7 @@ window.CoursewareComponent.define({
     `V9 工程、离线单 HTML、网页包目录与归档均位于 ${movedDeliveryDirectoryName}`,
   )
 
-  assert(!/https?:\/\//i.test(html), '移动后的单 HTML 含远程 URL')
+  assertNoRemoteUrlReferences(html, '移动后的单 HTML')
   assertNoForbiddenPathReferences(
     '移动后的单 HTML',
     html,
