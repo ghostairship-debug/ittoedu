@@ -400,7 +400,7 @@ describe('V9 Slide viewport adapter', () => {
       sceneId: 'scene-1',
       carrier: 'native',
       layerItemId: 'slide-title',
-      field: 'content.data.text',
+      field: 'item',
     }))
     expect(canvasTarget?.authoringAddress).not.toMatch(/hit/i)
     expect(JSON.stringify(canvasTarget)).not.toMatch(/hitId/)

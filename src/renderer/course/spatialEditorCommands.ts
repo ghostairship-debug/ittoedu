@@ -53,6 +53,7 @@ import {
   type SpatialEditorLayerView,
   type SpatialEditorView,
 } from './spatialEditorView'
+import { allocateCourseLayerOrder } from './globalLayerCommands'
 
 export {
   SPATIAL_REJECT_LOCKED,
@@ -447,10 +448,6 @@ function defaultWorldOrigin(
   }, worldItemCount(session.history.present, session.selection.surfaceId), hasExplicitPosition)
 }
 
-function nextWorldOrder(surface: SpatialSurfaceDocument): number {
-  return surface.world.layerItems.reduce((highest, item) => Math.max(highest, item.order), -1) + 1
-}
-
 function appendWorldLayer(
   draft: CourseProjectDocument,
   surfaceId: string,
@@ -460,7 +457,11 @@ function appendWorldLayer(
   if (surface.world.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
     throw new Error('世界元素 ID 已存在，请重新生成后重试')
   }
-  item.order = nextWorldOrder(surface)
+  const preferredOrder = surface.world.layerItems.reduce(
+    (highest, candidate) => Math.max(highest, candidate.order),
+    -1,
+  ) + 1
+  item.order = allocateCourseLayerOrder(draft, preferredOrder)
   surface.world.layerItems.push(item)
 }
 

@@ -43,7 +43,7 @@ Mixed：同一 `CourseProjectDocument` 内用 `addCourseSlidePage` / `addCourseF
 ## 仍按不可用处理
 
 - Capability Index 未声明的功能。
-- 外部组件目录缺失（当前快照 `catalogStatus: unavailable`，指向 `../courseware-components`）。这只表示没有现成目录包可浏览，**不是**禁止为本课新建/导入 `.h5component`，也不是 Flow/Spatial 不能挂组件。
+- 外部组件目录缺失时（以 `index.json` 当前 `catalogStatus` 为准，本文不复制该可变值；目录指向 `../courseware-components`）。缺失只表示没有现成目录包可浏览，**不是**禁止为本课新建/导入 `.h5component`，也不是 Flow/Spatial 不能挂组件。
 - 目录里若恢复实验包，许可/维护人/质量门槛不过就不要当已发布内置库宣传。
 - 编辑器内可见 AI、`courseAiHandoff` / `courseAiPatch` 调用点。
 - Phaser `PlayerApp` 作为 Mixed/Flow/Spatial 试运行主路径。

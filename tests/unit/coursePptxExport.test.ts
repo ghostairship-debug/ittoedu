@@ -83,6 +83,26 @@ describe('buildCoursePptx', () => {
     expect(slideXml).not.toContain('全局')
     expect(slideXml).not.toContain(globalBanner!)
     expect(result.pages.find((page) => page.id === spatialPage!.id)).toBeTruthy()
+
+    const spatialPages = pages.filter((page) => page.kind === 'spatial-frame')
+    const spatialPageIndex = spatialPages.findIndex((page) => page.id === spatialPage!.id)
+    const spatialSlideNumber = pages.filter((page) => page.kind === 'slide-scene').length
+      + spatialPageIndex
+      + 1
+    const spatialRelsPath = `ppt/slides/_rels/slide${spatialSlideNumber}.xml.rels`
+    const spatialRelsBytes = archive[spatialRelsPath]
+    expect(spatialRelsBytes, `${spatialRelsPath} should exist`).toBeTruthy()
+    const spatialRelsXml = new TextDecoder().decode(spatialRelsBytes)
+    const spatialMediaTarget = spatialRelsXml.match(/Target="\.\.\/media\/([^"?]+\.svg)"/)?.[1]
+    expect(spatialMediaTarget, 'Spatial slide should reference an SVG in ppt/media').toBeTruthy()
+
+    const spatialMediaPath = `ppt/media/${spatialMediaTarget}`
+    const spatialMediaBytes = archive[spatialMediaPath]
+    expect(spatialMediaBytes, `${spatialMediaPath} should exist`).toBeTruthy()
+    const spatialSvg = new TextDecoder().decode(spatialMediaBytes)
+    expect(spatialSvg).toContain('<svg xmlns="http://www.w3.org/2000/svg"')
+    expect(spatialSvg).toContain(`data-spatial-frame="${spatialPage!.cameraFrameId ?? 'home'}"`)
+    expect(spatialSvg).toContain('data-spatial-viewport=')
   })
 
   it('reports missing asset bytes in Chinese without throwing', async () => {

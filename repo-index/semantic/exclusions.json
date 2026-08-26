@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "exclusions": [
+    {
+      "schemaVersion": 1,
+      "id": "exclusion:external-component-source",
+      "name": "External component catalog source graph",
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "reason": "V1 may consume a catalog summary but must not claim navigation of the external repository.",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "exclusion:generated-self-input",
+      "name": "Generated repo-index output and temporary contexts",
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "reason": "Generated output and contexts cannot feed strict freshness hashes.",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "exclusion:archived-task-bodies",
+      "name": "Archived Editor 1.0 tasks and frozen reviews",
+      "origin": "semantic",
+      "statusClass": "current-must-preserve",
+      "reason": "Historical evidence remains in the repository but is outside the default development index reading set.",
+      "evidence": [
+        "docs/development-plan/WORKING_PROTOCOL.md"
+      ]
+    }
+  ]
+}

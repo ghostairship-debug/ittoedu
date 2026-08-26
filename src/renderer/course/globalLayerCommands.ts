@@ -16,9 +16,16 @@ import type {
   NativeLayerItem,
   ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
+import type { ProjectPlaybackSettings } from '../../shared/projectTypes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import {
+  centerTeacherControllerAuthoringFrame,
+  teacherControllerAuthoringRecoveryBounds,
+} from '../../shared/teacherControllerLayout'
 import type { DeepReadonly } from './slideEditorView'
 import { createTeacherControllerNode } from '../project/createProject'
 import {
+  restoreCourseTeacherControllerLayer,
   synchronizeCourseTeacherControllerControls,
 } from '../../shared/teacherControllerConsistency'
 import {
@@ -814,23 +821,132 @@ function nextFrontGlobalOrder(project: CourseProjectDocument): number {
   return max + 1
 }
 
+function appendDefaultTeacherController(
+  project: CourseProjectDocument,
+  node = createTeacherControllerNode({
+    id: `teacher-controller-${nanoid(8)}`,
+  }),
+): string {
+  if (findGlobalTeacherController(project)) {
+    throw new Error(CONTROLLER_DUPLICATE_REASON)
+  }
+  const item = sceneNodeToCourseLayerItem(node, nextFrontGlobalOrder(project))
+  project.globalLayerItems.push({
+    item,
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  project.playback.controls = 'canvas'
+  sortScopedLayerList(project.globalLayerItems)
+  return item.layerItemId
+}
+
+function applyCoursePlaybackPatch(
+  project: CourseProjectDocument,
+  patch: Partial<ProjectPlaybackSettings>,
+): void {
+  if (patch.controls !== undefined) project.playback.controls = patch.controls
+  if (patch.keyboardNavigation !== undefined) {
+    project.playback.keyboardNavigation = patch.keyboardNavigation
+  }
+  if (patch.presenter !== undefined) {
+    project.playback.presenter = structuredClone(patch.presenter)
+  }
+
+  if (patch.controls === 'none') {
+    for (const entry of project.globalLayerItems) {
+      if (isTeacherControllerLayerItem(entry.item)) {
+        entry.item.playbackInitialVisibility = 'hidden'
+      }
+    }
+  } else if (patch.controls === 'canvas') {
+    const controller = findGlobalTeacherController(project)
+    if (controller) restoreCourseTeacherControllerLayer(controller)
+    else appendDefaultTeacherController(project)
+  }
+
+  if (patch.controls !== undefined) {
+    synchronizeCourseTeacherControllerControls(project)
+    project.playback.controls = patch.controls
+  }
+}
+
 /**
- * Restores a global teacher controller. Never writes a scene item.
- * Geometry details remain R3-C; this only restores ownership and default visibility.
+ * Updates course-wide playback settings without choosing a Surface history.
+ * Store integrations persist the returned document through the active Slide,
+ * Flow or Spatial adapter, so one invocation creates at most one history step.
+ */
+export function updateCoursePlaybackSettings(
+  document: CourseProjectDocument,
+  patch: Partial<ProjectPlaybackSettings>,
+  options: LayerCommandOptions = {},
+): LayerCommandResult {
+  const stale = rejectIfStaleDocument(document, options.expectedRevision)
+  if (stale) return stale
+  try {
+    const candidate = structuredClone(document)
+    applyCoursePlaybackPatch(candidate, patch)
+    const unchanged = JSON.stringify(candidate.playback) === JSON.stringify(document.playback) &&
+      JSON.stringify(candidate.globalLayerItems) === JSON.stringify(document.globalLayerItems)
+    if (unchanged) return succeedLayerNoop(document, '成品控制设置未变化')
+    return runDocumentMutation(
+      document,
+      (draft) => applyCoursePlaybackPatch(draft, patch),
+      '成品控制设置已更新',
+      options,
+    )
+  } catch (error) {
+    return failLayerCommand(error instanceof Error ? error.message : '无法更新成品控制设置')
+  }
+}
+
+interface TeacherControllerRestoreOptions extends LayerCommandOptions {
+  /** Slide authoring locks are ownership state and must survive a delivery repair. */
+  readonly preserveAuthoringLock?: boolean
+}
+
+function resetCourseTeacherControllerAuthoringFrame(entry: ScopedLayerItem): void {
+  if (!isTeacherControllerLayerItem(entry.item)) return
+  const recovery = teacherControllerAuthoringRecoveryBounds(
+    entry.item.content.data,
+    entry.item.frame,
+    entry.item.rotation,
+  )
+  if (
+    recovery.left >= 0 &&
+    recovery.top >= 0 &&
+    recovery.right <= CANVAS_WIDTH &&
+    recovery.bottom <= CANVAS_HEIGHT
+  ) return
+  const frame = centerTeacherControllerAuthoringFrame(
+    entry.item.content.data,
+    entry.item.frame,
+    entry.item.rotation,
+    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+  )
+  entry.item.frame = {
+    ...entry.item.frame,
+    ...frame,
+  }
+}
+
+/**
+ * Restores the one global teacher controller to delivery-visible consistency.
+ * It never writes a scene or Surface-local item.
  */
 export function restoreDefaultTeacherController(
   document: CourseProjectDocument,
-  options: LayerCommandOptions = {},
+  options: TeacherControllerRestoreOptions = {},
 ): LayerCommandResult {
   const stale = rejectIfStaleDocument(document, options.expectedRevision)
   if (stale) return stale
   const existing = findGlobalTeacherController(document)
   try {
     if (existing) {
-      const unchanged = existing.item.visible &&
-        !existing.item.locked &&
-        existing.item.playbackInitialVisibility === 'inherit' &&
-        existing.visibility.mode === 'all' &&
+      const candidate = structuredClone(existing)
+      if (!options.preserveAuthoringLock) candidate.item.locked = false
+      restoreCourseTeacherControllerLayer(candidate)
+      resetCourseTeacherControllerAuthoringFrame(candidate)
+      const unchanged = JSON.stringify(candidate) === JSON.stringify(existing) &&
         document.playback.controls === 'canvas'
       if (unchanged) return succeedLayerNoop(document, '教师控制器已可用')
       return runDocumentMutation(document, (draft) => {
@@ -838,29 +954,17 @@ export function restoreDefaultTeacherController(
         if (!entry || !isTeacherControllerLayerItem(entry.item)) {
           throw new Error('全课控制器已失效，请重新选择。')
         }
-        entry.visibility = { mode: 'all', locationIds: [] }
-        entry.item.visible = true
-        entry.item.locked = false
-        entry.item.playbackInitialVisibility = 'inherit'
-        if (entry.item.opacity <= 0) entry.item.opacity = 1
+        if (!options.preserveAuthoringLock) entry.item.locked = false
+        restoreCourseTeacherControllerLayer(entry)
+        resetCourseTeacherControllerAuthoringFrame(entry)
         draft.playback.controls = 'canvas'
+        synchronizeCourseTeacherControllerControls(draft)
       }, '已恢复教师控制器', options, existing.item.layerItemId)
     }
-    const node = createTeacherControllerNode({
-      id: `teacher-controller-${nanoid(8)}`,
-    })
+    const node = createTeacherControllerNode({ id: `teacher-controller-${nanoid(8)}` })
     const createdId = node.id
     return runDocumentMutation(document, (draft) => {
-      if (findGlobalTeacherController(draft)) {
-        throw new Error(CONTROLLER_DUPLICATE_REASON)
-      }
-      const item = sceneNodeToCourseLayerItem(node, nextFrontGlobalOrder(draft))
-      draft.globalLayerItems.push({
-        item,
-        visibility: { mode: 'all', locationIds: [] },
-      })
-      draft.playback.controls = 'canvas'
-      sortScopedLayerList(draft.globalLayerItems)
+      appendDefaultTeacherController(draft, node)
     }, '已恢复教师控制器', options, createdId)
   } catch (error) {
     return failLayerCommand(error instanceof Error ? error.message : '无法恢复教师控制器')

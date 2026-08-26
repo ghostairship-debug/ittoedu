@@ -27,6 +27,12 @@ import {
   LAYER_ITEM_KINDS,
 } from '../src/shared/courseProjectTypes'
 import {
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+  COURSE_PROJECT_VALIDATION_FATAL_CODES,
+  COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+} from '../src/shared/courseProjectValidationDiagnostics'
+import {
   APP_VERSION,
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -90,8 +96,6 @@ import { ASSESSMENT_EVALUATOR_REGISTRY } from '../src/shared/assessmentEvaluator
 import {
   HOST_EVIDENCE_CONSOLE_PREFIX,
   HOST_EVIDENCE_SCHEMA_VERSION,
-  HOST_TEACHER_ESCAPE_ACTIONS,
-  HOST_TEACHER_ESCAPE_PHASES,
 } from '../src/player/HostEvidenceRecorder'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
@@ -644,50 +648,47 @@ function artifactEvidence(files: ReadonlyMap<string, string>): Record<string, {
   )
 }
 
+/**
+ * Direct provenance inputs of the generated capability artifacts: the files this
+ * generator reads or imports, plus the contracts whose declared text the output
+ * quotes. Broad main/preload/Player/preview/archive/export producer implementations
+ * are deliberately excluded — they carry the behaviour the capabilities describe,
+ * not the bytes the artifacts are generated from, so listing them only churns the
+ * evidence on unrelated edits. Keep this list narrow.
+ */
+const AI_CAPABILITY_SOURCE_EVIDENCE_PATHS = [
+  'package.json',
+  'scripts/generate-ai-capabilities.ts',
+  'scripts/validate-project.ts',
+  'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+  'src/renderer/components/importComponentPackage.ts',
+  'src/renderer/export/exportSize.ts',
+  'src/player/HostEvidenceRecorder.ts',
+  'src/shared/assessmentEvaluators.ts',
+  'src/shared/builtInComponentCatalog.ts',
+  'src/shared/componentCatalog.ts',
+  'src/shared/componentContentIntegrity.ts',
+  'src/shared/componentSchema.ts',
+  'src/shared/componentTypes.ts',
+  'src/shared/constants.ts',
+  'src/shared/courseProjectSchema.ts',
+  'src/shared/courseProjectTypes.ts',
+  'src/shared/courseProjectValidationDiagnostics.ts',
+  'src/shared/diagnosticCodes.ts',
+  'src/shared/interactionSchema.ts',
+  'src/shared/interactionTypes.ts',
+  'src/shared/publishedCourseSchema.ts',
+  'src/shared/publishedCourseTypes.ts',
+  'src/shared/runtimeSchema.ts',
+  'src/shared/runtimeTypes.ts',
+  'src/shared/surfaceRuntimeTypes.ts',
+] as const
+
 async function sourceEvidence(projectRoot: string): Promise<Array<{
   path: string
   sha256: string
 }>> {
-  const sources = [
-    'package-lock.json',
-    'package.json',
-    'scripts/generate-ai-capabilities.ts',
-    'scripts/validate-project.ts',
-    'src/renderer/components/componentPackageStore.ts',
-    'src/renderer/components/importComponentPackage.ts',
-    'src/renderer/export/exportSize.ts',
-    'src/renderer/export/course/buildCoursePackages.ts',
-    'src/renderer/export/course/buildCoursePrintArtifacts.ts',
-    'src/renderer/export/course/buildPublishedCourse.ts',
-    'src/renderer/project/createCourseProject.ts',
-    'src/renderer/project/courseProjectArchive.ts',
-    'src/player/RuntimeHost.ts',
-    'src/player/CourseRuntimeKernel.ts',
-    'src/player/HostEvidenceRecorder.ts',
-    'src/player/PlayerApp.ts',
-    'src/player/TeacherEscapeControls.ts',
-    'src/shared/builtInComponentCatalog.ts',
-    'src/shared/assessmentEvaluators.ts',
-    'src/shared/componentCatalog.ts',
-    'src/shared/componentContentIntegrity.ts',
-    'src/shared/componentSchema.ts',
-    'src/shared/componentTypes.ts',
-    'src/shared/constants.ts',
-    'src/shared/diagnosticCodes.ts',
-    'src/shared/interactionSchema.ts',
-    'src/shared/interactionTypes.ts',
-    'src/shared/formulaRenderer.ts',
-    'src/shared/layoutMeasure.ts',
-    'src/shared/courseProjectSchema.ts',
-    'src/shared/courseProjectTypes.ts',
-    'src/shared/publishedCourseSchema.ts',
-    'src/shared/publishedCourseTypes.ts',
-    'src/shared/runtimeSchema.ts',
-    'src/shared/runtimeTypes.ts',
-    'src/shared/surfaceRuntimeTypes.ts',
-    'src/shared/stableOrder.ts',
-    'src/shared/textLayout.ts',
-  ]
+  const sources = AI_CAPABILITY_SOURCE_EVIDENCE_PATHS
   return Promise.all(sources.map(async (relativePath) => ({
     path: relativePath,
     sha256: sha256(await fs.readFile(path.join(projectRoot, relativePath))),
@@ -782,7 +783,7 @@ export async function generateAiCapabilityArtifacts(
     layerItemKinds: LAYER_ITEM_KINDS,
     nativeTypes: COURSE_NATIVE_TYPES,
     runtimeProtocols: {
-      current: { protocol: 'surface-v1', runtimeApiVersion: SURFACE_RUNTIME_API_VERSION },
+      current: { protocol: 'surface-runtime', runtimeApiVersion: SURFACE_RUNTIME_API_VERSION },
     },
     nativeTypeSchemas: Object.fromEntries(
       COURSE_NATIVE_TYPES.map((type) => [type, {
@@ -844,31 +845,7 @@ export async function generateAiCapabilityArtifacts(
           recordKinds: [
             'assessment-evaluated',
             'action-recorded',
-            'teacher-escape-recorded',
           ],
-          teacherEscape: {
-            recordKind: 'teacher-escape-recorded',
-            actions: HOST_TEACHER_ESCAPE_ACTIONS,
-            phases: HOST_TEACHER_ESCAPE_PHASES,
-            requiredFields: [
-              'action',
-              'phase',
-              'sceneId',
-              'stateId',
-              'bypassNavigationGuards',
-              'eventType',
-            ],
-            acceptedField: {
-              requested: 'omitted',
-              confirmationRequired: false,
-              completed: 'boolean',
-            },
-            eventType: 'click',
-            requiresTrustedDispatchedClick: true,
-            phaseWriterLifetime: 'current-click-dispatch-only',
-            runtimeExposure: 'none',
-            publicCustomEventIsEvidence: false,
-          },
         },
       },
       evidence: {
@@ -891,6 +868,47 @@ export async function generateAiCapabilityArtifacts(
         restartCourse: 'cleared',
       },
     },
+    publishedPlayback: {
+      status: 'partial',
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-canvas-runtime-playback-with-partial-host-context',
+        },
+        {
+          surfaces: ['slide', 'flow', 'spatial-2d'],
+          carrier: 'globalLayerItems',
+          scope: 'session-global',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          lifetime: 'one-instance-per-published-session-moved-between-surface-wrappers',
+          behavior: 'interactive-canvas-runtime-playback-with-partial-host-context',
+        },
+      ],
+      notCovered: [
+        'surfaceLayerItems',
+        'flow-or-spatial-scene-local',
+        'runtime.event-or-host-actions',
+        'node-resolution-or-presentation',
+        'scene-local-cross-surface-courseState',
+        'capture-pdf-or-pptx',
+        'host-local-capabilities',
+      ],
+    },
     documentation: 'docs/RUNTIME_AUTHORING.md',
     sourceOfTruth: [
       'src/shared/runtimeSchema.ts',
@@ -899,14 +917,70 @@ export async function generateAiCapabilityArtifacts(
       'src/player/RuntimeHost.ts',
       'src/player/CourseRuntimeKernel.ts',
       'src/player/PlayerApp.ts',
-      'src/player/TeacherEscapeControls.ts',
+      'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
+      'src/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
+      'src/player/surfaces/flow/FlowSurfaceHost.ts',
+      'src/player/surfaces/spatial/SpatialSurfaceHost.ts',
     ],
   }))
   files.set('schemas/runtime-api3.json', canonicalJson({
     contract: 'Surface Runtime API 3',
-    protocol: 'surface-v1',
+    protocol: 'surface-runtime',
     runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
     renderMode: 'dom',
+    publishedPlayback: {
+      status: 'partial',
+      supportedSlice: {
+        surface: 'slide',
+        carrier: 'scene.layerItems',
+        scope: 'scene-local',
+        renderMode: 'dom',
+        consumers: [
+          'current-location-try-run',
+          'whole-course-preview',
+          'single-html',
+          'web-package',
+        ],
+        behavior: 'interactive-dom-playback',
+      },
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderMode: 'dom',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-dom-playback',
+        },
+        {
+          surface: 'flow',
+          carrier: 'surfaceLayerItems',
+          scope: 'surface-local',
+          renderMode: 'dom',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-dom-playback',
+        },
+      ],
+      notCovered: [
+        'spatial',
+        'globalLayerItems-or-non-flow-surfaceLayerItems',
+        'runtime.event-or-host-actions',
+        'cross-surface-courseState-or-presentation',
+        'capture-pdf-or-pptx',
+        'network-or-host-local-capabilities',
+      ],
+    },
     hostContract: {
       modes: ['playback', 'inspect', 'capture'],
       hostActions: runtimeHostActionNames,
@@ -918,6 +992,11 @@ export async function generateAiCapabilityArtifacts(
     documentation: 'docs/RUNTIME_AUTHORING.md',
     sourceOfTruth: [
       'src/shared/surfaceRuntimeTypes.ts',
+      'src/renderer/ui/coursePlayerTryRun.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
+      'src/player/surfaces/flow/FlowSurfaceHost.ts',
+      'src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     ],
   }))
   files.set('schemas/component-api4.json', canonicalJson({
@@ -937,10 +1016,38 @@ export async function generateAiCapabilityArtifacts(
         'ctx.editor.registerTextRegion',
       ],
     },
+    publishedPlayback: {
+      status: 'partial',
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderMode: 'phaser',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-component-api4-playback',
+        },
+      ],
+      notCovered: [
+        'phaser-global-or-surface-shared',
+        'phaser-flow-or-spatial',
+        'hybrid-published-parity',
+        'capture-pdf-or-pptx',
+        'component-event-or-host-actions-parity',
+      ],
+    },
     documentation: 'docs/COMPONENT_AUTHORING.md',
     sourceOfTruth: [
       'src/shared/componentSchema.ts',
       'src/shared/componentTypes.ts',
+      'src/player/surfaces/publishedComponentMount.ts',
+      'src/player/surfaces/slide/publishedSlidePhaserComponentMount.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
     ],
   }))
   files.set('diagnostics.json', canonicalJson({
@@ -950,6 +1057,52 @@ export async function generateAiCapabilityArtifacts(
     projectedProjectHealthForExport: PROJECT_HEALTH_CODES.map(
       (code) => `project-health:${code}`,
     ),
+    legacyRegistryScope: 'Project V8 editor/export registry; not the active Course Project V9 CLI finding ledger.',
+    courseProjectValidation: {
+      reportVersion: 1,
+      target: {
+        version: COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+        stableIdentity: 'course-project-v9-ids-only',
+        kinds: COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+        unresolvedFallback: 'project',
+        schemaInvalid: 'omitted',
+      },
+      fatalCodes: COURSE_PROJECT_VALIDATION_FATAL_CODES,
+      schemaIssueCodes: 'zod-issue-code',
+      findingCodes: COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+      projectHealth: {
+        collector: 'collectCourseProjectHealth',
+        input: 'schema-valid-course-project-v9-plus-opened-archive-files',
+        ordering: 'severity-path-code-message',
+        target: 'required-diagnostic-target-v1',
+        readOnly: true,
+        domains: [
+          {
+            id: 'runtime',
+            collector: 'collectCourseProjectRuntimeHealth',
+            source: 'src/shared/courseProjectHealth/runtime.ts',
+          },
+          {
+            id: 'interaction',
+            collector: 'collectCourseProjectInteractionHealth',
+            source: 'src/shared/courseProjectHealth/interaction.ts',
+          },
+          {
+            id: 'component',
+            collector: 'collectCourseProjectComponentHealth',
+            source: 'src/shared/courseProjectHealth/component.ts',
+          },
+          {
+            id: 'controller-media',
+            collector: 'collectCourseProjectControllerMediaHealth',
+            source: 'src/shared/courseProjectHealth/controllerMedia.ts',
+          },
+        ],
+        networkDeclarationParity: 'deferred',
+      },
+      sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+    },
     sourceOfTruth: 'src/shared/diagnosticCodes.ts',
   }))
   files.set('limits.json', canonicalJson({
@@ -1026,8 +1179,8 @@ export async function generateAiCapabilityArtifacts(
       authoringModes: ['professional'],
       scopes: RUNTIME_SCOPES,
       exports: {
-        singleHtml: 'interactive',
-        webPackage: 'interactive',
+        singleHtml: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
+        webPackage: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
         pdf: 'captured-with-static-fallback',
         pptx: 'captured-per-runtime-with-static-fallback',
       },
@@ -1047,9 +1200,34 @@ export async function generateAiCapabilityArtifacts(
       },
       authoringModes: ['professional'],
       scopes: ['manifest-dependent'],
+      publishedPlayback: {
+        status: 'partial',
+        provenSlices: [
+          {
+            surface: 'slide',
+            carrier: 'scene.layerItems',
+            scope: 'scene-local',
+            renderMode: 'phaser',
+            consumers: [
+              'current-location-try-run',
+              'whole-course-preview',
+              'single-html',
+              'web-package',
+            ],
+            behavior: 'interactive-component-api4-playback',
+          },
+        ],
+        notCovered: [
+          'phaser-global-or-surface-shared',
+          'phaser-flow-or-spatial',
+          'hybrid-published-parity',
+          'capture-pdf-or-pptx',
+          'component-event-or-host-actions-parity',
+        ],
+      },
       exports: {
-        singleHtml: 'interactive',
-        webPackage: 'interactive',
+        singleHtml: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+        webPackage: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
         pdf: 'isolated-static-capture',
         pptx: 'isolated-static-capture',
       },
@@ -1062,9 +1240,18 @@ export async function generateAiCapabilityArtifacts(
       input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+      findingCodeLedger: 'diagnostics.json#/courseProjectValidation/findingCodes',
+      diagnosticTargetVersion: COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+      schemaInvalid: {
+        status: 'unreadable',
+        exitCode: 2,
+        semanticSections: 'all-null',
+        canExport: false,
+      },
+      semanticCoverage: 'current-wired-only-see-code-ledger',
       checks: [
         'course-project-v9-schema',
-        'project-health',
         'assets-and-components',
         'runtime-component-protocol',
         'single-html-preflight',
@@ -1073,6 +1260,7 @@ export async function generateAiCapabilityArtifacts(
         'pptx-preflight',
         'stable-ids',
         'no-v8-fields-or-migration-markers',
+        'v9-project-health-runtime-interaction-component-controller-media',
       ],
       exitCodes: {
         valid: 0,
@@ -1099,13 +1287,37 @@ export async function generateAiCapabilityArtifacts(
       ],
     },
     exportSurfaces: {
-      singleHtml: { interactivity: 'preserved', resources: 'inline' },
+      singleHtml: {
+        interactivity: 'preserved',
+        resources: 'selectable-inline-or-declared-remote',
+        modes: {
+          offlinePortable: 'all-published-assets-inline',
+          onlineLightweight: 'referenced-project-assets-with-remote-url-remote-others-inline',
+        },
+        networkPolicy: 'exact-declared-origins-no-remote-script',
+      },
       webPackage: { interactivity: 'preserved', resources: 'relative-files' },
       pdf: { interactivity: 'omitted', representation: 'player-capture' },
       pptx: { interactivity: 'omitted', representation: 'native-plus-static-fallback' },
     },
+    previewSurfaces: {
+      host: 'main-renderer-published-v2',
+      consumers: ['current-location-try-run', 'whole-course-preview'],
+      resources: {
+        remoteProjectAssets: 'actual-published-references-with-https-remote-url',
+        localProjectAssets: 'inline-data-url',
+        componentAssets: 'inline-data-url',
+      },
+      networkPolicy: {
+        declaredConnectOrigins: ['https', 'wss'],
+        enforcement: 'editor-scheme-csp-plus-main-session-exact-origin-leases',
+        leaseLifetime: 'published-session-and-document-generation',
+        corsTls: 'browser-enforced',
+        remoteScripts: 'blocked',
+      },
+    },
     documentation: {
-      authoring: 'docs/AI_COURSEWARE_AUTHORING.md',
+      authoring: '.agents/skills/build-courseware-project/SKILL.md',
       runtime: 'docs/RUNTIME_AUTHORING.md',
       component: 'docs/COMPONENT_AUTHORING.md',
     },

@@ -70,11 +70,7 @@ import type {
   WritingMode,
 } from '../../shared/projectTypes'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
-import type {
-  RuntimeDocument,
-  RuntimeLayer,
-  RuntimeRenderMode,
-} from '../../shared/runtimeTypes'
+import type { RuntimeLayer } from '../../shared/runtimeTypes'
 import { isStrokeOnlyShapeType, SHAPE_TYPES } from '../../shared/projectTypes'
 import {
   isVerticalWritingMode,
@@ -102,6 +98,7 @@ import {
 } from '../course/globalLayerCommands'
 import {
   selectActiveCourseProjectDocument,
+  selectActiveCourseLocationId,
   selectActiveScene,
   selectCandidateGlobalLayerItems,
   selectEditingNodes,
@@ -112,6 +109,11 @@ import {
   type AlignmentMode,
   useEditorStore,
 } from '../store/editorStore'
+import {
+  selectRuntimeInspectorAuthoringView,
+  type RuntimeInspectorAuthoringView,
+} from '../runtime/runtimeInspectorAuthoringView'
+import { updateCourseAuthoringSessionRevision } from '../authoring/courseAuthoringSession'
 import {
   createImageAssetImport,
   createMediaAssetImport,
@@ -173,6 +175,11 @@ import {
 import type { SpatialGraphSelection } from '../store/editorStore'
 import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
+import {
+  deriveFlowSelectionFormat,
+  FLOW_PAPER_TEXT_COLOR,
+  type FlowSelectionFormatField,
+} from '../authoring/flowTextEdit'
 import { locateCourseLayer } from '../course/effectiveLayerCommands'
 import {
   commitFlowOverlayFormulaAst,
@@ -192,6 +199,7 @@ interface BufferedInputProps {
   step?: number
   disabled?: boolean
   title?: string
+  placeholder?: string
   onCommit(value: string): void
 }
 
@@ -204,6 +212,7 @@ function BufferedInput({
   step,
   disabled,
   title,
+  placeholder,
   onCommit,
 }: BufferedInputProps) {
   const [draft, setDraft] = useState(String(value))
@@ -237,6 +246,7 @@ function BufferedInput({
         step={step}
         disabled={disabled}
         title={title}
+        placeholder={placeholder}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
@@ -255,11 +265,13 @@ function SelectField<T extends string>({
   label,
   value,
   options,
+  disabled = false,
   onChange,
 }: {
   label: string
   value: T
   options: Array<{ value: T; label: string }>
+  disabled?: boolean
   onChange(value: T): void
 }) {
   return (
@@ -269,6 +281,7 @@ function SelectField<T extends string>({
         className="form-input"
         aria-label={label}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value as T)}
       >
         {options.map((option) => (
@@ -446,8 +459,9 @@ export function detectFontAvailability(fontFamily: string): FontAvailability {
   }
 }
 
-export function FontFamilyPicker({ value, onCommit }: {
+export function FontFamilyPicker({ value, placeholder, onCommit }: {
   value: string
+  placeholder?: string
   onCommit(value: string): void
 }) {
   const [draft, setDraft] = useState(value)
@@ -539,6 +553,7 @@ export function FontFamilyPicker({ value, onCommit }: {
               : undefined
           }
           value={draft}
+          placeholder={placeholder}
           spellCheck={false}
           onFocus={() => {
             if (!open) openAllFonts()
@@ -776,9 +791,10 @@ function CommonNodeProperties({ node, update }: {
   )
 }
 
-function TextProperties({ node, update }: {
+function TextProperties({ node, update, contentEditingEnabled = true }: {
   node: TextNode
   update(patch: DeepPartial<SceneNode>): void
+  contentEditingEnabled?: boolean
 }) {
   const style = node.style
   const beginTextEdit = useEditorStore((state) => state.beginTextEdit)
@@ -847,23 +863,35 @@ function TextProperties({ node, update }: {
   return (
     <section className="property-section">
       <h3 className="property-title"><Type size={14} />文本</h3>
-      <TextContentTextarea
-        label="文字内容"
-        value={node.text}
-        onBegin={() => beginTextEdit(node.id, 'properties')}
-        onChange={updateTextDraft}
-        onCommit={commitTextEdit}
-        onCancel={cancelTextEdit}
-      />
-      <button
-        type="button"
-        className="secondary-button"
-        style={{ width: '100%', marginBottom: 10 }}
-        onClick={() => beginTextEdit(node.id, 'canvas')}
-      >
-        <Type size={14} />编辑局部文字格式
-      </button>
-      <p className="property-hint">也可以双击画布中的文字，选中部分内容后设置局部格式。</p>
+      {contentEditingEnabled ? (
+        <>
+          <TextContentTextarea
+            label="文字内容"
+            value={node.text}
+            onBegin={() => beginTextEdit(node.id, 'properties')}
+            onChange={updateTextDraft}
+            onCommit={commitTextEdit}
+            onCancel={cancelTextEdit}
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ width: '100%', marginBottom: 10 }}
+            onClick={() => beginTextEdit(node.id, 'canvas')}
+          >
+            <Type size={14} />编辑局部文字格式
+          </button>
+          <p className="property-hint">也可以双击画布中的文字，选中部分内容后设置局部格式。</p>
+        </>
+      ) : (
+        <p
+          className="property-hint"
+          data-testid="spatial-text-content-unavailable"
+          role="status"
+        >
+          当前 Spatial 范围只支持整节点文字样式；文字内容与局部格式不会提供无法保存的控件。
+        </p>
+      )}
       <FontFamilyPicker value={style.fontFamily} onCommit={(fontFamily) => update({ style: { fontFamily } })} />
       <div className="coordinate-grid">
         <BufferedInput label="字号" type="number" min={8} max={400} value={style.fontSize} onCommit={(fontSize) => update({ style: { fontSize: Number(fontSize) } })} />
@@ -1497,12 +1525,14 @@ const ALIGN_ACTIONS: Array<{
 function MultiSelectionProperties({
   nodes,
   presentationContext,
+  spatialMode = false,
 }: {
   nodes: SceneNode[]
   presentationContext: {
     scene: SceneDocument
     stateId: string | null
   } | null
+  spatialMode?: boolean
 }) {
   const alignSelection = useEditorStore((state) => state.alignSelection)
   const distributeSelection = useEditorStore((state) => state.distributeSelection)
@@ -1599,17 +1629,30 @@ function MultiSelectionProperties({
           <button type="button" className="property-action-button" onClick={() => applyToAll({ locked: false })}><Unlock size={16} /><span>全部解锁</span></button>
         </div>
         <div className="button-row property-action-footer">
-          <button type="button" className="secondary-button" onClick={duplicateSelectedNodes}><Copy size={14} />复制所选</button>
-          <button type="button" className="secondary-button secondary-button--danger" onClick={deleteSelectedNodes}><Trash2 size={14} />删除所选</button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={spatialMode}
+            title={spatialMode ? 'Spatial 多选复制暂未接入原子历史' : undefined}
+            onClick={duplicateSelectedNodes}
+          ><Copy size={14} />复制所选</button>
+          <button
+            type="button"
+            className="secondary-button secondary-button--danger"
+            disabled={spatialMode}
+            title={spatialMode ? 'Spatial 多选删除暂未接入原子历史' : undefined}
+            onClick={deleteSelectedNodes}
+          ><Trash2 size={14} />删除所选</button>
         </div>
+        {spatialMode ? (
+          <p className="property-hint" data-testid="spatial-multi-actions-unavailable">
+            Spatial 多选复制与删除尚未接入一次提交，因此当前不会执行部分写入。
+          </p>
+        ) : null}
       </section>
     </div>
   )
 }
-
-type RuntimeEditorPatch = Partial<
-  Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>
->
 
 function runtimeSourceSummary(source: string): string {
   const compact = source.replace(/\s+/g, ' ').trim()
@@ -1617,29 +1660,74 @@ function runtimeSourceSummary(source: string): string {
   return compact.length > 96 ? `${compact.slice(0, 96)}…` : compact
 }
 
+type RuntimeInspectorCommitResult =
+  | { readonly ok: true; readonly status: 'updated' | 'unchanged' }
+  | { readonly ok: false; readonly reason: string }
+
 function RuntimeInspector({
-  runtime,
+  view,
   scope,
-  onChange,
 }: {
-  runtime: RuntimeDocument | undefined
+  view: RuntimeInspectorAuthoringView | null
   scope: 'scene' | 'global'
-  onChange(patch: RuntimeEditorPatch): void
 }) {
+  const updateRuntimePropertyAtTarget = useEditorStore(
+    (state) => state.updateRuntimePropertyAtTarget,
+  )
+  const updateRuntimeContentTextAtTarget = useEditorStore(
+    (state) => state.updateRuntimeContentTextAtTarget,
+  )
+  const setStatus = useEditorStore((state) => state.setStatus)
+  const setError = useEditorStore((state) => state.setError)
+  const [result, setResult] = useState<{
+    kind: 'success' | 'error'
+    message: string
+  } | null>(null)
+  const runtimeDocumentKey = view?.documentKey ?? null
+  useEffect(() => setResult(null), [runtimeDocumentKey])
+
+  const reportCommit = (
+    commit: RuntimeInspectorCommitResult,
+    updatedMessage: string,
+    unchangedMessage: string,
+  ) => {
+    if (!commit.ok) {
+      setResult({ kind: 'error', message: commit.reason })
+      setError(commit.reason)
+      setStatus(null)
+      return commit
+    }
+    const message = commit.status === 'updated'
+      ? updatedMessage
+      : unchangedMessage
+    setResult({ kind: 'success', message })
+    setError(null)
+    setStatus(message)
+    return commit
+  }
+
   const title = scope === 'global' ? '全局自定义运行时' : '场景自定义运行时'
-  if (!runtime) {
+  if (!view || view.availability !== 'available') {
     return (
       <section className="property-section" data-testid={`${scope}-runtime-empty`}>
         <h3 className="property-title"><Code2 size={14} />{title}</h3>
         <p className="property-empty">
-          当前没有自定义运行时。运行时代码由 AI 或生成脚本写入工程，编辑器只负责管理和修改登记文案。
+          {view?.label ?? '当前 Runtime 作者会话不可用'}。运行时代码由 AI 或生成脚本写入工程，编辑器只负责管理和修改登记文案。
         </p>
       </section>
     )
   }
 
-  const sourceBytes = new TextEncoder().encode(runtime.source).byteLength
-  const fallbackAsset = runtime.staticFallback?.assetId
+  const renderModeOptions: Array<{
+    value: typeof view.renderMode
+    label: string
+  }> = view.runtimeApiVersion === 3
+    ? [{ value: 'dom', label: 'HTML / DOM（API 3 固定）' }]
+    : [
+        { value: 'phaser', label: 'Phaser 画布' },
+        { value: 'dom', label: 'HTML / DOM' },
+        { value: 'hybrid', label: '混合渲染' },
+      ]
   return (
     <section
       className="property-section runtime-inspector"
@@ -1648,38 +1736,66 @@ function RuntimeInspector({
       <h3 className="property-title"><Code2 size={14} />{title}</h3>
       <ToggleRow
         label="启用运行时"
-        checked={runtime.enabled}
-        onChange={(enabled) => onChange({ enabled })}
+        checked={view.enabled}
+        disabled={view.effectiveLocked}
+        onChange={(enabled) => reportCommit(
+          updateRuntimePropertyAtTarget(
+            view.enabledTarget,
+            { field: 'enabled', value: enabled },
+          ),
+          enabled ? '运行时已启用' : '运行时已停用',
+          '运行时启用状态没有变化',
+        )}
       />
-      <SelectField<RuntimeRenderMode>
+      <SelectField
         label="渲染能力声明"
-        value={runtime.renderMode}
-        options={[
-          { value: 'phaser', label: 'Phaser 画布' },
-          { value: 'dom', label: 'HTML / DOM' },
-          { value: 'hybrid', label: '混合渲染' },
-        ]}
-        onChange={(renderMode) => onChange({ renderMode })}
+        value={view.renderMode}
+        options={renderModeOptions}
+        disabled={view.effectiveLocked || view.runtimeApiVersion === 3}
+        onChange={(renderMode) => reportCommit(
+          updateRuntimePropertyAtTarget(
+            view.renderModeTarget,
+            { field: 'renderMode', value: renderMode },
+          ),
+          '运行时渲染能力声明已更新',
+          '运行时渲染能力声明没有变化',
+        )}
       />
       <p className="property-hint">
-        Runtime API 2 会按此字段只挂载并暴露声明的能力。修改字段不会转换源码，请确认源码支持新模式。
+        {view.runtimeApiVersion === 3
+          ? 'Surface Runtime / API 3 固定使用 HTML / DOM；编辑器会保留其真实协议与版本。'
+          : 'Canvas Runtime / API 2 会按此字段只挂载并暴露声明的能力。修改字段不会转换源码，请确认源码支持新模式。'}
       </p>
+      {view.effectiveLocked && (
+        <p className="property-hint" role="status">
+          当前 Runtime 已锁定，属性与登记文案均为只读。
+        </p>
+      )}
+      {result && (
+        <p
+          className="property-hint"
+          role={result.kind === 'error' ? 'alert' : 'status'}
+          data-testid={`${scope}-runtime-result`}
+        >
+          {result.message}
+        </p>
+      )}
       <div className="runtime-summary-grid" aria-label="运行时摘要">
-        <span><small>运行时协议</small>API {runtime.runtimeApiVersion}</span>
-        <span><small>源码体积</small>{(sourceBytes / 1024).toFixed(sourceBytes >= 1024 ? 1 : 2)} KiB</span>
-        <span><small>素材绑定</small>{Object.keys(runtime.assets).length}</span>
-        <span><small>可编辑文案</small>{Object.keys(runtime.content.values).length}</span>
-        <span><small>静态后备</small>{fallbackAsset ? '已配置' : '未配置'}</span>
+        <span><small>运行时协议</small>{view.protocol} · API {view.runtimeApiVersion}</span>
+        <span><small>源码体积</small>{(view.sourceBytes / 1024).toFixed(view.sourceBytes >= 1024 ? 1 : 2)} KiB</span>
+        <span><small>素材绑定</small>{view.assetCount}</span>
+        <span><small>可编辑文案</small>{view.contentFields.length}</span>
+        <span><small>静态后备</small>{view.fallback ? '已配置' : '未配置'}</span>
       </div>
       <div className="form-field">
         <label>源码摘要（只读）</label>
         <div className="readonly-value runtime-source-summary">
-          {runtimeSourceSummary(runtime.source)}
+          {runtimeSourceSummary(view.runtime.source)}
         </div>
       </div>
-      {fallbackAsset && (
+      {view.fallback && (
         <p className="property-hint">
-          静态后备：{runtime.staticFallback!.coverage === 'full-scene' ? '整场景' : '运行时图层'} · {runtime.staticFallback!.layer}
+          静态后备：{view.fallback.coverage === 'scene' ? '整场景' : '整表面'} · {view.fallback.assetId}
         </p>
       )}
       <div className="runtime-content-heading">
@@ -1687,8 +1803,13 @@ function RuntimeInspector({
         <span>修改这里只更新 content.values，不会改写源码。</span>
       </div>
       <RuntimeContentEditor
-        runtime={runtime}
-        onChange={(nextRuntime) => onChange({ content: nextRuntime.content })}
+        fields={view.contentFields}
+        disabled={view.effectiveLocked}
+        onCommit={(target, value) => reportCommit(
+          updateRuntimeContentTextAtTarget(target, value),
+          `运行时文案“${target.contentKey}”已更新`,
+          `运行时文案“${target.contentKey}”没有变化`,
+        )}
       />
     </section>
   )
@@ -2098,6 +2219,19 @@ function selectedFlowBlock(session: FlowAuthoringSession): FlowBlock | null {
   }
 }
 
+function uniformFlowFormatValue<T>(field: FlowSelectionFormatField<T>): T | undefined {
+  return field.state === 'uniform' ? field.value : undefined
+}
+
+function flowFormatFieldDescription<T>(
+  label: string,
+  field: FlowSelectionFormatField<T>,
+): string {
+  if (field.state === 'mixed') return `${label}：混合`
+  if (field.state === 'unset') return `${label}：默认`
+  return `${label}：${String(field.value)}`
+}
+
 function FlowPageProperties({ session }: { session: FlowAuthoringSession }) {
   const renameFlowPage = useEditorStore((state) => state.renameFlowPage)
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
@@ -2166,7 +2300,7 @@ function FlowMediaBlockProperties({
         {FLOW_MEDIA_KIND_LABEL[block.mediaKind]}
         {asset?.filename ? ` · ${asset.filename}` : ''}
       </p>
-      {block.mediaKind === 'image' ? (
+      {block.mediaKind === 'image' || block.mediaKind === 'video' ? (
         <BufferedInput
           label="替代文本"
           value={block.altText ?? ''}
@@ -2357,7 +2491,7 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
   const formatFlowTextStyle = useEditorStore((state) => state.formatFlowTextStyle)
-  const project = useEditorStore((state) => state.project)
+  const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
   if (!block) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
@@ -2366,37 +2500,31 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
     )
   }
 
-  function flowRichTextColor(target: FlowBlock): string {
-    if (!('runs' in target) || !Array.isArray(target.runs)) return '#1f2937'
-    for (const run of target.runs) {
-      if (typeof run.style?.color === 'string' && run.style.color.length > 0) return run.style.color
-    }
-    return '#1f2937'
-  }
-
-  function flowRichTextFontFamily(target: FlowBlock): string {
-    if ('runs' in target && Array.isArray(target.runs)) {
-      for (const run of target.runs) {
-        if (typeof run.style?.fontFamily === 'string' && run.style.fontFamily.length > 0) {
-          return run.style.fontFamily
-        }
-      }
-    }
-    return session.history.present.designTokens?.fonts?.[0]?.fontFamily
-      ?? project.designTokens?.fonts?.[0]?.fontFamily
-      ?? ''
-  }
-
-  function flowRichTextFontSize(target: FlowBlock): string | number {
-    if ('runs' in target && Array.isArray(target.runs)) {
-      for (const run of target.runs) {
-        if (typeof run.style?.fontSize === 'number') return run.style.fontSize
-      }
-    }
-    return ''
-  }
-
   const document = session.history.present
+  const selectionFormat = deriveFlowSelectionFormat({
+    block,
+    edit: flowTextEdit?.blockId === block.id ? flowTextEdit : null,
+  })
+  const formatDisabled = !selectionFormat.canApplyInlineStyle
+  const formatScopeTitle = selectionFormat.mode === 'caret'
+    ? '插入点格式'
+    : selectionFormat.mode === 'range'
+      ? '选区格式'
+      : '整块格式'
+  const formatScopeHint = selectionFormat.mode === 'caret'
+    ? '当前显示插入点格式。选择文字后应用；这里不创建待输入样式。'
+    : selectionFormat.mode === 'range'
+      ? selectionFormat.hasMixedValue
+        ? '选区包含混合格式；修改会统一所选文字。'
+        : '修改只应用到当前选中的文字。'
+      : '未进入文字选区；修改会应用到整个文字块。'
+  const fontFamilyField = selectionFormat.fields.fontFamily
+  const fontSizeField = selectionFormat.fields.fontSize
+  const colorField = selectionFormat.fields.color
+  const boldField = selectionFormat.fields.bold
+  const italicField = selectionFormat.fields.italic
+  const boldActive = uniformFlowFormatValue(boldField) === true
+  const italicActive = uniformFlowFormatValue(italicField) === true
 
   const patchBlockLayout = (patch: { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number }) => {
     const target = flowBlockTargetFromSelection(document, session.selection)
@@ -2577,50 +2705,91 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
       {block.type === 'formula' ? (
         <FlowFormulaBlockProperties session={session} />
       ) : null}
-      {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
-        <section className="property-section">
-          <h3 className="property-title"><Type size={14} />选区格式</h3>
-          <FontFamilyPicker
-            value={flowRichTextFontFamily(block)}
-            onCommit={(fontFamily) => formatFlowTextStyle({ fontFamily })}
-          />
-          <div data-testid="flow-font-size">
-            <BufferedInput
-              label="字号"
-              type="number"
-              min={8}
-              max={400}
-              value={flowRichTextFontSize(block)}
-              onCommit={(value) => {
-                const fontSize = value === '' ? undefined : Number(value)
-                formatFlowTextStyle({ fontSize })
-              }}
-            />
-          </div>
-          <div className="property-button-row">
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-format-bold"
-              onClick={() => formatFlowTextStyle({ bold: true })}
+      {selectionFormat.richText ? (
+        <section
+          className="property-section"
+          data-testid="flow-selection-format-properties"
+          data-flow-selection-preserving-target="true"
+          data-flow-format-mode={selectionFormat.mode}
+          data-format-state={selectionFormat.hasMixedValue ? 'mixed' : 'resolved'}
+        >
+          <h3 className="property-title" data-testid="flow-selection-format-title">
+            <Type size={14} />{formatScopeTitle}
+          </h3>
+          <p className="property-hint" data-testid="flow-selection-format-hint">
+            {formatScopeHint}
+          </p>
+          <fieldset
+            disabled={formatDisabled}
+            title={formatDisabled ? '选择文字后应用' : undefined}
+            style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+          >
+            <div
+              data-testid="flow-font-family-state"
+              data-format-state={fontFamilyField.state}
+              aria-label={flowFormatFieldDescription('字体', fontFamilyField)}
             >
-              <Bold size={14} />粗体
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              data-testid="flow-format-italic"
-              onClick={() => formatFlowTextStyle({ italic: true })}
+              <FontFamilyPicker
+                value={uniformFlowFormatValue(fontFamilyField) ?? ''}
+                placeholder={fontFamilyField.state === 'mixed' ? '混合字体' : '默认字体'}
+                onCommit={(fontFamily) => formatFlowTextStyle({ fontFamily })}
+              />
+            </div>
+            <div
+              data-testid="flow-font-size"
+              data-format-state={fontSizeField.state}
+              aria-label={flowFormatFieldDescription('字号', fontSizeField)}
             >
-              <Italic size={14} />斜体
-            </button>
-          </div>
-          <ColorInput
-            id="flow-text-color"
-            label="文字颜色"
-            value={flowRichTextColor(block)}
-            onChange={(color) => formatFlowTextStyle({ color })}
-          />
+              <BufferedInput
+                label="字号"
+                type="number"
+                min={8}
+                max={400}
+                value={uniformFlowFormatValue(fontSizeField) ?? ''}
+                placeholder={fontSizeField.state === 'mixed' ? '混合' : '默认'}
+                onCommit={(value) => {
+                  const fontSize = value === '' ? undefined : Number(value)
+                  formatFlowTextStyle({ fontSize })
+                }}
+              />
+            </div>
+            <div className="property-button-row">
+              <button
+                type="button"
+                className={`secondary-button${boldActive ? ' secondary-button--active' : ''}`}
+                data-testid="flow-format-bold"
+                data-format-state={boldField.state}
+                aria-pressed={boldField.state === 'mixed' ? 'mixed' : boldActive}
+                title={flowFormatFieldDescription('粗体', boldField)}
+                onClick={() => formatFlowTextStyle({ bold: !boldActive })}
+              >
+                <Bold size={14} />粗体
+              </button>
+              <button
+                type="button"
+                className={`secondary-button${italicActive ? ' secondary-button--active' : ''}`}
+                data-testid="flow-format-italic"
+                data-format-state={italicField.state}
+                aria-pressed={italicField.state === 'mixed' ? 'mixed' : italicActive}
+                title={flowFormatFieldDescription('斜体', italicField)}
+                onClick={() => formatFlowTextStyle({ italic: !italicActive })}
+              >
+                <Italic size={14} />斜体
+              </button>
+            </div>
+            <div
+              data-testid="flow-text-color-state"
+              data-format-state={colorField.state}
+              aria-label={flowFormatFieldDescription('文字颜色', colorField)}
+            >
+              <ColorInput
+                id="flow-text-color"
+                label="文字颜色"
+                value={uniformFlowFormatValue(colorField) ?? FLOW_PAPER_TEXT_COLOR}
+                onChange={(color) => formatFlowTextStyle({ color })}
+              />
+            </div>
+          </fieldset>
         </section>
       ) : null}
     </div>
@@ -2757,21 +2926,50 @@ function FlowOverlayProperties({ session }: { session: FlowAuthoringSession }) {
 
 export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const flowSession = useEditorStore((state) => state.flowSession)
-  if (flowSession && flowSession.selection.focus !== 'overlay' && flowSession.selection.selectedBlockId) {
+  if (
+    flowSession
+    && flowSession.selection.authoringScope !== 'global'
+    && flowSession.selection.focus !== 'overlay'
+    && flowSession.selection.selectedBlockId
+  ) {
     return <FlowBlockProperties session={flowSession} />
   }
-  if (flowSession && flowSession.selection.focus === 'overlay' && flowSession.selection.selectedOverlayIds.length > 0) {
+  if (
+    flowSession
+    && flowSession.selection.authoringScope !== 'global'
+    && flowSession.selection.focus === 'overlay'
+    && flowSession.selection.selectedOverlayIds.length > 0
+  ) {
     return <FlowOverlayProperties session={flowSession} />
   }
+  return <PropertiesTabContent onReplaceImage={onReplaceImage} />
+}
+
+function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
+  const flowSession = useEditorStore((state) => state.flowSession)
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const slideAuthoringOwner = useEditorStore(
+    (state) => state.slideCandidateSnapshot?.scope ?? null,
+  )
   const editorMode = useEditorStore((state) => state.editorMode)
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
+  const courseProject = useEditorStore(selectActiveCourseProjectDocument)
+  const activeCourseLocationId = useEditorStore(selectActiveCourseLocationId)
+  const courseAuthoringSession = useEditorStore(
+    (state) => state.courseAuthoringSession,
+  )
   const editingNodes = useEditorStore(selectEditingNodes)
   const node = useEditorStore(selectSelectedNode)
   const spatialSession = useEditorStore((state) => state.spatialSession)
+  const propertiesOwner = !flowSession && !spatialSession && slideAuthoringOwner
+    ? slideAuthoringOwner
+    : editingScope
+  const isScenePropertiesOwner = propertiesOwner === 'scene'
+  const isGlobalPropertiesOwner = propertiesOwner === 'global'
+  const isSurfacePropertiesOwner = propertiesOwner === 'surface'
   const spatialGraphSelection = useEditorStore((state) => state.spatialGraphSelection)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedNodes = editingNodes.filter((item) => selectedNodeIds.includes(item.id))
@@ -2785,8 +2983,6 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
     [project],
   )
   const updateScene = useEditorStore((state) => state.updateScene)
-  const updateSceneRuntime = useEditorStore((state) => state.updateSceneRuntime)
-  const updateGlobalRuntime = useEditorStore((state) => state.updateGlobalRuntime)
   const updateNode = useEditorStore((state) => state.updateNode)
   const addInteractionRule = useEditorStore((state) => state.addInteractionRule)
   const updateInteractionRule = useEditorStore((state) => state.updateInteractionRule)
@@ -2802,6 +2998,34 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const clearNodePresentationOverride = useEditorStore(
     (state) => state.clearNodePresentationOverride,
   )
+  const activeCourseLocation = courseProject?.locations.find(
+    (location) => location.id === activeCourseLocationId,
+  )
+  const runtimeInspectorView = useMemo<RuntimeInspectorAuthoringView | null>(() => {
+    if (!courseProject || !activeCourseLocationId || !courseAuthoringSession) {
+      return null
+    }
+    const currentAuthoringSession = updateCourseAuthoringSessionRevision(
+      courseAuthoringSession,
+      courseProject.revision,
+    )
+    return selectRuntimeInspectorAuthoringView({
+      project: courseProject,
+      locationId: activeCourseLocationId,
+      editingScope,
+      activeStateId: activeCourseLocation?.kind === 'slide-scene'
+        ? activePresentationStateId
+        : null,
+      sessionToken: currentAuthoringSession.token,
+    })
+  }, [
+    activeCourseLocation?.kind,
+    activeCourseLocationId,
+    activePresentationStateId,
+    courseAuthoringSession,
+    courseProject,
+    editingScope,
+  ])
   const effectiveScene = materializeScene(scene, activePresentationStateId)
   const activePresentationState = activePresentationStateId === null
     ? null
@@ -2810,13 +3034,14 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
     return (
       <MultiSelectionProperties
         nodes={selectedNodes}
-        presentationContext={editingScope === 'scene'
+        spatialMode={Boolean(spatialSession)}
+        presentationContext={isScenePropertiesOwner
           ? { scene, stateId: activePresentationStateId }
           : null}
       />
     )
   }
-  if (spatialSession && spatialGraphSelection) {
+  if (editingScope !== 'global' && spatialSession && spatialGraphSelection) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
         <SpatialPathRelationFields
@@ -2830,7 +3055,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   if (!node) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
-        {editingScope === 'global' ? (
+        {isGlobalPropertiesOwner ? (
           <>
             <section className="property-section global-layer-summary">
               <h3 className="property-title"><Globe2 size={14} />全局层</h3>
@@ -2842,7 +3067,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
                     ? globalLayerCount
                     : project.globalLayer.filter((item) => item.layer === 'overlay').length
                 }</span>
-                <span><small>运行时</small>{project.globalRuntime ? '已配置' : '无'}</span>
+                <span><small>运行时</small>{runtimeInspectorView?.availability === 'available' ? '已配置' : '无'}</span>
               </div>
               <p className="property-hint">
                 全局层类似课件母版：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
@@ -2895,8 +3120,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
             {editorMode === 'professional' && (
               <RuntimeInspector
                 scope="global"
-                runtime={project.globalRuntime}
-                onChange={updateGlobalRuntime}
+                view={runtimeInspectorView}
               />
             )}
           </>
@@ -2904,6 +3128,17 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           <FlowPageProperties session={flowSession} />
         ) : spatialSession ? (
           <SpatialPageProperties session={spatialSession} />
+        ) : isSurfacePropertiesOwner ? (
+          <section
+            className="property-section"
+            data-testid="slide-surface-properties-context"
+            role="status"
+          >
+            <h3 className="property-title"><Layers3 size={14} />表面共享层</h3>
+            <p className="property-hint">
+              此范围的元素由同一 Slide 表面的所有场景共享；请选择一个表面图层后编辑其基础值。
+            </p>
+          </section>
         ) : (
           <>
             <section className={`state-editing-notice${activePresentationState ? ' state-editing-notice--override' : ''}`}>
@@ -2937,8 +3172,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
                 </section>
                 <RuntimeInspector
                   scope="scene"
-                  runtime={scene.runtime}
-                  onChange={(patch) => updateSceneRuntime(scene.id, patch)}
+                  view={runtimeInspectorView}
                 />
               </>
             ) : scene.interactions.length > 0 ? (
@@ -2972,7 +3206,14 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         ...textPatch,
         style: { ...node.style, ...textPatch.style },
       } as TextNode
-      if (nextNode.style.overflow === 'auto-height') {
+      const affectsTextLayout = (
+        'text' in textPatch ||
+        'runs' in textPatch ||
+        'style' in textPatch ||
+        'width' in textPatch ||
+        'height' in textPatch
+      )
+      if (affectsTextLayout && nextNode.style.overflow === 'auto-height') {
         const rendered = renderTextNodeCanvas(nextNode, nextNode.width)
         updateNode(node.id, {
           ...patch,
@@ -2986,7 +3227,19 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   }
   return (
     <div className="properties-scroll" data-testid="properties-tab">
-      {editingScope === 'scene' && !spatialSession && !flowSession && (
+      {isSurfacePropertiesOwner && !spatialSession && !flowSession && (
+        <section
+          className="state-editing-notice"
+          data-testid="slide-surface-base-editing-notice"
+        >
+          <Layers3 size={15} />
+          <div>
+            <strong>表面共享基础值</strong>
+            <span>修改会影响此 Slide 表面的所有场景，不会创建命名状态覆盖。</span>
+          </div>
+        </section>
+      )}
+      {isScenePropertiesOwner && !spatialSession && !flowSession && (
         <section className={`state-editing-notice${activePresentationState ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
@@ -3013,43 +3266,86 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         </section>
       )}
       <CommonNodeProperties node={node} update={update} />
-      {editingScope === 'scene' && editorMode === 'simple' && (
+      {isScenePropertiesOwner && editorMode === 'simple' && !spatialSession && (
         <SimpleEntranceAnimationEditor
           scene={scene}
           node={node}
           activeStateId={activePresentationStateId}
         />
       )}
-{(editingScope === 'global' ||
+      {(isGlobalPropertiesOwner ||
         Boolean(candidateGlobalLayerItems?.some((entry) => entry.item.layerItemId === node.id))) && (
         <GlobalLayerSettings nodeId={node.id} />
       )}
-      {node.type === 'text' && <TextProperties node={node} update={update} />}
-      {node.type === 'formula' && (
+      {spatialSession && node.type !== 'text' ? (
+        <section
+          className="property-section"
+          data-testid="spatial-type-properties-unavailable"
+          role="status"
+        >
+          <h3 className="property-title">类型属性</h3>
+          <p className="property-hint">
+            当前 Spatial 载体只开放上方可写入真实图层的通用属性；此类型的专属属性尚未接入 canonical 历史，因此已隐藏可提交控件。
+          </p>
+        </section>
+      ) : null}
+      {node.type === 'text' && (
+        <TextProperties
+          node={node}
+          update={update}
+          contentEditingEnabled={!spatialSession || spatialSession.scope === 'world'}
+        />
+      )}
+      {!spatialSession && node.type === 'formula' && (
         <FormulaProperties
           node={node}
           update={update}
         />
       )}
-      {node.type === 'image' && <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />}
-      {node.type === 'video' && (
+      {!spatialSession && node.type === 'image' && <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />}
+      {!spatialSession && node.type === 'video' && (
         <VideoProperties
           node={node}
           update={update}
           diagnostics={projectDiagnostics
             .filter((diagnostic) => (
-              editingScope === 'scene' &&
+              isScenePropertiesOwner &&
               diagnostic.sceneId === scene.id &&
               diagnostic.nodeId === node.id
             ))
             .map((diagnostic) => diagnostic.message)}
-          onOpenAutomation={editorMode === 'professional'
+          onOpenAutomation={editorMode === 'professional' && !isSurfacePropertiesOwner
             ? () => setActiveTab('automation')
             : undefined}
         />
       )}
       {editorMode === 'professional' &&
-        editingScope === 'global' &&
+        (spatialSession || flowSession) &&
+        node.type !== 'teacher-controller' && (
+        <section
+          className="property-section"
+          data-testid="interaction-properties-unavailable"
+          role="status"
+        >
+          <h3 className="property-title">交互</h3>
+          <p className="property-hint">
+            {editingScope === 'global'
+              ? '当前 Flow 或 Spatial 页面不在元素属性中提供全局点击规则写入；请在“互动与动画”中使用可写的全局模板与专业字段。'
+              : '当前 Flow 或 Spatial 页面没有元素级局部 Interaction carrier；这里不会创建无法保存的点击规则。'}
+          </p>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setActiveTab('automation')}
+          >
+            打开互动与动画
+          </button>
+        </section>
+      )}
+      {editorMode === 'professional' &&
+        isGlobalPropertiesOwner &&
+        !spatialSession &&
+        !flowSession &&
         node.type !== 'teacher-controller' && (
         <InteractionEditor
           scene={scene}
@@ -3072,11 +3368,11 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           onDeleteRule={deleteGlobalInteractionRule}
         />
       )}
-      {node.type === 'shape' && <ShapeProperties node={node} update={update} />}
-      {node.type === 'teacher-controller' && (
+      {!spatialSession && node.type === 'shape' && <ShapeProperties node={node} update={update} />}
+      {!spatialSession && node.type === 'teacher-controller' && (
         <TeacherControllerProperties node={node} scenes={project.scenes} update={update} />
       )}
-      {node.type === 'external-component' && (
+      {!spatialSession && node.type === 'external-component' && (
         <>
           <section className="property-section">
             <h3 className="property-title"><Box size={14} />外部组件</h3>
@@ -3094,7 +3390,10 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           )}
         </>
       )}
-      {editorMode === 'professional' && editingScope === 'scene' && (
+      {editorMode === 'professional' &&
+        isScenePropertiesOwner &&
+        !spatialSession &&
+        !flowSession && (
         <InteractionEditor
           scene={scene}
           selectedNode={node}

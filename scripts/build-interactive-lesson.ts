@@ -1,256 +1,452 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { promises as fs } from 'node:fs'
-import { strToU8, zipSync } from 'fflate'
-import sharp from 'sharp'
-import { componentManifestSchema } from '../src/shared/componentSchema'
-import type { ComponentManifest } from '../src/shared/componentTypes'
-import type { ProjectDocument, SceneDocument } from '../src/shared/projectTypes'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
+import type {
+  CourseProjectDocument,
+  RuntimeLayerItem,
+  SlideSceneDocument,
+} from '../src/shared/courseProjectTypes'
 import {
-  createExternalComponentNode,
-  createProject,
-  createShapeNode,
-  createScene,
-  createTextNode,
-} from '../src/renderer/project/createProject'
+  PUBLISHED_COURSE_FORMAT,
+  PUBLISHED_COURSE_VERSION,
+} from '../src/shared/publishedCourseTypes'
+import { buildPublishedCourseStandaloneHtml } from '../src/renderer/export/course/buildCoursePackages'
+import { buildPublishedCourseV2Payload } from '../src/renderer/export/course/buildPublishedCourse'
+import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
 import {
-  createProjectArchive,
-  openProjectArchive,
-} from '../src/renderer/project/projectArchive'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
-import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
-import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '../src/renderer/project/courseProjectArchive'
+import {
+  checkTrackedExampleOutputs,
+  type GeneratedExampleOutputs,
+} from './exampleGenerationBoundary'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(scriptDirectory, '..')
-const sourceDirectory = path.join(root, 'examples', 'photosynthesis-lab-component')
-const componentPath = path.join(root, 'examples', 'photosynthesis-lab.h5component')
-const lessonPath = path.join(root, 'examples', 'photosynthesis-interactive-lesson.h5lesson')
+const examplesDirectory = path.join(root, 'examples')
+export const INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS = {
+  lesson: 'photosynthesis-interactive-lesson.h5lesson',
+} as const
 const artifactDirectory = path.join(root, 'artifacts', 'photosynthesis-lesson')
 const htmlPath = path.join(artifactDirectory, 'photosynthesis-interactive-lesson.html')
-const thumbnailPath = path.join(sourceDirectory, 'thumbnail.png')
-const timestamp = new Date('2026-07-21T00:00:00.000Z')
+const timestamp = '2026-07-21T00:00:00.000Z'
+const archiveTimestamp = new Date(timestamp)
 
-const thumbnailSvg = String.raw`
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="340" viewBox="0 0 600 340">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#06152b"/><stop offset="1" stop-color="#0b3a3b"/>
-    </linearGradient>
-    <radialGradient id="halo"><stop stop-color="#34d399" stop-opacity=".4"/><stop offset="1" stop-color="#34d399" stop-opacity="0"/></radialGradient>
-    <filter id="shadow"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-opacity=".35"/></filter>
-  </defs>
-  <rect width="600" height="340" rx="30" fill="url(#bg)"/>
-  <circle cx="344" cy="180" r="130" fill="url(#halo)"/>
-  <g filter="url(#shadow)">
-    <rect x="24" y="24" width="552" height="292" rx="24" fill="#081d31" fill-opacity=".76" stroke="#34d399" stroke-opacity=".35"/>
-  </g>
-  <text x="52" y="69" fill="#7dd3fc" font-family="Microsoft YaHei,sans-serif" font-size="13" font-weight="700">INTERACTIVE SCIENCE · 互动科学</text>
-  <text x="52" y="111" fill="#f2fbff" font-family="Microsoft YaHei,sans-serif" font-size="30" font-weight="700">光合作用实验室</text>
-  <text x="52" y="140" fill="#87a9bd" font-family="Microsoft YaHei,sans-serif" font-size="14">探索 · 实验 · 挑战</text>
-  <circle cx="124" cy="214" r="24" fill="#fbbf24" opacity=".95"/>
-  <path d="M150 214 C205 214 220 200 260 184" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 10"/>
-  <ellipse cx="310" cy="177" rx="72" ry="38" transform="rotate(-24 310 177)" fill="#22c973" stroke="#86efac" stroke-width="2"/>
-  <ellipse cx="398" cy="167" rx="78" ry="42" transform="rotate(22 398 167)" fill="#16a765" stroke="#6ee7b7" stroke-width="2"/>
-  <path d="M348 183 L350 267" stroke="#34d399" stroke-width="10" stroke-linecap="round"/>
-  <g fill="#7dd3fc">
-    <circle cx="459" cy="196" r="7" opacity=".8"/><circle cx="486" cy="168" r="5" opacity=".6"/><circle cx="510" cy="211" r="9" opacity=".75"/>
-  </g>
-  <rect x="49" y="272" width="136" height="25" rx="12" fill="#123a47" stroke="#38bdf8" stroke-opacity=".45"/>
-  <rect x="196" y="272" width="136" height="25" rx="12" fill="#164335" stroke="#34d399" stroke-opacity=".45"/>
-  <rect x="343" y="272" width="136" height="25" rx="12" fill="#3b3218" stroke="#fbbf24" stroke-opacity=".45"/>
-  <text x="117" y="289" text-anchor="middle" fill="#a7e7ff" font-family="Microsoft YaHei,sans-serif" font-size="11">能量路径</text>
-  <text x="264" y="289" text-anchor="middle" fill="#a7f3d0" font-family="Microsoft YaHei,sans-serif" font-size="11">实时实验</text>
-  <text x="411" y="289" text-anchor="middle" fill="#fde68a" font-family="Microsoft YaHei,sans-serif" font-size="11">拖拽挑战</text>
-</svg>`
+const runtimeSource = String.raw`
+CoursewareRuntime.define({
+  protocol: 'surface-runtime',
+  runtimeApiVersion: 3,
+  create: function (ctx) {
+    var root = ctx.dom.root;
+    var page = Number(ctx.content.get('page'));
+    var accent = ctx.content.get('accent');
+    var titles = [
+      '一片叶子，如何把阳光变成生命能量？',
+      '环境改变，光合效率会怎样变化？',
+      '把光合作用“组装”起来'
+    ];
+    var subtitles = [
+      '依次点击三种输入，启动这条能量路径。',
+      '改变实验条件，观察光合效率的响应。',
+      '操作两张卡片，完成最后的知识挑战。'
+    ];
+    var listeners = [];
 
-function buildProject(
-  manifest: ComponentManifest,
-  metadata: ReturnType<typeof importComponentPackage>['metadata'],
-): ProjectDocument {
-  const project = createProject({
-    id: 'project_photosynthesis_interactive_lab',
-    title: '光合作用互动实验室',
-    now: timestamp,
-    idFactory: (() => { let i = 0; return () => String(++i).padStart(3, '0') })(),
-  })
+    function element(tag, styles, text) {
+      var node = document.createElement(tag);
+      Object.assign(node.style, styles || {});
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
 
-  const sceneDefinitions = [
-    {
-      id: 'scene_energy_path',
-      name: '01 · 发现能量路径',
-      background: '#06152b',
-      page: 1,
-      kicker: 'INTERACTIVE SCIENCE  /  互动科学',
-      title: '一片叶子，如何把阳光变成生命能量？',
-      subtitle: '点击三种输入，亲手启动光合作用。',
-      accent: '#34d399',
-    },
-    {
-      id: 'scene_live_experiment',
-      name: '02 · 光合实验室',
-      background: '#061b29',
-      page: 2,
-      kicker: 'LIVE EXPERIMENT  /  实时实验',
-      title: '环境改变，光合效率会怎样变化？',
-      subtitle: '调节光照、二氧化碳与温度，寻找最佳区间。',
-      accent: '#38bdf8',
-    },
-    {
-      id: 'scene_classification',
-      name: '03 · 光合挑战',
-      background: '#11102b',
-      page: 3,
-      kicker: 'MISSION CHECK  /  知识闯关',
-      title: '把光合作用“组装”起来',
-      subtitle: '拖动 6 张卡片完成分类，验证你的理解。',
-      accent: '#a78bfa',
-    },
-  ] as const
+    function listen(node, type, handler) {
+      node.addEventListener(type, handler);
+      listeners.push(function () { node.removeEventListener(type, handler); });
+    }
 
-  project.scenes = sceneDefinitions.map((definition): SceneDocument => {
-    const scene = createScene({
-      id: definition.id,
-      name: definition.name,
-      backgroundColor: definition.background,
-    })
-    scene.nodes = [
-      createShapeNode('rounded-rectangle', {
-        id: `${definition.id}_accent`,
-        name: '页面色标',
-        x: 64,
-        y: 58,
-        width: 16,
-        height: 92,
-        style: {
-          fillColor: definition.accent,
-          borderColor: definition.accent,
-          borderWidth: 0,
-          cornerRadius: 4,
+    Object.assign(root.style, {
+      position: 'relative', width: '100%', height: '100%', overflow: 'hidden',
+      boxSizing: 'border-box', color: '#ecfeff', background: '#071426',
+      fontFamily: 'Microsoft YaHei, PingFang SC, sans-serif'
+    });
+    root.replaceChildren();
+
+    var pageRoot = element('section', {
+      position: 'absolute', inset: '0', overflow: 'hidden',
+      background: page === 2
+        ? 'linear-gradient(135deg,#071827,#0b3241)'
+        : page === 3
+          ? 'linear-gradient(135deg,#11102b,#282153)'
+          : 'linear-gradient(135deg,#06152b,#0b3a3b)'
+    });
+    pageRoot.dataset.photosynthesisPage = String(page);
+    root.appendChild(pageRoot);
+
+    var glow = element('div', {
+      position: 'absolute', width: '520px', height: '520px', right: '-110px', top: '-190px',
+      borderRadius: '50%', background: accent, opacity: '0.16', filter: 'blur(12px)'
+    });
+    pageRoot.appendChild(glow);
+    var kicker = element('div', {
+      position: 'absolute', left: '72px', top: '54px', color: accent,
+      fontSize: '15px', fontWeight: '700', letterSpacing: '2px'
+    }, 'INTERACTIVE SCIENCE  /  互动科学');
+    pageRoot.appendChild(kicker);
+    var title = element('h1', {
+      position: 'absolute', left: '72px', top: '82px', width: '1040px', margin: '0',
+      fontSize: '38px', lineHeight: '1.3', fontWeight: '800', color: '#f2fbff'
+    }, titles[page - 1]);
+    pageRoot.appendChild(title);
+    var subtitle = element('p', {
+      position: 'absolute', left: '74px', top: '145px', width: '900px', margin: '0',
+      fontSize: '18px', color: '#9bc0d0'
+    }, subtitles[page - 1]);
+    pageRoot.appendChild(subtitle);
+    var pageNumber = element('div', {
+      position: 'absolute', right: '76px', top: '55px', color: accent,
+      fontSize: '48px', fontWeight: '800', opacity: '0.8'
+    }, '0' + page);
+    pageRoot.appendChild(pageNumber);
+
+    if (page === 1) {
+      var selected = 0;
+      var labels = ['阳光', '二氧化碳', '水'];
+      var colors = ['#fbbf24', '#38bdf8', '#34d399'];
+      var result = element('div', {
+        position: 'absolute', left: '445px', top: '238px', width: '735px', height: '376px',
+        boxSizing: 'border-box', borderRadius: '30px', border: '2px solid #34d39966',
+        background: '#082436', boxShadow: '0 24px 70px #00000055', transition: 'all 180ms ease'
+      });
+      var resultTitle = element('div', {
+        position: 'absolute', left: '54px', top: '46px', fontSize: '25px', fontWeight: '800'
+      }, '叶绿体能量转换器');
+      var resultStatus = element('div', {
+        position: 'absolute', left: '54px', top: '104px', right: '54px', padding: '24px',
+        borderRadius: '18px', background: '#02061788', color: '#bae6fd', fontSize: '20px'
+      }, '等待三种输入……');
+      var energy = element('div', {
+        position: 'absolute', left: '54px', right: '54px', bottom: '56px', height: '88px',
+        borderRadius: '18px', background: '#0f766e', opacity: '0.25', transition: 'all 200ms ease'
+      });
+      result.append(resultTitle, resultStatus, energy);
+      pageRoot.appendChild(result);
+      labels.forEach(function (label, index) {
+        var button = element('button', {
+          position: 'absolute', left: '150px', top: (365 + index * 80) + 'px',
+          width: '220px', height: '64px', borderRadius: '18px',
+          border: '2px solid ' + colors[index], background: '#0b2235', color: '#f8fafc',
+          fontSize: '20px', fontWeight: '700', cursor: 'pointer'
+        }, label);
+        listen(button, 'click', function () {
+          if (button.dataset.selected === 'true') return;
+          button.dataset.selected = 'true';
+          button.style.background = colors[index];
+          button.style.color = '#071426';
+          selected += 1;
+          resultStatus.textContent = selected === 3
+            ? '光能已转化为化学能，氧气正在释放！'
+            : '已接入 ' + selected + ' / 3 种原料';
+          energy.style.opacity = String(0.38 + selected * 0.2);
+          energy.style.background = selected === 3 ? '#34d399' : colors[index];
+          result.style.boxShadow = '0 24px 80px ' + colors[index] + '55';
+        });
+        pageRoot.appendChild(button);
+      });
+    } else if (page === 2) {
+      var meter = element('div', {
+        position: 'absolute', left: '690px', top: '246px', width: '420px', height: '340px',
+        borderRadius: '30px', border: '2px solid #38bdf877', background: '#061525',
+        boxShadow: '0 24px 70px #00000055', transition: 'all 200ms ease'
+      });
+      var meterLabel = element('div', {
+        position: 'absolute', left: '44px', top: '48px', fontSize: '22px', color: '#bae6fd'
+      }, '当前光合效率');
+      var meterValue = element('div', {
+        position: 'absolute', left: '44px', top: '105px', fontSize: '82px', fontWeight: '800',
+        color: '#38bdf8'
+      }, '42%');
+      var meterHint = element('div', {
+        position: 'absolute', left: '44px', bottom: '54px', right: '44px', fontSize: '17px',
+        color: '#7dd3fc'
+      }, '点击左侧实验按钮提高光照强度');
+      meter.append(meterLabel, meterValue, meterHint);
+      pageRoot.appendChild(meter);
+      var experimentButton = element('button', {
+        position: 'absolute', left: '330px', top: '365px', width: '280px', height: '78px',
+        borderRadius: '22px', border: '2px solid #38bdf8', background: '#0c4a6e',
+        color: '#ecfeff', fontSize: '21px', fontWeight: '800', cursor: 'pointer',
+        boxShadow: '0 14px 40px #0284c755'
+      }, '提高光照强度');
+      listen(experimentButton, 'click', function () {
+        experimentButton.textContent = '实验条件已改变';
+        experimentButton.style.background = '#fbbf24';
+        experimentButton.style.borderColor = '#fde68a';
+        experimentButton.style.color = '#422006';
+        meterValue.textContent = '86%';
+        meterValue.style.color = '#34d399';
+        meter.style.background = '#064e3b';
+        meter.style.transform = 'scale(1.025)';
+        meterHint.textContent = '光照增强后，效率进入理想区间';
+      });
+      pageRoot.appendChild(experimentButton);
+    } else {
+      var tray = element('div', {
+        position: 'absolute', left: '500px', top: '240px', width: '650px', height: '390px',
+        borderRadius: '30px', border: '2px dashed #a78bfa99', background: '#17153a',
+        boxShadow: '0 24px 70px #00000055'
+      });
+      var trayTitle = element('div', {
+        position: 'absolute', left: '42px', top: '36px', fontSize: '24px', fontWeight: '800'
+      }, '光合作用反应式');
+      var equation = element('div', {
+        position: 'absolute', left: '42px', top: '102px', right: '42px', padding: '30px',
+        borderRadius: '20px', background: '#09081f', fontSize: '25px', color: '#c4b5fd',
+        textAlign: 'center', transition: 'all 180ms ease'
+      }, '原料  +  能量  →  产物');
+      var challengeStatus = element('div', {
+        position: 'absolute', left: '42px', right: '42px', bottom: '52px', color: '#a5b4fc',
+        fontSize: '18px', textAlign: 'center'
+      }, '完成两次操作来验证理解');
+      tray.append(trayTitle, equation, challengeStatus);
+      pageRoot.appendChild(tray);
+      var actions = 0;
+      function completeAction(button, label) {
+        if (button.dataset.done === 'true') return;
+        button.dataset.done = 'true';
+        button.style.background = '#34d399';
+        button.style.borderColor = '#86efac';
+        button.style.color = '#052e16';
+        button.style.transform = 'translateX(250px)';
+        actions += 1;
+        equation.textContent = actions === 2
+          ? '二氧化碳 + 水 + 光能 → 有机物 + 氧气'
+          : label + ' 已归位，还差一步';
+        if (actions === 2) {
+          equation.style.background = '#14532d';
+          equation.style.color = '#dcfce7';
+          challengeStatus.textContent = '挑战完成：物质与能量路径均正确';
+        }
+      }
+      var energyCard = element('button', {
+        position: 'absolute', left: '150px', top: '500px', width: '180px', height: '72px',
+        borderRadius: '18px', border: '2px solid #fbbf24', background: '#3b3218',
+        color: '#fde68a', fontSize: '20px', fontWeight: '800', cursor: 'pointer',
+        transition: 'all 220ms ease'
+      }, '光能');
+      var materialCard = element('button', {
+        position: 'absolute', left: '180px', top: '375px', width: '220px', height: '76px',
+        borderRadius: '18px', border: '2px solid #38bdf8', background: '#0c3550',
+        color: '#bae6fd', fontSize: '20px', fontWeight: '800', cursor: 'pointer',
+        transition: 'all 220ms ease'
+      }, '二氧化碳 + 水');
+      listen(energyCard, 'click', function () { completeAction(energyCard, '光能'); });
+      listen(materialCard, 'click', function () { completeAction(materialCard, '原料'); });
+      pageRoot.append(energyCard, materialCard);
+    }
+
+    return {
+      destroy: function () {
+        listeners.splice(0).forEach(function (remove) { remove(); });
+        root.replaceChildren();
+      }
+    };
+  }
+});
+`.trim()
+
+function runtimeLayer(page: number, accent: string): RuntimeLayerItem {
+  return {
+    layerItemId: `photosynthesis_runtime_${page}`,
+    label: `光合作用互动 · 第 ${page} 页`,
+    kind: 'runtime',
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order: 0,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    runtime: {
+      protocol: 'surface-runtime',
+      runtimeApiVersion: 3,
+      enabled: true,
+      renderMode: 'dom',
+      source: runtimeSource,
+      content: {
+        values: { page: String(page), accent },
+        metadata: {
+          page: { label: '页码', maxLength: 1 },
+          accent: { label: '强调色', maxLength: 7 },
         },
-      }),
-      createTextNode({
-        id: `${definition.id}_kicker`,
-        name: '栏目标签',
-        x: 92,
-        y: 50,
-        width: 800,
-        height: 30,
-        text: definition.kicker,
-        style: { fontSize: 15, color: definition.accent, align: 'left', lineSpacing: 4 },
-      }),
-      createTextNode({
-        id: `${definition.id}_title`,
-        name: '页面标题',
-        x: 92,
-        y: 82,
-        width: 1040,
-        height: 56,
-        text: definition.title,
-        style: { fontSize: 35, color: '#f3fbff', align: 'left', lineSpacing: 5 },
-      }),
-      createTextNode({
-        id: `${definition.id}_subtitle`,
-        name: '学习提示',
-        x: 94,
-        y: 139,
-        width: 940,
-        height: 36,
-        text: definition.subtitle,
-        style: { fontSize: 17, color: '#87a6bb', align: 'left', lineSpacing: 4 },
-      }),
-      createTextNode({
-        id: `${definition.id}_number`,
-        name: '页码装饰',
-        x: 1116,
-        y: 64,
-        width: 100,
-        height: 70,
-        text: `0${definition.page}`,
-        style: { fontSize: 48, color: definition.accent, align: 'right', lineSpacing: 4 },
-      }),
-      createExternalComponentNode({
-        id: `${definition.id}_lab`,
-        name: `互动实验 · 第 ${definition.page} 页`,
-        x: 100,
-        y: 194,
-        width: manifest.defaultSize.width,
-        height: manifest.defaultSize.height,
-        component: { packageId: manifest.id, version: manifest.version },
-        props: { page: definition.page },
-      }),
-      createTextNode({
-        id: `${definition.id}_footer`,
-        name: '底部说明',
-        x: 100,
-        y: 671,
-        width: 1080,
-        height: 26,
-        text: definition.page === 3
-          ? '提示：分类完成后，可使用画布内教师控制器的“上一场景”回顾实验。'
-          : '完成本页互动后，点击画布内教师控制器的“下一场景”继续。',
-        style: { fontSize: 12, color: '#55758a', align: 'center', lineSpacing: 3 },
-      }),
-    ]
-    return scene
-  })
-  project.componentPackages[manifest.id] = metadata
-  return project
+      },
+      assets: {},
+    },
+  }
 }
 
-async function main(): Promise<void> {
-  await fs.mkdir(sourceDirectory, { recursive: true })
-  await fs.mkdir(artifactDirectory, { recursive: true })
-
-  const [manifestText, runtimeText] = await Promise.all([
-    fs.readFile(path.join(sourceDirectory, 'manifest.json'), 'utf8'),
-    fs.readFile(path.join(sourceDirectory, 'runtime.js'), 'utf8'),
-  ])
-  const parsedManifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
-  const thumbnail = await sharp(Buffer.from(thumbnailSvg)).png({ compressionLevel: 9 }).toBuffer()
-  await fs.writeFile(thumbnailPath, thumbnail)
-
-  const componentFiles = {
-    'manifest.json': strToU8(`${JSON.stringify(parsedManifest, null, 2)}\n`),
-    'runtime.js': strToU8(runtimeText),
-    'thumbnail.png': Uint8Array.from(thumbnail),
-  }
-  const componentArchive = zipSync(componentFiles, { level: 7, mtime: timestamp })
-  const component = importComponentPackage(componentArchive, {
-    expectedId: parsedManifest.id,
-    expectedVersion: parsedManifest.version,
+function buildProject(): CourseProjectDocument {
+  const project = createBlankCourseProject({
+    id: 'project_photosynthesis_v9_oracle',
+    title: '光合作用互动课例',
+    now: timestamp,
+    includeDefaultController: false,
+    controls: 'none',
   })
-  await fs.writeFile(componentPath, componentArchive)
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') {
+    throw new Error('空白 Course Project 必须包含 Slide 表面')
+  }
+  const definitions = [
+    { id: 'scene_energy_path', name: '01 · 发现能量路径', background: '#06152b', accent: '#34d399' },
+    { id: 'scene_live_experiment', name: '02 · 光合实验室', background: '#061b29', accent: '#38bdf8' },
+    { id: 'scene_classification', name: '03 · 光合挑战', background: '#11102b', accent: '#a78bfa' },
+  ] as const
+  const scenes: SlideSceneDocument[] = definitions.map((definition, index) => ({
+    id: definition.id,
+    name: definition.name,
+    backgroundColor: definition.background,
+    backgroundAssetId: null,
+    layerItems: [runtimeLayer(index + 1, definition.accent)],
+    presentation: {
+      initialStateId: 'state_initial',
+      thumbnailStateId: 'state_initial',
+      states: [{ id: 'state_initial', name: '初始', layerItemOverrides: {} }],
+    },
+    interactions: [],
+  }))
+  surface.title = project.title
+  surface.scenes = scenes
+  project.locations = scenes.map((scene) => ({
+    id: scene.id,
+    label: `${surface.title} · ${scene.name}`,
+    kind: 'slide-scene' as const,
+    surfaceId: surface.id,
+    sceneId: scene.id,
+  }))
+  project.startLocationId = scenes[0]!.id
+  project.updatedAt = timestamp
+  return courseProjectDocumentSchema.parse(project)
+}
 
-  const project = buildProject(component.manifest, component.metadata)
-  const lessonArchive = createProjectArchive({
-    project,
-    assetFiles: {},
-    componentFiles: { [component.key]: component.files },
-  }, { mtime: timestamp })
-  await fs.writeFile(lessonPath, lessonArchive)
+export interface InteractiveLessonOutputs {
+  tracked: GeneratedExampleOutputs
+  html: string
+}
 
-  const reopened = openProjectArchive(lessonArchive)
-  if (reopened.project.scenes.length !== 3) throw new Error('课例工程场景数量不是 3')
-  if (reopened.project.scenes.some((scene) => scene.nodes.filter((node) => node.type === 'external-component').length !== 1)) {
-    throw new Error('每个场景必须包含且仅包含一个互动实验组件')
+export async function buildInteractiveLessonOutputs(): Promise<InteractiveLessonOutputs> {
+  const project = buildProject()
+  const lessonArchive = createCourseProjectArchive(
+    { project, assetFiles: {}, componentFiles: {} },
+    { mtime: archiveTimestamp },
+  )
+  const reopened = openCourseProjectArchive(lessonArchive)
+  const reopenedSlide = reopened.project.surfaces[0]
+  if (
+    reopened.project.schemaVersion !== 9
+    || !reopenedSlide
+    || reopenedSlide.type !== 'slide'
+    || reopenedSlide.scenes.length !== 3
+    || reopenedSlide.scenes.some((scene) => (
+      scene.layerItems.length !== 1
+      || scene.layerItems[0]?.kind !== 'runtime'
+      || scene.layerItems[0].runtime.protocol !== 'surface-runtime'
+      || scene.layerItems[0].runtime.runtimeApiVersion !== 3
+    ))
+  ) {
+    throw new Error('光合作用 V9 课例保存重开后结构不完整')
   }
 
-  const playerBundle = await fs.readFile(path.join(root, 'dist-player', 'player.iife.js'), 'utf8')
-  const payload = buildExportPayload({
+  const sources = {
     project: reopened.project,
-    components: { [component.manifest.id]: component },
-  })
-  const html = buildStandaloneHtml(payload, { playerBundle, lang: 'zh-CN' })
+    assetFiles: reopened.assetFiles,
+    components: {},
+  }
+  const payload = buildPublishedCourseV2Payload(sources)
+  if (
+    payload.format !== PUBLISHED_COURSE_FORMAT
+    || payload.formatVersion !== PUBLISHED_COURSE_VERSION
+    || payload.sourceSchemaVersion !== 9
+    || payload.locations.length !== 3
+  ) {
+    throw new Error('光合作用课例没有生成 Published Course V2 payload')
+  }
+  const playerBundle = await fs.readFile(path.join(root, 'dist-player', 'player.iife.js'), 'utf8')
+  const html = buildPublishedCourseStandaloneHtml(sources, { playerBundle, lang: 'zh-CN' })
+  if (!html.includes('window.__H5_COURSE_PAYLOAD__=')) {
+    throw new Error('离线 HTML 缺少 Published Course V2 payload')
+  }
+  if (/window\.__H5_LESSON_PAYLOAD__\s*=/.test(html)) {
+    throw new Error('离线 HTML 意外内嵌 V8 ExportPayload')
+  }
   if (/https?:\/\//i.test(html)) throw new Error('离线 HTML 中出现远程 URL')
-  await fs.writeFile(htmlPath, html, 'utf8')
 
-  console.log(`互动组件：${componentPath}`)
-  console.log(`课例工程：${lessonPath}`)
-  console.log(`离线预览：${htmlPath}`)
+  return {
+    tracked: {
+      [INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.lesson]: lessonArchive,
+    },
+    html,
+  }
 }
 
-main().catch((error: unknown) => {
-  console.error('生成互动教学课例失败', error)
-  process.exitCode = 1
-})
+export async function checkInteractiveLessonOutputs(): Promise<void> {
+  const outputs = await buildInteractiveLessonOutputs()
+  await checkTrackedExampleOutputs(examplesDirectory, outputs.tracked, '光合作用课例')
+}
+
+async function writeInteractiveLessonHtml(html: string): Promise<void> {
+  await fs.mkdir(artifactDirectory, { recursive: true })
+  await fs.writeFile(htmlPath, html, 'utf8')
+}
+
+async function refreshInteractiveLessonOutputs(): Promise<void> {
+  const outputs = await buildInteractiveLessonOutputs()
+  await Promise.all([
+    ...Object.entries(outputs.tracked).map(([relativePath, bytes]) =>
+      fs.writeFile(path.join(examplesDirectory, relativePath), bytes)),
+    writeInteractiveLessonHtml(outputs.html),
+  ])
+  console.log('已刷新光合作用 Course Project V9 工程和 Published V2 离线预览')
+}
+
+async function prepareInteractiveLessonHtml(): Promise<void> {
+  const outputs = await buildInteractiveLessonOutputs()
+  await writeInteractiveLessonHtml(outputs.html)
+  console.log(`已准备 E2E 所需离线预览：${htmlPath}`)
+}
+
+export type InteractiveLessonGenerationMode = 'refresh' | 'check' | 'prepare'
+
+export function parseInteractiveLessonGenerationMode(
+  argv: readonly string[],
+): InteractiveLessonGenerationMode {
+  if (argv.length === 0 || (argv.length === 1 && argv[0] === '--refresh')) return 'refresh'
+  if (argv.length === 1 && argv[0] === '--check') return 'check'
+  if (argv.length === 1 && argv[0] === '--prepare') return 'prepare'
+  throw new Error(
+    'Usage: tsx scripts/build-interactive-lesson.ts [--refresh|--check|--prepare]',
+  )
+}
+
+async function main(argv: readonly string[]): Promise<void> {
+  switch (parseInteractiveLessonGenerationMode(argv)) {
+    case 'check':
+      await checkInteractiveLessonOutputs()
+      return
+    case 'prepare':
+      await prepareInteractiveLessonHtml()
+      return
+    case 'refresh':
+      await refreshInteractiveLessonOutputs()
+  }
+}
+
+const invokedPath = process.argv[1]
+if (invokedPath && import.meta.url === pathToFileURL(path.resolve(invokedPath)).href) {
+  main(process.argv.slice(2)).catch((error: unknown) => {
+    console.error('生成互动教学课例失败', error)
+    process.exitCode = 1
+  })
+}

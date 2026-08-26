@@ -22,7 +22,7 @@ import {
 import {
   buildFlowPrintPlan,
   flowPrintPlanHasRuntimeToc,
-  renderFlowPrintHtml,
+  renderFlowPrintBodyHtml,
 } from './flowPrintPlan'
 
 /** Camera viewport for Spatial print/PDF — not the Slide 1280×720 canvas. */
@@ -283,7 +283,63 @@ function buildSlideScenePrintHtml(
     return `<p data-layer-item-id="${escapeHtml(item.layerItemId)}" style="position:absolute;left:${item.frame.x}px;top:${item.frame.y}px;width:${item.frame.width}px;height:${item.frame.height}px;margin:0;color:#64748b">[${escapeHtml(item.layerItemId)}]</p>`
   }).join('')
   const background = state?.backgroundColor ?? scene.backgroundColor
-  return `<section class="course-slide-print-page" data-scene-id="${escapeHtml(scene.id)}" style="position:relative;width:1280px;height:720px;background:${escapeHtml(background)}">${body}</section>`
+  return `<section class="page course-slide-print-page" data-scene-id="${escapeHtml(scene.id)}"><div class="course-slide-print-canvas" style="position:relative;width:1280px;height:720px;background:${escapeHtml(background)}">${body}</div></section>`
+}
+
+interface MixedPrintPageLayout {
+  readonly pageRule: string
+  readonly width: string
+  readonly height: string
+  readonly slideScale: number
+}
+
+function resolveMixedPrintPageLayout(
+  published: PublishedCourseV2Payload,
+  pages: readonly CourseExportPage[],
+): MixedPrintPageLayout {
+  const pageSize = published.mixedPrintPlan?.pageSize ?? 'A4'
+  const configuredOrientation = published.mixedPrintPlan?.orientation ?? 'auto'
+  const hasNativeVisualPage = pages.some((page) => page.kind !== 'flow-document')
+  const nativeSize = pages.some((page) => page.kind === 'slide-scene')
+    ? { widthPixels: 1280, heightPixels: 720 }
+    : pages.some((page) => page.kind === 'spatial-frame')
+      ? { widthPixels: SPATIAL_EXPORT_VIEWPORT.width, heightPixels: SPATIAL_EXPORT_VIEWPORT.height }
+      : { widthPixels: 210 / 25.4 * 96, heightPixels: 297 / 25.4 * 96 }
+  const orientation = configuredOrientation === 'auto'
+    ? hasNativeVisualPage ? 'landscape' : 'portrait'
+    : configuredOrientation
+  const inches = (pixels: number) => `${Number((pixels / 96).toFixed(6))}in`
+  const portrait = pageSize === 'surface-native'
+    ? {
+        width: inches(Math.min(nativeSize.widthPixels, nativeSize.heightPixels)),
+        height: inches(Math.max(nativeSize.widthPixels, nativeSize.heightPixels)),
+        widthPixels: Math.min(nativeSize.widthPixels, nativeSize.heightPixels),
+        heightPixels: Math.max(nativeSize.widthPixels, nativeSize.heightPixels),
+      }
+    : pageSize === 'letter'
+      ? { width: '8.5in', height: '11in', widthPixels: 8.5 * 96, heightPixels: 11 * 96 }
+      : {
+          width: '210mm',
+          height: '297mm',
+          widthPixels: 210 / 25.4 * 96,
+          heightPixels: 297 / 25.4 * 96,
+        }
+  const oriented = orientation === 'landscape'
+    ? {
+        width: portrait.height,
+        height: portrait.width,
+        widthPixels: portrait.heightPixels,
+        heightPixels: portrait.widthPixels,
+      }
+    : portrait
+  return {
+    pageRule: pageSize === 'surface-native'
+      ? `${oriented.width} ${oriented.height}`
+      : `${pageSize} ${orientation}`,
+    width: oriented.width,
+    height: oriented.height,
+    slideScale: Math.min(oriented.widthPixels / 1280, oriented.heightPixels / 720),
+  }
 }
 
 function buildMixedPrintDocumentHtml(
@@ -304,7 +360,7 @@ function buildMixedPrintDocumentHtml(
     }
     if (page.kind === 'spatial-frame' && surface.type === 'spatial-2d') {
       const { svg } = renderPublishedSpatialFrameSvg(surface, page.cameraFrameId, resolveAsset)
-      sections.push(`<section class="course-spatial-print-page" data-page-id="${escapeHtml(page.id)}" data-camera-frame="${escapeHtml(page.cameraFrameId ?? 'home')}"><h2>${escapeHtml(page.title)}</h2>${svg}</section>`)
+      sections.push(`<section class="page course-spatial-print-page" data-page-id="${escapeHtml(page.id)}" data-camera-frame="${escapeHtml(page.cameraFrameId ?? 'home')}"><h2>${escapeHtml(page.title)}</h2>${svg}</section>`)
       continue
     }
     if (page.kind === 'flow-document' && surface.type === 'flow') {
@@ -316,10 +372,11 @@ function buildMixedPrintDocumentHtml(
             ? 'portrait'
             : undefined,
       })
-      sections.push(renderFlowPrintHtml(plan))
+      sections.push(`<section class="page flow-print-document" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}">${renderFlowPrintBodyHtml(plan)}</section>`)
     }
   }
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(published.title)}</title><style>@page{margin:0}html,body{margin:0;background:#fff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}.course-slide-print-page,.course-spatial-print-page,.flow-print-document{break-after:page;page-break-after:always}.course-spatial-print-page h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}</style></head><body>${sections.join('')}</body></html>`
+  const layout = resolveMixedPrintPageLayout(published, pages)
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(published.title)}</title><style>@page{size:${layout.pageRule};margin:0}*{box-sizing:border-box}html,body{margin:0;background:#fff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}.page{width:${layout.width};min-height:${layout.height};break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}.course-slide-print-page,.course-spatial-print-page{position:relative;height:${layout.height};overflow:hidden}.course-slide-print-page{display:flex;justify-content:center;align-items:flex-start}.course-slide-print-canvas{flex:0 0 1280px;transform:scale(${layout.slideScale.toFixed(6)});transform-origin:top center}.course-spatial-print-page svg{display:block;width:100%;height:100%}.course-spatial-print-page h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere}.flow-print-document table{max-width:100%;border-collapse:collapse}.flow-print-document pre{white-space:pre-wrap}</style></head><body>${sections.join('')}</body></html>`
 }
 
 export function auditCourseExportFonts(
@@ -408,6 +465,7 @@ export async function buildCoursePrintArtifacts(
   }
 
   const pdfImages: string[] = []
+  const pdfImagePageIds: string[] = []
   for (const page of pages) {
     const surface = surfaceById(published, page.surfaceId)
     if (!surface) continue
@@ -420,6 +478,7 @@ export async function buildCoursePrintArtifacts(
           : undefined
         if (captured?.startsWith('data:image/')) {
           pdfImages.push(captured)
+          pdfImagePageIds.push(page.id)
         } else {
           pushReport(report, {
             severity: 'warning',
@@ -452,6 +511,7 @@ export async function buildCoursePrintArtifacts(
       }
       const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
       pdfImages.push(encoded)
+      pdfImagePageIds.push(page.id)
       continue
     }
   }
@@ -466,8 +526,14 @@ export async function buildCoursePrintArtifacts(
     kind: 'flow-print-html',
   })
 
-  if (pdfImages.length > 0) {
-    const pdfHtml = buildPdfPrintHtml(published.title, pdfImages)
+  const imageCoverageComplete = pdfImagePageIds.length === pages.length
+    && pages.every((page, index) => pdfImagePageIds[index] === page.id)
+  const pureSlide = published.locations.every((location) => location.kind === 'slide-scene')
+    && published.surfaces.every((surface) => surface.type === 'slide')
+  if (imageCoverageComplete || !pureSlide) {
+    const pdfHtml = imageCoverageComplete
+      ? buildPdfPrintHtml(published.title, pdfImages)
+      : mixedHtml
     const pdfBytes = new TextEncoder().encode(pdfHtml)
     auditExportSize(pdfBytes, 'PDF 打印 HTML', report)
     files.push({

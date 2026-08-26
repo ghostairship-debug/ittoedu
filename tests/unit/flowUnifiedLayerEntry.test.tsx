@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { enterFlowTextEditing, selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { FLOW_AUDIO_OVERLAY_REASON } from '@/renderer/course/flowSharedAuthoringAdapters'
-import { flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import {
   selectActiveCourseProjectDocument,
   selectEffectiveLayerProjection,
@@ -69,6 +70,17 @@ function imageAsset(id = 'asset-flow-image'): AssetMeta {
   }
 }
 
+function insertFlowBlock(input: Parameters<typeof insertFlowEditorBlock>[1]) {
+  const state = useEditorStore.getState()
+  const flow = state.flowSession
+  if (!flow) throw new Error('expected flow session')
+  const result = insertFlowEditorBlock(flow.history.present, input, {
+    expectedRevision: flow.history.present.revision,
+  })
+  expect(result.ok).toBe(true)
+  state.applyFlowCommand(result)
+}
+
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
@@ -79,10 +91,59 @@ afterEach(() => {
 })
 
 describe('Flow unified layer entry', () => {
-  it('lists only overlays in NodesTab and renders the virtual paper body row', () => {
+  it('renders a selectable DFS body outline with valid structural actions, separate from overlays', () => {
     useEditorStore.getState().createNewFlowProject()
+    const surfaceId = flowSurface().id
+    insertFlowBlock({
+      surfaceId,
+      parentId: null,
+      index: flowSurface().blocks.length,
+      block: {
+        id: 'outline-section',
+        type: 'section',
+        title: '分节',
+        collapsedByDefault: false,
+        blocks: [],
+      },
+    })
+    insertFlowBlock({
+      surfaceId,
+      parentId: 'outline-section',
+      index: 0,
+      block: { id: 'outline-child', type: 'paragraph', text: '节内正文' },
+    })
+    insertFlowBlock({
+      surfaceId,
+      parentId: null,
+      index: flowSurface().blocks.length,
+      block: { id: 'outline-after-section', type: 'paragraph', text: '待缩进正文' },
+    })
+    render(<ElementsTab onAddImage={() => undefined} />)
+    fireEvent.click(screen.getByTestId('add-rectangle'))
+    const overlayId = flowSurface().surfaceLayerItems.at(-1)?.item.layerItemId
+    expect(overlayId).toBeTruthy()
+    cleanup()
     render(<NodesTab />)
-    expect(screen.queryByText('无标题')).toBeNull()
+
+    const outline = screen.getByTestId('flow-content-outline')
+    const overlayRegion = screen.getByTestId('flow-overlay-layers')
+    expect(outline).toHaveTextContent('正文大纲')
+    expect(screen.getByTestId('flow-content-placement')).toHaveTextContent(
+      '归属：当前 Flow 页面 · 定位：跟随稿纸',
+    )
+    const expectedDfsIds = [
+      ...flowSurface().blocks.slice(0, -2).map((block) => block.id),
+      'outline-section',
+      'outline-child',
+      'outline-after-section',
+    ]
+    expect(Array.from(outline.querySelectorAll('[data-testid^="flow-outline-block-"]')).map(
+      (row) => row.getAttribute('data-testid')?.replace('flow-outline-block-', ''),
+    )).toEqual(expectedDfsIds)
+    expect(screen.getByTestId('flow-outline-block-outline-child')).toHaveAttribute('data-depth', '1')
+    expect(outline.querySelector('.drag-handle')).toBeNull()
+    expect(outline.textContent).not.toContain('前后层级')
+
     expect(screen.queryByText('当前场景还没有节点')).toBeNull()
     const heading = flowSurface().blocks.find((block) => block.type === 'heading')
     const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
@@ -97,15 +158,42 @@ describe('Flow unified layer entry', () => {
     if (controller) {
       expect(screen.queryByTestId(`node-item-${controller.item.layerItemId}`)).toBeNull()
     }
+    const overlayRow = screen.getByTestId(`node-item-${overlayId}`)
+    expect(overlayRegion).toContainElement(overlayRow)
+    expect(overlayRow.querySelector('.drag-handle')).toBeTruthy()
+    expect(screen.getByTestId(`node-source-${overlayId}`)).toHaveTextContent('归属：当前 Flow 页面')
+    expect(screen.getByTestId(`node-source-${overlayId}`)).toHaveTextContent('定位：钉在视口')
+    expect(screen.getByLabelText(/隐藏“矩形”/)).toBeTruthy()
+    expect(screen.getByLabelText(/锁定“矩形”/)).toBeTruthy()
 
-    const bodyRow = screen.getByTestId('flow-paper-body-row')
-    expect(bodyRow).toBeTruthy()
-    expect(screen.getByText('正文')).toBeTruthy()
-
-    fireEvent.click(bodyRow)
-    const flow = useEditorStore.getState().flowSession
+    fireEvent.click(screen.getByLabelText('选择正文块“节内正文”'))
+    let flow = useEditorStore.getState().flowSession
     expect(flow?.selection.focus).toBe('block')
-    expect(flow?.selection.selectedBlockId ?? flow?.selection.selectedBlockIds?.[0]).toBe(heading!.id)
+    expect(flow?.selection.selectedBlockId).toBe('outline-child')
+
+    expect(screen.queryByTestId('flow-outline-move-up-outline-child')).toBeNull()
+    expect(screen.queryByTestId('flow-outline-move-down-outline-child')).toBeNull()
+    expect(screen.queryByTestId('flow-outline-indent-outline-child')).toBeNull()
+    expect(screen.getByTestId('flow-outline-outdent-outline-child')).toBeTruthy()
+    expect(screen.getByTestId('flow-outline-move-up-outline-after-section')).toBeTruthy()
+    expect(screen.queryByTestId('flow-outline-move-down-outline-after-section')).toBeNull()
+    expect(screen.getByTestId('flow-outline-indent-outline-after-section')).toBeTruthy()
+    expect(screen.queryByTestId('flow-outline-outdent-outline-after-section')).toBeNull()
+
+    const pastBeforeIndent = flow!.history.past.length
+    fireEvent.click(screen.getByTestId('flow-outline-indent-outline-after-section'))
+    flow = useEditorStore.getState().flowSession
+    expect(flow?.history.past).toHaveLength(pastBeforeIndent + 1)
+    expect(flow?.selection.selectedBlockId).toBe('outline-after-section')
+    expect(findFlowBlockRecursive(flowSurface().blocks, 'outline-after-section')?.parentId).toBe('outline-section')
+    const saved = useEditorStore.getState().exportV9SlideCandidateArchive()
+    expect(saved).toBeTruthy()
+
+    useEditorStore.getState().undo()
+    expect(findFlowBlockRecursive(flowSurface().blocks, 'outline-after-section')?.parentId).toBeNull()
+    useEditorStore.getState().createNewProject()
+    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(saved!)).toBe(true)
+    expect(findFlowBlockRecursive(flowSurface().blocks, 'outline-after-section')?.parentId).toBe('outline-section')
   })
 
   it('enters global authoring without writing history and keeps the controller as a viewport overlay', () => {
@@ -124,6 +212,9 @@ describe('Flow unified layer entry', () => {
     cleanup()
     render(<NodesTab />)
     expect(screen.getByTestId(`node-item-${controller!.item.layerItemId}`)).toBeTruthy()
+    expect(screen.getByTestId(`node-source-${controller!.item.layerItemId}`)).toHaveTextContent('归属：全课')
+    expect(screen.getByTestId(`node-source-${controller!.item.layerItemId}`)).toHaveTextContent('定位：钉在视口')
+    expect(screen.getByTestId(`node-source-${controller!.item.layerItemId}`)).toHaveTextContent('不可下沉')
   })
 
   it('splits Delete across text, block, and overlay focus', () => {
@@ -176,7 +267,7 @@ describe('Flow unified layer entry', () => {
       mimeType: 'audio/mpeg',
       kind: 'audio',
       path: 'assets/voice.mp3',
-      byteLength: 16,
+      byteLength: 4,
     }
     useEditorStore.getState().importAsset(audio, new Uint8Array([1, 2, 3, 4]))
     render(<MediaTab onImportAudio={() => undefined} onImportVideo={() => undefined} />)

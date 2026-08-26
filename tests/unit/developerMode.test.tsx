@@ -1,13 +1,89 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ComponentPackageData } from '../../src/shared/componentTypes'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import { RightSidebar } from '../../src/renderer/ui/RightSidebar'
 import { DeveloperTab } from '../../src/renderer/ui/DeveloperTab'
+import { selectRuntimeSourceAuthoringView } from '../../src/renderer/runtime/runtimeSourceAuthoringView'
 import {
   editableComponentPackageId,
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
   selectActiveScene,
   useEditorStore,
 } from '../../src/renderer/store/editorStore'
+
+const originalUpdateRuntimeSourceAtTarget =
+  useEditorStore.getState().updateRuntimeSourceAtTarget
+const originalCreateRuntimeTemplateAtTarget =
+  useEditorStore.getState().createRuntimeTemplateAtTarget
+
+function selectRuntimeView(editingScope: 'scene' | 'global') {
+  const state = useEditorStore.getState()
+  const project = selectActiveCourseProjectDocument(state)
+  const locationId = selectActiveCourseLocationId(state)
+  const location = project?.locations.find((candidate) => candidate.id === locationId)
+  const sessionToken = state.courseAuthoringSession?.token
+  if (!project || !locationId || !sessionToken) {
+    throw new Error('缺少 Runtime 作者会话')
+  }
+  return selectRuntimeSourceAuthoringView({
+    project,
+    locationId,
+    editingScope,
+    activeStateId: location?.kind === 'slide-scene'
+      ? state.activePresentationStateId
+      : null,
+    sessionToken,
+  })
+}
+
+function createRuntimeTemplate(editingScope: 'scene' | 'global') {
+  if (useEditorStore.getState().editingScope !== editingScope) {
+    useEditorStore.getState().setEditingScope(editingScope)
+  }
+  const missingView = selectRuntimeView(editingScope)
+  if (
+    missingView.availability !== 'unavailable'
+    || missingView.reason !== 'runtime-missing'
+    || !missingView.creationTarget
+  ) {
+    throw new Error('当前 Runtime 槽位不可创建模板')
+  }
+  const result = useEditorStore.getState().createRuntimeTemplateAtTarget(
+    missingView.creationTarget,
+  )
+  if (!result.ok) throw new Error(result.reason)
+  const availableView = selectRuntimeView(editingScope)
+  if (availableView.availability !== 'available') {
+    throw new Error(`新 Runtime 未立即可编辑：${availableView.reason}`)
+  }
+  return availableView
+}
+
+function installSceneRuntime(
+  sceneId: string,
+  source: string,
+): void {
+  if (selectActiveScene(useEditorStore.getState()).id !== sceneId) {
+    throw new Error('测试只能安装当前场景 Runtime')
+  }
+  const view = createRuntimeTemplate('scene')
+  const result = useEditorStore.getState().updateRuntimeSourceAtTarget(
+    view.target,
+    source,
+  )
+  if (!result.ok) throw new Error(result.reason)
+}
+
+function installGlobalRuntime(source: string): void {
+  const view = createRuntimeTemplate('global')
+  const result = useEditorStore.getState().updateRuntimeSourceAtTarget(
+    view.target,
+    source,
+  )
+  if (!result.ok) throw new Error(result.reason)
+}
 
 function editableSource(id: string, marker = ''): string {
   return `window.CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:4,create(){${marker};return{destroy(){}}}})`
@@ -67,6 +143,10 @@ function domComponentPackage(): ComponentPackageData {
 
 afterEach(() => {
   cleanup()
+  useEditorStore.setState({
+    updateRuntimeSourceAtTarget: originalUpdateRuntimeSourceAtTarget,
+    createRuntimeTemplateAtTarget: originalCreateRuntimeTemplateAtTarget,
+  })
   useEditorStore.getState().createNewProject()
 })
 
@@ -117,15 +197,28 @@ describe('专业开发模式', () => {
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
     const nextSource =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){ctx.emit("ready");return{destroy(){}}}})'
-    useEditorStore.getState().setSceneRuntime(scene.id, {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'phaser',
-      source: initialSource,
-      content: { values: {} },
-      assets: {},
+    installSceneRuntime(scene.id, initialSource)
+    const state = useEditorStore.getState()
+    const project = selectActiveCourseProjectDocument(state)
+    const locationId = selectActiveCourseLocationId(state)
+    const sessionToken = state.courseAuthoringSession?.token
+    if (!project || !locationId || !sessionToken) {
+      throw new Error('缺少 Runtime 源码编辑会话')
+    }
+    const view = selectRuntimeSourceAuthoringView({
+      project,
+      locationId,
+      editingScope: 'scene',
+      activeStateId: state.activePresentationStateId,
+      sessionToken,
     })
-    useEditorStore.getState().updateSceneRuntime(scene.id, { source: nextSource })
+    if (view.availability !== 'available') {
+      throw new Error(`Runtime 源码不可编辑：${view.reason}`)
+    }
+    expect(state.updateRuntimeSourceAtTarget(view.target, nextSource)).toMatchObject({
+      ok: true,
+      status: 'committed',
+    })
     expect(selectActiveScene(useEditorStore.getState()).runtime?.source).toBe(nextSource)
 
     useEditorStore.getState().undo()
@@ -139,14 +232,7 @@ describe('专业开发模式', () => {
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
     const validSource =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){ctx.emit("ok");return{destroy(){}}}})'
-    useEditorStore.getState().setSceneRuntime(scene.id, {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'phaser',
-      source: initialSource,
-      content: { values: {} },
-      assets: {},
-    })
+    installSceneRuntime(scene.id, initialSource)
     render(<DeveloperTab />)
     const editor = screen.getByLabelText('场景运行时源码')
     expect(editor).toHaveAttribute('wrap', 'off')
@@ -161,6 +247,223 @@ describe('专业开发模式', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
     expect(selectActiveScene(useEditorStore.getState()).runtime?.source)
       .toBe(validSource)
+  })
+
+  it('同源应用显示零写入，并在输入法组合期间禁用应用与取消', () => {
+    useEditorStore.getState().createNewProject()
+    const scene = selectActiveScene(useEditorStore.getState())
+    const source =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
+    installSceneRuntime(scene.id, source)
+    const beforeRevision = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )!.revision
+
+    render(<DeveloperTab />)
+    const editor = screen.getByLabelText('场景运行时源码')
+    const apply = screen.getByRole('button', { name: '校验并应用' })
+    const cancel = screen.getByRole('button', { name: '取消' })
+
+    fireEvent.compositionStart(editor)
+    expect(apply).toBeDisabled()
+    expect(cancel).toBeDisabled()
+    fireEvent.compositionEnd(editor)
+    expect(apply).toBeEnabled()
+    expect(cancel).toBeEnabled()
+
+    fireEvent.click(apply)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '源码没有变化，未写入工程历史',
+    )
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(beforeRevision)
+  })
+
+  it('脏草稿只绑定原 Runtime：切换目标时保持并禁用，返回后恢复，取消可加载当前目标', () => {
+    useEditorStore.getState().createNewProject()
+    const scene = selectActiveScene(useEditorStore.getState())
+    const localSource =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){const scope="local";return{destroy(){}}}})'
+    const globalSource =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){const scope="global";return{destroy(){}}}})'
+    const draftSource =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){const draft=true;return{destroy(){}}}})'
+    installSceneRuntime(scene.id, localSource)
+    installGlobalRuntime(globalSource)
+    useEditorStore.getState().setEditingScope('scene')
+
+    render(<DeveloperTab />)
+    const editor = screen.getByLabelText('场景运行时源码')
+    fireEvent.change(editor, { target: { value: draftSource } })
+
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    expect(screen.getByLabelText('场景运行时源码')).toHaveValue(draftSource)
+    expect(screen.getByTestId('runtime-source-stale')).toHaveTextContent(
+      '当前目标已经切换',
+    )
+    expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
+
+    act(() => useEditorStore.getState().setEditingScope('scene'))
+    expect(screen.queryByTestId('runtime-source-stale')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '校验并应用' })).toBeEnabled()
+    expect(screen.getByLabelText('场景运行时源码')).toHaveValue(draftSource)
+
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByLabelText('全局运行时源码')).toHaveValue(globalSource)
+    expect(screen.queryByTestId('runtime-source-stale')).not.toBeInTheDocument()
+  })
+
+  it('两个同源 Runtime 之间切换也按稳定目标标记脏草稿过期', () => {
+    useEditorStore.getState().createNewProject()
+    const scene = selectActiveScene(useEditorStore.getState())
+    const source =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
+    installSceneRuntime(scene.id, source)
+    installGlobalRuntime(source)
+    useEditorStore.getState().setEditingScope('scene')
+
+    render(<DeveloperTab />)
+    fireEvent.change(screen.getByLabelText('场景运行时源码'), {
+      target: { value: `${source}\n// local draft` },
+    })
+    act(() => useEditorStore.getState().setEditingScope('global'))
+
+    expect(screen.getByLabelText('场景运行时源码')).toHaveValue(
+      `${source}\n// local draft`,
+    )
+    expect(screen.getByTestId('runtime-source-stale')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
+  })
+
+  it('命名状态切换不重绑草稿，提交仍携带绑定时捕获的状态目标', () => {
+    useEditorStore.getState().createNewProject()
+    const scene = selectActiveScene(useEditorStore.getState())
+    const source =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
+    const nextSource = `${source}\n// captured base state`
+    installSceneRuntime(scene.id, source)
+    useEditorStore.getState().addPresentationState('讲解状态')
+    const namedStateId = useEditorStore.getState().activePresentationStateId
+    expect(namedStateId).not.toBeNull()
+    useEditorStore.getState().setActivePresentationState(null)
+    let capturedStateId: string | null | undefined = undefined
+    useEditorStore.setState({
+      updateRuntimeSourceAtTarget: (target, draft) => {
+        capturedStateId = target.stateId
+        return originalUpdateRuntimeSourceAtTarget(target, draft)
+      },
+    })
+
+    render(<DeveloperTab />)
+    fireEvent.change(screen.getByLabelText('场景运行时源码'), {
+      target: { value: nextSource },
+    })
+    act(() => useEditorStore.getState().setActivePresentationState(namedStateId))
+
+    expect(screen.queryByTestId('runtime-source-stale')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
+    expect(capturedStateId).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('修改已写入工程历史')
+  })
+
+  it('完整保留 V9 Surface Runtime 定义，并显示动态协议与 API 版本', () => {
+    const fixture = listCourseProjectV9Fixtures().find(
+      (candidate) => candidate.id === 'surface-runtime',
+    )!
+    useEditorStore.getState().loadCourseProject(
+      structuredClone(fixture.data.project),
+      null,
+      structuredClone(fixture.data.assetFiles),
+      {},
+    )
+    const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const beforeSurface = before.surfaces[0]
+    if (beforeSurface?.type !== 'slide') throw new Error('expected Slide fixture')
+    const beforeRuntime = beforeSurface.scenes[0]!.layerItems.find(
+      (item) => item.kind === 'runtime',
+    )
+    if (beforeRuntime?.kind !== 'runtime') throw new Error('expected Runtime fixture')
+    const original = structuredClone(beforeRuntime.runtime)
+    const nextSource =
+      'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){const changed=true;return{destroy(){}}}})'
+
+    render(<DeveloperTab />)
+    expect(screen.getByText(/Surface Runtime \/ Runtime API 3/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('场景运行时源码'), {
+      target: { value: nextSource },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
+
+    const after = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const afterSurface = after.surfaces[0]
+    if (afterSurface?.type !== 'slide') throw new Error('expected Slide fixture')
+    const afterRuntime = afterSurface.scenes[0]!.layerItems.find(
+      (item) => item.kind === 'runtime',
+    )
+    if (afterRuntime?.kind !== 'runtime') throw new Error('expected Runtime fixture')
+    expect(afterRuntime.runtime).toEqual({ ...original, source: nextSource })
+    expect(screen.getByRole('status')).toHaveTextContent('修改已写入工程历史')
+  })
+
+  it('把 typed Store 提交失败原因显示在原草稿旁且不宣称成功', () => {
+    useEditorStore.getState().createNewProject()
+    const scene = selectActiveScene(useEditorStore.getState())
+    const source =
+      'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
+    installSceneRuntime(scene.id, source)
+    useEditorStore.setState({
+      updateRuntimeSourceAtTarget: () => ({
+        ok: false,
+        code: 'revision-conflict',
+        reason: '模拟的 Runtime revision 冲突',
+      }),
+    })
+
+    render(<DeveloperTab />)
+    fireEvent.change(screen.getByLabelText('场景运行时源码'), {
+      target: { value: `${source}\n// draft` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '未应用：模拟的 Runtime revision 冲突',
+    )
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.surfaces[0])
+      .toEqual(expect.objectContaining({ type: 'slide' }))
+    expect(screen.queryByText('校验通过，修改已写入工程历史。'))
+      .not.toBeInTheDocument()
+  })
+
+  it('Flow 与 Spatial 的本地及全局缺失 Runtime 都不提供模板按钮', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const { unmount } = render(<DeveloperTab />)
+    expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
+      '尚未创建 Runtime',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
+      '尚未创建 Runtime',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
+
+    unmount()
+    useEditorStore.getState().createNewSpatialProject()
+    render(<DeveloperTab />)
+    expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
+      '尚未创建 Runtime',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
+      '尚未创建 Runtime',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
   })
 
   it('开发工作区一次只呈现一类任务，并给未就绪任务明确空状态', () => {
@@ -179,6 +482,94 @@ describe('专业开发模式', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /组件代码/ }))
     expect(screen.getByText('未选择互动组件')).toBeInTheDocument()
+  })
+
+  it('Slide 既有模板入口创建后刷新为可编辑的 canonical Runtime', () => {
+    useEditorStore.getState().createNewProject()
+    const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const beforeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
+    render(<DeveloperTab />)
+
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(before.revision + 1)
+    expect(selectActiveCourseLocationId(useEditorStore.getState()))
+      .toBe(beforeLocationId)
+    expect(useEditorStore.getState().editingScope).toBe('scene')
+    expect(useEditorStore.getState().activePresentationStateId).toBeNull()
+    expect((screen.getByLabelText('场景运行时源码') as HTMLTextAreaElement).value)
+      .toContain('runtimeApiVersion: 2')
+    expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
+  })
+
+  it('当前 Slide 经过其他编辑事务后仍可创建 Runtime 模板', () => {
+    useEditorStore.getState().createNewProject()
+    act(() => useEditorStore.getState().addTextNode())
+    const beforeRevision = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )!.revision
+
+    render(<DeveloperTab />)
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(beforeRevision + 1)
+    expect((screen.getByLabelText('场景运行时源码') as HTMLTextAreaElement).value)
+      .toContain('runtimeApiVersion: 2')
+  })
+
+  it('全局 Runtime 模板创建后保留全局作用域与当前命名状态', () => {
+    useEditorStore.getState().createNewProject()
+    useEditorStore.getState().addPresentationState('讲解状态')
+    const namedStateId = useEditorStore.getState().activePresentationStateId
+    expect(namedStateId).not.toBeNull()
+    useEditorStore.getState().setActivePresentationState(namedStateId)
+    useEditorStore.getState().setEditingScope('global')
+    const beforeRevision = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )!.revision
+    const beforeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
+    render(<DeveloperTab />)
+
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
+      .toBe(beforeRevision + 1)
+    expect(selectActiveCourseLocationId(useEditorStore.getState()))
+      .toBe(beforeLocationId)
+    expect(useEditorStore.getState().editingScope).toBe('global')
+    expect(useEditorStore.getState().activePresentationStateId).toBe(namedStateId)
+    expect((screen.getByLabelText('全局运行时源码') as HTMLTextAreaElement).value)
+      .toContain('runtimeApiVersion: 2')
+    expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['revision-conflict', '模拟的 Runtime 创建目标已经过期'],
+    ['runtime-already-exists', '模拟的 Runtime 槽位已经被占用'],
+  ] as const)('模板创建把 typed %s 失败留在原空状态旁', (code, reason) => {
+    useEditorStore.getState().createNewProject()
+    const before = structuredClone(
+      selectActiveCourseProjectDocument(useEditorStore.getState())!,
+    )
+    useEditorStore.setState({
+      createRuntimeTemplateAtTarget: () => ({
+        ok: false,
+        code,
+        reason,
+      }),
+    })
+    render(<DeveloperTab />)
+
+    fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+
+    expect(screen.getByTestId('runtime-template-create-error'))
+      .toHaveTextContent(`未创建：${reason}`)
+    expect(screen.getByTestId('runtime-source-missing')).toBeInTheDocument()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState()))
+      .toEqual(before)
+    expect(screen.queryByLabelText('场景运行时源码')).not.toBeInTheDocument()
   })
 
   it('创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复', () => {

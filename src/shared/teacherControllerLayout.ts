@@ -2,12 +2,25 @@ import type {
   TeacherControllerButton,
   TeacherControllerNode,
 } from './projectTypes'
+import { MIN_VISIBLE_NODE_EDGE } from './constants'
 
 export interface TeacherControllerRect {
   x: number
   y: number
   width: number
   height: number
+}
+
+export interface TeacherControllerCanvasSize {
+  width: number
+  height: number
+}
+
+export interface TeacherControllerBounds {
+  left: number
+  top: number
+  right: number
+  bottom: number
 }
 
 export interface TeacherControllerButtonLayout extends TeacherControllerRect {
@@ -265,6 +278,106 @@ export type TeacherControllerHitTarget = 'collapse' | 'button' | 'panel'
 
 function copyRect(rect: TeacherControllerRect): TeacherControllerRect {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+}
+
+function recoveryLocalRect(
+  source: TeacherControllerLayoutSource,
+  frame: TeacherControllerRect,
+): TeacherControllerRect {
+  const collapse = createTeacherControllerLayout(source, frame.width, frame.height).collapse
+  if (collapse) return copyRect(collapse)
+  const width = Math.min(frame.width, MIN_VISIBLE_NODE_EDGE)
+  const height = Math.min(frame.height, MIN_VISIBLE_NODE_EDGE)
+  return {
+    x: frame.width - width,
+    y: (frame.height - height) / 2,
+    width,
+    height,
+  }
+}
+
+/**
+ * Canvas-space bounds of the authored controller's recovery surface. A
+ * collapsible controller uses its visible collapse pill; a non-collapsible
+ * controller keeps a small right-edge grip available instead of requiring the
+ * entire (potentially very wide) panel to stay on canvas.
+ */
+export function teacherControllerAuthoringRecoveryBounds(
+  source: TeacherControllerLayoutSource,
+  frame: TeacherControllerRect,
+  rotation = 0,
+): TeacherControllerBounds {
+  const recovery = recoveryLocalRect(source, frame)
+  const radians = rotation * Math.PI / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const centerX = frame.x + frame.width / 2
+  const centerY = frame.y + frame.height / 2
+  const localCenterX = frame.width / 2
+  const localCenterY = frame.height / 2
+  const corners = [
+    [recovery.x, recovery.y],
+    [recovery.x + recovery.width, recovery.y],
+    [recovery.x + recovery.width, recovery.y + recovery.height],
+    [recovery.x, recovery.y + recovery.height],
+  ].map(([x, y]) => {
+    const relativeX = x! - localCenterX
+    const relativeY = y! - localCenterY
+    return {
+      x: centerX + relativeX * cosine - relativeY * sine,
+      y: centerY + relativeX * sine + relativeY * cosine,
+    }
+  })
+  return {
+    left: Math.min(...corners.map(({ x }) => x)),
+    top: Math.min(...corners.map(({ y }) => y)),
+    right: Math.max(...corners.map(({ x }) => x)),
+    bottom: Math.max(...corners.map(({ y }) => y)),
+  }
+}
+
+/**
+ * Preserves size and rotation while keeping the recovery surface fully inside
+ * the logical course canvas. Preview and commit call the same function so a
+ * pointer release cannot persist geometry different from what the author saw.
+ */
+export function constrainTeacherControllerAuthoringFrame(
+  source: TeacherControllerLayoutSource,
+  frame: TeacherControllerRect,
+  rotation: number,
+  canvas: TeacherControllerCanvasSize,
+): TeacherControllerRect {
+  const safeCanvas = {
+    width: Math.max(1, canvas.width),
+    height: Math.max(1, canvas.height),
+  }
+  const bounds = teacherControllerAuthoringRecoveryBounds(source, frame, rotation)
+  let dx = 0
+  let dy = 0
+  if (bounds.left < 0) dx = -bounds.left
+  else if (bounds.right > safeCanvas.width) dx = safeCanvas.width - bounds.right
+  if (bounds.top < 0) dy = -bounds.top
+  else if (bounds.bottom > safeCanvas.height) dy = safeCanvas.height - bounds.bottom
+  return {
+    x: frame.x + dx,
+    y: frame.y + dy,
+    width: frame.width,
+    height: frame.height,
+  }
+}
+
+/** Explicit recovery target for already-unrecoverable authored data. */
+export function centerTeacherControllerAuthoringFrame(
+  source: TeacherControllerLayoutSource,
+  frame: TeacherControllerRect,
+  rotation: number,
+  canvas: TeacherControllerCanvasSize,
+): TeacherControllerRect {
+  return constrainTeacherControllerAuthoringFrame(source, {
+    ...frame,
+    x: (canvas.width - frame.width) / 2,
+    y: (canvas.height - frame.height) / 2,
+  }, rotation, canvas)
 }
 
 /** Canonical authored box shared by Player content, Properties preview and selection chrome. */

@@ -5,6 +5,10 @@ import type {
   SpatialRelationDocument,
   SpatialSemanticZoomRule,
 } from '../../../shared/courseProjectTypes'
+import {
+  composePublishedCourseLocation,
+  type CourseLayerComposition,
+} from '../../../shared/courseLayerComposition'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
@@ -331,31 +335,65 @@ export function collectSpatialPlaybackEntries(
   input: PublishedSpatialRuntimeInput,
   locationId: string | null,
 ): SpatialPlaybackEntry[] {
+  if (locationId !== null) {
+    return composePublishedSpatialLocation({ input, locationId }).entries
+      .filter((entry) => entry.mounted)
+      .map((entry) => ({
+        item: entry.item,
+        source: entry.source as SpatialLayerSource,
+        coordinateSpace: spatialPlaybackCoordinateSpace(
+          entry.source as SpatialLayerSource,
+          entry.item,
+        ),
+      }))
+  }
   const entries: SpatialPlaybackEntry[] = [
     ...input.globalLayerItems
-      .filter((entry) => isPublishedScopedVisible(entry.visibility, locationId))
+      .filter((entry) => (
+        entry.item.visible && isPublishedScopedVisible(entry.visibility, locationId)
+      ))
       .map((entry) => ({
         item: entry.item,
         source: 'global' as const,
         coordinateSpace: spatialPlaybackCoordinateSpace('global', entry.item),
       })),
     ...input.surface.surfaceLayerItems
-      .filter((entry) => isPublishedScopedVisible(entry.visibility, locationId))
+      .filter((entry) => (
+        entry.item.visible && isPublishedScopedVisible(entry.visibility, locationId)
+      ))
       .map((entry) => ({
         item: entry.item,
         source: 'surface' as const,
         coordinateSpace: spatialPlaybackCoordinateSpace('surface', entry.item),
       })),
-    ...input.surface.world.layerItems.map((item) => ({
-      item,
-      source: 'world' as const,
-      coordinateSpace: spatialPlaybackCoordinateSpace('world', item),
-    })),
+    ...input.surface.world.layerItems
+      .filter((item) => item.visible)
+      .map((item) => ({
+        item,
+        source: 'world' as const,
+        coordinateSpace: spatialPlaybackCoordinateSpace('world', item),
+      })),
   ]
   return entries.sort((left, right) => (
     left.item.order - right.item.order ||
     left.item.layerItemId.localeCompare(right.item.layerItemId)
   ))
+}
+
+/** Valid-location Published adapter; camera and semantic culling stay outside this domain. */
+export function composePublishedSpatialLocation(input: {
+  readonly input: PublishedSpatialRuntimeInput
+  readonly locationId: string
+}): CourseLayerComposition<PublishedLayerItem> {
+  return composePublishedCourseLocation({
+    course: {
+      locations: input.input.locations,
+      globalLayerItems: input.input.globalLayerItems,
+      surfaces: [input.input.surface],
+    },
+    locationId: input.locationId,
+    stateId: null,
+  })
 }
 
 function worldRectIntersects(
@@ -386,8 +424,20 @@ export function worldItemVisibleInRuntimeCamera(
   camera: SpatialRuntimeCamera,
   rules: readonly SpatialSemanticZoomRule[],
 ): boolean {
-  if (!item.visible) return false
   if (item.playbackInitialVisibility === 'hidden') return false
+  return worldItemWithinRuntimeCamera(item, camera, rules)
+}
+
+/**
+ * Renderer/camera scope without transient Interaction visibility. Playback-hidden
+ * nodes must remain mountable in this scope so node.enter can reveal them.
+ */
+export function worldItemWithinRuntimeCamera(
+  item: PublishedLayerItem,
+  camera: SpatialRuntimeCamera,
+  rules: readonly SpatialSemanticZoomRule[],
+): boolean {
+  if (!item.visible) return false
   if (!worldRectIntersects(item, camera)) return false
   return isSpatialItemSemanticallyVisible(item.layerItemId, camera.zoom, rules)
 }

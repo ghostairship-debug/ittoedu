@@ -18,8 +18,6 @@ function canonicalFilePath(value: string): string {
 function networkOrigin(value: string): string | null {
   try {
     const url = new URL(value)
-    if (url.protocol === 'ws:') url.protocol = 'http:'
-    if (url.protocol === 'wss:') url.protocol = 'https:'
     return url.origin
   } catch {
     return null
@@ -109,7 +107,7 @@ export function hardenWebContents(
 
 export function configureRestrictedSession(
   electronSession: Session,
-  allowedNetworkOrigins: ReadonlySet<string>,
+  allowedNetworkOrigins: ReadonlySet<string> | ((url: string) => boolean),
 ): void {
   if (configuredSessions.has(electronSession)) return
   configuredSessions.add(electronSession)
@@ -130,8 +128,13 @@ export function configureRestrictedSession(
   electronSession.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
     (details, callback) => {
-      const origin = networkOrigin(details.url)
-      callback({ cancel: origin === null || !allowedNetworkOrigins.has(origin) })
+      const allowed = typeof allowedNetworkOrigins === 'function'
+        ? allowedNetworkOrigins(details.url)
+        : (() => {
+            const origin = networkOrigin(details.url)
+            return origin !== null && allowedNetworkOrigins.has(origin)
+          })()
+      callback({ cancel: !allowed })
     },
   )
 }
@@ -143,10 +146,13 @@ export function assertTrustedIpcSender(
 ): void {
   const senderFrame = event.senderFrame
   const mainFrame = event.sender.mainFrame
+  // This confirms the current top-level frame only. Preview-network document
+  // freshness is enforced separately by its per-commit capability token.
   const isMainFrame =
     senderFrame !== null &&
+    !senderFrame.detached &&
     senderFrame.processId === mainFrame.processId &&
-    senderFrame.routingId === mainFrame.routingId
+    senderFrame.frameToken === mainFrame.frameToken
 
   if (
     mainWindow === null ||

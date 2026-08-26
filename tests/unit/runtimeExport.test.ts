@@ -535,9 +535,6 @@ describe('Runtime API 2 PDF 静态化', () => {
       configurable: true,
       value: vi.fn().mockResolvedValue(undefined),
     })
-    vi.doMock('../../src/player/PlayerApp', () => ({
-      PlayerApp: class {},
-    }))
     const { renderSceneCanvas } = await import(
       '../../src/renderer/export/renderSceneImages'
     )

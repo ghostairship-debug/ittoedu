@@ -41,7 +41,6 @@ async function waitForPrintableDocument(
   `, true) as PrintableDocumentState
   if (
     state.pageCount < 1 ||
-    state.imageCount !== state.pageCount ||
     state.loadedImageCount !== state.imageCount
   ) {
     throw new Error(

@@ -4,8 +4,6 @@ import {
   createTeacherControllerNode,
 } from '../../src/renderer/project/createProject'
 
-vi.mock('../../src/player/PlayerApp', () => ({ PlayerApp: class {} }))
-
 import { renderSceneCanvas } from '../../src/renderer/export/renderSceneImages'
 
 afterEach(() => {

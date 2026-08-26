@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { getEffectiveCourseLayerOrder } from '@/shared/courseProjectModel'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
@@ -33,6 +34,7 @@ import {
   makeSpatialAuthoringTarget,
   openSpatialAuthoringSession,
   panSpatialSessionCamera,
+  redoSpatialAuthoring,
   selectSpatialLayers,
   setSpatialEditingScope,
   zoomSpatialSessionCamera,
@@ -44,6 +46,8 @@ import {
   worldLayerItem,
   type SpatialAuthoringSession,
 } from '@/renderer/course/spatialEditorCommands'
+import { addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 
 const NOW = '2026-08-17T17:00:00.000Z'
 const SURFACE_ID = 'surface-spatial'
@@ -218,7 +222,7 @@ function v9SpatialFixture(): CourseProjectDocument {
     courseState: [],
     navigationGuards: [],
     globalLayerItems: [
-      scoped(nativeText('global-hud', 50, '全局条', {
+      scoped(nativeText('global-hud', 3, '全局条', {
         frame: { mode: 'absolute', x: 24, y: 16, width: 180, height: 40 },
       })),
       scoped(globalController()),
@@ -368,6 +372,58 @@ describe('Spatial authoring session, address, snapshot, insert/update/transform/
     expect(hudTarget.coordinateSpace).toBe('viewport')
   })
 
+  it('allocates unique effective orders for consecutive world kinds in a default Mixed project', () => {
+    const blank = createBlankCourseProject({
+      id: 'default-mixed-order',
+      title: '默认 Mixed 顺序',
+      now: NOW,
+    })
+    const appended = addCourseSpatialPage(blank, { title: '无限画布', now: NOW })
+    expect(appended.ok).toBe(true)
+    if (!appended.ok) throw new Error(appended.reason)
+
+    const locationId = appended.activatedLocationId
+    const location = appended.project.locations.find((candidate) => candidate.id === locationId)
+    if (!location || location.kind !== 'spatial-camera') throw new Error('expected spatial location')
+    const surfaceId = location.surfaceId
+    const controllerOrder = appended.project.globalLayerItems[0]!.item.order
+    const session = openSpatialAuthoringSession(appended.project, {
+      locationId,
+      sessionId: 'spatial-session-default-mixed-order',
+    })
+
+    const text = addSpatialWorldTextLayer(session, { id: 'mixed-world-text' }, { now: NOW })
+    expect(text).toMatchObject({ ok: true, historyEntry: true })
+    expect(text.nextSession?.history.present.revision).toBe(session.history.present.revision + 1)
+    expect(text.nextSession?.history.past).toHaveLength(1)
+
+    const shape = addSpatialWorldShapeLayer(
+      text.nextSession!,
+      { id: 'mixed-world-shape', shapeType: 'ellipse' },
+      { now: NOW },
+    )
+    expect(shape).toMatchObject({ ok: true, historyEntry: true })
+    expect(shape.nextSession?.history.present.revision).toBe(session.history.present.revision + 2)
+    expect(shape.nextSession?.history.past).toHaveLength(2)
+
+    const project = shape.nextSession!.history.present
+    const surface = project.surfaces.find((candidate) => candidate.id === surfaceId)
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(surface.world.layerItems.map((item) => [item.layerItemId, item.order])).toEqual([
+      ['mixed-world-text', 0],
+      ['mixed-world-shape', 2],
+    ])
+    expect(project.globalLayerItems[0]!.item.order).toBe(controllerOrder)
+
+    const effectiveOrders = getEffectiveCourseLayerOrder({
+      project,
+      surfaceId,
+      locationId,
+    }).map((entry) => entry.item.order)
+    expect(new Set(effectiveOrders).size).toBe(effectiveOrders.length)
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+  })
+
   it('inserts native/media/component/runtime near the session camera, not page-center, one revision each', () => {
     let session = openSession()
     session = panSpatialSessionCamera(session, { x: -1000, y: 2500 }).nextSession!
@@ -377,6 +433,17 @@ describe('Spatial authoring session, address, snapshot, insert/update/transform/
     expect(text.ok).toBe(true)
     expect(text.historyEntry).toBe(true)
     expect(text.nextSession?.history.present.revision).toBe(before + 1)
+    expect(text.nextSession?.selection.selectionIds).toEqual(['w-text'])
+    expect(makeSpatialAuthoringTarget(text.nextSession!, 'w-text').authoringAddress).toBe(
+      makeAuthoringAddress({
+        projectId: session.history.present.id,
+        scope: 'surface',
+        surfaceId: SURFACE_ID,
+        carrier: 'native',
+        layerItemId: 'w-text',
+        field: 'content.data.text',
+      }),
+    )
     const textItem = worldLayerItem(text.nextSession!.history.present, SURFACE_ID, 'w-text')
     expect(textItem.frame.x).toBe(-1000 - 200 + 40)
     expect(textItem.frame.y).toBe(2500 - 40)
@@ -424,16 +491,57 @@ describe('Spatial authoring session, address, snapshot, insert/update/transform/
       height: 120,
     }, { now: NOW })
 
+    expect([
+      text,
+      shape,
+      formula,
+      image,
+      video,
+      component,
+      runtime,
+    ].map((result) => result.nextSession?.selection.selectionIds)).toEqual([
+      ['w-text'],
+      ['w-shape'],
+      ['w-formula'],
+      ['w-image'],
+      ['w-video'],
+      ['w-component'],
+      ['w-runtime'],
+    ])
+
     expect(runtime.nextSession?.history.present.revision).toBe(before + 7)
     expect(runtime.nextSession?.history.past).toHaveLength(7)
     expect(courseProjectDocumentSchema.parse(runtime.nextSession!.history.present).revision)
       .toBe(before + 7)
+    const effectiveOrders = getEffectiveCourseLayerOrder({
+      project: runtime.nextSession!.history.present,
+      surfaceId: SURFACE_ID,
+      locationId: LOCATION_ID,
+    }).map((entry) => entry.item.order)
+    expect(new Set(effectiveOrders).size).toBe(effectiveOrders.length)
 
-    const globalScope = setSpatialEditingScope(session, 'global')
-    const refused = addSpatialWorldTextLayer(globalScope.nextSession!, { id: 'nope' }, { now: NOW })
-    expect(refused.ok).toBe(false)
-    expect(refused.reason).toBe(SPATIAL_REJECT_WRONG_OWNER)
-    expect(refused.historyEntry).toBe(false)
+    const undone = undoSpatialAuthoring(runtime.nextSession!)
+    expect(undone.ok).toBe(true)
+    expect(undone.nextSession?.history.present.revision).toBe(before + 6)
+    expect(undone.nextSession?.history.future).toHaveLength(1)
+    expect(() => worldLayerItem(undone.nextSession!.history.present, SURFACE_ID, 'w-runtime'))
+      .toThrow(/找不到世界元素/)
+    const redone = redoSpatialAuthoring(undone.nextSession!)
+    expect(redone.ok).toBe(true)
+    expect(redone.nextSession?.history.present.revision).toBe(before + 7)
+    expect(redone.nextSession?.history.future).toHaveLength(0)
+    expect(worldLayerItem(redone.nextSession!.history.present, SURFACE_ID, 'w-runtime').kind)
+      .toBe('runtime')
+
+    for (const scope of ['surface', 'global'] as const) {
+      const ownerSession = setSpatialEditingScope(session, scope).nextSession!
+      const refused = addSpatialWorldTextLayer(ownerSession, { id: `nope-${scope}` }, { now: NOW })
+      expect(refused.ok).toBe(false)
+      expect(refused.reason).toBe(SPATIAL_REJECT_WRONG_OWNER)
+      expect(refused.historyEntry).toBe(false)
+      expect(refused.nextSession?.history).toBe(ownerSession.history)
+      expect(refused.nextSession?.selection).toEqual(ownerSession.selection)
+    }
   })
 
   it('commits one world gesture as one revision, keeps negative coords, and does not write the session camera', () => {

@@ -22,7 +22,7 @@
 
 ```text
 schemaVersion, id, revision, title, createdAt, updatedAt,
-assets, componentPackages, designTokens, media, playback,
+assets, componentPackages, network?, designTokens, media, playback,
 courseState, navigationGuards, locations, startLocationId,
 globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
 ```
@@ -32,8 +32,9 @@ globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
 - `revision`：单调自增作者编辑事务版本号（与审批 hash 无关）。
 - `title`：课程标题。
 - `createdAt` / `updatedAt`：UTC ISO 8601 时间戳字符串。
-- `assets`：工程内嵌资源元数据映射字典（`key === asset.id`）。
+- `assets`：工程内嵌资源元数据映射字典（`key === asset.id`），V9 值为 `CourseAssetMeta`（V8 `AssetMeta` 加可选远程交付字段，见第 7 节）。
 - `componentPackages`：内嵌组件包元数据映射字典（`key === packageId`）。
+- `network`（可选）：课程级网络声明（`CourseNetworkDeclaration`），见第 7 节。
 - `designTokens`：工程级设计 Token（字体 `fonts`、颜色 `colors`）。
 - `media`：工程级音频与媒体配置。
 - `playback`：全局播放器与演讲者模式配置。
@@ -129,3 +130,19 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 
 - **课程状态声明（`courseState: CourseStateDeclaration[]`）**：声明式标量状态（`boolean`、`number`、`string`、`null`）。
 - **导航守卫（`navigationGuards: CourseNavigationGuard[]`）**：声明式条件拦截规则（`effect: 'block'`），仅允许根据状态条件进行导航拦截，禁止执行任意重定向或执行代码。
+
+---
+
+## 7. 远程资源与网络声明（additive 可选）
+
+本节字段全部为软冻结后的 additive 可选字段：既有 V9 文件不含这些键，原样合法；各对象保持 `.strict()`。
+
+### 7.1 资源远程交付（`CourseAssetMeta.remote`）
+- V9 资源元数据为 `CourseAssetMeta`：共享 V8 `AssetMeta` 全部字段，外加可选 `remote: { url: string }`。V8 `AssetMeta` 本身不扩展这些键。
+- `remote.url` 声明与内嵌字节一致的 HTTPS 交付地址（允许 path/query），供“在线轻量”导出与远程媒体使用；内嵌本地字节仍是作者缓存与离线来源，`path`/`byteLength` 永远描述内嵌字节，不得为 remote-only 资产伪造。
+- `remote.url` 只接受 `https:` 且禁止 userinfo 凭证；Secret/凭证值不进入工程合同。
+
+### 7.2 课程网络声明（`network.connectOrigins`）
+- `network.connectOrigins?: string[]` 声明 Runtime/Component 代码允许连接的精确 origin（远程媒体、HTTP API、WebSocket、未来 AI API）。
+- 每个 origin 必须是规范化的精确 `https:`/`wss:` origin：字符串等于其 URL `origin`（小写 scheme/host、不写默认端口），拒绝 wildcard、userinfo、path/query/fragment 与其他 scheme；列表内不得重复。
+- 预览、发布与导出宿主从工程声明派生允许的 origin，未声明访问一律拒绝；远程脚本暂不开放。本节只定义网络声明，不定义或禁止桌面、本地、父页面等宿主专属能力；运行时放行与 CSP 派生由后续任务实现。

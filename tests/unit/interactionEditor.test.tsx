@@ -243,10 +243,16 @@ function renderEditor({
 function renderAutomationEditor({
   scene = makeScene([]),
   activeStateId = 'question' as string | null,
+  authoringStates = undefined as ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+  }> | undefined,
   selectedNodeId = null as string | null,
   ruleWarnings = {} as Record<string, string[]>,
+  legacyRuleActionsAvailable = undefined as boolean | undefined,
+  legacyRuleActionsUnavailableReason = undefined as string | undefined,
   onOpenClickRules = vi.fn(),
-  onPrepareMotionTargets = vi.fn(),
+  onApplyRevealSequenceTemplate = vi.fn(),
   onRunPreview = vi.fn(),
   onAddRule = vi.fn(),
   onUpdateRule = vi.fn(),
@@ -258,12 +264,15 @@ function renderAutomationEditor({
     <SceneAutomationEditor
       scene={scene}
       activeStateId={activeStateId}
+      authoringStates={authoringStates}
       selectedNodeId={selectedNodeId}
       scenes={projectScenes}
       sounds={sounds}
       ruleWarnings={ruleWarnings}
       onOpenClickRules={onOpenClickRules}
-      onPrepareMotionTargets={onPrepareMotionTargets}
+      onApplyRevealSequenceTemplate={onApplyRevealSequenceTemplate}
+      legacyRuleActionsAvailable={legacyRuleActionsAvailable}
+      legacyRuleActionsUnavailableReason={legacyRuleActionsUnavailableReason}
       onRunPreview={onRunPreview}
       onAddRule={onAddRule}
       onUpdateRule={onUpdateRule}
@@ -279,7 +288,7 @@ function renderAutomationEditor({
     onDuplicateRule,
     onMoveRule,
     onOpenClickRules,
-    onPrepareMotionTargets,
+    onApplyRevealSequenceTemplate,
     onRunPreview,
   }
 }
@@ -571,6 +580,82 @@ describe('InteractionEditor', () => {
 })
 
 describe('SceneAutomationEditor', () => {
+  it('uses an explicit empty authoring-state list instead of synthetic scene states', () => {
+    const stateRule = automationRule('state-rule', {
+      type: 'presentation.enter',
+      stateId: 'question',
+    })
+    renderAutomationEditor({
+      scene: makeScene([stateRule]),
+      authoringStates: [],
+    })
+
+    expect(screen.getByTestId('rule-summary-state-rule')).toHaveTextContent(
+      '缺失状态（question）',
+    )
+    expect(within(screen.getByLabelText('新规则的触发时机')).getByRole('option', {
+      name: '进入状态',
+    })).toBeDisabled()
+  })
+
+  it('disables unsupported legacy rule actions while preserving reveal and updates', () => {
+    const first = automationRule('first-rule', { type: 'scene.enter' })
+    const second = automationRule('second-rule', {
+      type: 'video.ended',
+      nodeId: video.id,
+    })
+    const reason = '此载体仅支持现有规则编辑和依次出现模板。'
+    const {
+      onAddRule,
+      onUpdateRule,
+      onDeleteRule,
+      onDuplicateRule,
+      onMoveRule,
+      onApplyRevealSequenceTemplate,
+    } = renderAutomationEditor({
+      scene: makeScene([first, second]),
+      legacyRuleActionsAvailable: false,
+      legacyRuleActionsUnavailableReason: reason,
+    })
+
+    expect(screen.getByTestId('legacy-rule-actions-unavailable')).toHaveTextContent(reason)
+    expect(screen.getByLabelText('新规则的触发时机')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加规则' })).toBeDisabled()
+    expect(screen.getByRole('option', {
+      name: '声音结束后，进入下一场景',
+    })).toBeDisabled()
+    expect(screen.getByRole('option', {
+      name: '进入场景后，元素依次出现',
+    })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
+    expect(onApplyRevealSequenceTemplate).toHaveBeenCalledOnce()
+    expect(onAddRule).not.toHaveBeenCalled()
+
+    for (const name of [
+      '复制规则 1',
+      '上移规则 1',
+      '下移规则 1',
+      '删除规则 1',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
+    fireEvent.click(screen.getByRole('button', { name: '复制规则 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '下移规则 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除规则 1' }))
+    expect(onDuplicateRule).not.toHaveBeenCalled()
+    expect(onMoveRule).not.toHaveBeenCalled()
+    expect(onDeleteRule).not.toHaveBeenCalled()
+
+    const firstRuleGroup = screen.getByRole('group', { name: '规则 1' })
+    fireEvent.change(within(firstRuleGroup).getByLabelText('规则名称'), {
+      target: { value: '专业编辑仍可用' },
+    })
+    expect(onUpdateRule).toHaveBeenCalledWith('first-rule', {
+      name: '专业编辑仍可用',
+    })
+  })
+
   it('exposes undoable rule copy and ordering controls', () => {
     const first = automationRule('first-rule', { type: 'scene.enter' })
     const second = automationRule('second-rule', {
@@ -671,55 +756,29 @@ describe('SceneAutomationEditor', () => {
     )
   })
 
-  it('creates a sequential entrance template and prepares playback visibility', () => {
-    const { onAddRule, onPrepareMotionTargets } = renderAutomationEditor({
+  it('emits one stable sequential entrance template intent', () => {
+    const { onAddRule, onApplyRevealSequenceTemplate } = renderAutomationEditor({
       selectedNodeId: button.id,
     })
 
     fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
 
-    expect(onPrepareMotionTargets).toHaveBeenCalledWith([
-      button.id,
-      video.id,
-      component.id,
-    ])
-    expect(onAddRule).toHaveBeenCalledWith({
-      id: expect.stringMatching(/^interaction_/),
+    expect(onApplyRevealSequenceTemplate).toHaveBeenCalledOnce()
+    expect(onApplyRevealSequenceTemplate).toHaveBeenCalledWith({
+      ruleId: expect.stringMatching(/^interaction_/),
       name: '进入场景后依次出现',
-      enabled: true,
-      trigger: { type: 'scene.enter' },
-      conditions: [{ type: 'presentation.in', stateIds: ['question'] }],
-      actions: [
-        expect.objectContaining({
-          id: expect.stringMatching(/^action_/),
-          start: 'after-previous',
-          delayMs: 0,
-          action: expect.objectContaining({
-            type: 'node.enter',
-            nodeId: button.id,
-            effect: 'fade',
-          }),
-        }),
-        expect.objectContaining({
-          id: expect.stringMatching(/^action_/),
-          start: 'after-previous',
-          delayMs: 80,
-          action: expect.objectContaining({
-            type: 'node.enter',
-            nodeId: video.id,
-          }),
-        }),
-        expect.objectContaining({
-          id: expect.stringMatching(/^action_/),
-          start: 'after-previous',
-          delayMs: 80,
-          action: expect.objectContaining({
-            type: 'node.enter',
-            nodeId: component.id,
-          }),
-        }),
+      actionIds: [
+        expect.stringMatching(/^action_/),
+        expect.stringMatching(/^action_/),
+        expect.stringMatching(/^action_/),
       ],
+      targetLayerItemIds: [button.id, video.id, component.id],
     })
+    expect(onAddRule).not.toHaveBeenCalled()
+
+    const intent = onApplyRevealSequenceTemplate.mock.calls[0]![0]
+    const stableIds = [intent.ruleId, ...intent.actionIds]
+    expect(new Set(stableIds).size).toBe(stableIds.length)
   })
 
   it('routes selected-element clicks to properties and starts current-position preview', () => {
@@ -819,6 +878,7 @@ describe('SceneAutomationEditor', () => {
         activeStateId="question"
         scenes={projectScenes}
         sounds={sounds}
+        onApplyRevealSequenceTemplate={vi.fn()}
         onAddRule={onAddRule}
         onUpdateRule={onUpdateRule}
         onDeleteRule={vi.fn()}

@@ -1,15 +1,14 @@
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import {
-  getEffectiveCourseLayerOrder,
-  isCourseLayerVisibleAtLocation,
-} from '../../shared/courseProjectModel'
+  composeCourseProjectLocation,
+  type CourseLayerComposition,
+} from '../../shared/courseLayerComposition'
 import type {
   CourseProjectDocument,
   FlowBlock,
   FlowSurfaceDocument,
   LayerItem,
 } from '../../shared/courseProjectTypes'
-import { compareStableStrings } from '../../shared/stableOrder'
 import {
   carrierForFlowBlock,
   findFlowBlockRecursive,
@@ -130,7 +129,6 @@ function overlayLayerView(
   surfaceId: string,
   source: FlowOverlayLayerSource,
   item: LayerItem,
-  locationId: string,
   scopedVisible: boolean,
 ): FlowEditorLayerView {
   return {
@@ -148,6 +146,14 @@ function overlayLayerView(
     }),
     item: deepFreeze(structuredClone(item)),
   }
+}
+
+/** Flow read-model adapter. Flow has no presentation state, so stateId is exact null. */
+export function composeFlowEditorLocation(input: {
+  readonly project: CourseProjectDocument
+  readonly locationId: string
+}): CourseLayerComposition<LayerItem> {
+  return composeCourseProjectLocation({ ...input, stateId: null })
 }
 
 export function listFlowCourseTreePages(project: CourseProjectDocument): FlowCourseTreePage[] {
@@ -246,29 +252,16 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     throw new Error(`找不到 Flow 块：${location.blockId}`)
   }
 
-  const overlayLayers = getEffectiveCourseLayerOrder({
-    project,
-    surfaceId: surface.id,
-    locationId,
-  }).map((entry) => {
-    const scoped = entry.source === 'global'
-      ? project.globalLayerItems.find((item) => item.item.layerItemId === entry.item.layerItemId)
-      : surface.surfaceLayerItems.find((item) => item.item.layerItemId === entry.item.layerItemId)
-    const scopedVisible = scoped
-      ? isCourseLayerVisibleAtLocation(scoped, locationId)
-      : true
-    return overlayLayerView(
+  const composition = composeFlowEditorLocation({ project, locationId })
+  const overlayLayers = composition.entries
+    .filter((entry) => entry.applicable)
+    .map((entry) => overlayLayerView(
       project.id,
       surface.id,
       entry.source === 'global' ? 'global' : 'surface',
       entry.item,
-      locationId,
-      scopedVisible,
-    )
-  }).sort((left, right) =>
-    left.item.order - right.item.order ||
-    compareStableStrings(left.selectionId, right.selectionId),
-  )
+      entry.applicable,
+    ))
 
   const courseTree = listFlowCourseTreePages(project).find((page) => page.surfaceId === surface.id)
   if (!courseTree) throw new Error(`找不到 Flow 表面：${surface.id}`)

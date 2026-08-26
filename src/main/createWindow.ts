@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
@@ -12,6 +13,7 @@ import {
 } from './security'
 import { editorEntryUrl } from './protocols'
 import { clearRecoveryProject } from './projectPersistence'
+import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
 import {
   BACKGROUND_E2E_WINDOW_ORIGIN,
   shouldShowApplicationWindows,
@@ -102,9 +104,19 @@ export async function createMainWindow(
   const developmentServerUrl = parseDevelopmentServerUrl()
   const rendererEntryUrl = developmentServerUrl?.toString() ?? editorEntryUrl()
 
-  const allowedNetworkOrigins = new Set<string>()
-  if (developmentServerUrl) allowedNetworkOrigins.add(developmentServerUrl.origin)
-  configureRestrictedSession(session.defaultSession, allowedNetworkOrigins)
+  const baseNetworkOrigins = new Set<string>()
+  if (developmentServerUrl) {
+    baseNetworkOrigins.add(developmentServerUrl.origin)
+    const websocketUrl = new URL(developmentServerUrl)
+    websocketUrl.protocol = 'ws:'
+    baseNetworkOrigins.add(websocketUrl.origin)
+  }
+  mainPreviewNetworkPolicy.replaceBaseOrigins(baseNetworkOrigins)
+  mainPreviewNetworkPolicy.beginDocumentNavigation()
+  configureRestrictedSession(
+    session.defaultSession,
+    (url) => mainPreviewNetworkPolicy.allowsRequest(url),
+  )
   const showApplicationWindows = shouldShowApplicationWindows()
 
   const window = new BrowserWindow({
@@ -141,6 +153,25 @@ export async function createMainWindow(
   })
   let closeApproved = false
   let closeCheckInFlight = false
+  let previewNetworkDocumentToken: string | null = null
+
+  const beginPreviewNetworkDocumentNavigation = (): void => {
+    previewNetworkDocumentToken = null
+    mainPreviewNetworkPolicy.beginDocumentNavigation()
+  }
+  const sendPreviewNetworkDocumentToken = (): void => {
+    if (previewNetworkDocumentToken === null || window.isDestroyed()) return
+    const mainFrame = window.webContents.mainFrame
+    if (mainFrame.detached) return
+    try {
+      mainFrame.send(
+        IPC_CHANNELS.previewNetworkDocumentToken,
+        previewNetworkDocumentToken,
+      )
+    } catch (error) {
+      console.error('下发预览网络文档凭据失败', error)
+    }
+  }
 
   onCreated?.({ window, rendererEntryUrl })
   appState.attachWindow(window)
@@ -200,8 +231,37 @@ export async function createMainWindow(
   })
 
   window.on('closed', () => {
+    beginPreviewNetworkDocumentNavigation()
     appState.detachWindow(window)
   })
+
+  window.webContents.on('render-process-gone', () => {
+    beginPreviewNetworkDocumentNavigation()
+  })
+
+  window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) beginPreviewNetworkDocumentNavigation()
+  })
+
+  window.webContents.on('did-frame-navigate', (
+    _event,
+    _url,
+    _httpResponseCode,
+    _httpStatusText,
+    isMainFrame,
+  ) => {
+    if (!isMainFrame) return
+    const mainFrame = window.webContents.mainFrame
+    previewNetworkDocumentToken = randomUUID()
+    mainPreviewNetworkPolicy.activateDocument({
+      processId: mainFrame.processId,
+      frameToken: mainFrame.frameToken,
+      documentToken: previewNetworkDocumentToken,
+    })
+    sendPreviewNetworkDocumentToken()
+  })
+
+  window.webContents.on('dom-ready', sendPreviewNetworkDocumentToken)
 
   window.once('ready-to-show', () => {
     if (window.isDestroyed()) return

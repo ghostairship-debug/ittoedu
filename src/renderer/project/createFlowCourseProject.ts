@@ -10,7 +10,6 @@ import {
   type FlowEditorHistory,
   type FlowEditorSelection,
 } from '../course/flowEditorSlice'
-import { commitSlideProjectMutation } from '../course/slideEditorCommands'
 import { createBlankCourseProject } from './createCourseProject'
 import type { CreateProjectOptions } from './createProject'
 
@@ -60,24 +59,5 @@ export function openFlowAuthoringSession(
   return {
     history: createFlowEditorHistory(parsed),
     selection: selectFlowEditorBlock(parsed, location.id, location.blockId),
-  }
-}
-
-export function appendBlankFlowPage(
-  document: CourseProjectDocument,
-  title = '流式讲义',
-): { document: CourseProjectDocument; locationId: string; surfaceId: string } {
-  const created = createBlankFlowSurface({
-    id: `surface-flow-${nanoid(10)}`,
-    title,
-  })
-  const next = commitSlideProjectMutation(document, (draft) => {
-    draft.surfaces.push(created.surface)
-    draft.locations.push(created.location)
-  })
-  return {
-    document: next,
-    locationId: created.location.id,
-    surfaceId: created.surface.id,
   }
 }

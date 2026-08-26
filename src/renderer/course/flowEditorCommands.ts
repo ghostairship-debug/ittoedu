@@ -14,7 +14,7 @@ import {
   rejectIfStaleDocument,
 } from './globalLayerCommands'
 import { deleteEffectiveLayerItem } from './effectiveLayerCommands'
-import { commitSlideProjectMutation } from './slideEditorCommands'
+import { commitCourseProjectMutation } from './courseProjectMutation'
 import {
   FLOW_GLOBAL_STRUCTURE_REASON,
   FLOW_LAST_HEADING_REASON,
@@ -159,7 +159,7 @@ function runMutation(
 ): FlowCommandResult {
   try {
     let createdBlockIds: string[] = []
-    const next = commitSlideProjectMutation(document, (draft) => {
+    const next = commitCourseProjectMutation(document, (draft) => {
       createdBlockIds = mutate(draft) ?? []
     }, options.now)
     return succeedMutation(next, reason, createdBlockIds.length > 0 ? { createdBlockIds } : {})

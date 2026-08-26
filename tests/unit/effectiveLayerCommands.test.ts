@@ -18,6 +18,7 @@ import {
   CROSS_OWNER_REORDER_REASON,
   LAYER_REJECT_LOCKED,
   LAYER_REJECT_STALE_REVISION,
+  SPATIAL_CROSS_COORDINATE_MOVE_REASON,
   deleteEffectiveLayerItem,
   duplicateEffectiveLayerItem,
   listEffectiveLayerCommandItems,
@@ -25,9 +26,11 @@ import {
   makeEffectiveLayerAuthoringAddress,
   moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
+  patchEffectiveLayerItems,
   reorderEffectiveLayerItems,
 } from '@/renderer/course/effectiveLayerCommands'
 import {
+  allocateCourseLayerOrder,
   findGlobalTeacherController,
   isTeacherControllerLayerItem,
   makeGlobalLayerAuthoringAddress,
@@ -36,6 +39,7 @@ import {
   setGlobalLayerVisibleAtLocation,
   type EffectiveLayerCommandTarget,
 } from '@/renderer/course/globalLayerCommands'
+import { addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
 
 /**
  * V9 command fixture. Proves global/effective layer commands.
@@ -227,7 +231,68 @@ function sceneTarget(
   }
 }
 
+function spatialLayerFixture(): {
+  project: CourseProjectDocument
+  locationId: string
+  surfaceId: string
+} {
+  const appended = addCourseSpatialPage(v9LayerFixture(), {
+    title: '空间图层移动',
+    now: NOW,
+  })
+  if (!appended.ok) throw new Error(appended.reason)
+  const location = appended.project.locations.find(
+    (candidate) => candidate.id === appended.activatedLocationId,
+  )
+  if (!location || location.kind !== 'spatial-camera') throw new Error('expected spatial location')
+  const project = structuredClone(appended.project)
+  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (!surface || surface.type !== 'spatial-2d') throw new Error('expected spatial surface')
+  surface.surfaceLayerItems.push(scoped(nativeText('spatial-surface', 101, '空间本页')))
+  surface.world.layerItems.push(
+    nativeText('spatial-world-a', 102, '世界元素 A'),
+    nativeText('spatial-world-b', 103, '世界元素 B'),
+  )
+  return {
+    project: courseProjectDocumentSchema.parse(project),
+    locationId: location.id,
+    surfaceId: surface.id,
+  }
+}
+
 describe('V9 effective / global layer commands', () => {
+  it('allocates from one course-wide order set without rewriting existing owner order', () => {
+    const appended = addCourseSpatialPage(v9LayerFixture(), {
+      title: '空间顺序',
+      now: NOW,
+    })
+    expect(appended.ok).toBe(true)
+    if (!appended.ok) throw new Error(appended.reason)
+    const location = appended.project.locations.find(
+      (candidate) => candidate.id === appended.activatedLocationId,
+    )
+    if (!location || location.kind !== 'spatial-camera') throw new Error('expected spatial location')
+    const surface = appended.project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    surface.surfaceLayerItems.push(scoped(nativeText('spatial-shared-order', 1, '空间共享')))
+    surface.world.layerItems.push(nativeText('spatial-world-order', 2, '世界元素'))
+    const project = courseProjectDocumentSchema.parse(appended.project)
+    const before = JSON.stringify(project)
+    const beforeEffectiveIds = getEffectiveCourseLayerOrder({
+      project,
+      surfaceId: surface.id,
+      locationId: location.id,
+    }).map((entry) => entry.item.layerItemId)
+
+    expect(allocateCourseLayerOrder(project, 0)).toBe(3)
+    expect(JSON.stringify(project)).toBe(before)
+    expect(getEffectiveCourseLayerOrder({
+      project,
+      surfaceId: surface.id,
+      locationId: location.id,
+    }).map((entry) => entry.item.layerItemId)).toEqual(beforeEffectiveIds)
+  })
+
   it('lists unified effective layers with stable owner addresses and no hitId', () => {
     const project = v9LayerFixture()
     const items = listEffectiveLayerCommandItems({
@@ -298,6 +363,107 @@ describe('V9 effective / global layer commands', () => {
     expect(mixed.reason).not.toContain('暂不能调整顺序')
     expect(mixed.nextDocument).toBeUndefined()
     expect(project.revision).toBe(1)
+  })
+
+  it('rejects Spatial viewport/world owner changes before writes while preserving safe moves and reorder', () => {
+    const { project, locationId, surfaceId } = spatialLayerFixture()
+    const before = structuredClone(project)
+
+    const globalToWorld = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'global-banner', locationId),
+      { source: 'world', surfaceId },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(globalToWorld).toEqual({
+      ok: false,
+      reason: SPATIAL_CROSS_COORDINATE_MOVE_REASON,
+      historyEntry: false,
+    })
+
+    const globalToSurface = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'global-footer', locationId),
+      { source: 'surface', surfaceId },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(globalToSurface).toEqual({
+      ok: false,
+      reason: SPATIAL_CROSS_COORDINATE_MOVE_REASON,
+      historyEntry: false,
+    })
+
+    const worldToGlobal = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'spatial-world-a', locationId),
+      { source: 'global' },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(worldToGlobal).toEqual({
+      ok: false,
+      reason: SPATIAL_CROSS_COORDINATE_MOVE_REASON,
+      historyEntry: false,
+    })
+
+    const surfaceToGlobal = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'spatial-surface', locationId),
+      { source: 'global' },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(surfaceToGlobal).toEqual({
+      ok: false,
+      reason: SPATIAL_CROSS_COORDINATE_MOVE_REASON,
+      historyEntry: false,
+    })
+    expect(project).toEqual(before)
+    expect(project.revision).toBe(before.revision)
+    expect(globalToWorld.nextDocument).toBeUndefined()
+    expect(globalToSurface.nextDocument).toBeUndefined()
+    expect(worldToGlobal.nextDocument).toBeUndefined()
+    expect(surfaceToGlobal.nextDocument).toBeUndefined()
+
+    const surfaceFrame = structuredClone(locateCourseLayer(project, 'spatial-surface')!.item.frame)
+    const surfaceToWorld = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'spatial-surface', locationId),
+      { source: 'world', surfaceId },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(surfaceToWorld).toMatchObject({ ok: true, historyEntry: true })
+    expect(surfaceToWorld.nextDocument?.revision).toBe(project.revision + 1)
+    expect(locateCourseLayer(surfaceToWorld.nextDocument!, 'spatial-surface')?.source).toBe('world')
+    expect(locateCourseLayer(surfaceToWorld.nextDocument!, 'spatial-surface')?.item.frame)
+      .toEqual(surfaceFrame)
+
+    const worldFrame = structuredClone(locateCourseLayer(project, 'spatial-world-a')!.item.frame)
+    const worldToSurface = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'spatial-world-a', locationId),
+      { source: 'surface', surfaceId },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(worldToSurface).toMatchObject({ ok: true, historyEntry: true })
+    expect(locateCourseLayer(worldToSurface.nextDocument!, 'spatial-world-a')?.source).toBe('surface')
+    expect(locateCourseLayer(worldToSurface.nextDocument!, 'spatial-world-a')?.item.frame)
+      .toEqual(worldFrame)
+
+    const reordered = reorderEffectiveLayerItems(
+      project,
+      globalTarget(project, 'spatial-world-a', locationId),
+      ['spatial-world-b', 'spatial-world-a'],
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(reordered).toMatchObject({ ok: true, historyEntry: true })
+    expect(reordered.nextDocument?.revision).toBe(project.revision + 1)
+    const reorderedSurface = reordered.nextDocument?.surfaces.find(
+      (candidate) => candidate.id === surfaceId,
+    )
+    if (!reorderedSurface || reorderedSurface.type !== 'spatial-2d') {
+      throw new Error('expected reordered spatial surface')
+    }
+    expect(reorderedSurface.world.layerItems.map((item) => item.layerItemId))
+      .toEqual(['spatial-world-b', 'spatial-world-a'])
   })
 
   it('keeps the teacher controller global and refuses moving it onto a scene', () => {
@@ -433,6 +599,39 @@ describe('V9 effective / global layer commands', () => {
     expect(courseProjectDocumentSchema.safeParse(hiddenInState.nextDocument).success).toBe(true)
   })
 
+  it('writes the surface base item under a named state and still rejects scene named-state atomic writes', () => {
+    const project = v9LayerFixture()
+    const surfaceTarget: EffectiveLayerCommandTarget = {
+      ...globalTarget(project, 'surface-shared'),
+      stateId: 'state-explain',
+    }
+    const renamed = patchEffectiveLayerItems(project, [
+      { target: surfaceTarget, patch: { label: '表面共享（已更新）', opacity: 0.5 } },
+    ], { expectedRevision: 1, now: NOW })
+    expect(renamed).toMatchObject({ ok: true, historyEntry: true })
+    const surface = renamed.nextDocument?.surfaces.find(
+      (candidate) => candidate.id === 'surface-slide',
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    expect(surface.surfaceLayerItems[0]!.item).toMatchObject({
+      layerItemId: 'surface-shared',
+      label: '表面共享（已更新）',
+      opacity: 0.5,
+    })
+    const scene = surface.scenes.find((candidate) => candidate.id === 'scene-1')!
+    expect(scene.presentation?.states.every(
+      (state) => !('surface-shared' in state.layerItemOverrides),
+    )).toBe(true)
+    expect(courseProjectDocumentSchema.safeParse(renamed.nextDocument).success).toBe(true)
+
+    const sceneWrite = patchEffectiveLayerItems(project, [
+      { target: sceneTarget(project, 'slide-title', 'state-explain'), patch: { label: '不应写入' } },
+    ], { expectedRevision: 1, now: NOW })
+    expect(sceneWrite).toMatchObject({ ok: false, historyEntry: false })
+    expect(sceneWrite.reason).toContain('命名状态')
+    expect(locateCourseLayer(project, 'slide-title')?.item.label).toBe('本页标题')
+  })
+
   it('rejects stale revision and restores a missing controller as a global item', () => {
     const project = v9LayerFixture()
     expect(reorderEffectiveLayerItems(
@@ -460,7 +659,34 @@ describe('V9 effective / global layer commands', () => {
     const controller = findGlobalTeacherController(restored.nextDocument!)
     expect(controller).toBeDefined()
     expect(locateCourseLayer(restored.nextDocument!, controller!.item.layerItemId)?.source).toBe('global')
+    expect(controller?.item.kind === 'native' &&
+      controller.item.content.nativeType === 'teacher-controller' &&
+      controller.item.content.data.defaultCollapsed).toBe(true)
     expect(restored.nextDocument?.playback.controls).toBe('canvas')
     expect(courseProjectDocumentSchema.safeParse(restored.nextDocument).success).toBe(true)
   })
+
+  it.each([true, false])(
+    'preserves an existing explicit defaultCollapsed=%s during a no-op restore',
+    (defaultCollapsed) => {
+      const project = v9LayerFixture()
+      const controller = findGlobalTeacherController(project)
+      if (!controller || !isTeacherControllerLayerItem(controller.item)) {
+        throw new Error('expected teacher controller')
+      }
+      controller.item.content.data.defaultCollapsed = defaultCollapsed
+      const beforeRestore = structuredClone(project)
+
+      const restored = restoreDefaultTeacherController(project, {
+        expectedRevision: project.revision,
+        now: NOW,
+      })
+
+      expect(restored).toMatchObject({ ok: true, historyEntry: false })
+      expect(restored.nextDocument).toBe(project)
+      expect(project).toEqual(beforeRestore)
+      expect(controller.item.content.data.defaultCollapsed).toBe(defaultCollapsed)
+      expect(project.revision).toBe(beforeRestore.revision)
+    },
+  )
 })

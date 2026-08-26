@@ -1,24 +1,34 @@
 import { strToU8, zip, zipSync } from 'fflate'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
+import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
+import type {
+  CourseAssetMeta,
+  CourseProjectDocument,
+} from '../../../shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
-import type { AssetMeta } from '../../../shared/projectTypes'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
-  collectPublishedCourseComponentKeys,
+  collectPublishedCourseSourceIssues,
   type CoursePublishSources,
+  type PublishedCourseSourceIssue,
 } from './buildPublishedCourse'
 
 export interface PublishedCoursePackageOptions {
   /** IIFE bundle exposing/bootstrapping the Course Player. */
   playerBundle: string
   lang?: string
+  /** Defaults to the existing fully embedded, offline-portable output. */
+  singleHtmlMode?: SingleHtmlExportMode
 }
 
 export type CoursePackageDelivery = 'standalone-html' | 'web-package'
+export type SingleHtmlExportMode = 'offline-portable' | 'online-lightweight'
+
+export interface CoursePackagePreflightOptions {
+  singleHtmlMode?: SingleHtmlExportMode
+}
 
 export interface CoursePackageExportResources {
   assetFiles: Readonly<Record<string, Uint8Array>>
@@ -28,10 +38,10 @@ export interface CoursePackageExportResources {
 export interface CoursePackagePreflightItem {
   severity: 'error' | 'warning' | 'info'
   code:
-    | 'asset-bytes-missing'
-    | 'component-bytes-missing'
-    | 'component-hash-mismatch'
+    | PublishedCourseSourceIssue['code']
     | 'player-bundle-empty'
+    | 'online-remote-asset'
+    | 'online-remote-url-invalid'
   message: string
   path?: ReadonlyArray<string | number>
 }
@@ -97,36 +107,94 @@ const EXTENSIONS: Readonly<Record<string, string>> = {
   'text/plain': 'txt',
 }
 
-function componentKey(packageId: string, version: string): string {
-  return `${packageId}@${version}`
-}
-
-function findAssetEntry(
-  project: CourseProjectDocument,
-  assetId: string,
-): readonly [string, AssetMeta] | undefined {
-  const direct = project.assets[assetId]
-  if (direct) return [assetId, direct]
-  return Object.entries(project.assets).find(([, metadata]) => metadata.id === assetId)
-}
-
-function findComponentSource(
-  components: Readonly<Record<string, ComponentPackageData>>,
-  packageId: string,
-  version: string,
-): ComponentPackageData | undefined {
-  return components[componentKey(packageId, version)]
-    ?? components[packageId]
-    ?? Object.values(components).find(({ manifest }) => (
-      manifest.id === packageId && manifest.version === version
-    ))
-}
-
 function summarize(items: readonly CoursePackagePreflightItem[]): CoursePackagePreflightReport['summary'] {
   const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: true }
   items.forEach(({ severity }) => { summary[severity] += 1 })
   summary.canExport = summary.error === 0
   return summary
+}
+
+interface OnlineRemoteAssetDependency {
+  assetId: string
+  recordKey: string
+  metadata: CourseAssetMeta
+  url: string
+}
+
+function onlineRemoteDeliveryMessage(dependency: OnlineRemoteAssetDependency): string {
+  return `素材“${dependency.metadata.filename}”的远程地址不能用于在线轻量单 HTML：请使用不含 wildcard 的精确 HTTPS 地址（${dependency.url}）。`
+}
+
+export class OnlineSingleHtmlDeliveryError extends Error {
+  readonly code = 'online-remote-url-invalid' as const
+  readonly path: ReadonlyArray<string | number>
+
+  constructor(dependency: OnlineRemoteAssetDependency) {
+    super(onlineRemoteDeliveryMessage(dependency))
+    this.name = 'OnlineSingleHtmlDeliveryError'
+    this.path = ['assets', dependency.recordKey, 'remote', 'url']
+  }
+}
+
+function findCourseAssetEntry(
+  project: CourseProjectDocument,
+  assetId: string,
+): readonly [string, CourseAssetMeta] | undefined {
+  const direct = project.assets[assetId]
+  if (direct) return [assetId, direct]
+  return Object.entries(project.assets).find(([, metadata]) => metadata.id === assetId)
+}
+
+function collectOnlineRemoteAssetDependencies(
+  project: CourseProjectDocument,
+  components: CoursePackageExportResources['components'],
+): OnlineRemoteAssetDependency[] | null {
+  const parsed = courseProjectDocumentSchema.safeParse(project)
+  if (!parsed.success) return null
+
+  let assetIds: Set<string>
+  try {
+    assetIds = collectPublishedCourseAssetIds({
+      project: parsed.data,
+      components,
+    })
+  } catch {
+    return null
+  }
+
+  const dependencies: OnlineRemoteAssetDependency[] = []
+  for (const assetId of [...assetIds].sort(compareStableStrings)) {
+    const entry = findCourseAssetEntry(parsed.data, assetId)
+    if (!entry?.[1].remote) continue
+    dependencies.push({
+      assetId,
+      recordKey: entry[0],
+      metadata: entry[1],
+      url: entry[1].remote.url,
+    })
+  }
+  return dependencies.sort((left, right) => (
+    compareStableStrings(left.url, right.url)
+    || compareStableStrings(left.assetId, right.assetId)
+  ))
+}
+
+function exactOnlineRemoteOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (
+      parsed.protocol !== 'https:'
+      || parsed.username !== ''
+      || parsed.password !== ''
+      || parsed.hostname.includes('*')
+      || parsed.origin === 'null'
+    ) {
+      return null
+    }
+    return parsed.origin
+  } catch {
+    return null
+  }
 }
 
 export function collectCoursePackageExportPreflight(
@@ -135,6 +203,7 @@ export function collectCoursePackageExportPreflight(
   resources: CoursePackageExportResources,
   playerBundle = '',
   now = new Date(),
+  options: CoursePackagePreflightOptions = {},
 ): CoursePackagePreflightReport {
   const items: CoursePackagePreflightItem[] = []
   if (!playerBundle.trim()) {
@@ -145,51 +214,34 @@ export function collectCoursePackageExportPreflight(
     })
   }
 
-  for (const assetId of [...collectPublishedCourseAssetIds({ project, components: resources.components })].sort()) {
-    const entry = findAssetEntry(project, assetId)
-    if (!entry) continue
-    const [recordKey, meta] = entry
-    const bytes = resources.assetFiles[meta.id]
-      ?? resources.assetFiles[recordKey]
-    if (!bytes) {
-      items.push({
-        severity: 'error',
-        code: 'asset-bytes-missing',
-        message: `素材“${meta.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
-        path: ['assets', recordKey],
-      })
-    }
+  const sourceIssues = collectPublishedCourseSourceIssues({ project, ...resources })
+  for (const issue of sourceIssues) {
+    items.push({ severity: 'error', ...issue })
   }
 
-  for (const key of [...collectPublishedCourseComponentKeys(project)].sort()) {
-    const separator = key.lastIndexOf('@')
-    const packageId = key.slice(0, separator)
-    const version = key.slice(separator + 1)
-    const metadataEntry = Object.entries(project.componentPackages).find(([, metadata]) => (
-      metadata.packageId === packageId && metadata.version === version
-    ))
-    const recordKey = metadataEntry?.[0] ?? key
-    const embedded = metadataEntry?.[1]
-    const component = findComponentSource(resources.components, packageId, version)
-    if (!component) {
+  if (
+    delivery === 'standalone-html'
+    && options.singleHtmlMode === 'online-lightweight'
+  ) {
+    const dependencies = collectOnlineRemoteAssetDependencies(project, resources.components) ?? []
+    for (const dependency of dependencies) {
+      if (exactOnlineRemoteOrigin(dependency.url)) continue
+      const error = new OnlineSingleHtmlDeliveryError(dependency)
       items.push({
         severity: 'error',
-        code: 'component-bytes-missing',
-        message: `组件包“${key}”没有可嵌入导出物的执行内容。`,
-        path: ['componentPackages', recordKey],
+        code: error.code,
+        path: error.path,
+        message: error.message,
       })
-      continue
     }
-    if (embedded) {
-      const actualHash = component.contentSha256 ?? componentContentSha256(component.files)
-      if (embedded.contentSha256 !== actualHash) {
-        items.push({
-          severity: 'error',
-          code: 'component-hash-mismatch',
-          message: `组件包“${key}”的工程锁定内容哈希与当前执行内容不一致。`,
-          path: ['componentPackages', recordKey, 'contentSha256'],
-        })
-      }
+    const urls = [...new Set(dependencies.map((dependency) => dependency.url))]
+      .sort(compareStableStrings)
+    for (const url of urls) {
+      items.push({
+        severity: 'info',
+        code: 'online-remote-asset',
+        message: `在线轻量单 HTML 将依赖远程素材：${url}`,
+      })
     }
   }
 
@@ -197,7 +249,8 @@ export function collectCoursePackageExportPreflight(
     const severityOrder = { error: 0, warning: 1, info: 2 }
     return severityOrder[left.severity] - severityOrder[right.severity] ||
       compareStableStrings(left.code, right.code) ||
-      compareStableStrings(left.message, right.message)
+      compareStableStrings(left.message, right.message) ||
+      compareStableStrings(JSON.stringify(left.path ?? []), JSON.stringify(right.path ?? []))
   })
 
   return {
@@ -230,10 +283,36 @@ function escapeScript(value: string): string {
 
 function options(input: string | PublishedCoursePackageOptions): Required<PublishedCoursePackageOptions> {
   const normalized = typeof input === 'string'
-    ? { playerBundle: input, lang: 'zh-CN' }
-    : { playerBundle: input.playerBundle, lang: input.lang ?? 'zh-CN' }
+    ? { playerBundle: input, lang: 'zh-CN', singleHtmlMode: 'offline-portable' as const }
+    : {
+      playerBundle: input.playerBundle,
+      lang: input.lang ?? 'zh-CN',
+      singleHtmlMode: input.singleHtmlMode ?? 'offline-portable',
+    }
   if (!normalized.playerBundle.trim()) throw new Error('Player Runtime 为空，无法生成课程导出物')
   return normalized
+}
+
+function buildStandalonePayload(
+  sources: CoursePublishSources,
+  mode: SingleHtmlExportMode,
+): PublishedCourseV2Payload {
+  if (mode === 'online-lightweight') {
+    const dependencies = collectOnlineRemoteAssetDependencies(
+      sources.project,
+      sources.components,
+    )
+    const invalid = dependencies?.find(
+      (dependency) => exactOnlineRemoteOrigin(dependency.url) === null,
+    )
+    if (invalid) throw new OnlineSingleHtmlDeliveryError(invalid)
+    return buildPublishedCourseV2Payload(sources, {
+      projectAssetUrl(_assetId, meta) {
+        return meta.remote?.url
+      },
+    })
+  }
+  return buildPublishedCourseV2Payload(sources)
 }
 
 function safeSegment(value: string): string {
@@ -269,13 +348,88 @@ function serializedAssignment(payload: PublishedCourseV2Payload): string {
   return `window.__H5_COURSE_PAYLOAD__=${serialized};`
 }
 
+const OFFLINE_STANDALONE_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src data: blob:; worker-src blob:"
+
+function exactHttpsOrigin(url: string): string | null {
+  return exactOnlineRemoteOrigin(url)
+}
+
+function exactConnectOrigin(value: string): string | null {
+  try {
+    const parsed = new URL(value.trim())
+    return parsed.protocol === 'https:' || parsed.protocol === 'wss:'
+      ? parsed.origin
+      : null
+  } catch {
+    return null
+  }
+}
+
+function cspSources(
+  fixed: readonly string[],
+  origins: ReadonlySet<string>,
+): string {
+  return [...fixed, ...[...origins].sort(compareStableStrings)].join(' ')
+}
+
+function onlineStandaloneCsp(
+  sources: CoursePublishSources,
+  payload: PublishedCourseV2Payload,
+): string {
+  const imageOrigins = new Set<string>()
+  const mediaOrigins = new Set<string>()
+  const fontOrigins = new Set<string>()
+  const connectOrigins = new Set(
+    (sources.project.network?.connectOrigins ?? [])
+      .map(exactConnectOrigin)
+      .filter((origin): origin is string => origin !== null),
+  )
+
+  for (const [assetId, asset] of Object.entries(payload.assets)) {
+    const origin = exactHttpsOrigin(asset.url)
+    if (!origin) continue
+    const metadata = sources.project.assets[assetId]
+      ?? Object.values(sources.project.assets).find((candidate) => candidate.id === assetId)
+    const mimeType = asset.mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+    if (
+      mimeType.startsWith('font/')
+      || mimeType === 'application/font-woff'
+      || mimeType === 'application/vnd.ms-fontobject'
+    ) {
+      fontOrigins.add(origin)
+    }
+    if (mimeType.startsWith('image/') || metadata?.kind === 'image') {
+      imageOrigins.add(origin)
+    }
+    if (
+      mimeType.startsWith('audio/')
+      || mimeType.startsWith('video/')
+      || metadata?.kind === 'audio'
+      || metadata?.kind === 'video'
+    ) {
+      mediaOrigins.add(origin)
+    }
+  }
+
+  return [
+    "default-src 'none'",
+    "script-src 'unsafe-inline' 'unsafe-eval' blob:",
+    "style-src 'unsafe-inline'",
+    `img-src ${cspSources(['data:', 'blob:'], imageOrigins)}`,
+    `media-src ${cspSources(['data:', 'blob:'], mediaOrigins)}`,
+    `font-src ${cspSources(['data:'], fontOrigins)}`,
+    `connect-src ${cspSources(['data:', 'blob:'], connectOrigins)}`,
+    'worker-src blob:',
+  ].join('; ')
+}
+
 function packageIndex(payload: PublishedCourseV2Payload, lang: string): string {
   return `<!doctype html>
 <html lang="${escapeHtml(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src blob:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src blob:">
   <title>${escapeHtml(payload.title)}</title>
   <link rel="stylesheet" href="./player/player.css">
 </head>
@@ -293,13 +447,16 @@ export function buildPublishedCourseStandaloneHtml(
   playerBundleOrOptions: string | PublishedCoursePackageOptions,
 ): string {
   const normalized = options(playerBundleOrOptions)
-  const payload = buildPublishedCourseV2Payload(sources)
+  const payload = buildStandalonePayload(sources, normalized.singleHtmlMode)
+  const contentSecurityPolicy = normalized.singleHtmlMode === 'online-lightweight'
+    ? onlineStandaloneCsp(sources, payload)
+    : OFFLINE_STANDALONE_CSP
   return `<!doctype html>
 <html lang="${escapeHtml(normalized.lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src data: blob:; worker-src blob:">
+  <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">
   <title>${escapeHtml(payload.title)}</title>
   <style>${COURSE_PLAYER_CSS}</style>
 </head>
@@ -382,7 +539,7 @@ export function buildCoursePackages(
 ): BuildCoursePackagesResult {
   const normalized = options(playerBundleOrOptions)
   if (delivery === 'standalone-html') {
-    const payload = buildPublishedCourseV2Payload(sources)
+    const payload = buildStandalonePayload(sources, normalized.singleHtmlMode)
     const html = buildPublishedCourseStandaloneHtml(sources, normalized)
     const files = { 'index.html': strToU8(html) }
     return {

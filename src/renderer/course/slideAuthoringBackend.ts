@@ -20,12 +20,15 @@ import {
   createSlideAuthoringHistory,
   redoSlideAuthoringHistory,
   selectSlideEditorLayers,
+  slideAuthoringRedoResourceTransition,
+  slideAuthoringUndoResourceTransition,
   transformSelectedSlideNativeLayers,
   undoSlideAuthoringHistory,
   SlideCommandError,
   type SlideAuthoringHistory,
   type SlideAuthoringSelection,
   type SlideAuthoringSessionRef,
+  type SlideAuthoringResourceTransition,
   type SlideAuthoringTarget,
   type SlideCommandOptions,
   type SlideCommandResult,
@@ -113,6 +116,7 @@ function freezeSession(session: SlideAuthoringSession): SlideAuthoringSession {
 function succeed(
   next: SlideAuthoringSession,
   historyEntry: boolean,
+  resourceTransition?: SlideAuthoringResourceTransition,
 ): SlideCommandResult {
   const session = freezeSession(next)
   return {
@@ -120,6 +124,7 @@ function succeed(
     nextSession: session,
     historyEntry,
     selection: session.selection,
+    ...(resourceTransition ? { resourceTransition } : {}),
   }
 }
 
@@ -251,8 +256,8 @@ export function makeSlideAuthoringTarget(
   const authoringAddress = makeAuthoringAddress({
     projectId: session.history.present.id,
     scope: layer.source,
-    surfaceId: view.surfaceId,
-    sceneId: view.sceneId,
+    surfaceId: layer.source === 'global' ? undefined : view.surfaceId,
+    sceneId: layer.source === 'scene' ? view.sceneId : undefined,
     carrier: slideLayerCarrier(layer.item as LayerItem),
     layerItemId,
     field: field ?? defaultSlideAuthoringField(layer.item as LayerItem),
@@ -929,6 +934,7 @@ export function undoSlideAuthoring(
 ): SlideCommandResult {
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
+  const resourceTransition = slideAuthoringUndoResourceTransition(session.history)
   const history = undoSlideAuthoringHistory(session.history)
   if (history === session.history) return succeed(session, false)
   return succeed({
@@ -936,7 +942,7 @@ export function undoSlideAuthoring(
     history,
     selection: selectionForHistory(session, history),
     generation: bumpGeneration(session),
-  }, false)
+  }, false, resourceTransition)
 }
 
 export function redoSlideAuthoring(
@@ -945,6 +951,7 @@ export function redoSlideAuthoring(
 ): SlideCommandResult {
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
+  const resourceTransition = slideAuthoringRedoResourceTransition(session.history)
   const history = redoSlideAuthoringHistory(session.history)
   if (history === session.history) return succeed(session, false)
   return succeed({
@@ -952,7 +959,7 @@ export function redoSlideAuthoring(
     history,
     selection: selectionForHistory(session, history),
     generation: bumpGeneration(session),
-  }, false)
+  }, false, resourceTransition)
 }
 
 /**

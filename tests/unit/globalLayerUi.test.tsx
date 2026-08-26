@@ -2,12 +2,19 @@ import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
-import type { RuntimeDocument } from '@/shared/runtimeTypes'
+import type {
+  CourseRuntimeDefinition,
+  RuntimeLayerItem,
+} from '@/shared/courseProjectTypes'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
+import { selectRuntimeInspectorAuthoringView } from '@/renderer/runtime/runtimeInspectorAuthoringView'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
   selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -48,8 +55,9 @@ function componentPackage(
   }
 }
 
-function runtime(label: string, value: string): RuntimeDocument {
+function runtime(label: string, value: string): CourseRuntimeDefinition {
   return {
+    protocol: 'canvas-runtime',
     runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'dom',
@@ -66,6 +74,69 @@ function runtime(label: string, value: string): RuntimeDocument {
     },
     assets: {},
   }
+}
+
+function runtimeItem(
+  layerItemId: string,
+  label: string,
+  order: number,
+  definition: CourseRuntimeDefinition,
+): RuntimeLayerItem {
+  return {
+    layerItemId,
+    label,
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    kind: 'runtime',
+    runtime: structuredClone(definition),
+  }
+}
+
+function installRuntimeDefinitions(
+  sceneId: string,
+  sceneRuntime: CourseRuntimeDefinition,
+  globalRuntime: CourseRuntimeDefinition,
+): void {
+  const store = useEditorStore.getState()
+  const current = selectActiveCourseProjectDocument(store)
+  if (!current) throw new Error('缺少当前 Course Project')
+  const project = structuredClone(current)
+  const surface = project.surfaces.find((candidate) => (
+    candidate.type === 'slide'
+    && candidate.scenes.some((scene) => scene.id === sceneId)
+  ))
+  if (!surface || surface.type !== 'slide') throw new Error('缺少当前 Slide Surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
+  if (!scene) throw new Error('缺少当前 Slide 场景')
+  const sceneOrder = allocateCourseLayerOrder(project, 0)
+  scene.layerItems.push(runtimeItem(
+    `test-scene-runtime-${sceneId}`,
+    '场景运行时',
+    sceneOrder,
+    sceneRuntime,
+  ))
+  const globalOrder = allocateCourseLayerOrder(project, sceneOrder + 1)
+  project.globalLayerItems.push({
+    item: runtimeItem(
+      `test-global-runtime-${project.id}`,
+      '全局运行时',
+      globalOrder,
+      globalRuntime,
+    ),
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  store.loadCourseProject(
+    project,
+    null,
+    store.assetFiles,
+    store.componentPackages,
+  )
 }
 
 beforeEach(() => {
@@ -131,13 +202,29 @@ describe('Project V8 global-layer editor UI', () => {
     const [firstScene, secondScene] = useEditorStore.getState().project.scenes
     const sceneRuntime = runtime('场景运行时标题', '场景原文')
     const globalRuntime = runtime('全局运行时标题', '全局原文')
-    store.setSceneRuntime(firstScene!.id, sceneRuntime)
-    store.setGlobalRuntime(globalRuntime)
+    installRuntimeDefinitions(firstScene!.id, sceneRuntime, globalRuntime)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(globalPackage.manifest.id)
     const globalNode = useEditorStore.getState().project.globalLayer.find(
       (item) => item.node.type === 'external-component',
     )!.node
+    const locationId = selectActiveCourseLocationId(useEditorStore.getState())
+    if (!locationId) throw new Error('缺少当前课程位置')
+    store.activateCourseLocation(locationId)
+    store.setEditingScope('global')
+    store.selectNode(globalNode.id)
+    const refreshed = useEditorStore.getState()
+    const canonicalProject = selectActiveCourseProjectDocument(refreshed)
+    if (!canonicalProject || !refreshed.courseAuthoringSession) {
+      throw new Error('缺少当前 Course Project 作者会话')
+    }
+    expect(selectRuntimeInspectorAuthoringView({
+      project: canonicalProject,
+      locationId,
+      editingScope: 'global',
+      activeStateId: null,
+      sessionToken: refreshed.courseAuthoringSession.token,
+    })).toMatchObject({ availability: 'available' })
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -180,12 +267,46 @@ describe('Project V8 global-layer editor UI', () => {
 
     act(() => useEditorStore.getState().selectNode(null))
     expect(screen.getByTestId('global-runtime-inspector')).toBeInTheDocument()
+    const globalRuntimeBefore = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    if (globalRuntimeBefore?.kind !== 'runtime') {
+      throw new Error('缺少 canonical 全局 Runtime')
+    }
+    const visibleBefore = globalRuntimeBefore.visible
+    fireEvent.click(screen.getByLabelText('启用运行时'))
+    const disabledGlobalRuntime = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    expect(disabledGlobalRuntime).toMatchObject({
+      kind: 'runtime',
+      visible: visibleBefore,
+      runtime: { enabled: false, renderMode: 'dom' },
+    })
+    fireEvent.change(screen.getByLabelText('渲染能力声明'), {
+      target: { value: 'hybrid' },
+    })
+    const hybridGlobalRuntime = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    expect(hybridGlobalRuntime).toMatchObject({
+      kind: 'runtime',
+      visible: visibleBefore,
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: false,
+        renderMode: 'hybrid',
+      },
+    })
     fireEvent.change(screen.getByLabelText('全局运行时标题'), {
       target: { value: '全局新标题' },
     })
+    fireEvent.blur(screen.getByLabelText('全局运行时标题'))
     fireEvent.change(screen.getByLabelText('全局运行时标题操作'), {
       target: { value: '统一开始' },
     })
+    fireEvent.blur(screen.getByLabelText('全局运行时标题操作'))
     expect(useEditorStore.getState().project.globalRuntime?.content.values).toEqual({
       title: '全局新标题',
       action: '统一开始',
@@ -194,14 +315,27 @@ describe('Project V8 global-layer editor UI', () => {
       globalRuntime.source,
     )
 
-    act(() => useEditorStore.getState().setActiveScene(firstScene!.id))
+    const projectAfterGlobalEdit = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )
+    const firstSceneLocation = projectAfterGlobalEdit?.locations.find(
+      (location) => location.kind === 'slide-scene'
+        && location.sceneId === firstScene!.id,
+    )
+    if (!firstSceneLocation) throw new Error('缺少首场景课程位置')
+    act(() => {
+      useEditorStore.getState().activateCourseLocation(firstSceneLocation.id)
+      useEditorStore.getState().setEditingScope('scene')
+    })
     expect(screen.getByTestId('scene-runtime-inspector')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('场景运行时标题'), {
       target: { value: '场景新标题' },
     })
+    fireEvent.blur(screen.getByLabelText('场景运行时标题'))
     fireEvent.change(screen.getByLabelText('场景运行时标题操作'), {
       target: { value: '进入互动' },
     })
+    fireEvent.blur(screen.getByLabelText('场景运行时标题操作'))
     const updatedSceneRuntime = useEditorStore
       .getState()
       .project.scenes.find((scene) => scene.id === firstScene!.id)!.runtime!
@@ -210,6 +344,152 @@ describe('Project V8 global-layer editor UI', () => {
       action: '进入互动',
     })
     expect(updatedSceneRuntime.source).toBe(sceneRuntime.source)
+  })
+
+  it('keeps an API 3 global Runtime exact and reachable from a Flow location', () => {
+    const store = useEditorStore.getState()
+    store.createNewFlowProject()
+    const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!canonical) throw new Error('缺少 Flow Course Project')
+    const api3Project = structuredClone(canonical)
+    const source = 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return{destroy(){}}}})'
+    api3Project.globalLayerItems.push({
+      item: {
+        kind: 'runtime',
+        layerItemId: 'flow-global-api-3-runtime',
+        label: 'Flow 全局 API 3 Runtime',
+        frame: { mode: 'absolute', x: 120, y: 80, width: 640, height: 360 },
+        order: 99,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        runtime: {
+          protocol: 'surface-runtime',
+          runtimeApiVersion: 3,
+          enabled: false,
+          renderMode: 'dom',
+          source,
+          content: {
+            values: { title: '曲面运行时', action: '开始' },
+            metadata: {
+              title: { label: 'API 3 全局标题' },
+              action: { label: 'API 3 全局操作' },
+            },
+          },
+          assets: {},
+        },
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const visibleBefore = true
+
+    useEditorStore.getState().loadCourseProject(api3Project, null, {}, {})
+    useEditorStore.getState().activateCourseLocation(api3Project.startLocationId)
+    useEditorStore.getState().selectNode(null)
+    useEditorStore.getState().setEditingScope('global')
+    useEditorStore.setState({
+      editorMode: 'professional',
+      selectedNodeId: null,
+      selectedNodeIds: [],
+    })
+    expect(useEditorStore.getState().flowSession?.selection.authoringScope)
+      .toBe('global')
+
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+
+    expect(screen.getByTestId('global-runtime-inspector')).toBeInTheDocument()
+    expect(screen.queryByTestId('scene-runtime-inspector')).not.toBeInTheDocument()
+    expect(screen.getByText('surface-runtime · API 3')).toBeInTheDocument()
+    expect(screen.getByLabelText('启用运行时')).not.toBeChecked()
+    const renderMode = screen.getByLabelText<HTMLSelectElement>('渲染能力声明')
+    expect(renderMode).toBeDisabled()
+    expect(renderMode).toHaveValue('dom')
+    expect(renderMode.options).toHaveLength(1)
+    expect(screen.getByLabelText('API 3 全局标题')).toHaveValue('曲面运行时')
+
+    fireEvent.click(screen.getByLabelText('启用运行时'))
+
+    const updated = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    expect(updated).toMatchObject({
+      kind: 'runtime',
+      visible: visibleBefore,
+      runtime: {
+        protocol: 'surface-runtime',
+        runtimeApiVersion: 3,
+        enabled: true,
+        renderMode: 'dom',
+        source,
+        content: {
+          values: {
+            title: '曲面运行时',
+            action: '开始',
+          },
+        },
+      },
+    })
+  })
+
+  it('keeps the global Runtime inspector above a retained Spatial graph selection', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!canonical) throw new Error('缺少 Spatial Course Project')
+    const spatialProject = structuredClone(canonical)
+    spatialProject.globalLayerItems.push({
+      item: {
+        kind: 'runtime',
+        layerItemId: 'spatial-global-runtime',
+        label: 'Spatial 全局 Runtime',
+        frame: { mode: 'absolute', x: 80, y: 60, width: 640, height: 360 },
+        order: 100001,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        runtime: {
+          protocol: 'canvas-runtime',
+          runtimeApiVersion: 2,
+          enabled: true,
+          renderMode: 'hybrid',
+          source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
+          content: { values: {} },
+          assets: {},
+        },
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+
+    useEditorStore.getState().loadCourseProject(spatialProject, null, {}, {})
+    useEditorStore.getState().activateCourseLocation(spatialProject.startLocationId)
+    useEditorStore.getState().setEditingScope('global')
+    useEditorStore.getState().setSpatialGraphSelection({
+      kind: 'path',
+      id: 'retained-spatial-path',
+    })
+    useEditorStore.setState({
+      editorMode: 'professional',
+      selectedNodeId: null,
+      selectedNodeIds: [],
+    })
+    expect(useEditorStore.getState()).toMatchObject({
+      editingScope: 'global',
+      spatialGraphSelection: {
+        kind: 'path',
+        id: 'retained-spatial-path',
+      },
+    })
+
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+
+    expect(screen.getByTestId('global-runtime-inspector')).toBeInTheDocument()
+    expect(screen.queryByTestId('scene-runtime-inspector')).not.toBeInTheDocument()
+    expect(screen.getByText('canvas-runtime · API 2')).toBeInTheDocument()
   })
 
   it('offers a state-free scene directory and keeps fixed scene targets as an advanced action', () => {
@@ -235,7 +515,12 @@ describe('Project V8 global-layer editor UI', () => {
       name: '跳转到指定场景（高级）',
     }).length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getByLabelText('打开课件时默认折叠'))
+    const defaultCollapsedCheckbox = screen.getByLabelText<HTMLInputElement>(
+      '打开课件时默认折叠',
+    )
+    expect(defaultCollapsedCheckbox).toBeChecked()
+    fireEvent.click(defaultCollapsedCheckbox)
+    expect(defaultCollapsedCheckbox).not.toBeChecked()
     fireEvent.change(screen.getAllByLabelText('点击动作')[0]!, {
       target: { value: 'scene.go' },
     })
@@ -253,7 +538,7 @@ describe('Project V8 global-layer editor UI', () => {
     if (updated.type !== 'teacher-controller') throw new Error('缺少教师控制器')
     expect(updated).toMatchObject({
       collapsible: true,
-      defaultCollapsed: true,
+      defaultCollapsed: false,
     })
     expect(updated.buttons[0]?.action).toEqual({
       type: 'scene.go',

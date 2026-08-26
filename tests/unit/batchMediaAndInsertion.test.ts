@@ -157,7 +157,7 @@ describe('batch media transactions', () => {
   it('routes more than twelve valid placements to the library without creating nodes', () => {
     const items = Array.from({ length: MAX_BATCH_CANVAS_ITEMS + 1 }, (_, index) => ({
       meta: image(`asset_overflow_${index}`, 800, 600),
-      bytes: Uint8Array.from([index]),
+      bytes: Uint8Array.from([index, index, index, index]),
     }))
     const plan = planMediaBatchImport(
       'add',
@@ -187,8 +187,8 @@ describe('batch media transactions', () => {
     store.loadProject(project, null)
     store.setActiveTab('elements')
     const items = [
-      { meta: image('asset_capacity_a', 800, 600), bytes: Uint8Array.from([1]) },
-      { meta: image('asset_capacity_b', 800, 600), bytes: Uint8Array.from([2]) },
+      { meta: image('asset_capacity_a', 800, 600), bytes: Uint8Array.from([1, 1, 1, 1]) },
+      { meta: image('asset_capacity_b', 800, 600), bytes: Uint8Array.from([2, 2, 2, 2]) },
     ]
     const plan = planMediaBatchImport(
       'add',
@@ -263,7 +263,7 @@ describe('continuous insertion context', () => {
     expect(useEditorStore.getState().activeTab).toBe('properties')
   })
 
-  it('keeps the insertion tab when creating a missing teacher controller', () => {
+  it('keeps the insertion tab when creating a missing teacher controller and opens properties when restoring it', () => {
     const project = createProject({ includeDefaultController: false, controls: 'none' })
     const store = useEditorStore.getState()
     store.loadProject(project, null)
@@ -274,5 +274,15 @@ describe('continuous insertion context', () => {
     expect(state.activeTab).toBe('elements')
     expect(state.project.globalLayer).toHaveLength(1)
     expect(state.project.globalLayer[0]!.node.type).toBe('teacher-controller')
+    expect(state.selectedNodeId).toBe(state.project.globalLayer[0]!.node.id)
+    expect(state.editingScope).toBe('global')
+
+    store.updatePlayback({ controls: 'none' })
+    store.setActiveTab('elements')
+    store.ensureTeacherController()
+
+    const restoredState = useEditorStore.getState()
+    expect(restoredState.activeTab).toBe('properties')
+    expect(restoredState.selectedNodeId).toBe(restoredState.project.globalLayer[0]!.node.id)
   })
 })

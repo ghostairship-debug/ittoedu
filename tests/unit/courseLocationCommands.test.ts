@@ -13,7 +13,6 @@ import {
   reorderCourseSurfaces,
 } from '@/renderer/course/courseLocationCommands'
 import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
-import { appendBlankFlowPage } from '@/renderer/project/createFlowCourseProject'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
@@ -118,9 +117,8 @@ describe('courseLocationCommands', () => {
     expect(result.reason).toBe('stale-revision')
   })
 
-  it('addCourseFlowPage succeeds where appendBlankFlowPage alone lacks mixedPrintPlan sync', () => {
+  it('adds a Flow page and synchronizes the mixed print plan', () => {
     const flow = createBlankFlowCourseProject({ now: NOW })
-    expect(() => appendBlankFlowPage(flow)).toThrow()
 
     const added = addCourseFlowPage(flow, { now: NOW, expectedRevision: flow.revision })
     expect(added.ok).toBe(true)

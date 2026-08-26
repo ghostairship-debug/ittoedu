@@ -6,7 +6,6 @@ import {
   sceneNodeSchema,
 } from '../../projectSchema'
 import type {
-  AssetMeta,
   BaseNode,
   EmbeddedComponentPackageMeta,
   ProjectDesignTokens,
@@ -17,6 +16,7 @@ import type {
 } from '../../projectTypes'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  type CourseAssetMeta,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
@@ -984,7 +984,53 @@ export const courseSurfaceSchema: z.ZodType<CourseSurfaceDocument> = z.discrimin
   spatialSurfaceSchema,
 ])
 
-const assetMetaSchema: z.ZodType<AssetMeta> = z.object({
+const assetRemoteDeliveryUrlSchema = z.string().trim().min(1).max(2_000).refine(
+  (value) => {
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' && url.username === '' && url.password === ''
+    } catch {
+      return false
+    }
+  },
+  'Remote asset delivery URL must be an https URL without credentials',
+)
+
+/**
+ * Normalized exact network origin: `https:`/`wss:` only, no wildcard, no
+ * userinfo, no path/query/fragment. Requiring the string to equal its URL
+ * `origin` enforces lowercase scheme/host and forbids default-port spelling.
+ */
+export const courseConnectOriginSchema = z.string().trim().min(1).max(300).refine(
+  (value) => {
+    try {
+      const url = new URL(value)
+      if (url.protocol !== 'https:' && url.protocol !== 'wss:') return false
+      if (url.username !== '' || url.password !== '') return false
+      if (url.hostname.includes('*')) return false
+      if (url.pathname !== '/' || url.search !== '' || url.hash !== '') return false
+      return url.origin === value
+    } catch {
+      return false
+    }
+  },
+  'Connect origin must be a normalized exact https/wss origin',
+)
+
+export const courseNetworkDeclarationSchema = z.object({
+  connectOrigins: z.array(courseConnectOriginSchema).max(1_000).optional(),
+}).strict().superRefine((network, context) => {
+  const origins = network.connectOrigins ?? []
+  if (new Set(origins).size !== origins.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['connectOrigins'],
+      message: 'Connect origins must be unique',
+    })
+  }
+})
+
+const assetMetaSchema: z.ZodType<CourseAssetMeta> = z.object({
   id: stableIdSchema,
   filename: z.string().trim().min(1).max(500),
   mimeType: z.string().trim().min(1).max(200),
@@ -994,6 +1040,9 @@ const assetMetaSchema: z.ZodType<AssetMeta> = z.object({
   width: finiteNumber.positive().optional(),
   height: finiteNumber.positive().optional(),
   duration: finiteNumber.nonnegative().optional(),
+  remote: z.object({
+    url: assetRemoteDeliveryUrlSchema,
+  }).strict().optional(),
 }).strict()
 
 const componentPackageSchema: z.ZodType<EmbeddedComponentPackageMeta> = z.object({
@@ -1183,6 +1232,7 @@ export const courseProjectDocumentSchema = z.object({
   updatedAt: z.string().datetime(),
   assets: z.record(z.string(), assetMetaSchema),
   componentPackages: z.record(z.string(), componentPackageSchema),
+  network: courseNetworkDeclarationSchema.optional(),
   designTokens: courseDesignTokensSchema,
   media: courseMediaSchema,
   playback: coursePlaybackSchema,

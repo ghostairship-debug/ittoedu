@@ -10,8 +10,6 @@ vi.mock('phaser', () => ({
   Input: { Events: {} },
 }))
 
-vi.mock('../../src/player/PlayerApp', () => ({ PlayerApp: class {} }))
-
 import { renderNode, type RenderNodeContext } from '../../src/player/renderNode'
 import { addPptxFormulaNode } from '../../src/renderer/export/pptxTextAndShape'
 import { renderSceneCanvas } from '../../src/renderer/export/renderSceneImages'

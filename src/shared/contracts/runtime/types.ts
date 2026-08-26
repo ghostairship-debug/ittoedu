@@ -255,7 +255,7 @@ export interface RuntimeAuthoringApi {
 
 export type RuntimeAuthoringTargetSource = 'registered' | 'dom'
 
-/** A read-only, session-local target snapshot emitted by an isolated Player. */
+/** A read-only, session-local target snapshot emitted by an authoring host. */
 export interface RuntimeAuthoringTarget {
   /** Stable for the lifetime of the registered region or DOM element. */
   targetId: string
@@ -299,7 +299,7 @@ export interface RuntimeCreateContextBase {
   navigation: RuntimeNavigationApi
   assessment: Readonly<RuntimeAssessmentApi>
   evidence: Readonly<RuntimeEvidenceApi>
-  /** Present only when the definition and isolated host both opt into authoring V1. */
+  /** Present only when the definition and authoring host both opt into authoring V1. */
   authoring?: RuntimeAuthoringApi
   emit(eventName: string, payload?: unknown): void
 }

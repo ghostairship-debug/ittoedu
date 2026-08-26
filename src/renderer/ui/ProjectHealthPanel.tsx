@@ -40,6 +40,20 @@ export function ProjectHealthPanel({
   onClose,
   onExportDiagnostics,
 }: ProjectHealthPanelProps) {
+  if (!open) return null
+
+  return (
+    <OpenProjectHealthPanel
+      onClose={onClose}
+      onExportDiagnostics={onExportDiagnostics}
+    />
+  )
+}
+
+function OpenProjectHealthPanel({
+  onClose,
+  onExportDiagnostics,
+}: Omit<ProjectHealthPanelProps, 'open'>) {
   const project = useEditorStore((state) => state.project)
   const componentPackages = useEditorStore((state) => state.componentPackages)
   const diagnostics = useMemo(
@@ -52,8 +66,6 @@ export function ProjectHealthPanel({
     [project],
   )
   const visualDensity = useMemo(() => analyzeVisualDensity(project), [project])
-
-  if (!open) return null
 
   const locate = (diagnostic: ProjectHealthDiagnostic) => {
     const route = resolveProjectHealthRoute(project, diagnostic)

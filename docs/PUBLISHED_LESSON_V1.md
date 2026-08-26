@@ -55,11 +55,17 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 
 选择 UTF-16LE 是为了精确保留所有 JavaScript 字符串，包括中文、Emoji、代理对和孤立代理代码单元。编码只避免原始文件结构和明文源码的主动交付，不提供加密或抗逆向能力。
 
+当前 CoursePlayer 对可执行 Runtime 的 Published playback 是明确的 partial slice：Slide `scene.layerItems` 中的 API 2 `canvas-runtime` 可按 DOM/Phaser/hybrid 执行；`globalLayerItems` 中的 API 2 由 Published session 持有唯一实例，并把同一容器迁入当前 Slide/Flow/Spatial global wrapper；Slide scene-local 与 Flow surface-local 的 API 3 DOM `surface-runtime` 也可执行。global API 3、其它 shared、Flow/Spatial scene-local API 2 与 capture 等未覆盖 carrier 仍使用后备。API 2 的宿主动作、presentation 与节点解析尚未接入，不得把“源码已携带”解释为完整宿主上下文 parity。三种互动交付与编辑器当前位置/整课预览复用同一 Published host。
+
+Component API 4 的 Published playback 同样按已验证切片声明：Slide `scene.layerItems` 中 scene-local Phaser component 会在当前位置试运行、整课预览、离线/在线单 HTML 与网页包中执行真实代码、素材、props、emit、frame/order、命中与 generation 生命周期。global/surface-shared、Flow/Spatial、hybrid 及静态 capture 仍需各自 consumer 证据，不得从这一切片外推。
+
 ## 两种互动发布物
 
 ### 单 HTML
 
-- PublishedLesson V1、素材和 Player 全部内联；
+- 离线便携模式把 PublishedLesson V1、全部发布素材和 Player 内联；
+- 在线轻量模式只把实际引用且声明 `remote.url` 的工程素材保留为原 HTTPS URL；未声明远程地址的工程素材与全部组件素材仍内联；
+- 在线轻量 CSP 只加入实际远程图片/媒体/字体的精确 origin 与工程 `network.connectOrigins`，不允许 wildcard hostname 或远程脚本；
 - 发布 JSON 整体使用 Base64 装入 HTML；
 - 不含 `.h5lesson`、`project.json` 或组件包目录。
 
@@ -71,16 +77,16 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 - `assets/` 中的工程运行素材
 - `component-assets/` 中的组件运行素材
 
-网页包不再同时保存 `course.json` 和离线回退副本，也不生成组件 `manifest.json` 或 `runtime.js`。唯一数据脚本同时支持静态服务器和 `file://` 双击打开。
+网页包不再同时保存 `course.json` 和离线回退副本，也不生成组件 `manifest.json` 或 `runtime.js`。工程与组件素材继续使用包内相对路径，唯一数据脚本同时支持静态服务器和 `file://` 双击打开；在线轻量单 HTML 的远程投影不会改变网页包语义。
 
 ## 验收门禁
 
 发布相关测试必须同时验证：
 
-1. 单 HTML 与网页包产生相同的 PublishedLesson 语义；
+1. 离线便携单 HTML 与网页包产生相同的 PublishedLesson 内容语义，仅素材 URL 载体不同；在线轻量单 HTML 只允许合同声明的远程投影差异；
 2. 发布数据不含工程包装、工程时间、组件包结构和编辑器字段；
 3. 网页包只有一份发布数据，不含组件源码/manifest 重复文件和源码映射；
 4. 所有素材 URL 在网页包根目录内，不能路径穿越；
 5. 编码前后的任意 Unicode JavaScript 代码单元完全一致；
 6. Player 能把 PublishedLesson 恢复为运行模型并实际注册组件；
-7. 当前 Project V8 作者态 `ExportPayload` 可作为内部预览和捕获输入；Project V1–V7 原始 Payload 必须明确拒绝。
+7. 仍在渐进退役的 V8-shaped `ExportPayload` 只可作为内部作者态预览和捕获输入，不是可打开或可保存的工程格式；Project V1–V8 `.h5lesson` 必须明确拒绝。

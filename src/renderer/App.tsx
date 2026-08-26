@@ -23,18 +23,17 @@ import type {
 import type { AssetKind } from '../shared/projectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
-import { buildStandaloneHtml } from './export/buildStandaloneHtml'
 import { buildPublishedCourseV2Payload } from './export/course/buildPublishedCourse'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageAsync,
   collectCoursePackageExportPreflight,
   type CoursePackagePreflightReport,
+  type SingleHtmlExportMode,
 } from './export/course/buildCoursePackages'
 import { buildCoursePptx } from './export/course/buildCoursePptx'
 import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
 import { buildFlowDocx, uniqueFlowDocxFilename } from './export/course/flowDocx'
-import { buildWebPackageFromProjectAsync } from './export/buildWebPackage'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
@@ -47,7 +46,7 @@ import {
   type ExportPreflightReport,
 } from './export/exportPreflight'
 import { loadPlayerBundle } from './export/loadPlayerBundle'
-import { renderProjectSceneImages, renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
+import { renderProjectSceneImages } from './export/renderSceneImages'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -90,6 +89,7 @@ import {
   selectSlideAuthoringBackend,
   useEditorStore,
   MAX_BATCH_CANVAS_ITEMS,
+  type ComponentPackageReplacementTarget,
   type ImportedAssetBatchItem,
 } from './store/editorStore'
 import { shouldIgnoreSlideLayerDeleteForFocus } from './course/v9SlideActionCommands'
@@ -137,22 +137,62 @@ function activeCoursePublishSources() {
   }
 }
 
+type CourseDeliveryTarget = 'full-preview' | 'single-html' | 'web-package' | 'pdf'
+
+function courseDeliveryUnavailable(target: CourseDeliveryTarget): UserFacingError {
+  const title = target === 'full-preview'
+    ? '整课预览不可用'
+    : target === 'single-html'
+      ? '单 HTML 导出不可用'
+      : target === 'web-package'
+        ? '网页包导出不可用'
+        : 'PDF 导出不可用'
+  return new UserFacingError(
+    title,
+    '当前编辑会话没有可发布的 Course Project V9 文档。',
+    '请新建或重新打开受支持的课程工程后再试。',
+  )
+}
+
 function isSlideOnlyCourseProject(project: CourseProjectDocument): boolean {
   return project.locations.every((location) => location.kind === 'slide-scene')
     && project.surfaces.every((surface) => surface.type === 'slide')
+}
+
+function mapCoursePackagePreflightItems(
+  target: ExportPreflightReport['target'],
+  report: CoursePackagePreflightReport,
+): ExportPreflightItem[] {
+  return report.items.map((item) => ({
+    severity: item.severity,
+    code: item.code as ExportPreflightItem['code'],
+    message: item.message,
+    target,
+    ...(item.path ? { path: item.path } : {}),
+  }))
+}
+
+function coursePackagePreflightToExportReport(
+  target: 'single-html' | 'web-package',
+  project: CourseProjectDocument,
+  report: CoursePackagePreflightReport,
+): ExportPreflightReport {
+  return {
+    reportVersion: 1,
+    projectId: project.id,
+    schemaVersion: project.schemaVersion,
+    target,
+    generatedAt: report.generatedAt,
+    items: mapCoursePackagePreflightItems(target, report),
+    summary: { ...report.summary },
+  }
 }
 
 function mergeCoursePackagePreflight(
   base: ExportPreflightReport,
   extra: CoursePackagePreflightReport,
 ): ExportPreflightReport {
-  const mapped: ExportPreflightItem[] = extra.items.map((item) => ({
-    severity: item.severity,
-    code: item.code as ExportPreflightItem['code'],
-    message: item.message,
-    target: base.target,
-    ...(item.path ? { path: item.path } : {}),
-  }))
+  const mapped = mapCoursePackagePreflightItems(base.target, extra)
   const items = [...base.items]
   for (const item of mapped) {
     if (items.some((existing) => existing.code === item.code && existing.message === item.message)) {
@@ -377,6 +417,7 @@ export default function App() {
     | {
       mode: 'replace'
       packageId: string
+      target: ComponentPackageReplacementTarget
       packageData: ComponentPackageData
       sourceFileName: string
     }
@@ -410,8 +451,13 @@ export default function App() {
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [exportPreflightReport, setExportPreflightReport] =
     useState<ExportPreflightReport | null>(null)
+  const [pendingSingleHtmlMode, setPendingSingleHtmlMode] =
+    useState<SingleHtmlExportMode | null>(null)
   const saveInFlightRef = useRef(false)
-  const pendingLargeHtmlRef = useRef<string | null>(null)
+  const pendingLargeHtmlRef = useRef<{
+    html: string
+    mode: SingleHtmlExportMode
+  } | null>(null)
   const recoveryRevisionRef = useRef(0)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
     RecoverySnapshot,
@@ -424,6 +470,7 @@ export default function App() {
   const dirty = useEditorStore((state) => state.dirty)
   const project = useEditorStore((state) => state.project)
   const projectPath = useEditorStore((state) => state.projectPath)
+  const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const sidecarFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
@@ -458,15 +505,26 @@ export default function App() {
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
   )
-  const replacePackageInStore = useEditorStore(
-    (state) => state.replaceComponentPackage,
+  const captureComponentPackageReplacementTarget = useEditorStore(
+    (state) => state.captureComponentPackageReplacementTarget,
+  )
+  const replacePackageAtTarget = useEditorStore(
+    (state) => state.replaceComponentPackageAtTarget,
   )
   const addImageNodes = useEditorStore((state) => state.addImageNodes)
-  const replaceImageAsset = useEditorStore(
-    (state) => state.replaceImageAsset,
+  const captureImageReplacementTarget = useEditorStore(
+    (state) => state.captureImageReplacementTarget,
+  )
+  const replaceImageAssetAtTarget = useEditorStore(
+    (state) => state.replaceImageAssetAtTarget,
   )
   const addVideoNodes = useEditorStore((state) => state.addVideoNodes)
-  const importAssets = useEditorStore((state) => state.importAssets)
+  const captureMediaLibraryImportTarget = useEditorStore(
+    (state) => state.captureMediaLibraryImportTarget,
+  )
+  const importAssetsAtTarget = useEditorStore(
+    (state) => state.importAssetsAtTarget,
+  )
   const importSounds = useEditorStore((state) => state.importSounds)
 
   const run = useCallback(
@@ -666,22 +724,41 @@ export default function App() {
     ) => {
       await run(async () => {
         if (mode === 'replace') {
+          const target = captureImageReplacementTarget()
+          if (!target) {
+            throw new UserFacingError(
+              '无法替换图片',
+              '当前没有可替换的 Slide 图片。',
+              '请先选择当前幻灯片中的图片，再点击“替换图片”。',
+            )
+          }
           const file = await desktopApi().selectImage()
           if (!file) return
           const dimensions = await readImageDimensions(file.bytes, file.mimeType)
           const imported = createImageAssetImport(file, { dimensions })
-          const node = selectSelectedNode(useEditorStore.getState())
-          if (!node || node.type !== 'image') {
+          const result = replaceImageAssetAtTarget(
+            target,
+            imported.meta,
+            imported.bytes,
+          )
+          if (!result.ok) {
             throw new UserFacingError(
               '无法替换图片',
-              '当前没有选中图片节点。',
-              '请先选择画布中的图片，再点击“替换图片”。',
+              result.reason,
+              '请重新选择目标图片，再次点击“替换图片”。',
             )
           }
-          replaceImageAsset(node.id, imported.meta, imported.bytes)
           return
         }
 
+        const libraryTarget = captureMediaLibraryImportTarget()
+        if (!libraryTarget) {
+          throw new UserFacingError(
+            '无法导入图片',
+            '当前没有可写入的 Course Project。',
+            '请重新打开或新建课件后再试。',
+          )
+        }
         const batch = await desktopApi().selectImages()
         if (!batch) return
         const prepared = await prepareAssetBatch<SelectedImageBatchFile>(
@@ -694,6 +771,34 @@ export default function App() {
           },
         )
         const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+        const importPlan = planMediaBatchImport(
+          mode,
+          prepared.placements.length,
+          MAX_BATCH_CANVAS_ITEMS,
+        )
+        const importIntoCapturedLibrary = (items: ImportedAssetBatchItem[]) => {
+          const result = importAssetsAtTarget(libraryTarget, items)
+          if (!result.ok) {
+            throw new UserFacingError(
+              '图片批量入库已取消',
+              result.reason,
+              '工程已发生变化；请重新选择文件后再试。',
+            )
+          }
+        }
+        if (importPlan.destination === 'library') {
+          importIntoCapturedLibrary(prepared.additions)
+          reportBatchOutcome({
+            label: mode === 'library' ? '图片批量入库' : '图片批量添加',
+            completedCount: prepared.additions.length,
+            duplicateCount: prepared.duplicateCount,
+            issues,
+            ...(importPlan.overflowToLibrary
+              ? { libraryFallback: 'batch-size' as const }
+              : {}),
+          })
+          return
+        }
         if (await importCandidateMediaIfInjected({
           kind: 'image',
           items: mode === 'library' ? prepared.additions : prepared.placements,
@@ -711,17 +816,12 @@ export default function App() {
           })
           return
         }
-        const importPlan = planMediaBatchImport(
-          mode,
-          prepared.placements.length,
-          MAX_BATCH_CANVAS_ITEMS,
-        )
         const commitResult = commitMediaBatchImport({
           plan: importPlan,
           placements: prepared.placements,
           additions: prepared.additions,
           placeOnCanvas: (items) => addImageNodes(items, position),
-          importIntoLibrary: importAssets,
+          importIntoLibrary: importIntoCapturedLibrary,
         })
         reportBatchOutcome({
           label: mode === 'library' ? '图片批量入库' : '图片批量添加',
@@ -732,7 +832,15 @@ export default function App() {
         })
       }, '图片读取失败。请重新选择受支持的图片。')
     },
-    [addImageNodes, importAssets, replaceImageAsset, reportBatchOutcome, run],
+    [
+      addImageNodes,
+      captureMediaLibraryImportTarget,
+      captureImageReplacementTarget,
+      importAssetsAtTarget,
+      replaceImageAssetAtTarget,
+      reportBatchOutcome,
+      run,
+    ],
   )
 
   const selectImageAsset = useCallback(async (): Promise<ImportedImageAsset | null> => {
@@ -787,6 +895,14 @@ export default function App() {
     position?: { x?: number; y?: number },
   ) => {
     await run(async () => {
+      const libraryTarget = captureMediaLibraryImportTarget()
+      if (!libraryTarget) {
+        throw new UserFacingError(
+          '无法导入视频',
+          '当前没有可写入的 Course Project。',
+          '请重新打开或新建课件后再试。',
+        )
+      }
       const batch = await desktopApi().selectVideos()
       if (!batch) return
       const prepared = await prepareAssetBatch<SelectedMediaBatchFile>(
@@ -799,6 +915,34 @@ export default function App() {
         },
       )
       const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+      const importPlan = planMediaBatchImport(
+        mode,
+        prepared.placements.length,
+        MAX_BATCH_CANVAS_ITEMS,
+      )
+      const importIntoCapturedLibrary = (items: ImportedAssetBatchItem[]) => {
+        const result = importAssetsAtTarget(libraryTarget, items)
+        if (!result.ok) {
+          throw new UserFacingError(
+            '视频批量入库已取消',
+            result.reason,
+            '工程已发生变化；请重新选择文件后再试。',
+          )
+        }
+      }
+      if (importPlan.destination === 'library') {
+        importIntoCapturedLibrary(prepared.additions)
+        reportBatchOutcome({
+          label: mode === 'add' ? '视频批量添加' : '视频批量入库',
+          completedCount: prepared.additions.length,
+          duplicateCount: prepared.duplicateCount,
+          issues,
+          ...(importPlan.overflowToLibrary
+            ? { libraryFallback: 'batch-size' as const }
+            : {}),
+        })
+        return
+      }
       if (await importCandidateMediaIfInjected({
         kind: 'video',
         items: mode === 'library' ? prepared.additions : prepared.placements,
@@ -816,17 +960,12 @@ export default function App() {
         })
         return
       }
-      const importPlan = planMediaBatchImport(
-        mode,
-        prepared.placements.length,
-        MAX_BATCH_CANVAS_ITEMS,
-      )
       const commitResult = commitMediaBatchImport({
         plan: importPlan,
         placements: prepared.placements,
         additions: prepared.additions,
         placeOnCanvas: (items) => addVideoNodes(items, position),
-        importIntoLibrary: importAssets,
+        importIntoLibrary: importIntoCapturedLibrary,
       })
       reportBatchOutcome({
         label: mode === 'add' ? '视频批量添加' : '视频批量入库',
@@ -836,7 +975,13 @@ export default function App() {
         libraryFallback: commitResult.libraryFallback,
       })
     }, '视频读取失败。请重新选择 MP4 或 WebM 文件。')
-  }, [addVideoNodes, importAssets, reportBatchOutcome, run])
+  }, [
+    addVideoNodes,
+    captureMediaLibraryImportTarget,
+    importAssetsAtTarget,
+    reportBatchOutcome,
+    run,
+  ])
 
   const handleImportComponent = useCallback(() => {
     void run(async () => {
@@ -906,6 +1051,14 @@ export default function App() {
 
   const handleReplaceComponent = useCallback((packageId: string) => {
     void run(async () => {
+      const target = captureComponentPackageReplacementTarget(packageId)
+      if (!target) {
+        throw new UserFacingError(
+          '组件替换已取消',
+          `工程中不存在可替换的组件包“${packageId}”。`,
+          '请刷新工程组件列表后重试。',
+        )
+      }
       const file = await desktopApi().selectComponentPackage()
       if (!file) return
       const sha256 = await componentPackageSha256(file.bytes)
@@ -926,20 +1079,28 @@ export default function App() {
       setComponentPackageRequest({
         mode: 'replace',
         packageId,
+        target,
         packageData: imported,
         sourceFileName: file.name,
       })
     }, '组件替换包读取失败，工程内原版本已保留。')
-  }, [run])
+  }, [captureComponentPackageReplacementTarget, run])
 
   const performComponentReplacement = useCallback(() => {
     const request = componentPackageRequest
     setComponentPackageRequest(null)
     if (!request) return
     void run(async () => {
-      replacePackageInStore(request.packageId, request.packageData)
+      const result = replacePackageAtTarget(request.target, request.packageData)
+      if (!result.ok) {
+        throw new UserFacingError(
+          '组件替换失败',
+          result.reason,
+          '工程或组件状态已发生变化，请重新开始替换。',
+        )
+      }
     }, '组件替换失败，工程内原版本已保留。')
-  }, [componentPackageRequest, replacePackageInStore, run])
+  }, [componentPackageRequest, replacePackageAtTarget, run])
 
   const performCatalogPackageOperation = useCallback(async (
     entries: AvailableComponentCatalogPackage[],
@@ -973,6 +1134,16 @@ export default function App() {
           '请刷新组件目录，重新审阅版本和哈希后再试。',
         )
       }
+      const updateTarget = mode === 'update' && updateEntry
+        ? stateBefore.captureComponentPackageReplacementTarget(updateEntry.packageId)
+        : null
+      if (mode === 'update' && !updateTarget) {
+        throw new UserFacingError(
+          '组件更新已取消',
+          '工程内组件替换目标已经失效。',
+          '请刷新组件目录，重新审阅版本和哈希后再试。',
+        )
+      }
 
       const importedPackages: ComponentPackageData[] = []
       for (const entry of pendingEntries) {
@@ -999,7 +1170,14 @@ export default function App() {
         }))
       }
       if (mode === 'update') {
-        replacePackageInStore(updateEntry!.packageId, importedPackages[0]!)
+        const result = replacePackageAtTarget(updateTarget!, importedPackages[0]!)
+        if (!result.ok) {
+          throw new UserFacingError(
+            '组件更新已取消',
+            result.reason,
+            '工程或组件状态已发生变化，请刷新组件目录后重试。',
+          )
+        }
         return true
       }
       const latestState = useEditorStore.getState()
@@ -1022,7 +1200,7 @@ export default function App() {
       ? '组件更新失败，工程内原版本已保留。'
       : '目录组件嵌入失败，工程未改变。')
     return completed === true
-  }, [importPackagesIntoStore, replacePackageInStore, run])
+  }, [importPackagesIntoStore, replacePackageAtTarget, run])
 
   const requestCatalogPackageBatch = useCallback(async (
     entries: AvailableComponentCatalogPackage[],
@@ -1049,56 +1227,57 @@ export default function App() {
     }, '组件目录刷新失败。')
   }, [run])
 
-  const buildHtml = useCallback(() => {
+  const buildHtml = useCallback((
+    singleHtmlMode: SingleHtmlExportMode = 'offline-portable',
+  ) => {
     const sources = activeCoursePublishSources()
-    if (sources) {
-      return buildPublishedCourseStandaloneHtml(sources, loadPlayerBundle())
-    }
-    const state = useEditorStore.getState()
-    const preview = projectCandidatePreviewDocument(state)
-    const payload = buildExportPayload({
-      project: preview?.project ?? state.project,
-      assetFiles: preview?.assetFiles ?? selectMediaAssetFiles(state),
-      components: state.componentPackages,
+    if (!sources) throw courseDeliveryUnavailable('single-html')
+    return buildPublishedCourseStandaloneHtml(sources, {
+      playerBundle: loadPlayerBundle(),
+      singleHtmlMode,
     })
-    return buildStandaloneHtml(payload, loadPlayerBundle())
   }, [])
 
   const handlePreview = useCallback(() => {
     void run(async () => {
-      if (activeCoursePublishSources()) {
-        setCoursePreviewFeedback({
-          kind: 'loading',
-          title: '正在准备整课预览',
-          message: '正在载入 CoursePlayer…',
-        })
-        setCoursePreviewOpen(true)
-        return
-      }
-      await desktopApi().openPreview({ html: buildHtml() })
-    }, '预览窗口创建失败。请关闭其他预览窗口后重试。')
-  }, [buildHtml, run])
+      if (!activeCoursePublishSources()) throw courseDeliveryUnavailable('full-preview')
+      setCoursePreviewFeedback({
+        kind: 'loading',
+        title: '正在准备整课预览',
+        message: '正在载入 CoursePlayer…',
+      })
+      setCoursePreviewOpen(true)
+    }, '整课预览不可用。请重新打开课程工程后重试。')
+  }, [run])
 
-  const writeSingleHtml = useCallback(async (html: string) => {
+  const writeSingleHtml = useCallback(async (
+    html: string,
+    mode: SingleHtmlExportMode,
+  ) => {
     const state = useEditorStore.getState()
     const title = selectActiveCourseProjectDocument(state)?.title ?? state.project.title
     const result = await desktopApi().exportHtml({
       suggestedName: `${title}.html`,
       html,
     })
-    if (result) state.setStatus(`单 HTML 已导出到 ${result.path}`)
+    if (result) {
+      const label = mode === 'online-lightweight' ? '在线轻量单 HTML' : '离线便携单 HTML'
+      state.setStatus(`${label}已导出到 ${result.path}`)
+    }
   }, [])
 
-  const handleExportHtml = useCallback(() => {
+  const handleExportHtml = useCallback((
+    mode: SingleHtmlExportMode = 'offline-portable',
+  ) => {
     void run(async () => {
-      const html = buildHtml()
+      const html = buildHtml(mode)
       const byteLength = utf8ByteLength(html)
       if (byteLength > SINGLE_HTML_WARNING_BYTES) {
-        pendingLargeHtmlRef.current = html
+        pendingLargeHtmlRef.current = { html, mode }
         setLargeHtmlByteLength(byteLength)
         return
       }
-      await writeSingleHtml(html)
+      await writeSingleHtml(html, mode)
     }, '导出失败。请检查磁盘空间并重试。')
   }, [buildHtml, run, writeSingleHtml])
 
@@ -1107,15 +1286,9 @@ export default function App() {
       const state = useEditorStore.getState()
       state.setStatus('正在生成网页包…')
       const sources = activeCoursePublishSources()
-      const bytes = sources
-        ? await buildPublishedCourseWebPackageAsync(sources, loadPlayerBundle())
-        : await buildWebPackageFromProjectAsync({
-          project: projectCandidatePreviewDocument(state)?.project ?? state.project,
-          assetFiles: projectCandidatePreviewDocument(state)?.assetFiles
-            ?? selectMediaAssetFiles(state),
-          components: state.componentPackages,
-        }, loadPlayerBundle())
-      const title = sources?.project.title ?? state.project.title
+      if (!sources) throw courseDeliveryUnavailable('web-package')
+      const bytes = await buildPublishedCourseWebPackageAsync(sources, loadPlayerBundle())
+      const title = sources.project.title
       const result = await desktopApi().exportWebPackage({
         suggestedName: `${title}-网页包.zip`,
         bytes,
@@ -1177,9 +1350,9 @@ export default function App() {
   const handleExportPdf = useCallback(() => {
     void run(async () => {
       const state = useEditorStore.getState()
-      state.setStatus('正在渲染 PDF 页面…')
       const sources = activeCoursePublishSources()
       if (sources) {
+        state.setStatus('正在渲染 PDF 页面…')
         const published = buildPublishedCourseV2Payload(sources)
         const artifacts = await buildCoursePrintArtifacts(published, {
           resolveAssetBytes: (assetId) => {
@@ -1204,6 +1377,13 @@ export default function App() {
           }
           return
         }
+        if (!isSlideOnlyCourseProject(sources.project)) {
+          throw new UserFacingError(
+            'PDF 导出不完整',
+            '未生成覆盖当前课程全部表面的 PDF 打印内容。',
+            '请检查混合打印计划后重试；为避免遗漏 Flow 或 Spatial 内容，本次未回退到旧版 Slide 快照。',
+          )
+        }
         const preview = projectCandidatePreviewDocument(state)
         const rasterFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
         const rasterProject = preview?.project ?? state.project
@@ -1220,19 +1400,7 @@ export default function App() {
         }
         return
       }
-      const preview = projectCandidatePreviewDocument(state)
-      const assetFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
-      const payload = buildExportPayload({
-        project: preview?.project ?? state.project,
-        assetFiles,
-        components: state.componentPackages,
-      })
-      const images = await renderProjectSceneImagesWithRuntime(payload, assetFiles)
-      const result = await desktopApi().exportPdf({
-        suggestedName: `${state.project.title}.pdf`,
-        html: buildPdfPrintHtml(state.project.title, images),
-      })
-      if (result) state.setStatus(`PDF 已导出到 ${result.path}（互动组件已静态化）`)
+      throw courseDeliveryUnavailable('pdf')
     }, 'PDF 导出失败。请减少大图片数量后重试。')
   }, [run])
 
@@ -1270,22 +1438,34 @@ export default function App() {
     }, 'DOCX 导出失败。请先新增流式讲义页面后重试。')
   }, [run])
 
-  const handleExport = useCallback((format: ExportFormat) => {
+  const handleExport = useCallback((
+    format: ExportFormat,
+    singleHtmlMode: SingleHtmlExportMode = 'offline-portable',
+  ) => {
     if (format === 'docx') {
       handleExportDocx()
       return
     }
+    const requestedSingleHtmlMode = format === 'single-html' ? singleHtmlMode : null
+    setPendingSingleHtmlMode(requestedSingleHtmlMode)
     const state = useEditorStore.getState()
     const sources = activeCoursePublishSources()
-    const base = collectExportPreflight(
-      state.project,
-      format,
-      {
-        assetFiles: selectMediaAssetFiles(state),
-        components: state.componentPackages,
-      },
-    )
     if (!sources) {
+      if (format === 'single-html' || format === 'web-package') {
+        setPendingSingleHtmlMode(null)
+        void run(async () => {
+          throw courseDeliveryUnavailable(format)
+        }, '课程交付不可用。请重新打开课程工程后重试。')
+        return
+      }
+      const base = collectExportPreflight(
+        state.project,
+        format,
+        {
+          assetFiles: selectMediaAssetFiles(state),
+          components: state.componentPackages,
+        },
+      )
       setExportPreflightReport(base)
       return
     }
@@ -1298,15 +1478,35 @@ export default function App() {
         components: sources.components,
       },
       loadPlayerBundle(),
+      new Date(),
+      { singleHtmlMode: requestedSingleHtmlMode ?? undefined },
+    )
+    if (format === 'single-html' || format === 'web-package') {
+      setExportPreflightReport(coursePackagePreflightToExportReport(
+        format,
+        sources.project,
+        v9,
+      ))
+      return
+    }
+    const base = collectExportPreflight(
+      state.project,
+      format,
+      {
+        assetFiles: selectMediaAssetFiles(state),
+        components: state.componentPackages,
+      },
     )
     setExportPreflightReport(mergeCoursePackagePreflight(base, v9))
-  }, [handleExportDocx])
+  }, [handleExportDocx, run])
 
   const continuePreflightExport = useCallback(() => {
     const report = exportPreflightReport
     if (!report?.summary.canExport) return
+    const singleHtmlMode = pendingSingleHtmlMode ?? 'offline-portable'
     setExportPreflightReport(null)
-    if (report.target === 'single-html') handleExportHtml()
+    setPendingSingleHtmlMode(null)
+    if (report.target === 'single-html') handleExportHtml(singleHtmlMode)
     else if (report.target === 'web-package') handleExportWebPackage()
     else if (report.target === 'pptx') handleExportPptx()
     else handleExportPdf()
@@ -1316,6 +1516,7 @@ export default function App() {
     handleExportPdf,
     handleExportPptx,
     handleExportWebPackage,
+    pendingSingleHtmlMode,
   ])
 
   const locatePreflightItem = useCallback((item: ExportPreflightItem) => {
@@ -1332,6 +1533,7 @@ export default function App() {
     state.setActiveTab('properties')
     state.setStatus(`已定位导出预检问题：${item.message}`)
     setExportPreflightReport(null)
+    setPendingSingleHtmlMode(null)
   }, [])
 
   const saveExportPreflightReport = useCallback(() => {
@@ -1428,8 +1630,7 @@ export default function App() {
       if (leftover) enqueueSerial(coursePreviewMountChainRef, () => leftover.destroy())
       return
     }
-    const sources = activeCoursePublishSources()
-    if (!sources) {
+    if (!activeCourseDocument) {
       setCoursePreviewOpen(false)
       return
     }
@@ -1440,9 +1641,9 @@ export default function App() {
     })
     return beginSerializedSessionMount(coursePreviewMountChainRef, () => mountPublishedCourseTryRun({
       container: coursePreviewHost,
-      project: sources.project,
-      assetFiles: sources.assetFiles,
-      components: sources.components,
+      project: activeCourseDocument,
+      assetFiles: sidecarFiles,
+      components: componentPackages,
     }), {
       onReady: (session) => {
         coursePreviewFitRef.current?.()
@@ -1463,7 +1664,13 @@ export default function App() {
         coursePreviewSessionRef.current = null
       },
     })
-  }, [coursePreviewHost, coursePreviewOpen])
+  }, [
+    activeCourseDocument,
+    componentPackages,
+    coursePreviewHost,
+    coursePreviewOpen,
+    sidecarFiles,
+  ])
 
   useEffect(() => {
     if (!window.desktopAPI) return
@@ -1762,7 +1969,10 @@ export default function App() {
       />
       <ExportPreflightDialog
         report={exportPreflightReport}
-        onCancel={() => setExportPreflightReport(null)}
+        onCancel={() => {
+          setExportPreflightReport(null)
+          setPendingSingleHtmlMode(null)
+        }}
         onContinue={continuePreflightExport}
         onLocate={locatePreflightItem}
         onSaveReport={saveExportPreflightReport}
@@ -1777,11 +1987,11 @@ export default function App() {
           handleExportWebPackage()
         }}
         onContinueSingleHtml={() => {
-          const html = pendingLargeHtmlRef.current
+          const pending = pendingLargeHtmlRef.current
           clearLargeHtmlWarning()
-          if (!html) return
+          if (!pending) return
           void run(
-            () => writeSingleHtml(html),
+            () => writeSingleHtml(pending.html, pending.mode),
             '单 HTML 导出失败。请改用网页包或检查磁盘空间。',
           )
         }}

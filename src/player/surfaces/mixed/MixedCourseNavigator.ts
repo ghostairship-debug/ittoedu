@@ -31,6 +31,29 @@ export interface MixedNavigationState {
   previousSurfaceId?: string
 }
 
+export interface MixedNavigationIdentity {
+  locationId: string
+  surfaceId: string
+  kind: SurfaceKind
+  index: number
+  total: number
+}
+
+export interface MixedNavigationTransition {
+  current: MixedNavigationIdentity | null
+  next: MixedNavigationIdentity
+  forced: boolean
+}
+
+export interface MixedNavigationRequestOptions {
+  recordHistory?: boolean
+  force?: boolean
+  /** Checked when queued work begins; later teardown may abort it without cancelling its own transition. */
+  signal?: AbortSignal
+  /** Internal request-local preparation after the dequeue guard and before host mutation. */
+  prepareTransition?: () => void
+}
+
 export interface MixedCourseProgress {
   index: number
   total: number
@@ -56,13 +79,22 @@ export interface MixedCoursePlayerPort {
 }
 
 export interface MixedCourseNavigatorOptions {
+  onBeforeNavigate?: (transition: MixedNavigationTransition) => void | Promise<void>
   onNavigate?: (state: MixedNavigationState) => void | Promise<void>
+  onResetCourse?: () => void | Promise<void>
 }
 
 function assertStableId(id: string, label: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)) {
     throw new Error(`${label} must be a stable non-empty id`)
   }
+}
+
+function assertNavigationNotAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return
+  const error = new Error('Mixed course navigation was aborted before it began')
+  error.name = 'AbortError'
+  throw error
 }
 
 export function mixedCourseDefinitionFromPublished(
@@ -122,16 +154,23 @@ export function parseMixedDeepLink(value: string): MixedDeepLink | null {
 export class MixedCourseNavigator {
   readonly #course: MixedCourseDefinition
   readonly #player: MixedCoursePlayerPort
+  readonly #onBeforeNavigate?: MixedCourseNavigatorOptions['onBeforeNavigate']
   readonly #onNavigate?: MixedCourseNavigatorOptions['onNavigate']
+  readonly #onResetCourse?: MixedCourseNavigatorOptions['onResetCourse']
   readonly #locationMap: Map<string, MixedLocationEntry>
   #current: MixedLocationEntry | null = null
   #history: string[] = []
   #queue: Promise<unknown> = Promise.resolve()
+  #pendingNavigationCount = 0
 
   #enqueue<T>(work: () => Promise<T>): Promise<T> {
+    this.#pendingNavigationCount += 1
     const result = this.#queue.then(work, work)
-    this.#queue = result.then(() => undefined, () => undefined)
-    return result
+    const tracked = result.finally(() => {
+      this.#pendingNavigationCount -= 1
+    })
+    this.#queue = tracked.then(() => undefined, () => undefined)
+    return tracked
   }
 
   constructor(
@@ -151,12 +190,19 @@ export class MixedCourseNavigator {
     }
     this.#locationMap = locationMap
     this.#player = player
+    this.#onBeforeNavigate = options.onBeforeNavigate
     this.#onNavigate = options.onNavigate
+    this.#onResetCourse = options.onResetCourse
   }
 
   get current(): MixedNavigationState | null {
     if (!this.#current) return null
     return this.#state()
+  }
+
+  /** True from synchronous enqueue until every active/queued request settles. */
+  get hasPendingNavigation(): boolean {
+    return this.#pendingNavigationCount > 0
   }
 
   get canGoBack(): boolean {
@@ -216,27 +262,16 @@ export class MixedCourseNavigator {
     return this.goToLocation(location.id)
   }
 
-  async goToLocation(
+  goToLocation(
     locationId: string,
-    options: { recordHistory?: boolean; force?: boolean } = {},
+    options: MixedNavigationRequestOptions = {},
   ): Promise<MixedNavigationState> {
     return this.#enqueue(async () => {
+      assertNavigationNotAborted(options.signal)
       const location = this.#locationMap.get(locationId)
       if (!location) throw new Error(`Unknown mixed-course location: ${locationId}`)
-      const previous = this.#current
-      if (previous?.id === locationId && options.force !== true) return this.#state()
-      if (previous && previous.surfaceId !== location.surfaceId) {
-        await this.#player.releaseSurfaceSession?.(previous.surfaceId)
-      }
-      const activation = await this.#player.activateSurface(location.surfaceId)
-      if (!activation.ok) throw activation.failure?.error ?? new Error('Surface activation failed')
-      const located = await this.#player.setSurfaceLocation?.(location.surfaceId, location.id)
-      if (located && !located.ok) throw located.failure?.error ?? new Error('Surface location failed')
-      if (previous && options.recordHistory !== false) this.#history.push(previous.id)
-      this.#current = { ...location }
-      const state = this.#state(previous?.id, previous?.surfaceId)
-      await this.#onNavigate?.(state)
-      return state
+      if (this.#current?.id === location.id && options.force !== true) return this.#state()
+      return this.#transitionTo(location, options)
     })
   }
 
@@ -257,27 +292,139 @@ export class MixedCourseNavigator {
   }
 
   async back(): Promise<MixedNavigationState | null> {
-    const locationId = this.#history.pop()
-    if (!locationId) return null
-    return this.goToLocation(locationId, { recordHistory: false })
+    return this.#enqueue(async () => {
+      const locationId = this.#history.at(-1)
+      if (!locationId) return null
+      const location = this.#locationMap.get(locationId)
+      if (!location) throw new Error(`Unknown mixed-course location: ${locationId}`)
+      const state = await this.#transitionTo(location, { recordHistory: false })
+      this.#history.pop()
+      return state
+    })
   }
 
   async resetCurrentSurface(): Promise<MixedNavigationState> {
-    if (!this.#current) throw new Error('Mixed course has not started')
-    const result = await this.#player.resetSurface(this.#current.surfaceId, 'surface')
-    if (!result.ok) throw result.failure?.error ?? new Error('Surface reset failed')
-    const first = this.#course.locations.find((location) => location.surfaceId === this.#current?.surfaceId)
-    if (!first) throw new Error('Current mixed-course surface no longer exists')
-    return this.goToLocation(first.id, { recordHistory: false, force: true })
+    return this.#enqueue(async () => {
+      if (!this.#current) throw new Error('Mixed course has not started')
+      const first = this.#course.locations.find((location) => location.surfaceId === this.#current?.surfaceId)
+      if (!first) throw new Error('Current mixed-course surface no longer exists')
+      await this.#notifyBeforeNavigate(first, true)
+      const result = await this.#player.resetSurface(this.#current.surfaceId, 'surface')
+      if (!result.ok) throw result.failure?.error ?? new Error('Surface reset failed')
+      return this.#transitionTo(first, { recordHistory: false, force: true }, false)
+    })
   }
 
-  async resetCourse(): Promise<MixedNavigationState> {
-    const results = await this.#player.resetCourse()
-    const failed = results.find((result) => !result.ok)
-    if (failed) throw failed.failure?.error ?? new Error('Course reset failed')
-    this.#history = []
-    this.#current = null
-    return this.start()
+  async resetCourse(options: Pick<MixedNavigationRequestOptions, 'signal'> = {}): Promise<MixedNavigationState> {
+    return this.#enqueue(async () => {
+      assertNavigationNotAborted(options.signal)
+      const target = this.#startLocation()
+      await this.#notifyBeforeNavigate(target, true)
+      const results = await this.#player.resetCourse()
+      const failed = results.find((result) => !result.ok)
+      if (failed) throw failed.failure?.error ?? new Error('Course reset failed')
+      await this.#onResetCourse?.()
+      this.#history = []
+      this.#current = null
+      return this.#transitionTo(target, { recordHistory: false, force: true }, false)
+    })
+  }
+
+  async #transitionTo(
+    location: MixedLocationEntry,
+    options: MixedNavigationRequestOptions,
+    notifyBeforeNavigate = true,
+  ): Promise<MixedNavigationState> {
+    const previous = this.#current
+    if (previous?.id === location.id && options.force !== true) return this.#state()
+    if (notifyBeforeNavigate) await this.#notifyBeforeNavigate(location, options.force === true)
+    let targetActivated = false
+    try {
+      if (previous && previous.surfaceId !== location.surfaceId) {
+        const released = await this.#player.releaseSurfaceSession?.(previous.surfaceId)
+        this.#throwIfSurfaceOperationFailed(released, 'Previous surface release failed')
+      }
+      const activation = await this.#player.activateSurface(location.surfaceId)
+      if (!activation.ok) throw activation.failure?.error ?? new Error('Surface activation failed')
+      targetActivated = true
+      options.prepareTransition?.()
+      const located = await this.#player.setSurfaceLocation?.(location.surfaceId, location.id)
+      this.#throwIfSurfaceOperationFailed(located, 'Surface location failed')
+    } catch (navigationFailure) {
+      try {
+        await this.#restoreAfterFailedTransition(previous, location, targetActivated)
+      } catch (rollbackFailure) {
+        throw new AggregateError(
+          [navigationFailure, rollbackFailure],
+          'Mixed course navigation failed and its previous location could not be restored',
+        )
+      }
+      throw navigationFailure
+    }
+    if (previous && options.recordHistory !== false) this.#history.push(previous.id)
+    this.#current = { ...location }
+    const state = this.#state(previous?.id, previous?.surfaceId)
+    await this.#onNavigate?.(state)
+    return state
+  }
+
+  async #restoreAfterFailedTransition(
+    previous: MixedLocationEntry | null,
+    target: MixedLocationEntry,
+    targetActivated: boolean,
+  ): Promise<void> {
+    if (previous?.surfaceId === target.surfaceId) {
+      const located = await this.#player.setSurfaceLocation?.(previous.surfaceId, previous.id)
+      this.#throwIfSurfaceOperationFailed(located, 'Previous surface location restore failed')
+      return
+    }
+
+    if (
+      this.#player.releaseSurfaceSession
+      && (targetActivated || this.#player.activeSurfaceId === target.surfaceId)
+    ) {
+      const released = await this.#player.releaseSurfaceSession(target.surfaceId)
+      this.#throwIfSurfaceOperationFailed(released, 'Target surface release during rollback failed')
+    }
+    if (!previous) return
+
+    if (this.#player.activeSurfaceId !== previous.surfaceId) {
+      const activated = await this.#player.activateSurface(previous.surfaceId)
+      this.#throwIfSurfaceOperationFailed(activated, 'Previous surface activation restore failed')
+    }
+    const located = await this.#player.setSurfaceLocation?.(previous.surfaceId, previous.id)
+    this.#throwIfSurfaceOperationFailed(located, 'Previous surface location restore failed')
+  }
+
+  #throwIfSurfaceOperationFailed(
+    result: SurfaceOperationResult | undefined,
+    fallbackMessage: string,
+  ): void {
+    if (result && !result.ok) throw result.failure?.error ?? new Error(fallbackMessage)
+  }
+
+  async #notifyBeforeNavigate(location: MixedLocationEntry, forced: boolean): Promise<void> {
+    await this.#onBeforeNavigate?.({
+      current: this.#current ? this.#identity(this.#current) : null,
+      next: this.#identity(location),
+      forced,
+    })
+  }
+
+  #startLocation(): MixedLocationEntry {
+    return this.#locationMap.get(this.#course.startLocationId) ?? this.#course.locations[0]!
+  }
+
+  #identity(location: MixedLocationEntry): MixedNavigationIdentity {
+    const index = this.#course.locations.findIndex((entry) => entry.id === location.id)
+    if (index < 0) throw new Error('Mixed-course location no longer exists')
+    return {
+      locationId: location.id,
+      surfaceId: location.surfaceId,
+      kind: location.kind,
+      index,
+      total: this.#course.locations.length,
+    }
   }
 
   #currentIndex(): number {

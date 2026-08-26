@@ -159,6 +159,7 @@ import {
   type RuntimeTargetEditContext,
   type RuntimeTargetEditSession,
 } from '../authoring/runtimeTargetEditSession'
+import type { CourseRuntimeContentTextTarget } from '../runtime/runtimeContentTextAuthoringCommands'
 import type { ImportedImageAsset } from '../project/assetManager'
 
 interface WorkspaceProps {
@@ -173,6 +174,11 @@ interface FormulaEditSession {
   sceneId: string
   stateId: string | null
   nodeId: string
+}
+
+interface WorkspaceRuntimeTextEditSession {
+  readonly liveSession: Readonly<RuntimeTargetEditSession>
+  readonly courseTarget: CourseRuntimeContentTextTarget
 }
 
 function nodesEqual(
@@ -756,11 +762,7 @@ function SpatialLocationWorkspace({
     }
     const authoring = authoringRef.current
     setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
-    setHudOverlay(
-      selectedNode?.type === 'teacher-controller' || editingScope === 'global'
-        ? authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT)
-        : null,
-    )
+    setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
   }, [canvasMode, editingScope, selectedNode, session, session?.selection.selectionIds, session?.sessionCamera, session?.history.present.revision])
 
   useEffect(() => {
@@ -932,7 +934,9 @@ function SpatialLocationWorkspace({
             pointer,
           )
           const layerHit = hitTestV9SpatialLayerItems(
-            adaptV9SpatialEditorLayers(view.layers),
+            adaptV9SpatialEditorLayers(view.layers).filter((target) => (
+              editingScope === 'global' || target.nativeType !== 'teacher-controller'
+            )),
             { viewport: hudPoint, world },
           )
           if (!layerHit) {
@@ -966,14 +970,32 @@ function SpatialLocationWorkspace({
           if (!pointerActiveRef.current) return
           pointerActiveRef.current = false
           const stagePoint = readLogicalPointer(event.clientX, event.clientY)
-          if (!stagePoint) return
-          authoringRef.current.pointerUp({
-            ...stagePoint,
-            additive: event.shiftKey,
-          }, LOGICAL_STAGE_VIEWPORT)
+          if (stagePoint) {
+            authoringRef.current.pointerUp({
+              ...stagePoint,
+              additive: event.shiftKey,
+            }, LOGICAL_STAGE_VIEWPORT)
+          } else {
+            authoringRef.current.pointerCancel({ x: 0, y: 0 }, LOGICAL_STAGE_VIEWPORT)
+          }
           setPreviewFrames(null)
           setPreviewCamera(null)
           syncOverlays()
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (!pointerActiveRef.current) return
+          pointerActiveRef.current = false
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY) ?? { x: 0, y: 0 }
+          authoringRef.current.pointerCancel(stagePoint, LOGICAL_STAGE_VIEWPORT)
+          setPreviewFrames(null)
+          setPreviewCamera(null)
+          syncOverlays()
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
         }}
         onDoubleClick={(event) => {
           if (canvasMode !== 'edit') return
@@ -1231,7 +1253,7 @@ function SpatialLocationWorkspace({
             {worldOverlay && editingScope !== 'global' ? (
               <SpatialSelectionOverlay overlay={worldOverlay} locked={selectedLocked} />
             ) : null}
-            {hudOverlay && (editingScope === 'global' || selectedNode?.type === 'teacher-controller') ? (
+            {hudOverlay ? (
               <SpatialSelectionOverlay overlay={hudOverlay} locked={selectedLocked} />
             ) : null}
           </>
@@ -1524,7 +1546,7 @@ function SlideLocationWorkspace({
   const [componentTargets, setComponentTargets] =
     useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
   const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
-    useState<Readonly<RuntimeTargetEditSession> | null>(null)
+    useState<Readonly<WorkspaceRuntimeTextEditSession> | null>(null)
   const [activeComponentTextSession, setActiveComponentTextSession] =
     useState<Readonly<ComponentTextEditSession> | null>(null)
   const [activeFormulaEditSession, setActiveFormulaEditSession] =
@@ -1621,7 +1643,11 @@ function SlideLocationWorkspace({
   }, [view.x, view.y, view.zoom])
 
   useEffect(() => {
-    if (slideBackendKind !== 'slide-authoring' || canvasMode !== 'edit') {
+    if (
+      slideBackendKind !== 'slide-authoring' ||
+      canvasMode !== 'edit' ||
+      editingScope !== 'global'
+    ) {
       setControllerOverlay(null)
       return
     }
@@ -1636,6 +1662,7 @@ function SlideLocationWorkspace({
   }, [
     canvasMode,
     candidateDocument,
+    editingScope,
     readCandidateViewport,
     selectedNode,
     slideBackendKind,
@@ -2673,8 +2700,8 @@ function SlideLocationWorkspace({
   const activeRuntimeTextTarget = useMemo(() => {
     if (
       !activeRuntimeTextSession ||
-      activeRuntimeTextSession.kind !== 'text' ||
-      !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession, {
+      activeRuntimeTextSession.liveSession.kind !== 'text' ||
+      !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession.liveSession, {
         projectId: project.id,
         scope: editingScope,
         sceneId: scene.id,
@@ -2683,7 +2710,7 @@ function SlideLocationWorkspace({
       return undefined
     }
     return visibleRuntimeTargets.find((target) => (
-      runtimeTargetMatchesEditSession(target, activeRuntimeTextSession)
+      runtimeTargetMatchesEditSession(target, activeRuntimeTextSession.liveSession)
     ))
   }, [
     activeRuntimeTextSession,
@@ -2692,12 +2719,7 @@ function SlideLocationWorkspace({
     scene.id,
     visibleRuntimeTargets,
   ])
-  const activeRuntimeTextValue = activeRuntimeTextTarget?.kind === 'text'
-    ? (activeRuntimeTextTarget.scope === 'global'
-        ? project.globalRuntime
-        : scene.runtime
-      )?.content.values[activeRuntimeTextTarget.key] ?? ''
-    : ''
+  const activeRuntimeTextValue = activeRuntimeTextSession?.courseTarget.initialValue ?? ''
 
   useEffect(() => {
     if (
@@ -2846,17 +2868,26 @@ function SlideLocationWorkspace({
       setActiveRuntimeTextSession(null)
       return
     }
+    const courseTarget = store.captureRuntimeContentTextTarget(result.session)
+    if (!courseTarget) {
+      store.setStatus('运行时文字目标没有可提交的 V9 作者地址，或当前 Runtime 已锁定')
+      setActiveRuntimeTextSession(null)
+      return
+    }
     setActiveComponentTextSession(null)
-    setActiveRuntimeTextSession(result.session)
+    setActiveRuntimeTextSession(Object.freeze({
+      liveSession: result.session,
+      courseTarget,
+    }))
   }, [currentRuntimeTargetEditContext])
 
   const commitRuntimeText = useCallback((
-    session: Readonly<RuntimeTargetEditSession>,
+    session: Readonly<WorkspaceRuntimeTextEditSession>,
     value: string,
   ) => {
     const store = useEditorStore.getState()
     const result = validateRuntimeTargetEditSession(
-      session,
+      session.liveSession,
       currentRuntimeTargetEditContext(),
     )
     if (!result.ok) {
@@ -2868,33 +2899,17 @@ function SlideLocationWorkspace({
       setActiveRuntimeTextSession(null)
       return
     }
-    const target = result.target
-    const runtime = target.scope === 'global'
-      ? store.project.globalRuntime
-      : store.project.scenes.find((item) => item.id === target.sceneId)?.runtime
-    if (
-      !runtime ||
-      target.kind !== 'text' ||
-      !Object.prototype.hasOwnProperty.call(runtime.content.values, target.key)
-    ) {
-      store.setStatus('运行时文字目标已失效，请重新选择')
-      setActiveRuntimeTextSession(null)
-      return
-    }
-    const patch = {
-      content: {
-        ...runtime.content,
-        values: {
-          ...runtime.content.values,
-          [target.key]: value,
-        },
-      },
-    }
-    if (target.scope === 'global') {
-      store.updateGlobalRuntime(patch)
+    const committed = store.updateRuntimeContentTextAtTarget(
+      session.courseTarget,
+      value,
+    )
+    if (!committed.ok) {
+      store.setStatus(`${committed.reason} 未写入修改`)
+    } else if (committed.status === 'unchanged') {
+      store.setStatus('运行时文字没有变化')
+    } else if (session.courseTarget.courseTarget.owner === 'global') {
       store.setStatus('已更新全局运行时文字；此内容由整课共享')
-    } else if (target.sceneId) {
-      store.updateSceneRuntime(target.sceneId, patch)
+    } else {
       store.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
     }
     setActiveRuntimeTextSession(null)
@@ -2918,6 +2933,11 @@ function SlideLocationWorkspace({
       return
     }
     const session = started.session
+    const courseTarget = store.captureRuntimeAssetReplacementTarget(session)
+    if (!courseTarget) {
+      store.setStatus('运行时图片目标没有可提交的 V9 作者地址，请重新选择')
+      return
+    }
     setReplacingRuntimeAssetTargetId(session.targetId)
     try {
       const imported = await onSelectImageAsset()
@@ -2935,36 +2955,24 @@ function SlideLocationWorkspace({
         )
         return
       }
-      const liveTarget = result.target
-      const runtime = liveTarget.scope === 'global'
-        ? latestState.project.globalRuntime
-        : latestState.project.scenes.find(
-            (item) => item.id === liveTarget.sceneId,
-          )?.runtime
-      if (
-        liveTarget.kind !== 'asset' ||
-        !runtime ||
-        !Object.prototype.hasOwnProperty.call(runtime.assets, liveTarget.key)
-      ) {
-        latestState.setStatus('运行时图片目标已失效，请重新选择')
+      const committed = latestState.replaceRuntimeAssetAtTarget(
+        courseTarget,
+        imported.meta,
+        imported.bytes,
+      )
+      if (!committed.ok) {
+        latestState.setStatus(`${committed.reason} 未写入修改`)
         return
       }
-      const patch = {
-        assets: {
-          ...runtime.assets,
-          [liveTarget.key]: { assetId: imported.meta.id },
-        },
+      if (committed.status === 'unchanged') {
+        latestState.setStatus('运行时图片未改变')
+        return
       }
-      const activeTabBeforeImport = latestState.activeTab
-      latestState.importAsset(imported.meta, imported.bytes)
-      useEditorStore.setState({ activeTab: activeTabBeforeImport })
-      if (liveTarget.scope === 'global') {
-        latestState.updateGlobalRuntime(patch)
-        latestState.setStatus('已替换全局运行时图片；此素材由整课共享')
-      } else if (liveTarget.sceneId) {
-        latestState.updateSceneRuntime(liveTarget.sceneId, patch)
-        latestState.setStatus('已替换运行时图片；此素材由当前场景的所有状态共享')
-      }
+      latestState.setStatus(
+        courseTarget.courseTarget.owner === 'global'
+          ? '已替换全局运行时图片；此素材由整课共享'
+          : '已替换运行时图片；此素材由当前场景的所有状态共享',
+      )
     } finally {
       setReplacingRuntimeAssetTargetId(null)
     }
@@ -3417,27 +3425,29 @@ function SlideLocationWorkspace({
         }
         const viewport = readCandidateViewport()
         if (!viewport) return
-        const controllerResult = controllerAuthoringRef.current.pointerDown({
-          x: event.clientX,
-          y: event.clientY,
-        }, viewport)
-        if (
-          controllerResult.kind !== 'v8' &&
-          controllerGestureConsumed(
-            controllerResult.overlay,
-            controllerResult.preview,
-            controllerResult.target,
-          )
-        ) {
-          controllerPointerActiveRef.current = true
-          if (controllerResult.target) {
-            store.selectNode(controllerResult.target.layerItemId)
+        if (store.editingScope === 'global') {
+          const controllerResult = controllerAuthoringRef.current.pointerDown({
+            x: event.clientX,
+            y: event.clientY,
+          }, viewport)
+          if (
+            controllerResult.kind !== 'v8' &&
+            controllerGestureConsumed(
+              controllerResult.overlay,
+              controllerResult.preview,
+              controllerResult.target,
+            )
+          ) {
+            controllerPointerActiveRef.current = true
+            if (controllerResult.target) {
+              store.selectNode(controllerResult.target.layerItemId)
+            }
+            setControllerOverlay(controllerResult.overlay)
+            event.currentTarget.setPointerCapture(event.pointerId)
+            event.preventDefault()
+            event.stopPropagation()
+            return
           }
-          setControllerOverlay(controllerResult.overlay)
-          event.currentTarget.setPointerCapture(event.pointerId)
-          event.preventDefault()
-          event.stopPropagation()
-          return
         }
         const result = slideAuthoringRef.current.pointerDown({
           x: event.clientX,
@@ -3511,12 +3521,21 @@ function SlideLocationWorkspace({
         ) {
           const viewport = readCandidateViewport()
           if (viewport) {
-            const controllerResult = controllerAuthoringRef.current.pointerUp({
-              x: event.clientX,
-              y: event.clientY,
-            }, viewport)
+            const controllerResult = useEditorStore.getState().editingScope === 'global'
+              ? controllerAuthoringRef.current.pointerUp({
+                  x: event.clientX,
+                  y: event.clientY,
+                }, viewport)
+              : controllerAuthoringRef.current.pointerCancel({
+                  x: event.clientX,
+                  y: event.clientY,
+                }, viewport)
             if (controllerResult.kind !== 'v8') {
-              setControllerOverlay(controllerResult.overlay)
+              setControllerOverlay(
+                useEditorStore.getState().editingScope === 'global'
+                  ? controllerResult.overlay
+                  : null,
+              )
             }
           }
           controllerPointerActiveRef.current = false
@@ -3554,6 +3573,35 @@ function SlideLocationWorkspace({
         setPanning(false)
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }}
+      onPointerCancelCapture={(event) => {
+        if (
+          slideBackendKind === 'slide-authoring' &&
+          controllerPointerActiveRef.current
+        ) {
+          const viewport = readCandidateViewport()
+          if (viewport) {
+            controllerAuthoringRef.current.pointerCancel({
+              x: event.clientX,
+              y: event.clientY,
+            }, viewport)
+          }
+          controllerPointerActiveRef.current = false
+          setControllerOverlay(null)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        if (panRef.current?.pointerId === event.pointerId) {
+          panRef.current = null
+          setPanning(false)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
         }
       }}
       onPointerLeave={() => setHoveredAuthoringTargetId(null)}
@@ -3903,7 +3951,7 @@ function SlideLocationWorkspace({
           </div>
         ) : null}
       </div>
-      {canvasMode === 'edit' && controllerOverlay ? (
+      {canvasMode === 'edit' && editingScope === 'global' && controllerOverlay ? (
         <TeacherControllerAuthoringOverlay overlay={controllerOverlay} />
       ) : null}
       {canvasMode === 'edit' && editingFormulaNode && (

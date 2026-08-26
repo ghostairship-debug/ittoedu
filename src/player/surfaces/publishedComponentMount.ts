@@ -1,9 +1,16 @@
 import type {
   ComponentCreateContextV4,
+  ComponentCreateContextV4Phaser,
+  ComponentDefinitionV4,
   ComponentHostActions,
   ComponentManifest,
   ComponentPackageData,
 } from '../../shared/componentTypes'
+import type {
+  CourseEventBus,
+  RuntimeEventDisposer,
+  RuntimeEventListener,
+} from '../../shared/runtimeTypes'
 import type {
   PublishedCourseAsset,
   PublishedCourseComponent,
@@ -39,12 +46,17 @@ export interface PublishedComponentMountOptions {
   registry?: ComponentRegistry
   mode?: 'preview' | 'edit' | 'capture'
   scope?: 'scene' | 'global'
+  sceneId?: string
   interactive?: boolean
   actions?: Readonly<ComponentHostActions>
   events?: ComponentCreateContextV4['events']
   courseState?: ComponentCreateContextV4['courseState']
   presentation?: ComponentCreateContextV4['presentation']
   emit?: (eventName: string, payload?: unknown) => void
+  reportError?: (
+    phase: 'register' | 'create' | 'lifecycle' | 'destroy',
+    error: Error,
+  ) => void
 }
 
 export interface PublishedComponentMountHandle {
@@ -55,7 +67,26 @@ export interface PublishedComponentMountHandle {
   readonly element: HTMLElement
   resize(width: number, height: number): void
   updateProps(props: Record<string, unknown>): void
+  setVisible(visible: boolean): void
+  suspend(): void
+  resume(): void
   destroy(): void
+}
+
+export interface ResolvedPublishedComponent {
+  readonly source: PublishedComponentPackageSource
+  readonly manifest: ComponentManifest
+  readonly definition: ComponentDefinitionV4
+}
+
+export type PublishedComponentContextBase = Omit<
+  ComponentCreateContextV4Phaser,
+  'renderMode' | 'phaser'
+>
+
+export interface PublishedComponentContextResources {
+  readonly context: PublishedComponentContextBase
+  dispose(): void
 }
 
 const sharedComponentRegistry = new ComponentRegistry()
@@ -86,7 +117,9 @@ export function findComponentPackageSource(
   })
 }
 
-function extractManifest(source: PublishedComponentPackageSource): ComponentManifest {
+export function extractPublishedComponentManifest(
+  source: PublishedComponentPackageSource,
+): ComponentManifest {
   if ('manifest' in source && source.manifest) {
     return source.manifest
   }
@@ -108,7 +141,9 @@ function extractManifest(source: PublishedComponentPackageSource): ComponentMani
   }
 }
 
-function extractRuntimeSource(source: PublishedComponentPackageSource): string {
+export function extractPublishedComponentRuntimeSource(
+  source: PublishedComponentPackageSource,
+): string {
   if ('runtimeSource' in source && typeof source.runtimeSource === 'string') {
     return source.runtimeSource
   }
@@ -118,7 +153,7 @@ function extractRuntimeSource(source: PublishedComponentPackageSource): string {
   return ''
 }
 
-function createFallbackElement(
+export function createPublishedComponentFallbackElement(
   container: HTMLElement,
   options: PublishedComponentMountOptions,
 ): HTMLElement {
@@ -174,6 +209,205 @@ function createFallbackElement(
   return fallbackEl
 }
 
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+export function reportPublishedComponentError(
+  options: PublishedComponentMountOptions,
+  phase: 'register' | 'create' | 'lifecycle' | 'destroy',
+  cause: unknown,
+): Error {
+  const error = normalizeError(cause)
+  try {
+    options.reportError?.(phase, error)
+  } catch (reportFailure) {
+    console.error('Published Component 诊断回调失败', reportFailure)
+  }
+  return error
+}
+
+export function resolvePublishedComponent(
+  options: PublishedComponentMountOptions,
+  registry: ComponentRegistry,
+): ResolvedPublishedComponent {
+  const source = findComponentPackageSource(
+    options.components,
+    options.componentId,
+    options.version,
+  )
+  if (!source) {
+    throw new Error(`组件包“${options.componentId}${options.version ? `@${options.version}` : ''}”不存在`)
+  }
+  const manifest = extractPublishedComponentManifest(source)
+  let definition = registry.get(manifest.id)
+  if (!definition) {
+    const runtimeSource = extractPublishedComponentRuntimeSource(source)
+    if (!runtimeSource) throw new Error(`组件“${manifest.id}”的 runtime.js 为空`)
+    definition = registry.executeRuntime(manifest, runtimeSource)
+  }
+  return { source, manifest, definition }
+}
+
+function scopedComponentEvents(base: CourseEventBus | undefined): {
+  events: CourseEventBus | undefined
+  dispose(): void
+} {
+  if (!base) return { events: undefined, dispose() {} }
+  const subscriptions = new Map<
+    string,
+    Map<RuntimeEventListener<unknown>, RuntimeEventDisposer>
+  >()
+  let disposed = false
+  const events: CourseEventBus = {
+    on<T = unknown>(eventName: string, listener: RuntimeEventListener<T>) {
+      if (disposed) throw new Error('组件事件作用域已销毁')
+      const stored = listener as RuntimeEventListener<unknown>
+      let bucket = subscriptions.get(eventName)
+      if (!bucket) {
+        bucket = new Map()
+        subscriptions.set(eventName, bucket)
+      }
+      bucket.get(stored)?.()
+      const baseDisposer = base.on(eventName, stored)
+      let active = true
+      const dispose = () => {
+        if (!active) return
+        active = false
+        baseDisposer()
+        bucket?.delete(stored)
+        if (bucket?.size === 0) subscriptions.delete(eventName)
+      }
+      bucket.set(stored, dispose)
+      return dispose
+    },
+    off<T = unknown>(eventName: string, listener: RuntimeEventListener<T>) {
+      subscriptions.get(eventName)?.get(listener as RuntimeEventListener<unknown>)?.()
+    },
+    emit<T = unknown>(eventName: string, payload?: T) {
+      if (!disposed) base.emit(eventName, payload)
+    },
+    listenerCount(eventName?: string) {
+      if (eventName !== undefined) return subscriptions.get(eventName)?.size ?? 0
+      let count = 0
+      for (const bucket of subscriptions.values()) count += bucket.size
+      return count
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      const disposers = [...subscriptions.values()]
+        .flatMap((bucket) => [...bucket.values()])
+      subscriptions.clear()
+      disposers.forEach((dispose) => dispose())
+    },
+  }
+  return { events, dispose: () => events.dispose() }
+}
+
+export function createPublishedComponentContextResources(
+  container: HTMLElement,
+  options: PublishedComponentMountOptions,
+  resolved: Pick<ResolvedPublishedComponent, 'source' | 'manifest'>,
+): PublishedComponentContextResources {
+  const { source, manifest } = resolved
+  const instanceId = options.instanceId ?? options.componentId
+  const targetWindow = container.ownerDocument.defaultView
+  if (!targetWindow) throw new Error('Published Component 挂载文档没有可执行 Window')
+  const mergedProps = mergeComponentProps(manifest, options.props ?? {})
+  const editorState = resolveComponentEditorState(manifest, mergedProps)
+  const mode = options.mode ?? 'preview'
+  const actions = options.actions ?? createPlayerComponentHostActions({
+    goToSceneById: () => false,
+    nextScene: () => false,
+    previousScene: () => false,
+    replayScene: () => false,
+    restartCourse: () => false,
+  })
+  const eventScope = scopedComponentEvents(options.events)
+  let disposed = false
+
+  const assetUrl = (assetKey: string): string => {
+    if ('assets' in source && source.assets) {
+      const asset = source.assets[assetKey] as PublishedCourseAsset | { dataUrl?: string } | undefined
+      if (asset) {
+        if ('url' in asset && typeof asset.url === 'string') return asset.url
+        if ('dataUrl' in asset && typeof asset.dataUrl === 'string') return asset.dataUrl
+      }
+    }
+    return ''
+  }
+  const projectAssetUrl = (assetId: string): string => options.resolveAsset?.(assetId) ?? ''
+  const emit = (eventName: string, payload?: unknown): void => {
+    if (disposed) return
+    if (options.emit) {
+      options.emit(eventName, payload)
+      return
+    }
+    const detail = {
+      scope: options.scope ?? 'scene',
+      sceneId: options.sceneId,
+      componentId: manifest.id,
+      instanceId,
+      eventName,
+      payload,
+    }
+    targetWindow.dispatchEvent(new targetWindow.CustomEvent(
+      'courseware-component-event',
+      { detail },
+    ))
+  }
+
+  return {
+    context: {
+      runtimeApiVersion: 4,
+      instanceId,
+      width: options.width,
+      height: options.height,
+      props: mergedProps,
+      editorState,
+      mode,
+      actions,
+      scope: options.scope ?? 'scene',
+      events: eventScope.events,
+      courseState: options.courseState,
+      presentation: options.presentation,
+      assetUrl,
+      projectAssetUrl,
+      emit,
+      capture: { waitUntil: () => {} },
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      eventScope.dispose()
+    },
+  }
+}
+
+function failedHandle(
+  element: HTMLElement,
+  options: PublishedComponentMountOptions,
+): PublishedComponentMountHandle {
+  let destroyed = false
+  return {
+    ok: false,
+    instanceId: options.instanceId ?? options.componentId,
+    componentId: options.componentId,
+    element,
+    resize() {},
+    updateProps() {},
+    setVisible() {},
+    suspend() {},
+    resume() {},
+    destroy() {
+      if (destroyed) return
+      destroyed = true
+      element.remove()
+    },
+  }
+}
+
 export function mountPublishedComponent(
   container: HTMLElement,
   options: PublishedComponentMountOptions,
@@ -183,65 +417,36 @@ export function mountPublishedComponent(
   const isCapture = options.mode === 'capture'
 
   if (!pkg || isCapture) {
-    const fallbackEl = createFallbackElement(container, options)
+    const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return {
-      ok: false,
-      instanceId,
-      componentId: options.componentId,
-      element: fallbackEl,
-      resize() {},
-      updateProps() {},
-      destroy() {
-        fallbackEl.remove()
-      },
-    }
+    return failedHandle(fallbackEl, options)
   }
 
-  const manifest = extractManifest(pkg)
+  const manifest = extractPublishedComponentManifest(pkg)
   if (manifest.renderMode === 'phaser') {
-    const fallbackEl = createFallbackElement(container, options)
+    const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return {
-      ok: false,
-      instanceId,
-      componentId: options.componentId,
-      element: fallbackEl,
-      resize() {},
-      updateProps() {},
-      destroy() {
-        fallbackEl.remove()
-      },
-    }
+    return failedHandle(fallbackEl, options)
   }
 
   const registry = options.registry ?? sharedComponentRegistry
   let definition = registry.get(manifest.id)
   if (!definition) {
-    const runtimeSource = extractRuntimeSource(pkg)
+    const runtimeSource = extractPublishedComponentRuntimeSource(pkg)
     if (runtimeSource) {
       try {
         definition = registry.executeRuntime(manifest.id, runtimeSource)
       } catch (cause) {
+        reportPublishedComponentError(options, 'register', cause)
         console.error(`组件“${manifest.id}”注册失败`, cause)
       }
     }
   }
 
   if (!definition) {
-    const fallbackEl = createFallbackElement(container, options)
+    const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return {
-      ok: false,
-      instanceId,
-      componentId: options.componentId,
-      element: fallbackEl,
-      resize() {},
-      updateProps() {},
-      destroy() {
-        fallbackEl.remove()
-      },
-    }
+    return failedHandle(fallbackEl, options)
   }
 
   const dom = container.ownerDocument
@@ -270,63 +475,16 @@ export function mountPublishedComponent(
   shadow.append(reset, root)
   container.appendChild(host)
 
-  const mergedProps = mergeComponentProps(manifest, options.props ?? {})
-  const editorState = resolveComponentEditorState(manifest, mergedProps)
+  const resources = createPublishedComponentContextResources(
+    container,
+    options,
+    { source: pkg, manifest },
+  )
   const mode = options.mode ?? 'preview'
-  const actions = options.actions ?? createPlayerComponentHostActions({
-    goToSceneById: () => false,
-    nextScene: () => false,
-    previousScene: () => false,
-    replayScene: () => false,
-    restartCourse: () => false,
-  })
-
-  const assetUrl = (assetKey: string): string => {
-    if ('assets' in pkg && pkg.assets) {
-      const asset = pkg.assets[assetKey] as PublishedCourseAsset | { dataUrl?: string } | undefined
-      if (asset) {
-        if ('url' in asset && typeof asset.url === 'string') return asset.url
-        if ('dataUrl' in asset && typeof asset.dataUrl === 'string') return asset.dataUrl
-      }
-    }
-    return ''
-  }
-
-  const projectAssetUrl = (assetId: string): string => {
-    return options.resolveAsset?.(assetId) ?? ''
-  }
-
-  const emit = options.emit ?? ((eventName: string, payload?: unknown) => {
-    const detail = {
-      scope: options.scope ?? 'scene',
-      componentId: manifest.id,
-      instanceId,
-      eventName,
-      payload,
-    }
-    window.dispatchEvent(new CustomEvent('courseware-component-event', { detail }))
-  })
 
   const createContext: ComponentCreateContextV4 = {
-    runtimeApiVersion: 4,
-    instanceId,
-    width: options.width,
-    height: options.height,
-    props: mergedProps,
-    editorState,
+    ...resources.context,
     renderMode: 'dom',
-    mode,
-    actions,
-    scope: options.scope ?? 'scene',
-    events: options.events,
-    courseState: options.courseState,
-    presentation: options.presentation,
-    assetUrl,
-    projectAssetUrl,
-    emit,
-    capture: {
-      waitUntil: () => {},
-    },
     dom: { root },
   }
 
@@ -336,20 +494,12 @@ export function mountPublishedComponent(
   )
 
   if (!creation.ok) {
+    reportPublishedComponentError(options, 'create', creation.failure.error)
+    resources.dispose()
     host.remove()
-    const fallbackEl = createFallbackElement(container, options)
+    const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
-    return {
-      ok: false,
-      instanceId,
-      componentId: options.componentId,
-      element: fallbackEl,
-      resize() {},
-      updateProps() {},
-      destroy() {
-        fallbackEl.remove()
-      },
-    }
+    return failedHandle(fallbackEl, options)
   }
 
   const lifecycle = creation.lifecycle
@@ -372,8 +522,18 @@ export function mountPublishedComponent(
       const nextState = resolveComponentEditorState(manifest, merged)
       lifecycle.setEditorState?.(nextState)
     },
+    setVisible(visible: boolean) {
+      lifecycle.setVisible?.(visible)
+    },
+    suspend() {
+      lifecycle.suspend?.()
+    },
+    resume() {
+      lifecycle.resume?.()
+    },
     destroy() {
       lifecycle.destroy()
+      resources.dispose()
       host.remove()
     },
   }

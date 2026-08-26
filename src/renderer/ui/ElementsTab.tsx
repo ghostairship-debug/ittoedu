@@ -30,6 +30,125 @@ type AddCategory =
   | 'media'
   | 'controls'
 
+type AuthoringSurface = 'slide' | 'flow' | 'spatial'
+type AuthoringScope = 'scene' | 'global'
+type SpatialInsertionScope = 'world' | 'surface' | 'global'
+type InsertableElementKind = 'text' | 'formula' | 'image' | 'video' | 'shape'
+type InsertionCarrier =
+  | 'free-node'
+  | 'document-block'
+  | 'page-overlay'
+  | 'world-item'
+  | 'global-layer-item'
+  | 'unavailable'
+
+interface InsertionCapability {
+  enabled: boolean
+  draggable: boolean
+  carrier: InsertionCarrier
+}
+
+const SURFACE_INSERTION_HINT: Record<AuthoringSurface, Record<AuthoringScope, string>> = {
+  slide: {
+    scene: '演示页：单击添加自由节点，也可拖入画布定位。',
+    global: '演示页全局层：单击或拖入可添加跨场景自由节点。',
+  },
+  flow: {
+    scene: '流式讲义：单击添加文档块；图形添加为页面浮层。当前不可从面板拖入。',
+    global: 'Flow 全局层：图形添加为全局浮层；文字和公式仍添加到当前文档页，图片和视频暂不可用。',
+  },
+  spatial: {
+    scene: '无限画布：单击添加世界元素。当前不可从面板拖入。',
+    global: '无限画布全局层：文本、公式、图片、视频和图形当前不可用；请切换到当前画布后添加世界元素。',
+  },
+}
+
+const GLOBAL_SCOPE_NOTICE: Record<AuthoringSurface, { title: string; body: string }> = {
+  slide: {
+    title: '母版式全局层',
+    body: '这里添加的文字、图片、图形和全局组件会跨场景持续存在，并可设置上下层与场景可见范围。',
+  },
+  flow: {
+    title: 'Flow 全局层',
+    body: '在上方快速添加中，当前只有图形会添加为跨页全局浮层；文字和公式仍添加到当前文档页，图片和视频暂不可用。',
+  },
+  spatial: {
+    title: '无限画布全局层',
+    body: '当前全局层不能插入文本、公式、图片、视频或图形。切换到当前画布后，可添加世界元素。',
+  },
+}
+
+function insertionCapability(
+  surface: AuthoringSurface,
+  scope: AuthoringScope,
+  kind: InsertableElementKind,
+  spatialScope?: SpatialInsertionScope,
+): InsertionCapability {
+  if (surface === 'slide') {
+    return {
+      enabled: true,
+      draggable: true,
+      carrier: scope === 'global' ? 'global-layer-item' : 'free-node',
+    }
+  }
+  if (surface === 'spatial') {
+    return spatialScope === 'world'
+      ? { enabled: true, draggable: false, carrier: 'world-item' }
+      : { enabled: false, draggable: false, carrier: 'unavailable' }
+  }
+  if (scope === 'global') {
+    if (kind === 'shape') {
+      return { enabled: true, draggable: false, carrier: 'global-layer-item' }
+    }
+    if (kind === 'image' || kind === 'video') {
+      return { enabled: false, draggable: false, carrier: 'unavailable' }
+    }
+  }
+  return {
+    enabled: true,
+    draggable: false,
+    carrier: kind === 'shape' ? 'page-overlay' : 'document-block',
+  }
+}
+
+function insertionTitle(
+  surface: AuthoringSurface,
+  scope: AuthoringScope,
+  kind: InsertableElementKind,
+  label: string,
+  spatialScope?: SpatialInsertionScope,
+): string {
+  const capability = insertionCapability(surface, scope, kind, spatialScope)
+  if (!capability.enabled) {
+    return surface === 'spatial'
+      ? spatialScope === 'surface'
+        ? `${label}：表面共享层暂不支持插入；请切换到无限画布世界层`
+        : `${label}：无限画布全局层暂不支持插入；请切换到无限画布世界层`
+      : `${label}：Flow 全局层暂不支持插入；请切换到当前文档页`
+  }
+  if (surface === 'slide') {
+    return scope === 'global'
+      ? `${label}：单击添加全局自由节点；也可拖入演示页画布定位`
+      : `${label}：单击添加自由节点；也可拖入演示页画布定位`
+  }
+  if (surface === 'spatial') return `${label}：单击添加世界元素`
+  if (scope === 'global' && kind === 'shape') {
+    return `${label}：单击添加全局浮层`
+  }
+  const carrier = kind === 'shape'
+    ? '页面浮层'
+    : kind === 'text'
+      ? '文档段落'
+      : kind === 'formula'
+        ? '独立公式块'
+        : kind === 'image'
+          ? '文中图片块'
+          : '文中视频块'
+  return scope === 'global'
+    ? `${label}：单击仍添加${carrier}（不会添加到全局层）`
+    : `${label}：单击添加${carrier}`
+}
+
 const SIMPLE_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
   { id: 'common', label: '常用' },
   { id: 'media', label: '媒体' },
@@ -84,6 +203,28 @@ export function ElementsTab({
   const project = useEditorStore((state) => state.project)
   const editorMode = useEditorStore((state) => state.editorMode)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const spatialInsertionScope = useEditorStore<SpatialInsertionScope | null>((state) => (
+    state.spatialSession?.scope ?? null
+  ))
+  const flowSessionActive = useEditorStore((state) => Boolean(state.flowSession))
+  const authoringSurface: AuthoringSurface = spatialInsertionScope
+    ? 'spatial'
+    : flowSessionActive
+      ? 'flow'
+      : 'slide'
+  const surfaceInsertionHint = authoringSurface === 'spatial'
+    ? spatialInsertionScope === 'world'
+      ? '无限画布：单击添加世界元素。当前不可从面板拖入。'
+      : spatialInsertionScope === 'surface'
+        ? '表面共享层暂不支持插入元素；请切换到无限画布世界层。'
+        : '无限画布全局层暂不支持插入元素；请切换到无限画布世界层。'
+    : SURFACE_INSERTION_HINT[authoringSurface][editingScope]
+  const globalScopeNotice = GLOBAL_SCOPE_NOTICE[authoringSurface]
+  const textInsertion = insertionCapability(authoringSurface, editingScope, 'text', spatialInsertionScope ?? undefined)
+  const formulaInsertion = insertionCapability(authoringSurface, editingScope, 'formula', spatialInsertionScope ?? undefined)
+  const imageInsertion = insertionCapability(authoringSurface, editingScope, 'image', spatialInsertionScope ?? undefined)
+  const videoInsertion = insertionCapability(authoringSurface, editingScope, 'video', spatialInsertionScope ?? undefined)
+  const shapeInsertion = insertionCapability(authoringSurface, editingScope, 'shape', spatialInsertionScope ?? undefined)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
   const categories = editorMode === 'professional'
     ? PROFESSIONAL_ADD_CATEGORIES
@@ -154,8 +295,8 @@ export function ElementsTab({
         <div className="global-elements-notice" data-testid="global-elements-notice">
           <Globe2 size={20} />
           <div>
-            <strong>母版式全局层</strong>
-            <span>这里添加的文字、图片、图形和全局组件会跨场景持续存在，并可设置上下层与场景可见范围。</span>
+            <strong>{globalScopeNotice.title}</strong>
+            <span>{globalScopeNotice.body}</span>
           </div>
         </div>
       )}
@@ -193,10 +334,21 @@ export function ElementsTab({
           <>
           <div className="section-heading">
             <span>快速添加</span>
-            <span title="可单击添加，也可拖入画布">
+            <span title={surfaceInsertionHint}>
               <MousePointerClick size={14} />
             </span>
           </div>
+          <p
+            data-testid="surface-insertion-hint"
+            style={{
+              margin: '-4px 0 10px',
+              color: 'var(--text-secondary)',
+              fontSize: 11,
+              lineHeight: 1.5,
+            }}
+          >
+            {surfaceInsertionHint}
+          </p>
 
           <div className="element-grid element-grid--primary">
             {showText && (
@@ -204,10 +356,16 @@ export function ElementsTab({
               type="button"
               aria-label="文本"
               className="element-card element-card--primary"
-              draggable
+              title={insertionTitle(authoringSurface, editingScope, 'text', '文本', spatialInsertionScope ?? undefined)}
+              disabled={!textInsertion.enabled}
+              draggable={textInsertion.draggable}
               data-testid="add-text"
-              onDragStart={(event) => setDragData(event, 'text', '文本')}
-              onClick={() => addTextNode()}
+              data-insertion-carrier={textInsertion.carrier}
+              style={{ cursor: textInsertion.enabled ? (textInsertion.draggable ? 'grab' : 'pointer') : 'not-allowed' }}
+              onDragStart={textInsertion.draggable
+                ? (event) => setDragData(event, 'text', '文本')
+                : undefined}
+              onClick={textInsertion.enabled ? () => addTextNode() : undefined}
             >
               <span className="element-icon">
                 <Type size={20} />
@@ -220,10 +378,16 @@ export function ElementsTab({
               type="button"
               aria-label="公式"
               className="element-card element-card--primary"
-              draggable
+              title={insertionTitle(authoringSurface, editingScope, 'formula', '公式', spatialInsertionScope ?? undefined)}
+              disabled={!formulaInsertion.enabled}
+              draggable={formulaInsertion.draggable}
               data-testid="add-formula"
-              onDragStart={(event) => setDragData(event, 'formula', '公式')}
-              onClick={() => addFormulaNode()}
+              data-insertion-carrier={formulaInsertion.carrier}
+              style={{ cursor: formulaInsertion.enabled ? (formulaInsertion.draggable ? 'grab' : 'pointer') : 'not-allowed' }}
+              onDragStart={formulaInsertion.draggable
+                ? (event) => setDragData(event, 'formula', '公式')
+                : undefined}
+              onClick={formulaInsertion.enabled ? () => addFormulaNode() : undefined}
             >
               <span className="element-icon">
                 <Sigma size={20} />
@@ -236,10 +400,16 @@ export function ElementsTab({
               type="button"
               aria-label="图片"
               className="element-card element-card--primary"
-              draggable
+              title={insertionTitle(authoringSurface, editingScope, 'image', '图片', spatialInsertionScope ?? undefined)}
+              disabled={!imageInsertion.enabled}
+              draggable={imageInsertion.draggable}
               data-testid="add-image"
-              onDragStart={(event) => setDragData(event, 'image', '图片')}
-              onClick={() => onAddImage()}
+              data-insertion-carrier={imageInsertion.carrier}
+              style={{ cursor: imageInsertion.enabled ? (imageInsertion.draggable ? 'grab' : 'pointer') : 'not-allowed' }}
+              onDragStart={imageInsertion.draggable
+                ? (event) => setDragData(event, 'image', '图片')
+                : undefined}
+              onClick={imageInsertion.enabled ? () => onAddImage() : undefined}
             >
               <span className="element-icon">
                 <ImageIcon size={20} />
@@ -253,9 +423,15 @@ export function ElementsTab({
               aria-label="视频"
               className="element-card element-card--primary"
               data-testid="add-video"
-              draggable
-              onDragStart={(event) => setDragData(event, 'video', '视频')}
-              onClick={() => onAddVideo?.()}
+              title={insertionTitle(authoringSurface, editingScope, 'video', '视频', spatialInsertionScope ?? undefined)}
+              disabled={!videoInsertion.enabled}
+              draggable={videoInsertion.draggable}
+              data-insertion-carrier={videoInsertion.carrier}
+              style={{ cursor: videoInsertion.enabled ? (videoInsertion.draggable ? 'grab' : 'pointer') : 'not-allowed' }}
+              onDragStart={videoInsertion.draggable
+                ? (event) => setDragData(event, 'video', '视频')
+                : undefined}
+              onClick={videoInsertion.enabled ? () => onAddVideo?.() : undefined}
             >
               <span className="element-icon"><Video size={20} /></span>
               视频
@@ -316,12 +492,17 @@ export function ElementsTab({
                       type="button"
                       className="shape-button"
                       key={type}
-                      title={label}
+                      title={insertionTitle(authoringSurface, editingScope, 'shape', label, spatialInsertionScope ?? undefined)}
+                      disabled={!shapeInsertion.enabled}
                       aria-label={`添加${label}`}
                       data-testid={testId ?? `add-shape-${type}`}
-                      draggable
-                      onDragStart={(event) => setDragData(event, `shape:${type}`, label)}
-                      onClick={() => addShapeNode(type)}
+                      draggable={shapeInsertion.draggable}
+                      data-insertion-carrier={shapeInsertion.carrier}
+                      style={{ cursor: shapeInsertion.enabled ? (shapeInsertion.draggable ? 'grab' : 'pointer') : 'not-allowed' }}
+                      onDragStart={shapeInsertion.draggable
+                        ? (event) => setDragData(event, `shape:${type}`, label)
+                        : undefined}
+                      onClick={shapeInsertion.enabled ? () => addShapeNode(type) : undefined}
                     >
                       <ShapePreview type={type} />
                       <span>{label}</span>

@@ -4,6 +4,7 @@ import type { RecentProjectEntry } from '@/shared/ipcTypes'
 import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
 import { utf8ByteLength } from '@/renderer/export/exportSize'
 import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
+import type { SingleHtmlExportMode } from '@/renderer/export/course/buildCoursePackages'
 import { ExportSizeWarningDialog } from '@/renderer/ui/ExportSizeWarningDialog'
 import { TopToolbar, type ExportFormat } from '@/renderer/ui/TopToolbar'
 
@@ -16,7 +17,7 @@ beforeEach(() => {
 })
 
 function renderToolbar(
-  onExport: (format: ExportFormat) => void,
+  onExport: (format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode) => void,
   busy = false,
   onOpenHealth = vi.fn(),
   options: {
@@ -117,17 +118,29 @@ describe('unified export menu', () => {
     expect(useEditorStore.getState().project).toBe(projectBefore)
   })
 
-  it('offers HTML, web package, PPTX, PDF, and DOCX from one export control', () => {
-    const onExport = vi.fn<(format: ExportFormat) => void>()
+  it('offers both explicit single HTML modes, web package, PPTX, PDF, and DOCX', () => {
+    const onExport = vi.fn<(
+      format: ExportFormat,
+      singleHtmlMode?: SingleHtmlExportMode,
+    ) => void>()
     renderToolbar(onExport)
 
     fireEvent.click(screen.getByLabelText('导出课件'))
-    expect(screen.getByRole('menuitem', { name: /单 HTML/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /离线便携单 HTML/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /在线轻量单 HTML/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /网页包/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /PowerPoint（PPTX）/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /^PDF/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /DOCX 讲义/ })).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('menuitem', { name: /离线便携单 HTML/ }))
+    expect(onExport).toHaveBeenLastCalledWith('single-html', 'offline-portable')
+
+    fireEvent.click(screen.getByLabelText('导出课件'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /在线轻量单 HTML/ }))
+    expect(onExport).toHaveBeenLastCalledWith('single-html', 'online-lightweight')
+
+    fireEvent.click(screen.getByLabelText('导出课件'))
     fireEvent.click(screen.getByRole('menuitem', { name: /网页包/ }))
     expect(onExport).toHaveBeenCalledWith('web-package')
   })

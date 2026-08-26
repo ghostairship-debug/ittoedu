@@ -13,6 +13,7 @@ import {
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
+import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import {
   collectSpatialPlaybackEntries,
   isSpatialTeacherControllerItem,
@@ -22,7 +23,7 @@ import {
   publishedSpatialPaths,
   publishedSpatialRelations,
   spatialWorldGroupTransform,
-  worldItemVisibleInRuntimeCamera,
+  worldItemWithinRuntimeCamera,
   type PublishedSpatialRuntimeInput,
   type SpatialPlaybackEntry,
   type SpatialRuntimeCamera,
@@ -49,6 +50,18 @@ import {
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
 import { paintPublishedFormula } from '../publishedFormula'
+import {
+  PublishedDomInteractionSurfacePort,
+  PublishedInteractionVisibilityState,
+  type PublishedInteractionNodeHandle,
+  type PublishedInteractionNodeOwnership,
+  type PublishedInteractionNodeState,
+} from '../../interactions/PublishedDomInteractionSurfacePort'
+import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
+import {
+  isPublishedGlobalCanvasRuntimePointerItem,
+  setPublishedGlobalCanvasRuntimeInteractionVisibility,
+} from '../runtime/publishedGlobalCanvasRuntimePointer'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -81,12 +94,20 @@ export interface SpatialSurfaceHostOptions {
   locationId?: string
   audioChangeSource?: SpatialAudioChangeSource
   courseProgressSource?: SpatialCourseProgressSource
+  teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  deferTeacherControllerCourseReset?: boolean
   resolveAsset?: (assetId: string) => string | undefined
   components?: Record<string, PublishedComponentPackageSource>
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
     item: PublishedNativeLayerItem,
   ) => boolean | void | Promise<boolean | void>
+  /** Published-session only; shared by global LayerItem handles across surfaces. */
+  globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+  /** Published-session generation hook fired before interaction records are invalidated. */
+  onInteractionInvalidated?: () => void
+  /** Published-session generation hook fired after an active interaction record set is ready. */
+  onInteractionReady?: () => void
 }
 
 type TeacherControllerNativeItem = PublishedNativeLayerItem & {
@@ -310,6 +331,29 @@ function isHtmlWorldWrapper(wrapper: HTMLElement | SVGGElement): wrapper is HTML
   return !(wrapper instanceof SVGElement)
 }
 
+function publishedInteractionOwnership(
+  item: PublishedLayerItem,
+): PublishedInteractionNodeOwnership {
+  if (item.kind === 'component') return 'component'
+  if (item.kind === 'runtime') return 'runtime'
+  if (item.content.nativeType === 'video') return 'media'
+  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  return 'native'
+}
+
+function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
+  if (item.kind !== 'native' || item.hitPolicy !== 'auto') return false
+  return item.content.nativeType === 'text'
+    || item.content.nativeType === 'image'
+    || item.content.nativeType === 'formula'
+    || item.content.nativeType === 'shape'
+}
+
+function spatialGestureOwner(item: PublishedLayerItem): string | null {
+  const ownership = publishedInteractionOwnership(item)
+  return ownership === 'native' ? null : ownership
+}
+
 function createViewportHud(
   dom: Document,
   item: PublishedLayerItem,
@@ -394,12 +438,17 @@ export class SpatialSurfaceHost {
   #worldHtml: HTMLElement | null = null
   #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialHostRecord>()
-  #controllerSession = new Map<string, TeacherControllerDomSession>()
+  readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
   #gestureDisposer: (() => void) | null = null
   #muted: boolean
   #audioDisposer: (() => void) | null = null
   #destroyed = false
   #publishedAssets: PublishedCourseV2Payload['assets'] | undefined
+  readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
+  #interactionPort: PublishedDomInteractionSurfacePort | null = null
+  #interactionGeneration = 0
+  #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
+  #active = false
 
   static fromPublishedCourse(
     course: PublishedCourseV2Payload,
@@ -428,6 +477,8 @@ export class SpatialSurfaceHost {
     options: SpatialSurfaceHostOptions & OpenSpatialRuntimeSessionOptions = {},
   ) {
     this.#options = options
+    this.#teacherControllerSession = options.teacherControllerSession
+      ?? new TeacherControllerRuntimeSessionStore()
     this.#components = ('components' in source && source.components
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
@@ -443,6 +494,8 @@ export class SpatialSurfaceHost {
     })
     this.id = this.#session.input.surface.id
     this.#muted = options.initialMuted ?? false
+    this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
+      ?? new PublishedInteractionVisibilityState()
   }
 
   get camera(): SpatialRuntimeCamera | null {
@@ -467,6 +520,27 @@ export class SpatialSurfaceHost {
 
   get rootElement(): HTMLElement | null {
     return this.#root
+  }
+
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
+    return this.#interactionPort
+  }
+
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    const record = this.#records.get(itemId)
+    if (
+      record?.entry.source !== 'global'
+      || record.wrapper.namespaceURI !== 'http://www.w3.org/1999/xhtml'
+    ) return null
+    return record.wrapper as HTMLElement
+  }
+
+  resetTeacherControllerSession(scope: 'surface' | 'course'): void {
+    if (scope === 'course') {
+      if (!this.#options.deferTeacherControllerCourseReset) {
+        this.#teacherControllerSession.resetCourse()
+      }
+    } else this.#teacherControllerSession.resetSurface(this.id)
   }
 
   publishedCameraSnapshot() {
@@ -555,6 +629,7 @@ export class SpatialSurfaceHost {
     this.#world = world
     this.#worldHtml = worldHtml
     this.#screenLayer = screenLayer
+    this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
     this.#gestureDisposer = attachSpatialPlaybackCameraGestures({
       root,
       isActive: () => this.#session.active && !this.#destroyed,
@@ -573,25 +648,36 @@ export class SpatialSurfaceHost {
     if (!this.#session.active) {
       this.#session = reopenSpatialRuntimeSession(this.#session)
     }
+    this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#updateWorldTransform()
     this.#reconcileRecords()
+    this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
+    this.#invalidateInteractions()
+    this.#active = false
     this.#session = leaveSpatialRuntimeLocation(this.#session)
     if (this.#root) this.#root.hidden = true
   }
 
   async resume(): Promise<void> {
     this.#session = reopenSpatialRuntimeSession(this.#session)
+    this.#active = true
     if (this.#root) this.#root.hidden = false
     this.#updateWorldTransform()
     this.#reconcileRecords()
+    this.#restoreInteractionsIfActive()
   }
 
   async destroy(): Promise<void> {
     if (this.#destroyed) return
+    this.#invalidateInteractions()
+    this.#active = false
+    this.#interactionPort?.destroy()
+    this.#interactionPort = null
+    this.#interactionNodes.clear()
     this.#destroyed = true
     this.#gestureDisposer?.()
     this.#gestureDisposer = null
@@ -602,7 +688,6 @@ export class SpatialSurfaceHost {
       record.componentHandle?.destroy()
     }
     this.#records.clear()
-    this.#controllerSession.clear()
     this.#root?.remove()
     this.#root = null
     this.#svg = null
@@ -613,40 +698,70 @@ export class SpatialSurfaceHost {
   }
 
   async goNext(): Promise<{ atBoundary: boolean }> {
+    const previousLocationId = this.#session.locationId
     const result = spatialRuntimeGoNext(this.#session)
-    this.#session = result.session
-    this.#updateWorldTransform()
-    this.#reconcileRecords()
-    this.#refreshControllers()
+    if (result.session.locationId !== previousLocationId) {
+      this.#commitLocationGeneration(result.session)
+    } else {
+      this.#session = result.session
+      this.#updateWorldTransform()
+      this.#reconcileWorldVisibility()
+      this.#refreshControllers()
+    }
     return { atBoundary: result.atBoundary }
   }
 
   async goPrevious(): Promise<{ atBoundary: boolean }> {
+    const previousLocationId = this.#session.locationId
     const result = spatialRuntimeGoPrevious(this.#session)
-    this.#session = result.session
-    this.#updateWorldTransform()
-    this.#reconcileRecords()
-    this.#refreshControllers()
+    if (result.session.locationId !== previousLocationId) {
+      this.#commitLocationGeneration(result.session)
+    } else {
+      this.#session = result.session
+      this.#updateWorldTransform()
+      this.#reconcileWorldVisibility()
+      this.#refreshControllers()
+    }
     return { atBoundary: result.atBoundary }
   }
 
   async setLocationId(locationId: string): Promise<void> {
-    this.#session = enterSpatialRuntimeLocation(this.#session, locationId)
-    this.#updateWorldTransform()
-    this.#reconcileRecords()
-    this.#refreshControllers()
+    const nextSession = enterSpatialRuntimeLocation(this.#session, locationId)
+    this.#commitLocationGeneration(nextSession)
   }
 
   async setPlaybackPath(playbackPathId: string | null): Promise<void> {
     this.#session = selectSpatialRuntimePlaybackPath(this.#session, playbackPathId)
     this.#updateWorldTransform()
-    this.#reconcileRecords()
+    this.#reconcileWorldVisibility()
+    this.#refreshControllers()
   }
 
   async setRuntimeCamera(camera: SpatialRuntimeCamera): Promise<void> {
     this.#session = setSpatialRuntimeCamera(this.#session, camera)
     this.#updateWorldTransform()
     this.#reconcileWorldVisibility()
+  }
+
+  #invalidateInteractions(): void {
+    this.#options.onInteractionInvalidated?.()
+    this.#interactionPort?.setActive(false)
+  }
+
+  #restoreInteractionsIfActive(): void {
+    if (!this.#active || !this.#interactionPort || !this.#root) return
+    this.#interactionPort.setActive(true)
+    this.#options.onInteractionReady?.()
+  }
+
+  #commitLocationGeneration(nextSession: SpatialRuntimeSession): void {
+    this.#invalidateInteractions()
+    this.#interactionPort?.resetLocalVisibility()
+    this.#session = nextSession
+    this.#updateWorldTransform()
+    this.#reconcileRecords()
+    this.#refreshControllers()
+    this.#restoreInteractionsIfActive()
   }
 
   #requireCamera(): SpatialRuntimeCamera {
@@ -732,6 +847,8 @@ export class SpatialSurfaceHost {
 
   #reconcileRecords(): void {
     if (!this.#world || !this.#worldHtml || !this.#screenLayer) return
+    this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
+    this.#interactionNodes.clear()
     const entries = collectSpatialPlaybackEntries(this.#session.input, this.#session.locationId)
     const nextIds = new Set(entries.map((entry) => entry.item.layerItemId))
     for (const [id, record] of [...this.#records.entries()]) {
@@ -752,6 +869,11 @@ export class SpatialSurfaceHost {
       this.#applyRecord(record)
     }
     this.#reconcileWorldVisibility()
+    for (const record of this.#records.values()) this.#registerInteractionNode(record)
+    this.#interactionPort?.refreshNodes(
+      this.#interactionNodes.values(),
+      ++this.#interactionGeneration,
+    )
   }
 
   #reconcileWorldVisibility(): void {
@@ -759,20 +881,88 @@ export class SpatialSurfaceHost {
     const camera = this.#session.camera
     const rules = this.#session.input.surface.semanticZoom
     for (const record of this.#records.values()) {
-      const { item, source, coordinateSpace } = record.entry
+      const { item, coordinateSpace } = record.entry
       if (coordinateSpace === 'viewport') {
         if (!this.#screenLayer.contains(record.wrapper)) this.#screenLayer.appendChild(record.wrapper)
+        record.wrapper.style.display = ''
         continue
       }
-      const visible = worldItemVisibleInRuntimeCamera(item, camera, rules) || source === 'surface'
+      const withinCamera = worldItemWithinRuntimeCamera(item, camera, rules)
       const parent = isHtmlWorldWrapper(record.wrapper) ? this.#worldHtml : this.#world
-      if (visible) {
-        if (!parent.contains(record.wrapper)) parent.appendChild(record.wrapper)
-        record.wrapper.removeAttribute('display')
-      } else {
-        record.wrapper.remove()
-      }
+      if (!parent.contains(record.wrapper)) parent.appendChild(record.wrapper)
+      // Camera/semantic culling stays outside transient Interaction visibility.
+      // Stable wrappers let an off-camera click binding become live after a pan
+      // without remounting the one session-global controller.
+      record.wrapper.style.display = withinCamera ? '' : 'none'
     }
+  }
+
+  #registerInteractionNode(record: SpatialHostRecord): void {
+    const { item, source } = record.entry
+    if (this.#interactionNodes.has(item.layerItemId)) return
+    if (
+      isSpatialTeacherControllerItem(item)
+      && (this.#options.playbackControls ?? 'canvas') === 'none'
+    ) return
+    const wrap = record.wrapper
+    const authoredPointerEvents = wrap.style.pointerEvents
+    const authoredTransform = isHtmlWorldWrapper(wrap)
+      ? wrap.style.transform || 'none'
+      : item.rotation === 0 ? 'none' : `rotate(${item.rotation}deg)`
+    if (!isHtmlWorldWrapper(wrap)) {
+      wrap.style.setProperty('transform-box', 'fill-box')
+      wrap.style.transformOrigin = 'center'
+    }
+    let handle: PublishedInteractionNodeHandle
+    handle = {
+      nodeId: item.layerItemId,
+      source,
+      ownership: publishedInteractionOwnership(item),
+      ...(source === 'global'
+        ? { visibilityState: this.#globalInteractionVisibilityState }
+        : {}),
+      resolveElement: () => wrap,
+      isInteractionAvailable: () => (
+        this.#root?.contains(wrap) === true
+        && this.#records.get(item.layerItemId) === record
+        && this.#interactionNodes.get(item.layerItemId) === handle
+      ),
+      canBindClick: () => canBindPublishedNativeClick(item),
+      canRunMotion: () => (
+        record.entry.coordinateSpace === 'viewport'
+        || this.#recordWithinRuntimeCamera(record)
+      ),
+      authoredVisible: () => item.playbackInitialVisibility !== 'hidden',
+      applyInteractionState: (state: PublishedInteractionNodeState) => {
+        const visible = state.visible
+        wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
+        wrap.style.visibility = visible ? 'visible' : 'hidden'
+        if (source === 'global' && isPublishedGlobalCanvasRuntimePointerItem(item)) {
+          setPublishedGlobalCanvasRuntimeInteractionVisibility(wrap, item, visible)
+        } else {
+          wrap.style.pointerEvents = visible
+            ? state.clickBound ? 'auto' : authoredPointerEvents
+            : 'none'
+        }
+        if (visible) wrap.removeAttribute('aria-hidden')
+        else wrap.setAttribute('aria-hidden', 'true')
+      },
+      authoredMotionStyle: () => ({
+        opacity: String(item.opacity),
+        transform: authoredTransform,
+      }),
+    }
+    this.#interactionNodes.set(item.layerItemId, handle)
+  }
+
+  #recordWithinRuntimeCamera(record: SpatialHostRecord): boolean {
+    const camera = this.#session.camera
+    if (!camera) return false
+    return worldItemWithinRuntimeCamera(
+      record.entry.item,
+      camera,
+      this.#session.input.surface.semanticZoom,
+    )
   }
 
   #createRecord(entry: SpatialPlaybackEntry): SpatialHostRecord {
@@ -796,6 +986,8 @@ export class SpatialSurfaceHost {
         overflow: 'hidden',
         pointerEvents: 'auto',
       })
+      const gestureOwner = spatialGestureOwner(entry.item)
+      if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
       let controllerDom: TeacherControllerDom | null = null
       if (isSpatialTeacherControllerItem(entry.item)) {
         const content = dom.createElement('div')
@@ -810,7 +1002,7 @@ export class SpatialSurfaceHost {
         wrapper.classList.add('spatial-screen-teacher-controller')
         wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'controller')
         wrapper.appendChild(content)
-        controllerDom = this.#mountTeacherController(entry.item, content)
+        controllerDom = this.#mountTeacherController(entry.item, content, wrapper)
       } else {
         wrapper.appendChild(createViewportHud(dom, entry.item, {
           components: this.#components,
@@ -825,6 +1017,8 @@ export class SpatialSurfaceHost {
       const url = this.#resolveAsset(entry.item.content.data.assetId)
       const wrapper = createWorldVideoHtml(dom, entry.item, url)
       wrapper.dataset.layerSource = entry.source
+      const gestureOwner = spatialGestureOwner(entry.item)
+      if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
       return { entry, wrapper, controllerDom: null, componentHandle: null }
     }
     const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
@@ -837,6 +1031,8 @@ export class SpatialSurfaceHost {
     wrapper.dataset.layerKind = entry.item.kind
     wrapper.dataset.layerSource = entry.source
     wrapper.dataset.coordinateSpace = 'world'
+    const gestureOwner = spatialGestureOwner(entry.item)
+    if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
     return { entry, wrapper, controllerDom: null, componentHandle }
   }
 
@@ -862,24 +1058,23 @@ export class SpatialSurfaceHost {
 
   #controllerSessionFor(item: PublishedLayerItem): TeacherControllerDomSession | undefined {
     if (!isSpatialTeacherControllerItem(item)) return undefined
-    const existing = this.#controllerSession.get(item.layerItemId)
-    if (existing) return existing
-    const session: TeacherControllerDomSession = {
-      offset: { dx: 0, dy: 0 },
-      collapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
-    }
-    this.#controllerSession.set(item.layerItemId, session)
-    return session
+    return this.#teacherControllerSession.get({
+      controllerId: item.layerItemId,
+      surfaceSessionId: this.id,
+      defaultCollapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+    })
   }
 
   #mountTeacherController(
     item: TeacherControllerNativeItem,
     container: HTMLElement,
+    footprintElement: HTMLElement,
   ): TeacherControllerDom {
     const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
     return new TeacherControllerDom({
       node,
       container,
+      footprintElement,
       canvas: {
         width: this.#session.viewport.width,
         height: this.#session.viewport.height,
@@ -894,7 +1089,11 @@ export class SpatialSurfaceHost {
       }),
       getSession: () => this.#controllerSessionFor(item) ?? { offset: { dx: 0, dy: 0 }, collapsed: false },
       onSessionChange: (next) => {
-        this.#controllerSession.set(item.layerItemId, {
+        this.#teacherControllerSession.set({
+          controllerId: item.layerItemId,
+          surfaceSessionId: this.id,
+          defaultCollapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+        }, {
           offset: { ...next.offset },
           collapsed: next.collapsed,
         })
@@ -967,9 +1166,10 @@ export class SpatialSurfaceHost {
     } else if (action.type === 'scene.previous') {
       await this.goPrevious()
     } else if (action.type === 'scene.replay') {
-      this.#session = reopenSpatialRuntimeSession(this.#session)
-      this.#updateWorldTransform()
-      this.#reconcileRecords()
+      this.#commitLocationGeneration(reopenSpatialRuntimeSession(this.#session))
+    } else if (action.type === 'course.restart') {
+      this.#teacherControllerSession.resetCourse()
+      await this.setLocationId(this.#session.input.startLocationId)
     } else if (action.type === 'audio.toggle-mute') {
       this.#muted = !this.#muted
       this.#refreshControllers()

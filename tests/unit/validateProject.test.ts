@@ -10,7 +10,11 @@ import {
   createCourseProjectArchive,
   type CourseProjectArchiveData,
 } from '@/renderer/project/courseProjectArchive'
-import { createImageNode, createProject } from '@/renderer/project/createProject'
+import {
+  createImageNode,
+  createProject,
+  createRectangleNode,
+} from '@/renderer/project/createProject'
 import { createProjectArchive } from '@/renderer/project/projectArchive'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type {
@@ -213,6 +217,21 @@ describe('headless Course Project V9 validation', () => {
 
     const report = validateCourseProjectArchiveBytes(bytes, 'lesson.h5lesson')
 
+    expect(Object.keys(report)).toEqual([
+      'reportVersion',
+      'status',
+      'input',
+      'measurement',
+      'schema',
+      'project',
+      'projectHealth',
+      'exportPreflight',
+      'protocols',
+      'stableIds',
+      'migrationMarkers',
+      'summary',
+      'fatal',
+    ])
     expect(report).toMatchObject({
       reportVersion: 1,
       status: 'valid',
@@ -249,6 +268,131 @@ describe('headless Course Project V9 validation', () => {
     )
   })
 
+  it('keeps the reachable duplicate stable-id guard and adds an owner-stable target', () => {
+    const source = blankArchiveData()
+    const firstSurface = source.project.surfaces[0]
+    if (firstSurface?.type !== 'slide') throw new Error('expected a slide surface')
+    const firstScene = firstSurface.scenes[0]
+    if (!firstScene) throw new Error('expected a slide scene')
+    const sharedIdItem = sceneNodeToCourseLayerItem(
+      createRectangleNode({ id: 'duplicate-across-surfaces' }),
+      0,
+    )
+    firstScene.layerItems.push(sharedIdItem)
+    const secondSurface = structuredClone(firstSurface)
+    secondSurface.id = 'second-surface'
+    secondSurface.scenes[0]!.id = 'second-scene'
+    source.project.surfaces.push(secondSurface)
+    source.project.locations.push({
+      id: 'second-location',
+      label: '第二页',
+      kind: 'slide-scene',
+      surfaceId: secondSurface.id,
+      sceneId: secondSurface.scenes[0]!.id,
+    })
+    source.project.mixedPrintPlan = {
+      pageSize: 'surface-native',
+      orientation: 'auto',
+      entries: [
+        {
+          id: 'print-first',
+          kind: 'slide-scenes',
+          surfaceId: firstSurface.id,
+          sceneIds: [firstScene.id],
+        },
+        {
+          id: 'print-second',
+          kind: 'slide-scenes',
+          surfaceId: secondSurface.id,
+          sceneIds: [secondSurface.scenes[0]!.id],
+        },
+      ],
+    }
+
+    const report = validateCourseProjectArchiveBytes(
+      createCourseProjectArchive(source),
+      'duplicate-stable-id.h5lesson',
+    )
+
+    expect(report.schema.valid).toBe(true)
+    expect(report.status).toBe('invalid')
+    expect(courseProjectValidationExitCode(report)).toBe(1)
+    expect(report.projectHealth?.items).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'duplicate-stable-id',
+        path: ['surfaces', 1, 'scenes', 0, 'layerItems', 0, 'layerItemId'],
+        target: {
+          version: 1,
+          kind: 'layer-item',
+          owner: 'scene',
+          projectId: source.project.id,
+          surfaceId: secondSurface.id,
+          sceneId: secondSurface.scenes[0]!.id,
+          layerItemId: sharedIdItem.layerItemId,
+        },
+      }),
+    ])
+  })
+
+  it('consumes V9-native project health findings with stable targets and exit 1', () => {
+    const source = blankArchiveData()
+    const scene = slideScene(source.project)
+    const runtime: RuntimeLayerItem = {
+      layerItemId: 'health-runtime',
+      label: '健康检查 Runtime',
+      frame: { mode: 'absolute', x: 0, y: 0, width: 320, height: 180 },
+      order: nextLayerOrder(source.project),
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'surface',
+      playbackInitialVisibility: 'inherit',
+      kind: 'runtime',
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: true,
+        renderMode: 'dom',
+        source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
+        content: { values: {} },
+        assets: {},
+        nodeBindings: { missing: 'missing-layer-item' },
+      },
+    }
+    scene.layerItems.push(runtime)
+
+    const report = validateCourseProjectArchiveBytes(
+      createCourseProjectArchive(source),
+      'v9-health.h5lesson',
+    )
+
+    expect(report.schema.valid).toBe(true)
+    expect(report.status).toBe('invalid')
+    expect(courseProjectValidationExitCode(report)).toBe(1)
+    expect(report.projectHealth?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime-node-reference-missing',
+        layerItemId: runtime.layerItemId,
+        target: {
+          version: 1,
+          kind: 'layer-item',
+          owner: 'scene',
+          projectId: source.project.id,
+          surfaceId: source.project.surfaces[0]!.id,
+          sceneId: scene.id,
+          layerItemId: runtime.layerItemId,
+        },
+      }),
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'runtime-static-fallback-missing',
+      }),
+    ]))
+  })
+
   it('returns exit 1 for leftover V9 migration markers', () => {
     const report = validateCourseProjectArchiveBytes(
       migrationMarkerArchive(),
@@ -275,17 +419,23 @@ describe('headless Course Project V9 validation', () => {
     })
     expect(courseProjectValidationExitCode(report)).toBe(0)
     const htmlItems = report.exportPreflight?.['single-html'].items ?? []
-    expect(htmlItems.some((item) => (
-      item.code === 'asset-bytes-missing' ||
-      item.code === 'component-bytes-missing' ||
-      item.code === 'component-hash-mismatch' ||
-      item.code === 'node-fully-outside-canvas'
-    ))).toBe(false)
+    const absentCodes = new Set<string>([
+      'asset-bytes-missing',
+      'component-bytes-missing',
+      'component-hash-mismatch',
+      'node-fully-outside-canvas',
+    ])
+    expect(htmlItems.some((item) => absentCodes.has(item.code))).toBe(false)
     for (const target of ['pdf', 'pptx'] as const) {
       expect(report.exportPreflight?.[target].items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code: 'static-export-interactions-omitted',
+            target: {
+              version: 1,
+              kind: 'project',
+              projectId: report.project?.id,
+            },
           }),
         ]),
       )
@@ -397,6 +547,30 @@ describe('headless Course Project V9 validation', () => {
       },
       fatal: { code: 'schema-invalid' },
     })
+    expect({
+      project: report.project,
+      projectHealth: report.projectHealth,
+      exportPreflight: report.exportPreflight,
+      protocols: report.protocols,
+      stableIds: report.stableIds,
+      migrationMarkers: report.migrationMarkers,
+    }).toEqual({
+      project: null,
+      projectHealth: null,
+      exportPreflight: null,
+      protocols: null,
+      stableIds: null,
+      migrationMarkers: null,
+    })
+    expect(report.summary).toEqual({
+      error: 0,
+      warning: 0,
+      info: 0,
+      total: 0,
+      canExport: false,
+    })
+    expect(report.fatal).not.toHaveProperty('target')
+    report.schema.issues.forEach((issue) => expect(issue).not.toHaveProperty('target'))
     expect(courseProjectValidationExitCode(report)).toBe(2)
   })
 

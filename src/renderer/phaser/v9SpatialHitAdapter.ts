@@ -5,34 +5,34 @@ import type {
   SpatialEditorLayerView,
 } from '../course/spatialEditorView'
 import {
-  adaptV9SlideLayerItemHit,
-  hitTestV9SlideLayerItems,
-  marqueeHitV9SlideLayerItems,
-  v9SlideLayerItemBounds,
-  type V9SlideHitBounds,
-  type V9SlideHitTarget,
-} from './v9SlideHitAdapter'
+  adaptLayerItemHit,
+  hitTestLayerItems,
+  layerItemBounds,
+  marqueeHitLayerItems,
+  type LayerItemHitBounds,
+  type LayerItemHitTarget,
+} from './layerItemHitTest'
 import type { StagePoint, StageRect } from '../authoring/stageViewportTransform'
 
 /**
- * Geometry-only Spatial hit adapter. Reuses the R2 Slide hittability rules
+ * Geometry-only Spatial hit adapter. Reuses the neutral LayerItem hittability rules
  * (Native / Component / Runtime, pass-through, teacher-controller only on
  * viewport/global) and tags the R5-A coordinate space. Phaser is not required.
  */
-export interface V9SpatialHitTarget extends V9SlideHitTarget {
+export interface V9SpatialHitTarget extends LayerItemHitTarget {
   readonly coordinateSpace: SpatialCoordinateSpace
   readonly source: SpatialEditorLayerScope
 }
 
-export type { V9SlideHitBounds as V9SpatialHitBounds }
+export type { LayerItemHitBounds as V9SpatialHitBounds }
 
-export function v9SpatialLayerItemBounds(item: LayerItem): V9SlideHitBounds {
-  return v9SlideLayerItemBounds(item)
+export function v9SpatialLayerItemBounds(item: LayerItem): LayerItemHitBounds {
+  return layerItemBounds(item)
 }
 
 export function adaptV9SpatialLayerHit(layer: SpatialEditorLayerView): V9SpatialHitTarget {
   const slideScope = layer.coordinateSpace === 'viewport' ? 'global' : 'scene'
-  const adapted = adaptV9SlideLayerItemHit(
+  const adapted = adaptLayerItemHit(
     layer.item as LayerItem,
     layer.effectiveVisible,
     slideScope,
@@ -58,12 +58,12 @@ export function hitTestV9SpatialLayerItems(
   targets: readonly V9SpatialHitTarget[],
   points: { readonly viewport: StagePoint; readonly world: StagePoint },
 ): V9SpatialHitTarget | null {
-  const viewportHit = hitTestV9SlideLayerItems(
+  const viewportHit = hitTestLayerItems(
     targets.filter((target) => target.coordinateSpace === 'viewport'),
     points.viewport,
   )
   if (viewportHit) return viewportHit as V9SpatialHitTarget
-  const worldHit = hitTestV9SlideLayerItems(
+  const worldHit = hitTestLayerItems(
     targets.filter((target) => target.coordinateSpace === 'world'),
     points.world,
   )
@@ -74,7 +74,7 @@ export function marqueeHitV9SpatialWorldLayerItems(
   targets: readonly V9SpatialHitTarget[],
   worldRect: StageRect,
 ): V9SpatialHitTarget[] {
-  return marqueeHitV9SlideLayerItems(
+  return marqueeHitLayerItems(
     targets.filter((target) => target.coordinateSpace === 'world'),
     worldRect,
   ) as V9SpatialHitTarget[]

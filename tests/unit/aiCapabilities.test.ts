@@ -23,6 +23,12 @@ import {
 } from '../../src/shared/constants'
 import { COURSE_PROJECT_SCHEMA_VERSION } from '../../src/shared/courseProjectTypes'
 import {
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+  COURSE_PROJECT_VALIDATION_FATAL_CODES,
+  COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+} from '../../src/shared/courseProjectValidationDiagnostics'
+import {
   INTERACTION_ACTION_TYPES,
   INTERACTION_CONDITION_TYPES,
   INTERACTION_TRIGGER_TYPES,
@@ -34,6 +40,38 @@ const expectedCatalogPackageCount = 4
 const siblingCatalogAvailable = existsSync(
   path.join(process.cwd(), '..', 'courseware-components', 'catalog.json'),
 )
+/**
+ * The exact, narrow provenance input set: files the generator reads or imports,
+ * plus the contracts whose declared text the artifacts quote. Order matches the
+ * generator's declaration order.
+ */
+const expectedSourceEvidencePaths = [
+  'package.json',
+  'scripts/generate-ai-capabilities.ts',
+  'scripts/validate-project.ts',
+  'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+  'src/renderer/components/importComponentPackage.ts',
+  'src/renderer/export/exportSize.ts',
+  'src/player/HostEvidenceRecorder.ts',
+  'src/shared/assessmentEvaluators.ts',
+  'src/shared/builtInComponentCatalog.ts',
+  'src/shared/componentCatalog.ts',
+  'src/shared/componentContentIntegrity.ts',
+  'src/shared/componentSchema.ts',
+  'src/shared/componentTypes.ts',
+  'src/shared/constants.ts',
+  'src/shared/courseProjectSchema.ts',
+  'src/shared/courseProjectTypes.ts',
+  'src/shared/courseProjectValidationDiagnostics.ts',
+  'src/shared/diagnosticCodes.ts',
+  'src/shared/interactionSchema.ts',
+  'src/shared/interactionTypes.ts',
+  'src/shared/publishedCourseSchema.ts',
+  'src/shared/publishedCourseTypes.ts',
+  'src/shared/runtimeSchema.ts',
+  'src/shared/runtimeTypes.ts',
+  'src/shared/surfaceRuntimeTypes.ts',
+]
 const expectedCurrentProtocols = {
   project: COURSE_PROJECT_SCHEMA_VERSION,
   publishedCourse: PUBLISHED_COURSE_VERSION,
@@ -91,11 +129,23 @@ describe('AI capability manifest generation', () => {
         command: string
         output: string
         reportVersion: number
+        contract: string
+        findingCodeLedger: string
+        diagnosticTargetVersion: number
+        schemaInvalid: Record<string, unknown>
+        semanticCoverage: string
+        checks: string[]
         exitCodes: Record<string, number>
         execution: string
       }
       components: {
         packageAdmission: Record<string, unknown>
+        exports: { singleHtml: string; webPackage: string }
+        publishedPlayback: {
+          status: string
+          provenSlices: Array<Record<string, unknown>>
+          notCovered: string[]
+        }
       }
       assessmentEvaluators: Array<{
         id: string
@@ -110,6 +160,26 @@ describe('AI capability manifest generation', () => {
         entrypoints: Record<string, string>
         output: string
         constraints: string[]
+      }
+      runtime: { exports: { singleHtml: string; webPackage: string } }
+      exportSurfaces: {
+        singleHtml: {
+          resources: string
+          modes: { offlinePortable: string; onlineLightweight: string }
+          networkPolicy: string
+        }
+      }
+      previewSurfaces: {
+        host: string
+        consumers: string[]
+        resources: Record<string, string>
+        networkPolicy: {
+          declaredConnectOrigins: string[]
+          enforcement: string
+          leaseLifetime: string
+          corsTls: string
+          remoteScripts: string
+        }
       }
     }>(first.files, 'index.json')
     expect(first.indexBytes).toBeLessThanOrEqual(AI_CAPABILITY_INDEX_MAX_BYTES)
@@ -150,12 +220,103 @@ describe('AI capability manifest generation', () => {
       input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+      findingCodeLedger: 'diagnostics.json#/courseProjectValidation/findingCodes',
+      diagnosticTargetVersion: 1,
+      schemaInvalid: {
+        status: 'unreadable',
+        exitCode: 2,
+        semanticSections: 'all-null',
+        canExport: false,
+      },
+      semanticCoverage: 'current-wired-only-see-code-ledger',
+      checks: [
+        'course-project-v9-schema',
+        'assets-and-components',
+        'runtime-component-protocol',
+        'single-html-preflight',
+        'web-package-preflight',
+        'pdf-preflight',
+        'pptx-preflight',
+        'stable-ids',
+        'no-v8-fields-or-migration-markers',
+        'v9-project-health-runtime-interaction-component-controller-media',
+      ],
       exitCodes: {
         valid: 0,
         diagnosedErrors: 1,
         unreadableOrUsageError: 2,
       },
       execution: 'node-only-no-electron-no-export-no-write',
+    })
+    expect(index.validation.checks).toContain(
+      'v9-project-health-runtime-interaction-component-controller-media',
+    )
+
+    const diagnostics = parseFile<{
+      legacyRegistryScope: string
+      courseProjectValidation: {
+        reportVersion: number
+        target: {
+          version: number
+          stableIdentity: string
+          kinds: string[]
+          unresolvedFallback: string
+          schemaInvalid: string
+        }
+        fatalCodes: string[]
+        schemaIssueCodes: string
+        findingCodes: unknown[]
+        projectHealth: Record<string, unknown>
+        sourceOfTruth: string
+        contract: string
+      }
+    }>(first.files, 'diagnostics.json')
+    expect(diagnostics.legacyRegistryScope).toContain('not the active Course Project V9 CLI')
+    expect(diagnostics.courseProjectValidation).toEqual({
+      reportVersion: 1,
+      target: {
+        version: COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+        stableIdentity: 'course-project-v9-ids-only',
+        kinds: COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+        unresolvedFallback: 'project',
+        schemaInvalid: 'omitted',
+      },
+      fatalCodes: COURSE_PROJECT_VALIDATION_FATAL_CODES,
+      schemaIssueCodes: 'zod-issue-code',
+      findingCodes: COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+      projectHealth: {
+        collector: 'collectCourseProjectHealth',
+        input: 'schema-valid-course-project-v9-plus-opened-archive-files',
+        ordering: 'severity-path-code-message',
+        target: 'required-diagnostic-target-v1',
+        readOnly: true,
+        domains: [
+          {
+            id: 'runtime',
+            collector: 'collectCourseProjectRuntimeHealth',
+            source: 'src/shared/courseProjectHealth/runtime.ts',
+          },
+          {
+            id: 'interaction',
+            collector: 'collectCourseProjectInteractionHealth',
+            source: 'src/shared/courseProjectHealth/interaction.ts',
+          },
+          {
+            id: 'component',
+            collector: 'collectCourseProjectComponentHealth',
+            source: 'src/shared/courseProjectHealth/component.ts',
+          },
+          {
+            id: 'controller-media',
+            collector: 'collectCourseProjectControllerMediaHealth',
+            source: 'src/shared/courseProjectHealth/controllerMedia.ts',
+          },
+        ],
+        networkDeclarationParity: 'deferred',
+      },
+      sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
     })
     expect(index.components.packageAdmission).toEqual({
       requiredAvailability: 'available',
@@ -164,6 +325,64 @@ describe('AI capability manifest generation', () => {
       releaseBlockersMustBeEmpty: true,
       licenseStatusMustBe: 'verified',
       maintainerMustBeAssigned: true,
+    })
+    expect(index.components.exports).toMatchObject({
+      singleHtml: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+      webPackage: 'partial:dom-carriers-plus-slide-scene-phaser-interactive',
+    })
+    expect(index.components.publishedPlayback).toEqual({
+      status: 'partial',
+      provenSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderMode: 'phaser',
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          behavior: 'interactive-component-api4-playback',
+        },
+      ],
+      notCovered: [
+        'phaser-global-or-surface-shared',
+        'phaser-flow-or-spatial',
+        'hybrid-published-parity',
+        'capture-pdf-or-pptx',
+        'component-event-or-host-actions-parity',
+      ],
+    })
+    expect(index.runtime.exports).toMatchObject({
+      singleHtml: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
+      webPackage: 'partial:slide-scene-api2-dom-phaser-hybrid-plus-slide-scene-flow-surface-api3-dom-interactive',
+    })
+    expect(index.exportSurfaces.singleHtml).toEqual({
+      interactivity: 'preserved',
+      resources: 'selectable-inline-or-declared-remote',
+      modes: {
+        offlinePortable: 'all-published-assets-inline',
+        onlineLightweight: 'referenced-project-assets-with-remote-url-remote-others-inline',
+      },
+      networkPolicy: 'exact-declared-origins-no-remote-script',
+    })
+    expect(index.previewSurfaces).toEqual({
+      host: 'main-renderer-published-v2',
+      consumers: ['current-location-try-run', 'whole-course-preview'],
+      resources: {
+        remoteProjectAssets: 'actual-published-references-with-https-remote-url',
+        localProjectAssets: 'inline-data-url',
+        componentAssets: 'inline-data-url',
+      },
+      networkPolicy: {
+        declaredConnectOrigins: ['https', 'wss'],
+        enforcement: 'editor-scheme-csp-plus-main-session-exact-origin-leases',
+        leaseLifetime: 'published-session-and-document-generation',
+        corsTls: 'browser-enforced',
+        remoteScripts: 'blocked',
+      },
     })
     expect(index.headlessBuild).toEqual({
       language: 'typescript',
@@ -587,14 +806,111 @@ describe('AI capability manifest generation', () => {
       formatVersion: number
     }>(generated.files, 'schemas/published-course-v2.json')
     expect(published.formatVersion).toBe(PUBLISHED_COURSE_VERSION)
+    const canvasRuntime = parseFile<{
+      runtimeApiVersion: number
+      publishedPlayback: {
+        status: string
+        supportedSlices: Array<{
+          surface?: string
+          surfaces?: string[]
+          carrier: string
+          scope: string
+          renderModes: string[]
+          consumers: string[]
+          lifetime?: string
+        }>
+        notCovered: string[]
+      }
+    }>(generated.files, 'schemas/runtime-api2.json')
+    expect(canvasRuntime.publishedPlayback).toMatchObject({
+      status: 'partial',
+      supportedSlices: [
+        {
+          surface: 'slide',
+          carrier: 'scene.layerItems',
+          scope: 'scene-local',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+        },
+        {
+          surfaces: ['slide', 'flow', 'spatial-2d'],
+          carrier: 'globalLayerItems',
+          scope: 'session-global',
+          renderModes: ['dom', 'phaser', 'hybrid'],
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+          lifetime: 'one-instance-per-published-session-moved-between-surface-wrappers',
+        },
+      ],
+    })
+    expect(canvasRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
+      'surfaceLayerItems',
+      'flow-or-spatial-scene-local',
+      'runtime.event-or-host-actions',
+      'node-resolution-or-presentation',
+      'scene-local-cross-surface-courseState',
+      'capture-pdf-or-pptx',
+      'host-local-capabilities',
+    ]))
     const surfaceRuntime = parseFile<{
       runtimeApiVersion: number
       protocol: string
+      publishedPlayback: {
+        status: string
+        supportedSlice: { consumers: string[] }
+        supportedSlices: Array<{
+          surface: string
+          carrier: string
+          scope: string
+          consumers: string[]
+        }>
+        notCovered: string[]
+      }
     }>(generated.files, 'schemas/runtime-api3.json')
     expect(surfaceRuntime).toMatchObject({
-      protocol: 'surface-v1',
+      protocol: 'surface-runtime',
       runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
+      publishedPlayback: {
+        status: 'partial',
+        supportedSlice: {
+          consumers: [
+            'current-location-try-run',
+            'whole-course-preview',
+            'single-html',
+            'web-package',
+          ],
+        },
+      },
     })
+    expect(surfaceRuntime.publishedPlayback.notCovered).toEqual(expect.arrayContaining([
+      'spatial',
+      'globalLayerItems-or-non-flow-surfaceLayerItems',
+      'runtime.event-or-host-actions',
+      'cross-surface-courseState-or-presentation',
+      'capture-pdf-or-pptx',
+      'network-or-host-local-capabilities',
+    ]))
+    expect(surfaceRuntime.publishedPlayback.supportedSlices).toEqual([
+      expect.objectContaining({
+        surface: 'slide',
+        carrier: 'scene.layerItems',
+        scope: 'scene-local',
+      }),
+      expect.objectContaining({
+        surface: 'flow',
+        carrier: 'surfaceLayerItems',
+        scope: 'surface-local',
+      }),
+    ])
     const interactions = parseFile<{
       contract: string
       protocolVersion: number
@@ -611,14 +927,6 @@ describe('AI capability manifest generation', () => {
             schemaVersion: number
             recordKinds: string[]
             sessionStartBeforeRuntimeMount: boolean
-            teacherEscape: {
-              actions: string[]
-              phases: string[]
-              eventType: string
-              requiresTrustedDispatchedClick: boolean
-              runtimeExposure: string
-              publicCustomEventIsEvidence: boolean
-            }
           }
         }
         evidence: {
@@ -636,17 +944,8 @@ describe('AI capability manifest generation', () => {
       recordKinds: [
         'assessment-evaluated',
         'action-recorded',
-        'teacher-escape-recorded',
       ],
       sessionStartBeforeRuntimeMount: true,
-      teacherEscape: {
-        actions: ['previous', 'next', 'scene-picker', 'replay'],
-        phases: ['requested', 'confirmation-required', 'completed'],
-        eventType: 'click',
-        requiresTrustedDispatchedClick: true,
-        runtimeExposure: 'none',
-        publicCustomEventIsEvidence: false,
-      },
     })
     expect(runtime.hostContract.evidence).toMatchObject({
       invocation: 'ctx.evidence.recordAction',
@@ -704,8 +1003,21 @@ describe('AI capability manifest generation', () => {
     const evidence = parseFile<{
       generator: string
       generatedAt: null
-      inputs: { sourceFiles: Array<{ path: string; sha256: string }> }
-      output: Record<string, { sha256: string }>
+      inputs: {
+        sourceFiles: Array<{ path: string; sha256: string }>
+        componentCatalog: {
+          status: string
+          expectedCatalogSha256: string
+          actualCatalogSha256?: string
+          packages: Array<{
+            identity: string
+            expectedSha256: string
+            actualSha256?: string
+            availability: string
+          }>
+        }
+      }
+      output: Record<string, { bytes: number; sha256: string }>
       hashScope: string
     }>(generated.files, 'generation-evidence.json')
     expect(evidence.generator).toBe('scripts/generate-ai-capabilities.ts')
@@ -714,36 +1026,76 @@ describe('AI capability manifest generation', () => {
     expect(evidence.output).not.toHaveProperty('generation-evidence.json')
     expect(evidence.hashScope).toContain('不记录 generation-evidence.json 自身哈希')
     const tracedSources = evidence.inputs.sourceFiles.map((entry) => entry.path)
-    expect(tracedSources).toEqual(expect.arrayContaining([
-      'src/shared/courseProjectSchema.ts',
-      'src/shared/courseProjectTypes.ts',
-      'src/shared/publishedCourseSchema.ts',
-      'src/shared/publishedCourseTypes.ts',
-      'src/shared/surfaceRuntimeTypes.ts',
-      'src/shared/interactionSchema.ts',
-      'src/shared/interactionTypes.ts',
-      'src/shared/runtimeSchema.ts',
-      'src/shared/componentSchema.ts',
-      'src/shared/diagnosticCodes.ts',
-      'src/shared/constants.ts',
-      'src/renderer/export/exportSize.ts',
+    expect(tracedSources).toEqual(expectedSourceEvidencePaths)
+    for (const entry of evidence.inputs.sourceFiles) {
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
+    }
+
+    // Broad producer implementations carry described behaviour, not generation
+    // input bytes; listing them churned the evidence on unrelated edits.
+    for (const excluded of [
+      'package-lock.json',
+      'src/main/createWindow.ts',
+      'src/main/previewNetworkPolicy.ts',
+      'src/preload/index.ts',
+      'src/player/PlayerApp.ts',
+      'src/player/RuntimeHost.ts',
+      'src/player/CourseRuntimeKernel.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
+      'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
+      'src/renderer/components/componentPackageStore.ts',
       'src/renderer/export/course/buildCoursePackages.ts',
       'src/renderer/export/course/buildCoursePrintArtifacts.ts',
       'src/renderer/export/course/buildPublishedCourse.ts',
-      'scripts/validate-project.ts',
-      'src/renderer/components/componentPackageStore.ts',
       'src/renderer/project/createCourseProject.ts',
       'src/renderer/project/courseProjectArchive.ts',
-      'src/shared/layoutMeasure.ts',
-      'src/shared/componentContentIntegrity.ts',
-      'src/shared/textLayout.ts',
-      'src/shared/formulaRenderer.ts',
-      'src/shared/stableOrder.ts',
-    ]))
-    expect(tracedSources).not.toContain('src/shared/projectSchema.ts')
-    expect(tracedSources).not.toContain('src/renderer/project/createProject.ts')
-    expect(tracedSources).not.toContain('src/renderer/project/projectArchive.ts')
-    expect(tracedSources).not.toContain('src/renderer/project/validateProjectArchive.ts')
+      'src/renderer/ui/coursePlayerTryRun.ts',
+      'src/shared/projectSchema.ts',
+      'src/renderer/project/createProject.ts',
+      'src/renderer/project/projectArchive.ts',
+      'src/renderer/project/validateProjectArchive.ts',
+    ]) {
+      expect(tracedSources, `${excluded} must not be source evidence`)
+        .not.toContain(excluded)
+    }
+    expect(tracedSources.filter((entry) => entry.startsWith('src/main/'))).toEqual([])
+    expect(tracedSources.filter((entry) => entry.startsWith('src/preload/'))).toEqual([])
+    expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/export/course/')))
+      .toEqual([])
+    expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/project/')))
+      .toEqual([])
+    // The player host is excluded except for the evidence recorder, whose
+    // constants are imported and published in schemas/runtime-api2.json.
+    expect(tracedSources.filter((entry) => entry.startsWith('src/player/')))
+      .toEqual(['src/player/HostEvidenceRecorder.ts'])
+
+    // Narrowing provenance inputs must not weaken catalog or output hashes.
+    expect(evidence.inputs.componentCatalog).toEqual({
+      status: 'unavailable',
+      expectedCatalogSha256: BUILT_IN_COMPONENT_CATALOG_SHA256,
+      packages: [],
+    })
+    expect(Object.keys(evidence.output)).toEqual([
+      'component-catalog.snapshot.json',
+      'diagnostics.json',
+      'index.json',
+      'limits.json',
+      'schemas/component-api4.json',
+      'schemas/course-project-v9.json',
+      'schemas/interactions.json',
+      'schemas/published-course-v2.json',
+      'schemas/runtime-api2.json',
+      'schemas/runtime-api3.json',
+    ])
+    for (const [relativePath, entry] of Object.entries(evidence.output)) {
+      expect(entry.sha256).toBe(
+        createHash('sha256').update(generated.files.get(relativePath)!).digest('hex'),
+      )
+      expect(entry.bytes).toBe(
+        Buffer.byteLength(generated.files.get(relativePath)!, 'utf8'),
+      )
+    }
 
     const project = parseFile<{ sourceOfTruth: string }>(
       generated.files,
@@ -779,6 +1131,28 @@ describe('AI capability manifest generation', () => {
     expect(diagnostics.sourceOfTruth).toBe('src/shared/diagnosticCodes.ts')
     expect(limits.sourceOfTruth).toContain('src/shared/constants.ts')
   }, 15_000)
+
+  it.skipIf(!siblingCatalogAvailable)('keeps every committed capability artifact byte-identical outside generation-evidence.json', async () => {
+    const generated = await generateAiCapabilityArtifacts()
+    const committedRoot = path.join(process.cwd(), 'artifacts', 'ai-capabilities')
+    const drifted: string[] = []
+    for (const [relativePath, content] of generated.files) {
+      if (relativePath === 'generation-evidence.json') continue
+      const committed = await fs.readFile(
+        path.join(committedRoot, ...relativePath.split('/')),
+        'utf8',
+      )
+      if (committed !== content) drifted.push(relativePath)
+    }
+    expect(drifted).toEqual([])
+    // Provenance scope lives only in generation-evidence.json: no other artifact
+    // records source files, so narrowing the input set cannot move capability bytes.
+    for (const [relativePath, content] of generated.files) {
+      if (relativePath === 'generation-evidence.json') continue
+      expect(content, `${relativePath} must not embed source provenance`)
+        .not.toContain('sourceFiles')
+    }
+  }, 30_000)
 
   it('rejects an oversized canonical index fixture', () => {
     expect(() => assertIndexWithinLimit({

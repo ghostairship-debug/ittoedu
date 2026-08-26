@@ -145,6 +145,23 @@ function makeCandidateBackend() {
   return createSlideAuthoringBackend(openSlideAuthoringSession(v9CandidateFixture()))
 }
 
+function expectExactlyOneActiveV9Document(label: string) {
+  const state = useEditorStore.getState()
+  const document = selectActiveCourseProjectDocument(state)
+  const activeBackends = [
+    state.spatialSession,
+    state.flowSession,
+    selectSlideAuthoringBackend(state),
+  ].filter(Boolean)
+
+  expect(document, `${label}: active V9 document`).not.toBeNull()
+  expect(document?.schemaVersion, `${label}: active document schema`).toBe(
+    COURSE_PROJECT_SCHEMA_VERSION,
+  )
+  expect(activeBackends, `${label}: active V9 backend count`).toHaveLength(1)
+  return document!
+}
+
 beforeEach(() => {
   useEditorStore.getState().clearV9SlideCandidateBackend()
   useEditorStore.getState().createNewProject()
@@ -260,5 +277,52 @@ describe('V9 slide authoring backend single document transaction', () => {
     expect(added.ok).toBe(true)
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionBefore + 1)
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+  })
+
+  it('never loses publish sources during normal V9 new, open, mixed-switch, and restore lifecycles', () => {
+    const store = useEditorStore.getState()
+    const freshSlide = expectExactlyOneActiveV9Document('new Slide project')
+
+    store.addCourseContent('flow-page')
+    expectExactlyOneActiveV9Document('add Flow page')
+    store.addCourseContent('spatial-page')
+    const mixed = expectExactlyOneActiveV9Document('add Spatial page')
+    expect(mixed.id).toBe(freshSlide.id)
+
+    const locations = {
+      slide: mixed.locations.find((location) => location.kind === 'slide-scene'),
+      flow: mixed.locations.find((location) => location.kind === 'flow-block'),
+      spatial: mixed.locations.find((location) => location.kind === 'spatial-camera'),
+    }
+    expect(locations.slide).toBeTruthy()
+    expect(locations.flow).toBeTruthy()
+    expect(locations.spatial).toBeTruthy()
+    expect(new Set(mixed.surfaces.map((surface) => surface.type))).toEqual(
+      new Set(['slide', 'flow', 'spatial-2d']),
+    )
+
+    for (const [label, location] of Object.entries(locations)) {
+      if (!location) throw new Error(`missing ${label} location`)
+      useEditorStore.getState().activateCourseLocation(location.id)
+      expectExactlyOneActiveV9Document(`activate Mixed ${label} location`)
+      expect(selectActiveCourseProjectDocument(useEditorStore.getState())?.id).toBe(mixed.id)
+    }
+    if (!locations.slide) throw new Error('missing Slide location')
+    useEditorStore.getState().activateCourseLocation(locations.slide.id)
+    expectExactlyOneActiveV9Document('return to Mixed Slide location')
+
+    const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
+    if (!archive) throw new Error('expected a legal V9 archive')
+
+    // New replaces the prior authoring session; normal product lifecycle does
+    // not expose a sessionless "closed project" state between these actions.
+    useEditorStore.getState().createNewProject()
+    expectExactlyOneActiveV9Document('replace document with new project')
+    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(archive)).toBe(true)
+    const restored = expectExactlyOneActiveV9Document('restore V9 archive')
+    expect(restored.id).toBe(mixed.id)
+
+    useEditorStore.getState().loadCourseProject(structuredClone(restored), 'C:/tmp/legal-v9.h5lesson')
+    expectExactlyOneActiveV9Document('open legal V9 project')
   })
 })

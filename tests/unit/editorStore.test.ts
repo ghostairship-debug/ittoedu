@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { MAX_PROJECT_SCENES, MAX_SCENE_NODES } from '@/shared/constants'
 import type { AssetMeta } from '@/shared/projectTypes'
@@ -16,13 +16,19 @@ import {
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import { openDefaultCourseProject } from '@/renderer/project/courseProjectIo'
-import { COURSE_PROJECT_SCHEMA_VERSION } from '@/shared/courseProjectTypes'
+import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
+import { addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
+import { addSpatialCameraFrameFromSession } from '@/renderer/course/spatialCameraCommands'
+import { COURSE_PROJECT_SCHEMA_VERSION, type LayerItem } from '@/shared/courseProjectTypes'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveScene,
   selectEditingNodes,
+  selectEffectiveLayerProjection,
   selectMediaAssetFiles,
   selectSlideBackendKind,
   selectSlideAuthoringDocument,
+  selectSlideSceneList,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -96,6 +102,7 @@ function mediaFiles() {
 }
 
 beforeEach(() => {
+  delete (window as Partial<Window>).desktopAPI
   useEditorStore.getState().createNewProject()
 })
 
@@ -131,6 +138,815 @@ describe('default Course Project V9 persistence', () => {
     expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
     expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/格式版本|版本不支持/)
     expect(() => openDefaultCourseProject(v8Bytes)).toThrow(/格式版本|版本不支持/)
+  })
+
+  it('keeps the V8 preview and effective layer selection aligned through Slide history and page changes', () => {
+    const store = useEditorStore.getState()
+    const firstSceneId = store.activeSceneId
+
+    store.addTextNode(40, 50)
+    const nodeId = selectEditingNodes(useEditorStore.getState())[0]!.id
+    let state = useEditorStore.getState()
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .toContain(nodeId)
+
+    store.undo()
+    state = useEditorStore.getState()
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .not.toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .not.toContain(nodeId)
+
+    store.redo()
+    state = useEditorStore.getState()
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .toContain(nodeId)
+
+    store.addScene()
+    state = useEditorStore.getState()
+    const secondSceneId = state.activeSceneId
+    expect(selectSlideSceneList(state).find((scene) => scene.id === secondSceneId)?.nodes)
+      .toEqual([])
+    expect(state.project.scenes.find((scene) => scene.id === secondSceneId)?.nodes)
+      .toEqual([])
+
+    store.setActiveScene(firstSceneId)
+    state = useEditorStore.getState()
+    expect(state.activeSceneId).toBe(firstSceneId)
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .toContain(nodeId)
+  })
+})
+
+describe('Spatial command failure diagnostics', () => {
+  it('keeps a structured reason out of teacher feedback and preserves failed-command state', () => {
+    const reportDiagnostic = vi.fn(async (
+      _input: Parameters<Window['desktopAPI']['reportDiagnostic']>[0],
+    ) => undefined)
+    Object.defineProperty(window, 'desktopAPI', {
+      configurable: true,
+      value: { reportDiagnostic },
+    })
+    useEditorStore.getState().createNewSpatialProject()
+    const before = useEditorStore.getState()
+    const sessionBefore = before.spatialSession
+    if (!sessionBefore) throw new Error('expected Spatial session')
+    const documentBefore = sessionBefore.history.present
+    const rawReason = JSON.stringify([
+      {
+        code: 'invalid_type',
+        path: ['surfaces', 0, 'world', 'layerItems', 0, 'order'],
+        message: 'Invalid input: expected number, received string',
+      },
+    ], null, 2)
+
+    const result = before.runSpatialCommand((session) => ({
+      ok: false,
+      reason: rawReason,
+      nextSession: session,
+      historyEntry: false,
+      selection: session.selection,
+    }))
+
+    const after = useEditorStore.getState()
+    expect(result.reason).toBe(rawReason)
+    expect(after.errorMessage).toBe('课件内容格式不正确。请检查刚才的输入后重试。')
+    expect(after.errorMessage).not.toMatch(/invalid_type|surfaces|code|path|[\[\]{}]/)
+    expect(reportDiagnostic).toHaveBeenCalledTimes(1)
+    expect(reportDiagnostic.mock.calls[0]?.[0]).toMatchObject({
+      source: 'renderer',
+      stack: rawReason,
+    })
+    expect(reportDiagnostic.mock.calls[0]?.[0]?.message).toContain(
+      `"sessionId":"${sessionBefore.sessionId}"`,
+    )
+    expect(reportDiagnostic.mock.calls[0]?.[0]?.message).toContain(
+      `"revision":${documentBefore.revision}`,
+    )
+    expect(after.spatialSession).toBe(sessionBefore)
+    expect(after.spatialSession?.history).toBe(sessionBefore.history)
+    expect(after.spatialSession?.history.present).toBe(documentBefore)
+    expect(after.spatialSession?.history.present.revision).toBe(documentBefore.revision)
+    expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
+    expect(after.history).toBe(before.history)
+    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+    expect(after.selectedNodeId).toBe(before.selectedNodeId)
+    expect(after.dirty).toBe(before.dirty)
+  })
+
+  it('maps an ordinary reason even when the local diagnostic write rejects', async () => {
+    const reportDiagnostic = vi.fn(async (
+      _input: Parameters<Window['desktopAPI']['reportDiagnostic']>[0],
+    ) => {
+      throw new Error('diagnostic disk unavailable')
+    })
+    Object.defineProperty(window, 'desktopAPI', {
+      configurable: true,
+      value: { reportDiagnostic },
+    })
+    useEditorStore.getState().createNewSpatialProject()
+    const before = useEditorStore.getState()
+    const sessionBefore = before.spatialSession
+    if (!sessionBefore) throw new Error('expected Spatial session')
+
+    const result = before.runSpatialCommand((session) => ({
+      ok: false,
+      reason: 'locked',
+      nextSession: session,
+      historyEntry: false,
+      selection: session.selection,
+    }))
+    await Promise.resolve()
+
+    const after = useEditorStore.getState()
+    expect(result.reason).toBe('locked')
+    expect(after.errorMessage).toBe('当前内容已锁定。请先解锁后重试。')
+    expect(after.errorMessage).not.toContain('locked')
+    expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'renderer',
+      stack: 'locked',
+    }))
+    expect(after.spatialSession).toBe(sessionBefore)
+    expect(after.spatialSession?.history).toBe(sessionBefore.history)
+    expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
+    expect(after.history).toBe(before.history)
+    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+  })
+})
+
+describe('Spatial canonical property updates', () => {
+  it('commits common and whole-node text properties atomically with undo and redo', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const nodes = selectEditingNodes(useEditorStore.getState()).filter(
+      (node) => node.type === 'text',
+    )
+    const [first, second] = nodes
+    if (!first || !second || first.type !== 'text' || second.type !== 'text') {
+      throw new Error('expected two Spatial text nodes')
+    }
+    useEditorStore.getState().selectNodes([first.id, second.id])
+    const before = useEditorStore.getState().spatialSession!
+
+    useEditorStore.getState().updateNodes([
+      {
+        nodeId: first.id,
+        patch: {
+          name: '原子标题',
+          x: first.x + 37,
+          y: first.y + 19,
+          width: first.width + 23,
+          height: first.height + 11,
+          rotation: 17,
+          opacity: 0.42,
+          visible: false,
+          locked: true,
+          playbackInitialVisibility: 'hidden',
+        },
+      },
+      {
+        nodeId: second.id,
+        patch: {
+          style: {
+            fontFamily: 'SimHei',
+            fontSize: 36,
+            color: '#123456',
+            bold: true,
+            lineSpacing: 1.8,
+          },
+        },
+      },
+    ])
+
+    const changed = useEditorStore.getState().spatialSession!
+    expect(changed.history.present.revision).toBe(before.history.present.revision + 1)
+    expect(changed.history.past).toHaveLength(before.history.past.length + 1)
+    const surface = changed.history.present.surfaces.find(
+      (candidate) => candidate.id === changed.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const firstItem = surface.world.layerItems.find((item) => item.layerItemId === first.id)
+    const secondItem = surface.world.layerItems.find((item) => item.layerItemId === second.id)
+    expect(firstItem).toMatchObject({
+      label: '原子标题',
+      frame: {
+        x: first.x + 37,
+        y: first.y + 19,
+        width: first.width + 23,
+        height: first.height + 11,
+      },
+      rotation: 17,
+      opacity: 0.42,
+      visible: false,
+      locked: true,
+      playbackInitialVisibility: 'hidden',
+    })
+    expect(secondItem).toMatchObject({
+      kind: 'native',
+      content: {
+        nativeType: 'text',
+        data: {
+          style: {
+            fontFamily: 'SimHei',
+            fontSize: 36,
+            color: '#123456',
+            bold: true,
+            lineSpacing: 1.8,
+          },
+        },
+      },
+    })
+
+    useEditorStore.getState().undo()
+    const undone = useEditorStore.getState().spatialSession!
+    const undoneSurface = undone.history.present.surfaces.find(
+      (candidate) => candidate.id === undone.selection.surfaceId,
+    )
+    if (!undoneSurface || undoneSurface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    expect(undoneSurface.world.layerItems.find((item) => item.layerItemId === first.id)?.label)
+      .toBe(first.name)
+    expect(undoneSurface.world.layerItems.find((item) => item.layerItemId === second.id))
+      .toMatchObject({ kind: 'native', content: { nativeType: 'text', data: { style: second.style } } })
+
+    useEditorStore.getState().redo()
+    const redone = useEditorStore.getState().spatialSession!
+    expect(redone.history.present.surfaces
+      .find((candidate) => candidate.id === redone.selection.surfaceId))
+      .toMatchObject({
+        type: 'spatial-2d',
+        world: {
+          layerItems: expect.arrayContaining([
+            expect.objectContaining({ layerItemId: first.id, label: '原子标题' }),
+            expect.objectContaining({
+              layerItemId: second.id,
+              content: expect.objectContaining({
+                data: expect.objectContaining({
+                  style: expect.objectContaining({ bold: true, color: '#123456' }),
+                }),
+              }),
+            }),
+          ]),
+        },
+      })
+  })
+
+  it('keeps no-op, locked, and unsupported batches at zero document and history writes', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const [first, second] = selectEditingNodes(useEditorStore.getState()).filter(
+      (node) => node.type === 'text',
+    )
+    if (!first || !second || first.type !== 'text' || second.type !== 'text') {
+      throw new Error('expected two Spatial text nodes')
+    }
+    useEditorStore.getState().selectNodes([first.id, second.id])
+
+    const beforeNoop = useEditorStore.getState().spatialSession!
+    useEditorStore.getState().updateNodes([{
+      nodeId: second.id,
+      patch: { opacity: second.opacity, style: { bold: second.style.bold } },
+    }])
+    expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
+    expect(useEditorStore.getState().spatialSession?.history).toBe(beforeNoop.history)
+
+    useEditorStore.getState().updateNode(first.id, { locked: true })
+    const beforeLocked = useEditorStore.getState().spatialSession!
+    const secondOpacity = beforeLocked.history.present.surfaces
+      .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
+      .find((item) => item.layerItemId === second.id)?.opacity
+    useEditorStore.getState().updateNodes([
+      { nodeId: first.id, patch: { name: '不应部分写入' } },
+      { nodeId: second.id, patch: { opacity: 0.25 } },
+    ])
+    const afterLocked = useEditorStore.getState()
+    expect(afterLocked.spatialSession).toBe(beforeLocked)
+    expect(afterLocked.spatialSession?.history).toBe(beforeLocked.history)
+    expect(afterLocked.errorMessage).toBe('当前内容已锁定。请先解锁后重试。')
+    expect(afterLocked.spatialSession?.history.present.surfaces
+      .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
+      .find((item) => item.layerItemId === second.id)?.opacity).toBe(secondOpacity)
+
+    useEditorStore.getState().updateNode(second.id, {
+      fit: 'cover',
+    } as never)
+    const afterUnsupported = useEditorStore.getState()
+    expect(afterUnsupported.spatialSession).toBe(beforeLocked)
+    expect(afterUnsupported.errorMessage).toBe(
+      '当前元素不支持这项属性，未保存任何更改。',
+    )
+  })
+
+  it('keeps geometry and presentation properties selection-bound', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const [selected, unselected] = selectEditingNodes(useEditorStore.getState()).filter(
+      (node) => node.type === 'text',
+    )
+    if (!selected || !unselected) throw new Error('expected two Spatial text nodes')
+    useEditorStore.getState().selectNode(selected.id)
+    const before = useEditorStore.getState().spatialSession!
+
+    useEditorStore.getState().updateNode(unselected.id, {
+      name: '不得借直接行属性绕过选择',
+      opacity: 0.25,
+    })
+
+    const after = useEditorStore.getState()
+    expect(after.spatialSession).toBe(before)
+    expect(after.spatialSession?.history).toBe(before.history)
+    expect(after.errorMessage).toBe('所选内容已失效。请重新选择后再试。')
+    const located = locateCourseLayer(before.history.present, unselected.id)
+    expect(located?.item.label).toBe(unselected.name)
+    expect(located?.item.opacity).toBe(unselected.opacity)
+  })
+})
+
+describe('Spatial canonical clipboard commands', () => {
+  it('copies and pastes one owner batch, then duplicates it with one history entry each', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode(40, 60)
+    useEditorStore.getState().addTextNode(260, 180)
+    const initial = useEditorStore.getState().spatialSession!
+    const surface = initial.history.present.surfaces.find(
+      (candidate) => candidate.id === initial.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const sourceIds = surface.world.layerItems.map((item) => item.layerItemId)
+    expect(sourceIds).toHaveLength(2)
+    useEditorStore.getState().runSpatialCommand((session) => addSpatialRelationInSession(session, {
+      sourceLayerItemId: sourceIds[0]!,
+      targetLayerItemId: sourceIds[1]!,
+      kind: 'arrow',
+      label: '成对复制',
+    }))
+    useEditorStore.getState().selectNodes(sourceIds)
+
+    const beforeCopy = useEditorStore.getState()
+    const copySession = beforeCopy.spatialSession!
+    beforeCopy.copySelectedNodes()
+    const copied = useEditorStore.getState()
+    expect(copied.spatialSession).toBe(copySession)
+    expect(copied.spatialSession?.history).toBe(copySession.history)
+    expect(copied.spatialSession?.selection).toBe(copySession.selection)
+    expect(copied.spatialClipboard).toMatchObject({
+      projectId: copySession.history.present.id,
+      sessionId: copySession.sessionId,
+      locationId: copySession.selection.locationId,
+      surfaceId: copySession.selection.surfaceId,
+      owner: 'world',
+      ownerKey: `world:${copySession.selection.surfaceId}`,
+    })
+    expect(copied.spatialClipboard?.items).toHaveLength(2)
+
+    const pasteBase = copied.spatialSession!
+    copied.pasteNodes()
+    const pasted = useEditorStore.getState().spatialSession!
+    const pastedIds = [...pasted.selection.selectionIds]
+    expect(pastedIds).toHaveLength(2)
+    expect(pasted.history.present.revision).toBe(pasteBase.history.present.revision + 1)
+    expect(pasted.history.past).toHaveLength(pasteBase.history.past.length + 1)
+    expect(pasted.scope).toBe('world')
+    const pastedSurface = pasted.history.present.surfaces.find(
+      (candidate) => candidate.id === pasted.selection.surfaceId,
+    )
+    if (!pastedSurface || pastedSurface.type !== 'spatial-2d') {
+      throw new Error('expected Spatial surface')
+    }
+    const sourceById = new Map(surface.world.layerItems.map((item) => [item.layerItemId, item]))
+    pastedIds.forEach((pastedId, index) => {
+      const source = sourceById.get(sourceIds[index]!)!
+      const item = pastedSurface.world.layerItems.find((candidate) => candidate.layerItemId === pastedId)
+      expect(item).toMatchObject({
+        locked: false,
+        label: `${source.label} 副本`,
+        frame: {
+          x: source.frame.x + 20,
+          y: source.frame.y + 20,
+          width: source.frame.width,
+          height: source.frame.height,
+        },
+      })
+    })
+    expect(new Set(pastedSurface.world.layerItems.map((item) => item.order)).size)
+      .toBe(pastedSurface.world.layerItems.length)
+    expect(pastedSurface.world.relations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceLayerItemId: pastedIds[0],
+        targetLayerItemId: pastedIds[1],
+        label: '成对复制',
+      }),
+    ]))
+
+    const duplicateBase = pasted
+    useEditorStore.getState().duplicateSelectedNodes()
+    const duplicated = useEditorStore.getState().spatialSession!
+    const duplicatedIds = [...duplicated.selection.selectionIds]
+    expect(duplicatedIds).toHaveLength(2)
+    expect(duplicated.history.present.revision).toBe(duplicateBase.history.present.revision + 1)
+    expect(duplicated.history.past).toHaveLength(duplicateBase.history.past.length + 1)
+    const duplicatedSurface = duplicated.history.present.surfaces.find(
+      (candidate) => candidate.id === duplicated.selection.surfaceId,
+    )
+    expect(duplicatedSurface).toMatchObject({
+      type: 'spatial-2d',
+      world: {
+        relations: expect.arrayContaining([
+          expect.objectContaining({
+            sourceLayerItemId: duplicatedIds[0],
+            targetLayerItemId: duplicatedIds[1],
+          }),
+        ]),
+      },
+    })
+
+    useEditorStore.getState().undo()
+    const undone = useEditorStore.getState().spatialSession!
+    expect(undone.selection.selectionIds).toEqual([])
+    expect(duplicatedIds.every((id) => locateCourseLayer(undone.history.present, id) === null)).toBe(true)
+    useEditorStore.getState().redo()
+    const redone = useEditorStore.getState().spatialSession!
+    expect(redone.selection.selectionIds).toEqual([])
+    expect(duplicatedIds.every((id) => locateCourseLayer(redone.history.present, id) !== null)).toBe(true)
+  })
+
+  it('clears the clipboard on a camera location transition and does not revive it on return', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    const sourceId = useEditorStore.getState().spatialSession!.history.present.surfaces
+      .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])[0]
+      ?.layerItemId
+    if (!sourceId) throw new Error('expected Spatial source item')
+    useEditorStore.getState().selectNode(sourceId)
+    useEditorStore.getState().copySelectedNodes()
+    const captured = useEditorStore.getState().spatialClipboard
+    expect(captured).not.toBeNull()
+
+    useEditorStore.getState().runSpatialCommand((session) => (
+      addSpatialCameraFrameFromSession(session, { name: '剪贴板转换镜头' })
+    ))
+    expect(useEditorStore.getState().spatialClipboard).toBe(captured)
+    const session = useEditorStore.getState().spatialSession!
+    const surface = session.history.present.surfaces.find(
+      (candidate) => candidate.id === session.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const activeLocation = session.history.present.locations.find(
+      (location) => location.id === session.selection.locationId,
+    )
+    if (!activeLocation || activeLocation.kind !== 'spatial-camera') {
+      throw new Error('expected active Spatial location')
+    }
+    const otherFrame = surface.camera.frames.find(
+      (frame) => frame.id !== activeLocation.cameraFrameId,
+    )
+    if (!otherFrame) throw new Error('expected second camera frame')
+
+    useEditorStore.getState().setActiveScene(otherFrame.id)
+    expect(useEditorStore.getState().spatialClipboard).toBeNull()
+    useEditorStore.getState().setActiveScene(activeLocation.cameraFrameId)
+    expect(useEditorStore.getState().spatialClipboard).toBeNull()
+  })
+
+  it('rejects locked, wrong-owner, removed-source, and empty operations without partial state writes', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
+    const items = useEditorStore.getState().spatialSession!.history.present.surfaces
+      .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
+    const [first, second] = items
+    if (!first || !second) throw new Error('expected Spatial items')
+
+    useEditorStore.getState().selectNode(first.layerItemId)
+    useEditorStore.getState().copySelectedNodes()
+    const validClipboard = useEditorStore.getState().spatialClipboard
+    expect(validClipboard).not.toBeNull()
+
+    useEditorStore.getState().updateNode(first.layerItemId, { locked: true })
+    const beforeLockedPaste = useEditorStore.getState()
+    beforeLockedPaste.pasteNodes()
+    const afterLockedPaste = useEditorStore.getState()
+    expect(afterLockedPaste.spatialSession).toBe(beforeLockedPaste.spatialSession)
+    expect(afterLockedPaste.spatialSession?.history).toBe(beforeLockedPaste.spatialSession?.history)
+    expect(afterLockedPaste.spatialSession?.selection).toBe(beforeLockedPaste.spatialSession?.selection)
+    expect(afterLockedPaste.selectedNodeIds).toBe(beforeLockedPaste.selectedNodeIds)
+    expect(afterLockedPaste.spatialClipboard).toBe(validClipboard)
+    expect(afterLockedPaste.errorMessage).toMatch(/锁定/)
+    useEditorStore.getState().undo()
+    expect(locateCourseLayer(
+      useEditorStore.getState().spatialSession!.history.present,
+      first.layerItemId,
+    )?.item.locked).toBe(false)
+    expect(useEditorStore.getState().spatialClipboard).toBe(validClipboard)
+
+    useEditorStore.getState().selectNode(second.layerItemId)
+    useEditorStore.getState().updateNode(second.layerItemId, { locked: true })
+    const beforeLocked = useEditorStore.getState()
+    beforeLocked.copySelectedNodes()
+    const afterLockedCopy = useEditorStore.getState()
+    expect(afterLockedCopy.spatialSession).toBe(beforeLocked.spatialSession)
+    expect(afterLockedCopy.spatialSession?.history).toBe(beforeLocked.spatialSession?.history)
+    expect(afterLockedCopy.spatialSession?.selection).toBe(beforeLocked.spatialSession?.selection)
+    expect(afterLockedCopy.selectedNodeIds).toBe(beforeLocked.selectedNodeIds)
+    expect(afterLockedCopy.spatialClipboard).toBe(validClipboard)
+    expect(afterLockedCopy.errorMessage).toMatch(/锁定/)
+
+    const beforeLockedDuplicate = useEditorStore.getState()
+    beforeLockedDuplicate.duplicateSelectedNodes()
+    const afterLockedDuplicate = useEditorStore.getState()
+    expect(afterLockedDuplicate.spatialSession).toBe(beforeLockedDuplicate.spatialSession)
+    expect(afterLockedDuplicate.spatialSession?.history).toBe(beforeLockedDuplicate.spatialSession?.history)
+    expect(afterLockedDuplicate.selectedNodeIds).toBe(beforeLockedDuplicate.selectedNodeIds)
+
+    useEditorStore.getState().selectNode(first.layerItemId)
+    useEditorStore.getState().copySelectedNodes()
+    useEditorStore.getState().setEditingScope('global')
+    const beforeWrongOwner = useEditorStore.getState()
+    beforeWrongOwner.pasteNodes()
+    const afterWrongOwner = useEditorStore.getState()
+    expect(afterWrongOwner.spatialSession).toBe(beforeWrongOwner.spatialSession)
+    expect(afterWrongOwner.spatialSession?.history).toBe(beforeWrongOwner.spatialSession?.history)
+    expect(afterWrongOwner.selectedNodeIds).toBe(beforeWrongOwner.selectedNodeIds)
+    expect(afterWrongOwner.errorMessage).toMatch(/编辑范围/)
+
+    const controllerId = beforeWrongOwner.spatialSession?.history.present.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native'
+        && entry.item.content.nativeType === 'teacher-controller',
+    )?.item.layerItemId
+    if (!controllerId) throw new Error('expected teacher controller')
+    const beforeController = useEditorStore.getState()
+    beforeController.duplicateNode(controllerId)
+    const afterController = useEditorStore.getState()
+    expect(afterController.spatialSession).toBe(beforeController.spatialSession)
+    expect(afterController.spatialSession?.history).toBe(beforeController.spatialSession?.history)
+    expect(afterController.selectedNodeIds).toBe(beforeController.selectedNodeIds)
+    expect(afterController.errorMessage).toMatch(/教师控制器/)
+
+    useEditorStore.getState().setEditingScope('scene')
+    useEditorStore.getState().selectNode(first.layerItemId)
+    useEditorStore.getState().copySelectedNodes()
+    useEditorStore.getState().deleteNode(first.layerItemId)
+    const beforeRemoved = useEditorStore.getState()
+    beforeRemoved.pasteNodes()
+    const afterRemoved = useEditorStore.getState()
+    expect(afterRemoved.spatialSession).toBe(beforeRemoved.spatialSession)
+    expect(afterRemoved.spatialSession?.history).toBe(beforeRemoved.spatialSession?.history)
+    expect(afterRemoved.selectedNodeIds).toBe(beforeRemoved.selectedNodeIds)
+    expect(afterRemoved.errorMessage).toMatch(/失效/)
+
+    useEditorStore.setState({ spatialClipboard: null })
+    const beforeEmpty = useEditorStore.getState()
+    beforeEmpty.pasteNodes()
+    const afterEmpty = useEditorStore.getState()
+    expect(afterEmpty.spatialSession).toBe(beforeEmpty.spatialSession)
+    expect(afterEmpty.spatialSession?.history).toBe(beforeEmpty.spatialSession?.history)
+    expect(afterEmpty.selectedNodeIds).toBe(beforeEmpty.selectedNodeIds)
+    expect(afterEmpty.errorMessage).toMatch(/剪贴板为空/)
+
+    useEditorStore.getState().createNewProject()
+    expect(useEditorStore.getState().spatialClipboard).toBeNull()
+  })
+
+  it('remaps runtime, interaction follower, and relation references across later edits and repeated paste', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode(20, 30)
+    useEditorStore.getState().addTextNode(500, 300)
+    const session = useEditorStore.getState().spatialSession!
+    const document = structuredClone(session.history.present)
+    const surface = document.surfaces.find(
+      (candidate) => candidate.id === session.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const [triggerItem, outsideItem] = surface.world.layerItems
+    if (!triggerItem || !outsideItem) throw new Error('expected Spatial world items')
+    const runtimeId = 'runtime-spatial-clipboard'
+    const runtimeItem = {
+      layerItemId: runtimeId,
+      label: '引用运行时',
+      frame: { mode: 'absolute', x: 180, y: 120, width: 320, height: 180 },
+      order: allocateCourseLayerOrder(document, triggerItem.order + 1),
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      kind: 'runtime',
+      runtime: {
+        protocol: 'surface-runtime',
+        runtimeApiVersion: 3,
+        enabled: true,
+        renderMode: 'dom',
+        source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime"})',
+        content: { values: { title: '引用运行时' } },
+        assets: {},
+        nodeBindings: {
+          peer: triggerItem.layerItemId,
+          self: runtimeId,
+          outside: outsideItem.layerItemId,
+        },
+      },
+    } satisfies LayerItem
+    surface.world.layerItems.push(runtimeItem)
+    surface.world.relations = [
+      {
+        id: 'relation-runtime-peer',
+        sourceLayerItemId: triggerItem.layerItemId,
+        targetLayerItemId: runtimeId,
+        label: '运行时关系',
+        kind: 'line',
+      },
+      {
+        id: 'relation-runtime-outside',
+        sourceLayerItemId: triggerItem.layerItemId,
+        targetLayerItemId: outsideItem.layerItemId,
+        label: '外部关系',
+        kind: 'arrow',
+      },
+    ]
+    surface.world.paths = [{
+      id: 'path-runtime-outside',
+      name: '原路径',
+      layerItemIds: [triggerItem.layerItemId, outsideItem.layerItemId],
+    }]
+    surface.semanticZoom = [{
+      id: 'zoom-runtime-outside',
+      layerItemIds: [runtimeId, outsideItem.layerItemId],
+      minZoom: 0.5,
+      maxZoom: 2,
+      visible: true,
+    }]
+    const originalPaths = structuredClone(surface.world.paths)
+    const originalSemanticZoom = structuredClone(surface.semanticZoom)
+    document.globalInteractions.push(
+      {
+        id: 'rule-spatial-copy-root',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: triggerItem.layerItemId },
+        conditions: [],
+        actions: [{
+          id: 'action-spatial-copy-motion',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'node.enter',
+            nodeId: runtimeId,
+            effect: 'fade',
+            durationMs: 240,
+            easing: 'ease-out',
+          },
+        }],
+      },
+      {
+        id: 'rule-spatial-copy-follower',
+        enabled: true,
+        trigger: {
+          type: 'animation.completed',
+          actionId: 'action-spatial-copy-motion',
+        },
+        conditions: [],
+        actions: [{
+          id: 'action-spatial-copy-follower',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'node.exit',
+            nodeId: triggerItem.layerItemId,
+            effect: 'fade',
+            durationMs: 180,
+            easing: 'ease-in',
+          },
+        }],
+      },
+    )
+    useEditorStore.getState().loadCourseProject(document, null)
+    useEditorStore.getState().selectNodes([triggerItem.layerItemId, runtimeId])
+    useEditorStore.getState().copySelectedNodes()
+    const capturedRevision = useEditorStore.getState().spatialClipboard?.capturedRevision
+
+    useEditorStore.getState().pasteNodes()
+    const firstPaste = useEditorStore.getState().spatialSession!
+    const [newTriggerId, newRuntimeId] = firstPaste.selection.selectionIds
+    expect(capturedRevision).toBeLessThan(firstPaste.history.present.revision)
+    const newRuntime = locateCourseLayer(firstPaste.history.present, newRuntimeId!)?.item
+    expect(newRuntime).toMatchObject({
+      kind: 'runtime',
+      runtime: {
+        nodeBindings: {
+          peer: newTriggerId,
+          self: newRuntimeId,
+          outside: outsideItem.layerItemId,
+        },
+      },
+    })
+    const copiedRoot = firstPaste.history.present.globalInteractions.find(
+      (rule) => 'nodeId' in rule.trigger && rule.trigger.nodeId === newTriggerId,
+    )
+    const copiedMotionId = copiedRoot?.actions[0]?.id
+    expect(copiedRoot?.actions[0]?.action).toMatchObject({ nodeId: newRuntimeId })
+    expect(firstPaste.history.present.globalInteractions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        trigger: { type: 'animation.completed', actionId: copiedMotionId },
+      }),
+    ]))
+    const firstSurface = firstPaste.history.present.surfaces.find(
+      (candidate) => candidate.id === firstPaste.selection.surfaceId,
+    )
+    expect(firstSurface).toMatchObject({
+      type: 'spatial-2d',
+      world: {
+        relations: expect.arrayContaining([
+          expect.objectContaining({
+            sourceLayerItemId: newTriggerId,
+            targetLayerItemId: newRuntimeId,
+            label: '运行时关系',
+          }),
+        ]),
+      },
+    })
+    if (firstSurface?.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    expect(firstSurface.world.relations).toHaveLength(3)
+    expect(firstSurface.world.relations).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceLayerItemId: newTriggerId,
+        targetLayerItemId: outsideItem.layerItemId,
+      }),
+    ]))
+    expect(firstSurface.world.paths).toEqual(originalPaths)
+    expect(firstSurface.semanticZoom).toEqual(originalSemanticZoom)
+
+    useEditorStore.getState().selectNode(outsideItem.layerItemId)
+    useEditorStore.getState().updateNode(outsideItem.layerItemId, { name: '普通后续编辑' })
+    const editedRevision = useEditorStore.getState().spatialSession!.history.present.revision
+    expect(editedRevision).toBeGreaterThan(firstPaste.history.present.revision)
+    useEditorStore.getState().pasteNodes()
+    const repeated = useEditorStore.getState().spatialSession!
+    expect(repeated.history.present.revision).toBe(editedRevision + 1)
+    expect(repeated.selection.selectionIds).toHaveLength(2)
+
+    const validClipboard = useEditorStore.getState().spatialClipboard
+    if (!validClipboard) throw new Error('expected Spatial clipboard')
+    const danglingClipboard = structuredClone(validClipboard)
+    const runtimeClipboardItem = danglingClipboard.items.find(
+      (entry) => entry.item.kind === 'runtime',
+    )
+    if (!runtimeClipboardItem || runtimeClipboardItem.item.kind !== 'runtime') {
+      throw new Error('expected Runtime clipboard item')
+    }
+    runtimeClipboardItem.item.runtime.nodeBindings = { missing: 'removed-layer-reference' }
+    useEditorStore.setState({ spatialClipboard: danglingClipboard })
+    const beforeDangling = useEditorStore.getState()
+    beforeDangling.pasteNodes()
+    const afterDangling = useEditorStore.getState()
+    expect(afterDangling.spatialSession).toBe(beforeDangling.spatialSession)
+    expect(afterDangling.spatialSession?.history).toBe(beforeDangling.spatialSession?.history)
+    expect(afterDangling.selectedNodeIds).toBe(beforeDangling.selectedNodeIds)
+    expect(afterDangling.errorMessage).toMatch(/资源|引用/)
+  })
+
+  it('rejects an owner at capacity without changing document, history, or selection', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    const initial = useEditorStore.getState().spatialSession!
+    const document = structuredClone(initial.history.present)
+    const surface = document.surfaces.find(
+      (candidate) => candidate.id === initial.selection.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const source = surface.world.layerItems[0]
+    if (!source) throw new Error('expected source item')
+    const allOrders = [
+      ...document.globalLayerItems.map((entry) => entry.item.order),
+      ...surface.surfaceLayerItems.map((entry) => entry.item.order),
+      ...surface.world.layerItems.map((item) => item.order),
+    ]
+    let order = Math.max(...allOrders) + 1
+    while (surface.world.layerItems.length < MAX_SCENE_NODES) {
+      const item = structuredClone(source)
+      item.layerItemId = `capacity-spatial-${surface.world.layerItems.length}`
+      item.label = `容量 ${surface.world.layerItems.length}`
+      item.order = order
+      order += 1
+      surface.world.layerItems.push(item)
+    }
+    useEditorStore.getState().loadCourseProject(document, null)
+    useEditorStore.getState().selectNode(source.layerItemId)
+    const before = useEditorStore.getState()
+    before.duplicateSelectedNodes()
+    const after = useEditorStore.getState()
+    expect(after.spatialSession).toBe(before.spatialSession)
+    expect(after.spatialSession?.history).toBe(before.spatialSession?.history)
+    expect(after.spatialSession?.selection).toBe(before.spatialSession?.selection)
+    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+    expect(after.errorMessage).toMatch(/上限/)
   })
 })
 

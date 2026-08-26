@@ -1,21 +1,31 @@
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
+import {
+  composePublishedCourseLocation,
+  type CourseLayerComposition,
+} from '../../../shared/courseLayerComposition'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
+import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  FLOW_MEDIA_QUERY_CONTAINER_TYPE,
+  resolveFlowMediaLayoutProjection,
+} from '../../../shared/flowMediaLayout'
 import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
-import { isGlobalLayerItemVisible } from '../../globalLayerVisibility'
 import {
   TeacherControllerDom,
   stageBoundsFromElement,
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
+import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
 import type {
   PublishedFlowSurface,
   PublishedLayerItem,
   PublishedNativeLayerItem,
-  PublishedScopedLayerItem,
+  PublishedRuntimeLayerItem,
 } from '../../../shared/publishedCourseTypes'
 import {
   FLOW_LOGICAL_CANVAS,
@@ -32,11 +42,11 @@ import {
   type FlowPublishedPlaybackSource,
 } from './flowModel'
 import {
-  FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX,
   FlowRuntimeTocChrome,
   buildFlowRuntimeToc,
   flowRuntimeTocAnchorId,
   flowRuntimeTocPageAnchorId,
+  flowRuntimeTocShellLayout,
   type FlowRuntimeTocEntry,
 } from './flowRuntimeToc'
 import {
@@ -45,6 +55,32 @@ import {
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
 import { fittedPublishedFormulaSize, paintPublishedFormula } from '../publishedFormula'
+import {
+  PublishedDomInteractionSurfacePort,
+  PublishedInteractionVisibilityState,
+  type PublishedInteractionNodeHandle,
+  type PublishedInteractionNodeOwnership,
+  type PublishedInteractionNodeState,
+} from '../../interactions/PublishedDomInteractionSurfacePort'
+import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
+import {
+  createPublishedSurfaceRuntimeSession,
+  mountPublishedSurfaceRuntime,
+  type PublishedSurfaceRuntimeMountHandle,
+} from '../runtime/publishedSurfaceRuntimeMount'
+import {
+  isPublishedGlobalCanvasRuntimePointerItem,
+  setPublishedGlobalCanvasRuntimeInteractionVisibility,
+} from '../runtime/publishedGlobalCanvasRuntimePointer'
+
+type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
+
+interface FlowRuntimeHandleRecord {
+  handle: PublishedSurfaceRuntimeMountHandle | null
+  wrap: HTMLElement
+  item: PublishedRuntimeLayerItem
+  retired: boolean
+}
 
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
@@ -65,6 +101,20 @@ export interface FlowSurfaceHostOptions {
   ) => boolean | void | Promise<boolean | void>
   onNavigateLocation?: (locationId: string) => void
   courseProgressSource?: FlowCourseProgressSource
+  teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  deferTeacherControllerCourseReset?: boolean
+  /** Published-session only; shared by global LayerItem handles across surfaces. */
+  globalInteractionVisibilityState?: PublishedInteractionVisibilityState
+  /** Published-session generation hook fired before interaction DOM is invalidated. */
+  onInteractionInvalidated?: () => void
+  /** Published-session generation hook fired after an active interaction DOM is ready. */
+  onInteractionReady?: () => void
+  /** Published-session diagnostic bridge; a failed Runtime never fails its Flow host. */
+  reportRuntimeError?: (
+    itemId: string,
+    phase: FlowRuntimeFailurePhase,
+    error: Error,
+  ) => void
 }
 
 export interface FlowHostAudioSession {
@@ -92,8 +142,21 @@ export class FlowSurfaceHost {
   #overlay: HTMLElement | null = null
   #toc: FlowRuntimeTocChrome | null = null
   #controller: TeacherControllerDom | null = null
-  #controllerSessions = new Map<string, TeacherControllerDomSession>()
+  readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
   #componentHandles: PublishedComponentMountHandle[] = []
+  readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
+  #interactionPort: PublishedDomInteractionSurfacePort | null = null
+  #interactionGeneration = 0
+  #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
+  #runtimeHandles: FlowRuntimeHandleRecord[] = []
+  #deferredRuntimeMounts: Array<{
+    wrap: HTMLElement
+    item: PublishedRuntimeLayerItem
+  }> = []
+  readonly #runtimeSession = createPublishedSurfaceRuntimeSession()
+  #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #completedActiveResetLocationId: string | null = null
   #active = false
   #queue: Promise<void> = Promise.resolve()
 
@@ -103,6 +166,10 @@ export class FlowSurfaceHost {
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
     this.#options = { ...options }
+    this.#teacherControllerSession = options.teacherControllerSession
+      ?? new TeacherControllerRuntimeSessionStore()
+    this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
+      ?? new PublishedInteractionVisibilityState()
     this.#audio = options.audio ?? createFlowHostAudioSession(
       this.#playback.media?.audio.defaultMuted === true,
     )
@@ -143,8 +210,36 @@ export class FlowSurfaceHost {
     return this.#root
   }
 
+  getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
+    return this.#interactionPort
+  }
+
+  getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
+    const overlay = this.#overlay
+    if (!overlay) return null
+    for (const candidate of overlay.querySelectorAll<HTMLElement>('[data-flow-overlay-source="global"]')) {
+      if (candidate.dataset.flowOverlayItem === itemId) return candidate
+    }
+    return null
+  }
+
+  /** Published navigator hint used to avoid resuming a stale Flow generation. */
+  preparePublishedLocation(locationId: string, forced: boolean): void {
+    resolveFlowLocation(this.#playback, locationId)
+    this.#completedActiveResetLocationId = null
+    this.#preparedRuntimeActivation = { locationId, forced }
+  }
+
   setTocOpen(open: boolean): void {
     this.#toc?.setOpen(open)
+  }
+
+  resetTeacherControllerSession(scope: 'surface' | 'course'): void {
+    if (scope === 'course') {
+      if (!this.#options.deferTeacherControllerCourseReset) {
+        this.#teacherControllerSession.resetCourse()
+      }
+    } else this.#teacherControllerSession.resetSurface(this.#surfaceId)
   }
 
   mount(container: HTMLElement): Promise<void> {
@@ -180,6 +275,7 @@ export class FlowSurfaceHost {
       container.appendChild(root)
       this.#root = root
       this.#overlay = overlay
+      this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
       this.#toc = new FlowRuntimeTocChrome(root, {
         initialOpen: this.#options.initialTocOpen === true,
         getEntries: () => buildFlowRuntimeToc(this.#playback),
@@ -190,16 +286,43 @@ export class FlowSurfaceHost {
       })
       this.#render()
       this.#applyShellLayout()
+      this.#restoreInteractionsIfActive()
     })
   }
 
   async activate(): Promise<void> {
+    const wasInactive = !this.#active
+    const preparedActivation = this.#preparedRuntimeActivation
+    this.#preparedRuntimeActivation = null
     this.#active = true
     if (this.#root) this.#root.hidden = false
+    this.#pendingRuntimeActivation = null
+    if (wasInactive) {
+      if (preparedActivation !== null) {
+        this.#pendingRuntimeActivation = preparedActivation
+      } else if (this.#runtimeHandles.length > 0) {
+        for (const record of [...this.#runtimeHandles]) {
+          record.handle?.setVisible(true)
+          if (!record.retired) record.handle?.resume()
+        }
+      } else {
+        this.#mountDeferredRuntimes()
+      }
+    }
+    this.#syncTeacherControllerSession()
+    this.#restoreInteractionsIfActive()
   }
 
   async suspend(): Promise<void> {
+    this.#invalidateInteractions()
     this.#active = false
+    this.#preparedRuntimeActivation = null
+    this.#pendingRuntimeActivation = null
+    this.#completedActiveResetLocationId = null
+    for (const record of [...this.#runtimeHandles]) {
+      record.handle?.setVisible(false)
+      if (!record.retired) record.handle?.suspend()
+    }
     if (this.#root) this.#root.hidden = true
   }
 
@@ -208,42 +331,74 @@ export class FlowSurfaceHost {
   }
 
   setLocationId(locationId: string): Promise<void> {
+    return this.#enqueue(async () => this.#applyLocation(locationId))
+  }
+
+  reset(scope: 'surface' | 'course', startLocationId: string): Promise<void> {
     return this.#enqueue(async () => {
-      const location = resolveFlowLocation(this.#playback, locationId)
-      this.#locationId = location.id
-      this.#surfaceId = location.surfaceId
-      if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
-      this.#render()
-      this.#applyShellLayout()
-      this.#scrollToAnchor(
-        location.blockId
-          ? flowRuntimeTocAnchorId(location.blockId)
-          : flowRuntimeTocPageAnchorId(location.surfaceId),
-      )
+      this.resetTeacherControllerSession(scope)
+      if (scope === 'course') this.#runtimeSession.resetCourse()
+      const preparedReset = this.#preparedRuntimeActivation
+      const resetWasActive = this.#active
+      this.#applyLocation(startLocationId)
+      if (
+        resetWasActive
+        && preparedReset?.forced
+        && preparedReset.locationId === startLocationId
+      ) {
+        this.#completedActiveResetLocationId = startLocationId
+      } else if (!resetWasActive && preparedReset?.locationId === startLocationId) {
+        // Course reset may rebuild the suspended start host before it is activated.
+        // Keep the navigator hint so activation does not execute then rebuild it twice.
+        this.#preparedRuntimeActivation = preparedReset
+      }
     })
   }
 
   updatePublishedCourse(source: FlowPublishedPlaybackSource): Promise<void> {
     return this.#enqueue(async () => {
-      this.#playback = toFlowPublishedPlayback(source)
-      if ('components' in source && source.components) {
-        this.#components = source.components as Record<string, PublishedComponentPackageSource>
-      }
-      if (!this.#playback.surfaces.some((surface) => surface.id === this.#surfaceId)) {
-        this.#surfaceId = this.#playback.surfaces[0]!.id
-        this.#locationId = flowPageStartLocationId(this.#playback, this.#surfaceId)
-      }
+      // Validate and resolve the replacement before touching the live generation.
+      // A rejected update must leave the current DOM port and controller usable.
+      const nextPlayback = toFlowPublishedPlayback(source)
+      const nextComponents = 'components' in source && source.components
+        ? source.components as Record<string, PublishedComponentPackageSource>
+        : this.#components
+      const keepsCurrentSurface = nextPlayback.surfaces.some(
+        (surface) => surface.id === this.#surfaceId,
+      )
+      const currentLocation = tryResolveLocation(nextPlayback, this.#locationId)
+      const keepsCurrentLocation = currentLocation?.surfaceId === this.#surfaceId
+      const nextSurfaceId = keepsCurrentSurface
+        ? this.#surfaceId
+        : nextPlayback.surfaces[0]!.id
+      const nextLocationId = keepsCurrentSurface && keepsCurrentLocation
+        ? currentLocation.id
+        : flowPageStartLocationId(nextPlayback, nextSurfaceId)
+
+      this.#invalidateInteractions()
+      this.#interactionPort?.resetLocalVisibility()
+      this.#playback = nextPlayback
+      this.#components = nextComponents
+      this.#surfaceId = nextSurfaceId
+      this.#locationId = nextLocationId
       if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
       this.#render()
       this.#toc?.sync()
       this.#applyShellLayout()
+      this.#restoreInteractionsIfActive()
     })
   }
 
   destroy(): Promise<void> {
     return this.#enqueue(async () => {
+      this.#invalidateInteractions()
+      this.#interactionPort?.destroy()
+      this.#interactionPort = null
+      this.#interactionNodes.clear()
+      this.#destroyRuntimeHandles()
       this.#destroyComponentHandles()
       this.#destroyController()
+      this.#runtimeSession.destroy()
       this.#toc?.destroy()
       this.#toc = null
       this.#root?.remove()
@@ -252,7 +407,21 @@ export class FlowSurfaceHost {
       this.#overlay = null
       this.#container = null
       this.#active = false
+      this.#preparedRuntimeActivation = null
+      this.#pendingRuntimeActivation = null
+      this.#completedActiveResetLocationId = null
     })
+  }
+
+  #invalidateInteractions(): void {
+    this.#options.onInteractionInvalidated?.()
+    this.#interactionPort?.setActive(false)
+  }
+
+  #restoreInteractionsIfActive(): void {
+    if (!this.#active || !this.#interactionPort || !this.#root) return
+    this.#interactionPort.setActive(true)
+    this.#options.onInteractionReady?.()
   }
 
   #destroyComponentHandles(): void {
@@ -266,6 +435,129 @@ export class FlowSurfaceHost {
     this.#componentHandles = []
   }
 
+  #destroyRuntimeHandles(): void {
+    this.#deferredRuntimeMounts = []
+    const records = [...this.#runtimeHandles]
+    this.#runtimeHandles = []
+    for (const record of records) this.#retireRuntimeHandle(record)
+  }
+
+  #retireRuntimeHandle(record: FlowRuntimeHandleRecord): boolean {
+    if (record.retired) return false
+    record.retired = true
+    const index = this.#runtimeHandles.indexOf(record)
+    if (index >= 0) this.#runtimeHandles.splice(index, 1)
+    try {
+      record.handle?.destroy()
+    } catch (error) {
+      console.error('Flow Surface Runtime 销毁失败', error)
+    }
+    return true
+  }
+
+  #mountRuntime(wrap: HTMLElement, item: PublishedRuntimeLayerItem): void {
+    wrap.replaceChildren()
+    wrap.dataset.flowRuntimeState = 'playback'
+    wrap.style.pointerEvents = item.hitPolicy === 'auto' ? 'auto' : 'none'
+    const record: FlowRuntimeHandleRecord = {
+      handle: null,
+      wrap,
+      item,
+      retired: false,
+    }
+    const handle = mountPublishedSurfaceRuntime(wrap, {
+      instanceId: item.layerItemId,
+      runtime: item.runtime,
+      width: item.frame.width,
+      height: item.frame.height,
+      visible: this.#active,
+      resolveAsset: (assetId) => resolvePlaybackAssetUrl(
+        this.#playback,
+        assetId,
+        this.#options.resolveAsset,
+      ),
+      session: this.#runtimeSession,
+      fallbackText: firstVisibleRuntimeText(item.runtime.content.values)
+        ?? item.runtime.protocol,
+      reportError: (phase, error) => {
+        if (phase === 'lifecycle' && this.#retireRuntimeHandle(record)) {
+          this.#showRuntimeFallback(record.wrap, record.item)
+        }
+        this.#options.reportRuntimeError?.(item.layerItemId, phase, error)
+      },
+    })
+    record.handle = handle
+    if (!handle.ok) {
+      wrap.dataset.flowRuntimeState = 'fallback'
+      wrap.style.pointerEvents = 'none'
+    }
+    if (record.retired) handle.destroy()
+    else this.#runtimeHandles.push(record)
+  }
+
+  #showRuntimeFallback(wrap: HTMLElement, item: PublishedRuntimeLayerItem): void {
+    const fallbackWrap = renderStaticOverlayItem(
+      wrap.ownerDocument,
+      { item, source: 'surface' },
+      (assetId) => resolvePlaybackAssetUrl(
+        this.#playback,
+        assetId,
+        this.#options.resolveAsset,
+      ),
+      { interactive: false },
+    )
+    wrap.replaceChildren(...fallbackWrap.childNodes)
+    wrap.dataset.flowRuntimeState = 'fallback'
+    wrap.style.pointerEvents = 'none'
+  }
+
+  #mountDeferredRuntimes(): void {
+    const deferred = this.#deferredRuntimeMounts
+    this.#deferredRuntimeMounts = []
+    for (const { wrap, item } of deferred) {
+      if (!wrap.isConnected || !this.#root?.contains(wrap)) continue
+      this.#mountRuntime(wrap, item)
+    }
+  }
+
+  #applyLocation(locationId: string): void {
+    const location = resolveFlowLocation(this.#playback, locationId)
+    const completedResetLocationId = this.#completedActiveResetLocationId
+    this.#completedActiveResetLocationId = null
+    this.#preparedRuntimeActivation = null
+    const sameLocation = location.id === this.#locationId
+      && location.surfaceId === this.#surfaceId
+    const pendingActivation = this.#pendingRuntimeActivation
+    this.#pendingRuntimeActivation = null
+    if (completedResetLocationId === location.id && sameLocation) return
+    if (
+      pendingActivation?.locationId === location.id
+      && !pendingActivation.forced
+      && sameLocation
+    ) {
+      if (this.#runtimeHandles.length > 0) {
+        for (const record of [...this.#runtimeHandles]) {
+          record.handle?.setVisible(true)
+          if (!record.retired) record.handle?.resume()
+        }
+      } else this.#mountDeferredRuntimes()
+      return
+    }
+    this.#invalidateInteractions()
+    this.#interactionPort?.resetLocalVisibility()
+    this.#locationId = location.id
+    this.#surfaceId = location.surfaceId
+    if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
+    this.#render()
+    this.#applyShellLayout()
+    this.#scrollToAnchor(
+      location.blockId
+        ? flowRuntimeTocAnchorId(location.blockId)
+        : flowRuntimeTocPageAnchorId(location.surfaceId),
+    )
+    this.#restoreInteractionsIfActive()
+  }
+
   #enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
     const result = this.#queue.then(operation, operation)
     this.#queue = result.then(() => undefined, () => undefined)
@@ -273,13 +565,63 @@ export class FlowSurfaceHost {
   }
 
   #applyShellLayout(): void {
-    const inset = this.tocOpen ? `${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px` : '0px'
-    if (this.#article) this.#article.style.marginLeft = inset
-    if (this.#overlay) this.#overlay.style.left = inset
+    const shell = flowRuntimeTocShellLayout(this.tocOpen)
+    if (this.#article) this.#article.style.marginLeft = `${shell.articleInsetPx}px`
+    if (this.#overlay) this.#overlay.style.left = `${shell.viewportOverlayInsetPx}px`
+  }
+
+  #registerInteractionNode(
+    wrap: HTMLElement,
+    item: PublishedLayerItem,
+    source: 'global' | 'surface',
+  ): void {
+    if (this.#interactionNodes.has(item.layerItemId)) return
+    const authoredPointerEvents = wrap.style.pointerEvents || 'none'
+    const authoredTransform = wrap.style.transform || 'none'
+    let handle: PublishedInteractionNodeHandle
+    handle = {
+      nodeId: item.layerItemId,
+      source,
+      ownership: publishedInteractionOwnership(item),
+      ...(source === 'global'
+        ? { visibilityState: this.#globalInteractionVisibilityState }
+        : {}),
+      resolveElement: () => wrap,
+      isInteractionAvailable: () => (
+        this.#root?.contains(wrap) === true
+        && this.#interactionNodes.get(item.layerItemId) === handle
+      ),
+      canBindClick: () => canBindPublishedNativeClick(item),
+      canRunMotion: () => true,
+      authoredVisible: () => item.playbackInitialVisibility !== 'hidden',
+      applyInteractionState: (state: PublishedInteractionNodeState) => {
+        const visible = state.visible
+        wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
+        wrap.style.visibility = visible ? 'visible' : 'hidden'
+        if (source === 'global' && isPublishedGlobalCanvasRuntimePointerItem(item)) {
+          setPublishedGlobalCanvasRuntimeInteractionVisibility(wrap, item, visible)
+        } else {
+          wrap.style.pointerEvents = visible
+            ? state.clickBound ? 'auto' : authoredPointerEvents
+            : 'none'
+        }
+        if (visible) wrap.removeAttribute('aria-hidden')
+        else wrap.setAttribute('aria-hidden', 'true')
+      },
+      authoredMotionStyle: () => ({
+        opacity: String(item.opacity),
+        transform: authoredTransform,
+      }),
+    }
+    this.#interactionNodes.set(item.layerItemId, handle)
   }
 
   #render(): void {
     if (!this.#root || !this.#overlay) return
+    this.#pendingRuntimeActivation = null
+    this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
+    this.#interactionNodes.clear()
+    this.#destroyRuntimeHandles()
     this.#destroyComponentHandles()
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
     const article = renderFlowArticle(surface, {
@@ -300,13 +642,17 @@ export class FlowSurfaceHost {
     this.#article = article
     this.#toc?.sync()
     this.#renderOverlay(surface)
+    this.#interactionPort?.refreshNodes(
+      this.#interactionNodes.values(),
+      ++this.#interactionGeneration,
+    )
   }
 
   #syncPaperOverlayPositions(surface: PublishedFlowSurface): void {
     const overlay = this.#overlay
     const article = this.#article
     if (!overlay || !article) return
-    const entries = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const scrollTop = article.scrollTop
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) continue
@@ -323,14 +669,15 @@ export class FlowSurfaceHost {
     if (!overlay) return
     this.#destroyController()
     overlay.replaceChildren()
-    const entries = visibleOverlayEntries(this.#playback, surface, this.#locationId)
+    const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const scrollTop = this.#article?.scrollTop ?? 0
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
-        this.#mountTeacherController(entry.item)
+        const wrap = this.#mountTeacherController(entry.item, entry.source)
+        if (wrap) this.#registerInteractionNode(wrap, entry.item, entry.source)
         continue
       }
-      overlay.appendChild(renderStaticOverlayItem(
+      const wrap = renderStaticOverlayItem(
         overlay.ownerDocument,
         entry,
         (assetId) => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
@@ -342,14 +689,31 @@ export class FlowSurfaceHost {
             this.#componentHandles.push(handle)
           },
         },
-      ))
+      )
+      overlay.appendChild(wrap)
+      if (isExecutableFlowSurfaceRuntime(entry)) {
+        wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
+        wrap.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
+        if (this.#active) this.#mountRuntime(wrap, entry.item)
+        else {
+          wrap.dataset.flowRuntimeState = 'deferred'
+          this.#deferredRuntimeMounts.push({ wrap, item: entry.item })
+        }
+      } else if (entry.item.kind === 'runtime') {
+        wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
+        wrap.dataset.flowRuntimeState = entry.item.runtime.enabled ? 'fallback' : 'disabled'
+      }
+      this.#registerInteractionNode(wrap, entry.item, entry.source)
     }
   }
 
-  #mountTeacherController(item: PublishedNativeLayerItem): void {
+  #mountTeacherController(
+    item: PublishedNativeLayerItem,
+    source: 'global' | 'surface',
+  ): HTMLElement | null {
     const overlay = this.#overlay
-    if (!overlay || item.content.nativeType !== 'teacher-controller') return
-    if (this.#playback.playback?.controls === 'none') return
+    if (!overlay || item.content.nativeType !== 'teacher-controller') return null
+    if (this.#playback.playback?.controls === 'none') return null
     const data = item.content.data
     const frame = item.frame
     const dom = overlay.ownerDocument
@@ -357,19 +721,17 @@ export class FlowSurfaceHost {
     frameEl.className = 'flow-runtime-teacher-controller-frame'
     frameEl.dataset.testid = 'flow-runtime-teacher-controller'
     frameEl.dataset.layerItemId = item.layerItemId
+    frameEl.dataset.flowOverlayItem = item.layerItemId
+    frameEl.dataset.flowOverlaySource = source
     frameEl.style.position = 'absolute'
-    const session = this.#controllerSessions.get(item.layerItemId) ?? {
-      offset: { dx: 0, dy: 0 },
-      collapsed: data.defaultCollapsed === true,
-    }
-    if (!this.#controllerSessions.has(item.layerItemId)) {
-      this.#controllerSessions.set(item.layerItemId, session)
-    }
+    const session = this.#controllerSessionFor(item)
     frameEl.style.left = `${frame.x + session.offset.dx}px`
     frameEl.style.top = `${frame.y + session.offset.dy}px`
     frameEl.style.width = `${frame.width}px`
     frameEl.style.height = `${frame.height}px`
     frameEl.style.pointerEvents = 'auto'
+    frameEl.style.transform = item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`
+    frameEl.style.transformOrigin = 'center center'
     frameEl.style.zIndex = String(item.order)
     overlay.appendChild(frameEl)
 
@@ -389,6 +751,7 @@ export class FlowSurfaceHost {
     this.#controller = new TeacherControllerDom({
       node,
       container: frameEl,
+      footprintElement: frameEl,
       canvas: { ...FLOW_LOGICAL_CANVAS },
       getRenderedStageBounds: () => stageBoundsFromElement(overlay, FLOW_LOGICAL_CANVAS),
       scenes,
@@ -399,12 +762,13 @@ export class FlowSurfaceHost {
         muted: this.#audio.muted(),
         fullscreen: Boolean(overlay.ownerDocument.fullscreenElement),
       }),
-      getSession: () => this.#controllerSessions.get(item.layerItemId) ?? {
-        offset: { dx: 0, dy: 0 },
-        collapsed: false,
-      },
+      getSession: () => this.#controllerSessionFor(item),
       onSessionChange: (next) => {
-        this.#controllerSessions.set(item.layerItemId, next)
+        this.#teacherControllerSession.set({
+          controllerId: item.layerItemId,
+          surfaceSessionId: this.#surfaceId,
+          defaultCollapsed: data.collapsible && data.defaultCollapsed === true,
+        }, next)
         frameEl.style.left = `${frame.x + next.offset.dx}px`
         frameEl.style.top = `${frame.y + next.offset.dy}px`
       },
@@ -413,6 +777,48 @@ export class FlowSurfaceHost {
       },
       getInteractive: () => this.#active,
     })
+    return frameEl
+  }
+
+  #controllerSessionFor(item: PublishedNativeLayerItem): TeacherControllerDomSession {
+    const data = item.content.nativeType === 'teacher-controller'
+      ? item.content.data
+      : null
+    return this.#teacherControllerSession.get({
+      controllerId: item.layerItemId,
+      surfaceSessionId: this.#surfaceId,
+      defaultCollapsed: data?.collapsible === true && data.defaultCollapsed === true,
+    })
+  }
+
+  #syncTeacherControllerSession(): void {
+    const controller = this.#controller
+    if (!controller) return
+    const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
+    const item = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
+      .map((entry) => entry.item)
+      .find(isPublishedTeacherController)
+    if (!item || item.content.nativeType !== 'teacher-controller') return
+    const data = item.content.data
+    const frame = item.frame
+    const session = this.#controllerSessionFor(item)
+    const frameEl = controller.rootElement.parentElement
+    if (frameEl) {
+      frameEl.style.left = `${frame.x + session.offset.dx}px`
+      frameEl.style.top = `${frame.y + session.offset.dy}px`
+    }
+    controller.update(teacherControllerDomNode(
+      { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
+      item.rotation,
+      {
+        title: data.title,
+        compact: data.compact,
+        showSceneProgress: data.showSceneProgress,
+        collapsible: data.collapsible,
+        buttons: data.buttons,
+        style: data.style,
+      },
+    ))
   }
 
   #destroyController(): void {
@@ -475,7 +881,12 @@ export class FlowSurfaceHost {
       }
       return
     }
-    if (action.type === 'course.restart' || action.type === 'scene.replay') {
+    if (action.type === 'course.restart') {
+      this.#teacherControllerSession.resetCourse()
+      await this.setLocationId(this.#playback.startLocationId)
+      return
+    }
+    if (action.type === 'scene.replay') {
       await this.setLocationId(this.#playback.startLocationId)
     }
   }
@@ -531,31 +942,33 @@ function createFlowHostAudioSession(defaultMuted: boolean): FlowHostAudioSession
   }
 }
 
-function visibleOverlayEntries(
+export function composePublishedFlowLocation(input: {
+  readonly playback: FlowPublishedPlaybackDocument
+  readonly locationId: string
+}): CourseLayerComposition<PublishedLayerItem> {
+  return composePublishedCourseLocation({
+    course: input.playback,
+    locationId: input.locationId,
+    stateId: null,
+  })
+}
+
+export function publishedFlowOverlayEntries(
   playback: FlowPublishedPlaybackDocument,
   surface: PublishedFlowSurface,
   locationId: string,
 ): Array<{ item: PublishedLayerItem; source: 'global' | 'surface' }> {
-  const entries: Array<{ item: PublishedLayerItem; source: 'global' | 'surface'; order: number }> = []
-  const push = (list: readonly PublishedScopedLayerItem[], source: 'global' | 'surface') => {
-    for (const entry of list) {
-      if (!isPublishedScopedVisible(entry, locationId)) continue
-      if (!entry.item.visible || entry.item.playbackInitialVisibility === 'hidden') continue
-      entries.push({ item: entry.item, source, order: entry.item.order })
-    }
+  const composition = composePublishedFlowLocation({ playback, locationId })
+  if (composition.surfaceId !== surface.id) {
+    throw new Error(`Flow composition surface mismatch: ${composition.surfaceId}`)
   }
-  push(playback.globalLayerItems, 'global')
-  push(surface.surfaceLayerItems, 'surface')
-  return entries
-    .sort((left, right) => left.order - right.order || left.item.layerItemId.localeCompare(right.item.layerItemId))
-    .map(({ item, source }) => ({ item, source }))
-}
-
-function isPublishedScopedVisible(entry: PublishedScopedLayerItem, locationId: string): boolean {
-  return isGlobalLayerItemVisible(
-    { visibility: { mode: entry.visibility.mode, sceneIds: entry.visibility.locationIds } },
-    locationId,
-  )
+  // Playback-hidden nodes stay mounted so Interaction V1 node.enter can reveal them.
+  return composition.entries
+    .filter((entry) => entry.mounted)
+    .map((entry) => ({
+      item: entry.item,
+      source: entry.source as 'global' | 'surface',
+    }))
 }
 
 function isPublishedTeacherController(
@@ -564,6 +977,44 @@ function isPublishedTeacherController(
   content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
 } {
   return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
+function publishedInteractionOwnership(
+  item: PublishedLayerItem,
+): PublishedInteractionNodeOwnership {
+  if (item.kind === 'component') return 'component'
+  if (item.kind === 'runtime') return 'runtime'
+  if (item.content.nativeType === 'video') return 'media'
+  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  return 'native'
+}
+
+function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
+  if (item.kind !== 'native' || item.hitPolicy !== 'auto') return false
+  return item.content.nativeType === 'text'
+    || item.content.nativeType === 'image'
+    || item.content.nativeType === 'formula'
+    || item.content.nativeType === 'shape'
+}
+
+function isExecutableFlowSurfaceRuntime(
+  entry: { item: PublishedLayerItem; source: 'global' | 'surface' },
+): entry is { item: PublishedRuntimeLayerItem; source: 'surface' } {
+  return entry.source === 'surface'
+    && entry.item.kind === 'runtime'
+    && entry.item.runtime.enabled
+    && entry.item.runtime.protocol === 'surface-runtime'
+    && entry.item.runtime.runtimeApiVersion === 3
+    && entry.item.runtime.renderMode === 'dom'
+}
+
+function firstVisibleRuntimeText(values: Readonly<Record<string, string>>): string | undefined {
+  const preferred = ['title', 'label', 'text', 'heading', 'name']
+  for (const key of preferred) {
+    const value = values[key]?.trim()
+    if (value) return value
+  }
+  return Object.values(values).map((value) => value.trim()).find(Boolean)
 }
 
 function renderStaticOverlayItem(
@@ -669,7 +1120,32 @@ function renderStaticOverlayItem(
       image.style.height = '100%'
       image.style.objectFit = 'contain'
       wrap.appendChild(image)
+      return wrap
     }
+  }
+  if (entry.item.kind === 'runtime') {
+    const label = dom.createElement('div')
+    label.className = 'published-surface-runtime-fallback'
+    label.dataset.runtimeInstanceId = entry.item.layerItemId
+    label.dataset.runtimeFallback = 'true'
+    label.textContent = firstVisibleRuntimeText(entry.item.runtime.content.values)
+      ?? entry.item.runtime.protocol
+    Object.assign(label.style, {
+      boxSizing: 'border-box',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+      height: '100%',
+      overflow: 'hidden',
+      padding: '12px 16px',
+      pointerEvents: 'none',
+      background: '#0f766e',
+      color: '#ffffff',
+      font: 'bold 16px "Microsoft YaHei", sans-serif',
+      textAlign: 'center',
+    })
+    wrap.appendChild(label)
   }
   return wrap
 }
@@ -687,15 +1163,18 @@ function renderFlowArticle(
 ): HTMLElement {
   const { dom } = options
   const article = dom.createElement('article')
-  article.className = 'flow-runtime-article'
+  article.className = 'flow-runtime-article flow-media-query-root'
   article.dataset.testid = 'flow-runtime-article'
   article.dataset.flowPaperScroll = 'true'
+  article.dataset.flowMediaQueryRoot = 'true'
   article.id = flowRuntimeTocPageAnchorId(surface.id)
   article.style.boxSizing = 'border-box'
   article.style.height = '100%'
   article.style.overflow = 'auto'
   article.style.pointerEvents = 'auto'
   article.style.overscrollBehavior = 'contain'
+  article.style.setProperty('container-type', FLOW_MEDIA_QUERY_CONTAINER_TYPE)
+  article.style.setProperty('container-name', 'flow-media-root')
   article.style.background = resolveCourseSurfaceBackgroundColor(surface.backgroundColor)
   article.style.color = '#172033'
 
@@ -851,30 +1330,44 @@ function renderBlockDom(
       return
     case 'media': {
       const figure = assignBlock(dom.createElement('figure'))
-      figure.className = 'flow-block-media'
       figure.dataset.flowMediaLayout = block.layout
       const readingWidth = options.readingWidth ?? 760
       const wideContentWidth = options.wideContentWidth ?? 1120
+      const projection = resolveFlowMediaLayoutProjection(block.layout, {
+        readingWidth,
+        wideContentWidth,
+      })
+      figure.className = `flow-block-media ${projection.className}`
+      figure.dataset.flowMediaWidthTier = projection.tier
 
       if (block.wrap === 'left') {
-        figure.style.width = '48%'
+        figure.style.width = projection.wrappedOuterInlineSize
+        figure.style.maxWidth = '100%'
+        figure.style.inlineSize = projection.wrappedOuterInlineSize
+        figure.style.maxInlineSize = '100%'
         figure.style.float = 'left'
         figure.style.margin = '0 16px 8px 0'
+        figure.dataset.flowMediaInlineSize = projection.wrappedOuterInlineSize
       } else if (block.wrap === 'right') {
-        figure.style.width = '48%'
+        figure.style.width = projection.wrappedOuterInlineSize
+        figure.style.maxWidth = '100%'
+        figure.style.inlineSize = projection.wrappedOuterInlineSize
+        figure.style.maxInlineSize = '100%'
         figure.style.float = 'right'
         figure.style.margin = '0 0 8px 16px'
+        figure.dataset.flowMediaInlineSize = projection.wrappedOuterInlineSize
       } else {
-        figure.style.width = '100%'
+        figure.style.setProperty(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, projection.inlineSize)
+        figure.style.width = FLOW_MEDIA_INLINE_SIZE_REFERENCE
+        figure.style.maxWidth = FLOW_MEDIA_INLINE_SIZE_REFERENCE
         figure.style.float = 'none'
-        figure.style.margin = '0 auto'
-        if (block.layout === 'wide') {
-          figure.style.maxWidth = `${wideContentWidth}px`
-        } else if (block.layout === 'full-width') {
-          figure.style.maxWidth = '100%'
-        } else {
-          figure.style.maxWidth = `${readingWidth}px`
-        }
+        figure.style.margin = '0'
+        figure.style.position = 'relative'
+        figure.style.left = '50%'
+        figure.style.transform = 'translateX(-50%)'
+        figure.style.inlineSize = FLOW_MEDIA_INLINE_SIZE_REFERENCE
+        figure.style.maxInlineSize = FLOW_MEDIA_INLINE_SIZE_REFERENCE
+        figure.dataset.flowMediaInlineSize = projection.inlineSize
       }
 
       const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)

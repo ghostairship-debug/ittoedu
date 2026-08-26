@@ -1,7 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createShapeNode, createTextNode } from '@/renderer/project/createProject'
-import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
+import {
+  selectActiveCourseProjectDocument,
+  selectActiveScene,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import {
   detectFontAvailability,
@@ -11,6 +15,7 @@ import { buildInitialRichTextHtml, TextEditOverlay } from '@/renderer/ui/TextEdi
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -171,6 +176,170 @@ describe('event-driven motion authoring entry point', () => {
 })
 
 describe('elements panel', () => {
+  it('keeps Slide element MIME drag and labels click insertion as free nodes', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () => null as never,
+    )
+    render(
+      <ElementsTab
+        onAddImage={() => undefined}
+        onAddVideo={() => undefined}
+      />,
+    )
+
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
+      '演示页：单击添加自由节点，也可拖入画布定位。',
+    )
+    const draggableEntries = [
+      ['add-text', 'text'],
+      ['add-formula', 'formula'],
+      ['add-image', 'image'],
+      ['add-video', 'video'],
+      ['add-rectangle', 'shape:rectangle'],
+    ] as const
+    const setData = vi.fn()
+    for (const [testId, payload] of draggableEntries) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toHaveProperty('draggable', true)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'free-node')
+      expect(entry).toHaveAttribute('title', expect.stringContaining('自由节点'))
+      fireEvent.dragStart(entry, {
+        dataTransfer: { effectAllowed: 'none', setData },
+      })
+      expect(setData).toHaveBeenCalledWith(
+        'application/x-courseware-element',
+        payload,
+      )
+    }
+
+    const nodeCount = selectActiveScene(useEditorStore.getState()).nodes.length
+    fireEvent.click(screen.getByTestId('add-text'))
+    fireEvent.click(screen.getByTestId('add-rectangle'))
+    expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(nodeCount + 2)
+
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
+      '演示页全局层：单击或拖入可添加跨场景自由节点。',
+    )
+    expect(screen.getByTestId('global-elements-notice')).toHaveTextContent(
+      '这里添加的文字、图片、图形和全局组件会跨场景持续存在',
+    )
+    for (const [testId] of draggableEntries) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toBeEnabled()
+      expect(entry).toHaveProperty('draggable', true)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'global-layer-item')
+      expect(entry).toHaveAttribute('title', expect.stringContaining('全局自由节点'))
+    }
+    const globalDragData = vi.fn()
+    fireEvent.dragStart(screen.getByTestId('add-text'), {
+      dataTransfer: { effectAllowed: 'none', setData: globalDragData },
+    })
+    expect(globalDragData).toHaveBeenCalledWith(
+      'application/x-courseware-element',
+      'text',
+    )
+
+    const beforeGlobal = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!beforeGlobal) throw new Error('expected Slide course document')
+    const globalCount = beforeGlobal.globalLayerItems.length
+    fireEvent.click(screen.getByTestId('add-text'))
+    fireEvent.click(screen.getByTestId('add-rectangle'))
+    expect(
+      selectActiveCourseProjectDocument(useEditorStore.getState())?.globalLayerItems,
+    ).toHaveLength(globalCount + 2)
+  })
+
+  it('makes Spatial entries click-only and keeps their clicks on world items', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () => null as never,
+    )
+    useEditorStore.getState().createNewSpatialProject()
+    const onAddImage = vi.fn()
+    const onAddVideo = vi.fn()
+    render(
+      <ElementsTab
+        onAddImage={onAddImage}
+        onAddVideo={onAddVideo}
+      />,
+    )
+
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
+      '无限画布：单击添加世界元素。当前不可从面板拖入。',
+    )
+    const clickOnlyEntries = [
+      'add-text',
+      'add-image',
+      'add-video',
+      'add-rectangle',
+    ] as const
+    const setData = vi.fn()
+    for (const testId of clickOnlyEntries) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toHaveProperty('draggable', false)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'world-item')
+      expect(entry).toHaveAttribute('title', expect.stringContaining('世界元素'))
+      fireEvent.dragStart(entry, { dataTransfer: { setData } })
+    }
+    expect(setData).not.toHaveBeenCalled()
+
+    const initialSession = useEditorStore.getState().spatialSession
+    if (!initialSession) throw new Error('expected Spatial session')
+    const initialSurface = initialSession.history.present.surfaces.find(
+      (surface) => surface.id === initialSession.selection.surfaceId,
+    )
+    if (!initialSurface || initialSurface.type !== 'spatial-2d') {
+      throw new Error('expected Spatial surface')
+    }
+    const initialWorldCount = initialSurface.world.layerItems.length
+
+    fireEvent.click(screen.getByTestId('add-text'))
+    fireEvent.click(screen.getByTestId('add-rectangle'))
+
+    const nextSession = useEditorStore.getState().spatialSession
+    if (!nextSession) throw new Error('expected updated Spatial session')
+    const nextSurface = nextSession.history.present.surfaces.find(
+      (surface) => surface.id === nextSession.selection.surfaceId,
+    )
+    if (!nextSurface || nextSurface.type !== 'spatial-2d') {
+      throw new Error('expected updated Spatial surface')
+    }
+    expect(nextSurface.world.layerItems).toHaveLength(initialWorldCount + 2)
+    expect(useEditorStore.getState().errorMessage).toBeNull()
+
+    act(() => useEditorStore.getState().setEditingScope('global'))
+    expect(screen.getByTestId('surface-insertion-hint')).toHaveTextContent(
+      '无限画布全局层暂不支持插入元素；请切换到无限画布世界层。',
+    )
+    expect(screen.getByTestId('global-elements-notice')).toHaveTextContent(
+      '当前全局层不能插入文本、公式、图片、视频或图形',
+    )
+    const disabledEntries = [
+      'add-text',
+      'add-formula',
+      'add-image',
+      'add-video',
+      'add-rectangle',
+    ] as const
+    const globalSession = useEditorStore.getState().spatialSession
+    if (!globalSession) throw new Error('expected global Spatial session')
+    const historyBeforeDisabledClicks = structuredClone(globalSession.history)
+    for (const testId of disabledEntries) {
+      const entry = screen.getByTestId(testId)
+      expect(entry).toBeDisabled()
+      expect(entry).toHaveProperty('draggable', false)
+      expect(entry).toHaveAttribute('data-insertion-carrier', 'unavailable')
+      expect(entry).toHaveAttribute('title', expect.stringContaining('暂不支持插入'))
+      fireEvent.click(entry)
+    }
+    expect(useEditorStore.getState().spatialSession?.history).toEqual(
+      historyBeforeDisabledClicks,
+    )
+    expect(onAddImage).not.toHaveBeenCalled()
+    expect(onAddVideo).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().errorMessage).toBeNull()
+  })
+
   it('keeps all quick entries under Common and Media focused on management', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
       () => null as never,

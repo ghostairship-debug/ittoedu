@@ -84,6 +84,147 @@ export interface FlowTextCommandResult extends FlowCommandResult {
   readonly nextSelection?: FlowEditorSelection
 }
 
+export type FlowSelectionFormatMode = 'caret' | 'range' | 'whole-block'
+
+export type FlowSelectionFormatField<T> =
+  | { readonly state: 'unset' }
+  | { readonly state: 'uniform'; readonly value: T }
+  | { readonly state: 'mixed' }
+
+export interface FlowSelectionFormat {
+  readonly mode: FlowSelectionFormatMode
+  readonly start: number
+  readonly end: number
+  readonly richText: boolean
+  /** A collapsed caret is display-only until the editor supports pending typing styles. */
+  readonly canApplyInlineStyle: boolean
+  readonly hasMixedValue: boolean
+  readonly fields: {
+    readonly fontFamily: FlowSelectionFormatField<string>
+    readonly fontSize: FlowSelectionFormatField<number>
+    readonly color: FlowSelectionFormatField<string>
+    readonly bold: FlowSelectionFormatField<boolean>
+    readonly italic: FlowSelectionFormatField<boolean>
+    readonly underline: FlowSelectionFormatField<boolean>
+    readonly strike: FlowSelectionFormatField<boolean>
+    readonly emphasis: FlowSelectionFormatField<boolean>
+    readonly highlightColor: FlowSelectionFormatField<string | null>
+  }
+}
+
+const FLOW_SELECTION_FORMAT_KEYS = [
+  'fontFamily',
+  'fontSize',
+  'color',
+  'bold',
+  'italic',
+  'underline',
+  'strike',
+  'emphasis',
+  'highlightColor',
+] as const satisfies readonly (keyof TextRunStyle)[]
+
+function unsetFlowSelectionFormatFields(): FlowSelectionFormat['fields'] {
+  return {
+    fontFamily: { state: 'unset' },
+    fontSize: { state: 'unset' },
+    color: { state: 'unset' },
+    bold: { state: 'unset' },
+    italic: { state: 'unset' },
+    underline: { state: 'unset' },
+    strike: { state: 'unset' },
+    emphasis: { state: 'unset' },
+    highlightColor: { state: 'unset' },
+  }
+}
+
+function flowCharacterStyles(text: string, runs: readonly TextRun[]): TextRunStyle[] {
+  const length = Array.from(text).length
+  const styles = Array.from({ length }, (): TextRunStyle => ({}))
+  for (const run of runs) {
+    const start = Math.max(0, Math.min(length, Math.floor(run.start)))
+    const end = Math.max(start, Math.min(length, Math.floor(run.end)))
+    for (let index = start; index < end; index += 1) {
+      Object.assign(styles[index], run.style)
+    }
+  }
+  return styles
+}
+
+function deriveFlowSelectionFormatField<K extends keyof FlowSelectionFormat['fields']>(
+  styles: readonly TextRunStyle[],
+  key: K,
+): FlowSelectionFormat['fields'][K] {
+  if (styles.length === 0) return { state: 'unset' } as FlowSelectionFormat['fields'][K]
+  const first = styles[0][key]
+  for (let index = 1; index < styles.length; index += 1) {
+    if (!Object.is(styles[index][key], first)) {
+      return { state: 'mixed' } as FlowSelectionFormat['fields'][K]
+    }
+  }
+  return first === undefined
+    ? { state: 'unset' } as FlowSelectionFormat['fields'][K]
+    : { state: 'uniform', value: first } as FlowSelectionFormat['fields'][K]
+}
+
+/**
+ * The single read adapter for Flow inline-format UI. It derives sparse run
+ * values directly from the live draft while editing, or from the selected
+ * block when idle; it never creates a parallel toolbar formatting state.
+ */
+export function deriveFlowSelectionFormat(input: {
+  readonly block: FlowBlock
+  readonly edit?: FlowTextEditSession | null
+}): FlowSelectionFormat {
+  const activeEdit = input.edit?.blockId === input.block.id ? input.edit : null
+  const mode: FlowSelectionFormatMode = activeEdit?.kind === 'rich-text'
+    ? activeEdit.range.end > activeEdit.range.start ? 'range' : 'caret'
+    : 'whole-block'
+  const content = activeEdit?.kind === 'rich-text'
+    ? activeEdit.draft as FlowRichTextDraft
+    : isRichTextFlowBlock(input.block)
+      ? { text: input.block.text, runs: input.block.runs ?? [] }
+      : null
+  if (!content) {
+    return {
+      mode,
+      start: 0,
+      end: 0,
+      richText: false,
+      canApplyInlineStyle: false,
+      hasMixedValue: false,
+      fields: unsetFlowSelectionFormatFields(),
+    }
+  }
+
+  const length = Array.from(content.text).length
+  const start = mode === 'whole-block'
+    ? 0
+    : Math.max(0, Math.min(length, activeEdit?.range.start ?? 0))
+  const end = mode === 'whole-block'
+    ? length
+    : Math.max(start, Math.min(length, activeEdit?.range.end ?? start))
+  const characterStyles = flowCharacterStyles(content.text, content.runs)
+  const sampledStyles = mode === 'caret'
+    ? length === 0
+      ? []
+      : [characterStyles[start === 0 ? 0 : Math.min(length - 1, start - 1)]]
+    : characterStyles.slice(start, end)
+  const fields = unsetFlowSelectionFormatFields()
+  for (const key of FLOW_SELECTION_FORMAT_KEYS) {
+    Object.assign(fields, { [key]: deriveFlowSelectionFormatField(sampledStyles, key) })
+  }
+  return {
+    mode,
+    start,
+    end,
+    richText: true,
+    canApplyInlineStyle: mode !== 'caret' && end > start,
+    hasMixedValue: Object.values(fields).some((field) => field.state === 'mixed'),
+    fields,
+  }
+}
+
 function freezeEdit(edit: FlowTextEditSession): FlowTextEditSession {
   return Object.freeze({
     ...edit,
@@ -190,7 +331,6 @@ export function resolveFlowFormatRange(
   if (range === 'all' || range == null) return { start: 0, end: length }
   const start = Math.max(0, Math.min(length, range.start))
   const end = Math.max(start, Math.min(length, range.end))
-  if (end <= start) return { start: 0, end: length }
   return { start, end }
 }
 
@@ -756,10 +896,41 @@ export function formatFlowAuthoringTextStyle(input: {
   }
   const block = locateBlock(input.document, input.selection.surfaceId, input.selection.selectedBlockId ?? '')
   if (!block) return failCommand(FLOW_TEXT_REJECT_NO_SELECTION)
+  if (
+    input.range !== undefined &&
+    input.range !== 'all'
+  ) {
+    let targetText: string | null = null
+    if (block.type === 'list' && input.selection.textRange?.listItemId) {
+      targetText = block.items.find(
+        (entry) => entry.id === input.selection.textRange?.listItemId,
+      )?.text ?? null
+    } else if (
+      block.type === 'table' &&
+      input.selection.textRange?.tableRowId &&
+      input.selection.textRange.tableColumnId
+    ) {
+      const row = block.rows.find(
+        (entry) => entry.id === input.selection.textRange?.tableRowId,
+      )
+      if (row) targetText = cellToRichText(row.cells[input.selection.textRange.tableColumnId]).text
+    } else if (isRichTextFlowBlock(block)) {
+      targetText = block.text
+    }
+    if (targetText !== null) {
+      const resolved = resolveFlowFormatRange(targetText, input.range)
+      if (resolved.end <= resolved.start) {
+        return identityDocument(input.document, {
+          nextEdit: null,
+          nextSelection: input.selection,
+        })
+      }
+    }
+  }
   if (block.type === 'list' && input.selection.textRange?.listItemId) {
     const item = block.items.find((entry) => entry.id === input.selection.textRange?.listItemId)
     if (!item) return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE)
-    const resolved = resolveFlowFormatRange(item.text, input.range ?? input.selection.textRange)
+    const resolved = resolveFlowFormatRange(item.text, input.range ?? 'all')
     const runs = applyTextRunStyle(item.text, item.runs ?? [], resolved.start, resolved.end, input.style)
     const result = updateFlowEditorBlock(input.document, flowBlockTargetFromSelection(input.document, input.selection), (current) => {
       if (current.type !== 'list') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
@@ -776,7 +947,7 @@ export function formatFlowAuthoringTextStyle(input: {
     const row = block.rows.find((entry) => entry.id === rowId)
     if (!row) return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE)
     const rich = cellToRichText(row.cells[columnId])
-    const resolved = resolveFlowFormatRange(rich.text, input.range ?? input.selection.textRange)
+    const resolved = resolveFlowFormatRange(rich.text, input.range ?? 'all')
     const runs = applyTextRunStyle(rich.text, rich.runs ?? [], resolved.start, resolved.end, input.style)
     const result = updateFlowEditorBlock(input.document, flowBlockTargetFromSelection(input.document, input.selection), (current) => {
       if (current.type !== 'table') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
@@ -789,9 +960,7 @@ export function formatFlowAuthoringTextStyle(input: {
   if (!isRichTextFlowBlock(block)) return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE)
   const resolved = resolveFlowFormatRange(
     block.text,
-    input.range ?? (input.selection.textRange
-      ? { start: input.selection.textRange.start, end: input.selection.textRange.end }
-      : 'all'),
+    input.range ?? 'all',
   )
   const result = executeFlowEditorCommand(input.document, input.selection, {
     name: 'format',

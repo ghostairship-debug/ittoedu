@@ -190,8 +190,10 @@ function writableNativeTransforms(
 }
 
 function makeTargets(backend: SlideAuthoringBackend): SlideAuthoringTarget[] {
+  // Canvas selection/transform targets identify the whole layer item. Field-specific
+  // content editors create their own targets, while Nodes/Properties project `item`.
   return backend.getSnapshot().selection.selectionIds.map((layerItemId) =>
-    backend.makeTarget(layerItemId),
+    backend.makeTarget(layerItemId, 'item'),
   )
 }
 

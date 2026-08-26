@@ -208,6 +208,21 @@ describe('Flow editor read projection', () => {
       navigable: false,
       layerKind: 'document-block',
     })
+    expect(view.blocks.map((block) => ({
+      blockId: block.blockId,
+      parentId: block.parentId,
+      depth: block.depth,
+      index: block.index,
+    }))).toEqual([
+      { blockId: 'block-h1', parentId: null, depth: 0, index: 0 },
+      { blockId: 'block-paragraph', parentId: null, depth: 0, index: 1 },
+      { blockId: 'block-list', parentId: null, depth: 0, index: 2 },
+      { blockId: 'block-quote', parentId: null, depth: 0, index: 3 },
+      { blockId: 'block-media', parentId: null, depth: 0, index: 4 },
+      { blockId: 'block-section', parentId: null, depth: 0, index: 5 },
+      { blockId: 'block-h2', parentId: 'block-section', depth: 1, index: 0 },
+      { blockId: 'block-section-p', parentId: 'block-section', depth: 1, index: 1 },
+    ])
     expect(fixture.project).toEqual(before)
     expect(Object.isFrozen(view)).toBe(true)
     expect(view.blocks[0]?.authoringAddress).not.toContain('hitId')

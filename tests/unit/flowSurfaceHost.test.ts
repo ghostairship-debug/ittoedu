@@ -3,6 +3,12 @@ import { strFromU8, unzipSync } from 'fflate'
 import type { TeacherControllerAction } from '@/shared/projectTypes'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import type { PublishedFlowSurface, PublishedNativeLayerItem } from '@/shared/publishedCourseTypes'
+import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  resolveFlowMediaLayoutInlineSize,
+  resolveFlowMediaLayoutProjection,
+} from '@/shared/flowMediaLayout'
 import { FlowSurfaceHost, type FlowSurfaceHostOptions } from '@/player/surfaces/flow/FlowSurfaceHost'
 import { isPublishedFlowSurface } from '@/player/surfaces/flow/flowModel'
 import {
@@ -49,6 +55,48 @@ function overlayVideo(): PublishedNativeLayerItem {
         endTime: null,
         poster: { mode: 'video-frame', time: 0 },
         backgroundAudioMode: 'duck',
+      },
+    },
+  }
+}
+
+function overlayText(): PublishedNativeLayerItem {
+  return {
+    layerItemId: 'flow-overlay-text',
+    kind: 'native',
+    frame: { mode: 'absolute', x: 48, y: 48, width: 240, height: 72 },
+    order: 10,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    content: {
+      nativeType: 'text',
+      data: {
+        text: '可交互提示',
+        runs: [],
+        style: {
+          fontFamily: 'sans-serif',
+          fontSize: 20,
+          color: '#172033',
+          bold: false,
+          italic: false,
+          underline: false,
+          strike: false,
+          emphasis: false,
+          highlightColor: null,
+          align: 'left',
+          verticalAlign: 'top',
+          writingMode: 'horizontal',
+          lineSpacing: 1.2,
+          letterSpacing: 0,
+          padding: 0,
+          overflow: 'fixed',
+          backgroundColor: '#ffffff',
+          backgroundOpacity: 0,
+          cornerRadius: 0,
+        },
       },
     },
   }
@@ -274,6 +322,36 @@ describe('FlowSurfaceHost course session overlay', () => {
     expect(progress?.textContent).toContain('运行讲义')
     expect(progress?.textContent).not.toContain('语义长文覆盖图层')
     expect(host.surface.id).toBe('flow-host')
+    await host.destroy()
+  })
+
+  it('keeps the active interaction generation usable when a course update is rejected', async () => {
+    const course = publishedCourse()
+    course.globalLayerItems.unshift({
+      item: overlayText(),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const { host, container } = await mountHost(course)
+    const port = host.getPublishedInteractionSurfacePort()!
+    const text = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-overlay-text"]',
+    )!
+    let clicks = 0
+    const unbind = port.bindNodeClick('flow-overlay-text', () => {
+      clicks += 1
+    })
+    expect(unbind).not.toBeNull()
+    text.click()
+    expect(clicks).toBe(1)
+
+    const invalid = structuredClone(course)
+    invalid.surfaces = []
+    await expect(host.updatePublishedCourse(invalid)).rejects.toThrow('课件没有 Flow 页面')
+
+    expect(container.querySelector('[data-flow-overlay-item="flow-overlay-text"]')).toBe(text)
+    text.click()
+    expect(clicks).toBe(2)
+    unbind?.()
     await host.destroy()
   })
 })
@@ -598,10 +676,18 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     await host.destroy()
   })
 
-  it('renders media block with wide layout matching wideContentWidth', async () => {
+  it('uses the shared responsive mapping for all three Player media tiers', async () => {
     const course = publishedCourse()
     const surf = course.surfaces[0] as PublishedFlowSurface
     surf.layout = { readingWidth: 760, wideContentWidth: 1120 }
+    surf.blocks.push({
+      id: 'media-content',
+      type: 'media',
+      assetId: 'clip',
+      mediaKind: 'video',
+      layout: 'content-width',
+      altText: '正文视频',
+    })
     surf.blocks.push({
       id: 'media-wide',
       type: 'media',
@@ -610,12 +696,58 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
       layout: 'wide',
       altText: '宽幅视频',
     })
+    surf.blocks.push({
+      id: 'media-full',
+      type: 'media',
+      assetId: 'clip',
+      mediaKind: 'video',
+      layout: 'full-width',
+      altText: '最宽视频',
+    })
 
     const { host, container } = await mountHost(course)
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    expect(article.style.containerType).toBe('inline-size')
+    expect(article.dataset.flowMediaQueryRoot).toBe('true')
+
+    const matrix = [700, 904, 1280].map((containerWidth) => [
+      resolveFlowMediaLayoutInlineSize('content-width', surf.layout, containerWidth),
+      resolveFlowMediaLayoutInlineSize('wide', surf.layout, containerWidth),
+      resolveFlowMediaLayoutInlineSize('full-width', surf.layout, containerWidth),
+    ])
+    expect(matrix).toEqual([
+      [572, 604, 636],
+      [760, 808, 840],
+      [760, 1120, 1216],
+    ])
+    for (const [content, wide, full] of matrix) {
+      expect(content).toBeLessThan(wide!)
+      expect(wide).toBeLessThan(full!)
+    }
+    const cases = [
+      ['media-content', 'content-width'],
+      ['media-wide', 'wide'],
+      ['media-full', 'full-width'],
+    ] as const
+    for (const [blockId, layout] of cases) {
+      const projection = resolveFlowMediaLayoutProjection(layout, surf.layout)
+      const media = container.querySelector<HTMLElement>(`[data-flow-block-id="${blockId}"]`)!
+      expect(media.classList.contains(projection.className)).toBe(true)
+      expect(media.dataset.flowMediaWidthTier).toBe(projection.tier)
+      expect(media.style.getPropertyValue(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY)).toBe(projection.inlineSize)
+      expect(media.style.width).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(media.style.maxWidth).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(media.style.inlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(media.style.maxInlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(media.style.left).toBe('50%')
+      expect(media.style.insetInlineStart).toBe('')
+      expect(media.style.transform).toBe('translateX(-50%)')
+    }
+
     const figure = container.querySelector<HTMLElement>('[data-flow-block-id="media-wide"]')!
     expect(figure).not.toBeNull()
     expect(figure.dataset.flowMediaLayout).toBe('wide')
-    expect(figure.style.maxWidth).toBe(`${surf.layout.wideContentWidth}px`)
+    expect(figure.style.maxWidth).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
 
     const video = figure.querySelector('video')
     expect(video).not.toBeNull()
@@ -691,6 +823,10 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(figLeft).not.toBeNull()
     expect(figLeft.style.float).toBe('left')
     expect(figLeft.style.width).toBe('48%')
+    expect(figLeft.style.inlineSize).toBe('48%')
+    expect(figLeft.style.left).toBe('')
+    expect(figLeft.style.insetInlineStart).toBe('')
+    expect(figLeft.style.transform).toBe('')
     expect(figLeft.style.margin).toBe('0px 16px 8px 0px')
 
     const pAfter = container.querySelector<HTMLElement>('[data-flow-block-id="p-after-left"]')!
@@ -702,12 +838,19 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(figRight).not.toBeNull()
     expect(figRight.style.float).toBe('right')
     expect(figRight.style.width).toBe('48%')
+    expect(figRight.style.inlineSize).toBe('48%')
+    expect(figRight.style.left).toBe('')
+    expect(figRight.style.insetInlineStart).toBe('')
+    expect(figRight.style.transform).toBe('')
     expect(figRight.style.margin).toBe('0px 0px 8px 16px')
 
     const figNone = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-none"]')!
     expect(figNone).not.toBeNull()
     expect(figNone.style.float).toBe('none')
-    expect(figNone.style.width).toBe('100%')
+    expect(figNone.style.width).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+    expect(figNone.style.left).toBe('50%')
+    expect(figNone.style.insetInlineStart).toBe('')
+    expect(figNone.style.transform).toBe('translateX(-50%)')
 
     const compLeft = container.querySelector<HTMLElement>('[data-flow-block-id="comp-wrap-left"]')!
     expect(compLeft).not.toBeNull()

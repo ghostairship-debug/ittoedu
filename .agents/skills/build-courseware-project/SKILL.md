@@ -73,7 +73,7 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 npm run --silent validate:course-project -- <project.h5lesson>
 ```
 
-`validate:project` 是同一入口。不要把 Project V8 写成当前格式。
+`validate:project` 是同一入口。该命令当前只证明 Schema、包内文件和已经接线的结构性工程健康/预检项目；在 REPAIR 路线完成前，退出码 0 不代表完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致已经证明。不要把 Project V8 写成当前格式，也不要把 Headless 绿色写成完整交付证据。
 
 若当前产品没有对应命令或宿主，停止并报告产品缺口，不自造影子 Project DSL。
 
@@ -120,7 +120,7 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 ## 9. 验证与交付
 
-运行产品 Schema/健康检查（`validate:course-project`）、相关单测、真实编辑保存重开、CoursePlayer、默认离线 HTML 和本课要求的其它导出。验证范围见 [validation-boundaries.md](references/validation-boundaries.md)。
+运行产品 Schema 与当前已接线的结构性健康检查（`validate:course-project`）、相关单测、真实编辑保存重开、CoursePlayer、默认离线 HTML 和本课要求的其它导出。真实 HTML/网页包还要观察外部请求，补足 Headless 尚未完整覆盖的 Runtime/Component 源码离线合规。验证范围见 [validation-boundaries.md](references/validation-boundaries.md)。
 
 工程检查通过后，由全新上下文做一次只读体验 QA。自动化最多 `engineering candidate`；具体课例未经真实视觉/互动复核不得称 `art candidate`；`accepted` 必须来自教师明确验收。不得宣称 Editor 1.0 已发布。
 

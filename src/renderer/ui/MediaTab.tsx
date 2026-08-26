@@ -237,6 +237,8 @@ interface AssetEntryProps {
   onAddAsOverlay?(): void
   placeLabel?: string
   overlayLabel?: string
+  placementDisabled?: boolean
+  placementDisabledReason?: string
 }
 
 function AssetEntry({
@@ -247,6 +249,8 @@ function AssetEntry({
   onAddAsOverlay,
   placeLabel,
   overlayLabel,
+  placementDisabled = false,
+  placementDisabledReason,
 }: AssetEntryProps) {
   const isVideo = asset.kind === 'video'
   const isAudio = asset.kind === 'audio'
@@ -285,16 +289,25 @@ function AssetEntry({
           type="button"
           className="media-add-to-canvas"
           data-testid={`insert-flow-media-${asset.id}`}
-          disabled={!bytes}
-          aria-label={placeLabel ?? `将${isVideo ? '视频' : isAudio ? '声音' : '图片'}“${asset.filename}”添加到画布`}
-          title={bytes
-            ? (placeLabel ?? `在当前场景中创建可编辑${isVideo ? '视频' : '图片'}元素`)
+          disabled={!bytes || placementDisabled}
+          aria-label={placementDisabled && placementDisabledReason
+            ? `${placeLabel ?? '添加到画布'}不可用：${placementDisabledReason}`
+            : placeLabel ?? `将${isVideo ? '视频' : isAudio ? '声音' : '图片'}“${asset.filename}”添加到画布`}
+          title={placementDisabled && placementDisabledReason
+            ? placementDisabledReason
+            : bytes
+              ? (placeLabel ?? `在当前场景中创建可编辑${isVideo ? '视频' : '图片'}元素`)
             : `工程缺少${isVideo ? '视频' : isAudio ? '声音' : '图片'}数据`}
           onClick={(event) => onAddToCanvas(event)}
         >
           <Plus size={15} />
           {placeLabel ?? '添加到画布'}
         </button>
+      ) : null}
+      {canPlaceOnCanvas && placementDisabledReason ? (
+        <div className="media-preview-unavailable" data-testid={`media-placement-reason-${asset.id}`}>
+          {placementDisabledReason}
+        </div>
       ) : null}
       {onAddAsOverlay ? (
         <button
@@ -424,8 +437,15 @@ export function MediaTab({
   const addImageNode = useEditorStore((state) => state.addImageNode)
   const addVideoNode = useEditorStore((state) => state.addVideoNode)
   const flowSession = useEditorStore((state) => state.flowSession)
+  const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const insertFlowLibraryMedia = useEditorStore((state) => state.insertFlowLibraryMedia)
   const setError = useEditorStore((state) => state.setError)
+  const spatialPlacementDisabled = spatialScope !== null && spatialScope !== 'world'
+  const spatialPlacementDisabledReason = spatialScope === 'surface'
+    ? '表面共享层暂不支持插入媒体；请切换到无限画布世界层。'
+    : spatialScope === 'global'
+      ? '无限画布全局层暂不支持插入媒体；请切换到无限画布世界层。'
+      : undefined
 
   const insertFlowAsset = (
     assetId: string,
@@ -568,6 +588,8 @@ export function MediaTab({
                   }}
                   onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
                   placeLabel={flowSession ? '插入正文' : undefined}
+                  placementDisabled={spatialPlacementDisabled}
+                  placementDisabledReason={spatialPlacementDisabledReason}
                   onDelete={() => deleteAsset(asset.id)}
                 />
               )
@@ -601,6 +623,8 @@ export function MediaTab({
                   }}
                   onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
                   placeLabel={flowSession ? '插入正文' : undefined}
+                  placementDisabled={spatialPlacementDisabled}
+                  placementDisabledReason={spatialPlacementDisabledReason}
                   onDelete={() => deleteAsset(asset.id)}
                 />
               )

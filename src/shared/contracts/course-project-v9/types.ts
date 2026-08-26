@@ -94,6 +94,42 @@ export interface CourseRuntimeContent {
   }>
 }
 
+/**
+ * Remote delivery hint for a project asset. The embedded local bytes stay the
+ * author cache / offline source of truth; `path` and `byteLength` always
+ * describe those embedded bytes and are never fabricated for remote-only payloads.
+ */
+export interface CourseAssetRemoteDelivery {
+  /**
+   * Canonical HTTPS URL serving the same bytes as the embedded local cache.
+   * Credentials are never allowed: secrets do not enter the project contract.
+   */
+  url: string
+}
+
+/**
+ * V9 asset metadata: the shared V8 `AssetMeta` shape plus optional remote
+ * delivery facts. V8 `AssetMeta` itself is frozen and must not grow these keys.
+ */
+export interface CourseAssetMeta extends AssetMeta {
+  remote?: CourseAssetRemoteDelivery
+}
+
+/**
+ * Course-level network declaration for Runtime/Component code.
+ * Supported preview/publish/export hosts derive network, CSP and diagnostics
+ * from these exact origins and deny undeclared access. This contract carries
+ * origins only, never secrets, and does not define host-local capabilities.
+ */
+export interface CourseNetworkDeclaration {
+  /**
+   * Normalized exact `https:`/`wss:` origins the course may connect to
+   * (remote media, HTTP API, WebSocket, future AI API). No wildcard, no
+   * userinfo, no path/query/fragment.
+   */
+  connectOrigins?: string[]
+}
+
 export interface CourseRuntimeDefinition {
   protocol: 'canvas-runtime' | 'surface-runtime'
   runtimeApiVersion: 2 | 3
@@ -477,8 +513,10 @@ export interface CourseProjectDocument {
   title: string
   createdAt: string
   updatedAt: string
-  assets: Record<string, AssetMeta>
+  assets: Record<string, CourseAssetMeta>
   componentPackages: Record<string, EmbeddedComponentPackageMeta>
+  /** Course-level network declaration; absent means no remote access is declared. */
+  network?: CourseNetworkDeclaration
   designTokens: ProjectDesignTokens
   media: ProjectMediaSettings
   playback: ProjectPlaybackSettings

@@ -1,3 +1,4 @@
+import type { ZodError, ZodIssue } from 'zod'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import {
@@ -10,6 +11,7 @@ import type {
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import type {
   ComponentLayerItem,
+  CourseAssetMeta,
   CourseProjectDocument,
   CourseSurfaceDocument,
   FlowBlock,
@@ -32,6 +34,7 @@ import {
 } from '../../../shared/publishedCourseTypes'
 import { publishedCourseV2Schema } from '../../../shared/publishedCourseSchema'
 import type { AssetMeta, EmbeddedComponentPackageMeta } from '../../../shared/projectTypes'
+import { compareStableStrings } from '../../../shared/stableOrder'
 import { bytesToBase64, bytesToDataUrl } from '../base64'
 
 export interface CoursePublishSources {
@@ -51,9 +54,9 @@ export interface BuildPublishedCourseOptions {
   /** Defaults to a Data URL, which is suitable for a standalone HTML file. */
   projectAssetUrl?: (
     assetId: string,
-    meta: AssetMeta,
+    meta: CourseAssetMeta,
     bytes: Uint8Array,
-  ) => string
+  ) => string | undefined
   /** Defaults to a Data URL, which is suitable for a standalone HTML file. */
   componentAssetUrl?: (
     componentKey: string,
@@ -61,6 +64,40 @@ export interface BuildPublishedCourseOptions {
     mimeType: string,
     bytes: Uint8Array,
   ) => string
+}
+
+/** Deterministic source facts that must hold before a V9 project can publish. */
+export type PublishedCourseSourceIssueCode =
+  | 'project-schema-invalid'
+  | 'asset-metadata-missing'
+  | 'asset-bytes-missing'
+  | 'asset-byte-length-mismatch'
+  | 'component-metadata-missing'
+  | 'component-bytes-missing'
+  | 'component-manifest-identity-mismatch'
+  | 'component-hash-mismatch'
+  | 'component-asset-bytes-missing'
+
+export interface PublishedCourseSourceIssue {
+  code: PublishedCourseSourceIssueCode
+  message: string
+  path: ReadonlyArray<string | number>
+}
+
+/**
+ * Retains the machine-stable source fact for callers that build without first
+ * showing the package preflight report.
+ */
+export class PublishedCourseSourceError extends Error {
+  readonly code: PublishedCourseSourceIssueCode
+  readonly path: ReadonlyArray<string | number>
+
+  constructor(readonly issue: PublishedCourseSourceIssue) {
+    super(issue.message)
+    this.name = 'PublishedCourseSourceError'
+    this.code = issue.code
+    this.path = issue.path
+  }
 }
 
 interface ComponentReference {
@@ -330,6 +367,234 @@ export function collectPublishedCourseAssetIds(
   return result
 }
 
+function sourceIssuePathKey(path: ReadonlyArray<string | number>): string {
+  return JSON.stringify(path)
+}
+
+function compareSourceIssues(
+  left: PublishedCourseSourceIssue,
+  right: PublishedCourseSourceIssue,
+): number {
+  return compareStableStrings(left.code, right.code) ||
+    compareStableStrings(left.message, right.message) ||
+    compareStableStrings(sourceIssuePathKey(left.path), sourceIssuePathKey(right.path))
+}
+
+interface PublishedCourseSourceFacts {
+  /**
+   * Available only when this is a V9 project that is either fully parsed, or
+   * has passed every nested/structural check and failed solely on missing
+   * asset/component reference checks. The latter retains actionable missing-
+   * resource diagnostics before the final schema rejection path.
+   */
+  sources: CoursePublishSources | null
+  parsedProject: ReturnType<typeof courseProjectDocumentSchema.safeParse>
+}
+
+function isRawV9Project(value: unknown): value is { schemaVersion: 9 } {
+  return isRecord(value) && value.schemaVersion === 9
+}
+
+/**
+ * Probe the exact read-only graph walkers used for source-fact collection.
+ * Both walks are pure, so a clean probe guarantees the real collection cannot
+ * leak a native TypeError on a malformed raw shape.
+ */
+function isRawSourceWalkSafe(sources: CoursePublishSources): boolean {
+  try {
+    collectPublishedCourseAssetIds(sources)
+    collectPublishedCourseComponentKeys(sources.project)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * These messages are emitted only by the document-level reference refinement,
+ * after every nested carrier has parsed successfully. They are the two schema
+ * failures for which source-fact collection intentionally provides the more
+ * actionable missing-metadata diagnostic. Other custom issues can be
+ * structural (notably native-data transforms) and must stay on the schema path
+ * even when a raw walker happens not to throw.
+ */
+function isMissingPublishedSourceReferenceIssue(issue: ZodIssue): boolean {
+  return issue.code === 'custom' && (
+    issue.message.startsWith('Missing asset: ')
+    || issue.message.startsWith('Missing component package/version: ')
+  )
+}
+
+/**
+ * Stable schema diagnostic shared by preflight and the producer for a raw V9
+ * project that failed parsing, keyed to the first Zod issue path.
+ */
+function publishedCourseSchemaInvalidIssue(
+  error: ZodError,
+): PublishedCourseSourceIssue {
+  const first = error.issues[0]
+  const path = (first?.path ?? []).filter(
+    (key): key is string | number => typeof key !== 'symbol',
+  )
+  return {
+    code: 'project-schema-invalid',
+    message: `工程不符合 Course Project V9 Schema：${first?.message ?? '未知错误'}`,
+    path,
+  }
+}
+
+/**
+ * Derive source facts from the same canonical V9 document the producer emits.
+ * A schema-valid document can trim stable IDs, so collecting against the raw
+ * object would disagree with subsequent producer lookups. When parsing fails
+ * solely on the document-level missing asset/component reference checks, every
+ * nested carrier has already parsed, so the raw shape may be inspected for the
+ * more actionable missing-metadata issue. Other custom issues can be structural
+ * (for example native `content.data`) and must stay on the schema rejection
+ * path; walker exception-safety alone is not evidence of structural validity.
+ */
+function resolvePublishedCourseSourceFacts(
+  input: CoursePublishSources,
+): PublishedCourseSourceFacts {
+  const parsedProject = courseProjectDocumentSchema.safeParse(input.project)
+  if (parsedProject.success) {
+    return {
+      parsedProject,
+      sources: { ...input, project: parsedProject.data },
+    }
+  }
+  if (
+    isRawV9Project(input.project)
+    && parsedProject.error.issues.length > 0
+    && parsedProject.error.issues.every(isMissingPublishedSourceReferenceIssue)
+    && isRawSourceWalkSafe(input)
+  ) {
+    return { parsedProject, sources: input }
+  }
+  return { parsedProject, sources: null }
+}
+
+function collectPublishedCourseSourceIssuesFromFacts(
+  sources: CoursePublishSources,
+): PublishedCourseSourceIssue[] {
+  const issues: PublishedCourseSourceIssue[] = []
+  const add = (issue: PublishedCourseSourceIssue): void => { issues.push(issue) }
+
+  for (const assetId of [...collectPublishedCourseAssetIds(sources)].sort(compareStableStrings)) {
+    const entry = findAssetEntry(sources.project, assetId)
+    if (!entry) {
+      add({
+        code: 'asset-metadata-missing',
+        message: `工程引用的素材“${assetId}”没有对应的素材元数据。`,
+        path: ['assets', assetId],
+      })
+      continue
+    }
+    const [recordKey, metadata] = entry
+    const bytes = findAssetBytes(sources, recordKey, metadata)
+    if (!bytes) {
+      add({
+        code: 'asset-bytes-missing',
+        message: `素材“${metadata.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
+        path: ['assets', recordKey],
+      })
+      continue
+    }
+    if (bytes.byteLength !== metadata.byteLength) {
+      add({
+        code: 'asset-byte-length-mismatch',
+        message: `素材“${metadata.filename}”的本地字节长度与工程元数据不一致。`,
+        path: ['assets', recordKey, 'byteLength'],
+      })
+    }
+  }
+
+  for (const key of [...collectPublishedCourseComponentKeys(sources.project)].sort(compareStableStrings)) {
+    const separator = key.lastIndexOf('@')
+    const packageId = key.slice(0, separator)
+    const version = key.slice(separator + 1)
+    const metadataEntry = findComponentMetadata(sources.project, packageId, version)
+    if (!metadataEntry) {
+      add({
+        code: 'component-metadata-missing',
+        message: `工程引用的组件包“${key}”没有对应的工程锁定元数据。`,
+        path: ['componentPackages', packageId],
+      })
+      continue
+    }
+
+    const [recordKey, metadata] = metadataEntry
+    const source = findComponentSource(sources, recordKey, packageId, version)
+    if (!source) {
+      add({
+        code: 'component-bytes-missing',
+        message: `组件包“${key}”没有可嵌入导出物的执行内容。`,
+        path: ['componentPackages', recordKey],
+      })
+      continue
+    }
+
+    if (source.manifest.id !== metadata.packageId || source.manifest.version !== metadata.version) {
+      add({
+        code: 'component-manifest-identity-mismatch',
+        message: `组件包“${key}”的 manifest ID 或版本与工程锁定值不一致。`,
+        path: ['componentPackages', recordKey],
+      })
+    }
+
+    const actualHash = source.contentSha256 ?? componentContentSha256(source.files)
+    if (actualHash !== metadata.contentSha256) {
+      add({
+        code: 'component-hash-mismatch',
+        message: `组件包“${key}”的工程锁定内容哈希与当前执行内容不一致。`,
+        path: ['componentPackages', recordKey, 'contentSha256'],
+      })
+    }
+
+    for (const [assetKey, path] of Object.entries(source.manifest.assets)
+      .sort(([left], [right]) => compareStableStrings(left, right))) {
+      if (!source.files[path]) {
+        add({
+          code: 'component-asset-bytes-missing',
+          message: `组件包“${key}”缺少声明素材“${assetKey}”对应的文件“${path}”。`,
+          path: ['componentPackages', recordKey],
+        })
+      }
+    }
+  }
+
+  return issues.sort(compareSourceIssues)
+}
+
+/**
+ * Collect every deterministic local source condition required by the V2
+ * producer. Package preflight maps these facts directly, while the producer
+ * raises the first fact as a structured hard gate before it starts emitting.
+ * A raw V9 project rejected by the schema reports the shared
+ * `project-schema-invalid` diagnostic keyed to the first Zod issue path.
+ */
+export function collectPublishedCourseSourceIssues(
+  input: CoursePublishSources,
+): PublishedCourseSourceIssue[] {
+  const facts = resolvePublishedCourseSourceFacts(input)
+  if (facts.parsedProject.success) {
+    return collectPublishedCourseSourceIssuesFromFacts(facts.sources!)
+  }
+  if (!isRawV9Project(input.project)) return []
+  if (facts.sources) {
+    const issues = collectPublishedCourseSourceIssuesFromFacts(facts.sources)
+    if (issues.length > 0) return issues
+  }
+  return [publishedCourseSchemaInvalidIssue(facts.parsedProject.error)]
+}
+
+export function assertPublishedCourseSourceIssues(
+  sources: CoursePublishSources,
+): void {
+  const issue = collectPublishedCourseSourceIssues(sources)[0]
+  if (issue) throw new PublishedCourseSourceError(issue)
+}
+
 function publishComponent(
   metadata: EmbeddedComponentPackageMeta,
   source: ComponentPackageData,
@@ -535,8 +800,25 @@ export function buildPublishedCourseV2Payload(
   input: CoursePublishSources,
   options: BuildPublishedCourseOptions = {},
 ): PublishedCourseV2Payload {
-  const project = courseProjectDocumentSchema.parse(input.project)
-  const sources: CoursePublishSources = { ...input, project }
+  const sourceFacts = resolvePublishedCourseSourceFacts(input)
+  // Keep the stable source-issue gate for V9 projects that are safe to walk.
+  // Schema-invalid V9 input shares the typed project-schema-invalid diagnostic
+  // with preflight instead of leaking a native TypeError from a raw walk;
+  // raw V8 input continues to surface Zod errors.
+  if (isRawV9Project(input.project)) {
+    if (sourceFacts.sources) {
+      const issue = collectPublishedCourseSourceIssuesFromFacts(sourceFacts.sources)[0]
+      if (issue) throw new PublishedCourseSourceError(issue)
+    }
+    if (!sourceFacts.parsedProject.success) {
+      throw new PublishedCourseSourceError(
+        publishedCourseSchemaInvalidIssue(sourceFacts.parsedProject.error),
+      )
+    }
+  }
+  if (!sourceFacts.parsedProject.success) throw sourceFacts.parsedProject.error
+  const project = sourceFacts.parsedProject.data
+  const sources: CoursePublishSources = sourceFacts.sources ?? { ...input, project }
   const assetIds = collectPublishedCourseAssetIds(sources)
   const assets: PublishedCourseV2Payload['assets'] = {}
   for (const assetId of [...assetIds].sort()) {

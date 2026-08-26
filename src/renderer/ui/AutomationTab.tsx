@@ -1,41 +1,82 @@
 import { useMemo } from 'react'
+import type { InteractionCondition } from '../../shared/interactionTypes'
 import { collectProjectDiagnostics } from '../../shared/projectDiagnostics'
 import {
+  selectGlobalInteractionAuthoringView,
+  selectLocalInteractionAuthoringView,
+  type AvailableLocalInteractionAuthoringView,
+  type GlobalInteractionAuthoringView,
+} from '../interactions/interactionAuthoringView'
+import type { InteractionAuthoringTarget } from '../interactions/interactionAuthoringCommands'
+import { SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID } from '../interactions/interactionTemplates'
+import {
   useEditorStore,
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
   selectActiveScene,
   selectEditingNodes,
+  selectSlideAuthoringSnapshot,
 } from '../store/editorStore'
-import { SceneAutomationEditor } from './InteractionEditor'
+import {
+  SceneAutomationEditor,
+  type RevealSequenceTemplateIntent,
+} from './InteractionEditor'
+
+type AvailableInteractionAuthoringView =
+  | AvailableLocalInteractionAuthoringView
+  | GlobalInteractionAuthoringView
+
+function authoringTargetFromView(
+  view: AvailableInteractionAuthoringView,
+): InteractionAuthoringTarget {
+  if (view.carrier === 'slide-scene') {
+    return {
+      carrier: 'slide-scene',
+      projectId: view.projectId,
+      baseRevision: view.revision,
+      locationId: view.locationId,
+      activeStateId: view.activeStateId,
+    }
+  }
+  return {
+    carrier: 'global',
+    projectId: view.projectId,
+    baseRevision: view.revision,
+    activeStateId: view.activeStateId,
+    ...(view.activeLocationId ? { activeLocationId: view.activeLocationId } : {}),
+  }
+}
+
+function templateConditionsFromView(
+  view: AvailableInteractionAuthoringView,
+): InteractionCondition[] {
+  const conditions: InteractionCondition[] = []
+  if (view.carrier === 'global' && view.activeSlideSceneId) {
+    conditions.push({ type: 'scene.in', sceneIds: [view.activeSlideSceneId] })
+  }
+  if (view.activeStateId) {
+    conditions.push({ type: 'presentation.in', stateIds: [view.activeStateId] })
+  }
+  return conditions
+}
 
 export function AutomationTab() {
   const scene = useEditorStore(selectActiveScene)
   const editingNodes = useEditorStore(selectEditingNodes)
   const editingScope = useEditorStore((state) => state.editingScope)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
-  const activeStateId = useEditorStore(
-    (state) => state.activePresentationStateId,
-  )
-  const project = useEditorStore((state) => state.project)
-  const addInteractionRule = useEditorStore(
-    (state) => state.addInteractionRule,
-  )
-  const updateInteractionRule = useEditorStore(
-    (state) => state.updateInteractionRule,
-  )
-  const deleteInteractionRule = useEditorStore(
-    (state) => state.deleteInteractionRule,
-  )
+  const courseProject = useEditorStore(selectActiveCourseProjectDocument)
+  const activeLocationId = useEditorStore(selectActiveCourseLocationId)
+  const slideAuthoringSnapshot = useEditorStore(selectSlideAuthoringSnapshot)
+  const projectedProject = useEditorStore((state) => state.project)
+  const addInteractionRule = useEditorStore((state) => state.addInteractionRule)
+  const deleteInteractionRule = useEditorStore((state) => state.deleteInteractionRule)
   const duplicateInteractionRule = useEditorStore(
     (state) => state.duplicateInteractionRule,
   )
-  const moveInteractionRule = useEditorStore(
-    (state) => state.moveInteractionRule,
-  )
+  const moveInteractionRule = useEditorStore((state) => state.moveInteractionRule)
   const addGlobalInteractionRule = useEditorStore(
     (state) => state.addGlobalInteractionRule,
-  )
-  const updateGlobalInteractionRule = useEditorStore(
-    (state) => state.updateGlobalInteractionRule,
   )
   const deleteGlobalInteractionRule = useEditorStore(
     (state) => state.deleteGlobalInteractionRule,
@@ -46,14 +87,43 @@ export function AutomationTab() {
   const moveGlobalInteractionRule = useEditorStore(
     (state) => state.moveGlobalInteractionRule,
   )
+  const applyInteractionTemplateAtTarget = useEditorStore(
+    (state) => state.applyInteractionTemplateAtTarget,
+  )
+  const updateInteractionRuleAtTarget = useEditorStore(
+    (state) => state.updateInteractionRuleAtTarget,
+  )
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
-  const updateNodes = useEditorStore((state) => state.updateNodes)
+  const setError = useEditorStore((state) => state.setError)
+
+  const activeSlideStateId = slideAuthoringSnapshot?.locationId === activeLocationId
+    ? slideAuthoringSnapshot.stateId
+    : null
+
+  const authoringView = useMemo(() => {
+    if (!courseProject) return null
+    if (editingScope === 'global') {
+      return selectGlobalInteractionAuthoringView(
+        courseProject,
+        activeLocationId,
+        activeSlideStateId,
+      )
+    }
+    return activeLocationId
+      ? selectLocalInteractionAuthoringView(
+          courseProject,
+          activeLocationId,
+          activeSlideStateId,
+        )
+      : null
+  }, [activeLocationId, activeSlideStateId, courseProject, editingScope])
+
   const diagnostics = useMemo(
-    () => collectProjectDiagnostics(project).filter(
+    () => collectProjectDiagnostics(projectedProject).filter(
       (diagnostic) => diagnostic.sceneId === scene.id,
     ),
-    [project, scene.id],
+    [projectedProject, scene.id],
   )
   const ruleWarnings = useMemo(() => {
     const warnings: Record<string, string[]> = {}
@@ -64,24 +134,92 @@ export function AutomationTab() {
     }
     return warnings
   }, [diagnostics])
-  const prepareMotionTargets = (nodeIds: string[]) => {
-    updateNodes(nodeIds.map((nodeId) => ({
-      nodeId,
-      patch: { playbackInitialVisibility: 'hidden' as const },
-    })))
-  }
-  const sharedProps = {
-    selectedNodeId,
-    sourceNodes: editingNodes,
-    activeStateId,
-    scenes: project.scenes,
-    sounds: project.media.audio.sounds,
-    onOpenClickRules: () => setActiveTab('properties'),
-    onPrepareMotionTargets: prepareMotionTargets,
-    onRunPreview: () => setCanvasMode('run'),
+
+  if (!courseProject || !authoringView) {
+    return (
+      <div className="properties-scroll" data-testid="automation-tab">
+        <section className="property-section interaction-overview" role="status">
+          <h2>互动与动画</h2>
+          <p>当前课程位置尚未准备好互动编辑，请重新选择一个页面。</p>
+        </section>
+      </div>
+    )
   }
 
-  if (editingScope === 'global') {
+  if (authoringView.availability === 'unavailable') {
+    return (
+      <div className="properties-scroll" data-testid="automation-tab">
+        <section
+          className="property-section interaction-overview"
+          data-testid="local-interaction-unavailable"
+          role="status"
+        >
+          <h2>互动与动画</h2>
+          <p>当前 Flow 或 Spatial 页面没有本地互动规则载体。</p>
+          <p className="property-hint">切换到“全局”范围可编辑整课共享规则；Slide 页面仍可编辑场景规则。</p>
+        </section>
+      </div>
+    )
+  }
+
+  const interactionView = authoringView
+  const authoringTarget = authoringTargetFromView(interactionView)
+  const availableNodeIds = new Set(interactionView.nodes.map((node) => node.id))
+  const revealTemplateTargetNodeIds = interactionView.nodes
+    .filter((node) => node.visible && !node.locked)
+    .map((node) => node.id)
+  const sourceNodes = editingNodes.filter((node) => availableNodeIds.has(node.id))
+  const applyRevealSequenceTemplate = (intent: RevealSequenceTemplateIntent) => {
+    applyInteractionTemplateAtTarget(authoringTarget, {
+      templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID,
+      ruleId: intent.ruleId,
+      actionIds: intent.actionIds,
+      targetLayerItemIds: intent.targetLayerItemIds,
+      conditions: templateConditionsFromView(interactionView),
+      name: intent.name,
+    })
+  }
+  const updateRule = (
+    ruleId: string,
+    patch: Parameters<typeof updateInteractionRuleAtTarget>[2],
+  ) => {
+    updateInteractionRuleAtTarget(authoringTarget, ruleId, patch)
+  }
+  const openClickRules = () => {
+    if (
+      interactionView.carrier === 'global'
+      && interactionView.activeSurfaceType !== 'slide'
+    ) {
+      setError('当前 Flow 或 Spatial 页面不在元素属性中提供全局点击规则写入；可继续使用这里的全局模板与专业字段。')
+      return
+    }
+    setActiveTab('properties')
+  }
+  const sharedProps = {
+    scene,
+    selectedNodeId,
+    sourceNodes,
+    sourceRules: interactionView.rules,
+    activeStateId: interactionView.activeStateId,
+    authoringStates: interactionView.states,
+    scenes: interactionView.sceneReferences,
+    sounds: courseProject.media.audio.sounds,
+    ruleWarnings,
+    revealTemplateTargetNodeIds,
+    conditionSceneId: interactionView.carrier === 'global'
+      ? interactionView.activeSlideSceneId
+      : interactionView.sceneId,
+    onOpenClickRules: openClickRules,
+    onApplyRevealSequenceTemplate: applyRevealSequenceTemplate,
+    onRunPreview: () => setCanvasMode('run'),
+    onUpdateRule: updateRule,
+  }
+
+  if (interactionView.carrier === 'global') {
+    const legacyGlobalWritesAvailable = interactionView.activeSurfaceType === 'slide'
+    const rejectUnavailableGlobalWrite = () => {
+      setError('当前 Flow 或 Spatial 页面只开放原子模板与专业字段更新；请在 Slide 页面管理其他全局规则操作。')
+    }
     return (
       <div className="properties-scroll" data-testid="automation-tab">
         <section className="property-section interaction-overview">
@@ -90,21 +228,26 @@ export function AutomationTab() {
         </section>
         <SceneAutomationEditor
           {...sharedProps}
-          scene={scene}
           sourceScope="global"
-          sourceRules={project.globalInteractions}
-          onAddRule={addGlobalInteractionRule}
-          onUpdateRule={(ruleId, patch) => {
-            const current = project.globalInteractions.find(
-              (rule) => rule.id === ruleId,
-            )
-            if (current) {
-              updateGlobalInteractionRule(ruleId, { ...current, ...patch })
-            }
-          }}
-          onDeleteRule={deleteGlobalInteractionRule}
-          onDuplicateRule={duplicateGlobalInteractionRule}
-          onMoveRule={moveGlobalInteractionRule}
+          legacyRuleActionsAvailable={legacyGlobalWritesAvailable}
+          legacyRuleActionsUnavailableReason={legacyGlobalWritesAvailable
+            ? undefined
+            : '当前 Flow 或 Spatial 页面仅开放原子模板与专业字段更新；其他全局规则操作请在 Slide 页面完成。'}
+          onAddRule={legacyGlobalWritesAvailable
+            ? addGlobalInteractionRule
+            : rejectUnavailableGlobalWrite}
+          onDeleteRule={legacyGlobalWritesAvailable
+            ? deleteGlobalInteractionRule
+            : rejectUnavailableGlobalWrite}
+          onDuplicateRule={legacyGlobalWritesAvailable
+            ? duplicateGlobalInteractionRule
+            : () => {
+                rejectUnavailableGlobalWrite()
+                return null
+              }}
+          onMoveRule={legacyGlobalWritesAvailable
+            ? moveGlobalInteractionRule
+            : rejectUnavailableGlobalWrite}
         />
       </div>
     )
@@ -137,21 +280,13 @@ export function AutomationTab() {
       ) : null}
       <SceneAutomationEditor
         {...sharedProps}
-        scene={scene}
-        ruleWarnings={ruleWarnings}
-        onAddRule={(rule) => addInteractionRule(scene.id, rule)}
-        onUpdateRule={(ruleId, patch) => {
-          const current = scene.interactions.find((rule) => rule.id === ruleId)
-          if (current) {
-            updateInteractionRule(scene.id, ruleId, { ...current, ...patch })
-          }
-        }}
-        onDeleteRule={(ruleId) => deleteInteractionRule(scene.id, ruleId)}
+        onAddRule={(rule) => addInteractionRule(interactionView.sceneId, rule)}
+        onDeleteRule={(ruleId) => deleteInteractionRule(interactionView.sceneId, ruleId)}
         onDuplicateRule={(ruleId) => {
-          duplicateInteractionRule(scene.id, ruleId)
+          duplicateInteractionRule(interactionView.sceneId, ruleId)
         }}
         onMoveRule={(ruleId, direction) => {
-          moveInteractionRule(scene.id, ruleId, direction)
+          moveInteractionRule(interactionView.sceneId, ruleId, direction)
         }}
       />
     </div>

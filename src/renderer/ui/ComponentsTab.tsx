@@ -19,15 +19,22 @@ import type {
   ComponentCatalogSnapshot,
 } from '../../shared/componentCatalog'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
-import { collectComponentPackageUsage } from '../../shared/componentPackageLifecycle'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
+import {
+  collectCourseComponentPackageUsage,
+  type CourseComponentPackageUsage,
+} from '../components/courseComponentPackageTransactions'
+import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import {
   collectComponentLibrarySubjects,
   filterComponentLibraryPackages,
   selectCurrentCatalogPackages,
 } from '../components/componentLibraryModel'
-import { useEditorStore } from '../store/editorStore'
+import {
+  selectActiveCourseProjectDocument,
+  useEditorStore,
+} from '../store/editorStore'
 
 interface ComponentsTabProps {
   componentCatalog?: ComponentCatalogSnapshot
@@ -90,11 +97,73 @@ function closeContainingMenu(target: HTMLElement) {
   target.closest('details')?.removeAttribute('open')
 }
 
+function locateFlowBlockUsage(surfaceId: string, blockId: string) {
+  const fail = (message: string) => {
+    const state = useEditorStore.getState()
+    state.setStatus(null)
+    state.setError(message)
+  }
+  const state = useEditorStore.getState()
+  const document = selectActiveCourseProjectDocument(state)
+  if (!document) return
+  const location = document.locations.find((candidate) => (
+    candidate.kind === 'flow-block'
+    && candidate.surfaceId === surfaceId
+    && candidate.blockId === blockId
+  )) ?? document.locations.find((candidate) => (
+    candidate.kind === 'flow-block' && candidate.surfaceId === surfaceId
+  ))
+  if (!location || location.kind !== 'flow-block') {
+    fail('该组件所在的流式讲义没有可激活的位置；请从页面列表打开该讲义后手动选择组件。')
+    return
+  }
+  state.activateCourseLocation(location.id)
+  const activated = useEditorStore.getState()
+  const activeDocument = selectActiveCourseProjectDocument(activated)
+  if (
+    !activeDocument
+    || activated.flowSession?.selection.surfaceId !== surfaceId
+    || activated.flowSession.selection.locationId !== location.id
+  ) {
+    fail('无法切换到该组件所在的流式讲义；请从页面列表打开该讲义后重试。')
+    return
+  }
+  try {
+    activated.applyFlowSelection(selectFlowEditorBlock(activeDocument, location.id, blockId))
+  } catch {
+    fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
+    return
+  }
+  const confirmed = useEditorStore.getState().flowSession?.selection
+  if (
+    confirmed?.surfaceId !== surfaceId
+    || confirmed.locationId !== location.id
+    || confirmed.selectedBlockId !== blockId
+  ) {
+    fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
+    return
+  }
+  const latest = useEditorStore.getState()
+  latest.setError(null)
+  latest.setStatus('已定位组件使用位置')
+}
+
 interface ComponentDetailsDialogProps {
   data?: ComponentPackageData
   entry?: AvailableComponentCatalogPackage
-  usage?: ReturnType<typeof collectComponentPackageUsage>
+  usage?: CourseComponentPackageUsage
   onClose(): void
+}
+
+function emptyCourseComponentPackageUsage(packageId: string): CourseComponentPackageUsage {
+  return {
+    packageId,
+    packageExists: false,
+    references: [],
+    sceneInstanceCount: 0,
+    globalInstanceCount: 0,
+    totalInstanceCount: 0,
+  }
 }
 
 function ComponentDetailsDialog({ data, entry, usage, onClose }: ComponentDetailsDialogProps) {
@@ -400,8 +469,9 @@ export function ComponentsTab({
   const [searchQuery, setSearchQuery] = useState('')
   const [detailsPackageId, setDetailsPackageId] = useState<string | null>(null)
   const components = useEditorStore((state) => state.componentPackages)
-  const project = useEditorStore((state) => state.project)
+  const project = useEditorStore(selectActiveCourseProjectDocument)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
   const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)
   const packages = useMemo(() => Object.values(components).sort((left, right) =>
@@ -424,21 +494,34 @@ export function ComponentsTab({
     ? currentCatalogEntries.find((entry) => entry.packageId === detailsPackageId)
     : undefined
   const detailsUsage = detailsPackageId
-    ? collectComponentPackageUsage(project, detailsPackageId)
+    ? project
+      ? collectCourseComponentPackageUsage(project, detailsPackageId)
+      : emptyCourseComponentPackageUsage(detailsPackageId)
     : undefined
 
   const locateFirstUsage = (packageId: string) => {
-    const usage = collectComponentPackageUsage(useEditorStore.getState().project, packageId)
+    const state = useEditorStore.getState()
+    const document = selectActiveCourseProjectDocument(state)
+    if (!document) return
+    const usage = collectCourseComponentPackageUsage(document, packageId)
     const reference = usage.references[0]
     if (!reference) return
-    const state = useEditorStore.getState()
+    if (reference.carrier === 'flow-block' && reference.surfaceId) {
+      locateFlowBlockUsage(reference.surfaceId, reference.instanceId)
+      return
+    }
     if (reference.scope === 'global') {
       state.setEditingScope('global')
     } else if (reference.sceneId) {
       state.setActiveScene(reference.sceneId)
+    } else if (reference.surfaceId) {
+      const location = document.locations.find((candidate) => (
+        candidate.surfaceId === reference.surfaceId
+      ))
+      if (location) state.activateCourseLocation(location.id)
     }
-    useEditorStore.getState().selectNode(reference.nodeId)
-    useEditorStore.getState().setStatus(`已定位“${reference.nodeName}”`)
+    useEditorStore.getState().selectNode(reference.instanceId)
+    useEditorStore.getState().setStatus('已定位组件使用位置')
   }
 
   return (
@@ -477,8 +560,27 @@ export function ComponentsTab({
         <div className="project-component-list">
           {visiblePackages.map((data) => {
             const packageId = data.manifest.id
-            const usage = collectComponentPackageUsage(project, packageId)
-            const scopeSupported = componentSupportsScope(data.manifest, editingScope)
+            const usage = project
+              ? collectCourseComponentPackageUsage(project, packageId)
+              : emptyCourseComponentPackageUsage(packageId)
+            const isSpatial = spatialScope !== null
+            const manifestScopeSupported = componentSupportsScope(
+              data.manifest,
+              isSpatial ? 'scene' : editingScope,
+            )
+            const scopeSupported = isSpatial
+              ? spatialScope === 'world' && manifestScopeSupported
+              : manifestScopeSupported
+            const draggable = isSpatial ? false : scopeSupported
+            const insertionDisabledReason = spatialScope === 'surface'
+              ? '表面共享层暂不支持插入组件；请切换到无限画布世界层。'
+              : spatialScope === 'global'
+                ? '无限画布全局层暂不支持插入组件；请切换到无限画布世界层。'
+                : spatialScope === 'world' && !manifestScopeSupported
+                  ? '该组件未声明支持场景层，不能插入无限画布世界层。'
+                  : editingScope === 'global'
+                    ? '该组件不支持全局层；仍可从右侧菜单管理。'
+                    : '该组件不支持场景层；仍可从右侧菜单管理。'
             const catalogEntry = currentCatalogEntries.find((entry) => entry.packageId === packageId)
             const catalogStatus = catalogEntry
               ? componentCatalogInstallStatus(catalogEntry, data)
@@ -491,13 +593,15 @@ export function ComponentsTab({
                     type="button"
                     className="component-card"
                     data-testid={`component-${packageId}`}
-                    draggable={scopeSupported}
+                    draggable={draggable}
                     disabled={!scopeSupported}
                     title={scopeSupported
                       ? `插入“${data.manifest.name}”`
-                      : `该组件不支持${editingScope === 'global' ? '全局层' : '场景层'}；仍可从右侧菜单管理。`}
-                    onDragStart={(event) => setComponentDragData(event, packageId, data.manifest.name)}
-                    onClick={() => addExternalComponentNode(packageId)}
+                      : insertionDisabledReason}
+                    onDragStart={draggable
+                      ? (event) => setComponentDragData(event, packageId, data.manifest.name)
+                      : undefined}
+                    onClick={scopeSupported ? () => addExternalComponentNode(packageId) : undefined}
                   >
                     <span className="component-thumb"><ComponentThumbnail data={data} /></span>
                     <span>
@@ -540,10 +644,14 @@ export function ComponentsTab({
                         type="button"
                         key={preset.id}
                         disabled={!scopeSupported}
-                        draggable={scopeSupported}
-                        title={preset.description}
-                        onDragStart={(event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)}
-                        onClick={() => addExternalComponentNode(packageId, undefined, undefined, preset.id)}
+                        draggable={draggable}
+                        title={scopeSupported ? preset.description : insertionDisabledReason}
+                        onDragStart={draggable
+                          ? (event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)
+                          : undefined}
+                        onClick={scopeSupported
+                          ? () => addExternalComponentNode(packageId, undefined, undefined, preset.id)
+                          : undefined}
                       >
                         {preset.label}
                       </button>
@@ -552,7 +660,7 @@ export function ComponentsTab({
                 )}
                 {!scopeSupported && (
                   <div className="project-component-card__hint">
-                    当前处于{editingScope === 'global' ? '全局层' : '场景层'}，该组件只能在其他层使用。
+                    {insertionDisabledReason}
                   </div>
                 )}
               </article>

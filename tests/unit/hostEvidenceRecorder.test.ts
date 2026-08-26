@@ -11,15 +11,6 @@ function recordFrom(message: string): HostEvidenceRecord {
     HostEvidenceRecord
 }
 
-function markJsdomEventTrusted(event: Event): void {
-  const implementation = Object.getOwnPropertySymbols(event)
-    .map((symbol) => Reflect.get(event, symbol))
-    .find((value) => value && typeof value === 'object' &&
-      'isTrusted' in (value as object)) as { isTrusted: boolean } | undefined
-  if (!implementation) throw new Error('jsdom Event implementation missing')
-  implementation.isTrusted = true
-}
-
 describe('HostEvidenceRecorder', () => {
   it('publishes the session before assessment records and increments sequence', () => {
     const sink = vi.fn<(message: string) => void>()
@@ -119,109 +110,6 @@ describe('HostEvidenceRecorder', () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
     )
     expect(sessionB.sessionId).not.toBe(sessionA.sessionId)
-  })
-
-  it('records exact teacher escape phases from one trusted click and rejects replay', () => {
-    const messages: string[] = []
-    const recorder = new HostEvidenceRecorder({
-      sink: (message) => messages.push(message),
-      sessionId: '49b9aa64-1733-4e6c-9d2f-6495f55ded62',
-    })
-    const button = document.createElement('button')
-    document.body.append(button)
-    let retainedWriter:
-      | ReturnType<HostEvidenceRecorder['beginTeacherEscapeClick']>
-      | undefined
-    button.addEventListener('click', markJsdomEventTrusted, { capture: true })
-    button.addEventListener('click', (event) => {
-      const write = recorder.beginTeacherEscapeClick(event)
-      retainedWriter = write
-      write({
-        action: 'scene-picker',
-        phase: 'requested',
-        sceneId: 'scene-one',
-        stateId: 'state-incomplete',
-        bypassNavigationGuards: true,
-      })
-      write({
-        action: 'scene-picker',
-        phase: 'completed',
-        sceneId: 'scene-one',
-        stateId: 'state-incomplete',
-        bypassNavigationGuards: true,
-        accepted: true,
-      })
-    })
-
-    button.click()
-
-    expect(recordFrom(messages[1]!)).toEqual({
-      schemaVersion: 1,
-      kind: 'teacher-escape-recorded',
-      sessionId: '49b9aa64-1733-4e6c-9d2f-6495f55ded62',
-      sequence: 1,
-      action: 'scene-picker',
-      phase: 'requested',
-      sceneId: 'scene-one',
-      stateId: 'state-incomplete',
-      bypassNavigationGuards: true,
-      eventType: 'click',
-    })
-    expect(recordFrom(messages[2]!)).toEqual({
-      schemaVersion: 1,
-      kind: 'teacher-escape-recorded',
-      sessionId: '49b9aa64-1733-4e6c-9d2f-6495f55ded62',
-      sequence: 2,
-      action: 'scene-picker',
-      phase: 'completed',
-      sceneId: 'scene-one',
-      stateId: 'state-incomplete',
-      bypassNavigationGuards: true,
-      accepted: true,
-      eventType: 'click',
-    })
-    expect(Object.isFrozen(retainedWriter)).toBe(true)
-    expect(() => retainedWriter?.({
-      action: 'scene-picker',
-      phase: 'completed',
-      sceneId: 'scene-one',
-      stateId: 'state-incomplete',
-      bypassNavigationGuards: true,
-      accepted: true,
-    })).toThrow('正在分发')
-    expect(messages).toHaveLength(3)
-  })
-
-  it('rejects synthetic clicks and invalid teacher escape phase shapes', () => {
-    const recorder = new HostEvidenceRecorder({
-      sink: vi.fn(),
-      sessionId: '49b9aa64-1733-4e6c-9d2f-6495f55ded62',
-    })
-    expect(() => recorder.beginTeacherEscapeClick(new Event('click')))
-      .toThrow('isTrusted')
-
-    const button = document.createElement('button')
-    document.body.append(button)
-    button.addEventListener('click', markJsdomEventTrusted, { capture: true })
-    button.addEventListener('click', (event) => {
-      const write = recorder.beginTeacherEscapeClick(event)
-      expect(() => write({
-        action: 'next',
-        phase: 'requested',
-        sceneId: 'scene-one',
-        stateId: null,
-        bypassNavigationGuards: false,
-        accepted: false,
-      })).toThrow('requested')
-      expect(() => write({
-        action: 'next',
-        phase: 'completed',
-        sceneId: 'scene-one',
-        stateId: null,
-        bypassNavigationGuards: true,
-      })).toThrow('completed')
-    })
-    button.click()
   })
 
   it('keeps using the captured JSON serializer after Runtime monkeypatching', () => {

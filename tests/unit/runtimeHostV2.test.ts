@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 
-vi.mock('phaser', () => ({ runtimeMarker: 'phaser-test-module' }))
+vi.mock('phaser', () => ({
+  runtimeMarker: 'phaser-test-module',
+  GameObjects: {
+    GameObject: class MockGameObject {
+      destroy(fromScene = false): void {
+        Reflect.set(this, 'baseDestroyFromScene', fromScene)
+        Reflect.set(this, 'active', false)
+        Reflect.set(this, 'visible', false)
+        Reflect.set(this, 'scene', undefined)
+        Reflect.set(this, 'parentContainer', undefined)
+      }
+    },
+  },
+}))
 
 import { CourseEventBus } from '@/player/CourseEventBus'
 import { CourseStateStore } from '@/player/CourseStateStore'
@@ -27,6 +40,8 @@ class FakeContainer {
   visible = true
   name = ''
   readonly children: FakeContainer[] = []
+  readonly list = this.children
+  parentContainer: FakeContainer | null = null
 
   setName(name: string): this {
     this.name = name
@@ -40,6 +55,14 @@ class FakeContainer {
 
   add(child: FakeContainer): this {
     this.children.push(child)
+    child.parentContainer = this
+    return this
+  }
+
+  remove(child: FakeContainer): this {
+    const index = this.children.indexOf(child)
+    if (index >= 0) this.children.splice(index, 1)
+    child.parentContainer = null
     return this
   }
 
@@ -176,6 +199,9 @@ afterEach(() => {
   delete window.CoursewareRuntime
   Reflect.deleteProperty(window, '__runtimeHostContext')
   Reflect.deleteProperty(window, '__runtimeLifecycleCalls')
+  Reflect.deleteProperty(window, '__runtimeHostTeardownCalls')
+  Reflect.deleteProperty(window, '__runtimeHostTeardownObjects')
+  Reflect.deleteProperty(window, '__runtimeHostCreateFailureProbe')
   document.body.replaceChildren()
   vi.restoreAllMocks()
 })
@@ -601,6 +627,137 @@ describe('RuntimeHost API 2', () => {
 
     host.destroy()
     expect(calls).toContain('destroy')
+    registry.dispose()
+  })
+
+  it('先脱离并以 fromScene=false 逐对象清理，hostile fallback 不阻断其余层', () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create(ctx) {
+          const calls = window.__runtimeHostTeardownCalls = []
+          const hostile = {
+            active: true,
+            visible: true,
+            parentContainer: null,
+            displayList: null,
+            scene: null,
+            destroy(fromScene) {
+              calls.push(['hostile', this.parentContainer === null, fromScene])
+              throw new Error('hostile GameObject destroy failed intentionally')
+            }
+          }
+          const healthy = {
+            active: true,
+            visible: true,
+            parentContainer: null,
+            displayList: null,
+            scene: null,
+            destroy(fromScene) {
+              calls.push(['healthy', this.parentContainer === null, fromScene])
+            }
+          }
+          window.__runtimeHostTeardownObjects = { hostile, healthy }
+          const nested = ctx.phaser.scene.add.container()
+          ctx.phaser.root.add(nested)
+          nested.add(hostile)
+          nested.add(healthy)
+          return { destroy() { calls.push(['lifecycle', true]) } }
+        }
+      })
+    `
+    const { host, testEnvironment, registry } = createHost(runtime(2, 'phaser', source))
+
+    expect(() => host.destroy()).toThrow('hostile GameObject destroy failed intentionally')
+    expect(Reflect.get(window, '__runtimeHostTeardownCalls')).toEqual([
+      ['lifecycle', true],
+      ['hostile', true, false],
+      ['healthy', true, false],
+    ])
+    const teardownObjects = Reflect.get(window, '__runtimeHostTeardownObjects') as {
+      hostile: { baseDestroyFromScene?: boolean }
+      healthy: { baseDestroyFromScene?: boolean }
+    }
+    expect(teardownObjects.hostile.baseDestroyFromScene).toBe(false)
+    expect(teardownObjects.healthy.baseDestroyFromScene).toBeUndefined()
+    expect(testEnvironment.phaserUnderlay.children).toHaveLength(0)
+    expect(testEnvironment.phaserOverlay.children).toHaveLength(0)
+    expect(testEnvironment.sceneContainers.every((container) => !container.active)).toBe(true)
+    registry.dispose()
+  })
+
+  it('保持 authored lifecycle.destroy 只报告而不向普通 RuntimeHost caller 抛出', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create() {
+          return {
+            destroy() { throw new Error('authored lifecycle destroy failed intentionally') }
+          }
+        }
+      })
+    `
+    const { host, testEnvironment, registry } = createHost(runtime(2, 'hybrid', source))
+
+    expect(() => host.destroy()).not.toThrow()
+    expect(error).toHaveBeenCalledWith(
+      '运行时“测试运行时”销毁失败',
+      expect.objectContaining({ message: 'authored lifecycle destroy failed intentionally' }),
+    )
+    expect(testEnvironment.sceneContainers.every((container) => !container.active)).toBe(true)
+    registry.dispose()
+  })
+
+  it('create 失败复用 children-first 清理且不让 hostile cleanup 掩盖原错误', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create(ctx) {
+          const rootChild = {
+            active: true,
+            visible: true,
+            parentContainer: null,
+            displayList: null,
+            scene: null,
+            destroy() { throw new Error('root child cleanup failed intentionally') }
+          }
+          const nested = ctx.phaser.scene.add.container()
+          ctx.phaser.root.add(nested)
+          nested.add(rootChild)
+          const loose = ctx.phaser.scene.add.container()
+          loose.destroy = function () {
+            throw new Error('loose scene object cleanup failed intentionally')
+          }
+          window.__runtimeHostCreateFailureProbe = { rootChild, loose }
+          throw new Error('runtime create failed intentionally')
+        }
+      })
+    `
+    const testEnvironment = createEnvironment()
+    const { host, registry } = createHost(
+      runtime(2, 'phaser', source),
+      testEnvironment,
+    )
+    const probe = Reflect.get(window, '__runtimeHostCreateFailureProbe') as {
+      rootChild: { active: boolean; parentContainer: unknown }
+      loose: { active: boolean; parentContainer: unknown }
+    }
+
+    expect(host.getFailure()?.message).toBe('runtime create failed intentionally')
+    expect(probe.rootChild).toMatchObject({ active: false, parentContainer: undefined })
+    expect(probe.loose).toMatchObject({ active: false, parentContainer: undefined })
+    expect(testEnvironment.phaserUnderlay.children).toHaveLength(0)
+    expect(testEnvironment.phaserOverlay.children).toHaveLength(0)
+    expect(error.mock.calls.filter(([message]) => (
+      message === '运行时“测试运行时”启动失败'
+    ))).toHaveLength(1)
+    expect(error).toHaveBeenCalledWith(
+      '运行时“测试运行时”启动失败',
+      expect.objectContaining({ message: 'runtime create failed intentionally' }),
+    )
+    expect(() => host.destroy()).not.toThrow()
     registry.dispose()
   })
 

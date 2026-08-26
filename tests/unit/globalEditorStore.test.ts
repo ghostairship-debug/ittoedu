@@ -3,8 +3,17 @@ import type {
   ComponentManifestV4,
   ComponentPackageData,
 } from '@/shared/componentTypes'
-import type { RuntimeDocument } from '@/shared/runtimeTypes'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import type {
+  CourseRuntimeDefinition,
+  RuntimeLayerItem,
+} from '@/shared/courseProjectTypes'
+import { captureCourseRuntimeContentTextTarget } from '@/renderer/runtime/runtimeContentTextAuthoringCommands'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
+import {
+  selectActiveCourseLocationId,
+  selectActiveCourseProjectDocument,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 
 function componentPackage(
   id: string,
@@ -40,8 +49,9 @@ function componentPackage(
   }
 }
 
-function runtime(title: string): RuntimeDocument {
+function runtime(title: string): CourseRuntimeDefinition {
   return {
+    protocol: 'canvas-runtime',
     runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'hybrid',
@@ -57,6 +67,110 @@ function runtime(title: string): RuntimeDocument {
     },
     assets: {},
   }
+}
+
+function runtimeItem(
+  layerItemId: string,
+  label: string,
+  order: number,
+  definition: CourseRuntimeDefinition,
+): RuntimeLayerItem {
+  return {
+    layerItemId,
+    label,
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    kind: 'runtime',
+    runtime: structuredClone(definition),
+  }
+}
+
+function installRuntimeDefinitions(
+  sceneId: string,
+  sceneRuntime: CourseRuntimeDefinition,
+  globalRuntime: CourseRuntimeDefinition,
+): void {
+  const store = useEditorStore.getState()
+  const current = selectActiveCourseProjectDocument(store)
+  if (!current) throw new Error('缺少当前 Course Project')
+  const project = structuredClone(current)
+  const surface = project.surfaces.find((candidate) => (
+    candidate.type === 'slide'
+    && candidate.scenes.some((scene) => scene.id === sceneId)
+  ))
+  if (!surface || surface.type !== 'slide') throw new Error('缺少当前 Slide Surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
+  if (!scene) throw new Error('缺少当前 Slide 场景')
+  const sceneOrder = allocateCourseLayerOrder(project, 0)
+  scene.layerItems.push(runtimeItem(
+    `test-scene-runtime-${sceneId}`,
+    '场景运行时',
+    sceneOrder,
+    sceneRuntime,
+  ))
+  const globalOrder = allocateCourseLayerOrder(project, sceneOrder + 1)
+  project.globalLayerItems.push({
+    item: runtimeItem(
+      `test-global-runtime-${project.id}`,
+      '全局运行时',
+      globalOrder,
+      globalRuntime,
+    ),
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  store.loadCourseProject(
+    project,
+    null,
+    store.assetFiles,
+    store.componentPackages,
+  )
+}
+
+function captureRuntimeTitleTarget(
+  owner: 'scene' | 'global',
+  initialValue: string,
+) {
+  const state = useEditorStore.getState()
+  const project = selectActiveCourseProjectDocument(state)
+  const locationId = selectActiveCourseLocationId(state)
+  const sessionToken = state.courseAuthoringSession?.token
+  const location = project?.locations.find((candidate) => candidate.id === locationId)
+  const surface = project?.surfaces.find(
+    (candidate) => candidate.id === location?.surfaceId,
+  )
+  if (
+    !project
+    || !locationId
+    || !sessionToken
+    || location?.kind !== 'slide-scene'
+    || surface?.type !== 'slide'
+  ) {
+    throw new Error('缺少 Slide Runtime 文字编辑会话')
+  }
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  const item = owner === 'global'
+    ? project.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    : scene?.layerItems.find((candidate) => candidate.kind === 'runtime')
+  if (!item || item.kind !== 'runtime') {
+    throw new Error(`缺少 ${owner} Runtime LayerItem`)
+  }
+  return captureCourseRuntimeContentTextTarget({
+    sessionToken,
+    projectId: project.id,
+    surfaceId: surface.id,
+    stateId: state.activePresentationStateId,
+    owner,
+    sceneId: owner === 'scene' ? scene!.id : null,
+    itemId: item.layerItemId,
+    contentKey: 'title',
+    initialValue,
+  })
 }
 
 beforeEach(() => {
@@ -331,33 +445,26 @@ describe('Project V8 global-layer editor store', () => {
   })
 
   it('edits scene and global runtime content without changing source and supports undo', () => {
-    const initial = structuredClone(useEditorStore.getState().project)
     const sceneRuntime = runtime('场景标题')
     const globalRuntime = runtime('全局标题')
-    initial.scenes[0]!.runtime = sceneRuntime
-    initial.globalRuntime = globalRuntime
-    useEditorStore.getState().loadProject(initial, null)
     const store = useEditorStore.getState()
-    const sceneId = initial.scenes[0]!.id
+    const sceneId = store.project.scenes[0]!.id
+    installRuntimeDefinitions(sceneId, sceneRuntime, globalRuntime)
+    const locationId = selectActiveCourseLocationId(useEditorStore.getState())
+    if (!locationId) throw new Error('缺少活动课程位置')
+    store.activateCourseLocation(locationId)
 
-    store.updateSceneRuntime(sceneId, {
-      content: {
-        ...sceneRuntime.content,
-        values: {
-          ...sceneRuntime.content.values,
-          title: '修改后的场景标题',
-        },
-      },
-    })
-    store.updateGlobalRuntime({
-      content: {
-        ...globalRuntime.content,
-        values: {
-          ...globalRuntime.content.values,
-          title: '修改后的全局标题',
-        },
-      },
-    })
+    const sceneResult = useEditorStore.getState().updateRuntimeContentTextAtTarget(
+      captureRuntimeTitleTarget('scene', '场景标题'),
+      '修改后的场景标题',
+    )
+    expect(sceneResult).toMatchObject({ ok: true, status: 'updated' })
+    useEditorStore.getState().setEditingScope('global')
+    const globalResult = useEditorStore.getState().updateRuntimeContentTextAtTarget(
+      captureRuntimeTitleTarget('global', '全局标题'),
+      '修改后的全局标题',
+    )
+    expect(globalResult).toMatchObject({ ok: true, status: 'updated' })
 
     let project = useEditorStore.getState().project
     expect(project.scenes[0]!.runtime?.source).toBe(sceneRuntime.source)
@@ -506,5 +613,186 @@ describe('Project V8 global-layer editor store', () => {
     expect(nextController.buttons.some((button) => (
       button.action.type === 'scene.go' && button.action.sceneId === targetSceneId
     ))).toBe(false)
+  })
+})
+
+describe('Course Project V9 cross-surface playback controls', () => {
+  it('keeps a locked Slide controller history-free and locked while restoring it', () => {
+    const store = useEditorStore.getState()
+    store.createNewProject()
+    const initial = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!initial) throw new Error('缺少 Slide Course Project')
+    const controller = initial.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+    )
+    if (!controller) throw new Error('缺少 Slide 教师控制器')
+    const initialPastCount = useEditorStore.getState().history.past.length
+
+    useEditorStore.getState().ensureTeacherController()
+
+    let state = useEditorStore.getState()
+    expect(state.history.past).toHaveLength(initialPastCount)
+    expect(state.selectedNodeId).toBe(controller.item.layerItemId)
+    expect(state.statusMessage).toBe('教师控制器已可用')
+
+    state.updateNode(controller.item.layerItemId, { locked: true })
+    state = useEditorStore.getState()
+    const lockedPastCount = state.history.past.length
+    expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller.item.layerItemId,
+    )?.item.locked).toBe(true)
+
+    state.ensureTeacherController()
+    state = useEditorStore.getState()
+    expect(state.history.past).toHaveLength(lockedPastCount)
+    expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller.item.layerItemId,
+    )?.item.locked).toBe(true)
+
+    state.updatePlayback({ controls: 'none' })
+    state = useEditorStore.getState()
+    expect(state.history.past).toHaveLength(lockedPastCount + 1)
+    expect(selectActiveCourseProjectDocument(state)?.playback.controls).toBe('none')
+
+    state.ensureTeacherController()
+    state = useEditorStore.getState()
+    expect(state.history.past).toHaveLength(lockedPastCount + 2)
+    expect(selectActiveCourseProjectDocument(state)?.playback.controls).toBe('canvas')
+    expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller.item.layerItemId,
+    )?.item.locked).toBe(true)
+    expect(state.statusMessage).toBe('已恢复教师控制器')
+
+    state.undo()
+    let document = selectActiveCourseProjectDocument(useEditorStore.getState())
+    expect(document?.playback.controls).toBe('none')
+    expect(document?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller.item.layerItemId,
+    )?.item.locked).toBe(true)
+    useEditorStore.getState().redo()
+    document = selectActiveCourseProjectDocument(useEditorStore.getState())
+    expect(document?.playback.controls).toBe('canvas')
+    expect(document?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller.item.layerItemId,
+    )?.item.locked).toBe(true)
+  })
+
+  it('restores the Flow global teacher controller in one undoable history step', () => {
+    const store = useEditorStore.getState()
+    store.createNewFlowProject()
+    const initial = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!initial) throw new Error('缺少 Flow Course Project')
+    const hidden = structuredClone(initial)
+    const controller = hidden.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+    )
+    if (!controller) throw new Error('缺少 Flow 教师控制器')
+    controller.item.playbackInitialVisibility = 'hidden'
+    hidden.playback.controls = 'none'
+    store.loadCourseProject(hidden, null, store.assetFiles, store.componentPackages)
+    const before = useEditorStore.getState().flowSession!.history
+
+    useEditorStore.getState().ensureTeacherController()
+
+    let state = useEditorStore.getState()
+    let document = state.flowSession!.history.present
+    expect(document.playback.controls).toBe('canvas')
+    expect(document.globalLayerItems).toHaveLength(hidden.globalLayerItems.length)
+    expect(document.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+    )?.item.playbackInitialVisibility).toBe('inherit')
+    expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(state.statusMessage).toBe('已恢复教师控制器')
+    expect(state.errorMessage).toBeNull()
+
+    state.undo()
+    document = useEditorStore.getState().flowSession!.history.present
+    expect(document.playback.controls).toBe('none')
+    expect(document.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+    )?.item.playbackInitialVisibility).toBe('hidden')
+
+    useEditorStore.getState().redo()
+    document = useEditorStore.getState().flowSession!.history.present
+    expect(document.playback.controls).toBe('canvas')
+  })
+
+  it('updates Flow controls, keyboard and presenter settings in one history step', () => {
+    const store = useEditorStore.getState()
+    store.createNewFlowProject()
+    const before = useEditorStore.getState().flowSession!.history
+    const patch = {
+      controls: 'none' as const,
+      keyboardNavigation: false,
+      presenter: {
+        enabled: false,
+        strategy: 'authored-command' as const,
+        additionalBindings: [],
+      },
+    }
+
+    useEditorStore.getState().updatePlayback(patch)
+
+    let state = useEditorStore.getState()
+    let document = state.flowSession!.history.present
+    expect(document.playback).toEqual(patch)
+    expect(document.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+    )?.item.playbackInitialVisibility).toBe('hidden')
+    expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(state.statusMessage).toBe('成品控制设置已更新')
+    expect(state.errorMessage).toBeNull()
+
+    useEditorStore.getState().updatePlayback(patch)
+    state = useEditorStore.getState()
+    expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(state.statusMessage).toBe('成品控制设置未变化')
+
+    state.undo()
+    document = useEditorStore.getState().flowSession!.history.present
+    expect(document.playback.controls).toBe('canvas')
+    expect(document.playback.keyboardNavigation).toBe(true)
+    expect(document.playback.presenter).toMatchObject({
+      enabled: true,
+      strategy: 'scene-navigation',
+    })
+
+    useEditorStore.getState().redo()
+    expect(useEditorStore.getState().flowSession!.history.present.playback).toEqual(patch)
+  })
+
+  it('updates Spatial controls, keyboard and presenter settings in one history step', () => {
+    const store = useEditorStore.getState()
+    store.createNewSpatialProject()
+    const before = useEditorStore.getState().spatialSession!.history
+    const patch = {
+      controls: 'none' as const,
+      keyboardNavigation: false,
+      presenter: {
+        enabled: false,
+        strategy: 'authored-command' as const,
+        additionalBindings: [],
+      },
+    }
+
+    useEditorStore.getState().updatePlayback(patch)
+
+    let state = useEditorStore.getState()
+    let document = state.spatialSession!.history.present
+    expect(document.playback).toEqual(patch)
+    expect(document.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+    )?.item.playbackInitialVisibility).toBe('hidden')
+    expect(state.spatialSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(state.statusMessage).toBe('成品控制设置已更新')
+    expect(state.errorMessage).toBeNull()
+
+    state.undo()
+    document = useEditorStore.getState().spatialSession!.history.present
+    expect(document.playback.controls).toBe('canvas')
+    expect(document.playback.keyboardNavigation).toBe(true)
+
+    useEditorStore.getState().redo()
+    expect(useEditorStore.getState().spatialSession!.history.present.playback).toEqual(patch)
   })
 })

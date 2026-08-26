@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { projectDocumentSchema } from '@/shared/projectSchema'
 import type { ComponentPackageData } from '@/shared/componentTypes'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import { useEditorStore } from '@/renderer/store/editorStore'
 
 const PACKAGE_ID = 'com.example.catalog-card'
 
 function catalogPackage(sha256: string): ComponentPackageData {
-  return {
-    manifest: {
+  const manifest: ComponentPackageData['manifest'] = {
       schemaVersion: 4,
       runtimeApiVersion: 4,
       renderMode: 'dom',
@@ -21,9 +21,17 @@ function catalogPackage(sha256: string): ComponentPackageData {
       preserveAspectRatio: false,
       assets: {},
       defaultProps: { content: { title: '卡片' } },
-    },
-    runtimeSource: 'window.CoursewareComponent.define({ runtimeApiVersion: 4 })',
-    files: { 'runtime.js': new Uint8Array([1, 2, 3]) },
+  }
+  const runtimeSource = 'window.CoursewareComponent.define({ runtimeApiVersion: 4 })'
+  const files = {
+    'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+    'runtime.js': new TextEncoder().encode(runtimeSource),
+  }
+  return {
+    manifest,
+    runtimeSource,
+    files,
+    contentSha256: componentContentSha256(files),
     provenance: {
       sha256,
       importedAt: '2026-08-10T00:00:00.000Z',

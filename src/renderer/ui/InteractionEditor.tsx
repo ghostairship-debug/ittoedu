@@ -159,7 +159,6 @@ export interface InteractionEditorProps {
   sounds: Readonly<Record<string, SoundDefinition>>
   ruleWarnings?: Readonly<Record<string, readonly string[]>>
   onOpenClickRules?(): void
-  onPrepareMotionTargets?(nodeIds: string[]): void
   onRunPreview?(): void
   onAddRule(rule: InteractionRule): void
   onUpdateRule(
@@ -169,6 +168,13 @@ export interface InteractionEditorProps {
   onDeleteRule(ruleId: string): void
   onDuplicateRule?(ruleId: string): void
   onMoveRule?(ruleId: string, direction: -1 | 1): void
+}
+
+export interface RevealSequenceTemplateIntent {
+  readonly ruleId: string
+  readonly actionIds: readonly string[]
+  readonly targetLayerItemIds: readonly string[]
+  readonly name: string
 }
 
 function sceneScope(rule: InteractionRule): string {
@@ -1697,10 +1703,22 @@ export function InteractionEditor({
   )
 }
 
-export type SceneAutomationEditorProps = Omit<
+export interface SceneAutomationEditorProps extends Omit<
   InteractionEditorProps,
   'selectedNode'
->
+> {
+  /** Carrier-derived states; an explicit empty list prevents synthetic scenes from inventing states. */
+  authoringStates?: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  /** Canonical Slide scene used for global scene.in; null on Flow/Spatial. */
+  conditionSceneId?: string | null
+  /** Stable, carrier-owned and unlocked candidates for the atomic reveal template. */
+  revealTemplateTargetNodeIds?: readonly string[]
+  /** Whether legacy callbacks can persist generic create/delete/copy/order operations. */
+  legacyRuleActionsAvailable?: boolean
+  /** Visible explanation shown when legacy rule actions are unavailable. */
+  legacyRuleActionsUnavailableReason?: string
+  onApplyRevealSequenceTemplate(intent: RevealSequenceTemplateIntent): void
+}
 
 export function SceneAutomationEditor({
   scene,
@@ -1709,12 +1727,17 @@ export function SceneAutomationEditor({
   sourceRules,
   selectedNodeId = null,
   activeStateId,
+  authoringStates,
   scenes,
   sounds,
   ruleWarnings,
   onOpenClickRules,
-  onPrepareMotionTargets,
   onRunPreview,
+  conditionSceneId,
+  revealTemplateTargetNodeIds,
+  legacyRuleActionsAvailable = true,
+  legacyRuleActionsUnavailableReason = '当前载体暂不支持普通规则的新建、删除、复制或排序。',
+  onApplyRevealSequenceTemplate,
   onAddRule,
   onUpdateRule,
   onDeleteRule,
@@ -1729,8 +1752,9 @@ export function SceneAutomationEditor({
       : []),
   ), [allRules])
   const states = useMemo(
-    () => ensureScenePresentation(scene).states.map(({ id, name }) => ({ id, name })),
-    [scene],
+    () => (authoringStates ?? ensureScenePresentation(scene).states)
+      .map(({ id, name }) => ({ id, name })),
+    [authoringStates, scene],
   )
   const videoNodes = useMemo(
     () => availableNodes.filter((node): node is VideoNode => node.type === 'video'),
@@ -1764,10 +1788,14 @@ export function SceneAutomationEditor({
   const rules = allRules.filter(isAutomationRule)
   const suggestedStateId = states.find((state) => state.id !== activeStateId)?.id ??
     states[0]?.id ?? ''
-  const visibleMotionNodes = useMemo(
-    () => availableNodes.filter((node) => node.visible).slice(0, 6),
-    [availableNodes],
-  )
+  const visibleMotionNodes = useMemo(() => {
+    const allowed = revealTemplateTargetNodeIds
+      ? new Set(revealTemplateTargetNodeIds)
+      : null
+    return availableNodes
+      .filter((node) => node.visible && (!allowed || allowed.has(node.id)))
+      .slice(0, 6)
+  }, [availableNodes, revealTemplateTargetNodeIds])
   const descriptionContext = useMemo<RuleDescriptionContext>(() => ({
     nodes: new Map(availableNodes.map((node) => [node.id, node.name])),
     states: new Map(states.map((state) => [state.id, state.name])),
@@ -1820,6 +1848,12 @@ export function SceneAutomationEditor({
   const selectedTemplateOption = RULE_TEMPLATE_OPTIONS.find(
     (option) => option.value === selectedTemplateId,
   )!
+  const isTemplateUnavailable = (
+    option: (typeof RULE_TEMPLATE_OPTIONS)[number],
+  ): boolean => (
+    ruleTemplateUnavailable(option, templateCounts) ||
+    (!legacyRuleActionsAvailable && option.value !== 'scene-enter-sequence')
+  )
   const ruleWarningsById = useMemo(() => new Map(rules.map((rule) => {
     const warnings = [...(ruleWarnings?.[rule.id] ?? [])]
     const navigationIndex = rule.actions.findIndex(isTerminalActionStep)
@@ -1873,13 +1907,19 @@ export function SceneAutomationEditor({
   }, [ruleFilter, selectedNodeId])
 
   useEffect(() => {
-    if (!ruleTemplateUnavailable(selectedTemplateOption, templateCounts)) return
+    if (!legacyRuleActionsAvailable && selectedTemplateId !== 'scene-enter-sequence') {
+      setSelectedTemplateId('scene-enter-sequence')
+      return
+    }
+    if (!isTemplateUnavailable(selectedTemplateOption)) return
     const fallback = RULE_TEMPLATE_OPTIONS.find(
-      (option) => !ruleTemplateUnavailable(option, templateCounts),
+      (option) => !isTemplateUnavailable(option),
     )
     if (fallback) setSelectedTemplateId(fallback.value)
   }, [
+    legacyRuleActionsAvailable,
     selectedTemplateOption,
+    selectedTemplateId,
     templateCounts.animations,
     templateCounts.components,
     templateCounts.nodes,
@@ -1888,21 +1928,27 @@ export function SceneAutomationEditor({
     templateCounts.videos,
   ])
 
+  const conditionSlideSceneId = conditionSceneId === undefined
+    ? scene.id
+    : conditionSceneId
   const defaultConditions = (): InteractionRule['conditions'] => (
     activeStateId
       ? [
-          ...(sourceScope === 'global'
-            ? [{ type: 'scene.in' as const, sceneIds: [scene.id] }]
+          ...(sourceScope === 'global' && conditionSlideSceneId
+            ? [{ type: 'scene.in' as const, sceneIds: [conditionSlideSceneId] }]
             : []),
           { type: 'presentation.in', stateIds: [activeStateId] },
         ]
-      : sourceScope === 'global'
-        ? [{ type: 'scene.in', sceneIds: [scene.id] }]
+      : sourceScope === 'global' && conditionSlideSceneId
+        ? [{ type: 'scene.in', sceneIds: [conditionSlideSceneId] }]
         : []
   )
 
   const addAutomationRule = () => {
-    if (automationTriggerUnavailable(selectedTriggerOption, triggerCounts)) return
+    if (
+      !legacyRuleActionsAvailable ||
+      automationTriggerUnavailable(selectedTriggerOption, triggerCounts)
+    ) return
     const action = suggestedStateId
       ? defaultAction('presentation.set', actionTargets)
       : defaultAction('scene.next', actionTargets)
@@ -1917,7 +1963,7 @@ export function SceneAutomationEditor({
   }
 
   const addTemplateRule = () => {
-    if (ruleTemplateUnavailable(selectedTemplateOption, templateCounts)) return
+    if (isTemplateUnavailable(selectedTemplateOption)) return
     const common = {
       id: `interaction_${nanoid()}`,
       enabled: true,
@@ -1927,23 +1973,13 @@ export function SceneAutomationEditor({
     switch (selectedTemplateId) {
       case 'scene-enter-sequence': {
         const nodeIds = visibleMotionNodes.map((node) => node.id)
-        onPrepareMotionTargets?.(nodeIds)
-        nextRule = {
-          ...common,
+        onApplyRevealSequenceTemplate({
+          ruleId: common.id,
+          actionIds: nodeIds.map(() => `action_${nanoid()}`),
+          targetLayerItemIds: nodeIds,
           name: '进入场景后依次出现',
-          trigger: { type: 'scene.enter' },
-          actions: nodeIds.map((nodeId, index) => createActionStep({
-            type: 'node.enter',
-            nodeId,
-            effect: 'fade',
-            durationMs: 240,
-            easing: 'ease-out',
-          }, 'after-previous')).map((step, index) => ({
-            ...step,
-            delayMs: index === 0 ? 0 : 80,
-          })),
-        }
-        break
+        })
+        return
       }
       case 'audio-ended-next':
         nextRule = {
@@ -2024,6 +2060,16 @@ export function SceneAutomationEditor({
         <span><strong>3 动作</strong><small>执行什么</small></span>
       </div>
 
+      {!legacyRuleActionsAvailable ? (
+        <p
+          className="property-hint"
+          role="status"
+          data-testid="legacy-rule-actions-unavailable"
+        >
+          {legacyRuleActionsUnavailableReason}
+        </p>
+      ) : null}
+
       <div className="interaction-template-panel" aria-labelledby="rule-template-title">
         <div>
           <h4 id="rule-template-title">从常用模板开始</h4>
@@ -2043,7 +2089,7 @@ export function SceneAutomationEditor({
               <option
                 key={option.value}
                 value={option.value}
-                disabled={ruleTemplateUnavailable(option, templateCounts)}
+                disabled={isTemplateUnavailable(option)}
               >
                 {option.label}
               </option>
@@ -2056,7 +2102,10 @@ export function SceneAutomationEditor({
         <button
           type="button"
           className="secondary-button"
-          disabled={ruleTemplateUnavailable(selectedTemplateOption, templateCounts)}
+          disabled={isTemplateUnavailable(selectedTemplateOption)}
+          title={!legacyRuleActionsAvailable && selectedTemplateId !== 'scene-enter-sequence'
+            ? legacyRuleActionsUnavailableReason
+            : undefined}
           onClick={addTemplateRule}
         >
           <Plus size={14} />使用模板
@@ -2080,6 +2129,10 @@ export function SceneAutomationEditor({
             id={`automation-${scene.id}-new-trigger`}
             className="form-input"
             value={newTriggerType}
+            disabled={!legacyRuleActionsAvailable}
+            title={!legacyRuleActionsAvailable
+              ? legacyRuleActionsUnavailableReason
+              : undefined}
             onChange={(event) => setNewTriggerType(
               event.currentTarget.value as AutomationTriggerType,
             )}
@@ -2098,7 +2151,13 @@ export function SceneAutomationEditor({
         <button
           type="button"
           className="secondary-button"
-          disabled={automationTriggerUnavailable(selectedTriggerOption, triggerCounts)}
+          disabled={
+            !legacyRuleActionsAvailable ||
+            automationTriggerUnavailable(selectedTriggerOption, triggerCounts)
+          }
+          title={!legacyRuleActionsAvailable
+            ? legacyRuleActionsUnavailableReason
+            : undefined}
           onClick={addAutomationRule}
         >
           <Plus size={14} />添加规则
@@ -2341,6 +2400,10 @@ export function SceneAutomationEditor({
                     type="button"
                     className="secondary-button"
                     aria-label={`复制规则 ${ruleIndex + 1}`}
+                    disabled={!legacyRuleActionsAvailable}
+                    title={!legacyRuleActionsAvailable
+                      ? legacyRuleActionsUnavailableReason
+                      : undefined}
                     onClick={() => onDuplicateRule(rule.id)}
                   >
                     <Copy size={13} />复制规则
@@ -2352,7 +2415,10 @@ export function SceneAutomationEditor({
                       type="button"
                       className="secondary-button"
                       aria-label={`上移规则 ${ruleIndex + 1}`}
-                      disabled={ruleIndex <= 0}
+                      disabled={!legacyRuleActionsAvailable || ruleIndex <= 0}
+                      title={!legacyRuleActionsAvailable
+                        ? legacyRuleActionsUnavailableReason
+                        : undefined}
                       onClick={() => onMoveRule(rule.id, -1)}
                     >
                       <ArrowUp size={13} />上移
@@ -2361,7 +2427,13 @@ export function SceneAutomationEditor({
                       type="button"
                       className="secondary-button"
                       aria-label={`下移规则 ${ruleIndex + 1}`}
-                      disabled={ruleIndex >= rules.length - 1}
+                      disabled={
+                        !legacyRuleActionsAvailable ||
+                        ruleIndex >= rules.length - 1
+                      }
+                      title={!legacyRuleActionsAvailable
+                        ? legacyRuleActionsUnavailableReason
+                        : undefined}
                       onClick={() => onMoveRule(rule.id, 1)}
                     >
                       <ArrowDown size={13} />下移
@@ -2372,10 +2444,15 @@ export function SceneAutomationEditor({
                   type="button"
                   className="secondary-button secondary-button--danger"
                   aria-label={`删除规则 ${ruleIndex + 1}`}
-                  disabled={rule.actions.some((step) => completionActionIds.has(step.id))}
-                  title={rule.actions.some((step) => completionActionIds.has(step.id))
-                    ? '该规则的动画正被“动画完成”规则引用，请先更改触发器。'
-                    : undefined}
+                  disabled={
+                    !legacyRuleActionsAvailable ||
+                    rule.actions.some((step) => completionActionIds.has(step.id))
+                  }
+                  title={!legacyRuleActionsAvailable
+                    ? legacyRuleActionsUnavailableReason
+                    : rule.actions.some((step) => completionActionIds.has(step.id))
+                      ? '该规则的动画正被“动画完成”规则引用，请先更改触发器。'
+                      : undefined}
                   onClick={() => onDeleteRule(rule.id)}
                 >
                   <Trash2 size={13} />删除规则

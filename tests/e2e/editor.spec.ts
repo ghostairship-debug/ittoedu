@@ -887,6 +887,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   })
 
   test('里程碑闭环：专业模式创建、复制、排序规则并修改受控运行时', async () => {
+    test.setTimeout(120_000)
     const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
       await addText(page)
@@ -913,11 +914,31 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(runtimeSource).toHaveValue(/CoursewareRuntime\.define/)
       await expect(runtimeSource).toHaveAttribute('wrap', 'off')
       const runtimeEditor = runtimeSource.locator('xpath=ancestor::section[1]')
+      await runtimeSource.fill(`${await runtimeSource.inputValue()}\n// Electron canonical source edit`)
       await runtimeEditor.getByRole('button', { name: '校验并应用' }).click()
       await expect(runtimeEditor.getByText(
         '校验通过，修改已写入工程历史。',
         { exact: true },
       )).toBeVisible()
+
+      await slideSceneItems(page).first().click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      const runtimeInspector = page.getByTestId('scene-runtime-inspector')
+      await expect(runtimeInspector).toBeVisible()
+      const enabled = runtimeInspector.getByRole('checkbox', { name: '启用运行时' })
+      const renderMode = runtimeInspector.getByRole('combobox', { name: '渲染能力声明' })
+      await expect(enabled).toBeChecked()
+      await runtimeInspector.locator('.toggle-track').click()
+      await expect(enabled).not.toBeChecked()
+      await renderMode.selectOption('hybrid')
+      await expect(renderMode).toHaveValue('hybrid')
+
+      await page.getByRole('tab', { name: '开发' }).click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      await expect(runtimeInspector.getByRole('checkbox', { name: '启用运行时' }))
+        .not.toBeChecked()
+      await expect(runtimeInspector.getByRole('combobox', { name: '渲染能力声明' }))
+        .toHaveValue('hybrid')
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
     } finally {
@@ -2243,22 +2264,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         exported.on('pageerror', (error) => exportedErrors.push(error.message))
         await exported.goto(pathToFileURL(htmlPath).toString())
         await expectCanvasPlayerScene(exported, 0)
-        const escapeControls = exported.getByTestId('teacher-escape-controls')
-        await expect(escapeControls).toBeVisible()
-        const escapeNext = exported.getByTestId('teacher-escape-next')
-        await expect(escapeNext).toBeEnabled()
-        expect(await escapeNext.evaluate((element) => {
-          const rect = element.getBoundingClientRect()
-          const hit = document.elementFromPoint(
-            rect.left + rect.width / 2,
-            rect.top + rect.height / 2,
-          )
-          return hit === element || element.contains(hit)
-        })).toBe(true)
+        await expect(exported.getByTestId('teacher-escape-controls')).toHaveCount(0)
+        await expect(exported.locator('.slide-native-teacher-controller')).toBeVisible()
         const exportedCanvas = exported.locator('.slide-published-adapter')
         const firstPage = await exportedCanvas.screenshot()
-        await escapeNext.click()
-        await expectCanvasPlayerScene(exported, 1)
+        await navigateCanvasPlayerByKeyboard(exported, 'PageDown', 1)
         await exported.waitForTimeout(150)
         const nextPageDifference = await averagePixelDifference(
           firstPage,
@@ -2285,11 +2295,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         packaged.on('pageerror', (error) => packageErrors.push(error.message))
         await packaged.goto(pathToFileURL(join(webPackageDirectory, 'index.html')).toString())
         await expectCanvasPlayerScene(packaged, 0)
-        await expect(packaged.getByTestId('teacher-escape-controls')).toBeVisible()
-        await packaged.getByTestId('teacher-escape-next').click()
-        await expectCanvasPlayerScene(packaged, 1)
-        await packaged.getByTestId('teacher-escape-previous').click()
-        await expectCanvasPlayerScene(packaged, 0)
+        await expect(packaged.getByTestId('teacher-escape-controls')).toHaveCount(0)
+        await expect(packaged.locator('.slide-native-teacher-controller')).toBeVisible()
+        await navigateCanvasPlayerByKeyboard(packaged, 'PageDown', 1)
+        await navigateCanvasPlayerByKeyboard(packaged, 'PageUp', 0)
         expect(packageRequests).toEqual([])
         expect(packageErrors).toEqual([])
       } finally {
@@ -3248,22 +3257,22 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       lesson.on('pageerror', (error) => pageErrors.push(error.message))
       await lesson.goto(pathToFileURL(lessonHtmlPath).toString())
 
-      const canvas = lesson.locator('.lesson-canvas-host canvas')
+      const stage = lesson.locator('.slide-published-adapter')
       await expectCanvasPlayerScene(lesson, 0)
-      await canvas.waitFor()
+      await expect(stage.locator('[data-photosynthesis-page="1"]')).toBeVisible()
       const clickDesignPoint = async (x: number, y: number) => {
-        const bounds = await canvas.boundingBox()
-        if (!bounds) throw new Error('课例画布不可见')
+        const bounds = await stage.boundingBox()
+        if (!bounds) throw new Error('课例 Published V2 舞台不可见')
         await lesson.mouse.click(
           bounds.x + (x / 1280) * bounds.width,
           bounds.y + (y / 720) * bounds.height,
         )
       }
 
-      const firstInitial = await canvas.screenshot()
+      const firstInitial = await stage.screenshot()
       for (const y of [397, 477, 557]) await clickDesignPoint(253, y)
       await lesson.waitForTimeout(1_000)
-      const firstCompleted = await canvas.screenshot()
+      const firstCompleted = await stage.screenshot()
       expect(await averagePixelDifference(firstInitial, firstCompleted)).toBeGreaterThan(0.1)
       await lesson.screenshot({
         path: join(visualOutputDirectory, 'lesson-page-1-complete.png'),
@@ -3271,11 +3280,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
 
       await navigateCanvasPlayerByKeyboard(lesson, 'ArrowRight', 1)
-      const secondInitial = await canvas.screenshot()
+      await expect(stage.locator('[data-photosynthesis-page="2"]')).toBeVisible()
+      const secondInitial = await stage.screenshot()
       await clickDesignPoint(471, 402)
       await lesson.waitForTimeout(350)
       expect(
-        await averagePixelDifference(secondInitial, await canvas.screenshot()),
+        await averagePixelDifference(secondInitial, await stage.screenshot()),
       ).toBeGreaterThan(0.02)
       await lesson.screenshot({
         path: join(visualOutputDirectory, 'lesson-page-2-experiment.png'),
@@ -3283,6 +3293,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
 
       await navigateCanvasPlayerByKeyboard(lesson, 'ArrowRight', 2)
+      await expect(stage.locator('[data-photosynthesis-page="3"]')).toBeVisible()
       await clickDesignPoint(214, 538)
       await clickDesignPoint(286, 413)
       await lesson.waitForTimeout(450)

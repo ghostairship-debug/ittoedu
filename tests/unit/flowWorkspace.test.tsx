@@ -7,11 +7,17 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import {
+  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
+  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
+  resolveFlowMediaLayoutProjection,
+} from '@/shared/flowMediaLayout'
 import { createTextNode } from '@/renderer/project/createProject'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { extractFlowRichTextFromEditor } from '@/renderer/authoring/flowTextEdit'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import type { FlowCommandResult } from '@/renderer/course/flowEditorCommands'
 import type { FlowEditorSelection } from '@/renderer/course/flowEditorSlice'
@@ -167,6 +173,7 @@ function renderPaper(project = createFlowProject(), selection: FlowEditorSelecti
   const view = buildFlowEditorView({ project, locationId: 'h1' })
   const onProjectChange = vi.fn<(result: FlowCommandResult) => void>()
   const onSelectionChange = vi.fn<(next: FlowEditorSelection | null) => void>()
+  const onTextEditChange = vi.fn()
   const result = render(
     <div style={{ width: 900, height: 640 }}>
       <FlowWorkspace
@@ -175,10 +182,11 @@ function renderPaper(project = createFlowProject(), selection: FlowEditorSelecti
         selection={selection}
         onProjectChange={onProjectChange}
         onSelectionChange={onSelectionChange}
+        onTextEditChange={onTextEditChange}
       />
     </div>,
   )
-  return { ...result, project, view, onProjectChange, onSelectionChange }
+  return { ...result, project, view, onProjectChange, onSelectionChange, onTextEditChange }
 }
 
 describe('FlowWorkspace paper', () => {
@@ -248,6 +256,7 @@ describe('FlowWorkspace paper', () => {
     )
     fireEvent.click(screen.getByTestId('flow-block-p-body').querySelector('[data-flow-rich-text="true"]')!)
     expect(onSelectionChange.mock.calls.at(-1)?.[0]?.focus).toBe('text')
+    expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
 
     rerender(
       <div style={{ width: 900, height: 640 }}>
@@ -266,27 +275,318 @@ describe('FlowWorkspace paper', () => {
     expect(editor).toHaveAttribute('contenteditable', 'true')
   })
 
-  it('keeps the context toolbar inside the selected block and does not steal focus on pointer down', () => {
+  it('keeps a native range across rich-text runs without bubbling back to block selection', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 0 },
+    })
+    const { onSelectionChange, onTextEditChange } = renderPaper(project, selection)
+    const editor = screen.getByTestId('flow-inline-editor')
+    const firstStyledText = editor.querySelector('span')?.firstChild
+    const trailingText = editor.lastChild
+    expect(firstStyledText?.nodeType).toBe(Node.TEXT_NODE)
+    expect(trailingText?.nodeType).toBe(Node.TEXT_NODE)
+
+    const range = document.createRange()
+    range.setStart(firstStyledText!, 1)
+    range.setEnd(trailingText!, 1)
+    const nativeSelection = window.getSelection()!
+    nativeSelection.removeAllRanges()
+    nativeSelection.addRange(range)
+    expect(nativeSelection.toString()).toBe('读任')
+
+    fireEvent(document, new Event('selectionchange'))
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]?.range).toEqual({ start: 1, end: 3 })
+
+    fireEvent.pointerDown(editor, { button: 0 })
+    fireEvent.click(editor)
+    expect(onSelectionChange).not.toHaveBeenCalled()
+    expect(window.getSelection()?.toString()).toBe('读任')
+  })
+
+  it('gives empty paragraph, heading, quote, list and table editors stable non-persisted geometry', () => {
+    const project = createFlowProject()
+    const surface = project.surfaces.find((entry) => entry.id === 'flow')
+    if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
+    surface.blocks = surface.blocks.map((block) => {
+      if (block.id === 'h1' && block.type === 'heading') return { ...block, text: '' }
+      if (block.id === 'p-body' && block.type === 'paragraph') {
+        const next = { ...block, text: '', lineSpacing: 8 }
+        delete next.runs
+        return next
+      }
+      if (block.id === 'list-1' && block.type === 'list') {
+        return {
+          ...block,
+          items: block.items.map((item) => {
+            const next = { ...item, text: '' }
+            delete next.runs
+            return next
+          }),
+        }
+      }
+      if (block.id === 'table-1' && block.type === 'table') {
+        return {
+          ...block,
+          rows: block.rows.map((row) => ({ ...row, cells: { ...row.cells, 'column-a': '' } })),
+        }
+      }
+      return block
+    })
+    surface.blocks.splice(2, 0, { id: 'quote-empty', type: 'quote', text: '' })
+
+    const cases = [
+      { blockId: 'p-body' },
+      { blockId: 'h1' },
+      { blockId: 'quote-empty' },
+      { blockId: 'list-1', listItemId: 'item-1' },
+      { blockId: 'table-1', tableRowId: 'row-1', tableColumnId: 'column-a' },
+    ] as const
+
+    for (const target of cases) {
+      const textRange = { ...target, start: 0, end: 0 }
+      const selection = selectFlowEditorBlocks(project, 'h1', [target.blockId], {
+        focus: 'text',
+        textRange,
+      })
+      const rendered = renderPaper(project, selection)
+      const editor = screen.getByTestId('flow-inline-editor')
+      expect(editor.querySelector('br[data-flow-empty-placeholder="true"]')).toBeTruthy()
+      expect(extractFlowRichTextFromEditor(editor)).toEqual({ text: '', runs: [] })
+      expect(editor).toHaveStyle({
+        display: 'block',
+        width: '100%',
+        minHeight: '1.4em',
+        userSelect: 'text',
+        cursor: 'text',
+      })
+      expect(editor.style.lineHeight).toBe('')
+      if (target.blockId === 'p-body') {
+        expect(editor.parentElement).toHaveStyle({ lineHeight: '2.1' })
+      }
+
+      editor.textContent = '首'
+      fireEvent.input(editor)
+      expect(rendered.onTextEditChange.mock.calls.at(-1)?.[0]?.draft).toMatchObject({ text: '首' })
+      expect(editor).toHaveStyle({ display: 'block', width: '100%', minHeight: '1.4em' })
+      rendered.unmount()
+    }
+  })
+
+  it('keeps toolbar commands inside the selected text range event boundary', () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], { focus: 'text', textRange: { blockId: 'p-body', start: 0, end: 4 } })
-    const { onSelectionChange } = renderPaper(project, selection)
+    const { onProjectChange, onSelectionChange, onTextEditChange } = renderPaper(project, selection)
     const block = screen.getByTestId('flow-block-p-body')
     const toolbar = screen.getByTestId('flow-block-context-toolbar')
     expect(block?.contains(toolbar)).toBe(true)
     expect(toolbar).toHaveAttribute('data-flow-toolbar-placement', 'below')
     expect(screen.getByTestId('flow-range-toolbar')).toBeTruthy()
-    fireEvent.mouseDown(screen.getByLabelText('局部加粗'))
+    const bold = screen.getByLabelText('局部加粗')
+    fireEvent.mouseDown(bold)
+    fireEvent.click(bold)
     expect(onSelectionChange).not.toHaveBeenCalled()
-  })
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toMatchObject({
+      range: { start: 0, end: 4 },
+      draft: {
+        text: '阅读任务',
+        runs: [{ start: 0, end: 4, style: { bold: true } }],
+      },
+    })
+    const editor = screen.getByTestId('flow-inline-editor')
+    expect(editor).toBeInTheDocument()
+    expect(screen.getByLabelText('局部加粗')).toHaveAttribute('aria-pressed', 'true')
 
-  it('opens the formula editor on double-click instead of a run editor', () => {
-    renderPaper()
-    fireEvent.doubleClick(screen.getByRole('math'))
-    expect(screen.getByTestId('formula-edit-dialog')).toBeTruthy()
+    onProjectChange.mockClear()
+    onSelectionChange.mockClear()
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+
+    expect(onProjectChange).toHaveBeenCalledTimes(1)
+    const committed = onProjectChange.mock.calls[0]?.[0]
+    const surface = committed?.nextDocument?.surfaces.find((entry) => entry.id === 'flow')
+    const paragraph = surface?.type === 'flow'
+      ? surface.blocks.find((block) => block.id === 'p-body')
+      : undefined
+    expect(committed?.historyEntry).toBeTruthy()
+    expect(paragraph).toMatchObject({
+      type: 'paragraph',
+      text: '阅读任务',
+      runs: [{ start: 0, end: 4, style: { bold: true } }],
+    })
+    expect(onSelectionChange).toHaveBeenCalledTimes(1)
+    expect(onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+      selectedBlockId: 'p-body',
+      focus: 'block',
+    })
     expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
   })
 
-  it('does not commit IME text until composition ends', () => {
+  it('cancels rich inline editing once without bubbling Escape into block deselection', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 4 },
+    })
+    const { onProjectChange, onSelectionChange } = renderPaper(project, selection)
+
+    fireEvent.keyDown(screen.getByTestId('flow-inline-editor'), { key: 'Escape' })
+
+    expect(onProjectChange).not.toHaveBeenCalled()
+    expect(onSelectionChange).toHaveBeenCalledTimes(1)
+    expect(onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+      selectedBlockId: 'p-body',
+      focus: 'block',
+    })
+    expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
+  })
+
+  it('isolates terminal commit and cancel keys for plain input and textarea editors', () => {
+    const scenarios: Array<{
+      block: FlowBlock
+      nextValue: string
+      commitKey: { key: string; ctrlKey?: boolean }
+      readValue: (block: FlowBlock) => string | undefined
+    }> = [
+      {
+        block: { id: 'code-terminal', type: 'code', code: 'const value = 1' },
+        nextValue: 'const value = 2',
+        commitKey: { key: 'Enter', ctrlKey: true },
+        readValue: (block) => block.type === 'code' ? block.code : undefined,
+      },
+      {
+        block: {
+          id: 'section-terminal',
+          type: 'section',
+          title: '旧标题',
+          collapsedByDefault: false,
+          blocks: [],
+        },
+        nextValue: '新标题',
+        commitKey: { key: 'Enter' },
+        readValue: (block) => block.type === 'section' ? block.title : undefined,
+      },
+    ]
+
+    for (const scenario of scenarios) {
+      const project = createFlowProject()
+      const flow = project.surfaces.find((surface) => surface.id === 'flow')
+      if (!flow || flow.type !== 'flow') throw new Error('expected Flow surface')
+      flow.blocks.push(scenario.block)
+      syncFlowCourseLocations(project, 'flow')
+      const selection = selectFlowEditorBlocks(project, 'h1', [scenario.block.id], {
+        focus: 'text',
+        textRange: { blockId: scenario.block.id, start: 0, end: 0 },
+      })
+      const committedRender = renderPaper(project, selection)
+      const editor = screen.getByTestId('flow-inline-plain-editor')
+      fireEvent.change(editor, { target: { value: scenario.nextValue } })
+      committedRender.onProjectChange.mockClear()
+      committedRender.onSelectionChange.mockClear()
+
+      fireEvent.keyDown(editor, scenario.commitKey)
+
+      expect(committedRender.onProjectChange).toHaveBeenCalledTimes(1)
+      const result = committedRender.onProjectChange.mock.calls[0]?.[0]
+      const nextFlow = result?.nextDocument?.surfaces.find((surface) => surface.id === 'flow')
+      const nextBlock = nextFlow?.type === 'flow'
+        ? nextFlow.blocks.find((block) => block.id === scenario.block.id)
+        : undefined
+      expect(result?.historyEntry).toBeTruthy()
+      expect(nextBlock && scenario.readValue(nextBlock)).toBe(scenario.nextValue)
+      expect(committedRender.onSelectionChange).toHaveBeenCalledTimes(1)
+      expect(committedRender.onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+        selectedBlockId: scenario.block.id,
+        focus: 'block',
+      })
+      expect(screen.queryByTestId('flow-inline-plain-editor')).toBeNull()
+      committedRender.unmount()
+
+      const cancelledRender = renderPaper(project, selection)
+      fireEvent.change(screen.getByTestId('flow-inline-plain-editor'), {
+        target: { value: scenario.nextValue },
+      })
+      cancelledRender.onProjectChange.mockClear()
+      cancelledRender.onSelectionChange.mockClear()
+
+      fireEvent.keyDown(screen.getByTestId('flow-inline-plain-editor'), { key: 'Escape' })
+
+      expect(cancelledRender.onProjectChange).not.toHaveBeenCalled()
+      expect(cancelledRender.onSelectionChange).toHaveBeenCalledTimes(1)
+      expect(cancelledRender.onSelectionChange.mock.calls[0]?.[0]).toMatchObject({
+        selectedBlockId: scenario.block.id,
+        focus: 'block',
+      })
+      expect(screen.queryByTestId('flow-inline-plain-editor')).toBeNull()
+      cancelledRender.unmount()
+    }
+  })
+
+  it('reserves the complete below-toolbar footprint before neighboring blocks', () => {
+    const project = createFlowProject()
+    const headingSelection = selectFlowEditorBlocks(project, 'h1', ['h1'])
+    const headingRender = renderPaper(project, headingSelection)
+    expect(screen.getByTestId('flow-block-context-toolbar'))
+      .toHaveAttribute('data-flow-toolbar-placement', 'below')
+    expect(screen.getByTestId('flow-block-h1')).toHaveStyle({ marginBottom: '72px' })
+    expect(screen.getByTestId('flow-block-p-body')).toHaveStyle({ marginBottom: '12px' })
+    headingRender.unmount()
+
+    const wrappedProject = createFlowProject()
+    const flow = wrappedProject.surfaces.find((surface) => surface.type === 'flow')
+    const media = flow?.type === 'flow'
+      ? flow.blocks.find((block) => block.id === 'media-1')
+      : undefined
+    if (!media || media.type !== 'media') throw new Error('expected Flow media fixture')
+    media.wrap = 'left'
+    const mediaSelection = selectFlowEditorBlocks(wrappedProject, 'h1', ['media-1'])
+    renderPaper(wrappedProject, mediaSelection)
+    expect(screen.getByTestId('flow-block-media-1')).toHaveStyle({ marginBottom: '68px' })
+  })
+
+  it('keeps the formula body target stable across selection rerender and opens on a second real click', () => {
+    const { onSelectionChange, onTextEditChange, project, rerender } = renderPaper()
+    const explicitEntry = screen.getByRole('button', { name: '编辑公式' })
+    expect(explicitEntry).toBeVisible()
+    fireEvent.click(explicitEntry)
+    expect(screen.getByTestId('formula-edit-dialog')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭公式编辑' }))
+    expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
+    onSelectionChange.mockClear()
+    onTextEditChange.mockClear()
+
+    const formulaTarget = document.querySelector<HTMLElement>('[data-flow-formula-id="formula-1"]')
+    if (!formulaTarget) throw new Error('expected formula body target')
+
+    fireEvent.click(formulaTarget)
+    const selected = onSelectionChange.mock.calls.at(-1)?.[0]
+    expect(selected).toMatchObject({ selectedBlockId: 'formula-1', focus: 'block' })
+
+    rerender(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={project}
+          view={buildFlowEditorView({ project, locationId: 'h1' })}
+          selection={selected ?? null}
+          onSelectionChange={onSelectionChange}
+          onTextEditChange={onTextEditChange}
+        />
+      </div>,
+    )
+    const rerenderedTarget = document.querySelector<HTMLElement>('[data-flow-formula-id="formula-1"]')
+    expect(rerenderedTarget).toBe(formulaTarget)
+    expect(screen.getByRole('math')).toHaveStyle({ pointerEvents: 'none' })
+
+    fireEvent.click(rerenderedTarget!)
+    expect(screen.getByTestId('formula-edit-dialog')).toBeTruthy()
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toMatchObject({
+      kind: 'formula',
+      blockId: 'formula-1',
+    })
+    expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
+  })
+
+  it('does not commit IME text until composition ends', async () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
       focus: 'text',
@@ -294,6 +594,7 @@ describe('FlowWorkspace paper', () => {
     })
     const { onProjectChange } = renderPaper(project, selection)
     const editor = screen.getByTestId('flow-inline-editor')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
     fireEvent.compositionStart(editor, { data: '中' })
     editor.textContent = '中文输入'
     fireEvent.input(editor)
@@ -301,6 +602,8 @@ describe('FlowWorkspace paper', () => {
     fireEvent.blur(editor)
     expect(onProjectChange).not.toHaveBeenCalled()
     fireEvent.compositionEnd(editor, { data: '中文输入' })
+    expect(onProjectChange).toHaveBeenCalledTimes(1)
+    expect(onProjectChange.mock.calls[0]?.[0]).toMatchObject({ ok: true, historyEntry: true })
   })
 
   it('commits range bold through the same apply-text command as the document model', () => {
@@ -355,7 +658,7 @@ describe('FlowWorkspace paper', () => {
     }
   })
 
-  it('applies wide and content-width maxWidth to media figure', () => {
+  it('applies the shared conflict-free width projection to media figures', () => {
     const project = createFlowProject()
     const flowSurface = project.surfaces.find((entry) => entry.id === 'flow')
     if (flowSurface && flowSurface.type === 'flow') {
@@ -370,13 +673,24 @@ describe('FlowWorkspace paper', () => {
       })
     }
     renderPaper(project)
-    const contentFigure = screen.getByTestId('flow-block-media-1').querySelector('figure')
-    expect(contentFigure).toHaveAttribute('data-flow-media-layout', 'content-width')
-    expect(contentFigure).toHaveStyle({ maxWidth: '760px', width: '100%' })
-
-    const wideFigure = screen.getByTestId('flow-block-media-wide').querySelector('figure')
-    expect(wideFigure).toHaveAttribute('data-flow-media-layout', 'wide')
-    expect(wideFigure).toHaveStyle({ maxWidth: '1120px', width: '100%' })
+    const widths = { readingWidth: 760, wideContentWidth: 1120 }
+    const cases = [
+      ['media-1', 'content-width'],
+      ['media-wide', 'wide'],
+    ] as const
+    for (const [blockId, layout] of cases) {
+      const projection = resolveFlowMediaLayoutProjection(layout, widths)
+      const figure = screen.getByTestId(`flow-block-${blockId}`).querySelector<HTMLElement>('figure')!
+      expect(figure).toHaveAttribute('data-flow-media-layout', layout)
+      expect(figure.style.getPropertyValue(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY)).toBe(projection.inlineSize)
+      expect(figure.style.width).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.maxWidth).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.inlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.maxInlineSize).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
+      expect(figure.style.left).toBe('50%')
+      expect(figure.style.insetInlineStart).toBe('')
+      expect(figure.style.transform).toBe('translateX(-50%)')
+    }
   })
 
   it('syncs store flowTextEdit updates to local inline editor during in-place editing', async () => {

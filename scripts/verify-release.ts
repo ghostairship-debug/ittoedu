@@ -8,15 +8,21 @@ import { promisify } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Browser, ElectronApplication, Page } from 'playwright'
 import packageJson from '../package.json'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
-import { openProjectArchive } from '../src/renderer/project/projectArchive'
+import {
+  importComponentPackage,
+  parseComponentPackageFiles,
+} from '../src/renderer/components/importComponentPackage'
+import { openCourseProjectArchive } from '../src/renderer/project/courseProjectArchive'
 import {
   APP_EXECUTABLE_NAME,
   APP_PRODUCT_NAME,
   APP_VERSION,
 } from '../src/shared/constants'
-import type { ProjectDocument } from '../src/shared/projectTypes'
-import { createTeacherControllerLayout } from '../src/shared/teacherControllerLayout'
+import type {
+  CourseProjectDocument,
+  LayerFrame,
+} from '../src/shared/courseProjectTypes'
+import { publishedCourseV2Schema } from '../src/shared/publishedCourseSchema'
 import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
 import {
   assertExpectedAsarPackage,
@@ -35,13 +41,16 @@ interface VerificationCheck {
 }
 
 interface ControllerVerificationTarget {
-  nodeId: string
-  layerName: 'global-underlay' | 'global-overlay'
-  nextButton: {
-    x: number
-    y: number
+  itemId: string
+  nextButtonId: string
+  frame: LayerFrame
+  canvas: {
+    width: number
+    height: number
   }
 }
+
+const PUBLISHED_FRAME_TOLERANCE_CSS_PX = 1
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
@@ -79,19 +88,19 @@ const renderHostBenchmarkDirectory = path.join(
 )
 const renderHostBenchmarkProject = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-benchmark.h5lesson',
+  'render-host-benchmark-v9.h5lesson',
 )
-const renderHostBenchmarkTable = path.join(
+const renderHostBenchmarkPublished = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-editable-table.h5component',
-)
-const renderHostBenchmarkPhaserMeter = path.join(
-  renderHostBenchmarkDirectory,
-  'render-host-phaser-meter.h5component',
+  'published-v2.json',
 )
 const renderHostBenchmarkHtml = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-benchmark.html',
+  'render-host-benchmark-v2.html',
+)
+const renderHostBenchmarkNotices = path.join(
+  renderHostBenchmarkDirectory,
+  'THIRD_PARTY_NOTICES_V9.md',
 )
 const exportedHtml = path.join(
   verificationDirectory,
@@ -128,37 +137,86 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 function sampleControllerTarget(
-  project: ProjectDocument,
+  project: CourseProjectDocument,
 ): ControllerVerificationTarget {
   assert(
     project.playback.controls === 'canvas',
     '示例工程必须使用画布内教师控制器',
   )
-  const placement = project.globalLayer.find(
-    (item) => item.node.type === 'teacher-controller' && item.node.visible,
+  const placement = project.globalLayerItems.find(
+    (entry) => entry.item.kind === 'native' &&
+      entry.item.content.nativeType === 'teacher-controller' &&
+      entry.item.visible,
   )
   assert(placement, '示例工程缺少可见的画布内教师控制器')
-  const controller = placement.node
-  assert(controller.type === 'teacher-controller', '教师控制器节点类型错误')
-  const layout = createTeacherControllerLayout(
-    controller,
-    controller.width,
-    controller.height,
+  const controller = placement.item
+  assert(
+    controller.kind === 'native' &&
+      controller.content.nativeType === 'teacher-controller',
+    '教师控制器图层类型错误',
   )
-  const nextButton = layout.buttons.find(
+  assert(
+    placement.visibility.mode === 'all',
+    '发布验收样例的教师控制器必须在全部位置可见',
+  )
+  const slide = project.surfaces.find((surface) => surface.type === 'slide')
+  assert(slide?.type === 'slide', '发布验收样例缺少 Slide surface')
+  assert(
+    controller.frame.x >= 0 && controller.frame.y >= 0 &&
+      controller.frame.x + controller.frame.width <= slide.canvas.width &&
+      controller.frame.y + controller.frame.height <= slide.canvas.height,
+    '发布验收样例的教师控制器位置超出 Slide 画布',
+  )
+  const nextButton = controller.content.data.buttons.find(
     (button) => button.action.type === 'scene.next',
   )
   assert(nextButton, '示例工程教师控制器缺少可见的下一场景按钮')
+  assert(nextButton.visible, '示例工程教师控制器的下一场景按钮不可见')
   assert(controller.rotation === 0, '发布验收样例的教师控制器不应旋转')
   return {
-    nodeId: controller.id,
-    layerName: placement.layer === 'underlay'
-      ? 'global-underlay'
-      : 'global-overlay',
-    nextButton: {
-      x: controller.x + nextButton.x + nextButton.width / 2,
-      y: controller.y + nextButton.y + nextButton.height / 2,
-    },
+    itemId: controller.layerItemId,
+    nextButtonId: nextButton.id,
+    frame: structuredClone(controller.frame),
+    canvas: structuredClone(slide.canvas),
+  }
+}
+
+async function assertPublishedControllerFrame(
+  page: Page,
+  target: ControllerVerificationTarget,
+): Promise<void> {
+  const stage = page.locator('[data-slide-scene-stage="true"]')
+  const wrapper = page.locator(`[data-global-layer-item="${target.itemId}"]`)
+  assert(await stage.count() === 1, '离线 HTML 中未找到唯一的 Published Slide 画布宿主')
+  assert(await wrapper.count() === 1, '离线 HTML 中未找到 Published 教师控制器 wrapper')
+  const [stageBounds, wrapperBounds] = await Promise.all([
+    stage.boundingBox(),
+    wrapper.boundingBox(),
+  ])
+  assert(stageBounds, 'Published Slide 画布宿主没有可见范围')
+  assert(wrapperBounds, 'Published 教师控制器 wrapper 没有可见范围')
+  const scaleX = stageBounds.width / target.canvas.width
+  const scaleY = stageBounds.height / target.canvas.height
+  assert(scaleX > 0 && scaleY > 0, 'Published Slide 画布缩放比例无效')
+  const mapped = {
+    left: wrapperBounds.x - stageBounds.x,
+    top: wrapperBounds.y - stageBounds.y,
+    width: wrapperBounds.width,
+    height: wrapperBounds.height,
+  }
+  const expected = {
+    left: target.frame.x * scaleX,
+    top: target.frame.y * scaleY,
+    width: target.frame.width * scaleX,
+    height: target.frame.height * scaleY,
+  }
+  for (const key of ['left', 'top', 'width', 'height'] as const) {
+    assert(
+      Math.abs(mapped[key] - expected[key]) <= PUBLISHED_FRAME_TOLERANCE_CSS_PX,
+      `Published 教师控制器 ${key} 映射错误：` +
+        `实际 ${mapped[key].toFixed(2)}px，预期 ${expected[key].toFixed(2)}px，` +
+        `容差 ${PUBLISHED_FRAME_TOLERANCE_CSS_PX}px`,
+    )
   }
 }
 
@@ -550,9 +608,25 @@ async function verifyUnpackedWorkflows(): Promise<void> {
       .getByRole('button', { name: '重命名课件' })
       .filter({ hasText: '示例互动课件' })
       .waitFor({ timeout: 20_000 })
-    const sceneCount = await projectRun.page.locator('.scene-item').count()
-    assert(sceneCount === 2, `示例工程应有 2 个场景，实际为 ${sceneCount}`)
-    pass('示例工程打开', '目录版 GUI 已打开双场景示例工程')
+    const sceneItems = projectRun.page.locator('[data-testid^="scene-item-"]')
+    await sceneItems.first().waitFor({ state: 'visible', timeout: 20_000 })
+    const sceneCount = await sceneItems.count()
+    assert(sceneCount === 2, `示例工程应有 2 个 Slide 位置，实际为 ${sceneCount}`)
+    for (let index = 0; index < sceneCount; index += 1) {
+      const sceneItem = sceneItems.nth(index)
+      assert(await sceneItem.isVisible(), `示例工程第 ${index + 1} 个 Slide 位置不可见`)
+      await sceneItem.click()
+      await projectRun.page.waitForFunction((activeIndex) => (
+        document.querySelectorAll('[data-testid^="scene-item-"]')[activeIndex]
+          ?.getAttribute('aria-current') === 'page'
+      ), index)
+    }
+    await sceneItems.first().click()
+    await projectRun.page.waitForFunction(() => (
+      document.querySelector('[data-testid^="scene-item-"]')
+        ?.getAttribute('aria-current') === 'page'
+    ))
+    pass('示例工程打开', '目录版 GUI 已打开且可切换两个 V9 Slide 位置')
 
     await fs.rm(exportedHtml, { force: true })
     await projectRun.page
@@ -634,7 +708,7 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     )
     assert(slide1.includes('交互式课件编辑器'), 'PPTX 第 1 页主标题不是原生文字')
     assert(slide1.includes('双击文字即可修改'), 'PPTX 第 1 页副标题不是原生文字')
-    assert((slide1.match(/<p:sp>/g) ?? []).length === 3, 'PPTX 第 1 页应包含 3 个独立原生对象')
+    assert((slide1.match(/<p:sp>/g) ?? []).length === 2, 'PPTX 第 1 页应包含 2 个独立原生文字对象')
     assert((slide1.match(/<p:pic>/g) ?? []).length === 0, 'PPTX 第 1 页不应退化为整页图片')
     assert(slide2.includes('拖动组件，调整课件布局'), 'PPTX 第 2 页提示不是原生文字')
     assert((slide2.match(/<p:sp>/g) ?? []).length === 1, 'PPTX 第 2 页应包含 1 个原生文字对象')
@@ -678,6 +752,11 @@ async function verifyOfflineHtml(
       timeout: 45_000,
     })
     await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
+    await page.evaluate(() => {
+      window.addEventListener('courseware-component-event', (event) => {
+        Reflect.set(window, '__sampleCounterEvent', (event as CustomEvent).detail)
+      })
+    })
     assert(
       await page.locator('.lesson-footer').count() === 0,
       '画布控制器成品不应再渲染 lesson-footer',
@@ -691,86 +770,58 @@ async function verifyOfflineHtml(
     )
     assert(initialSceneIndex === 0, '离线 HTML 初始场景错误')
 
-    const controllerState = await page.evaluate((target) => {
-      const player = window.__H5_LESSON_PLAYER__
-      if (!player) return null
-      const scene = player.game.scene.getScene('courseware-player')
-      type ControllerChild = {
-        active?: boolean
-        visible?: boolean
-        alpha?: number
-        type?: string
-        input?: { enabled?: boolean }
-        list?: ControllerChild[]
-      }
-      const layer = scene.children.getByName(target.layerName) as {
-        visible?: boolean
-        getByName?(name: string): ControllerChild | null
-      } | null
-      const controller = layer?.getByName?.(`node:${target.nodeId}`) ?? null
-      let enabledZones = 0
-      const pending: Array<{
-        item: ControllerChild
-        ancestorsVisible: boolean
-      }> = controller
-        ? [{ item: controller, ancestorsVisible: true }]
-        : []
-      while (pending.length > 0) {
-        const current = pending.pop()
-        if (!current) break
-        const visible = current.ancestorsVisible &&
-          current.item.active !== false &&
-          current.item.visible !== false &&
-          (current.item.alpha ?? 1) > 0
-        if (
-          visible &&
-          current.item.type === 'Zone' &&
-          current.item.input?.enabled
-        ) {
-          enabledZones += 1
-        }
-        for (const child of current.item.list ?? []) {
-          pending.push({ item: child, ancestorsVisible: visible })
-        }
-      }
-      return {
-        layerVisible: layer?.visible !== false,
-        active: controller?.active === true,
-        visible: controller?.visible === true,
-        alpha: controller?.alpha ?? 0,
-        enabledZones,
-      }
-    }, controllerTarget)
-    assert(controllerState, '离线 HTML 中未找到画布内教师控制器')
-    assert(
-      controllerState.layerVisible &&
-        controllerState.active &&
-        controllerState.visible &&
-        controllerState.alpha > 0 &&
-        controllerState.enabledZones > 0,
-      '离线 HTML 的画布内教师控制器不可见或按钮未启用',
+    await assertPublishedControllerFrame(page, controllerTarget)
+    const controller = page.locator(
+      `[data-global-layer-item="${controllerTarget.itemId}"] .slide-native-teacher-controller`,
     )
-
-    const canvas = page.locator('.lesson-canvas-host canvas')
-    const canvasBounds = await canvas.boundingBox()
-    assert(canvasBounds, '离线 HTML 的 Phaser 画布不可见')
+    assert(await controller.count() === 1, '离线 HTML 中未找到 Published V2 全局教师控制器')
+    assert(await controller.isVisible(), '离线 HTML 的全局教师控制器不可见')
+    const nextButton = controller.locator(
+      `[data-controller-button-id="${controllerTarget.nextButtonId}"]`,
+    )
+    if (!await nextButton.isVisible()) {
+      const expand = controller.locator('[data-teacher-controller-collapse="true"]')
+      assert(await expand.count() === 1, '收起的教师控制器缺少展开按钮')
+      const expandBounds = await expand.boundingBox()
+      assert(expandBounds, '教师控制器展开按钮没有可点击范围')
+      await page.mouse.click(
+        expandBounds.x + expandBounds.width / 2,
+        expandBounds.y + expandBounds.height / 2,
+      )
+    }
+    assert(await nextButton.isVisible(), '离线 HTML 的下一场景按钮不可见')
+    assert(await nextButton.isEnabled(), '离线 HTML 的下一场景按钮未启用')
+    const nextButtonBounds = await nextButton.boundingBox()
+    assert(nextButtonBounds, '下一场景按钮没有可点击范围')
     await page.mouse.click(
-      canvasBounds.x + (controllerTarget.nextButton.x / 1280) * canvasBounds.width,
-      canvasBounds.y + (controllerTarget.nextButton.y / 720) * canvasBounds.height,
+      nextButtonBounds.x + nextButtonBounds.width / 2,
+      nextButtonBounds.y + nextButtonBounds.height / 2,
     )
     await page.waitForFunction(
       () => window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() === 1,
     )
-    const beforeComponentClick = await canvas.screenshot()
-    await page.mouse.click(
-      canvasBounds.x + (760 / 1280) * canvasBounds.width,
-      canvasBounds.y + (458 / 720) * canvasBounds.height,
+
+    const canvas = page.locator(
+      '[data-published-phaser-component="component_sample_counter"]',
     )
-    await page.waitForTimeout(250)
-    const afterComponentClick = await canvas.screenshot()
+    await canvas.waitFor({ state: 'visible', timeout: 15_000 })
+    const canvasBounds = await canvas.boundingBox()
+    assert(canvasBounds, '离线 HTML 第 2 页的示例 Phaser 画布不可见')
+    await page.mouse.click(
+      canvasBounds.x + (356 / 480) * canvasBounds.width,
+      canvasBounds.y + (238 / 280) * canvasBounds.height,
+    )
+    await page.waitForFunction(() => {
+      const detail = Reflect.get(window, '__sampleCounterEvent') as
+        | { instanceId?: string; eventName?: string; payload?: { value?: number } }
+        | undefined
+      return detail?.instanceId === 'component_sample_counter' &&
+        detail.eventName === 'change' &&
+        detail.payload?.value === 1
+    }, undefined, { timeout: 10_000 })
     assert(
-      Buffer.compare(beforeComponentClick, afterComponentClick) !== 0,
-      '导出 HTML 中的示例计数器没有响应点击',
+      await canvas.isVisible(),
+      '计数变更后示例 Phaser 画布不可见',
     )
     await page.keyboard.press('ArrowLeft')
     await page.waitForFunction(
@@ -784,7 +835,7 @@ async function verifyOfflineHtml(
     )
     pass(
       '离线 HTML',
-      'Edge 通过 file:// 打开，无页脚栏；画布教师控制器/键盘翻页、组件交互可用且网络请求为 0',
+      'Edge 通过 file:// 打开，无页脚栏；Published 教师控制器/键盘翻页、Phaser 计数交互可用且网络请求为 0',
     )
   } finally {
     await browser.close()
@@ -822,12 +873,14 @@ async function main(): Promise<void> {
   )
   const requiredFiles = [
     path.join(projectRoot, 'README.md'),
+    path.join(projectRoot, 'docs', 'README.md'),
     path.join(projectRoot, 'docs', 'USER_GUIDE.md'),
     path.join(projectRoot, 'docs', 'COMPONENT_AUTHORING.md'),
-    path.join(projectRoot, 'docs', 'AI_COURSEWARE_AUTHORING.md'),
     path.join(projectRoot, 'docs', 'RUNTIME_AUTHORING.md'),
+    path.join(projectRoot, '.agents', 'skills', 'orchestrate-courseware', 'SKILL.md'),
+    path.join(projectRoot, '.agents', 'skills', 'build-courseware-project', 'SKILL.md'),
     path.join(renderHostBenchmarkDirectory, 'README.md'),
-    path.join(renderHostBenchmarkDirectory, 'THIRD_PARTY_NOTICES.md'),
+    renderHostBenchmarkNotices,
     path.join(projectRoot, 'package-lock.json'),
   ]
   for (const requiredFile of requiredFiles) {
@@ -836,69 +889,167 @@ async function main(): Promise<void> {
   }
   pass(
     '发布配套文件',
-    'README、AI 创作规范、自由运行时/组件指南、渲染基准及 package-lock.json 均存在',
+    'README、AI 编排/构建 Skills、自由运行时/组件指南、V9/V2 渲染基准及 package-lock.json 均存在',
   )
 
   const [projectBytes, componentBytes] = await Promise.all([
     fs.readFile(sampleProject),
     fs.readFile(sampleComponent),
   ])
-  const openedProject = openProjectArchive(Uint8Array.from(projectBytes))
+  const openedProject = openCourseProjectArchive(Uint8Array.from(projectBytes))
   const importedComponent = importComponentPackage(
     Uint8Array.from(componentBytes),
   )
-  assert(openedProject.project.scenes.length === 2, '示例工程场景数量错误')
+  const sampleSlide = openedProject.project.surfaces[0]
+  assert(
+    openedProject.project.schemaVersion === 9 &&
+      openedProject.project.surfaces.length === 1 &&
+      sampleSlide?.type === 'slide' &&
+      sampleSlide.scenes.length === 2,
+    '示例工程必须是两页 Slide 的 Course Project V9',
+  )
   const controllerTarget = sampleControllerTarget(openedProject.project)
   assert(
     importedComponent.manifest.id === 'com.example.sample-counter',
     '示例组件 ID 错误',
   )
+  const embeddedComponentFiles = openedProject.componentFiles[importedComponent.key]
+  assert(embeddedComponentFiles, '示例 V9 工程未内嵌计数器组件字节')
+  parseComponentPackageFiles(embeddedComponentFiles, {
+    expectedId: importedComponent.manifest.id,
+    expectedVersion: importedComponent.manifest.version,
+  })
   pass(
     '示例文件结构',
-    '示例工程与组件包均通过正式解析器校验',
+    'Course Project V9 与内嵌 Component API 4 包均通过正式解析器校验',
   )
 
-  const [benchmarkBytes, tableBytes, phaserMeterBytes, benchmarkHtml] =
+  const [benchmarkBytes, publishedBenchmarkJson, benchmarkHtml, benchmarkNotices] =
     await Promise.all([
       fs.readFile(renderHostBenchmarkProject),
-      fs.readFile(renderHostBenchmarkTable),
-      fs.readFile(renderHostBenchmarkPhaserMeter),
+      fs.readFile(renderHostBenchmarkPublished, 'utf8'),
       fs.readFile(renderHostBenchmarkHtml, 'utf8'),
+      fs.readFile(renderHostBenchmarkNotices, 'utf8'),
     ])
-  const benchmarkProject = openProjectArchive(Uint8Array.from(benchmarkBytes))
-  const benchmarkTable = importComponentPackage(Uint8Array.from(tableBytes))
-  const benchmarkPhaserMeter = importComponentPackage(Uint8Array.from(phaserMeterBytes))
+  const benchmarkProject = openCourseProjectArchive(Uint8Array.from(benchmarkBytes))
+  const publishedBenchmark = publishedCourseV2Schema.parse(
+    JSON.parse(publishedBenchmarkJson) as unknown,
+  )
+  const expectedBenchmarkLocationIds = [
+    'scene_native_nodes_v9',
+    'scene_runtime_phaser_v9',
+    'scene_runtime_three_v9',
+    'scene_component_v4_dom_v9',
+    'scene_component_v4_phaser_v9',
+  ]
   assert(
-    benchmarkProject.project.schemaVersion === 8 &&
-      benchmarkProject.project.scenes.length === 5,
-    '渲染宿主基准必须是五场景 Project V8 工程',
+    benchmarkProject.project.schemaVersion === 9 &&
+      benchmarkProject.project.locations.map(({ id }) => id).join('\n') ===
+        expectedBenchmarkLocationIds.join('\n'),
+    '渲染宿主基准必须是五页 Course Project V9 工程',
   )
   assert(
-    benchmarkProject.project.scenes[1]?.runtime?.runtimeApiVersion === 2 &&
-      benchmarkProject.project.scenes[1]?.runtime?.renderMode === 'phaser' &&
-      benchmarkProject.project.scenes[2]?.runtime?.runtimeApiVersion === 2 &&
-      benchmarkProject.project.scenes[2]?.runtime?.renderMode === 'dom',
-    '渲染宿主基准缺少 API 2 Phaser / Three-DOM 运行时',
+    benchmarkProject.project.globalLayerItems.filter(
+      ({ item, visibility }) => item.kind === 'native' &&
+        item.content.nativeType === 'teacher-controller' &&
+        item.visible && visibility.mode === 'all',
+    ).length === 1,
+    '渲染宿主 V9 基准必须只有一个全局教师控制器入口',
+  )
+  sampleControllerTarget(benchmarkProject.project)
+  const benchmarkSlide = benchmarkProject.project.surfaces[0]
+  assert(
+    benchmarkSlide?.type === 'slide' && benchmarkSlide.scenes.length === 5,
+    '渲染宿主 V9 基准必须包含单一五场景 Slide surface',
+  )
+  const benchmarkLayerItems = benchmarkSlide.scenes.flatMap(({ layerItems }) => layerItems)
+  assert(
+    benchmarkLayerItems.some((item) => item.kind === 'native') &&
+      benchmarkLayerItems.filter((item) => item.kind === 'component').length === 2,
+    '渲染宿主 V9 基准缺少 Native 或双 Component 路径',
+  )
+  const benchmarkRuntimeModes = benchmarkLayerItems.flatMap((item) =>
+    item.kind === 'runtime'
+      ? [`${item.runtime.runtimeApiVersion}:${item.runtime.renderMode}`]
+      : [],
   )
   assert(
-    benchmarkTable.manifest.schemaVersion === 4 &&
-      benchmarkTable.manifest.renderMode === 'dom',
-    '渲染宿主基准缺少 V4 DOM 组件',
+    benchmarkRuntimeModes.join('\n') === ['2:phaser', '2:dom'].join('\n'),
+    '渲染宿主 V9 基准缺少 API 2 Phaser / Three-DOM 运行时路径',
+  )
+  const embeddedBenchmarkComponents = Object.values(
+    benchmarkProject.project.componentPackages,
+  ).map((metadata) => {
+    const key = `${metadata.packageId}@${metadata.version}`
+    const files = benchmarkProject.componentFiles[key]
+    assert(files, `渲染宿主 V9 基准缺少内嵌组件包 ${key}`)
+    return parseComponentPackageFiles(files, {
+      expectedId: metadata.packageId,
+      expectedVersion: metadata.version,
+    })
+  })
+  assert(
+    embeddedBenchmarkComponents.length === 2 &&
+      embeddedBenchmarkComponents.every(({ manifest }) => manifest.schemaVersion === 4) &&
+      embeddedBenchmarkComponents.map(({ manifest }) => manifest.renderMode)
+        .sort().join('\n') === ['dom', 'phaser'].join('\n'),
+    '渲染宿主 V9 基准缺少内嵌 Component API 4 DOM / Phaser 包',
   )
   assert(
-    benchmarkPhaserMeter.manifest.schemaVersion === 4 &&
-      benchmarkPhaserMeter.manifest.renderMode === 'phaser',
-    '渲染宿主基准缺少 V4 Phaser 组件',
+    publishedBenchmark.formatVersion === 2 &&
+      publishedBenchmark.sourceSchemaVersion === 9 &&
+      publishedBenchmark.courseId === benchmarkProject.project.id &&
+      publishedBenchmark.locations.map(({ id }) => id).join('\n') ===
+        expectedBenchmarkLocationIds.join('\n'),
+    '渲染宿主 Published Course V2 与 V9 五页工程不一致',
+  )
+  const publishedSlide = publishedBenchmark.surfaces[0]
+  assert(
+    publishedSlide?.type === 'slide' && publishedSlide.scenes.length === 5,
+    '渲染宿主 Published Course V2 缺少五场景 Slide surface',
+  )
+  const publishedLayerItems = publishedSlide.scenes.flatMap(({ layerItems }) => layerItems)
+  const publishedRuntimeModes = publishedLayerItems.flatMap((item) =>
+    item.kind === 'runtime'
+      ? [`${item.runtime.runtimeApiVersion}:${item.runtime.renderMode}`]
+      : [],
   )
   assert(
-    benchmarkHtml.includes('connect-src data: blob:') &&
+    publishedLayerItems.some((item) => item.kind === 'native') &&
+      publishedRuntimeModes.join('\n') === ['2:phaser', '2:dom'].join('\n') &&
+      publishedLayerItems.filter((item) => item.kind === 'component').length === 2,
+    '渲染宿主 Published Course V2 未保留 Native、双 Runtime 与双 Component 五路径',
+  )
+  assert(
+    Object.values(publishedBenchmark.components).map(({ renderMode }) => renderMode)
+      .sort().join('\n') === ['dom', 'phaser'].join('\n'),
+    '渲染宿主 Published Course V2 缺少 Component API 4 DOM / Phaser 包',
+  )
+  assert(
+    publishedBenchmark.globalLayerItems.filter(
+      ({ item, visibility }) => item.kind === 'native' &&
+        item.content.nativeType === 'teacher-controller' &&
+        item.visible && visibility.mode === 'all',
+    ).length === 1,
+    '渲染宿主 Published Course V2 缺少唯一全局教师控制器入口',
+  )
+  assert(
+    benchmarkHtml.includes('window.__H5_COURSE_PAYLOAD__=') &&
+      !benchmarkHtml.includes('window.__H5_LESSON_PAYLOAD__=') &&
+      benchmarkHtml.includes('connect-src data: blob:') &&
       !/connect-src[^;]*(?:https?:|\*|'self')/i.test(benchmarkHtml) &&
       !/<script[^>]+src=/i.test(benchmarkHtml),
-    '渲染宿主基准单 HTML 不是自包含离线成品',
+    '渲染宿主 Published Course V2 单 HTML 不是自包含离线成品',
+  )
+  assert(
+    benchmarkNotices.includes('## Three.js ') &&
+      benchmarkNotices.includes('render-host-benchmark-v2.html') &&
+      benchmarkNotices.includes('The MIT License'),
+    '渲染宿主 V9/V2 第三方声明缺少 Three.js 来源或许可证',
   )
   pass(
     '渲染宿主基准',
-    'Project V8、Runtime API 2 Phaser/Three 与 Component API 4 DOM/Phaser 产物均通过正式解析器',
+    'Course Project V9、Published Course V2、Runtime API 2 Phaser/Three 与 Component API 4 DOM/Phaser 均通过正式解析器',
   )
 
   await verifyPortableStartup()
@@ -918,6 +1069,10 @@ async function main(): Promise<void> {
           appAsar: appAsarArtifact,
           sampleProject,
           sampleComponent,
+          renderHostBenchmarkProject,
+          renderHostBenchmarkPublished,
+          renderHostBenchmarkHtml,
+          renderHostBenchmarkNotices,
           exportedHtml,
           exportedPdf,
           exportedPptx,

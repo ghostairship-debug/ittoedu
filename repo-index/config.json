@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "tsconfigPaths": [
+    "tsconfig.json",
+    "tsconfig.electron.json",
+    "tsconfig.e2e.json"
+  ],
+  "scanRoots": [
+    "AGENTS.md",
+    "COURSEWARE_DEVELOPMENT_PLAN.md",
+    "README.md",
+    "artifacts/contracts",
+    "docs",
+    "package-lock.json",
+    "package.json",
+    "playwright.config.ts",
+    "repo-index",
+    "scripts",
+    "src",
+    "tests",
+    "tsconfig.e2e.json",
+    "tsconfig.electron.json",
+    "tsconfig.json",
+    "vite.player.config.ts",
+    "vite.renderer.config.ts",
+    "vitest.config.ts"
+  ],
+  "includeExtensions": [
+    ".cjs",
+    ".css",
+    ".html",
+    ".js",
+    ".json",
+    ".jsx",
+    ".md",
+    ".mjs",
+    ".mts",
+    ".cts",
+    ".ps1",
+    ".svg",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".yaml",
+    ".yml"
+  ],
+  "excludePathPrefixes": [
+    "docs/reviews",
+    "docs/tasks",
+    "docs/development-plan/tasks",
+    "repo-index/contexts",
+    "repo-index/generated"
+  ],
+  "excludeFiles": [
+    "artifacts/contracts/component-manifest.schema.json",
+    "artifacts/contracts/course-project-v9.schema.json",
+    "artifacts/contracts/published-course-v2.schema.json",
+    "docs/development-plan/TASK_BOARD.md"
+  ],
+  "semanticRoot": "repo-index/semantic",
+  "configFiles": [
+    "repo-index/config.json",
+    "tsconfig.e2e.json",
+    "tsconfig.electron.json",
+    "tsconfig.json"
+  ],
+  "toolPathPrefixes": [
+    "scripts/repo-index"
+  ],
+  "toolFiles": [
+    "package-lock.json",
+    "package.json",
+    "scripts/generate-repo-index.ts",
+    "scripts/query-repo-index.ts"
+  ]
+}

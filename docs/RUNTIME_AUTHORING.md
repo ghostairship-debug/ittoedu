@@ -1,22 +1,22 @@
-# 场景与全局自由运行时开发指南（API 2）
+# 场景与全局自由运行时开发指南（API 2/3 Published 纵切）
 
-> **当前工程格式是 Course Project V9。** 下文若仍出现 Project V8，只表示运行时曾随 V8 Native 形状一起定义；以 `src/shared/runtimeTypes.ts`、`runtimeSchema.ts` 和源码为准。
+> **当前工程格式是 Course Project V9。** 本文只描述当前 V9 可用边界；类型与协议真值以 `src/shared/runtimeTypes.ts`、`runtimeSchema.ts` 和源码为准。
 
-本文定义 `scene.runtime` / 画布运行时与 `globalRuntime` 的自由运行时创作协议。运行时只使用 `RuntimeDocument.runtimeApiVersion: 2`；API 1 会在当前入口得到明确拒绝。组件协议是另一套独立版本体系。
+本文主要定义 `scene.runtime` / 画布运行时与 `globalRuntime` 的 Runtime API 2 创作协议；API 1 会在当前入口得到明确拒绝。Course Project V9 还允许图层承载 `surface-runtime` API 3；当前发布执行实现了 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM 四个 playback 纵切。组件协议是另一套独立版本体系。
 
-文档同步基线：**2026-08-18**。生产 Schema、宿主、预览与发布路径只接受 Runtime API 2。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
+文档同步基线：**2026-08-26**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，且 host actions、presentation 与节点解析仍是明确的 partial context；API 3 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
 
 Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
 
-完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、运行时离线规则和四格式预检。该命令不执行运行时代码或真实导出，Node 布局近似也不能替代像素验收。
+完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。REPAIR 完成前，该命令尚不能证明完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致；它不执行运行时代码或真实导出，Node 布局近似和退出码 0 都不能替代真实 Player、导出画面与外部请求检查。
 
-编辑器的“编辑状态”和“当前位置试运行”使用同一块 1280×720 画布，Player 是唯一视觉源。编辑状态在 Blob sandbox iframe 中使用隔离 authoring Player 创建场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。当前位置试运行在原画布位置切换为完整 playback Player，直接从当前场景和当前命名状态启动（基础场景使用当前场景初始状态）。两种状态都使用会话过滤；父窗口用临时 Blob URL 承载文档，素材以可转移缓冲区进入沙箱后由 iframe 创建本地 Blob URL，实例替换、关闭、重试或失败时分别回收。顶部“整课预览”仍在独立窗口中从第一场景初始状态开始。
+编辑器的“编辑状态”使用 1280×720 authoring Player 创建 API 2 场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。“当前位置试运行”、整课预览、单 HTML 与网页包均复用 `createPublishedCourseSession` 执行路径并各自创建会话。Slide 场景 `layerItems` 与 `globalLayerItems` 内的 enabled `canvas-runtime` API 2 会按 `dom`、`phaser` 或 `hybrid` 执行真实源码；全局项在单个 Published session 中只创建一次，同一内层容器随 Slide/Flow/Spatial 导航迁移，普通换页保留实例与内部状态，restart 才销毁重建。Slide 场景与 Flow `surfaceLayerItems` 内的 `surface-runtime` API 3 DOM 也执行真实可点击 DOM，Flow 仅接受 `source: 'surface'`。`enabled: false`、global API 3 与未覆盖 carrier 继续显示后备；注册、创建、生命周期或 Phaser 核心销毁失败会完成 best-effort 清理并只回退该实例。Slide scene-local API 2 换场景会销毁旧 generation，Flow API 3 换 location 会重建；暂时切到其他 surface 时按 SurfaceHost `suspend()` / `resume()` 保留实例。API 2 的 actions/presentation/node resolution、Flow/Spatial scene-local、非 Flow surfaceLayerItems、捕获与宿主本地能力仍未由这些纵切覆盖。远程素材与 `connectOrigins` 在主 renderer 预览中按工程声明和实际 Published 引用建立可撤销 lease，但这不等于所有 Runtime API 或静态捕获已经具备网络 parity。authoring iframe 仍使用会话过滤、临时 Blob 文档和可转移素材缓冲区；它承担当前视觉合成、生命周期和会话竞态责任，不是可信 Runtime 必须永久继承的权限边界。
 
 Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩展。Blueprint、AI 局部 patch 和其他编辑器内 AI 接入延后到 2.0 以后；1.x 只预留版本化边界，不调用模型，也不允许运行时直接写工程 Store。
 
 类型真值以 [`src/shared/runtimeTypes.ts`](../src/shared/runtimeTypes.ts) 和 [`src/shared/runtimeSchema.ts`](../src/shared/runtimeSchema.ts) 为准。
 
-需要机器读取当前能力时，可从 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 发现 Runtime API 2 分域 Schema、协议版本和限制，再按需读取 `schemas/runtime-api2.json`。该生成物只是当前实现契约索引，不是运行时代码生成器、编辑器内 AI 或课件 Builder。
+需要机器读取当前能力时，可从 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 发现 Runtime API 2/3 的分域 Schema、协议版本和限制，再按需读取 `schemas/runtime-api2.json` 或 `schemas/runtime-api3.json`。两份生成物各自的 `publishedPlayback.status: 'partial'` 与 `notCovered` 是当前 carrier/host-context 范围的机器真相。该生成物不是运行时代码生成器、编辑器内 AI 或课件 Builder。
 
 ## 1. 选择场景运行时还是全局运行时
 
@@ -27,7 +27,7 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 
 整页少字的动画/特效/连续机制写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；稍复杂的局部互动（拖拽、配对、本地多步）制作 V4 组件，先匹配已有包，允许为本课新建。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
 
-编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史，试运行仍在隔离 Player 中执行。每个 Project V8 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由规则编排可编辑的结果。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；`scene-navigation` 统一经过导航守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
+编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。authoring 视觉仍在当前 iframe Player 中执行；Published V2 只对 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 开放真实 playback，其他 carrier/host context 仍显示 fallback、空实现或占位，不得借这些纵切验收全 parity。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由规则编排可编辑的结果。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；`scene-navigation` 统一经过导航守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
 
 ## 2. `RuntimeDocument`
 
@@ -93,7 +93,7 @@ CoursewareRuntime.define({
 })
 ```
 
-`define()` 中的版本必须与 `RuntimeDocument.runtimeApiVersion` 一致。源码不能使用 `import`、`export` 或 `require`。需要第三方库时，先将依赖打包为同一普通浏览器脚本；不得依赖 Node.js、Electron、CDN、远程字体或远程 API。
+`define()` 中的版本必须与 `RuntimeDocument.runtimeApiVersion` 一致。源码不能使用 `import`、`export` 或 `require`。需要第三方库时，先将依赖打包为同一普通浏览器脚本，不运行时加载远程脚本；远程媒体/API 按工程声明。Runtime 若需要父页面、本地、桌面或其他宿主能力，应使用目标环境明确提供的稳定合同，不能假定每个预览、浏览器或导出宿主都有同一能力。
 
 ## 4. 当前公开上下文
 
@@ -210,34 +210,10 @@ evidence-grade 候选。需要作为 `ACT-*` 证据的可见动作，应在实�
 
 Player 还会在 Runtime 挂载前开启独立的宿主证据会话，并以
 `[courseware-host-evidence-v1] ` 前缀输出严格 JSON。`session-start` 的
-`sequence` 固定为 `0`；后续 `assessment-evaluated`、`action-recorded` 与
-`teacher-escape-recorded` 共用同一个 `sessionId` 和无间断递增的
-`sequence`。
-
-`teacher-escape-recorded` 不是 Runtime API。它只由 `PlayerApp` 私有持有的
-`HostEvidenceRecorder` 与最顶层原生 `TeacherEscapeControls` 写入，Runtime
-上下文、`window` 和工程 store 都拿不到写入口。记录的精确业务字段为：
-
-```ts
-{
-  kind: 'teacher-escape-recorded'
-  action: 'previous' | 'next' | 'scene-picker' | 'replay'
-  phase: 'requested' | 'confirmation-required' | 'completed'
-  sceneId: string | null
-  stateId: string | null
-  bypassNavigationGuards: boolean
-  accepted?: boolean
-  eventType: 'click'
-}
-```
-
-每次原生按钮点击只会打开一个当前 `isTrusted` click 分发期间有效的写入闭包；
-同一次点击的 `requested` 与后续阶段可复用它，事件处理器返回后重放会被拒绝。
-受课程 guard 阻止的 `next` 首次点击记录 `requested` +
-`confirmation-required`，教师第二次点击才记录新的 `requested` + `completed`；
-`scene-picker` 与 `replay` 在各自同一次点击中记录 `requested` + `completed`。
-`courseware-teacher-escape-action` CustomEvent 只供界面观察，Runtime 可自行派发，
-因此绝不能当作证据。
+`sequence` 固定为 `0`；后续 `assessment-evaluated` 与 `action-recorded`
+共用同一个 `sessionId` 和无间断递增的 `sequence`。两类记录的
+写入口仍只由 `PlayerApp` 私有持有的 `HostEvidenceRecorder` 与 Runtime
+宿主桥接，不会暴露记录器本身。
 
 ## 5. 所有人工可见文字
 
@@ -349,7 +325,7 @@ ctx.dom.overlay.append(button)
 
 编辑器核心和 Player 不内置、导入或全局暴露 Three.js。需要地球、太阳系、立体几何或其他真 3D 时，由运行时作者在构建阶段把 Three.js 与所需 loader 一并打进 `source`，运行时仍声明 `renderMode: 'dom'`，把 `WebGLRenderer.domElement` 挂到 `ctx.dom.underlay` 或 `ctx.dom.overlay`；同时需要 Phaser 时才声明 `hybrid`。这让 3D 能力按课件付费，不增加不使用 3D 的工程核心负担。
 
-需要作者提供 3D 模型时，默认交付格式使用 GLB（glTF 二进制）；不要依赖 CDN 或运行时网络。当前 Project V8 的一等素材类型只有图片、声音和视频，不能把 GLB 伪装成图片后塞入 `RuntimeDocument.assets`：一次性小模型只能在 2 MiB 源码上限内随运行时构建产物离线嵌入，较大或可复用模型应放入 V4 组件包的 manifest asset。若产品需要独立替换/管理模型，必须先正式扩展 Project Schema、归档、编辑器“媒体”管理与导出链路。纹理、网格、动画和解码器必须一并离线打包并在目标设备验证显存与加载时间。改变 `renderMode` 不会自动把 Three.js 场景转换成 Phaser 或 DOM 元素。
+需要作者提供 3D 模型时，默认交付格式使用 GLB（glTF 二进制）；不要依赖 CDN 或运行时网络。当前 Course Project V9 的一等素材类型只有图片、声音和视频，不能把 GLB 伪装成图片后塞入 `RuntimeDocument.assets`：一次性小模型只能在 2 MiB 源码上限内随运行时构建产物离线嵌入，较大或可复用模型应放入 V4 组件包的 manifest asset。若产品需要独立替换/管理模型，必须先正式扩展 Project Schema、归档、编辑器“媒体”管理与导出链路。纹理、网格、动画和解码器必须一并离线打包并在目标设备验证显存与加载时间。改变 `renderMode` 不会自动把 Three.js 场景转换成 Phaser 或 DOM 元素。
 
 Three.js/WebGL 运行时至少要做到：
 
@@ -407,7 +383,7 @@ const onActivate = () => {
 
 Player 会在同一批根对象上原位更新文字、图片、图形、视频、教师控制器、组件 props、显隐、几何、层级和背景，并发布 `presentation:change`。这既保留组件生命周期与临时交互状态，也让最终稳定画面仍能在编辑画布、状态条和缩略图中修改。`setState()` / `transitionTo()` 返回同步 `boolean`；状态 ID 不存在或已经处于目标状态时返回 `false`。
 
-Project V8 不把动画时机存在节点上。可枚举的入场/退场是 `interactions` / `globalInteractions` 的 `node.enter` / `node.exit` 动作，由点击、场景/状态进入、节点激活、音视频/组件/运行时事件、`presenter.command` 或指定动画完成触发。每步可立即、淡化、滑动或缩放，并设置时长、缓动、局部延迟和顺序/并行关系。正常完成的动画按步骤 ID 发出 `animation.completed`；被新动画、状态基线更新或作用域销毁取消时不发。统一 `PresenterInput` 已把 PageUp/PageDown 和项目附加按键转换为前进/后退命令；`authored-command` 策略只分发显式作者规则，没有匹配规则时不隐式翻页，`scene-navigation` 策略仍统一经过导航守卫。
+Course Project V9 不把动画时机存在节点上。可枚举的入场/退场是 `interactions` / `globalInteractions` 的 `node.enter` / `node.exit` 动作，由点击、场景/状态进入、节点激活、音视频/组件/运行时事件、`presenter.command` 或指定动画完成触发。每步可立即、淡化、滑动或缩放，并设置时长、缓动、局部延迟和顺序/并行关系。正常完成的动画按步骤 ID 发出 `animation.completed`；被新动画、状态基线更新或作用域销毁取消时不发。统一 `PresenterInput` 已把 PageUp/PageDown 和项目附加按键转换为前进/后退命令；`authored-command` 策略只分发显式作者规则，没有匹配规则时不隐式翻页，`scene-navigation` 策略仍统一经过导航守卫。
 
 `TeacherControllerNode` 的授课拖动同样由 Player 宿主负责，不属于自由运行时。整个可见控制器使用统一点击/拖动候选手势；超过鼠标/触控阈值后抑制按钮并按逻辑画布坐标移动，旋转后的可见边界受限且可贴边。Alt+方向键提供键盘移动，Shift 细调；会话偏移在普通翻页和重播时保持，课程重开恢复作者 `x/y`。运行时不得复制一套拖拽、把临时偏移写进 `courseState`/Project，或拦截控制器的无障碍按键。
 
@@ -415,7 +391,7 @@ Project `designTokens` 是作者态的最小字体/色板词汇，`ImageNode.saf
 
 `playbackInitialVisibility: 'hidden'` 只表示互动 Player 开始时先隐藏等待入场。入场/退场只改变 Player 瞬态可见性和输入，不写回节点 `visible`、不调用 `presentation.setState()`。编辑画布、缩略图、PDF/PPTX 按作者稳定可见性显示。运行时不应为同一可枚举节奏重复实现 Tween；只有路径、关键帧、物理、粒子或算法动画继续属于运行时/组件。
 
-运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。编辑状态由 authoring Player 显示运行时真实稳定视觉；只有显式登记的 text/asset 区域可原位编辑，学生互动和瞬态业务仍须在“当前位置试运行”或“整课预览”验收。
+运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。编辑状态由 authoring Player 显示运行时真实稳定视觉；只有显式登记的 text/asset 区域可原位编辑。学生互动和瞬态业务只能在对应 carrier 的 Published playback parity 落地后，才用“当前位置试运行”或“整课预览”验收；当前包含 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM。API 2 若依赖 actions、presentation 或 nodes，仍必须等待对应宿主能力接线后验收。
 
 API 2 的 `phaser` / `hybrid` 上下文中，`ctx.nodes.get('actual_node_id')` 可直接按节点 ID 查询，用于当前工程中尚未声明 authoring target 的一次性互动或临时诊断；新创作仍不应在 `source` 中硬编码节点 ID。
 
@@ -439,11 +415,11 @@ const soundUrl = ctx.assets.url('successSound')
 const directProjectUrl = ctx.assets.projectUrl('asset_character')
 ```
 
-优先使用 `url(bindingKey)`，这样工程素材替换时无需改源码。返回值在单 HTML 中可能是 Data URL，在网页包中可能是相对 URL；不要解析或长期缓存其物理路径。
+优先使用 `url(bindingKey)`，这样工程素材替换时无需改源码。返回值在离线便携单 HTML 中是 Data URL，在在线轻量单 HTML 中也可能是工程声明的远程 HTTPS URL，在网页包中可能是相对 URL；不要解析或长期缓存其物理路径。
 
 工程删除素材时会复用带位置的共享引用图。`RuntimeDocument.assets` 与 `staticFallback` 是直接引用；`content.values` 和 `source` 中可保守识别的工程素材 ID 也会阻止删除。场景/全局 Runtime 即使 `enabled: false` 仍保留作者数据，但发布资源投影只纳入实际启用、会执行的运行时引用；这两个语义不能混用。为了得到稳定诊断和可维护替换，优先使用显式绑定，不要只在源码字符串中散落 Asset ID。
 
-Project V8 已为常规媒体播放提供一等模型：声音先登记到 `media.audio.sounds`，由声明式规则按稳定声音 ID 控制，统一经过主音量、`music/narration/sfx/ui` 声道、默认静音和旁白 ducking。视频使用可编辑 `VideoNode`，其声音进入 `video` 声道。媒体事件可以直接触发元素入场/退场或其他动作步骤，运行时不应绕过该模型重建背景音乐、静音按钮或视频 DOM。
+Course Project V9 已为常规媒体播放提供一等模型：声音先登记到 `media.audio.sounds`，由声明式规则按稳定声音 ID 控制，统一经过主音量、`music/narration/sfx/ui` 声道、默认静音和旁白 ducking。视频使用可编辑 `VideoNode`，其声音进入 `video` 声道。媒体事件可以直接触发元素入场/退场或其他动作步骤，运行时不应绕过该模型重建背景音乐、静音按钮或视频 DOM。
 
 若运行时确实自行创建音频或媒体流，它不受内置声道、画布教师控制器和声音映射自动管理，作者必须显式同步静音状态并在 `destroy()` 中暂停、解绑并释放资源。大视频不要转成源码字符串；登记为工程视频素材，交付时优先选择网页包。
 
@@ -470,7 +446,7 @@ ctx.localState.set('attempts', attempts)
 ctx.courseState.set('challengePassed', true)
 ```
 
-当前只有 Runtime/Component 上下文可以直接读写 `courseState`，声明式 `interactions` 还没有课程状态条件、动作或导航守卫语法。[声明式课程状态与导航守卫 RFC](reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md) 仍是等待人类批准的提案；测试目录内的最小内存原型未进入生产代码，也没有改变 API 2、Project V8 或导出合同。不要在当前工程中生成 RFC 示例字段。
+当前只有 Runtime/Component 上下文可以直接读写 `courseState`，声明式 `interactions` 还没有课程状态条件、动作或导航守卫语法。曾有一份声明式课程状态与导航守卫 RFC（2026-08-12，现存于 Git 历史），仍是未批准提案；最小内存原型未进入生产代码，也没有改变 API 2 或导出合同。不要在当前工程中生成 RFC 示例字段。
 
 ## 10. 事件
 
@@ -609,18 +585,18 @@ interface RuntimeInstanceLifecycle {
 
 挂在已声明的 `ctx.phaser.underlay/overlay` 或 `ctx.dom.underlay/overlay` 内的对象会由宿主兜底销毁，但不能依赖兜底掩盖泄漏。单个运行时启动或生命周期方法失败时，宿主记录该实例的首个失败、销毁其挂载并保留其他内容可翻页；该实例后续捕获会继续拒绝，不能在隐藏/恢复或第二次捕获时被误判为成功。导出器只回退受影响的页面、运行时条目或图层，不静默生成空白，也不丢弃其他成功结果。
 
-## 15. 安全边界
+## 15. 信任与宿主边界
 
-运行时是可信本地代码。预览和捕获环境禁用 Node.js、Electron API、外部导航、下载、权限和网络，但这不是恶意 JavaScript 的绝对沙箱。
+Runtime 是经过审核的可信扩展。当前统一画布的 authoring 与 playback 位于不授予同源权限的 sandbox iframe；authoring 额外冻结宿主输入、动作、内置媒体、导航、呈现状态变化与课程状态写入，并且只通过带版本、会话和 revision 的目标快照与编辑器通信。这些是当前视觉合成与生命周期行为，不是把 Runtime 当作不可信代码的安全合同。
 
-统一画布不会把运行时放进 React 主窗口执行。authoring 与 playback 都位于不授予同源权限的 sandbox iframe；authoring 额外冻结宿主输入、动作、内置媒体、导航、呈现状态变化与课程状态写入，并且只通过带版本、会话和 revision 的只读目标快照与编辑器通信。运行时是可信代码，仍必须在 authoring/capture 上下文中停止自行创建的原生音频、外部计时和业务推进；`ctx.authoring` 不是安全沙箱，也不是工程写 API。
+运行时确需父页面、本地、桌面或其他能力时，应由目标宿主提供稳定接口或同宿主执行语义；网页与静态导出可以不提供桌面专属能力，但必须明确降级。运行时仍须在 authoring/capture 上下文中停止自行创建的原生音频、外部计时和业务推进；`ctx.authoring` 是编辑协议，不是任意工程写 API。
 
-不要存放密钥、账号、隐私数据或远程控制逻辑；不要尝试访问本机文件系统；只分发经审查的工程。
+不要持久化或导出密钥、账号、隐私数据；远程脚本仍不开放，只分发经审查的工程。
 
 ## 16. 发布检查清单
 
 - [ ] 选择 scene/global 作用域有明确理由，没有为形式而组件化。
-- [ ] `source` 同步且只注册一个 API 2 定义；API 1 输入明确拒绝；无模块语法和远程依赖。
+- [ ] `source` 同步且只注册一个 API 2 定义；API 1 输入明确拒绝；无模块语法或远程脚本，远程媒体/API 与工程声明一致。
 - [ ] 所有人工可见文字都来自 `content.values`，metadata 标签清楚。
 - [ ] 如开放统一画布编辑，定义显式使用 `authoringApiVersion: 1`；registered/DOM text 与 asset key 分别存在于 `content.values` / `assets`，目标边界、更新、注销和普通宿主无 `ctx.authoring` 时均正确。
 - [ ] 运行时内容/素材的画布修改共享语义明确：`scene.runtime` 由当前场景全部命名状态共享，`globalRuntime` 由整课共享；未声明 authoring 目标的 API 2 运行时仍正常显示并可从属性面板编辑。
@@ -631,17 +607,17 @@ interface RuntimeInstanceLifecycle {
 - [ ] 稳定结果使用命名呈现状态；状态 ID 存在，编辑状态、当前位置试运行和缩略图状态切换一致。
 - [ ] 能由点击、状态/场景切换、声音或视频动作表达的逻辑已优先使用场景 `interactions` 或 `globalInteractions`；全局规则的 `scene.in` 正确，运行时未重复处理同一触发。
 - [ ] 跨场景指定状态使用 `goToScene(sceneId, targetStateId)` 或 `scene.go.targetStateId`，无效引用回退语义已验证。
-- [ ] 可枚举入场/退场使用 Project V8 `node.enter` / `node.exit`，有明确业务触发、顺序/并行/延迟与完成事件；运行时未重复同一宿主动画。
+- [ ] 可枚举入场/退场使用 Course Project V9 `node.enter` / `node.exit`，有明确业务触发、顺序/并行/延迟与完成事件；运行时未重复同一宿主动画。
 - [ ] `playbackInitialVisibility` 只影响互动 Player；编辑、缩略图和静态导出保持作者稳定画面。
-- [ ] 常规声音和视频使用 Project V8 媒体管理；运行时自建媒体已同步静音并完整清理。
+- [ ] 常规声音和视频使用 Course Project V9 媒体管理；运行时自建媒体已同步静音并完整清理。
 - [ ] local/course 状态边界符合重播和重开语义。
 - [ ] `resize/setVisible/suspend/resume` 与场景/全局生命周期相符；事件、守卫、监听、RAF、Tween、Timer、音频、WebGL 和 GPU 资源在销毁时清理。
 - [ ] `capture.waitUntil()` 不会永久阻塞；`prepareCapture()` 能为 Canvas/WebGL 主动渲染一个确定帧；实现没有私造多帧时间线或第二套捕获协议。
-- [ ] Three.js 如有使用，仅打包在该运行时内，GLB/纹理/loader 均离线，编辑器核心不承担 Three.js 依赖。
-- [ ] 完整归档已运行 `npm run --silent validate:project -- <file.h5lesson>`；按 JSON 中的 Schema、Project Health 和四格式预检修复确定性错误，Node 近似布局警告留给真实像素复核。
-- [ ] 工程检查没有阻断错误；信息释放/视觉密度只作为只读复核线索；四种目标的 Export Preflight 已审阅，阻断错误修复，必要时保存 JSON；需要排障时另行导出异常诊断报告。
+- [ ] Three.js 如有使用，其执行库打包在该运行时内；GLB/纹理/loader 使用工程内资源或已声明远程交付，并有捕获/离线降级，编辑器核心不承担 Three.js 依赖。
+- [ ] 完整归档已运行 `npm run --silent validate:project -- <file.h5lesson>`；按 JSON 中的 Schema、当前已接线的结构性工程健康结果和四格式预检修复确定性错误，Node 近似布局、源码外联网络与真实像素另行复核。
+- [ ] 工程检查没有已检出的阻断错误；信息释放/视觉密度只作为只读复核线索；四种目标的 Export Preflight 已审阅，但不把报告存在当作完整覆盖证明；需要排障时另行导出异常诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。
 - [ ] 编辑状态与当前位置试运行使用同一 1280×720 Player 视觉边界；authoring 冻结互动、媒体、导航和课程状态，透明 Phaser 层没有造成位置偏移或重复视觉。
-- [ ] 自动化 Electron 验证保持主窗口和预览窗口始终隐藏，不调用 `show()` 或抢占桌面；只在显式可视调试命令中显示窗口。
+- [ ] 自动化 Electron 验证保持主窗口始终隐藏，不调用 `show()` 或抢占桌面；只在显式可视调试命令中显示窗口。
 
 API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。其规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。该基准不替代真实课件的命名呈现状态设计。

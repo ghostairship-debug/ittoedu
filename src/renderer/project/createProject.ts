@@ -449,7 +449,7 @@ export function createTeacherControllerNode(
     showSceneProgress: options.showSceneProgress ?? true,
     compact: options.compact ?? false,
     collapsible: options.collapsible ?? true,
-    defaultCollapsed: options.defaultCollapsed ?? false,
+    defaultCollapsed: options.defaultCollapsed ?? true,
     buttons: options.buttons ?? [
       { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.previous' }, label: '上一场景', visible: true },
       { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.next' }, label: '下一场景', visible: true },

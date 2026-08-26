@@ -12,6 +12,7 @@ export {
   authoringAddressScopeForOwner,
   carrierForLayerKind,
   commandTargetFromRow,
+  composeEffectiveLayerLocation,
   courseAuthoringScopeFromLocation,
   createCourseAuthoringScope,
   createEffectiveLayerItemActionInput,
@@ -27,6 +28,10 @@ export {
   scopeTokenForSelectingRow,
   visualFrontToBackRows,
 } from '../effectiveLayerProjection'
+
+export { composeSlideEditorLocation } from '../slideEditorView'
+export { composeFlowEditorLocation } from '../flowEditorView'
+export { composeSpatialEditorLocation } from '../spatialEditorView'
 
 export type {
   CourseAuthoringAddressScope,

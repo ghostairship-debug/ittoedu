@@ -6,7 +6,10 @@ import {
 } from '../../player/surfaces/publishedFormula'
 
 export function PublishedFormulaPaint(
-  input: PublishedFormulaPaintInput & { readonly lockHeight?: boolean },
+  input: PublishedFormulaPaintInput & {
+    readonly lockHeight?: boolean
+    readonly pointerEvents?: 'auto' | 'none'
+  },
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
   const height = input.lockHeight ? input.height : fittedPublishedFormulaSize(input).height
@@ -37,6 +40,7 @@ export function PublishedFormulaPaint(
         height,
         maxWidth: '100%',
         overflow: 'hidden',
+        pointerEvents: input.pointerEvents,
       }}
     />
   )

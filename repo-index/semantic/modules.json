@@ -1,0 +1,507 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "schemaVersion": 1,
+      "id": "module:shared-contracts",
+      "name": "Shared Contracts",
+      "origin": "semantic",
+      "status": "existing",
+      "statusClass": "current-must-preserve",
+      "owner": "Shared Contracts/Domain",
+      "currentFact": "Authoring, Published, Runtime, Component and Interaction contracts live under src/shared/contracts.",
+      "targetState": "Remain platform- and renderer-independent.",
+      "entrypoints": [
+        "src/shared/contracts/index.ts"
+      ],
+      "allowedDependencies": [],
+      "forbiddenDependencies": [
+        "src/renderer",
+        "src/player",
+        "src/main",
+        "src/preload"
+      ],
+      "dependencyPolicyPhase": "current-and-forward",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:editor-core",
+      "name": "Editor Core",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Editor Core",
+      "currentFact": "Current responsibilities are spread across Store, authoring identity and read-model files.",
+      "targetState": "Canonical document, target validation, transaction/history and narrow selectors.",
+      "entrypoints": [
+        "src/renderer/course/read-model/index.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared"
+      ],
+      "forbiddenDependencies": [
+        "src/player",
+        "src/renderer/ui",
+        "src/renderer/App.tsx"
+      ],
+      "dependencyPolicyPhase": "ARCH-1",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-1",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:app-persistence",
+      "name": "App Composition and Persistence",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "App/Persistence",
+      "currentFact": "V9 lifecycle works, but App.tsx also owns catalog, media, preview, export and diagnostics composition.",
+      "targetState": "Lifecycle/use-case composition through narrow domain entrypoints.",
+      "entrypoints": [
+        "src/renderer/App.tsx",
+        "src/renderer/project/courseProjectIo.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/store",
+        "src/renderer/project",
+        "src/renderer/course",
+        "src/renderer/components",
+        "src/renderer/preview",
+        "src/renderer/export"
+      ],
+      "forbiddenDependencies": [
+        "src/main",
+        "src/preload",
+        "src/player/PlayerApp.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-1/ARCH-2",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-2",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:surface-slide",
+      "name": "Surface Slide",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Surface/Slide",
+      "currentFact": "Slide commands, state and Phaser editing are implemented but Store/UI wiring remains broad.",
+      "targetState": "Slide-owned commands, selection and edit geometry behind a stable seam.",
+      "entrypoints": [
+        "src/renderer/course/slideAuthoringBackend.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/authoring",
+        "src/renderer/phaser"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/course/flowEditorCommands.ts",
+        "src/renderer/course/spatialEditorCommands.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-3",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-3",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:surface-flow",
+      "name": "Surface Flow",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Surface/Flow",
+      "currentFact": "Flow command, text, layout and overlay responsibilities are distributed across command and UI hotspots.",
+      "targetState": "FlowBlock body and overlay placement remain separate behind Flow-owned APIs.",
+      "entrypoints": [
+        "src/renderer/course/flowEditorCommands.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/authoring",
+        "src/renderer/course"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/phaser",
+        "src/renderer/course/spatialEditorCommands.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-3",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-3",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:surface-spatial",
+      "name": "Surface Spatial",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Surface/Spatial",
+      "currentFact": "World, camera, path and relation commands exist across several focused files.",
+      "targetState": "Spatial-owned commands with session camera kept outside persisted V9.",
+      "entrypoints": [
+        "src/renderer/course/spatialEditorCommands.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/authoring",
+        "src/renderer/course"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/course/flowEditorCommands.ts",
+        "src/player/PlayerApp.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-3",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-3",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:feature-media",
+      "name": "Feature Media",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Media",
+      "currentFact": "Media metadata, bytes and import commands exist but share Store/App integration.",
+      "targetState": "Media validates resource plans; Surface owns placement; Core commits atomically.",
+      "entrypoints": [
+        "src/renderer/course/v9MediaAudioCommands.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/project"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/components"
+      ],
+      "dependencyPolicyPhase": "ARCH-1/ARCH-2",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-2",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:feature-components",
+      "name": "Feature Components",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Components",
+      "currentFact": "Catalog, package lifecycle, authoring and runtime mounting exist in separate current files.",
+      "targetState": "Package/default-prop services independent of Surface carrier placement.",
+      "entrypoints": [
+        "src/renderer/components/componentPackageStore.ts",
+        "src/renderer/components/importComponentPackage.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/project"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/course/flowEditorCommands.ts",
+        "src/renderer/course/spatialEditorCommands.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-2",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-2",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:runtime-interactions",
+      "name": "Runtime and Interactions",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Runtime / Interactions",
+      "currentFact": "Shared contracts and Player engines exist; authoring UI remains coupled to Store hotspots.",
+      "targetState": "Narrow authoring validators/commands and lifecycle-safe trusted runtime consumers with explicit host capabilities.",
+      "entrypoints": [
+        "src/player/RuntimeHost.ts",
+        "src/player/InteractionEngine.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/player"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/project"
+      ],
+      "dependencyPolicyPhase": "ARCH-2",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-2",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:global-layers-controller",
+      "name": "Global Layers and Teacher Controller",
+      "origin": "semantic",
+      "status": "existing",
+      "statusClass": "current-must-preserve",
+      "owner": "Global Layers / Teacher Controller",
+      "currentFact": "Ownership, effective order and single global controller semantics are established.",
+      "targetState": "Preserve semantics while narrowing Store/UI adapters.",
+      "entrypoints": [
+        "src/renderer/course/effectiveLayerCommands.ts",
+        "src/renderer/authoring/v9TeacherControllerAuthoring.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/authoring",
+        "src/renderer/course/read-model"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx",
+        "src/renderer/course/flowEditorCommands.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-2",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-2",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:preview-player",
+      "name": "Preview and Player",
+      "origin": "semantic",
+      "status": "existing",
+      "statusClass": "current-must-preserve",
+      "owner": "Preview / Player",
+      "currentFact": "Published V2 CoursePlayer hosts are the normal try-run/full-preview path.",
+      "targetState": "Readonly Published consumers; no renderer Store or legacy Player fallback for normal V9.",
+      "entrypoints": [
+        "src/renderer/ui/coursePlayerTryRun.ts",
+        "src/player/surfaces/publishedDynamicHosts.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/player/surfaces",
+        "src/renderer/export/course"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/store",
+        "src/player/PlayerApp.ts"
+      ],
+      "dependencyPolicyPhase": "current-and-ARCH-4",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-4",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:export-delivery",
+      "name": "Export Delivery",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Export / Published Producer",
+      "currentFact": "V2 HTML/Web and format adapters coexist with PPTX/PDF/Legacy branches.",
+      "targetState": "One Published producer and format-specific readonly adapters with explicit fallback semantics.",
+      "entrypoints": [
+        "src/renderer/export/course/index.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/player/surfaces"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/store",
+        "src/renderer/App.tsx"
+      ],
+      "dependencyPolicyPhase": "ARCH-4",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-4",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md",
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:diagnostics",
+      "name": "Diagnostics",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "Diagnostics",
+      "currentFact": "Project Health, export preflight and navigation exist, partly over V8 projection.",
+      "targetState": "Readonly V9 structural/authoring/export diagnostics.",
+      "entrypoints": [
+        "src/renderer/export/exportPreflight.ts",
+        "src/renderer/diagnostics/projectHealthNavigation.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/export/course"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/store/editorStore.ts"
+      ],
+      "dependencyPolicyPhase": "ARCH-2/ARCH-4",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-4",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:ui-composition",
+      "name": "UI Composition",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "current-debt",
+      "owner": "UI Integrator",
+      "currentFact": "App, Workspace, Properties and DeveloperTab contain both routing and domain implementation.",
+      "targetState": "Routes, panels and feedback over narrow typed Feature/Surface entrypoints.",
+      "entrypoints": [
+        "src/renderer/App.tsx",
+        "src/renderer/ui/RightSidebar.tsx"
+      ],
+      "allowedDependencies": [
+        "src/shared",
+        "src/renderer/store",
+        "src/renderer/course",
+        "src/renderer/components",
+        "src/renderer/export"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/store/history.ts",
+        "src/main",
+        "src/preload"
+      ],
+      "dependencyPolicyPhase": "ARCH-3",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-3",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:main-preload",
+      "name": "Main and Preload",
+      "origin": "semantic",
+      "status": "existing",
+      "statusClass": "current-must-preserve",
+      "owner": "Main / Preload",
+      "currentFact": "Electron services and the context-isolated DesktopAPI boundary are established.",
+      "targetState": "Maintain IPC parity, security, trust/path checks and atomic persistence.",
+      "entrypoints": [
+        "src/main/index.ts",
+        "src/preload/index.ts"
+      ],
+      "allowedDependencies": [
+        "src/shared"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer",
+        "src/player"
+      ],
+      "dependencyPolicyPhase": "current-and-forward",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-2/ARCH-5",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:tooling-release",
+      "name": "Tooling and Release Compatibility",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "transitional-allowance",
+      "owner": "Tooling / Release",
+      "currentFact": "Release and benchmark tooling retains explicit V8 consumers outside product open.",
+      "targetState": "Each consumer is migrated or retained with an explicit compatibility reason.",
+      "entrypoints": [
+        "scripts/verify-release.ts"
+      ],
+      "allowedDependencies": [
+        "scripts",
+        "src/shared",
+        "src/renderer/project",
+        "src/renderer/export"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/App.tsx"
+      ],
+      "dependencyPolicyPhase": "ARCH-5",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-5",
+      "reviewGate": "ARCH-5 exact consumer-zero and packaged-artifact inspection",
+      "evidence": [
+        "docs/development-plan/inventories/legacy-consumers.json"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "module:repo-knowledge",
+      "name": "Repo Knowledge",
+      "origin": "semantic",
+      "status": "partial",
+      "statusClass": "target-acceptance",
+      "owner": "Repo Knowledge",
+      "currentFact": "Deterministic generation exists; the generated cache is an optional untracked local navigation cache with no golden or quality gate.",
+      "targetState": "Fresh Context Packs with correct confidence and Bootstrap fallback.",
+      "entrypoints": [
+        "scripts/generate-repo-index.ts"
+      ],
+      "allowedDependencies": [
+        "scripts/repo-index",
+        "typescript/unstable/sync"
+      ],
+      "forbiddenDependencies": [
+        "src/renderer/store",
+        "src/player"
+      ],
+      "dependencyPolicyPhase": "ARCH-0B",
+      "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
+      "ownerReviewPhase": "ARCH-0B",
+      "evidence": [
+        "docs/development-plan/ARCHITECTURE_CONTRACT.md"
+      ]
+    }
+  ]
+}

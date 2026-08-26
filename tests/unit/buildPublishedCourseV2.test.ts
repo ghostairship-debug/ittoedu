@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ZodError } from 'zod'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -15,11 +16,15 @@ import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
   collectPublishedCourseComponentKeys,
+  PublishedCourseSourceError,
   type CoursePublishSources,
+  type PublishedCourseSourceIssueCode,
 } from '@/renderer/export/course/buildPublishedCourse'
+import { collectCoursePackageExportPreflight } from '@/renderer/export/course/buildCoursePackages'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 const ASSET_BYTES = new Uint8Array([1, 2, 3])
+const PLAYER_BUNDLE = 'window.__COURSE_PLAYER_PLACEHOLDER__=true;'
 
 function asset(id: string, kind: AssetMeta['kind'] = 'image'): AssetMeta {
   const mimeType = kind === 'audio' ? 'audio/mpeg' : kind === 'video' ? 'video/mp4' : 'image/png'
@@ -415,6 +420,37 @@ function mixedSources(): CoursePublishSources {
   }
 }
 
+interface MutableCoursePublishSources {
+  project: CourseProjectDocument
+  assetFiles: Record<string, Uint8Array>
+  components: Record<string, ComponentPackageData>
+}
+
+function mutableMixedSources(): MutableCoursePublishSources {
+  const source = mixedSources()
+  const assetFiles: Record<string, Uint8Array> = {}
+  const components: Record<string, ComponentPackageData> = {}
+  for (const [key, bytes] of Object.entries(source.assetFiles)) {
+    assetFiles[key] = Uint8Array.from(bytes)
+  }
+  for (const [key, component] of Object.entries(source.components)) {
+    const files: Record<string, Uint8Array> = {}
+    for (const [path, bytes] of Object.entries(component.files)) {
+      files[path] = Uint8Array.from(bytes)
+    }
+    components[key] = {
+      ...component,
+      manifest: structuredClone(component.manifest),
+      files,
+    }
+  }
+  return {
+    project: structuredClone(source.project),
+    assetFiles,
+    components,
+  }
+}
+
 describe('Published Course V2 producer', () => {
   it('builds V2 from an in-memory V9 project and keeps ownership, locations and asset closure', () => {
     const sources = mixedSources()
@@ -477,6 +513,29 @@ describe('Published Course V2 producer', () => {
     expect(Object.keys(published.components)).toEqual(['component.quiz@4.0.0'])
   })
 
+  it('exposes validated V9 remote delivery metadata to an opt-in asset projection', () => {
+    const sources = mixedSources()
+    sources.project.assets['slide-image']!.remote = {
+      url: 'https://media.example.com/course/slide-image.png?revision=3',
+    }
+    sources.project.assets.unused!.remote = {
+      url: 'https://media.example.com/course/unused.png',
+    }
+
+    const published = buildPublishedCourseV2Payload(sources, {
+      projectAssetUrl(_assetId, metadata) {
+        return metadata.remote?.url
+      },
+    })
+
+    expect(published.assets['slide-image']?.url)
+      .toBe('https://media.example.com/course/slide-image.png?revision=3')
+    expect(published.assets['flow-image']?.url).toMatch(/^data:image\/png;base64,/)
+    expect(published.assets).not.toHaveProperty('unused')
+    expect(published.components['component.quiz@4.0.0']?.assets.icon?.url)
+      .toMatch(/^data:image\/png;base64,/)
+  })
+
   it('copies Flow blocks and Spatial world data without claiming host playback', () => {
     const published = buildPublishedCourseV2Payload(mixedSources())
     const flow = published.surfaces.find((surface) => surface.type === 'flow')
@@ -533,7 +592,259 @@ describe('Published Course V2 producer', () => {
     expect(published).not.toHaveProperty('playbackResult')
   })
 
-  it('rejects a raw V8 project and missing asset bytes', () => {
+  it('uses the same source facts as package preflight before producing V2', () => {
+    const ready = mutableMixedSources()
+    const readyReport = collectCoursePackageExportPreflight(
+      ready.project,
+      'web-package',
+      { assetFiles: ready.assetFiles, components: ready.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(readyReport.summary.canExport).toBe(true)
+    expect(() => buildPublishedCourseV2Payload(ready)).not.toThrow()
+
+    const cases: Array<{
+      name: string
+      code: PublishedCourseSourceIssueCode
+      path: ReadonlyArray<string | number>
+      mutate(sources: MutableCoursePublishSources): void
+    }> = [
+      {
+        name: 'missing asset metadata',
+        code: 'asset-metadata-missing',
+        path: ['assets', 'slide-image'],
+        mutate(sources) {
+          delete sources.project.assets['slide-image']
+        },
+      },
+      {
+        name: 'missing asset bytes',
+        code: 'asset-bytes-missing',
+        path: ['assets', 'slide-image'],
+        mutate(sources) {
+          delete sources.assetFiles['slide-image']
+        },
+      },
+      {
+        name: 'asset byte length mismatch',
+        code: 'asset-byte-length-mismatch',
+        path: ['assets', 'slide-image', 'byteLength'],
+        mutate(sources) {
+          sources.assetFiles['slide-image'] = new Uint8Array([1, 2])
+        },
+      },
+      {
+        name: 'missing component metadata',
+        code: 'component-metadata-missing',
+        path: ['componentPackages', 'component.quiz'],
+        mutate(sources) {
+          delete sources.project.componentPackages['component.quiz']
+        },
+      },
+      {
+        name: 'missing component bytes',
+        code: 'component-bytes-missing',
+        path: ['componentPackages', 'component.quiz'],
+        mutate(sources) {
+          delete sources.components['component.quiz']
+        },
+      },
+      {
+        name: 'component manifest identity mismatch',
+        code: 'component-manifest-identity-mismatch',
+        path: ['componentPackages', 'component.quiz'],
+        mutate(sources) {
+          const component = sources.components['component.quiz']!
+          sources.components['component.quiz'] = {
+            ...component,
+            manifest: { ...component.manifest, id: 'component.other' },
+          }
+        },
+      },
+      {
+        name: 'component content hash mismatch',
+        code: 'component-hash-mismatch',
+        path: ['componentPackages', 'component.quiz', 'contentSha256'],
+        mutate(sources) {
+          sources.project.componentPackages['component.quiz']!.contentSha256 = '0'.repeat(64)
+        },
+      },
+      {
+        name: 'component asset closure missing bytes',
+        code: 'component-asset-bytes-missing',
+        path: ['componentPackages', 'component.quiz'],
+        mutate(sources) {
+          const component = sources.components['component.quiz']!
+          const files = { ...component.files }
+          delete files['assets/icon.png']
+          const contentSha256 = componentContentSha256(files)
+          sources.components['component.quiz'] = { ...component, files, contentSha256 }
+          sources.project.componentPackages['component.quiz']!.contentSha256 = contentSha256
+        },
+      },
+    ]
+
+    for (const scenario of cases) {
+      const sources = mutableMixedSources()
+      scenario.mutate(sources)
+      const report = collectCoursePackageExportPreflight(
+        sources.project,
+        'web-package',
+        { assetFiles: sources.assetFiles, components: sources.components },
+        PLAYER_BUNDLE,
+        new Date(NOW),
+      )
+      expect(report.summary.canExport, scenario.name).toBe(false)
+      expect(report.items, scenario.name).toContainEqual(expect.objectContaining({
+        severity: 'error',
+        code: scenario.code,
+        path: scenario.path,
+      }))
+
+      try {
+        buildPublishedCourseV2Payload(sources)
+        throw new Error(`expected producer to reject ${scenario.name}`)
+      } catch (error) {
+        expect(error, scenario.name).toBeInstanceOf(PublishedCourseSourceError)
+        expect(error, scenario.name).toMatchObject({
+          code: scenario.code,
+          path: scenario.path,
+        })
+      }
+    }
+  })
+
+  it('normalizes schema-valid V9 source facts before preflight and production', () => {
+    const sources = mutableMixedSources()
+    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+
+    sources.project.assets['slide-image']!.id = ' slide-image '
+    slide.scenes[0]!.backgroundAssetId = ' slide-image '
+    const bytes = sources.assetFiles['slide-image']!
+    delete sources.assetFiles['slide-image']
+    sources.assetFiles[' slide-image '] = bytes
+
+    expect(courseProjectDocumentSchema.safeParse(sources.project).success).toBe(true)
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'asset-bytes-missing',
+      path: ['assets', 'slide-image'],
+    }))
+    try {
+      buildPublishedCourseV2Payload(sources)
+      throw new Error('expected normalized source gate to reject raw asset bytes')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PublishedCourseSourceError)
+      expect(error).toMatchObject({
+        code: 'asset-bytes-missing',
+        path: ['assets', 'slide-image'],
+      })
+    }
+
+    delete sources.assetFiles[' slide-image ']
+    sources.assetFiles['slide-image'] = bytes
+    const readyReport = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(readyReport.summary.canExport).toBe(true)
+    expect(buildPublishedCourseV2Payload(sources).assets['slide-image']).toBeDefined()
+  })
+
+  it('gates structurally malformed native image data with the shared schema diagnostic', () => {
+    for (const scenario of [
+      { name: 'null data', data: null },
+      { name: 'empty data object', data: {} },
+    ]) {
+      const sources = mutableMixedSources()
+      const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+      if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+      const image = slide.scenes[0]!.layerItems.find(
+        (item) => item.kind === 'native' && item.content.nativeType === 'image',
+      )
+      if (!image || image.kind !== 'native') throw new Error('expected native image item')
+      ;(image.content as { data: unknown }).data = scenario.data
+
+      const parsed = courseProjectDocumentSchema.safeParse(sources.project)
+      if (parsed.success) throw new Error('expected malformed native data to fail schema parse')
+      expect(parsed.error.issues.every((issue) => issue.code === 'custom'), scenario.name)
+        .toBe(true)
+      const firstIssuePath = parsed.error.issues[0]!.path
+
+      const report = collectCoursePackageExportPreflight(
+        sources.project,
+        'web-package',
+        { assetFiles: sources.assetFiles, components: sources.components },
+        PLAYER_BUNDLE,
+        new Date(NOW),
+      )
+      expect(report.summary.canExport, scenario.name).toBe(false)
+      expect(report.items, scenario.name).toContainEqual(expect.objectContaining({
+        severity: 'error',
+        code: 'project-schema-invalid',
+        path: firstIssuePath,
+      }))
+
+      try {
+        buildPublishedCourseV2Payload(sources)
+        throw new Error(`expected producer to reject ${scenario.name}`)
+      } catch (error) {
+        expect(error, scenario.name).toBeInstanceOf(PublishedCourseSourceError)
+        expect(error, scenario.name).not.toBeInstanceOf(TypeError)
+        expect(error, scenario.name).toMatchObject({
+          code: 'project-schema-invalid',
+          path: firstIssuePath,
+        })
+      }
+    }
+  })
+
+  it('gates schema-invalid V9 with the shared typed diagnostic and keeps raw V8 on the Zod error path', () => {
+    const malformedV9 = mutableMixedSources()
+    delete (malformedV9.project as unknown as Record<string, unknown>).globalLayerItems
+
+    const parsed = courseProjectDocumentSchema.safeParse(malformedV9.project)
+    if (parsed.success) throw new Error('expected malformed V9 to fail schema parse')
+    const firstIssuePath = parsed.error.issues[0]!.path
+
+    const report = collectCoursePackageExportPreflight(
+      malformedV9.project,
+      'web-package',
+      { assetFiles: malformedV9.assetFiles, components: malformedV9.components },
+      PLAYER_BUNDLE,
+      new Date(NOW),
+    )
+    expect(report.summary.canExport).toBe(false)
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'project-schema-invalid',
+      path: firstIssuePath,
+    }))
+    try {
+      buildPublishedCourseV2Payload(malformedV9)
+      throw new Error('expected producer to reject schema-invalid V9')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PublishedCourseSourceError)
+      expect(error).not.toBeInstanceOf(ZodError)
+      expect(error).toMatchObject({
+        code: 'project-schema-invalid',
+        path: firstIssuePath,
+      })
+    }
+
     const v8 = createProject({
       id: 'v8-raw',
       title: 'V8 工程',
@@ -544,7 +855,7 @@ describe('Published Course V2 producer', () => {
       project: v8 as unknown as CourseProjectDocument,
       assetFiles: {},
       components: {},
-    })).toThrow()
+    })).toThrow(ZodError)
 
     const sources = mixedSources()
     const { 'slide-image': _omit, ...rest } = sources.assetFiles

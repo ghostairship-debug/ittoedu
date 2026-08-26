@@ -1,6 +1,6 @@
 # 互动组件开发指南（V4）
 
-> **当前工程格式是 Course Project V9。** 下文若仍出现 Project V8，只表示组件实例曾随 V8 Native 形状一起保存；以 `src/shared/componentTypes.ts`、`componentSchema.ts` 和源码为准。
+> **当前工程格式是 Course Project V9。** 本文只描述当前 V9 可用边界；类型与协议真值以 `src/shared/componentTypes.ts`、`componentSchema.ts` 和源码为准。
 
 本文定义 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
@@ -12,19 +12,19 @@
 
 组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions。整页或整块世界的动画、特效与连续耦合机制使用画布或 surface 运行时，少放可教文字。稍复杂的局部互动（拖拽、配对、本地多步控件）使用 Component API 4：先匹配已有包，允许为本课新建。不要用场景运行时去仿一个局部控件。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
 
-中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布。编辑状态由隔离 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过本文的显式文字目标向宿主描述“哪一段 Props 可在何处编辑”，不能访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。
+中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布。编辑状态由当前隔离 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过本文的显式文字目标向宿主描述“哪一段 Props 可在何处编辑”，不能借 authoring 协议访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。该 iframe 是当前合成与生命周期实现，不是把外部导入组件视为不可信代码的产品边界。
 
 该目标桥是确定性的人工 authoring 协议，不包含 Blueprint、AI 局部 patch 或模型调用。全部编辑器内 AI 接入延后到 2.0 以后；1.x 仅保留可选、版本化的能力边界。
 
 组件发现、导入、插入和包管理位于专业模式独立“组件”页。全尺寸“内置组件库”从受控 catalog 动态生成通用/学科、学段与用途筛选，可多选加入工程但不自动创建实例；“导入外部组件”允许一次选择多个包，选定后直接校验并原子加入，不逐包弹出导入确认或成功摘要。两种来源最终都进入同一“工程组件”列表，卡片负责插入，次级菜单负责详情、显式更新、替换、定位和受引用保护的移除。已经嵌入的精确包可直接反复实例化，不重新读取目录或重复提示；会覆盖已用代码的更新、替换和哈希冲突仍显式审阅或阻断。编辑器选中节点时通过“属性/交互”维护 `node.click`；右侧“互动与动画”维护状态/场景进入、节点激活、动画完成、音视频生命周期/时间点、`component.event` 和带 `scene/global` 来源的 `runtime.event`。步骤可用 `after-previous` / `with-previous` 编排顺序与并行，并设局部延迟。组件若只需发出一个可枚举事件，应使用 V4 `ctx.emit()`，再由规则编排元素动画、状态、声音、视频或导航。
 
-机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只信任与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；目录缺失、不受信任或不匹配时必须标记为不可用/降级。它不是组件生成器，也不解除质量门禁。目录不可用时仍可通过「导入外部组件」或课例构建写入工程内嵌包。不得因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
+机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只接纳与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；审核摘要缺失、目录缺失或完整性不匹配时必须标记为不可用/降级。这里的 catalog 状态表达发行身份与完整性，不决定组件执行权限。它不是组件生成器，也不解除质量门禁。目录不可用时仍可通过「导入外部组件」或课例构建写入工程内嵌包。不得因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
 
 组件不应重复实现编辑器已有的一等能力：常规视频使用 `VideoNode`，课程声音使用 `media.audio` 声音库与声道，默认教师控制平台使用 `globalLayer` 中的 `TeacherControllerNode`。内置控制器的默认 `scene.open-picker` 按钮展开全部场景，选择后只进入目标初始状态；固定 `scene.go` 是高级按钮动作。只有策划要求独特视觉、复用封装或内置节点无法表达的行为时，才把媒体播放器或控制平台制作成 V4 组件。
 
 ### 0.1 当前组件来源
 
-能力索引快照当前为 `catalogStatus: unavailable`：本 checkout 没有可读的外部目录 `../courseware-components`，`packageCount` 为 0。这只表示没有现成目录可浏览，**不是** Flow/Spatial/Slide 试运行不能挂组件（P8 已合入），也不是禁止为本课导入或新建 `.h5component`。
+组件目录状态以当次生成的 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 和 `component-catalog.snapshot.json` 为准；本次同步为 `catalogStatus: available`、`packageCount: 4`。以后目录不可用或包数变化，只表示当时没有对应目录包可浏览，**不是** Flow/Spatial/Slide 试运行不能挂组件（P8 已合入），也不是禁止为本课导入或新建 `.h5component`。
 
 当外部目录可用时，ittoedu 自有实验包预期仍是：
 
@@ -54,14 +54,14 @@ global-controls.h5component
 
 约束：
 
-工程同时记录两种不同哈希：`sha256` 是最初选择的 `.h5component` ZIP 原始字节来源锁，`contentSha256` 是对全部安全相对路径和解包字节按稳定顺序、带长度边界计算的 canonical SHA-256。新 Project V8 归档必须包含 `contentSha256`；打开、保存或 headless 校验时任一嵌入文件被改动都会作为归档损坏拒绝。内容哈希不受 ZIP 压缩、条目顺序和时间戳影响，也不是数字签名、许可证或权属证明。
+工程同时记录两种不同哈希：`sha256` 是最初选择的 `.h5component` ZIP 原始字节来源锁，`contentSha256` 是对全部安全相对路径和解包字节按稳定顺序、带长度边界计算的 canonical SHA-256。新 Course Project V9 归档必须包含 `contentSha256`；打开、保存或 headless 校验时任一嵌入文件被改动都会作为归档损坏拒绝。内容哈希不受 ZIP 压缩、条目顺序和时间戳影响，也不是数字签名、许可证或权属证明。
 
-组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、离线网络规则、工程引用和四格式预检。当前四个 ittoedu 身份实验包虽然可重现构建并通过 V8 四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
+组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、Schema、当前已接线的结构性工程健康结果和四格式预检。REPAIR 完成前，该命令尚不能证明完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致；退出码 0 仍须由真实 Player、导出和外部请求检查补足。当前四个 ittoedu 身份实验包虽然可重现构建并通过历史四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
 
 - 单包不超过 50 MB；
 - 路径使用 `/`，不得有绝对路径、盘符、反斜线、`..` 或路径穿越；
 - 入口是同步注册的普通浏览器 JavaScript，不能使用 `import`、`export` 或 `require`；
-- 不依赖 Node.js、Electron、CDN、远程字体、远程 API 或绝对文件路径；
+- 第三方执行依赖应在构建阶段打入入口脚本，不运行时加载远程脚本；远程媒体/API 按工程声明，宿主、父页面或本地能力只能使用目标环境明确提供的稳定合同，不得假定所有导出环境都有同一能力；
 - 包内素材全部在 manifest `assets` 中声明；
 - 缩略图可选，支持 PNG、JPG、WebP、GIF 或 SVG；正式可视组件建议始终提供。
 
@@ -383,7 +383,7 @@ ctx.presentation?.transitionTo('state_correct', {
 
 因此 DOM/hybrid 组件的 DOM 部分应按 overlay 内容设计。场景节点顺序或全局元素的 `layer: 'underlay'` 不能把这部分 DOM 压到 Canvas 后面；它们只对组件的 Phaser 代理/Phaser 部分保持 Canvas 内层级语义。必须位于原生节点背后的可复用视觉应使用 Phaser 组件，或把后景明确交给运行时 DOM underlay。
 
-编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Project V8 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、媒体管理和全部导出链路。
+编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Course Project V9 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、媒体管理和全部导出链路。
 
 Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVisible(false)` / `suspend()` 停止 RAF 和昂贵更新，在 `prepareCapture()` 主动渲染确定帧，在 `destroy()` 释放 geometry、material、texture、render target、renderer、监听和 RAF。加载任务通过 `ctx.capture.waitUntil()` 登记，并提供可理解的缩略图与可捕获静态画面。这样 3D 成本只由使用该组件的工程承担，不成为编辑器核心依赖。
 
@@ -406,7 +406,7 @@ Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVi
 - 隐藏时宿主关闭显示和输入，但不销毁内部状态。
 - 可通过 `ctx.scope === 'global'` 确认播放器挂载作用域，通过 `ctx.events` 订阅 `scene:enter` 更新常驻 HUD，通过 `ctx.courseState` 与场景运行时共享进度。
 
-全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Project V8 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
+全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Course Project V9 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
 
 若一个包声明同时支持两种作用域，其实现应根据可选 `ctx.scope` 正确适配两种生命周期；在字段缺失的编辑宿主中使用安全回退，不能直接解引用。
 
@@ -455,7 +455,7 @@ interface ComponentInstanceLifecycle {
 
 生命周期方法应可重复、安全调用。全局组件需特别防止把场景切换、隐藏或 suspend 误判为销毁或重新创建。宿主记录组件生命周期的首个失败并销毁失败挂载，后续捕获继续拒绝，不能因一次显隐或同步更新而“复活”为空白成功。`prepareCapture()` 抛错只使该组件实例产生可诊断占位，已经成功的组件快照继续保留，不应吞掉错误或让整批 PPTX 组件退化。
 
-组件自行创建的音频、视频或媒体流不会自动进入 Project V8 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
+组件自行创建的音频、视频或媒体流不会自动进入 Course Project V9 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
 
 场景状态切换不会销毁组件实例。宿主会在同一实例上调用 `resize()` 和 `updateProps()`，因此这两个方法必须真正刷新现有显示对象，不能要求通过重新执行 `create()` 才生效。
 
@@ -484,9 +484,11 @@ function loadProjectImage(assetId) {
 
 组件在“编辑状态”画布中由隔离 authoring Player 以 `mode: 'edit'` 创建，显示与成品相同坐标和合成层级下的稳定视觉，同时禁止内部互动；在中央“当前位置试运行”、顶部“整课预览”和网页导出中使用 `mode: 'preview'`；静态捕获使用 `mode: 'capture'`，不得推进学生业务，只生成确定画面。当前位置试运行从当前场景/状态启动（基础场景回退当前场景初始状态），整课预览从第一场景初始状态启动。场景命名状态切换时不会重新执行 `create()`，而是在同一实例上调用 `resize()` / `updateProps()`，因此状态覆盖中的组件参数必须能即时反映。
 
+Published V2 当前已证明的 API 4 Phaser 播放切片是 Slide `scene.layerItems` 中的 scene-local component：当前位置试运行、整课预览、离线/在线单 HTML 与网页包执行相同包版本、props、素材、emit、frame/order、命中与 generation 生命周期。global/surface-shared、Flow/Spatial、hybrid 以及 PDF/PPTX capture 不由这一切片推导；这些 carrier 必须在各自真实 consumer 出现后单独验收。
+
 单 HTML 和网页包导出会把组件默认参数展平到实际实例 props，只发布运行必需的组件 ID、版本、API/渲染能力、编码执行逻辑和组件素材；组件包的 `manifest.json`、`editor.properties/pages`、变体、预设、说明、缩略图和独立原始 `runtime.js` 不进入发布物。执行逻辑在浏览器端仍可恢复和分析，这只是 [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 的轻量发布裁剪，不是代码加密或 DRM。
 
-外部组件节点与原生节点一样，可作为 Project V8 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
+外部组件节点与原生节点一样，可作为 Course Project V9 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
 
 内部点击、拖拽、动画状态推进和宿主动作只在 `preview` 生效。authoring 中即使组件代码创建了命中对象，宿主也会屏蔽输入并冻结动作；组件不得访问编辑器 DOM，也不得假定属性栏结构。
 
@@ -502,7 +504,7 @@ Editor 1.0.0 在专业模式独立“组件”页的“工程组件”列表把�
 
 “选择新包替换”只接受 manifest ID 相同的新包。替换前会校验新包的 `supportedScopes` 是否覆盖所有现有场景/全局实例；校验、解包或迁移失败时原工程保持不变，成功后所有实例版本统一更新。不同 ID 的组件不能借替换入口隐式迁移。
 
-专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Project V8 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
+专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Course Project V9 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
 
 “只读”只阻止直接覆盖原包，不阻止查看或复制已经交付的代码，也不替代许可证约束；创建副本前应确认组件授权允许修改和二次分发。可编辑副本是工程作者态能力，不是源码保密措施。`.h5lesson` 保存完整组件包；单 HTML/网页包虽会裁掉 manifest、编辑器字段和独立原始 `runtime.js`，浏览器仍需取得可恢复的执行逻辑。不要在组件或工程中存放密钥，并且不要把 PublishedLesson 裁剪描述为加密、不可逆向或 DRM。
 
@@ -520,17 +522,15 @@ Rename-Item global-controls.zip global-controls.h5component
 
 无缩略图或素材目录时从命令中移除。不要压缩外层项目目录。
 
-### 14.1 旗舰 V4 组件参考
-
-可选相邻课例仓 `../courseware-cases/high-school/physics/induction-not-field-but-change/examples/induction-lab-component/` 中的 `induction-lab-component` 是完整 V4 场景组件历史参考；该仓不属于当前核心仓，缺失时本段只作历史说明。它使用 `renderMode: "dom"` 和离线素材复用同一套磁体—闭合线圈—检流计装置，把全部文案放入 `props.content`，通过语义事件连接 Project V8 命名状态，并完整实现 `updateProps`、`resize`、显隐、暂停/恢复、确定帧捕获和销毁。同一课例目录的 `scripts/build-induction-lesson.ts` 展示组件嵌入工程与离线导出，`scripts/validate-induction-lesson.ts` 展示交付门禁。它是课例专属历史源码，不属于核心产品夹具或公共组件 catalog。
+### 14.1 当前仓库参考
 
 V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)，可用 `npm run build:render-benchmark` 重建。其 Playwright 压力段执行 25 轮、共 100 次定制场景切换和 25 次末页重播，并检查组件/运行时挂载、Canvas/WebGL、活动 RAF、控制台异常与外部请求。
 
-## 15. 安全边界
+## 15. 信任与宿主边界
 
-组件是可信浏览器 JavaScript，不是普通图片。Renderer/Player 禁用 Node.js 和 Electron API，并限制网络、弹窗、下载和系统权限，但这不是对恶意 JavaScript 的完整沙箱。
+Component 是经过审核的可信扩展，不是普通图片；外部导入只表示组件没有内置进产品，不会自动降低信任等级。当前 authoring iframe、主窗口和网页导出提供的能力并不完全相同，这属于宿主事实，而不是“外部组件必须低权限”的合同。
 
-只导入可信来源组件。发布前审查入口和素材，不存放密钥、账号、隐私数据或远程控制逻辑。
+组件确需父页面、本地、桌面或其他宿主能力时，应使用该环境明确提供的稳定接口或同宿主执行语义；没有该能力的网页/导出环境必须明确降级，不能伪造 parity。发布前仍要审查入口和素材；不要持久化或导出密钥、账号、隐私数据，也不要运行时加载远程脚本。
 
 ## 16. 发布检查清单
 
@@ -554,10 +554,10 @@ V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照�
 - [ ] 必需 `scope` 使用正确；`events/courseState/presentation` 均做可选检查；事件订阅、课程状态和场景状态切换语义已验证。
 - [ ] 需要跨场景指定状态时使用 `goToScene(sceneId, targetStateId)`，并验证状态失效回退与导航守卫重定向。
 - [ ] 组件事件可被全局运行时接收，复杂导航规则未塞进组件私有全局变量。
-- [ ] 单 HTML 与网页包离线运行，PDF/PPTX 静态化结果已检查。
+- [ ] 离线便携单 HTML/网页包不产生外部请求；在线轻量目标只访问工程声明的远程依赖，PDF/PPTX 静态化与捕获降级结果已检查。
 - [ ] 发布物未携带作者态 manifest/编辑器字段或重复 `runtime.js`，同时已明确执行逻辑可恢复、不构成源码保密或 DRM。
 - [ ] 捕获按实例产生确定帧；单实例失败只生成该实例占位，成功快照不会被后续失败清空，批量 Three/WebGL 组件不会同时创建捕获宿主。
-- [ ] Three.js 如有使用，仅打包在组件内；GLB、loader、纹理和解码器离线；RAF、WebGL 与 GPU 资源可暂停、可捕获、可销毁。
+- [ ] Three.js 如有使用，其执行库打包在组件内；GLB、纹理和解码器使用包内资源或工程已声明的远程交付，并有捕获/离线降级；RAF、WebGL 与 GPU 资源可暂停、可捕获、可销毁。
 - [ ] ZIP 路径安全、大小写一致，组件包不超过 50 MB。
-- [ ] 完整工程已运行 `npm run --silent validate:project -- <file.h5lesson>`；真实内嵌文件、引用、离线规则和四格式预检没有未处理的确定性错误。
+- [ ] 完整工程已运行 `npm run --silent validate:project -- <file.h5lesson>`；真实内嵌文件、Schema 与当前已接线的工程健康/四格式预检没有未处理的确定性错误，并已用真实 Player/导出确认实际网络使用与工程声明一致。
 - [ ] 工程检查没有阻断导出的组件错误；异常隔离与诊断报告路径可用。

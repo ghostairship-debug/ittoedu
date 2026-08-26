@@ -74,7 +74,7 @@ import {
   type LayerCommandOptions,
   type LayerCommandResult,
 } from './globalLayerCommands'
-import { commitSlideProjectMutation } from './slideEditorCommands'
+import { commitCourseProjectMutation } from './courseProjectMutation'
 
 export const FLOW_NO_PAGE_REASON = '请先选择一个流式页面'
 export { FLOW_GLOBAL_STRUCTURE_REASON }
@@ -351,7 +351,7 @@ function runOverlayMutation(
   if (stale) return fail(stale.reason ?? '版本已过期')
   try {
     let created: string[] = []
-    const next = commitSlideProjectMutation(document, (draft) => {
+    const next = commitCourseProjectMutation(document, (draft) => {
       created = mutate(draft)
     }, options.now)
     return {
@@ -953,7 +953,7 @@ export function setFlowOverlayVisibleAtLocation(
         document.locations.map((location) => location.id),
       ),
     )
-    const next = commitSlideProjectMutation(document, (draft) => {
+    const next = commitCourseProjectMutation(document, (draft) => {
       const surface = flowSurfaceIn(draft, located.surfaceId ?? selection.surfaceId)
       const entry = surface.surfaceLayerItems.find(
         (candidate) => candidate.item.layerItemId === overlayId,

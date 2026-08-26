@@ -26,7 +26,6 @@ import {
   writeWebPackageFile,
 } from './fileDialogs'
 import { exportPdfFromHtml } from './pdfExport'
-import { openPreviewWindow } from './previewWindow'
 import {
   clearRecoveryProject,
   listRecentProjects,
@@ -37,6 +36,10 @@ import {
 import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
+import {
+  mainPreviewNetworkPolicy,
+  type PreviewNetworkDocumentOwner,
+} from './previewNetworkPolicy'
 
 interface IpcSuccess<T> {
   ok: true
@@ -120,11 +123,17 @@ const webPackageSchema = z
   })
   .strict()
 
-const previewSchema = z
-  .object({
-    html: z.string().min(1).max(256 * 1024 * 1024),
-  })
-  .strict()
+const previewNetworkLeaseIdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/)
+const previewNetworkPolicySchema = z.object({
+  leaseId: previewNetworkLeaseIdSchema,
+  connectOrigins: z.array(z.string().min(1).max(300)).max(1_000),
+  remoteAssetUrls: z.array(z.string().min(1).max(2_000)).max(10_000),
+  documentToken: z.string().uuid(),
+}).strict()
+const previewNetworkReleaseSchema = z.object({
+  leaseId: previewNetworkLeaseIdSchema,
+  documentToken: z.string().uuid(),
+}).strict()
 
 const dirtySchema = z.boolean()
 
@@ -178,6 +187,21 @@ function requireWindow(context: IpcContext): BrowserWindow {
     throw new Error('主窗口已经关闭。')
   }
   return window
+}
+
+function previewNetworkDocumentOwner(
+  event: IpcMainInvokeEvent,
+  documentToken: string,
+): PreviewNetworkDocumentOwner {
+  const frame = event.senderFrame
+  if (frame === null || frame.detached) {
+    throw new Error('Preview network policy source document is unavailable')
+  }
+  return {
+    processId: frame.processId,
+    frameToken: frame.frameToken,
+    documentToken,
+  }
 }
 
 function registerSafeHandler<T>(
@@ -584,17 +608,38 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
-    IPC_CHANNELS.openPreview,
+    IPC_CHANNELS.setPreviewNetworkPolicy,
     context,
     {
-      code: 'PREVIEW_FAILED',
-      title: '预览创建失败',
-      message: '无法打开课件预览窗口。',
-      suggestion: '请重试；如果问题持续出现，请重新启动编辑器。',
+      code: 'PREVIEW_NETWORK_POLICY_FAILED',
+      title: '预览网络配置失败',
+      message: '无法应用当前课件的网络声明。',
+      suggestion: '请检查工程网络声明并重新打开预览。',
     },
-    async (_event, args) => {
-      const input = previewSchema.parse(requireSingleArgument(args))
-      await openPreviewWindow(input.html, requireWindow(context))
+    (event, args) => {
+      const input = previewNetworkPolicySchema.parse(requireSingleArgument(args))
+      mainPreviewNetworkPolicy.replacePreviewLease(
+        input,
+        previewNetworkDocumentOwner(event, input.documentToken),
+      )
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.releasePreviewNetworkPolicy,
+    context,
+    {
+      code: 'PREVIEW_NETWORK_RELEASE_FAILED',
+      title: '预览网络清理失败',
+      message: '无法撤销已关闭预览的网络声明。',
+      suggestion: '请关闭当前工程或重启编辑器。',
+    },
+    (event, args) => {
+      const input = previewNetworkReleaseSchema.parse(requireSingleArgument(args))
+      mainPreviewNetworkPolicy.releasePreviewLease(
+        input.leaseId,
+        previewNetworkDocumentOwner(event, input.documentToken),
+      )
     },
   )
 

@@ -1,11 +1,28 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/projectTypes'
+import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import {
   createExternalComponentNode,
   createImageNode,
   createProject,
 } from '@/renderer/project/createProject'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import {
+  selectActiveCourseProjectDocument,
+  selectMediaAssetFiles,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
+
+const SLIDE_FIXTURE_PATH = join(
+  process.cwd(),
+  'tests',
+  'fixtures',
+  'architecture-baseline',
+  'slide-heavy.h5lesson',
+)
 
 function meta(
   id: string,
@@ -21,6 +38,39 @@ function meta(
     byteLength: 3,
     ...(kind === 'image' ? { width: 320, height: 180 } : {}),
   }
+}
+
+function loadSlideFixture(): void {
+  const archive = openCourseProjectArchive(
+    new Uint8Array(readFileSync(SLIDE_FIXTURE_PATH)),
+  )
+  useEditorStore.getState().loadCourseProject(
+    archive.project,
+    null,
+    archive.assetFiles,
+    componentPackagesFromArchive(archive.project, archive.componentFiles),
+  )
+  useEditorStore.getState().activateCourseLocation('slide-location-intro')
+  useEditorStore.getState().selectNode('slide-intro-hero')
+}
+
+function activeCourseProject(): CourseProjectDocument {
+  const project = selectActiveCourseProjectDocument(useEditorStore.getState())
+  if (!project) throw new Error('Expected a Course Project V9')
+  return project
+}
+
+function introHeroAssetId(project = activeCourseProject()): string {
+  const surface = project.surfaces.find((candidate) => candidate.id === 'slide-surface')
+  if (!surface || surface.type !== 'slide') throw new Error('Missing Slide surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === 'slide-scene-intro')
+  const item = scene?.layerItems.find((candidate) => (
+    candidate.layerItemId === 'slide-intro-hero'
+  ))
+  if (!item || item.kind !== 'native' || item.content.nativeType !== 'image') {
+    throw new Error('Missing intro hero image')
+  }
+  return item.content.data.assetId
 }
 
 beforeEach(() => useEditorStore.getState().createNewProject())
@@ -42,25 +92,49 @@ describe('single asset history transactions', () => {
     expect([...useEditorStore.getState().assetFiles.video!]).toEqual([1, 2, 3])
   })
 
-  it('restores previous metadata and bytes when replacing an image payload', () => {
-    const original = meta('image', 'image', 'old.png')
-    const replacement = { ...meta('image', 'image', 'new.png'), byteLength: 4 }
-    useEditorStore.getState().addImageNode(original, new Uint8Array([1, 2, 3]))
-    const nodeId = useEditorStore.getState().project.scenes[0]!.nodes[0]!.id
-    useEditorStore.getState().replaceImageAsset(
-      nodeId,
+  it('undoes and redoes target-based image replacement using a conflict-free asset ID', () => {
+    loadSlideFixture()
+    const originalProject = structuredClone(activeCourseProject())
+    const originalAssetId = introHeroAssetId(originalProject)
+    const originalBytes = selectMediaAssetFiles(useEditorStore.getState())[originalAssetId]
+    if (!originalBytes) throw new Error('Missing original hero bytes')
+    const replacement = {
+      ...meta('image-replacement', 'image', 'new.png'),
+      byteLength: 4,
+    }
+    const target = useEditorStore.getState().captureImageReplacementTarget()
+    if (!target) throw new Error('Expected a captured image target')
+    const result = useEditorStore.getState().replaceImageAssetAtTarget(
+      target,
       replacement,
       new Uint8Array([4, 5, 6, 7]),
     )
-    expect(useEditorStore.getState().project.assets.image).toEqual(replacement)
-    expect([...useEditorStore.getState().assetFiles.image!]).toEqual([4, 5, 6, 7])
+    expect(result).toMatchObject({ ok: true, status: 'replaced' })
+    expect(introHeroAssetId()).toBe(replacement.id)
+    expect(activeCourseProject().assets[originalAssetId])
+      .toEqual(originalProject.assets[originalAssetId])
+    expect(activeCourseProject().assets[replacement.id]).toEqual(replacement)
+    expect(selectMediaAssetFiles(useEditorStore.getState())[originalAssetId])
+      .toEqual(originalBytes)
+    expect([...selectMediaAssetFiles(useEditorStore.getState())[replacement.id]!])
+      .toEqual([4, 5, 6, 7])
 
     useEditorStore.getState().undo()
-    expect(useEditorStore.getState().project.assets.image).toEqual(original)
-    expect([...useEditorStore.getState().assetFiles.image!]).toEqual([1, 2, 3])
+    expect(activeCourseProject()).toEqual(originalProject)
+    expect(introHeroAssetId()).toBe(originalAssetId)
+    expect(selectMediaAssetFiles(useEditorStore.getState())[originalAssetId])
+      .toEqual(originalBytes)
+    expect(activeCourseProject().assets[replacement.id]).toBeUndefined()
+    expect(selectMediaAssetFiles(useEditorStore.getState())[replacement.id]).toBeUndefined()
     useEditorStore.getState().redo()
-    expect(useEditorStore.getState().project.assets.image).toEqual(replacement)
-    expect([...useEditorStore.getState().assetFiles.image!]).toEqual([4, 5, 6, 7])
+    expect(introHeroAssetId()).toBe(replacement.id)
+    expect(activeCourseProject().assets[originalAssetId])
+      .toEqual(originalProject.assets[originalAssetId])
+    expect(activeCourseProject().assets[replacement.id]).toEqual(replacement)
+    expect(selectMediaAssetFiles(useEditorStore.getState())[originalAssetId])
+      .toEqual(originalBytes)
+    expect([...selectMediaAssetFiles(useEditorStore.getState())[replacement.id]!])
+      .toEqual([4, 5, 6, 7])
   })
 
   it('undoes and redoes a sound definition with its asset bytes', () => {
