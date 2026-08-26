@@ -24,9 +24,11 @@ import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveScene,
   selectEditingNodes,
+  selectEffectiveLayerProjection,
   selectMediaAssetFiles,
   selectSlideBackendKind,
   selectSlideAuthoringDocument,
+  selectSlideSceneList,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -136,6 +138,49 @@ describe('default Course Project V9 persistence', () => {
     expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
     expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/格式版本|版本不支持/)
     expect(() => openDefaultCourseProject(v8Bytes)).toThrow(/格式版本|版本不支持/)
+  })
+
+  it('keeps the V8 preview and effective layer selection aligned through Slide history and page changes', () => {
+    const store = useEditorStore.getState()
+    const firstSceneId = store.activeSceneId
+
+    store.addTextNode(40, 50)
+    const nodeId = selectEditingNodes(useEditorStore.getState())[0]!.id
+    let state = useEditorStore.getState()
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .toContain(nodeId)
+
+    store.undo()
+    state = useEditorStore.getState()
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .not.toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .not.toContain(nodeId)
+
+    store.redo()
+    state = useEditorStore.getState()
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .toContain(nodeId)
+
+    store.addScene()
+    state = useEditorStore.getState()
+    const secondSceneId = state.activeSceneId
+    expect(selectSlideSceneList(state).find((scene) => scene.id === secondSceneId)?.nodes)
+      .toEqual([])
+    expect(state.project.scenes.find((scene) => scene.id === secondSceneId)?.nodes)
+      .toEqual([])
+
+    store.setActiveScene(firstSceneId)
+    state = useEditorStore.getState()
+    expect(state.activeSceneId).toBe(firstSceneId)
+    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+      .toContainEqual(expect.objectContaining({ id: nodeId }))
+    expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
+      .toContain(nodeId)
   })
 })
 

@@ -1235,10 +1235,9 @@ function derivedV8ProjectFromBackend(
   sidecar: CourseAssetSidecar | null,
   edit: V9SlideContentEditSession | null,
 ): ProjectDocument {
-  const view = candidateViewState(backend, edit)
   const preview = projectCandidatePreviewDocument({
     slideBackend: backend,
-    slideCandidateUi: view.slideCandidateUi,
+    slideCandidateUi: buildSlideCandidateUi(backend, edit),
     slideCandidateSidecar: sidecar,
     v9ContentEdit: edit,
   })
