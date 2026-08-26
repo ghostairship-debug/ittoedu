@@ -1,4 +1,5 @@
 import { _electron as electron, chromium } from '@playwright/test'
+import { assertElectronCanLaunchAsApp } from './electronLaunchEnvironment'
 import { unzipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, promises as fs } from 'node:fs'
@@ -402,6 +403,7 @@ async function launchPackagedEditor(
     '无法清理上一次目录版验证的临时用户目录',
   )
   await fs.mkdir(unpackedProfileDirectory, { recursive: true })
+  assertElectronCanLaunchAsApp()
   const application = await electron.launch({
     executablePath,
     args: [`--user-data-dir=${unpackedProfileDirectory}`],

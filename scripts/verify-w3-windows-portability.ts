@@ -1,4 +1,5 @@
 import { _electron as electron, chromium } from '@playwright/test'
+import { assertElectronCanLaunchAsApp } from './electronLaunchEnvironment'
 import { strToU8, zipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -10,6 +11,9 @@ import { promisify } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Browser, ElectronApplication, Page } from 'playwright'
 import packageJson from '../package.json'
+// Teaches the export builders where this host's font bytes are. Without it the
+// portability run would check an export the product never ships.
+import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   importComponentPackage,
   parseComponentPackageFiles,
@@ -325,6 +329,7 @@ async function verifyMovedUnpackedApplication(
   )
 
   await fs.mkdir(profileDirectory, { recursive: true })
+  assertElectronCanLaunchAsApp()
   const application = await electron.launch({
     executablePath: movedExecutable,
     cwd: isolatedRoot,
