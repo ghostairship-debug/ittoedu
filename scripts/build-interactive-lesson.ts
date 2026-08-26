@@ -20,6 +20,7 @@ import {
 } from '../src/renderer/project/courseProjectArchive'
 import {
   checkTrackedExampleOutputs,
+  createTimezoneStableZipMtime,
   type GeneratedExampleOutputs,
 } from './exampleGenerationBoundary'
 
@@ -31,8 +32,10 @@ export const INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS = {
 } as const
 const artifactDirectory = path.join(root, 'artifacts', 'photosynthesis-lesson')
 const htmlPath = path.join(artifactDirectory, 'photosynthesis-interactive-lesson.html')
+/** 写进工程数据的业务时刻（`createdAt`/`updatedAt`）。 */
 const timestamp = '2026-07-21T00:00:00.000Z'
-const archiveTimestamp = new Date(timestamp)
+/** 只用于 ZIP 封装的时间戳，与上面的业务时刻分开。 */
+const archiveZipMtime = createTimezoneStableZipMtime(timestamp)
 
 const runtimeSource = String.raw`
 CoursewareRuntime.define({
@@ -340,7 +343,7 @@ export async function buildInteractiveLessonOutputs(): Promise<InteractiveLesson
   const project = buildProject()
   const lessonArchive = createCourseProjectArchive(
     { project, assetFiles: {}, componentFiles: {} },
-    { mtime: archiveTimestamp },
+    { mtime: archiveZipMtime },
   )
   const reopened = openCourseProjectArchive(lessonArchive)
   const reopenedSlide = reopened.project.surfaces[0]

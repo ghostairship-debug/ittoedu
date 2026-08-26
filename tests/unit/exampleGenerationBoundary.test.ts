@@ -1,6 +1,10 @@
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -11,6 +15,7 @@ import {
 } from '../../scripts/build-examples'
 import {
   checkTrackedExampleOutputs,
+  createTimezoneStableZipMtime,
   equalBytes,
   normalizeLineEndings,
 } from '../../scripts/exampleGenerationBoundary'
@@ -29,6 +34,86 @@ import { importComponentPackage } from '../../src/renderer/components/importComp
 const projectRoot = path.resolve(__dirname, '..', '..')
 const examplesDirectory = path.join(projectRoot, 'examples')
 const tempRoots: string[] = []
+
+/** Resolves the tsx entry point from its manifest rather than a `dist/` guess. */
+function resolveTsxCli(): string {
+  const packageRoot = path.resolve(projectRoot, 'node_modules', 'tsx')
+  const { bin } = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as {
+    bin?: string | Record<string, string>
+  }
+  const entry = typeof bin === 'string' ? bin : bin?.tsx
+  if (!entry) throw new Error('无法定位 tsx CLI 入口')
+  return path.resolve(packageRoot, entry)
+}
+
+/**
+ * fflate 从 mtime 的**本地**日历分量推导 ZIP 的 DOS 时间戳，所以把绝对时刻
+ * 交给它会让每个时区写出不同的归档字节。宿主时区只能在子进程里真正换掉
+ * （`TZ=Asia/Shanghai cmd` 这种内联前缀在 Git Bash 里会被 MSYS 路径转换吃掉），
+ * 因此这个探针在子进程里重建示例与课例归档，回报字节摘要和 `project.json`
+ * 里的业务字段。
+ */
+const TIMEZONE_PROBE_PROGRAM = [
+  "const { createHash } = await import('node:crypto')",
+  "const { unzipSync } = await import('fflate')",
+  'const samples = await import(process.env.EXAMPLE_SAMPLE_MODULE_URL)',
+  'const lesson = await import(process.env.EXAMPLE_LESSON_MODULE_URL)',
+  'const outputs = { ...(await samples.buildSampleExampleOutputs()) }',
+  'const lessonOutputs = await lesson.buildInteractiveLessonOutputs()',
+  'for (const [name, bytes] of Object.entries(lessonOutputs.tracked)) outputs[name] = bytes',
+  'const digests = {}',
+  'const projects = {}',
+  'for (const [name, bytes] of Object.entries(outputs)) {',
+  "  digests[name] = createHash('sha256').update(bytes).digest('hex')",
+  "  if (!name.endsWith('.h5lesson')) continue",
+  "  const project = JSON.parse(new TextDecoder().decode(unzipSync(bytes)['project.json']))",
+  '  projects[name] = {',
+  '    createdAt: project.createdAt,',
+  '    updatedAt: project.updatedAt,',
+  '    componentPackages: Object.fromEntries(Object.entries(project.componentPackages)',
+  '      .map(([id, meta]) => [id, {',
+  '        contentSha256: meta.contentSha256,',
+  '        importedAt: meta.importedAt ?? null,',
+  '      }])),',
+  '  }',
+  '}',
+  'console.log(JSON.stringify({ digests, projects }))',
+].join('\n')
+
+interface TimezoneProbeResult {
+  digests: Record<string, string>
+  projects: Record<string, {
+    createdAt: string
+    updatedAt: string
+    componentPackages: Record<string, { contentSha256: string; importedAt: string | null }>
+  }>
+}
+
+function buildExampleArchivesInTimezone(timezone: string): TimezoneProbeResult {
+  const stdout = execFileSync(
+    process.execPath,
+    [resolveTsxCli(), '--input-type=module', '--eval', TIMEZONE_PROBE_PROGRAM],
+    {
+      cwd: projectRoot,
+      env: {
+        ...process.env,
+        TZ: timezone,
+        EXAMPLE_SAMPLE_MODULE_URL: pathToFileURL(
+          path.join(projectRoot, 'scripts', 'build-examples.ts'),
+        ).href,
+        EXAMPLE_LESSON_MODULE_URL: pathToFileURL(
+          path.join(projectRoot, 'scripts', 'build-interactive-lesson.ts'),
+        ).href,
+      },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  )
+  const payload = stdout.split('\n').map((line) => line.trim()).filter(Boolean).at(-1)
+  if (!payload) throw new Error(`TZ=${timezone} 的跨时区探针没有输出`)
+  return JSON.parse(payload) as TimezoneProbeResult
+}
 
 async function snapshotTrackedOutputs(
   outputPaths: Readonly<Record<string, string>>,
@@ -159,6 +244,59 @@ describe('example generation boundary', () => {
       checkInteractiveLessonOutputs,
     )
   }, 60_000)
+
+  it('derives a timezone-stable ZIP mtime from the UTC business instant', () => {
+    const mtime = createTimezoneStableZipMtime('2026-07-20T00:00:00.000Z')
+    // 本地日历分量固定，DOS 时间戳才能在每个时区编码出同样的字节。
+    expect([mtime.getFullYear(), mtime.getMonth() + 1, mtime.getDate()]).toEqual([2026, 7, 20])
+    expect([mtime.getHours(), mtime.getMinutes(), mtime.getSeconds(), mtime.getMilliseconds()])
+      .toEqual([12, 0, 0, 0])
+    // 不带时区的字面量会按本地时间解析，必须在这一步被挡住。
+    expect(() => createTimezoneStableZipMtime('2026-07-20T00:00:00')).toThrow(/UTC ISO/)
+    expect(() => createTimezoneStableZipMtime('2026-07-20')).toThrow(/UTC ISO/)
+    expect(() => createTimezoneStableZipMtime('not-an-instant')).toThrow(/UTC ISO/)
+  })
+
+  it('rebuilds tracked sample and lesson archives identically in every timezone', async () => {
+    const trackedPaths = [
+      ...Object.values(SAMPLE_EXAMPLE_OUTPUT_PATHS),
+      ...Object.values(INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS),
+    ]
+    const trackedDigests = Object.fromEntries(await Promise.all(trackedPaths.map(
+      async (relativePath) => [
+        relativePath,
+        createHash('sha256')
+          .update(await readFile(path.join(examplesDirectory, relativePath)))
+          .digest('hex'),
+      ] as const,
+    )))
+
+    const utc = buildExampleArchivesInTimezone('UTC')
+    const shanghai = buildExampleArchivesInTimezone('Asia/Shanghai')
+    const losAngeles = buildExampleArchivesInTimezone('America/Los_Angeles')
+
+    expect(shanghai).toEqual(utc)
+    expect(losAngeles).toEqual(utc)
+    // 锚定到已提交字节，否则三个子进程可以一起漂走而测试仍然通过。
+    expect(utc.digests).toEqual(trackedDigests)
+
+    // ZIP 封装时间换了写法，写进工程数据的业务字段不能跟着换。
+    expect(utc.projects[SAMPLE_EXAMPLE_OUTPUT_PATHS.project]).toEqual({
+      createdAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+      componentPackages: {
+        'com.example.sample-counter': {
+          contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+          importedAt: null,
+        },
+      },
+    })
+    expect(utc.projects[INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS.lesson]).toEqual({
+      createdAt: '2026-07-21T00:00:00.000Z',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+      componentPackages: {},
+    })
+  }, 300_000)
 
   it('normalizes CRLF and lone CR line endings before embedding text', () => {
     expect(normalizeLineEndings('a\r\nb\nc\rd')).toBe('a\nb\nc\nd')

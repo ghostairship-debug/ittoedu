@@ -36,6 +36,7 @@ import {
 import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
 import {
   checkTrackedExampleOutputs,
+  createTimezoneStableZipMtime,
   normalizeLineEndings,
   type GeneratedExampleOutputs,
 } from './exampleGenerationBoundary'
@@ -60,8 +61,11 @@ export const RENDER_HOST_BENCHMARK_OUTPUT_PATHS = {
   htmlV2: 'render-host-benchmark-v2.html',
   noticesV9: 'THIRD_PARTY_NOTICES_V9.md',
 } as const
+/** 写进工程数据的业务时刻（`createdAt`/`updatedAt`）。 */
 const reproducibleTimestamp = new Date('2026-07-23T00:00:00.000Z')
 const timestamp = reproducibleTimestamp.toISOString()
+/** 只用于 ZIP 封装的时间戳，与上面的业务时刻分开。 */
+const archiveZipMtime = createTimezoneStableZipMtime(timestamp)
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024
 export const RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION = '4.0.0-v9-probe.1'
 
@@ -332,7 +336,7 @@ async function loadComponent(
   if (manifest.thumbnail !== undefined) {
     files[manifest.thumbnail] = await fs.readFile(path.join(directory, manifest.thumbnail))
   }
-  const archive = zipSync(files, { level: 6, mtime: reproducibleTimestamp })
+  const archive = zipSync(files, { level: 6, mtime: archiveZipMtime })
   return {
     data: importComponentPackage(archive, {
       expectedId: manifest.id,
@@ -691,7 +695,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     project: projectV9,
     assetFiles,
     componentFiles: componentFilesV9,
-  }, { mtime: reproducibleTimestamp })
+  }, { mtime: archiveZipMtime })
   const reopenedV9 = openCourseProjectArchive(lessonV9)
   const reopenedSlide = reopenedV9.project.surfaces[0]
   if (

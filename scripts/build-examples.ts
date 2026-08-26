@@ -36,6 +36,7 @@ import {
 import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
 import {
   checkTrackedExampleOutputs,
+  createTimezoneStableZipMtime,
   normalizeLineEndings,
   type GeneratedExampleOutputs,
 } from './exampleGenerationBoundary'
@@ -52,7 +53,10 @@ export const SAMPLE_EXAMPLE_OUTPUT_PATHS = {
   component: 'sample-counter.h5component',
   project: 'sample-project.h5lesson',
 } as const
+/** 写进工程数据的业务时刻（`createdAt`/`updatedAt`）。 */
 const reproducibleTimestamp = new Date('2026-07-20T00:00:00.000Z')
+/** 只用于 ZIP 封装的时间戳，与上面的业务时刻分开。 */
+const archiveZipMtime = createTimezoneStableZipMtime(reproducibleTimestamp.toISOString())
 
 const thumbnailSvg = String.raw`
 <svg xmlns="http://www.w3.org/2000/svg" width="480" height="280" viewBox="0 0 480 280">
@@ -435,7 +439,7 @@ export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutpu
   }
   const componentArchive = zipSync(componentFiles, {
     level: 6,
-    mtime: reproducibleTimestamp,
+    mtime: archiveZipMtime,
   })
   const importedComponent = importComponentPackage(componentArchive)
   validateCounterRuntime(importedComponent.runtimeSource, importedComponent.manifest)
@@ -451,7 +455,7 @@ export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutpu
       [importedComponent.key]: importedComponent.files,
     },
   }, {
-    mtime: reproducibleTimestamp,
+    mtime: archiveZipMtime,
   })
 
   const reopened = openCourseProjectArchive(projectArchive)
