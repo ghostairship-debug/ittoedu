@@ -840,6 +840,28 @@ describe('Published Slide Phaser Component API 4 host', () => {
         })
       })
     }
+    const deferNextActivation = () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let reportStarted!: () => void
+      const started = new Promise<void>((resolve) => {
+        reportStarted = resolve
+      })
+      const originalActivateSurface = session.player.activateSurface.bind(session.player)
+      const activateSurface = vi.spyOn(session.player, 'activateSurface')
+        .mockImplementation(async (surfaceId) => {
+          reportStarted()
+          await gate
+          return originalActivateSurface(surfaceId)
+        })
+      return {
+        started,
+        release,
+        restore: () => activateSurface.mockRestore(),
+      }
+    }
 
     let generation = await currentReplayGeneration(root)
     expect(diagnostics).toEqual([])
@@ -883,18 +905,39 @@ describe('Published Slide Phaser Component API 4 host', () => {
     await expectProbeGeneration(5, 4)
     expectLocationUnchanged()
 
+    const pendingSlideNavigation = deferNextActivation()
     controllerButton(nextButtonId).click()
+    await pendingSlideNavigation.started
+    expect(session.navigator.hasPendingNavigation).toBe(true)
+    expect(session.navigator.current?.locationId).toBe(initialLocationId)
+    expect(session.canReplayScene()).toBe(false)
+    expect(await session.replayScene()).toBe(false)
+    expect(bridge.replayScene()).toBe(false)
+    pendingSlideNavigation.release()
     await vi.waitFor(() => {
       expect(session.getProgress().locationId).toBe(fixture.slideLocationIds[1])
+      expect(session.navigator.hasPendingNavigation).toBe(false)
     })
+    pendingSlideNavigation.restore()
     await session.goToLocation(initialLocationId)
     generation = await currentReplayGeneration(root)
 
-    await session.goToLocation(fixture.flowLocationId)
+    const pendingFlowNavigation = deferNextActivation()
+    const flowNavigation = session.goToLocation(fixture.flowLocationId)
+    await pendingFlowNavigation.started
+    expect(session.navigator.hasPendingNavigation).toBe(true)
+    expect(session.navigator.current?.locationId).toBe(initialLocationId)
+    expect(session.canReplayScene()).toBe(false)
+    expect(await session.replayScene()).toBe(false)
+    expect(bridge.replayScene()).toBe(false)
+    pendingFlowNavigation.release()
+    await flowNavigation
+    pendingFlowNavigation.restore()
     expect(session.navigator.current).toMatchObject({
       kind: 'flow',
       locationId: fixture.flowLocationId,
     })
+    expect(session.navigator.hasPendingNavigation).toBe(false)
     expect(session.canReplayScene()).toBe(false)
     expect(await session.replayScene()).toBe(false)
     expect(bridge.replayScene()).toBe(false)

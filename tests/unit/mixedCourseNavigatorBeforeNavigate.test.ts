@@ -312,6 +312,46 @@ describe('MixedCourseNavigator onBeforeNavigate', () => {
     })
   })
 
+  it('reports active and queued navigation until successful or rejected work settles', async () => {
+    const player = new RecordingPlayer()
+    let holdNavigation = false
+    let reportNavigationStarted!: () => void
+    const navigationStarted = new Promise<void>((resolve) => {
+      reportNavigationStarted = resolve
+    })
+    let releaseNavigation!: () => void
+    const navigationGate = new Promise<void>((resolve) => {
+      releaseNavigation = resolve
+    })
+    const navigator = new MixedCourseNavigator(course, player, {
+      onBeforeNavigate: async () => {
+        if (!holdNavigation) return
+        reportNavigationStarted()
+        await navigationGate
+      },
+    })
+    await navigator.start()
+    expect(navigator.hasPendingNavigation).toBe(false)
+    holdNavigation = true
+
+    const active = navigator.goToLocation('slide-two')
+    expect(navigator.hasPendingNavigation).toBe(true)
+    await navigationStarted
+    const queued = navigator.goToLocation('flow-page')
+    expect(navigator.hasPendingNavigation).toBe(true)
+    releaseNavigation()
+
+    await Promise.all([active, queued])
+    expect(navigator.current?.locationId).toBe('flow-page')
+    expect(navigator.canGoBack).toBe(true)
+    expect(navigator.hasPendingNavigation).toBe(false)
+
+    const rejected = navigator.goToLocation('missing-location')
+    expect(navigator.hasPendingNavigation).toBe(true)
+    await expect(rejected).rejects.toThrow('Unknown mixed-course location: missing-location')
+    expect(navigator.hasPendingNavigation).toBe(false)
+  })
+
   it('rejects an aborted queued request before its navigation lifecycle begins', async () => {
     const player = new RecordingPlayer()
     let holdNext = false

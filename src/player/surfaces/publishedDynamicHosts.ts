@@ -293,6 +293,7 @@ export class PublishedCourseSession {
   /** Synchronous acceptance guard for the public Slide replay entry. */
   canReplayScene(): boolean {
     return this.#publicReplayAbortController === null
+      && !this.navigator.hasPendingNavigation
       && this.canForceReplayCurrentLocation()
       && this.navigator.current?.kind === 'slide'
   }

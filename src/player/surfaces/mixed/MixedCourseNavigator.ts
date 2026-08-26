@@ -161,11 +161,15 @@ export class MixedCourseNavigator {
   #current: MixedLocationEntry | null = null
   #history: string[] = []
   #queue: Promise<unknown> = Promise.resolve()
+  #pendingNavigationCount = 0
 
   #enqueue<T>(work: () => Promise<T>): Promise<T> {
+    this.#pendingNavigationCount += 1
     const result = this.#queue.then(work, work)
     this.#queue = result.then(() => undefined, () => undefined)
-    return result
+    return result.finally(() => {
+      this.#pendingNavigationCount -= 1
+    })
   }
 
   constructor(
@@ -193,6 +197,11 @@ export class MixedCourseNavigator {
   get current(): MixedNavigationState | null {
     if (!this.#current) return null
     return this.#state()
+  }
+
+  /** True from synchronous enqueue until every active/queued request settles. */
+  get hasPendingNavigation(): boolean {
+    return this.#pendingNavigationCount > 0
   }
 
   get canGoBack(): boolean {
