@@ -1,13 +1,17 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { unzipSync } from 'fflate'
+import { unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import {
+  ARCHITECTURE_BASELINE_FIXTURE_IDS,
+  ARCHITECTURE_BASELINE_FIXTURE_MTIME,
   ARCHITECTURE_BASELINE_FIXTURE_SPECS,
   ARCHITECTURE_BASELINE_OUTPUT_DIRECTORY,
   buildArchitectureBaselineFixtureOutputs,
   type ArchitectureBaselineFixtureId,
 } from '../../scripts/build-architecture-baseline-fixtures'
+import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { CourseProjectDocument, FlowBlock } from '../../src/shared/courseProjectTypes'
 import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'
@@ -88,6 +92,30 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     }
     expect(ARCHITECTURE_BASELINE_FIXTURE_SPECS.map((fixture) => fixture.filename))
       .toEqual(first.manifest.fixtures.map((fixture) => fixture.filename))
+  })
+
+  it('records complete, deterministic provenance for the synthetic component package', () => {
+    const packageId = 'com.ittoedu.baseline.evidence-panel'
+    const packageKey = `${packageId}@4.0.0`
+    for (const id of ARCHITECTURE_BASELINE_FIXTURE_IDS) {
+      const archive = open(id)
+      const metadata = archive.project.componentPackages[packageId]
+      if (!metadata) throw new Error(`Fixture ${id} declares no baseline component package`)
+      expect(metadata.importedAt).toBe(ARCHITECTURE_BASELINE_FIXTURE_MTIME)
+      expect(metadata.sourceLabel).toBe(`ARCH-0 synthetic fixture: ${packageKey}`)
+
+      const packageFiles = archive.componentFiles[packageKey]
+      if (!packageFiles) throw new Error(`Fixture ${id} carries no ${packageKey} files`)
+      // Provenance hashes the reproducible raw `.h5component` bytes, while
+      // `contentSha256` stays the packaging-independent content digest.
+      const packageBytes = zipSync({ ...packageFiles }, {
+        level: 6,
+        mtime: ARCHITECTURE_BASELINE_FIXTURE_MTIME,
+      })
+      expect(metadata.sha256).toBe(createHash('sha256').update(packageBytes).digest('hex'))
+      expect(metadata.contentSha256).toBe(componentContentSha256(packageFiles))
+      expect(metadata.sha256).not.toBe(metadata.contentSha256)
+    }
   })
 
   it('covers Slide states, unified layers, media, component, playback and static inputs', () => {
