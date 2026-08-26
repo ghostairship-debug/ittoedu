@@ -170,6 +170,11 @@ jobs:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
+      # Example and benchmark generators read dist-player/player.iife.js, which is
+      # a build output and never tracked. Both product test paths below reach them,
+      # so the bundle must exist before either runs.
+      - run: npm run build:player
+        if: needs.changes.outputs.product_tests == 'true'
       - run: npm run test:product
         if: needs.changes.outputs.product_tests == 'true' && needs.changes.outputs.product_full == 'true'
       - name: Run affected product tests
