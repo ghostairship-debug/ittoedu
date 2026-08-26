@@ -1,5 +1,6 @@
 import type { ExportPayload } from '../shared/componentTypes'
 import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
+import { ensureBundledFonts } from '../shared/fonts/ensureBundledFonts'
 import { PlayerApp, type PlayerAppOptions } from './PlayerApp'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
@@ -456,15 +457,32 @@ export function bootstrapPlayer(): PlayerApp | null {
   return inlinePayload ? startAndExposePlayer(inlinePayload) : null
 }
 
+/**
+ * The Player measures text synchronously and bakes the result into a GPU
+ * texture that is never re-measured, so the bundled faces the host document
+ * declares have to be loaded before bootstrap. The wait lives here rather than
+ * inside `bootstrapPlayer()`: that function is exported API and returns
+ * `PlayerApp | null` synchronously, and making it async would change its
+ * return type for every caller and every embedded page.
+ */
+async function bootstrapPlayerAfterFonts(): Promise<void> {
+  await ensureBundledFonts()
+  bootstrapPlayer()
+}
+
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('message', handleEditorBridgeMessage)
   window.addEventListener('courseware-scene-change', forwardPlayerEvent)
   window.addEventListener('courseware-presentation-change', forwardPlayerEvent)
   window.addEventListener('pagehide', destroyExposedPlayer)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapPlayer, { once: true })
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => void bootstrapPlayerAfterFonts(),
+      { once: true },
+    )
   } else {
-    bootstrapPlayer()
+    void bootstrapPlayerAfterFonts()
   }
 }
 
