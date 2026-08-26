@@ -15,6 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { strFromU8, strToU8, Unzip, UnzipInflate, unzipSync, zipSync } from 'fflate'
+import { createTimezoneStableZipMtime } from '../src/shared/archiveTimestamp'
 
 interface Options {
   caseDir: string
@@ -597,7 +598,11 @@ function assertObservationUsesBoundField(
   }
 }
 
-function withInitialState(bytes: Uint8Array, sceneId: string, stateId: string | null): Uint8Array {
+export function withInitialState(
+  bytes: Uint8Array,
+  sceneId: string,
+  stateId: string | null,
+): Uint8Array {
   if (stateId === null) return bytes
   const archive = unzipSync(bytes)
   const projectBytes = archive['project.json']
@@ -619,7 +624,10 @@ function withInitialState(bytes: Uint8Array, sceneId: string, stateId: string | 
   }
   presentation.initialStateId = stateId
   archive['project.json'] = strToU8(`${JSON.stringify(project, null, 2)}\n`)
-  return zipSync(archive, { level: 6, mtime: new Date('1980-01-01T00:00:00.000Z') })
+  return zipSync(archive, {
+    level: 6,
+    mtime: createTimezoneStableZipMtime('1980-01-01T00:00:00.000Z'),
+  })
 }
 
 function collectRequiredEntities(inventory: Record<string, unknown>): InventoryEntity[] {

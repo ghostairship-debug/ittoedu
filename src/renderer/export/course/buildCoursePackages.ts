@@ -6,6 +6,7 @@ import type {
   CourseProjectDocument,
 } from '../../../shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
+import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import {
   bundledFontDataUrlCss,
@@ -546,7 +547,7 @@ export function buildPublishedCourseWebPackage(
 ): Uint8Array {
   return zipSync(buildPublishedCourseWebPackageFiles(sources, playerBundleOrOptions), {
     level: 6,
-    mtime: new Date('1980-01-01T00:00:00.000Z'),
+    mtime: createTimezoneStableZipMtime('1980-01-01T00:00:00.000Z'),
   })
 }
 
@@ -556,7 +557,10 @@ export function buildPublishedCourseWebPackageAsync(
 ): Promise<Uint8Array> {
   const files = buildPublishedCourseWebPackageFiles(sources, playerBundleOrOptions)
   return new Promise((resolve, reject) => {
-    zip(files, { level: 6, mtime: new Date('1980-01-01T00:00:00.000Z') }, (error, bytes) => {
+    zip(files, {
+      level: 6,
+      mtime: createTimezoneStableZipMtime('1980-01-01T00:00:00.000Z'),
+    }, (error, bytes) => {
       if (error) reject(error)
       else resolve(bytes)
     })

@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from 'fflate'
+import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
 import {
   buildFlowPrintPlan,
@@ -265,7 +266,10 @@ export function buildFlowDocxFromPlan(
   }
   for (const image of context.images) files[`word/${image.path}`] = image.bytes
   return {
-    bytes: zipSync(files, { level: 6, mtime: new Date('1980-01-01T00:00:00.000Z') }),
+    bytes: zipSync(files, {
+      level: 6,
+      mtime: createTimezoneStableZipMtime('1980-01-01T00:00:00.000Z'),
+    }),
     warnings: context.warnings,
     report: context.report,
   }
