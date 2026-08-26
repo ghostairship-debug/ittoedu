@@ -2,6 +2,7 @@ import type {
   InteractionActionPayload,
   InteractionRule,
 } from '../interactionTypes'
+import { composeCourseProjectLocation } from '../courseLayerComposition'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -9,6 +10,7 @@ import type {
 } from '../courseProjectTypes'
 import {
   allLayerVisits,
+  courseProjectComposedLayerPath,
   effectiveLayerItem,
   finalizeCourseProjectHealthFindings,
   slideScenes,
@@ -283,12 +285,12 @@ function checkRules(
 
     rule.conditions.forEach((condition, conditionIndex) => {
       if (condition.type !== 'presentation.in') return
-      condition.stateIds.forEach((stateId) => addStateReferenceFinding(
+      condition.stateIds.forEach((stateId, stateIndex) => addStateReferenceFinding(
         drafts,
         rule,
         stateId,
         scope,
-        [...rulePath, 'conditions', conditionIndex],
+        [...rulePath, 'conditions', conditionIndex, 'stateIds', stateIndex],
       ))
     })
 
@@ -321,100 +323,125 @@ function checkRules(
 }
 
 function informationReleaseFindings(
+  project: CourseProjectDocument,
+  surfaceIndex: number,
+  sceneIndex: number,
   scene: SlideSceneDocument,
-  scenePath: Array<string | number>,
   globalInteractions: readonly InteractionRule[],
 ): CourseProjectHealthFindingDraft[] {
   const drafts: CourseProjectHealthFindingDraft[] = []
+  const surface = project.surfaces[surfaceIndex]
+  if (surface?.type !== 'slide') return drafts
+  const locations = project.locations.filter((location) => (
+    location.kind === 'slide-scene'
+    && location.surfaceId === surface.id
+    && location.sceneId === scene.id
+  ))
   const states = scene.presentation?.states.map((state) => ({
     id: state.id as string | undefined,
     name: state.name,
-    overrides: state.layerItemOverrides,
-  })) ?? [{ id: undefined, name: '基础画面', overrides: {} }]
+  })) ?? [{ id: undefined, name: '基础画面' }]
 
   states.forEach((state) => {
-    const effective = scene.layerItems.map((item) => effectiveLayerItem(
-      item,
-      state.overrides[item.layerItemId],
-    ))
-    const items = new Map(effective.map((item) => [item.layerItemId, item]))
-    const initiallyVisible = new Set(effective
-      .filter((item) => item.visible && item.playbackInitialVisibility !== 'hidden')
-      .map((item) => item.layerItemId))
-    const initiallyHidden = effective
-      .filter((item) => item.visible && item.playbackInitialVisibility === 'hidden')
-      .map((item) => item.layerItemId)
-    if (initiallyHidden.length === 0) return
-
-    const candidates = [...globalInteractions, ...scene.interactions].filter((rule) => (
-      rule.enabled && rule.conditions.every((condition) => (
-        condition.type === 'scene.in'
-          ? condition.sceneIds.includes(scene.id)
-          : state.id !== undefined && condition.stateIds.includes(state.id)
-      ))
-    ))
-    const reachableRules = new Set<InteractionRule>()
-    const completedStages = new Map<string, number>()
-    const visibleStages = new Map([...initiallyVisible].map((id) => [id, 0]))
-    let changed = true
-    let pass = 0
-    while (changed && pass <= candidates.length + effective.length + 1) {
-      changed = false
-      pass += 1
-      candidates.forEach((rule) => {
-        if (reachableRules.has(rule)) return
-        const trigger = rule.trigger
-        let triggerStage: number | undefined
-        if (trigger.type === 'scene.enter') triggerStage = 0
-        else if (trigger.type === 'presentation.enter') {
-          if (state.id === trigger.stateId) triggerStage = 0
-        } else if (trigger.type === 'node.click') {
-          triggerStage = visibleStages.get(trigger.nodeId)
-        } else if (trigger.type === 'animation.completed') {
-          triggerStage = completedStages.get(trigger.actionId)
-        } else {
-          triggerStage = 0
-        }
-        if (triggerStage === undefined) return
-        const stage = triggerStage + 1
-        reachableRules.add(rule)
-        changed = true
-        rule.actions.forEach((step) => {
-          if (step.action.type === 'node.enter' || step.action.type === 'node.exit') {
-            completedStages.set(step.id, Math.max(completedStages.get(step.id) ?? 0, stage))
-          }
-          if (step.action.type !== 'node.enter') return
-          const target = items.get(step.action.nodeId)
-          if (!target?.visible) return
-          const previous = visibleStages.get(target.layerItemId)
-          if (previous === undefined || stage < previous) visibleStages.set(target.layerItemId, stage)
-        })
+    locations.forEach((location) => {
+      const composition = composeCourseProjectLocation({
+        project,
+        locationId: location.id,
+        stateId: state.id ?? null,
       })
-    }
+      const items = new Map(composition.entries.map((entry) => [
+        entry.item.layerItemId,
+        entry,
+      ]))
+      const initiallyVisible = new Set(composition.entries
+        .filter((entry) => entry.initiallyVisible)
+        .map((entry) => entry.item.layerItemId))
+      const initiallyHidden = composition.entries.filter((entry) => (
+        entry.mounted && !entry.initiallyVisible
+      ))
+      if (initiallyHidden.length === 0) return
 
-    initiallyHidden.filter((id) => !visibleStages.has(id)).forEach((layerItemId) => {
-      const item = items.get(layerItemId)
-      if (!item) return
-      const selfTriggered = candidates.some((rule) => (
-        rule.trigger.type === 'node.click'
-        && rule.trigger.nodeId === layerItemId
-        && rule.actions.some((step) => (
-          step.action.type === 'node.enter' && step.action.nodeId === layerItemId
+      const candidates = [...globalInteractions, ...scene.interactions].filter((rule) => (
+        rule.enabled && rule.conditions.every((condition) => (
+          condition.type === 'scene.in'
+            ? condition.sceneIds.includes(scene.id)
+            : state.id !== undefined && condition.stateIds.includes(state.id)
         ))
       ))
-      drafts.push({
-        severity: 'warning',
-        code: selfTriggered
-          ? 'information-release-hidden-self-trigger'
-          : 'information-release-hidden-unreachable',
-        message: selfTriggered
-          ? `状态“${state.name}”中的元素“${item.label}”初始隐藏，却只能通过点击自身显示；运行时无法完成这次点击。`
-          : `状态“${state.name}”中的元素“${item.label}”初始隐藏，但没有从当前可达触发器通向它的显示动作。`,
-        path: [...scenePath, 'layerItems', scene.layerItems.findIndex(
-          (candidate) => candidate.layerItemId === layerItemId,
-        ), 'playbackInitialVisibility'],
-        layerItemId,
-      })
+      const reachableRules = new Set<InteractionRule>()
+      const completedStages = new Map<string, number>()
+      const visibleStages = new Map([...initiallyVisible].map((id) => [id, 0]))
+      let changed = true
+      let pass = 0
+      while (changed && pass <= candidates.length + composition.entries.length + 1) {
+        changed = false
+        pass += 1
+        candidates.forEach((rule) => {
+          if (reachableRules.has(rule)) return
+          const trigger = rule.trigger
+          let triggerStage: number | undefined
+          if (trigger.type === 'scene.enter') triggerStage = 0
+          else if (trigger.type === 'presentation.enter') {
+            if (state.id === trigger.stateId) triggerStage = 0
+          } else if (trigger.type === 'node.click') {
+            triggerStage = visibleStages.get(trigger.nodeId)
+          } else if (trigger.type === 'animation.completed') {
+            triggerStage = completedStages.get(trigger.actionId)
+          } else {
+            triggerStage = 0
+          }
+          if (triggerStage === undefined) return
+          const stage = triggerStage + 1
+          reachableRules.add(rule)
+          changed = true
+          rule.actions.forEach((step) => {
+            if (step.action.type === 'node.enter' || step.action.type === 'node.exit') {
+              completedStages.set(step.id, Math.max(completedStages.get(step.id) ?? 0, stage))
+            }
+            if (step.action.type !== 'node.enter') return
+            const target = items.get(step.action.nodeId)
+            if (!target?.mounted) return
+            const previous = visibleStages.get(target.item.layerItemId)
+            if (previous === undefined || stage < previous) {
+              visibleStages.set(target.item.layerItemId, stage)
+            }
+          })
+        })
+      }
+
+      initiallyHidden
+        .filter(({ item }) => !visibleStages.has(item.layerItemId))
+        .forEach((entry) => {
+          const { item } = entry
+          const selfTriggered = candidates.some((rule) => (
+            rule.trigger.type === 'node.click'
+            && rule.trigger.nodeId === item.layerItemId
+            && rule.actions.some((step) => (
+              step.action.type === 'node.enter'
+              && step.action.nodeId === item.layerItemId
+            ))
+          ))
+          drafts.push({
+            severity: 'warning',
+            code: selfTriggered
+              ? 'information-release-hidden-self-trigger'
+              : 'information-release-hidden-unreachable',
+            message: selfTriggered
+              ? `课程位置“${location.label}”（${location.id}）的状态“${state.name}”（${state.id ?? 'base'}）中，元素“${item.label}”初始隐藏，却只能通过点击自身显示；运行时无法完成这次点击。`
+              : `课程位置“${location.label}”（${location.id}）的状态“${state.name}”（${state.id ?? 'base'}）中，元素“${item.label}”初始隐藏，但没有从当前可达触发器通向它的显示动作。`,
+            path: [
+              ...courseProjectComposedLayerPath(
+                project,
+                surfaceIndex,
+                sceneIndex,
+                entry.source,
+                item.layerItemId,
+              ),
+              'playbackInitialVisibility',
+            ],
+            layerItemId: item.layerItemId,
+          })
+        })
     })
   })
   return drafts
@@ -449,14 +476,16 @@ export function collectCourseProjectInteractionHealth(
   checkRules(projectScenes, drafts, itemsById, project.globalInteractions, {
     path: ['globalInteractions'],
   })
-  scenes.forEach(({ scene, path }) => {
+  scenes.forEach(({ scene, path, surfaceIndex, sceneIndex }) => {
     checkRules(projectScenes, drafts, itemsById, scene.interactions, {
       scene,
       path: [...path, 'interactions'],
     })
     drafts.push(...informationReleaseFindings(
+      project,
+      surfaceIndex,
+      sceneIndex,
       scene,
-      path,
       project.globalInteractions,
     ))
   })

@@ -10,9 +10,11 @@ import {
 } from '@/renderer/project/createProject'
 import {
   collectCourseProjectHealth,
+  collectCourseProjectInteractionHealth,
   collectCourseProjectRuntimeHealth,
   type CourseProjectHealthArchiveFiles,
 } from '@/shared/courseProjectHealth'
+import { finalizeCourseProjectHealthFindings } from '@/shared/courseProjectHealth/internal'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type {
@@ -530,6 +532,267 @@ describe('V9-native Course Project health', () => {
     expect(findings.every(({ target }) => target.version === 1)).toBe(true)
   })
 
+  it('checks composed shared videos and hidden items with scene and global rules', () => {
+    const project = blankProject()
+    const { surface, scene } = slide(project)
+    const location = project.locations.find((candidate) => (
+      candidate.kind === 'slide-scene' && candidate.sceneId === scene.id
+    ))
+    if (!location) throw new Error('expected Slide location')
+    const assetFiles: Record<string, Uint8Array> = {}
+    addImageAsset(project, assetFiles, 'surface-video-asset', 'video')
+    addImageAsset(project, assetFiles, 'global-video-asset', 'video')
+    addImageAsset(project, assetFiles, 'excluded-video-asset', 'video')
+
+    const surfaceVideo = sceneNodeToCourseLayerItem(createVideoNode({
+      id: 'surface-video',
+      assetId: 'surface-video-asset',
+      loop: true,
+      clickToToggle: true,
+      showControls: true,
+    }), 0)
+    const globalVideo = sceneNodeToCourseLayerItem(createVideoNode({
+      id: 'global-video',
+      assetId: 'global-video-asset',
+      loop: true,
+      clickToToggle: true,
+      showControls: true,
+    }), 1)
+    const excludedVideo = sceneNodeToCourseLayerItem(createVideoNode({
+      id: 'excluded-video',
+      assetId: 'excluded-video-asset',
+      loop: true,
+      clickToToggle: true,
+      showControls: true,
+    }), 2)
+    const surfaceHidden = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'surface-hidden',
+      name: 'Surface 自触发隐藏元素',
+      playbackInitialVisibility: 'hidden',
+    }), 3)
+    const globalHidden = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'global-hidden',
+      name: 'Global 不可达隐藏元素',
+      playbackInitialVisibility: 'hidden',
+    }), 4)
+    surface.surfaceLayerItems.push(
+      { item: surfaceVideo, visibility: { mode: 'all', locationIds: [] } },
+      {
+        item: excludedVideo,
+        visibility: { mode: 'exclude', locationIds: [location.id] },
+      },
+      { item: surfaceHidden, visibility: { mode: 'all', locationIds: [] } },
+    )
+    project.globalLayerItems.push(
+      { item: globalVideo, visibility: { mode: 'all', locationIds: [] } },
+      { item: globalHidden, visibility: { mode: 'all', locationIds: [] } },
+    )
+
+    const nextAction = (id: string) => ({
+      id,
+      start: 'after-previous' as const,
+      delayMs: 0,
+      action: { type: 'scene.next' as const },
+    })
+    scene.interactions.push(
+      {
+        id: 'surface-video-click',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: surfaceVideo.layerItemId },
+        conditions: [],
+        actions: [nextAction('surface-video-click-next')],
+      },
+      {
+        id: 'surface-video-ended',
+        enabled: true,
+        trigger: { type: 'video.ended', nodeId: surfaceVideo.layerItemId },
+        conditions: [],
+        actions: [nextAction('surface-video-ended-next')],
+      },
+      {
+        id: 'surface-hidden-self-reveal',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: surfaceHidden.layerItemId },
+        conditions: [],
+        actions: [{
+          id: 'surface-hidden-enter',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'node.enter',
+            nodeId: surfaceHidden.layerItemId,
+            durationMs: 200,
+            easing: 'linear',
+            effect: 'fade',
+          },
+        }],
+      },
+    )
+    project.globalInteractions.push(
+      {
+        id: 'surface-video-click',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: surfaceVideo.layerItemId },
+        conditions: [{ type: 'scene.in', sceneIds: [scene.id] }],
+        actions: [nextAction('global-surface-video-click-next')],
+      },
+      {
+        id: 'global-video-click',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: globalVideo.layerItemId },
+        conditions: [{ type: 'scene.in', sceneIds: [scene.id] }],
+        actions: [nextAction('global-video-click-next')],
+      },
+      {
+        id: 'global-video-ended',
+        enabled: true,
+        trigger: { type: 'video.ended', nodeId: globalVideo.layerItemId },
+        conditions: [{ type: 'scene.in', sceneIds: [scene.id] }],
+        actions: [nextAction('global-video-ended-next')],
+      },
+      {
+        id: 'excluded-video-click',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: excludedVideo.layerItemId },
+        conditions: [{ type: 'scene.in', sceneIds: [scene.id] }],
+        actions: [nextAction('excluded-video-click-next')],
+      },
+    )
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    const findings = collectCourseProjectHealth(project, { assetFiles, componentFiles: {} })
+    expect(findings.filter(({ code }) => code === 'video-click-interaction-conflict'))
+      .toHaveLength(2)
+    expect(findings.filter(({ code }) => code === 'looping-video-ended-unreachable'))
+      .toHaveLength(2)
+    expect(findings).toContainEqual(expect.objectContaining({
+      code: 'video-click-interaction-conflict',
+      layerItemId: surfaceVideo.layerItemId,
+      message: expect.stringContaining('2 条元素单击规则'),
+    }))
+    expect(findings).not.toContainEqual(expect.objectContaining({
+      layerItemId: excludedVideo.layerItemId,
+    }))
+    expect(findings).toContainEqual(expect.objectContaining({
+      code: 'information-release-hidden-self-trigger',
+      layerItemId: surfaceHidden.layerItemId,
+      target: expect.objectContaining({ kind: 'layer-item', owner: 'surface' }),
+    }))
+    expect(findings).toContainEqual(expect.objectContaining({
+      code: 'information-release-hidden-unreachable',
+      layerItemId: globalHidden.layerItemId,
+      target: expect.objectContaining({ kind: 'layer-item', owner: 'global' }),
+    }))
+    expect(new Set(findings.filter(({ code }) => (
+      code === 'video-click-interaction-conflict'
+      || code === 'looping-video-ended-unreachable'
+    )).map(({ target }) => target.kind === 'layer-item' ? target.owner : target.kind)))
+      .toEqual(new Set(['surface', 'global']))
+  })
+
+  it('keeps distinct missing state values and deterministic element paths', () => {
+    const project = blankProject()
+    const { scene } = slide(project)
+    scene.interactions.push({
+      id: 'two-missing-states',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{
+        type: 'presentation.in',
+        stateIds: ['missing-a', 'missing-b'],
+      }],
+      actions: [{
+        id: 'two-missing-states-next',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'scene.next' },
+      }],
+    })
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    const first = collectCourseProjectInteractionHealth(project, EMPTY_FILES).filter(
+      ({ code }) => code === 'interaction-state-reference-missing',
+    )
+    const second = collectCourseProjectInteractionHealth(project, EMPTY_FILES).filter(
+      ({ code }) => code === 'interaction-state-reference-missing',
+    )
+    expect(second).toEqual(first)
+    expect(first.map(({ message }) => message)).toEqual([
+      expect.stringContaining('missing-a'),
+      expect.stringContaining('missing-b'),
+    ])
+    expect(first.map(({ path }) => path.slice(-2))).toEqual([
+      ['stateIds', 0],
+      ['stateIds', 1],
+    ])
+  })
+
+  it('deduplicates only findings with the same complete diagnostic identity', () => {
+    const project = blankProject()
+    const path = ['surfaces', 0, 'scenes', 0, 'interactions', 0]
+    const findings = finalizeCourseProjectHealthFindings(project, [
+      {
+        severity: 'error',
+        code: 'interaction-state-reference-missing',
+        message: 'missing-a',
+        path,
+      },
+      {
+        severity: 'error',
+        code: 'interaction-state-reference-missing',
+        message: 'missing-b',
+        path,
+      },
+      {
+        severity: 'error',
+        code: 'interaction-state-reference-missing',
+        message: 'missing-a',
+        path,
+      },
+    ])
+
+    expect(findings.map(({ message }) => message)).toEqual(['missing-a', 'missing-b'])
+  })
+
+  it('does not let a disabled, state-hidden or out-of-scope Runtime hide an unused asset', () => {
+    const project = blankProject()
+    const { scene } = slide(project)
+    const location = project.locations.find((candidate) => (
+      candidate.kind === 'slide-scene' && candidate.sceneId === scene.id
+    ))
+    if (!location) throw new Error('expected Slide location')
+    const assetFiles: Record<string, Uint8Array> = {}
+    addImageAsset(project, assetFiles, 'unused-with-disabled-runtime')
+    const disabledRuntime = runtimeItem('disabled-runtime', 0)
+    disabledRuntime.runtime.enabled = false
+    disabledRuntime.runtime.nodeBindings = {}
+    scene.layerItems.push(disabledRuntime)
+    const excludedRuntime = runtimeItem('excluded-runtime', 1)
+    excludedRuntime.runtime.nodeBindings = {}
+    project.globalLayerItems.push({
+      item: excludedRuntime,
+      visibility: { mode: 'exclude', locationIds: [location.id] },
+    })
+    const stateHiddenRuntime = runtimeItem('state-hidden-runtime', 2)
+    stateHiddenRuntime.runtime.nodeBindings = {}
+    scene.layerItems.push(stateHiddenRuntime)
+    scene.presentation!.states.forEach((state) => {
+      state.layerItemOverrides[stateHiddenRuntime.layerItemId] = { visible: false }
+    })
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    expect(collectCourseProjectHealth(project, {
+      assetFiles,
+      componentFiles: {},
+    })).toContainEqual(expect.objectContaining({
+      code: 'asset-unused',
+      target: expect.objectContaining({
+        kind: 'asset',
+        assetId: 'unused-with-disabled-runtime',
+      }),
+    }))
+  })
+
   it('covers global partial states, cross-surface scene ids and hidden reveal paths', () => {
     const project = blankProject()
     const { surface, scene } = slide(project)
@@ -716,7 +979,7 @@ describe('V9-native Course Project health', () => {
       metaKey: false,
     })
     const authoredFindings = collectCourseProjectHealth(authored, EMPTY_FILES)
-    expect(authoredFindings.filter(({ code }) => code === 'presenter-command-unhandled')).toHaveLength(1)
+    expect(authoredFindings.filter(({ code }) => code === 'presenter-command-unhandled')).toHaveLength(2)
     expect(authoredFindings.find(({ code }) => code === 'presenter-f5-browser-reserved')?.severity)
       .toBe('warning')
 

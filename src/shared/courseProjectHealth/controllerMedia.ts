@@ -3,6 +3,7 @@ import {
   mergeComponentProps,
 } from '../componentProps'
 import type { ComponentManifest } from '../componentTypes'
+import { composeCourseProjectLocation } from '../courseLayerComposition'
 import type {
   CourseProjectDocument,
   FlowBlock,
@@ -15,6 +16,7 @@ import {
 } from '../teacherControllerConsistency'
 import {
   createCourseProjectHealthContext,
+  courseProjectComposedLayerPath,
   effectiveLayerItem,
   finalizeCourseProjectHealthFindings,
   manifestFor,
@@ -195,7 +197,7 @@ function addLayerAssetChecks(
     { ...common, path: [...path, 'runtime', 'staticFallback', 'assetId'] },
     false,
   )
-  return true
+  return false
 }
 
 function mixedControllerTarget(
@@ -316,68 +318,112 @@ function ruleAppliesInState(
   ))
 }
 
+function hasExecutableRuntimeAssetConsumer(project: CourseProjectDocument): boolean {
+  for (const location of project.locations) {
+    const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+    if (!surface) continue
+    let stateIds: Array<string | null> = [null]
+    if (surface.type === 'slide' && location.kind === 'slide-scene') {
+      const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+      if (scene?.presentation) {
+        stateIds = scene.presentation.states.map((state) => state.id)
+      }
+    }
+    for (const stateId of stateIds) {
+      const composition = composeCourseProjectLocation({
+        project,
+        locationId: location.id,
+        stateId,
+      })
+      if (composition.entries.some(({ item, mounted }) => (
+        mounted && item.kind === 'runtime' && item.runtime.enabled
+      ))) return true
+    }
+  }
+  return false
+}
+
 function videoChecks(
   project: CourseProjectDocument,
   drafts: CourseProjectHealthFindingDraft[],
 ): void {
-  slideScenes(project).forEach(({ scene, path }) => {
+  const diagnostics = new Map<string, {
+    code: 'video-click-interaction-conflict' | 'looping-video-ended-unreachable'
+    item: LayerItem
+    path: Array<string | number>
+    ruleRefs: Set<SlideSceneDocument['interactions'][number]>
+    contexts: Set<string>
+  }>()
+  slideScenes(project).forEach(({ surface, surfaceIndex, scene, sceneIndex }) => {
+    const locations = project.locations.filter((location) => (
+      location.kind === 'slide-scene'
+      && location.surfaceId === surface.id
+      && location.sceneId === scene.id
+    ))
     const states = scene.presentation?.states.map((state) => ({
       id: state.id as string | undefined,
-      overrides: state.layerItemOverrides,
-    })) ?? [{ id: undefined, overrides: {} }]
-    const diagnostics = new Map<string, {
-      code: 'video-click-interaction-conflict' | 'looping-video-ended-unreachable'
-      item: LayerItem
-      ruleIds: Set<string>
-      stateIds: Set<string>
-    }>()
+    })) ?? [{ id: undefined }]
+    const rules = [...project.globalInteractions, ...scene.interactions]
     states.forEach((state) => {
-      const items = new Map(scene.layerItems.map((item) => {
-        const effective = effectiveLayerItem(item, state.overrides[item.layerItemId])
-        return [effective.layerItemId, effective]
-      }))
-      scene.interactions.forEach((rule) => {
-        if (!ruleAppliesInState(rule, scene.id, state.id)) return
-        const trigger = rule.trigger
-        if (trigger.type !== 'node.click' && trigger.type !== 'video.ended') return
-        const item = items.get(trigger.nodeId)
-        if (
-          item?.kind !== 'native'
-          || item.content.nativeType !== 'video'
-          || !item.visible
-        ) return
-        const code = trigger.type === 'node.click'
-          && (item.content.data.clickToToggle || item.content.data.showControls)
-          ? 'video-click-interaction-conflict'
-          : trigger.type === 'video.ended' && item.content.data.loop
-            ? 'looping-video-ended-unreachable'
-            : undefined
-        if (!code) return
-        const key = `${code}:${item.layerItemId}`
-        const current = diagnostics.get(key) ?? {
-          code,
-          item,
-          ruleIds: new Set<string>(),
-          stateIds: new Set<string>(),
-        }
-        current.ruleIds.add(rule.id)
-        current.stateIds.add(state.id ?? 'base')
-        diagnostics.set(key, current)
+      locations.forEach((location) => {
+        const composition = composeCourseProjectLocation({
+          project,
+          locationId: location.id,
+          stateId: state.id ?? null,
+        })
+        const items = new Map(composition.entries.map((entry) => [
+          entry.item.layerItemId,
+          entry,
+        ]))
+        rules.forEach((rule) => {
+          if (!ruleAppliesInState(rule, scene.id, state.id)) return
+          const trigger = rule.trigger
+          if (trigger.type !== 'node.click' && trigger.type !== 'video.ended') return
+          const entry = items.get(trigger.nodeId)
+          const item = entry?.item
+          if (
+            !entry?.mounted
+            || item?.kind !== 'native'
+            || item.content.nativeType !== 'video'
+          ) return
+          const code = trigger.type === 'node.click'
+            && (item.content.data.clickToToggle || item.content.data.showControls)
+            ? 'video-click-interaction-conflict'
+            : trigger.type === 'video.ended' && item.content.data.loop
+              ? 'looping-video-ended-unreachable'
+              : undefined
+          if (!code) return
+          const itemPath = courseProjectComposedLayerPath(
+            project,
+            surfaceIndex,
+            sceneIndex,
+            entry.source,
+            item.layerItemId,
+          )
+          const key = JSON.stringify([code, itemPath])
+          const current = diagnostics.get(key) ?? {
+            code,
+            item,
+            path: itemPath,
+            ruleRefs: new Set<SlideSceneDocument['interactions'][number]>(),
+            contexts: new Set<string>(),
+          }
+          current.ruleRefs.add(rule)
+          current.contexts.add(`${surface.id}:${scene.id}:${state.id ?? 'base'}:${location.id}`)
+          diagnostics.set(key, current)
+        })
       })
     })
-    diagnostics.forEach((diagnostic) => {
-      const itemIndex = scene.layerItems.findIndex(
-        (item) => item.layerItemId === diagnostic.item.layerItemId,
-      )
-      drafts.push({
-        severity: 'warning',
-        code: diagnostic.code,
-        message: diagnostic.code === 'video-click-interaction-conflict'
-          ? `视频“${diagnostic.item.label}”在 ${diagnostic.stateIds.size} 个状态中启用了内置播放点击区，会覆盖该视频的 ${diagnostic.ruleIds.size} 条元素单击规则。`
-          : `视频“${diagnostic.item.label}”在 ${diagnostic.stateIds.size} 个状态中循环播放，因此其 ${diagnostic.ruleIds.size} 条“视频播放结束”规则无法由自然播放到达。`,
-        path: [...path, 'layerItems', itemIndex],
-        layerItemId: diagnostic.item.layerItemId,
-      })
+  })
+  diagnostics.forEach((diagnostic) => {
+    drafts.push({
+      severity: 'warning',
+      code: diagnostic.code,
+      message: diagnostic.code === 'video-click-interaction-conflict'
+        ? `视频“${diagnostic.item.label}”在 ${diagnostic.contexts.size} 个位置/状态组合中启用了内置播放点击区，会覆盖该视频的 ${diagnostic.ruleRefs.size} 条元素单击规则。`
+        : `视频“${diagnostic.item.label}”在 ${diagnostic.contexts.size} 个位置/状态组合中循环播放，因此其 ${diagnostic.ruleRefs.size} 条“视频播放结束”规则无法由自然播放到达。`,
+      path: diagnostic.path,
+      layerItemId: diagnostic.item.layerItemId,
     })
   })
 }
@@ -462,6 +508,9 @@ export function collectCourseProjectControllerMediaHealth(
       manifest,
     ) || hasExecutableAssetConsumer
   })
+
+  hasExecutableAssetConsumer = hasExecutableRuntimeAssetConsumer(project)
+    || hasExecutableAssetConsumer
 
   slideScenes(project).forEach(({ scene, path, surface }) => {
     addAssetCheck(

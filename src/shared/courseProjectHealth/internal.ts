@@ -1,5 +1,6 @@
 import { componentManifestSchema } from '../componentSchema'
 import type { ComponentManifest } from '../componentTypes'
+import type { CourseLayerCompositionSource } from '../courseLayerComposition'
 import type {
   CourseProjectDocument,
   CourseSurfaceDocument,
@@ -168,6 +169,63 @@ export function slideScenes(project: CourseProjectDocument): Array<{
   ))
 }
 
+export function courseProjectComposedLayerPath(
+  project: CourseProjectDocument,
+  surfaceIndex: number,
+  sceneIndex: number | undefined,
+  source: CourseLayerCompositionSource,
+  layerItemId: string,
+): Array<string | number> {
+  const itemIndex = (items: readonly LayerItem[]): number => {
+    const index = items.findIndex((item) => item.layerItemId === layerItemId)
+    if (index < 0) throw new Error(`Composed layer item has no canonical owner: ${layerItemId}`)
+    return index
+  }
+  if (source === 'global') {
+    return [
+      'globalLayerItems',
+      itemIndex(project.globalLayerItems.map((entry) => entry.item)),
+      'item',
+    ]
+  }
+  const surface = project.surfaces[surfaceIndex]
+  if (!surface) throw new Error(`Unknown Course Project surface index: ${surfaceIndex}`)
+  if (source === 'surface') {
+    return [
+      'surfaces',
+      surfaceIndex,
+      'surfaceLayerItems',
+      itemIndex(surface.surfaceLayerItems.map((entry) => entry.item)),
+      'item',
+    ]
+  }
+  if (source === 'scene') {
+    if (surface.type !== 'slide' || sceneIndex === undefined) {
+      throw new Error(`Unknown Slide scene index: ${sceneIndex ?? 'none'}`)
+    }
+    const scene = surface.scenes[sceneIndex]
+    if (!scene) throw new Error(`Unknown Slide scene index: ${sceneIndex}`)
+    return [
+      'surfaces',
+      surfaceIndex,
+      'scenes',
+      sceneIndex,
+      'layerItems',
+      itemIndex(scene.layerItems),
+    ]
+  }
+  if (surface.type !== 'spatial-2d') {
+    throw new Error('World composition requires a Spatial surface')
+  }
+  return [
+    'surfaces',
+    surfaceIndex,
+    'world',
+    'layerItems',
+    itemIndex(surface.world.layerItems),
+  ]
+}
+
 export function courseProjectLayerItemIds(
   project: CourseProjectDocument,
 ): Set<string> {
@@ -233,6 +291,7 @@ export function finalizeCourseProjectHealthFindings(
       finding.surfaceId,
       finding.layerItemId,
       finding.target,
+      finding.message,
     ])
     if (!deduped.has(key)) deduped.set(key, finding)
   })
