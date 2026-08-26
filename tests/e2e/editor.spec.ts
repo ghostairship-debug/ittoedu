@@ -2264,22 +2264,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         exported.on('pageerror', (error) => exportedErrors.push(error.message))
         await exported.goto(pathToFileURL(htmlPath).toString())
         await expectCanvasPlayerScene(exported, 0)
-        const escapeControls = exported.getByTestId('teacher-escape-controls')
-        await expect(escapeControls).toBeVisible()
-        const escapeNext = exported.getByTestId('teacher-escape-next')
-        await expect(escapeNext).toBeEnabled()
-        expect(await escapeNext.evaluate((element) => {
-          const rect = element.getBoundingClientRect()
-          const hit = document.elementFromPoint(
-            rect.left + rect.width / 2,
-            rect.top + rect.height / 2,
-          )
-          return hit === element || element.contains(hit)
-        })).toBe(true)
+        await expect(exported.getByTestId('teacher-escape-controls')).toHaveCount(0)
+        await expect(exported.locator('.slide-native-teacher-controller')).toBeVisible()
         const exportedCanvas = exported.locator('.slide-published-adapter')
         const firstPage = await exportedCanvas.screenshot()
-        await escapeNext.click()
-        await expectCanvasPlayerScene(exported, 1)
+        await navigateCanvasPlayerByKeyboard(exported, 'PageDown', 1)
         await exported.waitForTimeout(150)
         const nextPageDifference = await averagePixelDifference(
           firstPage,
@@ -2306,11 +2295,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         packaged.on('pageerror', (error) => packageErrors.push(error.message))
         await packaged.goto(pathToFileURL(join(webPackageDirectory, 'index.html')).toString())
         await expectCanvasPlayerScene(packaged, 0)
-        await expect(packaged.getByTestId('teacher-escape-controls')).toBeVisible()
-        await packaged.getByTestId('teacher-escape-next').click()
-        await expectCanvasPlayerScene(packaged, 1)
-        await packaged.getByTestId('teacher-escape-previous').click()
-        await expectCanvasPlayerScene(packaged, 0)
+        await expect(packaged.getByTestId('teacher-escape-controls')).toHaveCount(0)
+        await expect(packaged.locator('.slide-native-teacher-controller')).toBeVisible()
+        await navigateCanvasPlayerByKeyboard(packaged, 'PageDown', 1)
+        await navigateCanvasPlayerByKeyboard(packaged, 'PageUp', 0)
         expect(packageRequests).toEqual([])
         expect(packageErrors).toEqual([])
       } finally {

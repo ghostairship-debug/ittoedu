@@ -17,7 +17,6 @@ const appMocks = vi.hoisted(() => ({
   playerSceneConstructorArgs: [] as unknown[][],
   runtimeKernelOptions: [] as Array<Record<string, unknown> | undefined>,
   hostConstructionOrder: [] as string[],
-  teacherEscapeEvidenceClicks: [] as unknown[][],
 }))
 
 vi.mock('phaser', () => ({
@@ -77,11 +76,6 @@ vi.mock('../../src/player/HostEvidenceRecorder', () => ({
     }
     recordAssessment(): void {}
     recordAction(): void {}
-    beginTeacherEscapeClick(): (evidence: unknown) => void {
-      const records: unknown[] = []
-      appMocks.teacherEscapeEvidenceClicks.push(records)
-      return (evidence) => records.push(evidence)
-    }
   },
 }))
 
@@ -146,7 +140,7 @@ vi.mock('../../src/player/ScenePickerOverlay', () => ({
 }))
 
 import { PlayerApp } from '../../src/player/PlayerApp'
-import { createProject, createScene } from '../../src/renderer/project/createProject'
+import { createProject } from '../../src/renderer/project/createProject'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -155,7 +149,6 @@ afterEach(() => {
   appMocks.playerSceneConstructorArgs.length = 0
   appMocks.runtimeKernelOptions.length = 0
   appMocks.hostConstructionOrder.length = 0
-  appMocks.teacherEscapeEvidenceClicks.length = 0
   appMocks.sceneIndex = 0
   appMocks.showSceneCalls.length = 0
   appMocks.showSceneResults.length = 0
@@ -304,7 +297,7 @@ describe('PlayerApp fixed renderer planes', () => {
     canvasPlayer.destroy()
   })
 
-  it('只在交付播放且 presenter enabled 时创建最顶层教师逃生控制面', () => {
+  it('交付、捕获和 authoring 根都不创建重复教师快捷控件', () => {
     const enabledRoot = document.createElement('div')
     const enabledProject = createProject()
     const enabledPlayer = new PlayerApp({
@@ -312,8 +305,7 @@ describe('PlayerApp fixed renderer planes', () => {
       assets: {},
       components: {},
     }, enabledRoot)
-    expect(enabledRoot.querySelector('[data-testid="teacher-escape-controls"]'))
-      .toHaveStyle({ zIndex: '50', pointerEvents: 'auto' })
+    expect(enabledRoot.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
     enabledPlayer.destroy()
 
     const disabledRoot = document.createElement('div')
@@ -336,7 +328,7 @@ describe('PlayerApp fixed renderer planes', () => {
     }, noAuthoredControlsRoot, { controls: false })
     expect(noAuthoredControlsRoot.querySelector(
       '[data-testid="teacher-escape-controls"]',
-    )).not.toBeNull()
+    )).toBeNull()
     expect(appMocks.presenterInputOptions).toHaveLength(inputCount + 1)
     expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(false)
     noAuthoredControlsPlayer.destroy()
@@ -347,7 +339,7 @@ describe('PlayerApp fixed renderer planes', () => {
       assets: {},
       components: {},
     }, noneRoot)
-    expect(noneRoot.querySelector('[data-testid="teacher-escape-controls"]')).not.toBeNull()
+    expect(noneRoot.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
     nonePlayer.destroy()
 
     const captureRoot = document.createElement('div')
@@ -371,52 +363,5 @@ describe('PlayerApp fixed renderer planes', () => {
     expect(authoringRoot.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
     expect(appMocks.presenterInputOptions).toHaveLength(authoringInputCount)
     authoringPlayer.destroy()
-  })
-
-  it('教师逃生翻页的第二次确认会显式传入 navigation guard bypass', () => {
-    const root = document.createElement('div')
-    const project = createProject()
-    project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
-    appMocks.showSceneResults.push(false, true)
-    appMocks.showSceneBlockedReasons.push('当前任务未完成')
-    const player = new PlayerApp({ project, assets: {}, components: {} }, root)
-    const next = root.querySelector<HTMLButtonElement>(
-      '[data-testid="teacher-escape-next"]',
-    )!
-
-    next.click()
-    next.click()
-
-    expect(appMocks.showSceneCalls).toEqual([
-      [1, false, undefined, false],
-      [1, false, undefined, true],
-    ])
-    expect(appMocks.teacherEscapeEvidenceClicks).toEqual([
-      [
-        expect.objectContaining({
-          action: 'next',
-          phase: 'requested',
-          bypassNavigationGuards: false,
-        }),
-        expect.objectContaining({
-          action: 'next',
-          phase: 'confirmation-required',
-          accepted: false,
-        }),
-      ],
-      [
-        expect.objectContaining({
-          action: 'next',
-          phase: 'requested',
-          bypassNavigationGuards: true,
-        }),
-        expect.objectContaining({
-          action: 'next',
-          phase: 'completed',
-          accepted: true,
-        }),
-      ],
-    ])
-    player.destroy()
   })
 })

@@ -804,14 +804,6 @@ describe('AI capability manifest generation', () => {
             schemaVersion: number
             recordKinds: string[]
             sessionStartBeforeRuntimeMount: boolean
-            teacherEscape: {
-              actions: string[]
-              phases: string[]
-              eventType: string
-              requiresTrustedDispatchedClick: boolean
-              runtimeExposure: string
-              publicCustomEventIsEvidence: boolean
-            }
           }
         }
         evidence: {
@@ -829,17 +821,8 @@ describe('AI capability manifest generation', () => {
       recordKinds: [
         'assessment-evaluated',
         'action-recorded',
-        'teacher-escape-recorded',
       ],
       sessionStartBeforeRuntimeMount: true,
-      teacherEscape: {
-        actions: ['previous', 'next', 'scene-picker', 'replay'],
-        phases: ['requested', 'confirmation-required', 'completed'],
-        eventType: 'click',
-        requiresTrustedDispatchedClick: true,
-        runtimeExposure: 'none',
-        publicCustomEventIsEvidence: false,
-      },
     })
     expect(runtime.hostContract.evidence).toMatchObject({
       invocation: 'ctx.evidence.recordAction',

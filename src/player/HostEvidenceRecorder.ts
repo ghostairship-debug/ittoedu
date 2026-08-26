@@ -11,37 +11,6 @@ export const HOST_EVIDENCE_SCHEMA_VERSION = 1 as const
 export const HOST_EVIDENCE_CONSOLE_PREFIX =
   '[courseware-host-evidence-v1] ' as const
 
-export const HOST_TEACHER_ESCAPE_ACTIONS = [
-  'previous',
-  'next',
-  'scene-picker',
-  'replay',
-] as const
-
-export const HOST_TEACHER_ESCAPE_PHASES = [
-  'requested',
-  'confirmation-required',
-  'completed',
-] as const
-
-export type HostTeacherEscapeAction =
-  (typeof HOST_TEACHER_ESCAPE_ACTIONS)[number]
-export type HostTeacherEscapePhase =
-  (typeof HOST_TEACHER_ESCAPE_PHASES)[number]
-
-export interface HostTeacherEscapeEvidence {
-  action: HostTeacherEscapeAction
-  phase: HostTeacherEscapePhase
-  sceneId: string | null
-  stateId: string | null
-  bypassNavigationGuards: boolean
-  accepted?: boolean
-}
-
-export type HostTeacherEscapeEvidenceWriter = (
-  evidence: Readonly<HostTeacherEscapeEvidence>,
-) => void
-
 export interface RuntimeAssessmentEvaluationEvidence {
   scope: RuntimeScope
   sceneId?: string
@@ -101,25 +70,10 @@ export interface HostActionRecordedRecord {
   eventType: string
 }
 
-export interface HostTeacherEscapeRecordedRecord {
-  schemaVersion: typeof HOST_EVIDENCE_SCHEMA_VERSION
-  kind: 'teacher-escape-recorded'
-  sessionId: string
-  sequence: number
-  action: HostTeacherEscapeAction
-  phase: HostTeacherEscapePhase
-  sceneId: string | null
-  stateId: string | null
-  bypassNavigationGuards: boolean
-  accepted?: boolean
-  eventType: 'click'
-}
-
 export type HostEvidenceRecord =
   | HostEvidenceSessionStartRecord
   | HostAssessmentEvaluatedRecord
   | HostActionRecordedRecord
-  | HostTeacherEscapeRecordedRecord
 
 export type HostEvidenceSink = (serializedRecord: string) => void
 
@@ -127,100 +81,7 @@ export type HostEvidenceSink = (serializedRecord: string) => void
 // before any course-owned Runtime source can execute or replace console.info.
 const capturedConsoleInfo = console.info.bind(console)
 const capturedJsonStringify = JSON.stringify.bind(JSON)
-const capturedFreeze = Object.freeze.bind(Object)
 const defaultSink: HostEvidenceSink = capturedConsoleInfo
-const approvedTeacherEscapeActions = new Set<string>(HOST_TEACHER_ESCAPE_ACTIONS)
-const approvedTeacherEscapePhases = new Set<string>(HOST_TEACHER_ESCAPE_PHASES)
-const hasApprovedTeacherEscapeAction = approvedTeacherEscapeActions.has.bind(
-  approvedTeacherEscapeActions,
-)
-const hasApprovedTeacherEscapePhase = approvedTeacherEscapePhases.has.bind(
-  approvedTeacherEscapePhases,
-)
-const capturedEventComposedPath = Function.prototype.call.bind(
-  Event.prototype.composedPath,
-) as (event: Event) => EventTarget[]
-const eventTypeGetter = Object.getOwnPropertyDescriptor(Event.prototype, 'type')?.get
-const eventPhaseGetter = Object.getOwnPropertyDescriptor(
-  Event.prototype,
-  'eventPhase',
-)?.get
-
-if (!eventTypeGetter || !eventPhaseGetter) {
-  throw new Error('当前浏览器缺少教师出口证据所需的 Event 属性')
-}
-
-const capturedEventType = Function.prototype.call.bind(eventTypeGetter) as (
-  event: Event,
-) => string
-const capturedEventPhase = Function.prototype.call.bind(eventPhaseGetter) as (
-  event: Event,
-) => number
-
-function assertTrustedDispatchedClick(event: Event): 'click' {
-  try {
-    capturedEventComposedPath(event)
-  } catch {
-    throw new TypeError('教师出口证据必须绑定真实的浏览器 Event')
-  }
-  const eventType = capturedEventType(event)
-  if (
-    event.isTrusted !== true ||
-    capturedEventPhase(event) === 0 ||
-    eventType !== 'click'
-  ) {
-    throw new TypeError(
-      '教师出口证据只接受当前正在分发且 Event.isTrusted=true 的 click',
-    )
-  }
-  return eventType
-}
-
-function snapshotTeacherEscapeEvidence(
-  evidence: Readonly<HostTeacherEscapeEvidence>,
-): HostTeacherEscapeEvidence {
-  const source = evidence as Partial<HostTeacherEscapeEvidence> | null | undefined
-  const action = source?.action
-  const phase = source?.phase
-  const sceneId = source?.sceneId
-  const stateId = source?.stateId
-  const bypassNavigationGuards = source?.bypassNavigationGuards
-  const accepted = source?.accepted
-
-  if (typeof action !== 'string' || !hasApprovedTeacherEscapeAction(action)) {
-    throw new TypeError(`未批准的教师出口动作：${String(action)}`)
-  }
-  if (typeof phase !== 'string' || !hasApprovedTeacherEscapePhase(phase)) {
-    throw new TypeError(`未批准的教师出口阶段：${String(phase)}`)
-  }
-  if (sceneId !== null && typeof sceneId !== 'string') {
-    throw new TypeError('教师出口 sceneId 必须是 string 或 null')
-  }
-  if (stateId !== null && typeof stateId !== 'string') {
-    throw new TypeError('教师出口 stateId 必须是 string 或 null')
-  }
-  if (typeof bypassNavigationGuards !== 'boolean') {
-    throw new TypeError('教师出口 bypassNavigationGuards 必须是 boolean')
-  }
-  if (phase === 'requested' && accepted !== undefined) {
-    throw new TypeError('教师出口 requested 阶段不得声明 accepted')
-  }
-  if (phase === 'confirmation-required' && accepted !== false) {
-    throw new TypeError('教师出口 confirmation-required 阶段必须声明 accepted=false')
-  }
-  if (phase === 'completed' && typeof accepted !== 'boolean') {
-    throw new TypeError('教师出口 completed 阶段必须声明 boolean accepted')
-  }
-
-  return {
-    action: action as HostTeacherEscapeAction,
-    phase: phase as HostTeacherEscapePhase,
-    sceneId,
-    stateId,
-    bypassNavigationGuards,
-    ...(accepted !== undefined ? { accepted } : {}),
-  }
-}
 
 function createSessionId(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
@@ -298,30 +159,6 @@ export class HostEvidenceRecorder {
       responseId: evidence.responseId ?? null,
       actionKind: evidence.actionKind,
       eventType: evidence.eventType,
-    })
-  }
-
-  /**
-   * Opens a write-only receipt closure for one native teacher-control click.
-   * Every phase write rechecks that the original click is still dispatching,
-   * so the closure cannot be retained and replayed after the handler returns.
-   */
-  beginTeacherEscapeClick(event: Event): HostTeacherEscapeEvidenceWriter {
-    const eventType = assertTrustedDispatchedClick(event)
-    return capturedFreeze((evidence: Readonly<HostTeacherEscapeEvidence>) => {
-      if (assertTrustedDispatchedClick(event) !== eventType) {
-        throw new TypeError('教师出口证据事件类型在处理期间发生变化')
-      }
-      const snapshot = snapshotTeacherEscapeEvidence(evidence)
-      this.#sequence += 1
-      this.#write({
-        schemaVersion: HOST_EVIDENCE_SCHEMA_VERSION,
-        kind: 'teacher-escape-recorded',
-        sessionId: this.#sessionId,
-        sequence: this.#sequence,
-        ...snapshot,
-        eventType,
-      })
     })
   }
 

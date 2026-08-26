@@ -90,8 +90,6 @@ import { ASSESSMENT_EVALUATOR_REGISTRY } from '../src/shared/assessmentEvaluator
 import {
   HOST_EVIDENCE_CONSOLE_PREFIX,
   HOST_EVIDENCE_SCHEMA_VERSION,
-  HOST_TEACHER_ESCAPE_ACTIONS,
-  HOST_TEACHER_ESCAPE_PHASES,
 } from '../src/player/HostEvidenceRecorder'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
@@ -669,7 +667,6 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/player/CourseRuntimeKernel.ts',
     'src/player/HostEvidenceRecorder.ts',
     'src/player/PlayerApp.ts',
-    'src/player/TeacherEscapeControls.ts',
     'src/player/surfaces/publishedDynamicHosts.ts',
     'src/player/surfaces/publishedComponentMount.ts',
     'src/player/surfaces/flow/FlowSurfaceHost.ts',
@@ -855,31 +852,7 @@ export async function generateAiCapabilityArtifacts(
           recordKinds: [
             'assessment-evaluated',
             'action-recorded',
-            'teacher-escape-recorded',
           ],
-          teacherEscape: {
-            recordKind: 'teacher-escape-recorded',
-            actions: HOST_TEACHER_ESCAPE_ACTIONS,
-            phases: HOST_TEACHER_ESCAPE_PHASES,
-            requiredFields: [
-              'action',
-              'phase',
-              'sceneId',
-              'stateId',
-              'bypassNavigationGuards',
-              'eventType',
-            ],
-            acceptedField: {
-              requested: 'omitted',
-              confirmationRequired: false,
-              completed: 'boolean',
-            },
-            eventType: 'click',
-            requiresTrustedDispatchedClick: true,
-            phaseWriterLifetime: 'current-click-dispatch-only',
-            runtimeExposure: 'none',
-            publicCustomEventIsEvidence: false,
-          },
         },
       },
       evidence: {
@@ -951,7 +924,6 @@ export async function generateAiCapabilityArtifacts(
       'src/player/RuntimeHost.ts',
       'src/player/CourseRuntimeKernel.ts',
       'src/player/PlayerApp.ts',
-      'src/player/TeacherEscapeControls.ts',
       'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
       'src/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner.ts',
       'src/player/surfaces/slide/SlidePublishedAdapter.ts',
