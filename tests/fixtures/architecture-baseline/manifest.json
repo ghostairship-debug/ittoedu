@@ -16,8 +16,8 @@
         "teacher-controller-and-scene-interaction",
         "published-v2-static-export-inputs"
       ],
-      "byteLength": 7050,
-      "sha256": "101b8e8186e1fbadbf9f083e5d3273eee9f1166fa3028478f290497537274a7b"
+      "byteLength": 7145,
+      "sha256": "a3443f36f6267057d49249314f7ae0a8aa4f96fc82188c2439265f0574c53075"
     },
     {
       "id": "flow-heavy",
@@ -30,8 +30,8 @@
         "flow-component-block-with-fallback",
         "flow-print-and-docx-inputs"
       ],
-      "byteLength": 5358,
-      "sha256": "326b1c29d72358d01373af26cbc6f97f396a34ce40e0e057079bbdcd76beeea0"
+      "byteLength": 5461,
+      "sha256": "b6e45ec6be8881d53a7a56aca28a7409e67ae158cfcc7b81c219f0941cabc9cf"
     },
     {
       "id": "mixed-spatial",
@@ -44,8 +44,8 @@
         "spatial-component-and-surface-runtime",
         "published-v2-mixed-navigation-inputs"
       ],
-      "byteLength": 6583,
-      "sha256": "939a0d5520fe21a6608a4cb11b8487f87d223a1da15286965803eb4e2aaa66df"
+      "byteLength": 6672,
+      "sha256": "512c291ffb32b87afa6cb766c1036b6385fabd3e78b0c5ae33ec9d475beeae2a"
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { zipSync } from 'fflate'
 import { componentContentSha256 } from '../src/shared/componentContentIntegrity'
 import type { ComponentManifest } from '../src/shared/componentTypes'
 import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
@@ -559,6 +560,16 @@ function evidencePanelComponent(): {
     'runtime.js': new TextEncoder().encode(runtimeSource),
     'thumbnail.png': PNG_BYTES,
   }
+  /**
+   * The exact `.h5component` bytes this synthetic package would have been
+   * imported from. Provenance records the raw archive hash, while
+   * `contentSha256` stays the packaging-independent content digest; the two
+   * hashes cover different questions and must never be swapped.
+   */
+  const packageBytes = zipSync(files, {
+    level: 6,
+    mtime: ARCHITECTURE_BASELINE_FIXTURE_MTIME,
+  })
   return {
     files,
     componentFilesKey: `${COMPONENT_ID}@${COMPONENT_VERSION}`,
@@ -570,6 +581,9 @@ function evidencePanelComponent(): {
       runtimePath: `components/${COMPONENT_ID}@${COMPONENT_VERSION}/runtime.js`,
       thumbnailPath: `components/${COMPONENT_ID}@${COMPONENT_VERSION}/thumbnail.png`,
       contentSha256: componentContentSha256(files),
+      sha256: sha256(packageBytes),
+      importedAt: ARCHITECTURE_BASELINE_FIXTURE_MTIME,
+      sourceLabel: `ARCH-0 synthetic fixture: ${COMPONENT_ID}@${COMPONENT_VERSION}`,
     },
   }
 }
