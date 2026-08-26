@@ -129,7 +129,7 @@ Player Runtime
 
 架构核心不是 DOM 或 Phaser，而是受 Schema 校验的 Course Project V9 JSON。原生节点、声明式交互、自由运行时和组件都读取同一工程数据；渲染器只负责实现画面与输入。`renderMode` 决定宿主向某份 API 2/V4 代码开放哪些能力，不会把现有 DOM、Phaser、Canvas 或 Three.js 代码自动翻译成另一种实现。
 
-中央工作区不再维护一套“编辑画面”和另一套“运行画面”。当前隔离 Player 负责真实视觉合成；编辑状态通过版本化 authoring 协议把完整原生节点快照、背景和层级变化发送给 Player，并由透明 Phaser 层只处理原生节点选择与几何操作。authoring 宿主会冻结输入、导航、音视频、声明式互动和课程状态，组件/运行时只能通过该协议发布文字或素材命中目标，不能借 authoring 协议直接改写编辑器 Store。切换到“当前位置试运行”后，同一画布位置改用 playback 宿主接收真实互动。这里的 iframe 是当前视觉合成、生命周期和会话竞态实现，不是 Runtime/Component 必须永久继承的信任边界。
+中央工作区的“编辑画面”与“运行画面”目前仍由两套宿主承担。编辑状态由隔离 Player（`blob:` iframe + Phaser）负责视觉合成，通过版本化 authoring 协议接收完整原生节点快照、背景和层级变化，并由透明 Phaser 层只处理原生节点选择与几何操作；authoring 宿主会冻结输入、导航、音视频、声明式互动和课程状态，组件/运行时只能通过该协议发布文字或素材命中目标，不能借 authoring 协议直接改写编辑器 Store。切换到“当前位置试运行”后，同一画布位置改由主 renderer 内的 Published V2 DOM 宿主接收真实互动——两侧的断行与自动缩小实现并不相同，把 Slide 编辑画布统一到同一套 Published 宿主是当前任务板上的在办项。这里的 iframe 是当前视觉合成、生命周期和会话竞态实现，不是 Runtime/Component 必须永久继承的信任边界。
 
 Player 使用固定粗粒度平面：全局运行时 DOM underlay → 场景运行时 DOM underlay → 单一 Phaser Canvas → V4 组件 DOM 平面 → 场景运行时 DOM overlay → 全局运行时 DOM overlay。Phaser Canvas 内部再维护全局/场景前后景、原生节点和 Phaser 组件；V4 DOM/hybrid 组件的 DOM 部分跟随组件框变换，但整体位于 Canvas 上方，不能与单个 Phaser 对象按 depth 交错。DOM 与 Canvas 不是一个统一显示列表；要求精确交错的对象应使用同一渲染器，或拆成明确前景/后景。
 

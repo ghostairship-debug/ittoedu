@@ -162,7 +162,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板；2026-08-26 审计后建的 ARCH-0 fixture、repo-index 减负、能力证据收窄三张卡已于同日全部交付合入并删卡，任务板现为 0 张卡。NET-H1、RTP-03 与 V8-02 已通过固定候选 `7d17fed` phase gate；RTP-04、CMP-03、V8-03/04/05A/06/05B、SEM-B3/B4A、W4-C1 与 PRJ-00A 均已有产品提交和对应 focused/独立审查证据。LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板；2026-08-26 审计后建的 ARCH-0 fixture、repo-index 减负、能力证据收窄三张卡已于同日全部交付合入并删卡，当日清空了任务板（此后的建卡以任务板为准，本文不再复述卡数）。NET-H1、RTP-03 与 V8-02 已通过固定候选 `7d17fed` phase gate；RTP-04、CMP-03、V8-03/04/05A/06/05B、SEM-B3/B4A、W4-C1 与 PRJ-00A 均已有产品提交和对应 focused/独立审查证据。LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
 RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 RuntimeHost teardown 异常安全；CMP-03 只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
