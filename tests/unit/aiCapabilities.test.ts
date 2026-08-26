@@ -51,6 +51,7 @@ const expectedSourceEvidencePaths = [
   'scripts/validate-project.ts',
   'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
   'src/renderer/components/importComponentPackage.ts',
+  'src/renderer/project/archivePath.ts',
   'src/renderer/export/exportSize.ts',
   'src/player/HostEvidenceRecorder.ts',
   'src/shared/assessmentEvaluators.ts',
@@ -1113,8 +1114,11 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources.filter((entry) => entry.startsWith('src/preload/'))).toEqual([])
     expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/export/course/')))
       .toEqual([])
+    // Project producers are excluded, but archivePath is a value dependency of
+    // importComponentPackage: its helpers decide whether a catalog package
+    // imports, and therefore the bytes of component-catalog.snapshot.json.
     expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/project/')))
-      .toEqual([])
+      .toEqual(['src/renderer/project/archivePath.ts'])
     // The player host is excluded except for the evidence recorder, whose
     // constants are imported and published in schemas/runtime-api2.json.
     expect(tracedSources.filter((entry) => entry.startsWith('src/player/')))

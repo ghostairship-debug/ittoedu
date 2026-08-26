@@ -669,6 +669,7 @@ const AI_CAPABILITY_SOURCE_EVIDENCE_PATHS = [
   'scripts/validate-project.ts',
   'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
   'src/renderer/components/importComponentPackage.ts',
+  'src/renderer/project/archivePath.ts',
   'src/renderer/export/exportSize.ts',
   'src/player/HostEvidenceRecorder.ts',
   'src/shared/assessmentEvaluators.ts',
