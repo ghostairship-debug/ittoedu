@@ -1080,7 +1080,7 @@
       },
       "owner": "Diagnostics",
       "status": "active-debt",
-      "currentFact": "App and ProjectHealthPanel analyze the V8-shaped ProjectDocument projection; export preflight and a legacy validator also consume the same collector.",
+      "currentFact": "App, ProjectHealthPanel, and export preflight still consume the V8 collectProjectHealth over the V8-shaped ProjectDocument projection; the legacy validator src/renderer/project/validateProjectArchive.ts was deleted with LEG-010, and scripts/validate-project.ts now uses the V9 collectCourseProjectHealth, so the GUI and the CLI emit two separate diagnostic code sets.",
       "evidence": [
         {
           "path": "src/shared/projectHealth.ts",

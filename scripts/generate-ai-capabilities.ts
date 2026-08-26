@@ -655,6 +655,13 @@ function artifactEvidence(files: ReadonlyMap<string, string>): Record<string, {
  * are deliberately excluded — they carry the behaviour the capabilities describe,
  * not the bytes the artifacts are generated from, so listing them only churns the
  * evidence on unrelated edits. Keep this list narrow.
+ *
+ * Every `src/shared/*.ts` contract entry below is a one-line barrel that only
+ * re-exports `src/shared/contracts/**`. A barrel is just the import path; the
+ * contract implementation it re-exports is what actually decides the generated
+ * bytes — editing only the implementation must still move this evidence. So both
+ * halves of each pair must be recorded, and each implementation is listed
+ * immediately after the barrel that re-exports it.
  */
 const AI_CAPABILITY_SOURCE_EVIDENCE_PATHS = [
   'package.json',
@@ -669,19 +676,30 @@ const AI_CAPABILITY_SOURCE_EVIDENCE_PATHS = [
   'src/shared/componentCatalog.ts',
   'src/shared/componentContentIntegrity.ts',
   'src/shared/componentSchema.ts',
+  'src/shared/contracts/component-v4/schema.ts',
   'src/shared/componentTypes.ts',
+  'src/shared/contracts/component-v4/types.ts',
   'src/shared/constants.ts',
   'src/shared/courseProjectSchema.ts',
+  'src/shared/contracts/course-project-v9/schema.ts',
   'src/shared/courseProjectTypes.ts',
+  'src/shared/contracts/course-project-v9/types.ts',
   'src/shared/courseProjectValidationDiagnostics.ts',
   'src/shared/diagnosticCodes.ts',
   'src/shared/interactionSchema.ts',
+  'src/shared/contracts/interaction-v1/schema.ts',
   'src/shared/interactionTypes.ts',
+  'src/shared/contracts/interaction-v1/types.ts',
   'src/shared/publishedCourseSchema.ts',
+  'src/shared/contracts/published-course-v2/schema.ts',
   'src/shared/publishedCourseTypes.ts',
+  'src/shared/contracts/published-course-v2/types.ts',
   'src/shared/runtimeSchema.ts',
+  'src/shared/contracts/runtime/schema.ts',
   'src/shared/runtimeTypes.ts',
+  'src/shared/contracts/runtime/types.ts',
   'src/shared/surfaceRuntimeTypes.ts',
+  'src/shared/contracts/runtime/surface.ts',
 ] as const
 
 async function sourceEvidence(projectRoot: string): Promise<Array<{
