@@ -483,7 +483,7 @@
       "status": "partial",
       "statusClass": "target-acceptance",
       "owner": "Repo Knowledge",
-      "currentFact": "Deterministic generation exists; semantic and golden-query coverage are not yet accepted.",
+      "currentFact": "Deterministic generation exists; the generated cache is an optional untracked local navigation cache with no golden or quality gate.",
       "targetState": "Fresh Context Packs with correct confidence and Bootstrap fallback.",
       "entrypoints": [
         "scripts/generate-repo-index.ts"

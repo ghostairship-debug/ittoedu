@@ -2,7 +2,7 @@
 
 面向教师的可编辑互动课件桌面编辑器。**当前产品就是本仓库根目录 / `main`**：默认工程真相为 Course Project V9，发布为 Published Course V2，兼容 Runtime API 2/3 与 Component API 4。
 
-当前开发以根目录 [开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md) 为唯一入口：架构稳定化与审计修复已收口为 `engineering candidate`，当前活动路线是总纲第 5 节的工程修复与网络基础。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。
+当前开发以根目录 [开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md) 为唯一入口：架构稳定化与审计修复已收口为 `engineering candidate`，总纲第 5 节“审计收口与生产减负”同样已收口，当前没有 Ready 卡。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。
 
 开发使用精简生产模式：默认路径"确认问题 → 实现一个行为 → 最小充分验证 → product commit"，S2/热点/并发才建卡，Reviewer 按风险触发，验证同 SHA 去重，完整验证只在集成/发布门运行。当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 仍来自产品 Owner 的真实验收。
 

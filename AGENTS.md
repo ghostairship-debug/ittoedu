@@ -11,7 +11,7 @@
 
 当前产品协议是 Course Project V9、Published Course V2、Runtime API 2/3 兼容与 Component API 4。不打开、不导入 V8 `.h5lesson`；非 `schemaVersion: 9` 的工程一律视为不受支持。Course Project V9 作者工程 Schema 已**软冻结**：已有字段、判别器和语义不得改；允许 additive 可选字段（单独合同提交、保持 `.strict()`）；不承诺旧编辑器打开含新键的课。当前编辑器内没有可见 AI：无复制引用、Clipboard、Patch 应用、聊天、模型、Provider 或网络调用；`courseAiHandoff` / `courseAiPatch` 只是未挂载纯接口（internal/reserved），不得把接口预留宣称成可用工作流，也不得新增调用点。
 
-长期开发方向只看根目录 [唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)；当前活动路线是其第 5 节“审计收口与生产减负”。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史材料不再派工；默认直接读任务卡点名的源码、合同与目标测试。repo-index 只是可缺省的本地导航缓存，只有确能减少阅读量时才先显式生成并查询，不能阻断实现或覆盖源码事实。
+长期开发方向只看根目录 [唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)；其第 5 节“审计收口与生产减负”已收口，当前没有 Ready 卡，下一批由 Owner 按证据启动。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史材料不再派工；默认直接读任务卡点名的源码、合同与目标测试。repo-index 只是可缺省的本地导航缓存，只有确能减少阅读量时才先显式生成并查询，不能阻断实现或覆盖源码事实。
 
 开发执行使用精简生产模式（[工作协议](docs/development-plan/WORKING_PROTOCOL.md)）：默认路径是"确认问题 → 实现一个行为 → 最小充分验证 → product commit → 合入"，领取与关闭不产生独立提交。并发三层：调查无限并行；实现按互斥写入范围并行（隔离 worktree）；Store、App、Workspace/Properties、Published producer、合同、main/preload 与 generated index 等热点始终单写入者。完整 E2E、打包与 `verify` 只在集成/发布门运行。只有 Schema/V10、用户数据迁移、教师能力取舍、用户可见流程或导出语义变化、付费/重大依赖、安全权限、真实数据损坏风险和最终发布结论升级给产品 Owner。
 

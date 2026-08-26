@@ -7,7 +7,7 @@ This directory contains the deterministic development-navigation facts for codin
 - `generated/` is an optional local cache rebuilt from repository inputs; it is ignored by Git, is never committed, and must not be hand-edited. Run `npm run repo:index` yourself whenever you want it; a missing cache is a normal state.
 - `contexts/` is reserved for temporary Context Packs and is not committed.
 
-Live task cards and their derived `TASK_BOARD.md` are intentionally outside the strict `sourceTreeHash`: changing a card from `target-green` to `done` must not make the index produced for that same integration commit self-stale. Task cards remain the sole task-status truth under the development workflow.
+Live task cards and their derived `TASK_BOARD.md` are intentionally outside the strict `sourceTreeHash`: changing a card from `queued` to `active`, or deleting a finished card, must not make the index produced for that same integration commit self-stale. Task cards remain the sole task-status truth under the development workflow.
 
 Commands (all explicit and optional; none of them is a phase gate):
 

@@ -2,7 +2,7 @@
 
 > 治理关系：根目录 [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md) 是仓库唯一开发总纲；本目录是其下唯一详细执行子计划。历史阶段文档（ARCH-0A～ARCH-5 合同、评估、模板与已终态任务卡）已于 2026-08-25 文档整合中移除，原文由 Git 历史保留。
 >
-> 当前状态与下一可领取项只看自动生成的 [`TASK_BOARD.md`](TASK_BOARD.md)。
+> 当前状态与下一可领取项只看自动生成的 [`TASK_BOARD.md`](TASK_BOARD.md)；该板当前为 0 张卡。
 
 ## 本目录文件
 
@@ -13,7 +13,7 @@
 | [TASK_CARD_TEMPLATE.md](TASK_CARD_TEMPLATE.md) | 7 字段 Ready 任务卡模板，仅 S2/并发/热点/跨会话需要（与 `scripts/generate-task-board.ts` 同步） |
 | [REPAIR_PLAN.md](REPAIR_PLAN.md) | 已确认的工程修复事实、Owner 边界与历史 phase-gate 证据；不再派工 |
 | [TASK_BOARD.md](TASK_BOARD.md) | 生成的活跃任务摘要（`npm run generate:task-board`，不可手改；完成即删卡） |
-| `tasks/` | 建卡任务的卡文件；当前修复波使用 `tasks/repair/` |
+| `tasks/` | 建卡任务的卡文件；当前无活动卡（`tasks/repair/` 已随三张卡删空，Git 不跟踪空目录） |
 | `inventories/legacy-consumers.json` | Legacy consumer 台账（被 repo-index semantic 与测试消费，删除状态唯一真相） |
 | `inventories/FEATURE_CONSUMER_OWNER_LEDGER.md` | ARCH-0A 时期的 Feature/consumer/owner 清单（被 repo-index 引用） |
 | `baselines/ARCH_0_PERFORMANCE.md` | 性能对照基线（同机同夹具 median/P95 口径，PRJ 性能修复的对照来源） |

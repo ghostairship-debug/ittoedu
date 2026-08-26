@@ -1115,7 +1115,7 @@
       "moduleIds": [
         "module:repo-knowledge"
       ],
-      "currentFact": "Deterministic fact generation exists but broad query use is gated by golden-task quality.",
+      "currentFact": "Deterministic fact generation exists; the index is an optional local navigation cache with no golden or quality gate.",
       "targetState": "Fresh deterministic Context Packs with conservative low-confidence fallback.",
       "highSignalFiles": [
         "tsconfig.json",

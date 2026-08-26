@@ -2,7 +2,7 @@
 
 > 日期：2026-08-26
 >
-> 本文件只保存已合入修复、Owner 边界和历史门证据，不再提供当前开工顺序。当前路线只看根目录 `COURSEWARE_DEVELOPMENT_PLAN.md` 第 5 节、自动任务板与三张 Ready 卡。
+> 本文件只保存已合入修复、Owner 边界和历史门证据，不再提供当前开工顺序。当前路线只看根目录 `COURSEWARE_DEVELOPMENT_PLAN.md` 第 5 节与自动任务板；该路线已收口，当前没有 Ready 卡。
 >
 > 当前质量审计基线：`3780090`；Gate R0 文档/流程基线：`b967c96`。
 >
@@ -162,7 +162,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ## 5. 当前阶段门与下一批准入
 
-任务状态仍只看自动生成的任务板；2026-08-26 审计后只有 ARCH-0 fixture、repo-index 减负、能力证据收窄三张 queued 卡。NET-H1、RTP-03 与 V8-02 已通过固定候选 `7d17fed` phase gate；RTP-04、CMP-03、V8-03/04/05A/06/05B、SEM-B3/B4A、W4-C1 与 PRJ-00A 均已有产品提交和对应 focused/独立审查证据。LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
+任务状态仍只看自动生成的任务板；2026-08-26 审计后建的 ARCH-0 fixture、repo-index 减负、能力证据收窄三张卡已于同日全部交付合入并删卡，任务板现为 0 张卡。NET-H1、RTP-03 与 V8-02 已通过固定候选 `7d17fed` phase gate；RTP-04、CMP-03、V8-03/04/05A/06/05B、SEM-B3/B4A、W4-C1 与 PRJ-00A 均已有产品提交和对应 focused/独立审查证据。LEG-003 与 LEG-005A 已删除正常 V9 生命周期不可达的交付回退；SEC-01 因 Owner 推翻信任前提而取消，不计作产品完成项。
 
 RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 RuntimeHost teardown 异常安全；CMP-03 只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
@@ -175,7 +175,7 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 1. 三条分支均从 `ddab68b` 派生，已按 **V8-02 → RTP-03 → NET-H1** 合入；独立 Reviewer 发现的 Phaser 核心销毁、overlay A→B lease 残留与同 frame 跨文档迟到 IPC 均已修复后复审通过。
 2. Integrator 当时删除任务卡并统一同步用户文档、能力声明、Legacy inventory、任务板与 repo-index；这是历史记录，不再作为当前阶段的生成要求。
 3. 复用作者与 Reviewer 的 focused 证据；当前只补组合风险：Player bundle 刷新后的 benchmark 确定性、photosynthesis V9/V2 oracle、API 2 三 renderMode 三交付、真实 Electron preview network allow/deny/revoke 与 examples/fresh-checkout checks。
-4. 该历史批次只跑过一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、三条新增/改写定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。后两项已被本次审计判定为不应继续作为默认门；此处只保存当时证据。
+4. 该历史批次只跑过一次 phase gate：`npm run check:ai-capabilities`、`npm run typecheck`、`npm test`、`npm run pretest:e2e`、三条新增/改写定向 Playwright、`npm run check:task-board`、`npm run repo:index:check` 与 `npm run repo:index:quality`。后两项已被本次审计判定为不应继续作为默认门；此处只保存当时证据。（`npm run repo:index:quality` 已于 2026-08-26 随 repo-index 减负移除，本行仅存当时证据。）
 5. 固定候选 `7d17fed` 已通过上述门；唯一非产品失败是并发审计负载触发 repo-index 查询测试超时，取消并发后完整 259 files / 1868 tests 通过。
 
 ### 6.2 本批实现编排（已收口）
@@ -187,7 +187,7 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 
 ### 6.3 当前准入方式
 
-- 可领取项只看根计划第 5.3 节的三张 Ready 卡；W4-C2 与 PRJ-00B～05 不再从本文件恢复。
+- 当前没有可领取项；W4-C2 与 PRJ-00B～05 不再从本文件恢复。
 - 只有出现真实 HTTP/WebSocket 或远程 Published capture consumer 才准入 NET-C1；RTP-05、Spatial scene-local API 2、global API 3、Published capture 与非 Flow shared 同样继续按 consumer 证据准入。
 - 每个新实现项都必须重新给出可复现失败、真实 consumer 或量化收益，以及 1–3 条最小检查；完整集成、E2E、`verify`、打包/性能/签名只属于固定发布候选，不随普通恢复自动执行。
 
@@ -226,5 +226,5 @@ RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 Ru
 
 1. 总纲、架构合同、网络边界和精简任务机制曾形成固定提交 `b967c96`；其中“外部作者代码=低权限代码”的信任前提已由 2026-08-25 Owner 最新裁决替代；
 2. Gate 关闭当时的首批 7 张卡均记录该基线，初始任务板为 `queued: 7`；完成事实与后续重开由 Git 历史记录，当前状态只看任务板；
-3. typecheck、14 项治理测试、合同/能力/任务板/repo-index freshness 与 repo-index quality 已通过；
+3. typecheck、14 项治理测试、合同/能力/任务板/repo-index freshness 与 repo-index quality 已通过（repo-index freshness 与 repo-index quality 门已于 2026-08-26 移除，本行仅存当时证据）；
 4. 后续实现只从任务板领取，不从 Wave 标题直接派工。
