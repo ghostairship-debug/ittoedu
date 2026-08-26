@@ -32,6 +32,18 @@ interface Bounds {
   bottom: number
 }
 
+export interface AnalyzeVisualDensityStateInput {
+  sceneId: string
+  sceneName: string
+  stateId: string
+  stateName: string
+  nodes: readonly SceneNode[]
+  canvas: {
+    width: number
+    height: number
+  }
+}
+
 function visibleGlobalNodes(project: ProjectDocument, sceneId: string): SceneNode[] {
   return project.globalLayer
     .filter(({ visibility }) => {
@@ -69,66 +81,80 @@ function scoreBand(score: number): VisualDensityBand {
 }
 
 /**
+ * Shape-neutral density primitive for one already-composed Slide state.
+ * Membership, overrides, visibility and order must be resolved by the caller.
+ */
+export function analyzeVisualDensityState(
+  input: AnalyzeVisualDensityStateInput,
+): VisualDensityStateReport {
+  const nodes = input.nodes.filter(
+    (node) => node.visible && node.type !== 'teacher-controller',
+  )
+  const bounds = nodes.map((node) => rotatedRectangleAabb(node))
+  const canvasArea = input.canvas.width * input.canvas.height
+  const summedArea = bounds.reduce(
+    (total, item) => total + clippedArea(item, input.canvas.width, input.canvas.height),
+    0,
+  )
+  let significantOverlapPairs = 0
+  for (let leftIndex = 0; leftIndex < bounds.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < bounds.length; rightIndex += 1) {
+      const left = bounds[leftIndex]!
+      const right = bounds[rightIndex]!
+      const overlap = overlapArea(left, right)
+      const smallerArea = Math.min(
+        clippedArea(left, input.canvas.width, input.canvas.height),
+        clippedArea(right, input.canvas.width, input.canvas.height),
+      )
+      if (smallerArea > 0 && overlap / smallerArea >= 0.25) {
+        significantOverlapPairs += 1
+      }
+    }
+  }
+  const textCharacterCount = nodes.reduce(
+    (total, node) => total + visibleTextLength(node),
+    0,
+  )
+  const occupiedAreaRatio = Math.min(2, summedArea / Math.max(1, canvasArea))
+  const score = Math.round(Math.min(100,
+    Math.min(1, nodes.length / 24) * 30 +
+    Math.min(1, textCharacterCount / 500) * 25 +
+    Math.min(1, occupiedAreaRatio / 0.9) * 25 +
+    Math.min(1, significantOverlapPairs / 12) * 20,
+  ))
+  return {
+    sceneId: input.sceneId,
+    sceneName: input.sceneName,
+    stateId: input.stateId,
+    stateName: input.stateName,
+    visibleNodeCount: nodes.length,
+    textCharacterCount,
+    occupiedAreaRatio,
+    significantOverlapPairs,
+    score,
+    band: scoreBand(score),
+  }
+}
+
+/**
  * A deterministic, read-only overview. The score is a review aid rather than
  * a correctness verdict: it combines object count, visible copy, occupied
  * area and substantial AABB overlaps without interpreting visual meaning.
  */
 export function analyzeVisualDensity(project: ProjectDocument): VisualDensityReport {
-  const canvasArea = project.canvas.width * project.canvas.height
   const states = project.scenes.flatMap((scene) => {
     const presentation = ensureScenePresentation(scene)
     const globalNodes = visibleGlobalNodes(project, scene.id)
     return presentation.states.map((state): VisualDensityStateReport => {
       const effective = materializeScene(scene, state.id)
-      const nodes = [
-        ...effective.nodes.filter(
-          (node) => node.visible && node.type !== 'teacher-controller',
-        ),
-        ...globalNodes,
-      ]
-      const bounds = nodes.map((node) => rotatedRectangleAabb(node))
-      const summedArea = bounds.reduce(
-        (total, item) => total + clippedArea(item, project.canvas.width, project.canvas.height),
-        0,
-      )
-      let significantOverlapPairs = 0
-      for (let leftIndex = 0; leftIndex < bounds.length; leftIndex += 1) {
-        for (let rightIndex = leftIndex + 1; rightIndex < bounds.length; rightIndex += 1) {
-          const left = bounds[leftIndex]!
-          const right = bounds[rightIndex]!
-          const overlap = overlapArea(left, right)
-          const smallerArea = Math.min(
-            clippedArea(left, project.canvas.width, project.canvas.height),
-            clippedArea(right, project.canvas.width, project.canvas.height),
-          )
-          if (smallerArea > 0 && overlap / smallerArea >= 0.25) {
-            significantOverlapPairs += 1
-          }
-        }
-      }
-      const textCharacterCount = nodes.reduce(
-        (total, node) => total + visibleTextLength(node),
-        0,
-      )
-      const occupiedAreaRatio = Math.min(2, summedArea / Math.max(1, canvasArea))
-      const score = Math.round(Math.min(100,
-        Math.min(1, nodes.length / 24) * 30 +
-        Math.min(1, textCharacterCount / 500) * 25 +
-        Math.min(1, occupiedAreaRatio / 0.9) * 25 +
-        Math.min(1, significantOverlapPairs / 12) * 20,
-      ))
-      return {
+      return analyzeVisualDensityState({
         sceneId: scene.id,
         sceneName: scene.name,
         stateId: state.id,
         stateName: state.name,
-        visibleNodeCount: nodes.length,
-        textCharacterCount,
-        occupiedAreaRatio,
-        significantOverlapPairs,
-        score,
-        band: scoreBand(score),
-      }
+        nodes: [...effective.nodes, ...globalNodes],
+        canvas: project.canvas,
+      })
     })
   })
   return {
