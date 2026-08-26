@@ -258,11 +258,22 @@ describe('deterministic repo-index generator', () => {
       expect(parseJsonLines(first.get('edges.jsonl')!).length).toBeGreaterThan(0)
       expect(parseJsonLines(first.get('tests.jsonl')!).length).toBeGreaterThan(0)
       const edges = parseJsonLines(first.get('edges.jsonl')!)
+      // The generator must record the real 1-based import line. Deriving it from
+      // the source keeps this proof honest without breaking whenever an unrelated
+      // edit shifts Workspace.tsx.
+      const workspaceSource = readFileSync(
+        resolve(repoRoot, 'src/renderer/ui/Workspace.tsx'),
+        'utf8',
+      )
+      const spatialImportLine = workspaceSource
+        .split(/\r?\n/u)
+        .findIndex((text) => text.includes("from '../course/spatialEditorCommands'")) + 1
+      expect(spatialImportLine).toBeGreaterThan(0)
       expect(edges).toContainEqual(expect.objectContaining({
         kind: 'imports_type',
         from: 'file:src/renderer/ui/Workspace.tsx',
         specifier: '../course/spatialEditorCommands',
-        line: 121,
+        line: spatialImportLine,
       }))
       expect(edges).toContainEqual(expect.objectContaining({
         kind: 'imports',

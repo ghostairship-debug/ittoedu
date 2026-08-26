@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 计划版本：21.0（2026-08-26：第 5 节三张 Ready 卡已交付、合入 main 并推上远端，活动路线收口、任务板 0 张卡；但**远端 CI 当前为红**——fresh checkout 上的打包时区依赖与示例缩略图字体依赖各自确定性失败；能力索引来源清单已手工修到 37 项仍有遗漏，另新增经核实的 A/B 档事实偏差与 consumer 诉求，全部待 Owner 定级，无 Ready 卡）
+> 计划版本：22.0（2026-08-26：Owner 修订**不变量 15**——把"可复现失败"从唯一硬门降级为准入依据之一，补入"已完成论证的架构性偏差"与"Owner 决定"；据此重新立项 `host-unify-authoring-preview`（编辑画布与试运行统一到同一套 Published 宿主），任务板 1 张 queued 卡。原两项远端 CI 红灯的根因——打包时区依赖与示例缩略图字体依赖——已于同日修复；能力索引来源清单已手工修到 37 项仍有遗漏，其余 A/B 档事实偏差与 consumer 诉求仍待 Owner 定级）
 >
 > 当前活动路线：第 5 节“审计收口与生产减负”；可领取工作只看 [任务板](docs/development-plan/TASK_BOARD.md) 与对应任务卡
 >
@@ -72,8 +72,10 @@
 12. **公开入口必须诚实**：禁止静默 no-op、伪成功和底层校验 JSON 直出。
 13. **面向 AI 的契约必须诚实**：能力索引声明的检查、文档路由和能力状态必须与实现一致。
 14. **控制器作者与运行入口唯一**：页面 inert、全局层唯一持久化入口、运行态只写 Session；不得再渲染与全局控制器重合的独立教师逃生控件。
-15. **实现任务必须由证据准入**：至少有可复现失败、真实 consumer 或可量化维护成本下降之一；阶段名称、架构理想和未来可能性不能单独立项。
+15. **实现任务必须由证据准入**：至少满足以下之一——可复现失败；真实 consumer；可量化维护成本下降；**已完成论证的架构性偏差**（有明确技术分析、影响面清楚，即使失败尚未在测试中显形）；**产品 Owner 决定**。可复现失败只是其中一条依据，不再是唯一硬门。阶段名称、架构理想和未来可能性仍不能单独立项——这半句挡的是没有分析的设想，不挡已经论证清楚的已知偏差。
 16. **验证只证明待改属性**：先跑足以证伪的最小检查；未命中失效条件的既有通过证据继续有效，不把重复命令、重复 Reviewer 或生成后立即同义检查当质量。
+
+> 不变量 15 变更起因（2026-08-26，Owner 决定）：编辑画布与试运行的渲染分裂（LEG-002 / 原 PRJ-05）已被完整论证并批过方案，次日却因"没有当前可复现失败"被撤项；随后该失败在字体工作中真实出现（见 5.4 A）。原规则的失效模式是"要求先受伤才准治病"，故把可复现失败降级为准入依据之一，并补入已完成论证的架构性偏差与 Owner 决定。同一条规则的另外三处落点是 [工作协议](docs/development-plan/WORKING_PROTOCOL.md) 第 1 节与第 11 节、[AGENTS.md](AGENTS.md)，必须同步。
 
 ---
 
@@ -100,7 +102,7 @@
 
 - **repo-index 有有限导航价值，但当前实现已成为维护负担**：9 个 tracked 生成文件约 13.41 MiB、约 29,200 行；其专用核心与测试约 6,226 行，连同 semantic/golden 超过 9,000 行；约 70 个提交触及该系统，其中 56 个刷新生成物，近期样本约 21% diff 行来自索引。它没有产品运行时 consumer，`repo-index/contexts/` 也没有能证明查询改变实现决策的留存结果。裁决是保留显式 `repo:index` / `repo:context` 的可选导航能力，移除 tracked cache、golden/quality 自证循环和默认 CI freshness 门；不新建 watcher、数据库、自动缓存或另一套质量平台。
 - **能力索引不是同一类负担**：`artifacts/ai-capabilities` 约 102 KiB，Builder 直接消费，必须保留。当前只收窄 `generation-evidence.json` 的来源清单到生成器、正式合同/Schema/常量/诊断 ledger 与 catalog audit 等直接输入；不改变能力声明，不把广泛 main/preload/Player/producer 文件继续当生成依据。
-- **存在过度设计**：`W4-C1` 已交付 30 个诊断码且 CLI 有真实 consumer，保留并冻结；`W4-C2` 没有当前可复现失败，撤出活动路线。`PRJ-00B`、`PRJ-01`、`PRJ-02`、`PRJ-03`、`PRJ-04` 只有阶段名称和设想，没有当前失败/consumer/验收，全部取消预排；`PRJ-05` 仅在真实预览失败或 Owner 新决定时从当前事实重新建卡。
+- **存在过度设计**：`W4-C1` 已交付 30 个诊断码且 CLI 有真实 consumer，保留并冻结；`W4-C2` 没有当前可复现失败，撤出活动路线。`PRJ-00B`、`PRJ-01`、`PRJ-02`、`PRJ-03`、`PRJ-04` 只有阶段名称和设想，没有当前失败/consumer/验收，全部取消预排；`PRJ-05` 仅在真实预览失败或 Owner 新决定时从当前事实重新建卡——**该条件已于 2026-08-26 同时满足**（真实预览失败见 5.4 A0 第 2、3 条；Owner 决定见不变量 15 的变更起因），已按当前源码事实重新建卡为 `host-unify-authoring-preview`，未沿用 PRJ-05 编号与旧文案。
 - **存在过度验证**：上一阶段多次串行执行作者检查、独立 Reviewer、集成复查、文档同步与索引刷新；同一风险面被重复覆盖。72 项单 worker E2E、完整 `verify`、重复生成/检查不再作为每张卡的认真度证明。审计判断，长耗时主要来自串行编排、重复审查、文档/索引循环，而不是本轮实现本身天然需要十几小时。
 
 ### 5.2 前一批产品红灯（已消除）
@@ -113,20 +115,32 @@
 2. `tooling-repo-index-optional`（S2 / 热点 generated-index）：`repo-index/generated/**`、`golden-tasks/**`、`evaluateGoldenTasks.ts` 与其唯一测试 consumer 已删除，`repo:index:quality` 与 CI 的 freshness/quality 门已移除，净删约 31,440 行；`repo:index`、`repo:index:check`、`repo:context` 与 `repo-index/semantic/**` 保留为显式手动导航。独立 Reviewer 裁决 `APPROVE WITH FOLLOW-UP`：`.github` 唯一 workflow 经独立核验成立，workflow outputs 无悬空引用，semantic 全部 208 条路径引用有效，提交可干净 revert。
 3. `tooling-capability-evidence-scope`（S1）：`sourceEvidence()` 的 sources 由 57 先收窄至 25，`artifacts/ai-capabilities/**` 除 `generation-evidence.json` 外逐字节不变。**当前清单是 37 项**——同日两次后续修复把漏掉的真实生成输入补了回来：`87d2af5` 补入 11 个 `src/shared/contracts/**` 合同实现，`c2442c2` 再补入 `src/renderer/project/archivePath.ts` 的值依赖。这两次修复消除了收口时记录的"provenance 对合同实现失明"反例，但清单仍靠手工维护，仍有已核实的遗漏（见 5.4 A 第 1 条）。
 
-不自动恢复 W4/PRJ/NET/RTP 占位路线，也不再进行同类全仓审计；只有新的可复现失败、真实 consumer 或量化维护成本证据才能创建下一张实现卡。
+不自动恢复 W4/PRJ/NET/RTP 占位路线，也不再进行同类全仓审计；创建下一张实现卡仍须先满足不变量 15 的任一条准入依据（新的可复现失败、真实 consumer、量化维护成本、已完成论证的架构性偏差，或 Owner 决定）。
 
-### 5.4 收口后已核实的剩余问题（未立项，待 Owner 定级）
+### 5.4 收口后已核实的剩余问题（除 A0 外未立项，待 Owner 定级）
 
-按不变量 15 分档，均为只读核实结果，**不得**据此自行建卡：
+按不变量 15 分档，均为只读核实结果。**除 A0 已由 Owner 立项外，其余不得据此自行建卡。**
 
 收口时记录的两项 A 档已在同日修复，只作留档、不再待处置：能力索引 provenance 对合同实现失明（`87d2af5` 把 11 个 `src/shared/contracts/**` 合同实现补入来源清单，改 `src/shared/contracts/interaction-v1/schema.ts` 现在会改变清单里的 sha256）；`docs/development-plan/inventories/legacy-consumers.json` 的 LEG-007 `currentFact` 过期（已改写为 `src/renderer/project/validateProjectArchive.ts` 随 LEG-010 删除后的事实）。
+
+**A0. 编辑画布与试运行的渲染分裂（2026-08-26 核实；Owner 已立项，见 [host-unify-authoring-preview](docs/development-plan/tasks/host-unification/host-unify-authoring-preview.md)）**
+
+以下五条同源，行号以 `d36e519` 为准；`src/renderer/ui/Workspace.tsx` 正被并发写入，其位置以文中符号名为准而非行号。这一簇正是不变量 15 修订的起因：它在 2026-08-25 被完整论证并批过方案，次日以"没有当前可复现失败"撤项，而下面第 2、3 条就是当时被认为不存在的那个失败。
+
+1. **两套渲染实现**：编辑画布走 `blob:` iframe + V8 `ExportPayload` + Phaser `PlayerApp` + 自研 canvas 断行（`Workspace.tsx` 的 runtime-preview effect 内 `createRuntimePreviewPayloadResources` → `buildStandaloneHtml` → `createRuntimePreviewBlobResources`，blob 实际创建在 `src/renderer/preview/runtimePreviewDocument.ts:43-52`，iframe 带 `sandbox="allow-scripts"`；payload 由 `src/renderer/store/editorStore.ts:869-910` 的 `projectCandidatePreviewDocument` 构造，`schemaVersion: 8` 在 `:892`；`src/renderer/preview/runtimePreviewPayload.ts:95` 组装 `ExportPayload`；`src/player/index.ts:23-39` 起 `PlayerApp`）。试运行/整课预览走主 renderer + Published V2 DOM 宿主 + 浏览器断行（`src/renderer/ui/coursePlayerTryRun.ts:66-139` 的 `mountPublishedCourseTryRun`，`:119` `session.mount`，无 iframe 无 Phaser；`src/player/surfaces/slide/SlidePublishedAdapter.ts:173` 委派 `paintPublishedNativeText`，真正的换行是 `src/player/surfaces/publishedNativeText.ts:11` 的 `white-space: pre-wrap`）。台账编号 LEG-002（`active-debt`）。
+2. **"自动缩小字体"在 Published 侧未实现（教师直接可见，两个台账都没记）**：`src/shared/textLayout.ts` 有完整实现——shrink 在 `fitFontSize`（`:287-309`，`:293` 是 `overflow !== 'shrink'` 的 guard，`:294-308` 是每次降 1px、下限 8px 的收缩循环）、auto-height 在 `:380-393`、裁切在 `:426` 的 `context.clip()`。而 `src/player/surfaces/publishedNativeText.ts` 全文 63 行只设 `overflow: hidden`（`:10`）与 `fontSize`（`:13`），**没有任何测量、收缩或自动高度**。全仓 `src/player/` 下只有 `src/player/renderNode.ts:53` 一处 import `textLayout`，`src/player/surfaces/**` 零处。净效果：同一个设为自动缩小的文本框，编辑画布会缩小，试运行 / 整课预览 / 网页导出不会（溢出后直接裁掉）。另注：canvas 侧的断行本身是 `textLayout.ts:120-146` 的贪心逐字符实现（断点判断在 `:140`），没有词边界或 CJK 断行规则，与浏览器 `pre-wrap` 的结果本就不可能逐字一致。
+3. **合法 V9 编辑可能让编辑画布起不来（命中不变量 11）**：`editorStore.ts:824-832` 的 `locationIdsToSceneIds` 在 `:830` `return location?.kind === 'slide-scene' ? [location.sceneId] : []`——`flatMap` 静默丢弃 Flow / Spatial 位置；它在 `:885` 喂给全局图层的 `sceneIds`。iframe 内 `src/player/payload.ts:23` 会用 V8 `projectDocumentSchema` 重新 `parse`，失败即抛"课件 Payload 缺少必要数据或版本不受支持"。两条拒绝路径都成立：`src/shared/projectSchema.ts:831` 的 `scenes: z.array(sceneDocumentSchema).min(1)`（工程无 slide 场景时），以及 `:577-585` `globalLayerVisibilitySchema` 的 superRefine（`mode !== 'all'` 时 `sceneIds` 不得为空）。当年设计的降级提示（PRJ-01）未实现：`Workspace.tsx` 全文 4000+ 行无一处 `safeParse`，因此没有可见降级，只有失败。
+4. **字体差异（`224be20` 当天引入，正被并发修复）**：内置字体只注入顶层文档——`src/renderer/main.tsx:27` 调 `installBundledFontFaces()`（不传参即默认 `document`），其实现 `src/shared/fonts/installBundledFontFaces.ts:19-28` 是把 `@font-face` CSS 塞进一个 `<style id="bundled-font-faces">` 追加到 `target.head`（不是 `document.fonts.add`），生产环境只有 main.tsx 这一个调用点，从不传入预览文档。`224be20` 把 `STIX Two Math` 提到 `src/shared/formulaRenderer.ts` 公式字体链首位后，`d36e519` 上编辑画布显示回退字体、其余全部显示 STIX。**且结果依赖会话状态**：字体字节缓存是 `src/renderer/export/bundledFontEmbedSourceFetch.ts:93-94` 的闭包局部 `loaded` / `pending`（不是模块级，但生产只安装一次故等价于会话级），一旦本会话点过导出，此后编辑画布反而显示新字体——同一台机器同一份课件导出前后表现不同。**并发修复说明**：另一执行者正在未提交的工作树里给预览 blob 补 `@font-face`（`Workspace.tsx` 内 `collectBundledFontFamiliesInUse(payload).length > 0` 时 `await prepareBundledFontEmbedding()`；该收集器在 `src/renderer/export/bundledFontEmbedding.ts:192-194` 确实会把公式节点算成用到 `STIX Two Math`）。该补丁只消除本条症状，不消除第 1 条的宿主分裂，也不触及第 2、5 条。
+5. **远程素材两侧字节不同**：编辑画布把本地字节以 placeholder + transferable ArrayBuffer 传进 iframe，由 iframe 侧重新生成同上下文 Blob URL（`runtimePreviewPayload.ts:86-93`）；试运行则直接走远端 URL（`coursePlayerTryRun.ts:29` 的 `projectAssetUrl: (_assetId, metadata) => metadata.remote?.url`）。
+
+**测试缺口（同批核实）**：全仓**没有任何 oracle** 做"同一节点在两个宿主各渲一遍再比结果"——没有测试同时 import `renderTextNodeCanvas` 与 `paintPublishedNativeText`，两侧只被各自孤立测试（`tests/unit/textLayout.test.ts` / `tests/unit/slidePublishedNativeText.test.ts`）。最像的 `tests/unit/formulaCrossSurface.test.tsx` 是假 parity：它的四个"表面"全属同一 canvas/`textLayout` 家族，且把 `measureText` 打桩成 `length * 14`，原理上就测不出字体度量差异。也**没有断言"预览文档声明的 face 集合 ⊇ 顶层文档"**：`tests/` 内所有 `@font-face`/`FontFace` 断言都只针对导出产物或生成的样式表，唯一的注入结构检查 `tests/unit/bundledFonts.test.ts:315-321` 只校验顶层 renderer 的调用顺序。现有 parity 只到数据层（`tests/integration/courseLayerCompositionParity.test.ts` 的 `facts()` `:103-125` 与 `expectCompositionParity()` `:127-148`，断言 `id/source/order/stored/applicable/mounted/initiallyVisible/visible/playbackInitialVisibility/frame/rotation/opacity/hitPolicy/kind/payload` 与 `locationId/surfaceId/surfaceType/sceneId/stateId/background/entries`，**无字体、无计算样式、无实测几何、无像素**）与宿主身份层（`tests/e2e/editor.spec.ts:235-250` 的 `expectCoursePlayerTryRunReady` 只断言可见性与 `iframe[title="当前位置试运行"]` count 0）。像素对比只在同宿主内做（`editor.spec.ts:1594-1626`，locator 是单个 `[data-testid="canvas-stage"] canvas`，比的是同一画布改动前后）。
 
 **A. 有可复现事实偏差**
 
 - **能力索引来源清单仍在手工复制依赖图，且仍有遗漏**：`src/shared/contracts/course-project-v9/schema.ts` 实打实地值导入 `src/shared/projectSchema.ts` 的 `formulaAstSchema`、`projectDocumentSchema`、`sceneNodeSchema` 三个符号，但该文件不在 37 项来源清单内；更糟的是 `tests/unit/aiCapabilities.test.ts` 把它写在"必须不出现"的断言里。清单已连续从 25 → 36 → 37 补了三次，仍在漏。命中不变量 13。**处置待 Owner 二选一**：(a) 从真实依赖闭包自动派生，或建一个漏不掉的窄合同；(b) 降低 provenance 表述强度，不再声称"输入未变"。执行者不得自行裁决，也不得继续手工追加路径。
 - **能力索引部分产物并非由其声称的权威推导**：`scripts/generate-ai-capabilities.ts` 用手写对象字面量生成 `schemas/course-project-v9.json` 与 `schemas/published-course-v2.json`，并未从它标为 `sourceOfTruth` 的 Zod schema（`src/shared/courseProjectSchema.ts`、`src/shared/publishedCourseSchema.ts`）派生，因此两者可相对真实合同静默漂移。命中不变量 13。
-- **打包时间戳的时区不确定性是全仓库缺陷**：打包库按**本地时钟**写 ZIP 的 DOS 时间字段。已提交的 4 份归档 fixture（`examples/sample-project.h5lesson`、`examples/sample-counter.h5component`、`examples/photosynthesis-interactive-lesson.h5lesson`、`examples/render-host-benchmark/render-host-benchmark-v9.h5lesson`）DOS 时间全是 08:00，即全部生成于 UTC+8 机器；三个不同生成器在 `TZ=UTC` 下都会报"fixture 已过期"。`tests/fixtures/architecture-baseline/**` 那三份已于 `c602bb2` 修复（业务时间与 ZIP 时间分离 + 跨时区回归断言），**`examples/` 与 render-host-benchmark 的四份仍未修**。
-- **示例缩略图不可跨平台复现**：它由脚本用系统字体（微软雅黑 / Arial）现场栅格化，却又被要求与已提交字节逐字节相同；Linux 上这两个字体不存在。**处置待 Owner 决定**；候选之一是改为手工维护的输入资产——该 PNG 已内嵌进两个仍逐字节校验的归档，故这样不损失实质保证。
+- ~~**打包时间戳的时区不确定性是全仓库缺陷**~~（**已于同日修复，留档**）：打包库按本地时钟写 ZIP 的 DOS 时间字段，曾使 4 份 `examples/` 归档只在 UTC+8 机器上可复现。`c602bb2` 先修了 `tests/fixtures/architecture-baseline/**` 三份，`7600c67` 把该修法提升为共享助手 `createTimezoneStableZipMtime()`（`scripts/exampleGenerationBoundary.ts`）并接通全部四个示例生成器，业务时间仍是 UTC ISO，ZIP 框架时间改由 UTC 日历日的本地正午导出，并补了在 UTC / Asia/Shanghai / America/Los_Angeles 三时区子进程重建并比对字节的回归断言。**注意：产品导出侧的同源缺陷未修**，见下面 B 档第 1 条。
+- ~~**示例缩略图不可跨平台复现**~~（**已于同日修复，留档**）：`7d588ee` 按 5.4 原文列出的候选方案落地——`sample-counter-component/thumbnail.png` 不再由脚本用系统字体现场栅格化，而是与 manifest、runtime 同级的手工维护输入资产，生成器直接读已提交字节；原 SVG 留作来源注释并注明不参与构建。验证未削弱：该 PNG 仍逐字节内嵌进两份继续逐字节校验的归档。
 - `artifacts/ai-capabilities/diagnostics.json` 顶层并列两套互不兼容的诊断码：V8 的 `projectHealth` / `projectedProjectHealthForExport`（各 47 码）与 V9 的 `courseProjectValidation.projectHealth`（27 码），仅靠一行 `legacyRegistryScope` 字符串区分。
 
 **B. 有真实 consumer 诉求**
@@ -150,7 +164,7 @@
 - ✅ V9 Schema、CLI/Player/Export 行为与教师能力无变化；页面不新增控制器，也未恢复独立教师逃生控件；
 - ✅ 每张实现卡只执行卡内 focused checks；Reviewer 只补作者未覆盖的 CI/YAML 与任务板风险面，未复跑作者命令；本批未执行完整 E2E、完整 build、`verify`、打包、性能或签名门。集成层在合并 SHA 上补跑一次 `typecheck` 与一次 `vitest run` 作为组合风险验证；
 - ✅ 未由当前失败、真实 consumer 或量化收益支撑的新增抽象、缓存、诊断码、任务卡和验证平台：0；
-- ⚠️ **远端 CI 当前为红**：fresh checkout 上打包时间戳的本地时区依赖与示例缩略图的系统字体依赖各自产生确定性失败（见 5.4 A 第 3、4 条）。合并前的本地验证跑在 UTC+8 且已装微软雅黑的 Windows 机器上，因此没有暴露这两项；两项的处置都待 Owner 定级。
+- ✅ **原两项远端 CI 红灯的根因已于同日修复**：打包时间戳的本地时区依赖由 `7600c67` 修复（共享助手 + 三时区回归断言），示例缩略图的系统字体依赖由 `7d588ee` 修复（改为手工维护的输入资产），`3c60ec8` 另补了产品测试前先构建 player bundle。根因是合并前的本地验证跑在 UTC+8 且已装微软雅黑的 Windows 机器上，没有暴露这两项。CI 的最终结论以实际运行为准，本文不代为宣告绿灯。
 
 ## 7. 当前路线之外的方向
 
@@ -160,6 +174,6 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前没有活动卡（`docs/development-plan/tasks/` 已随三张卡删空，Git 不跟踪空目录）；新建卡时统一放在 `docs/development-plan/tasks/<wave>/`，完成即删除。
 
-当前任务板为 0 张卡：第 5 节三张 Ready 卡已全部交付、合入并删卡，活动路线收口。**当前没有 Ready 工作**。远端 CI 为红不改变这一点：它命中的是第 5.4 节 A 档第 3、4 条，处置方式本身待 Owner 决定，不得据此自行改 fixture、脚本或门禁。第 5.4 节的剩余问题都是只读核实结果，未立项；建卡前须由 Owner 就 A 档反例（尤其能力索引 provenance 清单增删与缩略图资产形态）与 B 档 consumer 诉求（尤其真实用户导出的负数年份缺陷与声明式表达合同）先行定级。执行者只读本总纲的不变量、自己的任务卡及卡中点名的源码/测试，不得通读旧 Wave 后自行补范围。不得自动继续 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1 或其它 carrier 扩展。
+当前任务板为 **1 张 queued 卡**：`host-unify-authoring-preview`（S2，编辑画布与试运行统一到同一套 Published 宿主），由产品 Owner 于 2026-08-26 依修订后的不变量 15（已完成论证的架构性偏差 + Owner 决定）重新立项，当前失败证据见 5.4 A0。第 5 节原三张 Ready 卡已全部交付、合入并删卡。除该卡外，第 5.4 节 A / B / C 档的剩余问题都是只读核实结果，仍未立项；建卡前须由 Owner 就 A 档反例（尤其能力索引 provenance 清单增删）与 B 档 consumer 诉求（尤其真实用户导出的负数年份缺陷与声明式表达合同）先行定级，不得据此自行改 fixture、脚本或门禁。执行者只读本总纲的不变量、自己的任务卡及卡中点名的源码/测试，不得通读旧 Wave 后自行补范围。不得自动继续 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1 或其它 carrier 扩展。
 
 历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。

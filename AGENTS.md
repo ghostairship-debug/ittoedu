@@ -11,11 +11,11 @@
 
 当前产品协议是 Course Project V9、Published Course V2、Runtime API 2/3 兼容与 Component API 4。不打开、不导入 V8 `.h5lesson`；非 `schemaVersion: 9` 的工程一律视为不受支持。Course Project V9 作者工程 Schema 已**软冻结**：已有字段、判别器和语义不得改；允许 additive 可选字段（单独合同提交、保持 `.strict()`）；不承诺旧编辑器打开含新键的课。当前编辑器内没有可见 AI：无复制引用、Clipboard、Patch 应用、聊天、模型、Provider 或网络调用；`courseAiHandoff` / `courseAiPatch` 只是未挂载纯接口（internal/reserved），不得把接口预留宣称成可用工作流，也不得新增调用点。
 
-长期开发方向只看根目录 [唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)；其第 5 节“审计收口与生产减负”已收口，当前没有 Ready 卡，下一批由 Owner 按证据启动。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史材料不再派工；默认直接读任务卡点名的源码、合同与目标测试。repo-index 只是可缺省的本地导航缓存，只有确能减少阅读量时才先显式生成并查询，不能阻断实现或覆盖源码事实。
+长期开发方向只看根目录 [唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)；其第 5 节“审计收口与生产减负”已收口；当前 Ready 工作只看[任务板](docs/development-plan/TASK_BOARD.md)（2026-08-26 Owner 重新立项“编辑画布与试运行统一到同一套 Published 宿主”），其余 5.4 节剩余问题仍由 Owner 按证据定级后启动。详细执行文件统一在 [docs/development-plan/](docs/development-plan/README.md)。历史材料不再派工；默认直接读任务卡点名的源码、合同与目标测试。repo-index 只是可缺省的本地导航缓存，只有确能减少阅读量时才先显式生成并查询，不能阻断实现或覆盖源码事实。
 
 开发执行使用精简生产模式（[工作协议](docs/development-plan/WORKING_PROTOCOL.md)）：默认路径是"确认问题 → 实现一个行为 → 最小充分验证 → product commit → 合入"，领取与关闭不产生独立提交。并发三层：调查无限并行；实现按互斥写入范围并行（隔离 worktree）；Store、App、Workspace/Properties、Published producer、合同、main/preload 与 generated index 等热点始终单写入者。完整 E2E、打包与 `verify` 只在集成/发布门运行。只有 Schema/V10、用户数据迁移、教师能力取舍、用户可见流程或导出语义变化、付费/重大依赖、安全权限、真实数据损坏风险和最终发布结论升级给产品 Owner。
 
-任务风险只有 S0/S1/S2 一个维度：S0/S1 默认不建卡；S2、并发协调、热点写入、跨会话或交接才建最多 7 字段任务卡（状态仅 queued/active/blocked，完成即删卡）。只为前置已满足的 Ready 工作建卡，`Write scope / Baseline` 必填，不预建未来依赖卡。Reviewer 按风险触发，验证同 SHA 去重。没有可复现风险、真实 consumer 或可量化复杂度下降时不创建实现任务。
+任务风险只有 S0/S1/S2 一个维度：S0/S1 默认不建卡；S2、并发协调、热点写入、跨会话或交接才建最多 7 字段任务卡（状态仅 queued/active/blocked，完成即删卡）。只为前置已满足的 Ready 工作建卡，`Write scope / Baseline` 必填，不预建未来依赖卡。Reviewer 按风险触发，验证同 SHA 去重。实现任务的准入依据有五类：可复现风险、真实 consumer、可量化复杂度下降、**已完成论证的架构性偏差**（技术分析明确、影响面清楚，即使失败尚未在测试中显形）、**Owner 决定**；可复现失败只是其中一条，不是唯一硬门（2026-08-26 Owner 修订，起因见总纲第 3 节不变量 15）。五者皆无时不创建实现任务；只有阶段名称、架构理想或未来可能性时同样不能立项。
 
 Runtime/Component 都是经过审核的可信扩展；外部导入只是分发方式，不是不可信边界。不得因为代码不内置就强制其进入 opaque-origin sandbox，也不得永久禁用其真实需要的宿主、父页面、本地或网络能力。现有 sandbox iframe 可为视觉合成、生命周期和会话竞态保留，但不是必须继承的权限安全边界；真实 consumer 需要宿主能力时，使用稳定宿主接口或同宿主执行语义接入，不建权限审批平台。远程图片、音视频、HTTP API、WebSocket 与未来 AI API 是正式能力；工程网络声明用于预览、发布、CSP 和诊断语义，不用来推导作者代码不可信。远程脚本暂不开放；长期 Provider Secret 不得写入工程、Published payload、组件包或导出 HTML。单 HTML 必须区分离线便携与在线轻量两种导出语义。
 

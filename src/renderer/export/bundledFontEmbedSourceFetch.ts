@@ -23,12 +23,15 @@
  * Why the bytes are pulled lazily: the full face set is ~4.7 MB of
  * `ArrayBuffer`, and a session that never exports must not pay for it.
  * Installation touches the network zero times; the first
- * `prepareBundledFontEmbedding()` — which the export commands await, and which
- * users already wait on — is what fetches, and it caches for the session.
+ * `prepareBundledFontEmbedding()` is what fetches, and it caches for the
+ * session. Both export commands await it, and so does the runtime preview —
+ * the preview reuses `buildStandaloneHtml` for a blob document, which is a
+ * separate `Document` that never inherits the editor's injected faces, so
+ * without that await the canvas and the preview would render different fonts.
  *
- * A consequence worth stating: a build that never prepares (the runtime preview,
- * which reuses `buildStandaloneHtml` for a blob document) resolves to no fonts
- * and stays exactly as small as it is today.
+ * A build that still never prepares resolves to no fonts and stays exactly as
+ * small as it is today; the preview only awaits when the project actually
+ * declares a bundled family.
  */
 import notoSansScLicense from '../../../vendor/fonts/noto-sans-sc/LICENSE?raw'
 import stixTwoMathLicense from '../../../vendor/fonts/stix-two-math/LICENSE?raw'
