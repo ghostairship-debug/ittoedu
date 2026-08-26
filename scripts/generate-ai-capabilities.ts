@@ -648,69 +648,47 @@ function artifactEvidence(files: ReadonlyMap<string, string>): Record<string, {
   )
 }
 
+/**
+ * Direct provenance inputs of the generated capability artifacts: the files this
+ * generator reads or imports, plus the contracts whose declared text the output
+ * quotes. Broad main/preload/Player/preview/archive/export producer implementations
+ * are deliberately excluded — they carry the behaviour the capabilities describe,
+ * not the bytes the artifacts are generated from, so listing them only churns the
+ * evidence on unrelated edits. Keep this list narrow.
+ */
+const AI_CAPABILITY_SOURCE_EVIDENCE_PATHS = [
+  'package.json',
+  'scripts/generate-ai-capabilities.ts',
+  'scripts/validate-project.ts',
+  'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+  'src/renderer/components/importComponentPackage.ts',
+  'src/renderer/export/exportSize.ts',
+  'src/player/HostEvidenceRecorder.ts',
+  'src/shared/assessmentEvaluators.ts',
+  'src/shared/builtInComponentCatalog.ts',
+  'src/shared/componentCatalog.ts',
+  'src/shared/componentContentIntegrity.ts',
+  'src/shared/componentSchema.ts',
+  'src/shared/componentTypes.ts',
+  'src/shared/constants.ts',
+  'src/shared/courseProjectSchema.ts',
+  'src/shared/courseProjectTypes.ts',
+  'src/shared/courseProjectValidationDiagnostics.ts',
+  'src/shared/diagnosticCodes.ts',
+  'src/shared/interactionSchema.ts',
+  'src/shared/interactionTypes.ts',
+  'src/shared/publishedCourseSchema.ts',
+  'src/shared/publishedCourseTypes.ts',
+  'src/shared/runtimeSchema.ts',
+  'src/shared/runtimeTypes.ts',
+  'src/shared/surfaceRuntimeTypes.ts',
+] as const
+
 async function sourceEvidence(projectRoot: string): Promise<Array<{
   path: string
   sha256: string
 }>> {
-  const sources = [
-    'package-lock.json',
-    'package.json',
-    'scripts/generate-ai-capabilities.ts',
-    'scripts/validate-project.ts',
-    'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
-    'src/renderer/components/componentPackageStore.ts',
-    'src/renderer/components/importComponentPackage.ts',
-    'src/renderer/export/exportSize.ts',
-    'src/renderer/export/course/buildCoursePackages.ts',
-    'src/renderer/export/course/buildCoursePrintArtifacts.ts',
-    'src/renderer/export/course/buildPublishedCourse.ts',
-    'src/renderer/project/createCourseProject.ts',
-    'src/renderer/project/courseProjectArchive.ts',
-    'src/renderer/ui/coursePlayerTryRun.ts',
-    'src/main/createWindow.ts',
-    'src/main/previewNetworkPolicy.ts',
-    'src/preload/index.ts',
-    'src/player/RuntimeHost.ts',
-    'src/player/CourseRuntimeKernel.ts',
-    'src/player/HostEvidenceRecorder.ts',
-    'src/player/PlayerApp.ts',
-    'src/player/surfaces/publishedDynamicHosts.ts',
-    'src/player/surfaces/publishedComponentMount.ts',
-    'src/player/surfaces/flow/FlowSurfaceHost.ts',
-    'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
-    'src/player/surfaces/runtime/publishedSurfaceRuntimeMount.ts',
-    'src/player/surfaces/slide/SlidePublishedAdapter.ts',
-    'src/player/surfaces/slide/publishedSlidePhaserComponentMount.ts',
-    'src/shared/builtInComponentCatalog.ts',
-    'src/shared/assessmentEvaluators.ts',
-    'src/shared/componentCatalog.ts',
-    'src/shared/componentContentIntegrity.ts',
-    'src/shared/componentSchema.ts',
-    'src/shared/componentTypes.ts',
-    'src/shared/constants.ts',
-    'src/shared/diagnosticCodes.ts',
-    'src/shared/interactionSchema.ts',
-    'src/shared/interactionTypes.ts',
-    'src/shared/formulaRenderer.ts',
-    'src/shared/layoutMeasure.ts',
-    'src/shared/courseProjectSchema.ts',
-    'src/shared/courseProjectTypes.ts',
-    'src/shared/courseProjectHealth.ts',
-    'src/shared/courseProjectHealth/component.ts',
-    'src/shared/courseProjectHealth/controllerMedia.ts',
-    'src/shared/courseProjectHealth/internal.ts',
-    'src/shared/courseProjectHealth/interaction.ts',
-    'src/shared/courseProjectHealth/runtime.ts',
-    'src/shared/courseProjectHealth/types.ts',
-    'src/shared/courseProjectValidationDiagnostics.ts',
-    'src/shared/publishedCourseSchema.ts',
-    'src/shared/publishedCourseTypes.ts',
-    'src/shared/runtimeSchema.ts',
-    'src/shared/runtimeTypes.ts',
-    'src/shared/surfaceRuntimeTypes.ts',
-    'src/shared/stableOrder.ts',
-    'src/shared/textLayout.ts',
-  ]
+  const sources = AI_CAPABILITY_SOURCE_EVIDENCE_PATHS
   return Promise.all(sources.map(async (relativePath) => ({
     path: relativePath,
     sha256: sha256(await fs.readFile(path.join(projectRoot, relativePath))),

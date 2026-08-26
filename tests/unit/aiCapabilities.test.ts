@@ -40,6 +40,38 @@ const expectedCatalogPackageCount = 4
 const siblingCatalogAvailable = existsSync(
   path.join(process.cwd(), '..', 'courseware-components', 'catalog.json'),
 )
+/**
+ * The exact, narrow provenance input set: files the generator reads or imports,
+ * plus the contracts whose declared text the artifacts quote. Order matches the
+ * generator's declaration order.
+ */
+const expectedSourceEvidencePaths = [
+  'package.json',
+  'scripts/generate-ai-capabilities.ts',
+  'scripts/validate-project.ts',
+  'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+  'src/renderer/components/importComponentPackage.ts',
+  'src/renderer/export/exportSize.ts',
+  'src/player/HostEvidenceRecorder.ts',
+  'src/shared/assessmentEvaluators.ts',
+  'src/shared/builtInComponentCatalog.ts',
+  'src/shared/componentCatalog.ts',
+  'src/shared/componentContentIntegrity.ts',
+  'src/shared/componentSchema.ts',
+  'src/shared/componentTypes.ts',
+  'src/shared/constants.ts',
+  'src/shared/courseProjectSchema.ts',
+  'src/shared/courseProjectTypes.ts',
+  'src/shared/courseProjectValidationDiagnostics.ts',
+  'src/shared/diagnosticCodes.ts',
+  'src/shared/interactionSchema.ts',
+  'src/shared/interactionTypes.ts',
+  'src/shared/publishedCourseSchema.ts',
+  'src/shared/publishedCourseTypes.ts',
+  'src/shared/runtimeSchema.ts',
+  'src/shared/runtimeTypes.ts',
+  'src/shared/surfaceRuntimeTypes.ts',
+]
 const expectedCurrentProtocols = {
   project: COURSE_PROJECT_SCHEMA_VERSION,
   publishedCourse: PUBLISHED_COURSE_VERSION,
@@ -971,8 +1003,21 @@ describe('AI capability manifest generation', () => {
     const evidence = parseFile<{
       generator: string
       generatedAt: null
-      inputs: { sourceFiles: Array<{ path: string; sha256: string }> }
-      output: Record<string, { sha256: string }>
+      inputs: {
+        sourceFiles: Array<{ path: string; sha256: string }>
+        componentCatalog: {
+          status: string
+          expectedCatalogSha256: string
+          actualCatalogSha256?: string
+          packages: Array<{
+            identity: string
+            expectedSha256: string
+            actualSha256?: string
+            availability: string
+          }>
+        }
+      }
+      output: Record<string, { bytes: number; sha256: string }>
       hashScope: string
     }>(generated.files, 'generation-evidence.json')
     expect(evidence.generator).toBe('scripts/generate-ai-capabilities.ts')
@@ -981,49 +1026,76 @@ describe('AI capability manifest generation', () => {
     expect(evidence.output).not.toHaveProperty('generation-evidence.json')
     expect(evidence.hashScope).toContain('不记录 generation-evidence.json 自身哈希')
     const tracedSources = evidence.inputs.sourceFiles.map((entry) => entry.path)
-    expect(tracedSources).toEqual(expect.arrayContaining([
-      'src/shared/courseProjectSchema.ts',
-      'src/shared/courseProjectTypes.ts',
-      'src/shared/courseProjectHealth.ts',
-      'src/shared/courseProjectHealth/component.ts',
-      'src/shared/courseProjectHealth/controllerMedia.ts',
-      'src/shared/courseProjectHealth/internal.ts',
-      'src/shared/courseProjectHealth/interaction.ts',
-      'src/shared/courseProjectHealth/runtime.ts',
-      'src/shared/courseProjectHealth/types.ts',
-      'src/shared/courseProjectValidationDiagnostics.ts',
-      'src/shared/publishedCourseSchema.ts',
-      'src/shared/publishedCourseTypes.ts',
-      'src/shared/surfaceRuntimeTypes.ts',
-      'src/shared/interactionSchema.ts',
-      'src/shared/interactionTypes.ts',
-      'src/shared/runtimeSchema.ts',
-      'src/shared/componentSchema.ts',
-      'src/shared/diagnosticCodes.ts',
-      'src/shared/constants.ts',
-      'src/renderer/export/exportSize.ts',
-      'src/renderer/export/course/buildCoursePackages.ts',
-      'src/renderer/export/course/buildCoursePrintArtifacts.ts',
-      'src/renderer/export/course/buildPublishedCourse.ts',
-      'scripts/validate-project.ts',
-      'src/renderer/components/componentPackageStore.ts',
-      'src/renderer/project/createCourseProject.ts',
-      'src/renderer/project/courseProjectArchive.ts',
+    expect(tracedSources).toEqual(expectedSourceEvidencePaths)
+    for (const entry of evidence.inputs.sourceFiles) {
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
+    }
+
+    // Broad producer implementations carry described behaviour, not generation
+    // input bytes; listing them churned the evidence on unrelated edits.
+    for (const excluded of [
+      'package-lock.json',
       'src/main/createWindow.ts',
       'src/main/previewNetworkPolicy.ts',
       'src/preload/index.ts',
+      'src/player/PlayerApp.ts',
+      'src/player/RuntimeHost.ts',
+      'src/player/CourseRuntimeKernel.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
       'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
-      'src/shared/layoutMeasure.ts',
-      'src/shared/componentContentIntegrity.ts',
-      'src/shared/textLayout.ts',
-      'src/shared/formulaRenderer.ts',
-      'src/shared/stableOrder.ts',
-      'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
-    ]))
-    expect(tracedSources).not.toContain('src/shared/projectSchema.ts')
-    expect(tracedSources).not.toContain('src/renderer/project/createProject.ts')
-    expect(tracedSources).not.toContain('src/renderer/project/projectArchive.ts')
-    expect(tracedSources).not.toContain('src/renderer/project/validateProjectArchive.ts')
+      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
+      'src/renderer/components/componentPackageStore.ts',
+      'src/renderer/export/course/buildCoursePackages.ts',
+      'src/renderer/export/course/buildCoursePrintArtifacts.ts',
+      'src/renderer/export/course/buildPublishedCourse.ts',
+      'src/renderer/project/createCourseProject.ts',
+      'src/renderer/project/courseProjectArchive.ts',
+      'src/renderer/ui/coursePlayerTryRun.ts',
+      'src/shared/projectSchema.ts',
+      'src/renderer/project/createProject.ts',
+      'src/renderer/project/projectArchive.ts',
+      'src/renderer/project/validateProjectArchive.ts',
+    ]) {
+      expect(tracedSources, `${excluded} must not be source evidence`)
+        .not.toContain(excluded)
+    }
+    expect(tracedSources.filter((entry) => entry.startsWith('src/main/'))).toEqual([])
+    expect(tracedSources.filter((entry) => entry.startsWith('src/preload/'))).toEqual([])
+    expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/export/course/')))
+      .toEqual([])
+    expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/project/')))
+      .toEqual([])
+    // The player host is excluded except for the evidence recorder, whose
+    // constants are imported and published in schemas/runtime-api2.json.
+    expect(tracedSources.filter((entry) => entry.startsWith('src/player/')))
+      .toEqual(['src/player/HostEvidenceRecorder.ts'])
+
+    // Narrowing provenance inputs must not weaken catalog or output hashes.
+    expect(evidence.inputs.componentCatalog).toEqual({
+      status: 'unavailable',
+      expectedCatalogSha256: BUILT_IN_COMPONENT_CATALOG_SHA256,
+      packages: [],
+    })
+    expect(Object.keys(evidence.output)).toEqual([
+      'component-catalog.snapshot.json',
+      'diagnostics.json',
+      'index.json',
+      'limits.json',
+      'schemas/component-api4.json',
+      'schemas/course-project-v9.json',
+      'schemas/interactions.json',
+      'schemas/published-course-v2.json',
+      'schemas/runtime-api2.json',
+      'schemas/runtime-api3.json',
+    ])
+    for (const [relativePath, entry] of Object.entries(evidence.output)) {
+      expect(entry.sha256).toBe(
+        createHash('sha256').update(generated.files.get(relativePath)!).digest('hex'),
+      )
+      expect(entry.bytes).toBe(
+        Buffer.byteLength(generated.files.get(relativePath)!, 'utf8'),
+      )
+    }
 
     const project = parseFile<{ sourceOfTruth: string }>(
       generated.files,
@@ -1059,6 +1131,28 @@ describe('AI capability manifest generation', () => {
     expect(diagnostics.sourceOfTruth).toBe('src/shared/diagnosticCodes.ts')
     expect(limits.sourceOfTruth).toContain('src/shared/constants.ts')
   }, 15_000)
+
+  it.skipIf(!siblingCatalogAvailable)('keeps every committed capability artifact byte-identical outside generation-evidence.json', async () => {
+    const generated = await generateAiCapabilityArtifacts()
+    const committedRoot = path.join(process.cwd(), 'artifacts', 'ai-capabilities')
+    const drifted: string[] = []
+    for (const [relativePath, content] of generated.files) {
+      if (relativePath === 'generation-evidence.json') continue
+      const committed = await fs.readFile(
+        path.join(committedRoot, ...relativePath.split('/')),
+        'utf8',
+      )
+      if (committed !== content) drifted.push(relativePath)
+    }
+    expect(drifted).toEqual([])
+    // Provenance scope lives only in generation-evidence.json: no other artifact
+    // records source files, so narrowing the input set cannot move capability bytes.
+    for (const [relativePath, content] of generated.files) {
+      if (relativePath === 'generation-evidence.json') continue
+      expect(content, `${relativePath} must not embed source provenance`)
+        .not.toContain('sourceFiles')
+    }
+  }, 30_000)
 
   it('rejects an oversized canonical index fixture', () => {
     expect(() => assertIndexWithinLimit({
