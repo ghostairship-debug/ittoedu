@@ -59,17 +59,37 @@ describe('bundled font manifest', () => {
     expect(countBundledFontFaces(resolved)).toBe(102)
   })
 
-  it('points every license record at a verbatim copy tracked in the repo', () => {
+  it('credits whoever the shipped bytes credit, and ships the OFL terms untouched', () => {
     for (const family of manifest().families) {
       expect(family.license.type).toBe('OFL-1.1')
+
+      // The holder is read out of a face we actually deliver, never out of the
+      // distributor's notice. Fontsource credits `Google Inc.` for Noto Sans
+      // SC, which descends from Source Han Sans and is Adobe's with `Source`
+      // reserved; comparing our copy against theirs only ever proved that two
+      // copies of the same mistake match. One face per family is enough —
+      // `resolveBundledFontDescriptors` already fails if the file set drifts
+      // from the single pinned package the slices come from.
+      const face = family.faces[0]!
+      const shipped = createFont(
+        readFileSync(join(nodeModules, family.license.packageName, 'files', face.file)),
+      )
+      expect(family.license.attribution, family.family).toBe(shipped.copyright)
+
       const notice = readFileSync(join(repoRoot, family.license.noticePath), 'utf8')
+      const [heading, ...body] = notice.split(/\r?\n/)
+      expect(heading, `${family.family} 的许可正文首行`).toBe(shipped.copyright)
+      expect(notice).toContain('SIL Open Font License, Version 1.1')
+
+      // OFL 1.1 §2 lets us restate the copyright line correctly; it does not
+      // let us reword the terms. Everything below the heading stays byte-equal
+      // to the upstream package.
       const upstream = readFileSync(
         join(nodeModules, family.license.packageName, 'LICENSE'),
         'utf8',
       )
-      expect(notice).toBe(upstream)
-      expect(notice).toContain('SIL Open Font License, Version 1.1')
-      expect(notice).toContain(family.license.attribution)
+      expect(body.join('\n'), `${family.family} 的 OFL 正文`)
+        .toBe(upstream.split(/\r?\n/).slice(1).join('\n'))
     }
   })
 

@@ -385,13 +385,15 @@ describe('web package links the declared family as sibling files', () => {
     expect(strFromU8(files['index.html']!)).toContain("font-src 'self' data:")
 
     const notices = strFromU8(files['THIRD_PARTY_NOTICES.md']!)
+    const notice = readFileSync(join(repoRoot, 'vendor/fonts/noto-sans-sc/LICENSE'), 'utf8')
     expect(notices).toContain(`## ${BUNDLED_TEXT_FONT_FAMILY}`)
     expect(notices).toContain('- License: OFL-1.1')
-    expect(notices).toContain('- Copyright: Google Inc.')
+    // Derived from the notice, not spelled out again: `bundledFonts.test.ts` is
+    // what holds that heading to the copyright inside the shipped `.woff2`, so
+    // naming the holder here too would only add a second place to forget it.
+    expect(notices).toContain(`- Copyright: ${notice.split(/\r?\n/)[0]}`)
     expect(notices).toContain('`player/fonts/`')
-    expect(notices).toContain(
-      readFileSync(join(repoRoot, 'vendor/fonts/noto-sans-sc/LICENSE'), 'utf8').trimEnd(),
-    )
+    expect(notices).toContain(notice.trimEnd())
   })
 
   it('writes the same layout for a V8 lesson web package', () => {

@@ -8,6 +8,8 @@ declare module 'fontkit' {
   interface FontkitFont {
     readonly familyName: string
     readonly numGlyphs: number
+    /** `name` table record 0 — the copyright notice the font itself declares. */
+    readonly copyright: string
     hasGlyphForCodePoint(codePoint: number): boolean
   }
 

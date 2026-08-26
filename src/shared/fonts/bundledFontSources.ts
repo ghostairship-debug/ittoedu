@@ -97,7 +97,12 @@ function resolveTextFamily(nodeModulesDirectory: string): BundledFontFamilyDescr
     display: FONT_DISPLAY,
     license: {
       type: 'OFL-1.1',
-      attribution: 'Google Inc.',
+      // Verbatim `nameID 0` of the shipped slices, not the distributor. Noto
+      // Sans SC descends from Source Han Sans, so the copyright is Adobe's and
+      // OFL 1.1 §3 reserves `Source` — the upstream Fontsource `LICENSE` drops
+      // both and names Google instead. `bundledFonts.test.ts` reads the name
+      // table out of a real `.woff2` to keep this honest.
+      attribution: "(c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.",
       noticePath: 'vendor/fonts/noto-sans-sc/LICENSE',
       packageName: TEXT_FONT_PACKAGE,
       packageVersion: packageVersion(packageDirectory),
