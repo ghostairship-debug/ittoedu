@@ -29,6 +29,12 @@ import {
   type CourseProjectDocument,
   type LayerItem,
 } from '../src/shared/courseProjectTypes'
+import {
+  resolveSchemaValidCourseProjectDiagnosticTarget,
+  type CourseProjectValidationFatalCode,
+  type CourseProjectValidationFindingCode,
+  type DiagnosticTargetV1,
+} from '../src/shared/courseProjectValidationDiagnostics'
 import { UserFacingError } from '../src/shared/errors'
 import { detectLayoutMeasurementMode } from '../src/shared/layoutMeasure'
 import { PUBLISHED_COURSE_VERSION } from '../src/shared/publishedCourseTypes'
@@ -59,13 +65,7 @@ export type CourseProjectExportTarget =
   | 'pptx'
 
 export interface CourseProjectValidationFatalError {
-  code:
-    | 'archive-invalid'
-    | 'input-unreadable'
-    | 'schema-invalid'
-    | 'unsupported-project-version'
-    | 'usage-error'
-    | 'validation-failed'
+  code: CourseProjectValidationFatalCode
   title: string
   message: string
   suggestion?: string
@@ -79,11 +79,12 @@ export interface CourseProjectValidationSchemaIssue {
 
 export interface CourseProjectValidationFinding {
   severity: 'error' | 'warning' | 'info'
-  code: string
+  code: CourseProjectValidationFindingCode
   message: string
   path?: Array<string | number>
   surfaceId?: string
   layerItemId?: string
+  target?: DiagnosticTargetV1
 }
 
 export interface CourseProjectExportPreflightReport {
@@ -229,6 +230,16 @@ function summarizeFindings(
   return summary
 }
 
+function withDiagnosticTargets(
+  project: CourseProjectDocument,
+  items: readonly CourseProjectValidationFinding[],
+): CourseProjectValidationFinding[] {
+  return items.map((item) => ({
+    ...item,
+    target: resolveSchemaValidCourseProjectDiagnosticTarget(project, item),
+  }))
+}
+
 function declaredSchemaVersion(value: unknown): number | null {
   if (typeof value !== 'object' || value === null) return null
   const version = Reflect.get(value, 'schemaVersion')
@@ -289,12 +300,12 @@ function collectStableIdIssues(
 ): CourseProjectValidationFinding[] {
   const issues: CourseProjectValidationFinding[] = []
   const seen = new Map<string, Array<string | number>>()
-  const remember = (id: string, path: Array<string | number>, code: string): void => {
+  const remember = (id: string, path: Array<string | number>): void => {
     const previous = seen.get(id)
     if (previous) {
       issues.push({
         severity: 'error',
-        code,
+        code: 'duplicate-stable-id',
         message: `稳定 ID 重复：${id}`,
         path,
       })
@@ -302,15 +313,15 @@ function collectStableIdIssues(
     }
     seen.set(id, path)
   }
-  remember(`project:${project.id}`, ['id'], 'duplicate-stable-id')
+  remember(`project:${project.id}`, ['id'])
   project.locations.forEach((location, index) => {
-    remember(`location:${location.id}`, ['locations', index, 'id'], 'duplicate-stable-id')
+    remember(`location:${location.id}`, ['locations', index, 'id'])
   })
   project.surfaces.forEach((surface, surfaceIndex) => {
-    remember(`surface:${surface.id}`, ['surfaces', surfaceIndex, 'id'], 'duplicate-stable-id')
+    remember(`surface:${surface.id}`, ['surfaces', surfaceIndex, 'id'])
   })
   visitLayerItems(project, (item, path) => {
-    remember(`layer:${item.layerItemId}`, [...path, 'layerItemId'], 'duplicate-stable-id')
+    remember(`layer:${item.layerItemId}`, [...path, 'layerItemId'])
   })
   return issues
 }
@@ -463,11 +474,11 @@ function collectExportReports(
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : '组件包无法用于导出预检。'
-    const items: CourseProjectValidationFinding[] = [{
+    const items = withDiagnosticTargets(archive.project, [{
       severity: 'error',
       code: 'component-bytes-missing',
       message,
-    }]
+    }])
     const toReport = (
       target: CourseProjectExportTarget,
     ): CourseProjectExportPreflightReport => ({
@@ -558,14 +569,17 @@ function collectExportReports(
   const toReport = (
     target: CourseProjectExportTarget,
     items: CourseProjectValidationFinding[],
-  ): CourseProjectExportPreflightReport => ({
-    reportVersion: 1,
-    projectId: archive.project.id,
-    schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
-    target,
-    items,
-    summary: summarizeFindings(items),
-  })
+  ): CourseProjectExportPreflightReport => {
+    const targetedItems = withDiagnosticTargets(archive.project, items)
+    return {
+      reportVersion: 1,
+      projectId: archive.project.id,
+      schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+      target,
+      items: targetedItems,
+      summary: summarizeFindings(targetedItems),
+    }
+  }
 
   return {
     'single-html': toReport('single-html', htmlItems),
@@ -668,10 +682,22 @@ export function validateCourseProjectArchiveBytes(
     })
   }
 
-  const v8Fields = collectV8FieldIssues(rawProject)
-  const migrationMarkers = collectMigrationMarkerIssues(archive.project)
-  const stableIdIssues = collectStableIdIssues(archive.project)
-  const protocolIssues = collectProtocolIssues(archive.project, archive)
+  const v8Fields = withDiagnosticTargets(
+    archive.project,
+    collectV8FieldIssues(rawProject),
+  )
+  const migrationMarkers = withDiagnosticTargets(
+    archive.project,
+    collectMigrationMarkerIssues(archive.project),
+  )
+  const stableIdIssues = withDiagnosticTargets(
+    archive.project,
+    collectStableIdIssues(archive.project),
+  )
+  const protocolIssues = withDiagnosticTargets(
+    archive.project,
+    collectProtocolIssues(archive.project, archive),
+  )
   const healthItems = [
     ...v8Fields,
     ...migrationMarkers,

@@ -298,7 +298,7 @@ PPTX 映射规则：
 | `npm run build:desktop` | 只构建可由根目录入口直接启动的三个生产目录 |
 | `npm run generate:ai-capabilities` | 从权威 Schema、协议常量、诊断注册表和受校验组件目录生成分层 AI 能力契约 |
 | `npm run check:ai-capabilities` | 只读检查能力内容、来源证据和 16 KiB 索引门禁；内容或证据任一过期都会失败，不自动写文件 |
-| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取 Course Project V9，向 stdout 输出 Schema、当前已接线的结构性工程健康结果与四格式预检 JSON；退出码 0/1/2。0 只表示现有检查无 error，不代表完整 V9 语义或实际网络使用与工程声明一致已证明 |
+| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取 Course Project V9，向 stdout 输出 [Validation Report V1](docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md)；Schema-invalid 保持 unreadable/exit 2、六个语义分区为 null，Schema 合法 finding 可附只含稳定 V9 ID 的 target。精确 code 可达性见机器 ledger；0 只表示现有检查无 error，不代表完整 V9 语义或实际网络使用与工程声明一致已证明 |
 | `npm run generate:contracts` | 从 Zod 生成 `artifacts/contracts/` |
 | `npm run check:contracts` | 检查合同快照与源码一致 |
 | `npm run build` | 先检查 AI 能力契约，再执行类型检查、测试并构建全部生产产物 |

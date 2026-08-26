@@ -27,6 +27,12 @@ import {
   LAYER_ITEM_KINDS,
 } from '../src/shared/courseProjectTypes'
 import {
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+  COURSE_PROJECT_VALIDATION_FATAL_CODES,
+  COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+} from '../src/shared/courseProjectValidationDiagnostics'
+import {
   APP_VERSION,
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -651,6 +657,7 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'package.json',
     'scripts/generate-ai-capabilities.ts',
     'scripts/validate-project.ts',
+    'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
     'src/renderer/components/componentPackageStore.ts',
     'src/renderer/components/importComponentPackage.ts',
     'src/renderer/export/exportSize.ts',
@@ -688,6 +695,7 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/shared/layoutMeasure.ts',
     'src/shared/courseProjectSchema.ts',
     'src/shared/courseProjectTypes.ts',
+    'src/shared/courseProjectValidationDiagnostics.ts',
     'src/shared/publishedCourseSchema.ts',
     'src/shared/publishedCourseTypes.ts',
     'src/shared/runtimeSchema.ts',
@@ -1064,6 +1072,22 @@ export async function generateAiCapabilityArtifacts(
     projectedProjectHealthForExport: PROJECT_HEALTH_CODES.map(
       (code) => `project-health:${code}`,
     ),
+    legacyRegistryScope: 'Project V8 editor/export registry; not the active Course Project V9 CLI finding ledger.',
+    courseProjectValidation: {
+      reportVersion: 1,
+      target: {
+        version: COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+        stableIdentity: 'course-project-v9-ids-only',
+        kinds: COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+        unresolvedFallback: 'project',
+        schemaInvalid: 'omitted',
+      },
+      fatalCodes: COURSE_PROJECT_VALIDATION_FATAL_CODES,
+      schemaIssueCodes: 'zod-issue-code',
+      findingCodes: COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+      sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+    },
     sourceOfTruth: 'src/shared/diagnosticCodes.ts',
   }))
   files.set('limits.json', canonicalJson({
@@ -1201,6 +1225,16 @@ export async function generateAiCapabilityArtifacts(
       input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+      findingCodeLedger: 'diagnostics.json#/courseProjectValidation/findingCodes',
+      diagnosticTargetVersion: COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+      schemaInvalid: {
+        status: 'unreadable',
+        exitCode: 2,
+        semanticSections: 'all-null',
+        canExport: false,
+      },
+      semanticCoverage: 'current-wired-only-see-code-ledger',
       checks: [
         'course-project-v9-schema',
         'assets-and-components',

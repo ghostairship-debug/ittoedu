@@ -23,6 +23,12 @@ import {
 } from '../../src/shared/constants'
 import { COURSE_PROJECT_SCHEMA_VERSION } from '../../src/shared/courseProjectTypes'
 import {
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+  COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+  COURSE_PROJECT_VALIDATION_FATAL_CODES,
+  COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+} from '../../src/shared/courseProjectValidationDiagnostics'
+import {
   INTERACTION_ACTION_TYPES,
   INTERACTION_CONDITION_TYPES,
   INTERACTION_TRIGGER_TYPES,
@@ -91,6 +97,11 @@ describe('AI capability manifest generation', () => {
         command: string
         output: string
         reportVersion: number
+        contract: string
+        findingCodeLedger: string
+        diagnosticTargetVersion: number
+        schemaInvalid: Record<string, unknown>
+        semanticCoverage: string
         checks: string[]
         exitCodes: Record<string, number>
         execution: string
@@ -177,6 +188,16 @@ describe('AI capability manifest generation', () => {
       input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
+      findingCodeLedger: 'diagnostics.json#/courseProjectValidation/findingCodes',
+      diagnosticTargetVersion: 1,
+      schemaInvalid: {
+        status: 'unreadable',
+        exitCode: 2,
+        semanticSections: 'all-null',
+        canExport: false,
+      },
+      semanticCoverage: 'current-wired-only-see-code-ledger',
       checks: [
         'course-project-v9-schema',
         'assets-and-components',
@@ -194,6 +215,42 @@ describe('AI capability manifest generation', () => {
         unreadableOrUsageError: 2,
       },
       execution: 'node-only-no-electron-no-export-no-write',
+    })
+    expect(index.validation.checks).not.toContain('project-health')
+
+    const diagnostics = parseFile<{
+      legacyRegistryScope: string
+      courseProjectValidation: {
+        reportVersion: number
+        target: {
+          version: number
+          stableIdentity: string
+          kinds: string[]
+          unresolvedFallback: string
+          schemaInvalid: string
+        }
+        fatalCodes: string[]
+        schemaIssueCodes: string
+        findingCodes: unknown[]
+        sourceOfTruth: string
+        contract: string
+      }
+    }>(first.files, 'diagnostics.json')
+    expect(diagnostics.legacyRegistryScope).toContain('not the active Course Project V9 CLI')
+    expect(diagnostics.courseProjectValidation).toEqual({
+      reportVersion: 1,
+      target: {
+        version: COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
+        stableIdentity: 'course-project-v9-ids-only',
+        kinds: COURSE_PROJECT_DIAGNOSTIC_TARGET_KINDS,
+        unresolvedFallback: 'project',
+        schemaInvalid: 'omitted',
+      },
+      fatalCodes: COURSE_PROJECT_VALIDATION_FATAL_CODES,
+      schemaIssueCodes: 'zod-issue-code',
+      findingCodes: COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
+      sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
+      contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
     })
     expect(index.components.packageAdmission).toEqual({
       requiredAvailability: 'available',
@@ -893,6 +950,7 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).toEqual(expect.arrayContaining([
       'src/shared/courseProjectSchema.ts',
       'src/shared/courseProjectTypes.ts',
+      'src/shared/courseProjectValidationDiagnostics.ts',
       'src/shared/publishedCourseSchema.ts',
       'src/shared/publishedCourseTypes.ts',
       'src/shared/surfaceRuntimeTypes.ts',
@@ -919,6 +977,7 @@ describe('AI capability manifest generation', () => {
       'src/shared/textLayout.ts',
       'src/shared/formulaRenderer.ts',
       'src/shared/stableOrder.ts',
+      'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
     ]))
     expect(tracedSources).not.toContain('src/shared/projectSchema.ts')
     expect(tracedSources).not.toContain('src/renderer/project/createProject.ts')
