@@ -23,7 +23,12 @@ import {
   type FlowSelectionFormat,
   type FlowSelectionFormatField,
 } from '../authoring/flowTextEdit'
-import { COMMON_FONT_FAMILIES } from './PropertiesTab'
+import {
+  COMMON_FONT_FAMILIES,
+  FONT_FAMILY_SOURCE_TAGS,
+  fontFamilySource,
+  type FontFamilySource,
+} from './PropertiesTab'
 
 export type FlowBlockContextCommand =
   | { type: 'range-style'; style: TextRunStyle }
@@ -232,11 +237,24 @@ export function FlowBlockContextToolbar({
           {familyField.state === 'uniform' && !COMMON_FONT_FAMILIES.some((family) => family === familyField.value)
             ? <option value={familyField.value}>{familyField.value}</option>
             : null}
-          {COMMON_FONT_FAMILIES.map((family) => (
-            <option key={family} value={family}>
-              {family}
-            </option>
-          ))}
+          {/* Grouped so this entry point states the same cost as the
+              properties picker: a bundled family is embedded on export, a
+              system family follows whatever the machine has. */}
+          {(['bundled', 'system'] as readonly FontFamilySource[]).map((source) => {
+            const families = COMMON_FONT_FAMILIES.filter(
+              (family) => fontFamilySource(family) === source,
+            )
+            if (families.length === 0) return null
+            return (
+              <optgroup key={source} label={FONT_FAMILY_SOURCE_TAGS[source].cost}>
+                {families.map((family) => (
+                  <option key={family} value={family}>
+                    {family}
+                  </option>
+                ))}
+              </optgroup>
+            )
+          })}
         </select>
         <input
           key={`${fontSizeField.state}-${fontSizeValue ?? ''}`}

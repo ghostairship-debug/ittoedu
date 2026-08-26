@@ -40,7 +40,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   findPresentationState,
   isNodeOverriddenInState,
@@ -82,6 +82,7 @@ import {
   transparencyPercentToOpacity,
 } from '../../shared/opacity'
 import { collectProjectDiagnostics } from '../../shared/projectDiagnostics'
+import { BUNDLED_FONT_FAMILIES } from '../../shared/fonts/bundledFontFamilies'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
 import type {
@@ -398,7 +399,45 @@ function TextContentTextarea({ label, value, onBegin, onChange, onCommit, onCanc
   )
 }
 
-export const FONT_FAMILY_OPTIONS = [
+/**
+ * Two kinds of font, two different bills. `bundled` families ship inside the
+ * app, so an export can embed them and the layout survives a machine change at
+ * the cost of file size; `system` families are whatever the machine happens to
+ * have, which keeps exports small and makes the layout machine-dependent.
+ */
+export type FontFamilySource = 'bundled' | 'system'
+
+const BUNDLED_FONT_FAMILY_SET = new Set(BUNDLED_FONT_FAMILIES)
+
+/**
+ * Classify a family. Membership comes from the bundled font module — the single
+ * truth about what we ship — so the picker can never promise an embed for a
+ * family the export does not have bytes for.
+ */
+export function fontFamilySource(fontFamily: string): FontFamilySource {
+  return BUNDLED_FONT_FAMILY_SET.has(fontFamily.trim()) ? 'bundled' : 'system'
+}
+
+/**
+ * What each class costs, in the same terse voice as the availability tags. The
+ * picker offers the choice, so it owes the teacher the trade-off that comes
+ * with it.
+ */
+export const FONT_FAMILY_SOURCE_TAGS: Record<
+  FontFamilySource,
+  { readonly badge: string; readonly cost: string }
+> = {
+  bundled: {
+    badge: '内置',
+    cost: '内置字体：导出时嵌入，换机器排版不变，文件更大',
+  },
+  system: {
+    badge: '系统',
+    cost: '系统字体：导出不嵌入，文件小，没装该字体的机器上排版可能变样',
+  },
+}
+
+const FONT_FAMILY_CATALOG = [
   { label: '微软雅黑', family: 'Microsoft YaHei' },
   { label: '微软雅黑 UI', family: 'Microsoft YaHei UI' },
   { label: '微软正黑体', family: 'Microsoft JhengHei' },
@@ -432,6 +471,30 @@ export const FONT_FAMILY_OPTIONS = [
   { label: '衬线通用字体', family: 'serif' },
   { label: '等宽通用字体', family: 'monospace' },
 ] as const
+
+/**
+ * Stable partition: bundled first, each class keeping its authored order. Two
+ * contiguous runs let the list state a class's cost once instead of repeating
+ * it on every row.
+ */
+function orderFontOptionsBySource<Option extends { readonly family: string }>(
+  options: readonly Option[],
+): Option[] {
+  return [
+    ...options.filter((option) => fontFamilySource(option.family) === 'bundled'),
+    ...options.filter((option) => fontFamilySource(option.family) !== 'bundled'),
+  ]
+}
+
+/**
+ * The bundled families lead the list: they are the only entries whose layout is
+ * guaranteed on another machine. This changes no default, only what the teacher
+ * sees first.
+ */
+export const FONT_FAMILY_OPTIONS: readonly {
+  readonly label: string
+  readonly family: string
+}[] = orderFontOptionsBySource(FONT_FAMILY_CATALOG)
 
 export const COMMON_FONT_FAMILIES = FONT_FAMILY_OPTIONS.map(
   (option) => option.family,
@@ -477,14 +540,18 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
   const currentOption = FONT_FAMILY_OPTIONS.find(
     (option) => option.family === value,
   )
-  const availableFonts = currentOption
-    ? [...FONT_FAMILY_OPTIONS]
-    : [
-        ...(value
-          ? [{ label: '自定义字体', family: value } as const]
-          : []),
-        ...FONT_FAMILY_OPTIONS,
-      ]
+  // The typed-in value is not a family we ship, so it joins the system run
+  // rather than sitting above the grouped list unlabelled.
+  const availableFonts = orderFontOptionsBySource(
+    currentOption
+      ? FONT_FAMILY_OPTIONS
+      : [
+          ...(value
+            ? [{ label: '自定义字体', family: value } as const]
+            : []),
+          ...FONT_FAMILY_OPTIONS,
+        ],
+  )
   const normalizedQuery = draft.trim().toLocaleLowerCase()
   const visibleFonts = queryDirty && normalizedQuery
     ? availableFonts.filter((font) => (
@@ -627,17 +694,41 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
                 : availability === 'unavailable'
                   ? '未安装'
                   : '未检测'
+              const source = fontFamilySource(font.family)
+              const sourceTag = FONT_FAMILY_SOURCE_TAGS[source]
+              // The list is grouped by class, so the cost is stated once per
+              // run of options instead of 33 times.
+              const startsGroup = index === 0 ||
+                fontFamilySource(visibleFonts[index - 1]!.family) !== source
               return (
+              <Fragment key={font.family}>
+              {startsGroup ? (
+                <div
+                  role="presentation"
+                  data-testid={`font-family-group-${source}`}
+                  style={{
+                    padding: '6px 9px 3px',
+                    color: 'var(--text-muted)',
+                    fontSize: 9,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {sourceTag.cost}
+                </div>
+              ) : null}
               <button
                 id={`courseware-font-option-${index}`}
                 type="button"
                 role="option"
                 aria-selected={font.family === draft}
-                aria-label={`${font.label}，${font.family}，${availabilityLabel}`}
+                aria-label={
+                  `${font.label}，${font.family}，${sourceTag.badge}字体，${availabilityLabel}`
+                }
+                title={sourceTag.cost}
+                data-font-source={source}
                 className={
                   `font-family-option${index === activeIndex ? ' is-active' : ''}`
                 }
-                key={font.family}
                 onPointerDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => selectFont(font.family)}
@@ -646,6 +737,9 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
                 <span className="font-family-option__identity">
                   <strong>{font.label}</strong>
                   <small>{font.family}</small>
+                </span>
+                <span className="font-family-option__status">
+                  {sourceTag.badge}
                 </span>
                 <span
                   className={`font-family-option__status font-family-option__status--${availability}`}
@@ -656,6 +750,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
                   ? <Check size={14} aria-hidden="true" />
                   : null}
               </button>
+              </Fragment>
               )
             }) : (
               <div className="font-family-empty">
@@ -673,7 +768,9 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
         中文字体预览 Aa 123
       </div>
       <small className="font-family-help">
-        列表同时显示中文名、CSS 字体名和本机可用状态；仍可输入自定义字体或回退字体串。
+        {'列表按“内置 / 系统”分组：内置字体导出时会嵌入，换机器排版不变、文件更大；' +
+          '系统字体不嵌入，文件小，但没装该字体的机器上排版可能变样。' +
+          '仍可输入自定义字体或回退字体串，未标“内置”的一律不嵌入。'}
       </small>
     </div>
   )
