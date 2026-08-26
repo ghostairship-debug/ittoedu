@@ -150,7 +150,7 @@ skill 重构、黄金样例、真实课例生产、声明式数据条件与编�
 
 ## 8. 当前状态与领取入口
 
-建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前卡统一放在 `docs/development-plan/tasks/repair/**`，完成即删除。
+建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。当前没有活动卡（`docs/development-plan/tasks/` 已随三张卡删空，Git 不跟踪空目录）；新建卡时统一放在 `docs/development-plan/tasks/<wave>/`，完成即删除。
 
 当前任务板为 0 张卡：第 5 节三张 Ready 卡已全部交付、合入并删卡，活动路线收口。**当前没有 Ready 工作**。第 5.4 节的剩余问题是只读核实结果，未立项；建卡前须由 Owner 就 A 档反例（尤其能力索引 provenance 清单增删）与 B 档 consumer 诉求先行定级。执行者只读本总纲的不变量、自己的任务卡及卡中点名的源码/测试，不得通读旧 Wave 后自行补范围。不得自动继续 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1 或其它 carrier 扩展。
 
