@@ -154,7 +154,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 ### Wave 5：合成与旧投影退出
 
-`SEM-B3` 共享合成与三方契约测试 → 有证据的 Slide preflight parity → `PRJ-00A` 去冗余 → 测量后决定 `PRJ-00B` context-aware cache → `PRJ-01` 收窄 → `PRJ-02～05` 按用户行为拆分。任何统一宿主必须保留可信扩展语义、既有生命周期责任、真实宿主能力与工程 origin 策略。
+`SEM-B3` 共享合成与三方契约测试已完成；`SEM-B4A` 又从现有 GUI PDF/PPTX 富预检中抽出 shape-neutral Slide 视觉规则，保持 V8 report item-for-item 不变，新增只读 V9 adapter 并以 `composeCourseProjectLocation` 证明可表示子域零差异及五类精确反例 delta。下一顺序为 `PRJ-00A` 去冗余 → 测量后决定 `PRJ-00B` context-aware cache → `PRJ-01` 收窄 → `PRJ-02～05` 按用户行为拆分。任何统一宿主必须保留可信扩展语义、既有生命周期责任、真实宿主能力与工程 origin 策略。
 
 ## 5. 当前阶段门与下一批准入
 
@@ -162,7 +162,7 @@ NET-R1 与 NET-P1 共享同一 V9 合同热点，并共同表达“课程声明�
 
 RTP-04 只建立了 session-global API 2 ownership、容器迁移与必要的 RuntimeHost teardown 异常安全；CMP-03 只接通 Slide scene-local API 4 Phaser Component。global API 3、actions/events/nodes/capture、其它 Component carrier 均不随卡开放。
 
-已知不准入事实：V8-06 release verifier 只能在 V8-05A 的 V9/V2 benchmark 行为门通过后准入，旧 V8 benchmark 不能提前删除；RTP-05 Published API 2 static capture 没有真实 V9 export capture consumer；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；Wave 4 的 reportVersion、schema-invalid 与 DiagnosticTarget 合同仍未裁决；Wave 5 等 Owner 先选择 SEM-B3 parity domain。Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
+已知不准入事实：V8-06 release verifier 只能在 V8-05A 的 V9/V2 benchmark 行为门通过后准入，旧 V8 benchmark 不能提前删除；RTP-05 Published API 2 static capture 没有真实 V9 export capture consumer；NET-C1 仍缺真实作者路径的 HTTP/WebSocket 或远程 Published capture consumer；SEM-B4A 只建立可表示纯 Slide 视觉子域 parity，不代表 App/PDF/PPTX consumer 已转换，也不允许删除 `collectExportPreflight`、LEG-006/007 或旧投影。Spatial/非 Flow shared/capture Runtime 不因 Schema 可表达就自动准入。
 
 ## 6. 并发与集成安排
 

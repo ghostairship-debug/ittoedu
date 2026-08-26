@@ -895,7 +895,7 @@
       },
       "owner": "Diagnostics / Export",
       "status": "active-debt",
-      "currentFact": "ExportPreflightReport is schemaVersion 8 and analyzes ProjectDocument; App always computes this base report before merging the V9 HTML/Web package preflight.",
+      "currentFact": "ExportPreflightReport remains a schemaVersion 8 App consumer. SEM-B4A extracted its Slide visual rules behind a shape-neutral composition input and added a headless Course Project V9 adapter driven only by shared location composition; no GUI/export route has switched and the Legacy report remains active debt.",
       "evidence": [
         {
           "path": "src/renderer/export/exportPreflight.ts",
@@ -906,6 +906,11 @@
           "path": "src/renderer/App.tsx",
           "symbol": "handleExport",
           "note": "Calls collectExportPreflight(state.project, ...) before optional V9 merge."
+        },
+        {
+          "path": "src/renderer/export/slideVisualPreflight.ts",
+          "symbol": "collectCourseProjectSlideVisualPreflight",
+          "note": "Headless V9 Slide visual adapter reuses the same rules and consumes membership, materialization, background and order from composeCourseProjectLocation."
         }
       ],
       "consumerCategories": {
@@ -949,7 +954,7 @@
             }
           ],
           "unknowns": [
-            "A V9-native PPTX/PDF preflight replacement is not yet identified."
+            "A V9-native Slide visual adapter exists, but complete PPTX/PDF resources, static-format semantics, report routing and GUI consumption are not migrated."
           ]
         },
         "buildFixtureOrRelease": {
@@ -986,6 +991,11 @@
               "path": "tests/unit/formulaNode.test.ts",
               "symbol": "collectExportPreflight",
               "use": "Formula export diagnostics through the Legacy report."
+            },
+            {
+              "path": "tests/unit/courseSlidePreflightParity.test.ts",
+              "symbol": "Slide export-preflight parity",
+              "use": "Pins the fixed-time V8 report item-for-item, proves representable V8/V9 parity and quantifies projection-only deltas."
             }
           ],
           "unknowns": []
@@ -1003,9 +1013,13 @@
           {
             "path": "src/renderer/export/course/buildCoursePackages.ts",
             "symbol": "collectCoursePackageExportPreflight"
+          },
+          {
+            "path": "src/renderer/export/slideVisualPreflight.ts",
+            "symbol": "collectCourseProjectSlideVisualPreflight"
           }
         ],
-        "notes": "HTML/Web V9 preflight exists. PPTX/PDF and location navigation need V9-native reports before removal."
+        "notes": "HTML/Web V9 preflight exists. SEM-B4A establishes only the shared Slide visual-rule seam and a headless V9 adapter; App routing, complete PDF/PPTX semantics and exported-report compatibility still block removal."
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
@@ -1013,7 +1027,7 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'collectExportPreflight' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 21
+            "observedMatches": 23
           }
         ],
         "requiredForRemoval": "App, validator, UI, tests, exported-report semantics, and every target adapter must migrate; exact references must be zero."
@@ -1032,13 +1046,18 @@
       },
       "tests": [
         "tests/unit/exportPreflight.test.ts",
+        "tests/unit/courseSlidePreflightParity.test.ts",
         "tests/unit/coursePackageExport.test.ts",
         "tests/unit/exportPreflightUi.test.tsx"
       ],
       "stableSince": {
-        "status": "not-established",
-        "wave": null,
-        "evidence": []
+        "status": "slide-visual-rule-parity-established",
+        "wave": "Wave 5 SEM-B4A",
+        "evidence": [
+          "tests/unit/courseSlidePreflightParity.test.ts",
+          "tests/unit/exportPreflight.test.ts",
+          "tests/unit/formulaNode.test.ts"
+        ]
       },
       "rollback": {
         "commit": "6893d25449511ef281c9399d6dd740d126a25bb6",
@@ -1046,7 +1065,7 @@
       },
       "indexImpact": "semantic-update",
       "unknowns": [
-        "V9-native PPTX/PDF preflight carrier and report compatibility are not yet specified."
+        "Complete V9-native PPTX/PDF preflight routing and exported-report compatibility are not yet specified; the SEM-B4A adapter is intentionally headless."
       ]
     },
     {

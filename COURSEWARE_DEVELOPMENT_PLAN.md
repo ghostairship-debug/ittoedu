@@ -98,7 +98,7 @@
 - **Wave 2 诊断合同**：Validation Report 与 Diagnostic Target 分别定约，再实现逐码 ledger。原“成功分支映射 17 码”控制流不可达，继续否决。
 - **Wave 3 V8 测试产物清退与真实发布门**：生成物/fresh checkout 前置已经关闭；无 consumer 的 incline-motion 全链已删除，photosynthesis 也已由三 Slide Course Project V9 archive + Published V2 离线交互 oracle 替代并删除专属旧组件链。CMP-03 已解除真实 Phaser Component 发布播放前置；sample、portability 与 render-host V9/V2 benchmark 正按互斥 consumer 分三条纵切替换。旧 V8 benchmark 在 release verifier 切换前继续作为并行输入保留，不迁移旧课例设计。
 - **Wave 4 V9 全工程诊断**：CLI 是主消费者；现有 GUI 面板要么读取同一份 V9 结果，要么隐藏/退役，不单独建设可视化诊断产品。网络诊断只报告未声明 origin、无效 URL、CORS/捕获不确定性和凭证泄露风险，不再把所有外链视为错误。
-- **Wave 5 合成与旧投影退出（条件准入）**：共享合成层与契约测试 → 有证据的 Slide 预检 parity → `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05` 按用户行为拆分。宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
+- **Wave 5 合成与旧投影退出（条件准入）**：`SEM-B3` 已统一 membership/materialization/background/order；`SEM-B4A` 又以同一组 shape-neutral Slide 视觉规则证明可表示纯 Slide 子域的 V8/V9 预检 parity，并将 surface shared、同 scene 多 location scope、精确 state、playback hidden 与稳定顺序/背景差值固定为反例棘轮。下一步才是 `PRJ-00A/B` → `PRJ-01` → `PRJ-02～05`；宿主统一必须保留 Runtime/Component 的可信扩展语义、生命周期、真实宿主能力和工程网络声明。
 
 上一批三个互斥 S2 已按 photosynthesis V9/V2 oracle → Slide API 2 Published playback → 真实 V9 预览联网的顺序合入并通过固定候选 `7d17fed` phase gate；独立 Reviewer 发现并关闭了 Phaser 核心销毁、overlay A→B 授权残留与跨文档迟到 IPC 三类 P1。RTP-04 又以 session owner 接通 `globalLayerItems` API 2 单实例播放，并在审查中补齐三 Surface 命中组合、lifecycle/create 双重异常下的 Phaser Core teardown，以及普通 Runtime 卸载的 `fromScene=false` 语义。CMP-03 的三次产品提交已合入 `e61cd82`；两名独立 Reviewer 先后关闭标准 mount→activate 空白、过期 emit、late boot zombie、prepared 旧 generation 与 Flow→restart 重复创建等 P1/P2 后，对最终累计提交双重 PASS。`f3fd31f` 的正常 V9 生命周期表征解锁并完成 LEG-003，LEG-005A 随后删除 PDF source-null Runtime raster；网络/CORS/捕获因没有真实作者消费链继续 No-Ready。
 
