@@ -35,7 +35,7 @@
       "manifestPath": "components/com.example.render-host-editable-table@4.0.0/manifest.json",
       "runtimePath": "components/com.example.render-host-editable-table@4.0.0/runtime.js",
       "thumbnailPath": "components/com.example.render-host-editable-table@4.0.0/thumbnail.svg",
-      "contentSha256": "49022ec7c82c9abdf3468069dfec4f91b0930b38057e53c6ea1b1a1f2b7941fd"
+      "contentSha256": "c57ac1eee77711378b2ed36a126f63d478f818e34beb606620c52469f5013f16"
     },
     "com.example.render-host-phaser-meter": {
       "packageId": "com.example.render-host-phaser-meter",

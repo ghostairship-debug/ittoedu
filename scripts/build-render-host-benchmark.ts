@@ -4,19 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { strToU8, zipSync } from 'fflate'
 import { build as viteBuild } from 'vite'
 import { componentManifestSchema } from '../src/shared/componentSchema'
-import type {
-  ComponentManifest,
-  ComponentPackageData,
-} from '../src/shared/componentTypes'
-import { projectDocumentSchema } from '../src/shared/projectSchema'
-import type {
-  BaseNode,
-  ExternalComponentNode,
-  ProjectDocument,
-  ShapeNode,
-  TeacherControllerNode,
-  TextNode,
-} from '../src/shared/projectTypes'
+import type { ComponentManifest } from '../src/shared/componentTypes'
 import type { RuntimeDocument } from '../src/shared/runtimeTypes'
 import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
 import type {
@@ -37,16 +25,10 @@ import {
   addSlideTextLayer,
   upsertSlideInteractionRule,
 } from '../src/renderer/course/v9SlideContentCommands'
-import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
-import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseV2Payload,
 } from '../src/renderer/export/course'
-import {
-  createProjectArchive,
-  openProjectArchive,
-} from '../src/renderer/project/projectArchive'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
@@ -72,12 +54,6 @@ export const RENDER_HOST_BENCHMARK_OUTPUT_PATHS = {
   threeRuntime: 'runtimes/three-runtime.js',
   phaserFallback: 'assets/phaser-runtime-fallback.svg',
   threeFallback: 'assets/three-runtime-fallback.svg',
-  tableComponent: 'render-host-editable-table.h5component',
-  phaserMeterComponent: 'render-host-phaser-meter.h5component',
-  project: 'project.json',
-  lesson: 'render-host-benchmark.h5lesson',
-  html: 'render-host-benchmark.html',
-  notices: 'THIRD_PARTY_NOTICES.md',
   projectV9: 'project-v9.json',
   publishedV2: 'published-v2.json',
   lessonV9: 'render-host-benchmark-v9.h5lesson',
@@ -125,23 +101,6 @@ async function loadThreePackageMetadata(): Promise<ThreePackageMetadata> {
   return { version: declaredVersion, licenseText }
 }
 
-function buildThreeThirdPartyNotice({ version, licenseText }: ThreePackageMetadata): string {
-  return `# Third-party notices
-
-The generated file \`runtimes/three-runtime.js\`, \`project.json\`,
-\`render-host-benchmark.h5lesson\`, and \`render-host-benchmark.html\` contain a
-bundled copy of Three.js. Keep this notice with the benchmark source and with
-any redistribution of those generated artifacts.
-
-## Three.js ${version}
-
-- Project: https://threejs.org/
-- Source repository: https://github.com/mrdoob/three.js
-- License: MIT
-
-${licenseText.trim()}\n`
-}
-
 const phaserContent: RuntimeDocument['content'] = {
   values: {
     panelTitle: 'Runtime API 2 · Phaser 一次性互动',
@@ -183,171 +142,6 @@ const threeContent: RuntimeDocument['content'] = {
     instruction: { label: 'Three.js 交互说明', multiline: true, maxLength: 260 },
     resetLabel: { label: '恢复按钮', maxLength: 30 },
   },
-}
-
-function baseNode(
-  id: string,
-  name: string,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): Omit<BaseNode, 'type'> {
-  return {
-    id,
-    name,
-    x,
-    y,
-    width,
-    height,
-    rotation: 0,
-    opacity: 1,
-    visible: true,
-    locked: false,
-    playbackInitialVisibility: 'inherit',
-  }
-}
-
-function textNode(
-  id: string,
-  name: string,
-  text: string,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  options: {
-    fontSize?: number
-    color?: string
-    bold?: boolean
-    align?: 'left' | 'center' | 'right'
-    backgroundColor?: string
-    backgroundOpacity?: number
-    cornerRadius?: number
-  } = {},
-): TextNode {
-  return {
-    ...baseNode(id, name, x, y, width, height),
-    type: 'text',
-    text,
-    runs: [],
-    style: {
-      fontFamily: 'Microsoft YaHei, PingFang SC, sans-serif',
-      fontSize: options.fontSize ?? 28,
-      color: options.color ?? '#f8fafc',
-      bold: options.bold ?? false,
-      italic: false,
-      underline: false,
-      strike: false,
-      emphasis: false,
-      highlightColor: null,
-      align: options.align ?? 'left',
-      verticalAlign: 'middle',
-      writingMode: 'horizontal',
-      lineSpacing: 1.35,
-      letterSpacing: 0,
-      padding: 12,
-      overflow: 'shrink',
-      backgroundColor: options.backgroundColor ?? '#000000',
-      backgroundOpacity: options.backgroundOpacity ?? 0,
-      cornerRadius: options.cornerRadius ?? 0,
-    },
-  }
-}
-
-function shapeNode(
-  id: string,
-  name: string,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  fillColor: string,
-  borderColor: string,
-  cornerRadius = 24,
-): ShapeNode {
-  return {
-    ...baseNode(id, name, x, y, width, height),
-    type: 'shape',
-    shapeType: 'rounded-rectangle',
-    style: {
-      fillColor,
-      fillOpacity: 1,
-      borderColor,
-      borderOpacity: 1,
-      borderWidth: 2,
-      lineStyle: 'solid',
-      cornerRadius,
-      startArrow: 'none',
-      endArrow: 'none',
-    },
-  }
-}
-
-function componentNode(
-  id: string,
-  name: string,
-  packageId: string,
-  version: string,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  props: Record<string, unknown>,
-): ExternalComponentNode {
-  return {
-    ...baseNode(id, name, x, y, width, height),
-    type: 'external-component',
-    component: { packageId, version },
-    props,
-  }
-}
-
-function controllerNode(): TeacherControllerNode {
-  return {
-    ...baseNode('benchmark_controller', '基准导航控制器', 40, 626, 1200, 72),
-    type: 'teacher-controller',
-    title: '渲染宿主基准',
-    showSceneProgress: true,
-    compact: true,
-    collapsible: false,
-    defaultCollapsed: false,
-    buttons: [
-      { id: 'previous', label: '上一页', visible: true, action: { type: 'scene.previous' } },
-      { id: 'picker', label: '五类基准', visible: true, action: { type: 'scene.open-picker' } },
-      { id: 'replay', label: '重播本页', visible: true, action: { type: 'scene.replay' } },
-      { id: 'next', label: '下一页', visible: true, action: { type: 'scene.next' } },
-    ],
-    style: {
-      backgroundColor: '#020617',
-      backgroundOpacity: 0.94,
-      accentColor: '#38bdf8',
-      textColor: '#f8fafc',
-      cornerRadius: 18,
-    },
-    includeInStaticExports: false,
-  }
-}
-
-function runtimeDocument(
-  source: string,
-  renderMode: RuntimeDocument['renderMode'],
-  content: RuntimeDocument['content'],
-  fallbackAssetId: string,
-): RuntimeDocument {
-  return {
-    runtimeApiVersion: 2,
-    enabled: true,
-    renderMode,
-    source,
-    content,
-    assets: {},
-    staticFallback: {
-      assetId: fallbackAssetId,
-      coverage: 'runtime-layer',
-      layer: 'overlay',
-    },
-  }
 }
 
 function xml(value: string): string {
@@ -490,7 +284,6 @@ async function bundleThreeRuntime(): Promise<string> {
 
 interface LoadedComponent {
   data: ReturnType<typeof importComponentPackage>
-  archive: Uint8Array
 }
 
 function withPhaserMeterGenerationProbe(source: string): string {
@@ -541,33 +334,11 @@ async function loadComponent(
   }
   const archive = zipSync(files, { level: 6, mtime: reproducibleTimestamp })
   return {
-    archive,
     data: importComponentPackage(archive, {
       expectedId: manifest.id,
       expectedVersion: manifest.version,
     }),
   }
-}
-
-function headerNodes(
-  prefix: string,
-  title: string,
-  subtitle: string,
-  color: string,
-): [TextNode, TextNode] {
-  return [
-    textNode(`${prefix}_title`, '场景标题', title, 68, 34, 1144, 56, {
-      fontSize: 32,
-      bold: true,
-      align: 'center',
-      color,
-    }),
-    textNode(`${prefix}_subtitle`, '场景说明', subtitle, 100, 86, 1080, 36, {
-      fontSize: 16,
-      align: 'center',
-      color: '#cbd5e1',
-    }),
-  ]
 }
 
 const v9SceneIds = [
@@ -681,7 +452,8 @@ function exitOnEventRule(input: {
 function buildV9ThirdPartyNotice({ version, licenseText }: ThreePackageMetadata): string {
   return `# Third-party notices for the V9 / Published V2 benchmark
 
-The generated files \`project-v9.json\`, \`published-v2.json\`,
+The generated source \`runtimes/three-runtime.js\` and the files
+\`project-v9.json\`, \`published-v2.json\`,
 \`render-host-benchmark-v9.h5lesson\`, and \`render-host-benchmark-v2.html\`
 contain a bundled copy of Three.js through the scene-local API 2 DOM Runtime.
 
@@ -709,7 +481,7 @@ function authorSlidePage(
 function buildV9BenchmarkProject(input: {
   phaserRuntimeSource: string
   threeRuntimeSource: string
-  projectAssets: ProjectDocument['assets']
+  projectAssets: CourseProjectDocument['assets']
   tableComponent: LoadedComponent
   phaserMeterComponent: LoadedComponent
 }): CourseProjectDocument {
@@ -838,10 +610,8 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     threeRuntimeSource,
     phaserRuntimeSource,
     playerBundle,
-    frozenLegacyHtml,
     tableComponent,
     phaserMeterComponent,
-    phaserMeterComponentV9,
   ] = await Promise.all([
     loadThreePackageMetadata(),
     bundleThreeRuntime(),
@@ -849,9 +619,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     fs.readFile(playerBundlePath, 'utf8').catch((error: unknown) => {
       throw new Error('缺少 dist-player/player.iife.js；请先运行 npm run build:player', { cause: error })
     }),
-    fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html)),
     loadComponent('editable-table'),
-    loadComponent('phaser-meter'),
     loadComponent('phaser-meter', {
       version: RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION,
       transformRuntimeSource: withPhaserMeterGenerationProbe,
@@ -865,15 +633,9 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
   }
   if (
     phaserMeterComponent.data.manifest.schemaVersion !== 4 ||
-    phaserMeterComponent.data.manifest.renderMode !== 'phaser'
-  ) {
-    throw new Error('交互仪表必须是 V4 Phaser 组件')
-  }
-  if (
-    phaserMeterComponentV9.data.manifest.id !== phaserMeterComponent.data.manifest.id ||
-    phaserMeterComponentV9.data.manifest.version !==
+    phaserMeterComponent.data.manifest.version !==
       RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION ||
-    phaserMeterComponentV9.data.manifest.renderMode !== 'phaser'
+    phaserMeterComponent.data.manifest.renderMode !== 'phaser'
   ) {
     throw new Error('V9 generation probe 必须保持 Phaser 仪表组件合同身份')
   }
@@ -890,7 +652,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
   } satisfies Record<string, { filename: string; source: string }>
 
   const assetFiles: Record<string, Uint8Array> = {}
-  const projectAssets: ProjectDocument['assets'] = {}
+  const projectAssets: CourseProjectDocument['assets'] = {}
   for (const [assetId, asset] of Object.entries(generatedAssets)) {
     const bytes = strToU8(asset.source)
     assetFiles[assetId] = bytes
@@ -906,231 +668,24 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     }
   }
 
-  const nativeHeaders = headerNodes(
-    'native',
-    '01 纯原生节点：稳定内容的默认路径',
-    '本页不含自由运行时或组件；文字、图形和几何都可在画布上直接修改。',
-    '#e0f2fe',
-  )
-  const phaserHeaders = headerNodes(
-    'phaser',
-    '02 Runtime API 2：Phaser 承担一次性程序互动',
-    '稳定标题仍是原生节点；轨道、粒子和点击响应由场景 runtime 承担。',
-    '#bae6fd',
-  )
-  const threeHeaders = headerNodes(
-    'three',
-    '03 Runtime API 2：Three.js 按需预打包为 DOM 增强',
-    'Three.js 不进入编辑器核心；只有本页的离线 runtime 承担代码与 GPU 资源。',
-    '#e0e7ff',
-  )
-  const tableHeaders = headerNodes(
-    'table',
-    '04 Component API 4：DOM 表格作为高复用组件',
-    '表格需要结构化编辑和重复使用，因此值得组件化；文案全部位于 props.content。',
-    '#ccfbf1',
-  )
-  const phaserComponentHeaders = headerNodes(
-    'phaser_component',
-    '05 Component API 4：Phaser 仪表作为可复用组件',
-    '同一 API 4 合同可按需选择 Phaser、DOM 或 Hybrid 渲染面；本页回归 Phaser 组件。',
-    '#fef3c7',
-  )
-
-  const projectCandidate: ProjectDocument = {
-    schemaVersion: 8,
-    id: 'project_render_host_benchmark',
-    title: 'Project V8 渲染宿主完整基准',
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    canvas: { width: 1280, height: 720 },
-    assets: projectAssets,
-    componentPackages: {
-      [tableComponent.data.key]: tableComponent.data.metadata,
-      [phaserMeterComponent.data.key]: phaserMeterComponent.data.metadata,
-    },
-    globalLayer: [{
-      node: controllerNode(),
-      layer: 'overlay',
-      visibility: { mode: 'all', sceneIds: [] },
-    }],
-    globalInteractions: [],
-    designTokens: {
-      fonts: [{
-        id: 'body',
-        label: '正文',
-        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
-      }],
-      colors: [
-        { id: 'background', label: '背景', color: '#ffffff' },
-        { id: 'text', label: '正文', color: '#1f2937' },
-        { id: 'accent', label: '强调', color: '#2563eb' },
-      ],
-    },
-    media: {
-      audio: {
-        defaultMuted: false,
-        masterVolume: 1,
-        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
-        sounds: {},
-        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
-      },
-    },
-    playback: {
-      controls: 'canvas',
-      keyboardNavigation: true,
-      presenter: {
-        enabled: true,
-        strategy: 'scene-navigation',
-        additionalBindings: [],
-      },
-    },
-    scenes: [
-      {
-        id: 'scene_native_nodes',
-        name: '01 纯原生节点',
-        backgroundColor: '#071a2b',
-        interactions: [],
-        nodes: [
-          ...nativeHeaders,
-          shapeNode('native_card_edit', '可编辑性卡片', 80, 170, 340, 330, '#0c4a6e', '#38bdf8'),
-          shapeNode('native_card_runtime', '业务真相卡片', 470, 170, 340, 330, '#134e4a', '#2dd4bf'),
-          shapeNode('native_card_enhance', '增强层卡片', 860, 170, 340, 330, '#312e81', '#a5b4fc'),
-          textNode('native_edit_text', '可编辑性说明', '稳定内容\n直接编辑\n文字 · 图形 · 排版', 110, 210, 280, 250, {
-            fontSize: 25, bold: true, align: 'center', color: '#e0f2fe',
-          }),
-          textNode('native_truth_text', '业务真相说明', 'Project V8 JSON\n是唯一业务真相\n渲染器只是执行层', 500, 210, 280, 250, {
-            fontSize: 25, bold: true, align: 'center', color: '#ccfbf1',
-          }),
-          textNode('native_enhance_text', '增强层说明', 'Phaser · DOM · Three.js\n按效果选择\n不互相替代', 890, 210, 280, 250, {
-            fontSize: 25, bold: true, align: 'center', color: '#e0e7ff',
-          }),
-        ],
-      },
-      {
-        id: 'scene_runtime_phaser',
-        name: '02 API2 Phaser 运行时',
-        backgroundColor: '#020617',
-        interactions: [],
-        nodes: phaserHeaders,
-        runtime: runtimeDocument(
-          phaserRuntimeSource,
-          'phaser',
-          phaserContent,
-          'asset_phaser_runtime_fallback',
-        ),
-      },
-      {
-        id: 'scene_runtime_three',
-        name: '03 API2 Three.js 运行时',
-        backgroundColor: '#0f172a',
-        interactions: [],
-        nodes: threeHeaders,
-        runtime: runtimeDocument(
-          threeRuntimeSource,
-          'dom',
-          threeContent,
-          'asset_three_runtime_fallback',
-        ),
-      },
-      {
-        id: 'scene_component_v4_dom',
-        name: '04 V4 DOM 表格组件',
-        backgroundColor: '#052e2b',
-        interactions: [],
-        nodes: [
-          ...tableHeaders,
-          componentNode(
-            'table_component_instance',
-            'V4 DOM 可编辑对比表',
-            tableComponent.data.manifest.id,
-            tableComponent.data.manifest.version,
-            70,
-            148,
-            1140,
-            420,
-            {
-              content: {
-                title: '课件渲染路径选型表',
-                caption: '实例文案已覆盖默认值；教师可继续在属性面板修改。',
-              },
-            },
-          ),
-        ],
-      },
-      {
-        id: 'scene_component_v4_phaser',
-        name: '05 V4 Phaser 仪表组件',
-        backgroundColor: '#1e1b4b',
-        interactions: [],
-        nodes: [
-          ...phaserComponentHeaders,
-          componentNode(
-            'phaser_meter_component_instance',
-            'V4 Phaser 交互仪表',
-            phaserMeterComponent.data.manifest.id,
-            phaserMeterComponent.data.manifest.version,
-            280,
-            156,
-            720,
-            390,
-            { content: { centerLabel: 'V4 OK' } },
-          ),
-        ],
-      },
-    ],
-  }
-
-  const project = projectDocumentSchema.parse(projectCandidate)
-
-  const components: Record<string, ComponentPackageData> = {
-    [tableComponent.data.key]: tableComponent.data,
-    [phaserMeterComponent.data.key]: phaserMeterComponent.data,
-  }
-  const componentFiles = {
-    [tableComponent.data.key]: tableComponent.data.files,
-    [phaserMeterComponent.data.key]: phaserMeterComponent.data.files,
-  }
-  const lessonArchive = createProjectArchive(
-    { project, assetFiles, componentFiles },
-    { mtime: reproducibleTimestamp },
-  )
-
-  const reopened = openProjectArchive(lessonArchive)
-  if (
-    reopened.project.schemaVersion !== 8 ||
-    reopened.project.scenes.length !== 5 ||
-    reopened.project.scenes[1]?.runtime?.runtimeApiVersion !== 2 ||
-    reopened.project.scenes[2]?.runtime?.source !== threeRuntimeSource ||
-    Object.keys(reopened.project.componentPackages).length !== 2
-  ) {
-    throw new Error('生成后的基准 .h5lesson 重新打开校验失败')
-  }
-
-  const payload = buildExportPayload({ project, assets: assetFiles, components })
-  const regeneratedLegacyHtml = buildStandaloneHtml(payload, { playerBundle })
-  if (!regeneratedLegacyHtml.includes('window.__H5_LESSON_PAYLOAD__=')) {
-    throw new Error('当前 Player 无法生成 Project V8 standalone')
-  }
-
   const projectV9 = buildV9BenchmarkProject({
     phaserRuntimeSource,
     threeRuntimeSource,
     projectAssets,
     tableComponent,
-    phaserMeterComponent: phaserMeterComponentV9,
+    phaserMeterComponent,
   })
   const courseSources = {
     project: projectV9,
     assetFiles,
     components: {
       [tableComponent.data.key]: tableComponent.data,
-      [phaserMeterComponentV9.data.key]: phaserMeterComponentV9.data,
+      [phaserMeterComponent.data.key]: phaserMeterComponent.data,
     },
   }
   const componentFilesV9 = {
     [tableComponent.data.key]: tableComponent.data.files,
-    [phaserMeterComponentV9.data.key]: phaserMeterComponentV9.data.files,
+    [phaserMeterComponent.data.key]: phaserMeterComponent.data.files,
   }
   const lessonV9 = createCourseProjectArchive({
     project: projectV9,
@@ -1156,16 +711,6 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.threeRuntime]: strToU8(threeRuntimeSource),
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.phaserFallback]: assetFiles.asset_phaser_runtime_fallback!,
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.threeFallback]: assetFiles.asset_three_runtime_fallback!,
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.tableComponent]: tableComponent.archive,
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.phaserMeterComponent]: phaserMeterComponent.archive,
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.project]: strToU8(
-      `${JSON.stringify(project, null, 2)}\n`,
-    ),
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.lesson]: lessonArchive,
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.html]: frozenLegacyHtml,
-    [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.notices]: strToU8(
-      buildThreeThirdPartyNotice(threePackageMetadata),
-    ),
     [RENDER_HOST_BENCHMARK_OUTPUT_PATHS.projectV9]: strToU8(
       `${JSON.stringify(projectV9, null, 2)}\n`,
     ),

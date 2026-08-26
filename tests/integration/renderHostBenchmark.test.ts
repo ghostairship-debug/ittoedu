@@ -2,20 +2,15 @@
 // 本文件会嵌套执行 vite 打包（esbuild）；jsdom 的 TextEncoder 破坏 esbuild 的
 // Uint8Array invariant，因此必须在 node 环境下运行。
 import { promises as fs } from 'node:fs'
-import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { componentManifestSchema } from '../../src/shared/componentSchema'
 import type { ComponentManifest } from '../../src/shared/componentTypes'
-import { projectDocumentSchema } from '../../src/shared/projectSchema'
-import type { ProjectDocument } from '../../src/shared/projectTypes'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '../../src/shared/publishedCourseTypes'
-import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
-import { openProjectArchive } from '../../src/renderer/project/projectArchive'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import {
   checkRenderHostBenchmarkOutputs,
@@ -32,7 +27,6 @@ const tableDirectory = path.join(exampleDirectory, 'components', 'editable-table
 const phaserMeterDirectory = path.join(exampleDirectory, 'components', 'phaser-meter')
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024
 
-let project: ProjectDocument
 let threeBundle = ''
 let phaserRuntime = ''
 let tableManifest: ComponentManifest
@@ -40,17 +34,6 @@ let phaserMeterManifest: ComponentManifest
 let tableRuntime = ''
 let phaserMeterRuntime = ''
 let declaredThreeVersion = ''
-
-const frozenV8ArtifactHashes = {
-  'render-host-benchmark.h5lesson': '8beb9feab7858df6f66db7b49c5090b8bed47b2ce0c2f76d4ffd0b47857a2ca9',
-  'render-host-editable-table.h5component': 'fd695aef3bb5416c1c4d5e9555b3475da2dedeba45445cf6b73637b9558cd234',
-  'render-host-phaser-meter.h5component': 'b77013e2620c60e43c303390c5580138005c30d82fec628c2e8a7539f1420d3d',
-  // Reviewed prerequisite 95a49d9 removed legacy teacher-escape chrome; this
-  // is the rebased frozen input, not V8-05A accepting fixture drift.
-  'render-host-benchmark.html': '3ba5198ed855caadf97d719c4e078dc5be2507fc9cd9bf5a978e68b1f12d633c',
-  'project.json': 'fcee1f76fdd83f4f1bf7f24316ce6ddc8e52b259ae840179fa52835dd28cb93d',
-  'THIRD_PARTY_NOTICES.md': 'a10971d922496b85d213d177d4fd8fd6e3391998a3b66fba3b09f18e43933e2b',
-} as const
 
 async function readJson(filePath: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown
@@ -168,7 +151,6 @@ function findThreeDependencyReferences(filePath: string, source: string): ThreeD
 
 beforeAll(async () => {
   const [
-    projectValue,
     threeSource,
     phaserSource,
     tableManifestValue,
@@ -177,7 +159,6 @@ beforeAll(async () => {
     phaserMeterSource,
     rootPackageValue,
   ] = await Promise.all([
-    readJson(path.join(exampleDirectory, 'project.json')),
     fs.readFile(path.join(runtimeDirectory, 'three-runtime.js'), 'utf8'),
     fs.readFile(path.join(runtimeDirectory, 'phaser-runtime.js'), 'utf8'),
     readJson(path.join(tableDirectory, 'manifest.json')),
@@ -186,7 +167,6 @@ beforeAll(async () => {
     fs.readFile(path.join(phaserMeterDirectory, 'runtime.js'), 'utf8'),
     readJson(path.join(projectRoot, 'package.json')),
   ])
-  project = projectDocumentSchema.parse(projectValue)
   threeBundle = threeSource
   phaserRuntime = phaserSource
   tableManifest = componentManifestSchema.parse(tableManifestValue)
@@ -213,47 +193,6 @@ describe('render host benchmark fixture', () => {
       expect(equalBytes(after.get(relativePath)!, bytes)).toBe(true)
     }
   }, 120_000)
-
-  it('is a complete Project V8 document with one scene for each route', () => {
-    expect(project.schemaVersion).toBe(8)
-    expect(project.scenes.map(({ id }) => id)).toEqual([
-      'scene_native_nodes',
-      'scene_runtime_phaser',
-      'scene_runtime_three',
-      'scene_component_v4_dom',
-      'scene_component_v4_phaser',
-    ])
-    expect(project.globalLayer).toHaveLength(1)
-    expect(project.globalInteractions).toEqual([])
-    expect(project.playback).toEqual({
-      controls: 'canvas',
-      keyboardNavigation: true,
-      presenter: {
-        enabled: true,
-        strategy: 'scene-navigation',
-        additionalBindings: [],
-      },
-    })
-    expect(project.scenes.every((scene) => Array.isArray(scene.interactions))).toBe(true)
-
-    const [nativeScene, phaserScene, threeScene, tableScene, phaserComponentScene] = project.scenes
-    expect(nativeScene?.runtime).toBeUndefined()
-    expect(nativeScene?.nodes.some((node) => node.type === 'external-component')).toBe(false)
-    expect(phaserScene?.runtime).toMatchObject({ runtimeApiVersion: 2, renderMode: 'phaser' })
-    expect(threeScene?.runtime).toMatchObject({ runtimeApiVersion: 2, renderMode: 'dom' })
-    expect(threeScene?.runtime?.source).toBe(threeBundle)
-    expect(tableScene?.nodes).toContainEqual(expect.objectContaining({
-      type: 'external-component',
-      component: { packageId: tableManifest.id, version: tableManifest.version },
-    }))
-    expect(phaserComponentScene?.nodes).toContainEqual(expect.objectContaining({
-      type: 'external-component',
-      component: { packageId: phaserMeterManifest.id, version: phaserMeterManifest.version },
-    }))
-
-    expect(Object.values(project.assets).every(({ kind }) => kind === 'image')).toBe(true)
-    expect(JSON.stringify(project.assets)).not.toContain('"model"')
-  })
 
   it('registers both one-off runtimes as API 2 definitions', () => {
     const phaserDefinition = executeRuntimeRegistration(phaserRuntime)
@@ -347,47 +286,6 @@ describe('render host benchmark fixture', () => {
     })
   })
 
-  it('reopens the lesson and both component archives with current import paths', async () => {
-    const [lessonBytes, tableBytes, phaserMeterBytes] = await Promise.all([
-      fs.readFile(path.join(exampleDirectory, 'render-host-benchmark.h5lesson')),
-      fs.readFile(path.join(exampleDirectory, 'render-host-editable-table.h5component')),
-      fs.readFile(path.join(exampleDirectory, 'render-host-phaser-meter.h5component')),
-    ])
-    const reopened = openProjectArchive(lessonBytes)
-    expect(reopened.project.scenes).toHaveLength(5)
-    expect(Object.keys(reopened.componentFiles)).toHaveLength(2)
-    expect(importComponentPackage(tableBytes).manifest.schemaVersion).toBe(4)
-    expect(importComponentPackage(phaserMeterBytes).manifest.schemaVersion).toBe(4)
-  })
-
-  it('ships an offline standalone player and the Three.js MIT notice beside it', async () => {
-    const [html, notice, noticeStat, installedPackage, installedLicense] = await Promise.all([
-      fs.readFile(path.join(exampleDirectory, 'render-host-benchmark.html'), 'utf8'),
-      fs.readFile(path.join(exampleDirectory, 'THIRD_PARTY_NOTICES.md'), 'utf8'),
-      fs.stat(path.join(exampleDirectory, 'THIRD_PARTY_NOTICES.md')),
-      readJson(path.join(projectRoot, 'node_modules', 'three', 'package.json')),
-      fs.readFile(path.join(projectRoot, 'node_modules', 'three', 'LICENSE'), 'utf8'),
-    ])
-    expect(html).toContain('window.__H5_LESSON_PAYLOAD__=')
-    expect(html).toContain('connect-src data: blob:')
-    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*|'self')/i)
-    expect(html).not.toMatch(/<script[^>]+src=/i)
-    expect(noticeStat.isFile()).toBe(true)
-    expect(installedPackage).toMatchObject({ version: declaredThreeVersion, license: 'MIT' })
-    expect(notice).toContain(`## Three.js ${declaredThreeVersion}`)
-    expect(notice.endsWith(`${installedLicense.trim()}\n`)).toBe(true)
-    expect(notice).toContain('https://github.com/mrdoob/three.js')
-    expect(notice).toContain('The MIT License')
-    expect(notice).toContain('runtimes/three-runtime.js')
-  })
-
-  it('keeps every frozen Project V8 release artifact byte-identical', async () => {
-    for (const [relativePath, expectedHash] of Object.entries(frozenV8ArtifactHashes)) {
-      const bytes = await fs.readFile(path.join(exampleDirectory, relativePath))
-      expect(createHash('sha256').update(bytes).digest('hex'), relativePath).toBe(expectedHash)
-    }
-  })
-
   it('authors a reopenable five-page Course Project V9 through the current carriers', async () => {
     const [projectValue, archiveBytes] = await Promise.all([
       readJson(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.projectV9)),
@@ -479,10 +377,13 @@ describe('render host benchmark fixture', () => {
   })
 
   it('ships the same five routes as a Published Course V2 standalone', async () => {
-    const [payloadValue, html, notice] = await Promise.all([
+    const [payloadValue, html, notice, noticeStat, installedPackage, installedLicense] = await Promise.all([
       readJson(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.publishedV2)),
       fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.htmlV2), 'utf8'),
       fs.readFile(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.noticesV9), 'utf8'),
+      fs.stat(path.join(exampleDirectory, RENDER_HOST_BENCHMARK_OUTPUT_PATHS.noticesV9)),
+      readJson(path.join(projectRoot, 'node_modules', 'three', 'package.json')),
+      fs.readFile(path.join(projectRoot, 'node_modules', 'three', 'LICENSE'), 'utf8'),
     ])
     const payload: PublishedCourseV2Payload = publishedCourseV2Schema.parse(payloadValue)
     expect(payload).toMatchObject({
@@ -529,7 +430,13 @@ describe('render host benchmark fixture', () => {
     expect(html).not.toContain('window.__H5_LESSON_PAYLOAD__=')
     expect(html).not.toMatch(/<script[^>]+src=/i)
     expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*|'self')/i)
+    expect(noticeStat.isFile()).toBe(true)
+    expect(installedPackage).toMatchObject({ version: declaredThreeVersion, license: 'MIT' })
     expect(notice).toContain(`## Three.js ${declaredThreeVersion}`)
+    expect(notice.endsWith(`${installedLicense.trim()}\n`)).toBe(true)
+    expect(notice).toContain('https://github.com/mrdoob/three.js')
+    expect(notice).toContain('The MIT License')
+    expect(notice).toContain('runtimes/three-runtime.js')
     expect(notice).toContain('render-host-benchmark-v2.html')
   })
 })

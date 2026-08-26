@@ -16,13 +16,10 @@ examples/render-host-benchmark/components/phaser-meter/manifest.json text eol=lf
 examples/render-host-benchmark/components/phaser-meter/runtime.js text eol=lf
 examples/render-host-benchmark/components/phaser-meter/thumbnail.svg text eol=lf
 
-# RENDER_HOST_BENCHMARK_OUTPUT_PATHS 文本输出（SAMPLE/LESSON 两组输出均为二进制，由 git 自动识别）
+# RENDER_HOST_BENCHMARK_OUTPUT_PATHS 文本输出（V9 LESSON 为二进制，由 git 自动识别）
 examples/render-host-benchmark/runtimes/three-runtime.js text eol=lf
 examples/render-host-benchmark/assets/phaser-runtime-fallback.svg text eol=lf
 examples/render-host-benchmark/assets/three-runtime-fallback.svg text eol=lf
-examples/render-host-benchmark/project.json text eol=lf
-examples/render-host-benchmark/render-host-benchmark.html text eol=lf
-examples/render-host-benchmark/THIRD_PARTY_NOTICES.md text eol=lf
 examples/render-host-benchmark/project-v9.json text eol=lf
 examples/render-host-benchmark/published-v2.json text eol=lf
 examples/render-host-benchmark/render-host-benchmark-v2.html text eol=lf

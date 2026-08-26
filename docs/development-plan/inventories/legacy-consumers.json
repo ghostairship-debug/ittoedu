@@ -255,7 +255,7 @@
       },
       "owner": "Preview / Export / Player",
       "status": "active-debt",
-      "currentFact": "Published Course V2 is the course product path, but Runtime authoring preview and several build/release scripts still construct the older ExportPayload and PlayerApp pipeline.",
+      "currentFact": "Published Course V2 is the course delivery and release-benchmark path. Runtime authoring preview, one retained App static-export branch, PlayerApp and focused contract tests still construct the older ExportPayload pipeline; committed sample, portability and render-host release fixtures no longer do.",
       "evidence": [
         {
           "path": "src/renderer/ui/Workspace.tsx",
@@ -295,13 +295,7 @@
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
-          "confirmed": [
-            {
-              "path": "package.json",
-              "symbol": "build:render-benchmark:fixture",
-              "use": "Runs the Legacy render-host payload builder."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "playerPreviewOrExport": {
@@ -325,28 +319,11 @@
           "unknowns": []
         },
         "buildFixtureOrRelease": {
-          "confirmed": [
-            {
-              "path": "scripts/build-render-host-benchmark.ts",
-              "symbol": "buildExportPayload",
-              "use": "Builds the render-host benchmark HTML."
-            },
-            {
-              "path": "scripts/verify-w3-windows-portability.ts",
-              "symbol": "buildExportPayload",
-              "use": "Builds and verifies a portable Legacy web artifact."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
-          "confirmed": [
-            {
-              "path": "examples/render-host-benchmark/render-host-benchmark.html",
-              "symbol": "committed generated artifact",
-              "use": "Persisted Legacy standalone benchmark consumed by release verification."
-            }
-          ],
+          "confirmed": [],
           "unknowns": [
             "No explicit promise to keep loading arbitrary historical ExportPayload files was found; committed artifacts and tests are the confirmed obligation."
           ]
@@ -404,7 +381,7 @@
             "symbol": "createPublishedCourseSession"
           }
         ],
-        "notes": "Course delivery and try-run have V2 replacements. Runtime authoring preview and legacy fixtures have not been migrated or approved for deletion."
+        "notes": "Course delivery, current samples, Windows portability and the render-host release benchmark use V9/V2 replacements. Runtime authoring preview and one retained App static-export branch still require the Legacy payload until separately characterized."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
@@ -412,23 +389,14 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'buildExportPayload' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 21
+            "observedMatches": 13
           }
         ],
         "requiredForRemoval": "Migrate or explicitly retain every authoring-preview, build, fixture, portability, test, generated artifact, and PlayerApp consumer."
       },
       "persistedCompatibility": {
-        "status": "retained-artifacts-confirmed",
-        "evidence": [
-          {
-            "path": "examples/render-host-benchmark/render-host-benchmark.html",
-            "symbol": "embedded Legacy payload"
-          },
-          {
-            "path": "scripts/verify-release.ts",
-            "symbol": "renderHostBenchmarkHtml"
-          }
-        ],
+        "status": "none-confirmed",
+        "evidence": [],
         "unknowns": [
           "Broader cross-version compatibility policy for already exported Legacy HTML is not documented."
         ]
@@ -1254,7 +1222,7 @@
     {
       "id": "LEG-008",
       "legacyTarget": {
-        "kind": "retained-v8-archive-build-fixture-release-toolchain",
+        "kind": "retained-v8-archive-test-toolchain",
         "path": "src/renderer/project/projectArchive.ts",
         "symbols": [
           "createProjectArchive",
@@ -1264,7 +1232,7 @@
       },
       "owner": "Tooling / Release",
       "status": "retained-compatibility",
-      "currentFact": "The product open path rejects V8; photosynthesis already uses Course Project V9 and Published Course V2. Slide scene-local Phaser Component playback now unblocks three active, separate replacements for the committed sample, Windows portability verifier, and a side-by-side V9/V2 render-host benchmark. The old V8 benchmark remains an active release-verifier input until a later consumer switch; focused legacy archive tests are not removed by these fixture replacements.",
+      "currentFact": "The product open path rejects V8. The committed sample, Windows portability verifier, render-host benchmark and release verifier now use Course Project V9 / Published Course V2, and the old render-host V8 artifacts are deleted. The archive implementation remains only for isolated adapters, feature round-trip tests, corruption tests and explicit V8/V9 format-isolation or rejection fixtures.",
       "evidence": [
         {
           "path": "src/renderer/project/courseProjectIo.ts",
@@ -1272,14 +1240,14 @@
           "note": "Current product open accepts only V9."
         },
         {
-          "path": "scripts/verify-release.ts",
-          "symbol": "main",
-          "note": "Explicitly asserts a five-scene Project V8 benchmark."
+          "path": "tests/unit/projectArchive.test.ts",
+          "symbol": "createProjectArchive / openProjectArchive",
+          "note": "Retained V8 archive round-trip, integrity and traversal-defense contract."
         },
         {
-          "path": "examples/render-host-benchmark/project.json",
-          "symbol": "schemaVersion",
-          "note": "Committed V8 benchmark source."
+          "path": "tests/unit/projectFormatIsolation.test.ts",
+          "symbol": "createProjectArchive",
+          "note": "Builds an explicit V8 input only to prove the V9 product opener rejects it."
         }
       ],
       "consumerCategories": {
@@ -1294,96 +1262,25 @@
               "path": "src/renderer/project/saveProject.ts",
               "symbol": "createProjectArchive",
               "use": "Legacy project-save adapter outside the V9 product path."
-            },
-            {
-              "path": "src/renderer/project/validateProjectArchive.ts",
-              "symbol": "openProjectArchive",
-              "use": "Legacy archive validator candidate."
             }
           ],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
-          "confirmed": [
-            {
-              "path": "package.json",
-              "symbol": "build:examples",
-              "use": "Runs V8 example generation."
-            },
-            {
-              "path": "package.json",
-              "symbol": "build:render-benchmark:fixture",
-              "use": "Runs the V8 benchmark builder."
-            },
-            {
-              "path": "package.json",
-              "symbol": "verify:release",
-              "use": "Runs the release verifier that asserts V8 fixtures."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "scripts/build-render-host-benchmark.ts",
-              "symbol": "buildStandaloneHtml",
-              "use": "Exports the retained V8 benchmark through the legacy Player pipeline."
-            },
-            {
-              "path": "scripts/verify-w3-windows-portability.ts",
-              "symbol": "buildWebPackageFromProjectAsync",
-              "use": "Verifies a retained V8 Web package."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "buildFixtureOrRelease": {
-          "confirmed": [
-            {
-              "path": "scripts/build-examples.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds examples/sample-project.h5lesson."
-            },
-            {
-              "path": "scripts/build-render-host-benchmark.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds the V8 render-host benchmark."
-            },
-            {
-              "path": "scripts/verify-w3-windows-portability.ts",
-              "symbol": "openProjectArchive",
-              "use": "Round-trips V8 archives across portable paths."
-            },
-            {
-              "path": "scripts/verify-release.ts",
-              "symbol": "openProjectArchive",
-              "use": "Verifies committed V8 sample and benchmark archives."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
-          "confirmed": [
-            {
-              "path": "examples/sample-project.h5lesson",
-              "symbol": "committed V8 archive",
-              "use": "Release sample artifact."
-            },
-            {
-              "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
-              "symbol": "committed V8 archive",
-              "use": "Render-host benchmark artifact."
-            },
-            {
-              "path": "examples/render-host-benchmark/project.json",
-              "symbol": "schemaVersion",
-              "use": "Source for the committed V8 benchmark."
-            }
-          ],
-          "unknowns": [
-            "These are tooling fixtures, not an authoring-project compatibility promise."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
@@ -1398,46 +1295,70 @@
               "use": "Async V8 archive tests."
             },
             {
-              "path": "tests/integration/renderHostBenchmark.test.ts",
-              "symbol": "openProjectArchive",
-              "use": "Asserts the retained benchmark is Project V8."
+              "path": "tests/unit/componentContentIntegrity.test.ts",
+              "symbol": "createProjectArchive / openProjectArchive",
+              "use": "Rejects component bytes whose content no longer matches V8 metadata."
+            },
+            {
+              "path": "tests/unit/courseProjectArchive.test.ts",
+              "symbol": "createProjectArchive / openProjectArchive",
+              "use": "Proves the V8 and V9 archive parsers remain format-isolated."
+            },
+            {
+              "path": "tests/unit/courseProjectMigration.test.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds an explicit V8 migration input for rejection/migration characterization."
+            },
+            {
+              "path": "tests/unit/editorStore.test.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds a V8 input to prove the active Store open path rejects it."
+            },
+            {
+              "path": "tests/unit/formulaNode.test.ts",
+              "symbol": "createProjectArchive / openProjectArchive",
+              "use": "Retained V8 formula-node archive round-trip coverage."
+            },
+            {
+              "path": "tests/unit/projectFormatIsolation.test.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds a V8 archive solely to prove product V9 format isolation."
+            },
+            {
+              "path": "tests/unit/textEmphasis.test.ts",
+              "symbol": "createProjectArchive / openProjectArchive",
+              "use": "Retained V8 text-emphasis archive round-trip coverage."
+            },
+            {
+              "path": "tests/unit/validateProject.test.ts",
+              "symbol": "createProjectArchive",
+              "use": "Builds V8 archive inputs for CLI format-rejection diagnostics."
             }
           ],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
-          "confirmed": [
-            {
-              "path": "examples/render-host-benchmark/render-host-benchmark.html",
-              "symbol": "generated benchmark",
-              "use": "Committed output consumed by release verification."
-            },
-            {
-              "path": "scripts/verify-release.ts",
-              "symbol": "renderHostBenchmarkDirectory",
-              "use": "Packaged release verification expects benchmark artifacts."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         }
       },
       "replacement": {
-        "status": "v9-fixtures-exist-release-migration-not-done",
+        "status": "v9-product-and-release-fixtures-complete-retained-tests-remain",
         "paths": [
           {
-            "path": "tests/fixtures/course-project-v9/sources.ts",
-            "symbol": "listCourseProjectV9Fixtures"
+            "path": "scripts/build-render-host-benchmark.ts",
+            "symbol": "buildRenderHostBenchmarkOutputs"
           },
           {
             "path": "src/renderer/project/courseProjectArchive.ts",
             "symbol": "createCourseProjectArchive"
           },
           {
-            "path": "scripts/build-interactive-lesson.ts",
-            "symbol": "buildInteractiveLessonOutputs"
+            "path": "scripts/verify-release.ts",
+            "symbol": "renderHostBenchmarkProject / renderHostBenchmarkPublished"
           }
         ],
-        "notes": "The photosynthesis lesson-demo and its browser behavior oracle use V9/V2. Do not delete the remaining retained tooling merely because that endpoint migrated; migrate each remaining script/release assertion first or explicitly retain the benchmark."
+        "notes": "All committed sample, portability, render-host and release-verifier consumers use V9/V2. The remaining archive implementation is retained only for isolated adapters and focused tests; it must not be reconnected to the product open path."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
@@ -1445,41 +1366,32 @@
         "queries": [
           {
             "command": "(git grep -n -I -F -- 'openProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 43
+            "observedMatches": 29
           },
           {
             "command": "(git grep -n -I -F -- 'createProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 54
+            "observedMatches": 45
           }
         ],
-        "requiredForRemoval": "Every script, committed fixture, release assertion, portability check, and archive test must be migrated or split into an approved retained record; product V8 rejection must remain."
+        "requiredForRemoval": "Remove or migrate the isolated open/save adapters and every focused archive, feature round-trip, corruption and format-isolation test without weakening product V8 rejection. Current release fixtures are no longer a blocker."
       },
       "persistedCompatibility": {
-        "status": "retained-tooling-artifacts",
-        "evidence": [
-          {
-            "path": "examples/sample-project.h5lesson",
-            "symbol": "committed artifact"
-          },
-          {
-            "path": "examples/render-host-benchmark/render-host-benchmark.h5lesson",
-            "symbol": "committed artifact"
-          }
-        ],
-        "unknowns": [
-          "Owner decision is still required if the benchmark remains uniquely valuable after V9 release fixtures cover equivalent hosts."
-        ]
+        "status": "none-confirmed",
+        "evidence": [],
+        "unknowns": []
       },
       "tests": [
         "tests/unit/projectArchive.test.ts",
-        "tests/integration/renderHostBenchmark.test.ts",
-        "tests/e2e/render-host-benchmark.spec.ts"
+        "tests/unit/projectFormatIsolation.test.ts",
+        "tests/unit/courseProjectArchive.test.ts"
       ],
       "stableSince": {
-        "status": "not-applicable-retained-at-baseline",
-        "wave": "ARCH-0A",
+        "status": "retained-after-v9-release-consumer-migration",
+        "wave": "REPAIR-W3",
         "evidence": [
-          "scripts/verify-release.ts"
+          "scripts/build-render-host-benchmark.ts",
+          "scripts/verify-release.ts",
+          "tests/unit/projectFormatIsolation.test.ts"
         ]
       },
       "rollback": {
@@ -1488,7 +1400,7 @@
       },
       "indexImpact": "semantic-update",
       "unknowns": [
-        "Which V8 benchmark cases remain uniquely necessary after V9 representative fixtures are finalized."
+        "Whether the isolated V8 feature round-trip tests should later move to schema-level unit fixtures requires a separate measured task; no current release artifact depends on them."
       ]
     },
     {

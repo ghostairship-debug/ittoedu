@@ -25,7 +25,7 @@
   "defaultProps": {
     "content": {
       "ariaLabel": "渲染路径对比表",
-      "title": "同一份 Project V8 中的渲染路径",
+      "title": "同一份 Course Project V9 中的渲染路径",
       "caption": "点击行可高亮，点击排序可按适用度重排；教师可在组件属性中修改所有文案。",
       "headers": {
         "route": "路径",

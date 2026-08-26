@@ -1,6 +1,7 @@
 # Third-party notices for the V9 / Published V2 benchmark
 
-The generated files `project-v9.json`, `published-v2.json`,
+The generated source `runtimes/three-runtime.js` and the files
+`project-v9.json`, `published-v2.json`,
 `render-host-benchmark-v9.h5lesson`, and `render-host-benchmark-v2.html`
 contain a bundled copy of Three.js through the scene-local API 2 DOM Runtime.
 

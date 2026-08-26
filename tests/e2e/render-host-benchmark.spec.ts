@@ -1,24 +1,15 @@
 import { chromium, expect, test, type Locator, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import sharp from 'sharp'
 
 const projectRoot = resolve(__dirname, '..', '..')
-const htmlPath = join(
-  projectRoot,
-  'examples',
-  'render-host-benchmark',
-  'render-host-benchmark.html',
-)
 const htmlV2Path = join(
   projectRoot,
   'examples',
   'render-host-benchmark',
   'render-host-benchmark-v2.html',
 )
-const visualOutputDirectory = join(projectRoot, 'output', 'playwright')
-
 async function goToScene(page: Page, index: number): Promise<void> {
   expect(await page.evaluate((targetIndex) =>
     window.__H5_LESSON_PLAYER__?.goToScene(targetIndex) === true,
@@ -26,33 +17,6 @@ async function goToScene(page: Page, index: number): Promise<void> {
   await page.waitForFunction((targetIndex) =>
     window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() === targetIndex,
   index)
-}
-
-async function clickLogicalPoint(page: Page, x: number, y: number): Promise<void> {
-  const canvas = page.locator('.lesson-canvas-host canvas').first()
-  const bounds = await canvas.boundingBox()
-  if (!bounds) throw new Error('Player canvas is not visible')
-  await page.mouse.click(
-    bounds.x + x / 1280 * bounds.width,
-    bounds.y + y / 720 * bounds.height,
-  )
-}
-
-async function phaserTexts(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const player = window.__H5_LESSON_PLAYER__
-    if (!player) throw new Error('Player is not initialized')
-    const scene = player.game.scene.getScene('courseware-player')
-    const texts: string[] = []
-    const visit = (candidate: unknown): void => {
-      if (typeof candidate !== 'object' || candidate === null) return
-      const record = candidate as Record<string, unknown>
-      if (typeof record.text === 'string') texts.push(record.text)
-      if (Array.isArray(record.list)) record.list.forEach(visit)
-    }
-    scene.children.list.forEach(visit)
-    return texts
-  })
 }
 
 async function screenshotLogicalCanvasRegion(
@@ -72,191 +36,6 @@ async function screenshotLogicalCanvasRegion(
     height: Math.max(1, Math.floor(region.height / logicalSize.height * metadata.height)),
   }).png().toBuffer()
 }
-
-test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主', async () => {
-  mkdirSync(visualOutputDirectory, { recursive: true })
-  const browser = await chromium.launch()
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-  const pageErrors: string[] = []
-  const consoleErrors: string[] = []
-  const externalRequests: string[] = []
-  page.on('pageerror', (error) => pageErrors.push(error.message))
-  page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text())
-  })
-  page.on('request', (request) => {
-    if (/^(?:https?|wss?):/i.test(request.url())) externalRequests.push(request.url())
-  })
-
-  await page.addInitScript(() => {
-    const originalRequest = window.requestAnimationFrame.bind(window)
-    const originalCancel = window.cancelAnimationFrame.bind(window)
-    const active = new Set<number>()
-    window.requestAnimationFrame = (callback: FrameRequestCallback): number => {
-      let id = 0
-      id = originalRequest((time) => {
-        active.delete(id)
-        callback(time)
-      })
-      active.add(id)
-      return id
-    }
-    window.cancelAnimationFrame = (id: number): void => {
-      active.delete(id)
-      originalCancel(id)
-    }
-    window.__renderHostActiveRafCount = () => active.size
-  })
-
-  try {
-    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' })
-    await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
-    await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
-    await expect.poll(() => page.evaluate(() =>
-      window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
-    )).toBe(0)
-    await expect.poll(() => page.evaluate(() => {
-      const scene = window.__H5_LESSON_PLAYER__?.game.scene
-        .getScene('courseware-player')
-      if (!scene) return 0
-      const sceneNodes = scene.children.getByName('scene-nodes')
-      if (!sceneNodes) return 0
-      const children = Reflect.get(sceneNodes, 'list')
-      return Array.isArray(children) ? children.length : 0
-    })).toBe(8)
-
-    await goToScene(page, 1)
-    await clickLogicalPoint(page, 900, 344)
-    await expect.poll(async () => (await phaserTexts(page)).some((text) =>
-      text.includes('已从右侧施加脉冲'),
-    )).toBe(true)
-
-    await goToScene(page, 2)
-    const threeCanvas = page.locator('.lesson-runtime-mount canvas')
-    await expect(threeCanvas).toBeVisible()
-    const threeBounds = await threeCanvas.boundingBox()
-    if (!threeBounds) throw new Error('Three.js canvas is not visible')
-    await page.mouse.move(threeBounds.x + threeBounds.width * 0.7, threeBounds.y + threeBounds.height * 0.48)
-    await page.mouse.down()
-    await page.mouse.move(threeBounds.x + threeBounds.width * 0.55, threeBounds.y + threeBounds.height * 0.34, { steps: 8 })
-    await page.mouse.up()
-    await expect(page.locator('.lesson-runtime-mount output')).toHaveText('视角已更新')
-    await threeCanvas.hover()
-    await page.mouse.wheel(0, -180)
-    await expect(page.locator('.lesson-runtime-mount output')).toHaveText('观察距离已更新')
-    await page.getByRole('button', { name: '恢复视角' }).click()
-    await expect(page.locator('.lesson-runtime-mount output')).toHaveText('已恢复默认观察视角')
-    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.waitForCaptureReady())
-    const preparedThreeFrame = await page.evaluate(() => {
-      const player = window.__H5_LESSON_PLAYER__
-      if (!player) throw new Error('Player is not initialized')
-      const source = [...document.querySelectorAll<HTMLElement>(
-        '.lesson-runtime-mount',
-      )]
-        .map((mount) => mount.shadowRoot?.querySelector<HTMLCanvasElement>('canvas'))
-        .find((canvas): canvas is HTMLCanvasElement => Boolean(canvas))
-      if (!source) return null
-      const snapshot = player.getPreparedCanvasSnapshot(source) as
-        | HTMLCanvasElement
-        | undefined
-      if (!snapshot) return null
-      return {
-        sameCanvas: snapshot === source,
-        width: snapshot.width,
-        height: snapshot.height,
-        png: snapshot.toDataURL('image/png'),
-      }
-    })
-    expect(preparedThreeFrame).not.toBeNull()
-    expect(preparedThreeFrame?.sameCanvas).toBe(false)
-    expect(preparedThreeFrame?.width ?? 0).toBeGreaterThanOrEqual(1156)
-    expect(preparedThreeFrame?.height ?? 0).toBeGreaterThanOrEqual(432)
-    const preparedThreeStats = await sharp(Buffer.from(
-      preparedThreeFrame!.png.split(',')[1] ?? '',
-      'base64',
-    )).stats()
-    expect(preparedThreeStats.channels.some(({ stdev }) => stdev > 12)).toBe(true)
-    const threeScreenshot = await threeCanvas.screenshot({
-      path: join(visualOutputDirectory, 'render-host-three-runtime.png'),
-    })
-    const threeStats = await sharp(threeScreenshot).stats()
-    expect(threeStats.channels.some(({ stdev }) => stdev > 12)).toBe(true)
-
-    await page.setViewportSize({ width: 1024, height: 768 })
-    await expect(threeCanvas).toBeVisible()
-    const resizedThreeBounds = await threeCanvas.boundingBox()
-    expect(resizedThreeBounds?.width ?? 0).toBeGreaterThan(500)
-    await page.setViewportSize({ width: 1440, height: 900 })
-
-    await goToScene(page, 3)
-    const table = page.locator('[data-component-instance-id="table_component_instance"]')
-    await expect(table.locator('h2')).toHaveText('课件渲染路径选型表')
-    await table.locator('tbody tr').first().click()
-    await expect(table.locator('output')).toContainText('已选中：原生节点')
-    await table.getByRole('button', { name: '按适用度排序' }).click()
-    await expect(table.locator('output')).toHaveText('已按适用度从高到低排序')
-    await table.screenshot({
-      path: join(visualOutputDirectory, 'render-host-v4-dom-table.png'),
-    })
-
-    await goToScene(page, 4)
-    expect(await phaserTexts(page)).toContain('V4 OK')
-    await clickLogicalPoint(page, 640, 380)
-    await expect.poll(async () => (await phaserTexts(page)).some((text) =>
-      text.includes('第 1 次交互'),
-    )).toBe(true)
-    await page.waitForTimeout(50)
-    const stableRafCount = await page.evaluate(() =>
-      window.__renderHostActiveRafCount?.() ?? 0,
-    )
-    const stress = await page.evaluate(async () => {
-      const player = window.__H5_LESSON_PLAYER__
-      if (!player) throw new Error('Player is not initialized')
-      let switches = 0
-      let replays = 0
-      for (let round = 0; round < 25; round += 1) {
-        for (const index of [1, 2, 3, 4]) {
-          if (!player.goToScene(index)) throw new Error(`stress scene ${index} failed`)
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-          switches += 1
-        }
-        if (!player.replayScene()) throw new Error(`stress replay ${round} failed`)
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-        replays += 1
-      }
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-      return {
-        index: player.getCurrentSceneIndex(),
-        rafCount: window.__renderHostActiveRafCount?.() ?? 0,
-        runtimeMounts: document.querySelectorAll('.lesson-runtime-mount').length,
-        componentMounts: document.querySelectorAll('.lesson-component-mount').length,
-        runtimeCanvases: document.querySelectorAll('.lesson-runtime-mount canvas').length,
-        switches,
-        replays,
-      }
-    })
-    expect(stress).toEqual(expect.objectContaining({
-      index: 4,
-      runtimeMounts: 0,
-      componentMounts: 0,
-      runtimeCanvases: 0,
-      switches: 100,
-      replays: 25,
-    }))
-    expect(stress.rafCount).toBeLessThanOrEqual(stableRafCount + 2)
-    await expect(page.getByTestId('teacher-escape-controls')).toHaveCount(0)
-
-    await page.screenshot({
-      path: join(visualOutputDirectory, 'render-host-benchmark-final.png'),
-      fullPage: true,
-    })
-    expect(pageErrors).toEqual([])
-    expect(consoleErrors).toEqual([])
-    expect(externalRequests).toEqual([])
-  } finally {
-    await browser.close()
-  }
-})
 
 test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压力切换无泄漏', async () => {
   const browser = await chromium.launch()
