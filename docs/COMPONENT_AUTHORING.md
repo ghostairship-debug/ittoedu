@@ -56,7 +56,7 @@ global-controls.h5component
 
 工程同时记录两种不同哈希：`sha256` 是最初选择的 `.h5component` ZIP 原始字节来源锁，`contentSha256` 是对全部安全相对路径和解包字节按稳定顺序、带长度边界计算的 canonical SHA-256。新 Course Project V9 归档必须包含 `contentSha256`；打开、保存或 headless 校验时任一嵌入文件被改动都会作为归档损坏拒绝。内容哈希不受 ZIP 压缩、条目顺序和时间戳影响，也不是数字签名、许可证或权属证明。
 
-组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、Schema、当前已接线的结构性工程健康结果和四格式预检。REPAIR 完成前，该命令尚不能证明完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致；退出码 0 仍须由真实 Player、导出和外部请求检查补足。当前四个 ittoedu 身份实验包虽然可重现构建并通过历史四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
+组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、Schema、当前已接线的结构性工程健康结果和四格式预检。该命令不能证明完整 V9 语义，也不能证明 Runtime/Component 实际网络使用与工程声明一致；这是长期边界而非等某条路线完成就会解除的临时状态——工程可以合法声明当前播放执行并不读取的字段，这类“声明了但不会生效”的偏差不产生任何 error 或 warning。退出码 0 仍须由真实 Player、导出和外部请求检查补足。当前四个 ittoedu 身份实验包虽然可重现构建并通过历史四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
 
 - 单包不超过 50 MB；
 - 路径使用 `/`，不得有绝对路径、盘符、反斜线、`..` 或路径穿越；
