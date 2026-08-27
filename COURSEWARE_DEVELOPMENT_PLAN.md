@@ -1,12 +1,12 @@
 # IttoEdu 开发总纲
 
-> 计划版本：23.0（2026-08-27：Owner 以当前对话明确要求结合本总纲与根目录评估修复全部问题、完成全部任务。宿主统一、产品归档时区、Published 课程状态/导航、作者命令、V9 诊断、纯 Slide 静态捕获、能力索引事实与 provenance、发布验证及文档口径已组成一个固定工程候选；Course Project V9 / Published Course V2 Schema 未变。当前工作状态只看自动任务板，不在本行复制卡片数量。）
+> 计划版本：24.0（2026-08-27：吸收根目录当前评估 `COURSE_LOGIC_CONDITIONS_ASSESSMENT.md`。基线 `9d42aa4` 只能作为带已知限制的内部源码候选，当前主要交付口径是纯 Slide HTML；草稿保存/关闭与统一 Delete 已进入下一版最高优先顺序，命名状态、Runtime / Component、兼容导出、性能及课程逻辑合同按各自触发条件推进。Course Project V9 / Published Course V2 Schema 未变；当前工作状态只看自动任务板，不在本行复制卡片数量。）
 >
-> 第 5 节“审计收口与生产减负”的审计与 2026-08-27 Owner 收口均已结束；该节只保存当前结果和历史立项证据，不再作为待执行路线。可领取工作只看 [任务板](docs/development-plan/TASK_BOARD.md) 与对应任务卡
+> 第 5 节“审计收口与生产减负”的审计与 2026-08-27 Owner 收口均已结束；该节只保存当前结果和历史立项证据，不再作为待执行路线。最新开发路线见第 9 节；可领取工作只看 [任务板](docs/development-plan/TASK_BOARD.md) 与对应任务卡。
 >
-> 产品 Owner 决策现状：架构稳定化与 2026-08-24 审计的 29 项修复已收口为 owner-waived `engineering candidate`（打包与性能测量豁免，记录为未执行项）；教师 `accepted` 只保留为最终产品与发布结论。既有 V8 课例均为测试产物、没有内容迁移或兼容义务；尚存文件按真实 consumer 删除，必要验证只重建最小 V9 fixture。Runtime/Component 均是经过审核的可信扩展，外部导入只是分发方式；不因“非内置”强制隔离或禁止宿主、父页面、本地与网络能力。
+> 产品 Owner 决策现状：架构稳定化与 2026-08-24 审计的 29 项修复已收口；最新评估覆盖了旧的“固定工程候选”发布口径，当前只允许称为**带已知限制的内部源码候选版**，不得宣称所有 Surface、Runtime / Component 与四种导出均无已知问题。教师 `accepted` 仍只保留为最终产品与发布结论。既有 V8 课例均为测试产物、没有内容迁移或兼容义务；尚存文件按真实 consumer 删除，必要验证只重建最小 V9 fixture。Runtime/Component 均是经过审核的可信扩展，外部导入只是分发方式；不因“非内置”强制隔离或禁止宿主、父页面、本地与网络能力。
 
-本文件是仓库唯一长期开发总纲。详细规则统一在 [docs/development-plan/](docs/development-plan/README.md)：[架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)（什么不能坏）、[工作协议](docs/development-plan/WORKING_PROTOCOL.md)（怎么干活）、[任务卡模板](docs/development-plan/TASK_CARD_TEMPLATE.md)与[修复方案](docs/development-plan/REPAIR_PLAN.md)（已确认修复事实和历史证据）。历史阶段合同、审计报告、评估与已终态任务卡由 Git 历史保存，不再作为派工入口。
+本文件是仓库唯一长期开发总纲。详细规则统一在 [docs/development-plan/](docs/development-plan/README.md)：[架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)（什么不能坏）、[工作协议](docs/development-plan/WORKING_PROTOCOL.md)（怎么干活）、[任务卡模板](docs/development-plan/TASK_CARD_TEMPLATE.md)与[修复方案](docs/development-plan/REPAIR_PLAN.md)（已确认修复事实和历史证据）。历史阶段合同、旧审计报告、已被取代的评估与已终态任务卡由 Git 历史保存，不再作为派工入口；根目录当前评估保留到被新版评估取代，但只提供当前发布裁决与计划输入，不能绕过任务板自动派工。
 
 权威顺序：
 
@@ -49,7 +49,7 @@
 - 当前编辑器内没有可见 AI、聊天、Provider 或网络调用；internal/reserved 接口不得宣称为可用工作流；编辑器内 AI 统一延后到 2.0 以后。
 - `artifacts/ai-capabilities` 有 Builder 真实 consumer，继续作为机器可发现的产品能力契约；repo-index 没有产品运行时 consumer，只保留显式、可重建、可缺省的本地导航能力，不跟踪其缓存，不设 freshness/golden/quality 门。
 - 教师控制器只在"全局层（全课）"持久化编辑；页面作者态 inert；运行态拖动只写 Session；运行态可见的教师入口也只有这个工程内全局控制器，不再叠加独立的“逃生控件”。不实现逐页/逐 location 控制器位置。
-- 打包分发当前不是交付目标；恢复打包时须随新的固定候选补齐打包、性能与签名证据。
+- 当前允许交付内部源码候选和以纯 Slide HTML 为主的内部课件；安装包与对外稳定发布仍不是当前交付目标。形成新的固定候选后，只在最终集成/发布门补一次适用的全量测试、打包、性能与签名证据，不把内部源码 ZIP 等同于稳定发行版。
 - Runtime/Component 是经过审核的可信扩展。它们可按真实 consumer 需要使用当前宿主提供的父页面、本地、桌面或其他能力；实现优先走稳定宿主接口或同宿主执行语义，不建权限审批平台。不同导出/嵌入环境可用能力不同，不得把桌面专属能力伪装成通用网页承诺。
 - 远程资源和 API 按工程声明开放。精确 `https`/`wss` origin 声明服务于预览、发布、CSP、可移植性和诊断，不用来推导扩展代码不可信。远程脚本不随本轮开放，若确有 consumer 另立合同。
 - 单 HTML 导出至少区分：离线便携（资源内嵌、文件较大）与在线轻量（远程资源保留 URL、依赖网络）。模式是导出选择，不新增持久化 `projectMode`。
@@ -94,9 +94,9 @@
 
 ---
 
-## 5. 当前活动路线：审计收口与生产减负
+## 5. 历史路线：审计收口与生产减负
 
-本节以 `442d4e1` 为审计与任务基线。旧 Wave 的已完成事实继续由产品提交和 [修复方案](docs/development-plan/REPAIR_PLAN.md) 保存；它们不再产生后续任务。当前只处理已经存在的红灯和已经量化的维护负担，不借“继续重构”增加产品范围。
+本节以 `442d4e1` 为当时的审计与任务基线。旧 Wave 的已完成事实继续由产品提交和 [修复方案](docs/development-plan/REPAIR_PLAN.md) 保存；它们不再产生后续任务。当时只处理已经存在的红灯和已经量化的维护负担，不借“继续重构”增加产品范围。
 
 ### 5.1 审计结论与裁决
 
@@ -181,12 +181,66 @@
 
 ## 7. 当前路线之外的方向
 
-skill 重构、黄金样例、真实课例生产、声明式 Interaction Protocol V1 的 `courseState` 条件/写动作与判题分支，以及编辑器内 AI 交互仍由 Owner 另行启动。Wave 1 只建设这些未来能力都需要的网络、资源和凭证边界，不接入具体模型或 Provider。表达能力类合同继续由真实 consumer 证据准入。
+skill 重构、黄金样例、真实课例生产、判题自动桥以及编辑器内 AI 交互仍由 Owner 另行启动。课程逻辑面板（`courseState` + `navigationGuards`）确定长期保留；声明式条件读取课程状态和声明式动作设置课程状态是已评估方向，但其冻结 Interaction 合同切片仍未启动，边界与启动条件见 9.4。Wave 1 只建设未来能力共用的网络、资源和凭证边界，不接入具体模型或 Provider。表达能力类合同继续由真实 consumer 证据和 Owner 决定准入。
 
 ## 8. 当前状态与领取入口
 
 建卡任务（S2/并发/热点/跨会话）的状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。普通 S0/S1 直接走精简生产路径；未来任务在前置未满足时不预建卡。新建卡统一放在 `docs/development-plan/tasks/<wave>/`，完成即删除（Git 不跟踪空目录）。
 
+第 9 节给出下一版顺序、启动条件和验收边界，不表示其中每项已经 Ready、已领取或已建卡。本次只更新路线；实际启动某个 S2 切片时，须用届时 HEAD 重新核对评估证据、建立唯一写入者和任务卡，再生成任务板。条件性 carrier、兼容导出与合同扩展在触发条件未满足前不得预建卡。
+
 `host-unify-authoring-preview` 与本轮同一 Owner 指令覆盖的 5.4 A/B/C 已按 5.4 当前结果收口；完成卡随候选删除，当前精确 Ready 状态只看自动任务板。以后不得从本节保留的 2026-08-26 立项证据自动恢复 `W4-C2`、`PRJ-00B～05`、RTP-05、NET-C1、Interaction V2/Schema 扩展或其它 carrier 扩面；新的实现仍须重新满足不变量 15，并从当时源码事实建立最小验收。
 
-历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；已提交过的历史材料可由 Git 历史读取，未提交的一次性评估只保留其已吸收结论。
+历史纪要：ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）、2026-08-24 深度审计的 29 项稳定化，均已终态收口。Policy version 2 与 REPAIR 初版已被当前方案取代；旧材料由 Git 历史读取，根目录当前评估则按上文约定保留到被新版替代。
+
+## 9. 2026-08-27 最新评估后的开发路线
+
+本节完整吸收根目录 `COURSE_LOGIC_CONDITIONS_ASSESSMENT.md` 的计划结论，评估基线为 `9d42aa4`；即使该评估以后转入历史，本节仍可独立作为长期路线读取。它只建立当前优先级、启动条件和成功标准；任务状态仍由第 8 节的任务板管理。优先级以受支持场景中的用户可用性为第一轴：保存或关闭时丢输入、删除结果错误和伪成功，均高于兼容导出完整度、性能、维护卫生与预防性风险。
+
+### 9.1 当前交付与发布边界
+
+- 当前工作区可先作为**带已知限制的内部源码候选版**；主要交付纯 Slide HTML，PDF / PPTX 是兼容项，Flow / Spatial 暂以 HTML 使用为主。
+- Spatial / Mixed 的 PDF / PPTX 静态表达缺口不阻断本次内部源码包；如果实际课程只使用 Native 与声明式互动，Component / Runtime 条件项也不阻断当前包。
+- 不得把既有 Scoped Validation 扩写为“已覆盖全部问题”：它没有覆盖未失焦草稿的保存事务、多选删除最终文档、跨版本 Component Registry、Mixed / Spatial 静态视觉或卡死图片请求。
+- 当前内部规避只能是保存前主动结束文字编辑、删除时一次一个并复查画面；规避不构成下一版完成。
+
+### 9.2 下一版核心流程顺序
+
+以下顺序是下一版的主线。前两项直接影响用户数据与核心结果，启动时均按 S2、单写入者和独立 Reviewer 执行；不得用失焦补丁、循环单删或成功文案遮盖根因。
+
+1. **草稿保存 / 关闭事务闭合**。Slide、Spatial、Flow 的活动文字草稿必须在手动保存、关闭前保存、恢复快照以及新建/打开前的未保存判断中进入同一份 canonical history document。任何 archive 只能从已纳入草稿的那个文档版本生成；成功后仅在该版本及素材/组件修订仍是当前版本时清除 `dirty`，失败或保存期间继续编辑时保留未保存状态。验收至少覆盖：不失焦直接 `Ctrl+S` 后保存重开文字仍在；直接关闭能识别草稿并在“保存/放弃/取消”三条路径保持正确；恢复副本包含草稿；一次草稿只形成一个可撤销提交。热点：App save/recovery、Editor Store/History、main/preload。
+2. **统一 Delete 原子化与诚实反馈**。一次多选删除必须从同一输入文档计算出一个新文档、一次 history 提交和一次选区更新；Slide、Flow 浮层、Spatial 与全局/Surface 共享层按各自所有权语义删除全部所选对象，并同步清理 presentation overrides/order、互动引用和 Runtime `nodeBindings`。任何锁定、stale revision、引用或 Schema 拒绝都必须保留原文档并返回真实失败，路由不得显示“节点已删除”。验收至少覆盖：多选最终文档、一次 undo 整体恢复、失败零写入、保存重开仍通过 V9 Schema；优先复用 `v9SlideActionCommands.ts` 已有原子删除与引用清理事实，不复制第二套规则。热点：Editor Store/History。
+3. **当前位置试运行从当前命名状态启动**。在前两项收口后，若下一版内部课件使用命名状态，试运行须同时传递当前位置和当前 `stateId`，当前非初始状态成为试运行起点；作者退出/重进后的普通最终 HTML 仍遵循其正式初始状态语义。该切片不新增持久字段、不改变 Published V2 合同，启动时按 Published/Player S2 复核。
+4. **只收口真实使用到的动态 carrier**。实际课程使用 DOM Component 或 Runtime 时，交付前按 9.3 的独立问题逐项建卡并在真实 Player 复核；未使用时不为当前内部包扩面。
+
+### 9.3 条件性 HTML carrier 问题
+
+以下问题都有明确源码事实，但只在对应课件能力实际进入交付范围时启动；每项单独验收，不合并成“修 Runtime / Component”大卡。
+
+- **DOM Component Registry 身份完整**：缓存键必须覆盖足以区分同 ID 新版本、新源码和另一工程的定义身份；切换工程或更新包后不得继续运行旧定义直到 Renderer 重载。
+- **Published 素材闭包覆盖 direct project asset API**：Runtime `ctx.assets.projectUrl(assetId)` 与 Component `ctx.projectAssetUrl(assetId)` 直接引用的已保存素材必须进入 Published payload，并在导出后的真实 Player 中可解析；不能只收显式 binding、fallback 或 manifest 图片属性。
+- **create 后生命周期异常真实回退**：DOM Component 与 Slide scene-local API 3 Runtime 的 `resize`、`setVisible`、`updateProps` 等生命周期异常不得继续保持 `ok: true` 和冻结旧画面；宿主必须进入诚实失败状态并切换 static fallback 或可见占位。
+
+### 9.4 课程逻辑合同方向（保留，未启动）
+
+- 课程逻辑面板继续保留。课程状态默认值、导航守卫、专业作者命令、Published 播放与 HTML 携带已经端到端可用，不重新立项这些已完成能力。
+- 待评估切片只包含：声明式条件读取现有 `CourseStateCondition`，以及声明式动作设置一个**已声明键**。明确不增加表达式、变量运算、工作流引擎或判题结果自动桥。
+- 该切片会修改冻结的 Interaction 合同，必须由 Owner 另行确认当期优先级，并在启动时按 S2 建卡；不得从本节自动恢复为 Ready 工作。
+- 教师控制器绕过导航守卫是课堂中强制翻页的既有设计。“导出时隐藏教师控制器”属于无人监督自学场景的独立产品决定，不并入上述合同切片。
+
+### 9.5 兼容项、优化与独立风险维度
+
+这些事项不阻断当前内部纯 Slide HTML 源码包；只有交付范围、性能目标或风险证据触发时，才按当时源码建卡。
+
+- **兼容导出视觉**：Spatial PDF / PPTX 补齐 shape、formula、video、`surfaceLayerItems`、背景等稳定内容；Mixed PDF 的 Slide 静态合成不得把 Native text 之外的内容退化为 `[layerItemId]`。
+- **打开性能**：消除大工程同步探测解压后再次完整异步解压的重复工作；以评估中的 64 MiB 合法资产工程约 563 ms 总时间、约 257 ms Renderer 事件循环阻塞为基线，先证明阻塞下降且打开结果不变。
+- **静态捕获可靠性**：Published 捕获的图片 fetch / decode 必须受既有 `timeoutMs` 或等价的统一截止时间约束，失败进入明确回退，不能让 PDF / PPTX 或 DOM 捕获永久 pending。
+- **低优先 UX / 诊断**：无效 ZIP 不应在 Renderer V9 校验失败前污染最近项目；在线轻量 HTML 应针对远程素材 origin 与 Runtime / Component `connectOrigins` 的双声明提供针对性预检。
+- **供应链安全**：`pptxgenjs` 传递依赖 `image-size` 的两项高等级 DoS 告警单列为安全/供应链维度；普通媒体导入的类型与魔数白名单降低当前利用面，不能据此抬高为当前产品可用性阻断，也不能在依赖升级时隐去。
+
+### 9.6 验证与候选门
+
+- 每个切片先运行 1–3 条直接证明行为的 focused checks；保存/恢复、删除历史、Published/Player 与导出语义继续按 S2 触发独立 Reviewer。
+- 视觉问题看真实渲染，动态 carrier 看真实 Player，保存问题看实际 archive 保存重开，性能问题看同机同夹具测量；Hash 或字节比较只在制品身份/确定性本身属于合同时使用。
+- 前两项完成后再进入当前状态试运行与实际使用到的 carrier，避免热点并行写入。所有相关改动固定为一个下一版候选后，只运行一次适用的最终全量测试、打包与发布门；不得为每个切片重复完整 E2E、`verify` 或打包。
+- 自动化最多把新候选提升为 `engineering candidate`；真实课程的视觉、互动与教师复核仍决定 `art candidate` / `accepted`。
