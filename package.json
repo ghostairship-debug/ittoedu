@@ -71,6 +71,7 @@
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
     "@noble/hashes": "1.8.0",
+    "acorn": "8.18.0",
     "fflate": "0.8.3",
     "immer": "11.1.15",
     "lucide-react": "1.25.0",

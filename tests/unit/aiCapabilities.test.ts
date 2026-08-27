@@ -287,6 +287,7 @@ describe('AI capability manifest generation', () => {
         schemaIssueCodes: string
         findingCodes: unknown[]
         projectHealth: Record<string, unknown>
+        onlinePackagePreflight: Record<string, unknown>
         sourceOfTruth: string
         contract: string
       }
@@ -346,7 +347,23 @@ describe('AI capability manifest generation', () => {
             source: 'src/shared/courseProjectHealth/controllerMedia.ts',
           },
         ],
-        networkDeclarationParity: 'deferred',
+      },
+      onlinePackagePreflight: {
+        collector: 'collectCoursePackageExportPreflight',
+        cliStatus: 'upstream-filtered',
+        status: 'partial',
+        scope: 'online-lightweight-single-html',
+        literalApis: [
+          'fetch',
+          'WebSocket',
+          'EventSource',
+          'navigator.sendBeacon',
+          'XMLHttpRequest.open',
+        ],
+        undeclaredStaticOrigin: 'blocking-error',
+        unresolvedOrigin: 'warning',
+        limitations: 'no-wrapper-alias-or-general-javascript-data-flow-analysis',
+        source: 'src/renderer/export/course/buildCoursePackages.ts',
       },
       sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
       contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',

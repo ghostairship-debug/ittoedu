@@ -165,6 +165,8 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'interaction-state-reference-missing',
       'looping-video-ended-unreachable',
       'migration-marker',
+      'online-connect-origin-undeclared',
+      'online-connect-origin-unresolved',
       'online-remote-asset',
       'online-remote-url-invalid',
       'player-bundle-empty',

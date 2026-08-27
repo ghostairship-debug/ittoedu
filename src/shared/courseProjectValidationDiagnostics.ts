@@ -264,6 +264,18 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'Legacy frame and runtime discriminators are rejected by the V9 Schema first.',
   },
   {
+    code: 'online-connect-origin-undeclared',
+    status: 'upstream-filtered',
+    sections: ['exportPreflight'],
+    note: 'The validator invokes standalone HTML preflight in its offline-portable default, not online-lightweight mode.',
+  },
+  {
+    code: 'online-connect-origin-unresolved',
+    status: 'upstream-filtered',
+    sections: ['exportPreflight'],
+    note: 'The validator invokes standalone HTML preflight in its offline-portable default, not online-lightweight mode.',
+  },
+  {
     code: 'online-remote-asset',
     status: 'upstream-filtered',
     sections: ['exportPreflight'],

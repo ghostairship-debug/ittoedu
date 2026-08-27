@@ -2,6 +2,7 @@ import { webcrypto } from 'node:crypto'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
+import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 
@@ -290,6 +291,46 @@ function loadCourseWithRemoteBackground(
   return project
 }
 
+function loadCourseWithNetworkRuntime(
+  source: string,
+  connectOrigins: string[] = [],
+) {
+  const project = createBlankCourseProject({
+    now: NOW,
+    includeDefaultController: false,
+    controls: 'none',
+  })
+  project.network = { connectOrigins }
+  const slide = project.surfaces.find((surface) => surface.type === 'slide')
+  if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+  const runtime: RuntimeLayerItem = {
+    kind: 'runtime',
+    layerItemId: 'online-network-runtime',
+    label: '在线网络 Runtime',
+    frame: { mode: 'absolute', x: 20, y: 20, width: 320, height: 180 },
+    order: 0,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    runtime: {
+      protocol: 'canvas-runtime',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'dom',
+      source,
+      content: { values: {} },
+      assets: {},
+    },
+  }
+  slide.scenes[0]!.layerItems.push(runtime)
+  useEditorStore.getState().loadCourseProject(project, null, {}, {})
+  useEditorStore.getState().activateCourseLocation(project.startLocationId)
+  return project
+}
+
 function savedReport(api: AppDesktopApi) {
   const input = api.exportBinary.mock.calls[0]?.[0]
   if (!input) throw new Error('expected saved preflight report')
@@ -515,5 +556,40 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     expect(screen.queryByRole('button', { name: '继续导出' }))
       .not.toBeInTheDocument()
     expect(api.exportHtml).not.toHaveBeenCalled()
+  })
+
+  it('blocks online HTML when an actual Runtime origin is undeclared', async () => {
+    loadCourseWithNetworkRuntime(`fetch('https://api.undeclared.example.com/v1')`)
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html-online'))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    expect(screen.getByText('online-connect-origin-undeclared')).toBeVisible()
+    expect(screen.getByText(/https:\/\/api\.undeclared\.example\.com/u)).toBeVisible()
+    expect(screen.queryByRole('button', { name: '继续导出' })).not.toBeInTheDocument()
+    expect(api.exportHtml).not.toHaveBeenCalled()
+  })
+
+  it('allows an explicit continue for a dynamic Runtime origin warning', async () => {
+    loadCourseWithNetworkRuntime(`fetch(resolveApiEndpoint())`)
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html-online'))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    expect(screen.getByText('online-connect-origin-unresolved')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+
+    await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
+    expect(deliveryProbe.publishedStandalone).toHaveBeenCalledOnce()
   })
 })

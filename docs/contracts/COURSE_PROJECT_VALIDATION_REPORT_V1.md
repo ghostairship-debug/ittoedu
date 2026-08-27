@@ -1,6 +1,6 @@
 # Course Project Validation Report V1
 
-本文冻结 `npm run --silent validate:course-project -- <project.h5lesson>` 当前已经公开的机器可读报告。权威实现是 `scripts/validate-project.ts`；稳定诊断 target、fatal code 与 finding code ledger 的权威定义是 `src/shared/courseProjectValidationDiagnostics.ts`。CLI 只在 V9 Schema 与 archive 打开成功后调用 V9-native `collectCourseProjectHealth`，其四域实现位于 `src/shared/courseProjectHealth/`。本合同不修改 Course Project V9 或 Published Course V2 Schema，也不承诺网络 declaration parity 或完整的 V9 工程健康分析。
+本文冻结 `npm run --silent validate:course-project -- <project.h5lesson>` 当前已经公开的机器可读报告。权威实现是 `scripts/validate-project.ts`；稳定诊断 target、fatal code 与 finding code ledger 的权威定义是 `src/shared/courseProjectValidationDiagnostics.ts`。CLI 只在 V9 Schema 与 archive 打开成功后调用 V9-native `collectCourseProjectHealth`，其四域实现位于 `src/shared/courseProjectHealth/`。本合同不修改 Course Project V9 或 Published Course V2 Schema；在线轻量单 HTML 只对实际发布源码中的字面量 connect API 做声明预检，动态依赖给出 warning，不承诺完整 JavaScript 静态分析或宽泛的 V9 工程健康分析。
 
 ## 1. 版本与顶层形状
 
@@ -128,6 +128,8 @@ severity, code, message, path?, surfaceId?, layerItemId?
 | `interaction-state-reference-missing` | active | presentation 触发器、条件与动作的 state 引用未由 Schema 交叉校验 |
 | `looping-video-ended-unreachable` | active | 循环视频无法自然到达 `video.ended` |
 | `migration-marker` | schema-shadowed | 旧 frame/runtime 判别器先被 V9 Schema 拒绝 |
+| `online-connect-origin-undeclared` | upstream-filtered | CLI 以 offline-portable 默认调用单 HTML preflight；online-lightweight 会阻断未精确声明的字面量 HTTPS/WSS origin |
+| `online-connect-origin-unresolved` | upstream-filtered | CLI 不请求 online-lightweight preflight；该模式会 warning 无法静态确定 origin 的 connect API |
 | `online-remote-asset` | upstream-filtered | CLI 以 offline-portable 默认调用单 HTML preflight |
 | `online-remote-url-invalid` | upstream-filtered | CLI 不请求 online-lightweight preflight |
 | `player-bundle-empty` | upstream-filtered | CLI 传入非空 sentinel bundle 并显式过滤该 code |
@@ -172,7 +174,7 @@ node-id-duplicate, scene-required, state-id-duplicate,
 state-node-reference-missing, thumbnail-state-reference-missing
 ```
 
-这些 code 不进入 active ledger：V9 不存在的 `scenes/globalLayer/globalRuntime` 规则被省略；重复 rule/action/button/state/layer ID、terminal navigation、直连 layer/sound/component/位置引用及状态 override owner 引用由 Schema 遮蔽；缺少组件执行上下文、组件身份、协议、hash 与文件缺失由 archive 遮蔽。Runtime/Component 源码 URL、Secret、危险 scheme、CORS 与 network declaration parity 属于后续独立网络诊断，不在本版扫描或推断。
+这些 code 不进入 active ledger：V9 不存在的 `scenes/globalLayer/globalRuntime` 规则被省略；重复 rule/action/button/state/layer ID、terminal navigation、直连 layer/sound/component/位置引用及状态 override owner 引用由 Schema 遮蔽；缺少组件执行上下文、组件身份、协议、hash 与文件缺失由 archive 遮蔽。Runtime/Component 的 Secret、CORS、远程脚本和通用数据流分析仍属于后续独立网络诊断；本版只在 online-lightweight package preflight 中扫描实际发布源码的 `fetch`、`WebSocket`、`EventSource`、`sendBeacon` 与 `XMLHttpRequest.open`，精确字面量核对 `network.connectOrigins`，动态、相对或词法歧义调用只给 warning。
 
 ## 5. 兼容与非承诺
 
