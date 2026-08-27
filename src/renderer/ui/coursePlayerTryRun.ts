@@ -79,6 +79,8 @@ export interface PublishedCourseMountInput {
   assetFiles: Readonly<Record<string, Uint8Array>>
   components: Readonly<Record<string, ComponentPackageData>>
   locationId?: string | null
+  /** Session-only Slide state used for the first current-position try-run mount. */
+  initialPresentationStateId?: string | null
   playbackPathId?: string | null
   width?: number
   height?: number
@@ -103,6 +105,9 @@ export async function mountPublishedCourseTryRun(
   // payload. Network declarations remain a playback-preview lease, derived
   // only from URLs that actually survived publishing plus explicit origins.
   const playback = input.authoring === undefined
+  if (!playback && input.initialPresentationStateId != null) {
+    throw new Error('Published 作者宿主不能接收试运行初始命名状态。')
+  }
   const published = buildPublishedCourseTryRunPayload(publishSources)
   const remoteAssetUrls = playback ? previewRemoteAssetUrls(published) : []
   const connectOrigins = playback
@@ -143,6 +148,9 @@ export async function mountPublishedCourseTryRun(
     session = createPublishedCourseSession(published, {
       playbackPathId: input.playbackPathId,
       ...(input.locationId ? { initialLocationId: input.locationId } : {}),
+      ...(playback && input.initialPresentationStateId != null
+        ? { initialPresentationStateId: input.initialPresentationStateId }
+        : {}),
       ...(input.authoring
         ? {
             authoring: {
@@ -181,7 +189,7 @@ export async function mountPublishedCourseTryRun(
 }
 
 export function mountPublishedCourseAuthoring(
-  input: Omit<PublishedCourseMountInput, 'authoring'> & {
+  input: Omit<PublishedCourseMountInput, 'authoring' | 'initialPresentationStateId'> & {
     sessionId: string
     scope: 'scene' | 'surface' | 'global'
     stateId: string | null

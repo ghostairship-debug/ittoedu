@@ -20,6 +20,7 @@ import type { PublishedInteractionDiagnostic } from '@/player/interactions/Publi
 import {
   createPublishedCourseSession,
   type PublishedCourseSession,
+  type PublishedCourseSessionOptions,
 } from '@/player/surfaces/publishedDynamicHosts'
 
 const SLIDE_SURFACE_ID = 'surface-slide'
@@ -376,12 +377,15 @@ async function settle(turns = 12): Promise<void> {
 async function mount(
   payload: PublishedCourseV2Payload,
   diagnostics: PublishedInteractionDiagnostic[] = [],
+  options: PublishedCourseSessionOptions = {},
 ) {
   const container = document.createElement('div')
   container.style.position = 'relative'
   document.body.appendChild(container)
   const session = createPublishedCourseSession(payload, {
+    ...options,
     services: {
+      ...options.services,
       reportDiagnostic: (diagnostic) => {
         diagnostics.push(diagnostic as PublishedInteractionDiagnostic)
       },
@@ -915,6 +919,88 @@ describe('Published Interaction Slide host integration', () => {
       ownedItems.map((item) => item.layerItemId).sort(),
     )
     expect(unavailable.every((diagnostic) => diagnostic.phase === 'execute')).toBe(true)
+  })
+
+  it('uses an explicit current state only for the initial playback mount', async () => {
+    const stateTarget = textItem('initial-session-state-target', 20, { visible: false })
+    const payload = publishedFixture({
+      sceneBItems: [stateTarget],
+      sceneBPresentation: {
+        initialStateId: 'initial-session-base',
+        states: [
+          {
+            id: 'initial-session-base',
+            name: 'Base',
+            backgroundColor: '#f8fafc',
+            layerItemOverrides: { [stateTarget.layerItemId]: { visible: false } },
+          },
+          {
+            id: 'initial-session-current',
+            name: 'Current authoring state',
+            backgroundColor: '#112233',
+            layerItemOverrides: {
+              [stateTarget.layerItemId]: {
+                visible: true,
+                opacity: 0.4,
+                frame: { x: 333 },
+              },
+            },
+          },
+        ],
+      },
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload, [], {
+      initialLocationId: LOCATION_B_ID,
+      initialPresentationStateId: 'initial-session-current',
+    })
+
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
+    expect(root.dataset.presentationStateId).toBe('initial-session-current')
+    expect(root.style.backgroundColor).toMatch(/#112233|rgb\(17,\s*34,\s*51\)/)
+    const materialized = renderedItem(container, stateTarget.layerItemId)
+    expect(materialized.style.left).toBe('333px')
+    expect(materialized.style.opacity).toBe('0.4')
+
+    expect(await session.replayScene()).toBe(true)
+    expect(root.dataset.presentationStateId).toBe('initial-session-base')
+    expect(container.querySelector(
+      `[data-slide-layer-item="${stateTarget.layerItemId}"]`,
+    )).toBeNull()
+    expect(payload).toEqual(before)
+
+    const ordinary = await mount(payload, [], { initialLocationId: LOCATION_B_ID })
+    const ordinaryRoot = ordinary.container.querySelector<HTMLElement>(
+      '.slide-published-adapter',
+    )!
+    expect(ordinaryRoot.dataset.presentationStateId).toBe('initial-session-base')
+    expect(ordinary.container.querySelector(
+      `[data-slide-layer-item="${stateTarget.layerItemId}"]`,
+    )).toBeNull()
+    expect(payload).toEqual(before)
+  })
+
+  it('rejects stale or non-Slide initial state requests before mount', () => {
+    const payload = publishedFixture({
+      sceneBPresentation: {
+        initialStateId: 'only-initial-session-state',
+        states: [{
+          id: 'only-initial-session-state',
+          name: 'Only state',
+          layerItemOverrides: {},
+        }],
+      },
+    })
+
+    expect(() => createPublishedCourseSession(payload, {
+      initialLocationId: LOCATION_B_ID,
+      initialPresentationStateId: 'missing-state',
+    })).toThrow(/missing-state/)
+    expect(() => createPublishedCourseSession(payload, {
+      initialLocationId: FLOW_LOCATION_ID,
+      initialPresentationStateId: 'only-initial-session-state',
+    })).toThrow(/Slide/)
   })
 
   it('materializes a valid scene.go targetStateId before entering the target location', async () => {

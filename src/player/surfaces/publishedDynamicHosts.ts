@@ -104,6 +104,8 @@ type CreatePublishedSurfaceHostOptions = CreatePublishedDynamicHostsOptions
 export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHostsOptions {
   /** Ephemeral session start; never mutates the caller's Published payload. */
   initialLocationId?: string
+  /** One-shot playback state for initialLocationId; never enters Published V2. */
+  initialPresentationStateId?: string
   services?: Partial<SurfacePlayerServices>
   onFailure?: CoursePlayerOptions['onFailure']
   /** Internal direct same-document authoring host. Published V2 stays immutable. */
@@ -312,6 +314,34 @@ function interactionCapableHost(
   return typeof candidate.getPublishedInteractionSurfacePort === 'function'
     ? host as PublishedInteractionCapableHost
     : null
+}
+
+function preparePublishedInitialPresentationState(
+  playback: PublishedCourseV2Payload,
+  hosts: readonly SurfaceHost[],
+  stateId: string,
+): void {
+  const location = playback.locations.find((candidate) => (
+    candidate.id === playback.startLocationId
+  ))
+  if (!location || location.kind !== 'slide-scene') {
+    throw new Error('试运行初始命名状态只能用于明确的 Slide 场景位置。')
+  }
+  const targetHost = interactionCapableHost(
+    hosts.find((host) => host.id === location.surfaceId),
+  )
+  if (
+    !targetHost?.validatePublishedPresentationState
+    || !targetHost.validatePublishedPresentationState(location.id, stateId)
+  ) {
+    throw new Error(`试运行初始命名状态“${stateId}”不属于位置“${location.id}”。`)
+  }
+  if (
+    !targetHost.preparePublishedPresentationState
+    || !targetHost.preparePublishedPresentationState(location.id, stateId)
+  ) {
+    throw new Error(`无法为位置“${location.id}”准备试运行初始命名状态。`)
+  }
 }
 
 const UNAVAILABLE_INTERACTION_SURFACE_PORT: PublishedInteractionSurfacePort = {
@@ -1140,6 +1170,17 @@ export function createPublishedCourseSession(
   payload: PublishedCourseV2Payload,
   options: PublishedCourseSessionOptions = {},
 ): PublishedCourseSession {
+  if (options.initialPresentationStateId !== undefined) {
+    if (options.authoring) {
+      throw new Error('Published 作者宿主不能接收试运行初始命名状态。')
+    }
+    if (options.staticCapture) {
+      throw new Error('Published 静态捕获不能接收试运行初始命名状态。')
+    }
+    if (options.initialLocationId === undefined) {
+      throw new Error('试运行初始命名状态必须同时指定初始位置。')
+    }
+  }
   const playback = structuredClone(payload)
   if (options.authoring && options.staticCapture) {
     throw new Error('Published 作者宿主不能同时作为静态捕获宿主。')
@@ -1207,6 +1248,13 @@ export function createPublishedCourseSession(
       },
     },
   ))
+  if (options.initialPresentationStateId !== undefined) {
+    preparePublishedInitialPresentationState(
+      playback,
+      hosts,
+      options.initialPresentationStateId,
+    )
+  }
   const services: SurfacePlayerServices = {
     ...defaultCourseStateServices(playback, courseState),
     ...options.services,

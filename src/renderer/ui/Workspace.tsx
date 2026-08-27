@@ -1561,8 +1561,6 @@ function SlideLocationWorkspace({
   const canvasMode = useEditorStore((state) => state.canvasMode)
   const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const courseLocationId = useEditorStore(selectActiveCourseLocationId)
-  const courseLocationIdRef = useRef(courseLocationId)
-  courseLocationIdRef.current = courseLocationId
   const courseSidecarFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
@@ -2257,6 +2255,7 @@ function SlideLocationWorkspace({
     })
     const state = useEditorStore.getState()
     const document = selectActiveCourseProjectDocument(state)
+    const locationId = selectActiveCourseLocationId(state)
     if (!document) {
       setTryRunFeedback(null)
       return
@@ -2266,7 +2265,10 @@ function SlideLocationWorkspace({
       project: document,
       assetFiles: selectMediaAssetFiles(state),
       components: state.componentPackages,
-      locationId: courseLocationIdRef.current,
+      locationId,
+      initialPresentationStateId: locationId
+        ? state.activePresentationStateId
+        : null,
     }), {
       onReady: (session) => {
         courseTryRunFitRef.current?.()

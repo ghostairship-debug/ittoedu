@@ -174,6 +174,8 @@ describe('mountPublishedCourseTryRun', () => {
         project,
         assetFiles: fixture.data.assetFiles,
         components: {},
+        locationId: 'location-current',
+        initialPresentationStateId: 'state-current',
       })
       expect(setPreviewNetworkPolicy).toHaveBeenCalledOnce()
       expect(setPreviewNetworkPolicy).toHaveBeenCalledWith(expect.objectContaining({
@@ -184,6 +186,10 @@ describe('mountPublishedCourseTryRun', () => {
         assets: Record<string, { url: string }>
       }).assets.photo?.url
       expect(playbackPhotoUrl).toMatch(/^data:image\/png;base64,/)
+      expect(publishedSessionProbe.calls[0]!.options).toMatchObject({
+        initialLocationId: 'location-current',
+        initialPresentationStateId: 'state-current',
+      })
       const leaseId = setPreviewNetworkPolicy.mock.calls[0]![0].leaseId
 
       await playback.destroy()
@@ -205,6 +211,8 @@ describe('mountPublishedCourseTryRun', () => {
       }).assets.photo?.url
       expect(authoringPhotoUrl).toMatch(/^data:image\/png;base64,/)
       expect(authoringPhotoUrl).toBe(playbackPhotoUrl)
+      expect(publishedSessionProbe.calls[1]!.options)
+        .not.toHaveProperty('initialPresentationStateId')
 
       await authoring.destroy()
       expect(releasePreviewNetworkPolicy).toHaveBeenCalledTimes(1)

@@ -1145,6 +1145,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(
         page.locator('[data-testid^="scene-item-"]').filter({ hasText: '场景 2' }),
       ).toHaveAttribute('aria-current', 'page')
+      const authoringHost = await expectPublishedAuthoringReady(page)
+      const authoringAdapter = authoringHost.locator('.slide-published-adapter')
+      const initialStateId = await authoringAdapter
+        .getAttribute('data-presentation-state-id')
+      if (!initialStateId) throw new Error('统一编辑宿主未写入正式初始状态')
       await page.getByRole('button', { name: '新建场景状态' }).click()
       await expect(page.getByRole('button', {
         name: /状态 2，命名状态/,
@@ -1154,6 +1159,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expectCoursePlayerTryRunReady(page)
       const host = page.getByTestId('course-try-run-host')
       const adapter = host.locator('.slide-published-adapter')
+      await expect(adapter).not.toHaveAttribute('data-presentation-state-id', initialStateId)
       const locationOnCurrent = await adapter.getAttribute('data-location-id')
       if (!locationOnCurrent) throw new Error('CoursePlayer 试运行未写入当前 location')
       await page.getByTestId('course-try-run-previous').click()
@@ -1162,6 +1168,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByTestId('course-try-run-next').click()
       await expect.poll(() => adapter.getAttribute('data-location-id'))
         .toBe(locationOnCurrent)
+      await expect(adapter).toHaveAttribute('data-presentation-state-id', initialStateId)
       await expect(host).toHaveAttribute('data-course-player-ready', 'true')
       await expect(page.locator('iframe[title="当前位置试运行"]')).toHaveCount(0)
 
