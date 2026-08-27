@@ -22,7 +22,7 @@ import {
   resolveFlowMediaLayoutProjection,
 } from '../../shared/flowMediaLayout'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
-import type { FlowCommandResult } from '../course/flowEditorCommands'
+import type { FlowCommandResult, FlowDeleteRequest } from '../course/flowEditorCommands'
 import {
   executeFlowDelete,
   executeFlowEditorCommand,
@@ -97,6 +97,7 @@ export interface FlowWorkspaceProps {
   readonly view: FlowEditorView
   readonly selection: FlowEditorSelection | null
   readonly onProjectChange?: (result: FlowCommandResult | FlowSharedAuthoringResult) => void
+  readonly onDeleteRequest?: (request: FlowDeleteRequest) => FlowCommandResult
   readonly onSelectionChange?: (selection: FlowEditorSelection | null) => void
   readonly onTextEditChange?: (edit: FlowTextEditSession | null) => void
   readonly readOnly?: boolean
@@ -746,6 +747,7 @@ export function FlowWorkspace({
   view,
   selection,
   onProjectChange,
+  onDeleteRequest,
   onSelectionChange,
   onTextEditChange,
   readOnly = false,
@@ -932,7 +934,20 @@ export function FlowWorkspace({
   }, [selection?.selectedBlockId])
 
   const emitProject = (result: FlowCommandResult | FlowSharedAuthoringResult) => {
-    if (result.ok && result.nextDocument) onProjectChange?.(result)
+    onProjectChange?.(result)
+  }
+
+  const requestDelete = (request: FlowDeleteRequest): FlowCommandResult => {
+    if (onDeleteRequest) return onDeleteRequest(request)
+    const deleteSelection = request.deleteSelectedBlocks
+      ? selectFlowEditorBlocks(project, request.selection.locationId, request.selection.selectedBlockIds)
+      : request.selection
+    const result = executeFlowDelete(project, deleteSelection, {
+      expectedRevision: request.expectedRevision,
+      direction: request.direction,
+    })
+    emitProject(result)
+    return result
   }
 
   const emitSelection = (next: FlowEditorSelection | null) => {
@@ -1154,8 +1169,12 @@ export function FlowWorkspace({
     if (event.key === 'Delete' || event.key === 'Backspace') {
       if (!selection) return
       event.preventDefault()
-      emitProject(executeFlowDelete(project, selection))
-      emitSelection(null)
+      event.stopPropagation()
+      requestDelete({
+        selection,
+        expectedRevision: project.revision,
+        direction: event.key === 'Backspace' ? 'backward' : 'forward',
+      })
       return
     }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
@@ -1280,12 +1299,12 @@ export function FlowWorkspace({
       return
     }
     if (command.type === 'delete') {
-      const blockSelection = selection.focus === 'text'
-        ? selectFlowEditorBlocks(project, locationId, selection.selectedBlockIds)
-        : selection
-      emitProject(executeFlowEditorCommand(project, blockSelection, { name: 'delete' }))
-      setEditState(null)
-      emitSelection(null)
+      const result = requestDelete({
+        selection,
+        expectedRevision: project.revision,
+        deleteSelectedBlocks: selection.focus === 'text',
+      })
+      if (result.ok) setEditState(null)
     }
   }
 

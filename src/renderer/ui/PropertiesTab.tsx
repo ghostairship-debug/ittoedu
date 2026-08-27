@@ -2380,6 +2380,7 @@ function FlowMediaBlockProperties({
   block: FlowMediaBlock
 }) {
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
+  const deleteFlowSelection = useEditorStore((state) => state.deleteFlowSelection)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const document = session.history.present
   const asset = document.assets[block.assetId]
@@ -2571,11 +2572,11 @@ function FlowMediaBlockProperties({
         type="button"
         className="secondary-button"
         data-testid="flow-delete-media-block"
-        onClick={() => applyFlowCommand(
-          executeFlowEditorCommand(document, session.selection, { name: 'delete' }, {
-            expectedRevision: document.revision,
-          }),
-        )}
+        onClick={() => deleteFlowSelection({
+          selection: session.selection,
+          expectedRevision: document.revision,
+          deleteSelectedBlocks: true,
+        })}
       >
         <Trash2 size={14} />删除此块
       </button>

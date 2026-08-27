@@ -327,12 +327,14 @@ export function selectionSnapshotFromSession(
   input: {
     readonly scope: 'location' | 'global'
     readonly focus: 'none' | 'text' | 'block' | 'overlay' | 'layer'
+    readonly stateId?: string | null
   },
 ): {
   readonly locationId: string
   readonly revision: number
   readonly sessionGeneration: number
   readonly surfaceKind: CourseAuthoringSurfaceType
+  readonly stateId: string | null
   readonly scope: 'location' | 'global'
   readonly focus: 'none' | 'text' | 'block' | 'overlay' | 'layer'
   readonly itemIds: readonly string[]
@@ -342,6 +344,7 @@ export function selectionSnapshotFromSession(
     revision: session.token.revision,
     sessionGeneration: session.token.generation,
     surfaceKind: session.token.surfaceType,
+    stateId: input.stateId ?? null,
     scope: input.scope,
     focus: input.focus,
     itemIds: session.itemIds,

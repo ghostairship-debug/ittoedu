@@ -13,7 +13,11 @@ import {
   LAYER_REJECT_STALE_REVISION,
   rejectIfStaleDocument,
 } from './globalLayerCommands'
-import { deleteEffectiveLayerItem } from './effectiveLayerCommands'
+import {
+  deleteEffectiveLayerItems,
+  locateCourseLayer,
+  makeEffectiveLayerAuthoringAddress,
+} from './effectiveLayerCommands'
 import { commitCourseProjectMutation } from './courseProjectMutation'
 import {
   controllerTargetIdsForLocations,
@@ -41,6 +45,7 @@ import {
 } from './flowDocumentModel'
 import {
   classifyFlowDeleteIntent,
+  clearFlowEditorSelection,
   flowBlockTargetFromSelection,
   type FlowEditorBlockTarget,
   type FlowEditorSelection,
@@ -51,6 +56,14 @@ export type FlowEditorBlockInput = FlowBlock extends infer Block
     ? Omit<Block, 'id'> & { id?: string }
     : never
   : never
+
+export interface FlowDeleteRequest {
+  readonly selection: FlowEditorSelection
+  readonly expectedRevision: number
+  readonly direction?: 'backward' | 'forward'
+  /** Toolbar delete promotes a text selection to the selected block set after freshness validation. */
+  readonly deleteSelectedBlocks?: boolean
+}
 
 export interface FlowCommandOptions {
   readonly now?: string
@@ -799,24 +812,59 @@ export function executeFlowDelete(
     return deleteFlowText(document, selection, options.direction ?? 'backward', options)
   }
   if (classified.intent === 'overlay-delete') {
-    const overlayId = selection.selectedOverlayIds[0]
-    if (!overlayId) return failCommand('没有可删除的浮层')
-    const overlay = deleteEffectiveLayerItem(document, {
-      authoringAddress: selection.authoringAddress,
-      locationId: selection.locationId,
-    }, options)
+    if (selection.selectedOverlayIds.length === 0) return failCommand('没有可删除的浮层')
+    const targets: Array<{ authoringAddress: string; locationId: string }> = []
+    try {
+      for (const overlayId of selection.selectedOverlayIds) {
+        const located = locateCourseLayer(document, overlayId)
+        if (
+          !located
+          || (located.source !== 'global' && located.source !== 'surface')
+          || (located.source === 'surface' && located.surfaceId !== selection.surfaceId)
+        ) {
+          throw new Error(`找不到当前页面浮层：${overlayId}`)
+        }
+        targets.push({
+          authoringAddress: makeEffectiveLayerAuthoringAddress(document.id, located),
+          locationId: selection.locationId,
+        })
+      }
+    } catch (error) {
+      return failCommand(error instanceof Error ? error.message : '无法解析所选浮层')
+    }
+    const overlay = deleteEffectiveLayerItems(document, targets, options)
     if (!overlay.ok) return failCommand(overlay.reason ?? '无法删除浮层')
+    const nextDocument = overlay.nextDocument ?? document
     return {
       ok: true,
       reason: overlay.reason,
-      nextDocument: overlay.nextDocument,
+      nextDocument,
       historyEntry: overlay.historyEntry,
+      selection: clearFlowSelectionAfterDelete(nextDocument, selection),
     }
   }
   const targets = selection.selectedBlockIds.map((blockId) =>
     flowBlockTargetFromSelection(document, selection, blockId),
   )
-  return deleteFlowEditorBlocks(document, targets, options)
+  const deleted = deleteFlowEditorBlocks(document, targets, options)
+  if (!deleted.ok || !deleted.nextDocument) return deleted
+  return {
+    ...deleted,
+    selection: clearFlowSelectionAfterDelete(deleted.nextDocument, selection),
+  }
+}
+
+function clearFlowSelectionAfterDelete(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+): FlowEditorSelection {
+  const locationId = document.locations.some((location) => location.id === selection.locationId)
+    ? selection.locationId
+    : document.locations.find((location) => (
+      location.kind === 'flow-block' && location.surfaceId === selection.surfaceId
+    ))?.id ?? document.locations.find((location) => location.kind === 'flow-block')?.id
+  if (!locationId) throw new Error('删除后找不到可继续编辑的 Flow 位置')
+  return clearFlowEditorSelection(document, locationId, selection.authoringScope)
 }
 
 export function copyFlowEditorBlocks(

@@ -1,9 +1,5 @@
 import { MAX_SCENE_NODES } from '../../shared/constants'
-import {
-  isNodeMotionAction,
-  isVideoInteractionAction,
-  type InteractionRule,
-} from '../../shared/interactionTypes'
+import type { InteractionRule } from '../../shared/interactionTypes'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -44,6 +40,7 @@ import {
   type V9SlideClipboardPayload,
 } from './v9SlideClipboard'
 import { selectSlideLayers, type SlideAuthoringSession } from './slideAuthoringBackend'
+import { repairRemovedCourseReferences } from './courseReferenceCleanup'
 
 export type {
   V9SlideClipboardItem,
@@ -437,43 +434,6 @@ function isNamedStateOwnedLayer(
     presentationState.layerItemOverrides[base.layerItemId]?.visible === true
 }
 
-function removeNodeReferencesFromInteractions(
-  interactions: InteractionRule[],
-  nodeIds: ReadonlySet<string>,
-): InteractionRule[] {
-  const removedActionIds = new Set<string>()
-  let remaining = interactions.flatMap((rule) => {
-    if ('nodeId' in rule.trigger && nodeIds.has(rule.trigger.nodeId)) {
-      rule.actions.forEach((step) => removedActionIds.add(step.id))
-      return []
-    }
-    rule.actions = rule.actions.filter((step) => {
-      const action = step.action
-      const remove = (isVideoInteractionAction(action) || isNodeMotionAction(action)) &&
-        nodeIds.has(action.nodeId)
-      if (remove) removedActionIds.add(step.id)
-      return !remove
-    })
-    if (rule.actions.length === 0) return []
-    rule.actions[0]!.start = 'after-previous'
-    return [rule]
-  })
-  let removedDependent = true
-  while (removedDependent) {
-    removedDependent = false
-    remaining = remaining.flatMap((rule) => {
-      if (
-        rule.trigger.type !== 'animation.completed' ||
-        !removedActionIds.has(rule.trigger.actionId)
-      ) return [rule]
-      rule.actions.forEach((step) => removedActionIds.add(step.id))
-      removedDependent = true
-      return []
-    })
-  }
-  return remaining
-}
-
 function structurallyDeleteSceneLayers(
   draft: CourseProjectDocument,
   draftScene: SlideSceneDocument,
@@ -495,53 +455,9 @@ function structurallyDeleteSceneLayers(
       }
     }
   })
-  draftScene.interactions = removeNodeReferencesFromInteractions(
-    draftScene.interactions,
-    layerItemIds,
-  )
-  const remainingIds = new Set<string>()
-  draft.globalLayerItems.forEach((entry) => remainingIds.add(entry.item.layerItemId))
-  draft.surfaces.forEach((surface) => {
-    surface.surfaceLayerItems.forEach((entry) => remainingIds.add(entry.item.layerItemId))
-    if (surface.type === 'slide') {
-      surface.scenes.forEach((scene) => {
-        scene.layerItems.forEach((item) => remainingIds.add(item.layerItemId))
-      })
-    } else if (surface.type === 'spatial-2d') {
-      surface.world.layerItems.forEach((item) => remainingIds.add(item.layerItemId))
-    }
-  })
-  const fullyRemoved = new Set([...layerItemIds].filter((id) => !remainingIds.has(id)))
-  if (fullyRemoved.size > 0) {
-    draft.globalInteractions = removeNodeReferencesFromInteractions(
-      draft.globalInteractions,
-      fullyRemoved,
-    )
-    draft.surfaces.forEach((surface) => {
-      if (surface.type !== 'slide') return
-      surface.scenes.forEach((scene) => {
-        if (scene === draftScene) return
-        scene.interactions = removeNodeReferencesFromInteractions(
-          scene.interactions,
-          fullyRemoved,
-        )
-      })
-    })
-  }
-  const visitBindings = (item: LayerItem): void => {
-    if (item.kind !== 'runtime' || !item.runtime.nodeBindings) return
-    for (const [binding, targetId] of Object.entries(item.runtime.nodeBindings)) {
-      if (layerItemIds.has(targetId)) delete item.runtime.nodeBindings[binding]
-    }
-  }
-  draft.globalLayerItems.forEach((entry) => visitBindings(entry.item))
-  draft.surfaces.forEach((surface) => {
-    surface.surfaceLayerItems.forEach((entry) => visitBindings(entry.item))
-    if (surface.type === 'slide') {
-      surface.scenes.forEach((scene) => scene.layerItems.forEach(visitBindings))
-    } else if (surface.type === 'spatial-2d') {
-      surface.world.layerItems.forEach(visitBindings)
-    }
+  repairRemovedCourseReferences(draft, {
+    removedLocationIds: new Set(),
+    removedLayerItemIds: layerItemIds,
   })
 }
 

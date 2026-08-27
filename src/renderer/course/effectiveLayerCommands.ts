@@ -18,6 +18,7 @@ import type {
 } from '../../shared/courseProjectTypes'
 import type { TextNode } from '../../shared/projectTypes'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
+import { synchronizeCourseTeacherControllerControls } from '../../shared/teacherControllerConsistency'
 import {
   CONTROLLER_MOVE_REASON,
   CROSS_OWNER_REORDER_REASON,
@@ -26,7 +27,6 @@ import {
   allocateCourseLayerOrder,
   carrierForLayerItem,
   collectCourseLayerItemIds,
-  deleteGlobalLayerItem,
   duplicateGlobalLayerItem,
   failLayerCommand,
   isTeacherControllerLayerItem,
@@ -47,6 +47,7 @@ import {
   type LayerCommandOptions,
   type LayerCommandResult,
 } from './globalLayerCommands'
+import { repairRemovedCourseReferences } from './courseReferenceCleanup'
 import { commitSlideProjectMutation } from './slideEditorCommands'
 import {
   spatialLayerCoordinateSpace,
@@ -781,41 +782,92 @@ export function deleteEffectiveLayerItem(
   target: EffectiveLayerCommandTarget,
   options: LayerCommandOptions = {},
 ): LayerCommandResult {
+  return deleteEffectiveLayerItems(document, [target], options)
+}
+
+interface EffectiveLayerDeletePlan {
+  readonly target: EffectiveLayerCommandTarget
+  readonly located: LocatedCourseLayer
+  readonly mode: 'structural' | 'state-hide'
+}
+
+export function deleteEffectiveLayerItems(
+  document: CourseProjectDocument,
+  targets: readonly EffectiveLayerCommandTarget[],
+  options: LayerCommandOptions = {},
+): LayerCommandResult {
   const stale = rejectIfStaleDocument(document, options.expectedRevision)
   if (stale) return stale
   try {
-    const located = resolveEffectiveLayerTarget(document, target)
-    if (located.source === 'global') {
-      return deleteGlobalLayerItem(document, target, options)
-    }
-    const locked = refuseLockedLayerWrite(located.item, false)
-    if (locked) return locked
-    const stateView = namedState(document, located, target.stateId)
-    if (stateView) {
-      if (isNamedStateOwnedLayer(located.item, stateView.state)) {
-        return runMutation(document, (draft) => {
-          removeLocatedItem(draft, located)
-        }, `已删除“${located.item.label}”`, options)
+    if (targets.length === 0) return failLayerCommand('没有可删除的选择')
+    const seen = new Set<string>()
+    const plans: EffectiveLayerDeletePlan[] = []
+    for (const target of targets) {
+      const located = resolveEffectiveLayerTarget(document, target)
+      if (seen.has(located.item.layerItemId)) {
+        return failLayerCommand(`所选图层重复：${located.item.layerItemId}`)
       }
-      const override = stateView.state.layerItemOverrides[located.item.layerItemId] ?? {}
-      if (override.visible === false || (override.visible === undefined && !located.item.visible)) {
-        return failLayerCommand(`“${located.item.label}”已在当前状态隐藏`)
+      seen.add(located.item.layerItemId)
+      const stateView = namedState(document, located, target.stateId)
+      if (target.stateId && located.source === 'scene' && !stateView) {
+        return failLayerCommand('当前命名状态已失效')
       }
-      return runMutation(document, (draft) => {
-        const nextState = namedState(draft, located, target.stateId)
-        if (!nextState) throw new Error('当前命名状态已失效')
-        const nextOverride = nextState.state.layerItemOverrides[located.item.layerItemId] ?? {}
-        if (located.item.visible) nextOverride.visible = false
-        else delete nextOverride.visible
-        nextState.state.layerItemOverrides[located.item.layerItemId] = nextOverride
-        deleteEmptyOverride(nextState.state.layerItemOverrides, located.item.layerItemId)
-      }, `已从当前状态隐藏“${located.item.label}”`, options)
+      const effectiveLocked = stateView?.state.layerItemOverrides[located.item.layerItemId]?.locked
+        ?? located.item.locked
+      if (effectiveLocked) return failLayerCommand(LAYER_REJECT_LOCKED)
+      if (stateView && !isNamedStateOwnedLayer(located.item, stateView.state)) {
+        const override = stateView.state.layerItemOverrides[located.item.layerItemId] ?? {}
+        const effectiveVisible = override.visible ?? located.item.visible
+        if (!effectiveVisible) {
+          return failLayerCommand(`“${located.item.label}”已在当前状态隐藏`)
+        }
+        plans.push({ target, located, mode: 'state-hide' })
+      } else {
+        plans.push({ target, located, mode: 'structural' })
+      }
     }
+
+    const structuralIds = new Set(
+      plans.filter((plan) => plan.mode === 'structural')
+        .map((plan) => plan.located.item.layerItemId),
+    )
+    const removedTeacherController = plans.some((plan) => (
+      plan.mode === 'structural' && isTeacherControllerLayerItem(plan.located.item)
+    ))
+    const reason = plans.length === 1
+      ? plans[0]!.mode === 'state-hide'
+        ? `已从当前状态隐藏“${plans[0]!.located.item.label}”`
+        : `已删除“${plans[0]!.located.item.label}”`
+      : plans.every((plan) => plan.mode === 'structural')
+        ? `已删除 ${plans.length} 个图层`
+        : `已删除或隐藏 ${plans.length} 个图层`
+
     return runMutation(document, (draft) => {
-      removeLocatedItem(draft, located)
-    }, `已删除“${located.item.label}”`, options)
+      for (const plan of plans) {
+        const current = locateCourseLayer(draft, plan.located.item.layerItemId)
+        if (!current) throw new Error(`找不到图层：${plan.located.item.layerItemId}`)
+        if (plan.mode === 'structural') {
+          removeLocatedItem(draft, current)
+          continue
+        }
+        const nextState = namedState(draft, current, plan.target.stateId)
+        if (!nextState) throw new Error('当前命名状态已失效')
+        const nextOverride = nextState.state.layerItemOverrides[current.item.layerItemId] ?? {}
+        if (current.item.visible) nextOverride.visible = false
+        else delete nextOverride.visible
+        nextState.state.layerItemOverrides[current.item.layerItemId] = nextOverride
+        deleteEmptyOverride(nextState.state.layerItemOverrides, current.item.layerItemId)
+      }
+      if (structuralIds.size > 0) {
+        repairRemovedCourseReferences(draft, {
+          removedLocationIds: new Set(),
+          removedLayerItemIds: structuralIds,
+        })
+      }
+      if (removedTeacherController) synchronizeCourseTeacherControllerControls(draft)
+    }, reason, options)
   } catch (error) {
-    return failLayerCommand(error instanceof Error ? error.message : '无法删除图层')
+    return failLayerCommand(error instanceof Error ? error.message : '无法删除所选图层')
   }
 }
 

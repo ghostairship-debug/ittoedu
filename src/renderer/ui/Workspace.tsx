@@ -1406,6 +1406,9 @@ function FlowLocationWorkspace(_props: WorkspaceProps) {
             onProjectChange={(result) => {
               useEditorStore.getState().applyFlowCommand(result)
             }}
+            onDeleteRequest={(request) => (
+              useEditorStore.getState().deleteFlowSelection(request)
+            )}
             onSelectionChange={(next) => {
               useEditorStore.getState().applyFlowSelection(next)
             }}

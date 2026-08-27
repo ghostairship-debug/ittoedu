@@ -143,6 +143,7 @@ import {
 import {
   CROSS_OWNER_REORDER_REASON,
   deleteEffectiveLayerItem,
+  deleteEffectiveLayerItems,
   duplicateEffectiveLayerItem,
   findGlobalTeacherController,
   moveEffectiveLayerOwner,
@@ -153,6 +154,7 @@ import {
   restoreDefaultTeacherController,
   setGlobalLayerLocationVisibility,
   setGlobalLayerVisibleAtLocation,
+  LAYER_REJECT_STALE_REVISION,
   type EffectiveLayerOwnerDestination,
   type EffectiveLayerPropertyPatch,
   type LayerCommandResult,
@@ -231,6 +233,7 @@ import {
 } from '../course/v9SlideContentCommands'
 import {
   addSlideSceneInteractionRule,
+  deleteSlideSceneLayers,
   executeSlideSceneAction,
   shouldIgnoreSlideLayerDeleteForFocus,
   updateSlideSceneInteractionRule,
@@ -284,6 +287,7 @@ import {
   insertFlowEditorBlock,
   updateFlowEditorBlock,
   type FlowCommandResult,
+  type FlowDeleteRequest,
 } from '../course/flowEditorCommands'
 import {
   enterFlowGlobalAuthoring,
@@ -373,6 +377,7 @@ import {
   buildSpatialAuthoringSnapshot,
   openSpatialAuthoringSession,
   redoSpatialAuthoring,
+  selectSpatialEditorLayers,
   selectSpatialLayers,
   setSpatialEditingScope,
   undoSpatialAuthoring,
@@ -962,6 +967,81 @@ function commandTargetForRow(row: EffectiveLayerProjectionRow) {
     locationId: input.locationId,
     stateId: input.stateId,
   }
+}
+
+function commandTargetsForItemIds(
+  state: Pick<EditorState, 'slideBackend' | 'slideCandidateSnapshot' | 'spatialSession' | 'flowSession'>,
+  itemIds: readonly string[],
+) {
+  if (new Set(itemIds).size !== itemIds.length) {
+    throw new Error('当前选择包含重复元素，请重新选择')
+  }
+  const rows = buildCandidateEffectiveLayers(state)?.unifiedRows ?? []
+  const rowById = new Map(rows.map((row) => [row.id, row]))
+  return itemIds.map((itemId) => {
+    const row = rowById.get(itemId)
+    if (!row) throw new Error(`所选元素已失效：${itemId}`)
+    return { row, target: commandTargetForRow(row) }
+  })
+}
+
+function sameEditorSelectionSnapshot(
+  left: EditorSelectionSnapshot,
+  right: EditorSelectionSnapshot | null,
+): boolean {
+  const leftRange = left.textRange ?? null
+  const rightRange = right?.textRange ?? null
+  const sameTextRange = leftRange === null
+    ? rightRange === null
+    : rightRange !== null
+      && leftRange.blockId === rightRange.blockId
+      && leftRange.start === rightRange.start
+      && leftRange.end === rightRange.end
+      && leftRange.listItemId === rightRange.listItemId
+      && leftRange.tableRowId === rightRange.tableRowId
+      && leftRange.tableColumnId === rightRange.tableColumnId
+  return right !== null
+    && left.locationId === right.locationId
+    && left.revision === right.revision
+    && left.sessionGeneration === right.sessionGeneration
+    && left.surfaceKind === right.surfaceKind
+    && (left.stateId ?? null) === (right.stateId ?? null)
+    && left.scope === right.scope
+    && left.focus === right.focus
+    && sameTextRange
+    && left.itemIds.length === right.itemIds.length
+    && left.itemIds.every((itemId, index) => itemId === right.itemIds[index])
+}
+
+function sameStringSequence(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index])
+}
+
+function sameFlowEditorSelection(
+  left: FlowEditorSelection,
+  right: FlowEditorSelection,
+): boolean {
+  const leftRange = left.textRange
+  const rightRange = right.textRange
+  const sameRange = leftRange === null
+    ? rightRange === null
+    : rightRange !== null
+      && leftRange.blockId === rightRange.blockId
+      && leftRange.start === rightRange.start
+      && leftRange.end === rightRange.end
+      && leftRange.listItemId === rightRange.listItemId
+      && leftRange.tableRowId === rightRange.tableRowId
+      && leftRange.tableColumnId === rightRange.tableColumnId
+  return left.locationId === right.locationId
+    && left.surfaceId === right.surfaceId
+    && left.authoringScope === right.authoringScope
+    && left.focus === right.focus
+    && left.selectedBlockId === right.selectedBlockId
+    && sameStringSequence(left.selectedBlockIds, right.selectedBlockIds)
+    && sameStringSequence(left.selectedOverlayIds, right.selectedOverlayIds)
+    && sameRange
+    && left.authoringAddress === right.authoringAddress
 }
 
 const SPATIAL_CROSS_OWNER_SELECTION_REASON = 'Spatial 暂不支持跨范围多选，请先取消当前选择。'
@@ -2031,6 +2111,7 @@ export interface EditorState {
     result: FlowCommandResult | FlowSharedAuthoringResult,
     extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar },
   ): FlowCommandResult | FlowSharedAuthoringResult
+  deleteFlowSelection(request: FlowDeleteRequest): FlowCommandResult
   applyFlowSelection(selection: FlowEditorSelection | null): void
   setFlowTextEdit(edit: FlowTextEditSession | null): void
   insertFlowLibraryMedia(
@@ -3760,7 +3841,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   const persistSpatialLayerCommand = (
     result: LayerCommandResult,
-    extra?: { statusMessage?: string | null },
+    extra?: { statusMessage?: string | null; selectionIds?: readonly string[] },
   ): SpatialCommandResult => {
     const session = get().spatialSession
     if (!session) {
@@ -3780,8 +3861,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const history = result.historyEntry
       ? commitSpatialAuthoringHistory(session.history, result.nextDocument)
       : { ...session.history, present: result.nextDocument }
+    const selection = extra?.selectionIds === undefined
+      ? session.selection
+      : selectSpatialEditorLayers({
+          project: result.nextDocument,
+          locationId: session.selection.locationId,
+          selectionIds: extra.selectionIds,
+        })
     return persistSpatialResult(
-      succeedSpatialCommand({ ...session, history }, Boolean(result.historyEntry)),
+      succeedSpatialCommand({ ...session, history, selection }, Boolean(result.historyEntry)),
       extra,
     )
   }
@@ -3968,12 +4056,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
       : current.componentPackages
     const nextSession: FlowAuthoringSession = { history, selection }
-    const nextCourseAuthoringSession = courseSessionAfterSurfaceHistory(
+    const historyAdjustedCourseSession = courseSessionAfterSurfaceHistory(
       current.courseAuthoringSession,
       history.present,
       selection.locationId,
       extra,
-    )
+    ) ?? current.courseAuthoringSession
+    const switchedCourseSession = historyAdjustedCourseSession
+      ? switchCourseAuthoringLocation(historyAdjustedCourseSession, {
+          locationId: selection.locationId,
+          surfaceType: surfaceTypeForLocation(history.present, selection.locationId),
+          revision: history.present.revision,
+        })
+      : null
+    const nextCourseAuthoringSession = switchedCourseSession && 'token' in switchedCourseSession
+      ? updateCourseAuthoringSessionItems(
+          switchedCourseSession,
+          selection.selectedOverlayIds.length > 0
+            ? selection.selectedOverlayIds
+            : selection.selectedBlockIds,
+        )
+      : undefined
     set({
       flowSession: nextSession,
       flowTextEdit: extra.clearTextEdit ? null : current.flowTextEdit,
@@ -5820,6 +5923,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return persistFlowResult(result, extra)
     },
 
+    deleteFlowSelection(request) {
+      const flow = get().flowSession
+      if (
+        !flow
+        || flow.history.present.revision !== request.expectedRevision
+        || !sameFlowEditorSelection(flow.selection, request.selection)
+      ) {
+        return persistFlowResult({
+          ok: false,
+          reason: LAYER_REJECT_STALE_REVISION,
+          historyEntry: false,
+        }) as FlowCommandResult
+      }
+      const selection = request.deleteSelectedBlocks
+        ? selectFlowEditorBlocks(
+            flow.history.present,
+            flow.selection.locationId,
+            flow.selection.selectedBlockIds,
+          )
+        : flow.selection
+      const result = executeFlowDelete(flow.history.present, selection, {
+        expectedRevision: request.expectedRevision,
+        direction: request.direction,
+      })
+      return persistFlowResult(result, {
+        clearTextEdit: result.ok && selection.focus !== 'text',
+      }) as FlowCommandResult
+    },
+
     applyFlowSelection(selection) {
       const flow = get().flowSession
       if (!flow) return
@@ -6984,11 +7116,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const scope = state.editingScope === 'global' ? 'global' : 'location'
       const focusKind = resolveEditorFocus(state, focus)
       const itemIds = collectLiveEditorItemIds(state)
+      const stateId = selectSlideAuthoringBackend(state)?.getSession().selection.stateId ?? null
       return createEditorSelectionSnapshot(
-        selectionSnapshotFromSession(
-          updateCourseAuthoringSessionItems(session, itemIds),
-          { scope, focus: focusKind },
-        ),
+        {
+          ...selectionSnapshotFromSession(
+            updateCourseAuthoringSessionItems(session, itemIds),
+            { scope, focus: focusKind, stateId },
+          ),
+          textRange: state.flowSession?.selection.textRange ?? null,
+        },
       )
     },
 
@@ -6998,6 +7134,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const reason = '当前没有可路由的编辑会话'
         set({ errorMessage: reason, statusMessage: null })
         return { actionId, ok: false, reason, adapter: 'none' }
+      }
+      const currentLive = get().createLiveEditorSelectionSnapshot()
+      if (!sameEditorSelectionSnapshot(live, currentLive)) {
+        set({ errorMessage: LAYER_REJECT_STALE_REVISION, statusMessage: null })
+        return {
+          actionId,
+          ok: false,
+          reason: LAYER_REJECT_STALE_REVISION,
+          adapter: 'none',
+        }
       }
       const result = routeEditorActionCore({
         actionId,
@@ -7013,16 +7159,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
               if (live.itemIds.length === 0) {
                 return { ok: false, reason: '没有可删除的选择' }
               }
-              for (const nodeId of live.itemIds) {
-                const row = findCandidateLayerRow(get(), nodeId)
-                if (!row) continue
-                persistLayerCommand(deleteEffectiveLayerItem(
-                  backend.getSession().history.present,
-                  commandTargetForRow(row),
-                  { expectedRevision: backend.getSnapshot().revision },
-                ))
+              const resolved = commandTargetsForItemIds(get(), live.itemIds)
+              if (resolved.every(({ row }) => row.owner === 'scene')) {
+                const deleted = deleteSlideSceneLayers(
+                  backend.getSession(),
+                  live.itemIds,
+                  { expectedRevision: live.revision },
+                )
+                persistCandidateResult(deleted)
+                return {
+                  ok: deleted.ok,
+                  reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+                }
               }
-              return { ok: true, reason: live.scope === 'global' ? '全局元素已删除' : '节点已删除' }
+              const deleted = deleteEffectiveLayerItems(
+                backend.getSession().history.present,
+                resolved.map(({ target }) => target),
+                { expectedRevision: live.revision },
+              )
+              persistLayerCommand(deleted)
+              return {
+                ok: deleted.ok,
+                reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+              }
             },
           },
           flow: {
@@ -7033,23 +7192,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
               const flow = get().flowSession
               if (!flow) return { ok: false, reason: '当前不是 Flow 编辑会话' }
               const route = resolveFlowDeleteRoute(live)
-              if (route === 'document') {
-                persistFlowResult(executeFlowDelete(
-                  flow.history.present,
-                  flow.selection,
-                  { expectedRevision: flow.history.present.revision },
-                ))
-                return { ok: true, reason: '已删除' }
+              if (route === 'refuse') return { ok: false, reason: '没有可删除的选择' }
+              const deleted = executeFlowDelete(
+                flow.history.present,
+                flow.selection,
+                { expectedRevision: live.revision },
+              )
+              persistFlowResult(deleted)
+              return {
+                ok: deleted.ok,
+                reason: deleted.reason ?? (deleted.ok ? '已删除' : '无法删除'),
               }
-              if (route === 'overlay') {
-                persistFlowResult(executeFlowSharedDelete(
-                  flow.history.present,
-                  flow.selection,
-                  { expectedRevision: flow.history.present.revision },
-                ))
-                return { ok: true, reason: '已删除浮层' }
-              }
-              return { ok: false, reason: '没有可删除的选择' }
             },
           },
           spatial: {
@@ -7065,10 +7218,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
               if (live.itemIds.length === 0) {
                 return { ok: false, reason: '没有可删除的选择' }
               }
-              for (const nodeId of live.itemIds) {
-                get().deleteNode(nodeId)
+              const resolved = commandTargetsForItemIds(get(), live.itemIds)
+              if (resolved.every(({ row }) => row.owner === 'world')) {
+                const deleted = deleteSpatialWorldLayersReportingReferences(spatial, {
+                  expectedRevision: live.revision,
+                })
+                persistSpatialResult(deleted, {
+                  statusMessage: deleted.cleanupSummary || deleted.reason || '节点已删除',
+                })
+                return {
+                  ok: deleted.ok,
+                  reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+                }
               }
-              return { ok: true, reason: '节点已删除' }
+              const deleted = deleteEffectiveLayerItems(
+                spatial.history.present,
+                resolved.map(({ target }) => target),
+                { expectedRevision: live.revision },
+              )
+              persistSpatialLayerCommand(deleted, { selectionIds: [] })
+              return {
+                ok: deleted.ok,
+                reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+              }
             },
           },
           global: {
@@ -7079,31 +7251,44 @@ export const useEditorStore = create<EditorState>((set, get) => {
               const current = get()
               const flow = current.flowSession
               if (flow) {
-                persistFlowResult(executeFlowSharedDelete(
+                const deleted = executeFlowDelete(
                   flow.history.present,
                   flow.selection,
-                  { expectedRevision: flow.history.present.revision },
-                ))
-                return { ok: true, reason: '已删除' }
+                  { expectedRevision: live.revision },
+                )
+                persistFlowResult(deleted)
+                return {
+                  ok: deleted.ok,
+                  reason: deleted.reason ?? (deleted.ok ? '已删除' : '无法删除'),
+                }
               }
               const backend = selectSlideAuthoringBackend(current)
               if (backend && live.itemIds.length > 0) {
-                for (const nodeId of live.itemIds) {
-                  const row = findCandidateLayerRow(current, nodeId)
-                  if (!row) continue
-                  persistLayerCommand(deleteEffectiveLayerItem(
-                    backend.getSession().history.present,
-                    commandTargetForRow(row),
-                    { expectedRevision: backend.getSnapshot().revision },
-                  ))
+                const resolved = commandTargetsForItemIds(current, live.itemIds)
+                const deleted = deleteEffectiveLayerItems(
+                  backend.getSession().history.present,
+                  resolved.map(({ target }) => target),
+                  { expectedRevision: live.revision },
+                )
+                persistLayerCommand(deleted)
+                return {
+                  ok: deleted.ok,
+                  reason: deleted.reason ?? (deleted.ok ? '全局元素已删除' : '无法删除全局元素'),
                 }
-                return { ok: true, reason: '全局元素已删除' }
               }
-              if (current.spatialSession) {
-                for (const nodeId of [...current.selectedNodeIds]) {
-                  current.deleteNode(nodeId)
+              const spatial = current.spatialSession
+              if (spatial && live.itemIds.length > 0) {
+                const resolved = commandTargetsForItemIds(current, live.itemIds)
+                const deleted = deleteEffectiveLayerItems(
+                  spatial.history.present,
+                  resolved.map(({ target }) => target),
+                  { expectedRevision: live.revision },
+                )
+                persistSpatialLayerCommand(deleted, { selectionIds: [] })
+                return {
+                  ok: deleted.ok,
+                  reason: deleted.reason ?? (deleted.ok ? '全局元素已删除' : '无法删除全局元素'),
                 }
-                return { ok: true, reason: '全局元素已删除' }
               }
               return { ok: false, reason: '没有可删除的选择' }
             },
@@ -10113,25 +10298,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (get().spatialContentEdit || get().editingTextNodeId) return
         const row = findCandidateLayerRow(get(), nodeId)
         if (!row) return
-        if (row.owner === 'world') {
-          persistSpatialResult(selectSpatialLayers(spatial, { layerItemIds: [nodeId] }, {
-            expectedRevision: spatial.history.present.revision,
-          }))
-          const live = get().spatialSession
-          if (!live) return
-          const deleted = deleteSpatialWorldLayersReportingReferences(live, {
-            expectedRevision: live.history.present.revision,
-          })
-          persistSpatialResult(deleted, {
-            statusMessage: deleted.cleanupSummary || '节点已删除',
-          })
-          return
-        }
-        persistSpatialLayerCommand(deleteEffectiveLayerItem(
+        persistSpatialLayerCommand(deleteEffectiveLayerItems(
           spatial.history.present,
-          commandTargetForRow(row),
+          [commandTargetForRow(row)],
           { expectedRevision: spatial.history.present.revision },
-        ))
+        ), {
+          selectionIds: spatial.selection.selectionIds.filter((id) => id !== nodeId),
+        })
         return
       }
       const flow = get().flowSession
@@ -10156,18 +10329,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })) return
         const row = findCandidateLayerRow(get(), nodeId)
         if (!row) return
-        if (backend.getSession().scope === 'scene' && backend.getSession().selection.stateId !== null) {
-          get().updateNode(nodeId, { visible: false })
-          set({
-            selectedNodeId: null,
-            selectedNodeIds: [],
-            statusMessage: '元素已在当前状态中隐藏；基础元素仍保留',
-          })
+        if (row.owner === 'scene') {
+          persistCandidateResult(deleteSlideSceneLayers(
+            backend.getSession(),
+            [nodeId],
+            { expectedRevision: backend.getSnapshot().revision },
+          ))
           return
         }
-        persistLayerCommand(deleteEffectiveLayerItem(
+        persistLayerCommand(deleteEffectiveLayerItems(
           backend.getSession().history.present,
-          commandTargetForRow(row),
+          [commandTargetForRow(row)],
           { expectedRevision: backend.getSnapshot().revision },
         ))
         return

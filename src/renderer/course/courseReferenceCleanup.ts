@@ -44,18 +44,24 @@ function remainingControllerTargetIds(project: CourseProjectDocument): Set<strin
   return controllerTargetIdsForLocations(project.locations)
 }
 
-function remainingLayerItemIds(project: CourseProjectDocument): Set<string> {
-  const ids = new Set(project.globalLayerItems.map((entry) => entry.item.layerItemId))
+function visitAllLayerItems(
+  project: CourseProjectDocument,
+  visit: (item: LayerItem) => void,
+): void {
+  project.globalLayerItems.forEach((entry) => visit(entry.item))
   project.surfaces.forEach((surface) => {
-    surface.surfaceLayerItems.forEach((entry) => ids.add(entry.item.layerItemId))
+    surface.surfaceLayerItems.forEach((entry) => visit(entry.item))
     if (surface.type === 'slide') {
-      surface.scenes.forEach((scene) => (
-        scene.layerItems.forEach((item) => ids.add(item.layerItemId))
-      ))
+      surface.scenes.forEach((scene) => scene.layerItems.forEach(visit))
     } else if (surface.type === 'spatial-2d') {
-      surface.world.layerItems.forEach((item) => ids.add(item.layerItemId))
+      surface.world.layerItems.forEach(visit)
     }
   })
+}
+
+function remainingLayerItemIds(project: CourseProjectDocument): Set<string> {
+  const ids = new Set<string>()
+  visitAllLayerItems(project, (item) => ids.add(item.layerItemId))
   return ids
 }
 
@@ -241,6 +247,59 @@ function repairProjectInteractionReferences(
   })
 }
 
+function removeLayerItemReferences(
+  project: CourseProjectDocument,
+  removedLayerItemIds: ReadonlySet<string>,
+): void {
+  project.surfaces.forEach((surface) => {
+    if (surface.type !== 'slide') return
+    surface.scenes.forEach((scene) => {
+      scene.presentation?.states.forEach((state) => {
+        removedLayerItemIds.forEach((layerItemId) => {
+          delete state.layerItemOverrides[layerItemId]
+        })
+        if (state.layerItemOrder) {
+          state.layerItemOrder = state.layerItemOrder.filter(
+            (layerItemId) => !removedLayerItemIds.has(layerItemId),
+          )
+          if (state.layerItemOrder.length === 0) delete state.layerItemOrder
+        }
+      })
+    })
+  })
+
+  visitAllLayerItems(project, (item) => {
+    if (item.kind !== 'runtime' || !item.runtime.nodeBindings) return
+    const bindings = item.runtime.nodeBindings
+    Object.entries(bindings).forEach(([binding, targetId]) => {
+      if (removedLayerItemIds.has(targetId)) delete bindings[binding]
+    })
+    if (Object.keys(bindings).length === 0) {
+      delete item.runtime.nodeBindings
+    }
+  })
+
+  project.surfaces.forEach((surface) => {
+    if (surface.type !== 'spatial-2d') return
+    if (surface.world.paths) {
+      surface.world.paths = surface.world.paths.flatMap((path) => {
+        const layerItemIds = path.layerItemIds.filter((id) => !removedLayerItemIds.has(id))
+        return layerItemIds.length === 0 ? [] : [{ ...path, layerItemIds }]
+      })
+    }
+    if (surface.world.relations) {
+      surface.world.relations = surface.world.relations.filter((relation) => (
+        !removedLayerItemIds.has(relation.sourceLayerItemId)
+        && !removedLayerItemIds.has(relation.targetLayerItemId)
+      ))
+    }
+    surface.semanticZoom = surface.semanticZoom.flatMap((rule) => {
+      const layerItemIds = rule.layerItemIds.filter((id) => !removedLayerItemIds.has(id))
+      return layerItemIds.length === 0 ? [] : [{ ...rule, layerItemIds }]
+    })
+  })
+}
+
 function removeControllerTargetReferences(
   project: CourseProjectDocument,
   removedIds: ReadonlySet<string>,
@@ -301,6 +360,9 @@ export function repairRemovedCourseReferences(
       removedInteractionSceneIds,
       removedLayerItemIds,
     )
+  }
+  if (removedLayerItemIds.size > 0) {
+    removeLayerItemReferences(project, removedLayerItemIds)
   }
 
   const removedControllerTargetIds = unresolvedIds(

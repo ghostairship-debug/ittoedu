@@ -337,6 +337,32 @@ export function selectFlowGlobalScope(
   return selectFlowOverlay(project, locationId, overlayIds, 'global')
 }
 
+export function clearFlowEditorSelection(
+  project: CourseProjectDocument,
+  locationId: string,
+  authoringScope: FlowAuthoringScope = 'page',
+): FlowEditorSelection {
+  const location = requireFlowLocation(project, locationId)
+  return freezeSelection({
+    locationId,
+    surfaceId: location.surfaceId,
+    authoringScope,
+    focus: 'idle',
+    selectedBlockId: null,
+    selectedBlockIds: [],
+    selectedOverlayIds: [],
+    textRange: null,
+    authoringAddress: makeAuthoringAddress({
+      projectId: project.id,
+      scope: authoringScope === 'global' ? 'global' : 'surface',
+      surfaceId: authoringScope === 'global' ? undefined : location.surfaceId,
+      carrier: 'native',
+      layerItemId: locationId,
+      field: 'scope',
+    }),
+  })
+}
+
 export function classifyFlowDeleteIntent(selection: FlowEditorSelection): {
   intent: FlowDeleteIntent
   reason?: string

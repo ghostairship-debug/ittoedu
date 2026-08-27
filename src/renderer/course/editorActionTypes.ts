@@ -33,13 +33,26 @@ export interface EditorSelectionItem {
   readonly locked?: boolean
 }
 
+export interface EditorTextRangeSnapshot {
+  readonly blockId: string
+  readonly start: number
+  readonly end: number
+  readonly listItemId?: string
+  readonly tableRowId?: string
+  readonly tableColumnId?: string
+}
+
 export interface EditorSelectionSnapshot {
   readonly locationId: string
   readonly revision: number
   readonly sessionGeneration: number
   readonly surfaceKind: EditorSurfaceKind
+  /** Active Slide named state. Null for base Slide, Flow, and Spatial editing. */
+  readonly stateId?: string | null
   readonly scope: EditorAuthoringScope
   readonly focus: EditorFocusKind
+  /** Exact Flow text caret/range. Null for non-text selections and non-Flow surfaces. */
+  readonly textRange?: EditorTextRangeSnapshot | null
   readonly itemIds: readonly string[]
   readonly items?: readonly EditorSelectionItem[]
 }
@@ -113,8 +126,12 @@ export function createEditorSelectionSnapshot(
   const items = input.items
     ? Object.freeze(input.items.map((item) => Object.freeze({ ...item })))
     : undefined
+  const textRange = input.textRange
+    ? Object.freeze({ ...input.textRange })
+    : null
   return Object.freeze({
     ...input,
+    textRange,
     itemIds,
     items,
   })

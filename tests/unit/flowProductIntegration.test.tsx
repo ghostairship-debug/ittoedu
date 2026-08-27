@@ -66,6 +66,7 @@ function FlowWorkspacePropertiesHarness() {
           view={view}
           selection={session.selection}
           onProjectChange={(result) => useEditorStore.getState().applyFlowCommand(result)}
+          onDeleteRequest={(request) => useEditorStore.getState().deleteFlowSelection(request)}
           onSelectionChange={(selection) => useEditorStore.getState().applyFlowSelection(selection)}
           onTextEditChange={(edit) => useEditorStore.getState().setFlowTextEdit(edit)}
         />
@@ -88,6 +89,65 @@ afterEach(() => {
 })
 
 describe('Flow product shell wiring', () => {
+  it('rejects Delete from stale rendered Flow props without overwriting newer store content', () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    useEditorStore.getState().createNewFlowProject()
+    const initial = useEditorStore.getState().flowSession
+    if (!initial) throw new Error('expected Flow session')
+    const surface = flowSurfaceIn(initial.history.present, initial.selection.surfaceId)
+    const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph) throw new Error('expected Flow paragraph')
+    const staleSelection = selectFlowEditorBlocks(
+      initial.history.present,
+      initial.selection.locationId,
+      [paragraph.id],
+    )
+    useEditorStore.getState().applyFlowSelection(staleSelection)
+    const staleProject = flowDocument()
+    const staleView = buildFlowEditorView({
+      project: staleProject,
+      locationId: staleSelection.locationId,
+    })
+    const onProjectChange = vi.fn()
+    const onDeleteRequest = vi.fn((request) => (
+      useEditorStore.getState().deleteFlowSelection(request)
+    ))
+    render(
+      <FlowWorkspace
+        project={staleProject}
+        view={staleView}
+        selection={staleSelection}
+        onProjectChange={onProjectChange}
+        onDeleteRequest={onDeleteRequest}
+      />,
+    )
+    const inserted = insertFlowEditorBlock(flowDocument(), {
+      surfaceId: surface.id,
+      parentId: null,
+      index: surface.blocks.length,
+      block: { type: 'paragraph', text: '新版本内容' },
+    }, { expectedRevision: flowDocument().revision })
+    useEditorStore.getState().applyFlowCommand(inserted)
+    const beforeDocument = flowDocument()
+    const beforeHistory = useEditorStore.getState().flowSession!.history.past
+    const beforeSelection = useEditorStore.getState().flowSession!.selection
+
+    fireEvent.keyDown(screen.getByTestId(`flow-block-${paragraph.id}`), { key: 'Delete' })
+
+    expect(onDeleteRequest).toHaveBeenCalledOnce()
+    expect(onProjectChange).not.toHaveBeenCalled()
+    expect(flowDocument()).toBe(beforeDocument)
+    expect(useEditorStore.getState().flowSession!.history.past).toBe(beforeHistory)
+    expect(useEditorStore.getState().flowSession!.selection).toBe(beforeSelection)
+    expect(flowSurface().blocks.some((block) => block.id === paragraph.id)).toBe(true)
+    expect(flowSurface().blocks.some((block) => (
+      block.type === 'paragraph' && block.text === '新版本内容'
+    ))).toBe(true)
+  })
+
   it('keeps default new project on Slide and adds a visible blank Flow entry without removing Spatial', () => {
     expect(flowDocument().surfaces[0]?.type).toBe('slide')
     expect(useEditorStore.getState().flowSession).toBeNull()

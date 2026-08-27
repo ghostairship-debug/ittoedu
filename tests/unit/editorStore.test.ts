@@ -1809,32 +1809,93 @@ describe('scene presentation states', () => {
     })
   })
 
-  it('adds and deletes nodes locally in a state without destroying the base identity', () => {
+  it('deletes state-owned nodes structurally and hides inherited nodes in a named state', () => {
     const store = useEditorStore.getState()
+    store.addTextNode(40, 60)
+    const inheritedId = activeScene().nodes[0]!.id
     store.addPresentationState('反馈')
     const stateId = useEditorStore.getState().activePresentationStateId!
     useEditorStore.getState().addRectangleNode(120, 140)
     const sceneAfterAdd = activeScene()
-    const nodeId = sceneAfterAdd.nodes[0]!.id
+    const stateOwnedId = sceneAfterAdd.nodes.find((node) => node.id !== inheritedId)!.id
 
-    expect(sceneAfterAdd.nodes[0]).toMatchObject({ visible: false })
-    expect(materializeScene(sceneAfterAdd, stateId).nodes[0]).toMatchObject({
+    expect(sceneAfterAdd.nodes.find((node) => node.id === stateOwnedId)).toMatchObject({ visible: false })
+    expect(materializeScene(sceneAfterAdd, stateId).nodes.find((node) => node.id === stateOwnedId))
+      .toMatchObject({
       visible: true,
       x: 120,
       y: 140,
     })
 
-    useEditorStore.getState().deleteNode(nodeId)
+    useEditorStore.getState().deleteNode(stateOwnedId)
     expect(activeScene().nodes).toHaveLength(1)
-    expect(materializeScene(activeScene(), stateId).nodes[0]).toMatchObject({
+    expect(activeScene().nodes[0]!.id).toBe(inheritedId)
+    expect(activeScene().presentation?.states.every(
+      (state) => !(stateOwnedId in state.nodeOverrides),
+    )).toBe(true)
+
+    useEditorStore.getState().deleteNode(inheritedId)
+    expect(activeScene().nodes).toHaveLength(1)
+    expect(materializeScene(activeScene(), stateId).nodes.find((node) => node.id === inheritedId))
+      .toMatchObject({
       visible: false,
     })
 
     useEditorStore.getState().setActivePresentationState(null)
-    useEditorStore.getState().deleteNode(nodeId)
+    useEditorStore.getState().deleteNode(inheritedId)
     expect(activeScene().nodes).toHaveLength(0)
     expect(Object.values(activeScene().presentation?.states[1]?.nodeOverrides ?? {}))
       .toHaveLength(0)
+  })
+
+  it('keeps a named-state locked row and all edit state unchanged on delete', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const nodeId = activeScene().nodes[0]!.id
+    store.addPresentationState('锁定')
+    const stateId = useEditorStore.getState().activePresentationStateId!
+    useEditorStore.getState().updateNode(nodeId, { locked: true })
+    useEditorStore.getState().selectNode(nodeId)
+    const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
+    const beforeHistory = useEditorStore.getState().history.past
+    const beforeSelection = useEditorStore.getState().selectedNodeIds
+
+    useEditorStore.getState().deleteNode(nodeId)
+
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
+    expect(useEditorStore.getState().history.past).toBe(beforeHistory)
+    expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
+    expect(materializeScene(activeScene(), stateId).nodes.find((node) => node.id === nodeId))
+      .toMatchObject({ locked: true })
+    expect(useEditorStore.getState().errorMessage).toBe('locked')
+  })
+
+  it('rejects a selection snapshot captured in another named state without writing', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const nodeId = activeScene().nodes[0]!.id
+    store.addPresentationState('状态 A')
+    const stateA = useEditorStore.getState().activePresentationStateId!
+    store.addPresentationState('状态 B')
+    const stateB = useEditorStore.getState().activePresentationStateId!
+    useEditorStore.getState().setActivePresentationState(stateA)
+    useEditorStore.getState().selectNode(nodeId)
+    const stale = useEditorStore.getState().createLiveEditorSelectionSnapshot('layer')
+    if (!stale) throw new Error('expected named-state selection snapshot')
+    expect(stale.stateId).toBe(stateA)
+    useEditorStore.getState().setActivePresentationState(stateB)
+    useEditorStore.getState().selectNode(nodeId)
+    const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
+    const beforeHistory = useEditorStore.getState().history.past
+    const beforeSelection = useEditorStore.getState().selectedNodeIds
+
+    const result = useEditorStore.getState().routeEditorAction('delete', stale)
+
+    expect(result).toMatchObject({ ok: false, adapter: 'none' })
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
+    expect(useEditorStore.getState().history.past).toBe(beforeHistory)
+    expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
+    expect(activeScene().nodes.some((node) => node.id === nodeId)).toBe(true)
   })
 
   it('commits text editing in a state as one undoable override transaction', () => {

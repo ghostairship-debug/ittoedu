@@ -54,6 +54,7 @@ import {
   type SpatialEditorView,
 } from './spatialEditorView'
 import { allocateCourseLayerOrder } from './globalLayerCommands'
+import { repairRemovedCourseReferences } from './courseReferenceCleanup'
 
 export {
   SPATIAL_REJECT_LOCKED,
@@ -1081,6 +1082,10 @@ export function deleteSpatialWorldLayers(
       (item) => !removedIds.has(item.layerItemId),
     )
     cascadeWorldReferences(surface)
+    repairRemovedCourseReferences(draft, {
+      removedLocationIds: new Set(),
+      removedLayerItemIds: removedIds,
+    })
   }, now)
   return commitSpatialAuthoringHistory(history, next)
 }

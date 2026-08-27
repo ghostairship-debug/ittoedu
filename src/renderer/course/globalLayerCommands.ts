@@ -34,6 +34,7 @@ import {
   SLIDE_REJECT_WRONG_OWNER,
   commitSlideProjectMutation,
 } from './slideEditorCommands'
+import { repairRemovedCourseReferences } from './courseReferenceCleanup'
 
 export const LAYER_REJECT_LOCKED = SLIDE_REJECT_LOCKED
 export const LAYER_REJECT_STALE_REVISION = SLIDE_REJECT_STALE_REVISION
@@ -764,27 +765,6 @@ export function duplicateGlobalLayerItem(
   }
 }
 
-function stripLayerReferencesFromInteractions(
-  project: CourseProjectDocument,
-  removedIds: ReadonlySet<string>,
-): void {
-  const filterRules = (rules: typeof project.globalInteractions) => rules.filter((rule) => {
-    if ('nodeId' in rule.trigger && removedIds.has(rule.trigger.nodeId)) return false
-    rule.actions = rule.actions.filter((step) => {
-      const action = step.action
-      return !('nodeId' in action && removedIds.has(action.nodeId))
-    })
-    return rule.actions.length > 0
-  })
-  project.globalInteractions = filterRules(project.globalInteractions)
-  for (const surface of project.surfaces) {
-    if (surface.type !== 'slide') continue
-    for (const scene of surface.scenes) {
-      scene.interactions = filterRules(scene.interactions)
-    }
-  }
-}
-
 export function deleteGlobalLayerItem(
   document: CourseProjectDocument,
   target: EffectiveLayerCommandTarget,
@@ -803,7 +783,10 @@ export function deleteGlobalLayerItem(
       )
       if (index < 0) throw new Error(`找不到全局图层：${entry.item.layerItemId}`)
       draft.globalLayerItems.splice(index, 1)
-      stripLayerReferencesFromInteractions(draft, new Set([entry.item.layerItemId]))
+      repairRemovedCourseReferences(draft, {
+        removedLocationIds: new Set(),
+        removedLayerItemIds: new Set([entry.item.layerItemId]),
+      })
       if (isTeacherControllerLayerItem(entry.item)) {
         synchronizeCourseTeacherControllerControls(draft)
       }

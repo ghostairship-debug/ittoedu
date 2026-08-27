@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { AssetMeta } from '@/shared/projectTypes'
 import {
@@ -32,12 +32,15 @@ const ASSET_FILES: Record<string, Uint8Array> = {
   'asset-audio': new Uint8Array(8),
 }
 
+const originalDeleteFlowSelection = useEditorStore.getState().deleteFlowSelection
+
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
 
 afterEach(() => {
   cleanup()
+  useEditorStore.setState({ deleteFlowSelection: originalDeleteFlowSelection })
   useEditorStore.getState().createNewProject()
 })
 
@@ -215,6 +218,46 @@ function commitPropertyInput(label: string, value: string): void {
 }
 
 describe('Flow media block field and asset replacement commands', () => {
+  it('routes a stale Properties delete through the Store boundary without overwriting newer content', () => {
+    useEditorStore.getState().loadCourseProject(createMediaEditProject(), null, ASSET_FILES)
+    selectStoreMedia('media-image')
+    let documentAfterConcurrentWrite: CourseProjectDocument | null = null
+    let historyAfterConcurrentWrite: readonly unknown[] | null = null
+    let selectionAfterConcurrentWrite = useEditorStore.getState().flowSession!.selection
+    const deleteThroughConcurrentWrite = vi.fn((
+      request: Parameters<typeof originalDeleteFlowSelection>[0],
+    ) => {
+      const flow = useEditorStore.getState().flowSession!
+      const videoSelection = selectFlowEditorBlock(
+        flow.history.present,
+        flow.selection.locationId,
+        'media-video',
+      )
+      useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(
+        flow.history.present,
+        flowBlockTargetFromSelection(flow.history.present, videoSelection),
+        { caption: '并发保留的新内容' },
+        { expectedRevision: flow.history.present.revision },
+      ))
+      documentAfterConcurrentWrite = storeFlowDocument()
+      historyAfterConcurrentWrite = useEditorStore.getState().flowSession!.history.past
+      selectionAfterConcurrentWrite = useEditorStore.getState().flowSession!.selection
+      return originalDeleteFlowSelection(request)
+    })
+    useEditorStore.setState({ deleteFlowSelection: deleteThroughConcurrentWrite })
+    render(createElement(PropertiesTab, { onReplaceImage: () => undefined }))
+
+    fireEvent.click(screen.getByTestId('flow-delete-media-block'))
+
+    expect(deleteThroughConcurrentWrite).toHaveBeenCalledOnce()
+    expect(storeFlowDocument()).toBe(documentAfterConcurrentWrite)
+    expect(useEditorStore.getState().flowSession!.history.past).toBe(historyAfterConcurrentWrite)
+    expect(useEditorStore.getState().flowSession!.selection).toBe(selectionAfterConcurrentWrite)
+    expect(mediaBlock(storeFlowDocument(), 'media-image')).toBeDefined()
+    expect(mediaBlock(storeFlowDocument(), 'media-video').caption).toBe('并发保留的新内容')
+    expect(useEditorStore.getState().errorMessage).toBe('stale-revision')
+  })
+
   it('edits and persists current-contract video fields through Store and Properties', () => {
     useEditorStore.getState().loadCourseProject(createMediaEditProject(), null, ASSET_FILES)
     selectStoreMedia('media-video')
