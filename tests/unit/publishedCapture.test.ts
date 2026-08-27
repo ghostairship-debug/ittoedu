@@ -117,12 +117,297 @@ function createLayer(root: HTMLElement): {
   return { layer, canvas }
 }
 
+function createImageLayer(root: HTMLElement, sources: readonly string[]): {
+  layer: HTMLElement
+  images: HTMLImageElement[]
+} {
+  const layer = document.createElement('div')
+  Object.assign(layer.style, {
+    position: 'absolute',
+    width: '100px',
+    height: '100px',
+  })
+  const images = sources.map((source) => {
+    const image = document.createElement('img')
+    image.src = source
+    layer.appendChild(image)
+    setRect(image)
+    return image
+  })
+  root.appendChild(layer)
+  setRect(layer)
+  return { layer, images }
+}
+
 afterEach(() => {
   document.body.replaceChildren()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe('Published Slide static capture', () => {
+  it('shares one absolute deadline across sequential capture resources and restores the root', async () => {
+    vi.useFakeTimers()
+    installCanvasHarness()
+    const root = document.createElement('section')
+    root.hidden = true
+    root.style.left = '7px'
+    document.body.appendChild(root)
+    setRect(root, 200, 100)
+    const first = createLayer(root)
+    const second = createLayer(root)
+    const firstRestored = vi.fn()
+    const secondRestored = vi.fn()
+    let secondStarted = false
+    const unregisterFirst = registerPublishedCaptureResource(first.layer, {
+      waitForCaptureReady: () => new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 30)
+      }),
+      restoreAfterCapture: firstRestored,
+    })
+    const unregisterSecond = registerPublishedCaptureResource(second.layer, {
+      waitForCaptureReady: () => {
+        secondStarted = true
+        return new Promise<void>(() => undefined)
+      },
+      restoreAfterCapture: secondRestored,
+    })
+
+    try {
+      const capture = capturePublishedSlidePng({
+        root,
+        width: 200,
+        height: 100,
+        layers: [
+          {
+            element: first.layer,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            rotation: 0,
+            opacity: 1,
+          },
+          {
+            element: second.layer,
+            x: 100,
+            y: 0,
+            width: 100,
+            height: 100,
+            rotation: 0,
+            opacity: 1,
+          },
+        ],
+        timeoutMs: 50,
+      })
+      const outcome = capture.then(
+        () => null,
+        (cause: unknown) => cause,
+      )
+
+      await vi.advanceTimersByTimeAsync(30)
+      expect(secondStarted).toBe(true)
+      await vi.advanceTimersByTimeAsync(19)
+      expect(firstRestored).not.toHaveBeenCalled()
+      expect(secondRestored).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await outcome).toMatchObject({ message: expect.stringContaining('等待动态内容就绪超时') })
+
+      expect(firstRestored).toHaveBeenCalledTimes(1)
+      expect(secondRestored).toHaveBeenCalledTimes(1)
+      expect(root.hidden).toBe(true)
+      expect(root.style.left).toBe('7px')
+    } finally {
+      unregisterSecond()
+      unregisterFirst()
+    }
+  })
+
+  it('aborts a pending remote image fetch at the capture deadline and restores resources', async () => {
+    vi.useFakeTimers()
+    installCanvasHarness()
+    const root = document.createElement('section')
+    root.hidden = true
+    document.body.appendChild(root)
+    setRect(root)
+    const { layer } = createImageLayer(root, ['https://assets.example.test/hanging.png'])
+    const restored = vi.fn()
+    const unregister = registerPublishedCaptureResource(layer, {
+      async waitForCaptureReady() {},
+      restoreAfterCapture: restored,
+    })
+    let fetchSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined
+      return new Promise<Response>((_resolve, reject) => {
+        fetchSignal?.addEventListener('abort', () => reject(fetchSignal?.reason), { once: true })
+      })
+    }))
+
+    try {
+      const capture = capturePublishedSlidePng({
+        root,
+        width: 100,
+        height: 100,
+        layers: [{
+          element: layer,
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          opacity: 1,
+        }],
+        timeoutMs: 40,
+      })
+      const rejection = expect(capture).rejects.toThrow('等待图片素材读取超时')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchSignal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(40)
+      await rejection
+
+      expect(fetchSignal?.aborted).toBe(true)
+      expect(restored).toHaveBeenCalledTimes(1)
+      expect(root.hidden).toBe(true)
+    } finally {
+      unregister()
+    }
+  })
+
+  it('cleans pending image decode handlers and the temporary source at the deadline', async () => {
+    vi.useFakeTimers()
+    installCanvasHarness()
+    const root = document.createElement('section')
+    document.body.appendChild(root)
+    setRect(root)
+    const { layer } = createImageLayer(root, ['data:image/png;base64,AA=='])
+    const created: PendingImage[] = []
+    class PendingImage {
+      onload: ((event: Event) => unknown) | null = null
+      onerror: ((event: Event | string) => unknown) | null = null
+      src = ''
+      naturalWidth = 1
+      naturalHeight = 1
+      width = 1
+      height = 1
+      readonly removeAttribute = vi.fn((name: string) => {
+        if (name === 'src') this.src = ''
+      })
+
+      constructor() {
+        created.push(this)
+      }
+    }
+    vi.stubGlobal('Image', PendingImage)
+
+    const capture = capturePublishedSlidePng({
+      root,
+      width: 100,
+      height: 100,
+      layers: [{
+        element: layer,
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        rotation: 0,
+        opacity: 1,
+      }],
+      timeoutMs: 25,
+    })
+    const rejection = expect(capture).rejects.toThrow('等待图片解码超时')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(created).toHaveLength(1)
+    expect(created[0]?.src).toBe('data:image/png;base64,AA==')
+
+    await vi.advanceTimersByTimeAsync(25)
+    await rejection
+
+    expect(created[0]?.onload).toBeNull()
+    expect(created[0]?.onerror).toBeNull()
+    expect(created[0]?.removeAttribute).toHaveBeenCalledWith('src')
+    expect(created[0]?.src).toBe('')
+  })
+
+  it('keeps successful data, blob, and remote images within the shared deadline', async () => {
+    installCanvasHarness()
+    const root = document.createElement('section')
+    document.body.appendChild(root)
+    setRect(root)
+    const { layer } = createImageLayer(root, [
+      'data:image/png;base64,AA==',
+      'blob:capture-proof',
+      'https://assets.example.test/ready.png',
+    ])
+    const created: ReadyImage[] = []
+    class ReadyImage {
+      onload: ((event: Event) => unknown) | null = null
+      onerror: ((event: Event | string) => unknown) | null = null
+      #src = ''
+      naturalWidth = 1
+      naturalHeight = 1
+      width = 1
+      height = 1
+
+      get src(): string {
+        return this.#src
+      }
+
+      set src(value: string) {
+        this.#src = value
+        queueMicrotask(() => this.onload?.(new Event('load')))
+      }
+
+      removeAttribute(name: string): void {
+        if (name === 'src') this.#src = ''
+      }
+
+      constructor() {
+        created.push(this)
+      }
+    }
+    vi.stubGlobal('Image', ReadyImage)
+    let fetchSignal: AbortSignal | undefined
+    const remoteBlob = {
+      type: 'image/png',
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    } as Blob
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined
+      return {
+        ok: true,
+        status: 200,
+        blob: async () => remoteBlob,
+      } as Response
+    }))
+
+    const result = await capturePublishedSlidePng({
+      root,
+      width: 100,
+      height: 100,
+      layers: [{
+        element: layer,
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        rotation: 0,
+        opacity: 1,
+      }],
+      timeoutMs: 1_000,
+    })
+
+    expect(result).toMatch(/^data:image\/png;base64,/)
+    expect(created.map((image) => image.src)).toEqual([
+      'data:image/png;base64,AA==',
+      'blob:capture-proof',
+      'data:image/png;base64,AQID',
+    ])
+    expect(fetchSignal?.aborted).toBe(false)
+  })
+
   it('freezes each prepared Canvas before a later slow resource can clear it', async () => {
     const { drawnSources } = installCanvasHarness()
     const root = document.createElement('section')

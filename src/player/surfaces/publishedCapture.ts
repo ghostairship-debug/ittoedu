@@ -175,29 +175,89 @@ class PublishedCanvasSnapshots {
   }
 }
 
-function withTimeout<T>(
-  promise: Promise<T>,
-  milliseconds: number,
-  message: string,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error(message)), milliseconds)
-    promise.then(
-      (value) => {
+function captureClockMs(): number {
+  return typeof performance === 'undefined' ? Date.now() : performance.now()
+}
+
+/**
+ * One monotonic deadline owns the complete capture. Every asynchronous stage
+ * receives only the remaining budget, and image fetches share one abort signal.
+ */
+class PublishedCaptureDeadline {
+  readonly #expiresAt: number
+  readonly #abortController = new AbortController()
+
+  constructor(timeoutMs: number) {
+    this.#expiresAt = captureClockMs() + Math.max(0, timeoutMs)
+  }
+
+  get signal(): AbortSignal {
+    return this.#abortController.signal
+  }
+
+  assertAvailable(message: string): void {
+    if (!this.signal.aborted && this.#remainingMs() > 0) return
+    const error = new Error(message)
+    this.#expire(error)
+    throw error
+  }
+
+  waitFor<T>(
+    promise: PromiseLike<T>,
+    message: string,
+    onDeadline?: () => void,
+  ): Promise<T> {
+    const pending = Promise.resolve(promise)
+    const remainingMs = this.#remainingMs()
+    if (this.signal.aborted || remainingMs <= 0) {
+      onDeadline?.()
+      const error = new Error(message)
+      this.#expire(error)
+      void pending.catch(() => undefined)
+      return Promise.reject(error)
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      let settled = false
+      const finish = (complete: () => void) => {
+        if (settled) return
+        settled = true
         window.clearTimeout(timeout)
-        resolve(value)
-      },
-      (error: unknown) => {
-        window.clearTimeout(timeout)
-        reject(error)
-      },
-    )
-  })
+        this.signal.removeEventListener('abort', handleAbort)
+        complete()
+      }
+      const timeoutError = () => new Error(message)
+      const handleAbort = () => {
+        if (settled) return
+        onDeadline?.()
+        finish(() => reject(timeoutError()))
+      }
+      const timeout = window.setTimeout(() => {
+        const error = timeoutError()
+        this.#expire(error)
+        handleAbort()
+      }, remainingMs)
+
+      this.signal.addEventListener('abort', handleAbort, { once: true })
+      pending.then(
+        (value) => finish(() => resolve(value)),
+        (cause: unknown) => finish(() => reject(cause)),
+      )
+    })
+  }
+
+  #remainingMs(): number {
+    return Math.max(0, this.#expiresAt - captureClockMs())
+  }
+
+  #expire(error: Error): void {
+    if (!this.signal.aborted) this.#abortController.abort(error)
+  }
 }
 
 async function prepareResources(
   roots: readonly Element[],
-  timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS,
+  deadline: PublishedCaptureDeadline,
 ): Promise<{
   entries: PublishedCaptureResourceEntry[]
   canvasSnapshots: PublishedCanvasSnapshots
@@ -209,9 +269,8 @@ async function prepareResources(
     // not outlive the readable drawing buffer produced by an earlier
     // prepareCapture() when preserveDrawingBuffer is false.
     for (const entry of entries) {
-      await withTimeout(
+      await deadline.waitFor(
         entry.resource.waitForCaptureReady(),
-        timeoutMs,
         'Published 静态捕获等待动态内容就绪超时',
       )
       canvasSnapshots.capture(entry.owner)
@@ -245,6 +304,7 @@ interface DomPaintContext {
   readonly origin: { left: number; top: number }
   readonly imageCache: Map<string, Promise<HTMLImageElement>>
   readonly canvasSnapshots: PublishedCanvasSnapshots
+  readonly deadline: PublishedCaptureDeadline
 }
 
 function localRect(rect: DOMRect, origin: DomPaintContext['origin']): CaptureRect {
@@ -393,26 +453,78 @@ function linearGradient(
   return gradient
 }
 
-async function embeddableImageSource(source: string): Promise<string> {
+async function embeddableImageSource(
+  source: string,
+  deadline: PublishedCaptureDeadline,
+): Promise<string> {
   if (source.startsWith('data:') || source.startsWith('blob:')) return source
-  const response = await fetch(source)
+  const response = await deadline.waitFor(
+    fetch(source, { signal: deadline.signal }),
+    'Published 静态捕获等待图片素材读取超时',
+  )
   if (!response.ok) throw new Error(`Published 捕获素材读取失败（${response.status}）`)
-  const blob = await response.blob()
-  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const blob = await deadline.waitFor(
+    response.blob(),
+    'Published 静态捕获等待图片素材响应超时',
+  )
+  const bytes = new Uint8Array(await deadline.waitFor(
+    blob.arrayBuffer(),
+    'Published 静态捕获等待图片素材读取超时',
+  ))
   return `data:${blob.type || 'application/octet-stream'};base64,${bytesToBase64(bytes)}`
+}
+
+async function decodeImage(
+  image: HTMLImageElement,
+  source: string,
+  deadline: PublishedCaptureDeadline,
+): Promise<void> {
+  let settled = false
+  const cleanup = () => {
+    image.onload = null
+    image.onerror = null
+  }
+  const abandon = () => {
+    if (settled) return
+    settled = true
+    cleanup()
+    image.removeAttribute('src')
+  }
+  const decoding = new Promise<void>((resolve, reject) => {
+    image.onload = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }
+    image.onerror = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      image.removeAttribute('src')
+      reject(new Error('Published 捕获图片解码失败'))
+    }
+    try {
+      image.src = source
+    } catch (cause) {
+      abandon()
+      reject(cause)
+    }
+  })
+  await deadline.waitFor(
+    decoding,
+    'Published 静态捕获等待图片解码超时',
+    abandon,
+  )
 }
 
 function loadImage(source: string, paint: DomPaintContext): Promise<HTMLImageElement> {
   const cached = paint.imageCache.get(source)
   if (cached) return cached
   const loading = (async () => {
+    const embedded = await embeddableImageSource(source, paint.deadline)
     const image = new Image()
-    const embedded = await embeddableImageSource(source)
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve()
-      image.onerror = () => reject(new Error('Published 捕获图片解码失败'))
-      image.src = embedded
-    })
+    await decodeImage(image, embedded, paint.deadline)
     return image
   })()
   paint.imageCache.set(source, loading)
@@ -708,6 +820,7 @@ async function captureElementContent(
   width: number,
   height: number,
   canvasSnapshots: PublishedCanvasSnapshots,
+  deadline: PublishedCaptureDeadline,
 ): Promise<HTMLCanvasElement> {
   const canvas = element.ownerDocument.createElement('canvas')
   canvas.width = Math.max(1, Math.round(width))
@@ -737,6 +850,7 @@ async function captureElementContent(
       origin: { left: rect.left, top: rect.top },
       imageCache: new Map(),
       canvasSnapshots,
+      deadline,
     })
     context.restore()
   } finally {
@@ -810,18 +924,18 @@ export async function capturePublishedSlidePng(
   options: CapturePublishedSlideOptions,
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS
+  const deadline = new PublishedCaptureDeadline(timeoutMs)
   const restoreCaptureRoot = exposeCaptureRootForLayout(options.root)
   try {
     const prepared = await prepareResources(
       options.layers.map((layer) => layer.element),
-      timeoutMs,
+      deadline,
     )
     try {
       const fontsReady = options.root.ownerDocument.fonts?.ready
       if (fontsReady) {
-        await withTimeout(
+        await deadline.waitFor(
           Promise.resolve(fontsReady).then(() => undefined),
-          timeoutMs,
           'Published 静态捕获等待字体就绪超时',
         )
       }
@@ -851,6 +965,7 @@ export async function capturePublishedSlidePng(
           origin: { left: 0, top: 0 },
           imageCache: new Map(),
           canvasSnapshots: prepared.canvasSnapshots,
+          deadline,
         })
       }
 
@@ -860,6 +975,7 @@ export async function capturePublishedSlidePng(
           layer.width,
           layer.height,
           prepared.canvasSnapshots,
+          deadline,
         )
         context.save()
         context.globalAlpha = Math.max(0, Math.min(1, layer.opacity))
@@ -874,6 +990,7 @@ export async function capturePublishedSlidePng(
         )
         context.restore()
       }
+      deadline.assertAvailable('Published 静态捕获超过统一截止时间')
       try {
         return canvas.toDataURL('image/png')
       } catch (cause) {
