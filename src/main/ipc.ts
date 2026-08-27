@@ -11,6 +11,7 @@ import { normalizeDesktopError, type DesktopErrorPayload } from './errors'
 import {
   openProjectFile,
   openRecentProjectFile,
+  confirmProjectOpen,
   saveProjectFile,
   selectAudioFile,
   selectAudioFiles,
@@ -85,6 +86,12 @@ const projectPathSchema = z
 const openRecentProjectSchema = z
   .object({
     path: projectPathSchema,
+  })
+  .strict()
+
+const confirmProjectOpenSchema = z
+  .object({
+    confirmationId: z.uuid(),
   })
   .strict()
 
@@ -274,6 +281,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       const input = openRecentProjectSchema.parse(requireSingleArgument(args))
       return openRecentProjectFile(input.path)
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.confirmProjectOpen,
+    context,
+    {
+      code: 'PROJECT_OPEN_CONFIRMATION_FAILED',
+      title: '工程打开确认失败',
+      message: '无法更新最近工程列表。',
+      suggestion: '工程仍可继续编辑；如果最近工程未更新，请重新打开一次。',
+    },
+    async (_event, args) => {
+      const input = confirmProjectOpenSchema.parse(requireSingleArgument(args))
+      await confirmProjectOpen(input.confirmationId)
     },
   )
 

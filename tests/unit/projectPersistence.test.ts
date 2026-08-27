@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const electronState = vi.hoisted(() => ({
   userDataPath: '',
+  showOpenDialog: vi.fn(),
+  showSaveDialog: vi.fn(),
 }))
 
 vi.mock('electron', () => ({
@@ -16,11 +18,19 @@ vi.mock('electron', () => ({
       return electronState.userDataPath
     },
   },
-  dialog: {},
+  dialog: {
+    showOpenDialog: electronState.showOpenDialog,
+    showSaveDialog: electronState.showSaveDialog,
+  },
 }))
 
 import { REBUILD_USER_DATA_DIRECTORY_NAME } from '../../src/main/applicationIdentity'
-import { openRecentProjectFile } from '../../src/main/fileDialogs'
+import {
+  confirmProjectOpen,
+  openProjectFile,
+  openRecentProjectFile,
+  saveProjectFile,
+} from '../../src/main/fileDialogs'
 import {
   listRecentProjects,
   MAX_RECOVERY_PROJECT_BYTES,
@@ -63,6 +73,10 @@ describe('projectPersistence', () => {
   beforeEach(async () => {
     testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'h5lesson-persistence-'))
     electronState.userDataPath = testRoot
+    electronState.showOpenDialog.mockReset()
+    electronState.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
+    electronState.showSaveDialog.mockReset()
+    electronState.showSaveDialog.mockResolvedValue({ canceled: true })
   })
 
   afterEach(async () => {
@@ -235,6 +249,79 @@ describe('projectPersistence', () => {
     await expect(openRecentProjectFile(approvedPath)).rejects.toMatchObject({
       code: 'PROJECT_ARCHIVE_INVALID',
     })
+  })
+
+  it('新选择只授权路径，确认幂等记录且成功保存只再记录一次', async () => {
+    const selectedPath = path.join(testRoot, 'selected.h5lesson')
+    const bytes = makeV9RecoveryArchive('selected')
+    await fs.writeFile(selectedPath, bytes)
+    electronState.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [selectedPath],
+    })
+    let timestamp = 1_800_000_000_000
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => ++timestamp)
+
+    const opened = await openProjectFile({} as Parameters<typeof openProjectFile>[0])
+    expect(opened).not.toBeNull()
+    expect(opened).toMatchObject({
+      path: selectedPath,
+      name: 'selected.h5lesson',
+      confirmationId: expect.any(String),
+    })
+    expect(await listRecentProjects()).toEqual([])
+
+    await Promise.all([
+      confirmProjectOpen(opened!.confirmationId),
+      confirmProjectOpen(opened!.confirmationId),
+    ])
+    const confirmed = await listRecentProjects()
+    expect(confirmed).toHaveLength(1)
+    expect(confirmed[0]).toMatchObject({ path: selectedPath })
+    const confirmedAt = confirmed[0]!.lastOpenedAt
+    expect(now).toHaveBeenCalledTimes(1)
+
+    await confirmProjectOpen(opened!.confirmationId)
+    expect((await listRecentProjects())[0]?.lastOpenedAt).toBe(confirmedAt)
+    expect(now).toHaveBeenCalledTimes(1)
+
+    await fs.unlink(selectedPath)
+    await expect(saveProjectFile(
+      {} as Parameters<typeof saveProjectFile>[0],
+      {
+        path: selectedPath,
+        suggestedName: 'selected.h5lesson',
+        bytes,
+      },
+    )).resolves.toEqual({ path: selectedPath })
+    expect(electronState.showSaveDialog).not.toHaveBeenCalled()
+    expect((await listRecentProjects())[0]?.lastOpenedAt).toBeGreaterThan(confirmedAt)
+    expect(now).toHaveBeenCalledTimes(2)
+  })
+
+  it('最近工程候选在 Renderer 确认前不提升，同一确认只提升一次', async () => {
+    const recentPath = path.join(testRoot, 'recent-candidate.h5lesson')
+    await fs.writeFile(recentPath, makeV9RecoveryArchive('recent-candidate'))
+    let timestamp = 1_900_000_000_000
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => ++timestamp)
+    await recordRecentProject(recentPath)
+    const originalOpenedAt = (await listRecentProjects())[0]!.lastOpenedAt
+
+    const opened = await openRecentProjectFile(recentPath)
+    expect((await listRecentProjects())[0]?.lastOpenedAt).toBe(originalOpenedAt)
+    expect(now).toHaveBeenCalledTimes(1)
+
+    await Promise.all([
+      confirmProjectOpen(opened.confirmationId),
+      confirmProjectOpen(opened.confirmationId),
+    ])
+    const promotedAt = (await listRecentProjects())[0]!.lastOpenedAt
+    expect(promotedAt).toBeGreaterThan(originalOpenedAt)
+    expect(now).toHaveBeenCalledTimes(2)
+
+    await confirmProjectOpen(opened.confirmationId)
+    expect((await listRecentProjects())[0]?.lastOpenedAt).toBe(promotedAt)
+    expect(now).toHaveBeenCalledTimes(2)
   })
 
   it('rebuild AppData 目录保持隔离，且恢复层接受当前课程工程 zip', async () => {

@@ -19,6 +19,7 @@ import {
 import type { CourseProjectDocument } from '../shared/courseProjectTypes'
 import type {
   BatchFileRejection,
+  OpenProjectFileResult,
   RecentProjectEntry,
   RecoveryProjectResult,
   SelectedImageBatchFile,
@@ -563,6 +564,17 @@ export default function App() {
     applyCourseArchive(archive, path, extra)
   }, [applyCourseArchive])
 
+  const ingestOpenedProjectFile = useCallback(async (
+    file: OpenProjectFileResult,
+  ): Promise<void> => {
+    await ingestOpenedCourseBytes(file.bytes, file.path)
+    await desktopApi().confirmProjectOpen({
+      confirmationId: file.confirmationId,
+    }).catch((error) => {
+      console.error('确认最近工程失败', error)
+    })
+  }, [ingestOpenedCourseBytes])
+
   const handleNew = useCallback(() => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
@@ -598,25 +610,25 @@ export default function App() {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openProject()
       if (!file) return
-      await ingestOpenedCourseBytes(file.bytes, file.path)
+      await ingestOpenedProjectFile(file)
       await desktopApi().clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
     }, '打开工程失败。请检查文件是否损坏后重试。')
-  }, [confirmDiscardIfNeeded, ingestOpenedCourseBytes, refreshRecentProjects, run])
+  }, [confirmDiscardIfNeeded, ingestOpenedProjectFile, refreshRecentProjects, run])
 
   const handleOpenRecent = useCallback((path: string) => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openRecentProject({ path })
-      await ingestOpenedCourseBytes(file.bytes, file.path)
+      await ingestOpenedProjectFile(file)
       await desktopApi().clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
     }, '最近工程打开失败。文件可能已被移动，请使用“打开工程”重新选择。')
-  }, [confirmDiscardIfNeeded, ingestOpenedCourseBytes, refreshRecentProjects, run])
+  }, [confirmDiscardIfNeeded, ingestOpenedProjectFile, refreshRecentProjects, run])
 
   const handleSave = useCallback(
     async (saveAs = false) => {

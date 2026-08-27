@@ -100,6 +100,7 @@ function desktopHarness(
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),
     openRecentProject: vi.fn(async () => { throw new Error('not used') }),
+    confirmProjectOpen: vi.fn(async () => undefined),
     saveProject,
     writeRecoveryProject: vi.fn(async () => undefined),
     readRecoveryProject: vi.fn(async () => null),

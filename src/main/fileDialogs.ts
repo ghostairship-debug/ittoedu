@@ -5,6 +5,7 @@ import { dialog, type BrowserWindow } from 'electron'
 import type {
   BatchFileDigest,
   BatchFileRejection,
+  OpenProjectFileResult,
   OpenBinaryFileResult,
   SaveBinaryFileInput,
   SaveBinaryFileResult,
@@ -34,6 +35,7 @@ const MAX_VIDEO_BATCH_BYTES = 256 * 1024 * 1024
 const MAX_COMPONENT_BATCH_BYTES = 256 * 1024 * 1024
 const MAX_HTML_BYTES = 256 * 1024 * 1024
 const MAX_EXPORT_BYTES = 512 * 1024 * 1024
+const MAX_PROJECT_OPEN_CONFIRMATIONS = 64
 
 export function batchCapacityIssue(
   selectedIndex: number,
@@ -71,6 +73,13 @@ const videoMimeTypes = new Map<string, string>([
 
 const approvedProjectPaths = new Set<string>()
 
+interface ProjectOpenConfirmation {
+  path: string
+  recordPromise: Promise<void> | null
+}
+
+const projectOpenConfirmations = new Map<string, ProjectOpenConfirmation>()
+
 function canonicalPath(value: string): string {
   const resolved = path.resolve(value)
   return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved
@@ -80,11 +89,43 @@ function rememberProjectPath(value: string): void {
   approvedProjectPaths.add(canonicalPath(value))
 }
 
-async function rememberOpenedProject(value: string): Promise<void> {
-  rememberProjectPath(value)
+async function recordRecentProjectSafely(value: string): Promise<void> {
   await recordRecentProject(value).catch((error) => {
     console.error('更新最近工程列表失败', error)
   })
+}
+
+async function rememberSavedProject(value: string): Promise<void> {
+  rememberProjectPath(value)
+  await recordRecentProjectSafely(value)
+}
+
+function issueProjectOpenConfirmation(value: string): string {
+  const confirmationId = crypto.randomUUID()
+  projectOpenConfirmations.set(confirmationId, {
+    path: path.resolve(value),
+    recordPromise: null,
+  })
+  while (projectOpenConfirmations.size > MAX_PROJECT_OPEN_CONFIRMATIONS) {
+    const oldestId = projectOpenConfirmations.keys().next().value
+    if (typeof oldestId !== 'string') break
+    projectOpenConfirmations.delete(oldestId)
+  }
+  return confirmationId
+}
+
+export async function confirmProjectOpen(confirmationId: string): Promise<void> {
+  const confirmation = projectOpenConfirmations.get(confirmationId)
+  if (!confirmation) {
+    throw new DesktopOperationError(
+      'PROJECT_OPEN_CONFIRMATION_INVALID',
+      '工程打开确认失败',
+      '本次工程打开确认已失效。',
+      '工程仍可继续编辑；如果最近工程未更新，请重新打开一次。',
+    )
+  }
+  confirmation.recordPromise ??= recordRecentProjectSafely(confirmation.path)
+  await confirmation.recordPromise
 }
 
 function isApprovedProjectPath(value: string): boolean {
@@ -335,7 +376,7 @@ async function atomicWrite(filePath: string, data: Uint8Array | string): Promise
 
 export async function openProjectFile(
   window: BrowserWindow,
-): Promise<OpenBinaryFileResult | null> {
+): Promise<OpenProjectFileResult | null> {
   const result = await dialog.showOpenDialog(window, {
     title: '打开课件工程',
     filters: [{ name: '课件工程', extensions: ['h5lesson'] }],
@@ -359,13 +400,18 @@ export async function openProjectFile(
     )
   }
 
-  await rememberOpenedProject(filePath)
-  return { path: filePath, name: path.basename(filePath), bytes }
+  rememberProjectPath(filePath)
+  return {
+    path: filePath,
+    name: path.basename(filePath),
+    bytes,
+    confirmationId: issueProjectOpenConfirmation(filePath),
+  }
 }
 
 export async function openRecentProjectFile(
   requestedPath: string,
-): Promise<OpenBinaryFileResult> {
+): Promise<OpenProjectFileResult> {
   const filePath = await resolveRecentProjectPath(requestedPath)
   const bytes = await readFileWithLimit(
     filePath,
@@ -382,8 +428,13 @@ export async function openRecentProjectFile(
     )
   }
 
-  await rememberOpenedProject(filePath)
-  return { path: filePath, name: path.basename(filePath), bytes }
+  rememberProjectPath(filePath)
+  return {
+    path: filePath,
+    name: path.basename(filePath),
+    bytes,
+    confirmationId: issueProjectOpenConfirmation(filePath),
+  }
 }
 
 export async function saveProjectFile(
@@ -437,7 +488,7 @@ export async function saveProjectFile(
     )
   }
 
-  await rememberOpenedProject(targetPath)
+  await rememberSavedProject(targetPath)
   return { path: targetPath }
 }
 

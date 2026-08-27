@@ -9,6 +9,15 @@ export interface OpenBinaryFileResult {
   bytes: Uint8Array
 }
 
+export interface OpenProjectFileResult extends OpenBinaryFileResult {
+  /** Opaque, process-local acknowledgement for one project-open attempt. */
+  confirmationId: string
+}
+
+export interface ConfirmProjectOpenInput {
+  confirmationId: string
+}
+
 export interface SaveBinaryFileInput {
   path?: string
   suggestedName: string
@@ -79,9 +88,10 @@ export interface PreviewNetworkPolicyInput {
 }
 
 export interface DesktopAPI {
-  openProject(): Promise<OpenBinaryFileResult | null>
+  openProject(): Promise<OpenProjectFileResult | null>
   listRecentProjects(): Promise<RecentProjectEntry[]>
-  openRecentProject(input: { path: string }): Promise<OpenBinaryFileResult>
+  openRecentProject(input: { path: string }): Promise<OpenProjectFileResult>
+  confirmProjectOpen(input: ConfirmProjectOpenInput): Promise<void>
   saveProject(input: SaveBinaryFileInput): Promise<SaveBinaryFileResult | null>
   writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
   readRecoveryProject(): Promise<RecoveryProjectResult | null>
@@ -141,6 +151,7 @@ export const IPC_CHANNELS = {
   openProject: 'project:open',
   listRecentProjects: 'project:list-recent',
   openRecentProject: 'project:open-recent',
+  confirmProjectOpen: 'project:confirm-open',
   saveProject: 'project:save',
   writeRecoveryProject: 'project:write-recovery',
   readRecoveryProject: 'project:read-recovery',
