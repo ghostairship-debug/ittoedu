@@ -1304,6 +1304,21 @@ function formulaDraftChanged(
   return !sameJson(draft.ast, original.ast) || accessibleText !== original.accessibleText
 }
 
+export function isSpatialWorldContentDraftDirty(
+  edit: SpatialWorldContentEditSession,
+): boolean {
+  if (edit.kind === 'text') {
+    return textDraftChanged(
+      edit.original as V9SlideTextContentSnapshot,
+      edit.draft as V9SlideTextContentDraft,
+    )
+  }
+  return formulaDraftChanged(
+    edit.original as V9SlideFormulaContentSnapshot,
+    edit.draft as V9SlideFormulaContentDraft,
+  )
+}
+
 function rejectIfStaleEdit(
   session: SpatialAuthoringSession,
   edit: SpatialWorldContentEditSession,

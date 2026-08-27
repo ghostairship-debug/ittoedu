@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -729,6 +729,56 @@ describe('FlowWorkspace paper', () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect(screen.getByTestId('flow-inline-editor').innerHTML).toMatch(/font-style:\s*italic/)
+  })
+
+  it('adopts an external Flow edit clear without publishing the stale local draft back', async () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 4 },
+    })
+    useEditorStore.setState({ flowTextEdit: null })
+    const { onTextEditChange } = renderPaper(project, selection)
+    await waitFor(() => expect(screen.getByTestId('flow-inline-editor')).toBeTruthy())
+    const mirroredEdit = onTextEditChange.mock.calls.at(-1)?.[0]
+    expect(mirroredEdit).toBeTruthy()
+    useEditorStore.setState({ flowTextEdit: mirroredEdit })
+    await waitFor(() => expect(useEditorStore.getState().flowTextEdit).toBe(mirroredEdit))
+    const publishesBeforeClear = onTextEditChange.mock.calls.length
+
+    useEditorStore.setState({ flowTextEdit: null })
+
+    await waitFor(() => expect(screen.queryByTestId('flow-inline-editor')).toBeNull())
+    expect(onTextEditChange).toHaveBeenCalledTimes(publishesBeforeClear)
+  })
+
+  it('drops a pending focusout commit after the Store has already finalized the Flow draft', async () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
+      focus: 'text',
+      textRange: { blockId: 'p-body', start: 0, end: 4 },
+    })
+    useEditorStore.setState({ flowTextEdit: null })
+    const { onProjectChange, onTextEditChange } = renderPaper(project, selection)
+    await waitFor(() => expect(screen.getByTestId('flow-inline-editor')).toBeTruthy())
+
+    const editor = screen.getByTestId('flow-inline-editor')
+    editor.textContent = '已经由保存事务封口的 Flow 草稿'
+    fireEvent.input(editor)
+    const mirroredEdit = onTextEditChange.mock.calls.at(-1)?.[0]
+    expect(mirroredEdit).toBeTruthy()
+    useEditorStore.setState({ flowTextEdit: mirroredEdit })
+    await waitFor(() => expect(useEditorStore.getState().flowTextEdit).toBe(mirroredEdit))
+
+    editor.ownerDocument.dispatchEvent(new FocusEvent('focusout', {
+      bubbles: true,
+      relatedTarget: document.body,
+    }))
+    useEditorStore.setState({ flowTextEdit: null })
+
+    await waitFor(() => expect(screen.queryByTestId('flow-inline-editor')).toBeNull())
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(onProjectChange).not.toHaveBeenCalled()
   })
 
   it('paints idle paragraph textAlign and lineSpacing on the paper block', () => {

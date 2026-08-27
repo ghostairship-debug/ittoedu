@@ -26,6 +26,7 @@ import {
   selectEditingNodes,
   selectEffectiveLayerProjection,
   selectMediaAssetFiles,
+  selectHasUnsavedCourseChanges,
   selectSlideBackendKind,
   selectSlideAuthoringDocument,
   selectSlideSceneList,
@@ -99,6 +100,16 @@ function visualBounds(node: {
 
 function mediaFiles() {
   return selectMediaAssetFiles(useEditorStore.getState())
+}
+
+function acknowledgeCurrentSave(path: string) {
+  const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
+  expect(preparation.ok).toBe(true)
+  if (!preparation.ok) throw new Error(preparation.reason)
+  expect(
+    useEditorStore.getState().acknowledgeCourseProjectSaved(path, preparation.token),
+  ).toBe(true)
+  return preparation
 }
 
 beforeEach(() => {
@@ -1494,7 +1505,7 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
-    store.markSaved('lesson.h5lesson')
+    acknowledgeCurrentSave('lesson.h5lesson')
     const historyBefore = useEditorStore.getState().history.past.length
 
     store.beginTextEdit(nodeId, 'properties')
@@ -1545,19 +1556,35 @@ describe('node operations', () => {
     expect(useEditorStore.getState().textEditSession).toBeNull()
   })
 
-  it('finalizes the current text draft when a save is marked complete', () => {
+  it('commits the current text draft before save acknowledgement', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
+    acknowledgeCurrentSave('before-draft.h5lesson')
     const historyBefore = useEditorStore.getState().history.past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     store.updateTextEditDraft(nodeId, '保存时的当前文字', [], 80)
-    store.markSaved('saved-draft.h5lesson')
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+
+    const preparation = store.prepareCourseProjectPersistence()
+    expect(preparation.ok).toBe(true)
+    if (!preparation.ok) throw new Error(preparation.reason)
 
     expect(activeScene().nodes[0]).toMatchObject({ text: '保存时的当前文字' })
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
     expect(useEditorStore.getState().textEditSession).toBeNull()
+    expect(useEditorStore.getState().v9ContentEdit).toBeNull()
+    expect(useEditorStore.getState().dirty).toBe(true)
+
+    const secondPreparation = store.prepareCourseProjectPersistence()
+    expect(secondPreparation.ok).toBe(true)
+    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+
+    expect(
+      store.acknowledgeCourseProjectSaved('saved-draft.h5lesson', preparation.token),
+    ).toBe(true)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
@@ -2356,7 +2383,7 @@ describe('history semantics', () => {
     const documentToLoad = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     expect(useEditorStore.getState().history.past).toHaveLength(1)
 
-    store.markSaved('C:\\course.h5lesson')
+    acknowledgeCurrentSave('C:\\course.h5lesson')
     expect(useEditorStore.getState().history.past).toHaveLength(1)
     expect(useEditorStore.getState().dirty).toBe(false)
 

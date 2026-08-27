@@ -125,6 +125,7 @@ import {
   cancelV9SlideContentEdit,
   commitV9SlideContentEdit,
   commitV9SlideTextRunStyle,
+  isV9SlideContentDraftDirty,
   updateV9SlideContentTextDraft,
   type V9SlideContentEditSession,
   type V9SlideFormulaContentDraft,
@@ -295,6 +296,7 @@ import {
 import {
   formatFlowAuthoringBlock,
   formatFlowAuthoringTextStyle,
+  commitFlowTextEdit,
   isFlowTextDraftDirty,
   type FlowTextEditSession,
 } from '../authoring/flowTextEdit'
@@ -418,6 +420,7 @@ import {
   beginSpatialWorldContentEdit,
   commitSpatialWorldContentEdit,
   commitSpatialWorldTextRunStyle,
+  isSpatialWorldContentDraftDirty,
   updateSpatialWorldContentFormulaDraft,
   updateSpatialWorldContentTextDraft,
   type SpatialWorldContentEditSession,
@@ -1696,6 +1699,39 @@ export type InteractionAuthoringCommitResult =
       readonly reason: string
     }
 
+export interface CourseProjectPersistenceSnapshot {
+  readonly project: CourseProjectDocument
+  readonly assetFiles: Record<string, Uint8Array>
+  readonly componentPackages: Record<string, ComponentPackageData>
+}
+
+export interface CourseProjectPersistenceToken {
+  readonly document: CourseProjectDocument
+  readonly sidecar: CourseAssetSidecar | null
+  readonly componentPackages: Record<string, ComponentPackageData>
+}
+
+export type PrepareCourseProjectPersistenceResult =
+  | {
+      readonly ok: true
+      readonly snapshot: CourseProjectPersistenceSnapshot
+      readonly token: CourseProjectPersistenceToken
+    }
+  | {
+      readonly ok: false
+      readonly reason: string
+    }
+
+export type CaptureCourseProjectRecoveryResult =
+  | {
+      readonly ok: true
+      readonly snapshot: CourseProjectPersistenceSnapshot
+    }
+  | {
+      readonly ok: false
+      readonly reason: string
+    }
+
 export interface EditorState {
   project: ProjectDocument
   activeSceneId: string
@@ -1763,7 +1799,9 @@ export interface EditorState {
     assetFiles?: Record<string, Uint8Array>,
     componentPackages?: Record<string, ComponentPackageData>,
   ): void
-  markSaved(path: string, project?: ProjectDocument): void
+  prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult
+  captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
+  acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
   setEditingScope(scope: EditingScope): void
   setCanvasMode(mode: CanvasMode): void
   setEditorMode(mode: EditorMode): void
@@ -2184,6 +2222,26 @@ function sameTextSnapshot(node: TextNode, snapshot: TextEditSnapshot): boolean {
     node.height === snapshot.height &&
     JSON.stringify(node.runs) === JSON.stringify(snapshot.runs)
   )
+}
+
+export function selectHasDirtyCourseContentDraft(state: EditorState): boolean {
+  if (
+    state.spatialContentEdit
+    && isSpatialWorldContentDraftDirty(state.spatialContentEdit)
+  ) {
+    return true
+  }
+  if (state.flowTextEdit && isFlowTextDraftDirty(state.flowTextEdit)) return true
+  if (state.v9ContentEdit && isV9SlideContentDraftDirty(state.v9ContentEdit)) return true
+  if (state.textEditSession) {
+    const node = textNodeForSession(state.project, state.textEditSession)
+    return Boolean(node && !sameTextSnapshot(node, state.textEditSession.original))
+  }
+  return false
+}
+
+export function selectHasUnsavedCourseChanges(state: EditorState): boolean {
+  return state.dirty || selectHasDirtyCourseContentDraft(state)
 }
 
 function projectWithTextSnapshot(
@@ -3337,9 +3395,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const presentPackageIds = new Set(
       Object.keys(nextBackend.getSession().history.present.componentPackages),
     )
-    const nextComponentPackages = Object.fromEntries(
+    const filteredComponentPackages = Object.fromEntries(
       Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
-    )
+    ) as Record<string, ComponentPackageData>
+    const currentPackageIds = Object.keys(current.componentPackages)
+    const nextComponentPackages =
+      currentPackageIds.length === Object.keys(filteredComponentPackages).length
+      && currentPackageIds.every(
+        (packageId) => filteredComponentPackages[packageId] === current.componentPackages[packageId],
+      )
+        ? current.componentPackages
+        : filteredComponentPackages
     const historyDirection = extra.sidecarDirection ?? (
       resourceTransition
         ? resourceTransition.resourceDirection === 'inverse' ? 'undo' : 'redo'
@@ -5276,6 +5342,99 @@ export const useEditorStore = create<EditorState>((set, get) => {
     return get().spatialSession
   }
 
+  const snapshotCourseProjectPersistence = (
+    state: EditorState,
+    document: CourseProjectDocument,
+  ): CourseProjectPersistenceSnapshot => ({
+    project: document,
+    assetFiles: { ...projectedAssetFiles(state.slideCandidateSidecar) },
+    componentPackages: { ...state.componentPackages },
+  })
+
+  const materializeCourseProjectRecoveryDocument = (
+    state: EditorState,
+  ): { ok: true; document: CourseProjectDocument } | { ok: false; reason: string } => {
+    if (state.spatialSession && state.spatialContentEdit) {
+      if (!isSpatialWorldContentDraftDirty(state.spatialContentEdit)) {
+        return { ok: true, document: state.spatialSession.history.present }
+      }
+      const edit = state.spatialContentEdit.composing
+        ? { ...state.spatialContentEdit, composing: false, pendingAction: null }
+        : state.spatialContentEdit
+      const result = commitSpatialWorldContentEdit(state.spatialSession, edit)
+      const document = result.nextSession?.history.present
+      return result.ok && document
+        ? { ok: true, document }
+        : { ok: false, reason: result.reason ?? '无法物化 Spatial 活动文字草稿' }
+    }
+
+    if (state.flowSession && state.flowTextEdit) {
+      if (!isFlowTextDraftDirty(state.flowTextEdit)) {
+        return { ok: true, document: state.flowSession.history.present }
+      }
+      const edit = state.flowTextEdit.composing
+        ? { ...state.flowTextEdit, composing: false, pendingAction: null }
+        : state.flowTextEdit
+      const result = commitFlowTextEdit(
+        state.flowSession.history.present,
+        state.flowSession.selection,
+        edit,
+        { expectedRevision: state.flowSession.history.present.revision },
+      )
+      const document = result.nextDocument
+      return result.ok && document
+        ? { ok: true, document }
+        : { ok: false, reason: result.reason ?? '无法物化 Flow 活动文字草稿' }
+    }
+
+    const backend = selectSlideAuthoringBackend(state)
+    if (backend && state.v9ContentEdit) {
+      if (!isV9SlideContentDraftDirty(state.v9ContentEdit)) {
+        return { ok: true, document: backend.getSession().history.present }
+      }
+      const edit = state.v9ContentEdit.composing
+        ? { ...state.v9ContentEdit, composing: false, pendingAction: null }
+        : state.v9ContentEdit
+      const result = commitV9SlideContentEdit(backend.getSession(), edit)
+      const document = result.nextSession?.history.present
+      return result.ok && document
+        ? { ok: true, document }
+        : { ok: false, reason: result.reason ?? '无法物化 Slide 活动文字草稿' }
+    }
+
+    if (backend && state.textEditSession) {
+      const node = textNodeForSession(state.project, state.textEditSession)
+      if (node && !sameTextSnapshot(node, state.textEditSession.original)) {
+        try {
+          const document = commitSlideProjectMutation(
+            backend.getSession().history.present,
+            (draft) => {
+              const item = findMutableCourseLayerItem(draft, state.textEditSession!.nodeId)
+              if (!item) throw new Error('活动文字目标已失效')
+              applySceneNodePatchToLayerItem(item, {
+                text: node.text,
+                runs: node.runs,
+                width: node.width,
+                height: node.height,
+              }, state.componentPackages)
+            },
+          )
+          return { ok: true, document }
+        } catch (error) {
+          return {
+            ok: false,
+            reason: error instanceof Error ? error.message : '无法物化 Slide 活动文字草稿',
+          }
+        }
+      }
+    }
+
+    const document = activeCourseDocument(state)
+    return document
+      ? { ok: true, document }
+      : { ok: false, reason: '当前会话没有课程工程' }
+  }
+
   const commit = (
     _recipe: (draft: ProjectDocument) => void,
     _selection?: string | null,
@@ -5705,8 +5864,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
         edit: get().flowTextEdit,
         expectedRevision: flow.history.present.revision,
       })
-      if (formatted.nextEdit) {
-        set({ flowTextEdit: formatted.nextEdit })
+      const formattedEdit = formatted.nextEdit
+      if (formattedEdit) {
+        set({ flowTextEdit: formattedEdit })
       }
       return persistFlowResult(formatted, {
         selection: formatted.nextSelection ?? flow.selection,
@@ -5997,68 +6157,89 @@ export const useEditorStore = create<EditorState>((set, get) => {
       get().loadCourseProject(migrated, path, assetFiles, componentPackages)
     },
 
-    markSaved(path, project) {
-      const spatial = get().spatialSession
-      if (spatial) {
-        persistOpenSpatialContentEdit()
-        const live = get().spatialSession ?? spatial
-        set({
-          projectPath: path,
-          dirty: false,
-          statusMessage: `已保存到 ${path}`,
-          editingTextNodeId: null,
-          textEditSession: null,
-          spatialContentEdit: null,
-          ...(project
-            ? { project: normalizeProjectPresentations(cloneProject(project)) }
-            : {
-                project: derivedV8ProjectFromSpatial(
-                  live,
-                  get().slideCandidateSidecar,
-                  null,
-                ),
-              }),
-        })
-        return
+    prepareCourseProjectPersistence() {
+      const state = get()
+      if (state.spatialSession && state.spatialContentEdit) {
+        const result = commitSpatialWorldContentEdit(
+          state.spatialSession,
+          state.spatialContentEdit,
+        )
+        if (!result.ok) {
+          persistSpatialResult(result)
+          return { ok: false, reason: result.reason ?? '无法提交 Spatial 活动文字草稿' }
+        }
+        persistSpatialResult(result, { clearContentEdit: true })
+      } else if (state.flowSession && state.flowTextEdit) {
+        const result = commitFlowTextEdit(
+          state.flowSession.history.present,
+          state.flowSession.selection,
+          state.flowTextEdit,
+          { expectedRevision: state.flowSession.history.present.revision },
+        )
+        if (!result.ok) {
+          persistFlowResult(result)
+          return { ok: false, reason: result.reason ?? '无法提交 Flow 活动文字草稿' }
+        }
+        persistFlowResult(result, { clearTextEdit: true })
+      } else {
+        const backend = selectSlideAuthoringBackend(state)
+        if (backend && state.v9ContentEdit) {
+          const result = commitV9SlideContentEdit(
+            backend.getSession(),
+            state.v9ContentEdit,
+          )
+          if (!result.ok) {
+            persistCandidateResult(result)
+            return { ok: false, reason: result.reason ?? '无法提交 Slide 活动文字草稿' }
+          }
+          persistCandidateResult(result, { clearContentEdit: true })
+        } else if (backend && state.textEditSession) {
+          get().commitTextEdit()
+          if (get().textEditSession) {
+            return { ok: false, reason: '无法提交 Slide 活动文字草稿' }
+          }
+        }
       }
-      const flow = get().flowSession
-      if (flow) {
-        set({
-          projectPath: path,
-          dirty: false,
-          statusMessage: `已保存到 ${path}`,
-          flowTextEdit: null,
-          ...(project
-            ? { project: normalizeProjectPresentations(cloneProject(project)) }
-            : {
-                project: derivedV8ProjectFromFlow(flow, get().slideCandidateSidecar),
-              }),
-        })
-        return
+
+      const prepared = get()
+      const document = activeCourseDocument(prepared)
+      if (!document) return { ok: false, reason: '当前会话没有课程工程' }
+      return {
+        ok: true,
+        snapshot: snapshotCourseProjectPersistence(prepared, document),
+        token: {
+          document,
+          sidecar: prepared.slideCandidateSidecar,
+          componentPackages: prepared.componentPackages,
+        },
       }
-      const backend = selectSlideAuthoringBackend(get())
-      if (backend) {
-        persistOpenV9ContentEdit()
-        const nextBackend = selectSlideAuthoringBackend(get()) ?? backend
-        set({
-          projectPath: path,
-          dirty: false,
-          statusMessage: `已保存到 ${path}`,
-          editingTextNodeId: null,
-          textEditSession: null,
-          v9ContentEdit: null,
-          ...(project
-            ? { project: normalizeProjectPresentations(cloneProject(project)) }
-            : {
-                project: derivedV8ProjectFromBackend(
-                  nextBackend,
-                  get().slideCandidateSidecar,
-                  null,
-                ),
-              }),
-        })
-        return
+    },
+
+    captureCourseProjectRecoverySnapshot() {
+      const state = get()
+      const materialized = materializeCourseProjectRecoveryDocument(state)
+      if (!materialized.ok) return materialized
+      return {
+        ok: true,
+        snapshot: snapshotCourseProjectPersistence(state, materialized.document),
       }
+    },
+
+    acknowledgeCourseProjectSaved(path, token) {
+      const state = get()
+      const allChangesSaved =
+        activeCourseDocument(state) === token.document
+        && state.slideCandidateSidecar === token.sidecar
+        && state.componentPackages === token.componentPackages
+        && !selectHasDirtyCourseContentDraft(state)
+      set({
+        projectPath: path,
+        dirty: !allChangesSaved,
+        statusMessage: allChangesSaved
+          ? `已保存到 ${path}`
+          : '已保存启动保存时的版本；之后的修改尚未保存',
+      })
+      return allChangesSaved
     },
 
     setEditingScope(editingScope) {

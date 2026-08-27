@@ -22,7 +22,11 @@ import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { ProjectHealthSummary } from '../../shared/projectHealth'
 import { APP_NAME } from '../../shared/constants'
 import type { SingleHtmlExportMode } from '../export/course/buildCoursePackages'
-import { useEditorStore, selectActiveCourseProjectDocument } from '../store/editorStore'
+import {
+  selectActiveCourseProjectDocument,
+  selectHasUnsavedCourseChanges,
+  useEditorStore,
+} from '../store/editorStore'
 
 interface TopToolbarProps {
   busy: boolean
@@ -88,7 +92,7 @@ export function TopToolbar({
   onExport,
 }: TopToolbarProps) {
   const project = useEditorStore((state) => state.project)
-  const dirty = useEditorStore((state) => state.dirty)
+  const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const history = useEditorStore((state) => state.history)
   const activeSceneId = useEditorStore((state) => state.activeSceneId)
   const editorMode = useEditorStore((state) => state.editorMode)

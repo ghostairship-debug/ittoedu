@@ -815,11 +815,32 @@ export function FlowWorkspace({
     onTextEditChange?.(next)
   }
 
-  useEffect(() => {
-    if (!storeEdit) return
+  const adoptStoreEdit = (next: FlowTextEditSession | null) => {
+    const previous = editRef.current
+    editRef.current = next
+    setEdit(next)
+    if (!next && previous?.kind === 'formula') setFormulaBlockId(null)
+    setRestyleToken((value) => value + 1)
+  }
+
+  useLayoutEffect(() => {
     const local = editRef.current
-    if (!local) return
-    if (storeEdit.blockId !== local.blockId) return
+    if (!storeEdit) {
+      if (local) adoptStoreEdit(null)
+      return
+    }
+    if (!local) {
+      adoptStoreEdit(storeEdit)
+      return
+    }
+    if (
+      storeEdit.blockId !== local.blockId
+      || storeEdit.surfaceId !== local.surfaceId
+      || storeEdit.revision !== local.revision
+    ) {
+      adoptStoreEdit(storeEdit)
+      return
+    }
     if (local.composing || storeEdit.composing) return
 
     const rangeEqual =
@@ -851,8 +872,7 @@ export function FlowWorkspace({
 
     if (rangeEqual && draftEqual) return
 
-    setEditState(storeEdit)
-    setRestyleToken((n) => n + 1)
+    adoptStoreEdit(storeEdit)
   }, [storeEdit])
 
   useEffect(() => {
@@ -927,6 +947,11 @@ export function FlowWorkspace({
       setEditState(null)
       return
     }
+    const liveStoreEdit = useEditorStore.getState().flowTextEdit
+    if (storeEdit && liveStoreEdit !== current) {
+      adoptStoreEdit(liveStoreEdit)
+      return
+    }
     const action = resolveFlowTextBlur({ composing: current.composing, blurReady: true })
     if (action === 'defer') {
       setEditState(deferFlowTextAction(current, 'commit'))
@@ -972,10 +997,15 @@ export function FlowWorkspace({
       if (!editRef.current || isFlowSelectionPreservingFocusTarget(event.relatedTarget, workspace)) {
         return
       }
+      const scheduledStoreEdit = useEditorStore.getState().flowTextEdit
       if (pendingCommit !== null) ownerWindow.clearTimeout(pendingCommit)
       pendingCommit = ownerWindow.setTimeout(() => {
         pendingCommit = null
         if (!editRef.current) return
+        if (
+          scheduledStoreEdit
+          && useEditorStore.getState().flowTextEdit !== scheduledStoreEdit
+        ) return
         if (isFlowSelectionPreservingFocusTarget(ownerDocument.activeElement, workspace)) return
         commitCurrent(true)
       }, 0)

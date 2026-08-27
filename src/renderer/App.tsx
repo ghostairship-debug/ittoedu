@@ -91,9 +91,11 @@ import {
   selectMediaAssetFiles,
   selectSelectedNode,
   selectSlideAuthoringBackend,
+  selectHasUnsavedCourseChanges,
   useEditorStore,
   MAX_BATCH_CANVAS_ITEMS,
   type ComponentPackageReplacementTarget,
+  type CourseProjectPersistenceSnapshot,
   type ImportedAssetBatchItem,
 } from './store/editorStore'
 import { shouldIgnoreSlideLayerDeleteForFocus } from './course/v9SlideActionCommands'
@@ -305,20 +307,13 @@ interface RecoverySnapshot {
   title: string
 }
 
-function currentCourseArchiveData(): CourseProjectArchiveData {
-  const state = useEditorStore.getState()
-  const document = selectActiveCourseProjectDocument(state)
-  if (!document) {
-    throw new UserFacingError(
-      '无法使用课程工程',
-      '当前会话没有课程工程。',
-      '请新建或打开课程工程后再保存。',
-    )
-  }
+function courseArchiveDataFromSnapshot(
+  snapshot: CourseProjectPersistenceSnapshot,
+): CourseProjectArchiveData {
   return {
-    project: document,
-    assetFiles: { ...selectMediaAssetFiles(state) },
-    componentFiles: componentPackagesToArchiveFiles(state.componentPackages),
+    project: snapshot.project,
+    assetFiles: snapshot.assetFiles,
+    componentFiles: componentPackagesToArchiveFiles(snapshot.componentPackages),
   }
 }
 
@@ -411,7 +406,7 @@ export default function App() {
     recoveryCoordinatorRef.current = createRecoveryWriteCoordinator()
   }
 
-  const dirty = useEditorStore((state) => state.dirty)
+  const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const project = useEditorStore((state) => state.project)
   const projectPath = useEditorStore((state) => state.projectPath)
   const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
@@ -419,6 +414,10 @@ export default function App() {
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
   )
+  const v9ContentEdit = useEditorStore((state) => state.v9ContentEdit)
+  const spatialContentEdit = useEditorStore((state) => state.spatialContentEdit)
+  const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
+  const textEditSession = useEditorStore((state) => state.textEditSession)
   const selectedNode = useEditorStore(selectSelectedNode)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -452,7 +451,6 @@ export default function App() {
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
   const loadCourseProject = useEditorStore((state) => state.loadCourseProject)
-  const markSaved = useEditorStore((state) => state.markSaved)
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
   )
@@ -534,7 +532,7 @@ export default function App() {
   }, [])
 
   const confirmDiscardIfNeeded = useCallback(async () => {
-    if (!useEditorStore.getState().dirty) return true
+    if (!selectHasUnsavedCourseChanges(useEditorStore.getState())) return true
     return (await desktopApi().confirmDiscardChanges()) === 'discard'
   }, [])
 
@@ -627,11 +625,16 @@ export default function App() {
       let savedCurrentRevision = false
       try {
         await run(async () => {
+          const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
+          if (!preparation.ok) {
+            throw new UserFacingError(
+              '无法保存当前文字草稿',
+              preparation.reason,
+              '请结束输入法组合或重新选择有效文字后再保存。',
+            )
+          }
           const state = useEditorStore.getState()
-          const archive = currentCourseArchiveData()
-          const savedDocument = archive.project
-          const savedSidecar = state.slideCandidateSidecar
-          const savedComponentRevision = state.componentPackages
+          const archive = courseArchiveDataFromSnapshot(preparation.snapshot)
           const bytes = await saveCourseProjectDocumentAsync(archive)
           const result = await desktopApi().saveProject({
             path: saveAs ? undefined : (state.projectPath ?? undefined),
@@ -639,22 +642,13 @@ export default function App() {
             bytes,
           })
           if (result) {
-            const current = useEditorStore.getState()
-            const revisionStillCurrent =
-              selectActiveCourseProjectDocument(current) === savedDocument &&
-              current.slideCandidateSidecar === savedSidecar &&
-              current.componentPackages === savedComponentRevision
-            if (revisionStillCurrent) {
-              markSaved(result.path)
+            const allChangesSaved = useEditorStore
+              .getState()
+              .acknowledgeCourseProjectSaved(result.path, preparation.token)
+            if (allChangesSaved) {
               savedCurrentRevision = true
               await desktopApi().clearRecoveryProject().catch((error) => {
                 console.error('清理恢复数据失败', error)
-              })
-            } else {
-              useEditorStore.setState({
-                projectPath: result.path,
-                dirty: true,
-                statusMessage: '已保存启动保存时的版本；之后的修改尚未保存',
               })
             }
             await refreshRecentProjects()
@@ -665,7 +659,7 @@ export default function App() {
       }
       return savedCurrentRevision
     },
-    [markSaved, refreshRecentProjects, run],
+    [refreshRecentProjects, run],
   )
 
   const selectAndImportImage = useCallback(
@@ -1656,20 +1650,32 @@ export default function App() {
       return
     }
     const state = useEditorStore.getState()
-    const document = selectActiveCourseProjectDocument(state)
-    if (!document) {
+    const capture = state.captureCourseProjectRecoverySnapshot()
+    if (!capture.ok) {
       coordinator.cancel()
       return
     }
+    const snapshot = capture.snapshot
     recoveryRevisionRef.current += 1
     coordinator.schedule(recoveryRevisionRef.current, {
-      project: document,
-      assetFiles: { ...selectMediaAssetFiles(state) },
-      componentPackages: state.componentPackages,
+      project: snapshot.project,
+      assetFiles: snapshot.assetFiles,
+      componentPackages: snapshot.componentPackages,
       projectPath: state.projectPath,
-      title: document.title,
+      title: snapshot.project.title,
     })
-  }, [sidecarFiles, componentPackages, dirty, project, projectPath, recoveryDecisionComplete])
+  }, [
+    componentPackages,
+    dirty,
+    flowTextEdit,
+    project,
+    projectPath,
+    recoveryDecisionComplete,
+    sidecarFiles,
+    spatialContentEdit,
+    textEditSession,
+    v9ContentEdit,
+  ])
 
   useEffect(() => () => {
     recoveryCoordinatorRef.current?.dispose()

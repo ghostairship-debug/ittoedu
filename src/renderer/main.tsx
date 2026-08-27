@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles/globals.css'
-import { useEditorStore } from './store/editorStore'
+import { selectHasUnsavedCourseChanges, useEditorStore } from './store/editorStore'
 import { AppErrorBoundary } from './ui/AppErrorBoundary'
 import { installRendererDiagnostics } from './diagnostics/installRendererDiagnostics'
 import { BUNDLED_FONT_MANIFEST } from '../shared/fonts/bundledFontAssets'
@@ -12,9 +12,9 @@ import { installFetchBundledFontEmbedSource } from './export/bundledFontEmbedSou
 
 installRendererDiagnostics()
 
-window.__COURSEWARE_EDITOR_DIRTY__ = useEditorStore.getState().dirty
+window.__COURSEWARE_EDITOR_DIRTY__ = selectHasUnsavedCourseChanges(useEditorStore.getState())
 useEditorStore.subscribe((state) => {
-  window.__COURSEWARE_EDITOR_DIRTY__ = state.dirty
+  window.__COURSEWARE_EDITOR_DIRTY__ = selectHasUnsavedCourseChanges(state)
 })
 
 const root = document.getElementById('root')

@@ -153,8 +153,49 @@ async function patchProjectDialogs(
   }, paths)
 }
 
+async function pressDesktopSaveShortcut(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) throw new Error('Editor window is unavailable')
+    window.webContents.sendInputEvent({
+      type: 'keyDown',
+      keyCode: 'S',
+      modifiers: ['control'],
+    })
+    window.webContents.sendInputEvent({
+      type: 'keyUp',
+      keyCode: 'S',
+      modifiers: ['control'],
+    })
+  })
+}
+
 function readProject(projectPath: string): CourseProjectDocument {
   return openCourseProjectArchive(new Uint8Array(readFileSync(projectPath))).project
+}
+
+function spatialWorldTextContents(project: CourseProjectDocument): string[] {
+  return project.surfaces.flatMap((surface) => (
+    surface.type === 'spatial-2d'
+      ? surface.world.layerItems.flatMap((item) => (
+          item.kind === 'native' && item.content.nativeType === 'text'
+            ? [item.content.data.text]
+            : []
+        ))
+      : []
+  ))
+}
+
+function flowTextContents(project: CourseProjectDocument): string[] {
+  const collect = (blocks: Extract<CourseProjectDocument['surfaces'][number], { type: 'flow' }>['blocks']): string[] => (
+    blocks.flatMap((block) => {
+      const own = 'text' in block && typeof block.text === 'string' ? [block.text] : []
+      return block.type === 'section' ? [...own, ...collect(block.blocks)] : own
+    })
+  )
+  return project.surfaces.flatMap((surface) => (
+    surface.type === 'flow' ? collect(surface.blocks) : []
+  ))
 }
 
 async function saveAs(
@@ -344,6 +385,97 @@ function expectCleanDiagnostics(diagnostics: Diagnostics): void {
     /^WebGL: INVALID_VALUE: texImage2D: bad image data$/.test(message)
   ))).toEqual([])
 }
+
+test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', async () => {
+  test.setTimeout(120_000)
+  const launch = await launchEditor()
+  const projectPath = join(launch.runRoot, 'focused-live-drafts.h5lesson')
+  const { app, page } = launch
+  const slideText = 'Slide 不失焦保存草稿'
+  const spatialText = 'Spatial 不失焦保存草稿'
+  const flowText = 'Flow 不失焦保存草稿'
+  try {
+    await patchProjectDialogs(app, { projectSave: projectPath, projectOpen: projectPath })
+
+    await page.getByRole('tab', { name: '元素' }).click()
+    await page.getByRole('tab', { name: '常用' }).click()
+    await page.getByTestId('add-text').click()
+    await page.getByRole('tab', { name: '属性' }).click()
+    await page.getByRole('button', { name: '编辑局部文字格式' }).click()
+    let editor = page.getByTestId('text-edit-overlay')
+    await expect(editor).toBeFocused()
+    await editor.fill(slideText)
+    await expect(editor).toBeFocused()
+    await pressDesktopSaveShortcut(app)
+    await expect.poll(
+      () => existsSync(projectPath) ? readProject(projectPath) : null,
+      { timeout: 15_000 },
+    ).not.toBeNull()
+    expect(
+      readProject(projectPath).surfaces
+        .filter((surface) => surface.type === 'slide')
+        .flatMap((surface) => surface.type === 'slide'
+          ? surface.scenes.flatMap((scene) => scene.layerItems)
+          : [])
+        .flatMap((item) => item.kind === 'native' && item.content.nativeType === 'text'
+          ? [item.content.data.text]
+          : []),
+    ).toContain(slideText)
+
+    await addSurface(page, 'spatial')
+    await page.getByRole('tab', { name: '元素' }).click()
+    await page.getByRole('tab', { name: '常用' }).click()
+    await page.getByTestId('add-text').click()
+    await page.getByRole('tab', { name: '属性' }).click()
+    await page.getByRole('button', { name: '编辑局部文字格式' }).click()
+    editor = page.getByTestId('text-edit-overlay')
+    await expect(editor).toBeFocused()
+    await editor.fill(spatialText)
+    await expect(editor).toBeFocused()
+    await pressDesktopSaveShortcut(app)
+    await expect.poll(
+      () => spatialWorldTextContents(readProject(projectPath)),
+      { timeout: 15_000 },
+    ).toContain(spatialText)
+
+    await addSurface(page, 'flow')
+    const paragraph = page.getByTestId('flow-paper').locator('.flow-block-paragraph').first()
+    await paragraph.dblclick()
+    editor = page.getByTestId('flow-inline-editor')
+    await expect(editor).toBeFocused()
+    await editor.fill(flowText)
+    await expect(editor).toBeFocused()
+    await pressDesktopSaveShortcut(app)
+    await expect.poll(
+      () => flowTextContents(readProject(projectPath)),
+      { timeout: 15_000 },
+    ).toContain(flowText)
+
+    await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    await openSlide(page)
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator('.node-item').filter({
+      has: page.locator('.node-type-icon[title="text"]'),
+    }).first().locator('.node-name').click()
+    await page.getByRole('tab', { name: '属性' }).click()
+    await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(slideText)
+
+    await openSpatial(page)
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator('.node-item').filter({
+      has: page.locator('.node-type-icon[title="text"]'),
+    }).first().locator('.node-name').click()
+    await page.getByRole('tab', { name: '属性' }).click()
+    await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(spatialText)
+
+    await openFlow(page)
+    await expect(page.getByTestId('flow-paper')).toContainText(flowText)
+    expectCleanDiagnostics(launch)
+  } finally {
+    await closeEditor(app, launch.runRoot)
+  }
+})
 
 test('Wave A core authoring remains usable across Mixed surfaces', async () => {
   test.setTimeout(180_000)
