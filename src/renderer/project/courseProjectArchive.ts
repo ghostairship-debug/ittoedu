@@ -60,7 +60,7 @@ function openError(message: string, cause?: unknown): UserFacingError {
   return new UserFacingError(
     '课程工程文件损坏',
     message,
-    '请重新选择有效的课程工程，或从备份恢复。',
+    '请重新选择有效的课程工程，或从备份恢复。不要把损坏文件另存覆盖原件。',
     { cause },
   )
 }
@@ -212,7 +212,7 @@ function readCourseProject(bytes: Uint8Array): CourseProjectDocument {
     throw new UserFacingError(
       '课程工程版本不支持',
       `该文件的格式版本为 ${schemaVersion}，当前编辑器无法直接打开。`,
-      '请使用对应版本的编辑器打开。当前不会转换不受支持的工程。',
+      `请使用支持格式版本 ${schemaVersion} 的编辑器打开。当前不会转换不受支持的工程。`,
       { cause },
     )
   }

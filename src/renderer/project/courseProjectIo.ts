@@ -49,11 +49,7 @@ export async function openDefaultCourseProjectAsync(
   bytes: Uint8Array,
   options: { signal?: AbortSignal } = {},
 ): Promise<CourseProjectArchiveData> {
-  const probe = detectCourseProjectArchiveFormat(bytes)
-  if (probe.kind === 'v9') {
-    return openCourseProjectArchiveAsync(bytes, options)
-  }
-  refuseUnsupportedOrCorrupt(probe.kind, probe.reason, probe.identity.schemaVersion)
+  return openCourseProjectArchiveAsync(bytes, options)
 }
 
 export function saveCourseProjectDocument(
