@@ -75,7 +75,7 @@
         "src/renderer/project",
         "src/renderer/course",
         "src/renderer/components",
-        "src/renderer/preview",
+        "src/player/surfaces",
         "src/renderer/export"
       ],
       "forbiddenDependencies": [

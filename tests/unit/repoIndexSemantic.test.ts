@@ -2,7 +2,9 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
@@ -14,6 +16,14 @@ import { readGeneratedDirectory } from '../../scripts/repo-index/writeGenerated'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'ittoedu-repo-index-semantic-'))
+
+function isMaterialRepositoryPath(candidate: string): boolean {
+  if (!existsSync(candidate)) return false
+  if (!statSync(candidate).isDirectory()) return true
+  return readdirSync(candidate, { withFileTypes: true }).some((entry) =>
+    entry.isFile() || entry.isSymbolicLink() ||
+    (entry.isDirectory() && isMaterialRepositoryPath(resolve(candidate, entry.name))))
+}
 
 afterAll(() => {
   rmSync(temporaryRoot, { recursive: true, force: true })
@@ -217,7 +227,10 @@ describe('repo-index stable semantic coverage', () => {
           expect(path).not.toMatch(/^[A-Za-z]:[\\/]/)
           expect(path).not.toContain('\\')
           expect(path.startsWith('../')).toBe(false)
-          expect(existsSync(resolve(repoRoot, path)), `${record.id}:${field}:${path}`).toBe(true)
+          expect(
+            isMaterialRepositoryPath(resolve(repoRoot, path)),
+            `${record.id}:${field}:${path}`,
+          ).toBe(true)
         }
       }
     }
@@ -228,7 +241,10 @@ describe('repo-index stable semantic coverage', () => {
         ...module.forbiddenDependencies,
       ]) {
         if (!/^(?:src|scripts|repo-index)(?:\/|$)/u.test(dependency)) continue
-        expect(existsSync(resolve(repoRoot, dependency)), `${module.id}:${dependency}`).toBe(true)
+        expect(
+          isMaterialRepositoryPath(resolve(repoRoot, dependency)),
+          `${module.id}:${dependency}`,
+        ).toBe(true)
       }
     }
 
