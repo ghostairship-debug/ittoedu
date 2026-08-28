@@ -3383,9 +3383,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
     const snapshot = nextBackend.getSnapshot()
     const generation = slideAuthoringGeneration(snapshot.sessionId)
+    const documentChanged =
+      nextBackend.getSession().history.present !== current.slideBackend.getSession().history.present
     const keepEdit = extra.clearContentEdit
       ? null
       : current.v9ContentEdit && current.v9ContentEdit.target.generation === generation
+        && (
+          !documentChanged
+          || current.v9ContentEdit.composing
+          || isV9SlideContentDraftDirty(current.v9ContentEdit)
+        )
         ? current.v9ContentEdit
         : null
     const presentSidecar = current.slideCandidateSidecar ?? emptyCourseAssetSidecar()
@@ -6295,39 +6302,77 @@ export const useEditorStore = create<EditorState>((set, get) => {
     prepareCourseProjectPersistence() {
       const state = get()
       if (state.spatialSession && state.spatialContentEdit) {
-        const result = commitSpatialWorldContentEdit(
-          state.spatialSession,
-          state.spatialContentEdit,
-        )
-        if (!result.ok) {
-          persistSpatialResult(result)
-          return { ok: false, reason: result.reason ?? '无法提交 Spatial 活动文字草稿' }
+        if (
+          !state.spatialContentEdit.composing
+          && !isSpatialWorldContentDraftDirty(state.spatialContentEdit)
+        ) {
+          set({
+            spatialContentEdit: null,
+            editingTextNodeId: null,
+            ...spatialViewState(
+              state.spatialSession,
+              state.slideCandidateSidecar,
+              null,
+            ),
+          })
+        } else {
+          const result = commitSpatialWorldContentEdit(
+            state.spatialSession,
+            state.spatialContentEdit,
+          )
+          if (!result.ok) {
+            persistSpatialResult(result)
+            return { ok: false, reason: result.reason ?? '无法提交 Spatial 活动文字草稿' }
+          }
+          persistSpatialResult(result, { clearContentEdit: true })
         }
-        persistSpatialResult(result, { clearContentEdit: true })
       } else if (state.flowSession && state.flowTextEdit) {
-        const result = commitFlowTextEdit(
-          state.flowSession.history.present,
-          state.flowSession.selection,
-          state.flowTextEdit,
-          { expectedRevision: state.flowSession.history.present.revision },
-        )
-        if (!result.ok) {
-          persistFlowResult(result)
-          return { ok: false, reason: result.reason ?? '无法提交 Flow 活动文字草稿' }
+        if (
+          !state.flowTextEdit.composing
+          && !isFlowTextDraftDirty(state.flowTextEdit)
+        ) {
+          set({ flowTextEdit: null })
+        } else {
+          const result = commitFlowTextEdit(
+            state.flowSession.history.present,
+            state.flowSession.selection,
+            state.flowTextEdit,
+            { expectedRevision: state.flowSession.history.present.revision },
+          )
+          if (!result.ok) {
+            persistFlowResult(result)
+            return { ok: false, reason: result.reason ?? '无法提交 Flow 活动文字草稿' }
+          }
+          persistFlowResult(result, { clearTextEdit: true })
         }
-        persistFlowResult(result, { clearTextEdit: true })
       } else {
         const backend = selectSlideAuthoringBackend(state)
         if (backend && state.v9ContentEdit) {
-          const result = commitV9SlideContentEdit(
-            backend.getSession(),
-            state.v9ContentEdit,
-          )
-          if (!result.ok) {
-            persistCandidateResult(result)
-            return { ok: false, reason: result.reason ?? '无法提交 Slide 活动文字草稿' }
+          if (
+            !state.v9ContentEdit.composing
+            && !isV9SlideContentDraftDirty(state.v9ContentEdit)
+          ) {
+            set({
+              v9ContentEdit: null,
+              editingTextNodeId: null,
+              project: derivedV8ProjectFromBackend(
+                backend,
+                state.slideCandidateSidecar,
+                null,
+              ),
+              ...candidateViewState(backend, null),
+            })
+          } else {
+            const result = commitV9SlideContentEdit(
+              backend.getSession(),
+              state.v9ContentEdit,
+            )
+            if (!result.ok) {
+              persistCandidateResult(result)
+              return { ok: false, reason: result.reason ?? '无法提交 Slide 活动文字草稿' }
+            }
+            persistCandidateResult(result, { clearContentEdit: true })
           }
-          persistCandidateResult(result, { clearContentEdit: true })
         } else if (backend && state.textEditSession) {
           get().commitTextEdit()
           if (get().textEditSession) {

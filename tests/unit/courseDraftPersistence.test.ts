@@ -26,6 +26,7 @@ interface DraftFixture {
   readonly targetId: string
   readonly originalText: string
   readonly historyBeforeDraft: number
+  begin(): void
   update(text: string): void
   read(document: CourseProjectDocument): string
 }
@@ -62,17 +63,21 @@ function createSlideFixture(): DraftFixture {
   const originalText = nativeText(activeDocument(), targetId)
   acknowledgeBaseline('slide-baseline.h5lesson')
   const historyBeforeDraft = useEditorStore.getState().history.past.length
+  const begin = () => {
+    useEditorStore.getState().beginTextEdit(targetId, 'properties')
+  }
   return {
     kind: 'slide',
     targetId,
     originalText,
     historyBeforeDraft,
+    begin,
     update(text) {
       const state = useEditorStore.getState()
       const node = state.project.scenes.flatMap((scene) => scene.nodes)
         .find((candidate) => candidate.id === targetId)
       if (!node || node.type !== 'text') throw new Error('expected Slide text projection')
-      state.beginTextEdit(targetId, 'canvas')
+      begin()
       useEditorStore.getState().updateTextEditDraft(
         targetId,
         text,
@@ -96,17 +101,21 @@ function createSpatialFixture(): DraftFixture {
   const originalText = nativeText(activeDocument(), targetId)
   acknowledgeBaseline('spatial-baseline.h5lesson')
   const historyBeforeDraft = useEditorStore.getState().history.past.length
+  const begin = () => {
+    useEditorStore.getState().beginTextEdit(targetId, 'properties')
+  }
   return {
     kind: 'spatial',
     targetId,
     originalText,
     historyBeforeDraft,
+    begin,
     update(text) {
       const state = useEditorStore.getState()
       const node = state.project.scenes.flatMap((scene) => scene.nodes)
         .find((candidate) => candidate.id === targetId)
       if (!node || node.type !== 'text') throw new Error('expected Spatial text projection')
-      state.beginTextEdit(targetId, 'canvas')
+      begin()
       useEditorStore.getState().updateTextEditDraft(
         targetId,
         text,
@@ -135,27 +144,34 @@ function createFlowFixture(): DraftFixture {
   const originalText = paragraph.text
   acknowledgeBaseline('flow-baseline.h5lesson')
   const historyBeforeDraft = useEditorStore.getState().history.past.length
+  const begin = () => {
+    const current = useEditorStore.getState().flowSession
+    if (!current) throw new Error('expected Flow session')
+    const selection = selectFlowEditorBlocks(
+      current.history.present,
+      current.selection.locationId,
+      [targetId],
+    )
+    const begun = beginFlowTextEdit({
+      project: current.history.present,
+      selection,
+      blockId: targetId,
+    })
+    if (!begun.ok) throw new Error(begun.reason)
+    useEditorStore.getState().applyFlowSelection(begun.selection)
+    useEditorStore.getState().setFlowTextEdit(begun.edit)
+  }
   return {
     kind: 'flow',
     targetId,
     originalText,
     historyBeforeDraft,
+    begin,
     update(text) {
-      const current = useEditorStore.getState().flowSession
-      if (!current) throw new Error('expected Flow session')
-      const selection = selectFlowEditorBlocks(
-        current.history.present,
-        current.selection.locationId,
-        [targetId],
-      )
-      const begun = beginFlowTextEdit({
-        project: current.history.present,
-        selection,
-        blockId: targetId,
-      })
-      if (!begun.ok) throw new Error(begun.reason)
-      useEditorStore.getState().applyFlowSelection(begun.selection)
-      useEditorStore.getState().setFlowTextEdit(updateFlowTextDraft(begun.edit, {
+      begin()
+      const edit = useEditorStore.getState().flowTextEdit
+      if (!edit) throw new Error('expected Flow edit')
+      useEditorStore.getState().setFlowTextEdit(updateFlowTextDraft(edit, {
         text,
         runs: [],
       }))
@@ -272,6 +288,86 @@ describe('active Course Project text draft persistence', () => {
       expect(fixture.read(nextPreparation.snapshot.project)).toBe('写盘期间版本 B')
     },
   )
+
+  it.each(fixtures)(
+    'saves the latest %s document without a history entry when only a clean edit session went stale',
+    (kind, createFixture) => {
+      const fixture = createFixture()
+      fixture.begin()
+      expect(
+        useEditorStore.getState().v9ContentEdit
+        ?? useEditorStore.getState().spatialContentEdit
+        ?? useEditorStore.getState().flowTextEdit,
+      ).not.toBeNull()
+
+      const revisionBeforeMutation = activeDocument().revision
+      if (kind === 'slide') {
+        useEditorStore.getState().renameProject('slide clean draft revision')
+      } else if (kind === 'spatial') {
+        const node = useEditorStore.getState().project.scenes
+          .flatMap((scene) => scene.nodes)
+          .find((candidate) => candidate.id === fixture.targetId)
+        if (!node) throw new Error('expected projected Spatial text')
+        useEditorStore.getState().updateNode(fixture.targetId, { x: node.x + 1 })
+      } else {
+        const flow = useEditorStore.getState().flowSession
+        if (!flow) throw new Error('expected Flow session')
+        useEditorStore.getState().renameFlowHeading(
+          flow.selection.locationId,
+          'Flow clean draft revision',
+        )
+      }
+      const documentAfterMutation = activeDocument()
+      const historyAfterMutation = useEditorStore.getState().history.past.length
+      expect(documentAfterMutation.revision).toBeGreaterThan(revisionBeforeMutation)
+      if (kind === 'slide') {
+        expect(useEditorStore.getState().v9ContentEdit).toBeNull()
+      }
+
+      const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
+      expect(preparation.ok).toBe(true)
+      if (!preparation.ok) throw new Error(preparation.reason)
+      expect(preparation.snapshot.project).toBe(documentAfterMutation)
+      expect(fixture.read(preparation.snapshot.project)).toBe(fixture.originalText)
+      expect(useEditorStore.getState().history.past).toHaveLength(historyAfterMutation)
+      expect(
+        useEditorStore.getState().v9ContentEdit
+        ?? useEditorStore.getState().spatialContentEdit
+        ?? useEditorStore.getState().flowTextEdit,
+      ).toBeNull()
+    },
+  )
+
+  it('keeps a dirty stale Slide draft and refuses to overwrite a newer document', () => {
+    const fixture = createSlideFixture()
+    fixture.update('尚未提交的旧版本文字')
+    const edit = useEditorStore.getState().v9ContentEdit
+    if (!edit) throw new Error('expected Slide edit')
+
+    useEditorStore.getState().renameProject('dirty stale document')
+    const historyAfterRename = useEditorStore.getState().history.past.length
+    expect(useEditorStore.getState().v9ContentEdit).toBe(edit)
+
+    const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
+    expect(preparation).toMatchObject({ ok: false, reason: 'stale-revision' })
+    expect(useEditorStore.getState().history.past).toHaveLength(historyAfterRename)
+    expect(useEditorStore.getState().v9ContentEdit).toBe(edit)
+  })
+
+  it('refuses to discard a clean Slide edit while IME composition is active', () => {
+    const fixture = createSlideFixture()
+    fixture.begin()
+    const edit = useEditorStore.getState().v9ContentEdit
+    if (!edit) throw new Error('expected Slide edit')
+    const composingEdit = { ...edit, composing: true }
+    useEditorStore.setState({ v9ContentEdit: composingEdit })
+    const historyBefore = useEditorStore.getState().history.past.length
+
+    const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
+    expect(preparation).toMatchObject({ ok: false, reason: 'composing' })
+    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(useEditorStore.getState().v9ContentEdit).toBe(composingEdit)
+  })
 
   it('acknowledges a Slide save when only selection changes during disk write', () => {
     const store = useEditorStore.getState()
