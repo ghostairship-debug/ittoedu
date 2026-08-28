@@ -1271,7 +1271,17 @@ describe('Published Slide Phaser Component API 4 host', () => {
       expect(session.navigator.hasPendingNavigation).toBe(false)
     })
     pendingSlideNavigation.restore()
-    await session.goToLocation(initialLocationId)
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ArrowLeft',
+      bubbles: true,
+      cancelable: true,
+    }))
+    await vi.waitFor(() => {
+      expect(session.getProgress()).toMatchObject({
+        index: 0,
+        locationId: initialLocationId,
+      })
+    })
     generation = await currentReplayGeneration(root, session)
 
     const pendingFlowNavigation = deferNextActivation()

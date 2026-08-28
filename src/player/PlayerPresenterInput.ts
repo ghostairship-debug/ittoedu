@@ -25,6 +25,8 @@ export interface PlayerPresenterInputOptions {
   onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult
   onFeedback?(feedback: PresenterInputFeedback): void
   isModalOpen?(): boolean
+  /** Authoritative delivery-time index when navigation can also come from other controls. */
+  readCurrentIndex?(): number
   /** Injectable only so the hardware de-duplication window stays deterministic in tests. */
   now?(): number
   dedupeMs?: number
@@ -118,6 +120,7 @@ export class PlayerPresenterInput {
   private readonly onAuthoredCommand: PlayerPresenterInputOptions['onAuthoredCommand']
   private readonly onFeedback: PlayerPresenterInputOptions['onFeedback']
   private readonly isModalOpen: () => boolean
+  private readonly readCurrentIndex?: PlayerPresenterInputOptions['readCurrentIndex']
   private readonly now: () => number
   private readonly dedupeMs: number
   private currentIndex = 0
@@ -133,6 +136,7 @@ export class PlayerPresenterInput {
     this.onAuthoredCommand = options.onAuthoredCommand
     this.onFeedback = options.onFeedback
     this.isModalOpen = options.isModalOpen ?? (() => false)
+    this.readCurrentIndex = options.readCurrentIndex
     this.now = options.now ?? (() => performance.now())
     this.dedupeMs = Math.max(0, options.dedupeMs ?? DEFAULT_DEDUPE_MS)
     window.addEventListener('keydown', this.handleKeyDown)
@@ -150,6 +154,16 @@ export class PlayerPresenterInput {
     if (this.destroyed) return
     this.destroyed = true
     window.removeEventListener('keydown', this.handleKeyDown)
+  }
+
+  private currentIndexAtDelivery(): number {
+    const candidate = this.readCurrentIndex?.()
+    if (candidate === undefined || !Number.isFinite(candidate)) return this.currentIndex
+    this.currentIndex = Math.min(
+      Math.max(0, Math.trunc(candidate)),
+      this.totalPages - 1,
+    )
+    return this.currentIndex
   }
 
   private resolveInput(event: KeyboardEvent): ResolvedInput | null {
@@ -216,9 +230,10 @@ export class PlayerPresenterInput {
     let result: PresenterInputResult
     if (input.source === 'keyboard-navigation' ||
       this.presenter.strategy === 'scene-navigation') {
+      const currentIndex = this.currentIndexAtDelivery()
       const targetIndex = input.command === 'next'
-        ? this.currentIndex + 1
-        : this.currentIndex - 1
+        ? currentIndex + 1
+        : currentIndex - 1
       if (targetIndex < 0 || targetIndex >= this.totalPages) {
         result = {
           accepted: false,

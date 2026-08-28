@@ -182,6 +182,16 @@ describe('PlayerPresenterInput', () => {
     }))
   })
 
+  it('reads the authoritative index after another course control navigates', () => {
+    let currentIndex = 0
+    const { navigate } = createInput({ readCurrentIndex: () => currentIndex })
+
+    currentIndex = 1
+    expect(keydown('ArrowLeft').defaultPrevented).toBe(true)
+
+    expect(navigate).toHaveBeenCalledWith(0, 'previous')
+  })
+
   it('ignores repeat and hardware bounce inside the de-duplication window', () => {
     let now = 1000
     const { authored } = createInput({

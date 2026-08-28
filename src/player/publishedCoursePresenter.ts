@@ -64,6 +64,7 @@ export function attachPublishedCoursePresenter(
         const targetIndex = command === 'previous' ? currentIndex - 1 : currentIndex + 1
         return goToIndex(targetIndex)
       },
+      readCurrentIndex: readIndex,
     })
     presenterInput.setIndex(readIndex())
   }
