@@ -13,7 +13,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import { strFromU8, unzipSync } from 'fflate'
-import type { BrowserContext, ElectronApplication, Page } from 'playwright'
+import type { BrowserContext, ElectronApplication, Locator, Page } from 'playwright'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
@@ -93,6 +93,25 @@ function sameBytes(left: Uint8Array | undefined, right: Uint8Array): boolean {
     left.byteLength === right.byteLength &&
     left.every((value, index) => value === right[index]),
   )
+}
+
+async function expectPublishedImageRendered(
+  root: Locator,
+  layerItemId: string,
+  expectedSrc: string,
+): Promise<void> {
+  const layer = root.locator(`[data-slide-layer-item="${layerItemId}"]`)
+  const source = layer.locator('img')
+  await expect(layer).toBeVisible()
+  await expect(source).toHaveAttribute('src', expectedSrc)
+  await expect.poll(() => source.evaluate((element) => {
+    const image = element as HTMLImageElement
+    return image.complete && image.naturalWidth > 0
+  })).toBe(true)
+  await expect.poll(async () => (
+    await layer.locator('canvas[aria-hidden="true"]').isVisible()
+    || await source.isVisible()
+  )).toBe(true)
 }
 
 function imageAssetId(
@@ -665,9 +684,11 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       await expect(currentLocationHost).toBeVisible({ timeout: 15_000 })
       await expect.poll(() => currentLocationHost.getAttribute('data-course-player-ready'))
         .toBe('true')
-      await expect(currentLocationHost.locator(
-        '[data-slide-layer-item="slide-summary-hero"] img',
-      )).toHaveAttribute('src', expectedDataUrl)
+      await expectPublishedImageRendered(
+        currentLocationHost,
+        'slide-summary-hero',
+        expectedDataUrl,
+      )
       await currentLocationHost.screenshot({
         path: join(evidenceDirectory, '06-current-location-try-run.png'),
       })
@@ -676,18 +697,22 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       await launch.page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
       const preview = launch.page.getByTestId('course-preview-overlay')
       const previewHost = launch.page.getByTestId('course-preview-host')
-      await expect(previewHost.locator('.slide-published-adapter')).toBeVisible({ timeout: 15_000 })
-      for (let index = 0; index < 3; index += 1) {
+      const previewAdapter = previewHost.locator('.slide-published-adapter')
+      await expect(previewAdapter).toBeVisible({ timeout: 15_000 })
+      for (const locationId of [
+        'slide-location-evidence',
+        'slide-location-practice',
+        'slide-location-summary',
+      ]) {
         await launch.page.getByTestId('course-preview-next').click()
+        await expect.poll(() => previewAdapter.getAttribute('data-location-id'))
+          .toBe(locationId)
       }
-      await expect.poll(() => (
-        previewHost.locator('.slide-published-adapter').getAttribute('data-location-id')
-      )).toBe('slide-location-summary')
-      const previewImage = previewHost.locator(
-        '[data-slide-layer-item="slide-summary-hero"] img',
+      await expectPublishedImageRendered(
+        previewHost,
+        'slide-summary-hero',
+        expectedDataUrl,
       )
-      await expect(previewImage).toBeVisible()
-      expect(await previewImage.getAttribute('src')).toBe(expectedDataUrl)
       await previewHost.screenshot({ path: join(evidenceDirectory, '06-preview.png') })
       await preview.getByRole('button', { name: '关闭预览' }).click()
 
@@ -734,23 +759,29 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
             if (/^https?:/i.test(request.url())) requests.push(request.url())
           })
           await page.goto(pathToFileURL(exported.path).toString())
-          await expect(page.locator('.slide-published-adapter')).toBeVisible({ timeout: 15_000 })
+          const publishedAdapter = page.locator('.slide-published-adapter')
+          await expect(publishedAdapter).toBeVisible({ timeout: 15_000 })
           const nextButton = page.locator('[data-controller-button-id="next"]')
           await expect(nextButton).toHaveText('下一场景', { timeout: 15_000 })
-          for (let index = 0; index < 3; index += 1) {
+          for (const locationId of [
+            'slide-location-evidence',
+            'slide-location-practice',
+            'slide-location-summary',
+          ]) {
             const bounds = await nextButton.boundingBox()
             if (!bounds) throw new Error('Exported player next-scene button has no bounds')
             await page.mouse.click(
               bounds.x + bounds.width / 2,
               bounds.y + bounds.height / 2,
             )
+            await expect.poll(() => publishedAdapter.getAttribute('data-location-id'))
+              .toBe(locationId)
           }
-          await expect.poll(() => (
-            page.locator('.slide-published-adapter').getAttribute('data-location-id')
-          )).toBe('slide-location-summary')
-          await expect(page.locator(`img[src="${
-            exported.path === htmlPath ? expectedDataUrl : webAssetUrl
-          }"]`)).toBeVisible()
+          await expectPublishedImageRendered(
+            publishedAdapter,
+            'slide-summary-hero',
+            exported.path === htmlPath ? expectedDataUrl : webAssetUrl!,
+          )
           await page.screenshot({
             path: join(evidenceDirectory, exported.screenshot),
             fullPage: true,
