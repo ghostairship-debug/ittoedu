@@ -4062,6 +4062,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selection.locationId,
       extra,
     ) ?? current.courseAuthoringSession
+    const nextItemIds = sameFlowEditorSelection(session.selection, selection)
+      ? (historyAdjustedCourseSession?.itemIds ?? [])
+      : selection.selectedOverlayIds.length > 0
+        ? selection.selectedOverlayIds
+        : selection.selectedBlockIds
     const switchedCourseSession = historyAdjustedCourseSession
       ? switchCourseAuthoringLocation(historyAdjustedCourseSession, {
           locationId: selection.locationId,
@@ -4072,9 +4077,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     const nextCourseAuthoringSession = switchedCourseSession && 'token' in switchedCourseSession
       ? updateCourseAuthoringSessionItems(
           switchedCourseSession,
-          selection.selectedOverlayIds.length > 0
-            ? selection.selectedOverlayIds
-            : selection.selectedBlockIds,
+          nextItemIds,
         )
       : undefined
     set({
