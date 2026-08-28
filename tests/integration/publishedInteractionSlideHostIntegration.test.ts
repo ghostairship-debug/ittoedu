@@ -58,6 +58,8 @@ interface FixtureOptions {
   sceneBLocationStateId?: string
   sceneBDuplicateLocationId?: string
   sceneBDuplicateLocationStateId?: string
+  courseState?: PublishedCourseV2Payload['courseState']
+  navigationGuards?: PublishedCourseV2Payload['navigationGuards']
   sceneAItems?: PublishedLayerItem[]
   sceneAInteractions?: InteractionRule[]
   sceneBItems?: PublishedLayerItem[]
@@ -282,8 +284,8 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
       keyboardNavigation: true,
       presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
     },
-    courseState: [],
-    navigationGuards: [],
+    courseState: options.courseState ?? [],
+    navigationGuards: options.navigationGuards ?? [],
     locations: [
       {
         id: sceneALocationId,
@@ -523,6 +525,100 @@ describe('Published Interaction Slide host integration', () => {
 
     expectInteractionVisibility(renderedItem(container, sceneIdTarget.layerItemId), true)
     expectInteractionVisibility(renderedItem(container, otherSceneTarget.layerItemId), false)
+  })
+
+  it('writes shared course state before later motion and guarded navigation', async () => {
+    const target = textItem('course-state-target', 20, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      courseState: [{
+        key: 'ready',
+        valueType: 'boolean',
+        defaultValue: false,
+      }],
+      navigationGuards: [{
+        id: 'block-until-ready',
+        effect: 'block',
+        fromLocationIds: [LOCATION_A_ID],
+        toLocationIds: [LOCATION_B_ID],
+        match: 'all',
+        conditions: [{
+          type: 'compare',
+          key: 'ready',
+          operator: 'eq',
+          value: false,
+        }],
+        message: '请先完成当前任务',
+      }],
+      sceneAItems: [textItem('course-state-trigger', 10), target],
+      sceneAInteractions: [clickRule(
+        'course-state-sequence',
+        'course-state-trigger',
+        [
+          step('mark-ready', { type: 'course-state.set', key: 'ready', value: true }),
+          step('reveal-after-state-write', motion('node.enter', target.layerItemId)),
+          step('navigate-after-state-write', { type: 'scene.go', sceneId: SCENE_B_ID }),
+        ],
+        [{
+          type: 'course-state.compare',
+          key: 'ready',
+          operator: 'eq',
+          value: false,
+        }],
+      )],
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload)
+
+    await expect(session.goToLocation(LOCATION_B_ID)).rejects.toThrow('请先完成当前任务')
+    expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+
+    renderedItem(container, 'course-state-trigger').click()
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    })
+    expect(animationTargets).toContain(target.layerItemId)
+
+    await session.goToLocation(LOCATION_A_ID)
+    renderedItem(container, 'course-state-trigger').click()
+    await settle(24)
+    expect(session.navigator.current?.locationId).toBe(LOCATION_A_ID)
+    expect(animationTargets.filter((itemId) => itemId === target.layerItemId)).toHaveLength(1)
+    expect(payload).toEqual(before)
+  })
+
+  it('keeps declarative interactions inert during static capture', async () => {
+    const target = textItem('static-course-state-target', 20)
+    const payload = publishedFixture({
+      courseState: [{
+        key: 'ready',
+        valueType: 'boolean',
+        defaultValue: false,
+      }],
+      sceneAItems: [textItem('static-course-state-trigger', 10), target],
+      sceneAInteractions: [clickRule(
+        'static-course-state-rule',
+        'static-course-state-trigger',
+        [
+          step('static-course-state-write', {
+            type: 'course-state.set',
+            key: 'ready',
+            value: true,
+          }),
+          step('static-course-state-motion', motion('node.exit', target.layerItemId)),
+        ],
+      )],
+    })
+    const before = structuredClone(payload)
+    const { container } = await mount(payload, [], { staticCapture: true })
+
+    renderedItem(container, 'static-course-state-trigger').click()
+    await settle(24)
+
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), true)
+    expect(animationTargets).not.toContain(target.layerItemId)
+    expect(payload).toEqual(before)
   })
 
   it('resets local visibility per generation while global visibility persists until course restart', async () => {

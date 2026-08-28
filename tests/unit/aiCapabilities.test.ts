@@ -1221,6 +1221,8 @@ describe('AI capability manifest generation', () => {
     // These are transitive dependencies that the former hand-maintained list
     // repeatedly missed. The closure must follow barrels and nested schemas.
     expect(tracedSources).toContain('src/shared/contracts/course-project-v9/schema.ts')
+    expect(tracedSources).toContain('src/shared/contracts/course-state/schema.ts')
+    expect(tracedSources).toContain('src/shared/contracts/course-state/types.ts')
     expect(tracedSources).toContain('src/shared/contracts/published-course-v2/schema.ts')
     expect(tracedSources).toContain('src/shared/projectSchema.ts')
     expect(tracedSources).toContain('src/shared/projectTypes.ts')
@@ -1335,6 +1337,7 @@ describe('AI capability manifest generation', () => {
       'src/shared/interactionSchema.ts',
       'src/shared/publishedInteractionSupport.ts',
       'src/player/interactions/PublishedInteractionController.ts',
+      'src/player/surfaces/publishedCourseState.ts',
       'src/player/surfaces/publishedDynamicHosts.ts',
     ])
     expect(runtime.sourceOfTruth).toContain('src/shared/runtimeSchema.ts')

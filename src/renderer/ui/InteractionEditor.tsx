@@ -15,15 +15,18 @@ import { ensureScenePresentation } from '../../shared/presentation'
 import {
   isNodeMotionAction,
   isTerminalNavigationAction,
+  MAX_INTERACTION_CONDITIONS,
   type AudioActionTarget,
   type InteractionAction,
   type InteractionActionStep,
+  type InteractionCondition,
   type InteractionRule,
   type InteractionTrigger,
   type MotionDirection,
   type MotionEasing,
   type MotionEffect,
 } from '../../shared/interactionTypes'
+import type { CourseStateDeclaration } from '../../shared/courseProjectTypes'
 import type {
   ExternalComponentNode,
   SceneDocument,
@@ -46,7 +49,7 @@ type AutomationRule = InteractionRule & { trigger: AutomationTrigger }
 interface ActionTypeOption {
   value: ActionType
   label: string
-  needs?: 'state' | 'scene' | 'sound' | 'video' | 'node'
+  needs?: 'state' | 'scene' | 'sound' | 'video' | 'node' | 'course-state'
 }
 
 const ACTION_TYPE_OPTIONS: ActionTypeOption[] = [
@@ -58,6 +61,7 @@ const ACTION_TYPE_OPTIONS: ActionTypeOption[] = [
   { value: 'scene.previous', label: '上一场景' },
   { value: 'scene.replay', label: '重播当前场景' },
   { value: 'course.restart', label: '重新开始课程' },
+  { value: 'course-state.set', label: '设置课程状态', needs: 'course-state' },
   { value: 'audio.play', label: '播放声音', needs: 'sound' },
   { value: 'audio.pause', label: '暂停声音' },
   { value: 'audio.resume', label: '继续声音' },
@@ -157,6 +161,7 @@ export interface InteractionEditorProps {
     Pick<SceneDocument, 'id' | 'name' | 'presentation'>
   >
   sounds: Readonly<Record<string, SoundDefinition>>
+  courseState?: readonly CourseStateDeclaration[]
   ruleWarnings?: Readonly<Record<string, readonly string[]>>
   onOpenClickRules?(): void
   onRunPreview?(): void
@@ -225,6 +230,7 @@ function needsUnavailableTarget(
     sounds: number
     videos: number
     nodes: number
+    courseStates: number
   },
 ): boolean {
   switch (option.needs) {
@@ -233,6 +239,7 @@ function needsUnavailableTarget(
     case 'sound': return counts.sounds === 0
     case 'video': return counts.videos === 0
     case 'node': return counts.nodes === 0
+    case 'course-state': return counts.courseStates === 0
     default: return false
   }
 }
@@ -245,6 +252,7 @@ function defaultAction(
     soundId?: string
     videoId?: string
     nodeId?: string
+    courseState?: CourseStateDeclaration
   },
 ): InteractionAction {
   switch (type) {
@@ -273,6 +281,12 @@ function defaultAction(
     case 'scene.replay':
     case 'course.restart':
       return { type }
+    case 'course-state.set':
+      return {
+        type,
+        key: targets.courseState?.key ?? '',
+        value: targets.courseState?.defaultValue ?? null,
+      }
     case 'audio.play':
       return { type, soundId: targets.soundId ?? '' }
     case 'audio.pause':
@@ -377,6 +391,7 @@ interface RuleDescriptionContext {
   scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
   sounds: ReadonlyMap<string, string>
   animationSteps: ReadonlyMap<string, string>
+  courseState: ReadonlyMap<string, CourseStateDeclaration>
 }
 
 const RULE_TEMPLATE_OPTIONS: Array<{
@@ -475,9 +490,26 @@ function describeConditions(
         return `“${scene?.name ?? `缺失场景（${sceneId}）`}”`
       }).join(' 或 ')}`
     }
-    return `当前状态是 ${condition.stateIds.map((stateId) => (
-      `“${namedReference(context.states, stateId, '缺失状态')}”`
-    )).join(' 或 ')}`
+    if (condition.type === 'presentation.in') {
+      return `当前状态是 ${condition.stateIds.map((stateId) => (
+        `“${namedReference(context.states, stateId, '缺失状态')}”`
+      )).join(' 或 ')}`
+    }
+    const key = context.courseState.has(condition.key)
+      ? condition.key
+      : `缺失课程状态（${condition.key}）`
+    if (condition.type === 'course-state.exists') {
+      return `课程状态“${key}”${condition.exists ? '存在' : '不存在'}`
+    }
+    const operators = {
+      eq: '等于',
+      neq: '不等于',
+      gt: '大于',
+      gte: '大于等于',
+      lt: '小于',
+      lte: '小于等于',
+    } as const
+    return `课程状态“${key}”${operators[condition.operator]} ${String(condition.value)}`
   }).join('，并且 ')
 }
 
@@ -540,6 +572,10 @@ function describeAction(
       return '重播当前场景'
     case 'course.restart':
       return '重新开始课程'
+    case 'course-state.set':
+      return `把课程状态“${context.courseState.has(action.key)
+        ? action.key
+        : `缺失课程状态（${action.key}）`}”设为 ${String(action.value)}`
     case 'audio.play':
       return `播放声音“${namedReference(context.sounds, action.soundId, '缺失声音')}”`
     case 'audio.pause':
@@ -994,6 +1030,263 @@ function AutomationTriggerEditor({
   )
 }
 
+type InteractionCourseStateCondition = Extract<
+  InteractionCondition,
+  { type: 'course-state.exists' | 'course-state.compare' }
+>
+
+function courseStateValueMatchesDeclaration(
+  declaration: CourseStateDeclaration,
+  value: unknown,
+): value is CourseStateDeclaration['defaultValue'] {
+  return declaration.valueType === 'null'
+    ? value === null
+    : typeof value === declaration.valueType
+}
+
+function CourseStateValueField({
+  id,
+  label,
+  declaration,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  declaration: CourseStateDeclaration
+  value: boolean | number | string | null
+  onChange(value: boolean | number | string | null): void
+}) {
+  const effectiveValue = courseStateValueMatchesDeclaration(declaration, value)
+    ? value
+    : declaration.defaultValue
+  if (declaration.valueType === 'boolean') {
+    return (
+      <div className="form-field">
+        <label htmlFor={id}>{label}</label>
+        <select
+          id={id}
+          className="form-input"
+          value={effectiveValue === true ? 'true' : 'false'}
+          onChange={(event) => onChange(event.currentTarget.value === 'true')}
+        >
+          <option value="true">是（true）</option>
+          <option value="false">否（false）</option>
+        </select>
+      </div>
+    )
+  }
+  if (declaration.valueType === 'number') {
+    return (
+      <div className="form-field">
+        <label htmlFor={id}>{label}</label>
+        <input
+          id={id}
+          className="form-input"
+          type="number"
+          value={typeof effectiveValue === 'number' ? effectiveValue : declaration.defaultValue}
+          onChange={(event) => onChange(Number.isFinite(event.currentTarget.valueAsNumber)
+            ? event.currentTarget.valueAsNumber
+            : declaration.defaultValue)}
+        />
+      </div>
+    )
+  }
+  if (declaration.valueType === 'string') {
+    return (
+      <div className="form-field">
+        <label htmlFor={id}>{label}</label>
+        <input
+          id={id}
+          className="form-input"
+          value={typeof effectiveValue === 'string' ? effectiveValue : declaration.defaultValue}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+      </div>
+    )
+  }
+  return (
+    <div className="form-field">
+      <label htmlFor={id}>{label}</label>
+      <input id={id} className="form-input" value="null" readOnly />
+    </div>
+  )
+}
+
+function CourseStateConditionsEditor({
+  rule,
+  declarations,
+  onChange,
+}: {
+  rule: InteractionRule
+  declarations: readonly CourseStateDeclaration[]
+  onChange(conditions: InteractionCondition[]): void
+}) {
+  const declarationByKey = new Map(declarations.map((item) => [item.key, item]))
+  const stateKeys = new Set(declarations.map((item) => item.key))
+  const entries = rule.conditions.flatMap((condition, index) => (
+    condition.type === 'course-state.exists'
+    || condition.type === 'course-state.compare'
+      ? [{ condition, index }]
+      : []
+  ))
+  const replace = (index: number, condition: InteractionCondition): void => {
+    onChange(rule.conditions.map((item, itemIndex) => (
+      itemIndex === index ? condition : item
+    )))
+  }
+  const firstDeclaration = declarations[0]
+
+  return (
+    <section className="interaction-course-state-conditions">
+      <h4>课程状态条件</h4>
+      <p className="property-hint">与场景、画面状态条件一起按“并且”判断。</p>
+      {entries.map(({ condition, index }, conditionIndex) => {
+        const declaration = declarationByKey.get(condition.key) ?? firstDeclaration
+        const idPrefix = `interaction-${rule.id}-course-state-condition-${index}`
+        return (
+          <fieldset key={`${condition.type}:${index}`} aria-label={`课程状态条件 ${conditionIndex + 1}`}>
+            <legend>{`课程状态条件 ${conditionIndex + 1}`}</legend>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}-type`}>条件类型</label>
+              <select
+                id={`${idPrefix}-type`}
+                className="form-input"
+                value={condition.type}
+                onChange={(event) => {
+                  const type = event.currentTarget.value as InteractionCourseStateCondition['type']
+                  replace(index, type === 'course-state.exists'
+                    ? { type, key: condition.key, exists: true }
+                    : {
+                        type,
+                        key: condition.key,
+                        operator: 'eq',
+                        value: declaration?.defaultValue ?? null,
+                      })
+                }}
+              >
+                <option value="course-state.compare">比较课程状态</option>
+                <option value="course-state.exists">检查课程状态是否存在</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}-key`}>课程状态键</label>
+              <select
+                id={`${idPrefix}-key`}
+                className="form-input"
+                value={condition.key}
+                onChange={(event) => {
+                  const nextDeclaration = declarationByKey.get(event.currentTarget.value)
+                  if (!nextDeclaration) return
+                  replace(index, condition.type === 'course-state.exists'
+                    ? { ...condition, key: nextDeclaration.key }
+                    : {
+                        ...condition,
+                        key: nextDeclaration.key,
+                        operator: nextDeclaration.valueType === 'number'
+                          ? condition.operator
+                          : condition.operator === 'eq' || condition.operator === 'neq'
+                            ? condition.operator
+                            : 'eq',
+                        value: nextDeclaration.defaultValue,
+                      })
+                }}
+              >
+                {missingOption(condition.key, stateKeys, condition.key)}
+                {declarations.map((item) => (
+                  <option key={item.key} value={item.key}>{item.key}</option>
+                ))}
+              </select>
+            </div>
+            {condition.type === 'course-state.exists' ? (
+              <div className="form-field">
+                <label htmlFor={`${idPrefix}-exists`}>存在要求</label>
+                <select
+                  id={`${idPrefix}-exists`}
+                  className="form-input"
+                  value={condition.exists ? 'true' : 'false'}
+                  onChange={(event) => replace(index, {
+                    ...condition,
+                    exists: event.currentTarget.value === 'true',
+                  })}
+                >
+                  <option value="true">必须存在</option>
+                  <option value="false">必须不存在</option>
+                </select>
+              </div>
+            ) : declaration ? (
+              <>
+                <div className="form-field">
+                  <label htmlFor={`${idPrefix}-operator`}>比较方式</label>
+                  <select
+                    id={`${idPrefix}-operator`}
+                    className="form-input"
+                    value={condition.operator}
+                    onChange={(event) => replace(index, {
+                      ...condition,
+                      operator: event.currentTarget.value as Extract<
+                        InteractionCourseStateCondition,
+                        { type: 'course-state.compare' }
+                      >['operator'],
+                    })}
+                  >
+                    <option value="eq">等于</option>
+                    <option value="neq">不等于</option>
+                    {declaration.valueType === 'number' ? (
+                      <>
+                        <option value="gt">大于</option>
+                        <option value="gte">大于等于</option>
+                        <option value="lt">小于</option>
+                        <option value="lte">小于等于</option>
+                      </>
+                    ) : null}
+                  </select>
+                </div>
+                <CourseStateValueField
+                  id={`${idPrefix}-value`}
+                  label="比较值"
+                  declaration={declaration}
+                  value={condition.value}
+                  onChange={(value) => replace(index, { ...condition, value })}
+                />
+              </>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button secondary-button--danger"
+              onClick={() => onChange(rule.conditions.filter((_, itemIndex) => itemIndex !== index))}
+            >
+              <Trash2 size={13} />删除条件
+            </button>
+          </fieldset>
+        )
+      })}
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={!firstDeclaration || rule.conditions.length >= MAX_INTERACTION_CONDITIONS}
+        onClick={() => {
+          if (!firstDeclaration) return
+          onChange([
+            ...rule.conditions,
+            {
+              type: 'course-state.compare',
+              key: firstDeclaration.key,
+              operator: 'eq',
+              value: firstDeclaration.defaultValue,
+            },
+          ])
+        }}
+      >
+        <Plus size={13} />添加课程状态条件
+      </button>
+      {!firstDeclaration ? (
+        <p className="property-hint">请先在“课程状态与导航守卫”中声明课程状态。</p>
+      ) : null}
+    </section>
+  )
+}
+
 function ActionEditor({
   rule,
   step,
@@ -1003,6 +1296,7 @@ function ActionEditor({
   sounds,
   videos,
   nodes,
+  courseState,
   referencedByCompletion,
   onChange,
   onRemove,
@@ -1017,6 +1311,7 @@ function ActionEditor({
   sounds: SoundDefinition[]
   videos: VideoNode[]
   nodes: ReadonlyArray<SceneNode>
+  courseState: readonly CourseStateDeclaration[]
   referencedByCompletion: boolean
   onChange(step: InteractionActionStep): void
   onRemove(): void
@@ -1043,6 +1338,7 @@ function ActionEditor({
     soundId: sounds[0]?.id,
     videoId: videos[0]?.id,
     nodeId: nodes[0]?.id,
+    courseState: courseState[0],
   }
   const counts = {
     states: states.length,
@@ -1050,6 +1346,7 @@ function ActionEditor({
     sounds: sounds.length,
     videos: videos.length,
     nodes: nodes.length,
+    courseStates: courseState.length,
   }
   const targetScene = action.type === 'scene.go'
     ? scenes.find((scene) => scene.id === action.sceneId)
@@ -1293,6 +1590,45 @@ function ActionEditor({
         </>
       ) : null}
 
+      {action.type === 'course-state.set' ? (() => {
+        const declaration = courseState.find((item) => item.key === action.key)
+          ?? courseState[0]
+        const keys = new Set(courseState.map((item) => item.key))
+        if (!declaration) return null
+        return (
+          <>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}-course-state-key`}>课程状态键</label>
+              <select
+                id={`${idPrefix}-course-state-key`}
+                className="form-input"
+                value={action.key}
+                onChange={(event) => {
+                  const next = courseState.find((item) => item.key === event.currentTarget.value)
+                  if (next) updateAction({
+                    type: 'course-state.set',
+                    key: next.key,
+                    value: next.defaultValue,
+                  })
+                }}
+              >
+                {missingOption(action.key, keys, action.key)}
+                {courseState.map((item) => (
+                  <option key={item.key} value={item.key}>{item.key}</option>
+                ))}
+              </select>
+            </div>
+            <CourseStateValueField
+              id={`${idPrefix}-course-state-value`}
+              label="目标值"
+              declaration={declaration}
+              value={action.value}
+              onChange={(value) => updateAction({ ...action, value })}
+            />
+          </>
+        )
+      })() : null}
+
       {action.type === 'scene.go' ? (
         <>
           <div className="form-field">
@@ -1443,6 +1779,7 @@ export function InteractionEditor({
   activeStateId,
   scenes,
   sounds,
+  courseState = [],
   onAddRule,
   onUpdateRule,
   onDeleteRule,
@@ -1492,6 +1829,7 @@ export function InteractionEditor({
     soundId: soundList[0]?.id,
     videoId: videoNodes[0]?.id,
     nodeId: availableNodes[0]?.id,
+    courseState: courseState[0],
   }
 
   const addQuickStateRule = () => {
@@ -1639,6 +1977,12 @@ export function InteractionEditor({
               </select>
             </div>
 
+            <CourseStateConditionsEditor
+              rule={rule}
+              declarations={courseState}
+              onChange={(conditions) => onUpdateRule(rule.id, { conditions })}
+            />
+
             {rule.actions.map((step, actionIndex) => (
               <ActionEditor
                 key={step.id}
@@ -1650,6 +1994,7 @@ export function InteractionEditor({
                 sounds={soundList}
                 videos={videoNodes}
                 nodes={availableNodes}
+                courseState={courseState}
                 referencedByCompletion={completionActionIds.has(step.id)}
                 onChange={(nextStep) => onUpdateRule(rule.id, {
                   actions: rule.actions.map((item, index) => (
@@ -1730,6 +2075,7 @@ export function SceneAutomationEditor({
   authoringStates,
   scenes,
   sounds,
+  courseState = [],
   ruleWarnings,
   onOpenClickRules,
   onRunPreview,
@@ -1802,7 +2148,8 @@ export function SceneAutomationEditor({
     scenes,
     sounds: new Map(soundList.map((sound) => [sound.id, sound.name])),
     animationSteps: new Map(animationSteps.map((step) => [step.id, step.label])),
-  }), [animationSteps, availableNodes, scenes, soundList, states])
+    courseState: new Map(courseState.map((state) => [state.key, state])),
+  }), [animationSteps, availableNodes, courseState, scenes, soundList, states])
   const [newTriggerType, setNewTriggerType] = useState<AutomationTriggerType>(
     'scene.enter',
   )
@@ -1825,6 +2172,7 @@ export function SceneAutomationEditor({
     soundId: soundList[0]?.id,
     videoId: videoNodes[0]?.id,
     nodeId: availableNodes[0]?.id,
+    courseState: courseState[0],
   }
   const triggerCounts = {
     states: states.length,
@@ -2342,6 +2690,12 @@ export function SceneAutomationEditor({
                 </select>
               </div>
 
+              <CourseStateConditionsEditor
+                rule={rule}
+                declarations={courseState}
+                onChange={(conditions) => onUpdateRule(rule.id, { conditions })}
+              />
+
               <ol className="interaction-action-sequence" aria-label="动作执行顺序">
                 {rule.actions.map((step, actionIndex) => (
                   <li key={step.id}>
@@ -2362,6 +2716,7 @@ export function SceneAutomationEditor({
                   sounds={soundList}
                   videos={videoNodes}
                   nodes={availableNodes}
+                  courseState={courseState}
                   referencedByCompletion={completionActionIds.has(step.id)}
                   onChange={(nextStep) => onUpdateRule(rule.id, {
                     actions: rule.actions.map((item, index) => (

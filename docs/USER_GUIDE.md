@@ -2,7 +2,7 @@
 
 本指南适用于 **互动课件编辑器（Windows x64）**，当前工程格式为 Course Project V9（`schemaVersion: 9`）。详细合同见 [docs/contracts/](contracts/)。产品由 **ittoedu** 开发，英文名为 **ittoedu Courseware Editor**。Course Project V9 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；简单点击/切场/播媒体用原生节点与声明式交互；稍复杂的局部互动用组件（可复用或为本课新建）；整页动画、特效与连续机制用场景/世界运行时。包版本号已是 `1.0.0`，V9 Schema 已软冻结；未获教师验收前不宣称 Editor 1.0 已发布。
 
-文档同步基线：**2026-08-27**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
+文档同步基线：**2026-08-28**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。自动化通过不代表教师 `accepted`。其他规范和证据入口见 [文档导航](README.md)。
 
 ## 1. 启动编辑器
 
@@ -137,7 +137,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 - 两种状态使用同一块 1280 × 720 舞台。切换只改变输入与运行权限，不改变画布坐标；
 - Slide“编辑状态”直接挂载同文档 Published V2 authoring 宿主，并在上方叠加透明 Phaser 原生交互层。该透明层只负责选择、框选、移动、缩放和旋转，不重复绘制第二套视觉；Flow / Spatial 的编辑状态继续使用专用作者面；
 - authoring 模式只显示当前 Slide 的稳定合成画面，并冻结学生点击/拖拽、宿主与教师控制器动作、声明式互动、音视频、导航、演示者输入、呈现推进及 `courseState` 写入。它通过带 session/revision 的版本化 direct ready/patch/ACK/error/target 协议更新画面与 Runtime/Component 编辑目标，也不允许扩展直接改写 Store；
-- “当前位置试运行”与“整课预览”使用 CoursePlayer + Published V2 playback，从当前页或课程起始页真实运行。Published 会话会按声明初始化 `courseState` 默认值，并把已支持 Runtime/Component carrier 的 go/next/previous、重播和重开动作接回同一会话。顶层 `block` 守卫只检查跨 location 的 go/next/previous；replay 不离开当前 location 且不经守卫，restart 明确绕过守卫、回到课程起点并把 `courseState` 重置为声明默认值。声明式 `interactions` 仍没有 `courseState` 条件或写动作；
+- “当前位置试运行”与“整课预览”使用 CoursePlayer + Published V2 playback，从当前页或课程起始页真实运行。Published 会话会按声明初始化 `courseState` 默认值；`node.click` Interaction 可按存在性或类型化比较读取它，并用“设置课程状态”同步写入，与已支持 Runtime/Component carrier 和导航守卫共享同一份 Store。顶层 `block` 守卫只检查跨 location 的 go/next/previous；replay 不离开当前 location 且不经守卫，restart 明确绕过守卫、回到课程起点并把 `courseState` 重置为声明默认值；
 - 当前 Runtime playback 范围为 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM；全局 API 2 在一个会话内保持唯一实例并随 Slide/Flow/Spatial 导航迁移。Slide scene-local API 2/3 的 `presentation` 已接线；API 2 `nodes`、Slide scene 以外的 `presentation` 和动态 Runtime 导航守卫仍未覆盖；
 - Component API 4 已证明的互动 playback 是 Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM carrier，以及 Slide scene Phaser carrier；这些本地 carrier 接通共享课程状态和宿主动作。manifest 的 `supportedScopes` 只有 `scene` / `global`，`surface` 是 carrier 不是 manifest scope。global Component 当前只证明可见挂载，不承诺 `global` scope 上下文、跨 location 单实例或内部状态保留；hybrid 也不宣称完整 parity；
 - 编辑状态中的场景/状态选择始终由编辑器决定，authoring 宿主不会反向导航或覆盖选择。只有试运行中的场景和命名状态变化会同步高亮左侧场景与下方状态卡；
@@ -192,11 +192,11 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`
 “互动与动画”中的“专业：课程状态与导航守卫”是整课级作者入口，在 Slide、Flow 与 Spatial 工程中都可使用：
 
 1. 在“课程状态声明”新增布尔、数字、文字或空值状态，并设置整课启动默认值；
-2. 修改状态键时，编辑器会同步所有导航守卫条件；仍被守卫引用的状态不能直接删除，需先调整守卫；
+2. 修改状态键时，编辑器会同步导航守卫、场景/全局 Interaction 的课程状态条件与写值动作；被任一处引用的状态不能直接删除。修改类型前也必须先清理不兼容的比较条件或写值动作；
 3. 在“导航守卫”选择所有来源或指定来源位置、一个或多个目标位置、`all` / `any` 匹配方式，以及“存在/不存在”或按类型比较的条件；
 4. 填写导航被阻止时的教师可读提示，再保存守卫。
 
-每次保存都是一条可撤销操作，并在进入 Store 前解析完整 Course Project V9；陈旧修订、重复 ID、失效位置/状态引用、非法比较和空条件都不会静默写入。Published playback 会把这些状态默认值共享给当前受支持的 Runtime/Component carrier。顶层 `block` 守卫只在 go/next/previous 实际跨 location 时执行；replay 不执行守卫，restart 绕过守卫并把课程状态重置为声明默认值。普通声明式 `interactions` 仍没有课程状态条件或写值动作。
+每次保存都是一条可撤销操作，并在进入 Store 前解析完整 Course Project V9；陈旧修订、重复 ID、失效位置/状态引用、非法比较、错类型写值和空条件都不会静默写入。两个 Interaction 编辑区都可添加“课程状态存在/比较”条件和类型化“设置课程状态”动作；不同条件按“并且”判断，写值动作同步且不是终止动作。Published playback 会把同一份状态共享给 Interaction、当前受支持的 Runtime/Component carrier 与导航守卫。顶层 `block` 守卫只在 go/next/previous 实际跨 location 时执行；replay 不执行守卫，restart 绕过守卫并把课程状态重置为声明默认值。
 
 ## 6. 文本与富文本
 
@@ -394,13 +394,13 @@ Course Project V9 工程可由外部 Builder、生成脚本或专业模式“开
 - 普通场景中的规则保存在 `scene.interactions`；进入“全局层”后，点击规则和非点击规则改为保存在课程级 `globalInteractions`，不会复制到每个场景；
 - 选中普通节点或全局元素时，“属性”面板显示“交互”，只编辑该元素的单击规则，并可用“连接到状态”快速建立映射；全局规则还可选择“生效场景”，底层以 `scene.in` 条件保存。视频节点不提供该快捷入口，因为其表面点击默认属于播放控制；
 - 右侧“互动与动画”不依赖清空节点选择，只编辑非点击规则，可新增进入场景、进入命名状态、节点激活（`node.activated`）、动画完成（`animation.completed`）、声音结束、视频生命周期/时间点、组件事件和运行时事件触发；全局规则也可按场景限制。运行时事件必须明确选择“当前场景运行时”或“全局运行时”；
-- 两个编辑区共用同一套状态条件、动作步骤时序和动作编辑器。同一条 `node.click` 规则不会在“互动与动画”中重复出现。面板以“当 / 如果 / 就”解释机制，并提供自然语言摘要、搜索与筛选、常用模板和顺序/同时动作标记。
+- 两个编辑区共用同一套场景/呈现/课程状态条件、动作步骤时序和动作编辑器。课程状态条件可检查声明键存在性或按声明类型比较，动作可同步设置声明键；同一条 `node.click` 规则不会在“互动与动画”中重复出现。面板以“当 / 如果 / 就”解释机制，并提供自然语言摘要、搜索与筛选、常用模板和顺序/同时动作标记。
 
 常用配置流程是：
 
 1. 选择触发器，例如某节点点击、进入场景/命名状态、节点激活、指定动画步骤完成、组件事件、带场景/全局来源的运行时事件、声音结束或视频事件；
-2. 按需添加“当前场景属于……”（`scene.in`，主要用于全局规则）和“当前呈现状态属于……”（`presentation.in`）条件；同一条件内多个 ID 按“或者”，不同条件按“并且”判断；
-3. 添加动作步骤：元素入场/退场、切换命名状态、跳转场景、上一页/下一页/重播/重开，以及声音或视频控制。每一步都有稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式；
+2. 按需添加“当前场景属于……”（`scene.in`，主要用于全局规则）、“当前呈现状态属于……”（`presentation.in`），以及“课程状态存在/比较”条件；同一条件内多个 ID 按“或者”，不同条件按“并且”判断；
+3. 添加动作步骤：元素入场/退场、切换命名状态、设置课程状态、跳转场景、上一页/下一页/重播/重开，以及声音或视频控制。课程状态写值必须匹配声明类型；每一步都有稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式；
 4. 连续 `with-previous` 步骤并行启动；下一个 `after-previous` 等待整个并行组完成。只有正常完成的入场/退场才发出可供其他规则使用的 `animation.completed`；
 5. 把场景导航、重播或重开放在最后一个独立动作组。选择“跳转场景”时可配置高级 `scene.go.targetStateId`，留空则进入目标初始状态；
 6. 需要复用或调整规则优先级时，使用规则卡片的“复制 / 上移 / 下移”。复制会生成新的规则与动作 ID，排序只在同类规则中进行，两者都进入撤销历史。
@@ -653,7 +653,7 @@ Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 �
 
 编辑器外部 AI 路径以两个仓库 Skill 为机器执行真相：`orchestrate-courseware` 先写出并确认中等详细的 `01-teaching-plan.md`，再写带表面、布局和逐步操作的 `02-presentation-script.md`；确认后 `build-courseware-project` 盘点资产、选择 Native / Runtime / Component，使用仓库真实 TypeScript API 增量构建或局部修补 Course Project V9，并做保存重开、Player 与导出验证。教师工作流不使用 Hash、审批状态机或 Evidence 清单。自动管线最多标记 `engineering candidate`，不能自行授予 `art candidate` 或 `accepted`。
 
-PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM Component、Slide scene Phaser Component，以及 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 和 Flow surface-local API 3 DOM Runtime 的真实播放。global Component 只证明可见挂载，不具有已证明的 global scope/session lifetime。Published 会话会初始化已声明的 `courseState` 默认值，并把受支持 Runtime/Component carrier 的宿主导航与重播/重开动作接回会话；守卫只检查跨 location 的 go/next/previous，replay 不检查，restart 绕过守卫并重置状态默认值。声明式 `interactions` 仍不能按 `courseState` 判断或写值。Slide scene Runtime API 2/3 的 `presentation` 已接线；API 2 `nodes`、Slide scene 以外的 `presentation`、动态 Runtime 守卫、Flow/Spatial scene-local API 2、global API 3、未覆盖 shared carrier、Component hybrid、声明式 Runtime/Component 事件触发或 Flow/Spatial 动态静态捕获仍未实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局 API 2 Runtime；稳定画面应主动创作为场景状态，任意运行时代码不会被反向拆成可视化节点。
+PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；单 HTML 与网页包当前保留原生交互、媒体、Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM Component、Slide scene Phaser Component，以及 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 和 Flow surface-local API 3 DOM Runtime 的真实播放。global Component 只证明可见挂载，不具有已证明的 global scope/session lifetime。Published 会话会初始化已声明的 `courseState` 默认值；`node.click` Interaction 可读取并同步设置它，受支持 Runtime/Component carrier 与导航守卫使用同一份 Store。守卫只检查跨 location 的 go/next/previous，replay 不检查，restart 绕过守卫并重置状态默认值。Slide scene Runtime API 2/3 的 `presentation` 已接线；API 2 `nodes`、Slide scene 以外的 `presentation`、动态 Runtime 守卫、Flow/Spatial scene-local API 2、global API 3、未覆盖 shared carrier、Component hybrid、声明式 Runtime/Component 事件触发或 Flow/Spatial 动态静态捕获仍未实现 parity。统一全局层可直接编辑母版式原生元素、教师控制器和全局 API 2 Runtime；稳定画面应主动创作为场景状态，任意运行时代码不会被反向拆成可视化节点。
 
 开发者可使用 [五路径渲染宿主基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js，以及 Component API 4 的 DOM 表格与 Phaser 仪表。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 

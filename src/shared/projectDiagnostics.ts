@@ -40,9 +40,15 @@ interface MutableDiagnostic {
 }
 
 function ruleAppliesInState(rule: InteractionRule, stateId: string): boolean {
-  return rule.conditions.every((condition) => (
-    condition.type === 'presentation.in' && condition.stateIds.includes(stateId)
-  ))
+  return rule.conditions.every((condition) => {
+    switch (condition.type) {
+      case 'presentation.in':
+        return condition.stateIds.includes(stateId)
+      case 'course-state.exists':
+      case 'course-state.compare':
+        return true
+    }
+  })
 }
 
 function addDiagnostic(

@@ -447,6 +447,7 @@ function checkCondition(
     })
     return
   }
+  if (condition.type !== 'presentation.in') return
   condition.stateIds.forEach((stateId) => {
     if (scope.stateIds.has(stateId)) return
     collector.add(

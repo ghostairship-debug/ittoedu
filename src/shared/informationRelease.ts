@@ -45,7 +45,8 @@ function ruleAllowedInState(
 ): boolean {
   return rule.enabled && rule.conditions.every((condition) => {
     if (condition.type === 'scene.in') return condition.sceneIds.includes(sceneId)
-    return condition.stateIds.includes(stateId)
+    if (condition.type === 'presentation.in') return condition.stateIds.includes(stateId)
+    return true
   })
 }
 

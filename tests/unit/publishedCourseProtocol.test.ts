@@ -195,6 +195,56 @@ describe('Published Course V2 protocol', () => {
     expect(published).not.toHaveProperty('componentPackages')
   })
 
+  it('preserves declarative course-state interactions and closes their Published references', () => {
+    const project = flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ])
+    project.courseState = [{
+      key: 'ready',
+      valueType: 'boolean',
+      defaultValue: false,
+    }]
+    project.globalLayerItems = [{
+      item: nativeText('state-trigger', 10, '完成'),
+      visibility: { mode: 'all', locationIds: [] },
+    }]
+    project.globalInteractions = [{
+      id: 'set-ready',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: 'state-trigger' },
+      conditions: [{
+        type: 'course-state.compare',
+        key: 'ready',
+        operator: 'eq',
+        value: false,
+      }],
+      actions: [{
+        id: 'write-ready',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key: 'ready', value: true },
+      }],
+    }]
+
+    const published = publish(project)
+    expect(published.globalInteractions).toEqual(project.globalInteractions)
+
+    const invalid = publishedCourseV2Schema.safeParse({
+      ...published,
+      courseState: [],
+    })
+    expect(invalid.success).toBe(false)
+    if (!invalid.success) {
+      const missingStatePaths = invalid.error.issues
+        .filter((issue) => issue.message.includes('Missing course-state key: ready'))
+        .map((issue) => issue.path.join('.'))
+      expect(missingStatePaths).toEqual(expect.arrayContaining([
+        'globalInteractions.0.conditions.0.key',
+        'globalInteractions.0.actions.0.action.key',
+      ]))
+    }
+  })
+
   it('keeps Flow rich-text runs inside published blocks', () => {
     const published = publish(flowProject([
       {

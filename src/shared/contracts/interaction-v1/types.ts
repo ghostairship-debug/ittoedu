@@ -1,4 +1,8 @@
 import type { RuntimePresentationTransition } from '../runtime/types'
+import type {
+  CourseStateCondition,
+  CourseStateScalar,
+} from '../course-state/types'
 
 /** Defensive authoring limits; these are not normal courseware targets. */
 export const MAX_SCENE_INTERACTIONS = 1_000
@@ -25,6 +29,8 @@ export const INTERACTION_TRIGGER_TYPES = [
 export const INTERACTION_CONDITION_TYPES = [
   'presentation.in',
   'scene.in',
+  'course-state.exists',
+  'course-state.compare',
 ] as const
 
 export const INTERACTION_ACTION_TYPES = [
@@ -34,6 +40,7 @@ export const INTERACTION_ACTION_TYPES = [
   'scene.previous',
   'scene.replay',
   'course.restart',
+  'course-state.set',
   'audio.play',
   'audio.pause',
   'audio.resume',
@@ -70,6 +77,14 @@ export type InteractionTrigger =
   | { type: 'animation.completed'; actionId: string }
   | { type: 'presenter.command'; command: 'next' | 'previous' }
 
+export type InteractionCourseStateCondition =
+  | (Omit<Extract<CourseStateCondition, { type: 'exists' }>, 'type'> & {
+      type: 'course-state.exists'
+    })
+  | (Omit<Extract<CourseStateCondition, { type: 'compare' }>, 'type'> & {
+      type: 'course-state.compare'
+    })
+
 /** Different conditions are ANDed. State ids inside one condition are ORed. */
 export type InteractionCondition =
   | {
@@ -80,6 +95,7 @@ export type InteractionCondition =
       type: 'scene.in'
       sceneIds: string[]
     }
+  | InteractionCourseStateCondition
 
 type AssertExactly<Left, Right> =
   [Exclude<Left, Right>, Exclude<Right, Left>] extends [never, never]
@@ -149,6 +165,12 @@ export type VideoInteractionAction =
   | { type: 'video.toggle'; nodeId: string }
   | { type: 'video.seek'; nodeId: string; seconds: number }
 
+export interface CourseStateSetAction {
+  type: 'course-state.set'
+  key: string
+  value: CourseStateScalar
+}
+
 export type MotionEffect = 'none' | 'fade' | 'slide' | 'scale'
 export type MotionDirection = 'left' | 'right' | 'up' | 'down'
 export type MotionEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out'
@@ -186,6 +208,7 @@ export type InteractionActionPayload =
   | { type: 'scene.previous' }
   | { type: 'scene.replay' }
   | { type: 'course.restart' }
+  | CourseStateSetAction
   | AudioInteractionAction
   | VideoInteractionAction
   | NodeMotionAction

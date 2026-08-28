@@ -57,8 +57,8 @@ npm test
 - 撤销、重做、复制、粘贴、重复，以及异步压缩、单通道去重写入的本地恢复副本；
 - 简洁/专业两套编辑工作流：简洁模式只保留“元素 / 图层 / 属性”三个一级入口和常用图文能力，最近工程、另存为与工程检查收进“更多”；专业模式追加独立“组件 / 互动与动画 / 开发”入口、精确参数和高级声音设置。模式是本机界面偏好，切换不会改写、删除或降级 Course Project V9；
 - Course Project V9 事件驱动元素动画：简洁模式会原子写入 `node.activated → node.enter` 规则及播放初始隐藏；专业模式可继续把 `node.enter` / `node.exit` 连接到点击、场景/状态进入、音视频/组件/运行时事件或前一动画完成。动作步骤支持 `after-previous` / `with-previous` 顺序与并行、局部延迟和完成事件；
-- Course Project V9 声明式交互规则：场景规则与课程级 `globalInteractions` 分开保存；当前可视化配置节点点击、场景/状态进入、节点激活、动画完成、组件事件、带场景/全局来源的运行时事件和音视频事件，并用 `scene.in` / `presentation.in` 限定范围；
-- 专业“互动与动画”提供整课 `courseState` 与 `navigationGuards` 作者界面：可新增、改名、修改默认值或安全删除布尔/数字/文字/空值状态，按全部/任一条件配置来源位置、目标位置和阻止提示；状态改名会同步守卫引用，仍被守卫使用的状态不能删除，所有提交先通过完整 V9 Schema 并进入撤销历史；
+- Course Project V9 声明式交互规则：场景规则与课程级 `globalInteractions` 分开保存；当前可视化配置节点点击、场景/状态进入、节点激活、动画完成、组件事件、带场景/全局来源的运行时事件和音视频事件，并用 `scene.in` / `presentation.in` / `course-state.exists` / `course-state.compare` 组合条件；
+- 专业“互动与动画”提供整课 `courseState` 与 `navigationGuards` 作者界面：可新增、改名、修改默认值或安全删除布尔/数字/文字/空值状态，按全部/任一条件配置来源位置、目标位置和阻止提示；状态改名会同步守卫、Interaction 条件与写值动作的引用，被任一处引用的状态不能删除，所有提交先通过完整 V9 Schema 并进入撤销历史；
 - 统一“元素”面板：文本、公式、图片、视频、声音和全部图形快捷入口统一放在“常用”；“媒体”负责批量导入、管理和复用工程内声音、视频与图片，专业模式再显示“控制与全局”。组件不再混入元素长列表，而在独立“组件”页统一浏览内置库、批量导入外部包并使用工程组件；
 - Course Project V9 场景/全局自由运行时只接受 `RuntimeDocument` API 2：`renderMode` 严格声明 `dom/phaser/hybrid` 能力；一次性复杂互动可直接写入场景，跨场景复杂规则可写入全局运行时；稳定视觉仍应落在可编辑节点和命名状态中；
 - Slide 中央工作区始终是同一个 1280 × 720 画布；“编辑状态”和“当前位置试运行”在同一 Renderer 文档内挂载同一套 Published V2 Slide 宿主。编辑状态只在画面上叠加透明 Phaser 原生节点交互层，当前位置试运行则把输入交给 Published playback；Flow / Spatial 继续使用各自的专用作者面和镜头语义；
@@ -183,7 +183,7 @@ resources/       应用图标等打包资源
 
 `playback.presenter.enabled` 开启后，Player 会接收无修饰键的 PageUp/PageDown 以及属性栏录入的精确附加按键组合。`scene-navigation` 策略直接切换相邻场景并在首尾边界给出反馈；`authored-command` 只分发 `presenter.command` 规则，没有匹配规则时不会退化为自动翻页。左/右方向键仍由独立的 `playback.keyboardNavigation` 控制。输入框、文本编辑、滑块、显式键盘捕获区和打开的模态层会保留键盘所有权；按键长按、组合键不匹配和短时间硬件抖动不会重复触发。
 
-Course Project V9 的声明式交互规则是稳定状态与运行逻辑之间的首选连接层。`scene.interactions` 管理当前场景节点及场景事件；`globalInteractions` 管理只创建一次的全局元素和课程级映射，并用 `scene.in` 限制规则在哪些场景生效。每条规则包含触发器、AND 条件和有序动作步骤；步骤的 `after-previous` 等待上一并行组完成，`with-previous` 与前一步同组启动，`delayMs` 是相对于当前触发点或上一组的局部延迟。`scene.go` 可携带 `targetStateId` 原子进入指定场景状态；场景导航、重播和重开必须是最后一个独立动作组。
+Course Project V9 的声明式交互规则是稳定状态与运行逻辑之间的首选连接层。`scene.interactions` 管理当前场景节点及场景事件；`globalInteractions` 管理只创建一次的全局元素和课程级映射，并用 `scene.in` 限制规则在哪些场景生效。每条规则包含触发器、AND 条件和有序动作步骤；`course-state.exists` / `course-state.compare` 读取已声明键，`course-state.set` 同步写入类型相符的标量值。步骤的 `after-previous` 等待上一并行组完成，`with-previous` 与前一步同组启动，`delayMs` 是相对于当前触发点或上一组的局部延迟。`scene.go` 可携带 `targetStateId` 原子进入指定场景状态；场景导航、重播和重开必须是最后一个独立动作组。
 
 `node.enter` / `node.exit` 是动作载荷，使用 `none`、`fade`、`slide`或 `scale`，滑动额外保存上/下/左/右方向，并提供时长与缓动。动画完成后会按步骤稳定 ID 发出 `animation.completed`，可触发下一条规则；被后续动画、场景销毁或状态基线更新取消时不发完成事件。`playbackInitialVisibility: 'hidden'` 只决定互动 Player 是否先隐藏等待入场；入场/退场只改变 Player 瞬态可见性，不写回节点 `visible` 或切换场景状态。路径、关键帧和连续程序动画仍由组件或运行时承载。
 
@@ -239,7 +239,7 @@ Slide 编辑状态和播放状态在同一 Renderer 文档中使用同一套 Pub
 - Component API 4 的 Published V2 已证明互动切片为 Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM carrier，以及 Slide scene-local Phaser carrier；真实包/版本、props、组件素材与工程素材、已公开事件、命中及 generation 生命周期在当前位置试运行、整课预览、离线/在线单 HTML 和网页包中保持互动；单实例失败只显示本地后备。global Component 只证明可见挂载，不承诺 global scope/session lifetime；hybrid 也仍在未覆盖边界；
 - 当前场景或全局运行时显式登记的 text/asset 目标可在对应编辑作用域原位修改；场景值由该场景全部命名状态共享，全局值由整课共享，均不生成 `presentation.nodeOverrides`；
 - 场景的 `interactions` 与课程级 `globalInteractions` 将可编辑节点、组件事件和带作用域的运行时事件映射到元素入场/退场、状态、导航和音视频动作；连续 `with-previous` 步骤同组并行，下一个 `after-previous` 等待整组完成；
-- Published playback 会用声明默认值初始化会话 `courseState`；顶层声明式 `block` 导航守卫只检查跨 location 的 go/next/previous。replay 留在当前 location 且不经守卫；restart 明确绕过守卫、回到课程起点并重置为声明默认值。普通 `interactions` 仍没有 `courseState` 条件或写动作；
+- Published playback 会用声明默认值初始化会话 `courseState`；`node.click` Interaction 可按存在性/类型化比较读取并同步设置状态，与 Runtime/Component 和顶层 `block` 导航守卫共享同一 Store。守卫只检查跨 location 的 go/next/previous；replay 留在当前 location 且不经守卫，restart 明确绕过守卫、回到课程起点并重置为声明默认值；
 - 新工程的 `TeacherControllerNode` 位于全局画布。默认“场景目录”是 `scene.open-picker`，列出全部场景，选择后进入该场景初始状态；展开与选中不会写入场景状态。固定 `scene.go` 可为高级按钮配置目标场景与可选目标状态；
 - 元素入场/退场只作用于宿主容器，不重建原生节点或组件，也不改变工程可见性或命名状态；`playbackInitialVisibility` 仅在互动 Player 中生效，捕获、缩略图和静态导出使用作者稳定画面；
 - 统一全局层的原生元素在普通翻页和重播时保留，只按场景更新可见性；global Component 当前不具备对等的单实例会话所有者，不能依赖内部状态跨 location 或 replay 保留；

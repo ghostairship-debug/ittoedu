@@ -185,6 +185,7 @@ export function collectV9InteractionRuleWarnings(
   const layerIds = knownLayerItemIds(project)
   const sceneIds = knownSceneIds(project)
   const stateIds = knownStateIds(project)
+  const courseStateKeys = new Set(project.courseState.map((state) => state.key))
   const soundIds = new Set(Object.keys(project.media.audio.sounds))
   const actionIds = new Set(rules.flatMap((rule) => rule.actions.map((step) => step.id)))
   const videos = videoHints(project, nodes)
@@ -228,8 +229,17 @@ export function collectV9InteractionRuleWarnings(
         if (condition.sceneIds.some((sceneId) => !sceneIds.has(sceneId))) {
           pushWarning(warnings, rule.id, '规则仍引用已删除的场景。')
         }
-      } else if (condition.stateIds.some((stateId) => !stateIds.has(stateId))) {
+      } else if (
+        condition.type === 'presentation.in'
+        && condition.stateIds.some((stateId) => !stateIds.has(stateId))
+      ) {
         pushWarning(warnings, rule.id, '规则仍引用已删除的状态。')
+      } else if (
+        (condition.type === 'course-state.exists'
+          || condition.type === 'course-state.compare')
+        && !courseStateKeys.has(condition.key)
+      ) {
+        pushWarning(warnings, rule.id, '规则仍引用已删除的课程状态。')
       }
     }
     for (const step of rule.actions) {
@@ -254,6 +264,9 @@ export function collectV9InteractionRuleWarnings(
       }
       if (action.type === 'presentation.set' && !stateIds.has(action.stateId)) {
         pushWarning(warnings, rule.id, '规则仍引用已删除的状态。')
+      }
+      if (action.type === 'course-state.set' && !courseStateKeys.has(action.key)) {
+        pushWarning(warnings, rule.id, '规则仍引用已删除的课程状态。')
       }
       if (action.type === 'scene.go') {
         if (!sceneIds.has(action.sceneId)) {

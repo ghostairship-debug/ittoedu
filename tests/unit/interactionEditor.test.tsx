@@ -14,6 +14,7 @@ import type {
   SoundDefinition,
   VideoNode,
 } from '@/shared/projectTypes'
+import type { CourseStateDeclaration } from '@/shared/courseProjectTypes'
 import {
   InteractionEditor,
   SceneAutomationEditor,
@@ -121,6 +122,11 @@ const sounds: Record<string, SoundDefinition> = {
   },
 }
 
+const courseStateDeclarations: CourseStateDeclaration[] = [
+  { key: 'answered', valueType: 'boolean', defaultValue: false },
+  { key: 'score', valueType: 'number', defaultValue: 0 },
+]
+
 function actionStep(
   id: string,
   action: InteractionAction,
@@ -217,6 +223,7 @@ function renderEditor({
   scene = makeScene([]),
   selectedNode = button as SceneNode,
   activeStateId = 'question' as string | null,
+  courseState = courseStateDeclarations as readonly CourseStateDeclaration[],
   onAddRule = vi.fn(),
   onUpdateRule = vi.fn(),
   onDeleteRule = vi.fn(),
@@ -230,6 +237,7 @@ function renderEditor({
       activeStateId={activeStateId}
       scenes={projectScenes}
       sounds={sounds}
+      courseState={courseState}
       onAddRule={onAddRule}
       onUpdateRule={onUpdateRule}
       onDeleteRule={onDeleteRule}
@@ -248,6 +256,7 @@ function renderAutomationEditor({
     readonly name: string
   }> | undefined,
   selectedNodeId = null as string | null,
+  courseState = courseStateDeclarations as readonly CourseStateDeclaration[],
   ruleWarnings = {} as Record<string, string[]>,
   legacyRuleActionsAvailable = undefined as boolean | undefined,
   legacyRuleActionsUnavailableReason = undefined as string | undefined,
@@ -268,6 +277,7 @@ function renderAutomationEditor({
       selectedNodeId={selectedNodeId}
       scenes={projectScenes}
       sounds={sounds}
+      courseState={courseState}
       ruleWarnings={ruleWarnings}
       onOpenClickRules={onOpenClickRules}
       onApplyRevealSequenceTemplate={onApplyRevealSequenceTemplate}
@@ -294,6 +304,25 @@ function renderAutomationEditor({
 }
 
 describe('InteractionEditor', () => {
+  it('adds an ANDed course-state condition to a click rule', () => {
+    const rule = clickRule('course-state-click', [{ type: 'scene.next' }])
+    const { onUpdateRule } = renderEditor({ scene: makeScene([rule]) })
+    const group = screen.getByRole('group', { name: '单击规则 1' })
+
+    fireEvent.click(within(group).getByRole('button', {
+      name: '添加课程状态条件',
+    }))
+
+    expect(onUpdateRule).toHaveBeenCalledWith('course-state-click', {
+      conditions: [{
+        type: 'course-state.compare',
+        key: 'answered',
+        operator: 'eq',
+        value: false,
+      }],
+    })
+  })
+
   it('creates a quick click-to-state rule using the active-state scope', () => {
     const { onAddRule } = renderEditor()
 
@@ -676,6 +705,42 @@ describe('SceneAutomationEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: '上移规则 2' }))
     expect(onMoveRule).toHaveBeenCalledWith('second-rule', -1)
     expect(screen.getByRole('button', { name: '下移规则 2' })).toBeDisabled()
+  })
+
+  it('edits typed course-state conditions and set actions in automation rules', () => {
+    const rule = automationRule(
+      'course-state-automation',
+      { type: 'scene.enter' },
+      [{ type: 'course-state.set', key: 'answered', value: true }],
+      [{ type: 'course-state.compare', key: 'score', operator: 'gte', value: 2 }],
+    )
+    const { onUpdateRule } = renderAutomationEditor({ scene: makeScene([rule]) })
+    const group = screen.getByRole('group', { name: '规则 1' })
+    const condition = within(group).getByRole('group', { name: '课程状态条件 1' })
+
+    fireEvent.change(within(condition).getByLabelText('比较值'), {
+      target: { value: '3' },
+    })
+    expect(onUpdateRule).toHaveBeenCalledWith('course-state-automation', {
+      conditions: [{
+        type: 'course-state.compare',
+        key: 'score',
+        operator: 'gte',
+        value: 3,
+      }],
+    })
+
+    expect(within(group).getByLabelText('动作类型')).toHaveValue('course-state.set')
+    fireEvent.change(within(group).getByLabelText('目标值'), {
+      target: { value: 'false' },
+    })
+    expect(onUpdateRule).toHaveBeenCalledWith('course-state-automation', {
+      actions: [actionStep('course-state-automation-action-1', {
+        type: 'course-state.set',
+        key: 'answered',
+        value: false,
+      })],
+    })
   })
 
   it('explains a rule as 当、如果、就 and makes parallel timing readable', () => {

@@ -4,11 +4,11 @@
 
 本文主要定义 `scene.runtime` / 画布运行时与 `globalRuntime` 的 Runtime API 2 创作协议；API 1 会在当前入口得到明确拒绝。Course Project V9 还允许图层承载 `surface-runtime` API 3；当前发布执行实现了 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM 四个 playback 纵切。组件协议是另一套独立版本体系。
 
-文档同步基线：**2026-08-27**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，并把这些已支持 carrier 的 host actions 接回同一会话。Slide scene-local API 2/3 已接通 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` 为 inert，当前 Published `nodes` 解析为空，动态 Runtime 导航守卫也为 inert。API 3 playback 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
+文档同步基线：**2026-08-28**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，并把这些已支持 carrier 的 host actions 接回同一会话。Slide scene-local API 2/3 已接通 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` 为 inert，当前 Published `nodes` 解析为空，动态 Runtime 导航守卫也为 inert。API 3 playback 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
 
 Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
 
-完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。Published V2 playback 会按 V9 `courseState` 声明初始化默认值，并在跨 location 的 `go` / `next` / `previous` 前执行顶层声明式 `navigationGuards` 的 `block` 语义；同位置状态切换与 replay 不经过守卫，restart 会绕过守卫并恢复声明默认值。校验命令只验证这些引用与类型，不会真的运行课程状态变化、导航路径、Runtime/Component 源码或真实导出。声明式 `interactions` 仍不能读取或写入 `courseState`，Runtime/Component 实际网络使用与工程声明一致性、Node 近似布局和真实像素也需另行复核；退出码 0 不能替代真实 Published playback、导出画面与外部请求检查。
+完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。Published V2 playback 会按 V9 `courseState` 声明初始化默认值；`node.click` Interaction 可用 `course-state.exists` / `course-state.compare` 读取这份状态，并用 `course-state.set` 同步写入已声明键。跨 location 的 `go` / `next` / `previous` 随后执行顶层声明式 `navigationGuards` 的 `block` 语义；同位置状态切换与 replay 不经过守卫，restart 会绕过守卫并恢复声明默认值。校验命令只验证这些引用与类型，不会真的运行课程状态变化、导航路径、Runtime/Component 源码或真实导出。Runtime/Component 实际网络使用与工程声明一致性、Node 近似布局和真实像素也需另行复核；退出码 0 不能替代真实 Published playback、导出画面与外部请求检查。
 
 Slide 的“编辑状态”和“当前位置试运行”现在都在主 Renderer 文档内挂载 Published V2 Slide 宿主。authoring 模式只挂载当前 Slide 位置并创建 Runtime/Component 的真实稳定视觉；其学生输入、宿主与教师控制器动作、声明式互动、音视频、导航、演示者输入、呈现推进和 `courseState` 写入全部冻结，透明 Phaser 层只负责 Native 选择与几何操作。现有带 session/revision 的 ready、patch、ACK/error、Runtime target 与 Component target 协议继续作为唯一作者边界，并在同文档内以直接调用/回调传递；Runtime 不能借 `ctx.authoring` 写 Store。Flow / Spatial 保留各自专用作者面和镜头语义。
 
@@ -31,7 +31,7 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 
 整页少字的动画/特效/连续机制写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；稍复杂的局部互动（拖拽、配对、本地多步）制作 V4 组件，先匹配已有包，允许为本课新建。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
 
-编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。Slide authoring 视觉由同文档 Published V2 authoring 模式执行；Published playback 只对 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 开放真实执行，其他 carrier/host context 仍显示 fallback、空实现或占位，不得借这些纵切验收全 parity。Slide scene-local API 2/3 的 `presentation` 已接通；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航；这些声明式规则仍不能以 `courseState` 为条件或写入它。当前 Published 声明式互动执行器只接通 `node.click`，不能把 Runtime/Component 自定义事件写成已落地的可视化规则纵切。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；跨 location 的 `scene-navigation` 经过顶层声明式 `block` 守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
+编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。Slide authoring 视觉由同文档 Published V2 authoring 模式执行；Published playback 只对 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 开放真实执行，其他 carrier/host context 仍显示 fallback、空实现或占位，不得借这些纵切验收全 parity。Slide scene-local API 2/3 的 `presentation` 已接通；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航；`course-state.exists` / `course-state.compare` 与其他条件一起在点击触发时按 AND 判断一次，延迟动作不会重新判断课程状态，`course-state.set` 同步写入与 Runtime/Component、导航守卫共享的会话 Store。当前 Published 声明式互动执行器仍只接通 `node.click`，不能把 Runtime/Component 自定义事件写成已落地的可视化规则纵切。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；跨 location 的 `scene-navigation` 经过顶层声明式 `block` 守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
 
 ## 2. `RuntimeDocument`
 
@@ -445,7 +445,7 @@ ctx.localState.set('attempts', attempts)
 ctx.courseState.set('challengePassed', true)
 ```
 
-Published playback 会先按 Course Project V9 / Published V2 的 `courseState` 声明初始化默认值；Runtime/Component 上下文可直接读写这份会话状态。顶层 `navigationGuards` 是独立、已冻结的声明式 `block` 守卫：它可用 `exists` / `compare` 条件读取课程状态，并阻止跨 location 的 `go` / `next` / `previous`，但不能重定向、执行动作或写状态。同位置状态切换与 replay 不经过守卫；restart 绕过守卫并恢复声明默认值。场景/全局 `interactions` 仍没有 `courseState` 条件或写动作，也不能把守卫内嵌进普通规则。曾有一份更广的声明式课程状态 RFC（2026-08-12，现存于 Git 历史），仍是未批准提案；不要在当前工程中生成该 RFC 的示例字段。
+Published playback 会先按 Course Project V9 / Published V2 的 `courseState` 声明初始化默认值；Runtime/Component 上下文与场景/全局 Interaction 共用这份会话状态。Interaction 的 `course-state.exists` / `course-state.compare` 只读取已声明键，`course-state.set` 只同步写入类型相符的标量值；多个条件与场景/呈现条件按 AND 组合。顶层 `navigationGuards` 是独立的声明式 `block` 守卫：它可用 `exists` / `compare` 条件读取同一状态，并阻止跨 location 的 `go` / `next` / `previous`，但不能重定向、执行动作或写状态。同位置状态切换与 replay 不经过守卫；restart 绕过守卫并恢复声明默认值。普通规则不能内嵌守卫，也没有 increment/delete、表达式或判题结果自动桥。
 
 ## 10. 事件
 
@@ -606,7 +606,7 @@ Runtime 是经过审核的可信扩展。Slide authoring 与 playback 位于主 
 - [ ] Phaser/DOM/WebGL 对象放入正确粗粒度 underlay/Canvas/overlay 平面，没有依赖跨渲染器逐对象交错。
 - [ ] 新内容使用语义 `nodeBindings`；复制场景后绑定重写正确，且不销毁宿主管理节点。
 - [ ] 稳定结果使用命名呈现状态；状态 ID 存在，编辑状态、当前位置试运行和缩略图状态切换一致。
-- [ ] 能由点击、状态/场景切换、声音或视频动作表达的逻辑已优先使用场景 `interactions` 或 `globalInteractions`；全局规则的 `scene.in` 正确，运行时未重复处理同一触发。
+- [ ] 能由点击、课程状态条件/写值、状态/场景切换、声音或视频动作表达的逻辑已优先使用场景 `interactions` 或 `globalInteractions`；课程状态键和值类型合法，全局规则的 `scene.in` 正确，运行时未重复处理同一触发。
 - [ ] 跨场景指定状态使用 `goToScene(sceneId, targetStateId)` 或 `scene.go.targetStateId`，无效引用回退语义已验证。
 - [ ] 可枚举入场/退场使用 Course Project V9 `node.enter` / `node.exit`，有明确业务触发、顺序/并行/延迟与完成事件；运行时未重复同一宿主动画。
 - [ ] `playbackInitialVisibility` 只影响互动 Player；编辑、缩略图和静态导出保持作者稳定画面。

@@ -169,6 +169,46 @@ describe('collectProjectDiagnostics', () => {
     ])
   })
 
+  it('keeps video diagnostics conservative when course-state conditions may pass', () => {
+    const { project, scene } = projectWithVideo({
+      assetId: 'asset_video',
+      loop: true,
+      clickToToggle: true,
+      showControls: false,
+    })
+    const clickRule = interaction(
+      'stateful-click',
+      { type: 'node.click', nodeId: 'video' },
+    )
+    clickRule.conditions.push({
+      type: 'course-state.exists',
+      key: 'ready',
+      exists: true,
+    })
+    const endedRule = interaction(
+      'stateful-ended',
+      { type: 'video.ended', nodeId: 'video' },
+    )
+    endedRule.conditions.push({
+      type: 'course-state.compare',
+      key: 'score',
+      operator: 'gte',
+      value: 1,
+    })
+    scene.interactions = [clickRule, endedRule]
+
+    expect(collectProjectDiagnostics(project)).toEqual([
+      expect.objectContaining({
+        code: 'video-click-interaction-conflict',
+        ruleIds: ['stateful-click'],
+      }),
+      expect.objectContaining({
+        code: 'looping-video-ended-unreachable',
+        ruleIds: ['stateful-ended'],
+      }),
+    ])
+  })
+
   it('does not diagnose rules in states where the video is hidden', () => {
     const { project, scene } = projectWithVideo({
       assetId: 'asset_video',

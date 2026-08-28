@@ -11,6 +11,7 @@ import type {
   PublishedInteractionSessionPort,
   PublishedInteractionSurfacePort,
 } from './PublishedInteractionSurfacePort'
+import { matchesPublishedCourseStateCondition } from '../surfaces/publishedCourseState'
 
 type StepOutcome = 'completed' | 'cancelled' | 'terminal'
 
@@ -41,6 +42,7 @@ const SUPPORTED_ACTION_TYPES = new Set<InteractionActionPayload['type']>([
   'scene.previous',
   'scene.replay',
   'course.restart',
+  'course-state.set',
 ])
 
 function boundedDelay(delayMs: number): number {
@@ -111,7 +113,11 @@ export class PublishedInteractionController {
 
       let conditionsSupported = true
       for (const condition of rule.conditions) {
-        if (condition.type === 'scene.in') continue
+        if (
+          condition.type === 'scene.in'
+          || condition.type === 'course-state.exists'
+          || condition.type === 'course-state.compare'
+        ) continue
         conditionsSupported = false
         this.#diagnose({
           code: 'unsupported-condition',
@@ -184,6 +190,7 @@ export class PublishedInteractionController {
           && condition.sceneIds.includes(currentScene!.sceneId)
         ))) continue
       }
+      if (!this.#matchesCourseStateConditions(rule, nodeId)) continue
       this.#startRule(rule)
     }
   }
@@ -264,6 +271,29 @@ export class PublishedInteractionController {
       && conditions.every((condition) => condition.sceneIds.includes(current.sceneId!))
   }
 
+  #matchesCourseStateConditions(rule: InteractionRule, nodeId: string): boolean {
+    const conditions = rule.conditions.filter((condition) => (
+      condition.type === 'course-state.exists'
+      || condition.type === 'course-state.compare'
+    ))
+    if (conditions.length === 0) return true
+    try {
+      return conditions.every((condition) => (
+        matchesPublishedCourseStateCondition(this.#session.courseState, condition)
+      ))
+    } catch (cause) {
+      this.#diagnose({
+        code: 'session-failed',
+        severity: 'error',
+        message: '读取 Published 课程状态失败',
+        ruleId: rule.id,
+        nodeId,
+        cause,
+      })
+      return false
+    }
+  }
+
   #readCurrentScene(
     rule: InteractionRule,
     step?: InteractionActionStep,
@@ -317,6 +347,9 @@ export class PublishedInteractionController {
       }
 
       switch (action.type) {
+        case 'course-state.set':
+          this.#session.courseState.set(action.key, action.value)
+          return 'completed'
         case 'scene.go':
           result = await this.#session.goToScene(
             action.sceneId,
@@ -354,8 +387,13 @@ export class PublishedInteractionController {
     } catch (cause) {
       if (this.#destroyed || signal.aborted) return 'cancelled'
       const motion = isNodeMotionAction(action)
+      const courseState = action.type === 'course-state.set'
       this.#reportActionFailure(
-        motion ? 'motion-failed' : 'navigation-failed',
+        motion
+          ? 'motion-failed'
+          : courseState
+            ? 'course-state-failed'
+            : 'navigation-failed',
         rule,
         step,
         `Published 交互动作 ${action.type} 执行失败`,
@@ -366,7 +404,10 @@ export class PublishedInteractionController {
   }
 
   #reportActionFailure(
-    code: Extract<PublishedInteractionDiagnosticCode, 'motion-failed' | 'navigation-failed'>,
+    code: Extract<
+      PublishedInteractionDiagnosticCode,
+      'motion-failed' | 'navigation-failed' | 'course-state-failed'
+    >,
     rule: InteractionRule,
     step: InteractionActionStep,
     message: string,

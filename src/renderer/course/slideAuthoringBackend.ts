@@ -1365,7 +1365,7 @@ function duplicateSlideSceneDocument(
     rule.conditions.forEach((condition) => {
       if (condition.type === 'presentation.in') {
         condition.stateIds = condition.stateIds.map((stateId) => stateIdMap.get(stateId) ?? stateId)
-      } else {
+      } else if (condition.type === 'scene.in') {
         condition.sceneIds = condition.sceneIds.map((id) => sceneIdMap.get(id) ?? id)
       }
     })

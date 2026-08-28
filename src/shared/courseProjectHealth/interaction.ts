@@ -426,7 +426,9 @@ function informationReleaseFindings(
         rule.enabled && rule.conditions.every((condition) => (
           condition.type === 'scene.in'
             ? condition.sceneIds.includes(scene.id)
-            : state.id !== undefined && condition.stateIds.includes(state.id)
+            : condition.type === 'presentation.in'
+              ? state.id !== undefined && condition.stateIds.includes(state.id)
+              : true
         ))
       ))
       const reachableRules = new Set<InteractionRule>()

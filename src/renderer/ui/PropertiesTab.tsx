@@ -3454,6 +3454,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
           activeStateId={activePresentationStateId}
           scenes={project.scenes}
           sounds={project.media.audio.sounds}
+          courseState={courseProject?.courseState ?? []}
           onAddRule={addGlobalInteractionRule}
           onUpdateRule={(ruleId, patch) => {
             const current = project.globalInteractions.find(
@@ -3498,6 +3499,7 @@ function PropertiesTabContent({ onReplaceImage }: { onReplaceImage(): void }) {
           activeStateId={activePresentationStateId}
           scenes={project.scenes}
           sounds={project.media.audio.sounds}
+          courseState={courseProject?.courseState ?? []}
           onAddRule={(rule) => addInteractionRule(scene.id, rule)}
           onUpdateRule={(ruleId, patch) => {
             const current = scene.interactions.find((rule) => rule.id === ruleId)

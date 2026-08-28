@@ -2,6 +2,7 @@ import type {
   NodeMotionAction,
 } from '../../shared/contracts/interaction-v1/types'
 import type { SurfaceDiagnostic } from '../surfaces/SurfaceHost'
+import type { CourseStateStore } from '../../shared/runtimeTypes'
 
 /** A port operation may complete synchronously or after host-owned work. */
 export type PublishedInteractionPortResult =
@@ -32,6 +33,7 @@ export interface PublishedInteractionSurfacePort {
 
 /** Published navigation boundary supplied by the whole-course session. */
 export interface PublishedInteractionSessionPort {
+  readonly courseState: Pick<CourseStateStore, 'get' | 'set'>
   currentSceneId(): string | null
   goToScene(
     sceneId: string,
@@ -53,6 +55,7 @@ export type PublishedInteractionDiagnosticCode =
   | 'session-failed'
   | 'motion-failed'
   | 'navigation-failed'
+  | 'course-state-failed'
   | 'execution-failed'
   | 'dispose-failed'
 

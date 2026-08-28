@@ -1,5 +1,14 @@
 import type { InteractionRule } from '../interaction-v1/types'
 import type {
+  CourseStateCondition,
+  CourseStateDeclaration,
+} from '../course-state/types'
+export type {
+  CourseStateCondition,
+  CourseStateDeclaration,
+  CourseStateScalar,
+} from '../course-state/types'
+import type {
   BaseNode,
   EmbeddedComponentPackageMeta,
   FormulaAstNode,
@@ -427,23 +436,6 @@ export type CourseSurfaceDocument =
   | SlideSurfaceDocument
   | FlowSurfaceDocument
   | SpatialSurfaceDocument
-
-export type CourseStateScalar = boolean | number | string | null
-
-export type CourseStateDeclaration =
-  | { key: string; valueType: 'boolean'; defaultValue: boolean }
-  | { key: string; valueType: 'number'; defaultValue: number }
-  | { key: string; valueType: 'string'; defaultValue: string }
-  | { key: string; valueType: 'null'; defaultValue: null }
-
-export type CourseStateCondition =
-  | { type: 'exists'; key: string; exists: boolean }
-  | {
-      type: 'compare'
-      key: string
-      operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'
-      value: CourseStateScalar
-    }
 
 /** A declarative guard may only block; it cannot redirect or execute code. */
 export interface CourseNavigationGuard {

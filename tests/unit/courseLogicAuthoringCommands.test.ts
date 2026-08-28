@@ -85,6 +85,87 @@ describe('course logic authoring commands', () => {
     expect(courseProjectDocumentSchema.safeParse(renamed.project).success).toBe(true)
   })
 
+  it('原子同步全局与场景互动引用，并拒绝删除或破坏其类型', () => {
+    const original = createBlankCourseProject({
+      id: 'course-logic-interactions',
+      now: NOW,
+      idFactory: () => 'fixed',
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const stateResult = addState(original, 'score')
+    if (!stateResult.ok) throw new Error(stateResult.reason)
+    stateResult.project.globalInteractions = [{
+      id: 'global-state-rule',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{ type: 'course-state.exists', key: 'score', exists: true }],
+      actions: [{
+        id: 'global-set-score',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key: 'score', value: 1 },
+      }],
+    }]
+    const surface = stateResult.project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('expected slide surface')
+    surface.scenes[0]!.interactions = [{
+      id: 'local-state-rule',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{
+        type: 'course-state.compare',
+        key: 'score',
+        operator: 'gte',
+        value: 1,
+      }],
+      actions: [{
+        id: 'local-set-score',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key: 'score', value: 2 },
+      }],
+    }]
+
+    const renamed = apply(stateResult.project, {
+      kind: 'course-state.update',
+      key: 'score',
+      declaration: { key: 'masteryScore', valueType: 'number', defaultValue: 0 },
+    })
+    expect(renamed.ok).toBe(true)
+    if (!renamed.ok) return
+    expect(renamed.project.globalInteractions[0]?.conditions[0]).toMatchObject({
+      type: 'course-state.exists',
+      key: 'masteryScore',
+    })
+    expect(renamed.project.globalInteractions[0]?.actions[0]?.action).toMatchObject({
+      type: 'course-state.set',
+      key: 'masteryScore',
+    })
+    const renamedSurface = renamed.project.surfaces[0]
+    if (renamedSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(renamedSurface.scenes[0]?.interactions[0]?.conditions[0]).toMatchObject({
+      type: 'course-state.compare',
+      key: 'masteryScore',
+    })
+    expect(renamedSurface.scenes[0]?.interactions[0]?.actions[0]?.action).toMatchObject({
+      type: 'course-state.set',
+      key: 'masteryScore',
+    })
+    expect(courseProjectDocumentSchema.safeParse(renamed.project).success).toBe(true)
+
+    expect(apply(renamed.project, {
+      kind: 'course-state.delete',
+      key: 'masteryScore',
+    })).toMatchObject({ ok: false, code: 'state-referenced', historyEntry: false })
+    expect(apply(renamed.project, {
+      kind: 'course-state.update',
+      key: 'masteryScore',
+      declaration: { key: 'masteryScore', valueType: 'string', defaultValue: '' },
+    })).toMatchObject({ ok: false, code: 'state-type-referenced', historyEntry: false })
+    expect(renamed.project.revision).toBe(2)
+  })
+
   it('拒绝删除仍被守卫引用的状态，也拒绝破坏比较条件的类型变更', () => {
     const original = createBlankCourseProject({
       id: 'course-logic-reject',

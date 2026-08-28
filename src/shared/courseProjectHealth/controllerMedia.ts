@@ -314,7 +314,9 @@ function ruleAppliesInState(
   return rule.enabled && rule.conditions.every((condition) => (
     condition.type === 'scene.in'
       ? condition.sceneIds.includes(sceneId)
-      : stateId !== undefined && condition.stateIds.includes(stateId)
+      : condition.type === 'presentation.in'
+        ? stateId !== undefined && condition.stateIds.includes(stateId)
+        : true
   ))
 }
 

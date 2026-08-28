@@ -426,6 +426,70 @@ describe('interaction authoring transaction plans', () => {
     })
   })
 
+  it('authors only declared and type-correct course-state conditions and actions', () => {
+    const project = mixedProject()
+    project.courseState = [{
+      key: 'ready',
+      valueType: 'boolean',
+      defaultValue: false,
+    }]
+    slideScene(project).interactions.push({
+      id: 'course-state-rule',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{
+        type: 'course-state.compare',
+        key: 'ready',
+        operator: 'eq',
+        value: false,
+      }],
+      actions: [{
+        id: 'set-ready',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key: 'ready', value: true },
+      }],
+    })
+
+    const valid = planUpdateInteractionRule({
+      project,
+      target: localTarget(project),
+      ruleId: 'course-state-rule',
+      patch: { name: '状态解锁' },
+      now: NOW,
+    })
+    expect(valid).toMatchObject({ ok: true, status: 'planned' })
+
+    expect(planUpdateInteractionRule({
+      project,
+      target: localTarget(project),
+      ruleId: 'course-state-rule',
+      patch: {
+        actions: [{
+          id: 'set-ready',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'course-state.set', key: 'ready', value: 'true' },
+        }],
+      },
+      now: NOW,
+    })).toMatchObject({ ok: false, code: 'invalid-rule' })
+
+    expect(planUpdateInteractionRule({
+      project,
+      target: localTarget(project),
+      ruleId: 'course-state-rule',
+      patch: {
+        conditions: [{
+          type: 'course-state.exists',
+          key: 'missing',
+          exists: true,
+        }],
+      },
+      now: NOW,
+    })).toMatchObject({ ok: false, code: 'invalid-rule' })
+  })
+
   it.each([
     undefined,
     'location-flow',

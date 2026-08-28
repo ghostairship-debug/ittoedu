@@ -56,6 +56,12 @@
 5. **不承诺旧二进制前向兼容**：含新可选键的课，未更新的编辑器可以因 `.strict()` 拒收。用户应更新到当前版本。
 6. **产品约定不是 Schema 收紧**：例如编辑器把 `startLocationId` 同步为大纲第一页，不得改成 Schema 新不变量去卡旧课。
 
+### 3.1 2026-08-28 Owner 批准的 Interaction 窄扩展
+
+产品 Owner 明确批准在现有 Interaction Protocol V1 联合类型中增加三个严格分支：条件 `course-state.exists`、`course-state.compare`，以及动作 `course-state.set`。这次扩展不改写任何已有字段、判别器或语义，也不改变 `schemaVersion: 9`、Published Course V2、Runtime API 2/3 或 Component API 4；未使用新分支的既有 V9 工程行为不变。
+
+该决定是软冻结后的显式合同例外，不构成以后任意扩展判别器的通行授权。含新分支的工程会被不了解这些判别器的旧编辑器按严格 Schema 拒绝；这是已披露的前向兼容结果，用户须使用当前编辑器打开。increment/delete、表达式、工作流引擎与判题结果自动桥仍不在本次批准范围内。
+
 ---
 
 ## 4. V10 大版本迁移边界

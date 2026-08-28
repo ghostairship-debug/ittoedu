@@ -123,12 +123,12 @@
 
 - Slide 编辑状态与当前位置试运行改为同 Renderer 文档、同 Published V2 Slide 宿主；作者态冻结互动、媒体、导航和状态写入，旧 V8 `ExportPayload` / Blob iframe / `PlayerApp` 作者预览主路径及其无 consumer 模块已删除。Published 原生文字复用既有排版分析，自动缩小、内置字体和保存素材字节在作者/试运行/网页发布间使用同一事实；合法 Mixed 工程只把 global 显示于 Flow 后切回 Slide 仍走正常作者宿主。
 - 现有版本化 authoring 协议继续承担 direct ready / patch / ACK / error / revision / stale-session；Runtime API 2/3 与 Component API 4 的显式目标接入 Published registry，原位内容修改只重建被修改的动态 carrier，不让扩展直接写 Store。
-- Published playback 初始化 V9 `courseState` 默认值，并把一份状态 Store、受 active generation 约束的 Runtime/Component 导航动作和顶层声明式 `navigationGuards` 共享到已支持的 Slide/Flow/Spatial carriers；重播保留，重开恢复声明默认值，静态/authoring carrier 冻结副作用。专业“互动与动画”提供状态/守卫新增、修改、改名同步、安全删除和 all/any 条件 GUI；每次提交解析完整 V9 文档并进入各表面的既有撤销历史。页面、场景、Flow 锚点与 Spatial 镜头删除共用按 location / Slide scene / controller target / layer item 分域的引用清理，空守卫与同名跨域误删不再产生非法工程。
+- Published playback 初始化 V9 `courseState` 默认值，并把一份状态 Store、受 active generation 约束的 Runtime/Component 导航动作和顶层声明式 `navigationGuards` 共享到已支持的 Slide/Flow/Spatial carriers；重播保留，重开恢复声明默认值，静态/authoring carrier 冻结副作用。专业“互动与动画”提供状态/守卫新增、修改、改名同步、安全删除和 all/any 条件 GUI；2026-08-28 的窄切片进一步让场景/全局 Interaction 以 `course-state.exists` / `course-state.compare` 读取、以 `course-state.set` 同步写入同一 Store，并把改名/删除/类型变更事务覆盖到这些引用。每次提交解析完整 V9 文档并进入各表面的既有撤销历史。页面、场景、Flow 锚点与 Spatial 镜头删除共用按 location / Slide scene / controller target / layer item 分域的引用清理，空守卫与同名跨域误删不再产生非法工程。
 - V9 CLI、编辑器工程检查和 Export Preflight 共用当前 V9 health collector，并对 Published 不支持的 trigger/condition/action/click carrier 给出稳定 warning；全局互动问题会定位到全局“互动与动画”，不会误切到场景范围。能力索引公开同一份 partial playback 事实、课程逻辑作者能力和远程-only 素材限制，不再用 `full-rule-authoring` 或静默 `valid/warning 0` 暗示全部规则都会播放。
 - 纯 Slide PDF 按真实 location 惰性逐页捕获 Published host；Slide PPTX 保留可编辑 Native，并逐 Runtime/Component 实例建立隔离 generation 捕获，失败明确回退作者后备或可见占位。Mixed PDF、Flow 与 Spatial 继续诚实使用静态 composition、语义打印计划或镜头 SVG，不宣称执行未覆盖动态实例。DOM painter 已覆盖单层线性渐变、表单当前值、slot 组合树与圆角裁剪；复杂伪元素、filter/blend/mask 仍明确列为画面复核边界。
 - 能力索引 provenance 从手工文件表改为生成器与两份 Schema authority roots 的本地模块传递闭包（含 type-only edge）；两个 `schemas/*.json` 明确标为 Builder 能力摘要而非校验 Schema；V8 registry 与 V9 诊断结构分区。产品 DOCX/课程包 ZIP 使用共享的跨时区安全时间；Windows 启动、W3 文档合同、离线 URL 大小写与 scoped gate 缺口已由前置产品提交修复。
 
-声明式 Interaction Protocol V1 仍不新增 `courseState` 条件/写动作或判题分支；复杂分支由现已接线的 Runtime/Component 状态与导航动作承担，索引和诊断会阻止 AI 把未播放规则误当能力。Component hybrid、Published `nodes`、全局 API 2 / Flow surface-local API 3 的 `presentation`、动态 Runtime 守卫、Mixed PDF 动态 Slide 捕获及 Flow/Spatial 动态静态捕获仍是明确的非承诺边界，不是本批未关闭任务；Slide scene-local API 2/3 的 `presentation` 已接通。
+2026-08-27 收口时，声明式 Interaction Protocol V1 还没有 `courseState` 条件/写动作；该事实已由第 9.4 节记录的 2026-08-28 Owner 决定取代。当前只增加读取已声明状态的 `course-state.exists` / `course-state.compare` 与同步写入的 `course-state.set`，仍不包含 increment/delete、表达式或判题分支。Component hybrid、Published `nodes`、全局 API 2 / Flow surface-local API 3 的 `presentation`、动态 Runtime 守卫、Mixed PDF 动态 Slide 捕获及 Flow/Spatial 动态静态捕获仍是明确的非承诺边界；Slide scene-local API 2/3 的 `presentation` 已接通。
 
 > 下列 A0/A/B/C 文字只保存 2026-08-26 的立项证据与当时源码快照；上面的收口结果才是当前事实。不得从下列历史描述重新派工，精确能力以源码和 `artifacts/ai-capabilities/index.json` 为准。
 
@@ -181,7 +181,7 @@
 
 ## 7. 当前路线之外的方向
 
-skill 重构、黄金样例、真实课例生产、判题自动桥以及编辑器内 AI 交互仍由 Owner 另行启动。课程逻辑面板（`courseState` + `navigationGuards`）确定长期保留；声明式条件读取课程状态和声明式动作设置课程状态是已评估方向，但其冻结 Interaction 合同切片仍未启动，边界与启动条件见 9.4。Wave 1 只建设未来能力共用的网络、资源和凭证边界，不接入具体模型或 Provider。表达能力类合同继续由真实 consumer 证据和 Owner 决定准入。
+skill 重构、黄金样例、真实课例生产、判题自动桥以及编辑器内 AI 交互仍由 Owner 另行启动。课程逻辑面板（`courseState` + `navigationGuards`）确定长期保留；2026-08-28 Owner 限定的声明式课程状态读写窄切片已实现并经 S2 独立复核，边界见 9.4。Wave 1 只建设未来能力共用的网络、资源和凭证边界，不接入具体模型或 Provider。后续表达能力合同仍须重新具备真实 consumer 证据或 Owner 决定，不得从本次批准外推。
 
 ## 8. 当前状态与领取入口
 
@@ -221,22 +221,22 @@ skill 重构、黄金样例、真实课例生产、判题自动桥以及编辑�
 - **Published 素材闭包覆盖 direct project asset API**：Runtime `ctx.assets.projectUrl(assetId)` 与 Component `ctx.projectAssetUrl(assetId)` 直接引用的已保存素材必须进入 Published payload，并在导出后的真实 Player 中可解析；不能只收显式 binding、fallback 或 manifest 图片属性。
 - **create 后生命周期异常真实回退**：DOM Component 与 Slide scene-local API 3 Runtime 的 `resize`、`setVisible`、`updateProps` 等生命周期异常不得继续保持 `ok: true` 和冻结旧画面；宿主必须进入诚实失败状态并切换 static fallback 或可见占位。
 
-### 9.4 课程逻辑合同方向（保留，未启动）
+### 9.4 课程逻辑合同方向（窄切片已实现）
 
 - 课程逻辑面板继续保留。课程状态默认值、导航守卫、专业作者命令、Published 播放与 HTML 携带已经端到端可用，不重新立项这些已完成能力。
-- 待评估切片只包含：声明式条件读取现有 `CourseStateCondition`，以及声明式动作设置一个**已声明键**。明确不增加表达式、变量运算、工作流引擎或判题结果自动桥。
-- 该切片会修改冻结的 Interaction 合同，必须由 Owner 另行确认当期优先级，并在启动时按 S2 建卡；不得从本节自动恢复为 Ready 工作。
+- 本轮窄切片只包含：声明式条件读取现有 `CourseStateCondition`，以及声明式动作设置一个**已声明键**。明确不增加表达式、变量运算、工作流引擎或判题结果自动桥。
+- 2026-08-28 产品 Owner 在当前对话批准推荐组合；`course-state.exists` / `course-state.compare` 条件与 `course-state.set` 动作已完成合同、作者面、Published 播放、诊断、能力索引与直接验证，并通过 S2 独立复核。旧编辑器会拒绝含新判别器的工程；不得借此加入 increment/delete、表达式、判题结果自动桥或工作流引擎。
 - 教师控制器绕过导航守卫是课堂中强制翻页的既有设计。“导出时隐藏教师控制器”属于无人监督自学场景的独立产品决定，不并入上述合同切片。
 
 ### 9.5 兼容项、优化与独立风险维度
 
 这些事项不阻断当前内部纯 Slide HTML 源码包；只有交付范围、性能目标或风险证据触发时，才按当时源码建卡。
 
-- **兼容导出视觉**：Spatial PDF / PPTX 补齐 shape、formula、video、`surfaceLayerItems`、背景等稳定内容；Mixed PDF 的 Slide 静态合成不得把 Native text 之外的内容退化为 `[layerItemId]`。
+- **兼容导出视觉**：Spatial PDF / PPTX 补齐 shape、formula、video、`surfaceLayerItems`、背景等稳定内容；Mixed PDF 的 Slide 静态合成不得把 Native text 之外的内容退化为 `[layerItemId]`。2026-08-28 Owner 选择推荐组合，本轮不扩大该兼容范围，仍由真实交付需要另行触发。
 - **打开性能**：消除大工程同步探测解压后再次完整异步解压的重复工作；以评估中的 64 MiB 合法资产工程约 563 ms 总时间、约 257 ms Renderer 事件循环阻塞为基线，先证明阻塞下降且打开结果不变。
 - **静态捕获可靠性**：Published 捕获的图片 fetch / decode 必须受既有 `timeoutMs` 或等价的统一截止时间约束，失败进入明确回退，不能让 PDF / PPTX 或 DOM 捕获永久 pending。
 - **低优先 UX / 诊断**：无效 ZIP 不应在 Renderer V9 校验失败前污染最近项目；在线轻量 HTML 应针对远程素材 origin 与 Runtime / Component `connectOrigins` 的双声明提供针对性预检。
-- **供应链安全**：`pptxgenjs` 传递依赖 `image-size` 的两项高等级 DoS 告警单列为安全/供应链维度；普通媒体导入的类型与魔数白名单降低当前利用面，不能据此抬高为当前产品可用性阻断，也不能在依赖升级时隐去。
+- **供应链安全**：`pptxgenjs` 传递依赖 `image-size` 的两项高等级 DoS 告警单列为安全/供应链维度；普通媒体导入的类型与魔数白名单降低当前利用面，不能据此抬高为当前产品可用性阻断，也不能在依赖升级时隐去。2026-08-28 Owner 选择接受并跟踪：官方无 patched release 且当前浏览器构建不可达时保留 PPTX 与告警，不 suppress、不采用未经审核的 fork；官方修复发布后重新建卡升级验证。
 
 ### 9.6 验证与候选门
 

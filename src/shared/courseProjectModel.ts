@@ -284,10 +284,12 @@ function addInteractionReferences(
         condition.sceneIds.forEach((sceneId, sceneIndex) => {
           add('scene', sceneId, [...rulePath, 'conditions', conditionIndex, 'sceneIds', sceneIndex])
         })
-      } else {
+      } else if (condition.type === 'presentation.in') {
         condition.stateIds.forEach((stateId, stateIndex) => {
           add('presentation-state', stateId, [...rulePath, 'conditions', conditionIndex, 'stateIds', stateIndex])
         })
+      } else {
+        add('course-state', condition.key, [...rulePath, 'conditions', conditionIndex, 'key'])
       }
     })
     rule.actions.forEach((step, stepIndex) => {
@@ -311,6 +313,8 @@ function addInteractionReferences(
         if (action.target.kind === 'sound') {
           add('sound', action.target.soundId, [...actionPath, 'target', 'soundId'])
         }
+      } else if (action.type === 'course-state.set') {
+        add('course-state', action.key, [...actionPath, 'key'])
       }
     })
   })

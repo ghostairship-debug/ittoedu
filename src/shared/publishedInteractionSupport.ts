@@ -12,7 +12,11 @@ import type { LayerItem } from './courseProjectTypes'
 export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   status: 'partial',
   triggerTypes: ['node.click'],
-  conditionTypes: ['scene.in'],
+  conditionTypes: [
+    'scene.in',
+    'course-state.exists',
+    'course-state.compare',
+  ],
   actionTypes: [
     'node.enter',
     'node.exit',
@@ -21,8 +25,9 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
     'scene.previous',
     'scene.replay',
     'course.restart',
+    'course-state.set',
   ],
-  courseState: 'declared-defaults-shared-with-runtime-and-component-hosts',
+  courseState: 'declared-defaults-and-declarative-read-write-shared-with-runtime-and-component-hosts',
   navigationGuards: 'cross-location-go-next-previous-only; replay-not-guarded; restart-bypasses-guards',
   bindingSemantics: {
     nodeClick: 'auto-hit-native-text-image-formula-shape-only',
@@ -35,8 +40,6 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
     restart: 'guard-bypassed-and-course-state-reset-to-declared-defaults',
   },
   limitations: [
-    'no-declarative-course-state-condition',
-    'no-declarative-course-state-mutation-action',
     'no-assessment-branch-condition',
   ],
 } as const satisfies {
@@ -44,7 +47,7 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   triggerTypes: readonly InteractionTrigger['type'][]
   conditionTypes: readonly InteractionCondition['type'][]
   actionTypes: readonly InteractionActionPayload['type'][]
-  courseState: 'declared-defaults-shared-with-runtime-and-component-hosts'
+  courseState: 'declared-defaults-and-declarative-read-write-shared-with-runtime-and-component-hosts'
   navigationGuards: 'cross-location-go-next-previous-only; replay-not-guarded; restart-bypasses-guards'
   bindingSemantics: Readonly<{
     nodeClick: 'auto-hit-native-text-image-formula-shape-only'
@@ -56,11 +59,7 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
     replay: 'same-location-and-not-guarded'
     restart: 'guard-bypassed-and-course-state-reset-to-declared-defaults'
   }>
-  limitations: readonly [
-    'no-declarative-course-state-condition',
-    'no-declarative-course-state-mutation-action',
-    'no-assessment-branch-condition',
-  ]
+  limitations: readonly ['no-assessment-branch-condition']
 }
 
 function includesType<T extends string>(

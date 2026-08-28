@@ -699,7 +699,10 @@ export class PlayerApp {
         if (condition.type === 'scene.in') {
           return sceneId !== null && condition.sceneIds.includes(sceneId)
         }
-        return stateId !== null && condition.stateIds.includes(stateId)
+        if (condition.type === 'presentation.in') {
+          return stateId !== null && condition.stateIds.includes(stateId)
+        }
+        return false
       })
     })
   }

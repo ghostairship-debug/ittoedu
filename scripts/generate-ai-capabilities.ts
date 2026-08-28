@@ -959,6 +959,7 @@ export async function generateAiCapabilityArtifacts(
       'src/shared/interactionSchema.ts',
       'src/shared/publishedInteractionSupport.ts',
       'src/player/interactions/PublishedInteractionController.ts',
+      'src/player/surfaces/publishedCourseState.ts',
       'src/player/surfaces/publishedDynamicHosts.ts',
     ],
   }))

@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import {
+  courseStateCompareOperatorSchema,
+  courseStateKeySchema,
+  courseStateScalarSchema,
+} from '../course-state/schema'
+import {
   MAX_INTERACTION_ACTIONS,
   MAX_INTERACTION_CONDITIONS,
   MAX_SCENE_INTERACTIONS,
@@ -103,6 +108,17 @@ const sceneInConditionSchema = z.object({
 export const interactionConditionSchema = z.union([
   presentationInConditionSchema,
   sceneInConditionSchema,
+  z.object({
+    type: z.literal('course-state.exists'),
+    key: courseStateKeySchema,
+    exists: z.boolean(),
+  }).strict(),
+  z.object({
+    type: z.literal('course-state.compare'),
+    key: courseStateKeySchema,
+    operator: courseStateCompareOperatorSchema,
+    value: courseStateScalarSchema,
+  }).strict(),
 ])
 
 export const audioActionTargetSchema = z.discriminatedUnion('kind', [
@@ -170,6 +186,11 @@ const baseActionSchemas = [
   z.object({ type: z.literal('scene.previous') }).strict(),
   z.object({ type: z.literal('scene.replay') }).strict(),
   z.object({ type: z.literal('course.restart') }).strict(),
+  z.object({
+    type: z.literal('course-state.set'),
+    key: courseStateKeySchema,
+    value: courseStateScalarSchema,
+  }).strict(),
   ...audioActionSchemas,
   z.object({
     type: z.literal('video.play'),

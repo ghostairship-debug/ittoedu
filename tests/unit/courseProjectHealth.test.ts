@@ -742,7 +742,11 @@ describe('V9-native Course Project health', () => {
       name: '自身手势目标',
     }), 0)
     unbindable.hitPolicy = 'surface'
-    scene.layerItems.push(unbindable)
+    const supportedClick = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'course-state-click-target',
+      name: '课程状态目标',
+    }), 1)
+    scene.layerItems.push(unbindable, supportedClick)
     project.courseState.push({
       key: 'ready',
       valueType: 'boolean',
@@ -762,6 +766,26 @@ describe('V9-native Course Project health', () => {
       message: '尚未就绪',
     })
     scene.interactions.push(
+      {
+        id: 'supported-course-state-condition-and-action',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: supportedClick.layerItemId },
+        conditions: [
+          { type: 'course-state.exists', key: 'ready', exists: true },
+          {
+            type: 'course-state.compare',
+            key: 'ready',
+            operator: 'eq',
+            value: false,
+          },
+        ],
+        actions: [{
+          id: 'supported-course-state-write',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'course-state.set', key: 'ready', value: true },
+        }],
+      },
       {
         id: 'unsupported-trigger',
         enabled: true,
@@ -824,6 +848,9 @@ describe('V9-native Course Project health', () => {
       layerItemId: unbindable.layerItemId,
       target: expect.objectContaining({ kind: 'layer-item', owner: 'scene' }),
     }))
+    expect(findings.some(({ message }) => (
+      message.includes('supported-course-state-condition-and-action')
+    ))).toBe(false)
   })
 
   it('deduplicates only findings with the same complete diagnostic identity', () => {

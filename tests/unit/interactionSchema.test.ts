@@ -4,11 +4,12 @@ import {
   parseSceneInteractions,
   sceneInteractionsSchema,
 } from '@/shared/interactionSchema'
-import type {
-  InteractionActionPayload,
-  InteractionActionStep,
-  InteractionRule,
-  InteractionTrigger,
+import {
+  isTerminalNavigationAction,
+  type InteractionActionPayload,
+  type InteractionActionStep,
+  type InteractionRule,
+  type InteractionTrigger,
 } from '@/shared/interactionTypes'
 
 function steps(actions: InteractionActionPayload[]): InteractionActionStep[] {
@@ -41,6 +42,43 @@ function rule(
 }
 
 describe('interaction schema', () => {
+  it('accepts strict course-state conditions and a non-terminal typed set action', () => {
+    const key = 'k'.repeat(240)
+    const candidate = rule(undefined, steps([
+      { type: 'course-state.set', key, value: 3 },
+      { type: 'scene.next' },
+    ]))
+    candidate.conditions = [
+      { type: 'course-state.exists', key, exists: true },
+      { type: 'course-state.compare', key, operator: 'gte', value: 2 },
+    ]
+
+    expect(interactionRuleSchema.parse(candidate)).toEqual(candidate)
+    expect(isTerminalNavigationAction(candidate.actions[0]!.action)).toBe(false)
+    expect(interactionRuleSchema.safeParse({
+      ...candidate,
+      conditions: [{
+        type: 'course-state.exists',
+        key,
+        exists: true,
+        unknown: true,
+      }],
+    }).success).toBe(false)
+    expect(interactionRuleSchema.safeParse({
+      ...candidate,
+      actions: steps([{ type: 'course-state.set', key, value: Number.POSITIVE_INFINITY }]),
+    }).success).toBe(false)
+    expect(interactionRuleSchema.safeParse({
+      ...candidate,
+      conditions: [{
+        type: 'course-state.compare',
+        key: `${key}x`,
+        operator: 'eq',
+        value: 2,
+      }],
+    }).success).toBe(false)
+  })
+
   it('accepts the authorable trigger family and preserves strict data', () => {
     const triggers: InteractionTrigger[] = [
       { type: 'node.click', nodeId: 'button' },

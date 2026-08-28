@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { sceneInteractionsSchema } from '../interaction-v1/schema'
 import {
+  courseStateConditionSchema,
+  courseStateDeclarationSchema,
+} from '../course-state/schema'
+import { courseStateScalarType } from '../course-state/types'
+export { courseStateDeclarationSchema } from '../course-state/schema'
+import {
   formulaAstSchema,
   projectDocumentSchema,
   sceneNodeSchema,
@@ -1129,24 +1135,6 @@ export const coursePlaybackSchema: z.ZodType<ProjectPlaybackSettings> = z.object
   }).strict(),
 }).strict()
 
-export const courseStateDeclarationSchema = z.discriminatedUnion('valueType', [
-  z.object({ key: stableIdSchema, valueType: z.literal('boolean'), defaultValue: z.boolean() }).strict(),
-  z.object({ key: stableIdSchema, valueType: z.literal('number'), defaultValue: finiteNumber }).strict(),
-  z.object({ key: stableIdSchema, valueType: z.literal('string'), defaultValue: z.string() }).strict(),
-  z.object({ key: stableIdSchema, valueType: z.literal('null'), defaultValue: z.null() }).strict(),
-])
-
-const courseStateScalarSchema = z.union([z.boolean(), finiteNumber, z.string(), z.null()])
-const courseStateConditionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('exists'), key: stableIdSchema, exists: z.boolean() }).strict(),
-  z.object({
-    type: z.literal('compare'),
-    key: stableIdSchema,
-    operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
-    value: courseStateScalarSchema,
-  }).strict(),
-])
-
 export const courseNavigationGuardSchema = z.object({
   id: stableIdSchema,
   effect: z.literal('block'),
@@ -1275,6 +1263,41 @@ export const courseProjectDocumentSchema = z.object({
   const checkAsset = (assetId: string | undefined, path: Array<string | number>): void => {
     if (assetId && !assetIds.has(assetId)) addReferenceIssue(context, path, `Missing asset: ${assetId}`)
   }
+  const checkCourseStateReference = (
+    reference: Readonly<{
+      key: string
+      value?: boolean | number | string | null
+      operator?: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'
+    }>,
+    path: Array<string | number>,
+  ): void => {
+    const state = stateByKey.get(reference.key)
+    if (!state) {
+      addReferenceIssue(context, [...path, 'key'], `Missing course-state key: ${reference.key}`)
+      return
+    }
+    if (!Object.hasOwn(reference, 'value')) return
+    const valueType = courseStateScalarType(reference.value!)
+    if (state.valueType !== valueType) {
+      addReferenceIssue(
+        context,
+        [...path, 'value'],
+        'Course-state value type must match the declared course state',
+      )
+    }
+    if (
+      reference.operator !== undefined
+      && reference.operator !== 'eq'
+      && reference.operator !== 'neq'
+      && state.valueType !== 'number'
+    ) {
+      addReferenceIssue(
+        context,
+        [...path, 'operator'],
+        'Ordering comparisons require a number state',
+      )
+    }
+  }
   const checkComponent = (
     reference: { packageId: string; version: string },
     path: Array<string | number>,
@@ -1355,6 +1378,14 @@ export const courseProjectDocumentSchema = z.object({
           condition.sceneIds.forEach((sceneId) => {
             if (!sceneIds.has(sceneId)) addReferenceIssue(context, [...path, ruleIndex, 'conditions', conditionIndex], `Interaction references missing scene: ${sceneId}`)
           })
+        } else if (
+          condition.type === 'course-state.exists'
+          || condition.type === 'course-state.compare'
+        ) {
+          checkCourseStateReference(
+            condition,
+            [...path, ruleIndex, 'conditions', conditionIndex],
+          )
         }
       })
       rule.actions.forEach((step, stepIndex) => {
@@ -1370,6 +1401,9 @@ export const courseProjectDocumentSchema = z.object({
           !project.media.audio.sounds[action.target.soundId]
         ) {
           addReferenceIssue(context, [...actionPath, 'target', 'soundId'], `Interaction references missing sound: ${action.target.soundId}`)
+        }
+        if (action.type === 'course-state.set') {
+          checkCourseStateReference(action, actionPath)
         }
       })
     })
@@ -1459,20 +1493,10 @@ export const courseProjectDocumentSchema = z.object({
       if (!locationsById.has(locationId)) addReferenceIssue(context, ['navigationGuards', index], `Navigation guard references missing location: ${locationId}`)
     })
     guard.conditions.forEach((condition, conditionIndex) => {
-      const state = stateByKey.get(condition.key)
-      if (!state) {
-        addReferenceIssue(context, ['navigationGuards', index, 'conditions', conditionIndex, 'key'], `Missing course-state key: ${condition.key}`)
-        return
-      }
-      if (condition.type === 'compare') {
-        const valueType = condition.value === null ? 'null' : typeof condition.value
-        if (state.valueType !== valueType) {
-          addReferenceIssue(context, ['navigationGuards', index, 'conditions', conditionIndex, 'value'], 'Comparison value type must match the declared course state')
-        }
-        if (condition.operator !== 'eq' && condition.operator !== 'neq' && state.valueType !== 'number') {
-          addReferenceIssue(context, ['navigationGuards', index, 'conditions', conditionIndex, 'operator'], 'Ordering comparisons require a number state')
-        }
-      }
+      checkCourseStateReference(
+        condition,
+        ['navigationGuards', index, 'conditions', conditionIndex],
+      )
     })
   })
 

@@ -660,6 +660,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#staticCapture = staticCapture
     this.#globalInteractionVisibilityState = globalInteractionVisibilityState
     this.#interactionSessionPort = {
+      courseState: this.#courseState,
       currentSceneId: () => this.#currentSlideSceneId(),
       goToScene: (sceneId, targetStateId, signal) => (
         this.#goToScene(sceneId, targetStateId, signal)
@@ -814,7 +815,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   #mountInteractionControllers(activatingSurfaceId?: string): void {
     this.#destroyInteractionControllers()
-    if (this.#interactionDestroyStarted) return
+    if (this.#interactionDestroyStarted || this.#staticCapture) return
     const current = this.navigator.current
     if (
       !current

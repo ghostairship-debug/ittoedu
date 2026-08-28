@@ -199,6 +199,73 @@ describe('Course Project V9 core contract', () => {
     }).success).toBe(false)
   })
 
+  it('validates declared course-state references in global and local interactions', () => {
+    const key = 's'.repeat(240)
+    const project = minimalSlideProject()
+    project.courseState = [
+      { key, valueType: 'number', defaultValue: 0 },
+      { key: 'label', valueType: 'string', defaultValue: '' },
+    ]
+    project.globalInteractions = [{
+      id: 'global-course-state',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{ type: 'course-state.exists', key, exists: true }],
+      actions: [{
+        id: 'set-global-score',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key, value: 1 },
+      }],
+    }]
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('expected slide surface')
+    surface.scenes[0]!.interactions = [{
+      id: 'local-course-state',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{ type: 'course-state.compare', key, operator: 'gte', value: 1 }],
+      actions: [{
+        id: 'set-local-score',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key, value: 2 },
+      }],
+    }]
+
+    expect(courseProjectDocumentSchema.parse(project)).toEqual(project)
+    expect(collectCourseProjectReferences(project).filter((reference) => (
+      reference.kind === 'course-state' && reference.id === key
+    ))).toHaveLength(4)
+
+    const missing = structuredClone(project)
+    missing.globalInteractions[0]!.actions[0]!.action = {
+      type: 'course-state.set',
+      key: 'missing',
+      value: 1,
+    }
+    expect(courseProjectDocumentSchema.safeParse(missing).success).toBe(false)
+
+    const wrongType = structuredClone(project)
+    wrongType.globalInteractions[0]!.actions[0]!.action = {
+      type: 'course-state.set',
+      key,
+      value: '1',
+    }
+    expect(courseProjectDocumentSchema.safeParse(wrongType).success).toBe(false)
+
+    const invalidOrdering = structuredClone(project)
+    const invalidSurface = invalidOrdering.surfaces[0]
+    if (invalidSurface?.type !== 'slide') throw new Error('expected slide surface')
+    invalidSurface.scenes[0]!.interactions[0]!.conditions = [{
+      type: 'course-state.compare',
+      key: 'label',
+      operator: 'gt',
+      value: 'a',
+    }]
+    expect(courseProjectDocumentSchema.safeParse(invalidOrdering).success).toBe(false)
+  })
+
   it('reads legacy Flow plain-text JSON without runs', () => {
     const legacyBlocks = [
       { id: 'heading', type: 'heading', level: 1, text: '标题' },

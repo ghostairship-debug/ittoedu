@@ -154,6 +154,10 @@ function matchesCondition(
       return stateId !== null && condition.stateIds.includes(stateId)
     case 'scene.in':
       return sceneId !== null && condition.sceneIds.includes(sceneId)
+    case 'course-state.exists':
+    case 'course-state.compare':
+      // Course Project V9 executes these through the Published V2 controller.
+      return false
   }
 }
 

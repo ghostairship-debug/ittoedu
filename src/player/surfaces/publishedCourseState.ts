@@ -1,6 +1,7 @@
 import type {
   CourseNavigationGuard,
   CourseStateDeclaration,
+  CourseStateScalar,
 } from '../../shared/courseProjectTypes'
 import type { ComponentHostActions } from '../../shared/componentTypes'
 import type {
@@ -8,8 +9,6 @@ import type {
   RuntimeHostActions,
 } from '../../shared/runtimeTypes'
 import type { CourseStateStore } from '../CourseStateStore'
-
-type CourseStateValue = boolean | number | string | null
 
 export interface PublishedCarrierSideEffects {
   readonly courseState?: CourseStateStoreContract
@@ -129,7 +128,7 @@ export class PublishedCarrierSideEffectGate {
   }
 }
 
-function cloneDefaultValue(declaration: CourseStateDeclaration): CourseStateValue {
+function cloneDefaultValue(declaration: CourseStateDeclaration): CourseStateScalar {
   return structuredClone(declaration.defaultValue)
 }
 
@@ -150,7 +149,7 @@ function compareStateValues(
     CourseNavigationGuard['conditions'][number],
     { type: 'compare' }
   >['operator'],
-  expected: CourseStateValue,
+  expected: CourseStateScalar,
 ): boolean {
   if (operator === 'eq') return Object.is(actual, expected)
   if (operator === 'neq') return !Object.is(actual, expected)
@@ -161,11 +160,21 @@ function compareStateValues(
   return actual <= expected
 }
 
-function conditionMatches(
-  store: CourseStateStore,
-  condition: CourseNavigationGuard['conditions'][number],
+/** Shared exists/compare semantics for navigation guards and Interaction rules. */
+export function matchesPublishedCourseStateCondition(
+  store: Pick<CourseStateStoreContract, 'get'>,
+  condition:
+    | Readonly<{ key: string; exists: boolean }>
+    | Readonly<{
+        key: string
+        operator: Extract<
+          CourseNavigationGuard['conditions'][number],
+          { type: 'compare' }
+        >['operator']
+        value: CourseStateScalar
+      }>,
 ): boolean {
-  if (condition.type === 'exists') {
+  if ('exists' in condition) {
     return (store.get(condition.key) !== undefined) === condition.exists
   }
   return compareStateValues(
@@ -200,7 +209,9 @@ export function findPublishedNavigationBlock(
       transition.fromLocationId,
       transition.toLocationId,
     )) continue
-    const results = guard.conditions.map((condition) => conditionMatches(store, condition))
+    const results = guard.conditions.map((condition) => (
+      matchesPublishedCourseStateCondition(store, condition)
+    ))
     const matched = guard.match === 'all'
       ? results.every(Boolean)
       : results.some(Boolean)

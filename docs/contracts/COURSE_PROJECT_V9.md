@@ -126,10 +126,13 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 
 ---
 
-## 6. 课程状态与导航守卫
+## 6. 课程状态、Interaction 读写与导航守卫
 
-- **课程状态声明（`courseState: CourseStateDeclaration[]`）**：声明式标量状态（`boolean`、`number`、`string`、`null`）。
+- **课程状态声明（`courseState: CourseStateDeclaration[]`）**：声明式标量状态（`boolean`、`number`、`string`、`null`）；键最长 240 字符且整课唯一。
+- **Interaction 条件**：`course-state.exists` 检查声明键当前是否存在，`course-state.compare` 使用 `eq` / `neq` / `gt` / `gte` / `lt` / `lte` 比较当前值。不同条件继续按 AND 组合；比较值必须与声明类型一致，排序比较只允许数字状态。
+- **Interaction 动作**：`course-state.set` 同步写入一个已声明键，写入值必须与声明类型一致。它不是 terminal 动作；同一规则中后续 `after-previous` 动作和后续导航守卫可立即读取新值。
 - **导航守卫（`navigationGuards: CourseNavigationGuard[]`）**：声明式条件拦截规则（`effect: 'block'`），仅允许根据状态条件进行导航拦截，禁止执行任意重定向或执行代码。
+- **窄切片边界**：当前合同不包含 increment/delete、表达式、工作流引擎或判题结果自动桥；Runtime/Component 仍可通过既有宿主接口处理更复杂的课程机制。
 
 ---
 

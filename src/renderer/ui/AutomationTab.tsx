@@ -217,6 +217,7 @@ export function AutomationTab() {
     authoringStates: interactionView.states,
     scenes: interactionView.sceneReferences,
     sounds: courseProject.media.audio.sounds,
+    courseState: courseProject.courseState,
     ruleWarnings,
     revealTemplateTargetNodeIds,
     conditionSceneId: interactionView.carrier === 'global'

@@ -1,6 +1,7 @@
 import type { EditorTransactionPlan } from '@/renderer/authoring/editorTransaction'
 import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { courseStateScalarType } from '@/shared/contracts/course-state/types'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -313,6 +314,7 @@ function validateInteractionReferences(
   )
   const scenes = slideScenes(project)
   const soundIds = new Set(Object.keys(project.media.audio.sounds))
+  const courseStateByKey = new Map(project.courseState.map((state) => [state.key, state]))
   const actionIds = new Set(scopeRules.flatMap((rule) => (
     rule.actions
       .filter((step) => isNodeMotionAction(step.action))
@@ -332,6 +334,31 @@ function validateInteractionReferences(
     }
     if (item.locked) {
       return fail('locked-layer', `锁定元素“${item.label}”不能被互动规则修改。`)
+    }
+    return null
+  }
+  const checkCourseState = (
+    reference: Readonly<{
+      key: string
+      value?: boolean | number | string | null
+      operator?: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'
+    }>,
+  ): Extract<InteractionAuthoringPlanResult, { readonly ok: false }> | null => {
+    const declaration = courseStateByKey.get(reference.key)
+    if (!declaration) {
+      return fail('invalid-rule', `互动规则引用了不存在的课程状态“${reference.key}”。`)
+    }
+    if (!Object.hasOwn(reference, 'value')) return null
+    if (courseStateScalarType(reference.value!) !== declaration.valueType) {
+      return fail('invalid-rule', `课程状态“${reference.key}”的值类型与声明不一致。`)
+    }
+    if (
+      reference.operator !== undefined
+      && reference.operator !== 'eq'
+      && reference.operator !== 'neq'
+      && declaration.valueType !== 'number'
+    ) {
+      return fail('invalid-rule', `课程状态“${reference.key}”只有数字类型可使用大小比较。`)
     }
     return null
   }
@@ -392,11 +419,14 @@ function validateInteractionReferences(
         if (missingScene) {
           return fail('invalid-rule', `互动规则引用了不存在的 Slide 场景“${missingScene}”。`)
         }
-      } else {
+      } else if (condition.type === 'presentation.in') {
         for (const stateId of condition.stateIds) {
           const invalidState = checkRuleState(stateId)
           if (invalidState) return invalidState
         }
+      } else {
+        const invalidCourseState = checkCourseState(condition)
+        if (invalidCourseState) return invalidCourseState
       }
     }
     for (const step of rule.actions) {
@@ -423,6 +453,10 @@ function validateInteractionReferences(
       if (action.type === 'presentation.set') {
         const invalidState = checkRuleState(action.stateId)
         if (invalidState) return invalidState
+      }
+      if (action.type === 'course-state.set') {
+        const invalidCourseState = checkCourseState(action)
+        if (invalidCourseState) return invalidCourseState
       }
       if (action.type === 'scene.go') {
         const targetScene = scenes.get(action.sceneId)

@@ -117,6 +117,17 @@ function structurallyEqual(left: unknown, right: unknown): boolean {
     ))
 }
 
+function forEachInteractionRule(
+  project: CourseProjectDocument,
+  visit: (rule: CourseProjectDocument['globalInteractions'][number]) => void,
+): void {
+  project.globalInteractions.forEach(visit)
+  project.surfaces.forEach((surface) => {
+    if (surface.type !== 'slide') return
+    surface.scenes.forEach((scene) => scene.interactions.forEach(visit))
+  })
+}
+
 function stateReferenceGuardIds(
   project: CourseProjectDocument,
   key: string,
@@ -126,6 +137,49 @@ function stateReferenceGuardIds(
       ? [guard.id]
       : []
   ))
+}
+
+function stateReferenceRuleIds(
+  project: CourseProjectDocument,
+  key: string,
+  mode: 'all' | 'type-sensitive' = 'all',
+): string[] {
+  const ids = new Set<string>()
+  forEachInteractionRule(project, (rule) => {
+    const conditionReference = rule.conditions.some((condition) => (
+      (condition.type === 'course-state.exists'
+        || condition.type === 'course-state.compare')
+      && condition.key === key
+      && (mode === 'all' || condition.type === 'course-state.compare')
+    ))
+    const actionReference = rule.actions.some((step) => (
+      step.action.type === 'course-state.set' && step.action.key === key
+    ))
+    if (conditionReference || actionReference) ids.add(rule.id)
+  })
+  return [...ids]
+}
+
+function renameInteractionCourseStateReferences(
+  project: CourseProjectDocument,
+  previousKey: string,
+  nextKey: string,
+): void {
+  forEachInteractionRule(project, (rule) => {
+    rule.conditions = rule.conditions.map((condition) => (
+      (condition.type === 'course-state.exists'
+        || condition.type === 'course-state.compare')
+      && condition.key === previousKey
+        ? { ...condition, key: nextKey }
+        : condition
+    ))
+    rule.actions = rule.actions.map((step) => (
+      step.action.type === 'course-state.set'
+      && step.action.key === previousKey
+        ? { ...step, action: { ...step.action, key: nextKey } }
+        : step
+    ))
+  })
 }
 
 function validateTarget(
@@ -189,10 +243,23 @@ function applyMutation(
             ? [guard.id]
             : []
         ))
-        if (compareGuardIds.length > 0) {
+        const interactionRuleIds = stateReferenceRuleIds(
+          project,
+          command.key,
+          'type-sensitive',
+        )
+        if (compareGuardIds.length > 0 || interactionRuleIds.length > 0) {
+          const references = [
+            ...(compareGuardIds.length > 0
+              ? [`守卫 ${compareGuardIds.join('、')}`]
+              : []),
+            ...(interactionRuleIds.length > 0
+              ? [`互动规则 ${interactionRuleIds.join('、')}`]
+              : []),
+          ]
           throw new CourseLogicAuthoringError(
             'state-type-referenced',
-            `状态“${command.key}”正被守卫 ${compareGuardIds.join('、')} 比较；请先调整条件，再修改类型。`,
+            `状态“${command.key}”正被${references.join('及')}按当前类型使用；请先调整比较条件或赋值动作，再修改类型。`,
           )
         }
       }
@@ -213,10 +280,15 @@ function applyMutation(
                 : condition
             ))
           })
+          renameInteractionCourseStateReferences(
+            draft,
+            command.key,
+            declaration.key,
+          )
         },
         statusMessage: declaration.key === command.key
           ? `已更新课程状态“${command.key}”`
-          : `已将课程状态“${command.key}”改为“${declaration.key}”，并同步守卫条件`,
+          : `已将课程状态“${command.key}”改为“${declaration.key}”，并同步守卫与互动规则`,
       }
     }
 
@@ -229,10 +301,17 @@ function applyMutation(
         )
       }
       const guardIds = stateReferenceGuardIds(project, command.key)
-      if (guardIds.length > 0) {
+      const interactionRuleIds = stateReferenceRuleIds(project, command.key)
+      if (guardIds.length > 0 || interactionRuleIds.length > 0) {
+        const references = [
+          ...(guardIds.length > 0 ? [`守卫 ${guardIds.join('、')}`] : []),
+          ...(interactionRuleIds.length > 0
+            ? [`互动规则 ${interactionRuleIds.join('、')}`]
+            : []),
+        ]
         throw new CourseLogicAuthoringError(
           'state-referenced',
-          `状态“${command.key}”仍被守卫 ${guardIds.join('、')} 使用；请先删除或调整这些条件。`,
+          `状态“${command.key}”仍被${references.join('及')}使用；请先删除或调整这些引用。`,
         )
       }
       return {

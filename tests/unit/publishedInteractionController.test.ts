@@ -8,6 +8,7 @@ import type {
   PublishedInteractionSurfacePort,
   PublishedNodeMotionContext,
 } from '@/player/interactions/PublishedInteractionSurfacePort'
+import { CourseStateStore } from '@/player/CourseStateStore'
 import type {
   InteractionActionPayload,
   InteractionActionStep,
@@ -82,6 +83,7 @@ function surfaceHarness(overrides: {
 
 function sessionHarness(initialSceneId = 'scene_one') {
   let sceneId: string | null = initialSceneId
+  const courseState = new CourseStateStore()
   const goToScene = vi.fn((
     _targetSceneId: string,
     _targetStateId: string | undefined,
@@ -92,6 +94,7 @@ function sessionHarness(initialSceneId = 'scene_one') {
   const replayScene = vi.fn((_signal: AbortSignal) => true)
   const restartCourse = vi.fn((_signal: AbortSignal) => true)
   const session: PublishedInteractionSessionPort = {
+    courseState,
     currentSceneId: () => sceneId,
     goToScene,
     nextScene,
@@ -106,6 +109,7 @@ function sessionHarness(initialSceneId = 'scene_one') {
     previousScene,
     replayScene,
     restartCourse,
+    courseState,
     setSceneId(next: string | null) {
       sceneId = next
     },
@@ -151,6 +155,53 @@ describe('PublishedInteractionController', () => {
 
     controller.destroy()
     expect(host.disposed).toEqual(['button'])
+  })
+
+  it('ANDs course-state conditions once and exposes a synchronous set to later steps', async () => {
+    const host = surfaceHarness()
+    const navigation = sessionHarness()
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    navigation.courseState.set('score', 2)
+    navigation.courseState.set('unlocked', false)
+    navigation.nextScene.mockImplementation(() => (
+      navigation.courseState.get('unlocked') === true
+    ))
+    const rule = clickRule('unlock', 'button', [
+      actionStep('set-unlocked', {
+        type: 'course-state.set',
+        key: 'unlocked',
+        value: true,
+      }),
+      actionStep('show-result', motion('node.enter', 'result')),
+      actionStep('continue', { type: 'scene.next' }),
+    ], [
+      { type: 'course-state.exists', key: 'score', exists: true },
+      { type: 'course-state.compare', key: 'score', operator: 'gte', value: 2 },
+      { type: 'course-state.compare', key: 'unlocked', operator: 'eq', value: false },
+    ])
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      rules: [rule],
+      surface: host.surface,
+      session: navigation.session,
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+
+    host.listeners.get('button')?.()
+
+    await vi.waitFor(() => expect(navigation.nextScene).toHaveBeenCalledOnce())
+    expect(navigation.courseState.get('unlocked')).toBe(true)
+    expect(host.executeNodeMotion).toHaveBeenCalledOnce()
+    expect(diagnostics).toEqual([])
+
+    navigation.courseState.set('score', 1)
+    navigation.courseState.set('unlocked', false)
+    host.listeners.get('button')?.()
+    await Promise.resolve()
+    expect(navigation.nextScene).toHaveBeenCalledOnce()
+    expect(navigation.courseState.get('unlocked')).toBe(false)
+
+    controller.destroy()
   })
 
   it('routes every supported terminal navigation through the Published session port', async () => {
