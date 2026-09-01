@@ -193,7 +193,7 @@ describe('Course Project V9 layer composition', () => {
     ])
   })
 
-  it('uses the global teacher controller as a stable Overlay boundary without rewriting authored order', () => {
+  it('resolves explicit and legacy global planes without consulting local order or applicability', () => {
     const fixture = listCourseProjectV9Fixtures().find((candidate) => (
       candidate.id === 'global-layer-teacher-controller'
     ))
@@ -208,36 +208,126 @@ describe('Course Project V9 layer composition', () => {
       candidate.item.layerItemId === 'global-banner'
     ))
     if (!banner) throw new Error('expected global banner')
-    project.globalLayerItems.push({
-      item: {
-        ...structuredClone(banner.item),
-        layerItemId: 'global-overlay-after-controller',
-        label: '控制器上方全局项',
-        order: 2_000,
+    const controller = project.globalLayerItems.find((candidate) => (
+      candidate.item.layerItemId === 'teacher-controller-main'
+    ))
+    if (!controller) throw new Error('expected global controller')
+    controller.visibility = { mode: 'include', locationIds: ['location-scene-2'] }
+    project.globalLayerItems.push(
+      {
+        item: {
+          ...structuredClone(banner.item),
+          layerItemId: 'explicit-overlay-before-controller',
+          label: '显式控制器前上层项',
+          order: 40,
+        },
+        plane: 'overlay',
+        visibility: { mode: 'all', locationIds: [] },
       },
-      visibility: { mode: 'all', locationIds: [] },
-    })
-    const before = structuredClone(project)
+      {
+        item: {
+          ...structuredClone(banner.item),
+          layerItemId: 'explicit-underlay-after-controller',
+          label: '显式控制器后下层项',
+          order: 2_000,
+        },
+        plane: 'underlay',
+        visibility: { mode: 'all', locationIds: [] },
+      },
+      {
+        item: {
+          ...structuredClone(banner.item),
+          layerItemId: 'legacy-overlay-after-controller',
+          label: '旧控制器后上层项',
+          order: 3_000,
+        },
+        visibility: { mode: 'all', locationIds: [] },
+      },
+    )
+    project.globalLayerItems.sort((left, right) => left.item.order - right.item.order)
+    const canonicalProject = courseProjectDocumentSchema.parse(project)
+    const canonicalScene = canonicalProject.surfaces[0]
+    if (!canonicalScene || canonicalScene.type !== 'slide') throw new Error('expected canonical Slide')
+    const before = structuredClone(canonicalProject)
 
     const composition = composeCourseProjectLocation({
-      project,
+      project: canonicalProject,
       locationId: 'location-scene-1',
       stateId: null,
     })
 
     expect(composition.entries.map((candidate) => candidate.item.layerItemId)).toEqual([
       'global-banner',
+      'explicit-underlay-after-controller',
       'slide-title-1',
+      'explicit-overlay-before-controller',
       'teacher-controller-main',
-      'global-overlay-after-controller',
+      'legacy-overlay-after-controller',
     ])
-    expect(composition.entries.map((candidate) => candidate.stackOrder)).toEqual([0, 1, 2, 3])
+    expect(composition.entries.map((candidate) => candidate.globalPlane)).toEqual([
+      'underlay',
+      'underlay',
+      null,
+      'overlay',
+      'overlay',
+      'overlay',
+    ])
+    expect(composition.entries.map((candidate) => candidate.stackOrder)).toEqual([0, 1, 2, 3, 4, 5])
     expect(composition.entries.map((candidate) => candidate.item.order)).toEqual([
       50,
-      900,
-      80,
       2_000,
+      900,
+      40,
+      80,
+      3_000,
     ])
-    expect(project).toEqual(before)
+    expect(composition.entries.find((candidate) => (
+      candidate.item.layerItemId === 'teacher-controller-main'
+    ))).toMatchObject({ applicable: false, globalPlane: 'overlay' })
+    expect(canonicalProject).toEqual(before)
+
+    canonicalScene.scenes[0]!.layerItems.push({
+      ...structuredClone(canonicalScene.scenes[0]!.layerItems[0]!),
+      layerItemId: 'later-local-content',
+      label: '后插入本地内容',
+      order: 0,
+    })
+    canonicalScene.scenes[0]!.layerItems.sort((left, right) => left.order - right.order)
+    const afterInsertProject = courseProjectDocumentSchema.parse(canonicalProject)
+    const afterLocalInsert = composeCourseProjectLocation({
+      project: afterInsertProject,
+      locationId: 'location-scene-1',
+      stateId: null,
+    })
+    expect(afterLocalInsert.entries
+      .filter((candidate) => candidate.source === 'global')
+      .map((candidate) => [candidate.item.layerItemId, candidate.globalPlane]))
+      .toEqual(composition.entries
+        .filter((candidate) => candidate.source === 'global')
+        .map((candidate) => [candidate.item.layerItemId, candidate.globalPlane]))
+  })
+
+  it('defaults legacy global entries to Overlay when no controller exists', () => {
+    const project = slideStateFixture()
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide fixture')
+    project.globalLayerItems[0]!.item.order = 0
+    surface.scenes[0]!.layerItems.forEach((item, index) => {
+      item.order = 10_000 + index
+    })
+
+    const canonicalProject = courseProjectDocumentSchema.parse(project)
+    const composition = composeCourseProjectLocation({
+      project: canonicalProject,
+      locationId: 'location-success',
+      stateId: null,
+    })
+    const contentEnd = Math.max(...composition.entries
+      .filter((candidate) => candidate.source !== 'global')
+      .map((candidate) => candidate.stackOrder))
+    const globals = composition.entries.filter((candidate) => candidate.source === 'global')
+
+    expect(globals.every((candidate) => candidate.globalPlane === 'overlay')).toBe(true)
+    expect(globals.every((candidate) => candidate.stackOrder > contentEnd)).toBe(true)
   })
 })

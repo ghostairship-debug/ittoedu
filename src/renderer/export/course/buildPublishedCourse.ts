@@ -15,6 +15,8 @@ import type {
   CourseProjectDocument,
   CourseSurfaceDocument,
   FlowBlock,
+  GlobalLayerEntry,
+  GlobalLayerPlane,
   LayerItem,
   LayerItemOverride,
   RuntimeLayerItem,
@@ -28,11 +30,13 @@ import {
   type PublishedCourseExecutableCode,
   type PublishedCourseSurface,
   type PublishedCourseV2Payload,
+  type PublishedGlobalLayerEntry,
   type PublishedLayerItem,
   type PublishedRuntimeLayerItem,
   type PublishedScopedLayerItem,
 } from '../../../shared/publishedCourseTypes'
 import { publishedCourseV2Schema } from '../../../shared/publishedCourseSchema'
+import { resolveEffectiveGlobalLayerPlanes } from '../../../shared/courseLayerComposition'
 import type { AssetMeta, EmbeddedComponentPackageMeta } from '../../../shared/projectTypes'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import { bytesToBase64, bytesToDataUrl } from '../base64'
@@ -693,6 +697,20 @@ function publishScoped(
   }
 }
 
+function publishGlobalScoped(
+  sources: CoursePublishSources,
+  effectivePlanes: ReadonlyMap<string, GlobalLayerPlane>,
+  entry: GlobalLayerEntry,
+): PublishedGlobalLayerEntry {
+  const plane = effectivePlanes.get(entry.item.layerItemId)
+  if (!plane) throw new Error(`Missing effective global plane: ${entry.item.layerItemId}`)
+  return {
+    item: publishLayerItem(sources, entry.item),
+    plane,
+    visibility: cloneJson(entry.visibility),
+  }
+}
+
 function publishFlowBlocks(
   sources: CoursePublishSources,
   blocks: readonly FlowBlock[],
@@ -850,6 +868,7 @@ export function buildPublishedCourseV2Payload(
     )
   }
 
+  const effectiveGlobalPlanes = resolveEffectiveGlobalLayerPlanes(project.globalLayerItems)
   const published: PublishedCourseV2Payload = {
     format: PUBLISHED_COURSE_FORMAT,
     formatVersion: PUBLISHED_COURSE_VERSION,
@@ -865,7 +884,9 @@ export function buildPublishedCourseV2Payload(
     navigationGuards: cloneJson(project.navigationGuards),
     locations: cloneJson(project.locations),
     startLocationId: project.startLocationId,
-    globalLayerItems: project.globalLayerItems.map((entry) => publishScoped(sources, entry)),
+    globalLayerItems: project.globalLayerItems.map((entry) => (
+      publishGlobalScoped(sources, effectiveGlobalPlanes, entry)
+    )),
     globalInteractions: cloneJson(project.globalInteractions),
     surfaces: project.surfaces.map((surface) => publishSurface(sources, surface)),
     ...(project.mixedPrintPlan ? { mixedPrintPlan: cloneJson(project.mixedPrintPlan) } : {}),

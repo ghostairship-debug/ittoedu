@@ -12,6 +12,7 @@ import type {
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { AssetMeta } from '@/shared/projectTypes'
 import { createProject } from '@/renderer/project/createProject'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
@@ -482,6 +483,7 @@ describe('Published Course V2 producer', () => {
     expect(published.courseState).toEqual(sources.project.courseState)
     expect(published.navigationGuards).toEqual(sources.project.navigationGuards)
     expect(published.globalLayerItems.map((entry) => entry.item.layerItemId)).toEqual(['global-banner'])
+    expect(published.globalLayerItems[0]?.plane).toBe('overlay')
     expect(published.surfaces.map((surface) => surface.type)).toEqual(['slide', 'flow', 'spatial-2d'])
 
     const slide = published.surfaces[0]
@@ -491,6 +493,7 @@ describe('Published Course V2 producer', () => {
       mode: 'include',
       locationIds: ['location-slide'],
     })
+    expect(slide.surfaceLayerItems[0]).not.toHaveProperty('plane')
     expect(slide.scenes[0]?.layerItems.map((item) => item.layerItemId)).toEqual([
       'slide-title',
       'slide-photo',
@@ -511,6 +514,38 @@ describe('Published Course V2 producer', () => {
     ])
     expect(published.assets).not.toHaveProperty('unused')
     expect(Object.keys(published.components)).toEqual(['component.quiz@4.0.0'])
+  })
+
+  it('materializes legacy global planes without mutating the V9 source', () => {
+    let idSequence = 0
+    const project = createBlankCourseProject({
+      id: 'legacy-global-planes',
+      title: '旧全局平面',
+      now: NOW,
+      idFactory: () => `fixed-${idSequence++}`,
+    })
+    const controller = project.globalLayerItems[0]
+    if (!controller) throw new Error('expected default controller')
+    delete controller.plane
+    project.globalLayerItems.unshift(scoped(nativeText('legacy-underlay', 0, '下层')))
+    project.globalLayerItems.push(scoped(nativeText('legacy-overlay', 2, '上层')))
+    const before = structuredClone(project)
+
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+
+    expect(published.globalLayerItems.map((entry) => ({
+      id: entry.item.layerItemId,
+      plane: entry.plane,
+    }))).toEqual([
+      { id: 'legacy-underlay', plane: 'underlay' },
+      { id: controller.item.layerItemId, plane: 'overlay' },
+      { id: 'legacy-overlay', plane: 'overlay' },
+    ])
+    expect(project).toEqual(before)
   })
 
   it('exposes validated V9 remote delivery metadata to an opt-in asset projection', () => {

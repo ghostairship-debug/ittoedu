@@ -41,13 +41,13 @@ import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sourc
 
 type AnyItem = LayerItem | PublishedLayerItem
 
-function fixture(id: 'mixed' | 'slide-presentation-state') {
+function fixture(id: 'mixed' | 'slide-presentation-state' | 'global-layer-teacher-controller') {
   const found = listCourseProjectV9Fixtures().find((candidate) => candidate.id === id)
   if (!found) throw new Error(`missing ${id} fixture`)
   return found
 }
 
-function publish(id: 'mixed' | 'slide-presentation-state') {
+function publish(id: 'mixed' | 'slide-presentation-state' | 'global-layer-teacher-controller') {
   const source = fixture(id).data
   return buildPublishedCourseV2Payload({
     project: source.project,
@@ -105,6 +105,8 @@ function facts(entries: readonly CourseLayerCompositionEntry<AnyItem>[]) {
     id: entry.item.layerItemId,
     source: entry.source,
     order: entry.item.order,
+    stackOrder: entry.stackOrder,
+    globalPlane: entry.globalPlane,
     stored: entry.stored,
     applicable: entry.applicable,
     mounted: entry.mounted,
@@ -148,6 +150,39 @@ function expectCompositionParity(
 }
 
 describe('shared ↔ renderer ↔ raw Published V2 composition parity', () => {
+  it('keeps legacy Published globals without plane in parity with the V9 controller boundary', () => {
+    const source = fixture('global-layer-teacher-controller').data
+    const project = structuredClone(source.project)
+    const controller = project.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))
+    if (!controller) throw new Error('expected global teacher controller')
+    controller.visibility = { mode: 'include', locationIds: ['location-scene-2'] }
+    const canonicalProject = courseProjectDocumentSchema.parse(project)
+    const shared = composeCourseProjectLocation({
+      project: canonicalProject,
+      locationId: 'location-scene-1',
+      stateId: null,
+    })
+    const legacyPublished = buildPublishedCourseV2Payload({
+      project: canonicalProject,
+      assetFiles: source.assetFiles,
+      components: {},
+    })
+    legacyPublished.globalLayerItems.forEach((entry) => {
+      delete entry.plane
+    })
+
+    expectCompositionParity(shared, composePublishedSlideLocation({
+      payload: legacyPublished,
+      locationId: 'location-scene-1',
+      stateId: null,
+    }))
+    expect(shared.entries.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))).toMatchObject({ applicable: false, globalPlane: 'overlay' })
+  })
+
   it.each([
     ['location-slide', 'slide'],
     ['location-flow', 'flow'],

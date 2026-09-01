@@ -3,6 +3,7 @@ import type {
   CourseLocation,
   CourseProjectDocument,
   CourseSurfaceType,
+  GlobalLayerPlane,
   LayerItem,
   LayerItemOverride,
   SlidePresentationState,
@@ -10,6 +11,7 @@ import type {
 import type {
   PublishedCourseSurface,
   PublishedCourseV2Payload,
+  PublishedGlobalLayerEntry,
   PublishedLayerItem,
   PublishedScopedLayerItem,
   PublishedSlidePresentationState,
@@ -28,14 +30,15 @@ export interface CourseLayerCompositionEntry<Item> {
   readonly mounted: boolean
   /** Initial playback visibility after the mount boundary. */
   readonly initiallyVisible: boolean
+  /** Resolved persisted/legacy global plane; non-global entries carry `null`. */
+  readonly globalPlane: GlobalLayerPlane | null
   /**
    * Dense back-to-front paint slot for the current composition. This is a
    * read-model fact only: renderers must not write it back to `item.order`.
    *
-   * A valid global teacher controller is the stable boundary between global
-   * underlay entries and global overlay entries. Content owned by the active
-   * surface/scene/world is always painted before the controller, while global
-   * entries keep their authored order on either side of that boundary.
+   * Effective global Underlay entries paint first, active surface/scene/world
+   * content paints next, and effective global Overlay entries paint last.
+   * Entries keep their authored order inside each group.
    */
   readonly stackOrder: number
   /** A detached, fully materialized item. Slide named-state overrides are applied. */
@@ -68,7 +71,7 @@ export interface ComposeCourseProjectLocationInput {
 
 export interface PublishedCourseCompositionSource {
   readonly locations: readonly CourseLocation[]
-  readonly globalLayerItems: readonly PublishedScopedLayerItem[]
+  readonly globalLayerItems: readonly PublishedGlobalLayerEntry[]
   readonly surfaces: readonly PublishedCourseSurface[]
 }
 
@@ -92,6 +95,10 @@ type ComposableScopedLayerItem<Item extends ComposableLayerItem> = {
     readonly locationIds: readonly string[]
   }
 }
+type ComposableGlobalLayerItem<Item extends ComposableLayerItem> =
+  ComposableScopedLayerItem<Item> & {
+    readonly plane?: GlobalLayerPlane
+  }
 
 type ComposableSurface<Item extends ComposableLayerItem> =
   | {
@@ -122,7 +129,7 @@ type ComposableSurface<Item extends ComposableLayerItem> =
 
 interface CompositionDocument<Item extends ComposableLayerItem> {
   readonly locations: readonly CourseLocation[]
-  readonly globalLayerItems: readonly ComposableScopedLayerItem<Item>[]
+  readonly globalLayerItems: readonly ComposableGlobalLayerItem<Item>[]
   readonly surfaces: readonly ComposableSurface<Item>[]
 }
 
@@ -236,13 +243,28 @@ function isComposableTeacherController(item: ComposableLayerItem): boolean {
 }
 
 /**
- * The teacher controller has a contract-defined global Overlay role even
- * though legacy V9 projects encode only one cross-owner `order`. Treat its
- * authored global position as a stable boundary without mutating that order:
- * global entries before it remain below content, active content occupies the
- * middle plane, and the controller plus later global entries stay above it.
- * Projects without a valid global controller retain their legacy flat order.
+ * Resolves the additive global plane contract without consulting local content.
+ * Explicit planes win. A legacy controller is always Overlay and acts as the
+ * old global-only boundary; legacy projects without one resolve to Overlay.
  */
+export function resolveEffectiveGlobalLayerPlanes<Item extends ComposableLayerItem>(
+  entries: readonly ComposableGlobalLayerItem<Item>[],
+): ReadonlyMap<string, GlobalLayerPlane> {
+  const sorted = [...entries]
+    .sort((left, right) => compareCourseLayerItems(left.item, right.item))
+  const controller = sorted.find((candidate) => isComposableTeacherController(candidate.item))
+  const result = new Map<string, GlobalLayerPlane>()
+  for (const entry of sorted) {
+    const plane = isComposableTeacherController(entry.item)
+      ? 'overlay'
+      : entry.plane ?? (controller && compareCourseLayerItems(entry.item, controller.item) < 0
+        ? 'underlay'
+        : 'overlay')
+    result.set(entry.item.layerItemId, plane)
+  }
+  return result
+}
+
 function assignCompositionStackOrder<Item extends ComposableLayerItem>(
   entries: readonly UnstackedCompositionEntry<Item>[],
 ): CourseLayerCompositionEntry<Item>[] {
@@ -250,20 +272,11 @@ function assignCompositionStackOrder<Item extends ComposableLayerItem>(
     compareCourseLayerItems(left.item, right.item)
   )
   const sorted = [...entries].sort(byAuthoredOrder)
-  const controller = sorted.find((entry) => (
-    entry.source === 'global' && isComposableTeacherController(entry.item)
-  ))
-  const ordered = controller
-    ? [
-        ...sorted.filter((entry) => (
-          entry.source === 'global' && byAuthoredOrder(entry, controller) < 0
-        )),
-        ...sorted.filter((entry) => entry.source !== 'global'),
-        ...sorted.filter((entry) => (
-          entry.source === 'global' && byAuthoredOrder(entry, controller) >= 0
-        )),
-      ]
-    : sorted
+  const ordered = [
+    ...sorted.filter((entry) => entry.source === 'global' && entry.globalPlane === 'underlay'),
+    ...sorted.filter((entry) => entry.source !== 'global'),
+    ...sorted.filter((entry) => entry.source === 'global' && entry.globalPlane === 'overlay'),
+  ]
   return ordered.map((entry, stackOrder) => ({ ...entry, stackOrder }))
 }
 
@@ -313,7 +326,12 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
   }
 
   const entries: UnstackedCompositionEntry<Item>[] = []
-  const push = (item: Item, source: CourseLayerCompositionSource, applicable: boolean): void => {
+  const push = (
+    item: Item,
+    source: CourseLayerCompositionSource,
+    applicable: boolean,
+    globalPlane: GlobalLayerPlane | null = null,
+  ): void => {
     const mounted = applicable && item.visible
     entries.push({
       source,
@@ -321,11 +339,20 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
       applicable,
       mounted,
       initiallyVisible: mounted && item.playbackInitialVisibility !== 'hidden',
+      globalPlane,
       item,
     })
   }
+  const effectiveGlobalPlanes = resolveEffectiveGlobalLayerPlanes(input.document.globalLayerItems)
   for (const entry of input.document.globalLayerItems) {
-    push(structuredClone(entry.item), 'global', scopedApplies(entry, location.id))
+    const globalPlane = effectiveGlobalPlanes.get(entry.item.layerItemId)
+    if (!globalPlane) throw new Error(`Missing effective global plane: ${entry.item.layerItemId}`)
+    push(
+      structuredClone(entry.item),
+      'global',
+      scopedApplies(entry, location.id),
+      globalPlane,
+    )
   }
   for (const entry of surface.surfaceLayerItems) {
     push(structuredClone(entry.item), 'surface', scopedApplies(entry, location.id))
