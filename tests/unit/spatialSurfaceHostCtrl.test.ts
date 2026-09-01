@@ -125,6 +125,7 @@ function spatialInput(): PublishedSpatialRuntimeInput {
       {
         item: teacherController('global-controller', { x: 24, y: 180, width: 180, height: 48 }, 9),
         visibility: { mode: 'all', locationIds: [] },
+        plane: 'underlay',
       },
       {
         item: publishedText('global-hud', '全课 HUD', { x: 12, y: 12, width: 96, height: 24 }, 8),
@@ -161,15 +162,21 @@ describe('SpatialSurfaceHost viewport teacher controller', () => {
 
     const root = container.querySelector<HTMLElement>('.spatial-surface')!
     const world = root.querySelector<SVGGElement>('[data-spatial-world]')!
+    const underlay = root.querySelector<HTMLElement>('.spatial-global-underlay-layer')!
     const screen = root.querySelector<HTMLElement>('.spatial-screen-layer')!
     const controller = screen.querySelector<HTMLElement>('[data-layer-item-id="global-controller"]')!
-    const hud = screen.querySelector<HTMLElement>('[data-layer-item-id="global-hud"]')!
+    const hud = underlay.querySelector<HTMLElement>('[data-layer-item-id="global-hud"]')!
     const nav = controller.querySelector<HTMLElement>('.slide-native-teacher-controller')!
 
     expect(world.contains(controller)).toBe(false)
     expect(controller.parentElement).toBe(screen)
+    expect(hud.parentElement).toBe(underlay)
     expect(controller.dataset.coordinateSpace).toBe('viewport')
     expect(hud.dataset.coordinateSpace).toBe('viewport')
+    expect(controller.dataset.globalPlane).toBe('overlay')
+    expect(hud.dataset.globalPlane).toBe('underlay')
+    expect(Number(underlay.style.zIndex)).toBeLessThan(Number(screen.style.zIndex))
+    expect(root.querySelector('svg')?.style.backgroundColor).toBe('transparent')
     expect(nav).not.toBeNull()
     expect(nav.querySelector('[data-controller-button-id="prev"]')?.textContent).toBe('上一')
     expect(nav.querySelector('[data-controller-button-id="next"]')?.textContent).toBe('下一')

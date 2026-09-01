@@ -496,7 +496,29 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.destroy()
   })
 
-  it('keeps high-order local viewport content below the controller and later globals above it', async () => {
+  it('keeps pass-through world video descendants out of pointer hit testing', async () => {
+    const course = playbackCourse()
+    const spatial = course.surfaces[0]
+    if (!spatial || spatial.type !== 'spatial-2d') throw new Error('expected spatial')
+    const videoItem = spatial.world.layerItems.find(
+      (item) => item.kind === 'native' && item.content.nativeType === 'video',
+    )
+    if (!videoItem) throw new Error('expected world video')
+    videoItem.hitPolicy = 'pass-through'
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const wrapper = container.querySelector<HTMLElement>('[data-layer-item-id="world-video"]')!
+    const video = wrapper.querySelector<HTMLVideoElement>('video')!
+    expect(wrapper.style.pointerEvents).toBe('none')
+    expect(video.style.pointerEvents).toBe('none')
+
+    await host.destroy()
+  })
+
+  it('uses physical global planes so authored order cannot cross the Spatial world', async () => {
     const course = playbackCourse()
     const spatial = course.surfaces[0]
     if (!spatial || spatial.type !== 'spatial-2d') throw new Error('expected spatial')
@@ -510,6 +532,18 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
     course.globalLayerItems.push({
+      item: {
+        ...publishedText(
+          'global-explicit-underlay',
+          '高序全局底层',
+          { x: 20, y: 180, width: 220, height: 48 },
+          4_000,
+        ),
+        hitPolicy: 'pass-through',
+      },
+      visibility: { mode: 'all', locationIds: [] },
+      plane: 'underlay',
+    }, {
       item: publishedText(
         'global-after-controller',
         '全局 Overlay 后项',
@@ -517,6 +551,7 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
         3_000,
       ),
       visibility: { mode: 'all', locationIds: [] },
+      plane: 'overlay',
     })
     const container = document.createElement('div')
     const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
@@ -526,12 +561,30 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     const local = container.querySelector<HTMLElement>(
       '[data-layer-item-id="surface-local-cover"]',
     )!
+    const underlayItem = container.querySelector<HTMLElement>(
+      '[data-layer-item-id="global-explicit-underlay"]',
+    )!
     const controller = container.querySelector<HTMLElement>(
       '[data-layer-item-id="global-controller"]',
     )!
     const laterGlobal = container.querySelector<HTMLElement>(
       '[data-layer-item-id="global-after-controller"]',
     )!
+    const underlayRoot = container.querySelector<HTMLElement>('.spatial-global-underlay-layer')!
+    const overlayRoot = container.querySelector<HTMLElement>('.spatial-global-overlay-layer')!
+    const worldRoot = container.querySelector<SVGSVGElement>('[data-spatial-world-canvas]')!
+    expect(underlayItem.parentElement).toBe(underlayRoot)
+    expect(controller.parentElement).toBe(overlayRoot)
+    expect(laterGlobal.parentElement).toBe(overlayRoot)
+    expect(underlayItem.dataset.globalPlane).toBe('underlay')
+    expect(underlayRoot.style.pointerEvents).toBe('none')
+    expect(underlayItem.style.pointerEvents).toBe('none')
+    expect(underlayItem.firstElementChild).toHaveStyle({ pointerEvents: 'none' })
+    expect(controller.dataset.globalPlane).toBe('overlay')
+    expect(Number(underlayRoot.style.zIndex)).toBeLessThan(Number(worldRoot.style.zIndex))
+    expect(Number(worldRoot.style.zIndex)).toBeLessThan(Number(overlayRoot.style.zIndex))
+    expect(worldRoot.style.backgroundColor).toBe('transparent')
+    expect(worldRoot.style.pointerEvents).toBe('none')
     expect(Number(local.style.zIndex)).toBeLessThan(Number(controller.style.zIndex))
     expect(Number(controller.style.zIndex)).toBeLessThan(Number(laterGlobal.style.zIndex))
 
@@ -606,6 +659,7 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
             const card = document.createElement('div')
             card.className = 'spatial-interactive-card'
             card.textContent = context.props.title || '卡片内容'
+            card.style.pointerEvents = 'auto'
             context.dom.root.appendChild(card)
             return {
               destroy() { card.remove() },
@@ -629,6 +683,20 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
       rotation: 0,
       opacity: 1,
       hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+    })
+    spatialSurf.world.layerItems.push({
+      layerItemId: 'world-pass-comp-1',
+      kind: 'component',
+      component: { packageId: 'spatial-card', version: '1.0.0' },
+      props: { title: '穿透世界组件' },
+      staticFallbackAssetId: 'world-pass-comp-fallback',
+      frame: { mode: 'absolute', x: 340, y: 150, width: 120, height: 60 },
+      order: 11,
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'pass-through',
       playbackInitialVisibility: 'inherit',
     })
 
@@ -668,6 +736,26 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     expect(worldMount).not.toBeNull()
     const worldCard = worldMount?.shadowRoot?.querySelector('.spatial-interactive-card')
     expect(worldCard?.textContent).toBe('世界组件')
+
+    // A pass-through boundary must stay inert even when the mounted component
+    // explicitly opts its own descendants back into pointer hit testing.
+    const passThroughWorldItem = container.querySelector<SVGGElement>(
+      '[data-layer-item-id="world-pass-comp-1"]',
+    )!
+    const passThroughForeign = passThroughWorldItem.querySelector('foreignObject')!
+    const passThroughHolder = passThroughForeign.firstElementChild as HTMLElement
+    const passThroughMount = passThroughHolder.querySelector<HTMLElement>('.published-component-mount')!
+    const passThroughCard = passThroughMount.shadowRoot?.querySelector<HTMLElement>(
+      '.spatial-interactive-card',
+    )!
+    expect(passThroughWorldItem.style.pointerEvents).toBe('none')
+    expect(passThroughWorldItem.hasAttribute('data-spatial-gesture-owner')).toBe(false)
+    expect(passThroughForeign.hasAttribute('data-spatial-gesture-owner')).toBe(false)
+    expect(passThroughHolder.style.pointerEvents).toBe('none')
+    expect(passThroughHolder.inert).toBe(true)
+    expect(passThroughHolder.hasAttribute('data-spatial-gesture-owner')).toBe(false)
+    expect(passThroughMount.style.pointerEvents).toBe('auto')
+    expect(passThroughCard.style.pointerEvents).toBe('auto')
 
     // HUD component in screenLayer
     const hudItem = container.querySelector('[data-layer-item-id="hud-comp-1"]')

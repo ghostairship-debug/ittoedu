@@ -244,14 +244,26 @@ describe('shared ↔ renderer ↔ raw Published V2 composition parity', () => {
     } else {
       expectCompositionParity(shared, composeSpatialEditorLocation({ project, locationId }))
       const view = buildSpatialEditorView({ project, locationId })
-      expect(view.layers.map((layer) => layer.selectionId)).toEqual(
-        shared.entries.map((entry) => entry.item.layerItemId),
-      )
+      expect(view.layers.map((layer) => ({
+        id: layer.selectionId,
+        globalPlane: layer.globalPlane,
+        stackOrder: layer.stackOrder,
+      }))).toEqual(shared.entries.map((entry) => ({
+        id: entry.item.layerItemId,
+        globalPlane: entry.globalPlane,
+        stackOrder: entry.stackOrder,
+      })))
       const input = publishedSpatialInputFromCourse(published, { surfaceId: shared.surfaceId })
       expectCompositionParity(shared, composePublishedSpatialLocation({ input, locationId }))
-      expect(collectSpatialPlaybackEntries(input, locationId).map((entry) => entry.item.layerItemId)).toEqual(
-        shared.entries.filter((entry) => entry.mounted).map((entry) => entry.item.layerItemId),
-      )
+      expect(collectSpatialPlaybackEntries(input, locationId).map((entry) => ({
+        id: entry.item.layerItemId,
+        globalPlane: entry.globalPlane,
+        stackOrder: entry.stackOrder,
+      }))).toEqual(shared.entries.filter((entry) => entry.mounted).map((entry) => ({
+        id: entry.item.layerItemId,
+        globalPlane: entry.globalPlane,
+        stackOrder: entry.stackOrder,
+      })))
       expect(shared.entries.find((entry) => entry.item.layerItemId === 'spatial-hard-hidden')).toMatchObject({
         applicable: true,
         mounted: false,

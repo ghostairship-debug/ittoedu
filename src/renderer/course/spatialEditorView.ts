@@ -5,6 +5,7 @@ import {
 import { makeAuthoringAddress, type AuthoringCarrier } from '../../shared/authoringAddress'
 import type {
   CourseProjectDocument,
+  GlobalLayerPlane,
   LayerItem,
   SpatialCameraFrame,
   SpatialCameraPose,
@@ -37,6 +38,10 @@ export interface SpatialEditorLayerView {
   readonly source: SpatialEditorLayerScope
   /** G3: global (including non-controller HUD) and teacher-controller are viewport. */
   readonly coordinateSpace: SpatialCoordinateSpace
+  /** Resolved global plane; non-global entries carry null. */
+  readonly globalPlane: GlobalLayerPlane | null
+  /** Dense back-to-front slot from the shared composition read model. */
+  readonly stackOrder: number
   readonly scopedVisible: boolean
   readonly effectiveVisible: boolean
   readonly selectionId: string
@@ -118,11 +123,15 @@ function layerView(
   item: LayerItem,
   source: SpatialEditorLayerScope,
   scopedVisible: boolean,
+  globalPlane: GlobalLayerPlane | null,
+  stackOrder: number,
 ): SpatialEditorLayerView {
   const readonlyItem = deepFreeze(item)
   return {
     source,
     coordinateSpace: spatialLayerCoordinateSpace(source, readonlyItem),
+    globalPlane,
+    stackOrder,
     scopedVisible,
     effectiveVisible: scopedVisible && readonlyItem.visible,
     selectionId: readonlyItem.layerItemId,
@@ -151,6 +160,8 @@ export function buildSpatialEditorView(input: BuildSpatialEditorViewInput): Spat
     entry.item,
     entry.source as SpatialEditorLayerScope,
     entry.applicable,
+    entry.globalPlane,
+    entry.stackOrder,
   ))
 
   return deepFreeze({

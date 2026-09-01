@@ -321,7 +321,7 @@ function fixture(): CourseProjectDocument {
     navigationGuards: [],
     globalLayerItems: [
       scoped(nativeText('global-hud', 50, '全局条', {
-        frame: { mode: 'absolute', x: 24, y: 16, width: 180, height: 40 },
+        frame: { mode: 'absolute', x: 440, y: 400, width: 220, height: 80 },
       })),
       scoped(globalController()),
     ],
@@ -449,6 +449,52 @@ describe('Spatial world authoring adapter', () => {
     expect(viewportPoint).toEqual({ x: overlap.x, y: overlap.y })
     expect(worldPoint.x).toBeCloseTo(-440)
     expect(worldPoint.y).toBeCloseTo(290)
+
+    const hitProject = structuredClone(host.session().history.present)
+    hitProject.globalLayerItems.push({
+      ...scoped(nativeText('global-overlay', 70, '全局前景', {
+        frame: { mode: 'absolute', x: 440, y: 400, width: 220, height: 80 },
+      })),
+      plane: 'overlay',
+    })
+    const composed = buildSpatialEditorView({
+      project: hitProject,
+      locationId: LOCATION_ID,
+    })
+    const targets = composed.layers.map(adaptV9SpatialLayerHit)
+    const sharedPoint = {
+      viewport: { x: 550, y: 440 },
+      world: { x: -90, y: 80 },
+    }
+    expect(targets.find((target) => target.layerItemId === 'global-hud')).toMatchObject({
+      globalPlane: 'underlay',
+    })
+    expect(targets.find((target) => target.layerItemId === 'global-overlay')).toMatchObject({
+      globalPlane: 'overlay',
+    })
+    expect(hitTestV9SpatialLayerItems(
+      targets.filter((target) => target.layerItemId !== 'global-overlay'),
+      sharedPoint,
+    )?.layerItemId).toBe('world-text')
+    expect(hitTestV9SpatialLayerItems(targets, sharedPoint)?.layerItemId).toBe('global-overlay')
+    expect(hitTestV9SpatialLayerItems(targets, {
+      viewport: sharedPoint.viewport,
+      world: { x: 10_000, y: 10_000 },
+    })?.layerItemId).toBe('global-overlay')
+    const passThroughProject = structuredClone(hitProject)
+    passThroughProject.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay',
+    )!.item.hitPolicy = 'pass-through'
+    const passThroughTargets = buildSpatialEditorView({
+      project: passThroughProject,
+      locationId: LOCATION_ID,
+    }).layers.map(adaptV9SpatialLayerHit)
+    expect(hitTestV9SpatialLayerItems(passThroughTargets, sharedPoint)?.layerItemId)
+      .toBe('world-text')
+    expect(hitTestV9SpatialLayerItems(
+      passThroughTargets,
+      { viewport: sharedPoint.viewport, world: { x: 10_000, y: 10_000 } },
+    )?.layerItemId).toBe('global-hud')
 
     const inertDown = controller.pointerDown({ x: overlap.x, y: overlap.y }, VIEWPORT)
     expect(host.session().scope).toBe('world')

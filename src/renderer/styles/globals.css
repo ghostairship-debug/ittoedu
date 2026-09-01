@@ -5695,6 +5695,18 @@ button:disabled {
   will-change: transform;
 }
 
+.spatial-global-underlay-layer {
+  z-index: 0;
+}
+
+.spatial-world-layer {
+  z-index: 1;
+}
+
+.spatial-global-overlay-layer {
+  z-index: 2;
+}
+
 .spatial-world-item {
   position: absolute;
   box-sizing: border-box;

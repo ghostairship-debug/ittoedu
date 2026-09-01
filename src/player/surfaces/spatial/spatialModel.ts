@@ -1,5 +1,6 @@
 import type {
   CourseLocation,
+  GlobalLayerPlane,
   SpatialCameraPose,
   SpatialPathDocument,
   SpatialRelationDocument,
@@ -7,10 +8,12 @@ import type {
 } from '../../../shared/courseProjectTypes'
 import {
   composePublishedCourseLocation,
+  resolveEffectiveGlobalLayerPlanes,
   type CourseLayerComposition,
 } from '../../../shared/courseLayerComposition'
 import type {
   PublishedCourseV2Payload,
+  PublishedGlobalLayerEntry,
   PublishedLayerItem,
   PublishedNativeLayerItem,
   PublishedScopedLayerItem,
@@ -35,7 +38,7 @@ export interface SpatialRuntimeViewport {
 
 export interface PublishedSpatialRuntimeInput {
   surface: PublishedSpatialSurface
-  globalLayerItems: readonly PublishedScopedLayerItem[]
+  globalLayerItems: readonly PublishedGlobalLayerEntry[]
   locations: readonly CourseLocation[]
   startLocationId: string
   playbackPathId: string | null
@@ -53,6 +56,8 @@ export interface SpatialPlaybackEntry {
   item: PublishedLayerItem
   source: SpatialLayerSource
   coordinateSpace: SpatialCoordinateSpace
+  /** Resolved global plane; non-global entries carry null. */
+  globalPlane: GlobalLayerPlane | null
   stackOrder: number
 }
 
@@ -342,6 +347,7 @@ export function collectSpatialPlaybackEntries(
       .map((entry) => ({
         item: entry.item,
         source: entry.source as SpatialLayerSource,
+        globalPlane: entry.globalPlane,
         stackOrder: entry.stackOrder,
         coordinateSpace: spatialPlaybackCoordinateSpace(
           entry.source as SpatialLayerSource,
@@ -349,6 +355,7 @@ export function collectSpatialPlaybackEntries(
         ),
       }))
   }
+  const effectiveGlobalPlanes = resolveEffectiveGlobalLayerPlanes(input.globalLayerItems)
   const entries = [
     ...input.globalLayerItems
       .filter((entry) => (
@@ -357,6 +364,7 @@ export function collectSpatialPlaybackEntries(
       .map((entry) => ({
         item: entry.item,
         source: 'global' as const,
+        globalPlane: effectiveGlobalPlanes.get(entry.item.layerItemId) ?? 'overlay',
         coordinateSpace: spatialPlaybackCoordinateSpace('global', entry.item),
       })),
     ...input.surface.surfaceLayerItems
@@ -366,6 +374,7 @@ export function collectSpatialPlaybackEntries(
       .map((entry) => ({
         item: entry.item,
         source: 'surface' as const,
+        globalPlane: null,
         coordinateSpace: spatialPlaybackCoordinateSpace('surface', entry.item),
       })),
     ...input.surface.world.layerItems
@@ -373,14 +382,19 @@ export function collectSpatialPlaybackEntries(
       .map((item) => ({
         item,
         source: 'world' as const,
+        globalPlane: null,
         coordinateSpace: spatialPlaybackCoordinateSpace('world', item),
       })),
   ]
-  return entries
-    .sort((left, right) => (
-      left.item.order - right.item.order ||
-      left.item.layerItemId.localeCompare(right.item.layerItemId)
-    ))
+  const sorted = [...entries].sort((left, right) => (
+    left.item.order - right.item.order ||
+    left.item.layerItemId.localeCompare(right.item.layerItemId)
+  ))
+  return [
+    ...sorted.filter((entry) => entry.source === 'global' && entry.globalPlane === 'underlay'),
+    ...sorted.filter((entry) => entry.source !== 'global'),
+    ...sorted.filter((entry) => entry.source === 'global' && entry.globalPlane === 'overlay'),
+  ]
     .map((entry, stackOrder) => ({ ...entry, stackOrder }))
 }
 

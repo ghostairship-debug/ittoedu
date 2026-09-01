@@ -48,7 +48,11 @@ import {
   type OpenSpatialRuntimeSessionOptions,
   type SpatialRuntimeSession,
 } from './spatialRuntimeSession'
-import { attachSpatialPlaybackCameraGestures, SPATIAL_GESTURE_OWNER_ATTR } from './spatialPlaybackGestures'
+import {
+  attachSpatialPlaybackCameraGestures,
+  SPATIAL_GESTURE_OWNER_ATTR,
+  type SpatialGestureOwner,
+} from './spatialPlaybackGestures'
 import {
   mountPublishedComponent,
   type PublishedComponentMountHandle,
@@ -240,6 +244,7 @@ function createWorldItem(
     foreign.appendChild(holder)
     group.appendChild(foreign)
   } else if (item.kind === 'component') {
+    const passThrough = item.hitPolicy === 'pass-through'
     const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
     foreign.setAttribute('x', String(frame.x))
     foreign.setAttribute('y', String(frame.y))
@@ -250,12 +255,15 @@ function createWorldItem(
     holder.style.width = '100%'
     holder.style.height = '100%'
     holder.style.position = 'relative'
-    holder.style.pointerEvents = 'auto'
-    holder.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
-    foreign.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
+    holder.style.pointerEvents = passThrough ? 'none' : 'auto'
+    holder.inert = passThrough
+    if (!passThrough) {
+      holder.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
+      foreign.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
+      group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
+    }
     foreign.appendChild(holder)
     group.appendChild(foreign)
-    group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
     const mountInstance = () => {
       const handle = mountPublishedComponent(holder, {
         container: holder,
@@ -298,6 +306,7 @@ function createWorldItem(
     group.appendChild(text)
   }
   group.setAttribute('opacity', String(item.opacity))
+  group.style.pointerEvents = item.hitPolicy === 'pass-through' ? 'none' : 'auto'
   if (item.rotation !== 0) {
     group.setAttribute(
       'transform',
@@ -331,7 +340,7 @@ function createWorldVideoHtml(
     width: `${item.frame.width}px`,
     height: `${item.frame.height}px`,
     boxSizing: 'border-box',
-    pointerEvents: 'auto',
+    pointerEvents: item.hitPolicy === 'pass-through' ? 'none' : 'auto',
     opacity: String(item.opacity),
     transform: item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`,
     transformOrigin: 'center center',
@@ -348,7 +357,7 @@ function createWorldVideoHtml(
     video.style.height = '100%'
     video.style.objectFit = 'contain'
     video.style.display = 'block'
-    video.style.pointerEvents = 'auto'
+    video.style.pointerEvents = item.hitPolicy === 'pass-through' ? 'none' : 'auto'
     wrapper.appendChild(video)
   }
   return wrapper
@@ -376,9 +385,10 @@ function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
     || item.content.nativeType === 'shape'
 }
 
-function spatialGestureOwner(item: PublishedLayerItem): string | null {
+function spatialGestureOwner(item: PublishedLayerItem): SpatialGestureOwner | null {
   const ownership = publishedInteractionOwnership(item)
-  return ownership === 'native' ? null : ownership
+  if (ownership === 'native') return null
+  return ownership === 'teacher-controller' ? 'controller' : ownership
 }
 
 function createViewportHud(
@@ -402,7 +412,7 @@ function createViewportHud(
     height: '100%',
     overflow: 'hidden',
     position: 'relative',
-    pointerEvents: 'auto',
+    pointerEvents: item.hitPolicy === 'pass-through' ? 'none' : 'auto',
   })
   if (item.kind === 'component') {
     const mountInstance = () => {
@@ -472,6 +482,7 @@ export class SpatialSurfaceHost {
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
   #worldHtml: HTMLElement | null = null
+  #underlayLayer: HTMLElement | null = null
   #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialHostRecord>()
   readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
@@ -648,11 +659,31 @@ export class SpatialSurfaceHost {
     svg.setAttribute('viewBox', `0 0 ${camera.viewportWidth} ${camera.viewportHeight}`)
     svg.setAttribute('aria-label', this.#session.input.surface.title)
     svg.dataset.spatialWorldCanvas = 'true'
-    svg.style.backgroundColor = bg
+    Object.assign(svg.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      zIndex: '1',
+      backgroundColor: 'transparent',
+      pointerEvents: 'none',
+    })
     const world = dom.createElementNS(SVG_NS, 'g')
     world.dataset.spatialWorld = 'true'
     world.dataset.coordinateSpace = 'world'
     svg.appendChild(world)
+    const underlayLayer = dom.createElement('div')
+    underlayLayer.className = 'spatial-global-underlay-layer'
+    underlayLayer.dataset.coordinateSpace = 'viewport'
+    underlayLayer.dataset.globalPlane = 'underlay'
+    underlayLayer.setAttribute('data-testid', 'spatial-global-underlay-layer')
+    Object.assign(underlayLayer.style, {
+      position: 'absolute',
+      inset: '0',
+      zIndex: '0',
+      overflow: 'visible',
+      pointerEvents: 'none',
+    })
+    root.appendChild(underlayLayer)
     root.appendChild(svg)
     const worldHtml = dom.createElement('div')
     worldHtml.className = 'spatial-world-html'
@@ -663,17 +694,21 @@ export class SpatialSurfaceHost {
       overflow: 'visible',
       pointerEvents: 'none',
       transformOrigin: '0 0',
+      zIndex: '1',
     })
     root.appendChild(worldHtml)
     const screenLayer = dom.createElement('div')
-    screenLayer.className = 'spatial-screen-layer'
+    screenLayer.className = 'spatial-screen-layer spatial-global-overlay-layer'
     screenLayer.dataset.coordinateSpace = 'viewport'
     screenLayer.dataset.spatialChrome = 'viewport'
+    screenLayer.dataset.globalPlane = 'overlay'
+    screenLayer.setAttribute('data-testid', 'spatial-hud-layer')
     Object.assign(screenLayer.style, {
       position: 'absolute',
       inset: '0',
       overflow: 'visible',
       pointerEvents: 'none',
+      zIndex: '2',
     })
     root.appendChild(screenLayer)
     container.appendChild(root)
@@ -681,6 +716,7 @@ export class SpatialSurfaceHost {
     this.#svg = svg
     this.#world = world
     this.#worldHtml = worldHtml
+    this.#underlayLayer = underlayLayer
     this.#screenLayer = screenLayer
     this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
     this.#gestureDisposer = attachSpatialPlaybackCameraGestures({
@@ -764,6 +800,7 @@ export class SpatialSurfaceHost {
     this.#svg = null
     this.#world = null
     this.#worldHtml = null
+    this.#underlayLayer = null
     this.#screenLayer = null
     this.#session = leaveSpatialRuntimeLocation(this.#session)
   }
@@ -957,7 +994,7 @@ export class SpatialSurfaceHost {
   }
 
   #reconcileRecords(): void {
-    if (!this.#world || !this.#worldHtml || !this.#screenLayer) return
+    if (!this.#world || !this.#worldHtml || !this.#underlayLayer || !this.#screenLayer) return
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
     const entries = collectSpatialPlaybackEntries(this.#session.input, this.#session.locationId)
@@ -989,13 +1026,23 @@ export class SpatialSurfaceHost {
   }
 
   #reconcileWorldVisibility(): void {
-    if (!this.#world || !this.#worldHtml || !this.#screenLayer || !this.#session.camera) return
+    if (
+      !this.#world
+      || !this.#worldHtml
+      || !this.#underlayLayer
+      || !this.#screenLayer
+      || !this.#session.camera
+    ) return
     const camera = this.#session.camera
     const rules = this.#session.input.surface.semanticZoom
     for (const record of this.#records.values()) {
       const { item, coordinateSpace } = record.entry
       if (coordinateSpace === 'viewport') {
-        if (!this.#screenLayer.contains(record.wrapper)) this.#screenLayer.appendChild(record.wrapper)
+        const parent = record.entry.source === 'global'
+          && record.entry.globalPlane === 'underlay'
+          ? this.#underlayLayer
+          : this.#screenLayer
+        if (!parent.contains(record.wrapper)) parent.appendChild(record.wrapper)
         record.wrapper.style.display = ''
         continue
       }
@@ -1128,10 +1175,12 @@ export class SpatialSurfaceHost {
         position: 'absolute',
         boxSizing: 'border-box',
         overflow: 'hidden',
-        pointerEvents: 'auto',
+        pointerEvents: entry.item.hitPolicy === 'pass-through' ? 'none' : 'auto',
       })
       const gestureOwner = spatialGestureOwner(entry.item)
-      if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+      if (gestureOwner && entry.item.hitPolicy !== 'pass-through') {
+        wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+      }
       let controllerDom: TeacherControllerDom | null = null
       if (isSpatialTeacherControllerItem(entry.item)) {
         const content = dom.createElement('div')
@@ -1169,7 +1218,9 @@ export class SpatialSurfaceHost {
       const wrapper = createWorldVideoHtml(dom, entry.item, url)
       wrapper.dataset.layerSource = entry.source
       const gestureOwner = spatialGestureOwner(entry.item)
-      if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+      if (gestureOwner && entry.item.hitPolicy !== 'pass-through') {
+        wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+      }
       return finish(wrapper, null)
     }
     const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
@@ -1190,7 +1241,9 @@ export class SpatialSurfaceHost {
     wrapper.dataset.layerSource = entry.source
     wrapper.dataset.coordinateSpace = 'world'
     const gestureOwner = spatialGestureOwner(entry.item)
-    if (gestureOwner) wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+    if (gestureOwner && entry.item.hitPolicy !== 'pass-through') {
+      wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+    }
     return finish(wrapper, null)
   }
 
@@ -1198,6 +1251,22 @@ export class SpatialSurfaceHost {
     const { item, source } = record.entry
     record.wrapper.dataset.layerItemId = item.layerItemId
     record.wrapper.dataset.layerSource = source
+    record.wrapper.dataset.hitPolicy = item.hitPolicy
+    record.wrapper.style.pointerEvents = item.hitPolicy === 'pass-through' ? 'none' : 'auto'
+    const gestureOwner = spatialGestureOwner(item)
+    if (item.hitPolicy === 'pass-through' || !gestureOwner) {
+      record.wrapper.removeAttribute(SPATIAL_GESTURE_OWNER_ATTR)
+    } else {
+      record.wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
+    }
+    if (isHtmlWorldWrapper(record.wrapper)) {
+      record.wrapper.inert = item.hitPolicy === 'pass-through'
+    }
+    if (source === 'global' && record.entry.globalPlane) {
+      record.wrapper.dataset.globalPlane = record.entry.globalPlane
+    } else {
+      delete record.wrapper.dataset.globalPlane
+    }
     if (!isSpatialViewportPlaybackItem(source, item) && !isHtmlWorldWrapper(record.wrapper)) return
     const html = record.wrapper as HTMLElement
     const session = this.#controllerSessionFor(item)

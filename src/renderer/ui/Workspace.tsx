@@ -735,6 +735,12 @@ function SpatialLocationWorkspace({
   )
   const worldItems = view?.layers.filter((layer) => layer.coordinateSpace === 'world') ?? []
   const hudItems = view?.layers.filter((layer) => layer.coordinateSpace === 'viewport') ?? []
+  const hudUnderlayItems = hudItems.filter((layer) => (
+    layer.source === 'global' && layer.globalPlane === 'underlay'
+  ))
+  const hudOverlayItems = hudItems.filter((layer) => !(
+    layer.source === 'global' && layer.globalPlane === 'underlay'
+  ))
   const previewById = new Map((previewFrames ?? []).map((frame) => [frame.layerItemId, frame]))
 
   useEffect(() => {
@@ -818,6 +824,108 @@ function SpatialLocationWorkspace({
     setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
     setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
   }
+
+  const renderHudLayer = (
+    items: typeof hudItems,
+    plane: 'underlay' | 'overlay',
+  ) => (
+    <div
+      className={`spatial-hud-layer spatial-global-${plane}-layer`}
+      data-testid={plane === 'overlay' ? 'spatial-hud-layer' : 'spatial-global-underlay-layer'}
+      data-global-plane={plane}
+      style={{
+        left: hudTransform.stageRect.x,
+        top: hudTransform.stageRect.y,
+        width: STAGE_VIEWPORT_WIDTH,
+        height: STAGE_VIEWPORT_HEIGHT,
+        transform: `scale(${hudTransform.scale})`,
+        pointerEvents: 'none',
+      }}
+    >
+      {items.map((layer) => {
+        const preview = previewById.get(layer.selectionId)
+        const frame = preview ?? layer.item.frame
+        const node = courseLayerItemToSceneNode(layer.item as LayerItem)
+        if (!node) return null
+        const controller = isTeacherControllerLayerItem(layer.item as LayerItem)
+        const rotation = preview?.rotation ?? layer.item.rotation
+        const media = controller ? null : spatialAuthoringMedia(node, assetUrls)
+        return (
+          <div
+            key={layer.selectionId}
+            className={`spatial-world-item spatial-world-item--${node.type}`}
+            data-hud-id={layer.selectionId}
+            data-global-plane={layer.globalPlane ?? undefined}
+            style={{
+              left: preview?.x ?? frame.x,
+              top: preview?.y ?? frame.y,
+              width: preview?.width ?? frame.width,
+              height: preview?.height ?? frame.height,
+              zIndex: layer.stackOrder,
+              transform: !controller && rotation ? `rotate(${rotation}deg)` : undefined,
+              background: controller
+                ? 'transparent'
+                : media
+                  ? 'rgba(255,255,255,0.04)'
+                  : 'rgba(23,32,51,0.88)',
+              color: '#f8fafc',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 13,
+              overflow: 'hidden',
+            }}
+          >
+            {controller ? (
+              <TeacherControllerAuthoringChrome
+                item={layer.item as LayerItem}
+                frame={{
+                  x: preview?.x ?? frame.x,
+                  y: preview?.y ?? frame.y,
+                  width: preview?.width ?? frame.width,
+                  height: preview?.height ?? frame.height,
+                }}
+                rotation={rotation}
+                canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+                getRenderedStageBounds={() => {
+                  const bounds = stageStackRef.current?.getBoundingClientRect()
+                  return {
+                    width: Math.max(1, bounds?.width || CANVAS_WIDTH),
+                    height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
+                  }
+                }}
+                scenes={session.history.present.locations.map((location) => ({
+                  id: location.id,
+                  name: location.label,
+                }))}
+                currentSceneId={session.selection.locationId}
+              />
+            ) : layer.item.kind === 'component' ? (
+              <SpatialComponentItemContent
+                layerItemId={layer.selectionId}
+                item={layer.item as LayerItem}
+                componentPackages={componentPackages}
+                assetUrls={assetUrls}
+              />
+            ) : node.type === 'formula' ? (
+              <PublishedFormulaPaint
+                formulaId={node.formulaId}
+                accessibleText={node.accessibleText}
+                ast={node.ast}
+                style={node.style}
+                width={Math.max(1, preview?.width ?? frame.width)}
+                height={Math.max(1, preview?.height ?? frame.height)}
+                lockHeight
+              />
+            ) : (
+              media ?? (node.name || node.type)
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 
   return (
     <main
@@ -1006,6 +1114,7 @@ function SpatialLocationWorkspace({
         >
         {canvasMode === 'edit' && (
           <>
+            {renderHudLayer(hudUnderlayItems, 'underlay')}
             <div
               className="spatial-world-layer"
               data-testid="spatial-world-layer"
@@ -1103,6 +1212,7 @@ function SpatialLocationWorkspace({
                       top: preview?.y ?? frame.y,
                       width: preview?.width ?? frame.width,
                       height: preview?.height ?? frame.height,
+                      zIndex: layer.stackOrder,
                       transform: rotation ? `rotate(${rotation}deg)` : undefined,
                       opacity: layer.item.opacity,
                       background: node.type === 'shape'
@@ -1140,99 +1250,7 @@ function SpatialLocationWorkspace({
                 )
               })}
             </div>
-            <div
-              className="spatial-hud-layer"
-              data-testid="spatial-hud-layer"
-              style={{
-                left: hudTransform.stageRect.x,
-                top: hudTransform.stageRect.y,
-                width: STAGE_VIEWPORT_WIDTH,
-                height: STAGE_VIEWPORT_HEIGHT,
-                transform: `scale(${hudTransform.scale})`,
-                pointerEvents: 'none',
-              }}
-            >
-              {hudItems.map((layer) => {
-                const preview = previewById.get(layer.selectionId)
-                const frame = preview ?? layer.item.frame
-                const node = courseLayerItemToSceneNode(layer.item as LayerItem)
-                if (!node) return null
-                const controller = isTeacherControllerLayerItem(layer.item as LayerItem)
-                const rotation = preview?.rotation ?? layer.item.rotation
-                const media = controller ? null : spatialAuthoringMedia(node, assetUrls)
-                return (
-                  <div
-                    key={layer.selectionId}
-                    className={`spatial-world-item spatial-world-item--${node.type}`}
-                    data-hud-id={layer.selectionId}
-                    style={{
-                      left: preview?.x ?? frame.x,
-                      top: preview?.y ?? frame.y,
-                      width: preview?.width ?? frame.width,
-                      height: preview?.height ?? frame.height,
-                      transform: !controller && rotation ? `rotate(${rotation}deg)` : undefined,
-                      background: controller
-                        ? 'transparent'
-                        : media
-                          ? 'rgba(255,255,255,0.04)'
-                          : 'rgba(23,32,51,0.88)',
-                      color: '#f8fafc',
-                      borderRadius: 12,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 13,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {controller ? (
-                      <TeacherControllerAuthoringChrome
-                        item={layer.item as LayerItem}
-                        frame={{
-                          x: preview?.x ?? frame.x,
-                          y: preview?.y ?? frame.y,
-                          width: preview?.width ?? frame.width,
-                          height: preview?.height ?? frame.height,
-                        }}
-                        rotation={rotation}
-                        canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
-                        getRenderedStageBounds={() => {
-                          const bounds = stageStackRef.current?.getBoundingClientRect()
-                          return {
-                            width: Math.max(1, bounds?.width || CANVAS_WIDTH),
-                            height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
-                          }
-                        }}
-                        scenes={session.history.present.locations.map((location) => ({
-                          id: location.id,
-                          name: location.label,
-                        }))}
-                        currentSceneId={session.selection.locationId}
-                      />
-                    ) : layer.item.kind === 'component' ? (
-                      <SpatialComponentItemContent
-                        layerItemId={layer.selectionId}
-                        item={layer.item as LayerItem}
-                        componentPackages={componentPackages}
-                        assetUrls={assetUrls}
-                      />
-                    ) : node.type === 'formula' ? (
-                      <PublishedFormulaPaint
-                        formulaId={node.formulaId}
-                        accessibleText={node.accessibleText}
-                        ast={node.ast}
-                        style={node.style}
-                        width={Math.max(1, preview?.width ?? frame.width)}
-                        height={Math.max(1, preview?.height ?? frame.height)}
-                        lockHeight
-                      />
-                    ) : (
-                      media ?? (node.name || node.type)
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            {renderHudLayer(hudOverlayItems, 'overlay')}
             {worldOverlay && editingScope !== 'global' ? (
               <SpatialSelectionOverlay overlay={worldOverlay} locked={selectedLocked} />
             ) : null}

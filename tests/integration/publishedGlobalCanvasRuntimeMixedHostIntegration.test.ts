@@ -5,6 +5,7 @@ import { createPublishedCourseSession, type PublishedCourseSession } from '@/pla
 import { PublishedGlobalCanvasRuntimeOwner } from '@/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { composePublishedCourseLocation } from '@/shared/courseLayerComposition'
 import type { CourseProjectDocument, RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import type {
   InteractionActionStep,
@@ -13,6 +14,7 @@ import type {
 } from '@/shared/contracts/interaction-v1/types'
 import type {
   PublishedNativeLayerItem,
+  PublishedCourseV2Payload,
   PublishedRuntimeLayerItem,
   PublishedScopedLayerItem,
 } from '@/shared/publishedCourseTypes'
@@ -210,6 +212,7 @@ function mixedGlobalRuntimeProject(): {
     || controller.item.content.nativeType !== 'teacher-controller'
   ) throw new Error('expected global teacher controller')
   controller.item.content.data.defaultCollapsed = false
+  controller.item.order = 10_000
   const restartButton = controller.item.content.data.buttons.find(
     (button) => button.action.type === 'course.restart',
   )
@@ -266,6 +269,7 @@ function mixedGlobalRuntimeProject(): {
     disabled,
     api3,
   ].map((item) => ({ item, visibility: { mode: 'all' as const, locationIds: [] } })))
+  project.globalLayerItems.sort((left, right) => left.item.order - right.item.order)
   return {
     project: courseProjectDocumentSchema.parse(project),
     slideLocationIds: fixture.slideLocationIds,
@@ -293,6 +297,20 @@ function globalWrapper(
   return wrapper
 }
 
+function publishedStackOrder(
+  payload: PublishedCourseV2Payload,
+  locationId: string,
+  itemId: string,
+): number {
+  const entry = composePublishedCourseLocation({
+    course: payload,
+    locationId,
+    stateId: null,
+  }).entries.find((candidate) => candidate.item.layerItemId === itemId)
+  if (!entry) throw new Error(`missing composition entry ${itemId} at ${locationId}`)
+  return entry.stackOrder
+}
+
 function runtimeButton(inner: HTMLElement): HTMLButtonElement | null {
   for (const mount of inner.querySelectorAll<HTMLElement>('.lesson-runtime-mount')) {
     const button = mount.shadowRoot?.querySelector<HTMLButtonElement>(
@@ -316,6 +334,12 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       assetFiles: {},
       components: {},
     })
+    expect(fixture.project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-api2-healthy',
+    )?.plane).toBeUndefined()
+    expect(payload.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-api2-healthy',
+    )?.plane).toBe('underlay')
     const healthy = payload.globalLayerItems.find((entry): entry is PublishedScopedLayerItem & {
       item: PublishedRuntimeLayerItem
     } => entry.item.kind === 'runtime' && entry.item.layerItemId === 'global-api2-healthy')
@@ -500,7 +524,11 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     if (!button) throw new Error('missing global Runtime button')
     expect(slideWrapper.style.left).toBe('48px')
     expect(slideWrapper.style.top).toBe('56px')
-    expect(slideWrapper.style.zIndex).toBe('410')
+    expect(slideWrapper.style.zIndex).toBe(String(publishedStackOrder(
+      payload,
+      session.navigator.current!.locationId,
+      'global-api2-healthy',
+    )))
     expect(slideWrapper.style.pointerEvents).toBe('auto')
     expect(slideWrapper.style.padding).toBe('')
     expect(slideWrapper.querySelector('[data-runtime-fallback="true"]')).toBeNull()
@@ -552,7 +580,15 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     expect(flowWrapper.firstElementChild).toBe(inner)
     expect(flowWrapper.style.left).toBe('48px')
     expect(flowWrapper.style.top).toBe('56px')
-    expect(flowWrapper.style.zIndex).toBe('410')
+    expect(flowWrapper.style.zIndex).toBe(String(publishedStackOrder(
+      payload,
+      fixture.flowLocationId,
+      'global-api2-healthy',
+    )))
+    expect(flowWrapper.parentElement).toHaveAttribute(
+      'data-flow-layer-plane',
+      'global-underlay',
+    )
     expect(flowWrapper.style.pointerEvents).toBe('auto')
     expect(runtimeButton(inner)).toBe(button)
 
@@ -572,7 +608,12 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     expect(spatialWrapper.firstElementChild).toBe(inner)
     expect(spatialWrapper.style.left).toBe('48px')
     expect(spatialWrapper.style.top).toBe('56px')
-    expect(spatialWrapper.style.zIndex).toBe('410')
+    expect(spatialWrapper.style.zIndex).toBe(String(publishedStackOrder(
+      payload,
+      fixture.spatialLocationId,
+      'global-api2-healthy',
+    )))
+    expect(spatialWrapper.parentElement?.dataset.globalPlane).toBe('underlay')
     expect(runtimeButton(inner)).toBe(button)
 
     await session.goToLocation(fixture.slideLocationIds[0]!)
