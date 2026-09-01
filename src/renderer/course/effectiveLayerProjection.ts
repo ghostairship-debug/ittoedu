@@ -6,6 +6,7 @@ import type {
   CourseProjectDocument,
   CourseSurfaceType,
   FlowBlock,
+  GlobalLayerPlane,
   LayerItem,
   LocationVisibility,
   NativeLayerItem,
@@ -13,7 +14,6 @@ import type {
   SlidePresentationState,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import { compareStableStrings } from '../../shared/stableOrder'
 import {
   createCourseAuthoringScope,
   makeLayerItemAuthoringAddress,
@@ -93,6 +93,8 @@ export interface EffectiveLayerProjectionRow {
   readonly sourceLabel: string
   readonly owner: CourseAuthoringOwner
   readonly ownerKey: string
+  /** Global plane is part of the reorder boundary, not the storage owner identity. */
+  readonly reorderGroupKey: string
   readonly authoringAddress: string
   readonly scopeToken: CourseAuthoringScopeToken
   readonly kind: LayerItem['kind']
@@ -105,6 +107,10 @@ export interface EffectiveLayerProjectionRow {
   readonly selected: boolean
   readonly stateOverrideApplied: boolean
   readonly impact: EffectiveLayerImpact
+  /** Effective persisted/legacy global plane; non-global rows carry `null`. */
+  readonly globalPlane: GlobalLayerPlane | null
+  /** Canonical dense back-to-front slot from the shared composition. */
+  readonly stackOrder: number
   readonly item: LayerItem
 }
 
@@ -199,8 +205,8 @@ export function commandTargetFromRow(
  * Owner-aware UI input contract for R3-Z → R3-A.
  * This lane only builds the read-only payload; it does not run commands.
  *
- * @example Reorder two global rows (NodesTab drag, then reverse visual order
- * back to engine back-to-front ids, same as V8 `visualNodes` + `arrayMove`):
+ * @example Reorder two rows inside one global plane (NodesTab drag, then
+ * reverse visual order back to engine back-to-front ids):
  * ```
  * const input = createEffectiveLayerReorderInput({
  *   unifiedRows: projection.unifiedRows,
@@ -209,11 +215,13 @@ export function commandTargetFromRow(
  *   placement: 'after',
  * })
  * // input.owner === 'global'
- * // input.orderedLayerItemIds is the complete global permutation, back-to-front
- * // R3-Z: reorderGlobalLayerItems(document, input.orderedLayerItemIds)
+ * // input.sameReorderGroup === true
+ * // input.orderedLayerItemIds is the complete Overlay permutation, back-to-front
+ * // R3-Z: reorderGlobalLayerItems(document, target, input.orderedLayerItemIds)
  * ```
  *
- * @example Cross-owner drop is still emitted so R3-A can refuse it:
+ * @example Cross-owner or cross-global-plane drops carry no permutation so
+ * R3-A can refuse them without writing:
  * ```
  * createEffectiveLayerReorderInput({
  *   unifiedRows,
@@ -243,10 +251,13 @@ export interface EffectiveLayerReorderInput {
   readonly fromOwnerKey: string
   readonly toOwnerKey: string
   readonly sameOwner: boolean
+  readonly fromReorderGroupKey: string
+  readonly toReorderGroupKey: string
+  readonly sameReorderGroup: boolean
   readonly placement: 'before' | 'after'
   readonly owner: CourseAuthoringOwner | null
   readonly ownerKey: string | null
-  /** Complete owner permutation, back-to-front. Empty when `sameOwner` is false. */
+  /** Complete reorder-group permutation, back-to-front. Empty across owner/global-plane boundaries. */
   readonly orderedLayerItemIds: readonly string[]
   readonly locationId: string
   readonly stateId: string | null
@@ -276,7 +287,8 @@ export function createEffectiveLayerReorderInput(input: {
   const from = requireRow(input.unifiedRows, input.fromId)
   const to = requireRow(input.unifiedRows, input.toId)
   const sameOwner = from.ownerKey === to.ownerKey
-  const orderedLayerItemIds = sameOwner
+  const sameReorderGroup = from.reorderGroupKey === to.reorderGroupKey
+  const orderedLayerItemIds = sameReorderGroup
     ? moveOwnerIds(input.unifiedRows, from, to, input.placement)
     : []
   return Object.freeze({
@@ -288,9 +300,12 @@ export function createEffectiveLayerReorderInput(input: {
     fromOwnerKey: from.ownerKey,
     toOwnerKey: to.ownerKey,
     sameOwner,
+    fromReorderGroupKey: from.reorderGroupKey,
+    toReorderGroupKey: to.reorderGroupKey,
+    sameReorderGroup,
     placement: input.placement,
-    owner: sameOwner ? from.owner : null,
-    ownerKey: sameOwner ? from.ownerKey : null,
+    owner: sameReorderGroup ? from.owner : null,
+    ownerKey: sameReorderGroup ? from.ownerKey : null,
     orderedLayerItemIds: Object.freeze(orderedLayerItemIds),
     locationId: from.scopeToken.locationId,
     stateId: from.scopeToken.stateId,
@@ -384,8 +399,10 @@ export function projectEffectiveLayers(
       locationId,
       sceneId: scene?.id ?? null,
       visibleAtLocation: entry.applicable,
+      globalPlane: entry.globalPlane,
+      stackOrder: entry.stackOrder,
     })
-  }).sort(compareProjectionRows)
+  })
 
   const compositedIds = new Set(composition.entries
     .filter((entry) => entry.applicable)
@@ -439,6 +456,8 @@ function toRow(input: {
   readonly locationId: string
   readonly sceneId: string | null
   readonly visibleAtLocation: boolean
+  readonly globalPlane: GlobalLayerPlane | null
+  readonly stackOrder: number
 }): EffectiveLayerProjectionRow {
   const { item, owner, scoped, state, viewing } = input
   const stateOverrideApplied = owner === 'scene' &&
@@ -463,6 +482,10 @@ function toRow(input: {
     : owner === 'world'
       ? { kind: 'world', mode: 'owner', locationIds: Object.freeze([]) }
       : { kind: 'scene', mode: 'owner', locationIds: Object.freeze([]) }
+  const ownerKey = ownerKeyFor(owner, viewing.surfaceId, owner === 'scene' ? input.sceneId : null)
+  const reorderGroupKey = owner === 'global'
+    ? `${ownerKey}:${input.globalPlane ?? 'overlay'}`
+    : ownerKey
 
   return Object.freeze({
     id: item.layerItemId,
@@ -470,7 +493,8 @@ function toRow(input: {
     source,
     sourceLabel: EFFECTIVE_LAYER_SOURCE_LABELS[source],
     owner,
-    ownerKey: ownerKeyFor(owner, viewing.surfaceId, owner === 'scene' ? input.sceneId : null),
+    ownerKey,
+    reorderGroupKey,
     authoringAddress: makeLayerItemAuthoringAddress({
       projectId: input.project.id,
       owner,
@@ -489,16 +513,10 @@ function toRow(input: {
     selected: input.selected,
     stateOverrideApplied,
     impact,
+    globalPlane: input.globalPlane,
+    stackOrder: input.stackOrder,
     item,
   })
-}
-
-function compareProjectionRows(
-  left: EffectiveLayerProjectionRow,
-  right: EffectiveLayerProjectionRow,
-): number {
-  return left.item.order - right.item.order ||
-    compareStableStrings(left.id, right.id)
 }
 
 function requireRow(
@@ -516,7 +534,7 @@ function moveOwnerIds(
   to: EffectiveLayerProjectionRow,
   placement: 'before' | 'after',
 ): string[] {
-  const ownerRows = unifiedRows.filter((row) => row.ownerKey === from.ownerKey)
+  const ownerRows = unifiedRows.filter((row) => row.reorderGroupKey === from.reorderGroupKey)
   const ids = ownerRows.map((row) => row.id)
   const fromIndex = ids.indexOf(from.id)
   let toIndex = ids.indexOf(to.id)

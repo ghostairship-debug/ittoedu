@@ -18,6 +18,7 @@ import {
   CONTROLLER_MOVE_REASON,
   SPATIAL_CROSS_COORDINATE_MOVE_REASON,
 } from '@/renderer/course/effectiveLayerCommands'
+import { CROSS_GLOBAL_PLANE_REORDER_REASON } from '@/renderer/course/globalLayerCommands'
 import {
   rowsForListKind,
 } from '@/renderer/course/effectiveLayerProjection'
@@ -40,6 +41,7 @@ import {
 import type { EffectiveLayerProjectionRow } from '@/renderer/course/effectiveLayerProjection'
 import {
   groupedVisualRows,
+  isCrossGlobalPlaneDrop,
   isForeignTeacherControllerDrop,
   isRejectedSpatialOwnerDrop,
   NodesTab,
@@ -225,12 +227,21 @@ function injectCandidate(project = v9ThreeLocationFixture()) {
 function visualRow(
   id: string,
   owner: EffectiveLayerProjectionRow['owner'],
-  options: { isTeacherController?: boolean; ownerKey?: string } = {},
+  options: {
+    isTeacherController?: boolean
+    ownerKey?: string
+    globalPlane?: 'underlay' | 'overlay'
+  } = {},
 ): EffectiveLayerProjectionRow {
+  const ownerKey = options.ownerKey ?? owner
+  const globalPlane = owner === 'global' ? options.globalPlane ?? 'overlay' : null
   return {
     id,
     owner,
-    ownerKey: options.ownerKey ?? owner,
+    ownerKey,
+    reorderGroupKey: globalPlane ? `${ownerKey}:${globalPlane}` : ownerKey,
+    globalPlane,
+    stackOrder: 0,
     isTeacherController: Boolean(options.isTeacherController),
     item: nativeText(id, 0, id),
   } as EffectiveLayerProjectionRow
@@ -297,7 +308,9 @@ function v9WithMisplacedControllerCopies(): CourseProjectDocument {
   return courseProjectDocumentSchema.parse(project)
 }
 
-function layerGroupNodeIds(groupId: 'global' | 'surface' | 'scene' | 'world'): string[] {
+function layerGroupNodeIds(
+  groupId: 'global-overlay' | 'global-underlay' | 'surface' | 'scene' | 'world',
+): string[] {
   return [...screen.getByTestId(`nodes-layer-group-${groupId}`)
     .querySelectorAll('[data-testid^="node-item-"]')]
     .flatMap((element) => {
@@ -351,9 +364,9 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     // Under default scene scope, teacher-controller is filtered out of the rendered layer tree
     expect(screen.queryByTestId('node-item-teacher-controller-main')).toBeNull()
     expect(screen.queryByTestId('node-source-teacher-controller-main')).toBeNull()
-    // Global banner is still in global group, so nodes-layer-group-global exists, but contains only global-banner
-    expect(screen.getByTestId('nodes-layer-group-global')).toBeTruthy()
-    expect(layerGroupNodeIds('global')).toEqual(['global-banner'])
+    // Legacy banner resolves below the controller and remains visible in Underlay.
+    expect(screen.getByTestId('nodes-layer-group-global-underlay')).toBeTruthy()
+    expect(layerGroupNodeIds('global-underlay')).toEqual(['global-banner'])
     expect(screen.getByTestId('nodes-layer-group-scene')).toBeTruthy()
     expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
     expect(
@@ -363,11 +376,12 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(screen.getByTestId('node-source-slide-title').textContent).toContain('本页')
     expect(screen.getByTestId('node-source-global-banner').textContent).toContain('全课')
 
-    // After switching to global scope, teacher-controller is visible under 全局
+    // After switching to global scope, the controller is visible only in Overlay.
     useEditorStore.getState().setEditingScope('global')
     rerender(<NodesTab />)
-    expect(screen.getByTestId('nodes-layer-group-global')).toBeTruthy()
-    expect(layerGroupNodeIds('global')).toContain('teacher-controller-main')
+    expect(screen.getByTestId('nodes-layer-group-global-overlay')).toBeTruthy()
+    expect(layerGroupNodeIds('global-overlay')).toEqual(['teacher-controller-main'])
+    expect(layerGroupNodeIds('global-underlay')).toEqual(['global-banner'])
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('全课')
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('不可下沉')
     expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
@@ -588,7 +602,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(redone.content.data.accessibleText).toBe('命名状态下更新的共享公式')
   })
 
-  it('groupedVisualRows keeps one controller under 全局 and out of scene/surface/world', () => {
+  it('groupedVisualRows splits global planes and keeps one controller only in Overlay', () => {
     const globalController = visualRow('teacher-controller-main', 'global', {
       isTeacherController: true,
       ownerKey: 'global',
@@ -610,11 +624,23 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
         ownerKey: 'world:surface-spatial',
       }),
       visualRow('global-banner', 'global', { ownerKey: 'global' }),
+      visualRow('global-background', 'global', {
+        ownerKey: 'global',
+        globalPlane: 'underlay',
+      }),
       globalController,
     ])
-    expect(groups.map((group) => group.id)).toEqual(['global', 'surface', 'scene', 'world'])
-    expect(groups.find((group) => group.id === 'global')?.rows.map((row) => row.id))
+    expect(groups.map((group) => group.id)).toEqual([
+      'global-overlay',
+      'surface',
+      'scene',
+      'world',
+      'global-underlay',
+    ])
+    expect(groups.find((group) => group.id === 'global-overlay')?.rows.map((row) => row.id))
       .toEqual(['global-banner', 'teacher-controller-main'])
+    expect(groups.find((group) => group.id === 'global-underlay')?.rows.map((row) => row.id))
+      .toEqual(['global-background'])
     expect(groups.find((group) => group.id === 'surface')?.rows.map((row) => row.id))
       .toEqual(['page-shared'])
     expect(groups.find((group) => group.id === 'scene')?.rows.map((row) => row.id))
@@ -625,7 +651,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       .toEqual([globalController])
   })
 
-  it('groupedVisualRows can list a stray world controller only under 全局', () => {
+  it('groupedVisualRows can list a stray world controller only under global Overlay', () => {
     const groups = groupedVisualRows([
       visualRow('world-shape', 'world', { ownerKey: 'world:surface-spatial' }),
       visualRow('teacher-controller-main', 'world', {
@@ -635,7 +661,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     ])
     expect(groups.find((group) => group.id === 'world')?.rows.map((row) => row.id))
       .toEqual(['world-shape'])
-    expect(groups.find((group) => group.id === 'global')?.rows.map((row) => row.id))
+    expect(groups.find((group) => group.id === 'global-overlay')?.rows.map((row) => row.id))
       .toEqual(['teacher-controller-main'])
   })
 
@@ -662,6 +688,13 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(isForeignTeacherControllerDrop(scene, controller)).toBe(true)
     expect(isForeignTeacherControllerDrop(sceneController, scene)).toBe(true)
     expect(isForeignTeacherControllerDrop(scene, banner)).toBe(false)
+    const underlay = visualRow('global-underlay', 'global', {
+      ownerKey: 'global',
+      globalPlane: 'underlay',
+    })
+    expect(isCrossGlobalPlaneDrop(controller, underlay)).toBe(true)
+    expect(isCrossGlobalPlaneDrop(banner, controller)).toBe(false)
+    expect(isCrossGlobalPlaneDrop(scene, underlay)).toBe(false)
   })
 
   it('classifies only unsafe Spatial owner drops while retaining safe owner operations', () => {
@@ -756,11 +789,11 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(screen.queryByTestId('node-item-teacher-controller-surface-copy')).toBeNull()
     expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
     expect(layerGroupNodeIds('surface')).toEqual(['page-shared'])
-    expect(layerGroupNodeIds('global')).toContain('teacher-controller-main')
-    expect(layerGroupNodeIds('global')).not.toContain('teacher-controller-scene-copy')
+    expect(layerGroupNodeIds('global-overlay')).toContain('teacher-controller-main')
+    expect(layerGroupNodeIds('global-overlay')).not.toContain('teacher-controller-scene-copy')
     expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent)
-      .toContain('全课、不可下沉')
+      .toContain('全课 Overlay、不可下沉')
 
     const after = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(JSON.stringify(after.globalLayerItems)).toBe(globalBefore)
@@ -772,7 +805,11 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   })
 
   it('reorders inside one owner with one history entry and refuses moving the controller onto a scene', () => {
-    injectCandidate()
+    const project = v9ThreeLocationFixture()
+    project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )!.plane = 'overlay'
+    injectCandidate(project)
     useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
     const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past.length
@@ -786,7 +823,18 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(after.history.past.length).toBe(before + 1)
     expect(after.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
       .toEqual(['teacher-controller-main', 'global-banner'])
+    expect(after.history.present.globalLayerItems.map((entry) => entry.plane))
+      .toEqual(['overlay', 'overlay'])
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+
+    useEditorStore.getState().undo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems
+      .map((entry) => entry.item.layerItemId))
+      .toEqual(['global-banner', 'teacher-controller-main'])
+    useEditorStore.getState().redo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems
+      .map((entry) => entry.item.layerItemId))
+      .toEqual(['teacher-controller-main', 'global-banner'])
 
     useEditorStore.getState().moveCandidateLayerOwner(
       'teacher-controller-main',
@@ -797,6 +845,48 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       .surfaces[0]
     if (!scene || scene.type !== 'slide') throw new Error('expected slide')
     expect(scene.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-main')).toBe(false)
+  })
+
+  it('rejects a direct reorder that mixes global Underlay and Overlay with zero history', () => {
+    injectCandidate()
+    useEditorStore.getState().setEditingScope('global')
+    render(<NodesTab />)
+    expect(layerGroupNodeIds('global-overlay')).toEqual(['teacher-controller-main'])
+    expect(layerGroupNodeIds('global-underlay')).toEqual(['global-banner'])
+    const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const beforeDocument = JSON.stringify(before.history.present)
+
+    useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
+
+    const after = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(useEditorStore.getState().errorMessage).toBe(CROSS_GLOBAL_PLANE_REORDER_REASON)
+    expect(after).toBe(before)
+    expect(after.history.past).toHaveLength(before.history.past.length)
+    expect(JSON.stringify(after.history.present)).toBe(beforeDocument)
+  })
+
+  it('routes a visible global row through the effective command while scene scope is active', () => {
+    const project = v9ThreeLocationFixture()
+    project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )!.plane = 'overlay'
+    injectCandidate(project)
+    render(<NodesTab />)
+    expect(useEditorStore.getState().editingScope).toBe('scene')
+    expect(layerGroupNodeIds('global-overlay')).toEqual(['global-banner'])
+    expect(screen.queryByTestId('node-item-teacher-controller-main')).toBeNull()
+    const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+
+    useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
+
+    const after = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(after.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
+      .toEqual(['teacher-controller-main', 'global-banner'])
+    useEditorStore.getState().undo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems
+      .map((entry) => entry.item.layerItemId))
+      .toEqual(['global-banner', 'teacher-controller-main'])
   })
 
   it('writes per-location visibility without changing startLocationId or location order', () => {

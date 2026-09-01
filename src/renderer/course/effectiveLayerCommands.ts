@@ -938,7 +938,7 @@ export function reorderEffectiveLayerItems(
       return failLayerCommand(CROSS_OWNER_REORDER_REASON)
     }
     if (located.source === 'global') {
-      return reorderGlobalLayerItems(document, orderedLayerItemIds, options)
+      return reorderGlobalLayerItems(document, target, orderedLayerItemIds, options)
     }
     const currentIds = ownerBackToFrontIds(siblings)
     if (

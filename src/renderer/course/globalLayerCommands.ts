@@ -48,7 +48,8 @@ const CONTROLLER_MOVE_REASON = '教师控制器必须留在全局层，不能移
 const CONTROLLER_DUPLICATE_REASON = '教师控制器不能重复，全课只需一个。'
 const CONTROLLER_PLANE_REASON = '教师控制器固定在全局 Overlay，不能放到 Underlay。'
 const CROSS_OWNER_REORDER_REASON = '不能跨来源假排序。请在同一来源内调整层级。'
-const INVALID_GLOBAL_REORDER_REASON = '全局层排序必须包含全部全局图层，且不能混入其他来源。'
+const CROSS_GLOBAL_PLANE_REORDER_REASON = '全局 Underlay 与 Overlay 不能通过排序互换；请先在属性中切换图层位置。'
+const INVALID_GLOBAL_REORDER_REASON = '全局平面排序必须包含该平面的全部图层，且不能混入其他来源。'
 
 export interface LayerCommandOptions {
   readonly expectedRevision?: number
@@ -538,23 +539,44 @@ export function validateLocationVisibilitySpec(
 
 export function reorderGlobalLayerItems(
   document: CourseProjectDocument,
+  target: EffectiveLayerCommandTarget,
   orderedLayerItemIds: readonly string[],
   options: LayerCommandOptions = {},
 ): LayerCommandResult {
   const stale = rejectIfStaleDocument(document, options.expectedRevision)
   if (stale) return stale
-  const currentIds = ownerBackToFrontIds(
-    document.globalLayerItems.map((entry) => entry.item),
-  )
-  if (!isPermutation(currentIds, orderedLayerItemIds)) {
-    return failLayerCommand(INVALID_GLOBAL_REORDER_REASON)
-  }
-  if (orderedLayerItemIds.every((id, index) => id === currentIds[index])) {
-    return succeedLayerNoop(document, '顺序未变化')
-  }
   try {
+    if (orderedLayerItemIds.length === 0) throw new Error(INVALID_GLOBAL_REORDER_REASON)
+    const targetEntry = resolveGlobalLayerTarget(document, target)
+    const effectivePlanes = resolveEffectiveGlobalLayerPlanes(document.globalLayerItems)
+    const plane = effectivePlanes.get(targetEntry.item.layerItemId)
+    if (!plane) throw new Error(INVALID_GLOBAL_REORDER_REASON)
+    const requestedPlanes = orderedLayerItemIds.map((id) => effectivePlanes.get(id))
+    if (requestedPlanes.some((requestedPlane) => requestedPlane === undefined)) {
+      throw new Error(INVALID_GLOBAL_REORDER_REASON)
+    }
+    if (requestedPlanes.some((requestedPlane) => requestedPlane !== plane)) {
+      return failLayerCommand(CROSS_GLOBAL_PLANE_REORDER_REASON)
+    }
+    const currentIds = ownerBackToFrontIds(document.globalLayerItems
+      .filter((entry) => effectivePlanes.get(entry.item.layerItemId) === plane)
+      .map((entry) => entry.item))
+    if (!isPermutation(currentIds, orderedLayerItemIds)) {
+      return failLayerCommand(INVALID_GLOBAL_REORDER_REASON)
+    }
+    if (orderedLayerItemIds.every((id, index) => id === currentIds[index])) {
+      return succeedLayerNoop(document, '顺序未变化')
+    }
     return runDocumentMutation(document, (draft) => {
-      const items = draft.globalLayerItems.map((entry) => entry.item)
+      const livePlanes = resolveEffectiveGlobalLayerPlanes(draft.globalLayerItems)
+      draft.globalLayerItems.forEach((entry) => {
+        const effectivePlane = livePlanes.get(entry.item.layerItemId)
+        if (!effectivePlane) throw new Error(INVALID_GLOBAL_REORDER_REASON)
+        entry.plane = effectivePlane
+      })
+      const items = draft.globalLayerItems
+        .filter((entry) => entry.plane === plane)
+        .map((entry) => entry.item)
       if (!reorderOwnerOrderSlots(items, orderedLayerItemIds)) {
         throw new Error(INVALID_GLOBAL_REORDER_REASON)
       }
@@ -914,6 +936,7 @@ export {
   CONTROLLER_DUPLICATE_REASON,
   CONTROLLER_PLANE_REASON,
   CONTROLLER_MOVE_REASON,
+  CROSS_GLOBAL_PLANE_REORDER_REASON,
   CROSS_OWNER_REORDER_REASON,
   INVALID_GLOBAL_REORDER_REASON,
 }

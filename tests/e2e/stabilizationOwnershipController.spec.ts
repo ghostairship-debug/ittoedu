@@ -822,7 +822,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       await renameSelectedNode(page, '世界文字 B')
 
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.getByTestId('nodes-layer-group-global')).toContainText('全局文字标记')
+      await expect(page.getByTestId('nodes-layer-group-global-overlay')).toContainText('全局文字标记')
       await expect(page.getByTestId('nodes-layer-group-world')).toContainText('世界文字 A')
       await expect(page.getByTestId('nodes-layer-group-world')).toContainText('世界文字 B')
       const ownerBaseline = await saveCurrent(page, projectPath)

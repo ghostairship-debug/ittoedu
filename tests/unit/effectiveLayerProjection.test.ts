@@ -93,7 +93,7 @@ function scoped(
 function v9ProjectionFixture(): CourseProjectDocument {
   const controller = sceneNodeToCourseLayerItem(
     createTeacherControllerNode({ id: 'teacher-controller', name: '教师控制器' }),
-    90,
+    110,
   )
   if (controller.kind !== 'native') throw new Error('expected native controller')
   return courseProjectDocumentSchema.parse({
@@ -133,11 +133,14 @@ function v9ProjectionFixture(): CourseProjectDocument {
     courseState: [],
     navigationGuards: [],
     globalLayerItems: [
-      scoped(nativeText('global-banner', 10, '全局条')),
-      scoped(controller as NativeLayerItem, {
-        mode: 'exclude',
-        locationIds: ['location-scene-2'],
-      }),
+      { ...scoped(nativeText('global-banner', 100, '全局条')), plane: 'underlay' },
+      {
+        ...scoped(controller as NativeLayerItem, {
+          mode: 'exclude',
+          locationIds: ['location-scene-2'],
+        }),
+        plane: 'overlay',
+      },
     ],
     globalInteractions: [],
     locations: [
@@ -294,6 +297,9 @@ describe('effective layer projection', () => {
       sourceLabel: '全课',
       owner: 'global',
       ownerKey: 'global',
+      reorderGroupKey: 'global:underlay',
+      globalPlane: 'underlay',
+      stackOrder: 0,
       impact: { kind: 'location', mode: 'all', locationIds: [] },
     })
     expect(describeLayerImpact(byId['global-banner']!.impact)).toBe('全部页面')
@@ -315,6 +321,9 @@ describe('effective layer projection', () => {
       source: 'global',
       owner: 'global',
       isTeacherController: true,
+      reorderGroupKey: 'global:overlay',
+      globalPlane: 'overlay',
+      stackOrder: 4,
       impact: { kind: 'location', mode: 'exclude', locationIds: ['location-scene-2'] },
     })
     expect(isTeacherControllerLayerItem(byId['teacher-controller']!.item)).toBe(true)
@@ -409,6 +418,28 @@ describe('effective layer projection', () => {
 
   it('applies named-state overrides, keeps Flow blocks out of the generic adapter, and exposes owner-aware UI inputs', () => {
     const project = v9ProjectionFixture()
+    const crossPlaneProjection = projectEffectiveLayers({
+      project,
+      locationId: 'location-scene-1',
+      stateId: null,
+    })
+    const crossPlaneReorder = createEffectiveLayerReorderInput({
+      unifiedRows: crossPlaneProjection.unifiedRows,
+      fromId: 'global-banner',
+      toId: 'teacher-controller',
+      placement: 'after',
+    })
+    expect(crossPlaneReorder).toMatchObject({
+      sameOwner: true,
+      sameReorderGroup: false,
+      fromReorderGroupKey: 'global:underlay',
+      toReorderGroupKey: 'global:overlay',
+      owner: null,
+      ownerKey: null,
+      orderedLayerItemIds: [],
+    })
+    project.globalLayerItems[0]!.plane = 'overlay'
+    project.globalLayerItems[0]!.item.order = 10
     const named = projectEffectiveLayers({
       project,
       locationId: 'location-scene-1',
@@ -477,8 +508,11 @@ describe('effective layer projection', () => {
     expect(sameOwnerReorder).toMatchObject({
       action: 'reorder',
       sameOwner: true,
+      sameReorderGroup: true,
       owner: 'global',
       ownerKey: 'global',
+      fromReorderGroupKey: 'global:overlay',
+      toReorderGroupKey: 'global:overlay',
       orderedLayerItemIds: ['teacher-controller', 'global-banner'],
     })
     const crossOwnerReorder = createEffectiveLayerReorderInput({
@@ -488,6 +522,7 @@ describe('effective layer projection', () => {
       placement: 'before',
     })
     expect(crossOwnerReorder.sameOwner).toBe(false)
+    expect(crossOwnerReorder.sameReorderGroup).toBe(false)
     expect(crossOwnerReorder.orderedLayerItemIds).toEqual([])
     expect(crossOwnerReorder.fromOwner).toBe('global')
     expect(crossOwnerReorder.toOwner).toBe('scene')

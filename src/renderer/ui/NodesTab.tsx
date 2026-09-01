@@ -5,8 +5,6 @@ import {
   closestCenter,
   useSensor,
   useSensors,
-  type CancelDrop,
-  type CollisionDetection,
   type DragEndEvent,
   type KeyboardCoordinateGetter,
 } from '@dnd-kit/core'
@@ -375,21 +373,28 @@ function listedTeacherControllerRow(
 }
 
 export function groupedVisualRows(visualRows: readonly EffectiveLayerProjectionRow[]): readonly {
-  readonly id: 'global' | 'surface' | 'scene' | 'world'
+  readonly id: 'global-overlay' | 'surface' | 'scene' | 'world' | 'global-underlay'
   readonly label: string
   readonly rows: readonly EffectiveLayerProjectionRow[]
 }[] {
   const specs = [
-    { id: 'global' as const, label: '全局', owner: 'global' as const },
+    { id: 'global-overlay' as const, label: '全局 Overlay', owner: 'global' as const },
     { id: 'surface' as const, label: '本页', owner: 'surface' as const },
     { id: 'scene' as const, label: '场景', owner: 'scene' as const },
     { id: 'world' as const, label: '世界', owner: 'world' as const },
+    { id: 'global-underlay' as const, label: '全局 Underlay', owner: 'global' as const },
   ]
   const listedController = listedTeacherControllerRow(visualRows)
   return specs.flatMap((spec) => {
     const rows = visualRows.filter((row) => {
       if (row.isTeacherController) {
-        return spec.id === 'global' && row === listedController
+        return spec.id === 'global-overlay' && row === listedController
+      }
+      if (spec.id === 'global-overlay') {
+        return row.owner === 'global' && row.globalPlane === 'overlay'
+      }
+      if (spec.id === 'global-underlay') {
+        return row.owner === 'global' && row.globalPlane === 'underlay'
       }
       return row.owner === spec.owner
     })
@@ -417,6 +422,15 @@ export function isForeignTeacherControllerDrop(
   return from.owner !== 'global' || to.owner !== 'global' || from.ownerKey !== to.ownerKey
 }
 
+export function isCrossGlobalPlaneDrop(
+  from: EffectiveLayerProjectionRow,
+  to: EffectiveLayerProjectionRow,
+): boolean {
+  return from.owner === 'global' && to.owner === 'global' &&
+    from.globalPlane !== null && to.globalPlane !== null &&
+    from.globalPlane !== to.globalPlane
+}
+
 export function isRejectedSpatialOwnerDrop(
   surfaceType: CourseSurfaceType,
   from: EffectiveLayerProjectionRow,
@@ -427,37 +441,14 @@ export function isRejectedSpatialOwnerDrop(
     isSpatialCrossCoordinateOwnerMove(from.item, from.owner, to.owner)
 }
 
-function sameOwnerDropRow(
-  visualRows: readonly EffectiveLayerProjectionRow[],
-  fromIndex: number,
-  overIndex: number,
-): EffectiveLayerProjectionRow | null {
-  const from = visualRows[fromIndex]
-  const over = visualRows[overIndex]
-  if (!from || !over) return null
-  if (from.ownerKey === over.ownerKey && !isForeignTeacherControllerDrop(from, over)) {
-    return over
-  }
-  if (!isForeignTeacherControllerDrop(from, over)) return null
-  const direction = overIndex > fromIndex ? 1 : -1
-  for (let index = overIndex; index >= 0 && index < visualRows.length; index += direction) {
-    const candidate = visualRows[index]
-    if (!candidate || candidate.id === from.id) continue
-    if (isForeignTeacherControllerDrop(from, candidate)) continue
-    if (candidate.ownerKey === from.ownerKey) return candidate
-  }
-  return null
-}
-
 function layerKeyboardCoordinates(
   rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
-  preserveRawSpatialTargetsRef: { current: boolean },
 ): KeyboardCoordinateGetter {
   return (event, args) => {
     const rows = rowsRef.current
     const activeId = String(args.context.active?.id ?? args.active)
     const activeRow = rows?.find((row) => row.id === activeId)
-    if (!rows || !activeRow || preserveRawSpatialTargetsRef.current) {
+    if (!rows || !activeRow) {
       return sortableKeyboardCoordinates(event, args)
     }
     const droppableContainers = args.context.droppableContainers
@@ -470,7 +461,7 @@ function layerKeyboardCoordinates(
           getEnabled: () => droppableContainers.getEnabled().filter((entry) => {
             const row = rows.find((candidate) => candidate.id === String(entry.id))
             if (!row) return true
-            return !isForeignTeacherControllerDrop(activeRow, row)
+            return row.reorderGroupKey === activeRow.reorderGroupKey
           }),
           toArray: () => droppableContainers.toArray(),
           getNodeFor: (id) => droppableContainers.getNodeFor(id),
@@ -480,28 +471,17 @@ function layerKeyboardCoordinates(
   }
 }
 
-function layerCollisionDetection(
-  rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
-  preserveRawSpatialTargetsRef: { current: boolean },
-): CollisionDetection {
-  return (args) => {
-    const rows = rowsRef.current
-    const activeRow = rows?.find((row) => row.id === String(args.active.id))
-    if (!rows || !activeRow || preserveRawSpatialTargetsRef.current) return closestCenter(args)
-    return closestCenter({
-      ...args,
-      droppableContainers: args.droppableContainers.filter((container) => {
-        const row = rows.find((candidate) => candidate.id === String(container.id))
-        if (!row) return true
-        return !isForeignTeacherControllerDrop(activeRow, row)
-      }),
-    })
-  }
+function flowOverlaySourceLabel(row: EffectiveLayerProjectionRow): string {
+  const owner = row.owner === 'global'
+    ? `全课 ${row.globalPlane === 'underlay' ? 'Underlay' : 'Overlay'}`
+    : '当前 Flow 页面'
+  return `归属：${owner} · 定位：钉在视口${row.isTeacherController ? ' · 不可下沉' : ''}`
 }
 
-function flowOverlaySourceLabel(row: EffectiveLayerProjectionRow): string {
-  const owner = row.owner === 'global' ? '全课' : '当前 Flow 页面'
-  return `归属：${owner} · 定位：钉在视口${row.isTeacherController ? ' · 不可下沉' : ''}`
+function effectiveLayerSourceLabel(row: EffectiveLayerProjectionRow): string {
+  if (row.owner !== 'global') return row.sourceLabel
+  const plane = row.globalPlane === 'underlay' ? 'Underlay' : 'Overlay'
+  return row.isTeacherController ? `全课 ${plane}、不可下沉` : `全课 ${plane}`
 }
 
 export function NodesTab() {
@@ -540,34 +520,16 @@ export function NodesTab() {
   const duplicateNode = useEditorStore((state) => state.duplicateNode)
   const updateNode = useEditorStore((state) => state.updateNode)
   const reorderNodes = useEditorStore((state) => state.reorderNodes)
-  const moveCandidateLayerOwner = useEditorStore((state) => state.moveCandidateLayerOwner)
   const visualRowsRef = useRef(visualRows)
   visualRowsRef.current = visualRows
-  const preserveRawSpatialTargetsRef = useRef(projection?.surfaceType === 'spatial-2d')
-  preserveRawSpatialTargetsRef.current = projection?.surfaceType === 'spatial-2d'
   const skipControllerCoordinates = useMemo(
-    () => layerKeyboardCoordinates(visualRowsRef, preserveRawSpatialTargetsRef),
-    [],
-  )
-  const skipControllerCollision = useMemo(
-    () => layerCollisionDetection(visualRowsRef, preserveRawSpatialTargetsRef),
+    () => layerKeyboardCoordinates(visualRowsRef),
     [],
   )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: skipControllerCoordinates }),
   )
-
-  const cancelRejectedSpatialDrop: CancelDrop = ({ active, over }) => {
-    if (!over || !visualRows || projection?.surfaceType !== 'spatial-2d') return false
-    const from = visualRows.find((row) => row.id === String(active.id))
-    const to = visualRows.find((row) => row.id === String(over.id))
-    if (!from || !to || !isRejectedSpatialOwnerDrop(projection.surfaceType, from, to)) {
-      return false
-    }
-    moveCandidateLayerOwner(from.id, to.id)
-    return true
-  }
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
@@ -577,24 +539,15 @@ export function NodesTab() {
       if (oldIndex < 0 || newIndex < 0) return
       const from = visualRows[oldIndex]!
       const overRow = visualRows[newIndex]!
-      let to = overRow
-      if (
-        projection?.surfaceType === 'spatial-2d' &&
-        isRejectedSpatialOwnerDrop(projection.surfaceType, from, overRow)
-      ) {
-        moveCandidateLayerOwner(from.id, overRow.id)
-        return
-      } else if (isForeignTeacherControllerDrop(from, overRow)) {
-        const snapped = sameOwnerDropRow(visualRows, oldIndex, newIndex)
-        if (!snapped) return
-        to = snapped
-      } else if (from.ownerKey !== overRow.ownerKey) {
-        moveCandidateLayerOwner(from.id, overRow.id)
+      if (from.reorderGroupKey !== overRow.reorderGroupKey) {
+        reorderNodes([from.id, overRow.id])
         return
       }
-      const ownerVisual = visualRows.filter((row) => row.ownerKey === from.ownerKey)
+      const ownerVisual = visualRows.filter(
+        (row) => row.reorderGroupKey === from.reorderGroupKey,
+      )
       const ownerOld = ownerVisual.findIndex((row) => row.id === from.id)
-      const ownerNew = ownerVisual.findIndex((row) => row.id === to.id)
+      const ownerNew = ownerVisual.findIndex((row) => row.id === overRow.id)
       if (ownerOld < 0 || ownerNew < 0) return
       reorderNodes(
         arrayMove(ownerVisual, ownerOld, ownerNew)
@@ -723,8 +676,7 @@ export function NodesTab() {
           <>
           <DndContext
             sensors={sensors}
-            collisionDetection={skipControllerCollision}
-            cancelDrop={cancelRejectedSpatialDrop}
+            collisionDetection={closestCenter}
             onDragEnd={onDragEnd}
           >
             <SortableContext
@@ -740,7 +692,9 @@ export function NodesTab() {
                   >
                     <h3 className="nodes-layer-group__title">
                       {flowSession
-                        ? group.id === 'global' ? '全课浮层' : '当前 Flow 页面浮层'
+                        ? group.id === 'global-overlay' ? '全课 Overlay'
+                          : group.id === 'global-underlay' ? '全课 Underlay'
+                            : '当前 Flow 页面浮层'
                         : group.label}
                     </h3>
                     {group.rows.map((row) => {
@@ -752,7 +706,7 @@ export function NodesTab() {
                           selected={selectedNodeIds.includes(node.id)}
                           sourceLabel={flowSession
                             ? flowOverlaySourceLabel(row)
-                            : row.isTeacherController ? '全课、不可下沉' : row.sourceLabel}
+                            : effectiveLayerSourceLabel(row)}
                           impactLabel={describeLayerImpact(row.impact)}
                           onSelect={(additive) => {
                             selectNode(node.id, additive)
@@ -792,12 +746,12 @@ export function NodesTab() {
           >
             {flowSession
               ? editingScope === 'global'
-                ? '这里只管理归属全课、钉在视口的浮层；可拖动调整前后层级。'
-                : '这里只管理钉在视口的浮层；可拖动调整前后层级。正文顺序使用上方大纲的结构按钮。'
+                ? '这里只管理归属全课的浮层；可在同一 Underlay / Overlay 分组内调整前后层级。'
+                : '这里只管理页面浮层；全课浮层只可在同一 Underlay / Overlay 分组内排序。正文顺序使用上方大纲的结构按钮。'
               : spatialSession
               ? `同一定位内可拖动排序；${SPATIAL_CROSS_COORDINATE_MOVE_REASON}`
               : candidate
-              ? '同一来源内可拖动排序；跨来源放置会改存储范围。教师控制器必须留在全课。'
+              ? '同一来源内可拖动排序；全课图层还必须位于同一 Underlay / Overlay 分组。跨来源不能通过排序移动。'
               : editingScope === 'global'
                 ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
                 : '列表最上方就是画面最上层；拖动条目可改变层级。'}

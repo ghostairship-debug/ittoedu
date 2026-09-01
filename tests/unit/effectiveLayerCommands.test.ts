@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
+import { resolveEffectiveGlobalLayerPlanes } from '@/shared/courseLayerComposition'
 import {
   getEffectiveCourseLayerOrder,
   isCourseLayerVisibleAtLocation,
@@ -32,6 +33,7 @@ import {
 import {
   allocateCourseLayerOrder,
   CONTROLLER_PLANE_REASON,
+  CROSS_GLOBAL_PLANE_REORDER_REASON,
   findGlobalTeacherController,
   isTeacherControllerLayerItem,
   makeGlobalLayerAuthoringAddress,
@@ -340,20 +342,63 @@ describe('V9 effective / global layer commands', () => {
     }).map((entry) => entry.source)).toEqual(items.map((item) => item.source))
   })
 
-  it('reorders inside one owner, fails mixed-owner lists, and never succeeds with 暂不能调整顺序', () => {
+  it('reorders only inside one global plane and rejects cross-plane or mixed-owner lists', () => {
     const project = v9LayerFixture()
     const controller = findGlobalTeacherController(project)!
+    const unchanged = reorderEffectiveLayerItems(
+      project,
+      globalTarget(project, 'global-banner'),
+      ['global-banner', 'global-footer'],
+      { expectedRevision: 1, now: NOW },
+    )
+    expect(unchanged).toMatchObject({ ok: true, historyEntry: false })
+    expect(unchanged.nextDocument).toBe(project)
+    expect(project.globalLayerItems.every((entry) => entry.plane === undefined)).toBe(true)
+
+    const otherPlaneOrders = Object.fromEntries(project.globalLayerItems
+      .filter((entry) => entry.item.layerItemId === controller.item.layerItemId)
+      .map((entry) => [entry.item.layerItemId, entry.item.order]))
     const reordered = reorderEffectiveLayerItems(
       project,
       globalTarget(project, 'global-banner'),
-      ['global-footer', 'global-banner', controller.item.layerItemId],
+      ['global-footer', 'global-banner'],
       { expectedRevision: 1, now: NOW },
     )
     expect(reordered).toMatchObject({ ok: true, historyEntry: true })
     expect(reordered.nextDocument?.revision).toBe(2)
     expect(reordered.nextDocument?.globalLayerItems.map((entry) => entry.item.layerItemId))
       .toEqual(['global-footer', 'global-banner', 'teacher-controller-main'])
+    expect(reordered.nextDocument?.globalLayerItems.map((entry) => entry.plane))
+      .toEqual(['underlay', 'underlay', 'overlay'])
+    expect(Object.fromEntries(reordered.nextDocument!.globalLayerItems
+      .filter((entry) => entry.plane === 'overlay')
+      .map((entry) => [entry.item.layerItemId, entry.item.order])))
+      .toEqual(otherPlaneOrders)
     expect(reordered.reason).not.toContain('暂不能调整顺序')
+
+    const crossPlane = reorderEffectiveLayerItems(
+      project,
+      globalTarget(project, 'global-banner'),
+      ['global-banner', controller.item.layerItemId],
+      { expectedRevision: 1, now: NOW },
+    )
+    expect(crossPlane).toEqual({
+      ok: false,
+      reason: CROSS_GLOBAL_PLANE_REORDER_REASON,
+      historyEntry: false,
+    })
+    expect(crossPlane.nextDocument).toBeUndefined()
+    expect(project.globalLayerItems.every((entry) => entry.plane === undefined)).toBe(true)
+    expect(reorderEffectiveLayerItems(
+      project,
+      globalTarget(project, 'global-banner'),
+      [controller.item.layerItemId],
+      { expectedRevision: 1, now: NOW },
+    )).toEqual({
+      ok: false,
+      reason: CROSS_GLOBAL_PLANE_REORDER_REASON,
+      historyEntry: false,
+    })
 
     const mixed = reorderEffectiveLayerItems(
       project,
@@ -366,6 +411,46 @@ describe('V9 effective / global layer commands', () => {
     expect(mixed.reason).not.toContain('暂不能调整顺序')
     expect(mixed.nextDocument).toBeUndefined()
     expect(project.revision).toBe(1)
+  })
+
+  it('materializes legacy planes before moving the controller across an Overlay sibling', () => {
+    const project = v9LayerFixture()
+    project.globalLayerItems.push(scoped(nativeText(
+      'global-legacy-overlay',
+      100,
+      '旧全局前景',
+    )))
+    const beforePlanes = Object.fromEntries(resolveEffectiveGlobalLayerPlanes(
+      project.globalLayerItems,
+    ))
+    const underlayOrders = Object.fromEntries(project.globalLayerItems
+      .filter((entry) => beforePlanes[entry.item.layerItemId] === 'underlay')
+      .map((entry) => [entry.item.layerItemId, entry.item.order]))
+    const controller = findGlobalTeacherController(project)!
+    const reordered = reorderEffectiveLayerItems(
+      project,
+      globalTarget(project, controller.item.layerItemId),
+      ['global-legacy-overlay', controller.item.layerItemId],
+      { expectedRevision: project.revision, now: NOW },
+    )
+
+    expect(reordered).toMatchObject({ ok: true, historyEntry: true })
+    const next = reordered.nextDocument!
+    expect(Object.fromEntries(resolveEffectiveGlobalLayerPlanes(next.globalLayerItems)))
+      .toEqual(beforePlanes)
+    expect(next.globalLayerItems.every((entry) => entry.plane !== undefined)).toBe(true)
+    expect(Object.fromEntries(next.globalLayerItems
+      .filter((entry) => entry.plane === 'underlay')
+      .map((entry) => [entry.item.layerItemId, entry.item.order])))
+      .toEqual(underlayOrders)
+    expect(next.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-legacy-overlay',
+    )?.item.order).toBe(90)
+    expect(next.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller.item.layerItemId,
+    )?.item.order).toBe(100)
+    expect(courseProjectDocumentSchema.safeParse(next).success).toBe(true)
+    expect(project.globalLayerItems.every((entry) => entry.plane === undefined)).toBe(true)
   })
 
   it('writes a stable global plane without rewriting order and protects the controller', () => {
@@ -456,6 +541,9 @@ describe('V9 effective / global layer commands', () => {
     ))?.plane).toBe('overlay')
     expect(courseProjectDocumentSchema.safeParse(moved.nextDocument).success).toBe(true)
 
+    project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-footer',
+    )!.plane = 'underlay'
     const movedOut = moveEffectiveLayerOwner(
       project,
       globalTarget(project, 'global-footer'),

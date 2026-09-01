@@ -141,7 +141,6 @@ import {
   type EffectiveLayerProjectionRow,
 } from '../course/effectiveLayerProjection'
 import {
-  CROSS_OWNER_REORDER_REASON,
   deleteEffectiveLayerItem,
   deleteEffectiveLayerItems,
   duplicateEffectiveLayerItem,
@@ -11539,22 +11538,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       const backend = selectSlideAuthoringBackend(get())
       if (backend) {
-        if (get().editingScope === 'global') {
-          const projection = buildCandidateEffectiveLayers(get())
-          if (!projection) return
-          const first = projection.unifiedRows.find((row) => row.id === nodeIds[0])
-          if (!first) return
-          if (nodeIds.some((id) => {
-            const row = projection.unifiedRows.find((candidate) => candidate.id === id)
-            return !row || row.ownerKey !== first.ownerKey
-          })) {
-            persistLayerCommand({
-              ok: false,
-              reason: CROSS_OWNER_REORDER_REASON,
-              historyEntry: false,
-            })
-            return
-          }
+        const projection = buildCandidateEffectiveLayers(get())
+        const first = projection?.unifiedRows.find((row) => row.id === nodeIds[0])
+        if (first && first.owner !== 'scene') {
           persistLayerCommand(reorderEffectiveLayerItems(
             backend.getSession().history.present,
             commandTargetForRow(first),
