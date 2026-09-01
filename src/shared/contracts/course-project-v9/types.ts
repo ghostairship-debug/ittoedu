@@ -38,6 +38,10 @@ export type LayerItemKind = typeof LAYER_ITEM_KINDS[number]
 export const GLOBAL_LAYER_PLANES = ['underlay', 'overlay'] as const
 export type GlobalLayerPlane = typeof GLOBAL_LAYER_PLANES[number]
 
+/** Surface-local Flow overlays paint on either side of the semantic body. */
+export const FLOW_BODY_LAYER_PLANES = ['underlay', 'overlay'] as const
+export type FlowBodyLayerPlane = typeof FLOW_BODY_LAYER_PLANES[number]
+
 export type LayerHitPolicy = 'auto' | 'surface' | 'pass-through'
 
 export interface LayerFrame {
@@ -172,6 +176,15 @@ export interface LocationVisibility {
 export interface ScopedLayerItem {
   item: LayerItem
   visibility: LocationVisibility
+}
+
+/**
+ * Missing `bodyPlane` is the V9 compatibility case and resolves to Overlay,
+ * preserving the rendering of projects authored before the body boundary was
+ * persisted.
+ */
+export interface FlowSurfaceLayerEntry extends ScopedLayerItem {
+  bodyPlane?: FlowBodyLayerPlane
 }
 
 /**
@@ -360,6 +373,7 @@ export type FlowBlock =
 
 export interface FlowSurfaceDocument extends SurfaceBase {
   type: 'flow'
+  surfaceLayerItems: FlowSurfaceLayerEntry[]
   /**
    * Paper / page-chrome color. Omitted documents read as `#ffffff`.
    * This is not a Flow block field and does not rename Slide scene `backgroundColor`.

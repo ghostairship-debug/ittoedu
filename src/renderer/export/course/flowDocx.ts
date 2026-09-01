@@ -248,6 +248,11 @@ export function buildFlowDocxFromPlan(
     nextRelationshipId: 3,
     resolveAsset: options.resolveAsset ?? (() => undefined),
   }
+  if (!plan.includesFloatingLayers && plan.omittedFloatingLayerCount > 0) {
+    const detail = `DOCX 采用正文重排，已省略 ${plan.omittedFloatingLayerCount} 个页面浮层。`
+    context.warnings.push(detail)
+    context.report.push({ disposition: 'omitted', detail })
+  }
   const body = plan.nodes.map((node) => renderPrintNode(node, context)).join('')
   const page = pageSizeTwips(plan.pageSize)
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><w:body>${body}<w:sectPr><w:pgSz w:w="${page.width}" w:h="${page.height}"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`

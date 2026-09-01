@@ -5,6 +5,7 @@ import {
 import type {
   CourseProjectDocument,
   FlowBlock,
+  FlowBodyLayerPlane,
   LayerItem,
 } from '../../shared/courseProjectTypes'
 import {
@@ -46,6 +47,8 @@ export interface FlowUnifiedOverlayRow {
   readonly isTeacherController: boolean
   readonly scopedVisible: boolean
   readonly effectiveVisible: boolean
+  /** Effective page-overlay plane around the Flow body; global rows carry null. */
+  readonly bodyPlane: FlowBodyLayerPlane | null
   readonly item: LayerItem
 }
 
@@ -72,6 +75,7 @@ function overlayRow(entry: FlowEditorLayerView): FlowUnifiedOverlayRow {
     isTeacherController,
     scopedVisible: entry.scopedVisible,
     effectiveVisible: entry.effectiveVisible,
+    bodyPlane: entry.flowBodyPlane,
     item: entry.item as LayerItem,
   })
 }
@@ -175,6 +179,7 @@ export function listFlowGlobalAuthoringItems(
       isTeacherController: isTeacherControllerLayerItem(entry.item),
       scopedVisible,
       effectiveVisible: scopedVisible && entry.item.visible,
+      bodyPlane: null,
       item: entry.item,
     })
   }))

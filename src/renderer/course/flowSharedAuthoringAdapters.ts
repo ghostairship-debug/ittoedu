@@ -14,6 +14,7 @@ import type {
   CourseProjectDocument,
   CourseRuntimeDefinition,
   FlowBlock,
+  FlowBodyLayerPlane,
   FlowComponentBlock,
   FlowMediaBlock,
   LayerItem,
@@ -284,7 +285,10 @@ function appendOverlayItem(
     sortAllCourseLayerLists(draft)
     return
   }
-  flowSurfaceIn(draft, destination.surfaceId).surfaceLayerItems.push(scoped)
+  flowSurfaceIn(draft, destination.surfaceId).surfaceLayerItems.push({
+    ...scoped,
+    bodyPlane: 'overlay',
+  })
   sortAllCourseLayerLists(draft)
 }
 
@@ -1197,6 +1201,59 @@ export function patchFlowOverlayPaperSpace(
     else next.item.paperSpace = 'paper'
     return []
   }, paperSpace === 'paper' ? '已改为跟随稿纸滚动' : '已改为钉在视口')
+  if (!mutated.ok) return mutated
+  return {
+    ...mutated,
+    selection,
+    ownership: 'viewport-overlay',
+  }
+}
+
+export function patchFlowOverlayBodyPlane(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  bodyPlane: FlowBodyLayerPlane,
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return fail('请先选择一个页面浮层')
+  const located = locateCourseLayer(document, overlayId)
+  if (!located) return fail(`找不到浮层：${overlayId}`)
+  if (located.source !== 'surface' || !located.surfaceId) {
+    return fail('只有当前 Flow 页面的浮层可以跨越正文边界')
+  }
+  const surfaceId = located.surfaceId
+  const location = document.locations.find((candidate) => candidate.id === selection.locationId)
+  if (!location || location.surfaceId !== surfaceId) {
+    return fail('所选浮层不属于当前 Flow 页面')
+  }
+  const surface = document.surfaces.find((candidate) => candidate.id === surfaceId)
+  if (!surface || surface.type !== 'flow') return fail('当前浮层不属于 Flow 页面')
+  const entry = surface.surfaceLayerItems.find(
+    (candidate) => candidate.item.layerItemId === overlayId,
+  )
+  if (!entry) return fail(`找不到浮层：${overlayId}`)
+  const locked = teacherLocked(entry.item)
+  if (locked) return locked
+  if ((entry.bodyPlane ?? 'overlay') === bodyPlane) {
+    return {
+      ok: true,
+      reason: '未变化',
+      nextDocument: document,
+      historyEntry: false,
+      selection,
+      ownership: 'viewport-overlay',
+    }
+  }
+  const mutated = runOverlayMutation(document, options, (draft) => {
+    const draftSurface = flowSurfaceIn(draft, surfaceId)
+    const draftEntry = draftSurface.surfaceLayerItems.find(
+      (candidate) => candidate.item.layerItemId === overlayId,
+    )
+    if (!draftEntry) throw new Error(`找不到浮层：${overlayId}`)
+    draftEntry.bodyPlane = bodyPlane
+    return []
+  }, bodyPlane === 'underlay' ? '已移到正文下方' : '已移到正文上方')
   if (!mutated.ok) return mutated
   return {
     ...mutated,

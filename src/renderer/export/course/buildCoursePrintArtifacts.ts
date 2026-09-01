@@ -436,7 +436,7 @@ function buildMixedPrintDocumentHtml(
             ? 'portrait'
             : undefined,
       })
-      sections.push(`<section class="page flow-print-document" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}">${renderFlowPrintBodyHtml(plan)}</section>`)
+      sections.push(`<section class="page flow-print-document" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${renderFlowPrintBodyHtml(plan)}</section>`)
     }
   }
   const layout = resolveMixedPrintPageLayout(published, pages)

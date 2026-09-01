@@ -1,9 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { enterFlowTextEditing, selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { FLOW_AUDIO_OVERLAY_REASON } from '@/renderer/course/flowSharedAuthoringAdapters'
-import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import {
   selectActiveCourseProjectDocument,
   selectEffectiveLayerProjection,
@@ -70,17 +69,6 @@ function imageAsset(id = 'asset-flow-image'): AssetMeta {
   }
 }
 
-function insertFlowBlock(input: Parameters<typeof insertFlowEditorBlock>[1]) {
-  const state = useEditorStore.getState()
-  const flow = state.flowSession
-  if (!flow) throw new Error('expected flow session')
-  const result = insertFlowEditorBlock(flow.history.present, input, {
-    expectedRevision: flow.history.present.revision,
-  })
-  expect(result.ok).toBe(true)
-  state.applyFlowCommand(result)
-}
-
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
@@ -91,33 +79,8 @@ afterEach(() => {
 })
 
 describe('Flow unified layer entry', () => {
-  it('renders a selectable DFS body outline with valid structural actions, separate from overlays', () => {
+  it('renders one body boundary, keeps paragraphs out of layers, and persists overlay moves across it', () => {
     useEditorStore.getState().createNewFlowProject()
-    const surfaceId = flowSurface().id
-    insertFlowBlock({
-      surfaceId,
-      parentId: null,
-      index: flowSurface().blocks.length,
-      block: {
-        id: 'outline-section',
-        type: 'section',
-        title: '分节',
-        collapsedByDefault: false,
-        blocks: [],
-      },
-    })
-    insertFlowBlock({
-      surfaceId,
-      parentId: 'outline-section',
-      index: 0,
-      block: { id: 'outline-child', type: 'paragraph', text: '节内正文' },
-    })
-    insertFlowBlock({
-      surfaceId,
-      parentId: null,
-      index: flowSurface().blocks.length,
-      block: { id: 'outline-after-section', type: 'paragraph', text: '待缩进正文' },
-    })
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByTestId('add-rectangle'))
     const overlayId = flowSurface().surfaceLayerItems.at(-1)?.item.layerItemId
@@ -125,32 +88,17 @@ describe('Flow unified layer entry', () => {
     cleanup()
     render(<NodesTab />)
 
-    const outline = screen.getByTestId('flow-content-outline')
     const overlayRegion = screen.getByTestId('flow-overlay-layers')
-    expect(outline).toHaveTextContent('正文大纲')
-    expect(screen.getByTestId('flow-content-placement')).toHaveTextContent(
-      '归属：当前 Flow 页面 · 定位：跟随稿纸',
-    )
-    const expectedDfsIds = [
-      ...flowSurface().blocks.slice(0, -2).map((block) => block.id),
-      'outline-section',
-      'outline-child',
-      'outline-after-section',
-    ]
-    expect(Array.from(outline.querySelectorAll('[data-testid^="flow-outline-block-"]')).map(
-      (row) => row.getAttribute('data-testid')?.replace('flow-outline-block-', ''),
-    )).toEqual(expectedDfsIds)
-    expect(screen.getByTestId('flow-outline-block-outline-child')).toHaveAttribute('data-depth', '1')
-    expect(outline.querySelector('.drag-handle')).toBeNull()
-    expect(outline.textContent).not.toContain('前后层级')
+    const body = screen.getByTestId('flow-body-boundary')
+    expect(screen.queryByTestId('flow-content-outline')).toBeNull()
+    expect(screen.getAllByTestId('flow-body-boundary')).toHaveLength(1)
+    expect(body).toHaveTextContent('正文')
+    expect(body).toHaveTextContent('全部 FlowBlock')
 
     expect(screen.queryByText('当前场景还没有节点')).toBeNull()
-    const heading = flowSurface().blocks.find((block) => block.type === 'heading')
-    const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
-    expect(heading).toBeTruthy()
-    expect(paragraph).toBeTruthy()
-    if (heading) expect(screen.queryByTestId(`node-item-${heading.id}`)).toBeNull()
-    if (paragraph) expect(screen.queryByTestId(`node-item-${paragraph.id}`)).toBeNull()
+    for (const block of flowSurface().blocks) {
+      expect(screen.queryByTestId(`node-item-${block.id}`)).toBeNull()
+    }
 
     const controller = flowDocument().globalLayerItems.find((entry) => (
       entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
@@ -161,39 +109,38 @@ describe('Flow unified layer entry', () => {
     const overlayRow = screen.getByTestId(`node-item-${overlayId}`)
     expect(overlayRegion).toContainElement(overlayRow)
     expect(overlayRow.querySelector('.drag-handle')).toBeTruthy()
-    expect(screen.getByTestId(`node-source-${overlayId}`)).toHaveTextContent('归属：当前 Flow 页面')
-    expect(screen.getByTestId(`node-source-${overlayId}`)).toHaveTextContent('定位：钉在视口')
+    expect(screen.getByTestId(`node-source-${overlayId}`)).toHaveTextContent('正文上方')
     expect(screen.getByLabelText(/隐藏“矩形”/)).toBeTruthy()
     expect(screen.getByLabelText(/锁定“矩形”/)).toBeTruthy()
+    const flowBeforeMove = useEditorStore.getState().flowSession!
+    const pastBeforeMove = flowBeforeMove.history.past.length
+    fireEvent.click(screen.getByTestId(`flow-move-across-body-${overlayId}`))
+    let flow = useEditorStore.getState().flowSession!
+    expect(flow.history.past).toHaveLength(pastBeforeMove + 1)
+    expect(flowSurface().surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === overlayId,
+    )?.bodyPlane).toBe('underlay')
+    expect(screen.getByTestId(`node-source-${overlayId}`)).toHaveTextContent('正文下方')
+    expect(body.compareDocumentPosition(screen.getByTestId(`node-item-${overlayId}`))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
-    fireEvent.click(screen.getByLabelText('选择正文块“节内正文”'))
-    let flow = useEditorStore.getState().flowSession
-    expect(flow?.selection.focus).toBe('block')
-    expect(flow?.selection.selectedBlockId).toBe('outline-child')
-
-    expect(screen.queryByTestId('flow-outline-move-up-outline-child')).toBeNull()
-    expect(screen.queryByTestId('flow-outline-move-down-outline-child')).toBeNull()
-    expect(screen.queryByTestId('flow-outline-indent-outline-child')).toBeNull()
-    expect(screen.getByTestId('flow-outline-outdent-outline-child')).toBeTruthy()
-    expect(screen.getByTestId('flow-outline-move-up-outline-after-section')).toBeTruthy()
-    expect(screen.queryByTestId('flow-outline-move-down-outline-after-section')).toBeNull()
-    expect(screen.getByTestId('flow-outline-indent-outline-after-section')).toBeTruthy()
-    expect(screen.queryByTestId('flow-outline-outdent-outline-after-section')).toBeNull()
-
-    const pastBeforeIndent = flow!.history.past.length
-    fireEvent.click(screen.getByTestId('flow-outline-indent-outline-after-section'))
-    flow = useEditorStore.getState().flowSession
-    expect(flow?.history.past).toHaveLength(pastBeforeIndent + 1)
-    expect(flow?.selection.selectedBlockId).toBe('outline-after-section')
-    expect(findFlowBlockRecursive(flowSurface().blocks, 'outline-after-section')?.parentId).toBe('outline-section')
+    act(() => useEditorStore.getState().undo())
+    expect(flowSurface().surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === overlayId,
+    )?.bodyPlane).toBe('overlay')
+    act(() => useEditorStore.getState().redo())
+    flow = useEditorStore.getState().flowSession!
+    expect(flow.history.present.surfaces.find(
+      (surface) => surface.type === 'flow',
+    )?.surfaceLayerItems.find((entry) => entry.item.layerItemId === overlayId)?.bodyPlane).toBe('underlay')
     const saved = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(saved).toBeTruthy()
 
-    useEditorStore.getState().undo()
-    expect(findFlowBlockRecursive(flowSurface().blocks, 'outline-after-section')?.parentId).toBeNull()
     useEditorStore.getState().createNewProject()
     expect(useEditorStore.getState().reopenV9SlideCandidateArchive(saved!)).toBe(true)
-    expect(findFlowBlockRecursive(flowSurface().blocks, 'outline-after-section')?.parentId).toBe('outline-section')
+    expect(flowSurface().surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === overlayId,
+    )?.bodyPlane).toBe('underlay')
   })
 
   it('enters global authoring without writing history and keeps the controller as a viewport overlay', () => {

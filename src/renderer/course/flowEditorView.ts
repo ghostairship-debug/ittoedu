@@ -6,6 +6,7 @@ import {
 import type {
   CourseProjectDocument,
   FlowBlock,
+  FlowBodyLayerPlane,
   FlowSurfaceDocument,
   GlobalLayerPlane,
   LayerItem,
@@ -59,6 +60,8 @@ export interface FlowEditorLayerView {
   readonly source: FlowOverlayLayerSource
   /** Exact canonical/legacy-resolved plane for globals; surface entries carry null. */
   readonly globalPlane: GlobalLayerPlane | null
+  /** Surface overlay plane around the semantic body; globals carry null. */
+  readonly flowBodyPlane: FlowBodyLayerPlane | null
   /** Dense composition slot. It is a read-model fact and is never written to item.order. */
   readonly stackOrder: number
   readonly scopedVisible: boolean
@@ -136,11 +139,13 @@ function overlayLayerView(
   item: LayerItem,
   scopedVisible: boolean,
   globalPlane: GlobalLayerPlane | null,
+  flowBodyPlane: FlowBodyLayerPlane | null,
   stackOrder: number,
 ): FlowEditorLayerView {
   return {
     source,
     globalPlane,
+    flowBodyPlane,
     stackOrder,
     scopedVisible,
     effectiveVisible: scopedVisible && item.visible,
@@ -271,6 +276,7 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
       entry.item,
       entry.applicable,
       entry.globalPlane,
+      entry.flowBodyPlane,
       entry.stackOrder,
     ))
 

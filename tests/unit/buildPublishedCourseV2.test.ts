@@ -331,7 +331,10 @@ function mixedSources(): CoursePublishSources {
         id: 'surface-flow',
         title: '讲义',
         type: 'flow',
-        surfaceLayerItems: [],
+        surfaceLayerItems: [{
+          ...scoped(nativeText('flow-underlay', 10, '正文下方'), ['location-flow']),
+          bodyPlane: 'underlay',
+        }],
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         blocks: [
           {
@@ -514,6 +517,11 @@ describe('Published Course V2 producer', () => {
     ])
     expect(published.assets).not.toHaveProperty('unused')
     expect(Object.keys(published.components)).toEqual(['component.quiz@4.0.0'])
+    const flow = published.surfaces.find((surface) => surface.type === 'flow')
+    expect(flow?.surfaceLayerItems[0]).toMatchObject({
+      bodyPlane: 'underlay',
+      item: { layerItemId: 'flow-underlay' },
+    })
   })
 
   it('materializes legacy global planes without mutating the V9 source', () => {

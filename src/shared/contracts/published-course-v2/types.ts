@@ -2,6 +2,7 @@ import type {
   CourseNavigationGuard,
   CourseStateDeclaration,
   CourseLocation,
+  FlowBodyLayerPlane,
   FlowBlock,
   GlobalLayerPlane,
   LayerFrame,
@@ -109,6 +110,11 @@ export interface PublishedScopedLayerItem {
   }
 }
 
+/** Missing `bodyPlane` keeps legacy Published V2 Flow overlays above body. */
+export interface PublishedFlowSurfaceLayerEntry extends PublishedScopedLayerItem {
+  bodyPlane?: FlowBodyLayerPlane
+}
+
 /** Optional only so previously emitted Published V2 payloads remain readable. */
 export interface PublishedGlobalLayerEntry extends PublishedScopedLayerItem {
   plane?: GlobalLayerPlane
@@ -152,6 +158,7 @@ export interface PublishedSlideSurface extends PublishedSurfaceBase {
 
 export interface PublishedFlowSurface extends PublishedSurfaceBase {
   type: 'flow'
+  surfaceLayerItems: PublishedFlowSurfaceLayerEntry[]
   backgroundColor?: string
   layout: { readingWidth: number; wideContentWidth: number }
   blocks: FlowBlock[]

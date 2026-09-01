@@ -22,12 +22,14 @@ import type {
 } from '../../projectTypes'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  FLOW_BODY_LAYER_PLANES,
   GLOBAL_LAYER_PLANES,
   type CourseAssetMeta,
   type GlobalLayerEntry,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
+  type FlowSurfaceLayerEntry,
   type LayerItem,
   type MixedPrintEntry,
   type ScopedLayerItem,
@@ -407,6 +409,19 @@ export const scopedLayerItemSchema: z.ZodType<ScopedLayerItem> = z.object({
 }).strict()
 
 export const scopedLayerItemListSchema = z.array(scopedLayerItemSchema).max(20_000)
+  .superRefine((entries, context) => {
+    addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
+  })
+
+export const flowBodyLayerPlaneSchema = z.enum(FLOW_BODY_LAYER_PLANES)
+
+export const flowSurfaceLayerEntrySchema: z.ZodType<FlowSurfaceLayerEntry> = z.object({
+  item: layerItemSchema,
+  visibility: locationVisibilitySchema,
+  bodyPlane: flowBodyLayerPlaneSchema.optional(),
+}).strict()
+
+export const flowSurfaceLayerEntryListSchema = z.array(flowSurfaceLayerEntrySchema).max(20_000)
   .superRefine((entries, context) => {
     addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
   })
@@ -859,7 +874,9 @@ const slideSurfaceSchema = z.object({
 })
 
 const flowSurfaceSchema = z.object({
-  ...surfaceBaseFields,
+  id: surfaceBaseFields.id,
+  title: surfaceBaseFields.title,
+  surfaceLayerItems: flowSurfaceLayerEntryListSchema,
   type: z.literal('flow'),
   backgroundColor: colorSchema.optional(),
   layout: z.object({

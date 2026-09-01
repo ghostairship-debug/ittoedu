@@ -8,6 +8,7 @@ import {
   coursePlaybackSchema,
   courseProjectDocumentSchema,
   courseStateDeclarationSchema,
+  flowBodyLayerPlaneSchema,
   flowBlockSchema,
   globalLayerPlaneSchema,
   layerFrameSchema,
@@ -27,6 +28,7 @@ import type {
 } from '../../projectTypes'
 import type {
   CourseProjectDocument,
+  FlowSurfaceLayerEntry,
   GlobalLayerEntry,
   LayerItem,
   ScopedLayerItem,
@@ -36,6 +38,7 @@ import {
   PUBLISHED_COURSE_VERSION,
   type PublishedCourseSurface,
   type PublishedCourseV2Payload,
+  type PublishedFlowSurfaceLayerEntry,
   type PublishedGlobalLayerEntry,
   type PublishedLayerItem,
   type PublishedScopedLayerItem,
@@ -149,6 +152,17 @@ const publishedScopedLayerListSchema = z.array(publishedScopedLayerItemSchema).m
     addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
   })
 
+const publishedFlowSurfaceLayerEntrySchema: z.ZodType<PublishedFlowSurfaceLayerEntry> = z.object({
+  item: publishedLayerItemSchema,
+  visibility: locationVisibilitySchema,
+  bodyPlane: flowBodyLayerPlaneSchema.optional(),
+}).strict()
+
+const publishedFlowSurfaceLayerEntryListSchema = z.array(publishedFlowSurfaceLayerEntrySchema).max(20_000)
+  .superRefine((entries, context) => {
+    addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
+  })
+
 const publishedGlobalLayerEntrySchema: z.ZodType<PublishedGlobalLayerEntry> = z.object({
   item: publishedLayerItemSchema,
   visibility: locationVisibilitySchema,
@@ -216,7 +230,9 @@ const publishedSlideSurfaceSchema = z.object({
 }).strict()
 
 const publishedFlowSurfaceSchema = z.object({
-  ...publishedSurfaceBaseFields,
+  id: publishedSurfaceBaseFields.id,
+  title: publishedSurfaceBaseFields.title,
+  surfaceLayerItems: publishedFlowSurfaceLayerEntryListSchema,
   type: z.literal('flow'),
   backgroundColor: colorSchema.optional(),
   layout: z.object({
@@ -350,6 +366,14 @@ function hydrateScoped(entry: PublishedScopedLayerItem): ScopedLayerItem {
   return { item: hydrateLayer(entry.item), visibility: entry.visibility }
 }
 
+function hydrateFlowScoped(entry: PublishedFlowSurfaceLayerEntry): FlowSurfaceLayerEntry {
+  return {
+    item: hydrateLayer(entry.item),
+    visibility: entry.visibility,
+    ...(entry.bodyPlane === undefined ? {} : { bodyPlane: entry.bodyPlane }),
+  }
+}
+
 function hydrateGlobal(entry: PublishedGlobalLayerEntry): GlobalLayerEntry {
   return {
     item: hydrateLayer(entry.item),
@@ -382,7 +406,7 @@ function hydrateSurface(surface: PublishedCourseSurface): CourseProjectDocument[
     }
   }
   if (surface.type === 'flow') {
-    return { ...surface, surfaceLayerItems: base.surfaceLayerItems }
+    return { ...surface, surfaceLayerItems: surface.surfaceLayerItems.map(hydrateFlowScoped) }
   }
   return {
     ...surface,

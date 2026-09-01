@@ -20,6 +20,7 @@ import {
   courseNetworkDeclarationSchema,
   courseProjectDocumentSchema,
   flowBlockSchema,
+  flowSurfaceLayerEntrySchema,
   globalLayerEntrySchema,
   scopedLayerItemSchema,
 } from '@/shared/courseProjectSchema'
@@ -203,7 +204,7 @@ describe('Course Project V9 core contract', () => {
     }).success).toBe(false)
   })
 
-  it('adds a strict optional plane only to global entries and allows equal cross-owner order', () => {
+  it('keeps global and Flow body planes strict on their own entry contracts', () => {
     const project = createBlankCourseProject({ now: NOW })
     const controller = project.globalLayerItems[0]
     const surface = project.surfaces[0]
@@ -230,6 +231,27 @@ describe('Course Project V9 core contract', () => {
       visibility: { mode: 'all', locationIds: [] },
       plane: 'overlay',
     }).success).toBe(false)
+
+    const flowEntry = {
+      item: { ...local, layerItemId: 'flow-body-plane' },
+      visibility: { mode: 'all' as const, locationIds: [] },
+      bodyPlane: 'underlay' as const,
+    }
+    expect(flowSurfaceLayerEntrySchema.parse(flowEntry)).toEqual(flowEntry)
+    expect(flowSurfaceLayerEntrySchema.safeParse({
+      ...flowEntry,
+      bodyPlane: 'middle',
+    }).success).toBe(false)
+    expect(scopedLayerItemSchema.safeParse(flowEntry).success).toBe(false)
+
+    const flowProject = createBlankFlowCourseProject({ now: NOW })
+    const flowSurface = flowProject.surfaces[0]
+    if (flowSurface?.type !== 'flow') throw new Error('expected blank Flow surface')
+    flowSurface.surfaceLayerItems.push(flowEntry)
+    const parsedFlow = courseProjectDocumentSchema.parse(flowProject)
+    const parsedFlowSurface = parsedFlow.surfaces[0]
+    if (parsedFlowSurface?.type !== 'flow') throw new Error('expected parsed Flow surface')
+    expect(parsedFlowSurface.surfaceLayerItems[0]?.bodyPlane).toBe('underlay')
   })
 
   it('validates declared course-state references in global and local interactions', () => {

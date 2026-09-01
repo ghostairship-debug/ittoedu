@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { composeCourseProjectLocation } from '@/shared/courseLayerComposition'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { createTextNode } from '@/renderer/project/createProject'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -329,5 +331,47 @@ describe('Course Project V9 layer composition', () => {
 
     expect(globals.every((candidate) => candidate.globalPlane === 'overlay')).toBe(true)
     expect(globals.every((candidate) => candidate.stackOrder > contentEnd)).toBe(true)
+  })
+
+  it('resolves missing Flow body planes to Overlay and orders explicit Underlay before it', () => {
+    const fixture = listCourseProjectV9Fixtures().find((candidate) => candidate.id === 'flow')
+    if (!fixture) throw new Error('missing Flow fixture')
+    const project = structuredClone(fixture.data.project)
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'flow') throw new Error('expected Flow fixture')
+    surface.surfaceLayerItems = [
+      {
+        item: sceneNodeToCourseLayerItem(createTextNode({
+          id: 'flow-legacy-overlay',
+          name: '旧工程上层',
+          text: '上层',
+        }), 1),
+        visibility: { mode: 'all', locationIds: [] },
+      },
+      {
+        item: sceneNodeToCourseLayerItem(createTextNode({
+          id: 'flow-explicit-underlay',
+          name: '正文下层',
+          text: '下层',
+        }), 9_000),
+        bodyPlane: 'underlay',
+        visibility: { mode: 'all', locationIds: [] },
+      },
+    ]
+    const canonical = courseProjectDocumentSchema.parse(project)
+    const composition = composeCourseProjectLocation({
+      project: canonical,
+      locationId: 'location-flow',
+      stateId: null,
+    })
+    expect(composition.entries.map((candidate) => candidate.item.layerItemId)).toEqual([
+      'flow-explicit-underlay',
+      'flow-legacy-overlay',
+    ])
+    expect(composition.entries.map((candidate) => candidate.flowBodyPlane)).toEqual([
+      'underlay',
+      'overlay',
+    ])
+    expect(composition.entries.every((candidate) => candidate.globalPlane === null)).toBe(true)
   })
 })

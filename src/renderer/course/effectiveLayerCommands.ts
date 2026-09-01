@@ -735,10 +735,21 @@ export function duplicateEffectiveLayerItem(
       if (current.source === 'surface' && current.surfaceId) {
         const surface = draft.surfaces.find((candidate) => candidate.id === current.surfaceId)
         if (!surface) throw new Error('当前内容表面已失效')
-        surface.surfaceLayerItems.push({
+        const scoped: ScopedLayerItem = {
           item: duplicate,
           visibility: structuredClone(current.scoped?.visibility ?? { mode: 'all', locationIds: [] }),
-        })
+        }
+        if (surface.type === 'flow') {
+          const sourceEntry = surface.surfaceLayerItems.find(
+            (entry) => entry.item.layerItemId === current.item.layerItemId,
+          )
+          surface.surfaceLayerItems.push({
+            ...scoped,
+            bodyPlane: sourceEntry?.bodyPlane ?? 'overlay',
+          })
+        } else {
+          surface.surfaceLayerItems.push(scoped)
+        }
       } else if (current.source === 'scene' && current.surfaceId && current.sceneId) {
         const surface = draft.surfaces.find((candidate) => candidate.id === current.surfaceId)
         if (!surface || surface.type !== 'slide') throw new Error('当前幻灯片已失效')
@@ -929,6 +940,41 @@ export function reorderEffectiveLayerItems(
   if (stale) return stale
   try {
     const located = resolveEffectiveLayerTarget(document, target)
+    if (located.source === 'surface' && located.surfaceId) {
+      const surface = document.surfaces.find((candidate) => candidate.id === located.surfaceId)
+      if (surface?.type === 'flow') {
+        const entry = surface.surfaceLayerItems.find(
+          (candidate) => candidate.item.layerItemId === located.item.layerItemId,
+        )
+        if (!entry) return failLayerCommand(`找不到图层：${located.item.layerItemId}`)
+        const bodyPlane = entry.bodyPlane ?? 'overlay'
+        const siblings = surface.surfaceLayerItems
+          .filter((candidate) => (candidate.bodyPlane ?? 'overlay') === bodyPlane)
+          .map((candidate) => candidate.item)
+        const currentIds = ownerBackToFrontIds(siblings)
+        if (
+          orderedLayerItemIds.length !== currentIds.length ||
+          new Set(orderedLayerItemIds).size !== orderedLayerItemIds.length ||
+          orderedLayerItemIds.some((id) => !currentIds.includes(id))
+        ) {
+          return failLayerCommand('排序必须包含正文同一侧的全部页面浮层，且不能跨越正文边界。')
+        }
+        if (orderedLayerItemIds.every((id, index) => id === currentIds[index])) {
+          return succeedLayerNoop(document, '顺序未变化')
+        }
+        return runMutation(document, (draft) => {
+          const draftSurface = draft.surfaces.find((candidate) => candidate.id === located.surfaceId)
+          if (!draftSurface || draftSurface.type !== 'flow') throw new Error('当前 Flow 页面已失效')
+          const items = draftSurface.surfaceLayerItems
+            .filter((candidate) => (candidate.bodyPlane ?? 'overlay') === bodyPlane)
+            .map((candidate) => candidate.item)
+          if (!reorderOwnerOrderSlots(items, orderedLayerItemIds)) {
+            throw new Error('排序必须包含正文同一侧的全部页面浮层，且不能跨越正文边界。')
+          }
+          sortAllCourseLayerLists(draft)
+        }, '已调整正文同侧浮层顺序', options)
+      }
+    }
     const siblings = listOwnedLayerItems(document, located.source, {
       surfaceId: located.surfaceId,
       sceneId: located.sceneId,
@@ -987,10 +1033,15 @@ function insertIntoOwner(
   if (destination.source === 'surface' && destination.surfaceId) {
     const surface = project.surfaces.find((candidate) => candidate.id === destination.surfaceId)
     if (!surface) throw new Error('目标表面已失效')
-    surface.surfaceLayerItems.push({
+    const scoped = {
       item,
-      visibility: visibility ?? { mode: 'all', locationIds: [] },
-    })
+      visibility: visibility ?? { mode: 'all' as const, locationIds: [] },
+    }
+    if (surface.type === 'flow') {
+      surface.surfaceLayerItems.push({ ...scoped, bodyPlane: 'overlay' })
+    } else {
+      surface.surfaceLayerItems.push(scoped)
+    }
     return
   }
   if (destination.source === 'scene' && destination.sceneId) {

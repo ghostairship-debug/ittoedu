@@ -169,6 +169,9 @@ describe('Flow unified overlay projection', () => {
     )
     expect(projection.overlayRows.every((row) => row.membership === 'viewport-overlay')).toBe(true)
     expect(projection.overlayRows.every((row) => row.placement === 'viewport-overlay')).toBe(true)
+    expect(projection.overlayRows.find((row) => row.layerItemId === 'overlay-text')?.bodyPlane)
+      .toBe('overlay')
+    expect(projection.teacherController?.bodyPlane).toBeNull()
 
     const engineIds = getEffectiveCourseLayerOrder({
       project,

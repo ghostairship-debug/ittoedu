@@ -6,6 +6,7 @@ import type {
   CourseProjectDocument,
   CourseSurfaceType,
   FlowBlock,
+  FlowBodyLayerPlane,
   GlobalLayerPlane,
   LayerItem,
   LocationVisibility,
@@ -109,6 +110,8 @@ export interface EffectiveLayerProjectionRow {
   readonly impact: EffectiveLayerImpact
   /** Effective persisted/legacy global plane; non-global rows carry `null`. */
   readonly globalPlane: GlobalLayerPlane | null
+  /** Effective Flow surface plane around body; all other rows carry `null`. */
+  readonly flowBodyPlane: FlowBodyLayerPlane | null
   /** Canonical dense back-to-front slot from the shared composition. */
   readonly stackOrder: number
   readonly item: LayerItem
@@ -400,6 +403,7 @@ export function projectEffectiveLayers(
       sceneId: scene?.id ?? null,
       visibleAtLocation: entry.applicable,
       globalPlane: entry.globalPlane,
+      flowBodyPlane: entry.flowBodyPlane,
       stackOrder: entry.stackOrder,
     })
   })
@@ -457,6 +461,7 @@ function toRow(input: {
   readonly sceneId: string | null
   readonly visibleAtLocation: boolean
   readonly globalPlane: GlobalLayerPlane | null
+  readonly flowBodyPlane: FlowBodyLayerPlane | null
   readonly stackOrder: number
 }): EffectiveLayerProjectionRow {
   const { item, owner, scoped, state, viewing } = input
@@ -485,7 +490,9 @@ function toRow(input: {
   const ownerKey = ownerKeyFor(owner, viewing.surfaceId, owner === 'scene' ? input.sceneId : null)
   const reorderGroupKey = owner === 'global'
     ? `${ownerKey}:${input.globalPlane ?? 'overlay'}`
-    : ownerKey
+    : owner === 'surface' && input.flowBodyPlane !== null
+      ? `${ownerKey}:flow-body:${input.flowBodyPlane}`
+      : ownerKey
 
   return Object.freeze({
     id: item.layerItemId,
@@ -514,6 +521,7 @@ function toRow(input: {
     stateOverrideApplied,
     impact,
     globalPlane: input.globalPlane,
+    flowBodyPlane: input.flowBodyPlane,
     stackOrder: input.stackOrder,
     item,
   })

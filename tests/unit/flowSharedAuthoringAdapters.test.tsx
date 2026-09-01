@@ -46,6 +46,7 @@ import {
   insertFlowSharedMedia,
   insertFlowSharedRuntime,
   insertFlowSharedShape,
+  patchFlowOverlayBodyPlane,
   readFlowSharedOwnership,
   resolveFlowMediaInsertPlacement,
   setFlowOverlayVisibleAtLocation,
@@ -260,6 +261,38 @@ function idleSelection(): FlowEditorSelection {
 }
 
 describe('Flow shared authoring adapters', () => {
+  it('moves only page overlays across the body as one revisioned command', () => {
+    const project = createFlowProject()
+    const selection = selectFlowOverlay(project, 'h1', ['overlay-text'])
+    const moved = patchFlowOverlayBodyPlane(project, selection, 'underlay', {
+      expectedRevision: project.revision,
+      now: NOW,
+    })
+    expect(moved.ok).toBe(true)
+    expect(moved.historyEntry).toBe(true)
+    expect(moved.nextDocument?.revision).toBe(project.revision + 1)
+    expect(flowOf(project).surfaceLayerItems[0]?.bodyPlane).toBeUndefined()
+    expect(flowOf(moved.nextDocument!).surfaceLayerItems[0]?.bodyPlane).toBe('underlay')
+
+    const unchanged = patchFlowOverlayBodyPlane(
+      moved.nextDocument!,
+      moved.selection!,
+      'underlay',
+      { expectedRevision: moved.nextDocument!.revision },
+    )
+    expect(unchanged.ok).toBe(true)
+    expect(unchanged.historyEntry).toBe(false)
+    expect(unchanged.nextDocument).toBe(moved.nextDocument)
+
+    const globalSelection = selectFlowOverlay(project, 'h1', ['teacher-controller-main'], 'global')
+    const rejected = patchFlowOverlayBodyPlane(project, globalSelection, 'underlay', {
+      expectedRevision: project.revision,
+    })
+    expect(rejected.ok).toBe(false)
+    expect(rejected.historyEntry).toBe(false)
+    expect(rejected.nextDocument).toBeUndefined()
+  })
+
   it('inserts image, video and audio as in-document media by default and keeps them off layers', () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlock(project, 'h1', 'p-body')

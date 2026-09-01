@@ -3576,6 +3576,13 @@
                         "locationIds"
                       ],
                       "additionalProperties": false
+                    },
+                    "bodyPlane": {
+                      "type": "string",
+                      "enum": [
+                        "underlay",
+                        "overlay"
+                      ]
                     }
                   },
                   "required": [

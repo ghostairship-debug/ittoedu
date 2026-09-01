@@ -3,6 +3,7 @@ import type {
   CourseLocation,
   CourseProjectDocument,
   CourseSurfaceType,
+  FlowBodyLayerPlane,
   GlobalLayerPlane,
   LayerItem,
   LayerItemOverride,
@@ -32,6 +33,8 @@ export interface CourseLayerCompositionEntry<Item> {
   readonly initiallyVisible: boolean
   /** Resolved persisted/legacy global plane; non-global entries carry `null`. */
   readonly globalPlane: GlobalLayerPlane | null
+  /** Flow surface plane around semantic body; all other entries carry `null`. */
+  readonly flowBodyPlane: FlowBodyLayerPlane | null
   /**
    * Dense back-to-front paint slot for the current composition. This is a
    * read-model fact only: renderers must not write it back to `item.order`.
@@ -90,6 +93,7 @@ type UnstackedCompositionEntry<Item> = Omit<
 >
 type ComposableScopedLayerItem<Item extends ComposableLayerItem> = {
   readonly item: Item
+  readonly bodyPlane?: FlowBodyLayerPlane
   readonly visibility: {
     readonly mode: 'all' | 'include' | 'exclude'
     readonly locationIds: readonly string[]
@@ -274,7 +278,8 @@ function assignCompositionStackOrder<Item extends ComposableLayerItem>(
   const sorted = [...entries].sort(byAuthoredOrder)
   const ordered = [
     ...sorted.filter((entry) => entry.source === 'global' && entry.globalPlane === 'underlay'),
-    ...sorted.filter((entry) => entry.source !== 'global'),
+    ...sorted.filter((entry) => entry.source === 'surface' && entry.flowBodyPlane === 'underlay'),
+    ...sorted.filter((entry) => entry.source !== 'global' && entry.flowBodyPlane !== 'underlay'),
     ...sorted.filter((entry) => entry.source === 'global' && entry.globalPlane === 'overlay'),
   ]
   return ordered.map((entry, stackOrder) => ({ ...entry, stackOrder }))
@@ -331,6 +336,7 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
     source: CourseLayerCompositionSource,
     applicable: boolean,
     globalPlane: GlobalLayerPlane | null = null,
+    flowBodyPlane: FlowBodyLayerPlane | null = null,
   ): void => {
     const mounted = applicable && item.visible
     entries.push({
@@ -340,6 +346,7 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
       mounted,
       initiallyVisible: mounted && item.playbackInitialVisibility !== 'hidden',
       globalPlane,
+      flowBodyPlane,
       item,
     })
   }
@@ -355,7 +362,13 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
     )
   }
   for (const entry of surface.surfaceLayerItems) {
-    push(structuredClone(entry.item), 'surface', scopedApplies(entry, location.id))
+    push(
+      structuredClone(entry.item),
+      'surface',
+      scopedApplies(entry, location.id),
+      null,
+      surface.type === 'flow' ? (entry.bodyPlane ?? 'overlay') : null,
+    )
   }
   if (localSource) {
     for (const item of localItems) push(item, localSource, true)

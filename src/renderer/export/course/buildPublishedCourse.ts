@@ -15,6 +15,7 @@ import type {
   CourseProjectDocument,
   CourseSurfaceDocument,
   FlowBlock,
+  FlowSurfaceLayerEntry,
   GlobalLayerEntry,
   GlobalLayerPlane,
   LayerItem,
@@ -31,6 +32,7 @@ import {
   type PublishedCourseSurface,
   type PublishedCourseV2Payload,
   type PublishedGlobalLayerEntry,
+  type PublishedFlowSurfaceLayerEntry,
   type PublishedLayerItem,
   type PublishedRuntimeLayerItem,
   type PublishedScopedLayerItem,
@@ -697,6 +699,17 @@ function publishScoped(
   }
 }
 
+function publishFlowScoped(
+  sources: CoursePublishSources,
+  entry: FlowSurfaceLayerEntry,
+): PublishedFlowSurfaceLayerEntry {
+  return {
+    item: publishLayerItem(sources, entry.item),
+    visibility: cloneJson(entry.visibility),
+    bodyPlane: entry.bodyPlane ?? 'overlay',
+  }
+}
+
 function publishGlobalScoped(
   sources: CoursePublishSources,
   effectivePlanes: ReadonlyMap<string, GlobalLayerPlane>,
@@ -785,6 +798,7 @@ function publishSurface(
     return {
       ...base,
       type: 'flow',
+      surfaceLayerItems: surface.surfaceLayerItems.map((entry) => publishFlowScoped(sources, entry)),
       ...(surface.backgroundColor !== undefined ? { backgroundColor: surface.backgroundColor } : {}),
       layout: cloneJson(surface.layout),
       blocks: publishFlowBlocks(sources, surface.blocks),

@@ -8,6 +8,7 @@ import {
 } from '../../../player/surfaces/flow/flowModel'
 
 export const FLOW_PRINT_EXCLUDES_RUNTIME_TOC = false as const
+export const FLOW_PRINT_INCLUDES_FLOATING_LAYERS = false as const
 
 export type FlowPrintPageSize = MixedPrintPlan['pageSize']
 export type FlowPrintOrientation = MixedPrintPlan['orientation']
@@ -75,6 +76,9 @@ export interface FlowPrintPlan {
   readonly nodes: readonly FlowPrintNode[]
   /** Runtime TOC chrome is session UI and must never enter print/PDF/DOCX. */
   readonly includesRuntimeToc: typeof FLOW_PRINT_EXCLUDES_RUNTIME_TOC
+  /** Absolute Flow overlays are intentionally omitted from reflowed print/DOCX. */
+  readonly includesFloatingLayers: typeof FLOW_PRINT_INCLUDES_FLOATING_LAYERS
+  readonly omittedFloatingLayerCount: number
 }
 
 export interface BuildFlowPrintPlanOptions {
@@ -97,6 +101,8 @@ export function buildFlowPrintPlan(
     orientation: options.orientation ?? 'portrait',
     nodes,
     includesRuntimeToc: FLOW_PRINT_EXCLUDES_RUNTIME_TOC,
+    includesFloatingLayers: FLOW_PRINT_INCLUDES_FLOATING_LAYERS,
+    omittedFloatingLayerCount: surface.surfaceLayerItems.length,
   }
 }
 
@@ -131,7 +137,7 @@ export function renderFlowPrintBodyHtml(plan: FlowPrintPlan): string {
 
 export function renderFlowPrintHtml(plan: FlowPrintPlan): string {
   const body = renderFlowPrintBodyHtml(plan)
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(plan.title)}</title></head><body class="flow-print-document" data-flow-print-surface="${escapeHtml(plan.surfaceId)}">${body}</body></html>`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(plan.title)}</title></head><body class="flow-print-document" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${body}</body></html>`
 }
 
 export function flowPrintPlanHasRuntimeToc(plan: FlowPrintPlan): boolean {

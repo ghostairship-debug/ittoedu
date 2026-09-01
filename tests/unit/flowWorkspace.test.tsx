@@ -181,6 +181,14 @@ function createFlowProject(): CourseProjectDocument {
           text: '浮层',
         }), 20),
         visibility: { mode: 'all', locationIds: [] },
+      }, {
+        item: sceneNodeToCourseLayerItem(createTextNode({
+          id: 'underlay-text',
+          name: '正文下方浮层',
+          text: '正文下方',
+        }), 21),
+        bodyPlane: 'underlay',
+        visibility: { mode: 'all', locationIds: [] },
       }],
       blocks,
     }],
@@ -224,33 +232,38 @@ describe('FlowWorkspace paper', () => {
     const paper = screen.getByTestId('flow-paper')
     const scroll = screen.getByTestId('flow-workspace-scroll')
     const underlay = screen.getByTestId('flow-authoring-global-underlay')
-    const surface = screen.getByTestId('flow-authoring-surface-overlay')
+    const surfaceUnderlay = screen.getByTestId('flow-authoring-surface-underlay')
+    const surfaceOverlay = screen.getByTestId('flow-authoring-surface-overlay')
     const overlay = screen.getByTestId('flow-authoring-layer-overlay')
     const selectionPlane = screen.getByTestId('flow-authoring-selection-plane')
     expect(workspace.getAttribute('data-flow-not-slide-stage')).toBe('true')
     expect(paper.getAttribute('data-flow-reading-width')).toBe('760')
     expect(paper).toHaveStyle({ maxWidth: '760px', background: 'transparent' })
-    expect(scroll).toHaveStyle({ overflow: 'auto', zIndex: '1' })
+    expect(scroll).toHaveStyle({ overflow: 'auto', zIndex: '2' })
     expect(workspace).not.toHaveStyle({ width: '1280px' })
     expect(workspace).not.toHaveStyle({ height: '720px' })
     expect(underlay.parentElement).toBe(workspace)
-    expect(surface.parentElement).toBe(workspace)
+    expect(surfaceUnderlay.parentElement).toBe(workspace)
+    expect(surfaceOverlay.parentElement).toBe(workspace)
     expect(overlay.parentElement).toBe(workspace)
     expect(selectionPlane.parentElement).toBe(workspace)
-    expect([...workspace.children].slice(0, 5)).toEqual([
+    expect([...workspace.children].slice(0, 6)).toEqual([
       underlay,
+      surfaceUnderlay,
       scroll,
-      surface,
+      surfaceOverlay,
       overlay,
       selectionPlane,
     ])
     expect(underlay).toHaveStyle({ zIndex: '0', pointerEvents: 'none' })
-    expect(surface).toHaveStyle({ zIndex: '2', pointerEvents: 'none' })
-    expect(overlay).toHaveStyle({ zIndex: '3', pointerEvents: 'none' })
-    expect(selectionPlane).toHaveStyle({ zIndex: '4', pointerEvents: 'none' })
+    expect(surfaceUnderlay).toHaveStyle({ zIndex: '1', pointerEvents: 'none' })
+    expect(surfaceOverlay).toHaveStyle({ zIndex: '3', pointerEvents: 'none' })
+    expect(overlay).toHaveStyle({ zIndex: '4', pointerEvents: 'none' })
+    expect(selectionPlane).toHaveStyle({ zIndex: '5', pointerEvents: 'none' })
     expect(screen.getByTestId('flow-layer-card-global-underlay').parentElement).toBe(underlay)
     expect(screen.getByTestId('flow-layer-card-overlay-text')).toBeTruthy()
-    expect(screen.getByTestId('flow-layer-card-overlay-text').parentElement).toBe(surface)
+    expect(screen.getByTestId('flow-layer-card-underlay-text').parentElement).toBe(surfaceUnderlay)
+    expect(screen.getByTestId('flow-layer-card-overlay-text').parentElement).toBe(surfaceOverlay)
     expect(screen.getByTestId('flow-layer-card-global-overlay').parentElement).toBe(overlay)
     expect(overlay).toHaveStyle({
       width: '1280px',

@@ -18,7 +18,7 @@ import type {
 } from '../../../shared/runtimeTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { CourseStateStore } from '../../CourseStateStore'
-import type { FlowBlock, GlobalLayerPlane } from '../../../shared/courseProjectTypes'
+import type { FlowBlock, FlowBodyLayerPlane, GlobalLayerPlane } from '../../../shared/courseProjectTypes'
 import {
   TeacherControllerDom,
   stageBoundsFromElement,
@@ -97,6 +97,7 @@ interface PublishedFlowOverlayEntry {
   readonly item: PublishedLayerItem
   readonly source: 'global' | 'surface'
   readonly globalPlane: GlobalLayerPlane | null
+  readonly flowBodyPlane: FlowBodyLayerPlane | null
   readonly stackOrder: number
 }
 
@@ -165,6 +166,7 @@ export class FlowSurfaceHost {
   #root: HTMLElement | null = null
   #article: HTMLElement | null = null
   #globalUnderlay: HTMLElement | null = null
+  #surfaceUnderlay: HTMLElement | null = null
   #surfaceOverlay: HTMLElement | null = null
   /** Legacy overlay handle and the physical global Overlay plane. */
   #overlay: HTMLElement | null = null
@@ -295,13 +297,15 @@ export class FlowSurfaceHost {
       root.hidden = !this.#active
 
       const globalUnderlay = createFlowRuntimePlane(dom, 'global-underlay', 0)
-      const surfaceOverlay = createFlowRuntimePlane(dom, 'surface', 2)
-      const overlay = createFlowRuntimePlane(dom, 'global-overlay', 3, true)
-      root.append(globalUnderlay, surfaceOverlay, overlay)
+      const surfaceUnderlay = createFlowRuntimePlane(dom, 'surface-underlay', 1)
+      const surfaceOverlay = createFlowRuntimePlane(dom, 'surface-overlay', 3)
+      const overlay = createFlowRuntimePlane(dom, 'global-overlay', 4, true)
+      root.append(globalUnderlay, surfaceUnderlay, surfaceOverlay, overlay)
 
       container.appendChild(root)
       this.#root = root
       this.#globalUnderlay = globalUnderlay
+      this.#surfaceUnderlay = surfaceUnderlay
       this.#surfaceOverlay = surfaceOverlay
       this.#overlay = overlay
       this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
@@ -449,6 +453,7 @@ export class FlowSurfaceHost {
       this.#root = null
       this.#article = null
       this.#globalUnderlay = null
+      this.#surfaceUnderlay = null
       this.#surfaceOverlay = null
       this.#overlay = null
       this.#container = null
@@ -689,6 +694,7 @@ export class FlowSurfaceHost {
     if (
       !this.#root
       || !this.#globalUnderlay
+      || !this.#surfaceUnderlay
       || !this.#surfaceOverlay
       || !this.#overlay
     ) return
@@ -760,7 +766,7 @@ export class FlowSurfaceHost {
 
   #renderOverlay(surface: PublishedFlowSurface): void {
     const overlay = this.#overlay
-    if (!overlay || !this.#globalUnderlay || !this.#surfaceOverlay) return
+    if (!overlay || !this.#globalUnderlay || !this.#surfaceUnderlay || !this.#surfaceOverlay) return
     this.#destroyController()
     for (const plane of this.#layerPlanes()) plane.replaceChildren()
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
@@ -825,13 +831,15 @@ export class FlowSurfaceHost {
   }
 
   #layerPlanes(): HTMLElement[] {
-    return [this.#globalUnderlay, this.#surfaceOverlay, this.#overlay]
+    return [this.#globalUnderlay, this.#surfaceUnderlay, this.#surfaceOverlay, this.#overlay]
       .filter((plane): plane is HTMLElement => plane !== null)
   }
 
   #layerPlaneForEntry(entry: PublishedFlowOverlayEntry): HTMLElement | null {
     if (isPublishedTeacherController(entry.item)) return this.#overlay
-    if (entry.source === 'surface') return this.#surfaceOverlay
+    if (entry.source === 'surface') {
+      return entry.flowBodyPlane === 'underlay' ? this.#surfaceUnderlay : this.#surfaceOverlay
+    }
     return entry.globalPlane === 'underlay' ? this.#globalUnderlay : this.#overlay
   }
 
@@ -1063,7 +1071,7 @@ function tryResolveLocation(
 
 function createFlowRuntimePlane(
   dom: Document,
-  plane: 'global-underlay' | 'surface' | 'global-overlay',
+  plane: 'global-underlay' | 'surface-underlay' | 'surface-overlay' | 'global-overlay',
   zIndex: number,
   legacyOverlay = false,
 ): HTMLElement {
@@ -1131,6 +1139,7 @@ export function publishedFlowOverlayEntries(
       item: entry.item,
       source: entry.source as 'global' | 'surface',
       globalPlane: entry.globalPlane,
+      flowBodyPlane: entry.flowBodyPlane,
       stackOrder: entry.stackOrder,
     }))
 }
@@ -1186,6 +1195,7 @@ function renderStaticOverlayItem(
   entry: {
     item: PublishedLayerItem
     source: 'global' | 'surface'
+    flowBodyPlane?: FlowBodyLayerPlane | null
     stackOrder: number
   },
   resolveAsset: (assetId: string) => string | undefined,
@@ -1203,6 +1213,7 @@ function renderStaticOverlayItem(
   const wrap = dom.createElement('div')
   wrap.dataset.flowOverlayItem = entry.item.layerItemId
   wrap.dataset.flowOverlaySource = entry.source
+  if (entry.flowBodyPlane) wrap.dataset.flowBodyPlane = entry.flowBodyPlane
   if (entry.item.paperSpace === 'paper') {
     wrap.dataset.flowPaperSpace = 'paper'
   }
@@ -1356,7 +1367,7 @@ function renderFlowArticle(
   article.id = flowRuntimeTocPageAnchorId(surface.id)
   article.style.boxSizing = 'border-box'
   article.style.position = 'relative'
-  article.style.zIndex = '1'
+  article.style.zIndex = '2'
   article.style.height = '100%'
   article.style.overflow = 'auto'
   article.style.pointerEvents = 'auto'

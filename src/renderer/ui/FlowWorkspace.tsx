@@ -1843,7 +1843,12 @@ export function FlowWorkspace({
   const globalUnderlayLayers = overlayLayers.filter((layer) => (
     layer.source === 'global' && layer.globalPlane === 'underlay'
   ))
-  const surfaceOverlayLayers = overlayLayers.filter((layer) => layer.source === 'surface')
+  const surfaceUnderlayLayers = overlayLayers.filter((layer) => (
+    layer.source === 'surface' && layer.flowBodyPlane === 'underlay'
+  ))
+  const surfaceOverlayLayers = overlayLayers.filter((layer) => (
+    layer.source === 'surface' && layer.flowBodyPlane !== 'underlay'
+  ))
   const globalOverlayLayers = overlayLayers.filter((layer) => (
     layer.source === 'global' && layer.globalPlane !== 'underlay'
   ))
@@ -2023,6 +2028,7 @@ export function FlowWorkspace({
         data-testid={`flow-layer-card-${layer.selectionId}`}
         data-controller-page-preview={controllerPagePreview || undefined}
         data-flow-global-plane={layer.globalPlane ?? undefined}
+        data-flow-body-plane={layer.flowBodyPlane ?? undefined}
         aria-hidden={controllerPagePreview || inertVisual || undefined}
         aria-label={interactive ? layer.item.label || '浮层' : undefined}
         {...(inertVisual ? { inert: true } : {})}
@@ -2139,6 +2145,14 @@ export function FlowWorkspace({
         {globalUnderlayLayers.map(renderOverlayVisual)}
       </div>
       <div
+        className="flow-authoring-layer-plane flow-authoring-layer-plane--surface-underlay"
+        data-flow-layer-plane="surface-underlay"
+        data-testid="flow-authoring-surface-underlay"
+        style={overlayPlaneStyle(1)}
+      >
+        {surfaceUnderlayLayers.map(renderOverlayVisual)}
+      </div>
+      <div
         ref={scrollRef}
         className="flow-workspace__scroll flow-media-query-root"
         data-testid="flow-workspace-scroll"
@@ -2149,7 +2163,7 @@ export function FlowWorkspace({
         style={{
           flex: 1,
           position: 'relative',
-          zIndex: 1,
+          zIndex: 2,
           overflow: 'auto',
           height: '100%',
           padding: '24px 16px 48px',
@@ -2179,10 +2193,10 @@ export function FlowWorkspace({
         </article>
       </div>
       <div
-        className="flow-authoring-layer-plane flow-authoring-layer-plane--surface"
-        data-flow-layer-plane="surface"
+        className="flow-authoring-layer-plane flow-authoring-layer-plane--surface-overlay"
+        data-flow-layer-plane="surface-overlay"
         data-testid="flow-authoring-surface-overlay"
-        style={overlayPlaneStyle(2)}
+        style={overlayPlaneStyle(3)}
       >
         {surfaceOverlayLayers.map(renderOverlayVisual)}
       </div>
@@ -2191,14 +2205,14 @@ export function FlowWorkspace({
         className="flow-authoring-layer-plane flow-authoring-layer-plane--global-overlay flow-authoring-layer-overlay"
         data-flow-layer-plane="global-overlay"
         data-testid="flow-authoring-layer-overlay"
-        style={overlayPlaneStyle(3)}
+        style={overlayPlaneStyle(4)}
       >
         {globalOverlayLayers.map(renderOverlayVisual)}
       </div>
       <div
         className="flow-authoring-selection-plane"
         data-testid="flow-authoring-selection-plane"
-        style={overlayPlaneStyle(4)}
+        style={overlayPlaneStyle(5)}
       >
         {overlayLayers.map(renderSelectionChrome)}
       </div>

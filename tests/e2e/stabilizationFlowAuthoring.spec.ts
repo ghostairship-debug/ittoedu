@@ -36,15 +36,6 @@ const MEDIA_PROBES = [
   { blockId: 'wave-c-media-wide', layout: 'wide', tier: 'wide' },
   { blockId: 'wave-c-media-full', layout: 'full-width', tier: 'container' },
 ] as const
-const OUTLINE_IDS = [
-  'flow-heading',
-  'flow-paragraph',
-  'flow-formula',
-  'flow-section',
-  'flow-section-note',
-  'wave-c-media-edit',
-  ...MEDIA_PROBES.map(({ blockId }) => blockId),
-]
 
 interface Diagnostics {
   pageErrors: string[]
@@ -492,7 +483,7 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(page.getByTestId('formula-edit-dialog')).toHaveCount(0)
     })
 
-    await test.step('real range formatting stays local while body outline and overlay order stay separate', async () => {
+    await test.step('real range formatting stays local while a page overlay crosses the single body boundary', async () => {
       const formatBaseline = readProject(projectPath)
       const paragraph = page.getByTestId('flow-block-flow-paragraph')
       await paragraph.dblclick()
@@ -547,27 +538,39 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(editor).toHaveCount(0)
 
       await page.getByRole('tab', { name: '图层' }).click()
-      const outline = page.getByTestId('flow-content-outline')
       const overlayRegion = page.getByTestId('flow-overlay-layers')
-      await expect(outline).toContainText('正文大纲')
-      await expect(page.getByTestId('flow-content-placement'))
-        .toHaveText('归属：当前 Flow 页面 · 定位：跟随稿纸')
+      const bodyBoundary = page.getByTestId('flow-body-boundary')
+      await expect(bodyBoundary).toHaveCount(1)
+      await expect(bodyBoundary).toContainText('正文')
+      await expect(bodyBoundary).toContainText('全部 FlowBlock · 跟随稿纸')
+      await expect(page.locator('[data-testid^="flow-outline-block-"]')).toHaveCount(0)
+      await expect(page.getByTestId('nodes-layer-group-surface-overlay'))
+        .toContainText('正文上方')
       await expect(page.getByTestId('flow-overlay-placement'))
-        .toHaveText('归属：全课 / 当前 Flow 页面 · 定位：钉在视口')
-      expect(await outline.locator('[data-testid^="flow-outline-block-"]').evaluateAll((rows) => (
-        rows.map((row) => row.getAttribute('data-testid')?.replace('flow-outline-block-', ''))
-      ))).toEqual(OUTLINE_IDS)
-      await expect(page.getByTestId('flow-outline-block-flow-section-note'))
-        .toHaveAttribute('data-depth', '1')
-      await expect(outline.locator('.drag-handle')).toHaveCount(0)
+        .toHaveText('页面浮层可排在正文上方或下方；正文内部顺序在稿纸中编辑。')
       const overlayRow = page.getByTestId('node-item-wave-c-overlay')
       await expect(overlayRegion.locator('[data-testid="node-item-wave-c-overlay"]')).toBeVisible()
       await expect(overlayRow.locator('.drag-handle')).toBeVisible()
-      await expect(overlayRegion).toContainText('可拖动调整前后层级')
+      await expect(page.getByTestId('node-source-wave-c-overlay'))
+        .toContainText('归属：当前 Flow 页面 · 正文上方')
+      await expect(page.getByTestId('flow-authoring-surface-overlay')
+        .getByTestId('flow-layer-card-wave-c-overlay'))
+        .toHaveAttribute('data-flow-body-plane', 'overlay')
+
+      await page.getByTestId('flow-move-across-body-wave-c-overlay').click()
+      await expect(page.getByTestId('nodes-layer-group-surface-overlay')).toHaveCount(0)
+      await expect(page.getByTestId('nodes-layer-group-surface-underlay'))
+        .toContainText('正文下方')
+      await expect(page.getByTestId('node-source-wave-c-overlay'))
+        .toContainText('归属：当前 Flow 页面 · 正文下方')
+      await expect(page.getByTestId('flow-authoring-surface-underlay')
+        .getByTestId('flow-layer-card-wave-c-overlay'))
+        .toHaveAttribute('data-flow-body-plane', 'underlay')
 
       const saved = await saveCurrent(page, projectPath)
       const savedParagraph = requireBlock(requireFlowSurface(saved), 'flow-paragraph', 'paragraph')
-      expect(saved.revision).toBe(formatBaseline.revision + 1)
+      expect(requireFlowSurface(saved).surfaceLayerItems[0]?.bodyPlane).toBe('underlay')
+      expect(saved.revision).toBe(formatBaseline.revision + 2)
       expect(savedParagraph.text).toBe(FORMAT_TEXT)
       expect(savedParagraph.runs).toEqual([
         { start: 2, end: 4, style: { bold: true } },
@@ -632,6 +635,9 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(preview).toBeVisible()
       const playerArticle = previewHost.getByTestId('flow-runtime-article')
       await expect(playerArticle).toBeVisible({ timeout: 15_000 })
+      await expect(previewHost.getByTestId('flow-runtime-surface-underlay')
+        .locator('[data-flow-overlay-item="wave-c-overlay"]'))
+        .toHaveAttribute('data-flow-body-plane', 'underlay')
       await expect(previewHost.locator('[data-flow-block-id="wave-c-media-content"] img'))
         .toHaveAttribute('src', /^(?:blob:|data:image\/)/)
       await expect(previewHost.locator('[data-flow-block-id="wave-c-media-wide"] img'))

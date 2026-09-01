@@ -2926,6 +2926,21 @@ button:disabled {
   color: var(--text-secondary);
 }
 
+.node-item--flow-plane {
+  grid-template-columns: 24px 24px minmax(0, 1fr) repeat(5, 28px);
+}
+
+.flow-body-boundary {
+  border-color: color-mix(in srgb, var(--accent, #5b9cff) 42%, transparent);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent, #5b9cff) 8%, transparent);
+}
+
+.flow-body-boundary--over {
+  border-color: var(--accent, #5b9cff);
+  background: color-mix(in srgb, var(--accent, #5b9cff) 18%, transparent);
+}
+
 .node-item > .icon-button {
   opacity: 0.72;
 }

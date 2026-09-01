@@ -347,6 +347,15 @@ describe('FlowSurfaceHost course session overlay', () => {
       },
       visibility: { mode: 'all', locationIds: [] },
     })
+    surface.surfaceLayerItems.push({
+      item: {
+        ...overlayText(),
+        layerItemId: 'flow-local-underlay',
+        order: 1_999,
+      },
+      bodyPlane: 'underlay',
+      visibility: { mode: 'all', locationIds: [] },
+    })
     course.globalLayerItems.push({
       plane: 'overlay',
       item: {
@@ -369,8 +378,11 @@ describe('FlowSurfaceHost course session overlay', () => {
     const globalUnderlay = container.querySelector<HTMLElement>(
       '[data-flow-layer-plane="global-underlay"]',
     )!
-    const surfacePlane = container.querySelector<HTMLElement>(
-      '[data-flow-layer-plane="surface"]',
+    const surfaceUnderlay = container.querySelector<HTMLElement>(
+      '[data-flow-layer-plane="surface-underlay"]',
+    )!
+    const surfaceOverlay = container.querySelector<HTMLElement>(
+      '[data-flow-layer-plane="surface-overlay"]',
     )!
     const globalOverlay = container.querySelector<HTMLElement>(
       '[data-flow-layer-plane="global-overlay"]',
@@ -379,24 +391,33 @@ describe('FlowSurfaceHost course session overlay', () => {
     const underlayItem = container.querySelector<HTMLElement>(
       '[data-flow-overlay-item="flow-overlay-video"]',
     )!
+    const localUnderlay = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-local-underlay"]',
+    )!
 
-    expect([...host.rootElement!.children].slice(0, 4)).toEqual([
+    expect([...host.rootElement!.children].slice(0, 5)).toEqual([
       globalUnderlay,
+      surfaceUnderlay,
       article,
-      surfacePlane,
+      surfaceOverlay,
       globalOverlay,
     ])
     expect(host.rootElement?.style.backgroundColor).toBe('rgb(18, 52, 86)')
     expect(article.style.background).toBe('transparent')
     expect(globalUnderlay.style.zIndex).toBe('0')
-    expect(article.style.zIndex).toBe('1')
-    expect(surfacePlane.style.zIndex).toBe('2')
-    expect(globalOverlay.style.zIndex).toBe('3')
+    expect(surfaceUnderlay.style.zIndex).toBe('1')
+    expect(article.style.zIndex).toBe('2')
+    expect(surfaceOverlay.style.zIndex).toBe('3')
+    expect(globalOverlay.style.zIndex).toBe('4')
     expect(globalUnderlay.style.pointerEvents).toBe('none')
-    expect(surfacePlane.style.pointerEvents).toBe('none')
+    expect(surfaceUnderlay.style.pointerEvents).toBe('none')
+    expect(surfaceOverlay.style.pointerEvents).toBe('none')
     expect(globalOverlay.style.pointerEvents).toBe('none')
     expect(underlayItem.parentElement).toBe(globalUnderlay)
-    expect(local.parentElement).toBe(surfacePlane)
+    expect(localUnderlay.parentElement).toBe(surfaceUnderlay)
+    expect(local.parentElement).toBe(surfaceOverlay)
+    expect(local.dataset.flowBodyPlane).toBe('overlay')
+    expect(localUnderlay.dataset.flowBodyPlane).toBe('underlay')
     expect(controller.parentElement).toBe(globalOverlay)
     expect(laterGlobal.parentElement).toBe(globalOverlay)
     expect(Number(controller.style.zIndex)).toBeLessThan(Number(laterGlobal.style.zIndex))
@@ -476,6 +497,28 @@ describe('Flow print and DOCX helpers', () => {
     expect(documentXml).not.toContain('收起目录')
     await host.destroy()
   })
+
+  it('explicitly reports that reflowed print and DOCX omit page overlays', () => {
+    const surface = flowSurface()
+    surface.surfaceLayerItems.push({
+      item: overlayText(),
+      bodyPlane: 'underlay',
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const plan = buildFlowPrintPlan(surface)
+    expect(plan.includesFloatingLayers).toBe(false)
+    expect(plan.omittedFloatingLayerCount).toBe(1)
+    const html = renderFlowPrintHtml(plan)
+    expect(html).toContain('data-flow-floating-layers="omitted"')
+    expect(html).toContain('data-flow-omitted-floating-layer-count="1"')
+    expect(html).not.toContain('可交互提示')
+    const docx = buildFlowDocx(surface)
+    expect(docx.warnings).toContain('DOCX 采用正文重排，已省略 1 个页面浮层。')
+    expect(docx.report).toContainEqual({
+      disposition: 'omitted',
+      detail: 'DOCX 采用正文重排，已省略 1 个页面浮层。',
+    })
+  })
 })
 
 describe('FlowSurfaceHost playback controller and video', () => {
@@ -484,7 +527,8 @@ describe('FlowSurfaceHost playback controller and video', () => {
     const planes = [...container.querySelectorAll<HTMLElement>('[data-flow-layer-plane]')]
     expect(planes.map((plane) => plane.dataset.flowLayerPlane)).toEqual([
       'global-underlay',
-      'surface',
+      'surface-underlay',
+      'surface-overlay',
       'global-overlay',
     ])
     for (const plane of planes) {
@@ -775,7 +819,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
       },
     })
     const planes = [...container.querySelectorAll<HTMLElement>('[data-flow-layer-plane]')]
-    expect(planes).toHaveLength(3)
+    expect(planes).toHaveLength(4)
     expect(planes.every((plane) => plane.style.pointerEvents === 'none')).toBe(true)
 
     const frame = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
