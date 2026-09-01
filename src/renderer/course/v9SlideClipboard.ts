@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
+import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
+import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
 import {
   MAX_SCENE_INTERACTIONS,
   isNodeMotionAction,
@@ -8,6 +10,8 @@ import {
 } from '../../shared/interactionTypes'
 import type {
   CourseProjectDocument,
+  GlobalLayerEntry,
+  GlobalLayerPlane,
   LayerItem,
   SlidePresentationState,
   SlideSceneDocument,
@@ -18,6 +22,7 @@ import {
   type SlideAuthoringSessionRef,
 } from './slideEditorCommands'
 import { buildSlideEditorView } from './slideEditorView'
+import { allocateCourseLayerOrder, sortScopedLayerList } from './globalLayerCommands'
 
 /** V8 duplicate/paste offset. R2-D owns consecutive insertion stagger for new inserts. */
 export const SLIDE_SCENE_CLIPBOARD_OFFSET = 20
@@ -28,16 +33,35 @@ export interface V9SlideClipboardItem {
   readonly item: LayerItem
 }
 
-export interface V9SlideClipboardPayload {
+export interface V9SlideGlobalClipboardItem {
+  /** Canonical wrapper with the legacy effective plane explicitly materialized. */
+  readonly entry: Omit<GlobalLayerEntry, 'plane'> & { readonly plane: GlobalLayerPlane }
+}
+
+interface V9SlideClipboardPayloadBase {
   readonly projectId: string
-  readonly sourceScope: V9SlideClipboardScope
-  readonly items: readonly V9SlideClipboardItem[]
   readonly interactions: readonly InteractionRule[]
 }
+
+export interface V9SlideLocalClipboardPayload extends V9SlideClipboardPayloadBase {
+  readonly sourceScope: 'scene' | 'surface'
+  readonly items: readonly V9SlideClipboardItem[]
+}
+
+export interface V9SlideGlobalClipboardPayload extends V9SlideClipboardPayloadBase {
+  readonly sourceScope: 'global'
+  readonly items: readonly V9SlideGlobalClipboardItem[]
+}
+
+export type V9SlideClipboardPayload =
+  | V9SlideLocalClipboardPayload
+  | V9SlideGlobalClipboardPayload
 
 export const SLIDE_CLIPBOARD_EMPTY_REASON = '剪贴板为空，无法粘贴'
 export const SLIDE_CLIPBOARD_WRONG_OWNER_REASON =
   '当前 Slide scene 命令不能粘贴 global/surface 图层；请交给 R3'
+export const SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON =
+  '教师控制器为全局单份，不能通过剪贴板复制'
 
 function requireSlideLocation(project: CourseProjectDocument, locationId: string) {
   const location = project.locations.find((candidate) => candidate.id === locationId)
@@ -178,11 +202,13 @@ export function remapCopiedInteractionRules(
   rules: readonly InteractionRule[],
   idMap: ReadonlyMap<string, string>,
 ): InteractionRule[] {
+  const actionIdMap = new Map(
+    rules.flatMap((rule) => rule.actions.map(
+      (step) => [step.id, `action-${nanoid(10)}`] as const,
+    )),
+  )
   return rules.map((source) => {
     const rule = structuredClone(source)
-    const actionIdMap = new Map(
-      rule.actions.map((step) => [step.id, `action-${nanoid(10)}`] as const),
-    )
     rule.id = `rule-${nanoid(10)}`
     if ('nodeId' in rule.trigger) {
       rule.trigger.nodeId = idMap.get(rule.trigger.nodeId) ?? rule.trigger.nodeId
@@ -281,7 +307,7 @@ function showDuplicateInNamedState(
 export function copySlideSceneClipboard(
   session: SlideAuthoringSessionRef,
   layerItemIds: readonly string[],
-): V9SlideClipboardPayload {
+): V9SlideLocalClipboardPayload {
   const uniqueIds = [...new Set(layerItemIds)]
   if (uniqueIds.length === 0) throw new Error('没有可复制的选择')
   const layers = sceneLayers(session)
@@ -302,6 +328,51 @@ export function copySlideSceneClipboard(
       item: structuredClone(byId.get(layerItemId)!.item) as LayerItem,
     })),
     interactions: collectCopiedInteractionRules(scene.interactions, sourceIds).map(
+      (rule) => structuredClone(rule),
+    ),
+  }
+}
+
+/**
+ * Snapshots canonical global wrappers and their interaction subgraph without
+ * passing through the lossy V8 SceneNode projection. Legacy planes are frozen
+ * to their current effective value so a later paste cannot flip them.
+ */
+export function copySlideGlobalClipboard(
+  session: SlideAuthoringSessionRef,
+  layerItemIds: readonly string[],
+): V9SlideGlobalClipboardPayload {
+  if (session.scope !== 'global') {
+    throw new SlideCommandError(
+      SLIDE_REJECT_WRONG_OWNER,
+      '当前编辑范围不是全局层，不能复制 global 图层',
+    )
+  }
+  const uniqueIds = [...new Set(layerItemIds)]
+  if (uniqueIds.length === 0) throw new Error('没有可复制的选择')
+  const project = session.history.present
+  const byId = new Map(
+    project.globalLayerItems.map((entry) => [entry.item.layerItemId, entry] as const),
+  )
+  const missing = uniqueIds.find((id) => !byId.has(id))
+  if (missing !== undefined) {
+    throw new SlideCommandError('invalid-selection', '所选全局元素已失效，请重新选择')
+  }
+  if (uniqueIds.some((id) => isCourseTeacherControllerLayerItem(byId.get(id)?.item))) {
+    throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
+  }
+  const effectivePlanes = resolveEffectiveGlobalLayerPlanes(project.globalLayerItems)
+  const sourceIds = new Set(uniqueIds)
+  return {
+    projectId: project.id,
+    sourceScope: 'global',
+    items: uniqueIds.map((layerItemId) => {
+      const entry = structuredClone(byId.get(layerItemId)!)
+      const plane = effectivePlanes.get(layerItemId)
+      if (!plane) throw new Error(`找不到全局图层平面：${layerItemId}`)
+      return { entry: { ...entry, plane } }
+    }),
+    interactions: collectCopiedInteractionRules(project.globalInteractions, sourceIds).map(
       (rule) => structuredClone(rule),
     ),
   }
@@ -358,4 +429,69 @@ export function mutatePasteSlideSceneClipboard(
   scene.interactions.push(...remapped)
   sortSlideSceneLayerItems(scene)
   return pastedIds
+}
+
+/** Mutates a draft document; the caller owns the single history commit. */
+export function mutatePasteSlideGlobalClipboard(
+  draft: CourseProjectDocument,
+  clipboard: V9SlideClipboardPayload,
+): string[] {
+  if (clipboard.items.length === 0) throw new Error(SLIDE_CLIPBOARD_EMPTY_REASON)
+  if (clipboard.sourceScope !== 'global') {
+    throw new SlideCommandError(
+      SLIDE_REJECT_WRONG_OWNER,
+      '当前全局层不能粘贴 scene/surface 图层',
+    )
+  }
+  if (clipboard.projectId !== draft.id) {
+    throw new Error('剪贴板不属于当前课件，请重新复制')
+  }
+  if (draft.globalLayerItems.length + clipboard.items.length > MAX_SCENE_NODES) {
+    throw new Error(`粘贴后将超过全局层 ${MAX_SCENE_NODES} 个元素的上限。`)
+  }
+  if (clipboard.items.some(({ entry }) => isCourseTeacherControllerLayerItem(entry.item))) {
+    throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
+  }
+  const idMap = new Map<string, string>()
+  for (const { entry } of clipboard.items) {
+    idMap.set(
+      entry.item.layerItemId,
+      `${authoringDuplicateIdPrefix(entry.item)}-${nanoid(10)}`,
+    )
+  }
+  const remapped = remapCopiedInteractionRules(clipboard.interactions, idMap)
+  if (draft.globalInteractions.length + remapped.length > MAX_SCENE_INTERACTIONS) {
+    throw new Error(`全局层最多 ${MAX_SCENE_INTERACTIONS} 条规则`)
+  }
+  const prepared = clipboard.items.map(({ entry }) => {
+    const nextId = idMap.get(entry.item.layerItemId)!
+    return {
+      source: entry,
+      nextId,
+      duplicate: cloneClipboardItem(entry.item, nextId, idMap),
+    }
+  })
+  const paintOrder = [...prepared].sort((left, right) => {
+    if (left.source.plane !== right.source.plane) {
+      return left.source.plane === 'underlay' ? -1 : 1
+    }
+    return left.source.item.order - right.source.item.order
+      || left.source.item.layerItemId.localeCompare(right.source.item.layerItemId)
+  })
+  let preferredOrder = draft.globalLayerItems.reduce(
+    (maximum, entry) => Math.max(maximum, entry.item.order + 1),
+    0,
+  )
+  for (const { source, duplicate } of paintOrder) {
+    duplicate.order = allocateCourseLayerOrder(draft, preferredOrder)
+    preferredOrder = duplicate.order + 1
+    draft.globalLayerItems.push({
+      item: duplicate,
+      visibility: structuredClone(source.visibility),
+      plane: source.plane,
+    })
+  }
+  draft.globalInteractions.push(...remapped)
+  sortScopedLayerList(draft.globalLayerItems)
+  return prepared.map(({ nextId }) => nextId)
 }

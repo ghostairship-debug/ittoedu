@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { MAX_SCENE_NODES } from '@/shared/constants'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
@@ -8,6 +10,7 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import type { InteractionRule } from '@/shared/interactionTypes'
+import { createTeacherControllerNode } from '@/renderer/project/createProject'
 import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
@@ -21,14 +24,17 @@ import {
 } from '@/renderer/course/slideAuthoringBackend'
 import {
   SLIDE_DELETE_FOCUS_GUARD_REASON,
+  SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON,
   SLIDE_SCENE_ACTION_COMMAND_MAP,
   SLIDE_SCENE_ACTION_IDS,
   addSlideSceneInteractionRule,
+  copySlideGlobalClipboard,
   deleteSlideSceneLayers,
   duplicateSlideSceneLayers,
   executeSlideSceneAction,
   nudgeSlideSceneLayers,
   patchSlideSceneLayers,
+  pasteSlideGlobalLayers,
   reorderSlideSceneLayers,
   selectAllSlideSceneLayers,
   shouldIgnoreSlideLayerDeleteForFocus,
@@ -338,7 +344,11 @@ describe('V9 Slide scene actions', () => {
     const copied = executeSlideSceneAction('copy', selected)
     expect(copied.ok).toBe(true)
     expect(copied.historyEntry).toBe(false)
-    expect(copied.clipboard?.items.map((entry) => entry.item.layerItemId)).toEqual([
+    expect(copied.clipboard?.sourceScope).toBe('scene')
+    if (!copied.clipboard || copied.clipboard.sourceScope !== 'scene') {
+      throw new Error('expected scene clipboard')
+    }
+    expect(copied.clipboard.items.map((entry) => entry.item.layerItemId)).toEqual([
       'slide-title',
       'slide-runtime',
     ])
@@ -380,6 +390,120 @@ describe('V9 Slide scene actions', () => {
     expect(cut.historyEntry).toBe(true)
     expect(sceneOf(requireSession(cut)).layerItems.map((item) => item.layerItemId))
       .toEqual(['slide-title', 'slide-locked'])
+  })
+
+  it('keeps global clipboard failures atomic and refuses stale, foreign, controller, and capacity writes', () => {
+    const project = v9SlideFixture()
+    project.globalLayerItems.push({
+      item: runtimeBoundTo('global-runtime', 60, 'global-banner'),
+      visibility: { mode: 'include', locationIds: ['location-scene-1'] },
+      plane: 'underlay',
+    })
+    const sceneSession = openSlideAuthoringSession(project)
+    const globalSession = select(
+      requireSession(setSlideEditingScope(sceneSession, 'global')),
+      ['global-banner', 'global-runtime'],
+    )
+    const clipboard = copySlideGlobalClipboard(
+      globalSession,
+      globalSession.selection.selectionIds,
+    )
+
+    const stale = pasteSlideGlobalLayers(globalSession, clipboard, {
+      expectedRevision: globalSession.history.present.revision + 1,
+    })
+    expect(stale).toMatchObject({
+      ok: false,
+      reason: SLIDE_REJECT_STALE_REVISION,
+      historyEntry: false,
+    })
+    expect(stale.nextSession?.history.present).toBe(globalSession.history.present)
+
+    const wrongOwner = pasteSlideGlobalLayers(sceneSession, clipboard)
+    expect(wrongOwner).toMatchObject({
+      ok: false,
+      reason: SLIDE_REJECT_WRONG_OWNER,
+      historyEntry: false,
+    })
+    expect(wrongOwner.nextSession?.history.present).toBe(sceneSession.history.present)
+
+    const foreign = pasteSlideGlobalLayers(globalSession, {
+      ...clipboard,
+      projectId: 'another-project',
+    })
+    expect(foreign).toMatchObject({
+      ok: false,
+      reason: '剪贴板不属于当前课件，请重新复制',
+      historyEntry: false,
+    })
+    expect(foreign.nextSession?.history.present).toBe(globalSession.history.present)
+
+    const controllerProject = v9SlideFixture()
+    const controller = sceneNodeToCourseLayerItem(
+      createTeacherControllerNode({ id: 'global-controller' }),
+      100,
+    )
+    controllerProject.globalLayerItems.push({
+      item: controller,
+      visibility: { mode: 'all', locationIds: [] },
+      plane: 'overlay',
+    })
+    const controllerSession = select(
+      requireSession(setSlideEditingScope(
+        openSlideAuthoringSession(controllerProject),
+        'global',
+      )),
+      ['global-controller'],
+    )
+    expect(() => copySlideGlobalClipboard(
+      controllerSession,
+      ['global-controller'],
+    )).toThrow(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
+    const validControllerProjectClipboard = copySlideGlobalClipboard(
+      controllerSession,
+      ['global-banner'],
+    )
+    const controllerEntry = controllerSession.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-controller',
+    )!
+    const controllerClipboard = {
+      ...validControllerProjectClipboard,
+      items: [{
+        entry: {
+          ...structuredClone(controllerEntry),
+          plane: 'overlay' as const,
+        },
+      }],
+    }
+    const controllerPaste = pasteSlideGlobalLayers(controllerSession, controllerClipboard)
+    expect(controllerPaste).toMatchObject({
+      ok: false,
+      reason: SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON,
+      historyEntry: false,
+    })
+    expect(controllerPaste.nextSession?.history.present).toBe(controllerSession.history.present)
+
+    const capacityProject = v9SlideFixture()
+    capacityProject.globalLayerItems = Array.from({ length: MAX_SCENE_NODES }, (_, index) => ({
+      item: nativeText(`global-${index}`, 100 + index, `全局 ${index}`),
+      visibility: { mode: 'all' as const, locationIds: [] },
+      plane: 'overlay' as const,
+    }))
+    const capacitySession = select(
+      requireSession(setSlideEditingScope(
+        openSlideAuthoringSession(capacityProject),
+        'global',
+      )),
+      ['global-0'],
+    )
+    const capacityClipboard = copySlideGlobalClipboard(capacitySession, ['global-0'])
+    const capacityPaste = pasteSlideGlobalLayers(capacitySession, capacityClipboard)
+    expect(capacityPaste).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/上限/),
+      historyEntry: false,
+    })
+    expect(capacityPaste.nextSession?.history.present).toBe(capacitySession.history.present)
   })
 
   it('ignores Delete while text, formula or contenteditable is focused', () => {

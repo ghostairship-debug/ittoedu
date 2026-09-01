@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  type ComponentLayerItem,
   type CourseProjectDocument,
   type NativeLayerItem,
+  type RuntimeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -19,6 +21,7 @@ import {
   SPATIAL_CROSS_COORDINATE_MOVE_REASON,
 } from '@/renderer/course/effectiveLayerCommands'
 import { CROSS_GLOBAL_PLANE_REORDER_REASON } from '@/renderer/course/globalLayerCommands'
+import { SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON } from '@/renderer/course/v9SlideActionCommands'
 import {
   rowsForListKind,
 } from '@/renderer/course/effectiveLayerProjection'
@@ -105,6 +108,54 @@ function nativeText(
       nativeType: 'text',
       data: { text, runs: [], style: textStyle() },
     },
+  }
+}
+
+function globalRuntime(
+  layerItemId: string,
+  order: number,
+  bindTo: string,
+): RuntimeLayerItem {
+  return {
+    layerItemId,
+    label: '全课 Runtime',
+    frame: { mode: 'absolute', x: 360, y: 80, width: 320, height: 180 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 0.85,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'hidden',
+    kind: 'runtime',
+    runtime: {
+      protocol: 'surface-runtime',
+      runtimeApiVersion: 3,
+      enabled: true,
+      renderMode: 'dom',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return {destroy(){}}}})',
+      content: { values: { label: 'canonical-only' } },
+      assets: {},
+      nodeBindings: { target: bindTo },
+    },
+  }
+}
+
+function globalComponent(layerItemId: string, order: number): ComponentLayerItem {
+  return {
+    layerItemId,
+    label: '全课组件',
+    frame: { mode: 'absolute', x: 720, y: 80, width: 260, height: 180 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 0.9,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'component',
+    component: { packageId: 'component.quiz', version: '4.0.0' },
+    props: { prompt: 'canonical component', nested: { answer: 42 } },
   }
 }
 
@@ -863,6 +914,233 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(after).toBe(before)
     expect(after.history.past).toHaveLength(before.history.past.length)
     expect(JSON.stringify(after.history.present)).toBe(beforeDocument)
+  })
+
+  it('preserves effective global planes, visibility, references, and history across clipboard paste', () => {
+    const project = v9ThreeLocationFixture()
+    project.componentPackages['component.quiz'] = {
+      packageId: 'component.quiz',
+      version: '4.0.0',
+      name: 'Quiz',
+      manifestPath: 'components/component.quiz/manifest.json',
+      runtimePath: 'components/component.quiz/runtime.js',
+      contentSha256: '1'.repeat(64),
+    }
+    const legacyUnderlay = project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )!
+    legacyUnderlay.visibility = {
+      mode: 'include',
+      locationIds: ['location-scene-1'],
+    }
+    project.globalLayerItems.splice(1, 0, {
+      item: globalRuntime('global-runtime', 40, 'global-banner'),
+      visibility: { mode: 'exclude', locationIds: ['location-scene-3'] },
+      plane: 'overlay',
+    })
+    project.globalLayerItems.splice(2, 0, {
+      item: globalComponent('global-component', 60),
+      visibility: { mode: 'all', locationIds: [] },
+      plane: 'underlay',
+    })
+    project.globalInteractions.push(
+      {
+        id: 'global-copy-link',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: 'global-banner' },
+        conditions: [],
+        actions: [{
+          id: 'global-copy-link-enter',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'node.enter',
+            nodeId: 'global-runtime',
+            effect: 'fade',
+            durationMs: 200,
+            easing: 'ease-out',
+          },
+        }],
+      },
+      {
+        id: 'global-copy-follower',
+        enabled: true,
+        trigger: { type: 'animation.completed', actionId: 'global-copy-link-enter' },
+        conditions: [],
+        actions: [{
+          id: 'global-copy-follower-next',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        }],
+      },
+    )
+    injectCandidate(courseProjectDocumentSchema.parse(project))
+    useEditorStore.getState().setEditingScope('global')
+    useEditorStore.getState().selectNodes([
+      'global-component',
+      'global-runtime',
+      'global-banner',
+    ])
+    const beforeCopy = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+
+    useEditorStore.getState().copySelectedNodes()
+
+    const copiedState = useEditorStore.getState()
+    expect(selectSlideAuthoringBackend(copiedState)!.getSession()).toBe(beforeCopy)
+    expect(copiedState.clipboardGlobalItems).toEqual([])
+    const clipboard = copiedState.slideCandidateClipboard
+    expect(clipboard?.sourceScope).toBe('global')
+    if (!clipboard || clipboard.sourceScope !== 'global') {
+      throw new Error('expected canonical global clipboard')
+    }
+    expect(clipboard.items.map(({ entry }) => ({
+      id: entry.item.layerItemId,
+      plane: entry.plane,
+      visibility: entry.visibility,
+    }))).toEqual([
+      {
+        id: 'global-component',
+        plane: 'underlay',
+        visibility: { mode: 'all', locationIds: [] },
+      },
+      {
+        id: 'global-runtime',
+        plane: 'overlay',
+        visibility: { mode: 'exclude', locationIds: ['location-scene-3'] },
+      },
+      {
+        id: 'global-banner',
+        plane: 'underlay',
+        visibility: { mode: 'include', locationIds: ['location-scene-1'] },
+      },
+    ])
+    expect(clipboard.items[1]?.entry.item).toMatchObject({
+      kind: 'runtime',
+      hitPolicy: 'surface',
+      playbackInitialVisibility: 'hidden',
+      runtime: {
+        content: { values: { label: 'canonical-only' } },
+        nodeBindings: { target: 'global-banner' },
+      },
+    })
+    expect(clipboard.items[0]?.entry.item).toMatchObject({
+      kind: 'component',
+      component: { packageId: 'component.quiz', version: '4.0.0' },
+      props: { prompt: 'canonical component', nested: { answer: 42 } },
+    })
+
+    useEditorStore.getState().selectNode('teacher-controller-main')
+    useEditorStore.getState().copySelectedNodes()
+    expect(useEditorStore.getState().errorMessage).toBe(
+      SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON,
+    )
+    expect(useEditorStore.getState().slideCandidateClipboard).toBe(clipboard)
+
+    useEditorStore.getState().pasteNodes()
+
+    const pasted = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const [pastedComponentId, pastedOverlayId, pastedUnderlayId] = pasted.selection.selectionIds
+    expect(pastedComponentId).toBeTruthy()
+    expect(pastedOverlayId).toBeTruthy()
+    expect(pastedUnderlayId).toBeTruthy()
+    expect(pasted.history.past).toHaveLength(beforeCopy.history.past.length + 1)
+    expect(pasted.history.present.revision).toBe(beforeCopy.history.present.revision + 1)
+    expect(pasted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )?.plane).toBeUndefined()
+    expect(pasted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedUnderlayId,
+    )).toMatchObject({
+      plane: 'underlay',
+      visibility: { mode: 'include', locationIds: ['location-scene-1'] },
+    })
+    const pastedRuntimeEntry = pasted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedOverlayId,
+    )
+    expect(pastedRuntimeEntry).toMatchObject({
+      plane: 'overlay',
+      visibility: { mode: 'exclude', locationIds: ['location-scene-3'] },
+      item: {
+        kind: 'runtime',
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'hidden',
+      },
+    })
+    if (pastedRuntimeEntry?.item.kind !== 'runtime') {
+      throw new Error('expected pasted canonical Runtime')
+    }
+    expect(pastedRuntimeEntry.item.runtime.nodeBindings).toEqual({
+      target: pastedUnderlayId,
+    })
+    expect(pasted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedComponentId,
+    )).toMatchObject({
+      plane: 'underlay',
+      item: {
+        kind: 'component',
+        component: { packageId: 'component.quiz', version: '4.0.0' },
+        props: { prompt: 'canonical component', nested: { answer: 42 } },
+      },
+    })
+    const pastedBannerOrder = pasted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedUnderlayId,
+    )?.item.order
+    const pastedComponentOrder = pasted.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedComponentId,
+    )?.item.order
+    expect(pastedBannerOrder).toBeLessThan(pastedComponentOrder!)
+    const pastedRootRule = pasted.history.present.globalInteractions.find(
+      (rule) => rule.trigger.type === 'node.click'
+        && rule.trigger.nodeId === pastedUnderlayId,
+    )
+    expect(pastedRootRule).toEqual(expect.objectContaining({
+      trigger: { type: 'node.click', nodeId: pastedUnderlayId },
+      actions: [expect.objectContaining({
+        action: expect.objectContaining({
+          type: 'node.enter',
+          nodeId: pastedOverlayId,
+        }),
+      })],
+    }))
+    const pastedActionId = pastedRootRule?.actions[0]?.id
+    expect(pastedActionId).toBeTruthy()
+    expect(pasted.history.present.globalInteractions).toContainEqual(expect.objectContaining({
+      trigger: { type: 'animation.completed', actionId: pastedActionId },
+    }))
+
+    useEditorStore.getState().undo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.some(
+      (entry) => entry.item.layerItemId === pastedUnderlayId,
+    )).toBe(false)
+    useEditorStore.getState().redo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedUnderlayId,
+    )?.plane).toBe('underlay')
+
+    const beforeRepeat = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    useEditorStore.getState().pasteNodes()
+    const repeated = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    expect(repeated.history.past).toHaveLength(beforeRepeat.history.past.length + 1)
+    for (const [index, id] of repeated.selection.selectionIds.entries()) {
+      const expectedPlane = index === 1 ? 'overlay' : 'underlay'
+      expect(repeated.history.present.globalLayerItems.find(
+        (entry) => entry.item.layerItemId === id,
+      )?.plane).toBe(expectedPlane)
+    }
+
+    const reopened = courseProjectDocumentSchema.parse(structuredClone(repeated.history.present))
+    injectCandidate(reopened)
+    const reopenedDocument = selectSlideAuthoringDocument(useEditorStore.getState())!
+    expect(reopenedDocument.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedUnderlayId,
+    )?.plane).toBe('underlay')
+    expect(reopenedDocument.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedOverlayId,
+    )?.plane).toBe('overlay')
+    expect(reopenedDocument.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === pastedComponentId,
+    )?.plane).toBe('underlay')
   })
 
   it('routes a visible global row through the effective command while scene scope is active', () => {

@@ -232,8 +232,10 @@ import {
 } from '../course/v9SlideContentCommands'
 import {
   addSlideSceneInteractionRule,
+  copySlideGlobalClipboard,
   deleteSlideSceneLayers,
   executeSlideSceneAction,
+  pasteSlideGlobalLayers,
   shouldIgnoreSlideLayerDeleteForFocus,
   updateSlideSceneInteractionRule,
   type SlideSceneActionId,
@@ -10793,11 +10795,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
         return
       }
-      if (selectSlideAuthoringBackend(get()) && get().editingScope !== 'global') {
-        runCandidateAction('copy')
+      const state = get()
+      const slideBackend = selectSlideAuthoringBackend(state)
+      if (slideBackend) {
+        if (state.editingScope !== 'global') {
+          runCandidateAction('copy')
+          return
+        }
+        if (state.selectedNodeIds.length === 0) return
+        try {
+          const clipboard = copySlideGlobalClipboard(
+            slideBackend.getSession(),
+            state.selectedNodeIds,
+          )
+          set({
+            slideCandidateClipboard: clipboard,
+            clipboardNodes: [],
+            clipboardGlobalItems: [],
+            clipboardInteractionRules: [],
+            errorMessage: null,
+            statusMessage: `已复制 ${clipboard.items.length} 个全局元素到剪贴板`,
+          })
+        } catch (error) {
+          set({
+            errorMessage: error instanceof Error ? error.message : '无法复制全局图层',
+            statusMessage: null,
+          })
+        }
         return
       }
-      const state = get()
       const selected = editingNodes(state).filter((node) => state.selectedNodeIds.includes(node.id))
       if (selected.length === 0) return
       if (state.editingScope === 'global') {
@@ -10843,53 +10869,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (result.ok) set({ activeTab: 'properties' })
         return
       }
-      if (selectSlideAuthoringBackend(get()) && get().editingScope !== 'global') {
-        runCandidateAction('paste')
-        return
-      }
-      if (selectSlideAuthoringBackend(get()) && get().editingScope === 'global') {
-        const state = get()
-        if (state.clipboardGlobalItems.length === 0) return
-        if (state.project.globalLayer.length + state.clipboardGlobalItems.length > MAX_SCENE_NODES) {
-          set({ errorMessage: `粘贴后将超过全局层 ${MAX_SCENE_NODES} 个元素的上限。` })
+      const slideBackend = selectSlideAuthoringBackend(get())
+      if (slideBackend) {
+        if (get().editingScope !== 'global') {
+          runCandidateAction('paste')
           return
         }
-        const copies = state.clipboardGlobalItems.map((source) => ({
-          ...structuredClone(source),
-          node: normalizeNewNodeGeometry({
-            ...structuredClone(source.node),
-            id: `${source.node.type}_${nanoid()}`,
-            name: `${source.node.name} 副本`,
-            x: source.node.x + 20,
-            y: source.node.y + 20,
-            locked: false,
-          }, state.componentPackages),
-        }))
-        const nodeIdMap = new Map(
-          state.clipboardGlobalItems.map((source, index) => [
-            source.node.id,
-            copies[index]!.node.id,
-          ]),
-        )
-        const copiedRules = state.clipboardInteractionRules.map((rule) =>
-          rewriteInteractionRuleForNodeCopy(rule, nodeIdMap),
-        )
-        runV9DocumentMutation((draft) => {
-          for (const copy of copies) {
-            appendGlobalCourseNode(draft, copy.node)
-            const entry = draft.globalLayerItems.find(
-              (item) => item.item.layerItemId === copy.node.id,
-            )
-            if (entry) {
-              entry.visibility = locationVisibilityFromScenePatch(draft, copy.visibility)
-            }
-          }
-          draft.globalInteractions.push(...copiedRules)
-        }, {
-          selectionIds: copies.map((instance) => instance.node.id),
-          scope: 'global',
-          statusMessage: `已粘贴 ${copies.length} 个全局元素`,
+        const clipboard = get().slideCandidateClipboard
+        const result = runCandidateSession((session) => pasteSlideGlobalLayers(
+          session,
+          clipboard,
+          { expectedRevision: session.history.present.revision },
+        ), {
+          statusMessage: clipboard?.sourceScope === 'global'
+            ? `已粘贴 ${clipboard.items.length} 个全局元素`
+            : undefined,
         })
+        if (result.ok) set({ activeTab: 'properties' })
         return
       }
       const state = get()

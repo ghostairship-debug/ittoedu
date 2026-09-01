@@ -34,7 +34,9 @@ import {
   type SlideInteractionTarget,
 } from './slideInteractionCommands'
 import {
+  copySlideGlobalClipboard,
   copySlideSceneClipboard,
+  mutatePasteSlideGlobalClipboard,
   mutatePasteSlideSceneClipboard,
   sortSlideSceneLayerItems,
   type V9SlideClipboardPayload,
@@ -46,11 +48,15 @@ export type {
   V9SlideClipboardItem,
   V9SlideClipboardPayload,
   V9SlideClipboardScope,
+  V9SlideGlobalClipboardItem,
+  V9SlideGlobalClipboardPayload,
 } from './v9SlideClipboard'
 export {
   SLIDE_CLIPBOARD_EMPTY_REASON,
   SLIDE_CLIPBOARD_WRONG_OWNER_REASON,
+  SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON,
   SLIDE_SCENE_CLIPBOARD_OFFSET,
+  copySlideGlobalClipboard,
   copySlideSceneClipboard,
 } from './v9SlideClipboard'
 
@@ -332,6 +338,13 @@ function catchCommand(session: SlideAuthoringSessionRef, error: unknown): SlideC
 
 function requireSceneScope(session: SlideAuthoringSessionRef): SlideCommandResult | null {
   if (session.scope !== 'scene') {
+    return reject(session, SLIDE_REJECT_WRONG_OWNER)
+  }
+  return null
+}
+
+function requireGlobalScope(session: SlideAuthoringSessionRef): SlideCommandResult | null {
+  if (session.scope !== 'global') {
     return reject(session, SLIDE_REJECT_WRONG_OWNER)
   }
   return null
@@ -737,6 +750,38 @@ export function pasteSlideSceneLayers(
         stateId: session.selection.stateId,
         clipboard,
       })
+    }, options.now)
+    return succeed(
+      commitDocument(session, project, selectionAfter(session, project, pastedIds)),
+      true,
+    )
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+export function pasteSlideGlobalLayers(
+  session: SlideAuthoringSessionRef,
+  clipboard: V9SlideClipboardPayload | null | undefined,
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  const wrong = requireGlobalScope(session)
+  if (wrong) return wrong
+  try {
+    if (!clipboard || clipboard.items.length === 0) {
+      throw new Error('剪贴板为空，无法粘贴')
+    }
+    if (clipboard.sourceScope !== 'global') {
+      throw new SlideCommandError(
+        SLIDE_REJECT_WRONG_OWNER,
+        '当前全局层不能粘贴 scene/surface 图层',
+      )
+    }
+    let pastedIds: string[] = []
+    const project = commitSlideProjectMutation(session.history.present, (draft) => {
+      pastedIds = mutatePasteSlideGlobalClipboard(draft, clipboard)
     }, options.now)
     return succeed(
       commitDocument(session, project, selectionAfter(session, project, pastedIds)),
