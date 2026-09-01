@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
+import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
 import {
   MAX_SCENE_INTERACTIONS,
   isNodeMotionAction,
@@ -8,6 +9,7 @@ import {
 } from '../../shared/interactionTypes'
 import type {
   CourseProjectDocument,
+  GlobalLayerPlane,
   LayerItem,
   LocationVisibility,
   ScopedLayerItem,
@@ -64,6 +66,8 @@ export interface SpatialClipboardItem {
   readonly authoringAddress: string
   /** Global/surface storage fact. World items intentionally carry null. */
   readonly visibility: LocationVisibility | null
+  /** Effective source plane for global items; non-global items carry null. */
+  readonly plane: GlobalLayerPlane | null
 }
 
 /** Session-only canonical clipboard. It is never serialized or mirrored to V8 fields. */
@@ -151,16 +155,23 @@ function canonicalClipboardItem(
   surface: SpatialSurfaceDocument,
   owner: SpatialEditorLayerScope,
   layerItemId: string,
-): { readonly item: LayerItem; readonly visibility: LocationVisibility | null } {
+  globalPlanes: ReadonlyMap<string, GlobalLayerPlane>,
+): {
+  readonly item: LayerItem
+  readonly visibility: LocationVisibility | null
+  readonly plane: GlobalLayerPlane | null
+} {
   const scoped = scopedEntriesForOwner(project, surface, owner)
   if (scoped) {
     const entry = scoped.find((candidate) => candidate.item.layerItemId === layerItemId)
     if (!entry) throw new SpatialCommandError('invalid-selection', '所选元素已失效，请重新选择')
-    return { item: entry.item, visibility: entry.visibility }
+    const plane = owner === 'global' ? globalPlanes.get(layerItemId) : null
+    if (owner === 'global' && !plane) throw new SpatialCommandError('invalid-selection')
+    return { item: entry.item, visibility: entry.visibility, plane: plane ?? null }
   }
   const item = surface.world.layerItems.find((candidate) => candidate.layerItemId === layerItemId)
   if (!item) throw new SpatialCommandError('invalid-selection', '所选元素已失效，请重新选择')
-  return { item, visibility: null }
+  return { item, visibility: null, plane: null }
 }
 
 function collectCopiedInteractionRules(
@@ -456,12 +467,14 @@ function captureSpatialClipboard(
   if (rows.some((row) => row.locked)) {
     throw new SpatialCommandError('locked')
   }
+  const globalPlanes = resolveEffectiveGlobalLayerPlanes(project.globalLayerItems)
   const items = rows.map((row): SpatialClipboardItem => {
-    const canonical = canonicalClipboardItem(project, surface, owner, row.id)
+    const canonical = canonicalClipboardItem(project, surface, owner, row.id, globalPlanes)
     return {
       item: structuredClone(canonical.item),
       authoringAddress: row.authoringAddress,
       visibility: canonical.visibility ? structuredClone(canonical.visibility) : null,
+      plane: canonical.plane,
     }
   })
   const sourceIds = new Set(uniqueIds)
@@ -621,6 +634,7 @@ export function pasteSpatialClipboard(
         if (clipboard.owner === 'global') {
           draft.globalLayerItems.push({
             item: duplicate,
+            plane: entry.plane ?? 'overlay',
             visibility: structuredClone(entry.visibility!),
           })
         } else if (clipboard.owner === 'surface') {

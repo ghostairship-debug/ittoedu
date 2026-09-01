@@ -280,7 +280,7 @@ function appendOverlayItem(
   item.order = allocateCourseLayerOrder(draft, item.order)
   const scoped = { item, visibility: { mode: 'all' as const, locationIds: [] } }
   if (destination.source === 'global') {
-    draft.globalLayerItems.push(scoped)
+    draft.globalLayerItems.push({ ...scoped, plane: 'overlay' })
     sortAllCourseLayerLists(draft)
     return
   }

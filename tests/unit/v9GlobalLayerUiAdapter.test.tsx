@@ -805,7 +805,8 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const order = before.locations.map((location) => location.id)
     render(<PropertiesTab onReplaceImage={() => undefined} />)
-    expect(screen.getByLabelText('图层位置')).toBeTruthy()
+    expect(screen.getByLabelText('图层位置')).toBeDisabled()
+    expect(screen.getByLabelText('图层位置')).toHaveValue('overlay')
     fireEvent.change(screen.getByLabelText('场景可见范围'), {
       target: { value: 'include' },
     })

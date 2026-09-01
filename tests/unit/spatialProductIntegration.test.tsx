@@ -935,6 +935,36 @@ describe('Spatial product shell wiring', () => {
     })
   })
 
+  it('preserves the effective global plane through copy, paste, and duplicate', () => {
+    const fixture = mixedOwnerSelectionFixture()
+    useEditorStore.getState().updateGlobalLayerSettings(fixture.globalTextId, {
+      layer: 'underlay',
+    })
+    const authored = useEditorStore.getState().spatialSession!
+    expect(authored.history.present.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === fixture.globalTextId
+    ))?.plane).toBe('underlay')
+
+    useEditorStore.getState().selectNode(fixture.globalTextId)
+    useEditorStore.getState().copySelectedNodes()
+    expect(useEditorStore.getState().spatialClipboard?.items[0]?.plane).toBe('underlay')
+    useEditorStore.getState().pasteNodes()
+
+    const pasted = useEditorStore.getState().spatialSession!
+    const pastedId = pasted.selection.selectionIds[0]
+    expect(pastedId).toBeTruthy()
+    expect(pasted.history.present.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === pastedId
+    ))?.plane).toBe('underlay')
+
+    useEditorStore.getState().duplicateNode(pastedId!)
+    const duplicated = useEditorStore.getState().spatialSession!
+    const duplicatedId = duplicated.selection.selectionIds[0]
+    expect(duplicated.history.present.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === duplicatedId
+    ))?.plane).toBe('underlay')
+  })
+
   it('rejects a clipboard visibility reference after its non-active location is removed', () => {
     const fixture = mixedOwnerSelectionFixture()
     useEditorStore.getState().runSpatialCommand((session) => (

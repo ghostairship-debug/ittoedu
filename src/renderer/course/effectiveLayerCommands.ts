@@ -979,6 +979,7 @@ function insertIntoOwner(
   if (destination.source === 'global') {
     project.globalLayerItems.push({
       item,
+      plane: 'overlay',
       visibility: visibility ?? { mode: 'all', locationIds: [] },
     })
     return

@@ -31,10 +31,13 @@ import {
 } from '@/renderer/course/effectiveLayerCommands'
 import {
   allocateCourseLayerOrder,
+  CONTROLLER_PLANE_REASON,
   findGlobalTeacherController,
   isTeacherControllerLayerItem,
   makeGlobalLayerAuthoringAddress,
   restoreDefaultTeacherController,
+  readGlobalLayerScenePlane,
+  setGlobalLayerScenePlane,
   setGlobalLayerLocationVisibility,
   setGlobalLayerVisibleAtLocation,
   type EffectiveLayerCommandTarget,
@@ -363,6 +366,112 @@ describe('V9 effective / global layer commands', () => {
     expect(mixed.reason).not.toContain('暂不能调整顺序')
     expect(mixed.nextDocument).toBeUndefined()
     expect(project.revision).toBe(1)
+  })
+
+  it('writes a stable global plane without rewriting order and protects the controller', () => {
+    const project = v9LayerFixture()
+    const original = structuredClone(project)
+    const authoredOrders = Object.fromEntries(
+      listEffectiveLayerCommandItems({ project, locationId: 'location-scene-1' })
+        .map((entry) => [entry.id, locateCourseLayer(project, entry.id)!.item.order]),
+    )
+    expect(readGlobalLayerScenePlane(project, 'global-footer')).toBe('underlay')
+
+    const switched = setGlobalLayerScenePlane(
+      project,
+      globalTarget(project, 'global-footer'),
+      'overlay',
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(switched).toMatchObject({ ok: true, historyEntry: true })
+    const next = switched.nextDocument!
+    expect(next.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === 'global-footer'
+    ))?.plane).toBe('overlay')
+    expect(readGlobalLayerScenePlane(next, 'global-footer')).toBe('overlay')
+    expect(Object.fromEntries(
+      listEffectiveLayerCommandItems({ project: next, locationId: 'location-scene-1' })
+        .map((entry) => [entry.id, locateCourseLayer(next, entry.id)!.item.order]),
+    )).toEqual(authoredOrders)
+    expect(project.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === 'global-footer'
+    ))?.plane).toBeUndefined()
+
+    expect(setGlobalLayerScenePlane(
+      next,
+      globalTarget(next, 'global-footer'),
+      'overlay',
+      { expectedRevision: next.revision, now: NOW },
+    )).toMatchObject({ ok: true, historyEntry: false })
+    expect(setGlobalLayerScenePlane(
+      project,
+      globalTarget(project, 'teacher-controller-main'),
+      'underlay',
+      { expectedRevision: project.revision, now: NOW },
+    )).toEqual({ ok: false, reason: CONTROLLER_PLANE_REASON, historyEntry: false })
+    expect(setGlobalLayerScenePlane(
+      project,
+      globalTarget(project, 'global-footer'),
+      'overlay',
+      { expectedRevision: project.revision - 1, now: NOW },
+    )).toEqual({ ok: false, reason: LAYER_REJECT_STALE_REVISION, historyEntry: false })
+
+    const lockedProject = structuredClone(project)
+    const lockedFooter = lockedProject.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-footer',
+    )!
+    lockedFooter.item.locked = true
+    const lockedBefore = structuredClone(lockedProject)
+    expect(setGlobalLayerScenePlane(
+      lockedProject,
+      globalTarget(lockedProject, 'global-footer'),
+      'overlay',
+      { expectedRevision: lockedProject.revision, now: NOW },
+    )).toEqual({ ok: false, reason: LAYER_REJECT_LOCKED, historyEntry: false })
+    expect(lockedProject).toEqual(lockedBefore)
+    expect(project).toEqual(original)
+
+    const duplicate = duplicateEffectiveLayerItem(
+      project,
+      globalTarget(project, 'global-banner'),
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(duplicate).toMatchObject({ ok: true, historyEntry: true })
+    expect(duplicate.nextDocument?.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === duplicate.createdLayerItemId
+    ))?.plane).toBe('underlay')
+  })
+
+  it('defaults an item moved into the global owner to Overlay', () => {
+    const project = v9LayerFixture()
+    const moved = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'surface-shared'),
+      { source: 'global' },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(moved).toMatchObject({ ok: true, historyEntry: true })
+    expect(moved.nextDocument?.globalLayerItems.find((entry) => (
+      entry.item.layerItemId === 'surface-shared'
+    ))?.plane).toBe('overlay')
+    expect(courseProjectDocumentSchema.safeParse(moved.nextDocument).success).toBe(true)
+
+    const movedOut = moveEffectiveLayerOwner(
+      project,
+      globalTarget(project, 'global-footer'),
+      { source: 'surface', surfaceId: 'surface-slide' },
+      { expectedRevision: project.revision, now: NOW },
+    )
+    expect(movedOut).toMatchObject({ ok: true, historyEntry: true })
+    const surface = movedOut.nextDocument?.surfaces.find(
+      (candidate) => candidate.id === 'surface-slide',
+    )
+    const movedEntry = surface?.surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-footer',
+    )
+    expect(movedEntry).toBeDefined()
+    expect('plane' in movedEntry!).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse(movedOut.nextDocument).success).toBe(true)
   })
 
   it('rejects Spatial viewport/world owner changes before writes while preserving safe moves and reorder', () => {

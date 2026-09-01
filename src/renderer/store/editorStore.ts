@@ -351,6 +351,7 @@ import {
   type CurrentCourseAuthoringTargetIdentity,
 } from '../authoring/courseAuthoringSession'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
+import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
 import {
   migrateProjectV8ToCourseProjectV9,
@@ -790,6 +791,7 @@ function appendGlobalCourseNode(draft: CourseProjectDocument, node: SceneNode): 
   item.order = allocateCourseLayerOrder(draft, preferred)
   draft.globalLayerItems.push({
     item,
+    plane: 'overlay',
     visibility: { mode: 'all', locationIds: [] },
   })
   sortScopedLayerList(draft.globalLayerItems)
@@ -10568,6 +10570,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
             duplicate.item.frame.y += 20
             duplicate.item.locked = false
             duplicate.item.order = allocateCourseLayerOrder(draft, entry.item.order + 1)
+            duplicate.plane = resolveEffectiveGlobalLayerPlanes(draft.globalLayerItems)
+              .get(entry.item.layerItemId) ?? 'overlay'
             draft.globalLayerItems.push(duplicate)
             sortScopedLayerList(draft.globalLayerItems)
             const copies = draft.globalInteractions.flatMap((rule) => {

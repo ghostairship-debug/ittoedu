@@ -93,8 +93,7 @@ import type {
   LocationVisibility,
 } from '../../shared/courseProjectTypes'
 import {
-  collectAllCourseLayerOrders,
-  collectSlideSurfaceSceneOrders,
+  isTeacherControllerLayerItem,
   readGlobalLayerScenePlane,
 } from '../course/globalLayerCommands'
 import {
@@ -1982,11 +1981,8 @@ function CandidateGlobalLayerSettings({ nodeId }: { nodeId: string }) {
   const visibleHere = isCourseLayerVisibleAtLocation(entry, locationId)
   const locationKind = document.locations.find((location) => location.id === locationId)?.kind
   const visibilityCopy = candidateGlobalVisibilityCopy(locationKind)
-  const scenePlane = readGlobalLayerScenePlane(
-    entry.item.order,
-    collectSlideSurfaceSceneOrders(document, locationId),
-    collectAllCourseLayerOrders(document),
-  )
+  const scenePlane = readGlobalLayerScenePlane(document, entry.item.layerItemId)
+  const isController = isTeacherControllerLayerItem(entry.item)
 
   return (
     <section
@@ -2002,10 +1998,13 @@ function CandidateGlobalLayerSettings({ nodeId }: { nodeId: string }) {
       <SelectField<RuntimeLayer>
         label="图层位置"
         value={scenePlane}
-        options={[
-          { value: 'underlay', label: 'Underlay · 场景内容下方' },
-          { value: 'overlay', label: 'Overlay · 场景内容上方' },
-        ]}
+        options={isController
+          ? [{ value: 'overlay', label: 'Overlay · 固定在内容上方' }]
+          : [
+              { value: 'underlay', label: 'Underlay · 场景内容下方' },
+              { value: 'overlay', label: 'Overlay · 场景内容上方' },
+            ]}
+        disabled={isController}
         onChange={(layer) => updateSettings(nodeId, { layer })}
       />
       <SelectField<LocationVisibility['mode']>

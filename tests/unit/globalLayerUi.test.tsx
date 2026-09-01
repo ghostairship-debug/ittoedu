@@ -15,6 +15,7 @@ import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectSlideAuthoringBackend,
   selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -552,7 +553,7 @@ describe('Project V8 global-layer editor UI', () => {
     expect(new Set(updated.buttons.map((button) => button.id)).size).toBe(8)
   })
 
-  it('maps 图层位置 onto global order without leaving the global owner', () => {
+  it('writes 图层位置 as one undoable global plane without changing authored order', () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     store.addTextNode()
@@ -561,6 +562,20 @@ describe('Project V8 global-layer editor UI', () => {
       (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'text',
     )
     if (!text) throw new Error('missing global text')
+    expect(text.plane).toBe('overlay')
+    const beforeOrders = JSON.stringify({
+      global: before.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item.order]),
+      surfaces: before.surfaces.map((surface) => ({
+        surface: surface.surfaceLayerItems.map((entry) => [entry.item.layerItemId, entry.item.order]),
+        local: surface.type === 'slide'
+          ? surface.scenes.map((scene) => scene.layerItems.map((item) => [item.layerItemId, item.order]))
+          : surface.type === 'spatial-2d'
+            ? surface.world.layerItems.map((item) => [item.layerItemId, item.order])
+            : [],
+      })),
+    })
+    const historyBefore = selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past.length
     store.selectNode(text.item.layerItemId)
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
@@ -571,29 +586,44 @@ describe('Project V8 global-layer editor UI', () => {
     })
 
     const after = selectSlideAuthoringDocument(useEditorStore.getState())!
-    const sceneOrders = after.surfaces.flatMap((surface) => (
-      surface.type === 'slide'
-        ? surface.scenes.flatMap((scene) => scene.layerItems.map((item) => item.order))
-        : []
-    ))
     const updated = after.globalLayerItems.find(
       (entry) => entry.item.layerItemId === text.item.layerItemId,
     )
-    expect(updated).toBeTruthy()
+    expect(updated?.plane).toBe('underlay')
     expect(after.surfaces.some((surface) => (
       surface.type === 'slide'
       && surface.scenes.some((scene) => (
         scene.layerItems.some((item) => item.layerItemId === text.item.layerItemId)
       ))
     ))).toBe(false)
-    if (sceneOrders.length > 0) {
-      expect(updated!.item.order).toBeLessThan(Math.min(...sceneOrders))
-    } else {
-      const others = after.globalLayerItems
-        .filter((entry) => entry.item.layerItemId !== text.item.layerItemId)
-        .map((entry) => entry.item.order)
-      expect(updated!.item.order).toBeLessThan(Math.min(...others))
-    }
+    expect(JSON.stringify({
+      global: after.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item.order]),
+      surfaces: after.surfaces.map((surface) => ({
+        surface: surface.surfaceLayerItems.map((entry) => [entry.item.layerItemId, entry.item.order]),
+        local: surface.type === 'slide'
+          ? surface.scenes.map((scene) => scene.layerItems.map((item) => [item.layerItemId, item.order]))
+          : surface.type === 'spatial-2d'
+            ? surface.world.layerItems.map((item) => [item.layerItemId, item.order])
+            : [],
+      })),
+    })).toBe(beforeOrders)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past.length).toBe(historyBefore + 1)
+
+    store.undo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === text.item.layerItemId,
+    )?.plane).toBe('overlay')
+    store.redo()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === text.item.layerItemId,
+    )?.plane).toBe('underlay')
+    const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
+    expect(archive).not.toBeNull()
+    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === text.item.layerItemId,
+    )?.plane).toBe('underlay')
     expect(useEditorStore.getState().errorMessage).toBeNull()
   })
 })

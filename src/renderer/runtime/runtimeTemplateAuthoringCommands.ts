@@ -447,6 +447,7 @@ export function planRuntimeTemplateCreation(
   if (input.target.owner === 'global') {
     next.globalLayerItems.push({
       item: parsedItem.data,
+      plane: 'overlay',
       visibility: { mode: 'all', locationIds: [] },
     })
     sortScopedLayerList(next.globalLayerItems)

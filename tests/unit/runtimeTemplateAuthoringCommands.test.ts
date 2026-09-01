@@ -191,7 +191,10 @@ describe('planRuntimeTemplateCreation', () => {
       if (owner === 'global') {
         expect(plan.nextDocument.globalLayerItems.find(
           (entry) => entry.item.layerItemId === NEW_ITEM_ID,
-        )?.visibility).toEqual({ mode: 'all', locationIds: [] })
+        )).toMatchObject({
+          plane: 'overlay',
+          visibility: { mode: 'all', locationIds: [] },
+        })
       }
 
       const step = createEditorTransactionStep(source.project, plan)

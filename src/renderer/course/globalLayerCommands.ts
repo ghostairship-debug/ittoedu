@@ -9,8 +9,11 @@ import {
   isCourseLayerVisibleAtLocation,
   sceneNodeToCourseLayerItem,
 } from '../../shared/courseProjectModel'
+import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
 import type {
   CourseProjectDocument,
+  GlobalLayerEntry,
+  GlobalLayerPlane,
   LayerItem,
   LocationVisibility,
   NativeLayerItem,
@@ -43,6 +46,7 @@ export const LAYER_REJECT_WRONG_OWNER = SLIDE_REJECT_WRONG_OWNER
 const LOCKED_WRITE_REASON = '图层已锁定，除解锁外不能修改。'
 const CONTROLLER_MOVE_REASON = '教师控制器必须留在全局层，不能移动到页面或世界层。'
 const CONTROLLER_DUPLICATE_REASON = '教师控制器不能重复，全课只需一个。'
+const CONTROLLER_PLANE_REASON = '教师控制器固定在全局 Overlay，不能放到 Underlay。'
 const CROSS_OWNER_REORDER_REASON = '不能跨来源假排序。请在同一来源内调整层级。'
 const INVALID_GLOBAL_REORDER_REASON = '全局层排序必须包含全部全局图层，且不能混入其他来源。'
 
@@ -109,7 +113,7 @@ export function isTeacherControllerLayerItem(
 
 export function findGlobalTeacherController(
   project: Pick<CourseProjectDocument, 'globalLayerItems'>,
-): ScopedLayerItem | undefined {
+): GlobalLayerEntry | undefined {
   return project.globalLayerItems.find((entry) => isTeacherControllerLayerItem(entry.item))
 }
 
@@ -216,7 +220,7 @@ function requireLocation(
 export function requireGlobalLayerEntry(
   project: CourseProjectDocument,
   layerItemId: string,
-): ScopedLayerItem {
+): GlobalLayerEntry {
   const entry = project.globalLayerItems.find(
     (candidate) => candidate.item.layerItemId === layerItemId,
   )
@@ -227,7 +231,7 @@ export function requireGlobalLayerEntry(
 export function resolveGlobalLayerTarget(
   project: CourseProjectDocument,
   target: EffectiveLayerCommandTarget,
-): ScopedLayerItem {
+): GlobalLayerEntry {
   const parts = parseLayerAuthoringAddress(target.authoringAddress)
   if (parts.projectId !== project.id) {
     throw new Error('作者地址不属于当前工程')
@@ -373,56 +377,18 @@ export function allocateCourseLayerOrder(
   return order
 }
 
-export type GlobalLayerScenePlane = 'underlay' | 'overlay'
-
-/**
- * Scene-item orders on the slide surface that owns `locationId`.
- * Global/surface arrays are storage scope, not a visual plane — callers map
- * underlay/overlay onto unique `order` relative to these scene items.
- */
-export function collectSlideSurfaceSceneOrders(
-  document: CourseProjectDocument,
-  locationId: string,
-): number[] {
-  const location = document.locations.find((candidate) => candidate.id === locationId)
-  const preferredSurfaceId = location?.surfaceId
-  const surface =
-    (preferredSurfaceId
-      ? document.surfaces.find((candidate) => candidate.id === preferredSurfaceId)
-      : undefined)
-    ?? document.surfaces.find((candidate) => candidate.type === 'slide')
-  if (!surface || surface.type !== 'slide') return []
-  return surface.scenes.flatMap((scene) => scene.layerItems.map((item) => item.order))
-}
-
-export function collectAllCourseLayerOrders(document: CourseProjectDocument): number[] {
-  const orders: number[] = []
-  visitAllCourseLayerItems(document, (item) => {
-    orders.push(item.order)
-  })
-  return orders
-}
+export type GlobalLayerScenePlane = GlobalLayerPlane
 
 export function readGlobalLayerScenePlane(
-  itemOrder: number,
-  sceneOrders: readonly number[],
-  allOrders: readonly number[] = sceneOrders,
+  document: Pick<CourseProjectDocument, 'globalLayerItems'>,
+  layerItemId: string,
 ): GlobalLayerScenePlane {
-  if (sceneOrders.length > 0) {
-    return itemOrder < Math.min(...sceneOrders) ? 'underlay' : 'overlay'
-  }
-  if (allOrders.length === 0) return 'overlay'
-  const minAll = Math.min(...allOrders)
-  return itemOrder === minAll && allOrders.some((order) => order > minAll)
-    ? 'underlay'
-    : 'overlay'
+  const plane = resolveEffectiveGlobalLayerPlanes(document.globalLayerItems).get(layerItemId)
+  if (!plane) throw new Error(`找不到全局图层：${layerItemId}`)
+  return plane
 }
 
-/**
- * Places a global item below or above every scene item on the current slide
- * surface by rewriting `order` only. Does not move the item into
- * `scene.layerItems` and does not add a `layer` field.
- */
+/** Writes the orthogonal global plane without changing any authored order. */
 export function setGlobalLayerScenePlane(
   document: CourseProjectDocument,
   target: EffectiveLayerCommandTarget,
@@ -436,32 +402,19 @@ export function setGlobalLayerScenePlane(
     const locked = refuseLockedLayerWrite(entry.item, false)
     if (locked) return locked
     requireLocation(document, target.locationId)
-    const sceneOrders = collectSlideSurfaceSceneOrders(document, target.locationId)
-    const currentPlane = readGlobalLayerScenePlane(
-      entry.item.order,
-      sceneOrders,
-      collectAllCourseLayerOrders(document),
-    )
+    if (isTeacherControllerLayerItem(entry.item) && plane !== 'overlay') {
+      return failLayerCommand(CONTROLLER_PLANE_REASON)
+    }
+    const currentPlane = readGlobalLayerScenePlane(document, entry.item.layerItemId)
     if (currentPlane === plane) {
       return succeedLayerNoop(document, '图层位置未变化')
     }
     return runDocumentMutation(document, (draft) => {
       const current = requireGlobalLayerEntry(draft, entry.item.layerItemId)
-      const liveOrders = collectSlideSurfaceSceneOrders(draft, target.locationId)
-      if (plane === 'underlay') {
-        const minScene = liveOrders.length > 0 ? Math.min(...liveOrders) : 0
-        shiftCourseLayerOrdersAtOrAbove(draft, minScene)
-        current.item.order = minScene
-      } else {
-        let maxOthers = liveOrders.length > 0 ? Math.max(...liveOrders) : -1
-        visitAllCourseLayerItems(draft, (item) => {
-          if (item.layerItemId !== current.item.layerItemId && item.order > maxOthers) {
-            maxOthers = item.order
-          }
-        })
-        current.item.order = allocateCourseLayerOrder(draft, maxOthers + 1)
+      if (isTeacherControllerLayerItem(current.item) && plane !== 'overlay') {
+        throw new Error(CONTROLLER_PLANE_REASON)
       }
-      sortAllCourseLayerLists(draft)
+      current.plane = plane
     }, plane === 'underlay' ? '已放到场景内容下方' : '已放到场景内容上方', options)
   } catch (error) {
     return failLayerCommand(error instanceof Error ? error.message : '无法更新图层位置')
@@ -747,6 +700,7 @@ export function duplicateGlobalLayerItem(
     }
     const locked = refuseLockedLayerWrite(entry.item, false)
     if (locked) return locked
+    const sourcePlane = readGlobalLayerScenePlane(document, entry.item.layerItemId)
     const reserved = collectCourseLayerItemIds(document)
     const createdId = nextDuplicateLayerItemId(entry.item, reserved)
     return runDocumentMutation(document, (draft) => {
@@ -756,6 +710,7 @@ export function duplicateGlobalLayerItem(
       duplicate.order = current.item.order + 1
       draft.globalLayerItems.push({
         item: duplicate,
+        plane: sourcePlane,
         visibility: structuredClone(current.visibility),
       })
       sortScopedLayerList(draft.globalLayerItems)
@@ -957,6 +912,7 @@ export function restoreDefaultTeacherController(
 
 export {
   CONTROLLER_DUPLICATE_REASON,
+  CONTROLLER_PLANE_REASON,
   CONTROLLER_MOVE_REASON,
   CROSS_OWNER_REORDER_REASON,
   INVALID_GLOBAL_REORDER_REASON,

@@ -529,6 +529,35 @@ describe('Flow shared authoring adapters', () => {
     )
     expect(globalInsert.ok).toBe(false)
     expect(globalInsert.reason).toBe(FLOW_GLOBAL_STRUCTURE_REASON)
+
+    const globalSelection = selectFlowGlobalScope(project, 'h1', 'teacher-controller-main')
+    const globalMedia = insertFlowSharedMedia(project, globalSelection, {
+      assetId: 'asset-image',
+      placement: 'viewport-overlay',
+      id: 'global-overlay-media',
+    }, { now: NOW })
+    expect(globalMedia.ok).toBe(true)
+    expect(globalMedia.nextDocument?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay-media',
+    )?.plane).toBe('overlay')
+
+    const globalComponent = insertFlowSharedComponent(project, globalSelection, {
+      packageId: 'com.example.flow',
+      manifest: componentManifest,
+      id: 'global-overlay-component',
+    }, { now: NOW })
+    expect(globalComponent.ok).toBe(true)
+    expect(globalComponent.nextDocument?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay-component',
+    )?.plane).toBe('overlay')
+
+    const globalRuntime = insertFlowSharedRuntime(project, globalSelection, {
+      id: 'global-overlay-runtime',
+    }, { now: NOW })
+    expect(globalRuntime.ok).toBe(true)
+    expect(globalRuntime.nextDocument?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay-runtime',
+    )?.plane).toBe('overlay')
   })
 
   it('changes a surface overlay visibility only at the selected Flow location', () => {
