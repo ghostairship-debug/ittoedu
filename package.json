@@ -40,6 +40,7 @@
     "repo:context": "tsx scripts/query-repo-index.ts",
     "validate:course-project": "tsx scripts/validate-project.ts",
     "validate:project": "tsx scripts/validate-project.ts",
+    "build:courseware-case": "tsx scripts/build-courseware-case.ts",
     "run-courseware-authoring": "tsx scripts/run-courseware-authoring.ts",
     "build": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run build:desktop",
     "dist:win": "npm run build && electron-builder --win portable dir --x64",

@@ -716,6 +716,11 @@ const AI_CAPABILITY_PROVENANCE_ENTRYPOINTS = [
   'src/shared/publishedCourseSchema.ts',
 ] as const
 
+const HEADLESS_BUILD_EVIDENCE_FILES = [
+  'scripts/build-courseware-case.ts',
+  'src/renderer/course/coursewareCaseBuilderApi.ts',
+] as const
+
 const LOCAL_MODULE_EXTENSIONS = [
   '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json',
 ] as const
@@ -812,6 +817,16 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     left.localeCompare(right, 'en'),
   )
   return Promise.all(sources.map(async (relativePath) => ({
+    path: relativePath,
+    sha256: sha256(await fs.readFile(path.join(projectRoot, relativePath))),
+  })))
+}
+
+async function directFileEvidence(
+  projectRoot: string,
+  relativePaths: readonly string[],
+): Promise<Array<{ path: string, sha256: string }>> {
+  return Promise.all(relativePaths.map(async (relativePath) => ({
     path: relativePath,
     sha256: sha256(await fs.readFile(path.join(projectRoot, relativePath))),
   })))
@@ -1450,16 +1465,21 @@ export async function generateAiCapabilityArtifacts(
     },
     headlessBuild: {
       language: 'typescript',
-      runner: 'npx tsx --tsconfig <editor-root>/tsconfig.json <case-dir>/implementation/build.ts',
+      runner: 'npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <relative-output.h5lesson> --html <relative-output.html>',
+      caseDirectory: 'may-be-outside-editor-repository-and-need-not-be-git',
+      builderContract: 'src/renderer/course/coursewareCaseBuilderApi.ts',
       entrypoints: {
+        externalCaseBuilder: 'scripts/build-courseware-case.ts',
         createCourseProject: 'src/renderer/project/createCourseProject.ts',
         courseProjectArchive: 'src/renderer/project/courseProjectArchive.ts',
         importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
         courseProjectSchema: 'src/shared/courseProjectSchema.ts',
       },
-      output: 'Course Project V9 .h5lesson',
+      output: 'Course Project V9 .h5lesson and offline HTML inside case-dir',
       constraints: [
-        'use-real-repository-apis',
+        'case-builder-receives-real-repository-apis-through-versioned-facade',
+        'no-editor-internal-imports-from-case-module',
+        'all-inputs-and-outputs-remain-inside-case-dir',
         'no-shadow-project-dsl',
         'preserve-stable-ids-after-human-edits',
       ],
@@ -1527,6 +1547,7 @@ export async function generateAiCapabilityArtifacts(
         includesTypeOnlyEdges: true,
       },
       sourceFiles: await sourceEvidence(projectRoot),
+      headlessBuildFiles: await directFileEvidence(projectRoot, HEADLESS_BUILD_EVIDENCE_FILES),
       componentCatalog: {
         status: componentCatalogSnapshot.status,
         expectedCatalogSha256:

@@ -1,4 +1,4 @@
 interface:
   display_name: "构建互动课件工程"
-  short_description: "从已确认的教学文档盘点资产、拆分任务，增量构建并验证可编辑互动课件"
-  default_prompt: "Use $build-courseware-project to write a Course Project V9 .h5lesson from the confirmed 01-teaching-plan.md and 02-presentation-script.md using product factories and V9 commands. Inventory assets and split work before writing the whole lesson."
+  short_description: "在任意课例目录调用编辑器产品入口，构建并验证可编辑互动课件"
+  default_prompt: "Use $build-courseware-project to resolve the installed editor automatically and build a Course Project V9 plus offline HTML inside my current case directory from the two confirmed teaching documents."

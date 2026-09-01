@@ -52,6 +52,10 @@ const expectedProvenanceEntrypoints = [
   'src/shared/courseProjectSchema.ts',
   'src/shared/publishedCourseSchema.ts',
 ]
+const expectedHeadlessBuildEvidenceFiles = [
+  'scripts/build-courseware-case.ts',
+  'src/renderer/course/coursewareCaseBuilderApi.ts',
+]
 const expectedCurrentProtocols = {
   project: COURSE_PROJECT_SCHEMA_VERSION,
   publishedCourse: PUBLISHED_COURSE_VERSION,
@@ -143,6 +147,8 @@ describe('AI capability manifest generation', () => {
       headlessBuild: {
         language: string
         runner: string
+        caseDirectory: string
+        builderContract: string
         entrypoints: Record<string, string>
         output: string
         constraints: string[]
@@ -475,16 +481,21 @@ describe('AI capability manifest generation', () => {
     })
     expect(index.headlessBuild).toEqual({
       language: 'typescript',
-      runner: 'npx tsx --tsconfig <editor-root>/tsconfig.json <case-dir>/implementation/build.ts',
+      runner: 'npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <relative-output.h5lesson> --html <relative-output.html>',
+      caseDirectory: 'may-be-outside-editor-repository-and-need-not-be-git',
+      builderContract: 'src/renderer/course/coursewareCaseBuilderApi.ts',
       entrypoints: {
+        externalCaseBuilder: 'scripts/build-courseware-case.ts',
         createCourseProject: 'src/renderer/project/createCourseProject.ts',
         courseProjectArchive: 'src/renderer/project/courseProjectArchive.ts',
         importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
         courseProjectSchema: 'src/shared/courseProjectSchema.ts',
       },
-      output: 'Course Project V9 .h5lesson',
+      output: 'Course Project V9 .h5lesson and offline HTML inside case-dir',
       constraints: [
-        'use-real-repository-apis',
+        'case-builder-receives-real-repository-apis-through-versioned-facade',
+        'no-editor-internal-imports-from-case-module',
+        'all-inputs-and-outputs-remain-inside-case-dir',
         'no-shadow-project-dsl',
         'preserve-stable-ids-after-human-edits',
       ],
@@ -1178,6 +1189,7 @@ describe('AI capability manifest generation', () => {
           includesTypeOnlyEdges: boolean
         }
         sourceFiles: Array<{ path: string; sha256: string }>
+        headlessBuildFiles: Array<{ path: string; sha256: string }>
         componentCatalog: {
           status: string
           expectedCatalogSha256: string
@@ -1211,6 +1223,11 @@ describe('AI capability manifest generation', () => {
       ),
     )
     for (const entry of evidence.inputs.sourceFiles) {
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
+    }
+    expect(evidence.inputs.headlessBuildFiles.map((entry) => entry.path))
+      .toEqual(expectedHeadlessBuildEvidenceFiles)
+    for (const entry of evidence.inputs.headlessBuildFiles) {
       expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
     }
 

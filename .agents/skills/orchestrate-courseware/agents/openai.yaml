@@ -1,4 +1,4 @@
 interface:
   display_name: "策划互动课件"
-  short_description: "先确认中等详细教学策划，再写带表面、布局和逐步操作的教学呈现脚本"
-  default_prompt: "Use $orchestrate-courseware to turn my teaching materials into 01-teaching-plan.md, confirm it, then write 02-presentation-script.md."
+  short_description: "多轮补全教学信息，逐阶段确认策划与呈现脚本后再构建"
+  default_prompt: "Use $orchestrate-courseware to clarify my teaching intent over multiple turns, confirm the teaching plan, then separately clarify and confirm the presentation script before building."

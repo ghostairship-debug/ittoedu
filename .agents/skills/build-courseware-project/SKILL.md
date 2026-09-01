@@ -1,6 +1,6 @@
 ---
 name: build-courseware-project
-description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md 构建、增量修复和验证当前编辑器支持的可编辑互动课件。Use when the agent should act as a clean Build Coordinator, discover current capabilities from artifacts/ai-capabilities/index.json, select Native/Runtime/Component ownership, write Course Project V9 via product factories and V9 commands, export deliverables, or make a revision-protected edit at a stable authoringAddress using the same commands a teacher would use.
+description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md，在任意课例交付目录中构建、增量修复和验证当前编辑器支持的可编辑互动课件。Use when the agent should act as a clean Build Coordinator, autonomously resolve the editor product root and Capability Index, run the external-case builder facade, select Native/Runtime/Component ownership, write Course Project V9 via product factories and V9 commands, export deliverables, or make a revision-protected edit at a stable authoringAddress.
 ---
 
 # 构建互动课件工程
@@ -15,8 +15,9 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 
 1. 直接读取 `01-teaching-plan.md`、`02-presentation-script.md` 和其中引用的材料。
 2. 读取用户本轮约束；不继承被否决的设计和无关聊天摘要。
-3. 确认编辑器根目录就是当前 git 仓库根（`main` 上的 Course Project V9）。能力索引：`<editor-root>/artifacts/ai-capabilities/index.json`。
-4. 若两份文件缺失关键教学内容、表面选择或逐步操作，或实现必须改变教师可感知体验，返回 `$orchestrate-courseware`；不要猜。未确认的策划或脚本不得当作成品输入。
+3. 把教师当前目录或明确指定目录作为**课例交付目录**；它可以是任意普通目录，不需要是 Git 仓库，也不得被切换成编辑器仓库。
+4. 按 [external-case-build.md](references/external-case-build.md) 自行解析**编辑器产品根目录**，再读取 `<editor-root>/artifacts/ai-capabilities/index.json`。不要把定位产品依赖转嫁给教师。
+5. 若两份文件缺失关键教学内容、表面选择或逐步操作，或实现必须改变教师可感知体验，返回 `$orchestrate-courseware`；不要猜。未确认的策划或脚本不得当作成品输入。
 
 ## 2. 发现能力
 
@@ -38,6 +39,9 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 2. **组件**：稍复杂的局部互动（拖拽、配对、本地多步控件）。先匹配工程已有包和（若目录可用）可导入包，能小改就复用；没有合适的就允许新建 Component API 4 包并嵌入本课。不要因为「只这一课用」而改用整页 Runtime 去仿一个控件。不要把空 catalog 当成禁止新建。
 3. **场景 / 世界 Runtime**：整页或整块世界的动画、特效、连续耦合机制；尽量少放可教文字。不要把局部拖拽器做进场景 Runtime。
 4. **无限画布**：脚本若要求空间漫游，运行态必须同时支持自由逛（会话平移/缩放，不写回工程）和镜头画面/路径巡游。手势与组件、Runtime、视频、教师控制器冲突时，被占用的交互优先。
+5. **课程状态与导航守卫**：跨页的进度门槛（"完成本页练习才能进下一页"）。状态是课程级键值（boolean/number/string/null + 默认值）；守卫只有 `block` 一种效果——拦截并显示作者写的提示，不跳转、不执行代码。守卫只拦跨位置的 go/next/previous；重播不检查；重新开始绕过守卫并把状态重置为默认值；教师控制器操作可绕过（课堂接管是特性，不是缺陷）。Published `node.click` 的声明式窄切片可用 `course-state.exists` / `course-state.compare` 读取状态，并以同步 `course-state.set` 写状态；Runtime/Component 仍可通过 `ctx.courseState` 读写。当前没有判题结果自动分支或自动写状态桥。
+
+脚本里任何「对/错/条件/按学生行为改变走向」的体验，动手前必须映射到三者之一，并可对索引核对：① `interactions.publishedPlayback` 声明的可执行切片；② 课程状态 + 导航守卫（由 `node.click` 的 `course-state.set` 或组件/Runtime 写状态）；③ 组件/Runtime 内部逻辑（为本课新建组件也算）。三者都装不下、或映射会改变教师可感知体验时，停止并返回 `$orchestrate-courseware`。不得写播放器不执行的交互种类交差——`validate:course-project` 的 `published-interaction-*-unsupported` 诊断会当场拒绝。选 ③ 时逻辑进代码，教师改阈值就要再改代码：能用 ② 表达的门槛优先用 ②，并让组件把可调参数公开为可编辑内容。
 
 ## 4. 资产与任务图（动手前）
 
@@ -52,6 +56,16 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 
 权威工程是 `CourseProjectDocument`（`schemaVersion: 9`），不是 Agent Kit 语义 DSL，也不是 Project V8。
 
+课例实现放在 `<case-dir>/implementation/build.ts`，由编辑器仓库的正式外部案例入口加载。该模块不得用相对路径、绝对路径或路径别名导入编辑器内部源码；它导出构建函数，从注入的 `context.api` 取得下列真实产品工厂和 V9 命令，并返回 `{ project, assetFiles, componentFiles }`。这只是产品 API Facade，不是第二套 DSL。
+
+从任意工作目录调用：
+
+```text
+npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <case-relative-output.h5lesson> --html <case-relative-output.html>
+```
+
+两个输出路径都必须相对课例目录。只有明确要替换已有交付物时才追加 `--force`。入口在写文件前完成 V9 打包、保存重开、当前 `validate:course-project` 语义检查、Published V2 构建和离线 HTML 构建；失败时不得留下半套新交付物。不要再用 `npx tsx <case-dir>/implementation/build.ts` 直接执行，也不要在课例脚本中写 `../../../<editor-repo>/src/...`。
+
 空白工厂（按脚本选定的表面选用；默认 Slide 工厂**不会**变成讲义或无限画布）：
 
 | 形态 | 工厂 |
@@ -62,12 +76,13 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 
 同一课需要多种表面时，从一种空白工程出发，再用 `src/renderer/course/courseLocationCommands.ts` 的 `addCourseSlidePage` / `addCourseFlowPage` / `addCourseSpatialPage` 追加。不要新造第二份工程拼盘。
 
-写入走与教师相同的 V9 命令，一次 history：
+下列入口通过 `context.api` 暴露，写入仍走与教师相同的 V9 命令，一次 history：
 
 - Slide：`slideEditorCommands.ts`、`v9SlideContentCommands.ts`（含 `addSlideRuntimeLayer`）
 - Flow：`flowEditorCommands.ts`（含 `insertFlowEditorBlock`、`cutFlowEditorBlocks` / `pasteFlowEditorBlocks`、`replaceFlowMediaBlockAsset`、`importAndReplaceFlowMediaBlock`）；共享插入见 `flowSharedAuthoringAdapters.ts`（`insertFlowSharedMedia`、`insertFlowSharedRuntime`）
 - Spatial：`spatialEditorCommands.ts`（含 `addSpatialWorldVideoLayer`、`addSpatialWorldComponentLayer`、`addSpatialWorldRuntimeLayer`）。工具栏视频必须把真实 session **和** `asset` 传给 `addSpatialWorldVideoLayer`；不要克隆假 session。
 - 组件：`importComponentPackage` 写入工程，再按表面插入；替换用 store `replaceComponentPackage`。
+- 课程逻辑：`executeCourseLogicAuthoringCommand`（`src/renderer/course/courseLogicAuthoringCommands.ts`，状态声明与导航守卫，一次 history；与专业模式「互动与动画」面板同源）。
 
 打包：`createCourseProjectArchive`（`src/renderer/project/courseProjectArchive.ts`）。校验：
 
@@ -75,7 +90,7 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 npm run --silent validate:course-project -- <project.h5lesson>
 ```
 
-`validate:project` 是同一入口。该命令当前只证明 Schema、包内文件和已经接线的结构性工程健康/预检项目；在 REPAIR 路线完成前，退出码 0 不代表完整 V9 语义或 Runtime/Component 实际网络使用与工程声明一致已经证明。不要把 Project V8 写成当前格式，也不要把 Headless 绿色写成完整交付证据。
+`validate:project` 是同一入口。它跑哪些检查以索引 `validation.checks` 为准，不在本文抄清单（当前覆盖 V9 Schema、资产与组件、Runtime/Component 协议、单 HTML/网页包/PDF/PPTX 四类导出预检、稳定 ID、无 V8 残留和工程健康；其中 `published-interaction-*-unsupported` 会当场拒绝播放器不执行的交互种类）。静态绿仍不等于视觉与互动可用——真实画面、断网表现和教师编辑证据按 §9 取得。不要把 Project V8 写成当前格式，也不要把 Headless 绿色写成完整交付证据。
 
 若当前产品没有对应命令或宿主，停止并报告产品缺口，不自造影子 Project DSL。
 
@@ -122,7 +137,7 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 ## 9. 验证与交付
 
-运行产品 Schema 与当前已接线的结构性健康检查（`validate:course-project`）、相关单测、真实编辑保存重开、CoursePlayer、默认离线 HTML 和本课要求的其它导出。真实 HTML/网页包还要观察外部请求，补足 Headless 尚未完整覆盖的 Runtime/Component 源码离线合规。验证范围见 [validation-boundaries.md](references/validation-boundaries.md)。
+运行 `validate:course-project`（检查范围以索引 `validation.checks` 为准）、相关单测、真实编辑保存重开、CoursePlayer、默认离线 HTML 和本课要求的其它导出。用了课程状态/守卫的课，还要在 CoursePlayer 里真实走一遍：未达标被拦并看到作者提示、达标放行、重新开始后状态回默认。真实 HTML/网页包还要观察外部请求，补足 Headless 尚未完整覆盖的 Runtime/Component 源码离线合规。验证范围见 [validation-boundaries.md](references/validation-boundaries.md)。
 
 工程检查通过后，由全新上下文做一次只读体验 QA。自动化最多 `engineering candidate`；具体课例未经真实视觉/互动复核不得称 `art candidate`；`accepted` 必须来自教师明确验收。不得宣称 Editor 1.0 已发布。
 

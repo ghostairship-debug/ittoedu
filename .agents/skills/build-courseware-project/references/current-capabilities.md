@@ -5,6 +5,7 @@
 ## 索引与命令
 
 - 生成合同：`<editor-root>/artifacts/ai-capabilities/index.json`。
+- 任意课例目录构建：`npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <relative.h5lesson> --html <relative.html>`。课例模块由 `coursewareCaseBuilderApi.ts` 注入真实产品 API，不得静态导入编辑器内部路径。
 - `protocols`：project **9**、publishedCourse **2**、runtime `[2, 3]`、component **4**、interaction **1**。
 - 仓库**没有** `agent-kit/bin/courseware-agent-kit.mjs` 或 `agent-kit/capabilities/index.json`。发现能力 = 读上述 `index.json`，再打开它列出的 `schemas/`、`diagnostics.json`、`limits.json`、组件快照。
 - 核对生成物：`npm run check:ai-capabilities`。不要手改索引冒充当前能力。
@@ -39,6 +40,14 @@ Mixed：同一 `CourseProjectDocument` 内用 `addCourseSlidePage` / `addCourseF
 - Spatial 插入视频：`addSpatialWorldVideoLayer(session, { assetId, asset, x?, y? }, { expectedRevision })`，并写入 sidecar。`addVideoNode` 的 spatial 早退必须传真实 session + `asset`。
 - 组件：P8 已把 Component API 4 挂到 Flow 稿纸/浮层、Spatial 世界/HUD、Slide Published 试运行。导入 `importComponentPackage`，替换 store `replaceComponentPackage`。Runtime 插入：`addSlideRuntimeLayer` / `insertFlowSharedRuntime` / `addSpatialWorldRuntimeLayer`。
 - Flow cut/paste **已实现**（`cutFlowEditorBlocks` / `pasteFlowEditorBlocks`）。
+- Slide 编辑画布与试运行已统一为同一套 Published 宿主（不再有 `blob:` iframe 编辑预览）；Phaser 仍只作 Slide 编辑的命中/选择/几何层，不负责视觉合成。
+
+## 课程逻辑（状态 + 导航守卫；2026-08-27 Owner 追认保留）
+
+- 能力声明：`index.json` → `interactions.courseLogicAuthoring`；播放器**实际执行**的交互切片看 `interactions.publishedPlayback`——当前 `node.click` 支持 `course-state.exists` / `course-state.compare` 条件和同步 `course-state.set` 动作，限制仍是无判题分支条件与无判题结果自动写状态桥。映射体验时以索引为准，不要凭印象。
+- 命令：`executeCourseLogicAuthoringCommand`（`courseLogicAuthoringCommands.ts`）；GUI 在专业模式「互动与动画」。
+- 守卫语义：只 `block`；只拦跨位置 go/next/previous；replay 不检查；restart 绕过并重置为默认值；教师控制器可绕过。
+- 状态写入：Published `node.click` 可同步执行 `course-state.set`；Runtime/Component 也可经 `ctx.courseState` 读写。判题器（`ctx.assessment.evaluate`）结果不会自动进状态，组件判完须自行写入。
 
 ## 仍按不可用处理
 
