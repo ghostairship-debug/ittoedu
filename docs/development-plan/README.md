@@ -1,39 +1,35 @@
-# 开发执行方案入口
+# 开发文档入口
 
-> 治理关系：根目录 [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md) 是仓库唯一开发总纲；本目录是其下唯一详细执行子计划。历史阶段文档（ARCH-0A～ARCH-5 合同、评估、模板与已终态任务卡）已于 2026-08-25 文档整合中移除，原文由 Git 历史保留。
->
-> 当前状态与下一可领取项只看自动生成的 [`TASK_BOARD.md`](TASK_BOARD.md)。卡数只在该板上，本文不复述——复述过的数字会在下一次建卡或删卡时过期，并与板本身矛盾。
+> 根目录 [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md) 是当前产品决定与开发路线的唯一总纲；当前任务数量和状态只看自动生成的 [`TASK_BOARD.md`](TASK_BOARD.md)。已完成、取消和被取代的路线由 Git 历史保存，不回填当前总纲。
 
-## 本目录文件
+## 权威文件
 
-| 文件 | 职责 |
+| 文件 | 唯一职责 |
 |---|---|
-| [ARCHITECTURE_CONTRACT.md](ARCHITECTURE_CONTRACT.md) | 什么不能坏/本轮必须兑现：25 组架构不变量、状态七分类、模块 Owner、carrier、可信扩展宿主能力与声明式网络边界 |
-| [WORKING_PROTOCOL.md](WORKING_PROTOCOL.md) | 怎么干活（精简生产模式）：默认直达路径、S0/S1/S2、三态任务卡、Reviewer 风险触发器、并发三层、验证同 SHA 去重、Done 定义、Legacy 删除八问 |
-| [TASK_CARD_TEMPLATE.md](TASK_CARD_TEMPLATE.md) | 7 字段 Ready 任务卡模板，仅 S2/并发/热点/跨会话需要（与 `scripts/generate-task-board.ts` 同步） |
-| [REPAIR_PLAN.md](REPAIR_PLAN.md) | 已确认的工程修复事实、Owner 边界与历史 phase-gate 证据；不再派工 |
-| [TASK_BOARD.md](TASK_BOARD.md) | 生成的活跃任务摘要（`npm run generate:task-board`，不可手改；完成即删卡） |
-| `tasks/` | 建卡任务的卡文件，按 `tasks/<wave>/` 存放，完成即删除（Git 不跟踪空目录）；当前有哪些卡只看 `TASK_BOARD.md` |
-| `inventories/legacy-consumers.json` | Legacy consumer 台账（被 repo-index semantic 与测试消费，删除状态唯一真相） |
-| `inventories/FEATURE_CONSUMER_OWNER_LEDGER.md` | ARCH-0A 时期的 Feature/consumer/owner 清单（被 repo-index 引用） |
-| `baselines/ARCH_0_PERFORMANCE.md` | 性能对照基线（同机同夹具 median/P95 口径，PRJ 性能修复的对照来源） |
+| [开发总纲](../../COURSEWARE_DEVELOPMENT_PLAN.md) | 当前产品决定、边界、优先路线和成功标准 |
+| [架构合同](ARCHITECTURE_CONTRACT.md) | 技术不变量、状态分类、模块 Owner、carrier、可信扩展与协议负边界 |
+| [工作协议](WORKING_PROTOCOL.md) | 立项、S0/S1/S2、任务卡、Reviewer、并发、验证、Git 与完成定义 |
+| [任务板](TASK_BOARD.md) | 当前 queued / active / blocked 任务摘要；由脚本生成，不可手改 |
+| [任务卡模板](TASK_CARD_TEMPLATE.md) | 仅 S2、并发、热点、跨会话或交接任务使用的 7 字段模板 |
 
-## 目标
+## 辅助材料
 
-把已有能力变成真正可用、稳定、可维护的软件——软件做减法：一个可写 Course Project V9 真相、一套稳定 authoring identity/transaction/history 语义、更少的重复 writer/consumer/session、App/Workspace/Properties 从业务实现降为组合与路由。衡量进展看重复机制是否减少、核心流程是否更稳，不看新增目录、文档或抽象数量。
+| 文件 | 用途 |
+|---|---|
+| `inventories/legacy-consumers.json` | 被自动化消费的 Legacy consumer 真相 |
+| `inventories/FEATURE_CONSUMER_OWNER_LEDGER.md` | Feature / consumer / owner 辅助清单 |
+| `baselines/ARCH_0_PERFORMANCE.md` | 同机同夹具性能对照基线 |
 
-长期目标（G1–G6）：教师能力不降级；核心链路高可用（编辑→保存→重开→预览→导出）；唯一可写工程真相；无环模块边界；AI 按需认知（小上下文可定位正确入口）；单人 Owner + 自动多智能体可维护。
+## 阅读路由
 
-## 不可协商的产品与协议边界
+- 决定当前做什么、为什么做、成功标准是什么：读开发总纲。
+- 修改 Schema、持久化、Surface、global/surface 图层、教师控制器、Published/Player、Runtime/Component、网络、导出或稳定身份：补读架构合同的相关条目。
+- 决定是否建卡、如何并发、何时 Reviewer、跑哪些验证或怎样合入：只读工作协议，不从总纲或 AGENTS 复制规则。
+- 查看谁正在做什么：只读任务板和对应任务卡；历史阶段名与完成卡不得自动恢复为任务。
 
-- Course Project V9 软冻结；additive 可选字段必须独立合同提交；不恢复 V8 导入、不建 V10。
-- 不从 Player DOM/Canvas、Phaser proxy 或 Published payload 反建作者工程。
-- 不删除或禁用已有高级编辑能力；隐藏能力必须可发现、可保存、可撤销。
-- `globalLayerItems`、`surfaceLayerItems`、教师控制器和三种 Surface 能力保留。
-- 自动化最多证明 `engineering candidate`；真实视觉、互动和教师确认决定 `art candidate` / `accepted`。
-- repo-index 不进入产品运行时，只是可缺省、可重建的本地导航缓存；默认直接读源码/合同/目标测试，不跟踪缓存，不设 golden/quality/freshness 产品门，也不建图数据库、向量库、Watcher 或常驻服务。
-- 不借重构扩建重型平台或第二份数据真相；Owner 已明确准入的远程资源/API 只做最小纵切，不预建 Provider 插件框架；不在缺少真实行为或 consumer 证据时大拆 `editorStore.ts` / `Workspace.tsx` / `PropertiesTab.tsx`。
+## 维护规则
 
-## 历史纪要
-
-ARCH-0A/0B（治理与 repo-index）、ARCH-1（首个事务纵切）、ARCH-2（跨 Surface 公共能力）、ARCH-3（Surface 模块化）、ARCH-4（交付链收口）、ARCH-5（清理与最终候选）以及 2026-08-24 深度审计的 29 项稳定化已全部终态收口，结论上限 `engineering candidate`（打包与性能测量按 Owner 决定豁免，记录为未执行项）。阶段合同、门禁报告与全部已终态任务卡由 Git 历史保存。
+- 一条规则只在一个权威文件写全文；其他文件只写职责指针或任务触发条件。
+- 总纲只写当前状态。内容一旦完成、取消或被取代，下一次路线更新时移出正文，由 Git 历史保留。
+- 任务数量、状态和瞬时卡片清单只出现在任务板；README、总纲和 AGENTS 不复制。
+- 参考材料与源码冲突时，按总纲的权威顺序修正参考材料，不按过时文档强改代码。

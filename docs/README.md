@@ -9,7 +9,7 @@
 | 产品概览、启动、架构与命令 | [根目录 README](../README.md) |
 | 教师和课件作者操作 | [用户指南](USER_GUIDE.md) |
 | 当前唯一开发总纲 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md) |
-| 详细执行规则与修复事实 | [docs/development-plan/](development-plan/README.md)；当前派工只看根计划与任务板，[工程修复方案](development-plan/REPAIR_PLAN.md)仅保存已确认事实 |
+| 详细执行规则 | [docs/development-plan/](development-plan/README.md)；当前派工只看根计划与任务板 |
 | Course Project V9 合同、兼容政策与架构边界 | [COURSE_PROJECT_V9.md](contracts/COURSE_PROJECT_V9.md)、[V9_COMPATIBILITY_POLICY.md](contracts/V9_COMPATIBILITY_POLICY.md)、[EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md) |
 | 当前任务状态 | [自动任务板](development-plan/TASK_BOARD.md)（由任务卡生成，不可手改） |
 | AI 教学策划 | [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) |

@@ -15,15 +15,15 @@
 ### 产品能力
 
 1. Slide、Flow、Spatial、Mixed 均可创建和编辑。
-2. Flow 普通正文保持 FlowBlock 文档流；FlowComponentBlock 保持稿纸组件 carrier。
+2. Flow 普通正文保持 FlowBlock 文档流；FlowComponentBlock 保持稿纸组件 carrier。图层面板与合成器以一个“正文”边界表示整份语义正文，页面浮层通过可选 `bodyPlane` 稳定处于正文下方或上方，旧工程缺字段时解析为正文上方；paragraph/heading 不进入 generic z-order，默认空 paragraph 不作为图层噪声暴露。当前不增加逐 paragraph 锚定。
 3. Spatial 运行时可自由逛并支持镜头巡游，会话相机不写回工程。
 4. Phaser 保持 Slide 编辑能力，不重新成为 V9 运行主路径。
 5. 高级编辑、组件、Runtime、互动、媒体和代码能力不被删除；低频能力可渐进披露，但必须可发现、可保存、可撤销。
-6. 全局层入口保持可发现；教师控制器保持全局单份，运行态会话拖拽不写回工程；页面作者态控制器 inert，全局层是唯一持久化编辑入口。
+6. 全局层入口保持可发现；教师控制器保持全局单份、固定属于 Overlay，运行态会话拖拽不写回工程；页面作者态控制器 inert，全局层是唯一持久化编辑入口。控制器在作者、试运行、Player 与 HTML 中始终高于当前 surface/scene/world 的 Native、Runtime、Component 内容，并只承担恢复、手动跳转、重播和临时越过；它可为课堂强制跳转绕过导航守卫，但课程主推进不得依赖它，也不得为它预留正文安全区。控制器与其他全局 Overlay 元素的关系仍由全局平面内排序决定。
 
 ### 保存与运行
 
-7. Save 从活动 V9 document、asset sidecar 和 component files 构建 archive。
+7. Save 从已提交活动文字草稿的 V9 document、asset sidecar 和 component files 构建 archive；关闭脏判定与恢复快照使用同一份含草稿 canonical document。
 8. 保存 single-flight 与"保存期间继续编辑仍为 dirty"行为保留。
 9. RecoveryWriteCoordinator 的 debounce/cancel/snapshot 语义保留。
 10. V9 Try-run / Full Preview 的 CoursePlayer + Published V2 主路径保留；HTML/Web 的 V2 主路径保留。
@@ -34,12 +34,12 @@
 ### 编辑一致性
 
 14. stable `authoringAddress` 不被临时 `hitId` 取代；禁止 DOM id、数组下标、临时 hitId 作为持久身份。
-15. global/surface/scene/world owner 语义保留；跨 owner 操作不得暗中混用 viewport/world 坐标。
+15. global/surface/scene/world owner 语义保留；跨 owner 操作不得暗中混用 viewport/world 坐标。有效合成严格分为“全局 Underlay → 当前 surface/scene/world 内容 → 全局 Overlay”，不存在全局项与本地项的逐项可编辑层级；全局排序只改变同一平面内的全局项关系。平面由带旧工程默认值的 V9 additive 可选字段持久化，不得从共享 `order` 相对本地内容最小值猜测。
 16. contenteditable/IME composing 时不被无提示提交或切页覆盖。
 17. 拖拽只在明确结束时形成逻辑提交。
 18. 简洁/专业只是 UI 能力披露差异，不是不同工程真相；DeveloperTab 已有代码能力不得因模式整理消失。
 19. 作者与交付的有效域必须闭合：任何作者端允许保存的状态都必须被 Preview、统一画布、Published Player 和适用导出接受。
-20. 公开入口必须诚实：属性、复制、粘贴、重复、拖放和错误反馈要么真实改变唯一工程并进入正确历史，要么明确不可用；禁止静默 no-op、伪成功和底层校验 JSON 直出。
+20. 公开入口必须诚实：属性、复制、粘贴、重复、拖放和错误反馈要么真实改变唯一工程并进入正确历史，要么明确不可用；禁止静默 no-op、伪成功和底层校验 JSON 直出。统一多选 Delete 必须从同一输入文档形成一次原子提交和一次选区更新，并同步清理 presentation overrides/order、互动引用与 Runtime `nodeBindings`；任何拒绝都必须零写入并返回真实失败。
 
 ### 可信扩展与网络
 
@@ -56,8 +56,6 @@
 23. read-model boundary 与 forbidden-token 棘轮保留并只允许收紧。
 24. 自动化最多证明 engineering candidate；未经明确教师验收不得宣称 accepted/发布。
 25. 用户未提交修改不得被自动回退或覆盖。
-
-（第 1–20、22–25 组覆盖原 35 条语义，合并关系可由 Git 历史中的 `90-appendix/00_CURRENT_MUST_PRESERVE.md` 对照；第 21 组已按 2026-08-25 Owner 最新信任模型裁决替代原低权限假设。）
 
 ## 3. 状态七分类与唯一工程真相
 
@@ -84,13 +82,13 @@
 | Editor Core | canonical port、authoring identity、transaction/history、typed selectors | 具体 Surface selection、Feature UI |
 | App Composition | 项目生命周期、跨 Feature use case、路由、错误反馈 | Surface 内部模型、格式实现 |
 | Slide | Scene/Layer placement、Phaser 编辑生命周期、Slide selection | Catalog、通用包生命周期 |
-| Flow | FlowBlock、稿纸布局、overlay placement、Flow selection | 把普通 block 变成通用图层 |
+| Flow | FlowBlock、稿纸布局、正文合成边界、overlay placement、Flow selection | 把普通 block 变成通用图层或逐 paragraph z-order |
 | Spatial | World item、camera/path/relation、Spatial selection | Player 会话相机写回工程 |
 | Components | Catalog、package、props、authoring validation | Surface carrier/placement |
 | Media | AssetMeta、sidecar bytes、引用与导入计划 | Surface 具体布局 |
 | Runtime | Runtime definition、draft、validator、host contract | Player 反写作者文档 |
 | Interactions | Rule、template、validator、authoring UI | Surface 私有布局 |
-| Global Layers | global/surface effective ownership/order | 复制教师控制器到每个 Surface |
+| Global Layers | global/surface ownership、严格 Underlay/Overlay 平面与平面内排序 | 全局项和本地项逐项交错排序；复制教师控制器到每个 Surface |
 | Teacher Controller | 控制器作者与运行行为 | 独立持久化副本 |
 | Preview | session build、mount/destroy/generation、fit | Export 格式实现 |
 | Export | Published/static plan 到具体格式 | 修改作者 Store |
@@ -111,14 +109,14 @@
 
 - 统一：CourseProjectDocument、projectId/revision、AuthoringTarget、Core transaction/history、asset/component 生命周期、preview/export producer 输入、authoringAddress 与 owner scope。
 - 不统一：Slide scene/presentation state；Flow 文档流、嵌套、wrap 排版；Spatial world/camera/path/relation；各 Surface selection；Phaser/DOM/Spatial viewport 生命周期。
-- Flow 普通 block 不进入 generic z-order owner；Surface 公共入口最多提供 selector/command/placement/selection adapter/preview adapter/minimal UI entry，不建万能 SurfaceEditorService。
+- Flow 普通 block 不进入 generic z-order owner；统一图层只呈现一个正文合成边界与其上下浮层，不把 paragraph 伪造成 LayerItem。Surface 公共入口最多提供 selector/command/placement/selection adapter/preview adapter/minimal UI entry，不建万能 SurfaceEditorService。
 
 ## 6. 模块级补充边界
 
 - **Components**：Catalog snapshot 不是工程真相；四子域为 Catalog / Packages / Instances / Authoring。
 - **Runtime/互动**：简洁模板与专业规则必须生成同一种标准 Interaction V1 规则；Automation UI 是界面不是第三套业务模型。
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
-- **全局层**：有效图层管线为 global+surface+scene/world → visibility filter → ownership-aware order → rows/canvas/player。
+- **全局层**：有效图层管线为 visibility filter → global Underlay（平面内排序）→ 当前本地合成（Flow 为 surface Underlay → 语义正文 → surface Overlay；Slide / Spatial 保留各自本地 carrier）→ global Overlay（平面内排序）→ rows/canvas/player；跨 owner `order` 不得泄漏成可编辑交错层级。
 - **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。
 - **Diagnostics**：不预建 structural/contextual/authoring/export 框架矩阵，只处理已复现的债务。网络 finding 判断“声明与使用是否一致”，不得把合法外链本身定义为错误。
 - **Secrets**：长期 API/AI Provider 密钥不属于 Course Project、Published payload、component package 或导出文件；只允许服务端代理、运行时用户输入或短期限域 Token。
