@@ -241,7 +241,8 @@
       "visibility": {
         "mode": "all",
         "locationIds": []
-      }
+      },
+      "plane": "overlay"
     }
   ],
   "globalInteractions": [],

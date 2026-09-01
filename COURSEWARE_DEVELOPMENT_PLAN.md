@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 当前路线核实日期：2026-09-01。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
+> 当前路线核实日期：2026-09-02。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
 >
 > 本文件只保存当前产品决定、边界和开发路线。已经完成、取消或被取代的内容在下一次路线更新时移出正文，由 Git 历史保留；不得在这里维护 changelog、完成卡清单或行号级历史源码快照。
 
@@ -51,7 +51,7 @@
 - Runtime/Component 是经过审核的可信扩展。外部导入只是分发方式；真实 consumer 需要宿主能力时走稳定宿主接口或同宿主执行语义，不建权限审批平台。
 - 远程资源和 API 按工程的精确 `https` / `wss` origin 声明开放。远程脚本暂不开放；长期 Provider Secret 不得写入工程、Published payload、组件包或导出 HTML。
 - 单 HTML 明确区分离线便携与在线轻量；这是导出选择，不新增持久化 `projectMode`。
-- 当前工作区仍有第 5.1 节列出的候选红灯，只能视为内部开发源码；红灯清零并固定候选后，主要交付纯 Slide HTML，Flow / Spatial 以 HTML 为主，兼容导出与安装包不构成当前稳定发布承诺。仓库不保留历史 release 输出，安装包必须从明确固定的当前候选重新构建。
+- 当前工作区第 5.1 节的确定性红灯已经清零，但已验收差异尚未形成 product commit 或固定候选并通过适用门，因此仍只能视为内部开发源码；候选固定并过门后，主要交付纯 Slide HTML，Flow / Spatial 以 HTML 为主，兼容导出与安装包不构成当前稳定发布承诺。仓库不保留历史 release 输出，安装包必须从明确固定的当前候选重新构建。
 - 自动化最多证明 `engineering candidate`；真实课程的视觉、互动和教师复核决定 `art candidate` / `accepted`。
 
 ## 3. 产品级不变量
@@ -88,13 +88,12 @@
 
 ### 5.1 固定下一候选前的直接红灯
 
-以下是当前可复现的候选闭合项，不代表新的产品架构阶段：
+当前没有仍可复现的确定性产品或测试红灯。剩余工作是候选收口，不代表新的产品架构阶段：
 
-1. **对齐剩余 Published Slide 宿主断言**。`publishedPhaserComponentSlideHostIntegration.test.ts` 仍把 DOM `zIndex` 断言为作者端稀疏 `order`；当前宿主按严格平面合成输出密集 `stackOrder`。只修正过时断言并保留“组件低于哨兵”的相对顺序证明，不反改产品实现。
-2. **刷新真实 consumer 使用的生成制品**。当前 `sample-project.h5lesson` 与 render-host benchmark 因 V9 全局平面 / Flow `bodyPlane` 合同变化而过期；当前能力索引 `generation-evidence.json` 也未覆盖工作区最新 Builder/Skill 输入。先固定相关输入，再各生成一次并保留生成命令自身的写入校验；不把同输入的 `--check` 紧接在生成后重复执行。
-3. **固定候选并执行一次适用门**。上述红灯清零后，再按工作协议对固定 SHA 执行一次适用的组合验证。可缺省、未 tracked 的 repo-index 缓存即使本地 stale 也不是产品红灯；只有本次调查确需使用时才显式重建。
+1. **固定当前已验收差异**。把五个真实 consumer 生成制品、Published Slide 密集栈序测试修复及本次长期路线更新形成可整体识别、可回滚的 product commit 或紧凑提交组；不得纳入用户的 `.codex-remote-attachments/`，也不得为收口顺便修改产品实现。
+2. **对固定候选执行一次适用门**。只在上述差异形成固定 SHA 后，按工作协议补齐尚未被有效证据覆盖的组合验证；同一候选、同一命令只执行一次。可缺省、未 tracked 的 repo-index 缓存即使本地 stale 也不是产品红灯；只有本次调查确需使用时才显式重建。
 
-2026-09-01 当前工作区的直接证据是：类型检查通过；合同、任务板和 102 个字体切片检查通过；草稿/删除/命名状态/单次解压/捕获截止时间/最近项目/origin 预检/课程状态/三 Surface 平面合成的 12 个聚焦文件共 144 项测试通过。当前有 4 个确定性失败：1 个为上述 `zIndex` 旧断言，3 个为示例或基准制品过期。过往完整测试总数和量化评分不作为当前候选门依据。
+2026-09-02 当前工作区的直接证据是：`check:ai-capabilities`、`check:sample-examples`、`check:render-benchmark:fixture` 与任务板检查通过；`sample-project.h5lesson` 和 `render-host-benchmark-v9.h5lesson` 均通过无界面 V9 校验并允许适用导出；`publishedPhaserComponentSlideHostIntegration.test.ts` 以实际 DOM 密集栈序证明组件低于哨兵，12 项全部通过。此前通过的类型检查、合同、102 个字体切片检查及 12 个聚焦文件共 144 项测试未命中相关失效条件，继续有效。当前确定性红灯为 0；五个刷新后的 tracked 生成制品、一个测试修复与本次总纲更新仍是未提交的已验收工作区差异，不能在形成 product commit 或紧凑提交组并完成固定候选门前宣称候选可发布。过往完整测试总数和量化评分不作为当前候选门依据。
 
 ### 5.2 条件性动态 carrier
 
@@ -113,7 +112,7 @@
 
 ### 5.4 兼容项与独立风险
 
-以下事项不阻断第 5.1 节红灯清零后固定内部纯 Slide HTML 源码候选，只在真实交付、性能目标或新证据触发时启动：
+以下事项不阻断第 5.1 节当前候选收口，只在真实交付、性能目标或新证据触发时启动：
 
 - Spatial / Mixed PDF、PPTX 的 shape、formula、video、`surfaceLayerItems`、背景和动态静态表达完整度；
 - 根级单一 Error Boundary、巨石 UI 文件、JSDOM Canvas 告警、Lint 缺失和大素材导出内存峰值目前只有结构或预防性风险，没有已复现的受支持核心流程失败；只有出现真实失败、量化收益或 Owner 决定时才按当时事实立项，不按评估中的 High / Phase 标签自动提级。

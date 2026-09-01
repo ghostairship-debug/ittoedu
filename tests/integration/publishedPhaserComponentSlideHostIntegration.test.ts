@@ -1036,20 +1036,13 @@ describe('Published Slide Phaser Component API 4 host', () => {
     expect(wrapper.style.top).toBe('87px')
     expect(wrapper.style.width).toBe('360px')
     expect(wrapper.style.height).toBe('210px')
-    const publishedSlide = payload.surfaces.find((surface) => surface.id === fixture.slideSurfaceId)
-    if (!publishedSlide || publishedSlide.type !== 'slide') throw new Error('expected Slide payload')
-    const firstScene = publishedSlide.scenes[0]!
-    const componentOrder = firstScene.layerItems.find(
-      (item) => item.layerItemId === PUBLISHED_PHASER_COMPONENT_ITEM_ID,
-    )?.order
-    const sentinelOrder = firstScene.layerItems.find(
-      (item) => item.layerItemId === 'published-phaser-order-sentinel',
-    )?.order
-    expect(wrapper.style.zIndex).toBe(String(componentOrder))
-    expect(currentRoot.querySelector<HTMLElement>(
+    const componentZIndex = Number(wrapper.style.zIndex)
+    const sentinelZIndex = Number(currentRoot.querySelector<HTMLElement>(
       '[data-slide-layer-item="published-phaser-order-sentinel"]',
-    )?.style.zIndex).toBe(String(sentinelOrder))
-    expect(Number(componentOrder)).toBeLessThan(Number(sentinelOrder))
+    )?.style.zIndex)
+    expect(Number.isFinite(componentZIndex)).toBe(true)
+    expect(Number.isFinite(sentinelZIndex)).toBe(true)
+    expect(componentZIndex).toBeLessThan(sentinelZIndex)
     await currentPlayer.destroy()
     await flushTeardown()
 
