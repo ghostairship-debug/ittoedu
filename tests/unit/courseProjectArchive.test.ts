@@ -291,6 +291,7 @@ describe('createBlankCourseProject', () => {
       controller.item.content.nativeType !== 'teacher-controller') {
       throw new Error('expected teacher controller')
     }
+    expect(controller.plane).toBe('overlay')
     expect(controller.item.content.data.defaultCollapsed).toBe(true)
     expect(courseProjectDocumentSchema.parse(structuredClone(project))).toEqual(project)
     expect(courseProjectDocumentSchema.parse(structuredClone(aliased))).toEqual(aliased)
@@ -328,6 +329,7 @@ describe('createBlankCourseProject', () => {
         throw new Error('expected reopened teacher controller')
       }
 
+      expect(reopenedController.plane).toBe('overlay')
       expect(reopenedController.item.content.data.defaultCollapsed).toBe(defaultCollapsed)
       expect(reopened.project.revision).toBe(revisionBeforeSave)
       expect(reopened.project).toEqual(project)

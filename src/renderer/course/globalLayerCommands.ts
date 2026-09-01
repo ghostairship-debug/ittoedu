@@ -816,6 +816,7 @@ function appendDefaultTeacherController(
   const item = sceneNodeToCourseLayerItem(node, nextFrontGlobalOrder(project))
   project.globalLayerItems.push({
     item,
+    plane: 'overlay',
     visibility: { mode: 'all', locationIds: [] },
   })
   project.playback.controls = 'canvas'

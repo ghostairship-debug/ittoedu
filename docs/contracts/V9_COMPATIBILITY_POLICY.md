@@ -52,6 +52,7 @@
    - 已落地的例子：Flow heading / paragraph / quote 块的 `textAlign?` 与 `lineSpacing?`，缺省时沿用默认段落对齐与行距。
    - 已落地的例子：`FlowMediaBlock.wrap?` 与 `FlowComponentBlock.wrap?`，缺省时表示不绕排（`none`）。
    - 已落地的例子：`LayerItemBase.paperSpace?` 与 `PublishedLayerItemBase.paperSpace?`，缺省时为视口坐标定位（`viewport`）。
+   - 已落地的例子：`GlobalLayerEntry.plane?`，缺省按 3.2 节的冻结 legacy global 顺序解析为 `underlay` / `overlay`。
    - additive 仍是合同变更：单独提交、更新 `artifacts/contracts/`，不得混进教师手感/UI 提交。
 5. **不承诺旧二进制前向兼容**：含新可选键的课，未更新的编辑器可以因 `.strict()` 拒收。用户应更新到当前版本。
 6. **产品约定不是 Schema 收紧**：例如编辑器把 `startLocationId` 同步为大纲第一页，不得改成 Schema 新不变量去卡旧课。
@@ -61,6 +62,14 @@
 产品 Owner 明确批准在现有 Interaction Protocol V1 联合类型中增加三个严格分支：条件 `course-state.exists`、`course-state.compare`，以及动作 `course-state.set`。这次扩展不改写任何已有字段、判别器或语义，也不改变 `schemaVersion: 9`、Published Course V2、Runtime API 2/3 或 Component API 4；未使用新分支的既有 V9 工程行为不变。
 
 该决定是软冻结后的显式合同例外，不构成以后任意扩展判别器的通行授权。含新分支的工程会被不了解这些判别器的旧编辑器按严格 Schema 拒绝；这是已披露的前向兼容结果，用户须使用当前编辑器打开。increment/delete、表达式、工作流引擎与判题结果自动桥仍不在本次批准范围内。
+
+### 3.2 2026-09-01 Owner 批准的全局平面窄扩展
+
+产品 Owner 明确批准为 `globalLayerItems` 增加可选 `plane: 'underlay' | 'overlay'`，Published Course V2 增加对等可选字段。该字段把 global owner 与相对页面内容的视觉平面分开：有效顺序固定为 global Underlay → 当前 surface/scene/world 内容 → global Overlay；`order` 不再作为 global 与本地内容之间的比较键，跨 owner 的相同 `order` 合法。
+
+缺字段的旧 V9 / Published V2 保持可读，并使用冻结兼容规则：教师控制器固定为 Overlay；存在全局控制器时，按旧 global `order + layerItemId` 排在控制器之前的项解析为 Underlay，控制器及其后的项解析为 Overlay；不存在控制器时解析为 Overlay。该缺省不读取本地内容的最小 `order`，因此后续新增、删除或重排页面内容不会翻转 global 平面。新的作者命令与 Published producer 应物化显式 plane；教师控制器显式 Underlay 必须拒绝。
+
+这是软冻结后的显式合同例外，不改变 `schemaVersion: 9` 或 `formatVersion: 2`，不授权为 surface/scene/world 项增加同名字段，也不引入全局项与本地项逐项交错排序。
 
 ---
 

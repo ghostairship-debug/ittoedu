@@ -1502,6 +1502,13 @@
               "locationIds"
             ],
             "additionalProperties": false
+          },
+          "plane": {
+            "type": "string",
+            "enum": [
+              "underlay",
+              "overlay"
+            ]
           }
         },
         "required": [

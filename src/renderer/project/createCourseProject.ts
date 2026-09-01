@@ -4,7 +4,7 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
-  type ScopedLayerItem,
+  type GlobalLayerEntry,
 } from '@/shared/courseProjectTypes'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import {
@@ -62,10 +62,11 @@ export function createBlankCourseProject(
         playbackInitialVisibility: controls === 'canvas' ? 'inherit' : 'hidden',
       })
     : null
-  const globalLayerItems: ScopedLayerItem[] = controller
+  const globalLayerItems: GlobalLayerEntry[] = controller
     ? [{
         item: sceneNodeToCourseLayerItem(controller, 1),
         visibility: { mode: 'all', locationIds: [] },
+        plane: 'overlay',
       }]
     : []
 

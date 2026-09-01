@@ -97,10 +97,12 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 ```
 
 ### 4.1 图层作用域与排序
-- **全局图层（`globalLayerItems: ScopedLayerItem[]`）**：跨表面全局共享，通过 `LocationVisibility` 控制逐 location 可见性。
+- **全局图层（`globalLayerItems: GlobalLayerEntry[]`）**：跨表面全局共享，通过 `LocationVisibility` 控制逐 location 可见性；可选 `plane: 'underlay' | 'overlay'` 表示位于当前页面内容下方或上方。
 - **表面共享图层（`surfaceLayerItems: ScopedLayerItem[]`）**：在单个 surface 内共享。
 - **场景/世界图层（`layerItems: LayerItem[]`）**：属于特定 Slide 场景或 Spatial 世界。
-- **图层排序**：`order` 属性为全局统一的从后向前（back-to-front）稀疏排序键，各作用域数组为存储范围而非独立视觉平面。
+- **有效平面**：合成恒为 global Underlay → 当前 surface/scene/world 内容 → global Overlay；跨 owner 的 `order` 数值允许相同，不参与全局与本地内容的平面判定。
+- **图层排序**：`order` 仍是各 owner 内从后向前（back-to-front）的稀疏排序键；global 项只在各自有效平面内比较顺序。
+- **旧工程缺省**：缺 `plane` 时，教师控制器视为 Overlay；存在全局控制器时，控制器之前的旧 global 项视为 Underlay，控制器及其后的项视为 Overlay；没有控制器时视为 Overlay。该规则只依赖 global 内部顺序，不随页面内容增删或排序变化。
 
 ### 4.2 元素类型
 - **Native（`NativeLayerItem`）**：包含 `text`、`formula`、`image`、`video`、`shape`、`teacher-controller`。
@@ -109,6 +111,7 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 
 ### 4.3 教师控制器（Teacher Controller）
 - 教师控制器作为一份全局图层元素存在于 `globalLayerItems` 中（`nativeType: 'teacher-controller'`）。
+- 教师控制器固定属于 global Overlay；旧工程可缺 `plane`，但显式 `plane: 'underlay'` 非法。
 - 禁止为每个场景复制一份控制器副本，禁止将控制器写入场景 `layerItems`。
 - 编辑态控制器保持 inert（静态预览），试运行与播放态响应拖拽与点击交互。
 

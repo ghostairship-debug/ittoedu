@@ -35,6 +35,9 @@ export type CourseSurfaceType = typeof COURSE_SURFACE_TYPES[number]
 export const LAYER_ITEM_KINDS = ['native', 'component', 'runtime'] as const
 export type LayerItemKind = typeof LAYER_ITEM_KINDS[number]
 
+export const GLOBAL_LAYER_PLANES = ['underlay', 'overlay'] as const
+export type GlobalLayerPlane = typeof GLOBAL_LAYER_PLANES[number]
+
 export type LayerHitPolicy = 'auto' | 'surface' | 'pass-through'
 
 export interface LayerFrame {
@@ -169,6 +172,15 @@ export interface LocationVisibility {
 export interface ScopedLayerItem {
   item: LayerItem
   visibility: LocationVisibility
+}
+
+/**
+ * Course-global ownership and the plane around local content are orthogonal.
+ * Missing `plane` is the documented legacy compatibility case; canonical
+ * authoring commands and Published producers materialize the effective plane.
+ */
+export interface GlobalLayerEntry extends ScopedLayerItem {
+  plane?: GlobalLayerPlane
 }
 
 export interface LayerItemOverride {
@@ -516,7 +528,7 @@ export interface CourseProjectDocument {
   navigationGuards: CourseNavigationGuard[]
   locations: CourseLocation[]
   startLocationId: string
-  globalLayerItems: ScopedLayerItem[]
+  globalLayerItems: GlobalLayerEntry[]
   globalInteractions: InteractionRule[]
   surfaces: CourseSurfaceDocument[]
   /** Required only for a project containing more than one surface. */

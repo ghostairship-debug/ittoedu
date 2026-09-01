@@ -9,8 +9,10 @@ import {
   migrateProjectV8ToCourseProjectV9,
   normalizeFlowRichText,
   resolveCourseSurfaceBackgroundColor,
+  sceneNodeToCourseLayerItem,
   visitCourseProject,
 } from '@/shared/courseProjectModel'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
@@ -18,6 +20,8 @@ import {
   courseNetworkDeclarationSchema,
   courseProjectDocumentSchema,
   flowBlockSchema,
+  globalLayerEntrySchema,
+  scopedLayerItemSchema,
 } from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -25,7 +29,7 @@ import {
   type CourseRuntimeDefinition,
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
-import { createProject } from '@/renderer/project/createProject'
+import { createProject, createRectangleNode } from '@/renderer/project/createProject'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 
@@ -196,6 +200,35 @@ describe('Course Project V9 core contract', () => {
       type: 'paragraph',
       text: 'x',
       level: 2,
+    }).success).toBe(false)
+  })
+
+  it('adds a strict optional plane only to global entries and allows equal cross-owner order', () => {
+    const project = createBlankCourseProject({ now: NOW })
+    const controller = project.globalLayerItems[0]
+    const surface = project.surfaces[0]
+    if (!controller || surface?.type !== 'slide') {
+      throw new Error('expected blank Slide controller')
+    }
+    expect(controller.plane).toBe('overlay')
+    expect(globalLayerEntrySchema.parse(controller)).toEqual(controller)
+
+    const legacy = structuredClone(controller)
+    delete legacy.plane
+    expect(globalLayerEntrySchema.parse(legacy).plane).toBeUndefined()
+    expect(globalLayerEntrySchema.safeParse({ ...controller, plane: 'underlay' }).success)
+      .toBe(false)
+
+    const local = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'same-order-local',
+      name: '同序本地项',
+    }), controller.item.order)
+    surface.scenes[0]!.layerItems.push(local)
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    expect(scopedLayerItemSchema.safeParse({
+      item: local,
+      visibility: { mode: 'all', locationIds: [] },
+      plane: 'overlay',
     }).success).toBe(false)
   })
 

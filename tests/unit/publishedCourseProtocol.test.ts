@@ -9,6 +9,7 @@ import type {
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 
@@ -193,6 +194,32 @@ describe('Published Course V2 protocol', () => {
     expect(published).not.toHaveProperty('createdAt')
     expect(published).not.toHaveProperty('updatedAt')
     expect(published).not.toHaveProperty('componentPackages')
+  })
+
+  it('accepts an optional plane only on global entries and rejects an Underlay controller', () => {
+    const project = flowProject([{ id: 'heading', type: 'heading', level: 1, text: '标题' }])
+    project.globalLayerItems = [{
+      item: nativeText('global-underlay', 10, '底层'),
+      visibility: { mode: 'all', locationIds: [] },
+    }]
+    const published = publish(project)
+    published.globalLayerItems[0]!.plane = 'underlay'
+    expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+
+    const invalidSurfacePlane = structuredClone(published)
+    const invalidEntry = structuredClone(invalidSurfacePlane.globalLayerItems[0]!)
+    invalidEntry.plane = 'overlay'
+    invalidSurfacePlane.globalLayerItems = []
+    invalidSurfacePlane.surfaces[0]!.surfaceLayerItems.push(invalidEntry)
+    expect(publishedCourseV2Schema.safeParse(invalidSurfacePlane).success).toBe(false)
+
+    const controllerPayload = buildPublishedCourseV2Payload({
+      project: createBlankCourseProject({ now: NOW }),
+      assetFiles: {},
+      components: {},
+    })
+    controllerPayload.globalLayerItems[0]!.plane = 'underlay'
+    expect(publishedCourseV2Schema.safeParse(controllerPayload).success).toBe(false)
   })
 
   it('preserves declarative course-state interactions and closes their Published references', () => {

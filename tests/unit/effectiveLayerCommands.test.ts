@@ -662,6 +662,9 @@ describe('V9 effective / global layer commands', () => {
     expect(controller?.item.kind === 'native' &&
       controller.item.content.nativeType === 'teacher-controller' &&
       controller.item.content.data.defaultCollapsed).toBe(true)
+    expect(restored.nextDocument?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === controller?.item.layerItemId,
+    )?.plane).toBe('overlay')
     expect(restored.nextDocument?.playback.controls).toBe('canvas')
     expect(courseProjectDocumentSchema.safeParse(restored.nextDocument).success).toBe(true)
   })

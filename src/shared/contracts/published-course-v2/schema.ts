@@ -9,6 +9,7 @@ import {
   courseProjectDocumentSchema,
   courseStateDeclarationSchema,
   flowBlockSchema,
+  globalLayerPlaneSchema,
   layerFrameSchema,
   layerItemOverrideSchema,
   locationVisibilitySchema,
@@ -26,6 +27,7 @@ import type {
 } from '../../projectTypes'
 import type {
   CourseProjectDocument,
+  GlobalLayerEntry,
   LayerItem,
   ScopedLayerItem,
 } from '../course-project-v9/types'
@@ -34,6 +36,7 @@ import {
   PUBLISHED_COURSE_VERSION,
   type PublishedCourseSurface,
   type PublishedCourseV2Payload,
+  type PublishedGlobalLayerEntry,
   type PublishedLayerItem,
   type PublishedScopedLayerItem,
 } from './types'
@@ -142,6 +145,29 @@ const publishedScopedLayerItemSchema: z.ZodType<PublishedScopedLayerItem> = z.ob
 }).strict()
 
 const publishedScopedLayerListSchema = z.array(publishedScopedLayerItemSchema).max(20_000)
+  .superRefine((entries, context) => {
+    addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
+  })
+
+const publishedGlobalLayerEntrySchema: z.ZodType<PublishedGlobalLayerEntry> = z.object({
+  item: publishedLayerItemSchema,
+  visibility: locationVisibilitySchema,
+  plane: globalLayerPlaneSchema.optional(),
+}).strict().superRefine((entry, context) => {
+  if (
+    entry.plane === 'underlay'
+    && entry.item.kind === 'native'
+    && entry.item.content.nativeType === 'teacher-controller'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['plane'],
+      message: 'Teacher controller must stay in the global Overlay plane',
+    })
+  }
+})
+
+const publishedGlobalLayerEntryListSchema = z.array(publishedGlobalLayerEntrySchema).max(20_000)
   .superRefine((entries, context) => {
     addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
   })
@@ -324,6 +350,14 @@ function hydrateScoped(entry: PublishedScopedLayerItem): ScopedLayerItem {
   return { item: hydrateLayer(entry.item), visibility: entry.visibility }
 }
 
+function hydrateGlobal(entry: PublishedGlobalLayerEntry): GlobalLayerEntry {
+  return {
+    item: hydrateLayer(entry.item),
+    visibility: entry.visibility,
+    ...(entry.plane === undefined ? {} : { plane: entry.plane }),
+  }
+}
+
 function hydrateSurface(surface: PublishedCourseSurface): CourseProjectDocument['surfaces'][number] {
   const base = {
     id: surface.id,
@@ -372,7 +406,7 @@ export const publishedCourseV2Schema = z.object({
   navigationGuards: z.array(courseNavigationGuardSchema).max(10_000),
   locations: z.array(courseLocationSchema).min(1).max(100_000),
   startLocationId: stableIdSchema,
-  globalLayerItems: publishedScopedLayerListSchema,
+  globalLayerItems: publishedGlobalLayerEntryListSchema,
   globalInteractions: strictCourseInteractionsSchema,
   surfaces: z.array(publishedCourseSurfaceSchema).min(1).max(10_000),
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
@@ -426,7 +460,7 @@ export const publishedCourseV2Schema = z.object({
     navigationGuards: published.navigationGuards,
     locations: published.locations,
     startLocationId: published.startLocationId,
-    globalLayerItems: published.globalLayerItems.map(hydrateScoped),
+    globalLayerItems: published.globalLayerItems.map(hydrateGlobal),
     globalInteractions: published.globalInteractions,
     surfaces: published.surfaces.map(hydrateSurface),
     mixedPrintPlan: published.mixedPrintPlan,

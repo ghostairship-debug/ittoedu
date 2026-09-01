@@ -24,18 +24,8 @@ export function createBlankSpatialCourseProject(
   const surfaceId = `surface-spatial-${idFactory()}`
   const frameId = `camera-home-${idFactory()}`
   const pose = { x: 0, y: 0, zoom: 1 }
-  // World insert assigns order 0,1,2… from world items only. Unified schema
-  // also counts global HUD, so keep inherited overlay/controller orders high.
-  const globalLayerItems = slide.globalLayerItems.map((entry, index) => ({
-    ...entry,
-    item: {
-      ...entry.item,
-      order: 100_000 + index,
-    },
-  }))
   return courseProjectDocumentSchema.parse({
     ...slide,
-    globalLayerItems,
     locations: [{
       id: frameId,
       label: `${slide.title} · 全景`,

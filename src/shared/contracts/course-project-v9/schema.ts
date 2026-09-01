@@ -22,7 +22,9 @@ import type {
 } from '../../projectTypes'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  GLOBAL_LAYER_PLANES,
   type CourseAssetMeta,
+  type GlobalLayerEntry,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
@@ -405,6 +407,31 @@ export const scopedLayerItemSchema: z.ZodType<ScopedLayerItem> = z.object({
 }).strict()
 
 export const scopedLayerItemListSchema = z.array(scopedLayerItemSchema).max(20_000)
+  .superRefine((entries, context) => {
+    addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
+  })
+
+export const globalLayerPlaneSchema = z.enum(GLOBAL_LAYER_PLANES)
+
+export const globalLayerEntrySchema: z.ZodType<GlobalLayerEntry> = z.object({
+  item: layerItemSchema,
+  visibility: locationVisibilitySchema,
+  plane: globalLayerPlaneSchema.optional(),
+}).strict().superRefine((entry, context) => {
+  if (
+    entry.plane === 'underlay'
+    && entry.item.kind === 'native'
+    && entry.item.content.nativeType === 'teacher-controller'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['plane'],
+      message: 'Teacher controller must stay in the global Overlay plane',
+    })
+  }
+})
+
+export const globalLayerEntryListSchema = z.array(globalLayerEntrySchema).max(20_000)
   .superRefine((entries, context) => {
     addCanonicalLayerOrderIssues(entries.map((entry) => entry.item), context)
   })
@@ -1228,7 +1255,7 @@ export const courseProjectDocumentSchema = z.object({
   navigationGuards: z.array(courseNavigationGuardSchema).max(10_000),
   locations: z.array(courseLocationSchema).min(1).max(100_000),
   startLocationId: stableIdSchema,
-  globalLayerItems: scopedLayerItemListSchema,
+  globalLayerItems: globalLayerEntryListSchema,
   globalInteractions: strictCourseInteractionsSchema,
   surfaces: z.array(courseSurfaceSchema).min(1).max(10_000),
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
@@ -1327,21 +1354,16 @@ export const courseProjectDocumentSchema = z.object({
       if (!locationsById.has(locationId)) addReferenceIssue(context, [...path, 'visibility', 'locationIds'], `Missing location: ${locationId}`)
     })
   }
-  const checkUnifiedLayerFact = (
+  const checkEffectiveLayerIdentity = (
     items: readonly LayerItem[],
     path: Array<string | number>,
   ): void => {
     const ids = new Set<string>()
-    const orders = new Set<number>()
     items.forEach((item, index) => {
       if (ids.has(item.layerItemId)) {
         addReferenceIssue(context, [...path, index, 'layerItemId'], `Effective layer item id is duplicated: ${item.layerItemId}`)
       }
-      if (orders.has(item.order)) {
-        addReferenceIssue(context, [...path, index, 'order'], `Effective unified layer order is duplicated: ${item.order}`)
-      }
       ids.add(item.layerItemId)
-      orders.add(item.order)
     })
   }
 
@@ -1419,7 +1441,7 @@ export const courseProjectDocumentSchema = z.object({
     ]
     if (surface.type === 'slide') {
       surface.scenes.forEach((scene, sceneIndex) => {
-        checkUnifiedLayerFact(
+        checkEffectiveLayerIdentity(
           [...sharedLayerItems, ...scene.layerItems],
           ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'effectiveLayerItems'],
         )
@@ -1440,7 +1462,7 @@ export const courseProjectDocumentSchema = z.object({
         })
       })
     } else if (surface.type === 'flow') {
-      checkUnifiedLayerFact(sharedLayerItems, ['surfaces', surfaceIndex, 'effectiveLayerItems'])
+      checkEffectiveLayerIdentity(sharedLayerItems, ['surfaces', surfaceIndex, 'effectiveLayerItems'])
       walkFlowBlocks(surface.blocks, (block) => {
         if (block.type === 'media') checkAsset(block.assetId, ['surfaces', surfaceIndex, 'blocks', block.id, 'assetId'])
         if (block.type === 'component') {
@@ -1449,7 +1471,7 @@ export const courseProjectDocumentSchema = z.object({
         }
       })
     } else {
-      checkUnifiedLayerFact(
+      checkEffectiveLayerIdentity(
         [...sharedLayerItems, ...surface.world.layerItems],
         ['surfaces', surfaceIndex, 'world', 'effectiveLayerItems'],
       )

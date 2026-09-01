@@ -3,6 +3,7 @@ import type {
   CourseStateDeclaration,
   CourseLocation,
   FlowBlock,
+  GlobalLayerPlane,
   LayerFrame,
   LayerHitPolicy,
   LayerItemOverride,
@@ -108,6 +109,11 @@ export interface PublishedScopedLayerItem {
   }
 }
 
+/** Optional only so previously emitted Published V2 payloads remain readable. */
+export interface PublishedGlobalLayerEntry extends PublishedScopedLayerItem {
+  plane?: GlobalLayerPlane
+}
+
 export interface PublishedSlidePresentationState {
   id: string
   name: string
@@ -187,7 +193,7 @@ export interface PublishedCourseV2Payload {
   navigationGuards: CourseNavigationGuard[]
   locations: CourseLocation[]
   startLocationId: string
-  globalLayerItems: PublishedScopedLayerItem[]
+  globalLayerItems: PublishedGlobalLayerEntry[]
   globalInteractions: InteractionRule[]
   surfaces: PublishedCourseSurface[]
   mixedPrintPlan?: MixedPrintPlan
