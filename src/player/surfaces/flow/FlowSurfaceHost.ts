@@ -543,7 +543,11 @@ export class FlowSurfaceHost {
   #showRuntimeFallback(wrap: HTMLElement, item: PublishedRuntimeLayerItem): void {
     const fallbackWrap = renderStaticOverlayItem(
       wrap.ownerDocument,
-      { item, source: 'surface' },
+      {
+        item,
+        source: 'surface',
+        stackOrder: Number.parseInt(wrap.style.zIndex, 10) || 0,
+      },
       (assetId) => resolvePlaybackAssetUrl(
         this.#playback,
         assetId,
@@ -738,7 +742,11 @@ export class FlowSurfaceHost {
     const scrollTop = this.#article?.scrollTop ?? 0
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
-        const wrap = this.#mountTeacherController(entry.item, entry.source)
+        const wrap = this.#mountTeacherController(
+          entry.item,
+          entry.source,
+          entry.stackOrder,
+        )
         if (wrap) this.#registerInteractionNode(wrap, entry.item, entry.source)
         continue
       }
@@ -790,6 +798,7 @@ export class FlowSurfaceHost {
   #mountTeacherController(
     item: PublishedNativeLayerItem,
     source: 'global' | 'surface',
+    stackOrder: number,
   ): HTMLElement | null {
     const overlay = this.#overlay
     if (!overlay || item.content.nativeType !== 'teacher-controller') return null
@@ -812,7 +821,7 @@ export class FlowSurfaceHost {
     frameEl.style.pointerEvents = 'auto'
     frameEl.style.transform = item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`
     frameEl.style.transformOrigin = 'center center'
-    frameEl.style.zIndex = String(item.order)
+    frameEl.style.zIndex = String(stackOrder)
     overlay.appendChild(frameEl)
 
     const node = teacherControllerDomNode(
@@ -1041,7 +1050,11 @@ export function publishedFlowOverlayEntries(
   playback: FlowPublishedPlaybackDocument,
   surface: PublishedFlowSurface,
   locationId: string,
-): Array<{ item: PublishedLayerItem; source: 'global' | 'surface' }> {
+): Array<{
+  item: PublishedLayerItem
+  source: 'global' | 'surface'
+  stackOrder: number
+}> {
   const composition = composePublishedFlowLocation({ playback, locationId })
   if (composition.surfaceId !== surface.id) {
     throw new Error(`Flow composition surface mismatch: ${composition.surfaceId}`)
@@ -1052,6 +1065,7 @@ export function publishedFlowOverlayEntries(
     .map((entry) => ({
       item: entry.item,
       source: entry.source as 'global' | 'surface',
+      stackOrder: entry.stackOrder,
     }))
 }
 
@@ -1103,7 +1117,11 @@ function firstVisibleRuntimeText(values: Readonly<Record<string, string>>): stri
 
 function renderStaticOverlayItem(
   dom: Document,
-  entry: { item: PublishedLayerItem; source: 'global' | 'surface' },
+  entry: {
+    item: PublishedLayerItem
+    source: 'global' | 'surface'
+    stackOrder: number
+  },
   resolveAsset: (assetId: string) => string | undefined,
   options?: {
     components?: Record<string, PublishedComponentPackageSource>
@@ -1132,7 +1150,7 @@ function renderStaticOverlayItem(
     || entry.item.kind === 'component'
     ? 'auto'
     : 'none'
-  wrap.style.zIndex = String(entry.item.order)
+  wrap.style.zIndex = String(entry.stackOrder)
   if (entry.item.kind === 'native' && entry.item.content.nativeType === 'image') {
     const url = resolveAsset(entry.item.content.data.assetId)
     if (url) {

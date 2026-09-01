@@ -28,6 +28,16 @@ export interface CourseLayerCompositionEntry<Item> {
   readonly mounted: boolean
   /** Initial playback visibility after the mount boundary. */
   readonly initiallyVisible: boolean
+  /**
+   * Dense back-to-front paint slot for the current composition. This is a
+   * read-model fact only: renderers must not write it back to `item.order`.
+   *
+   * A valid global teacher controller is the stable boundary between global
+   * underlay entries and global overlay entries. Content owned by the active
+   * surface/scene/world is always painted before the controller, while global
+   * entries keep their authored order on either side of that boundary.
+   */
+  readonly stackOrder: number
   /** A detached, fully materialized item. Slide named-state overrides are applied. */
   readonly item: Item
 }
@@ -45,7 +55,7 @@ export interface CourseLayerComposition<Item> {
   /** Exact caller-selected state. `null` is the base scene. */
   readonly stateId: string | null
   readonly background: CourseLayerCompositionBackground | null
-  /** Stable back-to-front order by materialized `order + layerItemId`. */
+  /** Stable back-to-front paint order; each entry retains its authored item order. */
   readonly entries: readonly CourseLayerCompositionEntry<Item>[]
 }
 
@@ -71,6 +81,10 @@ export interface ComposePublishedCourseLocationInput {
 
 type ComposableLayerItem = LayerItem | PublishedLayerItem
 type ComposableState = SlidePresentationState | PublishedSlidePresentationState
+type UnstackedCompositionEntry<Item> = Omit<
+  CourseLayerCompositionEntry<Item>,
+  'stackOrder'
+>
 type ComposableScopedLayerItem<Item extends ComposableLayerItem> = {
   readonly item: Item
   readonly visibility: {
@@ -217,6 +231,42 @@ function resolveExactState(
   return state
 }
 
+function isComposableTeacherController(item: ComposableLayerItem): boolean {
+  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
+/**
+ * The teacher controller has a contract-defined global Overlay role even
+ * though legacy V9 projects encode only one cross-owner `order`. Treat its
+ * authored global position as a stable boundary without mutating that order:
+ * global entries before it remain below content, active content occupies the
+ * middle plane, and the controller plus later global entries stay above it.
+ * Projects without a valid global controller retain their legacy flat order.
+ */
+function assignCompositionStackOrder<Item extends ComposableLayerItem>(
+  entries: readonly UnstackedCompositionEntry<Item>[],
+): CourseLayerCompositionEntry<Item>[] {
+  const byAuthoredOrder = (left: UnstackedCompositionEntry<Item>, right: UnstackedCompositionEntry<Item>) => (
+    compareCourseLayerItems(left.item, right.item)
+  )
+  const sorted = [...entries].sort(byAuthoredOrder)
+  const controller = sorted.find((entry) => (
+    entry.source === 'global' && isComposableTeacherController(entry.item)
+  ))
+  const ordered = controller
+    ? [
+        ...sorted.filter((entry) => (
+          entry.source === 'global' && byAuthoredOrder(entry, controller) < 0
+        )),
+        ...sorted.filter((entry) => entry.source !== 'global'),
+        ...sorted.filter((entry) => (
+          entry.source === 'global' && byAuthoredOrder(entry, controller) >= 0
+        )),
+      ]
+    : sorted
+  return ordered.map((entry, stackOrder) => ({ ...entry, stackOrder }))
+}
+
 function composeLocation<Item extends ComposableLayerItem>(input: {
   readonly document: CompositionDocument<Item>
   readonly locationId: string
@@ -262,7 +312,7 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
     localItems = surface.world.layerItems.map((item) => structuredClone(item))
   }
 
-  const entries: CourseLayerCompositionEntry<Item>[] = []
+  const entries: UnstackedCompositionEntry<Item>[] = []
   const push = (item: Item, source: CourseLayerCompositionSource, applicable: boolean): void => {
     const mounted = applicable && item.visible
     entries.push({
@@ -283,7 +333,7 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
   if (localSource) {
     for (const item of localItems) push(item, localSource, true)
   }
-  entries.sort((left, right) => compareCourseLayerItems(left.item, right.item))
+  const stackedEntries = assignCompositionStackOrder(entries)
 
   return {
     locationId: location.id,
@@ -292,7 +342,7 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
     sceneId,
     stateId: input.stateId,
     background,
-    entries,
+    entries: stackedEntries,
   }
 }
 

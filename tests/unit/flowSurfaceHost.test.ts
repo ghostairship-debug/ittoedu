@@ -325,6 +325,42 @@ describe('FlowSurfaceHost course session overlay', () => {
     await host.destroy()
   })
 
+  it('keeps local overlays below the controller and preserves later global overlay order', async () => {
+    const course = publishedCourse()
+    const surface = course.surfaces[0]
+    if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
+    surface.surfaceLayerItems.push({
+      item: {
+        ...overlayText(),
+        layerItemId: 'flow-local-cover',
+        order: 2_000,
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    course.globalLayerItems.push({
+      item: {
+        ...overlayText(),
+        layerItemId: 'flow-global-after-controller',
+        order: 3_000,
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const { host, container } = await mountHost(course)
+    const local = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-local-cover"]',
+    )!
+    const controller = container.querySelector<HTMLElement>(
+      '[data-testid="flow-runtime-teacher-controller"]',
+    )!
+    const laterGlobal = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-global-after-controller"]',
+    )!
+
+    expect(Number(local.style.zIndex)).toBeLessThan(Number(controller.style.zIndex))
+    expect(Number(controller.style.zIndex)).toBeLessThan(Number(laterGlobal.style.zIndex))
+    await host.destroy()
+  })
+
   it('keeps the active interaction generation usable when a course update is rejected', async () => {
     const course = publishedCourse()
     course.globalLayerItems.unshift({

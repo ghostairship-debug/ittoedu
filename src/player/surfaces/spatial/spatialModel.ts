@@ -53,6 +53,7 @@ export interface SpatialPlaybackEntry {
   item: PublishedLayerItem
   source: SpatialLayerSource
   coordinateSpace: SpatialCoordinateSpace
+  stackOrder: number
 }
 
 const POSE_EPSILON = 1e-4
@@ -341,13 +342,14 @@ export function collectSpatialPlaybackEntries(
       .map((entry) => ({
         item: entry.item,
         source: entry.source as SpatialLayerSource,
+        stackOrder: entry.stackOrder,
         coordinateSpace: spatialPlaybackCoordinateSpace(
           entry.source as SpatialLayerSource,
           entry.item,
         ),
       }))
   }
-  const entries: SpatialPlaybackEntry[] = [
+  const entries = [
     ...input.globalLayerItems
       .filter((entry) => (
         entry.item.visible && isPublishedScopedVisible(entry.visibility, locationId)
@@ -374,10 +376,12 @@ export function collectSpatialPlaybackEntries(
         coordinateSpace: spatialPlaybackCoordinateSpace('world', item),
       })),
   ]
-  return entries.sort((left, right) => (
-    left.item.order - right.item.order ||
-    left.item.layerItemId.localeCompare(right.item.layerItemId)
-  ))
+  return entries
+    .sort((left, right) => (
+      left.item.order - right.item.order ||
+      left.item.layerItemId.localeCompare(right.item.layerItemId)
+    ))
+    .map((entry, stackOrder) => ({ ...entry, stackOrder }))
 }
 
 /** Valid-location Published adapter; camera and semantic culling stay outside this domain. */

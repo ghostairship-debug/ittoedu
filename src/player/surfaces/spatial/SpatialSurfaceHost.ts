@@ -1208,7 +1208,7 @@ export class SpatialSurfaceHost {
     html.style.height = `${item.frame.height}px`
     html.style.opacity = String(item.opacity)
     html.style.transform = item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`
-    html.style.zIndex = String(item.order)
+    html.style.zIndex = String(record.entry.stackOrder)
     if (isSpatialTeacherControllerItem(item)) {
       html.hidden = (this.#options.playbackControls ?? 'canvas') === 'none'
     }

@@ -496,6 +496,48 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.destroy()
   })
 
+  it('keeps high-order local viewport content below the controller and later globals above it', async () => {
+    const course = playbackCourse()
+    const spatial = course.surfaces[0]
+    if (!spatial || spatial.type !== 'spatial-2d') throw new Error('expected spatial')
+    spatial.surfaceLayerItems.push({
+      item: publishedText(
+        'surface-local-cover',
+        '局部遮挡候选',
+        { x: 20, y: 180, width: 220, height: 48 },
+        2_000,
+      ),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    course.globalLayerItems.push({
+      item: publishedText(
+        'global-after-controller',
+        '全局 Overlay 后项',
+        { x: 20, y: 180, width: 220, height: 48 },
+        3_000,
+      ),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const local = container.querySelector<HTMLElement>(
+      '[data-layer-item-id="surface-local-cover"]',
+    )!
+    const controller = container.querySelector<HTMLElement>(
+      '[data-layer-item-id="global-controller"]',
+    )!
+    const laterGlobal = container.querySelector<HTMLElement>(
+      '[data-layer-item-id="global-after-controller"]',
+    )!
+    expect(Number(local.style.zIndex)).toBeLessThan(Number(controller.style.zIndex))
+    expect(Number(controller.style.zIndex)).toBeLessThan(Number(laterGlobal.style.zIndex))
+
+    await host.destroy()
+  })
+
   it('forwards scene.next through executeTeacherControllerAction without local tour walk', async () => {
     const actions: TeacherControllerAction[] = []
     const course = playbackCourse()

@@ -766,6 +766,7 @@ type SlideRenderedLayerSource = 'scene' | 'surface' | 'global'
 
 interface SlideRenderedLayerRecord {
   item: PublishedLayerItem
+  stackOrder: number
   readonly source: SlideRenderedLayerSource
   readonly applicable: boolean
   readonly wrap: HTMLElement
@@ -981,11 +982,14 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         )
       }
       const slots = records.map((record) => record.item.order)
+      const stackSlots = records.map((record) => record.stackOrder)
+        .sort((left, right) => left - right)
       const byId = new Map(records.map((record) => [record.item.layerItemId, record]))
       patch.nodeIds.forEach((id, index) => {
         const record = byId.get(id)!
         record.item = { ...record.item, order: slots[index]! }
-        record.wrap.style.zIndex = String(slots[index]!)
+        record.stackOrder = stackSlots[index]!
+        record.wrap.style.zIndex = String(record.stackOrder)
       })
       return { ok: true, target: patch.target }
     }
@@ -1238,7 +1242,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       )
     }
     const ordered = records.sort((left, right) => (
-      left.item.order - right.item.order
+      left.stackOrder - right.stackOrder
       || left.item.layerItemId.localeCompare(right.item.layerItemId)
     ))
     const itemCapture = request.layerItemId !== undefined
@@ -1397,7 +1401,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     wrap.style.height = `${item.frame.height}px`
     wrap.style.opacity = String(item.opacity)
     wrap.style.transform = `rotate(${item.rotation}deg)`
-    wrap.style.zIndex = String(item.order)
+    wrap.style.zIndex = String(record.stackOrder)
     const visible = this.#isRenderedLayerVisible(record)
     wrap.style.visibility = visible ? 'visible' : 'hidden'
     wrap.style.pointerEvents = this.#authoring ? 'none' : wrap.style.pointerEvents
@@ -2124,6 +2128,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         },
       )
       if (!wrap) continue
+      wrap.style.zIndex = String(entry.stackOrder)
       if (registeredComponentMount) {
         const mountComponent = registeredComponentMount
         remountComponent = async (nextItem) => {
@@ -2144,6 +2149,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       }
       record = {
         item: entry.item,
+        stackOrder: entry.stackOrder,
         source,
         applicable: entry.applicable,
         wrap,

@@ -212,6 +212,15 @@ describe('published course Mixed navigation', () => {
 
   it('mounts the global teacher controller on Slide Published Adapter', async () => {
     const project = mixedProject()
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected Slide surface')
+    const localCover = globalNote(project.startLocationId).item
+    slide.scenes[0]!.layerItems.push({
+      ...structuredClone(localCover),
+      layerItemId: 'slide-local-cover',
+      label: '局部遮挡候选',
+      order: 100_000,
+    })
     const payload = buildPublishedCourseV2Payload({
       project,
       assetFiles: {},
@@ -230,7 +239,20 @@ describe('published course Mixed navigation', () => {
     const slideRoot = container.querySelector<HTMLElement>('.slide-published-adapter')
     expect(slideRoot?.querySelector('.slide-native-teacher-controller')).not.toBeNull()
     expect(slideRoot?.querySelector(`[data-native-type="teacher-controller"]`)).not.toBeNull()
-    expect(slideRoot?.querySelector(`[data-global-layer-item="${controllerId}"]`)).not.toBeNull()
+    const controller = slideRoot?.querySelector<HTMLElement>(
+      `[data-global-layer-item="${controllerId}"]`,
+    )
+    const local = slideRoot?.querySelector<HTMLElement>(
+      '[data-slide-layer-item="slide-local-cover"]',
+    )
+    const laterGlobal = slideRoot?.querySelector<HTMLElement>(
+      '[data-global-layer-item="global-note"]',
+    )
+    expect(controller).not.toBeNull()
+    expect(local).not.toBeNull()
+    expect(laterGlobal).not.toBeNull()
+    expect(Number(local!.style.zIndex)).toBeLessThan(Number(controller!.style.zIndex))
+    expect(Number(controller!.style.zIndex)).toBeLessThan(Number(laterGlobal!.style.zIndex))
     container.remove()
   })
 
