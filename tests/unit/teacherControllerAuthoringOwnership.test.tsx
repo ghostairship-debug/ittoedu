@@ -272,7 +272,9 @@ describe('teacher controller authoring ownership', () => {
         onSelectionChange={onSelectionChange}
       />,
     )
-    const globalCard = screen.getByTestId(`flow-layer-card-${controllerId}`)
+    const globalVisual = screen.getByTestId(`flow-layer-card-${controllerId}`)
+    expect(globalVisual.parentElement).toHaveAttribute('data-flow-layer-plane', 'global-overlay')
+    const globalCard = screen.getByTestId(`flow-layer-selection-${controllerId}`)
     const overlay = screen.getByTestId('flow-authoring-layer-overlay')
     overlay.getBoundingClientRect = () => ({
       x: 0,

@@ -63,7 +63,7 @@ function secondSurface(): PublishedFlowSurface {
 }
 
 describe('Flow runtime TOC model', () => {
-  it('insets only the article and never accumulates a viewport controller offset', () => {
+  it('insets the article and paper overlays without accumulating a viewport controller offset', () => {
     const sessionOffset = { dx: 0, dy: 0 }
     const controller = {
       title: '教师控制台',
@@ -86,6 +86,7 @@ describe('Flow runtime TOC model', () => {
     }
     const sequence = [false, true, false, true].map(flowRuntimeTocShellLayout)
     expect(sequence.map((layout) => layout.articleInsetPx)).toEqual([0, 260, 0, 260])
+    expect(sequence.map((layout) => layout.paperOverlayInsetPx)).toEqual([0, 260, 0, 260])
     expect(sequence.map((layout) => layout.viewportOverlayInsetPx)).toEqual([0, 0, 0, 0])
 
     const pill = teacherControllerHitBounds(controller, sessionOffset, true)

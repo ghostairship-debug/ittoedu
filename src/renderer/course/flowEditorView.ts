@@ -7,6 +7,7 @@ import type {
   CourseProjectDocument,
   FlowBlock,
   FlowSurfaceDocument,
+  GlobalLayerPlane,
   LayerItem,
 } from '../../shared/courseProjectTypes'
 import {
@@ -56,6 +57,10 @@ export type FlowOverlayLayerSource = 'global' | 'surface'
 
 export interface FlowEditorLayerView {
   readonly source: FlowOverlayLayerSource
+  /** Exact canonical/legacy-resolved plane for globals; surface entries carry null. */
+  readonly globalPlane: GlobalLayerPlane | null
+  /** Dense composition slot. It is a read-model fact and is never written to item.order. */
+  readonly stackOrder: number
   readonly scopedVisible: boolean
   readonly effectiveVisible: boolean
   readonly selectionId: string
@@ -130,9 +135,13 @@ function overlayLayerView(
   source: FlowOverlayLayerSource,
   item: LayerItem,
   scopedVisible: boolean,
+  globalPlane: GlobalLayerPlane | null,
+  stackOrder: number,
 ): FlowEditorLayerView {
   return {
     source,
+    globalPlane,
+    stackOrder,
     scopedVisible,
     effectiveVisible: scopedVisible && item.visible,
     selectionId: item.layerItemId,
@@ -261,6 +270,8 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
       entry.source === 'global' ? 'global' : 'surface',
       entry.item,
       entry.applicable,
+      entry.globalPlane,
+      entry.stackOrder,
     ))
 
   const courseTree = listFlowCourseTreePages(project).find((page) => page.surfaceId === surface.id)

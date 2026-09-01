@@ -11,5 +11,7 @@ describe('Flow try-run / export CSS paper hit', () => {
   it('documents runtime article scrolling in exported player CSS', () => {
     expect(COURSE_PLAYER_CSS).toMatch(/\.flow-runtime-article\{[^}]*pointer-events:auto/)
     expect(COURSE_PLAYER_CSS).toMatch(/\.flow-runtime-article\{[^}]*overflow:auto/)
+    expect(COURSE_PLAYER_CSS).toMatch(/\.flow-runtime-article\{[^}]*background:transparent/)
+    expect(COURSE_PLAYER_CSS).toMatch(/\.flow-runtime-layer-plane,[^{]*\{pointer-events:none/)
   })
 })

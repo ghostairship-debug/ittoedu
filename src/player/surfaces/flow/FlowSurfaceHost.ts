@@ -18,7 +18,7 @@ import type {
 } from '../../../shared/runtimeTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { CourseStateStore } from '../../CourseStateStore'
-import type { FlowBlock } from '../../../shared/courseProjectTypes'
+import type { FlowBlock, GlobalLayerPlane } from '../../../shared/courseProjectTypes'
 import {
   TeacherControllerDom,
   stageBoundsFromElement,
@@ -93,6 +93,13 @@ interface FlowRuntimeHandleRecord {
   retired: boolean
 }
 
+interface PublishedFlowOverlayEntry {
+  readonly item: PublishedLayerItem
+  readonly source: 'global' | 'surface'
+  readonly globalPlane: GlobalLayerPlane | null
+  readonly stackOrder: number
+}
+
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
   getCurrentLocationId(): string | null
@@ -157,6 +164,9 @@ export class FlowSurfaceHost {
   #container: HTMLElement | null = null
   #root: HTMLElement | null = null
   #article: HTMLElement | null = null
+  #globalUnderlay: HTMLElement | null = null
+  #surfaceOverlay: HTMLElement | null = null
+  /** Legacy overlay handle and the physical global Overlay plane. */
   #overlay: HTMLElement | null = null
   #toc: FlowRuntimeTocChrome | null = null
   #controller: TeacherControllerDom | null = null
@@ -239,10 +249,11 @@ export class FlowSurfaceHost {
   }
 
   getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
-    const overlay = this.#overlay
-    if (!overlay) return null
-    for (const candidate of overlay.querySelectorAll<HTMLElement>('[data-flow-overlay-source="global"]')) {
-      if (candidate.dataset.flowOverlayItem === itemId) return candidate
+    for (const plane of [this.#globalUnderlay, this.#overlay]) {
+      if (!plane) continue
+      for (const candidate of plane.querySelectorAll<HTMLElement>('[data-flow-overlay-source="global"]')) {
+        if (candidate.dataset.flowOverlayItem === itemId) return candidate
+      }
     }
     return null
   }
@@ -283,21 +294,15 @@ export class FlowSurfaceHost {
       root.style.setProperty('--flow-toc-inset', '0px')
       root.hidden = !this.#active
 
-      const overlay = dom.createElement('div')
-      overlay.className = 'flow-runtime-overlay'
-      overlay.dataset.testid = 'flow-runtime-overlay'
-      overlay.style.position = 'absolute'
-      overlay.style.top = '0'
-      overlay.style.right = '0'
-      overlay.style.bottom = '0'
-      overlay.style.left = '0'
-      overlay.style.zIndex = '20'
-      overlay.style.pointerEvents = 'none'
-      overlay.style.overflow = 'hidden'
-      root.appendChild(overlay)
+      const globalUnderlay = createFlowRuntimePlane(dom, 'global-underlay', 0)
+      const surfaceOverlay = createFlowRuntimePlane(dom, 'surface', 2)
+      const overlay = createFlowRuntimePlane(dom, 'global-overlay', 3, true)
+      root.append(globalUnderlay, surfaceOverlay, overlay)
 
       container.appendChild(root)
       this.#root = root
+      this.#globalUnderlay = globalUnderlay
+      this.#surfaceOverlay = surfaceOverlay
       this.#overlay = overlay
       this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
       this.#toc = new FlowRuntimeTocChrome(root, {
@@ -443,6 +448,8 @@ export class FlowSurfaceHost {
       this.#root?.remove()
       this.#root = null
       this.#article = null
+      this.#globalUnderlay = null
+      this.#surfaceOverlay = null
       this.#overlay = null
       this.#container = null
       this.#active = false
@@ -622,7 +629,14 @@ export class FlowSurfaceHost {
   #applyShellLayout(): void {
     const shell = flowRuntimeTocShellLayout(this.tocOpen)
     if (this.#article) this.#article.style.marginLeft = `${shell.articleInsetPx}px`
-    if (this.#overlay) this.#overlay.style.left = `${shell.viewportOverlayInsetPx}px`
+    for (const plane of this.#layerPlanes()) {
+      plane.style.left = `${shell.viewportOverlayInsetPx}px`
+    }
+    if (this.#article) {
+      this.#syncPaperOverlayPositions(
+        findPublishedFlowSurface(this.#playback, this.#surfaceId),
+      )
+    }
   }
 
   #registerInteractionNode(
@@ -672,7 +686,12 @@ export class FlowSurfaceHost {
   }
 
   #render(): void {
-    if (!this.#root || !this.#overlay) return
+    if (
+      !this.#root
+      || !this.#globalUnderlay
+      || !this.#surfaceOverlay
+      || !this.#overlay
+    ) return
     this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
     this.#pendingRuntimeActivation = null
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
@@ -703,11 +722,14 @@ export class FlowSurfaceHost {
         this.#componentHandles.push(handle)
       },
     })
+    this.#root.style.backgroundColor = resolveCourseSurfaceBackgroundColor(
+      surface.backgroundColor,
+    )
     article.addEventListener('scroll', () => {
       this.#syncPaperOverlayPositions(surface)
     })
     this.#article?.remove()
-    this.#root.insertBefore(article, this.#overlay)
+    this.#root.insertBefore(article, this.#surfaceOverlay)
     this.#article = article
     this.#toc?.sync()
     this.#renderOverlay(surface)
@@ -718,16 +740,19 @@ export class FlowSurfaceHost {
   }
 
   #syncPaperOverlayPositions(surface: PublishedFlowSurface): void {
-    const overlay = this.#overlay
     const article = this.#article
-    if (!overlay || !article) return
+    if (!article) return
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const scrollTop = article.scrollTop
+    const paperInset = flowRuntimeTocShellLayout(this.tocOpen).paperOverlayInsetPx
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) continue
       if (entry.item.paperSpace !== 'paper') continue
-      const wrap = overlay.querySelector<HTMLElement>(`[data-flow-overlay-item="${entry.item.layerItemId}"]`)
+      const wrap = this.#layerPlaneForEntry(entry)?.querySelector<HTMLElement>(
+        `[data-flow-overlay-item="${entry.item.layerItemId}"]`,
+      )
       if (wrap) {
+        wrap.style.left = `${entry.item.frame.x + paperInset}px`
         wrap.style.top = `${entry.item.frame.y - scrollTop}px`
       }
     }
@@ -735,11 +760,12 @@ export class FlowSurfaceHost {
 
   #renderOverlay(surface: PublishedFlowSurface): void {
     const overlay = this.#overlay
-    if (!overlay) return
+    if (!overlay || !this.#globalUnderlay || !this.#surfaceOverlay) return
     this.#destroyController()
-    overlay.replaceChildren()
+    for (const plane of this.#layerPlanes()) plane.replaceChildren()
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const scrollTop = this.#article?.scrollTop ?? 0
+    const paperInset = flowRuntimeTocShellLayout(this.tocOpen).paperOverlayInsetPx
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
         const wrap = this.#mountTeacherController(
@@ -750,8 +776,10 @@ export class FlowSurfaceHost {
         if (wrap) this.#registerInteractionNode(wrap, entry.item, entry.source)
         continue
       }
+      const targetPlane = this.#layerPlaneForEntry(entry)
+      if (!targetPlane) continue
       const wrap = renderStaticOverlayItem(
-        overlay.ownerDocument,
+        targetPlane.ownerDocument,
         entry,
         (assetId) => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
         {
@@ -771,12 +799,13 @@ export class FlowSurfaceHost {
               }
             : {}),
           scrollTop,
+          paperInset,
           onMountComponent: (handle) => {
             this.#componentHandles.push(handle)
           },
         },
       )
-      overlay.appendChild(wrap)
+      targetPlane.appendChild(wrap)
       if (isExecutableFlowSurfaceRuntime(entry)) {
         wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
         wrap.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
@@ -793,6 +822,17 @@ export class FlowSurfaceHost {
       }
       this.#registerInteractionNode(wrap, entry.item, entry.source)
     }
+  }
+
+  #layerPlanes(): HTMLElement[] {
+    return [this.#globalUnderlay, this.#surfaceOverlay, this.#overlay]
+      .filter((plane): plane is HTMLElement => plane !== null)
+  }
+
+  #layerPlaneForEntry(entry: PublishedFlowOverlayEntry): HTMLElement | null {
+    if (isPublishedTeacherController(entry.item)) return this.#overlay
+    if (entry.source === 'surface') return this.#surfaceOverlay
+    return entry.globalPlane === 'underlay' ? this.#globalUnderlay : this.#overlay
   }
 
   #mountTeacherController(
@@ -1021,6 +1061,35 @@ function tryResolveLocation(
   }
 }
 
+function createFlowRuntimePlane(
+  dom: Document,
+  plane: 'global-underlay' | 'surface' | 'global-overlay',
+  zIndex: number,
+  legacyOverlay = false,
+): HTMLElement {
+  const element = dom.createElement('div')
+  element.className = [
+    'flow-runtime-layer-plane',
+    `flow-runtime-layer-plane--${plane}`,
+    legacyOverlay ? 'flow-runtime-overlay' : '',
+  ].filter(Boolean).join(' ')
+  element.dataset.flowLayerPlane = plane
+  element.dataset.testid = legacyOverlay
+    ? 'flow-runtime-overlay'
+    : `flow-runtime-${plane}`
+  Object.assign(element.style, {
+    position: 'absolute',
+    top: '0',
+    right: '0',
+    bottom: '0',
+    left: '0',
+    zIndex: String(zIndex),
+    pointerEvents: 'none',
+    overflow: 'hidden',
+  })
+  return element
+}
+
 function createFlowHostAudioSession(defaultMuted: boolean): FlowHostAudioSession {
   let muted = defaultMuted
   return {
@@ -1050,11 +1119,7 @@ export function publishedFlowOverlayEntries(
   playback: FlowPublishedPlaybackDocument,
   surface: PublishedFlowSurface,
   locationId: string,
-): Array<{
-  item: PublishedLayerItem
-  source: 'global' | 'surface'
-  stackOrder: number
-}> {
+): PublishedFlowOverlayEntry[] {
   const composition = composePublishedFlowLocation({ playback, locationId })
   if (composition.surfaceId !== surface.id) {
     throw new Error(`Flow composition surface mismatch: ${composition.surfaceId}`)
@@ -1065,6 +1130,7 @@ export function publishedFlowOverlayEntries(
     .map((entry) => ({
       item: entry.item,
       source: entry.source as 'global' | 'surface',
+      globalPlane: entry.globalPlane,
       stackOrder: entry.stackOrder,
     }))
 }
@@ -1131,6 +1197,7 @@ function renderStaticOverlayItem(
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
     deferComponentMount?: (mount: () => void) => void
     scrollTop?: number
+    paperInset?: number
   },
 ): HTMLElement {
   const wrap = dom.createElement('div')
@@ -1140,14 +1207,18 @@ function renderStaticOverlayItem(
     wrap.dataset.flowPaperSpace = 'paper'
   }
   wrap.style.position = 'absolute'
-  wrap.style.left = `${entry.item.frame.x}px`
+  const leftInset = entry.item.paperSpace === 'paper' ? (options?.paperInset ?? 0) : 0
+  wrap.style.left = `${entry.item.frame.x + leftInset}px`
   const topOffset = entry.item.paperSpace === 'paper' ? (options?.scrollTop ?? 0) : 0
   wrap.style.top = `${entry.item.frame.y - topOffset}px`
   wrap.style.width = `${entry.item.frame.width}px`
   wrap.style.height = `${entry.item.frame.height}px`
   wrap.style.opacity = String(entry.item.opacity)
-  wrap.style.pointerEvents = (entry.item.kind === 'native' && entry.item.content.nativeType === 'video')
-    || entry.item.kind === 'component'
+  wrap.inert = entry.item.hitPolicy !== 'auto'
+  const intrinsicallyInteractive = (
+    entry.item.kind === 'native' && entry.item.content.nativeType === 'video'
+  ) || entry.item.kind === 'component'
+  wrap.style.pointerEvents = intrinsicallyInteractive && entry.item.hitPolicy === 'auto'
     ? 'auto'
     : 'none'
   wrap.style.zIndex = String(entry.stackOrder)
@@ -1173,7 +1244,7 @@ function renderStaticOverlayItem(
       video.style.width = '100%'
       video.style.height = '100%'
       video.style.objectFit = 'contain'
-      video.style.pointerEvents = 'auto'
+      video.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
       wrap.appendChild(video)
     }
     return wrap
@@ -1209,7 +1280,7 @@ function renderStaticOverlayItem(
         staticFallbackAssetId: componentItem.staticFallbackAssetId,
         components: options?.components,
         resolveAsset,
-        interactive: options?.interactive ?? true,
+        interactive: (options?.interactive ?? true) && componentItem.hitPolicy === 'auto',
         ...(options?.courseState ? { courseState: options.courseState } : {}),
         ...(options?.componentActions ? { actions: options.componentActions } : {}),
       })
@@ -1284,13 +1355,15 @@ function renderFlowArticle(
   article.dataset.flowMediaQueryRoot = 'true'
   article.id = flowRuntimeTocPageAnchorId(surface.id)
   article.style.boxSizing = 'border-box'
+  article.style.position = 'relative'
+  article.style.zIndex = '1'
   article.style.height = '100%'
   article.style.overflow = 'auto'
   article.style.pointerEvents = 'auto'
   article.style.overscrollBehavior = 'contain'
   article.style.setProperty('container-type', FLOW_MEDIA_QUERY_CONTAINER_TYPE)
   article.style.setProperty('container-name', 'flow-media-root')
-  article.style.background = resolveCourseSurfaceBackgroundColor(surface.backgroundColor)
+  article.style.background = 'transparent'
   article.style.color = '#172033'
 
   article.addEventListener('wheel', (event: WheelEvent) => {

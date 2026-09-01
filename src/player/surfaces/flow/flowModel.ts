@@ -5,7 +5,7 @@ import type {
   PublishedCourseSurface,
   PublishedCourseV2Payload,
   PublishedFlowSurface,
-  PublishedScopedLayerItem,
+  PublishedGlobalLayerEntry,
 } from '../../../shared/publishedCourseTypes'
 
 export type {
@@ -26,7 +26,7 @@ export interface FlowPublishedPlaybackDocument {
   readonly playback?: PublishedCourseV2Payload['playback']
   readonly locations: readonly CourseLocation[]
   readonly startLocationId: string
-  readonly globalLayerItems: readonly PublishedScopedLayerItem[]
+  readonly globalLayerItems: readonly PublishedGlobalLayerEntry[]
   readonly surfaces: readonly PublishedFlowSurface[]
 }
 
@@ -149,7 +149,7 @@ export function flowPlaybackFromSurface(
     courseId?: string
     title?: string
     assets?: Record<string, PublishedCourseAsset>
-    globalLayerItems?: readonly PublishedScopedLayerItem[]
+    globalLayerItems?: readonly PublishedGlobalLayerEntry[]
     startBlockId?: string
   } = {},
 ): FlowPublishedPlaybackDocument {

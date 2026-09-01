@@ -372,11 +372,29 @@ describe('FlowWorkspace edit media', () => {
 
   it('keeps overlay pointer-events as layer none and card auto so media can still be selected', () => {
     renderMediaPaper()
+    expect(screen.getByTestId('flow-authoring-global-underlay')).toHaveStyle({ pointerEvents: 'none' })
+    expect(screen.getByTestId('flow-authoring-surface-overlay')).toHaveStyle({ pointerEvents: 'none' })
     expect(screen.getByTestId('flow-authoring-layer-overlay')).toHaveStyle({ pointerEvents: 'none' })
     expect(screen.getByTestId('flow-layer-card-overlay-image')).toHaveStyle({ pointerEvents: 'auto' })
     expect(screen.getByTestId('flow-layer-card-overlay-video')).toHaveStyle({ pointerEvents: 'auto' })
     const overlayImage = screen.getByTestId('flow-layer-card-overlay-image').querySelector('img')
     expect(overlayImage).toHaveStyle({ pointerEvents: 'none' })
+  })
+
+  it('keeps a pass-through authoring visual inert so it cannot steal the paper hit', () => {
+    const project = createMediaFlowProject()
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
+    const image = surface.surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === 'overlay-image',
+    )
+    if (!image) throw new Error('expected overlay image')
+    image.item.hitPolicy = 'pass-through'
+    renderMediaPaper(project)
+
+    const card = screen.getByTestId('flow-layer-card-overlay-image')
+    expect(card).toHaveStyle({ pointerEvents: 'none' })
+    expect(card).toHaveAttribute('inert')
   })
 
   it('marks a selected paper image and writes alt, layout, and a same-kind replacement assetId', () => {

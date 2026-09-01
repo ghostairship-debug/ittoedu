@@ -325,10 +325,20 @@ describe('FlowSurfaceHost course session overlay', () => {
     await host.destroy()
   })
 
-  it('keeps local overlays below the controller and preserves later global overlay order', async () => {
+  it('uses physical Underlay, body, surface and Overlay roots independent of raw order', async () => {
     const course = publishedCourse()
     const surface = course.surfaces[0]
     if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
+    surface.backgroundColor = '#123456'
+    const underlay = course.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'flow-overlay-video',
+    )!
+    underlay.plane = 'underlay'
+    underlay.item.order = 9_000
+    const controllerEntry = course.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'flow-controller',
+    )!
+    controllerEntry.plane = 'overlay'
     surface.surfaceLayerItems.push({
       item: {
         ...overlayText(),
@@ -338,6 +348,7 @@ describe('FlowSurfaceHost course session overlay', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
     course.globalLayerItems.push({
+      plane: 'overlay',
       item: {
         ...overlayText(),
         layerItemId: 'flow-global-after-controller',
@@ -355,8 +366,39 @@ describe('FlowSurfaceHost course session overlay', () => {
     const laterGlobal = container.querySelector<HTMLElement>(
       '[data-flow-overlay-item="flow-global-after-controller"]',
     )!
+    const globalUnderlay = container.querySelector<HTMLElement>(
+      '[data-flow-layer-plane="global-underlay"]',
+    )!
+    const surfacePlane = container.querySelector<HTMLElement>(
+      '[data-flow-layer-plane="surface"]',
+    )!
+    const globalOverlay = container.querySelector<HTMLElement>(
+      '[data-flow-layer-plane="global-overlay"]',
+    )!
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const underlayItem = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-overlay-video"]',
+    )!
 
-    expect(Number(local.style.zIndex)).toBeLessThan(Number(controller.style.zIndex))
+    expect([...host.rootElement!.children].slice(0, 4)).toEqual([
+      globalUnderlay,
+      article,
+      surfacePlane,
+      globalOverlay,
+    ])
+    expect(host.rootElement?.style.backgroundColor).toBe('rgb(18, 52, 86)')
+    expect(article.style.background).toBe('transparent')
+    expect(globalUnderlay.style.zIndex).toBe('0')
+    expect(article.style.zIndex).toBe('1')
+    expect(surfacePlane.style.zIndex).toBe('2')
+    expect(globalOverlay.style.zIndex).toBe('3')
+    expect(globalUnderlay.style.pointerEvents).toBe('none')
+    expect(surfacePlane.style.pointerEvents).toBe('none')
+    expect(globalOverlay.style.pointerEvents).toBe('none')
+    expect(underlayItem.parentElement).toBe(globalUnderlay)
+    expect(local.parentElement).toBe(surfacePlane)
+    expect(controller.parentElement).toBe(globalOverlay)
+    expect(laterGlobal.parentElement).toBe(globalOverlay)
     expect(Number(controller.style.zIndex)).toBeLessThan(Number(laterGlobal.style.zIndex))
     await host.destroy()
   })
@@ -437,14 +479,21 @@ describe('Flow print and DOCX helpers', () => {
 })
 
 describe('FlowSurfaceHost playback controller and video', () => {
-  it('positions the runtime overlay on the host, not as a window-covering fixed layer', async () => {
+  it('positions every runtime plane on the host, not as a window-covering fixed layer', async () => {
     const { host, container } = await mountHost()
-    const overlay = container.querySelector<HTMLElement>('[data-testid="flow-runtime-overlay"]')!
-    expect(overlay.style.position).toBe('absolute')
-    expect(overlay.style.position).not.toBe('fixed')
-    expect(overlay.style.top).toBe('0px')
-    expect(overlay.style.right).toBe('0px')
-    expect(overlay.style.bottom).toBe('0px')
+    const planes = [...container.querySelectorAll<HTMLElement>('[data-flow-layer-plane]')]
+    expect(planes.map((plane) => plane.dataset.flowLayerPlane)).toEqual([
+      'global-underlay',
+      'surface',
+      'global-overlay',
+    ])
+    for (const plane of planes) {
+      expect(plane.style.position).toBe('absolute')
+      expect(plane.style.position).not.toBe('fixed')
+      expect(plane.style.top).toBe('0px')
+      expect(plane.style.right).toBe('0px')
+      expect(plane.style.bottom).toBe('0px')
+    }
     await host.destroy()
   })
 
@@ -463,10 +512,30 @@ describe('FlowSurfaceHost playback controller and video', () => {
 
   it('renders a playable overlay video from the published asset URL', async () => {
     const { host, container } = await mountHost()
-    const video = container.querySelector<HTMLVideoElement>('[data-flow-overlay-item="flow-overlay-video"] video')
+    const wrapper = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-video"]')!
+    const video = wrapper.querySelector<HTMLVideoElement>('video')
     expect(video).not.toBeNull()
     expect(video?.controls).toBe(true)
     expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
+    expect(wrapper.style.pointerEvents).toBe('auto')
+    expect(wrapper.inert).toBe(false)
+    expect(video?.style.pointerEvents).toBe('auto')
+    await host.destroy()
+  })
+
+  it('keeps a pass-through overlay video inert through its media descendant', async () => {
+    const course = publishedCourse()
+    const videoEntry = course.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'flow-overlay-video',
+    )
+    if (!videoEntry) throw new Error('expected overlay video')
+    videoEntry.item.hitPolicy = 'pass-through'
+    const { host, container } = await mountHost(course)
+    const wrapper = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-video"]')!
+    const video = wrapper.querySelector<HTMLVideoElement>('video')!
+    expect(wrapper.style.pointerEvents).toBe('none')
+    expect(wrapper.inert).toBe(true)
+    expect(video.style.pointerEvents).toBe('none')
     await host.destroy()
   })
 
@@ -705,8 +774,9 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
         return true
       },
     })
-    const overlay = container.querySelector<HTMLElement>('[data-testid="flow-runtime-overlay"]')!
-    expect(overlay.style.pointerEvents).toBe('none')
+    const planes = [...container.querySelectorAll<HTMLElement>('[data-flow-layer-plane]')]
+    expect(planes).toHaveLength(3)
+    expect(planes.every((plane) => plane.style.pointerEvents === 'none')).toBe(true)
 
     const frame = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
     expect(frame.style.pointerEvents).toBe('auto')
@@ -908,6 +978,14 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
   it('follows paper scroll for paperSpace overlays while keeping controllers and viewport overlays fixed', async () => {
     const course = publishedCourse()
     const surf = course.surfaces[0] as PublishedFlowSurface
+    const globalPaperEntry = course.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'flow-overlay-video',
+    )!
+    globalPaperEntry.plane = 'underlay'
+    globalPaperEntry.item.frame = {
+      mode: 'absolute', x: 70, y: 350, width: 200, height: 100,
+    }
+    globalPaperEntry.item.paperSpace = 'paper'
     surf.blocks = [
       { id: 'h-top', type: 'heading', level: 1, text: '长文标题' },
       ...Array.from({ length: 40 }, (_, i) => ({
@@ -939,14 +1017,32 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     const { host, container } = await mountHost(course)
     const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
     const paperOverlay = container.querySelector<HTMLElement>('[data-flow-overlay-item="overlay-paper-item"]')!
+    const globalPaperOverlay = container.querySelector<HTMLElement>(
+      '[data-flow-overlay-item="flow-overlay-video"]',
+    )!
     const viewportOverlay = container.querySelector<HTMLElement>('[data-flow-overlay-item="overlay-viewport-item"]')!
     const controller = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
 
     expect(paperOverlay).not.toBeNull()
     expect(paperOverlay.dataset.flowPaperSpace).toBe('paper')
+    expect(globalPaperOverlay.dataset.flowPaperSpace).toBe('paper')
+    expect(globalPaperOverlay.parentElement).toHaveAttribute(
+      'data-flow-layer-plane',
+      'global-underlay',
+    )
+    expect(paperOverlay.style.left).toBe('50px')
+    expect(globalPaperOverlay.style.left).toBe('70px')
     expect(paperOverlay.style.top).toBe('300px')
+    expect(globalPaperOverlay.style.top).toBe('350px')
     expect(viewportOverlay.style.top).toBe('300px')
     expect(controller.style.top).toBe('640px')
+
+    host.setTocOpen(true)
+    expect(article.style.marginLeft).toBe('260px')
+    expect(paperOverlay.style.left).toBe('310px')
+    expect(globalPaperOverlay.style.left).toBe('330px')
+    expect(viewportOverlay.style.left).toBe('50px')
+    expect(controller.style.left).toBe('24px')
 
     let currentScrollTop = 0
     Object.defineProperty(article, 'clientHeight', { value: 720, configurable: true })
@@ -963,8 +1059,16 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     article.dispatchEvent(new Event('scroll'))
 
     expect(paperOverlay.style.top).toBe('200px')
+    expect(globalPaperOverlay.style.top).toBe('250px')
     expect(viewportOverlay.style.top).toBe('300px')
     expect(controller.style.top).toBe('640px')
+
+    host.setTocOpen(false)
+    expect(article.style.marginLeft).toBe('0px')
+    expect(paperOverlay.style.left).toBe('50px')
+    expect(globalPaperOverlay.style.left).toBe('70px')
+    expect(viewportOverlay.style.left).toBe('50px')
+    expect(controller.style.left).toBe('24px')
 
     await host.destroy()
   })

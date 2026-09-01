@@ -15,6 +15,8 @@ export const FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL = '打开目录'
 
 export interface FlowRuntimeTocShellLayout {
   articleInsetPx: number
+  /** Paper-owned overlays follow the reflowed article; viewport chrome does not. */
+  paperOverlayInsetPx: number
   viewportOverlayInsetPx: number
 }
 
@@ -22,6 +24,7 @@ export interface FlowRuntimeTocShellLayout {
 export function flowRuntimeTocShellLayout(open: boolean): FlowRuntimeTocShellLayout {
   return {
     articleInsetPx: open ? FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX : 0,
+    paperOverlayInsetPx: open ? FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX : 0,
     viewportOverlayInsetPx: 0,
   }
 }

@@ -350,6 +350,7 @@ function overlayCardStyle(
     height: frame.height,
     boxSizing: 'border-box',
     pointerEvents: 'auto',
+    zIndex: layer.stackOrder,
   }
 }
 
@@ -1839,6 +1840,17 @@ export function FlowWorkspace({
 
   const rootBlocks = childrenByParent.get(null) ?? []
   const overlayLayers = view.overlayLayers.filter((layer) => layer.effectiveVisible)
+  const globalUnderlayLayers = overlayLayers.filter((layer) => (
+    layer.source === 'global' && layer.globalPlane === 'underlay'
+  ))
+  const surfaceOverlayLayers = overlayLayers.filter((layer) => layer.source === 'surface')
+  const globalOverlayLayers = overlayLayers.filter((layer) => (
+    layer.source === 'global' && layer.globalPlane !== 'underlay'
+  ))
+  const flowSurface = project.surfaces.find((candidate) => candidate.id === view.surfaceId)
+  const surfaceBackground = resolveCourseSurfaceBackgroundColor(
+    flowSurface?.type === 'flow' ? flowSurface.backgroundColor : undefined,
+  )
   const overlayScenes = project.locations.map((entry) => ({
     id: entry.id,
     name: entry.label,
@@ -1977,6 +1989,129 @@ export function FlowWorkspace({
     event.stopPropagation()
   }
 
+  const overlayPlaneStyle = (zIndex: number): CSSProperties => ({
+    position: 'absolute',
+    left: overlayTransform.stageRect.x,
+    top: overlayTransform.stageRect.y,
+    width: STAGE_VIEWPORT_WIDTH,
+    height: STAGE_VIEWPORT_HEIGHT,
+    transform: `scale(${overlayTransform.scale})`,
+    transformOrigin: '0 0',
+    zIndex,
+    pointerEvents: 'none',
+    overflow: 'hidden',
+  })
+
+  const renderOverlayVisual = (layer: FlowEditorLayerView) => {
+    const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
+    const controller = isTeacherControllerLayerItem(layer.item)
+    const controllerGlobalAuthoring = controller && selection?.authoringScope === 'global'
+    const controllerPagePreview = controller && !controllerGlobalAuthoring
+    const selected = !controllerPagePreview
+      && selection?.selectedOverlayIds.includes(layer.selectionId) === true
+    const underlayVisual = layer.source === 'global' && layer.globalPlane === 'underlay'
+    const passThroughVisual = layer.item.hitPolicy === 'pass-through'
+    const inertVisual = underlayVisual || passThroughVisual
+    const interactive = !readOnly && !selected && !controllerPagePreview && !inertVisual
+    return (
+      <div
+        key={layer.selectionId}
+        role={interactive ? 'button' : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        className={`flow-layer-card${controller ? ' flow-layer-card--controller' : ''}`}
+        data-layer-item-id={layer.selectionId}
+        data-testid={`flow-layer-card-${layer.selectionId}`}
+        data-controller-page-preview={controllerPagePreview || undefined}
+        data-flow-global-plane={layer.globalPlane ?? undefined}
+        aria-hidden={controllerPagePreview || inertVisual || undefined}
+        aria-label={interactive ? layer.item.label || '浮层' : undefined}
+        {...(inertVisual ? { inert: true } : {})}
+        style={{
+          ...overlayCardStyle(layer, preview, paperScrollTop),
+          pointerEvents: interactive ? 'auto' : 'none',
+        }}
+        onPointerDown={interactive ? (event) => beginOverlayGesture(event, layer) : undefined}
+        onPointerMove={interactive ? moveOverlayGesture : undefined}
+        onPointerUp={interactive ? endOverlayGesture : undefined}
+        onPointerCancel={interactive ? cancelOverlayGesture : undefined}
+      >
+        {controller ? (
+          <TeacherControllerAuthoringChrome
+            item={layer.item as LayerItem}
+            frame={overlayFrameOf(layer)}
+            rotation={layer.item.rotation}
+            canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+            getRenderedStageBounds={() => {
+              const bounds = overlayRef.current?.getBoundingClientRect()
+              return {
+                width: Math.max(1, bounds?.width || CANVAS_WIDTH),
+                height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
+              }
+            }}
+            scenes={overlayScenes}
+            currentSceneId={locationId}
+          />
+        ) : (
+          renderFlowOverlayCardContent(layer, assetUrls, componentPackages)
+        )}
+      </div>
+    )
+  }
+
+  const renderSelectionChrome = (layer: FlowEditorLayerView) => {
+    const controller = isTeacherControllerLayerItem(layer.item)
+    const controllerPagePreview = controller && selection?.authoringScope !== 'global'
+    const selected = !controllerPagePreview
+      && selection?.selectedOverlayIds.includes(layer.selectionId) === true
+    if (!selected) return null
+    const editable = !readOnly && !layer.item.locked
+    return (
+      <div
+        key={layer.selectionId}
+        role={readOnly ? undefined : 'button'}
+        tabIndex={readOnly ? undefined : 0}
+        className="flow-layer-selection-chrome flow-layer-card--selected"
+        data-layer-item-id={layer.selectionId}
+        data-testid={`flow-layer-selection-${layer.selectionId}`}
+        aria-label={readOnly ? undefined : `${layer.item.label || '浮层'}选择框`}
+        style={{
+          ...overlayCardStyle(
+            layer,
+            overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null,
+            paperScrollTop,
+          ),
+          pointerEvents: readOnly ? 'none' : 'auto',
+          background: 'transparent',
+        }}
+        onPointerDown={readOnly ? undefined : (event) => beginOverlayGesture(event, layer)}
+        onPointerMove={readOnly ? undefined : moveOverlayGesture}
+        onPointerUp={readOnly ? undefined : endOverlayGesture}
+        onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
+      >
+        {editable ? STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
+          const point = overlayHandlePoint(overlayFrameOf(layer), direction)
+          const frame = overlayFrameOf(layer)
+          return (
+            <div
+              key={direction}
+              className="flow-layer-card__handle"
+              data-handle={direction}
+              data-testid={`flow-overlay-handle-${layer.selectionId}-${direction}`}
+              style={{
+                position: 'absolute',
+                left: point.x - frame.x - 4,
+                top: point.y - frame.y - 4,
+                width: 8,
+                height: 8,
+                pointerEvents: 'auto',
+              }}
+            />
+          )
+        }) : null}
+      </div>
+    )
+  }
+
   return (
     <div
       ref={workspaceMeasureRef}
@@ -1991,9 +2126,18 @@ export function FlowWorkspace({
         height: '100%',
         minHeight: 320,
         overflow: 'hidden',
-        background: '#eef1f6',
+        isolation: 'isolate',
+        background: surfaceBackground,
       }}
     >
+      <div
+        className="flow-authoring-layer-plane flow-authoring-layer-plane--global-underlay"
+        data-flow-layer-plane="global-underlay"
+        data-testid="flow-authoring-global-underlay"
+        style={overlayPlaneStyle(0)}
+      >
+        {globalUnderlayLayers.map(renderOverlayVisual)}
+      </div>
       <div
         ref={scrollRef}
         className="flow-workspace__scroll flow-media-query-root"
@@ -2004,6 +2148,8 @@ export function FlowWorkspace({
         }}
         style={{
           flex: 1,
+          position: 'relative',
+          zIndex: 1,
           overflow: 'auto',
           height: '100%',
           padding: '24px 16px 48px',
@@ -2023,12 +2169,7 @@ export function FlowWorkspace({
             minHeight: '100%',
             margin: '0 auto',
             padding: '28px 36px 64px',
-            background: resolveCourseSurfaceBackgroundColor(
-              (() => {
-                const surface = project.surfaces.find((candidate) => candidate.id === view.surfaceId)
-                return surface?.type === 'flow' ? surface.backgroundColor : undefined
-              })(),
-            ),
+            background: 'transparent',
             color: FLOW_PAPER_TEXT_COLOR,
             boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
           }}
@@ -2037,97 +2178,30 @@ export function FlowWorkspace({
           <div style={{ clear: 'both' }} aria-hidden="true" />
         </article>
       </div>
-      {overlayLayers.length > 0 ? (
-        <div
-          ref={overlayRef}
-          className="flow-authoring-layer-overlay"
-          data-testid="flow-authoring-layer-overlay"
-          style={{
-            position: 'absolute',
-            left: overlayTransform.stageRect.x,
-            top: overlayTransform.stageRect.y,
-            width: STAGE_VIEWPORT_WIDTH,
-            height: STAGE_VIEWPORT_HEIGHT,
-            transform: `scale(${overlayTransform.scale})`,
-            transformOrigin: '0 0',
-            zIndex: 4,
-            pointerEvents: 'none',
-            overflow: 'hidden',
-          }}
-        >
-          {overlayLayers.map((layer) => {
-            const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
-            const controller = isTeacherControllerLayerItem(layer.item)
-            const controllerGlobalAuthoring = controller && selection?.authoringScope === 'global'
-            const controllerPagePreview = controller && !controllerGlobalAuthoring
-            const selected = !controllerPagePreview &&
-              selection?.selectedOverlayIds.includes(layer.selectionId) === true
-            return (
-              <div
-                key={layer.selectionId}
-                role={controllerPagePreview ? undefined : 'button'}
-                tabIndex={controllerPagePreview ? undefined : readOnly ? -1 : 0}
-                className={`flow-layer-card${selected ? ' flow-layer-card--selected' : ''}${controller ? ' flow-layer-card--controller' : ''}`}
-                data-layer-item-id={layer.selectionId}
-                data-testid={`flow-layer-card-${layer.selectionId}`}
-                data-controller-page-preview={controllerPagePreview || undefined}
-                aria-hidden={controllerPagePreview || undefined}
-                aria-label={controllerPagePreview ? undefined : layer.item.label || '浮层'}
-                style={{
-                  ...overlayCardStyle(layer, preview, paperScrollTop),
-                  ...(controllerPagePreview ? { pointerEvents: 'none' } : {}),
-                }}
-                onPointerDown={controllerPagePreview ? undefined : (event) => beginOverlayGesture(event, layer)}
-                onPointerMove={controllerPagePreview ? undefined : moveOverlayGesture}
-                onPointerUp={controllerPagePreview ? undefined : endOverlayGesture}
-                onPointerCancel={controllerPagePreview ? undefined : cancelOverlayGesture}
-              >
-                {controller ? (
-                  <TeacherControllerAuthoringChrome
-                    item={layer.item as LayerItem}
-                    frame={overlayFrameOf(layer)}
-                    rotation={layer.item.rotation}
-                    canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
-                    getRenderedStageBounds={() => {
-                      const bounds = overlayRef.current?.getBoundingClientRect()
-                      return {
-                        width: Math.max(1, bounds?.width || CANVAS_WIDTH),
-                        height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
-                      }
-                    }}
-                    scenes={overlayScenes}
-                    currentSceneId={locationId}
-                  />
-                ) : (
-                  renderFlowOverlayCardContent(layer, assetUrls, componentPackages)
-                )}
-                {selected && !readOnly && !layer.item.locked && !controllerPagePreview ? (
-                  STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
-                    const point = overlayHandlePoint(overlayFrameOf(layer), direction)
-                    const frame = overlayFrameOf(layer)
-                    return (
-                      <div
-                        key={direction}
-                        className="flow-layer-card__handle"
-                        data-handle={direction}
-                        data-testid={`flow-overlay-handle-${layer.selectionId}-${direction}`}
-                        style={{
-                          position: 'absolute',
-                          left: point.x - frame.x - 4,
-                          top: point.y - frame.y - 4,
-                          width: 8,
-                          height: 8,
-                          pointerEvents: 'auto',
-                        }}
-                      />
-                    )
-                  })
-                ) : null}
-              </div>
-            )
-          })}
-        </div>
-      ) : null}
+      <div
+        className="flow-authoring-layer-plane flow-authoring-layer-plane--surface"
+        data-flow-layer-plane="surface"
+        data-testid="flow-authoring-surface-overlay"
+        style={overlayPlaneStyle(2)}
+      >
+        {surfaceOverlayLayers.map(renderOverlayVisual)}
+      </div>
+      <div
+        ref={overlayRef}
+        className="flow-authoring-layer-plane flow-authoring-layer-plane--global-overlay flow-authoring-layer-overlay"
+        data-flow-layer-plane="global-overlay"
+        data-testid="flow-authoring-layer-overlay"
+        style={overlayPlaneStyle(3)}
+      >
+        {globalOverlayLayers.map(renderOverlayVisual)}
+      </div>
+      <div
+        className="flow-authoring-selection-plane"
+        data-testid="flow-authoring-selection-plane"
+        style={overlayPlaneStyle(4)}
+      >
+        {overlayLayers.map(renderSelectionChrome)}
+      </div>
       {formulaNode ? (
         <FormulaEditDialog
           node={formulaNode}

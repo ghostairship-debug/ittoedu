@@ -15,7 +15,7 @@ import {
 import { createTextNode } from '@/renderer/project/createProject'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
-import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
+import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 import { extractFlowRichTextFromEditor } from '@/renderer/authoring/flowTextEdit'
 import { useEditorStore } from '@/renderer/store/editorStore'
@@ -149,6 +149,26 @@ function createFlowProject(): CourseProjectDocument {
       blockId: 'h1',
     }],
     startLocationId: 'h1',
+    globalLayerItems: [
+      {
+        item: sceneNodeToCourseLayerItem(createTextNode({
+          id: 'global-underlay',
+          name: '全局底图',
+          text: '底图',
+        }), 10_000),
+        plane: 'underlay',
+        visibility: { mode: 'all', locationIds: [] },
+      },
+      {
+        item: sceneNodeToCourseLayerItem(createTextNode({
+          id: 'global-overlay',
+          name: '全局前景',
+          text: '前景',
+        }), 10_001),
+        plane: 'overlay',
+        visibility: { mode: 'all', locationIds: [] },
+      },
+    ],
     surfaces: [{
       id: 'flow',
       type: 'flow',
@@ -203,17 +223,87 @@ describe('FlowWorkspace paper', () => {
     const workspace = screen.getByTestId('flow-workspace')
     const paper = screen.getByTestId('flow-paper')
     const scroll = screen.getByTestId('flow-workspace-scroll')
+    const underlay = screen.getByTestId('flow-authoring-global-underlay')
+    const surface = screen.getByTestId('flow-authoring-surface-overlay')
+    const overlay = screen.getByTestId('flow-authoring-layer-overlay')
+    const selectionPlane = screen.getByTestId('flow-authoring-selection-plane')
     expect(workspace.getAttribute('data-flow-not-slide-stage')).toBe('true')
     expect(paper.getAttribute('data-flow-reading-width')).toBe('760')
-    expect(paper).toHaveStyle({ maxWidth: '760px' })
-    expect(scroll).toHaveStyle({ overflow: 'auto' })
+    expect(paper).toHaveStyle({ maxWidth: '760px', background: 'transparent' })
+    expect(scroll).toHaveStyle({ overflow: 'auto', zIndex: '1' })
     expect(workspace).not.toHaveStyle({ width: '1280px' })
     expect(workspace).not.toHaveStyle({ height: '720px' })
+    expect(underlay.parentElement).toBe(workspace)
+    expect(surface.parentElement).toBe(workspace)
+    expect(overlay.parentElement).toBe(workspace)
+    expect(selectionPlane.parentElement).toBe(workspace)
+    expect([...workspace.children].slice(0, 5)).toEqual([
+      underlay,
+      scroll,
+      surface,
+      overlay,
+      selectionPlane,
+    ])
+    expect(underlay).toHaveStyle({ zIndex: '0', pointerEvents: 'none' })
+    expect(surface).toHaveStyle({ zIndex: '2', pointerEvents: 'none' })
+    expect(overlay).toHaveStyle({ zIndex: '3', pointerEvents: 'none' })
+    expect(selectionPlane).toHaveStyle({ zIndex: '4', pointerEvents: 'none' })
+    expect(screen.getByTestId('flow-layer-card-global-underlay').parentElement).toBe(underlay)
     expect(screen.getByTestId('flow-layer-card-overlay-text')).toBeTruthy()
-    expect(screen.getByTestId('flow-authoring-layer-overlay')).toHaveStyle({
+    expect(screen.getByTestId('flow-layer-card-overlay-text').parentElement).toBe(surface)
+    expect(screen.getByTestId('flow-layer-card-global-overlay').parentElement).toBe(overlay)
+    expect(overlay).toHaveStyle({
       width: '1280px',
       height: '720px',
     })
+  })
+
+  it('keeps an Underlay visual inert while exposing its selected chrome above every plane', () => {
+    const project = createFlowProject()
+    const selection = selectFlowOverlay(project, 'h1', ['global-underlay'], 'global')
+    renderPaper(project, selection)
+
+    const visual = screen.getByTestId('flow-layer-card-global-underlay')
+    const chrome = screen.getByTestId('flow-layer-selection-global-underlay')
+    expect(visual).toHaveStyle({ pointerEvents: 'none' })
+    expect(visual).not.toHaveAttribute('role')
+    expect(visual.querySelector('[data-handle]')).toBeNull()
+    expect(chrome.parentElement).toBe(screen.getByTestId('flow-authoring-selection-plane'))
+    expect(chrome).toHaveAttribute('role', 'button')
+    expect(chrome.querySelector('[data-handle]')).not.toBeNull()
+  })
+
+  it('scrolls paper-space visuals in every physical plane while viewport visuals stay fixed', () => {
+    const project = createFlowProject()
+    const underlay = project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-underlay',
+    )!
+    underlay.item.paperSpace = 'paper'
+    underlay.item.frame = { mode: 'absolute', x: 10, y: 300, width: 200, height: 80 }
+    const overlay = project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay',
+    )!
+    overlay.item.frame = { mode: 'absolute', x: 20, y: 340, width: 200, height: 80 }
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'flow') throw new Error('expected Flow surface')
+    const surfacePaper = surface.surfaceLayerItems[0]!
+    surfacePaper.item.paperSpace = 'paper'
+    surfacePaper.item.frame = { mode: 'absolute', x: 30, y: 320, width: 200, height: 80 }
+    renderPaper(project)
+
+    const underlayCard = screen.getByTestId('flow-layer-card-global-underlay')
+    const surfaceCard = screen.getByTestId('flow-layer-card-overlay-text')
+    const overlayCard = screen.getByTestId('flow-layer-card-global-overlay')
+    expect(underlayCard).toHaveStyle({ top: '300px' })
+    expect(surfaceCard).toHaveStyle({ top: '320px' })
+    expect(overlayCard).toHaveStyle({ top: '340px' })
+
+    const scroll = screen.getByTestId('flow-workspace-scroll')
+    Object.defineProperty(scroll, 'scrollTop', { value: 100, configurable: true })
+    fireEvent.scroll(scroll)
+    expect(underlayCard).toHaveStyle({ top: '200px' })
+    expect(surfaceCard).toHaveStyle({ top: '220px' })
+    expect(overlayCard).toHaveStyle({ top: '340px' })
   })
 
   it('selects a block on click and enters contenteditable on double-click, Enter, or a second text click', () => {

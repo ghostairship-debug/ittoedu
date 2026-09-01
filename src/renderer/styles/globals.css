@@ -2898,7 +2898,8 @@ button:disabled {
   letter-spacing: 0.08em;
 }
 
-.flow-layer-card {
+.flow-layer-card,
+.flow-layer-selection-chrome {
   overflow: visible;
 }
 
@@ -5799,7 +5800,9 @@ button:disabled {
   z-index: 1;
 }
 
-.flow-authoring-layer-overlay {
+.flow-authoring-layer-overlay,
+.flow-authoring-layer-plane,
+.flow-authoring-selection-plane {
   transform-origin: 0 0;
 }
 

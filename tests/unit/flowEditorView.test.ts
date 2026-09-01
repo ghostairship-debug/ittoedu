@@ -131,6 +131,11 @@ function flowFixture(): {
     name: '作用域外全局层',
     text: '隐藏全局',
   }), 10)
+  const globalOverlay = sceneNodeToCourseLayerItem(createTextNode({
+    id: 'global-overlay',
+    name: '全局前景',
+    text: '前景',
+  }), 60)
 
   const project: CourseProjectDocument = {
     ...courseShell(),
@@ -149,6 +154,12 @@ function flowFixture(): {
       },
       {
         item: globalVisible,
+        plane: 'underlay',
+        visibility: { mode: 'all', locationIds: [] },
+      },
+      {
+        item: globalOverlay,
+        plane: 'overlay',
         visibility: { mode: 'all', locationIds: [] },
       },
     ],
@@ -262,10 +273,16 @@ describe('Flow editor read projection', () => {
       project: fixture.project,
       locationId: fixture.locationId,
     })
-    expect(view.overlayLayers.map((layer) => [layer.source, layer.selectionId])).toEqual([
-      ['surface', 'surface-shared'],
-      ['surface', 'surface-hidden'],
-      ['global', 'global-banner'],
+    expect(view.overlayLayers.map((layer) => [
+      layer.source,
+      layer.selectionId,
+      layer.globalPlane,
+      layer.stackOrder,
+    ])).toEqual([
+      ['global', 'global-banner', 'underlay', 0],
+      ['surface', 'surface-shared', null, 1],
+      ['surface', 'surface-hidden', null, 2],
+      ['global', 'global-overlay', 'overlay', 4],
     ])
     expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-paragraph')).toBe(false)
     expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-h1')).toBe(false)
@@ -277,9 +294,10 @@ describe('Flow editor read projection', () => {
       surfaceId: fixture.surfaceId,
       locationId: fixture.locationId,
     }).map((entry) => entry.item.layerItemId)).toEqual([
+      'global-banner',
       'surface-shared',
       'surface-hidden',
-      'global-banner',
+      'global-overlay',
     ])
     expect(view.overlayLayers.find((layer) => layer.selectionId === 'surface-shared')?.authoringAddress).toBe(
       makeAuthoringAddress({
