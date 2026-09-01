@@ -87,6 +87,10 @@ interface PublishedInteractionHostFactoryOptions {
   restartCourse?: () => Promise<boolean>
   /** Internal route for a Slide controller scene.replay action. */
   replayScene?: () => Promise<boolean>
+  /** Session-owned controller route. `undefined` leaves local chrome actions to the host. */
+  executeTeacherControllerAction?: (
+    action: TeacherControllerAction,
+  ) => Promise<boolean | undefined>
   /** Mixed reset commits the shared controller authority only after all hosts reset. */
   deferTeacherControllerCourseReset?: boolean
   /** One mutable Published playback store shared by every executable carrier. */
@@ -172,6 +176,10 @@ function createPublishedSurfaceHostInternal(
       teacherControllerSession: options.teacherControllerSession,
       replayScene: options.replayScene,
       executeTeacherControllerAction: async (action) => {
+        if (options.executeTeacherControllerAction) {
+          const outcome = await options.executeTeacherControllerAction(action)
+          if (outcome !== undefined) return true
+        }
         if (action.type !== 'course.restart' || !options.restartCourse) return false
         return options.restartCourse()
       },
@@ -195,6 +203,7 @@ function createPublishedSurfaceHostInternal(
       teacherControllerSession: options.teacherControllerSession,
       restartCourse: options.restartCourse,
       replayScene: options.replayScene,
+      executeTeacherControllerAction: options.executeTeacherControllerAction,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
@@ -215,6 +224,7 @@ function createPublishedSurfaceHostInternal(
       teacherControllerSession: options.teacherControllerSession,
       restartCourse: options.restartCourse,
       replayScene: options.replayScene,
+      executeTeacherControllerAction: options.executeTeacherControllerAction,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
@@ -639,7 +649,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #terminalNavigationClaimed = false
   #terminalNavigationInvalidated = false
   #interactionDestroyStarted = false
-  #navigationGuardsBypassed = false
+  #navigationGuardBypassTargetId: string | null = null
 
   constructor(
     player: CoursePlayer,
@@ -675,10 +685,13 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   assertNavigationAllowed(transition: MixedNavigationTransition): void {
     if (
       this.#staticCapture
-      || this.#navigationGuardsBypassed
       || !transition.current
       || transition.current.locationId === transition.next.locationId
     ) return
+    if (this.#navigationGuardBypassTargetId === transition.next.locationId) {
+      this.#navigationGuardBypassTargetId = null
+      return
+    }
     const guard = this.#navigationBlockFor(transition.next.locationId)
     if (!guard) return
     this.#reportNavigationBlock(guard.message, transition.next.surfaceId)
@@ -733,6 +746,36 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       return Promise.resolve(false)
     }
     return this.#replayScene(new AbortController().signal)
+  }
+
+  async executeTeacherControllerAction(
+    action: TeacherControllerAction,
+  ): Promise<boolean | undefined> {
+    if (action.type === 'course.restart') {
+      return this.#restartCourse(new AbortController().signal)
+    }
+    if (action.type === 'scene.replay') {
+      return this.#replayScene(new AbortController().signal)
+    }
+    if (
+      action.type !== 'scene.go'
+      && action.type !== 'scene.next'
+      && action.type !== 'scene.previous'
+    ) return undefined
+    if (!this.#canAcceptHostAction()) return false
+    const current = this.navigator.current
+    if (!current) return false
+    const target = publishedControllerNavigationTarget(action, {
+      locations: this.#payload.locations,
+      currentLocationId: current.locationId,
+      startLocationId: this.#payload.startLocationId,
+    })
+    if (!target) return false
+    return this.#navigateFromTeacherController(
+      target,
+      action.type === 'scene.go' ? action.targetStateId : undefined,
+      new AbortController().signal,
+    )
   }
 
   requestHostRestartCourse(): boolean {
@@ -1020,6 +1063,55 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     }
   }
 
+  async #navigateFromTeacherController(
+    target: CourseLocation,
+    targetStateId: string | undefined,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (signal.aborted) return false
+    const current = this.navigator.current
+    if (!current || (current.locationId === target.id && targetStateId === undefined)) return false
+    const targetHost = target.kind === 'slide-scene'
+      ? interactionCapableHost(this.#hostsById.get(target.surfaceId))
+      : null
+    if (
+      targetStateId !== undefined
+      && (
+        target.kind !== 'slide-scene'
+        || !targetHost?.validatePublishedPresentationState
+        || !targetHost.validatePublishedPresentationState(target.id, targetStateId)
+      )
+    ) return false
+    if (!this.#claimTerminalNavigation(signal)) return false
+    this.#navigationGuardBypassTargetId = target.id
+    try {
+      await this.navigator.goToLocation(target.id, {
+        force: targetStateId !== undefined,
+        recordHistory: current.locationId !== target.id,
+        signal,
+        ...(targetStateId !== undefined
+          ? {
+              prepareTransition: () => {
+                if (
+                  !targetHost?.preparePublishedPresentationState
+                  || !targetHost.preparePublishedPresentationState(target.id, targetStateId)
+                ) throw new Error(`Unable to prepare Published scene state for ${target.id}`)
+              },
+            }
+          : {}),
+      })
+      return true
+    } catch (error) {
+      if (targetStateId !== undefined) {
+        targetHost?.cancelPreparedPublishedPresentationState?.(target.id)
+      }
+      this.#releaseTerminalNavigationClaim()
+      throw error
+    } finally {
+      this.#navigationGuardBypassTargetId = null
+    }
+  }
+
   async #replayScene(signal: AbortSignal): Promise<boolean> {
     if (
       this.#interactionDestroyStarted
@@ -1041,7 +1133,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   async #restartCourse(signal: AbortSignal): Promise<boolean> {
     if (!this.navigator.current || !this.#claimTerminalNavigation(signal)) return false
-    this.#navigationGuardsBypassed = true
+    this.#navigationGuardBypassTargetId = this.#payload.startLocationId
     this.preparePublishedGlobalRuntimeRestart()
     try {
       await this.navigator.resetCourse({ signal })
@@ -1055,7 +1147,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       this.#releaseTerminalNavigationClaim()
       throw error
     } finally {
-      this.#navigationGuardsBypassed = false
+      this.#navigationGuardBypassTargetId = null
     }
   }
 }
@@ -1214,6 +1306,11 @@ export function createPublishedCourseSession(
   const replayScene = (): Promise<boolean> => (
     session?.replayCurrentLocationFromController() ?? Promise.resolve(false)
   )
+  const executeTeacherControllerAction = (
+    action: TeacherControllerAction,
+  ): Promise<boolean | undefined> => (
+    session?.executeTeacherControllerAction(action) ?? Promise.resolve(undefined)
+  )
   const componentActions = createPlayerComponentHostActions({
     goToSceneById: (sceneId, targetStateId) => (
       session?.requestHostGoToScene(sceneId, targetStateId) ?? false
@@ -1235,6 +1332,7 @@ export function createPublishedCourseSession(
       teacherControllerSession,
       restartCourse,
       replayScene,
+      executeTeacherControllerAction,
       deferTeacherControllerCourseReset: true,
       courseState,
       ...(!options.staticCapture ? { runtimeActions, componentActions } : {}),
@@ -1361,6 +1459,9 @@ class FlowPublishedAdapter implements SurfaceHost {
   readonly #startLocationId: string
   readonly #restartCourse?: () => Promise<boolean>
   readonly #replayScene?: () => Promise<boolean>
+  readonly #executeTeacherControllerAction?: (
+    action: TeacherControllerAction,
+  ) => Promise<boolean | undefined>
   #services: SurfacePlayerServices | null = null
 
   constructor(
@@ -1375,6 +1476,9 @@ class FlowPublishedAdapter implements SurfaceHost {
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
       restartCourse?: () => Promise<boolean>
       replayScene?: () => Promise<boolean>
+      executeTeacherControllerAction?: (
+        action: TeacherControllerAction,
+      ) => Promise<boolean | undefined>
       deferTeacherControllerCourseReset?: boolean
       courseState?: CourseStateStore
       runtimeActions?: Readonly<RuntimeHostActions>
@@ -1386,6 +1490,7 @@ class FlowPublishedAdapter implements SurfaceHost {
     this.#startLocationId = options.locationId
     this.#restartCourse = options.restartCourse
     this.#replayScene = options.replayScene
+    this.#executeTeacherControllerAction = options.executeTeacherControllerAction
     this.#host = new FlowSurfaceHost(payload, {
       surfaceId,
       locationId: options.locationId,
@@ -1485,6 +1590,10 @@ class FlowPublishedAdapter implements SurfaceHost {
   }
 
   async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+    if (this.#executeTeacherControllerAction) {
+      const outcome = await this.#executeTeacherControllerAction(action)
+      if (outcome !== undefined) return true
+    }
     if (action.type === 'course.restart' && this.#restartCourse) {
       return this.#restartCourse()
     }
@@ -1520,6 +1629,9 @@ class SpatialPublishedAdapter implements SurfaceHost {
   readonly #startLocationId: string
   readonly #restartCourse?: () => Promise<boolean>
   readonly #replayScene?: () => Promise<boolean>
+  readonly #executeTeacherControllerAction?: (
+    action: TeacherControllerAction,
+  ) => Promise<boolean | undefined>
   #services: SurfacePlayerServices | null = null
 
   constructor(
@@ -1536,6 +1648,9 @@ class SpatialPublishedAdapter implements SurfaceHost {
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
       restartCourse?: () => Promise<boolean>
       replayScene?: () => Promise<boolean>
+      executeTeacherControllerAction?: (
+        action: TeacherControllerAction,
+      ) => Promise<boolean | undefined>
       deferTeacherControllerCourseReset?: boolean
       courseState?: CourseStateStore
       runtimeActions?: Readonly<RuntimeHostActions>
@@ -1547,6 +1662,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
     this.#startLocationId = options.startLocationId
     this.#restartCourse = options.restartCourse
     this.#replayScene = options.replayScene
+    this.#executeTeacherControllerAction = options.executeTeacherControllerAction
     this.#host = SpatialSurfaceHost.fromPublishedCourse(payload, options.viewport, {
       surfaceId,
       locationId: options.startLocationId,
@@ -1643,6 +1759,10 @@ class SpatialPublishedAdapter implements SurfaceHost {
   }
 
   async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+    if (this.#executeTeacherControllerAction) {
+      const outcome = await this.#executeTeacherControllerAction(action)
+      if (outcome !== undefined) return true
+    }
     if (action.type === 'course.restart' && this.#restartCourse) {
       return this.#restartCourse()
     }

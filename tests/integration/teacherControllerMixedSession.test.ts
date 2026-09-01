@@ -367,4 +367,179 @@ describe('Mixed teacher controller runtime Session', () => {
     expect(project).toEqual(projectBefore)
     expect(payload).toEqual(payloadBefore)
   })
+
+  it('lets each Surface controller bypass one guard without leaking authority to public navigation', async () => {
+    const payload = buildPublishedCourseV2Payload({
+      project: mixedControllerProject(),
+      assetFiles: {},
+      components: {},
+    })
+    const [slideLocation, flowLocation, spatialLocation] = payload.locations
+    if (
+      slideLocation?.kind !== 'slide-scene'
+      || flowLocation?.kind !== 'flow-block'
+      || spatialLocation?.kind !== 'spatial-camera'
+    ) throw new Error('fixture requires ordered Slide, Flow, and Spatial locations')
+    payload.courseState = [{
+      key: 'ready',
+      valueType: 'boolean',
+      defaultValue: false,
+    }]
+    payload.navigationGuards = [
+      {
+        id: 'block-slide-to-flow',
+        effect: 'block',
+        fromLocationIds: [slideLocation.id],
+        toLocationIds: [flowLocation.id],
+        match: 'all',
+        conditions: [{
+          type: 'compare',
+          key: 'ready',
+          operator: 'eq',
+          value: false,
+        }],
+        message: 'Slide must stay guarded',
+      },
+      {
+        id: 'block-flow-to-spatial',
+        effect: 'block',
+        fromLocationIds: [flowLocation.id],
+        toLocationIds: [spatialLocation.id],
+        match: 'all',
+        conditions: [{
+          type: 'compare',
+          key: 'ready',
+          operator: 'eq',
+          value: false,
+        }],
+        message: 'Flow must stay guarded',
+      },
+      {
+        id: 'block-spatial-to-flow',
+        effect: 'block',
+        fromLocationIds: [spatialLocation.id],
+        toLocationIds: [flowLocation.id],
+        match: 'all',
+        conditions: [{
+          type: 'compare',
+          key: 'ready',
+          operator: 'eq',
+          value: false,
+        }],
+        message: 'Spatial must stay guarded',
+      },
+      {
+        id: 'block-flow-to-slide',
+        effect: 'block',
+        fromLocationIds: [flowLocation.id],
+        toLocationIds: [slideLocation.id],
+        match: 'all',
+        conditions: [{
+          type: 'compare',
+          key: 'ready',
+          operator: 'eq',
+          value: false,
+        }],
+        message: 'Flow-to-Slide must stay guarded',
+      },
+    ]
+    const controllerEntry = payload.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native'
+      && entry.item.content.nativeType === 'teacher-controller'
+    ))
+    if (
+      !controllerEntry
+      || controllerEntry.item.kind !== 'native'
+      || controllerEntry.item.content.nativeType !== 'teacher-controller'
+    ) throw new Error('fixture requires a global teacher controller')
+    const controllerId = controllerEntry.item.layerItemId
+    controllerEntry.item.content.data.defaultCollapsed = false
+    const nextButton = controllerEntry.item.content.data.buttons.find(
+      (button) => button.action.type === 'scene.next',
+    )
+    const previousButton = controllerEntry.item.content.data.buttons.find(
+      (button) => button.action.type === 'scene.previous',
+    )
+    if (!nextButton || !previousButton) throw new Error('fixture requires next/previous controls')
+    nextButton.visible = true
+    previousButton.visible = true
+    const goToSlideButtonId = 'controller-go-to-slide'
+    controllerEntry.item.content.data.buttons.push({
+      id: goToSlideButtonId,
+      action: { type: 'scene.go', sceneId: slideLocation.sceneId },
+      label: 'Go to Slide',
+      visible: true,
+    })
+    const reportDiagnostic = vi.fn()
+    const session = createPublishedCourseSession(payload, {
+      services: { reportDiagnostic },
+    })
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    const clickControllerButton = (
+      kind: 'slide' | 'flow' | 'spatial',
+      buttonId: string,
+    ): void => {
+      const button = controllerFrame(container, kind, controllerId)
+        .querySelector<HTMLButtonElement>(`[data-controller-button-id="${buttonId}"]`)
+      if (!button) throw new Error(`missing ${kind} controller button ${buttonId}`)
+      button.click()
+    }
+
+    await expect(session.goToLocation(flowLocation.id)).rejects.toThrow('Slide must stay guarded')
+    expect(session.navigator.current?.locationId).toBe(slideLocation.id)
+    const activateSurfaceSpy = vi.spyOn(session.player, 'activateSurface')
+      .mockRejectedValueOnce(new Error('forced controller navigation failure'))
+    clickControllerButton('slide', nextButton.id)
+    await vi.waitFor(() => {
+      expect(session.navigator.hasPendingNavigation).toBe(false)
+      expect(session.navigator.current?.locationId).toBe(slideLocation.id)
+      expect(reportDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+        severity: 'error',
+        message: expect.stringContaining('forced controller navigation failure'),
+      }))
+    })
+    activateSurfaceSpy.mockRestore()
+    await expect(session.goToLocation(flowLocation.id)).rejects.toThrow('Slide must stay guarded')
+    expect(session.navigator.current?.locationId).toBe(slideLocation.id)
+    clickControllerButton('slide', nextButton.id)
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(flowLocation.id)
+    })
+
+    await expect(session.goToLocation(spatialLocation.id)).rejects.toThrow('Flow must stay guarded')
+    expect(session.navigator.current?.locationId).toBe(flowLocation.id)
+    clickControllerButton('flow', nextButton.id)
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(spatialLocation.id)
+    })
+
+    await expect(session.goToLocation(flowLocation.id)).rejects.toThrow('Spatial must stay guarded')
+    expect(session.navigator.current?.locationId).toBe(spatialLocation.id)
+    clickControllerButton('spatial', previousButton.id)
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(flowLocation.id)
+    })
+
+    await expect(session.goToLocation(slideLocation.id)).rejects.toThrow('Flow-to-Slide must stay guarded')
+    expect(session.navigator.current?.locationId).toBe(flowLocation.id)
+    clickControllerButton('flow', goToSlideButtonId)
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe(slideLocation.id)
+    })
+
+    await expect(session.goToLocation(flowLocation.id)).rejects.toThrow('Slide must stay guarded')
+    expect(session.navigator.current?.locationId).toBe(slideLocation.id)
+    const navigationWarnings = reportDiagnostic.mock.calls.filter(([diagnostic]) => (
+      diagnostic.severity === 'warning'
+    ))
+    expect(navigationWarnings).toHaveLength(6)
+    expect(reportDiagnostic).toHaveBeenLastCalledWith(expect.objectContaining({
+      severity: 'warning',
+      message: 'Slide must stay guarded',
+    }))
+  })
 })
