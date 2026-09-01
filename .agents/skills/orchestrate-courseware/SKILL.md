@@ -5,6 +5,8 @@ description: 把教学主题、教材、教案、题目、课程标准或既有�
 
 # 编排互动课件
 
+形成或修订教学策划、呈现简报和呈现脚本时，同时遵守 [main-progression.md](references/main-progression.md)；教师控制器只作课堂兜底，不能代替正文主推进。
+
 目标是得到两份足够支撑制作、仍保留教师自由度的当前 Markdown；聊天记录不是交付真相。
 
 ## 原则

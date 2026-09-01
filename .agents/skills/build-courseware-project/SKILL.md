@@ -5,6 +5,8 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md �
 
 # 构建互动课件工程
 
+映射载体、构建和体验 QA 时必须遵守 [main-progression.md](references/main-progression.md)：先证明控制器隐藏时的正文主路径，再验证控制器兜底。
+
 以两份当前教学文件为体验真相，以 Capability Index 和源码为工程真相。交付可编辑 Course Project V9（`.h5lesson`）与离线 HTML；不得用旧聊天、旧课件或模板补写缺失内容。
 
 仓库里**没有** `agent-kit/` CLI。不要运行 `courseware-agent-kit.mjs`，也不要虚构 `scaffold` / `graph` / `assemble` / `rig` / `validate --workspace`。
