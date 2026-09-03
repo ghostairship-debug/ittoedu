@@ -111,8 +111,16 @@ function videoItem(
   id: string,
   order: number,
   options: {
+    fit?: 'contain' | 'cover'
+    autoplay?: boolean
+    loop?: boolean
     muted?: boolean
     volume?: number
+    playbackRate?: number
+    showControls?: boolean
+    clickToToggle?: boolean
+    startTime?: number
+    endTime?: number | null
     backgroundAudioMode?: 'none' | 'duck' | 'pause' | 'stop'
   } = {},
 ): PublishedNativeLayerItem {
@@ -123,16 +131,16 @@ function videoItem(
       nativeType: 'video',
       data: {
         assetId: 'video-owned-asset',
-        fit: 'contain',
-        autoplay: false,
-        loop: false,
+        fit: options.fit ?? 'contain',
+        autoplay: options.autoplay ?? false,
+        loop: options.loop ?? false,
         muted: options.muted ?? true,
         volume: options.volume ?? 1,
-        playbackRate: 1,
-        showControls: true,
-        clickToToggle: true,
-        startTime: 0,
-        endTime: null,
+        playbackRate: options.playbackRate ?? 1,
+        showControls: options.showControls ?? true,
+        clickToToggle: options.clickToToggle ?? true,
+        startTime: options.startTime ?? 0,
+        endTime: options.endTime ?? null,
         poster: { mode: 'video-frame', time: 0 },
         backgroundAudioMode: options.backgroundAudioMode ?? 'none',
       },
@@ -1556,13 +1564,22 @@ describe('Published Interaction Slide host integration', () => {
   })
 
   it('applies formal video fields and routes video actions to video events', async () => {
+    const playing = new WeakMap<HTMLMediaElement, boolean>()
+    vi.spyOn(window.HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(
+      function paused(this: HTMLMediaElement) {
+        return !(playing.get(this) ?? false)
+      },
+    )
     vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(
       function play(this: HTMLMediaElement) {
+        playing.set(this, true)
         return Promise.resolve()
       },
     )
     vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(
-      function pause(this: HTMLMediaElement) {},
+      function pause(this: HTMLMediaElement) {
+        playing.set(this, false)
+      },
     )
     const target = textItem('video-motion-target', 30, {
       playbackInitialVisibility: 'hidden',
@@ -1573,13 +1590,43 @@ describe('Published Interaction Slide host integration', () => {
     const payload = publishedFixture({
       sceneAItems: [
         textItem('video-play-trigger', 10),
-        videoItem('video-a', 20),
+        textItem('video-pause-trigger', 11),
+        textItem('video-restart-trigger', 12),
+        textItem('video-stop-trigger', 13),
+        textItem('video-toggle-trigger', 14),
+        textItem('video-seek-trigger', 15),
+        videoItem('video-a', 20, {
+          fit: 'cover',
+          loop: true,
+          muted: false,
+          volume: 0.65,
+          playbackRate: 1.25,
+          showControls: false,
+          clickToToggle: false,
+          startTime: 2,
+          endTime: 8,
+        }),
         target,
         timeTarget,
       ],
       sceneAInteractions: [
         clickRule('play-video-a', 'video-play-trigger', [
           step('play-video-a-step', { type: 'video.play', nodeId: 'video-a' }),
+        ]),
+        clickRule('pause-video-a', 'video-pause-trigger', [
+          step('pause-video-a-step', { type: 'video.pause', nodeId: 'video-a' }),
+        ]),
+        clickRule('restart-video-a', 'video-restart-trigger', [
+          step('restart-video-a-step', { type: 'video.restart', nodeId: 'video-a' }),
+        ]),
+        clickRule('stop-video-a', 'video-stop-trigger', [
+          step('stop-video-a-step', { type: 'video.stop', nodeId: 'video-a' }),
+        ]),
+        clickRule('toggle-video-a', 'video-toggle-trigger', [
+          step('toggle-video-a-step', { type: 'video.toggle', nodeId: 'video-a' }),
+        ]),
+        clickRule('seek-video-a', 'video-seek-trigger', [
+          step('seek-video-a-step', { type: 'video.seek', nodeId: 'video-a', seconds: 20 }),
         ]),
         {
           id: 'on-video-started',
@@ -1602,12 +1649,12 @@ describe('Published Interaction Slide host integration', () => {
 
     const video = renderedItem(container, 'video-a').querySelector('video')
     expect(video).not.toBeNull()
-    expect(video!.controls).toBe(true)
-    expect(video!.loop).toBe(false)
-    expect(video!.muted).toBe(true)
-    expect(video!.volume).toBe(1)
-    expect(video!.playbackRate).toBe(1)
-    expect(video!.style.objectFit).toBe('contain')
+    expect(video!.controls).toBe(false)
+    expect(video!.loop).toBe(true)
+    expect(video!.muted).toBe(false)
+    expect(video!.volume).toBe(0.65)
+    expect(video!.playbackRate).toBe(1.25)
+    expect(video!.style.objectFit).toBe('cover')
 
     renderedItem(container, 'video-play-trigger').click()
     await settle()
@@ -1635,6 +1682,29 @@ describe('Published Interaction Slide host integration', () => {
     video!.dispatchEvent(new Event('timeupdate'))
     await settle()
     expectInteractionVisibility(renderedItem(container, timeTarget.layerItemId), true)
+
+    renderedItem(container, 'video-pause-trigger').click()
+    await settle()
+    expect(window.HTMLMediaElement.prototype.pause).toHaveBeenCalled()
+
+    const playsBeforeRestart = vi.mocked(window.HTMLMediaElement.prototype.play).mock.calls.length
+    renderedItem(container, 'video-restart-trigger').click()
+    await settle()
+    expect(video!.currentTime).toBe(2)
+    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(playsBeforeRestart + 1)
+
+    renderedItem(container, 'video-seek-trigger').click()
+    await settle()
+    expect(video!.currentTime).toBe(8)
+
+    renderedItem(container, 'video-stop-trigger').click()
+    await settle()
+    expect(video!.currentTime).toBe(2)
+
+    const playsBeforeToggle = vi.mocked(window.HTMLMediaElement.prototype.play).mock.calls.length
+    renderedItem(container, 'video-toggle-trigger').click()
+    await settle()
+    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(playsBeforeToggle + 1)
     expect(payload).toEqual(before)
   })
 

@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-052b-old-renderer-tests](tasks/1.1/r11-052b-old-renderer-tests.md) | queued | Integrator | none | 处理 `componentEventMountBuffer.test.ts`、`formulaCrossSurface.test.tsx`、`nodeMotionDirector.test.ts`、`playerComponentV4Render.test.ts`、`playerSceneAssets.test.ts` 五个文件已完成（整删 4 文件：componentEventMountBuffer、playerSceneAssets、nodeMotionDirector 16 例、formulaCrossSurface :198/:229；迁移 4 例：previewPageProp/editorState 与 capture waitUntil 顺序→`publishedComponentMount.test.ts`、公式确定性→`formulaNode.test.ts`、PPTX 公式静态化→`coursePptxExport.test.ts`；`playerComponentV4Render` 仅保留 hybrid 行）。剩余 `renderVideoNode.test.ts`、`teacherControllerActions.test.ts` 与 hybrid 行已由 Owner 裁定为受支持产品行为，必须等待 `r11-052e → 052f → 052g → 052h` 的真实 V2 consumer 与直接测试全部落地后再迁移/删除；不得把 blocked 解释为授权删除。 |
+| [r11-052d-preservation-evidence-links](tasks/1.1/r11-052d-preservation-evidence-links.md) | queued | Integrator | none | 052a–052c 与 052e–052h 已把保全行为迁入正式 V2 consumer 测试；仅同步 PM 条目引用的测试路径，不改变保全行为文字。 |
