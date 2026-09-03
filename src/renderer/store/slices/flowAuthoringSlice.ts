@@ -21,6 +21,12 @@ import {
   type FlowEditorHistory,
   type FlowEditorSelection,
 } from '../../course/flowEditorSlice'
+import type { EditorActionId } from '../../course/editorActionTypes'
+import {
+  resolveFlowDeleteRoute,
+  type EditorFocusKind,
+  type EditorSelectionSnapshot,
+} from '../../course/editorActionRouting'
 import {
   executeFlowDelete,
   executeFlowEditorCommand,
@@ -638,6 +644,9 @@ export function createFlowAuthoringSlice(
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
   setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
+  deriveFocus(): EditorFocusKind
+  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
+  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
 } {
   const flowRow = (layerItemId: string) => {
     const session = flow.read().flowSession
@@ -1783,6 +1792,51 @@ export function createFlowAuthoringSlice(
         visible,
         { expectedRevision: session.history.present.revision },
       ))
+    },
+
+    deriveFocus(): EditorFocusKind {
+      const owned = flow.read()
+      const session = owned.flowSession
+      if (!session) return 'none'
+      if (owned.flowTextEdit?.composing || session.selection.focus === 'text') return 'text'
+      if (session.selection.focus === 'block') return 'block'
+      if (session.selection.selectedOverlayIds.length > 0) return 'overlay'
+      return 'none'
+    },
+
+    executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string } {
+      if (actionId !== 'delete') return { ok: false, reason: `Flow 尚未接入${actionId}` }
+      const session = flow.read().flowSession
+      if (!session) return { ok: false, reason: '当前不是 Flow 编辑会话' }
+      if (resolveFlowDeleteRoute(live) === 'refuse') {
+        return { ok: false, reason: '没有可删除的选择' }
+      }
+      const deleted = executeFlowDelete(
+        session.history.present,
+        session.selection,
+        { expectedRevision: live.revision },
+      )
+      flow.persist(deleted)
+      return {
+        ok: deleted.ok,
+        reason: deleted.reason ?? (deleted.ok ? '已删除' : '无法删除'),
+      }
+    },
+
+    executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string } {
+      if (actionId !== 'delete') return { ok: false, reason: `全局层尚未接入${actionId}` }
+      const session = flow.read().flowSession
+      if (!session) return { ok: false, reason: '当前不是 Flow 编辑会话' }
+      const deleted = executeFlowDelete(
+        session.history.present,
+        session.selection,
+        { expectedRevision: live.revision },
+      )
+      flow.persist(deleted)
+      return {
+        ok: deleted.ok,
+        reason: deleted.reason ?? (deleted.ok ? '已删除' : '无法删除'),
+      }
     },
   }
 }

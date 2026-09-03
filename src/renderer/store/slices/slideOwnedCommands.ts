@@ -18,6 +18,8 @@ import {
 } from '../../course/effectiveLayerCommands'
 import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
+import type { EditorActionId } from '../../course/editorActionTypes'
+import type { EditorFocusKind, EditorSelectionSnapshot } from '../../course/editorActionRouting'
 import {
   copySlideGlobalClipboard,
 } from '../../course/v9SlideClipboard'
@@ -840,6 +842,104 @@ export function createSlideOwnedCommands(
         visible,
         { expectedRevision: backend.getSnapshot().revision },
       ))
+    },
+
+    deriveFocus(focus?: EditorFocusKind | EventTarget | null, shellEditingTextNodeId?: boolean): EditorFocusKind {
+      const owned = slide.read()
+      const backend = owned.slideBackend
+      if (!isSlideAuthoringBackend(backend)) return 'none'
+      const tagName = focus instanceof HTMLElement ? focus.tagName : undefined
+      const isContentEditable = focus instanceof HTMLElement ? focus.isContentEditable : false
+      const isText = shouldIgnoreSlideLayerDeleteForFocus({
+        textEditSession: Boolean(shellEditingTextNodeId || owned.v9ContentEdit?.kind === 'text'),
+        formulaEditSession: owned.v9ContentEdit?.kind === 'formula',
+        tagName,
+        isContentEditable,
+      })
+      if (isText) return 'text'
+      return backend.getSession().selection.selectionIds.length > 0 ? 'layer' : 'none'
+    },
+
+    executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string } {
+      if (actionId !== 'delete') return { ok: false, reason: `Slide 尚未接入${actionId}` }
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) {
+        return { ok: false, reason: '当前不是 Slide 编辑会话' }
+      }
+      if (live.itemIds.length === 0) return { ok: false, reason: '没有可删除的选择' }
+      const commandTargets = (itemIds: readonly string[]) => {
+        if (new Set(itemIds).size !== itemIds.length) {
+          throw new Error('当前选择包含重复元素，请重新选择')
+        }
+        const rows = buildCandidateEffectiveLayers({
+          slideBackend: backend,
+          spatialSession: null,
+          flowSession: null,
+        })?.unifiedRows ?? []
+        const rowById = new Map(rows.map((row) => [row.id, row]))
+        return itemIds.map((itemId) => {
+          const row = rowById.get(itemId)
+          if (!row) throw new Error(`所选元素已失效：${itemId}`)
+          return { row, target: commandTargetForRow(row) }
+        })
+      }
+      const resolved = commandTargets(live.itemIds)
+      if (resolved.every(({ row }) => row.owner === 'scene')) {
+        const deleted = deleteSlideSceneLayers(
+          backend.getSession(),
+          live.itemIds,
+          { expectedRevision: live.revision },
+        )
+        slide.persist(deleted)
+        return {
+          ok: deleted.ok,
+          reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+        }
+      }
+      const deleted = deleteEffectiveLayerItems(
+        backend.getSession().history.present,
+        resolved.map(({ target }) => target),
+        { expectedRevision: live.revision },
+      )
+      persistLayer(deleted)
+      return {
+        ok: deleted.ok,
+        reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+      }
+    },
+
+    executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string } {
+      if (actionId !== 'delete') return { ok: false, reason: `全局层尚未接入${actionId}` }
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) return { ok: false, reason: '当前不是 Slide 编辑会话' }
+      if (live.itemIds.length === 0) return { ok: false, reason: '没有可删除的选择' }
+      const commandTargets = (itemIds: readonly string[]) => {
+        if (new Set(itemIds).size !== itemIds.length) {
+          throw new Error('当前选择包含重复元素，请重新选择')
+        }
+        const rows = buildCandidateEffectiveLayers({
+          slideBackend: backend,
+          spatialSession: null,
+          flowSession: null,
+        })?.unifiedRows ?? []
+        const rowById = new Map(rows.map((row) => [row.id, row]))
+        return itemIds.map((itemId) => {
+          const row = rowById.get(itemId)
+          if (!row) throw new Error(`所选元素已失效：${itemId}`)
+          return { row, target: commandTargetForRow(row) }
+        })
+      }
+      const resolved = commandTargets(live.itemIds)
+      const deleted = deleteEffectiveLayerItems(
+        backend.getSession().history.present,
+        resolved.map(({ target }) => target),
+        { expectedRevision: live.revision },
+      )
+      persistLayer(deleted)
+      return {
+        ok: deleted.ok,
+        reason: deleted.reason ?? (deleted.ok ? '全局元素已删除' : '无法删除全局元素'),
+      }
     },
 
     commitSlideCandidateTextRunStyle(input: {

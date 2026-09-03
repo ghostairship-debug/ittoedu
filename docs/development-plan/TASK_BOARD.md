@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037t-routed-action-owners](tasks/1.1/r11-037t-routed-action-owners.md) | queued | — | none | 把 routeEditorAction 的三 Surface adapter、global delete 分支和 focus 推导迁到各 slice；router 只组装 snapshot 并分派。 |
+| [r11-037u-teacher-controller-injection](tasks/1.1/r11-037u-teacher-controller-injection.md) | queued | — | none | 删除教师控制器的模块级 bind/service locator；两个工厂的 ports 改为必填。 |

@@ -91,6 +91,9 @@ import {
   type SpatialClipboardPayload,
 } from '../../course/spatialClipboardCommands'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
+import { deleteSpatialWorldLayersReportingReferences } from '../../course/spatialPathCommands'
+import type { EditorActionId } from '../../course/editorActionTypes'
+import type { EditorFocusKind, EditorSelectionSnapshot } from '../../course/editorActionRouting'
 import { courseLayerItemToEditorCanvasNode } from '../slideEditorProjection'
 import {
   commandTargetForRow,
@@ -667,6 +670,9 @@ export function createSpatialAuthoringSlice(
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
   setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
+  deriveFocus(shellEditingTextNodeId?: boolean): EditorFocusKind
+  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot, shellEditingTextNodeId?: boolean): { ok: boolean; reason: string }
+  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
 } {
   const spatialRow = (layerItemId: string) => {
     const session = spatial.read().spatialSession
@@ -1841,6 +1847,96 @@ export function createSpatialAuthoringSlice(
         visible,
         { expectedRevision: session.history.present.revision },
       ))
+    },
+
+    deriveFocus(shellEditingTextNodeId?: boolean): EditorFocusKind {
+      const owned = spatial.read()
+      const session = owned.spatialSession
+      if (!session) return 'none'
+      if (owned.spatialContentEdit || shellEditingTextNodeId) return 'text'
+      return session.selection.selectionIds.length > 0 ? 'layer' : 'none'
+    },
+
+    executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot, shellEditingTextNodeId?: boolean): { ok: boolean; reason: string } {
+      if (actionId !== 'delete') return { ok: false, reason: `Spatial 尚未接入${actionId}` }
+      const session = spatial.read().spatialSession
+      if (!session) return { ok: false, reason: '当前不是 Spatial 编辑会话' }
+      if (spatial.read().spatialContentEdit || shellEditingTextNodeId) {
+        return { ok: false, reason: '文字编辑中，Delete/Backspace 只编辑文本，不删除元素' }
+      }
+      if (live.itemIds.length === 0) return { ok: false, reason: '没有可删除的选择' }
+      const commandTargets = (itemIds: readonly string[]) => {
+        if (new Set(itemIds).size !== itemIds.length) {
+          throw new Error('当前选择包含重复元素，请重新选择')
+        }
+        const rows = buildCandidateEffectiveLayers({
+          slideBackend: null,
+          spatialSession: session,
+          flowSession: null,
+        })?.unifiedRows ?? []
+        const rowById = new Map(rows.map((row) => [row.id, row]))
+        return itemIds.map((itemId) => {
+          const row = rowById.get(itemId)
+          if (!row) throw new Error(`所选元素已失效：${itemId}`)
+          return { row, target: commandTargetForRow(row) }
+        })
+      }
+      const resolved = commandTargets(live.itemIds)
+      if (resolved.every(({ row }) => row.owner === 'world')) {
+        const deleted = deleteSpatialWorldLayersReportingReferences(session, {
+          expectedRevision: live.revision,
+        })
+        spatial.persist(deleted, {
+          statusMessage: deleted.cleanupSummary || deleted.reason || '节点已删除',
+        })
+        return {
+          ok: deleted.ok,
+          reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+        }
+      }
+      const deleted = deleteEffectiveLayerItems(
+        session.history.present,
+        resolved.map(({ target }) => target),
+        { expectedRevision: live.revision },
+      )
+      persistSpatialLayerCommand(spatial, deleted, { selectionIds: [] })
+      return {
+        ok: deleted.ok,
+        reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
+      }
+    },
+
+    executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string } {
+      if (actionId !== 'delete') return { ok: false, reason: `全局层尚未接入${actionId}` }
+      const session = spatial.read().spatialSession
+      if (!session || live.itemIds.length === 0) return { ok: false, reason: '没有可删除的选择' }
+      const commandTargets = (itemIds: readonly string[]) => {
+        if (new Set(itemIds).size !== itemIds.length) {
+          throw new Error('当前选择包含重复元素，请重新选择')
+        }
+        const rows = buildCandidateEffectiveLayers({
+          slideBackend: null,
+          spatialSession: session,
+          flowSession: null,
+        })?.unifiedRows ?? []
+        const rowById = new Map(rows.map((row) => [row.id, row]))
+        return itemIds.map((itemId) => {
+          const row = rowById.get(itemId)
+          if (!row) throw new Error(`所选元素已失效：${itemId}`)
+          return { row, target: commandTargetForRow(row) }
+        })
+      }
+      const resolved = commandTargets(live.itemIds)
+      const deleted = deleteEffectiveLayerItems(
+        session.history.present,
+        resolved.map(({ target }) => target),
+        { expectedRevision: live.revision },
+      )
+      persistSpatialLayerCommand(spatial, deleted, { selectionIds: [] })
+      return {
+        ok: deleted.ok,
+        reason: deleted.reason ?? (deleted.ok ? '全局元素已删除' : '无法删除全局元素'),
+      }
     },
   }
 }

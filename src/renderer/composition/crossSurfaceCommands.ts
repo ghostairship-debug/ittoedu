@@ -50,10 +50,9 @@ import type {
 } from '../store/editorStore'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
 import type { GlobalLayerItem, TextRun, TextRunStyle } from '../../shared/projectTypes'
-import { findCourseSlideScene, commandTargetForRow } from '../store/v9LayerMutations'
+import { findCourseSlideScene } from '../store/v9LayerMutations'
 import {
   findGlobalTeacherController,
-  deleteEffectiveLayerItems,
   type LayerCommandResult,
 } from '../course/effectiveLayerCommands'
 import type { EffectiveLayerProjection } from '../course/effectiveLayerProjection'
@@ -62,7 +61,6 @@ import type { FlowTextEditSession } from '../authoring/flowTextEdit'
 import type { SpatialWorldContentEditSession } from '../authoring/spatialWorldAuthoring'
 import {
   createEditorSelectionSnapshot,
-  resolveFlowDeleteRoute,
   routeEditorAction as routeEditorActionCore,
   type EditorFocusKind,
   type EditorSelectionSnapshot,
@@ -70,12 +68,6 @@ import {
 import { selectionSnapshotFromSession } from '../authoring/courseAuthoringSession'
 import type { EditorActionId } from '../course/editorActionTypes'
 import { LAYER_REJECT_STALE_REVISION } from '../course/effectiveLayerCommands'
-import {
-  deleteSlideSceneLayers,
-  shouldIgnoreSlideLayerDeleteForFocus,
-} from '../course/v9SlideActionCommands'
-import { executeFlowDelete } from '../course/flowEditorCommands'
-import { deleteSpatialWorldLayersReportingReferences } from '../course/spatialPathCommands'
 import { updateCourseAuthoringSessionRevision } from '../authoring/courseAuthoringSession'
 
 type SurfaceNodeCommands = {
@@ -131,6 +123,9 @@ export type CrossSurfaceSlidePorts = {
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
   setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
+  deriveFocus(focus?: EditorFocusKind | EventTarget | null, shellEditingTextNodeId?: boolean): EditorFocusKind
+  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
+  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
 } & SurfaceNodeCommands
 
 export type CrossSurfaceFlowPorts = {
@@ -165,6 +160,9 @@ export type CrossSurfaceFlowPorts = {
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
   setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
+  deriveFocus(): EditorFocusKind
+  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
+  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
 } & SurfaceNodeCommands
 
 export type CrossSurfaceSpatialPorts = {
@@ -215,6 +213,9 @@ export type CrossSurfaceSpatialPorts = {
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
   setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
+  deriveFocus(shellEditingTextNodeId?: boolean): EditorFocusKind
+  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot, shellEditingTextNodeId?: boolean): { ok: boolean; reason: string }
+  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
 } & SurfaceNodeCommands
 
 export type CrossSurfaceCommandPorts = {
@@ -872,24 +873,11 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       if (focus === 'text' || focus === 'block' || focus === 'overlay' || focus === 'layer' || focus === 'none') {
         focusKind = focus
       } else if (flow.flowSession) {
-        if (flow.flowTextEdit?.composing || flow.flowSession.selection.focus === 'text') focusKind = 'text'
-        else if (flow.flowSession.selection.focus === 'block') focusKind = 'block'
-        else if (flow.flowSession.selection.selectedOverlayIds.length > 0) focusKind = 'overlay'
-        else focusKind = 'none'
+        focusKind = ports.flow.deriveFocus()
       } else if (spatial.spatialSession) {
-        focusKind = spatial.spatialContentEdit || shell.editingTextNodeId ? 'text'
-          : selection.selectedNodeIds.length > 0 ? 'layer' : 'none'
+        focusKind = ports.spatial.deriveFocus(Boolean(shell.editingTextNodeId))
       } else if (slide.slideBackend && typeof (slide.slideBackend as SlideAuthoringBackend).getSession === 'function') {
-        const tagName = focus instanceof HTMLElement ? focus.tagName : undefined
-        const isContentEditable = focus instanceof HTMLElement ? focus.isContentEditable : false
-        focusKind = shouldIgnoreSlideLayerDeleteForFocus({
-          textEditSession: Boolean(shell.editingTextNodeId || slide.v9ContentEdit?.kind === 'text'),
-          formulaEditSession: slide.v9ContentEdit?.kind === 'formula',
-          tagName,
-          isContentEditable,
-        })
-          ? 'text'
-          : selection.selectedNodeIds.length > 0 ? 'layer' : 'none'
+        focusKind = ports.slide.deriveFocus(focus, Boolean(shell.editingTextNodeId))
       } else {
         focusKind = shell.editingTextNodeId ? 'text'
           : selection.selectedNodeIds.length > 0 ? 'layer' : 'none'
@@ -921,152 +909,31 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
           adapter: 'none' as const,
         }
       }
-      const commandTargets = (itemIds: readonly string[]) => {
-        if (new Set(itemIds).size !== itemIds.length) {
-          throw new Error('当前选择包含重复元素，请重新选择')
-        }
-        const rows = ports.readProjection()?.unifiedRows ?? []
-        const rowById = new Map(rows.map((row) => [row.id, row]))
-        return itemIds.map((itemId) => {
-          const row = rowById.get(itemId)
-          if (!row) throw new Error(`所选元素已失效：${itemId}`)
-          return { row, target: commandTargetForRow(row) }
-        })
-      }
       const result = routeEditorActionCore({
         actionId,
         snapshot: live,
         adapters: {
           slide: {
-            execute: (id) => {
-              if (id !== 'delete') return { ok: false, reason: `Slide 尚未接入${id}` }
-              const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-              if (!backend || typeof backend.getSession !== 'function') {
-                return { ok: false, reason: '当前不是 Slide 编辑会话' }
-              }
-              if (live.itemIds.length === 0) return { ok: false, reason: '没有可删除的选择' }
-              const resolved = commandTargets(live.itemIds)
-              if (resolved.every(({ row }) => row.owner === 'scene')) {
-                const deleted = deleteSlideSceneLayers(
-                  backend.getSession(),
-                  live.itemIds,
-                  { expectedRevision: live.revision },
-                )
-                ports.slide.persist(deleted)
-                return {
-                  ok: deleted.ok,
-                  reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
-                }
-              }
-              const deleted = deleteEffectiveLayerItems(
-                backend.getSession().history.present,
-                resolved.map(({ target }) => target),
-                { expectedRevision: live.revision },
-              )
-              ports.persistLayer.slide(deleted)
-              return {
-                ok: deleted.ok,
-                reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
-              }
-            },
+            execute: (id) => ports.slide.executeAction(id, live),
           },
           flow: {
-            execute: (id) => {
-              if (id !== 'delete') return { ok: false, reason: `Flow 尚未接入${id}` }
-              const flow = ports.flow.read().flowSession
-              if (!flow) return { ok: false, reason: '当前不是 Flow 编辑会话' }
-              if (resolveFlowDeleteRoute(live) === 'refuse') {
-                return { ok: false, reason: '没有可删除的选择' }
-              }
-              const deleted = executeFlowDelete(
-                flow.history.present,
-                flow.selection,
-                { expectedRevision: live.revision },
-              )
-              ports.flow.persist(deleted)
-              return {
-                ok: deleted.ok,
-                reason: deleted.reason ?? (deleted.ok ? '已删除' : '无法删除'),
-              }
-            },
+            execute: (id) => ports.flow.executeAction(id, live),
           },
           spatial: {
-            execute: (id) => {
-              if (id !== 'delete') return { ok: false, reason: `Spatial 尚未接入${id}` }
-              const spatial = ports.spatial.read().spatialSession
-              if (!spatial) return { ok: false, reason: '当前不是 Spatial 编辑会话' }
-              if (ports.spatial.read().spatialContentEdit || ports.shell.read().editingTextNodeId) {
-                return { ok: false, reason: '文字编辑中，Delete/Backspace 只编辑文本，不删除元素' }
-              }
-              if (live.itemIds.length === 0) return { ok: false, reason: '没有可删除的选择' }
-              const resolved = commandTargets(live.itemIds)
-              if (resolved.every(({ row }) => row.owner === 'world')) {
-                const deleted = deleteSpatialWorldLayersReportingReferences(spatial, {
-                  expectedRevision: live.revision,
-                })
-                ports.spatial.persist(deleted, {
-                  statusMessage: deleted.cleanupSummary || deleted.reason || '节点已删除',
-                })
-                return {
-                  ok: deleted.ok,
-                  reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
-                }
-              }
-              const deleted = deleteEffectiveLayerItems(
-                spatial.history.present,
-                resolved.map(({ target }) => target),
-                { expectedRevision: live.revision },
-              )
-              ports.persistLayer.spatial(deleted, { selectionIds: [] })
-              return {
-                ok: deleted.ok,
-                reason: deleted.reason ?? (deleted.ok ? '节点已删除' : '无法删除节点'),
-              }
-            },
+            execute: (id) => ports.spatial.executeAction(id, live, Boolean(ports.shell.read().editingTextNodeId)),
           },
           global: {
             execute: (id) => {
               if (id !== 'delete') return { ok: false, reason: `全局层尚未接入${id}` }
-              const flow = ports.flow.read().flowSession
-              if (flow) {
-                const deleted = executeFlowDelete(
-                  flow.history.present,
-                  flow.selection,
-                  { expectedRevision: live.revision },
-                )
-                ports.flow.persist(deleted)
-                return {
-                  ok: deleted.ok,
-                  reason: deleted.reason ?? (deleted.ok ? '已删除' : '无法删除'),
-                }
+              if (ports.flow.read().flowSession) {
+                return ports.flow.executeGlobalAction(id, live)
               }
-              const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-              if (backend && typeof backend.getSession === 'function' && live.itemIds.length > 0) {
-                const resolved = commandTargets(live.itemIds)
-                const deleted = deleteEffectiveLayerItems(
-                  backend.getSession().history.present,
-                  resolved.map(({ target }) => target),
-                  { expectedRevision: live.revision },
-                )
-                ports.persistLayer.slide(deleted)
-                return {
-                  ok: deleted.ok,
-                  reason: deleted.reason ?? (deleted.ok ? '全局元素已删除' : '无法删除全局元素'),
-                }
+              const backend = ports.slide.read().slideBackend
+              if (backend && typeof (backend as SlideAuthoringBackend).getSession === 'function') {
+                return ports.slide.executeGlobalAction(id, live)
               }
-              const spatial = ports.spatial.read().spatialSession
-              if (spatial && live.itemIds.length > 0) {
-                const resolved = commandTargets(live.itemIds)
-                const deleted = deleteEffectiveLayerItems(
-                  spatial.history.present,
-                  resolved.map(({ target }) => target),
-                  { expectedRevision: live.revision },
-                )
-                ports.persistLayer.spatial(deleted, { selectionIds: [] })
-                return {
-                  ok: deleted.ok,
-                  reason: deleted.reason ?? (deleted.ok ? '全局元素已删除' : '无法删除全局元素'),
-                }
+              if (ports.spatial.read().spatialSession) {
+                return ports.spatial.executeGlobalAction(id, live)
               }
               return { ok: false, reason: '没有可删除的选择' }
             },
