@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "733e7df6ae911d32af4ea35627d3dd6b0167b5ab",
-    "reconciledScope": "054b 删除旧 Player/payload 空壳后的当前产品树；Published Course V2、CoursePlayer 与 RuntimeHost 保持唯一当前路径。",
-    "reconciledProductTreeDigest": "7f2ae07c52125475ef1dc79787ef1077a15eddff4f5207a1ac12df34008cbf21"
+    "reconciledProductCommit": "d2d7d96d265cc2a55edce73bae2c52c479ee899e",
+    "reconciledScope": "054c 删除旧 Export/diagnostics 空壳后的当前产品树；V9/V2 package producer 与 Course Project Health 是唯一当前 Owner。",
+    "reconciledProductTreeDigest": "7326fde4c23049c846cbb15828c2576046cd490dd0dcf4904310b412815a0ed0"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
@@ -297,8 +297,8 @@
         }
       ],
       "owner": "Preview / Export / Player",
-      "status": "dead-candidate",
-      "currentFact": "旧 Player/payload 五个 targets 已删除；同记录的七个 Export file targets 仍是零消费者空壳，等待 054c。",
+      "status": "removed",
+      "currentFact": "旧 Player、payload 与 Export targets 全部删除；Published Course V2 与 CoursePlayer 是唯一交付/播放路径。",
       "evidence": [
         {
           "path": "src/player/index.ts",
@@ -552,8 +552,8 @@
         }
       ],
       "owner": "Export",
-      "status": "dead-candidate",
-      "currentFact": "正式重算确认 consumer=0、unknown=0、target reference=0；现存 file-absent target 是无副作用空模块，只等待 054 精确删除。",
+      "status": "removed",
+      "currentFact": "旧 PPTX target 已删除；Course Project V9 PPTX producer 是唯一当前路径。",
       "evidence": [
         {
           "path": "src/renderer/app/useCourseDelivery.ts",
@@ -666,8 +666,8 @@
         }
       ],
       "owner": "Export",
-      "status": "dead-candidate",
-      "currentFact": "正式重算确认 consumer=0、unknown=0、target reference=0；现存 file-absent target 是无副作用空模块，只等待 054 精确删除。",
+      "status": "removed",
+      "currentFact": "旧整场景图片 target 已删除；Course Project print artifact pipeline 是唯一当前路径。",
       "evidence": [
         {
           "path": "src/renderer/app/useCourseDelivery.ts",
@@ -883,8 +883,8 @@
         }
       ],
       "owner": "Diagnostics",
-      "status": "dead-candidate",
-      "currentFact": "正式重算确认 consumer=0、unknown=0、target reference=0；现存 file-absent target 是无副作用空模块，只等待 054 精确删除。",
+      "status": "removed",
+      "currentFact": "旧 Project Health target 已删除；Course Project Health owner 是唯一当前诊断路径。",
       "evidence": [
         {
           "path": "src/renderer/ui/ProjectHealthPanel.tsx",
@@ -1429,8 +1429,8 @@
   "reconciledCounts": {
     "recordCount": 11,
     "byStatus": {
-      "dead-candidate": 5,
-      "removed": 6
+      "dead-candidate": 1,
+      "removed": 10
     },
     "confirmedConsumerRelationsByCategory": {
       "staticImportsOrReferences": 0,
@@ -1501,7 +1501,7 @@
         "tests/integration/coursePdfExportApp.test.tsx",
         "tests/unit/courseProjectHealth.test.ts"
       ],
-      "status": "pending"
+      "status": "removed"
     },
     {
       "id": "r11-054d-archive-shell",
