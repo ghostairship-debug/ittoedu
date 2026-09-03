@@ -175,6 +175,22 @@ interface FakeGameProbe {
   destroyed: boolean
 }
 
+interface PublishedHybridProbe {
+  creates: number
+  context: boolean
+  domRootConnected: boolean
+  modes: string[]
+  resizes: number
+  updates: number
+  visibility: boolean[]
+  suspends: number
+  resumes: number
+  prepares: number
+  destroys: number
+  ticks: number
+  domConnectedAtDestroy?: boolean
+}
+
 declare global {
   var __fakePublishedPhaserGames: FakeGameProbe[] | undefined
   var __deferPublishedPhaserBoot: boolean | undefined
@@ -184,6 +200,7 @@ declare global {
     __publishedPhaserLifecycleProbe?: Record<string, number>
     __publishedPhaserComponentV4Probe?: Record<string, unknown>
     __publishedPhaserComponentV4Games?: FakeGameProbe[]
+    __publishedHybridProbe?: PublishedHybridProbe
     __slideReplayRuntimeProbe?: Record<string, number>
   }
 }
@@ -383,6 +400,63 @@ function runtime(version: string): string {
   `
 }
 
+function hybridRuntime(): string {
+  return `
+    window.CoursewareComponent.define({
+      id: '${PUBLISHED_PHASER_COMPONENT_ID}',
+      runtimeApiVersion: 4,
+      create(ctx) {
+        var previous = window.__publishedHybridProbe;
+        var probe = window.__publishedHybridProbe = {
+          creates: ((previous && previous.creates) || 0) + 1,
+          context: ctx.renderMode === 'hybrid'
+            && !!ctx.dom && !!ctx.dom.root
+            && !!ctx.phaser && !!ctx.phaser.Phaser && !!ctx.phaser.scene && !!ctx.phaser.root
+            && !('Phaser' in ctx) && !('root' in ctx),
+          domRootConnected: ctx.dom.root.isConnected,
+          modes: [], resizes: 0, updates: 0, visibility: [],
+          suspends: 0, resumes: 0, prepares: 0, destroys: 0, ticks: 0
+        };
+        var width = ctx.width;
+        var content = document.createElement('button');
+        content.dataset.publishedHybridContent = 'true';
+        ctx.dom.root.appendChild(content);
+        ctx.events.on('hybrid:tick', function () { probe.ticks += 1; });
+        var disposeEditor = ctx.editor
+          ? ctx.editor.registerTextRegion({
+              key: 'label',
+              getBounds: function () {
+                return { x: 8, y: 10, width: width / 2, height: 24 };
+              }
+            })
+          : function () {};
+        return {
+          setMode(mode) { probe.modes.push(mode); },
+          resize(nextWidth) {
+            width = nextWidth;
+            probe.resizes += 1;
+            if (ctx.editor) ctx.editor.invalidate();
+          },
+          updateProps() {
+            probe.updates += 1;
+            if (ctx.editor) ctx.editor.invalidate();
+          },
+          setVisible(value) { probe.visibility.push(value); },
+          suspend() { probe.suspends += 1; },
+          resume() { probe.resumes += 1; },
+          prepareCapture() { probe.prepares += 1; },
+          destroy() {
+            probe.destroys += 1;
+            probe.domConnectedAtDestroy = ctx.dom.root.isConnected;
+            disposeEditor();
+            content.remove();
+          }
+        };
+      }
+    });
+  `
+}
+
 function authoringPhaserComponent(): ComponentPackageData {
   return {
     manifest: {
@@ -541,6 +615,7 @@ afterEach(() => {
   delete window.__publishedPhaserLifecycleProbe
   delete window.__publishedPhaserComponentV4Probe
   delete window.__publishedPhaserComponentV4Games
+  delete window.__publishedHybridProbe
   delete window.__slideReplayRuntimeProbe
   Reflect.deleteProperty(window, '__H5_LESSON_PLAYER__')
 })
@@ -608,6 +683,134 @@ describe('Published Slide Phaser Component API 4 host', () => {
     expect(game.canvas.isConnected).toBe(false)
     expect(game.loop.game).toBeNull()
     expect(game.loop.callback).toBeNull()
+  })
+
+  it('owns one scene-local hybrid DOM and Phaser lifecycle through capture and teardown', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const events = new CourseEventBus()
+    const updates: Array<Readonly<ComponentAuthoringTargetUpdate>> = []
+    const node = authoringComponentNode({ id: 'hybrid-instance' })
+    const component = authoringPhaserComponent()
+    component.manifest.renderMode = 'hybrid'
+    component.runtimeSource = hybridRuntime()
+    const handle = mountPublishedSlidePhaserComponent(container, {
+      container,
+      componentId: PUBLISHED_PHASER_COMPONENT_ID,
+      version: '1.0.0',
+      instanceId: node.id,
+      width: node.width,
+      height: node.height,
+      props: node.props,
+      components: { [PUBLISHED_PHASER_COMPONENT_ID]: component },
+      mode: 'edit',
+      scope: 'scene',
+      sceneId: 'hybrid-scene',
+      events,
+      authoring: {
+        node,
+        onTargetsChanged: (update) => updates.push(update),
+      },
+    })
+
+    await handle.waitForReady()
+    await flushAuthoringTargets()
+    const probe = window.__publishedHybridProbe!
+    const domRoot = container.querySelector<HTMLElement>(
+      '[data-published-hybrid-component-dom="hybrid-instance"]',
+    )
+    expect(handle.ok).toBe(true)
+    expect(probe).toMatchObject({
+      creates: 1,
+      context: true,
+      domRootConnected: true,
+      modes: ['edit'],
+      resizes: 1,
+      visibility: [true],
+    })
+    expect(domRoot).not.toBeNull()
+    expect(domRoot?.querySelector('[data-published-hybrid-content="true"]')).not.toBeNull()
+    expect(container.querySelectorAll('canvas[data-published-phaser-component="hybrid-instance"]'))
+      .toHaveLength(1)
+    expect(events.listenerCount('hybrid:tick')).toBe(1)
+    expect(updates.at(-1)).toMatchObject({
+      scope: 'scene',
+      sceneId: 'hybrid-scene',
+      nodeId: 'hybrid-instance',
+      targets: [{ key: 'label', bounds: { x: 108, width: 180 } }],
+    })
+
+    events.emit('hybrid:tick')
+    handle.resize(400, 220)
+    handle.updateProps({ label: '更新' })
+    handle.setVisible(false)
+    handle.setVisible(true)
+    handle.suspend()
+    handle.resume()
+    await handle.waitForCaptureReady()
+    handle.restoreAfterCapture()
+    await flushAuthoringTargets()
+    expect(probe).toMatchObject({
+      ticks: 1,
+      resizes: 2,
+      updates: 1,
+      visibility: [true, false, true],
+      suspends: 2,
+      resumes: 2,
+      prepares: 1,
+      modes: ['edit', 'capture', 'edit'],
+    })
+    expect(updates.at(-1)?.targets[0]?.bounds.width).toBe(200)
+
+    handle.destroy()
+    handle.destroy()
+    await flushTeardown()
+    expect(probe).toMatchObject({ destroys: 1, domConnectedAtDestroy: true })
+    expect(events.listenerCount()).toBe(0)
+    expect(updates.at(-1)?.targets).toEqual([])
+    expect(container.querySelector('.published-slide-phaser-component-mount')).toBeNull()
+    expect(container.querySelector('canvas')).toBeNull()
+    expect(globalThis.__fakePublishedPhaserGames).toHaveLength(1)
+    expect(globalThis.__fakePublishedPhaserGames![0]!.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('routes a Published V2 Slide scene hybrid through the shared Phaser boot owner', async () => {
+    const fixture = createPublishedPhaserComponentV2Fixture()
+    const payload = buildPublishedCourseV2Payload({
+      project: fixture.project,
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+    })
+    const component = payload.components[`${PUBLISHED_PHASER_COMPONENT_ID}@4.0.0`]
+    if (!component) throw new Error('expected fixture component')
+    Object.assign(component, {
+      renderMode: 'hybrid',
+      code: encode(hybridRuntime()),
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const host = createPublishedSurfaceHost(payload, fixture.slideSurfaceId)
+    const player = new CoursePlayer([host], { services: services() })
+
+    try {
+      expect(await player.mountSurface(fixture.slideSurfaceId, container)).toEqual({ ok: true })
+      expect(await player.activateSurface(fixture.slideSurfaceId)).toEqual({ ok: true })
+      await vi.waitFor(() => expect(window.__publishedHybridProbe?.creates).toBe(1))
+      expect(window.__publishedHybridProbe?.context).toBe(true)
+      expect(container.querySelectorAll(
+        `[data-published-hybrid-component-dom="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+      )).toHaveLength(1)
+      expect(container.querySelectorAll(
+        `canvas[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+      )).toHaveLength(1)
+      expect(container.querySelector('.published-component-fallback')).toBeNull()
+    } finally {
+      await player.destroy()
+      await flushTeardown()
+    }
+    expect(window.__publishedHybridProbe).toMatchObject({ creates: 1, destroys: 1 })
+    expect(container.querySelector('[data-published-hybrid-component-dom]')).toBeNull()
+    expect(container.querySelector('canvas')).toBeNull()
   })
 
   it('wires Phaser authoring targets and revokes them before teardown', async () => {

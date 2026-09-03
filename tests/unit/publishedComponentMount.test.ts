@@ -437,6 +437,58 @@ describe('publishedComponentMount helper', () => {
     handle.destroy()
   })
 
+  it.each(['phaser', 'hybrid'] as const)(
+    'rejects %s packages instead of silently running them in the DOM host',
+    (renderMode) => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const reports: Array<{ phase: string; message: string }> = []
+      const packageData: ComponentPackageData = {
+        manifest: {
+          schemaVersion: 4,
+          runtimeApiVersion: 4,
+          id: `${renderMode}-only-component`,
+          name: `${renderMode} only`,
+          version: '1.0.0',
+          entry: 'runtime.js',
+          defaultSize: { width: 200, height: 100 },
+          minSize: { width: 100, height: 50 },
+          preserveAspectRatio: false,
+          supportedScopes: ['scene'],
+          renderMode,
+          assets: {},
+          defaultProps: {},
+        },
+        runtimeSource: `
+          window.CoursewareComponent.define({
+            id: '${renderMode}-only-component', runtimeApiVersion: 4,
+            create() { throw new Error('DOM host must not create this component') }
+          });
+        `,
+        files: {},
+      }
+
+      const handle = mountPublishedComponent(container, {
+        container,
+        componentId: `${renderMode}-only-component`,
+        version: '1.0.0',
+        width: 200,
+        height: 100,
+        components: { [`${renderMode}-only-component`]: packageData },
+        reportError: (phase, error) => reports.push({ phase, message: error.message }),
+      })
+
+      expect(handle.ok).toBe(false)
+      expect(container.querySelectorAll('.published-component-fallback')).toHaveLength(1)
+      expect(container.querySelector('.published-component-mount')).toBeNull()
+      expect(reports).toEqual([{
+        phase: 'register',
+        message: `组件“${renderMode}-only-component”声明 ${renderMode} 渲染面，不能在 DOM Published 宿主中运行`,
+      }])
+      handle.destroy()
+    },
+  )
+
   it('captures a real DOM package and reserves static fallback for unavailable packages', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)

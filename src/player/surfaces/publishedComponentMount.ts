@@ -507,13 +507,17 @@ export function mountPublishedComponent(
   }
 
   const manifest = extractPublishedComponentManifest(pkg)
-  if (manifest.renderMode === 'phaser') {
+  if (manifest.renderMode !== 'dom') {
+    const error = new Error(
+      `组件“${manifest.id}”声明 ${manifest.renderMode} 渲染面，不能在 DOM Published 宿主中运行`,
+    )
+    reportPublishedComponentError(options, 'register', error)
     const fallbackEl = createPublishedComponentFallbackElement(container, options)
     container.appendChild(fallbackEl)
     return failedHandle(
       fallbackEl,
       options,
-      new Error(`组件“${manifest.id}”不能在 DOM Published 宿主中捕获`),
+      error,
     )
   }
 

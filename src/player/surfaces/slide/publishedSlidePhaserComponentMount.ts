@@ -58,7 +58,7 @@ function failedHandle(
 }
 
 /**
- * Owns one Published V2 Component API 4 Phaser instance on a Slide layer. The
+ * Owns one Published V2 Component API 4 Phaser or Hybrid instance on a Slide layer. The
  * authored Slide wrapper remains authoritative for frame, rotation, opacity,
  * order and hit routing; this host owns only the component-local renderer.
  */
@@ -86,11 +86,13 @@ export function mountPublishedSlidePhaserComponent(
   let resolved: ResolvedPublishedComponent
   try {
     resolved = resolvePublishedComponent(options, registry)
-    if (
-      resolved.manifest.renderMode !== 'phaser'
-      || !resolved.manifest.supportedScopes.includes(scope)
-    ) {
-      throw new Error(`组件“${resolved.manifest.id}”未声明 ${scope} Phaser 渲染面`)
+    const renderMode = resolved.manifest.renderMode
+    const supportedRenderMode = renderMode === 'phaser'
+      || (renderMode === 'hybrid' && scope === 'scene')
+    if (!supportedRenderMode || !resolved.manifest.supportedScopes.includes(scope)) {
+      throw new Error(
+        `组件“${resolved.manifest.id}”未声明受支持的 ${scope} Phaser/Hybrid 渲染面`,
+      )
     }
   } catch (cause) {
     reportPublishedComponentError(options, 'register', cause)
@@ -122,8 +124,25 @@ export function mountPublishedSlidePhaserComponent(
     height: '100%',
     overflow: 'hidden',
     pointerEvents: 'inherit',
+    zIndex: '0',
   })
   host.appendChild(canvasHost)
+  const domRoot = resolved.manifest.renderMode === 'hybrid'
+    ? dom.createElement('div')
+    : null
+  if (domRoot) {
+    domRoot.dataset.publishedHybridComponentDom = options.instanceId ?? options.componentId
+    Object.assign(domRoot.style, {
+      position: 'absolute',
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      overflow: 'hidden',
+      pointerEvents: 'inherit',
+      zIndex: '1',
+    })
+    host.appendChild(domRoot)
+  }
   container.appendChild(host)
 
   const instanceId = options.instanceId ?? options.componentId
@@ -258,14 +277,25 @@ export function mountPublishedSlidePhaserComponent(
                 : {}),
             },
             resolved,
+            domRoot ?? undefined,
           )
           let createFailure: Error | null = null
+          const phaser = { Phaser, scene: this, root }
           const creation = tryCreateComponentLifecycle(
-            () => resolved.definition.create({
-              ...resources!.context,
-              renderMode: 'phaser',
-              phaser: { Phaser, scene: this, root },
-            }),
+            () => resolved.definition.create(
+              resolved.manifest.renderMode === 'hybrid'
+                ? {
+                    ...resources!.context,
+                    renderMode: 'hybrid',
+                    dom: { root: domRoot! },
+                    phaser,
+                  }
+                : {
+                    ...resources!.context,
+                    renderMode: 'phaser',
+                    phaser,
+                  },
+            ),
             {
               componentId: resolved.manifest.id,
               instanceId,

@@ -1,6 +1,6 @@
 # r11-052b-old-renderer-tests 旧渲染器测试迁移
 
-- Status / Owner: blocked / Integrator（解除条件：r11-052h 完成后改为 queued）
+- Status / Owner: queued / Integrator
 - Outcome / Evidence: 处理 `componentEventMountBuffer.test.ts`、`formulaCrossSurface.test.tsx`、`nodeMotionDirector.test.ts`、`playerComponentV4Render.test.ts`、`playerSceneAssets.test.ts` 五个文件已完成（整删 4 文件：componentEventMountBuffer、playerSceneAssets、nodeMotionDirector 16 例、formulaCrossSurface :198/:229；迁移 4 例：previewPageProp/editorState 与 capture waitUntil 顺序→`publishedComponentMount.test.ts`、公式确定性→`formulaNode.test.ts`、PPTX 公式静态化→`coursePptxExport.test.ts`；`playerComponentV4Render` 仅保留 hybrid 行）。剩余 `renderVideoNode.test.ts`、`teacherControllerActions.test.ts` 与 hybrid 行已由 Owner 裁定为受支持产品行为，必须等待 `r11-052e → 052f → 052g → 052h` 的真实 V2 consumer 与直接测试全部落地后再迁移/删除；不得把 blocked 解释为授权删除。
 - Write scope: `tests/unit/renderVideoNode.test.ts`、`tests/unit/teacherControllerActions.test.ts`、`tests/unit/playerComponentV4Render.test.ts`，以及实际承接行为的 V2 测试 `tests/unit/publishedInteractionController.test.ts`、`tests/integration/publishedInteractionSlideHostIntegration.test.ts`、`tests/unit/publishedCourseNavigation.test.ts`、`tests/unit/publishedComponentMount.test.ts`、`tests/integration/publishedPhaserComponentSlideHostIntegration.test.ts`。禁止改产品代码；若四张补实现卡的 V2 测试未覆盖原断言，停止并返回对应 failure-owner 卡，不在本卡补产品实现。
 - Write locks: none

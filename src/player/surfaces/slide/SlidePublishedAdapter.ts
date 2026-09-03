@@ -516,13 +516,16 @@ function appendLayerNode(
       item.component.version,
     )
     const componentScope = source === 'global' ? 'global' : 'scene'
-    let phaserComponent = false
+    let phaserOwnedComponent = false
     if (packageSource !== undefined) {
       const manifest = extractPublishedComponentManifest(packageSource)
-      phaserComponent = manifest.renderMode === 'phaser'
+      phaserOwnedComponent = (
+        manifest.renderMode === 'phaser'
+        || (manifest.renderMode === 'hybrid' && source === 'scene')
+      )
         && manifest.supportedScopes.includes(componentScope)
     }
-    if (phaserComponent && options?.mountPhaserComponent) {
+    if (phaserOwnedComponent && options?.mountPhaserComponent) {
       options.mountPhaserComponent(wrap, item)
     } else {
       const mountInstance = (
