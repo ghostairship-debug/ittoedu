@@ -408,4 +408,43 @@ describe('PublishedDomInteractionSurfacePort', () => {
     node.current().click()
     expect(listener).toHaveBeenCalledTimes(1)
   })
+
+  it('clamps an overlong authored motion duration to the V2 ceiling', async () => {
+    vi.useFakeTimers()
+    const root = document.createElement('section')
+    document.body.appendChild(root)
+    const node = nodeHarness(root, 'answer')
+    Object.defineProperty(node.current(), 'animate', {
+      configurable: true,
+      value: undefined,
+    })
+    const port = new PublishedDomInteractionSurfacePort(root, { active: true })
+    port.refreshNodes([node.handle])
+    const pending = Promise.resolve(port.executeNodeMotion(
+      motion('node.enter', 'answer', 'fade', 99_999),
+      context().value,
+    ))
+    let result: boolean | null = null
+    void pending.then((value) => { result = value })
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(result).toBeNull()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await pending).toBe(true)
+    port.destroy()
+  })
+
+  it('settles a transition-free motion immediately without creating timers', async () => {
+    vi.useFakeTimers()
+    const root = document.createElement('section')
+    document.body.appendChild(root)
+    const node = nodeHarness(root, 'answer')
+    const port = new PublishedDomInteractionSurfacePort(root, { active: true })
+    port.refreshNodes([node.handle])
+    expect(await port.executeNodeMotion(
+      motion('node.enter', 'answer', 'none'),
+      context().value,
+    )).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    port.destroy()
+  })
 })

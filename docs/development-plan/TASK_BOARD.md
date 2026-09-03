@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-052a-player-scene-tests](tasks/1.1/r11-052a-player-scene-tests.md) | queued | — | none | 处理 `playerSceneMotionLifecycle.test.ts`、`playerSceneComponentEventBuffer.test.ts`、`playerSceneAnimationMode.test.ts` 三个 V1 Player 内部机制测试文件；受支持行为只由 V9/Published V2 最近层测试承接。 |
+| [r11-052b-old-renderer-tests](tasks/1.1/r11-052b-old-renderer-tests.md) | queued | — | none | 处理 `componentEventMountBuffer.test.ts`、`formulaCrossSurface.test.tsx`、`nodeMotionDirector.test.ts`、`playerComponentV4Render.test.ts`、`renderVideoNode.test.ts`、`teacherControllerActions.test.ts`、`playerSceneAssets.test.ts` 七个文件；保留的用户行为迁到 Published V2 host 测试；不得通过删除公式、视频、组件、动画或教师控制器能力来清零。 |
