@@ -16,6 +16,13 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 const manifest: ComponentManifestV4 = {
   schemaVersion: 4,
   runtimeApiVersion: 4,
@@ -257,7 +264,7 @@ describe('ComponentsTab component presets', () => {
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
-      const historyLengthBeforeInsert = useEditorStore.getState().history.past.length
+      const historyLengthBeforeInsert = activeHistory().past.length
       render(<ComponentsTab />)
       fireEvent.click(within(screen.getByLabelText('属性组件预设')).getByRole('button', { name: '即用' }))
 
@@ -267,7 +274,7 @@ describe('ComponentsTab component presets', () => {
         name: '属性组件 · 即用',
         props: { title: '预设标题' },
       })
-      expect(useEditorStore.getState().history.past).toHaveLength(historyLengthBeforeInsert + 1)
+      expect(activeHistory().past).toHaveLength(historyLengthBeforeInsert + 1)
       useEditorStore.getState().undo()
       expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
     } finally {

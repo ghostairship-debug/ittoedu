@@ -24,6 +24,13 @@ import {
 
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
+
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
 import type { CourseProjectDocument, SlideSurfaceDocument } from '@/shared/courseProjectTypes'
 
@@ -114,14 +121,14 @@ describe('batch media transactions', () => {
       { meta: image('asset_b', 900, 1600), bytes: Uint8Array.from([5, 6, 7, 8]) },
       { meta: image('asset_c', 800, 600), bytes: Uint8Array.from([9, 10, 11, 12]) },
     ]
-    const historyBefore = store.history.past.length
+    const historyBefore = activeHistory().past.length
 
     const nodeIds = store.addImageNodes(items)
     let state = useEditorStore.getState()
     let nodes = selectActiveScene(state).nodes
 
     expect(nodeIds).toHaveLength(3)
-    expect(state.history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(state.activeTab).toBe('elements')
     expect(state.selectedNodeIds).toEqual(nodeIds)
     expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
@@ -163,7 +170,7 @@ describe('batch media transactions', () => {
 
     expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
     expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toHaveLength(2)
-    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
 
     store.undo()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets).toEqual({})
@@ -199,7 +206,7 @@ describe('batch media transactions', () => {
     expect(selectActiveScene(state).nodes).toHaveLength(0)
     expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toHaveLength(items.length)
     expect(state.selectedNodeIds).toEqual([])
-    expect(state.history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
   })
 
 function firstSlideScene(project: CourseProjectDocument) {
@@ -249,7 +256,7 @@ function firstSlideScene(project: CourseProjectDocument) {
       'asset_capacity_a',
       'asset_capacity_b',
     ])
-    expect(state.history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
     expect(state.errorMessage).toContain(`${MAX_SCENE_NODES} 个节点上限`)
     expect(state.activeTab).toBe('elements')
   })

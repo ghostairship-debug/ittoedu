@@ -19,6 +19,13 @@ import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProj
 import { formulaAstSchema } from '@/shared/contracts/native-v1/schema'
 import type { FormulaAstNode } from '@/shared/projectTypes'
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 function materialized(
   scene: object,
   stateId?: string | null,
@@ -193,7 +200,7 @@ describe('Course Project V9 FormulaNode contract', () => {
     const formulaId = formula.formulaId
     store.addPresentationState('公式答案')
     const stateId = useEditorStore.getState().activePresentationStateId!
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().updateNode(formula.id, {
       accessibleText: '答案为一',
@@ -214,7 +221,7 @@ describe('Course Project V9 FormulaNode contract', () => {
       ast: { type: 'token', value: '1' },
       style: { fontSize: 64, color: '#7c3aed', align: 'right' },
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
     useEditorStore.getState().undo()
     scene = selectActiveScene(useEditorStore.getState())

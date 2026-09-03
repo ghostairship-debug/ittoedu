@@ -42,6 +42,13 @@ function catalogPackage(sha256: string): ComponentPackageData {
   }
 }
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 describe('组件目录版本锁定', () => {
   beforeEach(() => {
     useEditorStore.getState().createNewProject()
@@ -51,7 +58,7 @@ describe('组件目录版本锁定', () => {
     const original = catalogPackage('a'.repeat(64))
     useEditorStore.getState().importComponentPackage(original)
     const projectBefore = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     expect(() => useEditorStore.getState().replaceComponentPackage(
       PACKAGE_ID,
@@ -61,7 +68,7 @@ describe('组件目录版本锁定', () => {
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(projectBefore)
     expect(state.componentPackages[PACKAGE_ID]).toBe(original)
-    expect(state.history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
   })
 
   it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', () => {

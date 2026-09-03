@@ -32,6 +32,14 @@ function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLaye
   }))
 }
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  if (state.spatialSession) return state.spatialSession.history
+  if (state.flowSession) return state.flowSession.history
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active Surface session')
+  return backend.getSession().history
+}
 
 const PACKAGE_ID = 'com.example.managed'
 
@@ -158,7 +166,7 @@ describe('editorStore component package management', () => {
       PACKAGE_ID,
       'com.example.second',
     ])
-    expect(state.history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
 
     state.undo()
     state = useEditorStore.getState()
@@ -180,7 +188,7 @@ describe('editorStore component package management', () => {
     let state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.componentPackages[PACKAGE_ID]).toBeUndefined()
-    expect(state.history.past).toHaveLength(2)
+    expect(activeHistory().past).toHaveLength(2)
 
     state.undo()
     state = useEditorStore.getState()
@@ -200,13 +208,13 @@ describe('editorStore component package management', () => {
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
     const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID)).toBe(false)
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(before)
     expect(state.componentPackages[PACKAGE_ID]).toBeDefined()
-    expect(state.history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(state.errorMessage).toContain('1 个场景实例和 1 个全局实例')
   })
 
@@ -221,12 +229,12 @@ describe('editorStore component package management', () => {
       const imported = componentPackage('1.0.0')
       useEditorStore.getState().importComponentPackage(imported)
       const beforeDocument = structuredClone(activeCourseProject())
-      const historyBefore = useEditorStore.getState().history.past.length
+      const historyBefore = activeHistory().past.length
 
       expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID), surface).toBe(true)
       expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
       expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
-      expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+      expect(activeHistory().past).toHaveLength(historyBefore + 1)
       const session = surface === 'Flow'
         ? useEditorStore.getState().flowSession
         : useEditorStore.getState().spatialSession
@@ -277,12 +285,12 @@ describe('editorStore component package management', () => {
       useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
       const beforeDocument = structuredClone(activeCourseProject())
       const beforePackages = structuredClone(useEditorStore.getState().componentPackages)
-      const historyBefore = useEditorStore.getState().history.past.length
+      const historyBefore = activeHistory().past.length
 
       expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID), surface).toBe(false)
       expect(activeCourseProject()).toEqual(beforeDocument)
       expect(useEditorStore.getState().componentPackages).toEqual(beforePackages)
-      expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+      expect(activeHistory().past).toHaveLength(historyBefore)
       expect(useEditorStore.getState().statusMessage).toBeNull()
       expect(useEditorStore.getState().errorMessage).toContain('1 个场景实例和 0 个全局实例')
     }
@@ -306,11 +314,11 @@ describe('editorStore component package management', () => {
     useEditorStore.getState().updateNode(globalNodeId, {
       props: { label: '全局自定义', theme: 'dark' },
     })
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().replaceComponentPackage(PACKAGE_ID, second)
     let state = useEditorStore.getState()
-    expect(state.history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(state.activeTab).toBe('components')
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
     expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
@@ -351,7 +359,7 @@ describe('editorStore component package management', () => {
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
     const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     expect(() => useEditorStore.getState().replaceComponentPackage(
       PACKAGE_ID,
@@ -365,7 +373,7 @@ describe('editorStore component package management', () => {
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(before)
     expect(state.componentPackages[PACKAGE_ID]).toBe(first)
-    expect(state.history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
   })
 })
 
@@ -505,7 +513,6 @@ describe('ComponentsTab locate component usage', () => {
     }
     useEditorStore.setState({ flowTextEdit: composingEdit })
     const beforeDocument = structuredClone(activeCourseProject())
-    const historyBefore = useEditorStore.getState().history.past.length
     const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
     if (flowHistoryBefore === undefined) throw new Error('Expected Flow history')
     const originalGetContext = HTMLCanvasElement.prototype.getContext
@@ -521,7 +528,6 @@ describe('ComponentsTab locate component usage', () => {
       expect(state.flowSession?.selection.selectedBlockId).not.toBe(blockId)
       expect(state.flowTextEdit).toBe(composingEdit)
       expect(activeCourseProject()).toEqual(beforeDocument)
-      expect(state.history.past).toHaveLength(historyBefore)
       expect(state.flowSession?.history.past).toHaveLength(flowHistoryBefore)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
@@ -575,7 +581,6 @@ describe('ComponentsTab locate component usage', () => {
       location.surfaceId === surfaceId,
     )).toBe(false)
     const beforeDocument = structuredClone(activeCourseProject())
-    const historyBefore = useEditorStore.getState().history.past.length
     const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
     if (flowHistoryBefore === undefined) throw new Error('Expected Flow history')
     const originalGetContext = HTMLCanvasElement.prototype.getContext
@@ -588,7 +593,6 @@ describe('ComponentsTab locate component usage', () => {
       expect(state.errorMessage).toContain('没有可激活的位置')
       expect(state.flowSession?.selection.surfaceId).toBe(fallbackLocation.surfaceId)
       expect(activeCourseProject()).toEqual(beforeDocument)
-      expect(state.history.past).toHaveLength(historyBefore)
       expect(state.flowSession?.history.past).toHaveLength(flowHistoryBefore)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext

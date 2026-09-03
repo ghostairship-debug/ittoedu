@@ -18,6 +18,13 @@ function formulaNode(): FormulaNode {
   return node as FormulaNode
 }
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 function drawingContext(): CanvasRenderingContext2D {
   return {
     measureText: vi.fn((value: string) => ({
@@ -53,7 +60,7 @@ afterEach(() => {
 describe('FormulaNode authoring UI', () => {
   it('uses linear input and one history transaction instead of editable AST JSON', () => {
     const original = structuredClone(formulaNode())
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
     expect(screen.queryByTestId('formula-id')).not.toBeInTheDocument()
@@ -101,7 +108,7 @@ describe('FormulaNode authoring UI', () => {
     })
     expect(updated.formulaId).toBe(original.formulaId)
     expect(updated.accessibleText).toBe(formulaAstToAccessibleText(updated.ast))
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(screen.getByText('公式已应用，无障碍描述已同步更新')).toBeInTheDocument()
 
     useEditorStore.getState().undo()
@@ -160,7 +167,7 @@ describe('FormulaNode authoring UI', () => {
 
   it('supports slot navigation and Escape cancellation without touching project history', () => {
     const original = structuredClone(formulaNode())
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     const input = screen.getByRole('textbox', {
       name: '公式内容（线性输入）',
@@ -177,7 +184,7 @@ describe('FormulaNode authoring UI', () => {
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(input).toHaveValue(serializeFormulaAst(original.ast))
     expect(formulaNode()).toEqual(original)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(screen.getByText('已取消未应用的公式修改')).toBeInTheDocument()
   })
 

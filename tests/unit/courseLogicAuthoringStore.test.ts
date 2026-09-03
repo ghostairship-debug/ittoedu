@@ -8,6 +8,13 @@ beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 describe('course logic authoring store persistence', () => {
   const sessionCases = [
     ['Slide', () => useEditorStore.getState().createNewProject()],
@@ -53,7 +60,7 @@ describe('course logic authoring store persistence', () => {
       declaration: { key: 'ready', valueType: 'boolean', defaultValue: false },
     })
     if (!added.ok) throw new Error(added.reason)
-    const historyBeforeFailure = useEditorStore.getState().history.past.length
+    const historyBeforeFailure = activeHistory().past.length
 
     const rejected = useEditorStore.getState().applyCourseLogicAuthoringCommand({
       kind: 'course-state.add',
@@ -64,7 +71,7 @@ describe('course logic authoring store persistence', () => {
     expect(rejected).toMatchObject({ ok: false, code: 'state-key-exists' })
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())?.revision)
       .toBe(added.project.revision)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBeforeFailure)
+    expect(activeHistory().past).toHaveLength(historyBeforeFailure)
     expect(useEditorStore.getState().errorMessage).toContain('已经存在')
     expect(useEditorStore.getState().statusMessage).toBeNull()
   })

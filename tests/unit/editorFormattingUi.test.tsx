@@ -22,6 +22,13 @@ beforeEach(() => {
   useEditorStore.setState({ editorMode: 'professional' })
 })
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 describe('shape editing UI', () => {
   it('creates braces as stroke-only shapes with usable defaults', () => {
     const brace = createShapeNode('brace-left')
@@ -49,18 +56,18 @@ describe('shape editing UI', () => {
     store.addShapeNode('rectangle')
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const slider = screen.getByRole('slider', { name: '填充透明度' })
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     fireEvent.change(slider, { target: { value: '65' } })
     fireEvent.change(slider, { target: { value: '35' } })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     fireEvent.pointerUp(slider)
 
     const shape = selectActiveScene(useEditorStore.getState()).nodes[0]!
     expect(shape.type).toBe('shape')
     if (shape.type !== 'shape') throw new Error('Expected a shape node')
     expect(shape.style?.fillOpacity).toBe(0.65)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
   })
 })
 
@@ -128,7 +135,7 @@ describe('basic text property semantics', () => {
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.updateNode(nodeId, { style: { overflow: 'fixed' } })
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const emphasis = screen.getByRole('checkbox', { name: '文字着重号' })
@@ -139,7 +146,7 @@ describe('basic text property semantics', () => {
       type: 'text',
       style: { emphasis: true },
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     useEditorStore.getState().undo()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       type: 'text',
@@ -401,7 +408,7 @@ describe('rich text editing UI', () => {
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.updateNode(nodeId, { style: { overflow: 'fixed' } })
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const textarea = screen.getByRole('textbox', { name: '文字内容' })
@@ -412,10 +419,10 @@ describe('rich text editing UI', () => {
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       text: '属性栏最终文字',
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
 
     fireEvent.blur(textarea)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     store.undo()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       text: '双击编辑文字',

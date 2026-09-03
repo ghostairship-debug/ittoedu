@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037c-history-unit-consumers-1](tasks/1.1/r11-037c-history-unit-consumers-1.md) | queued | — | editor-store-history | 迁移首批 8 个单元测试对 `useEditorStore.getState().history` 的读取，使其直接改读活动 Surface 会话的 history，产品代码不动。 |
+| [r11-037d-history-unit-consumers-2](tasks/1.1/r11-037d-history-unit-consumers-2.md) | queued | — | editor-store-history | 迁移余下 7 个单元测试对 `useEditorStore.getState().history` 的读取，使其直接改读活动 Surface 会话的 history，产品代码不动。 |
