@@ -1,5 +1,46 @@
 # 1.1 Integrator handoff（接手审计修订：2026-09-03）
 
+## 当前检查点（2026-09-03 Kimi 接力版，优先于下文一切旧节）
+
+**进度**：HEAD=`03ae8aa`（r11-037y 完成）。036b、037a–037y 全部完成；剩余 `037z → 052a–052d → 053 → 054a–054d`，最终 055/060/061 归 Codex、062 归 Owner（规则见 [GEMINI_EXECUTION_PLAN.md](GEMINI_EXECUTION_PLAN.md) 与 [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)，不变）。
+
+**中断现场**：037z 卡（`docs/development-plan/tasks/1.1/r11-037z-root-selection-tests-and-removal.md`）已 queued，一个执行代理刚开工即中断——工作树可能只有该卡文件的 Write scope 扩充（授权加入 `composition/crossSurfaceCommands.ts`），无实质产品改动。接手后先 `git status` 盘点，然后按本节的 037z 执行简报重新执行该卡。
+
+### 037z 执行简报（预研已完成，以下事实可直接采信）
+
+- 起始条件：五字段（activeSceneId、activePresentationStateId、selectedNodeId、selectedNodeIds、editingScope）在 src/renderer 除 root 声明/初始化/同步写与命名 selector 外应零直接 consumer；开工先 Grep 复扫，有遗漏真实 consumer 即停（phaser/** 全是类私有字段误报，勿动）。
+- 删除清单：editorStore.ts 的 EditorRootOwnedState 五字段+初始化+readSelection/syncSelection host 实现+内部 4 处 `state.editingScope` 读（改 `selectEditingScope(...)`）；editorStoreKernel.ts 的 EditorUiSelection（26-32）、接口与透传（66-67、80-81、108-109）；slideAuthoringSlice.ts 206-217/258-262、flowAuthoringSlice.ts 425-429/458-462、spatialAuthoringSlice.ts 393-397/441-445 的同步写；五个命名 selector 的 root 回退分支。
+- **协调者已授权扩写范围**：crossSurfaceCommands.ts 含 kernel readSelection/syncSelection 全部 10 个调用点（readSelection 307/344/354/400/498/854；syncSelection 319/362/459/497，四处均只清空 selectedNodeId/selectedNodeIds，改为各 Surface 自有 clear-selection 命令；读出点 418/861/871/883 随迁）。
+- **sessionless 默认值已裁定**：selectedNodeIds→空常量、selectedNodeId→null、editingScope→'scene'、activePresentationStateId→null、activeSceneId→保留现有回退链中活动 location/document 推导部分。
+- 测试迁移清单（均按 037x 风格改命名 selector 或读对应 session selection；除注明外均 Slide）：unit 侧 editorStore.test.ts（约 53 行，最大头，含 Spatial 段→spatialSession）、developerMode、globalEditorStore、batchMediaAndInsertion、v9SlideProductIntegration、v9SlideTextTransaction、spatialAuthoringTarget（Spatial）、spatialProductIntegration:1138、flowProductIntegration:1034,1038（Flow→flowSession.selection.authoringScope）、simpleEditorMode、continuousInsertionUi、courseDraftPersistence、imageSafeAreas:31、textEmphasis:148、formulaNode:202、sceneStateUi:129、unifiedDeleteTransaction、v9GlobalLayerUiAdapter:1162、runtimeTemplateLifecycleIntegration；integration 侧 componentCatalogV8Matrix:210、componentTextEditSession、courseRuntimeAssetReplacementVerticalSlice、courseComponentPackageReplacementVerticalSlice、courseMediaLibraryImportVerticalSlice（含三 surface 分支助手）、imageReplacementVerticalSlice、imageReplacementRaceCharacterization:255、runtimeContentTextAuthoringVerticalSlice、runtimePropertyAuthoringVerticalSlice:296、courseRuntimeSourceAuthoringVerticalSlice:412、draftSaveTransaction:159。假阳性勿动：interactionEditor.test.tsx（props）、v9SlideDomain、surfaceRouter、slidePreviewRebuildKey、三个 runtime*AuthoringView/Commands 测试。
+- 验证：实际改动的测试合并为一条 `npx vitest run`（不得全量）+ `npm run typecheck`。收尾：删 037z 卡、实例化 052a 卡（只建卡不执行）、`npm run generate:task-board`、单提交 `r11-037z: ...`。
+
+### 协调者已裁定事项（无需再问）
+
+1. 037y 已授权扩充并落地：`selectSelectedNodeIds` 引用记忆化（修复 App.tsx:97 无限重渲染）、`globalLayerUi.test.tsx` 两段裸 setState 已迁走、`selectEditingScope` 已补 flowSession 派生分支（`authoringScope==='global'?'global':'scene'`）。
+2. 052a 裁定：三文件测的 motion flush 排序/组件事件挂载缓冲/页面可见性缓存是 V1 Player 内部机制，实现代码本身是 LEG-002 删除目标 → 8 条用例按退役行为删除；2 条动画时长钳制用例迁往 `tests/unit/publishedDomInteractionSurfacePort.test.ts`（V2 有同款 `MAX_MOTION_DURATION_MS=10_000` 钳制但缺测试），承接名单扩充需记录在卡。三文件无 V8 拒绝用例需保留（`publishedCourseProtocol.test.ts:567` 已覆盖拒绝档）。PM map/matrix 对三文件零引用，052d 无需为 052a 更新。
+
+### 待 Owner 裁定事项（052b/052c 执行前必须先问）
+
+1. **052b 视频播放行为**：V2 slide 宿主只画 `<video controls>`，不支持播放动作路由、`video:started` 事件、背景音乐闪避 → `renderVideoNode.test.ts:312/:375/:396` 三例无 V2 宿主可迁。是 V2 合同有意收窄还是产品缺口（需补实现）？
+2. **052b scene.open-picker 场景目录**：文档承诺的教师控制器默认能力（USER_GUIDE.md:62,414；合同 native-v1/schema.ts:327），但 V2 各宿主均不处理，点击"场景目录"无效 → `teacherControllerActions.test.ts` 唯一用例无处可迁。疑似产品缺口。
+3. **052b hybrid renderMode**：组件双面渲染在 V2 无任何宿主/测试（publishedComponentMount.ts:580 硬编码 dom）。
+4. **052c 孤儿模块**：`src/shared/presentation.ts`、`informationRelease.ts`、`projectDiagnostics.ts`、`componentPackageLifecycle.ts` import LEG-011 目标 projectTypes.ts，各自唯一产品 consumer 均为 LEG 删除目标，但四者自身不在 LEG 清单 → 052c 删测试后若 053/054 不补删这四模块，LEG-011 永远无法清零。需裁定：补入 LEG 删除清单，还是另立后续卡。
+
+### 052b/052c 已预研的无争议处置（可直接执行部分）
+
+- 052b 整删：componentEventMountBuffer、playerSceneAssets；nodeMotionDirector 16 例全有 V2/编辑器侧覆盖→删重复；playerComponentV4Render 约 12 例删重复，previewPageProp/editorState 与 capture waitUntil 顺序迁入 publishedComponentMount.test.ts；formulaCrossSurface :155 迁公式渲染器确定性用例（落点 formulaNode.test.ts 或 published 侧）、:275 迁 PPTX 公式静态化用例到 coursePptxExport.test.ts，:198/:229 删。
+- 052c：删重复 4 文件（componentPackageLifecycle、informationRelease、projectDiagnostics、presentation 的测试，V9 覆盖均已存在，以上述孤儿模块裁定为前提）；迁移 2 文件（interactionEditor.test.tsx→InteractionSceneView/InteractionLayerTarget；slidePreviewRebuildKey.test.ts→SlidePreviewIdentityNode/裸字面量）；保留不动 21 个（15 个拒绝路径已合规、6 个守卫/标题、legacyInventoryChecker 字符串夹具）。词边界扫描真实命中 31 文件/85 次，排除 052a/b 后 27 个。
+- 052d：PM 引用点为 `v1.1-preservation-map.json:143-151`（PM-07 引用 formulaCrossSurface/renderVideoNode）与 `PRESERVATION_MATRIX.md:23`；只更新路径不改行为文字；验证 `npx vitest run tests/unit/preservationChecker.test.ts tests/unit/developmentRoadmap.test.ts` + `npm run check:development-roadmap`，禁止跑 check:preservation。
+
+### 053/054 机制预研结论
+
+- 台账：`docs/development-plan/inventories/legacy-consumers.json`（schemaVersion=2，11 条 LEG：active-debt 7 / removed 3 / dead-candidate 1，confirmed relation 382）。scanner 实现 `scripts/check-legacy-consumers.ts`；`check:legacy-inventory`=ratchet（允许 digest 偏离），`check:legacy-ready`=ready（digest 一致+observed 全 0），`check:legacy-zero` 归 Codex 060。
+- 053 操作序：跑 `check:legacy-inventory` 取 stdout JSON → `candidate.currentProductTreeDigest` 写入 `baseline.reconciledProductTreeDigest`、当前 HEAD 写入 `reconciledProductCommit`、按 records/summary 更新明细并重算 `reconciledCounts` 五字段 → 之后只跑 `check:legacy-ready` 验证。digest 覆盖工作树 src/tests/scripts/examples/artifacts+package.json；台账自身在 docs/ 不计入。
+- 054 预分组：a) Shared contract=LEG-011（projectTypes/projectSchema/projectSchemaTypeContract/createProject[磁盘已不存在]+courseProjectModel 5 个 symbol）；b) Player/payload=LEG-002 player 侧 5 文件（注意 publishedComponentMount.ts 引用 publishedLesson.ts#decodePublishedCode，该 import 存在时不得删 publishedLesson.ts）；c) Export/diagnostics=LEG-002 export 侧+LEG-004/005/006/007（buildPptx.ts 被 buildCoursePrintArtifacts.ts import buildPdfPrintHtml，删前须迁移）；d) Archive/test helper=LEG-008/009/010。LEG-001 的 slideEditorProjection.ts 替代未建立，大概率不进删除表，053 实跑确认。空组不建卡。
+
+---
+
 ## 当前执行覆盖（2026-09-03，Gemini 最小验证版）
 
 本节覆盖下文所有旧恢复顺序、W1–W9、052 A–E、candidate digest、Hash 报告和旧 deletion list；下文仅作历史审计依据。

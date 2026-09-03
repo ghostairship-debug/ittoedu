@@ -22,10 +22,14 @@ import { COURSE_PROJECT_SCHEMA_VERSION, type LayerItem } from '@/shared/coursePr
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveScene,
+  selectActiveSceneId,
+  selectActivePresentationStateId,
   selectEditingNodes,
   selectEffectiveLayerProjection,
   selectMediaAssetFiles,
   selectHasUnsavedCourseChanges,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
   selectSlideBackendKind,
   selectSlideAuthoringDocument,
   selectSlideSceneList,
@@ -167,7 +171,7 @@ describe('default Course Project V9 persistence', () => {
 
   it('keeps the V8 preview and effective layer selection aligned through Slide history and page changes', () => {
     const store = useEditorStore.getState()
-    const firstSceneId = store.activeSceneId
+    const firstSceneId = selectActiveSceneId(store)
 
     store.addTextNode(40, 50)
     const nodeId = selectEditingNodes(useEditorStore.getState())[0]!.id
@@ -193,7 +197,7 @@ describe('default Course Project V9 persistence', () => {
 
     store.addScene()
     state = useEditorStore.getState()
-    const secondSceneId = state.activeSceneId
+    const secondSceneId = selectActiveSceneId(state)
     expect(selectSlideSceneList(state).find((scene) => scene.id === secondSceneId)?.nodes)
       .toEqual([])
     expect(selectSlideSceneList(state).find((scene) => scene.id === secondSceneId)?.nodes)
@@ -201,7 +205,7 @@ describe('default Course Project V9 persistence', () => {
 
     store.setActiveScene(firstSceneId)
     state = useEditorStore.getState()
-    expect(state.activeSceneId).toBe(firstSceneId)
+    expect(selectActiveSceneId(state)).toBe(firstSceneId)
     expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .toContainEqual(expect.objectContaining({ id: nodeId }))
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
@@ -259,8 +263,8 @@ describe('Spatial command failure diagnostics', () => {
     expect(after.spatialSession?.history.present).toBe(documentBefore)
     expect(after.spatialSession?.history.present.revision).toBe(documentBefore.revision)
     expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
-    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
-    expect(after.selectedNodeId).toBe(before.selectedNodeId)
+    expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
+    expect(after.spatialSession?.selection.selectionIds.at(-1) ?? null).toBe(before.spatialSession?.selection.selectionIds.at(-1) ?? null)
     expect(after.dirty).toBe(before.dirty)
   })
 
@@ -299,7 +303,7 @@ describe('Spatial command failure diagnostics', () => {
     expect(after.spatialSession).toBe(sessionBefore)
     expect(after.spatialSession?.history).toBe(sessionBefore.history)
     expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
-    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+    expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
   })
 })
 
@@ -660,7 +664,7 @@ describe('Spatial canonical clipboard commands', () => {
     expect(afterLockedPaste.spatialSession).toBe(beforeLockedPaste.spatialSession)
     expect(afterLockedPaste.spatialSession?.history).toBe(beforeLockedPaste.spatialSession?.history)
     expect(afterLockedPaste.spatialSession?.selection).toBe(beforeLockedPaste.spatialSession?.selection)
-    expect(afterLockedPaste.selectedNodeIds).toBe(beforeLockedPaste.selectedNodeIds)
+    expect(afterLockedPaste.spatialSession?.selection.selectionIds).toBe(beforeLockedPaste.spatialSession?.selection.selectionIds)
     expect(afterLockedPaste.spatialClipboard).toBe(validClipboard)
     expect(afterLockedPaste.errorMessage).toMatch(/锁定/)
     useEditorStore.getState().undo()
@@ -678,7 +682,7 @@ describe('Spatial canonical clipboard commands', () => {
     expect(afterLockedCopy.spatialSession).toBe(beforeLocked.spatialSession)
     expect(afterLockedCopy.spatialSession?.history).toBe(beforeLocked.spatialSession?.history)
     expect(afterLockedCopy.spatialSession?.selection).toBe(beforeLocked.spatialSession?.selection)
-    expect(afterLockedCopy.selectedNodeIds).toBe(beforeLocked.selectedNodeIds)
+    expect(afterLockedCopy.spatialSession?.selection.selectionIds).toBe(beforeLocked.spatialSession?.selection.selectionIds)
     expect(afterLockedCopy.spatialClipboard).toBe(validClipboard)
     expect(afterLockedCopy.errorMessage).toMatch(/锁定/)
 
@@ -687,7 +691,7 @@ describe('Spatial canonical clipboard commands', () => {
     const afterLockedDuplicate = useEditorStore.getState()
     expect(afterLockedDuplicate.spatialSession).toBe(beforeLockedDuplicate.spatialSession)
     expect(afterLockedDuplicate.spatialSession?.history).toBe(beforeLockedDuplicate.spatialSession?.history)
-    expect(afterLockedDuplicate.selectedNodeIds).toBe(beforeLockedDuplicate.selectedNodeIds)
+    expect(afterLockedDuplicate.spatialSession?.selection.selectionIds).toBe(beforeLockedDuplicate.spatialSession?.selection.selectionIds)
 
     useEditorStore.getState().selectNode(first.layerItemId)
     useEditorStore.getState().copySelectedNodes()
@@ -697,7 +701,7 @@ describe('Spatial canonical clipboard commands', () => {
     const afterWrongOwner = useEditorStore.getState()
     expect(afterWrongOwner.spatialSession).toBe(beforeWrongOwner.spatialSession)
     expect(afterWrongOwner.spatialSession?.history).toBe(beforeWrongOwner.spatialSession?.history)
-    expect(afterWrongOwner.selectedNodeIds).toBe(beforeWrongOwner.selectedNodeIds)
+    expect(afterWrongOwner.spatialSession?.selection.selectionIds).toBe(beforeWrongOwner.spatialSession?.selection.selectionIds)
     expect(afterWrongOwner.errorMessage).toMatch(/编辑范围/)
 
     const controllerId = beforeWrongOwner.spatialSession?.history.present.globalLayerItems.find(
@@ -710,7 +714,7 @@ describe('Spatial canonical clipboard commands', () => {
     const afterController = useEditorStore.getState()
     expect(afterController.spatialSession).toBe(beforeController.spatialSession)
     expect(afterController.spatialSession?.history).toBe(beforeController.spatialSession?.history)
-    expect(afterController.selectedNodeIds).toBe(beforeController.selectedNodeIds)
+    expect(afterController.spatialSession?.selection.selectionIds).toBe(beforeController.spatialSession?.selection.selectionIds)
     expect(afterController.errorMessage).toMatch(/教师控制器/)
 
     useEditorStore.getState().setEditingScope('scene')
@@ -722,7 +726,7 @@ describe('Spatial canonical clipboard commands', () => {
     const afterRemoved = useEditorStore.getState()
     expect(afterRemoved.spatialSession).toBe(beforeRemoved.spatialSession)
     expect(afterRemoved.spatialSession?.history).toBe(beforeRemoved.spatialSession?.history)
-    expect(afterRemoved.selectedNodeIds).toBe(beforeRemoved.selectedNodeIds)
+    expect(afterRemoved.spatialSession?.selection.selectionIds).toBe(beforeRemoved.spatialSession?.selection.selectionIds)
     expect(afterRemoved.errorMessage).toMatch(/失效/)
 
     useEditorStore.setState({ spatialClipboard: null })
@@ -731,7 +735,7 @@ describe('Spatial canonical clipboard commands', () => {
     const afterEmpty = useEditorStore.getState()
     expect(afterEmpty.spatialSession).toBe(beforeEmpty.spatialSession)
     expect(afterEmpty.spatialSession?.history).toBe(beforeEmpty.spatialSession?.history)
-    expect(afterEmpty.selectedNodeIds).toBe(beforeEmpty.selectedNodeIds)
+    expect(afterEmpty.spatialSession?.selection.selectionIds).toBe(beforeEmpty.spatialSession?.selection.selectionIds)
     expect(afterEmpty.errorMessage).toMatch(/剪贴板为空/)
 
     useEditorStore.getState().createNewProject()
@@ -931,7 +935,7 @@ describe('Spatial canonical clipboard commands', () => {
     const afterDangling = useEditorStore.getState()
     expect(afterDangling.spatialSession).toBe(beforeDangling.spatialSession)
     expect(afterDangling.spatialSession?.history).toBe(beforeDangling.spatialSession?.history)
-    expect(afterDangling.selectedNodeIds).toBe(beforeDangling.selectedNodeIds)
+    expect(afterDangling.spatialSession?.selection.selectionIds).toBe(beforeDangling.spatialSession?.selection.selectionIds)
     expect(afterDangling.errorMessage).toMatch(/资源|引用/)
   })
 
@@ -968,7 +972,7 @@ describe('Spatial canonical clipboard commands', () => {
     expect(after.spatialSession).toBe(before.spatialSession)
     expect(after.spatialSession?.history).toBe(before.spatialSession?.history)
     expect(after.spatialSession?.selection).toBe(before.spatialSession?.selection)
-    expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
+    expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
     expect(after.errorMessage).toMatch(/上限/)
   })
 })
@@ -985,7 +989,7 @@ describe('scene operations', () => {
       '场景 2',
       '场景 3',
     ])
-    expect(state.activeSceneId).toBe(selectSlideSceneList(state)[2]!.id)
+    expect(selectActiveSceneId(state)).toBe(selectSlideSceneList(state)[2]!.id)
     expect(activeHistory().past).toHaveLength(2)
     expect(state.dirty).toBe(true)
   })
@@ -1030,7 +1034,7 @@ describe('scene operations', () => {
     expect(store.deleteScene(thirdId)).toBe(true)
     const state = useEditorStore.getState()
     expect(selectSlideSceneList(state).map((scene) => scene.id)).toEqual([firstId, secondId])
-    expect(state.activeSceneId).toBe(firstId)
+    expect(selectActiveSceneId(state)).toBe(firstId)
   })
 
   it('ignores invalid reorder requests without changing history', () => {
@@ -1099,8 +1103,8 @@ describe('scene operations', () => {
     expect(copy.nodes.map(({ id: _id, ...node }) => node)).toEqual(
       sourceNodes.map(({ id: _id, ...node }) => node),
     )
-    expect(state.activeSceneId).toBe(copy.id)
-    expect(state.selectedNodeIds).toEqual([])
+    expect(selectActiveSceneId(state)).toBe(copy.id)
+    expect(selectSelectedNodeIds(state)).toEqual([])
     expect(activeHistory().past).toHaveLength(historyBeforeDuplicate + 1)
 
     const copiedText = copy.nodes.find((node) => node.type === 'text')
@@ -1117,7 +1121,7 @@ describe('scene operations', () => {
     const store = useEditorStore.getState()
     const sourceSceneId = activeScene().id
     store.addPresentationState('完成')
-    const targetStateId = useEditorStore.getState().activePresentationStateId!
+    const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     store.addInteractionRule(sourceSceneId, {
       id: 'reenter-complete',
       enabled: true,
@@ -1333,7 +1337,7 @@ describe('node operations', () => {
       assetId: imageMeta.id,
       preserveAspectRatio: true,
     })
-    expect(useEditorStore.getState().selectedNodeId).toBe(nodes[2]!.id)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(nodes[2]!.id)
   })
 
   it('keeps newly dropped nodes at least 20px inside the visible canvas edge', () => {
@@ -1378,7 +1382,7 @@ describe('node operations', () => {
     const nodeId = activeScene().nodes[0]!.id
     store.deleteNode(nodeId)
     expect(activeScene().nodes).toHaveLength(0)
-    expect(useEditorStore.getState().selectedNodeId).toBeNull()
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBeNull()
 
     store.undo()
     expect(activeScene().nodes).toHaveLength(1)
@@ -1533,7 +1537,7 @@ describe('node operations', () => {
 
   it('deterministically commits text before switching nodes or scenes', () => {
     const store = useEditorStore.getState()
-    const firstSceneId = store.activeSceneId
+    const firstSceneId = selectActiveSceneId(store)
     store.addTextNode()
     const textId = activeScene().nodes[0]!.id
     store.addRectangleNode()
@@ -1551,7 +1555,7 @@ describe('node operations', () => {
     expect(activeScene().nodes[0]).toMatchObject({ text: '切换后仍保留' })
 
     store.addScene()
-    const secondSceneId = useEditorStore.getState().activeSceneId
+    const secondSceneId = selectActiveSceneId(useEditorStore.getState())
     store.setActiveScene(firstSceneId)
     store.selectNode(textId)
     store.beginTextEdit(textId, 'properties')
@@ -1737,20 +1741,16 @@ describe('scene presentation states', () => {
     expect(presentation).toBeDefined()
     const initialId = presentation!.initialStateId
     expect(presentation?.states.length).toBeGreaterThanOrEqual(1)
-    expect(useEditorStore.getState().activePresentationStateId).toBeNull()
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
 
     useEditorStore.getState().setCanvasMode('run')
-    expect(useEditorStore.getState()).toMatchObject({
-      canvasMode: 'run',
-      activePresentationStateId: initialId,
-    })
+    expect(useEditorStore.getState().canvasMode).toBe('run')
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(initialId)
     useEditorStore.getState().setCanvasMode('edit')
-    expect(useEditorStore.getState().activePresentationStateId).toBe(initialId)
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(initialId)
     useEditorStore.getState().setActivePresentationState(null)
-    expect(useEditorStore.getState()).toMatchObject({
-      canvasMode: 'edit',
-      activePresentationStateId: null,
-    })
+    expect(useEditorStore.getState().canvasMode).toBe('edit')
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
   })
 
   it('stores state edits as overrides while keeping the canonical base editable', () => {
@@ -1758,7 +1758,7 @@ describe('scene presentation states', () => {
     store.addTextNode(80, 90)
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('答错')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const historyBeforeEdit = activeHistory().past.length
 
     useEditorStore.getState().updateNode(nodeId, {
@@ -1802,7 +1802,7 @@ describe('scene presentation states', () => {
     expect(activeScene().nodes[0]).toMatchObject({ id: nodeId, type: 'text' })
 
     store.addPresentationState('状态')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().updateNode(nodeId, {
       id: 'state-replacement',
       type: 'shape',
@@ -1820,7 +1820,7 @@ describe('scene presentation states', () => {
     store.addTextNode(40, 60)
     const inheritedId = activeScene().nodes[0]!.id
     store.addPresentationState('反馈')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().addRectangleNode(120, 140)
     const sceneAfterAdd = activeScene()
     const stateOwnedId = sceneAfterAdd.nodes.find((node) => node.id !== inheritedId)!.id
@@ -1859,18 +1859,18 @@ describe('scene presentation states', () => {
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('锁定')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().updateNode(nodeId, { locked: true })
     useEditorStore.getState().selectNode(nodeId)
     const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
     const beforeHistory = activeHistory().past
-    const beforeSelection = useEditorStore.getState().selectedNodeIds
+    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
 
     useEditorStore.getState().deleteNode(nodeId)
 
     expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
     expect(activeHistory().past).toBe(beforeHistory)
-    expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
     expect(materialized(activeScene(), stateId).nodes.find((node) => node.id === nodeId))
       .toMatchObject({ locked: true })
     expect(useEditorStore.getState().errorMessage).toBe('locked')
@@ -1881,9 +1881,9 @@ describe('scene presentation states', () => {
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('状态 A')
-    const stateA = useEditorStore.getState().activePresentationStateId!
+    const stateA = selectActivePresentationStateId(useEditorStore.getState())!
     store.addPresentationState('状态 B')
-    const stateB = useEditorStore.getState().activePresentationStateId!
+    const stateB = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().setActivePresentationState(stateA)
     useEditorStore.getState().selectNode(nodeId)
     const stale = useEditorStore.getState().createLiveEditorSelectionSnapshot('layer')
@@ -1893,14 +1893,14 @@ describe('scene presentation states', () => {
     useEditorStore.getState().selectNode(nodeId)
     const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
     const beforeHistory = activeHistory().past
-    const beforeSelection = useEditorStore.getState().selectedNodeIds
+    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
     expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
     expect(activeHistory().past).toBe(beforeHistory)
-    expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
     expect(activeScene().nodes.some((node) => node.id === nodeId)).toBe(true)
   })
 
@@ -1909,7 +1909,7 @@ describe('scene presentation states', () => {
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('完成')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().beginTextEdit(nodeId, 'properties')
@@ -1940,7 +1940,7 @@ describe('scene presentation states', () => {
     const sourceSceneId = activeScene().id
     const [sourceNodeId, sourceBackNodeId] = activeScene().nodes.map((node) => node.id)
     store.addPresentationState('正确')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().updateNode(sourceNodeId!, { x: 640, visible: false })
     useEditorStore.getState().reorderNodes([sourceBackNodeId!, sourceNodeId!])
 
@@ -1964,7 +1964,7 @@ describe('scene presentation states', () => {
     store.addShapeNode('ellipse')
     const baseOrder = activeScene().nodes.map((node) => node.id)
     store.addPresentationState('分层')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const stateOrder = [baseOrder[2]!, baseOrder[0]!, baseOrder[1]!]
 
     useEditorStore.getState().updateNode(baseOrder[0]!, { x: 777 })
@@ -2004,14 +2004,14 @@ describe('scene presentation states', () => {
   it('falls back to the runtime initial state when the active thumbnail state is deleted', () => {
     const store = useEditorStore.getState()
     store.addPresentationState('运行初始')
-    const initialId = useEditorStore.getState().activePresentationStateId!
+    const initialId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().addPresentationState('缩略图')
-    const thumbnailId = useEditorStore.getState().activePresentationStateId!
+    const thumbnailId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().setInitialPresentationState(initialId)
     useEditorStore.getState().setThumbnailPresentationState(thumbnailId)
 
     expect(useEditorStore.getState().deletePresentationState(thumbnailId)).toBe(true)
-    expect(useEditorStore.getState().activePresentationStateId).toBe(initialId)
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(initialId)
     expect(activeScene().presentation).toMatchObject({
       initialStateId: initialId,
       thumbnailStateId: initialId,
@@ -2031,7 +2031,7 @@ describe('scene presentation states', () => {
     store.addScene()
     const targetSceneId = activeScene().id
     store.addPresentationState('详情')
-    const targetStateId = useEditorStore.getState().activePresentationStateId!
+    const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     store.setActiveScene(sourceSceneId)
     store.addInteractionRule(sourceSceneId, {
       id: 'go-to-detail',
@@ -2110,7 +2110,7 @@ describe('multi-selection operations', () => {
 
     store.duplicateSelectedNodes()
 
-    const copiedIds = useEditorStore.getState().selectedNodeIds
+    const copiedIds = selectSelectedNodeIds(useEditorStore.getState())
     const clickRules = activeScene().interactions.filter(
       (rule) => rule.trigger.type === 'node.click',
     )
@@ -2143,20 +2143,20 @@ describe('multi-selection operations', () => {
 
     store.selectNode(text!.id)
     store.selectNode(rectangle!.id, true)
-    expect(useEditorStore.getState().selectedNodeIds).toEqual([
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([
       text!.id,
       rectangle!.id,
     ])
-    expect(useEditorStore.getState().selectedNodeId).toBe(rectangle!.id)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(rectangle!.id)
 
     store.selectNode(text!.id, true)
-    expect(useEditorStore.getState().selectedNodeIds).toEqual([rectangle!.id])
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([rectangle!.id])
     store.selectNodes([text!.id, 'missing-node', ellipse!.id, text!.id])
-    expect(useEditorStore.getState().selectedNodeIds).toEqual([
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([
       text!.id,
       ellipse!.id,
     ])
-    expect(useEditorStore.getState().selectedNodeId).toBe(ellipse!.id)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(ellipse!.id)
   })
 
   it.each(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const)(
@@ -2369,7 +2369,7 @@ describe('multi-selection operations', () => {
     store.pasteNodes()
 
     const state = useEditorStore.getState()
-    const pastedIds = state.selectedNodeIds
+    const pastedIds = selectSelectedNodeIds(state)
     expect(pastedIds).toHaveLength(2)
     const pasted = activeScene().nodes.filter((node) => pastedIds.includes(node.id))
     expect(pasted).toHaveLength(2)

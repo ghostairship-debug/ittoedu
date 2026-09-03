@@ -1135,7 +1135,7 @@ describe('Spatial product shell wiring', () => {
     expect(afterPaste.spatialSession).toBe(beforePaste.spatialSession)
     expect(afterPaste.spatialSession?.history).toBe(beforePaste.spatialSession?.history)
     expect(afterPaste.spatialSession?.selection).toBe(beforePaste.spatialSession?.selection)
-    expect(afterPaste.selectedNodeIds).toBe(beforePaste.selectedNodeIds)
+    expect(afterPaste.spatialSession?.selection.selectionIds).toBe(beforePaste.spatialSession?.selection.selectionIds)
     expect(afterPaste.spatialClipboard).toBe(captured)
     expect(afterPaste.errorMessage).toMatch(/引用|失效/)
   })

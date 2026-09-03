@@ -7,6 +7,7 @@ import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchiv
 import {
   selectActiveCourseProjectDocument,
   selectHasUnsavedCourseChanges,
+  selectSelectedNodeId,
   useEditorStore,
   selectSlideSceneList,
 } from '@/renderer/store/editorStore'
@@ -156,7 +157,7 @@ function createActiveSlideDraft(text: string): string {
   const store = useEditorStore.getState()
   store.createNewProject()
   store.addTextNode()
-  const layerItemId = useEditorStore.getState().selectedNodeId
+  const layerItemId = selectSelectedNodeId(useEditorStore.getState())
   if (!layerItemId) throw new Error('expected selected text layer')
   const baseline = useEditorStore.getState().prepareCourseProjectPersistence()
   if (!baseline.ok) throw new Error(baseline.reason)

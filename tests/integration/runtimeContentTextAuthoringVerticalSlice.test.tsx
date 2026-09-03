@@ -16,6 +16,8 @@ import {
 } from '@/renderer/runtime/runtimeContentTextAuthoringCommands'
 import {
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectActiveSceneId,
   selectMediaAssetFiles,
   useEditorStore,
   selectCandidateGlobalLayerItems,
@@ -487,7 +489,7 @@ function discoverySession(
   return {
     projectId: activeProject().id,
     scope: source.owner === 'global' ? 'global' : 'scene',
-    sceneId: useEditorStore.getState().activeSceneId,
+    sceneId: selectActiveSceneId(useEditorStore.getState()),
     targetId,
     nodeId: source.itemId,
     kind: 'text',
@@ -503,7 +505,7 @@ function captureDirectTarget(source: RuntimeContentFixture): CourseRuntimeConten
     sessionToken: session.token,
     projectId: activeProject().id,
     surfaceId: source.surfaceId,
-    stateId: state.activePresentationStateId,
+    stateId: selectActivePresentationStateId(state),
     owner: source.owner,
     sceneId: source.sceneId,
     itemId: source.itemId,
@@ -890,7 +892,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
         ready: true,
       })
       expect(publishedAuthoringHarness.mounts[1]?.readyContext).toEqual({
-        sceneId: useEditorStore.getState().activeSceneId,
+        sceneId: selectActiveSceneId(useEditorStore.getState()),
         stateId: publishedAuthoringHarness.mounts[1]?.stateId,
       })
     })
@@ -907,12 +909,12 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
         update: {
           revision: 99,
           scope: 'scene',
-          sceneId: useEditorStore.getState().activeSceneId,
+          sceneId: selectActiveSceneId(useEditorStore.getState()),
           targets: [{
             targetId: 'runtime:surface:stale',
             nodeId: source.itemId,
             scope: 'scene',
-            sceneId: useEditorStore.getState().activeSceneId,
+            sceneId: selectActiveSceneId(useEditorStore.getState()),
             kind: 'text',
             key: CONTENT_KEY,
             label: '过期表面课程标题',
@@ -941,12 +943,12 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
         update: {
           revision: currentRevision,
           scope: 'scene',
-          sceneId: useEditorStore.getState().activeSceneId,
+          sceneId: selectActiveSceneId(useEditorStore.getState()),
           targets: [{
             targetId: 'runtime:surface:current',
             nodeId: source.itemId,
             scope: 'scene',
-            sceneId: useEditorStore.getState().activeSceneId,
+            sceneId: selectActiveSceneId(useEditorStore.getState()),
             kind: 'text',
             key: CONTENT_KEY,
             label: '表面课程标题',
@@ -992,7 +994,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
       )
       await publishRuntimeTextTarget({
         scope: source.owner === 'global' ? 'global' : 'scene',
-        sceneId: useEditorStore.getState().activeSceneId,
+        sceneId: selectActiveSceneId(useEditorStore.getState()),
         nodeId: source.itemId,
       })
       const label = source.owner === 'global' ? '全局课程标题' : '场景课程标题'
@@ -1029,7 +1031,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
         onSelectImageAsset={async () => null}
       />,
     )
-    const sceneId = useEditorStore.getState().activeSceneId
+    const sceneId = selectActiveSceneId(useEditorStore.getState())
     await publishRuntimeTextTarget({
       scope: 'scene',
       sceneId,

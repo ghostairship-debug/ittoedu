@@ -15,7 +15,12 @@ import {
 } from '@/renderer/runtime/courseRuntimeTransactions'
 import {
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectActiveSceneId,
+  selectEditingScope,
   selectMediaAssetFiles,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -431,7 +436,7 @@ function discoverySession(
   return {
     projectId: activeProject().id,
     scope: source.owner === 'global' ? 'global' : 'scene',
-    sceneId: state.activeSceneId,
+    sceneId: selectActiveSceneId(state),
     targetId,
     nodeId: source.itemId,
     kind: 'asset',
@@ -460,7 +465,7 @@ function captureDirectCarrierTarget(
     sessionToken: session.token,
     projectId: activeProject().id,
     surfaceId: source.surfaceId,
-    stateId: state.activePresentationStateId,
+    stateId: selectActivePresentationStateId(state),
     owner: source.owner,
     sceneId: source.sceneId,
     itemId: source.itemId,
@@ -477,11 +482,11 @@ function targetForStore(source: RuntimeStoreFixture): CourseRuntimeAssetReplacem
 function selectionSnapshot() {
   const state = useEditorStore.getState()
   return {
-    activeSceneId: state.activeSceneId,
-    activePresentationStateId: state.activePresentationStateId,
-    selectedNodeId: state.selectedNodeId,
-    selectedNodeIds: [...state.selectedNodeIds],
-    editingScope: state.editingScope,
+    activeSceneId: selectActiveSceneId(state),
+    activePresentationStateId: selectActivePresentationStateId(state),
+    selectedNodeId: selectSelectedNodeId(state),
+    selectedNodeIds: [...selectSelectedNodeIds(state)],
+    editingScope: selectEditingScope(state),
     slide: state.slideBackend?.kind === 'slide-authoring'
       ? structuredClone(state.slideBackend.getSession().selection)
       : null,
@@ -657,7 +662,7 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     const revisionAtCapture = activeProject().revision
 
     useEditorStore.getState().setActivePresentationState('state-b')
-    expect(useEditorStore.getState().activePresentationStateId).toBe('state-b')
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe('state-b')
     expect(activeProject().revision).toBe(revisionAtCapture)
     expect(useEditorStore.getState().captureRuntimeAssetReplacementTarget(
       discoverySession(source),

@@ -11,6 +11,7 @@ import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
 import {
   selectActiveCourseProjectDocument,
+  selectSelectedNodeIds,
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -79,7 +80,7 @@ describe('unified Delete transaction', () => {
     expect(after.revision).toBe(before.revision + 1)
     expect(selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.past).toHaveLength(historyCount + 1)
-    expect(useEditorStore.getState().selectedNodeIds).toEqual([])
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
     const backend = selectSlideAuthoringBackend(useEditorStore.getState())
     const lastFrame = backend?.getSession().history.past.at(-1)
     expect(lastFrame && isSlideAuthoringTransactionFrame(lastFrame)).toBe(true)
@@ -100,7 +101,7 @@ describe('unified Delete transaction', () => {
     const beforeDocument = activeDocument()
     const beforeHistory = selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.past
-    const beforeSelection = useEditorStore.getState().selectedNodeIds
+    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
@@ -108,7 +109,7 @@ describe('unified Delete transaction', () => {
     expect(activeDocument()).toBe(beforeDocument)
     expect(selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.past).toBe(beforeHistory)
-    expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
     expect(firstSlideScene().layerItems.some((item) => item.layerItemId === nodeId)).toBe(true)
   })
 
@@ -122,7 +123,7 @@ describe('unified Delete transaction', () => {
     const beforeDocument = activeDocument()
     const beforeHistory = selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.past
-    const beforeSelection = useEditorStore.getState().selectedNodeIds
+    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
@@ -130,7 +131,7 @@ describe('unified Delete transaction', () => {
     expect(activeDocument()).toBe(beforeDocument)
     expect(selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.past).toBe(beforeHistory)
-    expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
     expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
       .toEqual(expect.arrayContaining(ids))
   })

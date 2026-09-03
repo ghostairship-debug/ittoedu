@@ -13,6 +13,7 @@ import type { CourseLifecycleOwnedState } from '../store/slices/courseLifecycleS
 import type { createCourseStructureSlice } from '../store/slices/courseStructureSlice'
 import type {
   SlideAuthoringBackend,
+  SlideAuthoringSnapshot,
   SlideCommandResult,
 } from '../course/slideAuthoringBackend'
 import { createSlideAuthoringBackend, openSlideAuthoringSession } from '../course/slideAuthoringBackend'
@@ -85,7 +86,7 @@ type SurfaceNodeCommands = {
 export type CrossSurfaceSlidePorts = {
   read(): {
     slideBackend: SlideAuthoringBackend | null
-    slideCandidateSnapshot: { locationId: string; sceneId: string; stateId: string | null; revision: number } | null
+    slideCandidateSnapshot: SlideAuthoringSnapshot | null
     v9ContentEdit: V9SlideContentEditSession | null
   }
   patch(patch: { v9ContentEdit?: null }): void
@@ -295,6 +296,16 @@ function sameEditorSelectionSnapshot(
 }
 
 export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
+  /** 内核根选区镜像已删除：编辑范围一律从各 Surface 自有 session 派生。 */
+  const readSessionEditingScope = (): 'scene' | 'global' => {
+    const spatialSession = ports.spatial.read().spatialSession
+    if (spatialSession) return spatialSession.scope === 'global' ? 'global' : 'scene'
+    const flowSession = ports.flow.read().flowSession
+    if (flowSession) return flowSession.selection.authoringScope === 'global' ? 'global' : 'scene'
+    const slideSnapshot = ports.slide.read().slideCandidateSnapshot
+    if (slideSnapshot) return slideSnapshot.scope === 'global' ? 'global' : 'scene'
+    return 'scene'
+  }
   const commands = {
     setCanvasMode(canvasMode: 'edit' | 'run') {
       dispatchActiveSurface(ports.detect(), {
@@ -304,7 +315,6 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
             && ports.spatial.read().spatialContentEdit
             && !ports.spatial.commitDraft()
           ) return
-          const selection = ports.kernel.readSelection()
           ports.spatial.patch({
             spatialGraphSelection: canvasMode === 'run' ? null : ports.spatial.read().spatialGraphSelection,
           })
@@ -316,11 +326,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
               : '已返回无限画布编辑',
           })
           if (canvasMode === 'run') {
-            ports.kernel.syncSelection({
-              ...selection,
-              selectedNodeId: null,
-              selectedNodeIds: [],
-            })
+            ports.spatial.selectNode(null)
           }
         },
         flow: () => {
@@ -341,7 +347,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
           const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
           if (backend && typeof backend.getSession === 'function') {
             const session = backend.getSession()
-            const currentStateId = ports.kernel.readSelection().activePresentationStateId
+            const currentStateId = session.selection.stateId
             const scene = findCourseSlideScene(session.history.present, backend.getSnapshot().sceneId)
             const nextStateId =
               canvasMode === 'run' && currentStateId === null
@@ -351,7 +357,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
               ports.slide.activateState(nextStateId)
             }
           }
-          const selection = ports.kernel.readSelection()
+          const slideSnapshot = ports.slide.read().slideCandidateSnapshot
           ports.shell.patch({
             canvasMode,
             editingTextNodeId: null,
@@ -359,11 +365,9 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
               ? '正在运行当前课件；切回编辑可直接修改元素'
               : '已返回状态编辑画布',
           })
-          ports.kernel.syncSelection({
-            ...selection,
-            selectedNodeId: canvasMode === 'run' ? null : selection.selectedNodeId,
-            selectedNodeIds: canvasMode === 'run' ? [] : selection.selectedNodeIds,
-          })
+          if (canvasMode === 'run' && slideSnapshot) {
+            ports.slide.selectNode(null)
+          }
         },
         sessionless: () => ports.kernel.failSessionless(),
       })
@@ -397,7 +401,6 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       const flow = ports.flow.read()
       const spatial = ports.spatial.read()
       const shell = ports.shell.read()
-      const selection = ports.kernel.readSelection()
       const requestedLocation = project.locations.find((candidate) => candidate.id === locationId)
       if (
         requestedLocation?.kind === 'spatial-camera'
@@ -415,7 +418,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
           spatialLocationId: spatial.spatialSession?.selection.locationId ?? null,
           flowLocationId: flow.flowSession?.selection.locationId ?? null,
           slideLocationId: slide.slideCandidateSnapshot?.locationId ?? null,
-          editingScope: selection.editingScope,
+          editingScope: readSessionEditingScope(),
           composing: Boolean(
             flow.flowTextEdit?.composing ||
             slide.v9ContentEdit ||
@@ -456,11 +459,9 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
 
       if (plan.kind === 'noop-same-location') {
         ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
-        ports.kernel.syncSelection({
-          ...selection,
-          selectedNodeIds: [],
-          selectedNodeId: null,
-        })
+        if (plan.surface === 'spatial') ports.spatial.selectNode(null)
+        else if (plan.surface === 'flow') ports.flow.selectNode(null)
+        else ports.slide.selectNode(null)
         if (plan.surface === 'spatial') {
           ports.spatial.patch({ spatialContentEdit: null })
           ports.shell.patch({ editingTextNodeId: null })
@@ -494,11 +495,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         ports.slide.commitDraft()
         ports.slide.activateScene(plan.sceneId)
         ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
-        ports.kernel.syncSelection({
-          ...ports.kernel.readSelection(),
-          selectedNodeIds: [],
-          selectedNodeId: null,
-        })
+        ports.slide.selectNode(null)
       }
     },
 
@@ -851,14 +848,15 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       const flow = ports.flow.read()
       const spatial = ports.spatial.read()
       const shell = ports.shell.read()
-      const selection = ports.kernel.readSelection()
       const itemIds = flow.flowSession
         ? (
           flow.flowSession.selection.selectedOverlayIds.length > 0
             ? flow.flowSession.selection.selectedOverlayIds
             : flow.flowSession.selection.selectedBlockIds
         )
-        : selection.selectedNodeIds
+        : spatial.spatialSession
+          ? [...spatial.spatialSession.selection.selectionIds]
+          : [...(slide.slideCandidateSnapshot?.selection.selectionIds ?? [])]
       if (!session) {
         try {
           session = buildCourseAuthoringSessionForProject(project, locationId, itemIds)
@@ -868,7 +866,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       } else if (session.token.revision !== project.revision) {
         session = updateCourseAuthoringSessionRevision(session, project.revision)
       }
-      const scope = selection.editingScope === 'global' ? 'global' : 'location'
+      const scope = readSessionEditingScope() === 'global' ? 'global' : 'location'
       let focusKind: EditorFocusKind
       if (focus === 'text' || focus === 'block' || focus === 'overlay' || focus === 'layer' || focus === 'none') {
         focusKind = focus
@@ -880,7 +878,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         focusKind = ports.slide.deriveFocus(focus, Boolean(shell.editingTextNodeId))
       } else {
         focusKind = shell.editingTextNodeId ? 'text'
-          : selection.selectedNodeIds.length > 0 ? 'layer' : 'none'
+          : itemIds.length > 0 ? 'layer' : 'none'
       }
       const stateId = slide.slideCandidateSnapshot?.stateId ?? null
       return createEditorSelectionSnapshot({

@@ -203,8 +203,6 @@ export function persistSlideCandidateResult(
   commit({
     slideBackend: nextBackend,
     slideCandidateSnapshot: nextSnapshot,
-    activeSceneId: nextSnapshot.sceneId,
-    activePresentationStateId: nextSnapshot.stateId,
     ...committed,
     dirty: resourceAware || extra.sidecarDirection || result.historyEntry
       ? true
@@ -212,9 +210,6 @@ export function persistSlideCandidateResult(
     ...(extra.clipboard !== undefined
       ? { slideCandidateClipboard: extra.clipboard }
       : {}),
-    selectedNodeIds: [...nextSnapshot.selection.selectionIds],
-    selectedNodeId: nextSnapshot.selection.selectionIds.at(-1) ?? null,
-    editingScope: nextSnapshot.scope === 'global' ? 'global' : 'scene',
     v9ContentEdit: keepEdit,
     ...(extra.clearContentEdit || (snapshot.v9ContentEdit && !keepEdit)
       ? { editingTextNodeId: null }
@@ -255,11 +250,6 @@ export function applyV9BackendState(
     v9ContentEdit: null,
     ...continuedCourseResourceStacks(extra.resourceHistory),
     courseAssetSidecar: sidecar,
-    activeSceneId: snapshot.sceneId,
-    activePresentationStateId: snapshot.stateId,
-    editingScope: snapshot.scope === 'global' ? 'global' : 'scene',
-    selectedNodeIds: [...snapshot.selection.selectionIds],
-    selectedNodeId: snapshot.selection.selectionIds.at(-1) ?? null,
     editingTextNodeId: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,

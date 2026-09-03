@@ -16,6 +16,7 @@ import type {
 } from '@/renderer/runtime/runtimePropertyAuthoringCommands'
 import {
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
   selectMediaAssetFiles,
   useEditorStore,
   selectCandidateGlobalLayerItems,
@@ -293,7 +294,7 @@ function captureTarget(
     project: activeProject(),
     locationId: source.locationId,
     editingScope: source.owner === 'global' ? 'global' : 'scene',
-    activeStateId: state.activePresentationStateId,
+    activeStateId: selectActivePresentationStateId(state),
     sessionToken: session.token,
   })
   expect(view.availability).toBe('available')

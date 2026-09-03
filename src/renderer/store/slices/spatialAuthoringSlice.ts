@@ -34,7 +34,6 @@ import {
   addSpatialWorldFormulaLayer,
   addSpatialWorldShapeLayer,
   addSpatialWorldTextLayer,
-  buildSpatialAuthoringSnapshot,
   panSpatialSessionCamera,
   redoSpatialAuthoring,
   selectSpatialEditorLayers,
@@ -360,7 +359,6 @@ export function persistSpatialResult(
         legacyFutureCount: spatialAuthoringLegacyHistoryEntryCount(session.history.future),
       })
     : snapshot.resources
-  const snapshotView = buildSpatialAuthoringSnapshot(session)
   const graphSelection = snapshot.spatialGraphSelection
   // A resource-bearing undo/redo keeps the same location, so the location-switch
   // helper would retain the generation and let a stale target pass the freshness
@@ -390,11 +388,6 @@ export function persistSpatialResult(
     dirty: extra.transactionStep || extra.resourceTransition || extra.sidecarDirection || result.historyEntry
       ? true
       : snapshot.dirty,
-    selectedNodeIds: [...session.selection.selectionIds],
-    selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
-    editingScope: session.scope === 'global' ? 'global' : 'scene',
-    activeSceneId: snapshotView.activeCameraFrameId,
-    activePresentationStateId: null,
     ...(extra.clearContentEdit
       ? { editingTextNodeId: null }
       : extra.contentEdit !== undefined
@@ -428,7 +421,6 @@ export function applySpatialBackendState(
   } = {},
 ): Record<string, unknown> {
   const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
-  const snapshot = buildSpatialAuthoringSnapshot(session)
   return {
     ...exclusiveInactiveSurfaces('spatial'),
     spatialSession: session,
@@ -438,11 +430,6 @@ export function applySpatialBackendState(
     spatialPlaybackPathId: null,
     ...continuedCourseResourceStacks(extra.resourceHistory),
     courseAssetSidecar: sidecar,
-    activeSceneId: snapshot.activeCameraFrameId,
-    activePresentationStateId: null,
-    editingScope: session.scope === 'global' ? 'global' : 'scene',
-    selectedNodeIds: [...session.selection.selectionIds],
-    selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
     editingTextNodeId: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,

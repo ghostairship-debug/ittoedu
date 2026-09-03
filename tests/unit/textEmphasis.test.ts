@@ -10,6 +10,7 @@ import {
   selectActiveScene,
   useEditorStore,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
 } from '@/renderer/store/editorStore'
 import { materializeScene } from '@/shared/presentation'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -145,7 +146,7 @@ describe('Course Project V9 native text emphasis', () => {
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.addPresentationState('着重状态')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().updateNode(nodeId, {

@@ -36,6 +36,7 @@ import {
 } from '@/renderer/authoring/stageViewportTransform'
 import {
   selectEffectiveLayerProjection,
+  selectEditingScope,
   selectSlideBackendKind,
   selectSlideAuthoringBackend,
   selectSlideAuthoringDocument,
@@ -1159,7 +1160,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     )!.plane = 'overlay'
     injectCandidate(project)
     render(<NodesTab />)
-    expect(useEditorStore.getState().editingScope).toBe('scene')
+    expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
     expect(layerGroupNodeIds('global-overlay')).toEqual(['global-banner'])
     expect(screen.queryByTestId('node-item-teacher-controller-main')).toBeNull()
     const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()

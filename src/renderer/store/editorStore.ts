@@ -563,12 +563,6 @@ import type { SpatialOwnedState } from './slices/spatialAuthoringSlice'
 import type { CourseLifecycleOwnedState } from './slices/courseLifecycleSlice'
 
 export interface EditorRootOwnedState {
-  activeSceneId: string
-  /** `null` edits the canonical base scene. */
-  activePresentationStateId: string | null
-  editingScope: EditingScope
-  selectedNodeId: string | null
-  selectedNodeIds: string[]
   courseAuthoringSession: CourseAuthoringSession | null
   readonly assetFiles: Record<string, Uint8Array>
 }
@@ -950,24 +944,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readResources: () => readCourseResourceState(get()),
     commit: (patch) => set(patch),
     readDirty: () => get().dirty,
-    readSelection: () => {
-      const current = get()
-      return {
-        selectedNodeIds: selectSelectedNodeIds(current),
-        selectedNodeId: selectSelectedNodeId(current),
-        editingScope: selectEditingScope(current),
-        activeSceneId: selectActiveSceneId(current),
-        activePresentationStateId: selectActivePresentationStateId(current),
-      }
-    },
-    syncSelection: (selection) => set(selection),
     persistDocument: (document, options) => {
       const state = get()
       const active = detectActiveSurface({
         spatialLocationId: state.spatialSession?.selection.locationId ?? null,
         flowLocationId: state.flowSession?.selection.locationId ?? null,
         slideLocationId: state.slideCandidateSnapshot?.locationId ?? null,
-        editingScope: state.editingScope,
+        editingScope: selectEditingScope(state),
         composing: Boolean(
           state.flowTextEdit?.composing ||
           state.v9ContentEdit ||
@@ -988,7 +971,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         spatialLocationId: state.spatialSession?.selection.locationId ?? null,
         flowLocationId: state.flowSession?.selection.locationId ?? null,
         slideLocationId: state.slideCandidateSnapshot?.locationId ?? null,
-        editingScope: state.editingScope,
+        editingScope: selectEditingScope(state),
         composing: Boolean(
           state.flowTextEdit?.composing ||
           state.v9ContentEdit ||
@@ -1053,7 +1036,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     spatialLocationId: get().spatialSession?.selection.locationId ?? null,
     flowLocationId: get().flowSession?.selection.locationId ?? null,
     slideLocationId: get().slideCandidateSnapshot?.locationId ?? null,
-    editingScope: get().editingScope,
+    editingScope: selectEditingScope(get()),
     composing: Boolean(
       get().flowTextEdit?.composing ||
       get().v9ContentEdit ||
@@ -1109,7 +1092,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       spatialLocationId: get().spatialSession?.selection.locationId ?? null,
       flowLocationId: get().flowSession?.selection.locationId ?? null,
       slideLocationId: get().slideCandidateSnapshot?.locationId ?? null,
-      editingScope: get().editingScope,
+      editingScope: selectEditingScope(get()),
       composing: Boolean(
         get().flowTextEdit?.composing ||
         get().v9ContentEdit ||
@@ -1199,12 +1182,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   })
 
   return {
-    activeSceneId: initialSnapshot.sceneId,
-    activePresentationStateId: null,
-    editingScope: 'scene',
     canvasMode: 'edit',
-    selectedNodeId: null,
-    selectedNodeIds: [],
     projectPath: null,
     dirty: false,
     get assetFiles() {
@@ -1257,6 +1235,9 @@ let selectedNodeIdsCache: {
   readonly result: string[]
 } | null = null
 
+/** Sessionless 回退：根镜像已删除，无会话时选区恒为空。 */
+const EMPTY_ROOT_SELECTED_NODE_IDS: readonly string[] = Object.freeze([])
+
 export const selectSelectedNodeIds = (state: EditorState): string[] => {
   const source: readonly string[] = state.spatialSession
     ? state.spatialSession.selection.selectionIds
@@ -1264,7 +1245,7 @@ export const selectSelectedNodeIds = (state: EditorState): string[] => {
       ? state.flowSession.selection.selectedOverlayIds
       : state.slideCandidateSnapshot
         ? state.slideCandidateSnapshot.selection.selectionIds
-        : state.selectedNodeIds
+        : EMPTY_ROOT_SELECTED_NODE_IDS
   if (selectedNodeIdsCache?.source === source) return selectedNodeIdsCache.result
   const result = [...source]
   selectedNodeIdsCache = { source, result }
@@ -1278,17 +1259,17 @@ export const selectEditingScope = (state: EditorState): EditingScope => {
   if (state.spatialSession) return state.spatialSession.scope === 'global' ? 'global' : 'scene'
   if (state.flowSession) return state.flowSession.selection.authoringScope === 'global' ? 'global' : 'scene'
   if (state.slideCandidateSnapshot) return state.slideCandidateSnapshot.scope === 'global' ? 'global' : 'scene'
-  return state.editingScope
+  return 'scene'
 }
 
 export const selectActivePresentationStateId = (state: EditorState): string | null =>
-  state.slideCandidateSnapshot?.selection.stateId ?? state.activePresentationStateId ?? null
+  state.slideCandidateSnapshot?.selection.stateId ?? null
 
 export const selectActiveSceneId = (state: EditorState): string =>
   state.slideCandidateSnapshot?.sceneId
   ?? state.flowSession?.selection.locationId
   ?? state.spatialSession?.selection.locationId
-  ?? state.activeSceneId
+  ?? ''
 
 export const selectActiveScene = (state: EditorState): EditorCanvasSceneView => projectActiveScene(state)
 

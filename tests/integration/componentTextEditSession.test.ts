@@ -6,7 +6,10 @@ import {
 } from '@/renderer/authoring/componentTextEditSession'
 import {
   selectActiveScene,
+  selectActiveSceneId,
+  selectActivePresentationStateId,
   selectEditingNodes,
+  selectEditingScope,
   useEditorStore,
   selectActiveCourseProjectDocument,
 } from '@/renderer/store/editorStore'
@@ -96,9 +99,9 @@ function currentContext(
   const store = useEditorStore.getState()
   return {
     projectId: selectActiveCourseProjectDocument(store)!.id,
-    scope: store.editingScope,
-    sceneId: store.activeSceneId,
-    stateId: store.activePresentationStateId,
+    scope: selectEditingScope(store),
+    sceneId: selectActiveSceneId(store),
+    stateId: selectActivePresentationStateId(store),
     nodes: selectEditingNodes(store),
     componentPackages: store.componentPackages,
     targets,
@@ -128,12 +131,12 @@ describe('component canvas text session with editor store', () => {
     const store = useEditorStore.getState()
     store.importComponentPackage(componentPackage())
     store.addExternalComponentNode(packageId, 100, 80)
-    const sceneId = useEditorStore.getState().activeSceneId
+    const sceneId = selectActiveSceneId(useEditorStore.getState())
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes.find(
       (node) => node.type === 'external-component',
     )!.id
     store.addPresentationState('反馈')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const liveTarget = target(sceneId, nodeId)
     const started = beginComponentTextEditSession(
       liveTarget,
@@ -167,12 +170,12 @@ describe('component canvas text session with editor store', () => {
     const store = useEditorStore.getState()
     store.importComponentPackage(componentPackage())
     store.addExternalComponentNode(packageId, 100, 80)
-    const sceneId = useEditorStore.getState().activeSceneId
+    const sceneId = selectActiveSceneId(useEditorStore.getState())
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes.find(
       (node) => node.type === 'external-component',
     )!.id
     store.addPresentationState('反馈')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const liveTarget = target(sceneId, nodeId)
     const started = beginComponentTextEditSession(
       liveTarget,

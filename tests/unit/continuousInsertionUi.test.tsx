@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
+import {
+  selectActiveScene,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 import { NodesTab } from '@/renderer/ui/NodesTab'
 
 beforeEach(() => {
@@ -22,7 +27,7 @@ describe('explicit layer selection', () => {
     render(<NodesTab />)
     fireEvent.click(screen.getByText(node.name))
 
-    expect(useEditorStore.getState().selectedNodeId).toBe(node.id)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(node.id)
     expect(useEditorStore.getState().activeTab).toBe('properties')
   })
 
@@ -55,7 +60,7 @@ describe('explicit layer selection', () => {
     expect(unselectedName).toBeDefined()
     fireEvent.click(unselectedName!, { ctrlKey: true })
 
-    expect(useEditorStore.getState().selectedNodeIds).toHaveLength(2)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toHaveLength(2)
     expect(useEditorStore.getState().activeTab).toBe('layers')
     expect(nodes).toHaveLength(2)
   })

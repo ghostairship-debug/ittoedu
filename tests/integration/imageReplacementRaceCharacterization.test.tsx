@@ -17,6 +17,7 @@ import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
+  selectSelectedNodeId,
   useEditorStore,
 } from '../../src/renderer/store/editorStore'
 
@@ -252,7 +253,7 @@ function snapshot(): ReplacementSnapshot {
     projectId: project.id,
     revision: project.revision,
     locationId: selectActiveCourseLocationId(state),
-    selectedNodeId: state.selectedNodeId,
+    selectedNodeId: selectSelectedNodeId(state),
     imageAAssetId: imageAssetId(project, IMAGE_A),
     imageBAssetId: imageAssetId(project, IMAGE_B),
     assetIds: Object.keys(project.assets).sort(),

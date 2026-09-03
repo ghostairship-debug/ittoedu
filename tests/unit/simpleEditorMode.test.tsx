@@ -6,6 +6,8 @@ import { collectCourseProjectHealth } from '@/shared/courseProjectHealth'
 import { materializeScene } from '@/shared/presentation'
 import { selectActiveScene, useEditorStore,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectSelectedNodeId,
 } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { RightSidebar } from '@/renderer/ui/RightSidebar'
@@ -173,7 +175,7 @@ describe('simple and professional editor modes', () => {
 
   it('creates, updates, removes, and restores a complete entrance animation atomically', () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
-    const nodeId = useEditorStore.getState().selectedNodeId!
+    const nodeId = selectSelectedNodeId(useEditorStore.getState())!
     const historyBefore = activeHistory().past.length
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
@@ -250,7 +252,7 @@ describe('simple and professional editor modes', () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
     const store = useEditorStore.getState()
     const scene = selectActiveScene(store)
-    const nodeId = store.selectedNodeId!
+    const nodeId = selectSelectedNodeId(store)!
     store.addInteractionRule(scene.id, {
       id: 'advanced-enter-rule',
       name: '复杂入场',
@@ -292,7 +294,7 @@ describe('simple and professional editor modes', () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
     const store = useEditorStore.getState()
     const scene = selectActiveScene(store)
-    const nodeId = store.selectedNodeId!
+    const nodeId = selectSelectedNodeId(store)!
     store.addInteractionRule(scene.id, {
       id: 'professional-node-activation',
       name: '专业自定义入场',
@@ -337,10 +339,10 @@ describe('simple and professional editor modes', () => {
   it('keeps simple entrance animations isolated between presentation states', () => {
     const store = useEditorStore.getState()
     store.addShapeNode('rectangle')
-    const nodeId = useEditorStore.getState().selectedNodeId!
+    const nodeId = selectSelectedNodeId(useEditorStore.getState())!
 
     store.addPresentationState('状态 A')
-    const stateA = useEditorStore.getState().activePresentationStateId!
+    const stateA = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().setSimpleEntranceAnimation(nodeId, {
       effect: 'fade',
       durationMs: 320,
@@ -348,7 +350,7 @@ describe('simple and professional editor modes', () => {
     })
 
     useEditorStore.getState().addPresentationState('状态 B')
-    const stateB = useEditorStore.getState().activePresentationStateId!
+    const stateB = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().setSimpleEntranceAnimation(nodeId, {
       effect: 'slide',
       direction: 'right',

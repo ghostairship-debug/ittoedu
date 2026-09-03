@@ -20,6 +20,7 @@ import {
 } from '@/renderer/project/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
   selectActiveScene,
   selectMediaAssetFiles,
   useEditorStore,
@@ -207,7 +208,7 @@ catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩�
 
     expect(activeExternalNodes()).toHaveLength(expectedPackageCount)
     useEditorStore.getState().addPresentationState('四组件状态覆盖')
-    const stateId = useEditorStore.getState().activePresentationStateId
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())
     expect(stateId).toBeTruthy()
     for (const [index, component] of packages.entries()) {
       const node = activeExternalNodes().find(

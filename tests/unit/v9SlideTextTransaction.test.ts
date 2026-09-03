@@ -43,6 +43,7 @@ import {
 import {
   selectEditingNodes,
   selectSelectedNode,
+  selectSelectedNodeIds,
   selectSlideBackendKind,
   selectSlideAuthoringBackend,
   useEditorStore,
@@ -557,7 +558,7 @@ describe('V9 Slide text/formula transactions', () => {
       createSlideAuthoringBackend(session),
     )
     const store = useEditorStore.getState()
-    expect(store.selectedNodeIds).toEqual([])
+    expect(selectSelectedNodeIds(store)).toEqual([])
 
     store.beginTextEdit('slide-title', 'canvas')
     store.updateTextEditDraft(
@@ -569,7 +570,7 @@ describe('V9 Slide text/formula transactions', () => {
     store.commitTextEdit()
 
     const after = useEditorStore.getState()
-    expect(after.selectedNodeIds).toContain('slide-title')
+    expect(selectSelectedNodeIds(after)).toContain('slide-title')
     expect(after.v9ContentEdit).toBeNull()
     expect(after.editingTextNodeId).toBeNull()
     const selected = selectSelectedNode(after)

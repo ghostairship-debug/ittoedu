@@ -9,8 +9,11 @@ import { editableComponentPackageId } from '../../src/renderer/components/editab
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
   selectActiveScene,
   useEditorStore,
+  selectEditingScope,
+  selectSelectedNodeId,
   selectSlideSceneList,
 } from '../../src/renderer/store/editorStore'
 
@@ -33,14 +36,14 @@ function selectRuntimeView(editingScope: 'scene' | 'global') {
     locationId,
     editingScope,
     activeStateId: location?.kind === 'slide-scene'
-      ? state.activePresentationStateId
+      ? selectActivePresentationStateId(state)
       : null,
     sessionToken,
   })
 }
 
 function createRuntimeTemplate(editingScope: 'scene' | 'global') {
-  if (useEditorStore.getState().editingScope !== editingScope) {
+  if (selectEditingScope(useEditorStore.getState()) !== editingScope) {
     useEditorStore.getState().setEditingScope(editingScope)
   }
   const missingView = selectRuntimeView(editingScope)
@@ -210,7 +213,7 @@ describe('专业开发模式', () => {
       project,
       locationId,
       editingScope: 'scene',
-      activeStateId: state.activePresentationStateId,
+      activeStateId: selectActivePresentationStateId(state),
       sessionToken,
     })
     if (view.availability !== 'available') {
@@ -345,7 +348,7 @@ describe('专业开发模式', () => {
     const nextSource = `${source}\n// captured base state`
     installSceneRuntime(scene.id, source)
     useEditorStore.getState().addPresentationState('讲解状态')
-    const namedStateId = useEditorStore.getState().activePresentationStateId
+    const namedStateId = selectActivePresentationStateId(useEditorStore.getState())
     expect(namedStateId).not.toBeNull()
     useEditorStore.getState().setActivePresentationState(null)
     let capturedStateId: string | null | undefined = undefined
@@ -502,7 +505,7 @@ describe('专业开发模式', () => {
     expect(screen.getByRole('button', { name: '校验并应用' })).toBeEnabled()
 
     act(() => useEditorStore.getState().addTextNode())
-    expect(useEditorStore.getState().selectedNodeId).not.toBe(firstNode.id)
+    expect(selectSelectedNodeId(useEditorStore.getState())).not.toBe(firstNode.id)
     expect(screen.getByTestId('code-document-stale')).toHaveTextContent('草稿未写入工程')
     expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
     expect((editor as HTMLTextAreaElement).value).toContain('不得迟到写入的对象')
@@ -526,8 +529,8 @@ describe('专业开发模式', () => {
       .toBe(before.revision + 1)
     expect(selectActiveCourseLocationId(useEditorStore.getState()))
       .toBe(beforeLocationId)
-    expect(useEditorStore.getState().editingScope).toBe('scene')
-    expect(useEditorStore.getState().activePresentationStateId).toBeNull()
+    expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
     expect((screen.getByLabelText('场景运行时源码') as HTMLTextAreaElement).value)
       .toContain('runtimeApiVersion: 2')
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
@@ -552,7 +555,7 @@ describe('专业开发模式', () => {
   it('全局 Runtime 模板创建后保留全局作用域与当前命名状态', () => {
     useEditorStore.getState().createNewProject()
     useEditorStore.getState().addPresentationState('讲解状态')
-    const namedStateId = useEditorStore.getState().activePresentationStateId
+    const namedStateId = selectActivePresentationStateId(useEditorStore.getState())
     expect(namedStateId).not.toBeNull()
     useEditorStore.getState().setActivePresentationState(namedStateId)
     useEditorStore.getState().setEditingScope('global')
@@ -568,8 +571,8 @@ describe('专业开发模式', () => {
       .toBe(beforeRevision + 1)
     expect(selectActiveCourseLocationId(useEditorStore.getState()))
       .toBe(beforeLocationId)
-    expect(useEditorStore.getState().editingScope).toBe('global')
-    expect(useEditorStore.getState().activePresentationStateId).toBe(namedStateId)
+    expect(selectEditingScope(useEditorStore.getState())).toBe('global')
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(namedStateId)
     expect((screen.getByLabelText('全局运行时源码') as HTMLTextAreaElement).value)
       .toContain('runtimeApiVersion: 2')
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()

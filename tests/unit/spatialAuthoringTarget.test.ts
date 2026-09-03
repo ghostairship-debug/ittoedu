@@ -13,8 +13,16 @@ import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { markSpatialWorldContentComposing } from '@/renderer/authoring/spatialWorldAuthoring'
 import { createSpatialWorldTargetAuthoringController } from '@/renderer/authoring/spatialWorldTargetAuthoring'
 import { worldToClient } from '@/renderer/authoring/stageViewportTransform'
-import { createSpatialWorldViewTransform } from '@/renderer/course/spatialEditorCommands'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import {
+  buildSpatialAuthoringSnapshot,
+  createSpatialWorldViewTransform,
+} from '@/renderer/course/spatialEditorCommands'
+import {
+  selectActiveSceneId,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 
 const VIEWPORT = { x: 0, y: 0, width: 800, height: 450 }
 
@@ -47,9 +55,9 @@ function expectPersistentStateUnchanged(before: ReturnType<typeof useEditorStore
   expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
   expect(after.spatialContentEdit).toBe(before.spatialContentEdit)
   expect(after.spatialGraphSelection).toBe(before.spatialGraphSelection)
-  expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
-  expect(after.selectedNodeId).toBe(before.selectedNodeId)
-  expect(after.activeSceneId).toBe(before.activeSceneId)
+  expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
+  expect(after.spatialSession?.selection.selectionIds.at(-1) ?? null).toBe(before.spatialSession?.selection.selectionIds.at(-1) ?? null)
+  expect(selectActiveSceneId(after)).toBe(selectActiveSceneId(before))
   expect(after.dirty).toBe(before.dirty)
 }
 
@@ -149,7 +157,7 @@ describe('Spatial canonical authoring targets', () => {
       y: frame.y,
       zoom: frame.zoom,
     })
-    expect(after.activeSceneId).toBe(frame.id)
+    expect(after.spatialSession ? buildSpatialAuthoringSnapshot(after.spatialSession).activeCameraFrameId : null).toBe(frame.id)
     expect(after.courseAssetSidecar).toBe(initial.courseAssetSidecar)
     expect(after.courseAssetSidecarPast).toBe(initial.courseAssetSidecarPast)
     expect(after.courseAssetSidecarFuture).toBe(initial.courseAssetSidecarFuture)
@@ -440,8 +448,8 @@ describe('Spatial canonical authoring targets', () => {
     expect(after.spatialContentEdit).toBeNull()
     expect(after.spatialGraphSelection).toEqual({ kind: 'path', id: pathId })
     expect(after.spatialSession?.selection.selectionIds).toEqual([])
-    expect(after.selectedNodeIds).toEqual([])
-    expect(after.selectedNodeId).toBeNull()
+    expect(selectSelectedNodeIds(after)).toEqual([])
+    expect(selectSelectedNodeId(after)).toBeNull()
     expect(after.spatialSession?.history.past).toHaveLength(beforeSession.history.past.length + 1)
     expect(after.spatialSession?.history.past.at(-1)).toBe(beforeSession.history.present)
     expect(after.courseAssetSidecarPast).toHaveLength(before.courseAssetSidecarPast.length + 1)

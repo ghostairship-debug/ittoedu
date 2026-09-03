@@ -22,6 +22,7 @@ import {
 } from '@/renderer/authoring/flowTextEdit'
 import {
   selectActiveCourseProjectDocument,
+  selectEditingScope,
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -1031,11 +1032,11 @@ describe('Flow product shell wiring', () => {
     const blockCount = flowSurface().blocks.length
     fireEvent.click(screen.getByTestId('add-text'))
     expect(flowSurface().blocks).toHaveLength(blockCount + 1)
-    expect(useEditorStore.getState().editingScope).toBe('scene')
+    expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
     act(() => useEditorStore.getState().setEditingScope('global'))
     fireEvent.click(screen.getByTestId('add-formula'))
     expect(flowSurface().blocks).toHaveLength(blockCount + 2)
-    expect(useEditorStore.getState().editingScope).toBe('global')
+    expect(selectEditingScope(useEditorStore.getState())).toBe('global')
     expect(flowDocument().globalLayerItems).toHaveLength(globalCount + 1)
     expect(useEditorStore.getState().errorMessage).toBeNull()
   })

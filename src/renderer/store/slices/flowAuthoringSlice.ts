@@ -422,11 +422,6 @@ export function persistFlowResult(
     dirty: extra.transactionStep || extra.resourceTransition || extra.sidecarDirection || result.historyEntry
       ? true
       : snapshot.dirty,
-    selectedNodeIds: [...selection.selectedOverlayIds],
-    selectedNodeId: selection.selectedOverlayIds.at(-1) ?? null,
-    editingScope: selection.authoringScope === 'global' ? 'global' : 'scene',
-    activeSceneId: selection.locationId,
-    activePresentationStateId: null,
     errorMessage: null,
     ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
     ...(nextCourseAuthoringSession
@@ -455,11 +450,6 @@ export function applyFlowBackendState(
     flowTextEdit: null,
     ...continuedCourseResourceStacks(extra.resourceHistory),
     courseAssetSidecar: sidecar,
-    activeSceneId: session.selection.locationId,
-    activePresentationStateId: null,
-    editingScope: session.selection.authoringScope === 'global' ? 'global' : 'scene',
-    selectedNodeIds: [...session.selection.selectedOverlayIds],
-    selectedNodeId: session.selection.selectedOverlayIds.at(-1) ?? null,
     editingTextNodeId: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,

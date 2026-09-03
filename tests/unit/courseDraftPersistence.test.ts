@@ -18,6 +18,7 @@ import {
   selectHasUnsavedCourseChanges,
   useEditorStore,
   type CourseProjectPersistenceSnapshot,
+  selectSelectedNodeId,
   selectSlideSceneList,
   selectEditingNodes,
 } from '@/renderer/store/editorStore'
@@ -71,7 +72,7 @@ function createSlideFixture(): DraftFixture {
   const store = useEditorStore.getState()
   store.createNewProject()
   store.addTextNode()
-  const targetId = useEditorStore.getState().selectedNodeId
+  const targetId = selectSelectedNodeId(useEditorStore.getState())
   if (!targetId) throw new Error('expected selected Slide text')
   const originalText = nativeText(activeDocument(), targetId)
   acknowledgeBaseline('slide-baseline.h5lesson')
@@ -109,7 +110,7 @@ function createSpatialFixture(): DraftFixture {
   const store = useEditorStore.getState()
   store.createNewSpatialProject()
   store.addTextNode()
-  const targetId = useEditorStore.getState().selectedNodeId
+  const targetId = selectSelectedNodeId(useEditorStore.getState())
   if (!targetId) throw new Error('expected selected Spatial text')
   const originalText = nativeText(activeDocument(), targetId)
   acknowledgeBaseline('spatial-baseline.h5lesson')

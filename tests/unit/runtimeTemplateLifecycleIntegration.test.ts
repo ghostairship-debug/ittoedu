@@ -5,6 +5,9 @@ import { selectRuntimeSourceAuthoringView } from '@/renderer/runtime/runtimeSour
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectEditingScope,
+  selectSelectedNodeIds,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -75,7 +78,7 @@ function createRuntimeTemplate(owner: 'scene' | 'global'): string {
     project,
     locationId,
     editingScope: scope,
-    activeStateId: state.activePresentationStateId,
+    activeStateId: selectActivePresentationStateId(state),
     sessionToken,
   })
   if (
@@ -162,7 +165,7 @@ describe('Runtime template lifecycle through unified layer deletion', () => {
     store.setEditingScope('scene')
     store.selectNode(sceneRuntimeId)
 
-    expect(useEditorStore.getState().selectedNodeIds).toEqual([sceneRuntimeId])
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([sceneRuntimeId])
     store.deleteSelectedNodes()
 
     expect(hasSceneRuntime()).toBe(false)
@@ -211,11 +214,9 @@ describe('Runtime template lifecycle through unified layer deletion', () => {
     store.setEditingScope('global')
     store.selectNode(globalRuntimeId)
 
-    expect(useEditorStore.getState()).toMatchObject({
-      activePresentationStateId: 'state_initial',
-      editingScope: 'global',
-      selectedNodeIds: [globalRuntimeId],
-    })
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe('state_initial')
+    expect(selectEditingScope(useEditorStore.getState())).toBe('global')
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([globalRuntimeId])
     store.deleteSelectedNodes()
 
     expect(hasGlobalRuntime()).toBe(false)

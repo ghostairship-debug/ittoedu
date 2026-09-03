@@ -16,6 +16,9 @@ import { clearFlowEditorSelection } from '@/renderer/course/flowEditorSlice'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectActiveSceneId,
+  selectEditingScope,
   selectSlideAuthoringBackend,
   selectSlideAuthoringDocument,
   useEditorStore,
@@ -171,18 +174,18 @@ afterEach(() => cleanup())
 
 describe('Project V8 global-layer editor UI', () => {
   it('switches explicitly between the fixed global entry and a scene', () => {
-    const sceneId = useEditorStore.getState().activeSceneId
+    const sceneId = selectActiveSceneId(useEditorStore.getState())
     render(<ScenePanel />)
 
     fireEvent.click(screen.getByTestId('global-layer-entry'))
-    expect(useEditorStore.getState().editingScope).toBe('global')
+    expect(selectEditingScope(useEditorStore.getState())).toBe('global')
     expect(screen.getByTestId('global-layer-entry')).toHaveAttribute(
       'aria-pressed',
       'true',
     )
 
     fireEvent.click(screen.getByTestId(`scene-item-${sceneId}`))
-    expect(useEditorStore.getState().editingScope).toBe('scene')
+    expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
   })
 
   it('shows native elements and only enables global-compatible component packages', () => {
@@ -524,8 +527,8 @@ describe('Project V8 global-layer editor UI', () => {
     })
     useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().selectNode(null)
+    expect(selectEditingScope(useEditorStore.getState())).toBe('global')
     expect(useEditorStore.getState()).toMatchObject({
-      editingScope: 'global',
       spatialGraphSelection: {
         kind: 'path',
         id: 'retained-spatial-path',
@@ -542,9 +545,9 @@ describe('Project V8 global-layer editor UI', () => {
   it('offers a state-free scene directory and keeps fixed scene targets as an advanced action', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    const targetSceneId = useEditorStore.getState().activeSceneId
+    const targetSceneId = selectActiveSceneId(useEditorStore.getState())
     store.addPresentationState('反馈')
-    const targetStateId = useEditorStore.getState().activePresentationStateId!
+    const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     store.setEditingScope('global')
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',

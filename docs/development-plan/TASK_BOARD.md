@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037z-root-selection-tests-and-removal](tasks/1.1/r11-037z-root-selection-tests-and-removal.md) | queued | — | none | 迁移测试对五个根镜像字段（`activeSceneId`、`activePresentationStateId`、`selectedNodeId`、`selectedNodeIds`、`editingScope`）的读取，然后删除五个根字段及 `kernel.readSelection/syncSelection` 镜像写入；不删除各 Surface 自有 selection。 |
+| [r11-052a-player-scene-tests](tasks/1.1/r11-052a-player-scene-tests.md) | queued | — | none | 处理 `playerSceneMotionLifecycle.test.ts`、`playerSceneComponentEventBuffer.test.ts`、`playerSceneAnimationMode.test.ts` 三个 V1 Player 内部机制测试文件；受支持行为只由 V9/Published V2 最近层测试承接。 |

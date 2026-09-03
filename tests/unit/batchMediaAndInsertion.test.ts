@@ -18,6 +18,9 @@ import {
   useEditorStore,
   selectActiveCourseProjectDocument,
   selectCandidateGlobalLayerItems,
+  selectEditingScope,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
   selectSlideSceneList,
   selectMediaAssetFiles,
 } from '@/renderer/store/editorStore'
@@ -130,7 +133,7 @@ describe('batch media transactions', () => {
     expect(nodeIds).toHaveLength(3)
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(state.activeTab).toBe('elements')
-    expect(state.selectedNodeIds).toEqual(nodeIds)
+    expect(selectSelectedNodeIds(state)).toEqual(nodeIds)
     expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
       'asset_a',
       'asset_b',
@@ -205,7 +208,7 @@ describe('batch media transactions', () => {
     const state = useEditorStore.getState()
     expect(selectActiveScene(state).nodes).toHaveLength(0)
     expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toHaveLength(items.length)
-    expect(state.selectedNodeIds).toEqual([])
+    expect(selectSelectedNodeIds(state)).toEqual([])
     expect(activeHistory().past).toHaveLength(1)
   })
 
@@ -290,7 +293,7 @@ describe('continuous insertion context', () => {
     let state = useEditorStore.getState()
     const nodes = selectActiveScene(state).nodes
     expect(state.activeTab).toBe('elements')
-    expect(state.selectedNodeId).toBe(nodes.at(-1)!.id)
+    expect(selectSelectedNodeId(state)).toBe(nodes.at(-1)!.id)
     expect(new Set(nodes.map((node) => `${node.x}:${node.y}`)).size).toBe(nodes.length)
 
     store.setActiveTab('elements')
@@ -314,8 +317,8 @@ describe('continuous insertion context', () => {
     expect(state.activeTab).toBe('elements')
     expect(projectedGlobalLayer(state)).toHaveLength(1)
     expect(projectedGlobalLayer(state)[0]!.node.type).toBe('teacher-controller')
-    expect(state.selectedNodeId).toBe(projectedGlobalLayer(state)[0]!.node.id)
-    expect(state.editingScope).toBe('global')
+    expect(selectSelectedNodeId(state)).toBe(projectedGlobalLayer(state)[0]!.node.id)
+    expect(selectEditingScope(state)).toBe('global')
 
     store.updatePlayback({ controls: 'none' })
     store.setActiveTab('elements')
@@ -323,6 +326,6 @@ describe('continuous insertion context', () => {
 
     const restoredState = useEditorStore.getState()
     expect(restoredState.activeTab).toBe('properties')
-    expect(restoredState.selectedNodeId).toBe(projectedGlobalLayer(restoredState)[0]!.node.id)
+    expect(selectSelectedNodeId(restoredState)).toBe(projectedGlobalLayer(restoredState)[0]!.node.id)
   })
 })

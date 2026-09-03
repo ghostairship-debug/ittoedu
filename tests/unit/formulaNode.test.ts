@@ -11,6 +11,7 @@ import {
   selectActiveScene,
   useEditorStore,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
 } from '@/renderer/store/editorStore'
 import { materializeScene } from '@/shared/presentation'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -199,7 +200,7 @@ describe('Course Project V9 FormulaNode contract', () => {
     if (formula?.type !== 'formula') throw new Error('Expected FormulaNode')
     const formulaId = formula.formulaId
     store.addPresentationState('公式答案')
-    const stateId = useEditorStore.getState().activePresentationStateId!
+    const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().updateNode(formula.id, {

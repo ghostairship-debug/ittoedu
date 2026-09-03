@@ -14,6 +14,7 @@ import {
 import { onElementAnimationPreviewRequested } from '@/renderer/phaser/elementAnimationPreviewBus'
 import {
   selectEditingNodes,
+  selectSelectedNodeId,
   selectSlideAuthoringSnapshot,
   selectSlideBackendKind,
   selectSlideAuthoringBackend,
@@ -277,7 +278,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(firstRow).toBeTruthy()
     fireEvent.click(firstRow!, { detail: 0 })
 
-    expect(useEditorStore.getState().selectedNodeId).toBe(firstId)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(firstId)
 
     const controller = createSlideWorkspaceAuthoringController(storeAuthoringPorts())
     controller.selectFromLayerIds([firstId], VIEW)
@@ -432,7 +433,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     fireEvent.compositionEnd(nameInput)
     fireEvent.change(nameInput, { target: { value: '不得迟到写入' } })
     act(() => useEditorStore.getState().addTextNode())
-    const secondId = useEditorStore.getState().selectedNodeId
+    const secondId = selectSelectedNodeId(useEditorStore.getState())
     expect(secondId).not.toBe(firstId)
     expect(nameInput).toHaveValue('不得迟到写入')
     expect(nameInput).toHaveAttribute('aria-invalid', 'true')
@@ -445,9 +446,9 @@ describe('V9 slide product integration on the real V8 UI', () => {
   it('同值图层切换后拒绝滑杆的迟到 pointerup，不写入新目标', () => {
     injectCandidate()
     act(() => useEditorStore.getState().addRectangleNode())
-    const firstId = useEditorStore.getState().selectedNodeId
+    const firstId = selectSelectedNodeId(useEditorStore.getState())
     act(() => useEditorStore.getState().addRectangleNode())
-    const secondId = useEditorStore.getState().selectedNodeId
+    const secondId = selectSelectedNodeId(useEditorStore.getState())
     if (!firstId || !secondId || firstId === secondId) throw new Error('expected two shapes')
     act(() => useEditorStore.getState().selectNode(firstId))
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -473,7 +474,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(afterLate).toBe(beforeLate)
     expect(afterLate.history).toBe(beforeLate.history)
     expect(afterLate.selection).toBe(beforeLate.selection)
-    expect(useEditorStore.getState().selectedNodeId).toBe(secondId)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(secondId)
     for (const id of [firstId, secondId]) {
       const shape = selectEditingNodes(useEditorStore.getState()).find((node) => node.id === id)
       if (!shape || shape.type !== 'shape' || !shape.style) throw new Error('expected shape')
@@ -526,7 +527,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
       expect(afterBackend.getSession().selection).toBe(beforeSession.selection)
       expect(afterLate.v9ContentEdit).toBe(beforeEdit)
       expect(afterLate.dirty).toBe(beforeLate.dirty)
-      expect(afterLate.selectedNodeId).toBe(secondId)
+      expect(selectSelectedNodeId(afterLate)).toBe(secondId)
       expect(selectEditingNodes(afterLate).find((node) => node.id === secondId)?.type).toBe('text')
       expect(afterLate.errorMessage).toMatch(/目标已经改变|草稿/)
     },

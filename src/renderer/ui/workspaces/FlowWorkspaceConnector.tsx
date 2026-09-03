@@ -17,7 +17,6 @@ type FlowWorkspaceStore = {
   readonly flowSession: FlowAuthoringSession | null
   readonly courseAuthoringSession: CourseAuthoringSession | null
   readonly canvasMode: 'edit' | 'run'
-  readonly editingScope: 'scene' | 'global'
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly flowTextEdit: FlowTextEditSession | null
   readonly runFlowAuthoringIntent: FlowCurrentSessionCommandPort['run']

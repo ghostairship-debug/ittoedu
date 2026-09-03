@@ -23,14 +23,6 @@ import {
 
 export const SESSIONLESS_COURSE_REASON = '当前会话没有课程工程'
 
-export type EditorUiSelection = {
-  selectedNodeIds: string[]
-  selectedNodeId: string | null
-  editingScope: 'scene' | 'global'
-  activeSceneId: string
-  activePresentationStateId: string | null
-}
-
 export type EditorFeedback = {
   errorMessage?: string | null
   statusMessage?: string | null
@@ -63,8 +55,6 @@ export type EditorStoreKernel = {
   setFeedback(feedback: EditorFeedback): void
   markDirty(dirty?: boolean): void
   readDirty(): boolean
-  readSelection(): EditorUiSelection
-  syncSelection(selection: EditorUiSelection): void
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   failSessionless(reason?: string): never
@@ -77,8 +67,6 @@ export type EditorStoreKernelHost = {
   readResources(): CourseResourceState
   commit(patch: Record<string, unknown>): void
   readDirty(): boolean
-  readSelection(): EditorUiSelection
-  syncSelection(selection: EditorUiSelection): void
   persistDocument?(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
 }
@@ -105,8 +93,6 @@ export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStor
       host.commit({ dirty })
     },
     readDirty: host.readDirty,
-    readSelection: host.readSelection,
-    syncSelection: host.syncSelection,
     persistDocument(document, options) {
       return host.persistDocument ? host.persistDocument(document, options) : false
     },

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  selectActivePresentationStateId,
   selectSlideAuthoringDocument,
   selectSlideAuthoringSnapshot,
   useEditorStore,
@@ -126,7 +127,7 @@ describe('scene presentation state UI', () => {
     )
 
     fireEvent.click(initial)
-    expect(useEditorStore.getState().activePresentationStateId).toBe(
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(
       'state_initial',
     )
     expect(initial).toHaveAttribute('aria-pressed', 'true')

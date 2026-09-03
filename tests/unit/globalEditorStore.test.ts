@@ -12,9 +12,14 @@ import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectActiveSceneId,
+  selectEditingScope,
   selectMediaAssetFiles,
   useEditorStore,
   selectCandidateGlobalLayerItems,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
   selectSlideSceneList,
 } from '@/renderer/store/editorStore'
 
@@ -189,7 +194,7 @@ function captureRuntimeTitleTarget(
     sessionToken,
     projectId: project.id,
     surfaceId: surface.id,
-    stateId: state.activePresentationStateId,
+    stateId: selectActivePresentationStateId(state),
     owner,
     sceneId: owner === 'scene' ? scene!.id : null,
     itemId: item.layerItemId,
@@ -291,7 +296,7 @@ describe('Project V8 global-layer editor store', () => {
         component: { packageId: global.manifest.id },
       },
     })
-    expect(state.selectedNodeId).toBe(placement.node.id)
+    expect(selectSelectedNodeId(state)).toBe(placement.node.id)
 
     store.undo()
     expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(
@@ -529,15 +534,15 @@ describe('Project V8 global-layer editor store', () => {
     store.importComponentPackage(global)
 
     store.setEditingScope('global')
-    expect(useEditorStore.getState().selectedNodeIds).toEqual([])
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
     store.addExternalComponentNode(global.manifest.id)
     const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component',
     )!.node
     store.updateNode(globalNode.id, { x: 900 })
 
-    store.setActiveScene(useEditorStore.getState().activeSceneId)
-    expect(useEditorStore.getState().editingScope).toBe('scene')
+    store.setActiveScene(selectActiveSceneId(useEditorStore.getState()))
+    expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0]).toEqual(sceneNode)
     store.selectNode(sceneNode.id)
     store.updateNode(sceneNode.id, { x: 120 })
@@ -571,7 +576,7 @@ describe('Project V8 global-layer editor store', () => {
     let state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(2)
     const duplicate = projectedGlobalLayer(state).find(
-      (item) => item.node.id === state.selectedNodeId,
+      (item) => item.node.id === selectSelectedNodeId(state),
     )!.node
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions.some((rule) => (
       rule.trigger.type === 'node.click' && rule.trigger.nodeId === duplicate.id
@@ -589,7 +594,7 @@ describe('Project V8 global-layer editor store', () => {
     store.copySelectedNodes()
     store.pasteNodes()
     state = useEditorStore.getState()
-    const pastedId = state.selectedNodeId!
+    const pastedId = selectSelectedNodeId(state)!
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(2)
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions.some((rule) => (
       rule.trigger.type === 'node.click' && rule.trigger.nodeId === pastedId
@@ -599,9 +604,9 @@ describe('Project V8 global-layer editor store', () => {
   it('keeps scene copies in global scopes and removes deleted controller targets', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    const targetSceneId = useEditorStore.getState().activeSceneId
+    const targetSceneId = selectActiveSceneId(useEditorStore.getState())
     store.addPresentationState('目标状态')
-    const targetStateId = useEditorStore.getState().activePresentationStateId!
+    const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',
     )!.node
@@ -633,7 +638,7 @@ describe('Project V8 global-layer editor store', () => {
     })
 
     store.duplicateScene(targetSceneId)
-    const copiedSceneId = useEditorStore.getState().activeSceneId
+    const copiedSceneId = selectActiveSceneId(useEditorStore.getState())
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.globalInteractions[0]?.conditions)
       .toEqual([{ type: 'scene.in', sceneIds: [targetSceneId, copiedSceneId] }])
 
@@ -668,7 +673,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
 
     let state = useEditorStore.getState()
     expect(activeHistory().past).toHaveLength(initialPastCount)
-    expect(state.selectedNodeId).toBe(controller.item.layerItemId)
+    expect(selectSelectedNodeId(state)).toBe(controller.item.layerItemId)
     expect(state.statusMessage).toBe('教师控制器已可用')
 
     state.updateNode(controller.item.layerItemId, { locked: true })

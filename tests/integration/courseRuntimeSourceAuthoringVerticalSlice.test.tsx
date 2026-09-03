@@ -18,6 +18,7 @@ import {
 } from '@/renderer/runtime/runtimeSourceAuthoringView'
 import {
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
   selectMediaAssetFiles,
   useEditorStore,
   selectCandidateGlobalLayerItems,
@@ -409,7 +410,7 @@ function captureRuntimeSourceTarget(
     project: activeProject(),
     locationId: fixture.locationId,
     editingScope: fixture.owner === 'global' ? 'global' : 'scene',
-    activeStateId: state.activePresentationStateId,
+    activeStateId: selectActivePresentationStateId(state),
     sessionToken: session.token,
   })
   expect(view.availability).toBe('available')

@@ -5,6 +5,7 @@ import { sceneNodeSchema } from '../../src/shared/projectSchema'
 import { createImageNode } from '../../src/renderer/project/nativeNodeFactories'
 import { selectActiveScene, useEditorStore,
   selectActiveCourseProjectDocument,
+  selectSelectedNodeId,
   selectSlideSceneList,
 } from '../../src/renderer/store/editorStore'
 import { PropertiesTab } from '../../src/renderer/ui/PropertiesTab'
@@ -28,7 +29,7 @@ function addImage(): string {
     width: 320,
     height: 180,
   }, new Uint8Array([1, 2, 3, 4]))
-  return useEditorStore.getState().selectedNodeId!
+  return selectSelectedNodeId(useEditorStore.getState())!
 }
 
 describe('image safe-area metadata', () => {

@@ -14,7 +14,12 @@ import {
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectActiveSceneId,
+  selectEditingScope,
   selectMediaAssetFiles,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
@@ -92,11 +97,11 @@ function selectionSnapshot() {
   const state = useEditorStore.getState()
   return {
     locationId: selectActiveCourseLocationId(state),
-    activeSceneId: state.activeSceneId,
-    activePresentationStateId: state.activePresentationStateId,
-    selectedNodeId: state.selectedNodeId,
-    selectedNodeIds: [...state.selectedNodeIds],
-    editingScope: state.editingScope,
+    activeSceneId: selectActiveSceneId(state),
+    activePresentationStateId: selectActivePresentationStateId(state),
+    selectedNodeId: selectSelectedNodeId(state),
+    selectedNodeIds: [...selectSelectedNodeIds(state)],
+    editingScope: selectEditingScope(state),
     slide: state.slideBackend?.kind === 'slide-authoring'
       ? structuredClone(state.slideBackend.getSession().selection)
       : null,

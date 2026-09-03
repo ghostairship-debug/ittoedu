@@ -11,7 +11,12 @@ import {
 } from '@/renderer/project/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectActiveSceneId,
+  selectEditingScope,
   selectMediaAssetFiles,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -154,11 +159,11 @@ function authoritativeSnapshot() {
     componentPackagesPast: structuredClone(state.courseComponentPackagesPast),
     componentPackagesFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
-    activeSceneId: state.activeSceneId,
-    activePresentationStateId: state.activePresentationStateId,
-    selectedNodeId: state.selectedNodeId,
-    selectedNodeIds: [...state.selectedNodeIds],
-    editingScope: state.editingScope,
+    activeSceneId: selectActiveSceneId(state),
+    activePresentationStateId: selectActivePresentationStateId(state),
+    selectedNodeId: selectSelectedNodeId(state),
+    selectedNodeIds: [...selectSelectedNodeIds(state)],
+    editingScope: selectEditingScope(state),
     dirty: state.dirty,
     errorMessage: state.errorMessage,
     statusMessage: state.statusMessage,
@@ -197,7 +202,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(selectMediaAssetFiles(stateAtCapture)[REPLACEMENT_ASSET_ID]).toBeUndefined()
 
     useEditorStore.getState().selectNode(SELECTION_B)
-    expect(useEditorStore.getState().selectedNodeId).toBe(SELECTION_B)
+    expect(selectSelectedNodeId(useEditorStore.getState())).toBe(SELECTION_B)
     expect(activeProject().revision).toBe(beforeProject.revision)
 
     const result = useEditorStore.getState().replaceImageAssetAtTarget(
@@ -217,8 +222,8 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
 
     const after = useEditorStore.getState()
     const afterProject = activeProject()
-    expect(after.selectedNodeId).toBe(SELECTION_B)
-    expect(after.selectedNodeIds).toEqual([SELECTION_B])
+    expect(selectSelectedNodeId(after)).toBe(SELECTION_B)
+    expect(selectSelectedNodeIds(after)).toEqual([SELECTION_B])
     expect(afterProject.revision).toBe(beforeProject.revision + 1)
     expect(imageAssetId(afterProject)).toBe(REPLACEMENT_ASSET_ID)
     expect(sceneItem(afterProject, SELECTION_B)).toEqual(beforeSelectionB)
