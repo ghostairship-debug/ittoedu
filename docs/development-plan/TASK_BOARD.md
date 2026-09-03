@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037s-layer-command-owners](tasks/1.1/r11-037s-layer-command-owners.md) | queued | — | none | 把全局图层设置、重排、owner 移动和位置可见性的 Flow/Spatial 实现迁到对应 slice；cross-surface 只分派。 |
+| [r11-037t-routed-action-owners](tasks/1.1/r11-037t-routed-action-owners.md) | queued | — | none | 把 routeEditorAction 的三 Surface adapter、global delete 分支和 focus 推导迁到各 slice；router 只组装 snapshot 并分派。 |

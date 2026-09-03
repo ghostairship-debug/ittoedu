@@ -50,14 +50,9 @@ import type {
 } from '../store/editorStore'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
 import type { GlobalLayerItem, TextRun, TextRunStyle } from '../../shared/projectTypes'
-import { findCourseSlideScene, commandTargetForRow, locationVisibilityFromScenePatch } from '../store/v9LayerMutations'
-import { setGlobalLayerScenePlane } from '../course/globalLayerCommands'
+import { findCourseSlideScene, commandTargetForRow } from '../store/v9LayerMutations'
 import {
   findGlobalTeacherController,
-  moveEffectiveLayerOwner,
-  reorderEffectiveLayerItems,
-  setGlobalLayerLocationVisibility,
-  setGlobalLayerVisibleAtLocation,
   deleteEffectiveLayerItems,
   type LayerCommandResult,
 } from '../course/effectiveLayerCommands'
@@ -133,6 +128,9 @@ export type CrossSurfaceSlidePorts = {
     patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
   ): void
   reorderNodes(nodeIds: string[]): void
+  moveGlobalLayerOwner(fromId: string, toId: string): void
+  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
+  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
 } & SurfaceNodeCommands
 
 export type CrossSurfaceFlowPorts = {
@@ -162,6 +160,11 @@ export type CrossSurfaceFlowPorts = {
   ensureTeacherController(): void
   patch(patch: { flowTextEdit?: null }): void
   activateBlock(locationId: string): boolean
+  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  reorderNodes(nodeIds: string[]): void
+  moveGlobalLayerOwner(fromId: string, toId: string): void
+  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
+  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
 } & SurfaceNodeCommands
 
 export type CrossSurfaceSpatialPorts = {
@@ -207,6 +210,11 @@ export type CrossSurfaceSpatialPorts = {
   activateCameraFrame(frameId: string): boolean
   setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
   setScope(scope: 'global' | 'world'): void
+  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  reorderNodes(nodeIds: string[]): void
+  moveGlobalLayerOwner(fromId: string, toId: string): void
+  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
+  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
 } & SurfaceNodeCommands
 
 export type CrossSurfaceCommandPorts = {
@@ -717,54 +725,8 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     ) {
       dispatchActiveSurface(ports.detect(), {
         slide: () => ports.slide.updateGlobalLayerSettings(nodeId, patch),
-        spatial: () => {
-          const session = ports.spatial.read().spatialSession
-          if (!session) {
-            ports.kernel.failSessionless()
-          }
-          const row = ports.readProjection()?.unifiedRows.find((candidate) => candidate.id === nodeId)
-          if (!row || row.owner !== 'global') return
-          if (patch.layer !== undefined) {
-            ports.persistLayer.spatial(setGlobalLayerScenePlane(
-              session.history.present,
-              commandTargetForRow(row),
-              patch.layer,
-              { expectedRevision: session.history.present.revision },
-            ))
-          }
-          if (patch.visibility) {
-            const live = ports.spatial.read().spatialSession ?? session
-            ports.persistLayer.spatial(setGlobalLayerLocationVisibility(
-              live.history.present,
-              commandTargetForRow(row),
-              locationVisibilityFromScenePatch(live.history.present, patch.visibility),
-              { expectedRevision: live.history.present.revision },
-            ))
-          }
-        },
-        flow: () => {
-          const session = ports.flow.read().flowSession
-          if (!session) return
-          const row = ports.readProjection()?.unifiedRows.find((candidate) => candidate.id === nodeId)
-          if (!row || row.owner !== 'global') return
-          if (patch.layer !== undefined) {
-            ports.persistLayer.flow(setGlobalLayerScenePlane(
-              session.history.present,
-              commandTargetForRow(row),
-              patch.layer,
-              { expectedRevision: session.history.present.revision },
-            ))
-          }
-          if (patch.visibility) {
-            const live = ports.flow.read().flowSession ?? session
-            ports.persistLayer.flow(setGlobalLayerLocationVisibility(
-              live.history.present,
-              commandTargetForRow(row),
-              locationVisibilityFromScenePatch(live.history.present, patch.visibility),
-              { expectedRevision: live.history.present.revision },
-            ))
-          }
-        },
+        spatial: () => ports.spatial.updateGlobalLayerSettings(nodeId, patch),
+        flow: () => ports.flow.updateGlobalLayerSettings(nodeId, patch),
         sessionless: () => ports.kernel.failSessionless(),
       })
     },
@@ -787,32 +749,8 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     reorderNodes(nodeIds: string[]) {
       dispatchActiveSurface(ports.detect(), {
         slide: () => ports.slide.reorderNodes(nodeIds),
-        spatial: () => {
-          const session = ports.spatial.read().spatialSession
-          if (!session) {
-            ports.kernel.failSessionless()
-          }
-          const first = ports.readProjection()?.unifiedRows.find((row) => row.id === nodeIds[0])
-          if (!first) return
-          ports.persistLayer.spatial(reorderEffectiveLayerItems(
-            session.history.present,
-            commandTargetForRow(first),
-            nodeIds,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        flow: () => {
-          const session = ports.flow.read().flowSession
-          if (!session) return
-          const first = ports.readProjection()?.unifiedRows.find((row) => row.id === nodeIds[0])
-          if (!first) return
-          ports.persistLayer.flow(reorderEffectiveLayerItems(
-            session.history.present,
-            commandTargetForRow(first),
-            nodeIds,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
+        spatial: () => ports.spatial.reorderNodes(nodeIds),
+        flow: () => ports.flow.reorderNodes(nodeIds),
         sessionless: () => ports.kernel.failSessionless(),
       })
     },
@@ -865,46 +803,10 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
 
     moveCandidateLayerOwner(fromId: string, toId: string) {
-      const projection = ports.readProjection()
-      const from = projection?.unifiedRows.find((row) => row.id === fromId)
-      const to = projection?.unifiedRows.find((row) => row.id === toId)
-      if (!from || !to) return
-      const destination = {
-        source: to.owner,
-        surfaceId: to.scopeToken.surfaceId,
-        sceneId: to.scopeToken.sceneId,
-      }
       dispatchActiveSurface(ports.detect(), {
-        spatial: () => {
-          const session = ports.spatial.read().spatialSession
-          if (!session) return
-          ports.persistLayer.spatial(moveEffectiveLayerOwner(
-            session.history.present,
-            commandTargetForRow(from),
-            destination,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        flow: () => {
-          const session = ports.flow.read().flowSession
-          if (!session) return
-          ports.persistLayer.flow(moveEffectiveLayerOwner(
-            session.history.present,
-            commandTargetForRow(from),
-            destination,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        slide: () => {
-          const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-          if (!backend || typeof backend.getSession !== 'function') return
-          ports.persistLayer.slide(moveEffectiveLayerOwner(
-            backend.getSession().history.present,
-            commandTargetForRow(from),
-            destination,
-            { expectedRevision: backend.getSnapshot().revision },
-          ))
-        },
+        spatial: () => ports.spatial.moveGlobalLayerOwner(fromId, toId),
+        flow: () => ports.flow.moveGlobalLayerOwner(fromId, toId),
+        slide: () => ports.slide.moveGlobalLayerOwner(fromId, toId),
         sessionless: () => ports.kernel.failSessionless(),
       })
     },
@@ -913,77 +815,19 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       nodeId: string,
       visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
     ) {
-      const row = ports.readProjection()?.unifiedRows.find((candidate) => candidate.id === nodeId)
-      if (!row || row.owner !== 'global') return
       dispatchActiveSurface(ports.detect(), {
-        spatial: () => {
-          const session = ports.spatial.read().spatialSession
-          if (!session) return
-          ports.persistLayer.spatial(setGlobalLayerLocationVisibility(
-            session.history.present,
-            commandTargetForRow(row),
-            visibility,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        flow: () => {
-          const session = ports.flow.read().flowSession
-          if (!session) return
-          ports.persistLayer.flow(setGlobalLayerLocationVisibility(
-            session.history.present,
-            commandTargetForRow(row),
-            visibility,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        slide: () => {
-          const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-          if (!backend || typeof backend.getSession !== 'function') return
-          ports.persistLayer.slide(setGlobalLayerLocationVisibility(
-            backend.getSession().history.present,
-            commandTargetForRow(row),
-            visibility,
-            { expectedRevision: backend.getSnapshot().revision },
-          ))
-        },
+        spatial: () => ports.spatial.setCandidateGlobalLayerLocationVisibility(nodeId, visibility),
+        flow: () => ports.flow.setCandidateGlobalLayerLocationVisibility(nodeId, visibility),
+        slide: () => ports.slide.setCandidateGlobalLayerLocationVisibility(nodeId, visibility),
         sessionless: () => ports.kernel.failSessionless(),
       })
     },
 
     setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean) {
-      const row = ports.readProjection()?.unifiedRows.find((candidate) => candidate.id === nodeId)
-      if (!row || row.owner !== 'global') return
       dispatchActiveSurface(ports.detect(), {
-        spatial: () => {
-          const session = ports.spatial.read().spatialSession
-          if (!session) return
-          ports.persistLayer.spatial(setGlobalLayerVisibleAtLocation(
-            session.history.present,
-            commandTargetForRow(row),
-            visible,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        flow: () => {
-          const session = ports.flow.read().flowSession
-          if (!session) return
-          ports.persistLayer.flow(setGlobalLayerVisibleAtLocation(
-            session.history.present,
-            commandTargetForRow(row),
-            visible,
-            { expectedRevision: session.history.present.revision },
-          ))
-        },
-        slide: () => {
-          const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-          if (!backend || typeof backend.getSession !== 'function') return
-          ports.persistLayer.slide(setGlobalLayerVisibleAtLocation(
-            backend.getSession().history.present,
-            commandTargetForRow(row),
-            visible,
-            { expectedRevision: backend.getSnapshot().revision },
-          ))
-        },
+        spatial: () => ports.spatial.setCandidateGlobalLayerVisibleAtLocation(nodeId, visible),
+        flow: () => ports.flow.setCandidateGlobalLayerVisibleAtLocation(nodeId, visible),
+        slide: () => ports.slide.setCandidateGlobalLayerVisibleAtLocation(nodeId, visible),
         sessionless: () => ports.kernel.failSessionless(),
       })
     },

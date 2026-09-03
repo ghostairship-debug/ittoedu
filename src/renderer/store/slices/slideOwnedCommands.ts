@@ -8,10 +8,12 @@ import { commitTeacherControllerAuthoringFrame } from '../../authoring/v9Teacher
 import { commitV9SlideContentEdit, commitV9SlideTextRunStyle } from '../../authoring/v9SlideContentEdit'
 import {
   deleteEffectiveLayerItems,
+  moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
   patchEffectiveLayerItems,
   reorderEffectiveLayerItems,
   setGlobalLayerLocationVisibility,
+  setGlobalLayerVisibleAtLocation,
   type EffectiveLayerPropertyPatch,
 } from '../../course/effectiveLayerCommands'
 import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
@@ -790,6 +792,54 @@ export function createSlideOwnedCommands(
         return
       }
       runCandidateAction('reorder', { orderedLayerItemIds: nodeIds })
+    },
+
+    moveGlobalLayerOwner(fromId: string, toId: string) {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) return kernel.failSessionless()
+      const from = slideRow(fromId)
+      const to = slideRow(toId)
+      if (!from || !to) return
+      const destination = {
+        source: to.owner,
+        surfaceId: to.scopeToken.surfaceId,
+        sceneId: to.scopeToken.sceneId,
+      }
+      persistLayer(moveEffectiveLayerOwner(
+        backend.getSession().history.present,
+        commandTargetForRow(from),
+        destination,
+        { expectedRevision: backend.getSnapshot().revision },
+      ))
+    },
+
+    setCandidateGlobalLayerLocationVisibility(
+      nodeId: string,
+      visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
+    ) {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) return kernel.failSessionless()
+      const row = slideRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      persistLayer(setGlobalLayerLocationVisibility(
+        backend.getSession().history.present,
+        commandTargetForRow(row),
+        visibility,
+        { expectedRevision: backend.getSnapshot().revision },
+      ))
+    },
+
+    setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean) {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) return kernel.failSessionless()
+      const row = slideRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      persistLayer(setGlobalLayerVisibleAtLocation(
+        backend.getSession().history.present,
+        commandTargetForRow(row),
+        visible,
+        { expectedRevision: backend.getSnapshot().revision },
+      ))
     },
 
     commitSlideCandidateTextRunStyle(input: {

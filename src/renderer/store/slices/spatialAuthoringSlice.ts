@@ -73,12 +73,17 @@ import {
   deleteEffectiveLayerItems,
   findGlobalTeacherController,
   locateCourseLayer,
+  moveEffectiveLayerOwner,
   patchEffectiveLayerItems,
+  reorderEffectiveLayerItems,
   restoreDefaultTeacherController,
+  setGlobalLayerLocationVisibility,
+  setGlobalLayerVisibleAtLocation,
   type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
+import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
-import type { ShapeType, TextRun } from '../../../shared/projectTypes'
+import type { GlobalLayerItem, ShapeType, TextRun } from '../../../shared/projectTypes'
 import {
   copySpatialClipboard,
   duplicateSpatialLayers,
@@ -90,6 +95,7 @@ import { courseLayerItemToEditorCanvasNode } from '../slideEditorProjection'
 import {
   commandTargetForRow,
   isSpatialDirectRowPropertyPatch,
+  locationVisibilityFromScenePatch,
   spatialLayerPropertyPatch,
 } from '../v9LayerMutations'
 import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
@@ -656,7 +662,22 @@ export function createSpatialAuthoringSlice(
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   activateCameraFrame(frameId: string): boolean
   setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
+  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  reorderNodes(nodeIds: string[]): void
+  moveGlobalLayerOwner(fromId: string, toId: string): void
+  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
+  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
 } {
+  const spatialRow = (layerItemId: string) => {
+    const session = spatial.read().spatialSession
+    if (!session) return null
+    return buildCandidateEffectiveLayers({
+      slideBackend: null,
+      spatialSession: session,
+      flowSession: null,
+    })?.unifiedRows.find((row) => row.id === layerItemId) ?? null
+  }
+
   const commitDraft = (): SpatialAuthoringSession | null => {
     const owned = spatial.read()
     const session = owned.spatialSession
@@ -1733,6 +1754,93 @@ export function createSpatialAuthoringSlice(
       if (receipt.ok && selection) {
         spatial.openPropertiesTab?.()
       }
+    },
+    updateGlobalLayerSettings(
+      nodeId: string,
+      patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+    ) {
+      const session = spatial.read().spatialSession
+      if (!session) return kernel.failSessionless()
+      const row = spatialRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      if (patch.layer !== undefined) {
+        spatial.persist(setGlobalLayerScenePlane(
+          session.history.present,
+          commandTargetForRow(row),
+          patch.layer,
+          { expectedRevision: session.history.present.revision },
+        ))
+      }
+      if (patch.visibility) {
+        const live = spatial.read().spatialSession ?? session
+        spatial.persist(setGlobalLayerLocationVisibility(
+          live.history.present,
+          commandTargetForRow(row),
+          locationVisibilityFromScenePatch(live.history.present, patch.visibility),
+          { expectedRevision: live.history.present.revision },
+        ))
+      }
+    },
+
+    reorderNodes(nodeIds: string[]) {
+      const session = spatial.read().spatialSession
+      if (!session) return kernel.failSessionless()
+      const first = spatialRow(nodeIds[0] ?? '')
+      if (!first) return
+      spatial.persist(reorderEffectiveLayerItems(
+        session.history.present,
+        commandTargetForRow(first),
+        nodeIds,
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+
+    moveGlobalLayerOwner(fromId: string, toId: string) {
+      const session = spatial.read().spatialSession
+      if (!session) return kernel.failSessionless()
+      const from = spatialRow(fromId)
+      const to = spatialRow(toId)
+      if (!from || !to) return
+      const destination = {
+        source: to.owner,
+        surfaceId: to.scopeToken.surfaceId,
+        sceneId: to.scopeToken.sceneId,
+      }
+      spatial.persist(moveEffectiveLayerOwner(
+        session.history.present,
+        commandTargetForRow(from),
+        destination,
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+
+    setCandidateGlobalLayerLocationVisibility(
+      nodeId: string,
+      visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
+    ) {
+      const session = spatial.read().spatialSession
+      if (!session) return kernel.failSessionless()
+      const row = spatialRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      spatial.persist(setGlobalLayerLocationVisibility(
+        session.history.present,
+        commandTargetForRow(row),
+        visibility,
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+
+    setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean) {
+      const session = spatial.read().spatialSession
+      if (!session) return kernel.failSessionless()
+      const row = spatialRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      spatial.persist(setGlobalLayerVisibleAtLocation(
+        session.history.present,
+        commandTargetForRow(row),
+        visible,
+        { expectedRevision: session.history.present.revision },
+      ))
     },
   }
 }

@@ -35,12 +35,18 @@ import {
 } from '../../course/flowEditorCommands'
 import {
   findGlobalTeacherController,
+  moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
+  reorderEffectiveLayerItems,
   restoreDefaultTeacherController,
+  setGlobalLayerLocationVisibility,
+  setGlobalLayerVisibleAtLocation,
   type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
+import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
-import { commandTargetForRow } from '../v9LayerMutations'
+import { commandTargetForRow, locationVisibilityFromScenePatch } from '../v9LayerMutations'
+import type { GlobalLayerItem } from '../../../shared/projectTypes'
 import {
   enterFlowGlobalAuthoring,
   commitFlowOverlayFormulaAst,
@@ -627,7 +633,22 @@ export function createFlowAuthoringSlice(
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   activateBlock(locationId: string): boolean
+  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  reorderNodes(nodeIds: string[]): void
+  moveGlobalLayerOwner(fromId: string, toId: string): void
+  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
+  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
 } {
+  const flowRow = (layerItemId: string) => {
+    const session = flow.read().flowSession
+    if (!session) return null
+    return buildCandidateEffectiveLayers({
+      slideBackend: null,
+      spatialSession: null,
+      flowSession: session,
+    })?.unifiedRows.find((row) => row.id === layerItemId) ?? null
+  }
+
   const missingSession = (): FlowCommandResult => ({
     ok: false,
     reason: '请先选择一个流式页面',
@@ -1675,6 +1696,93 @@ export function createFlowAuthoringSlice(
         selection: selectFlowEditorBlock(document, location.id, location.blockId),
       }, { clearTextEdit: true })
       return result.ok
+    },
+    updateGlobalLayerSettings(
+      nodeId: string,
+      patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+    ) {
+      const session = flow.read().flowSession
+      if (!session) return
+      const row = flowRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      if (patch.layer !== undefined) {
+        persistFlowLayerCommand(flow, setGlobalLayerScenePlane(
+          session.history.present,
+          commandTargetForRow(row),
+          patch.layer,
+          { expectedRevision: session.history.present.revision },
+        ))
+      }
+      if (patch.visibility) {
+        const live = flow.read().flowSession ?? session
+        persistFlowLayerCommand(flow, setGlobalLayerLocationVisibility(
+          live.history.present,
+          commandTargetForRow(row),
+          locationVisibilityFromScenePatch(live.history.present, patch.visibility),
+          { expectedRevision: live.history.present.revision },
+        ))
+      }
+    },
+
+    reorderNodes(nodeIds: string[]) {
+      const session = flow.read().flowSession
+      if (!session) return
+      const first = flowRow(nodeIds[0] ?? '')
+      if (!first) return
+      persistFlowLayerCommand(flow, reorderEffectiveLayerItems(
+        session.history.present,
+        commandTargetForRow(first),
+        nodeIds,
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+
+    moveGlobalLayerOwner(fromId: string, toId: string) {
+      const session = flow.read().flowSession
+      if (!session) return
+      const from = flowRow(fromId)
+      const to = flowRow(toId)
+      if (!from || !to) return
+      const destination = {
+        source: to.owner,
+        surfaceId: to.scopeToken.surfaceId,
+        sceneId: to.scopeToken.sceneId,
+      }
+      persistFlowLayerCommand(flow, moveEffectiveLayerOwner(
+        session.history.present,
+        commandTargetForRow(from),
+        destination,
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+
+    setCandidateGlobalLayerLocationVisibility(
+      nodeId: string,
+      visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
+    ) {
+      const session = flow.read().flowSession
+      if (!session) return
+      const row = flowRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      persistFlowLayerCommand(flow, setGlobalLayerLocationVisibility(
+        session.history.present,
+        commandTargetForRow(row),
+        visibility,
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+
+    setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean) {
+      const session = flow.read().flowSession
+      if (!session) return
+      const row = flowRow(nodeId)
+      if (!row || row.owner !== 'global') return
+      persistFlowLayerCommand(flow, setGlobalLayerVisibleAtLocation(
+        session.history.present,
+        commandTargetForRow(row),
+        visible,
+        { expectedRevision: session.history.present.revision },
+      ))
     },
   }
 }
