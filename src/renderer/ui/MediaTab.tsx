@@ -18,8 +18,8 @@ import {
   selectMediaAssetFiles,
   selectMediaAssets,
   useEditorStore,
-  type ProjectAudioSettingsPatch,
 } from '../store/editorStore'
+import type { ProjectAudioSettingsPatch } from '../media/commitCourseMediaAuthoring'
 
 export interface MediaTabProps {
   onImportImage?(): void

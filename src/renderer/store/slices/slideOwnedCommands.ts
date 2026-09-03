@@ -3,8 +3,7 @@ import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { GlobalLayerItem } from '../../../shared/projectTypes'
 import type { SlidePresentationState } from '../../../shared/courseProjectTypes'
 import { rotatedRectangleAabb } from '../../../shared/geometry'
-import type { AlignmentMode } from '../../course/slideOwnedCommands'
-export type { AlignmentMode }
+export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
 import { commitTeacherControllerAuthoringFrame } from '../../authoring/v9TeacherControllerAuthoring'
 import { commitV9SlideContentEdit, commitV9SlideTextRunStyle } from '../../authoring/v9SlideContentEdit'
 import {

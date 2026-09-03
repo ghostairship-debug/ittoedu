@@ -45,7 +45,7 @@ import {
 import type {
   RuntimeSourceAuthoringCommitResult,
   RuntimeTemplateCreationCommitResult,
-} from '../store/editorStore'
+} from '../runtime/commitRuntimeAuthoring'
 import {
   commandTargetFromRow,
   type EffectiveLayerProjectionRow,

@@ -638,134 +638,29 @@ function loadEditorMode(): EditorMode {
 }
 
 
-export interface ProjectAudioSettingsPatch {
-  defaultMuted?: boolean
-  masterVolume?: number
-  channelVolumes?: Partial<Record<AudioChannel, number>>
-  narrationDucking?: Partial<ProjectAudioSettings['narrationDucking']>
-}
-
-export interface ImportedAssetBatchItem {
-  meta: AssetMeta
-  bytes: Uint8Array
-}
-
-export type ImageReplacementCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'replaced' | 'unchanged'
-      readonly feedback: CourseImageReplacementFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: CourseImageReplacementPlanFailureCode
-      readonly reason: string
-    }
-
-export interface CourseProjectRevisionTarget {
-  readonly projectId: string
-  readonly documentRevision: number
-}
-
-export type MediaLibraryImportCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'imported' | 'unchanged'
-      readonly feedback: CourseMediaLibraryImportFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: CourseMediaLibraryImportPlanFailureCode
-      readonly reason: string
-    }
-
-export interface ComponentPackageReplacementTarget extends CourseProjectRevisionTarget {
-  readonly packageId: string
-}
-
-export type ComponentPackageReplacementCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'replaced' | 'unchanged'
-      readonly feedback: CourseComponentPackageReplacementFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: CourseComponentPackageReplacementFailureCode
-      readonly reason: string
-    }
-
-export type RuntimeAssetReplacementCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'replaced' | 'unchanged'
-      readonly feedback: CourseRuntimeAssetReplacementFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: CourseRuntimeAssetReplacementFailureCode
-      readonly reason: string
-    }
-
-export type RuntimeSourceAuthoringCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'committed' | 'unchanged'
-      readonly feedback: RuntimeSourceAuthoringFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: RuntimeSourceAuthoringPlanFailureCode
-      readonly reason: string
-    }
-
-export type RuntimeContentTextAuthoringCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'updated' | 'unchanged'
-      readonly feedback: RuntimeContentTextAuthoringFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: RuntimeContentTextAuthoringPlanFailureCode
-      readonly reason: string
-    }
-
-export type RuntimePropertyAuthoringCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'updated' | 'unchanged'
-      readonly feedback: RuntimePropertyAuthoringFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: RuntimePropertyAuthoringPlanFailureCode
-      readonly reason: string
-    }
-
-export type RuntimeTemplateCreationCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'created'
-      readonly feedback: CourseRuntimeTemplateCreationFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: CourseRuntimeTemplateCreationPlanFailureCode
-      readonly reason: string
-    }
-
-export type InteractionAuthoringCommitResult =
-  | {
-      readonly ok: true
-      readonly status: 'committed' | 'unchanged'
-      readonly feedback: InteractionAuthoringFeedback
-    }
-  | {
-      readonly ok: false
-      readonly code: InteractionAuthoringPlanFailureCode
-      readonly reason: string
-    }
+import type {
+  ImageReplacementCommitResult,
+  ImportedAssetBatchItem,
+  MediaLibraryImportCommitResult,
+  ProjectAudioSettingsPatch,
+} from '../media/commitCourseMediaAuthoring'
+import type {
+  ComponentPackageReplacementCommitResult,
+  ComponentPackageReplacementTarget,
+} from '../components/commitComponentPackageAuthoring'
+import type {
+  RuntimeAssetReplacementCommitResult,
+  RuntimeContentTextAuthoringCommitResult,
+  RuntimePropertyAuthoringCommitResult,
+  RuntimeSourceAuthoringCommitResult,
+  RuntimeTemplateCreationCommitResult,
+} from '../runtime/commitRuntimeAuthoring'
+import type {
+  InteractionAuthoringCommitResult,
+} from '../interactions/commitInteractionAuthoring'
+import type {
+  CourseProjectRevisionTarget,
+} from '../authoring/courseAuthoringSession'
 
 export type {
   CourseProjectPersistenceSnapshot,

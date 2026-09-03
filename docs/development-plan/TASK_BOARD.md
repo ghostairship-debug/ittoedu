@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037h-feature-result-types](tasks/1.1/r11-037h-feature-result-types.md) | queued | — | none | 把媒体、组件、Runtime、Interaction 结果类型从 root 移到各 Feature 文件，只有一个定义。 |
+| [r11-037i-slide-persist-owner](tasks/1.1/r11-037i-slide-persist-owner.md) | queued | — | none | 把 Slide persist 逻辑完全收敛在 slideAuthoringSlice，消除 root 冗余实现。 |

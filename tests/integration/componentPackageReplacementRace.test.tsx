@@ -18,9 +18,11 @@ import { openCourseProjectArchive } from '../../src/renderer/project/courseProje
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
-  type ComponentPackageReplacementCommitResult,
-  type ComponentPackageReplacementTarget,
 } from '../../src/renderer/store/editorStore'
+import type {
+  ComponentPackageReplacementCommitResult,
+  ComponentPackageReplacementTarget,
+} from '../../src/renderer/components/commitComponentPackageAuthoring'
 
 vi.mock('../../src/renderer/ui/Workspace', () => ({
   Workspace: () => <div data-testid="workspace-stub" />,

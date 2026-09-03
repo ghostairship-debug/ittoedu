@@ -25,6 +25,11 @@ export interface CourseAuthoringExactRevisionPolicy {
   readonly kind: 'exact'
 }
 
+export interface CourseProjectRevisionTarget {
+  readonly projectId: string
+  readonly documentRevision: number
+}
+
 /**
  * Immutable identity captured before an asynchronous authoring operation.
  *

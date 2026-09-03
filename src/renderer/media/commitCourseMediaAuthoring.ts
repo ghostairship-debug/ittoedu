@@ -36,10 +36,18 @@ import {
   type CourseMediaLibraryImportFeedback,
   type CourseMediaLibraryImportPlanFailureCode,
 } from './courseMediaLibraryImport'
+import type { AudioChannel, ProjectAudioSettings } from '../../shared/projectTypes'
+import {
+  type CourseProjectRevisionTarget,
+} from '../authoring/courseAuthoringSession'
 
-export interface CourseProjectRevisionTarget {
-  readonly projectId: string
-  readonly documentRevision: number
+export type { CourseProjectRevisionTarget }
+
+export interface ProjectAudioSettingsPatch {
+  defaultMuted?: boolean
+  masterVolume?: number
+  channelVolumes?: Partial<Record<AudioChannel, number>>
+  narrationDucking?: Partial<ProjectAudioSettings['narrationDucking']>
 }
 
 export interface ImportedAssetBatchItem {
