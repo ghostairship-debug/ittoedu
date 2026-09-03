@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 当前路线核实日期：2026-09-03。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
+> 当前路线核实日期：2026-09-04。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
 >
 > 本文件只保存当前产品决定、边界和开发路线。已经完成、取消或被取代的内容在下一次路线更新时移出正文，由 Git 历史保留；不得在这里维护 changelog、完成卡清单或行号级历史源码快照。
 
@@ -56,7 +56,7 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 - 首发 Agent 集成只支持用户自行安装并自行认证的 Codex、Claude 与 OpenCode。CLI 保持自身规划循环；编辑器只提供本地 session harness、受管暂存区、自动准入、宿主 canonical command 提交边界和 1.8 起的版本化 MCP Authoring Tools，不复制一套模型 Agent 内核。
 - AI 会话与工具轨迹保存在应用本地，按工程 ID 与规范化文件位置隔离；Save As 不复制会话。会话、材料与工具轨迹不进入 `.h5lesson`、Published、组件包或导出物；产品只承诺删除自身记录，不代替外部 CLI 删除其历史。
 - 单 HTML 明确区分离线便携与在线轻量；这是导出选择，不新增持久化 `projectMode`。
-- 当前产品定位为内部生产工具；当前 HEAD 尚未通过 1.1 的零遗留、不可降级、主动模块化与 Owner 固定课例验收，因此不得把当前任意提交冒充 `v1.1.0` 候选。既有证据只在相关实现、依赖、测试、fixture 和验证定义未变化时复用；任何版本的发布身份都由对应路线节点重新固定。
+- `v1.1.0` 是当前 V9-only、主动模块化、零遗留与零降级的已签署基线；发布制品是该源码标签和固定的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不含安装包。既有证据只在相关实现、依赖、测试、fixture 和验证定义未变化时复用；后续版本的发布身份仍由对应路线节点重新固定。
 - 自动化最多证明 `engineering candidate`；真实课程的视觉、互动和教师复核决定 `art candidate` / `accepted`。
 - 发布列车固定为：1.1 发布源码标签与固定课例离线 HTML；1.2–1.9 只发布内部源码标签；2.0 发布内部生产源码标签与固定课例离线 HTML。当前路线不承诺安装包。每个版本由 Owner 对固定候选与固定课例签署 `accepted`，该签署不表示对外发行。
 
@@ -93,27 +93,11 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和弱模型规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 1.1：V9-only、主动模块化与零降级稳定底座
+### 5.1 当前起点：1.1 已签署基线
 
-1.1 是下一开发阶段。目标不是删除教师能力，而是在保持当前全部产品行为的前提下，使可执行代码、测试、脚本、示例、fixture 与正式生成制品不再依赖 V8 工程模型、Schema、Player/Export payload 或测试工具链；同时完成当前 Editor Store 与 UI/交付热点的真实 Owner 拆分，使 `editorStore.ts` 收敛为唯一 Zustand 组合根。
+后续开发以 `v1.1.0` 为依赖基线：作者工程仅为 Course Project V9，发布仅为 Published Course V2，`editorStore.ts` 仅作为唯一 Zustand 组合根，Legacy inventory 的正式 consumer 与生成制品命中保持为零。固定课例离线 HTML 与源码标签共同构成 1.1 发布身份；任何后续改动都不得恢复 V8、第二 Store/Session/History、双轨 writer，或削弱 PM-01–PM-28 已签署行为。
 
-执行顺序为：正式合同与行为基线 → 以 `inventories/legacy-consumers.json` 建立只减不增的保守上界与扫描门 → 抽取仍有效的 Native/Design/Media 等领域合同 → 使 V9 Native 与 Published V2 Schema 独立 → 按写锁迁移 Editor、Published/Preview/Export/Diagnostics 与 Archive/Test lane → 清零 V8 镜像与双轨 writer → 抽取 Core resource/history → 依次迁移 Slide、Flow、Spatial state/action → 迁移 App router/lifecycle 与 Feature use case → 拆分 UI 与交付热点 → 以依赖棘轮证明组合根只接线 → 单一 writer 在集成候选原子复核 inventory → 按精确零 consumer 清单删除旧模块 → 固定候选执行零遗留、模块化、不可降级和发布门 → Owner 签署。
-
-2026-09-03 当前检查点为 `ee1f87e`。`r11-036b`、`r11-037a–037z`、`r11-052a` 和 `r11-052b` 的无争议部分已经完成，工作树干净；当前只有 `r11-052c-old-token-and-rejection-tests` 可执行。052b 剩余旧测试不是可直接删除的重复：源码与正式合同共同证明 Published V2 尚缺 Slide 视频动作/事件、视频与背景音乐会话协作、教师控制器 `scene.open-picker`，以及 Component API 4 的 Slide scene-local `hybrid` 宿主。四项必须先形成等价 V2 consumer，随后才能删除旧测试。纯 Flow 课程的兼容格式仍是 DOCX，PPTX 只适用于含 Slide 场景或 Spatial 镜头的课程。
-
-剩余实施统一遵循 `docs/development-plan/roadmap/1.1/EXECUTION_GUIDE.md` 与 `GEMINI_EXECUTION_PLAN.md`，当前唯一顺序为：`r11-052c → r11-052e-v2-video-playback → r11-052f-v2-video-background-audio → r11-052g-v2-scene-picker → r11-052h-v2-component-hybrid → 收口 r11-052b → r11-052d → r11-053 → r11-054a–054d`。任务目录可以保存这条依赖链上的 blocked 卡，但任一时点只能有一张 queued 卡；每卡只跑一条最近层测试命令，并在产品 TypeScript 变化时跑 `typecheck`。实施阶段不运行全量产品测试、保全门、Legacy zero、verify、候选 Hash 或字节比较。全部实施完成后由 Codex 一次执行 `r11-055 → r11-060 → r11-061` 的最终结构审查、Legacy 零检查、全量产品测试与保全检查，再交 Owner 执行 `r11-062`。旧 W1–W9、052 A–E、053/054 candidate digest 与旧 deletion list 均不再授权执行。
-
-052c 删除四个重复测试时不删除对应产品模块。`src/shared/presentation.ts`、`informationRelease.ts`、`projectDiagnostics.ts`、`componentPackageLifecycle.ts` 已由 Owner 裁定为 LEG-011 删除闭包：053 必须把它们纳入精确删除目标并重新证明 consumer 为零，054 才能删除；若 053 发现任一非删除闭包 consumer，必须停止并回到 Owner，不另开悬空清理路线。
-
-硬约束：
-
-- 任何中间状态都必须保留新建、打开、保存、另存、恢复、Undo/Redo、三种 Surface、Mixed、Preview/Player、Runtime/Component、Builder、诊断与当前全部导出；不允许先降级再于末尾恢复。
-- 先交付并验证等价 V9/Published consumer，后删除旧 consumer；旧模块只在唯一台账的 confirmed consumer 为零后删除。
-- 1.1 不改变 V9 或 Published V2 wire，不导入 V8，不创建 V10，不通过静态占位、no-op、隐藏入口或弱化测试实现清零。
-- 已经完成且仍有有效证据的修复不重新立项；每个任务启动时仍以届时 HEAD、工作树、源码和直接测试核实事实。
-- 每个中间提交保持唯一 writer 和完整可运行行为；不得先建立新 slice writer、保留旧 writer，再留给后续任务清理。re-export、同文件代理、完整 `EditorState` / raw `get()` 注入或只搬代码不算完成。
-
-1.1 最终门与 Owner 签署完成后才可发布 `v1.1.0` 源码标签与固定课例离线 HTML，不做安装包；当前暂停点不发布。
+当前任务板没有 1.1 剩余工作。下一批可按依赖与写锁实例化的路线从 1.2 开始；路线节点本身不自动创建任务卡。
 
 ### 5.2 1.2–1.5：人工创作与外部 Builder 生产力
 
