@@ -257,6 +257,16 @@
               "path": "tests/unit/spatialWorkspaceAuthoring.test.ts",
               "symbol": "courseLayerItemToSceneNode",
               "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/architectureDependencyRatchet.test.ts",
+              "symbol": "SceneNode",
+              "use": "Negative ratchet still names the frozen SceneNode token."
+            },
+            {
+              "path": "tests/unit/coursePptxExport.test.ts",
+              "symbol": "SceneNode",
+              "use": "Negative probe still names SceneNode; scanner token hit."
             }
           ],
           "unknowns": []
@@ -653,6 +663,11 @@
               "path": "tests/unit/renderPptxRuntimeSnapshots.test.ts",
               "symbol": "PlayerApp",
               "use": "PPTX runtime fallback test still names the legacy PlayerApp."
+            },
+            {
+              "path": "tests/unit/coursePptxExport.test.ts",
+              "symbol": "PlayerApp",
+              "use": "Negative probe still names PlayerApp; scanner token hit."
             }
           ],
           "unknowns": []
@@ -3387,10 +3402,10 @@
       "playerPreviewOrExport": 56,
       "buildFixtureOrRelease": 9,
       "persistedRecoveryOrCrossVersion": 0,
-      "testConsumers": 188,
+      "testConsumers": 191,
       "cacheAsyncGeneratedOrPackaging": 7
     },
-    "confirmedConsumerRelationCount": 379,
-    "uniqueConfirmedConsumerEndpointCount": 379
+    "confirmedConsumerRelationCount": 382,
+    "uniqueConfirmedConsumerEndpointCount": 382
   }
 }

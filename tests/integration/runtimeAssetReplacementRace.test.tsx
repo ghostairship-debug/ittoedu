@@ -8,6 +8,7 @@ import {
 } from '../../src/shared/playerAuthoringProtocol'
 import type { PlayerAuthoringHostMessage } from '../../src/shared/playerAuthoringProtocol'
 import type { RuntimeAuthoringTarget } from '../../src/shared/runtimeTypes'
+import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { ImportedImageAsset } from '../../src/renderer/project/assetManager'
@@ -325,6 +326,10 @@ beforeEach(() => {
     observe() {}
     disconnect() {}
   })
+  window.desktopAPI = {
+    setPreviewNetworkPolicy: vi.fn(async () => undefined),
+    releasePreviewNetworkPolicy: vi.fn(async () => undefined),
+  } as unknown as DesktopAPI
   loadFixture()
 })
 
@@ -338,6 +343,7 @@ afterEach(() => {
   useEditorStore.getState().clearV9SlideCandidateBackend()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  delete (window as Partial<Window>).desktopAPI
 })
 
 describe('ARCH-2 Workspace Runtime asset replacement race', () => {

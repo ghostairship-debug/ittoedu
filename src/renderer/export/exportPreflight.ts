@@ -400,7 +400,7 @@ export function adaptCoursePptxProducerFindings(
   ))
   if (!hasPptxPage) {
     items.push({
-      severity: 'error',
+      severity: 'info',
       code: 'static-export-preflight',
       message: '当前课程没有可映射到 PPTX 的 Slide 场景或 Spatial 镜头。',
       diagnosticTarget: projectDiagnosticTarget,

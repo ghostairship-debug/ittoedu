@@ -110,10 +110,10 @@ describe('ARCH-0 representative functional baseline', () => {
           ])
         : new Set<string>()
       expect(report.status).toBe('valid')
-      expect(report.summary).toMatchObject({
+      expect(report.summary).toMatchObject({ error: 0, canExport: true })
+      expect(report.projectHealth?.summary).toMatchObject({
         error: 0,
         warning: expectedHealthWarningCodes.size,
-        canExport: true,
       })
       expect(new Set(report.projectHealth?.items
         .filter(({ severity }) => severity === 'warning')

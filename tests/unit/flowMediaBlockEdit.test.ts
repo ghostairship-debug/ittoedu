@@ -9,6 +9,7 @@ import {
   type FlowBlock,
   type FlowMediaBlock,
 } from '@/shared/courseProjectTypes'
+import { COURSE_AUTHORING_TARGET_REJECTION_REASONS } from '@/renderer/authoring/courseAuthoringSession'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import {
   executeFlowEditorCommand,
@@ -32,7 +33,7 @@ const ASSET_FILES: Record<string, Uint8Array> = {
   'asset-audio': new Uint8Array(8),
 }
 
-const originalDeleteFlowSelection = useEditorStore.getState().deleteFlowSelection
+const originalRunFlowAuthoringIntent = useEditorStore.getState().runFlowAuthoringIntent
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
@@ -40,7 +41,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  useEditorStore.setState({ deleteFlowSelection: originalDeleteFlowSelection })
+  useEditorStore.setState({ runFlowAuthoringIntent: originalRunFlowAuthoringIntent })
   useEditorStore.getState().createNewProject()
 })
 
@@ -225,7 +226,7 @@ describe('Flow media block field and asset replacement commands', () => {
     let historyAfterConcurrentWrite: readonly unknown[] | null = null
     let selectionAfterConcurrentWrite = useEditorStore.getState().flowSession!.selection
     const deleteThroughConcurrentWrite = vi.fn((
-      request: Parameters<typeof originalDeleteFlowSelection>[0],
+      ...args: Parameters<typeof originalRunFlowAuthoringIntent>
     ) => {
       const flow = useEditorStore.getState().flowSession!
       const videoSelection = selectFlowEditorBlock(
@@ -242,9 +243,9 @@ describe('Flow media block field and asset replacement commands', () => {
       documentAfterConcurrentWrite = storeFlowDocument()
       historyAfterConcurrentWrite = useEditorStore.getState().flowSession!.history.past
       selectionAfterConcurrentWrite = useEditorStore.getState().flowSession!.selection
-      return originalDeleteFlowSelection(request)
+      return originalRunFlowAuthoringIntent(...args)
     })
-    useEditorStore.setState({ deleteFlowSelection: deleteThroughConcurrentWrite })
+    useEditorStore.setState({ runFlowAuthoringIntent: deleteThroughConcurrentWrite })
     render(createElement(PropertiesTab, { onReplaceImage: () => undefined }))
 
     fireEvent.click(screen.getByTestId('flow-delete-media-block'))
@@ -255,7 +256,9 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(useEditorStore.getState().flowSession!.selection).toBe(selectionAfterConcurrentWrite)
     expect(mediaBlock(storeFlowDocument(), 'media-image')).toBeDefined()
     expect(mediaBlock(storeFlowDocument(), 'media-video').caption).toBe('并发保留的新内容')
-    expect(useEditorStore.getState().errorMessage).toBe('stale-revision')
+    expect(useEditorStore.getState().errorMessage).toBe(
+      COURSE_AUTHORING_TARGET_REJECTION_REASONS['revision-conflict'],
+    )
   })
 
   it('edits and persists current-contract video fields through Store and Properties', () => {

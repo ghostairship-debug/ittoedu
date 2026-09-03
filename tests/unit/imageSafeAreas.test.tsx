@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { sceneNodeSchema } from '../../src/shared/projectSchema'
@@ -75,7 +75,7 @@ describe('image safe-area metadata', () => {
     if (node?.type !== 'image') throw new Error('Expected image node')
     expect(node.safeAreas?.[0]!.x).toBe(0.15)
 
-    useEditorStore.getState().undo()
+    act(() => { useEditorStore.getState().undo() })
     node = selectActiveScene(useEditorStore.getState()).nodes.find(
       ({ id }) => id === nodeId,
     )
