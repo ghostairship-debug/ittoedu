@@ -27,10 +27,13 @@ import {
   commitV9SlideContentEdit,
   updateV9SlideContentTextDraft,
 } from '../../authoring/v9SlideContentEdit'
+import { MAX_SCENE_NODES } from '../../../shared/constants'
 import {
   findGlobalTeacherController,
   restoreDefaultTeacherController,
+  type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
+import type { CourseMediaCommandResult } from '../../course/v9MediaAudioCommands'
 import type { ShapeType } from '../../../shared/projectTypes'
 import { createFormulaNode, createShapeNode, createTextNode } from '../../project/nativeNodeFactories'
 import { normalizeNewNodeGeometry, sessionFromLayerResult } from '../v9LayerMutations'
@@ -305,6 +308,8 @@ export function createSlideAuthoringSlice(
   cancelTextEdit(): void
   selectNode(nodeId: string | null, additive?: boolean): void
   ensureTeacherController(): void
+  persistLayerCommand(result: LayerCommandResult, extra?: SlidePersistExtra): SlideCommandResult
+  persistMediaResult(result: CourseMediaCommandResult, currentErrorMessage?: string | null): CourseMediaCommandResult
 } & ReturnType<typeof createSlideOwnedCommands> {
   const runCandidateSession = (
     run: (session: SlideAuthoringSession) => SlideCommandResult,
@@ -716,8 +721,55 @@ export function createSlideAuthoringSlice(
         },
       }, { statusMessage: result.reason })
     },
+    persistLayerCommand(result: LayerCommandResult, extra: SlidePersistExtra = {}): SlideCommandResult {
+      return persistSlideLayerCommand(slide, result, extra)
+    },
+    persistMediaResult(result: CourseMediaCommandResult, currentErrorMessage?: string | null): CourseMediaCommandResult {
+      return persistSlideMediaResult(kernel, slide, result, currentErrorMessage ?? null)
+    },
     ...createSlideOwnedCommands(kernel, slide),
   }
+}
+
+export function persistSlideLayerCommand(
+  slide: SlideAuthoringPorts,
+  result: LayerCommandResult,
+  extra: SlidePersistExtra = {},
+): SlideCommandResult {
+  const backend = slide.read().slideBackend
+  if (!isSlideAuthoringBackend(backend)) {
+    return {
+      ok: false,
+      reason: 'not-slide-authoring-backend',
+      historyEntry: false,
+    }
+  }
+  return slide.persist(sessionFromLayerResult(backend.getSession(), result), extra)
+}
+
+export function persistSlideMediaResult(
+  kernel: EditorStoreKernel,
+  slide: SlideAuthoringPorts,
+  result: CourseMediaCommandResult,
+  currentErrorMessage: string | null,
+): CourseMediaCommandResult {
+  const capacityError =
+    `当前场景已达到或将超过 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`
+  const keepCapacityError = currentErrorMessage === capacityError
+  slide.persist({
+    ok: result.ok,
+    reason: result.reason,
+    nextSession: result.nextSession,
+    historyEntry: result.historyEntry,
+    selection: result.selection,
+  }, {
+    sidecar: result.sidecar,
+    statusMessage: result.ok ? result.reason ?? null : undefined,
+  })
+  if (result.ok && (result.libraryFallback === 'scene-capacity' || keepCapacityError)) {
+    kernel.setFeedback({ errorMessage: capacityError })
+  }
+  return result
 }
 
 export function slidePersistSnapshotFrom(

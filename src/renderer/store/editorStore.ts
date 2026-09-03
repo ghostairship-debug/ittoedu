@@ -77,6 +77,8 @@ import {
   applyV9BackendState,
   createSlideAuthoringSlice,
   persistSlideCandidateResult,
+  persistSlideLayerCommand,
+  persistSlideMediaResult,
   slidePersistSnapshotFrom,
 } from './slices/slideAuthoringSlice'
 import {
@@ -1327,12 +1329,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return persistCandidateResult(run(backend.getSession()), extra)
     },
     persistMedia(result) {
-      return persistMediaResult(result)
+      return slideAuthoringSlice.persistMediaResult(result, get().errorMessage)
     },
     persistLayer(result, extra) {
-      const backend = selectSlideAuthoringBackend(get())
-      if (!backend) return
-      persistCandidateResult(sessionFromLayerResult(backend.getSession(), result), extra)
+      slideAuthoringSlice.persistLayerCommand(result, extra)
     },
     persistSpatial(result, extra) {
       persistSpatialResult(result, extra)
@@ -1405,46 +1405,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     })
   }
 
-  const persistLayerCommand = (
-    result: LayerCommandResult,
-    extra?: { statusMessage?: string | null },
-  ): SlideCommandResult => {
-    const backend = selectSlideAuthoringBackend(get())
-    if (!backend) {
-      return {
-        ok: false,
-        reason: 'not-slide-authoring-backend',
-        historyEntry: false,
-      }
-    }
-    return persistCandidateResult(sessionFromLayerResult(backend.getSession(), result), extra)
-  }
-
-  const persistMediaResult = (
-    result: CourseMediaCommandResult,
-  ): CourseMediaCommandResult => {
-    const capacityError =
-      `当前场景已达到或将超过 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`
-    const keepCapacityError = get().errorMessage === capacityError
-    persistCandidateResult({
-      ok: result.ok,
-      reason: result.reason,
-      nextSession: result.nextSession,
-      historyEntry: result.historyEntry,
-      selection: result.selection,
-    }, {
-      sidecar: result.sidecar,
-      statusMessage: result.ok ? result.reason ?? null : undefined,
-    })
-    if (result.ok && (result.libraryFallback === 'scene-capacity' || keepCapacityError)) {
-      set({
-        errorMessage: capacityError,
-        statusMessage: null,
-        activeTab: 'elements',
-      })
-    }
-    return result
-  }
 
   const kernel = createEditorStoreKernel({
     tryReadDocument: () => selectActiveCourseProjectDocument(get()),
@@ -1629,7 +1589,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     hasDirtyContentDraft: () => selectHasDirtyCourseContentDraft(get()),
     readProjection: () => buildCandidateEffectiveLayers(get()),
     persistLayer: {
-      slide: persistLayerCommand,
+      slide: (result, extra) => slideAuthoringSlice.persistLayerCommand(result, extra),
       spatial: persistSpatialLayerCommand,
       flow: persistFlowLayerCommand,
     },

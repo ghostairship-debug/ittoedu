@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037i-slide-persist-owner](tasks/1.1/r11-037i-slide-persist-owner.md) | queued | — | none | 把 Slide persist 逻辑完全收敛在 slideAuthoringSlice，消除 root 冗余实现。 |
+| [r11-037j-flow-persist-owner](tasks/1.1/r11-037j-flow-persist-owner.md) | queued | — | none | 把 applyFlowBackend、persistFlowResult、persistFlowLayerCommand 迁入 flowAuthoringSlice，root 仅接返回成员。 |
