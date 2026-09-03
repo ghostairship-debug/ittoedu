@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037v-canvas-projection-owner](tasks/1.1/r11-037v-canvas-projection-owner.md) | queued | — | none | 新建 course/editorCanvasProjection.ts，迁入 Slide/Flow/Spatial 画布投影 helper、缓存与 effective projection；root selector 只委托。 |
+| [r11-037w-editor-state-composition](tasks/1.1/r11-037w-editor-state-composition.md) | queued | — | none | EditorState 改为 owner state 与各工厂返回类型的交叉类型；root 工厂只剩 kernel host、slice/Feature 工厂调用、分派接线、初始值和展开返回。 |

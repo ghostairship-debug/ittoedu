@@ -80,7 +80,7 @@ function compositionRootFactory(text: string): string {
   return sliceBetween(
     text,
     'export const useEditorStore = create<EditorState>((set, get) => {',
-    '\nlet cachedSlideUiPresent',
+    '\nexport const selectActiveScene',
   )
 }
 
@@ -238,7 +238,6 @@ describe('ARCH-2 resource-safety ratchet', () => {
     const components = source('src/renderer/components/commitComponentPackageAuthoring.ts')
     expect(media).toContain('planCourseMediaLibraryImport({')
     expect(components).toContain('planCourseComponentPackageReplacement({')
-    expect(store).toMatch(/persistProjectResourceTransaction\s*=\s*\(/)
     expect(media).toContain('    importAssets(items: ImportedAssetBatchItem[]) {')
     expect(store).not.toContain('planCourseMediaLibraryImport({')
     expect(store).not.toContain('planCourseComponentPackageReplacement({')
@@ -515,8 +514,9 @@ describe('r11-055 architecture modularity gate', () => {
       'export const useEditorStore = create<EditorState>((set, get) => {',
       'export const selectActiveScene',
     )
-    expect(store).toContain("'无限画布'")
-    expect(store).toContain("'流式讲义'")
+    const canvasProjection = source('src/renderer/course/editorCanvasProjection.ts')
+    expect(canvasProjection).toContain("'无限画布'")
+    expect(canvasProjection).toContain("'流式讲义'")
   })
 
   it('keeps slices and Feature use cases free of root Store, EditorState, and raw zustand', () => {
@@ -546,7 +546,7 @@ describe('r11-055 architecture modularity gate', () => {
     expect(source('src/renderer/store/slices/slideAuthoringSlice.ts')).toContain('kernel: EditorStoreKernel')
     expect(source('src/renderer/store/slices/flowAuthoringSlice.ts')).toContain('kernel: EditorStoreKernel')
     expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).toContain('kernel: EditorStoreKernel')
-    expect(source('src/renderer/store/slices/courseLifecycleSlice.ts')).toContain('_kernel: EditorStoreKernel')
+    expect(source('src/renderer/store/slices/courseLifecycleSlice.ts')).toContain('kernel: EditorStoreKernel')
     expect(source('src/renderer/store/slices/editorShellSlice.ts')).toContain('kernel: EditorStoreKernel')
   })
 

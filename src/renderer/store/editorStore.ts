@@ -139,10 +139,12 @@ import {
   type EffectiveLayerProjectionRow,
 } from '../course/effectiveLayerProjection'
 import {
-  buildCandidateEffectiveLayers as projectActiveSurfaceLayers,
-  flowEffectiveLayers,
-  spatialEffectiveLayers,
-} from '../course/activeSurfaceProjection'
+  buildCandidateEffectiveLayers,
+  projectActiveScene,
+  projectEditingNodes,
+  projectEffectiveLayerProjection,
+  projectSlideSceneList,
+} from '../course/editorCanvasProjection'
 import {
   createRuntimeAuthoringActions,
 } from '../runtime/commitRuntimeAuthoring'
@@ -471,12 +473,7 @@ import {
   type SlideBackend,
   type SlideBackendKind,
 } from './slideBackendPort'
-import {
-  applyV9SlideContentDraft,
-  courseLayerItemToEditorCanvasNode,
-  projectV9EditingNodes,
-  projectV9SlideScenes,
-} from './slideEditorProjection'
+
 import type {
   EditorCanvasDocument,
   EditorCanvasNode,
@@ -485,122 +482,9 @@ import type {
 } from '../phaser/editorCanvasNode'
 
 
-interface SlideCandidateUiProjection {
-  scenes: EditorCanvasSceneView[]
-  activeScene: EditorCanvasSceneView
-  nodes: EditorCanvasNode[]
-}
-
-function isV9SlideTextContentDraft(
-  draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft,
-): draft is V9SlideTextContentDraft {
-  return 'text' in draft && 'runs' in draft
-}
-
-function courseRuntimeToDocument(runtime: CourseRuntimeDefinition): RuntimeDocument {
-  return {
-    runtimeApiVersion: 2,
-    enabled: runtime.enabled,
-    renderMode: runtime.renderMode,
-    source: runtime.source,
-    content: structuredClone(runtime.content),
-    assets: structuredClone(runtime.assets),
-    ...(runtime.nodeBindings ? { nodeBindings: structuredClone(runtime.nodeBindings) } : {}),
-    ...(runtime.staticFallback
-      ? {
-          staticFallback: {
-            assetId: runtime.staticFallback.assetId,
-            coverage: runtime.staticFallback.coverage === 'scene' ? 'full-scene' : 'runtime-layer',
-            layer: 'overlay' as const,
-          },
-        }
-      : {}),
-  }
-}
-
-function firstRuntimeItem(items: readonly LayerItem[]): LayerItem | undefined {
-  return items.find((item) => item.kind === 'runtime')
-}
-
-function attachProjectedRuntimes(
-  document: CourseProjectDocument,
-  scenes: EditorCanvasSceneView[],
-): { scenes: EditorCanvasSceneView[]; globalRuntime?: RuntimeDocument } {
-  const globalRuntimeItem = firstRuntimeItem(document.globalLayerItems.map((entry) => entry.item))
-  const nextScenes = scenes.map((scene) => {
-    const surface = document.surfaces.find((candidate) => (
-      candidate.type === 'slide' && candidate.scenes.some((item) => item.id === scene.id)
-    ))
-    const source = surface && surface.type === 'slide'
-      ? surface.scenes.find((item) => item.id === scene.id)
-      : undefined
-    const runtimeItem = source ? firstRuntimeItem(source.layerItems) : undefined
-    if (!runtimeItem || runtimeItem.kind !== 'runtime') return scene
-    return { ...scene, runtime: courseRuntimeToDocument(runtimeItem.runtime) }
-  })
-  return {
-    scenes: nextScenes,
-    ...(globalRuntimeItem?.kind === 'runtime'
-      ? { globalRuntime: courseRuntimeToDocument(globalRuntimeItem.runtime) }
-      : {}),
-  }
-}
-
-function buildCandidateEffectiveLayers(
-  state: Pick<EditorState, 'slideBackend' | 'slideCandidateSnapshot' | 'spatialSession' | 'flowSession'>,
-): EffectiveLayerProjection | null {
-  return projectActiveSurfaceLayers({
-    slideBackend: isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null,
-    spatialSession: state.spatialSession,
-    flowSession: state.flowSession,
-  })
-}
-
 export type SpatialGraphSelection =
   | { readonly kind: 'path'; readonly id: string }
   | { readonly kind: 'relation'; readonly id: string }
-
-function spatialEditingNodes(
-  session: SpatialAuthoringSession,
-  edit: SpatialWorldContentEditSession | null,
-): EditorCanvasNode[] {
-  const view = buildSpatialEditorView({
-    project: session.history.present,
-    locationId: session.selection.locationId,
-    sessionCamera: session.sessionCamera,
-  })
-  const wanted = session.scope === 'global' ? 'viewport' : 'world'
-  return view.layers.flatMap((layer): EditorCanvasNode[] => {
-    if (layer.coordinateSpace !== wanted) return []
-    const node = courseLayerItemToEditorCanvasNode(layer.item as LayerItem)
-    if (!node) return []
-    if (
-      edit?.kind === 'text' &&
-      edit.target.layerItemId === node.id &&
-      node.type === 'text' &&
-      isV9SlideTextContentDraft(edit.draft)
-    ) {
-      return [{
-        ...node,
-        text: edit.draft.text,
-        runs: structuredClone(edit.draft.runs),
-        ...(typeof edit.draft.width === 'number' ? { width: edit.draft.width } : {}),
-        ...(typeof edit.draft.height === 'number' ? { height: edit.draft.height } : {}),
-      }]
-    }
-    return [node]
-  })
-}
-
-function flowEditingNodes(session: FlowAuthoringSession): EditorCanvasNode[] {
-  const projection = flowEffectiveLayers(session)
-  const wanted = session.selection.authoringScope === 'global' ? 'global' : null
-  return projection.unifiedRows.flatMap((row) => {
-    if (wanted && row.owner !== wanted) return []
-    const node = courseLayerItemToEditorCanvasNode(row.item)
-    return node ? [node] : []
-  })
-}
 
 export type {
   SidebarTab,
@@ -998,15 +882,7 @@ export interface EditorState {
 }
 
 
-const EMPTY_SCENE_NODES: EditorCanvasNode[] = []
 
-function editingNodes(state: EditorState): EditorCanvasNode[] {
-  const backend = isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
-  if (backend) return applyV9SlideContentDraft(projectV9EditingNodes(backend), state.v9ContentEdit)
-  if (state.spatialSession) return spatialEditingNodes(state.spatialSession, state.spatialContentEdit)
-  if (state.flowSession) return flowEditingNodes(state.flowSession)
-  return EMPTY_SCENE_NODES
-}
 
 export function selectHasDirtyCourseContentDraft(state: EditorState): boolean {
   if (
@@ -1641,199 +1517,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 })
 
-let cachedSlideUiPresent: object | null = null
-let cachedSlideUiEdit: V9SlideContentEditSession | null | undefined
-let cachedSlideUiSceneId = ''
-let cachedSlideUiStateId: string | null = null
-let cachedSlideUiScope: string | null = null
-let cachedSlideUiLocationId = ''
-let cachedSlideUi: SlideCandidateUiProjection | null = null
+export const selectActiveScene = (state: EditorState): EditorCanvasSceneView => projectActiveScene(state)
 
-let cachedSpatialPresent: object | null = null
-let cachedSpatialEdit: SpatialWorldContentEditSession | null | undefined
-let cachedSpatialScope: string | null = null
-let cachedSpatialLocationId = ''
-let cachedSpatialNodes: EditorCanvasNode[] = []
+export const selectSlideSceneList = (state: EditorState): EditorCanvasSceneView[] => projectSlideSceneList(state)
 
-let cachedFlowPresent: object | null = null
-let cachedFlowLocationId = ''
-let cachedFlowScope: string | null = null
-let cachedFlowOverlayKey = ''
-let cachedFlowNodes: EditorCanvasNode[] = []
-
-function slideAuthoringUiFromState(state: EditorState): SlideCandidateUiProjection | null {
-  const backend = isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
-  if (!backend) {
-    cachedSlideUi = null
-    return null
-  }
-  const present = backend.getSession().history.present
-  const snapshot = state.slideCandidateSnapshot ?? backend.getSnapshot()
-  if (
-    cachedSlideUi &&
-    cachedSlideUiPresent === present &&
-    cachedSlideUiEdit === state.v9ContentEdit &&
-    cachedSlideUiSceneId === snapshot.sceneId &&
-    cachedSlideUiStateId === snapshot.stateId &&
-    cachedSlideUiScope === snapshot.scope &&
-    cachedSlideUiLocationId === snapshot.locationId
-  ) {
-    return cachedSlideUi
-  }
-  const document = backend.getSession().history.present
-  const scenes = attachProjectedRuntimes(document, projectV9SlideScenes(backend)).scenes
-  const snapshotSceneId = snapshot.sceneId
-  const activeScene = scenes.find((scene) => scene.id === snapshotSceneId) ?? scenes[0]
-  const namedStateActive = snapshot.stateId !== null
-  cachedSlideUi = !activeScene
-    ? {
-        scenes,
-        activeScene: {
-          id: snapshotSceneId,
-          name: '场景',
-          backgroundColor: '#ffffff',
-          nodes: [],
-          interactions: [],
-        },
-        nodes: [],
-      }
-    : {
-        scenes,
-        activeScene: {
-          ...activeScene,
-          nodes: namedStateActive
-            ? activeScene.nodes
-            : applyV9SlideContentDraft(activeScene.nodes, state.v9ContentEdit),
-        },
-        nodes: applyV9SlideContentDraft(projectV9EditingNodes(backend), state.v9ContentEdit),
-      }
-  cachedSlideUiPresent = present
-  cachedSlideUiEdit = state.v9ContentEdit
-  cachedSlideUiSceneId = snapshot.sceneId
-  cachedSlideUiStateId = snapshot.stateId
-  cachedSlideUiScope = snapshot.scope
-  cachedSlideUiLocationId = snapshot.locationId
-  return cachedSlideUi
-}
-
-function spatialEditingNodesFromState(state: EditorState): EditorCanvasNode[] | null {
-  const session = state.spatialSession
-  if (!session) return null
-  if (
-    cachedSpatialPresent === session.history.present &&
-    cachedSpatialEdit === state.spatialContentEdit &&
-    cachedSpatialScope === session.scope &&
-    cachedSpatialLocationId === session.selection.locationId
-  ) {
-    return cachedSpatialNodes
-  }
-  cachedSpatialPresent = session.history.present
-  cachedSpatialEdit = state.spatialContentEdit
-  cachedSpatialScope = session.scope
-  cachedSpatialLocationId = session.selection.locationId
-  cachedSpatialNodes = spatialEditingNodes(session, state.spatialContentEdit)
-  return cachedSpatialNodes
-}
-
-function flowEditingNodesFromState(state: EditorState): EditorCanvasNode[] | null {
-  const session = state.flowSession
-  if (!session) return null
-  const overlayKey = session.selection.selectedOverlayIds.join('\0')
-  if (
-    cachedFlowPresent === session.history.present &&
-    cachedFlowLocationId === session.selection.locationId &&
-    cachedFlowScope === session.selection.authoringScope &&
-    cachedFlowOverlayKey === overlayKey
-  ) {
-    return cachedFlowNodes
-  }
-  cachedFlowPresent = session.history.present
-  cachedFlowLocationId = session.selection.locationId
-  cachedFlowScope = session.selection.authoringScope
-  cachedFlowOverlayKey = overlayKey
-  cachedFlowNodes = flowEditingNodes(session)
-  return cachedFlowNodes
-}
-
-let cachedSyntheticSceneKind: 'spatial' | 'flow' | null = null
-let cachedSyntheticScenePresent: object | null = null
-let cachedSyntheticSceneLocationId = ''
-let cachedSyntheticSceneNodes: EditorCanvasNode[] | null = null
-let cachedSyntheticScene: EditorCanvasSceneView | null = null
-
-function syntheticActiveScene(
-  kind: 'spatial' | 'flow',
-  present: object,
-  locationId: string,
-  nodes: EditorCanvasNode[],
-  name: string,
-): EditorCanvasSceneView {
-  if (
-    cachedSyntheticScene
-    && cachedSyntheticSceneKind === kind
-    && cachedSyntheticScenePresent === present
-    && cachedSyntheticSceneLocationId === locationId
-    && cachedSyntheticSceneNodes === nodes
-  ) {
-    return cachedSyntheticScene
-  }
-  cachedSyntheticSceneKind = kind
-  cachedSyntheticScenePresent = present
-  cachedSyntheticSceneLocationId = locationId
-  cachedSyntheticSceneNodes = nodes
-  cachedSyntheticScene = {
-    id: locationId,
-    name,
-    backgroundColor: '#ffffff',
-    nodes,
-    interactions: [],
-  }
-  return cachedSyntheticScene
-}
-
-export const selectActiveScene = (state: EditorState) => {
-  const slideUi = slideAuthoringUiFromState(state)
-  if (slideUi) return slideUi.activeScene
-  const spatialNodes = spatialEditingNodesFromState(state)
-  if (spatialNodes && state.spatialSession) {
-    return syntheticActiveScene(
-      'spatial',
-      state.spatialSession.history.present,
-      state.spatialSession.selection.locationId,
-      spatialNodes,
-      '无限画布',
-    )
-  }
-  const flowNodes = flowEditingNodesFromState(state)
-  if (flowNodes && state.flowSession) {
-    return syntheticActiveScene(
-      'flow',
-      state.flowSession.history.present,
-      state.flowSession.selection.locationId,
-      flowNodes,
-      '流式讲义',
-    )
-  }
-  throw new Error(SESSIONLESS_COURSE_REASON)
-}
-
-const EMPTY_SLIDE_SCENES: EditorCanvasSceneView[] = []
-
-export const selectSlideSceneList = (state: EditorState): EditorCanvasSceneView[] => {
-  const slideUi = slideAuthoringUiFromState(state)
-  if (slideUi) return slideUi.scenes
-  return EMPTY_SLIDE_SCENES
-}
-
-export const selectEditingNodes = (state: EditorState) => {
-  const slideUi = slideAuthoringUiFromState(state)
-  if (slideUi) return slideUi.nodes
-  const spatialNodes = spatialEditingNodesFromState(state)
-  if (spatialNodes) return spatialNodes
-  const flowNodes = flowEditingNodesFromState(state)
-  if (flowNodes) return flowNodes
-  return editingNodes(state)
-}
+export const selectEditingNodes = (state: EditorState): EditorCanvasNode[] => projectEditingNodes(state)
 
 export const selectSelectedNode = (state: EditorState) =>
   selectEditingNodes(state).find(
@@ -1891,90 +1579,9 @@ export const selectActiveCourseLocationId = (state: EditorState): string | null 
   return null
 }
 
-let cachedProjectionPresent: object | null = null
-let cachedProjectionLocationId = ''
-let cachedProjectionStateId: string | null = null
-let cachedProjectionScope: string | null = null
-let cachedProjectionSelectionKey = ''
-let cachedProjectionSurface: 'slide' | 'spatial' | 'flow' | null = null
-let cachedProjection: EffectiveLayerProjection | null = null
-
 export const selectEffectiveLayerProjection = (
   state: EditorState,
-): EffectiveLayerProjection | null => {
-  if (state.spatialSession) {
-    const session = state.spatialSession
-    const selectionKey = session.selection.selectionIds.join('\0')
-    if (
-      cachedProjection
-      && cachedProjectionSurface === 'spatial'
-      && cachedProjectionPresent === session.history.present
-      && cachedProjectionLocationId === session.selection.locationId
-      && cachedProjectionScope === session.scope
-      && cachedProjectionSelectionKey === selectionKey
-    ) {
-      return cachedProjection
-    }
-    cachedProjectionSurface = 'spatial'
-    cachedProjectionPresent = session.history.present
-    cachedProjectionLocationId = session.selection.locationId
-    cachedProjectionStateId = null
-    cachedProjectionScope = session.scope
-    cachedProjectionSelectionKey = selectionKey
-    cachedProjection = buildCandidateEffectiveLayers(state)
-    return cachedProjection
-  }
-  if (state.flowSession) {
-    const session = state.flowSession
-    const selectionKey = session.selection.selectedOverlayIds.join('\0')
-    if (
-      cachedProjection
-      && cachedProjectionSurface === 'flow'
-      && cachedProjectionPresent === session.history.present
-      && cachedProjectionLocationId === session.selection.locationId
-      && cachedProjectionScope === session.selection.authoringScope
-      && cachedProjectionSelectionKey === selectionKey
-    ) {
-      return cachedProjection
-    }
-    cachedProjectionSurface = 'flow'
-    cachedProjectionPresent = session.history.present
-    cachedProjectionLocationId = session.selection.locationId
-    cachedProjectionStateId = null
-    cachedProjectionScope = session.selection.authoringScope
-    cachedProjectionSelectionKey = selectionKey
-    cachedProjection = buildCandidateEffectiveLayers(state)
-    return cachedProjection
-  }
-  const backend = selectSlideAuthoringBackend(state)
-  if (!backend) {
-    cachedProjection = null
-    cachedProjectionPresent = null
-    cachedProjectionSurface = null
-    return null
-  }
-  const session = backend.getSession()
-  const selectionKey = session.selection.selectionIds.join('\0')
-  if (
-    cachedProjection
-    && cachedProjectionSurface === 'slide'
-    && cachedProjectionPresent === session.history.present
-    && cachedProjectionLocationId === session.selection.locationId
-    && cachedProjectionStateId === session.selection.stateId
-    && cachedProjectionScope === session.scope
-    && cachedProjectionSelectionKey === selectionKey
-  ) {
-    return cachedProjection
-  }
-  cachedProjectionSurface = 'slide'
-  cachedProjectionPresent = session.history.present
-  cachedProjectionLocationId = session.selection.locationId
-  cachedProjectionStateId = session.selection.stateId
-  cachedProjectionScope = session.scope
-  cachedProjectionSelectionKey = selectionKey
-  cachedProjection = buildCandidateEffectiveLayers(state)
-  return cachedProjection
-}
+): EffectiveLayerProjection | null => projectEffectiveLayerProjection(state)
 
 const EMPTY_CANDIDATE_ASSET_FILES: Record<string, Uint8Array> = Object.freeze({})
 
