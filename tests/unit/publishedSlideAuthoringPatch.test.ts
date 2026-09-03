@@ -159,7 +159,7 @@ describe('Published Slide authoring patch', () => {
     })
   })
 
-  it('merges Native render input without constructing SceneNode', () => {
+  it('merges Native render input without reconstructing an authoring node', () => {
     const merged = mergePublishedAuthoringFrame(publishedText(), textRenderInput('改写'))
     expect(merged.ok).toBe(true)
     if (!merged.ok || merged.item.kind !== 'native') return

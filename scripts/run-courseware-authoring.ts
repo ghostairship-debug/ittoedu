@@ -67,7 +67,7 @@ interface ProjectScene {
   }
 }
 
-interface ProjectDocument {
+interface AuthoringProjectProjection {
   schemaVersion: number
   scenes: ProjectScene[]
 }
@@ -561,7 +561,7 @@ function slideScenesFromCourseProject(value: Record<string, unknown>): ProjectSc
   return scenes
 }
 
-function projectFromArchive(bytes: Uint8Array): ProjectDocument {
+function projectFromArchive(bytes: Uint8Array): AuthoringProjectProjection {
   const archive = unzipSync(bytes)
   const projectBytes = archive['project.json']
   if (!projectBytes) throw new Error('Project archive has no project.json')

@@ -1164,7 +1164,6 @@ describe('AI capability manifest generation', () => {
           entrypoints: string[]
           aliases: Record<string, string>
           includesTypeOnlyEdges: boolean
-          excludesRetiredExportCompatibilityEdge: boolean
         }
         sourceFiles: Array<{ path: string; sha256: string }>
         headlessBuildFiles: Array<{ path: string; sha256: string }>
@@ -1193,7 +1192,6 @@ describe('AI capability manifest generation', () => {
       entrypoints: expectedProvenanceEntrypoints,
       aliases: { '@/': 'src/' },
       includesTypeOnlyEdges: true,
-      excludesRetiredExportCompatibilityEdge: true,
     })
     const tracedSources = evidence.inputs.sourceFiles.map((entry) => entry.path)
     expect(tracedSources).toEqual(

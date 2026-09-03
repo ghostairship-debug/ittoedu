@@ -10,8 +10,6 @@ export const APP_E2E_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-e2e`
 export const APP_VERSION = '1.0.0'
 export const CANVAS_WIDTH = 1280 as const
 export const CANVAS_HEIGHT = 720 as const
-/** Historical Project V8 shape constant; current openable course version is COURSE_PROJECT_SCHEMA_VERSION (9). */
-export const PROJECT_SCHEMA_VERSION = 8 as const
 export const RUNTIME_API_VERSION = 2 as const
 export const RUNTIME_AUTHORING_API_VERSION = 1 as const
 export const COMPONENT_SCHEMA_VERSION = 4 as const

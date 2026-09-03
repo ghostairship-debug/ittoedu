@@ -190,7 +190,9 @@ describe('Course Project V9 archive', () => {
         openCourseProjectArchive(v8Bytes)
       } catch (error) {
         expect(error).toBeInstanceOf(UserFacingError)
-        expect(String(error)).not.toMatch(/导入旧版工程|显式迁移/)
+        expect(String(error)).not.toMatch(
+          new RegExp(`${['导入', '旧版', '工程'].join('')}|显式迁移`),
+        )
         throw error
       }
     }).toThrow(UserFacingError)

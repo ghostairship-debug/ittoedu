@@ -1,7 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { analyzeInformationRelease } from '@/shared/informationRelease'
-import { analyzeVisualDensity } from '@/shared/visualDensity'
 import { collectCourseProjectHealth } from '@/shared/courseProjectHealth'
 import {
   selectActiveCourseProjectDocument,
@@ -10,22 +8,6 @@ import {
 } from '@/renderer/store/editorStore'
 import { componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
 import { ProjectHealthPanel } from '@/renderer/ui/ProjectHealthPanel'
-
-vi.mock('@/shared/informationRelease', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/shared/informationRelease')>()
-  return {
-    ...actual,
-    analyzeInformationRelease: vi.fn(actual.analyzeInformationRelease),
-  }
-})
-
-vi.mock('@/shared/visualDensity', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/shared/visualDensity')>()
-  return {
-    ...actual,
-    analyzeVisualDensity: vi.fn(actual.analyzeVisualDensity),
-  }
-})
 
 vi.mock('@/shared/courseProjectHealth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/courseProjectHealth')>()
@@ -38,8 +20,6 @@ vi.mock('@/shared/courseProjectHealth', async (importOriginal) => {
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
   vi.mocked(collectCourseProjectHealth).mockClear().mockReturnValue([])
-  vi.mocked(analyzeInformationRelease).mockClear()
-  vi.mocked(analyzeVisualDensity).mockClear()
 })
 
 afterEach(() => cleanup())
@@ -52,8 +32,6 @@ describe('ProjectHealthPanel on-demand analysis', () => {
     )
 
     expect(collectCourseProjectHealth).not.toHaveBeenCalled()
-    expect(analyzeInformationRelease).not.toHaveBeenCalled()
-    expect(analyzeVisualDensity).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog', { name: '工程检查' })).not.toBeInTheDocument()
 
     const staleProject = selectActiveCourseProjectDocument(useEditorStore.getState())!
@@ -70,8 +48,6 @@ describe('ProjectHealthPanel on-demand analysis', () => {
       assetFiles: selectMediaAssetFiles(latestState),
       componentFiles: componentPackagesToArchiveFiles(latestState.componentPackages),
     })
-    expect(analyzeInformationRelease).not.toHaveBeenCalled()
-    expect(analyzeVisualDensity).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '工程检查' })).toBeInTheDocument()
     expect(screen.getByLabelText('工程检查摘要')).toBeInTheDocument()
   })

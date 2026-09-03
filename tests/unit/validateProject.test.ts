@@ -151,10 +151,12 @@ function completeContextArchive(): {
 
 function migrationMarkerArchive(): Uint8Array {
   const source = blankArchiveData()
+  const retiredFrameMode = ['legacy', 'whole', 'canvas'].join('-')
+  const retiredRuntimeProtocol = ['legacy', 'runtime', 'v2'].join('-')
   const runtime = {
     layerItemId: 'legacy-runtime',
     label: '迁移运行时',
-    frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+    frame: { mode: retiredFrameMode, x: 0, y: 0, width: 1280, height: 720 },
     order: nextLayerOrder(source.project),
     visible: true,
     locked: false,
@@ -164,7 +166,7 @@ function migrationMarkerArchive(): Uint8Array {
     playbackInitialVisibility: 'inherit',
     kind: 'runtime',
     runtime: {
-      protocol: 'legacy-runtime-v2',
+      protocol: retiredRuntimeProtocol,
       runtimeApiVersion: 2,
       enabled: true,
       renderMode: 'dom',

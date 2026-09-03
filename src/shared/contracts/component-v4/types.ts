@@ -325,23 +325,10 @@ export interface ComponentPackageData {
   /** Recomputed by package parsing; raw test/build sources may omit the cache. */
   readonly contentSha256?: string
   thumbnailUrl?: string
-  /** Import provenance used to lock exact executable bytes in Project V8. */
+  /** Import provenance used to lock exact executable bytes in the current project. */
   provenance?: {
     sha256: string
     importedAt: string
     sourceLabel: string
   }
-}
-
-export interface ExportPayload {
-  project: import('../../projectTypes').ProjectDocument
-  assets: Record<string, { mimeType: string; dataUrl: string }>
-  components: Record<
-    string,
-    {
-      manifest: ComponentManifest
-      runtimeSource: string
-      assets: Record<string, { mimeType: string; dataUrl: string }>
-    }
-  >
 }

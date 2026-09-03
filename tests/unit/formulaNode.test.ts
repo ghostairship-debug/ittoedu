@@ -13,7 +13,7 @@ import {
   selectActiveCourseProjectDocument,
   selectActivePresentationStateId,
 } from '@/renderer/store/editorStore'
-import { materializeScene } from '@/shared/presentation'
+import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
 import {
   analyzeFormulaNodeLayout,
   renderFormulaNodeCanvas,
@@ -29,13 +29,6 @@ function activeHistory() {
   const backend = state.slideBackend
   if (!backend) throw new Error('expected active slideBackend')
   return backend.getSession().history
-}
-
-function materialized(
-  scene: object,
-  stateId?: string | null,
-) {
-  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
 }
 
 const completeAst: FormulaAstNode = {
@@ -269,7 +262,7 @@ describe('Course Project V9 FormulaNode contract', () => {
       formulaId,
       accessibleText: 'x 的平方加二分之一',
     })
-    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
+    expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       type: 'formula',
       formulaId,
       accessibleText: '答案为一',
@@ -280,12 +273,12 @@ describe('Course Project V9 FormulaNode contract', () => {
 
     useEditorStore.getState().undo()
     scene = selectActiveScene(useEditorStore.getState())
-    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
+    expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       accessibleText: 'x 的平方加二分之一',
     })
     useEditorStore.getState().redo()
     scene = selectActiveScene(useEditorStore.getState())
-    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
+    expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       accessibleText: '答案为一',
       formulaId,
     })

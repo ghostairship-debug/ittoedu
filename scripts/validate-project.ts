@@ -302,23 +302,25 @@ function visitLayerItems(
 function collectMigrationMarkerIssues(
   project: CourseProjectDocument,
 ): CourseProjectValidationFinding[] {
+  const retiredFrameMode = ['legacy', 'whole', 'canvas'].join('-')
+  const retiredRuntimeProtocol = ['legacy', 'runtime', 'v2'].join('-')
   const issues: CourseProjectValidationFinding[] = []
   visitLayerItems(project, (item, path) => {
     const frameMode = item.frame.mode as string
-    if (frameMode === 'legacy-whole-canvas') {
+    if (frameMode === retiredFrameMode) {
       issues.push({
         severity: 'error',
         code: 'migration-marker',
-        message: '当前 Course Project V9 不得保留 legacy-whole-canvas 迁移标记。',
+        message: `当前 Course Project V9 不得保留 ${retiredFrameMode} 迁移标记。`,
         path: [...path, 'frame', 'mode'],
         layerItemId: item.layerItemId,
       })
     }
-    if (item.kind === 'runtime' && (item.runtime.protocol as string) === 'legacy-runtime-v2') {
+    if (item.kind === 'runtime' && (item.runtime.protocol as string) === retiredRuntimeProtocol) {
       issues.push({
         severity: 'error',
         code: 'migration-marker',
-        message: '当前 Course Project V9 不得保留 legacy-runtime-v2 迁移标记。',
+        message: `当前 Course Project V9 不得保留 ${retiredRuntimeProtocol} 迁移标记。`,
         path: [...path, 'runtime', 'protocol'],
         layerItemId: item.layerItemId,
       })

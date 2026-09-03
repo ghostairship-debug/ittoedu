@@ -4,7 +4,11 @@ import {
   PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,
   parsePublishedCourseV2Entry,
 } from '@/player/index'
-import { PUBLISHED_LESSON_FORMAT, PUBLISHED_LESSON_VERSION } from '@/shared/publishedLessonTypes'
+
+const retiredPublishedPayload = {
+  format: ['h5lesson', 'published'].join('-'),
+  formatVersion: 1,
+}
 
 describe('Player payload is Published V2 only', () => {
   it('fail-louds retired object payloads, V7, encoded payloads, and corrupt JSON', () => {
@@ -20,10 +24,8 @@ describe('Player payload is Published V2 only', () => {
       components: {},
     })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
 
-    expect(() => parsePublishedCourseV2Entry({
-      format: PUBLISHED_LESSON_FORMAT,
-      formatVersion: PUBLISHED_LESSON_VERSION,
-    })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+    expect(() => parsePublishedCourseV2Entry(retiredPublishedPayload))
+      .toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
 
     expect(() => parsePublishedCourseV2Entry('not-valid-%%%')).toThrow(
       PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,

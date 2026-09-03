@@ -487,7 +487,7 @@
       "moduleIds": [
         "module:runtime-interactions"
       ],
-      "currentFact": "Canonical V9 targets now author Runtime assets, source, keyed content, scalar Properties and supported Slide scene/global templates as single current-Surface transactions; Published V2 preserves a read-only minimal/static-fallback projection, while actual RuntimeHost/CourseRuntimeKernel execution remains on the characterized Legacy path.",
+      "currentFact": "Canonical V9 targets author Runtime assets, source, keyed content, scalar Properties and supported Slide scene/global templates as single current-Surface transactions; Published V2 preserves a read-only minimal/static-fallback projection and executes trusted extensions through RuntimeHost.",
       "targetState": "Narrow authoring/validation/host ports with no Player writeback.",
       "highSignalFiles": [
         "src/renderer/ui/DeveloperTab.tsx",
@@ -508,7 +508,7 @@
       ],
       "entrypoints": [
         "src/player/RuntimeHost.ts",
-        "src/player/CourseRuntimeKernel.ts"
+        "src/player/surfaces/publishedDynamicHosts.ts"
       ],
       "runtimeConsumers": [
         "src/renderer/ui/DeveloperTab.tsx",
@@ -602,7 +602,7 @@
       "highSignalTests": [
         "tests/unit/effectiveLayerProjection.test.ts",
         "tests/unit/v9GlobalLayerUiAdapter.test.tsx",
-        "tests/unit/globalLayerVisibility.test.ts"
+        "tests/unit/teacherControllerRuntimeSession.test.ts"
       ],
       "carriers": {
         "global": "CourseProjectDocument.globalLayerItems (ScopedLayerItem[])",
@@ -620,7 +620,7 @@
         "src/renderer/course/effectiveLayerCommands.ts"
       ],
       "runtimeConsumers": [
-        "src/player/renderTeacherController.ts"
+        "src/player/surfaces/slide/SlidePublishedAdapter.ts"
       ],
       "tests": [
         "tests/unit/effectiveLayerCommands.test.ts",
@@ -810,8 +810,8 @@
       "moduleIds": [
         "module:export-delivery"
       ],
-      "currentFact": "Published V2 PPTX exists, but Slide-only export still routes through the V8 projection builder.",
-      "targetState": "Route supported V9 content through one path with editable/staticization parity.",
+      "currentFact": "Published V2 and Course Project V9 share the current PPTX producer, including editable Native content and explicit static fallbacks for dynamic content.",
+      "targetState": "Preserve editable/staticization parity through the Course Project package producer.",
       "highSignalFiles": [
         "src/renderer/export/course/buildPublishedCourse.ts",
         "src/renderer/export/course/buildCoursePrintArtifacts.ts",
@@ -825,7 +825,7 @@
       ],
       "canonicalFiles": [
         "src/renderer/export/course/buildCoursePptx.ts",
-        "src/renderer/export/buildPptx.ts"
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts"
       ],
       "entrypoints": [
         "src/renderer/export/course/buildCoursePptx.ts",
@@ -904,8 +904,8 @@
       "moduleIds": [
         "module:diagnostics"
       ],
-      "currentFact": "Project Health and base export preflight still consume V8-shaped ProjectDocument.",
-      "targetState": "Readonly V9 structural/export reports with actionable navigation and stable codes.",
+      "currentFact": "Project Health and export preflight consume the canonical Course Project V9 document and emit stable actionable findings.",
+      "targetState": "Preserve readonly V9 structural/export reports with actionable navigation and stable codes.",
       "highSignalFiles": [
         "src/shared/contracts/course-project-v9/types.ts",
         "src/shared/contracts/course-project-v9/schema.ts",
@@ -916,7 +916,7 @@
         "tests/unit/validateProject.test.ts"
       ],
       "canonicalFiles": [
-        "src/shared/projectHealth.ts",
+        "src/shared/courseProjectHealth.ts",
         "src/renderer/export/exportPreflight.ts",
         "src/renderer/ui/ProjectHealthPanel.tsx"
       ],
@@ -1039,51 +1039,51 @@
     {
       "schemaVersion": 1,
       "id": "feature:legacy-release",
-      "name": "Retained V8 Tooling after V9/V2 Release Migration",
+      "name": "V9/V2 Format Rejection and Release Verification",
       "aliases": [
         "legacy-release",
-        "V8 benchmark",
-        "no-source fallback",
-        "Legacy ExportPayload",
+        "format rejection",
+        "unsupported project",
+        "retired player payload",
         "release verifier"
       ],
       "origin": "semantic",
-      "statusClass": "transitional-allowance",
+      "statusClass": "current-must-preserve",
       "owner": "Export / Tooling / Release",
       "moduleIds": [
         "module:tooling-release",
         "module:export-delivery"
       ],
-      "currentFact": "The product open path rejects V8, and committed sample, portability, render-host and release-verifier consumers now use V9/V2. V8 archive adapters and the test factory remain only for isolated round-trip, corruption, Legacy payload and format-rejection tests.",
-      "targetState": "Keep retained V8 compatibility isolated until each adapter or focused test has a measured replacement; never reconnect it to product open or release verification.",
-      "removalPhase": "REPAIR-W3 release migration complete; retained tests are evidence-gated",
-      "reviewGate": "LEG-008/009 retain exact non-product consumers, and product/release V8 references stay at zero.",
+      "currentFact": "The product open path accepts only Course Project V9, Player accepts only Published Course V2, and release verification operates on those current contracts while unsupported historic formats fail loudly.",
+      "targetState": "Preserve strict current-format parsing and actionable unsupported-version errors without restoring a compatibility reader.",
+      "removalPhase": "1.1 legacy modules removed; fail-loud boundary retained",
+      "reviewGate": "Legacy inventory remains at zero while V9/V2 rejection tests continue to pass.",
       "highSignalFiles": [
-        "src/renderer/project/projectArchive.ts",
+        "src/renderer/project/courseProjectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
         "scripts/verify-release.ts",
         "scripts/build-render-host-benchmark.ts",
         "docs/contracts/V9_COMPATIBILITY_POLICY.md"
       ],
       "highSignalTests": [
-        "tests/unit/projectArchive.test.ts",
+        "tests/unit/courseProjectArchive.test.ts",
         "tests/unit/aiCapabilities.test.ts",
         "tests/unit/validateProject.test.ts",
         "tests/integration/renderHostBenchmark.test.ts",
         "tests/unit/projectFormatIsolation.test.ts"
       ],
       "canonicalFiles": [
-        "src/renderer/project/projectArchive.ts",
+        "src/renderer/project/courseProjectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
         "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "entrypoints": [
         "scripts/verify-release.ts",
-        "src/renderer/project/projectArchive.ts"
+        "src/renderer/project/courseProjectArchive.ts"
       ],
       "runtimeConsumers": [
         "src/renderer/App.tsx",
-        "src/player/PlayerApp.ts"
+        "src/main/projectPersistence.ts"
       ],
       "tests": [
         "tests/integration/renderHostBenchmark.test.ts",

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { collectCourseProjectHealth } from '@/shared/courseProjectHealth'
-import { materializeScene } from '@/shared/presentation'
+import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
 import { selectActiveScene, useEditorStore,
   selectActiveCourseProjectDocument,
   selectActivePresentationStateId,
@@ -11,13 +11,6 @@ import { selectActiveScene, useEditorStore,
 } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { RightSidebar } from '@/renderer/ui/RightSidebar'
-
-function materialized(
-  scene: object,
-  stateId?: string | null,
-) {
-  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
-}
 
 function activeHistory() {
   const state = useEditorStore.getState()
@@ -361,11 +354,11 @@ describe('simple and professional editor modes', () => {
     let scene = selectActiveScene(useEditorStore.getState())
     expect(scene.interactions).toHaveLength(2)
     expect(
-      materialized(scene, stateA).nodes.find((node) => node.id === nodeId)
+      selectEffectiveSlideSceneNodes(stateA).find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('hidden')
     expect(
-      materialized(scene, stateB).nodes.find((node) => node.id === nodeId)
+      selectEffectiveSlideSceneNodes(stateB).find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('hidden')
 
@@ -379,11 +372,11 @@ describe('simple and professional editor modes', () => {
       stateIds: [stateB],
     }])
     expect(
-      materialized(scene, stateA).nodes.find((node) => node.id === nodeId)
+      selectEffectiveSlideSceneNodes(stateA).find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('inherit')
     expect(
-      materialized(scene, stateB).nodes.find((node) => node.id === nodeId)
+      selectEffectiveSlideSceneNodes(stateB).find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('hidden')
   })

@@ -80,8 +80,7 @@
       ],
       "forbiddenDependencies": [
         "src/main",
-        "src/preload",
-        "src/player/PlayerApp.ts"
+        "src/preload"
       ],
       "dependencyPolicyPhase": "ARCH-1/ARCH-2",
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
@@ -170,8 +169,7 @@
       ],
       "forbiddenDependencies": [
         "src/renderer/App.tsx",
-        "src/renderer/course/flowEditorCommands.ts",
-        "src/player/PlayerApp.ts"
+        "src/renderer/course/flowEditorCommands.ts"
       ],
       "dependencyPolicyPhase": "ARCH-3",
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",
@@ -317,8 +315,7 @@
         "src/renderer/export/course"
       ],
       "forbiddenDependencies": [
-        "src/renderer/store",
-        "src/player/PlayerApp.ts"
+        "src/renderer/store"
       ],
       "dependencyPolicyPhase": "current-and-ARCH-4",
       "dependencyPolicyMeaning": "declared-policy-not-current-import-graph-compliance",

@@ -16,7 +16,7 @@ import {
 } from '../../shared/publishedCourseTypes'
 
 export const PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR =
-  'Published Course V2 捕获入口只接受已解析的 V2 payload，不接受旧版播放器导出包、PlayerApp 或旧 Player payload。'
+  'Published Course V2 捕获入口只接受已解析的 V2 payload，不接受已退役的播放器导出包或旧 Player payload。'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null

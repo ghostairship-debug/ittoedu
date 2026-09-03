@@ -806,15 +806,6 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
         relativePath,
         specifier,
       )
-      // Component API 4 still shares one file with a retired export-only type
-      // until the coordinated deletion group lands. That edge is unrelated to
-      // the component schema and host contract summarized by this generator.
-      if (
-        relativePath === 'src/shared/contracts/component-v4/types.ts'
-        && dependency === ['src/shared/project', 'Types.ts'].join('')
-      ) {
-        continue
-      }
       if (dependency && !discovered.has(dependency)) pending.push(dependency)
     }
   }
@@ -1538,7 +1529,6 @@ export async function generateAiCapabilityArtifacts(
         entrypoints: AI_CAPABILITY_PROVENANCE_ENTRYPOINTS,
         aliases: { '@/': 'src/' },
         includesTypeOnlyEdges: true,
-        excludesRetiredExportCompatibilityEdge: true,
       },
       sourceFiles: await sourceEvidence(projectRoot),
       headlessBuildFiles: await directFileEvidence(projectRoot, HEADLESS_BUILD_EVIDENCE_FILES),

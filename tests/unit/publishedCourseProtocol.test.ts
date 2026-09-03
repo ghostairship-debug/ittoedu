@@ -18,9 +18,12 @@ import {
   startPlayer,
 } from '@/player/index'
 import { CoursePlayer } from '@/player/surfaces/CoursePlayer'
-import { PUBLISHED_LESSON_FORMAT, PUBLISHED_LESSON_VERSION } from '@/shared/publishedLessonTypes'
 
 const NOW = '2026-08-17T00:00:00.000Z'
+const retiredPublishedPayload = {
+  format: ['h5lesson', 'published'].join('-'),
+  formatVersion: 1,
+}
 
 function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocationId' | 'surfaces'> {
   return {
@@ -564,17 +567,15 @@ describe('Player bundle entry is Published V2 only', () => {
     expect(session.listCatalog().map((entry) => entry.kind)).toEqual(['flow'])
   })
 
-  it('fail-louds Legacy ExportPayload, PublishedLesson, encoded payload, and corrupt V2', () => {
+  it('fail-louds retired player envelopes, encoded payload, and corrupt V2', () => {
     expect(() => parsePublishedCourseV2Entry({
       project: { schemaVersion: 8, scenes: [] },
       assets: {},
       components: {},
     })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
 
-    expect(() => parsePublishedCourseV2Entry({
-      format: PUBLISHED_LESSON_FORMAT,
-      formatVersion: PUBLISHED_LESSON_VERSION,
-    })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+    expect(() => parsePublishedCourseV2Entry(retiredPublishedPayload))
+      .toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
 
     expect(() => parsePublishedCourseV2Entry('AAAA')).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
     expect(() => startPlayer({

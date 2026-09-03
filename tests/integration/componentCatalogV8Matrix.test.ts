@@ -6,7 +6,7 @@ import type {
   ComponentEditorProperty,
 } from '@/shared/componentTypes'
 import type { EditorCanvasNode } from '@/renderer/phaser/editorCanvasNode'
-import { materializeScene } from '@/shared/presentation'
+import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '@/main/componentCatalogScanner'
 import { componentPackagesFromArchive, componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
 import { executeComponentRuntime } from '@/renderer/components/executeComponentRuntime'
@@ -25,13 +25,6 @@ import {
   selectMediaAssetFiles,
   useEditorStore,
 } from '@/renderer/store/editorStore'
-
-function materialized(
-  scene: object,
-  stateId?: string | null,
-) {
-  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
-}
 
 const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
   ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR)
@@ -222,7 +215,7 @@ catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩�
     }
 
     const scene = selectActiveScene(useEditorStore.getState())
-    const materializedScene = materialized(scene, stateId)
+    const effectiveNodes = selectEffectiveSlideSceneNodes(stateId)
     for (const [index, component] of packages.entries()) {
       const property = textProperty(component)
       if (!property) continue
@@ -230,7 +223,7 @@ catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩�
         (node): node is CatalogCanvasComponent =>
           isCatalogCanvasComponent(node) && node.component.packageId === component.manifest.id,
       )!
-      const effective = materializedScene.nodes.find(
+      const effective = effectiveNodes.find(
         (node): node is CatalogCanvasComponent =>
           isCatalogCanvasComponent(node) && node.component.packageId === component.manifest.id,
       )!

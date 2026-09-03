@@ -18,14 +18,7 @@ import type {
   ComponentPackageData,
 } from '@/shared/componentTypes'
 import { getComponentPropValue, mergeComponentProps } from '@/shared/componentProps'
-import { materializeScene } from '@/shared/presentation'
-
-function materialized(
-  scene: ReturnType<typeof selectActiveScene>,
-  stateId?: string | null,
-) {
-  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
-}
+import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
 
 function activeHistory() {
   const state = useEditorStore.getState()
@@ -110,14 +103,13 @@ function currentContext(
 
 function titleAtState(stateId: string | null, nodeId: string): unknown {
   const store = useEditorStore.getState()
-  const scene = selectActiveScene(store)
-  const node = materialized(scene, stateId).nodes.find(
+  const node = selectEffectiveSlideSceneNodes(stateId).find(
     (candidate) => candidate.id === nodeId,
   )
   if (!node || node.type !== 'external-component') return undefined
   const component = store.componentPackages[packageId]!
   return getComponentPropValue(
-    mergeComponentProps(component.manifest, node.props),
+    mergeComponentProps(component.manifest, node.props ?? {}),
     'content.title',
   )
 }

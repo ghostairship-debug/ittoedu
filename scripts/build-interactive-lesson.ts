@@ -385,7 +385,7 @@ export async function buildInteractiveLessonOutputs(): Promise<InteractiveLesson
     throw new Error('离线 HTML 缺少 Published Course V2 payload')
   }
   if (/window\.__H5_LESSON_PAYLOAD__\s*=/.test(html)) {
-    throw new Error('离线 HTML 意外内嵌 V8 ExportPayload')
+    throw new Error('离线 HTML 意外内嵌已退役的播放器数据包')
   }
   if (/https?:\/\//i.test(html)) throw new Error('离线 HTML 中出现远程 URL')
 

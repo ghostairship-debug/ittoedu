@@ -12,7 +12,7 @@ import {
   selectActiveCourseProjectDocument,
   selectActivePresentationStateId,
 } from '@/renderer/store/editorStore'
-import { materializeScene } from '@/shared/presentation'
+import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
@@ -22,13 +22,6 @@ function activeHistory() {
   const backend = state.slideBackend
   if (!backend) throw new Error('expected active slideBackend')
   return backend.getSession().history
-}
-
-function materialized(
-  scene: object,
-  stateId?: string | null,
-) {
-  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
 }
 
 function canvasContext(): CanvasRenderingContext2D {
@@ -156,7 +149,7 @@ describe('Course Project V9 native text emphasis', () => {
 
     const scene = selectActiveScene(useEditorStore.getState())
     expect(scene.nodes[0]).toMatchObject({ style: { emphasis: false }, runs: [] })
-    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
+    expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       style: { emphasis: true },
       runs: [{ start: 0, end: 2, style: { emphasis: false } }],
     })
@@ -165,10 +158,8 @@ describe('Course Project V9 native text emphasis', () => {
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
     useEditorStore.getState().undo()
-    expect(materialized(
-      selectActiveScene(useEditorStore.getState()),
-      stateId,
-    ).nodes[0]).toMatchObject({ style: { emphasis: false }, runs: [] })
+    expect(selectEffectiveSlideSceneNodes(stateId)[0])
+      .toMatchObject({ style: { emphasis: false }, runs: [] })
   })
 
   it('commits a local emphasis command as one undoable and redoable text edit', () => {

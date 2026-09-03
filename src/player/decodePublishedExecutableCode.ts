@@ -1,5 +1,4 @@
 import type { PublishedCourseExecutableCode } from '../shared/publishedCourseTypes'
-import type { PublishedExecutableCode } from '../shared/publishedLessonTypes'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -32,7 +31,7 @@ function decodeBase64Bytes(value: string, label: string): Uint8Array {
 }
 
 export function decodePublishedCode(
-  encoded: PublishedCourseExecutableCode | PublishedExecutableCode,
+  encoded: PublishedCourseExecutableCode,
   label = '发布代码',
 ): string {
   if (
