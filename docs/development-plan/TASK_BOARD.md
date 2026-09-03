@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-052d-preservation-evidence-links](tasks/1.1/r11-052d-preservation-evidence-links.md) | queued | Integrator | none | 052a–052c 与 052e–052h 已把保全行为迁入正式 V2 consumer 测试；仅同步 PM 条目引用的测试路径，不改变保全行为文字。 |
+| [r11-053-legacy-list](tasks/1.1/r11-053-legacy-list.md) | queued | Integrator | legacy-inventory | 在 037z 与 052d 完成后的当前树上只运行一次 Legacy inventory 扫描，按 structured output 原子更新唯一台账的明细、计数、当前提交和 schema 强制的 product digest；在台账中形成 `LEG ID / 精确路径 / 当前 consumer=0 / replacement 测试` 删除表，不删除产品文件、不生成第二报告或文件 Hash。 |

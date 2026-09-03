@@ -31,7 +31,7 @@
 
 ## Write scope
 
-只允许修改 Exact targets 中的精确文件和 `designTokens.test.tsx`、`assetReferences.test.ts`、`componentPackageLifecycle.test.ts` 的直接断言。禁止修改共享 inventory、表外 host、package/archive 字节、组件 API、网络权限、Registry identity、生命周期或 UI 工作流。
+只允许修改 Exact targets 中的精确文件和 `designTokens.test.tsx`、`assetReferences.test.ts`、`courseComponentPackageTransactions.test.ts` 的直接断言。禁止修改共享 inventory、表外 host、package/archive 字节、组件 API、网络权限、Registry identity、生命周期或 UI 工作流。
 
 ## Execution
 
@@ -55,7 +55,7 @@
 
 ## Focused validation
 
-- `npx vitest run tests/unit/designTokens.test.tsx tests/unit/assetReferences.test.ts tests/unit/componentPackageLifecycle.test.ts`
+- `npx vitest run tests/unit/designTokens.test.tsx tests/unit/assetReferences.test.ts tests/unit/courseComponentPackageTransactions.test.ts`
 - `npm run typecheck`
 
 ## Rollback / handoff

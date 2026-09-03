@@ -140,15 +140,18 @@
     {
       "id": "PM-07",
       "type": "automated",
-      "evidenceCommand": "npx vitest run tests/unit/v9SlideContentCommands.test.ts tests/unit/formulaCrossSurface.test.tsx tests/unit/renderVideoNode.test.ts",
+      "evidenceCommand": "npx vitest run tests/unit/v9SlideContentCommands.test.ts tests/unit/formulaNode.test.ts tests/unit/coursePptxExport.test.ts tests/unit/publishedInteractionController.test.ts tests/integration/publishedInteractionSlideHostIntegration.test.ts",
       "fixtureIds": ["slide-heavy"],
       "inputClosure": [
         "src/renderer/course/v9SlideContentCommands.ts",
         "src/shared/formulaRenderer.ts",
-        "src/player/renderVideoNode.ts",
+        "src/player/surfaces/slide/publishedNativeRendering.ts",
+        "src/player/surfaces/slide/publishedNativeVideoMount.ts",
         "tests/unit/v9SlideContentCommands.test.ts",
-        "tests/unit/formulaCrossSurface.test.tsx",
-        "tests/unit/renderVideoNode.test.ts"
+        "tests/unit/formulaNode.test.ts",
+        "tests/unit/coursePptxExport.test.ts",
+        "tests/unit/publishedInteractionController.test.ts",
+        "tests/integration/publishedInteractionSlideHostIntegration.test.ts"
       ],
       "invalidation": "Native text/formula/image/video/shape authoring or render tests change."
     },
@@ -236,13 +239,13 @@
     {
       "id": "PM-14",
       "type": "automated",
-      "evidenceCommand": "npx vitest run tests/unit/componentProtocolV4.test.ts tests/unit/componentPackageLifecycle.test.ts tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts",
+      "evidenceCommand": "npx vitest run tests/unit/componentProtocolV4.test.ts tests/unit/courseComponentPackageTransactions.test.ts tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts",
       "fixtureIds": ["slide-heavy", "render-host-benchmark-v9"],
       "inputClosure": [
         "src/renderer/components",
         "src/shared/contracts/component-v4",
         "tests/unit/componentProtocolV4.test.ts",
-        "tests/unit/componentPackageLifecycle.test.ts",
+        "tests/unit/courseComponentPackageTransactions.test.ts",
         "tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts"
       ],
       "invalidation": "Component API 4, package lifecycle, or replacement transaction tests change."

@@ -44,7 +44,7 @@ Course Project V9 的 `NativeElementContent`、strict parser、presentation `nat
 
 ## Focused validation
 
-- `npx vitest run tests/unit/courseProjectCoreContract.test.ts tests/unit/courseProjectRoundTrip.test.ts tests/unit/presentation.test.ts`
+- `npx vitest run tests/unit/courseProjectCoreContract.test.ts tests/unit/courseProjectRoundTrip.test.ts`
 - `npm run check:contracts`
 - `npm run typecheck`
 
