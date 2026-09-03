@@ -10,6 +10,7 @@ import type {
 } from '../authoring/spatialAuthoringIntents'
 import type { EditorShellOwnedState } from '../store/slices/editorShellSlice'
 import type { CourseLifecycleOwnedState } from '../store/slices/courseLifecycleSlice'
+import type { createCourseStructureSlice } from '../store/slices/courseStructureSlice'
 import type {
   SlideAuthoringBackend,
   SlideCommandResult,
@@ -38,22 +39,9 @@ import {
 import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import {
-  addCourseFlowPage,
-  addCourseScene,
-  addCourseSlidePage,
-  addCourseSpatialPage,
-  deleteCourseLocation as applyDeleteCourseLocation,
-  deleteCourseSurface as applyDeleteCourseSurface,
-  moveCourseSlideScene as applyMoveCourseSlideScene,
-  reorderCourseSurfaces as applyReorderCourseSurfaces,
-  type CourseLocationCommandResult,
-} from '../course/courseLocationCommands'
-import {
-  deriveCourseEditorLayout,
   type CourseEditorDropdownAction,
   type CourseEditorPrimaryAction,
 } from '../course/courseEditorLayout'
-import { MAX_PROJECT_SCENES } from '../../shared/constants'
 import {
   buildSpatialEditorView,
   captureSpatialEditorAuthoringTarget,
@@ -253,6 +241,7 @@ export type CrossSurfaceCommandPorts = {
   slide: CrossSurfaceSlidePorts
   flow: CrossSurfaceFlowPorts
   spatial: CrossSurfaceSpatialPorts
+  structure: ReturnType<typeof createCourseStructureSlice>
   shell: {
     read(): EditorShellOwnedState
     patch(patch: Partial<EditorShellOwnedState> & Record<string, unknown>): void
@@ -421,51 +410,6 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       })
       return false
     }
-  }
-
-  const persistCourseProjectCommand = (
-    result: CourseLocationCommandResult,
-    extra: { statusMessage?: string | null } = {},
-  ) => {
-    if (!result.ok) {
-      if (result.reason) {
-        ports.kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-      }
-      return
-    }
-    dispatchActiveSurface(ports.detect(), {
-      spatial: () => {
-        const session = ports.spatial.read().spatialSession
-        if (!session) return
-        const history = commitSpatialAuthoringHistory(session.history, result.project)
-        ports.spatial.persist(
-          succeedSpatialCommand({ ...session, history }, true),
-          extra,
-        )
-      },
-      flow: () => {
-        const session = ports.flow.read().flowSession
-        if (!session) return
-        ports.flow.persist({
-          ok: true,
-          nextDocument: result.project,
-          historyEntry: true,
-          selection: session.selection,
-        }, extra)
-      },
-      slide: () => {
-        const backend = ports.slide.read().slideBackend
-        if (!backend || typeof (backend as SlideAuthoringBackend).getSession !== 'function') return
-        const session = (backend as SlideAuthoringBackend).getSession()
-        const history = commitSlideAuthoringHistory(session.history, result.project)
-        ports.slide.persist({
-          ok: true,
-          nextSession: { ...session, history },
-          historyEntry: true,
-        }, extra)
-      },
-      sessionless: () => ports.kernel.failSessionless(),
-    })
   }
 
   const commands = {
@@ -721,111 +665,44 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       action: CourseEditorPrimaryAction | CourseEditorDropdownAction,
       options: { surfaceId?: string } = {},
     ) {
-      const project = ports.kernel.tryReadDocument()
-      if (!project) return
-      let result: CourseLocationCommandResult
-      const expectedRevision = project.revision
-      if (action === 'scene') {
-        if (!options.surfaceId) {
-          ports.kernel.setFeedback({ errorMessage: '找不到当前 Slide 表面', statusMessage: null })
-          return
-        }
-        const slideSurface = project.surfaces.find(
-          (surface) => surface.id === options.surfaceId && surface.type === 'slide',
-        )
-        const sceneCount = slideSurface?.type === 'slide' ? slideSurface.scenes.length : 0
-        if (sceneCount >= MAX_PROJECT_SCENES) {
-          ports.kernel.setFeedback({
-            errorMessage: `工程已达到 ${MAX_PROJECT_SCENES} 个场景上限。请删除不需要的场景后再试。`,
-            statusMessage: null,
-          })
-          return
-        }
-        result = addCourseScene(project, {
-          surfaceId: options.surfaceId,
-          title: `场景 ${sceneCount + 1}`,
-          expectedRevision,
-        })
-      } else if (action === 'slide-page') {
-        result = addCourseSlidePage(project, { expectedRevision })
-      } else if (action === 'flow-page') {
-        result = addCourseFlowPage(project, { expectedRevision })
-      } else {
-        result = addCourseSpatialPage(project, { expectedRevision })
+      const result = ports.structure.addCourseContent(action, options)
+      if (result.ok && result.activatedLocationId) {
+        commands.activateCourseLocation(result.activatedLocationId)
       }
-      if (!result.ok) {
-        ports.kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return
-      }
-      const statusMessage = action === 'scene'
-        ? '已新建场景'
-        : action === 'slide-page'
-          ? '已新增演示页面'
-          : action === 'flow-page'
-            ? '已新增流式讲义'
-            : '已新增无限画布'
-      persistCourseProjectCommand(result, { statusMessage })
-      commands.activateCourseLocation(result.activatedLocationId)
     },
 
     addScene() {
-      const project = ports.kernel.tryReadDocument()
-      if (!project) return
-      const layout = deriveCourseEditorLayout(project, ports.readActiveLocationId() ?? undefined)
-      if (layout.primary.action === 'scene' && layout.primary.surfaceId) {
-        commands.addCourseContent('scene', { surfaceId: layout.primary.surfaceId })
-        return
+      const result = ports.structure.addScene()
+      if (result.ok && result.activatedLocationId) {
+        commands.activateCourseLocation(result.activatedLocationId)
       }
-      commands.addCourseContent(layout.primary.action)
     },
 
     reorderCourseSurfaces(surfaceIds: string[]) {
-      const project = ports.kernel.tryReadDocument()
-      if (!project) return
-      persistCourseProjectCommand(applyReorderCourseSurfaces(project, surfaceIds, {
-        expectedRevision: project.revision,
-        activeLocationId: ports.readActiveLocationId() ?? undefined,
-      }))
+      ports.structure.reorderCourseSurfaces(surfaceIds)
     },
 
     deleteCourseSurface(surfaceId: string) {
       const project = ports.kernel.tryReadDocument()
-      if (!project) return
       const activeLocationId = ports.readActiveLocationId() ?? undefined
-      const active = activeLocationId
+      const active = activeLocationId && project
         ? project.locations.find((location) => location.id === activeLocationId)
         : undefined
-      if (active?.surfaceId === surfaceId) {
+      if (active?.surfaceId === surfaceId && project) {
         const fallback = project.locations.find((location) => location.surfaceId !== surfaceId)
         if (fallback) commands.activateCourseLocation(fallback.id)
       }
-      const liveProject = ports.kernel.tryReadDocument() ?? project
-      const result = applyDeleteCourseSurface(liveProject, surfaceId, {
-        expectedRevision: liveProject.revision,
-        activeLocationId: ports.readActiveLocationId() ?? activeLocationId,
-      })
-      if (!result.ok) {
-        ports.kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return
+      const result = ports.structure.deleteCourseSurface(surfaceId)
+      if (result.ok && result.activatedLocationId) {
+        commands.activateCourseLocation(result.activatedLocationId)
       }
-      persistCourseProjectCommand(result, { statusMessage: '已删除页面' })
-      if (result.activatedLocationId) commands.activateCourseLocation(result.activatedLocationId)
     },
 
     moveCourseSlideScene(locationId: string, targetSurfaceId: string, toIndex?: number) {
-      const project = ports.kernel.tryReadDocument()
-      if (!project) return
-      const result = applyMoveCourseSlideScene(project, locationId, targetSurfaceId, {
-        expectedRevision: project.revision,
-        toIndex,
-        activeLocationId: ports.readActiveLocationId() ?? undefined,
-      })
-      if (!result.ok) {
-        ports.kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return
+      const result = ports.structure.moveCourseSlideScene(locationId, targetSurfaceId, toIndex)
+      if (result.ok && result.activatedLocationId) {
+        commands.activateCourseLocation(result.activatedLocationId)
       }
-      persistCourseProjectCommand(result, { statusMessage: '已调整演示页面' })
-      if (result.activatedLocationId) commands.activateCourseLocation(result.activatedLocationId)
     },
 
     setActiveScene(activeSceneId: string) {
@@ -1609,11 +1486,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
           candidate.stateId === undefined,
         )
         if (!liveLocation) return false
-        const result = applyDeleteCourseLocation(liveProject, liveLocation.id, {
-          expectedRevision: liveProject.revision,
-          activeLocationId: ports.readActiveLocationId() ?? undefined,
-        })
-        persistCourseProjectCommand(result, { statusMessage: '场景已删除' })
+        const result = ports.structure.deleteCourseLocation(liveLocation.id)
         if (result.ok && result.activatedLocationId) {
           commands.activateCourseLocation(result.activatedLocationId)
         }

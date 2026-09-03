@@ -100,6 +100,7 @@ import {
   type SpatialAuthoringReceipt,
 } from './slices/spatialAuthoringSlice'
 import { createEditorShellSlice } from './slices/editorShellSlice'
+import { createCourseStructureSlice } from './slices/courseStructureSlice'
 import { bindTeacherControllerAuthoringPorts } from '../authoring/v9TeacherControllerAuthoring'
 import {
   applyEditorTransactionStep,
@@ -1474,7 +1475,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readBackend: () => selectSlideAuthoringBackend(get()),
     commit: (run) => get().applySlideCandidateCommand(run),
   })
+  const courseStructureSlice = createCourseStructureSlice(kernel, {
+    readActiveLocationId: () => selectActiveCourseLocationId(get()),
+  })
   const crossSurfaceCommands = createCrossSurfaceCommands({
+    structure: courseStructureSlice,
     detect: () => detectActiveSurface({
       spatialLocationId: get().spatialSession?.selection.locationId ?? null,
       flowLocationId: get().flowSession?.selection.locationId ?? null,
@@ -1611,6 +1616,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ...mediaAuthoringActions,
     ...componentAuthoringActions,
     ...interactionAuthoringActions,
+    ...courseStructureSlice,
     ...crossSurfaceCommands,
 
   }
