@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { unzipSync } from 'fflate'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,9 +12,10 @@ import { buildPublishedCourseV2Payload, type CoursePublishSources } from '@/rend
 import { buildCourseExportPageList } from '@/renderer/export/course/buildCoursePrintArtifacts'
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
+import { addPptxFormulaNode } from '@/renderer/export/pptxTextAndShape'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { APP_COMPANY, APP_NAME } from '@/shared/constants'
-import { createShapeNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createShapeNode, createTextNode, createFormulaNode } from '@/renderer/project/nativeNodeFactories'
 import {
   listCourseProjectV9Fixtures,
   type CourseProjectV9FixtureId,
@@ -424,5 +425,73 @@ describe('buildCoursePptx', () => {
       assets: {},
       components: {},
     } as never)).rejects.toThrow(/Published Course V2|V9 发布源|旧版导出包/)
+  })
+
+  it('staticizes PPTX formulas as a transparent image with traceable metadata', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      {
+        arc: vi.fn(),
+        beginPath: vi.fn(),
+        clearRect: vi.fn(),
+        clip: vi.fn(),
+        closePath: vi.fn(),
+        drawImage: vi.fn(),
+        fill: vi.fn(),
+        fillRect: vi.fn(),
+        fillText: vi.fn(),
+        lineTo: vi.fn(),
+        measureText: vi.fn((value: string) => ({
+          width: Math.max(8, Array.from(value).length * 14),
+        })),
+        moveTo: vi.fn(),
+        quadraticCurveTo: vi.fn(),
+        rect: vi.fn(),
+        roundRect: vi.fn(),
+        restore: vi.fn(),
+        rotate: vi.fn(),
+        save: vi.fn(),
+        scale: vi.fn(),
+        stroke: vi.fn(),
+        strokeRect: vi.fn(),
+        translate: vi.fn(),
+        fillStyle: '',
+        strokeStyle: '',
+        font: '',
+        globalAlpha: 1,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+        lineCap: 'butt',
+        lineJoin: 'miter',
+        lineWidth: 1,
+        textAlign: 'left',
+        textBaseline: 'alphabetic',
+      } as unknown as CanvasRenderingContext2D,
+    )
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,Zm9ybXVsYQ==',
+    )
+    const formula = createFormulaNode({
+      id: 'formula-pptx',
+      formulaId: 'math.pptx.1',
+      accessibleText: '二分之一',
+      ast: {
+        type: 'fraction',
+        numerator: { type: 'token', value: '1' },
+        denominator: { type: 'token', value: '2' },
+      },
+    })
+    const slide = { addImage: vi.fn() }
+
+    addPptxFormulaNode(
+      slide as never,
+      formula,
+      { x: 13.333 / 1280, y: 7.5 / 720 },
+    )
+
+    expect(slide.addImage).toHaveBeenCalledWith(expect.objectContaining({
+      data: 'data:image/png;base64,Zm9ybXVsYQ==',
+      objectName: expect.stringContaining('静态公式'),
+      altText: expect.stringContaining('math.pptx.1'),
+    }))
   })
 })

@@ -87,6 +87,52 @@ window.CoursewareComponent.define({
 })
 `
 
+const EDITOR_STATE_RUNTIME_CODE = `
+window.CoursewareComponent.define({
+  id: 'editor-state-component',
+  runtimeApiVersion: 4,
+  create(context) {
+    window.__publishedEditorStateProbe = {
+      initialEditorState: context.editorState,
+      editorStates: [],
+    }
+    return {
+      setEditorState(state) { window.__publishedEditorStateProbe.editorStates.push(state) },
+      destroy() {},
+    }
+  },
+})
+`
+
+const CAPTURE_ORDER_RUNTIME_CODE = `
+window.CoursewareComponent.define({
+  id: 'capture-order-component',
+  runtimeApiVersion: 4,
+  create(context) {
+    var order = window.__publishedCaptureOrderProbe = []
+    context.capture.waitUntil(new Promise(function (resolve) {
+      window.__publishedCaptureOrderResolve = function () {
+        order.push('initial')
+        resolve()
+      }
+    }).then(function () {
+      context.capture.waitUntil(Promise.resolve().then(function () {
+        order.push('nested')
+      }))
+    }))
+    return {
+      prepareCapture() {
+        order.push('prepare')
+        context.capture.waitUntil(Promise.resolve().then(function () {
+          order.push('prepare-task')
+        }))
+      },
+      destroy() {},
+    }
+  },
+})
+`
+
 const CAPTURE_RUNTIME_CODE = `
 window.CoursewareComponent.define({
   id: 'counter-component',
@@ -439,5 +485,114 @@ describe('publishedComponentMount helper', () => {
     handle.destroy()
     expect(Reflect.get(window, '__publishedCaptureComponentProbe')).toMatchObject({ destroys: 1 })
     Reflect.deleteProperty(window, '__publishedCaptureComponentProbe')
+  })
+
+  it('resolves editorState from previewPageProp and syncs it on props updates', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const packageData: ComponentPackageData = {
+      manifest: {
+        schemaVersion: 4,
+        runtimeApiVersion: 4,
+        id: 'editor-state-component',
+        name: '多页组件',
+        version: '1.0.0',
+        entry: 'runtime.js',
+        defaultSize: { width: 200, height: 60 },
+        minSize: { width: 100, height: 30 },
+        preserveAspectRatio: false,
+        supportedScopes: ['scene'],
+        renderMode: 'dom',
+        assets: {},
+        defaultProps: {},
+        editor: {
+          properties: [],
+          pages: [
+            { id: 'intro', label: '简介', propertyKeys: [] },
+            { id: 'detail', label: '详情', propertyKeys: [] },
+          ],
+          defaultPageId: 'intro',
+          previewPageProp: 'previewPageId',
+        },
+      },
+      runtimeSource: EDITOR_STATE_RUNTIME_CODE,
+      files: {},
+    }
+    const handle = mountPublishedComponent(container, {
+      container,
+      componentId: 'editor-state-component',
+      version: '1.0.0',
+      instanceId: 'inst-editor-state',
+      width: 200,
+      height: 60,
+      props: { previewPageId: 'detail' },
+      components: { 'editor-state-component': packageData },
+      mode: 'edit',
+    })
+
+    expect(handle.ok).toBe(true)
+    const probe = Reflect.get(window, '__publishedEditorStateProbe') as {
+      initialEditorState: unknown
+      editorStates: unknown[]
+    }
+    expect(probe.initialEditorState).toEqual({ pageId: 'detail' })
+
+    handle.updateProps({ previewPageId: 'intro' })
+    expect(probe.editorStates.at(-1)).toEqual({ pageId: 'intro' })
+
+    handle.updateProps({ previewPageId: 'missing-page' })
+    expect(probe.editorStates.at(-1)).toEqual({ pageId: 'intro' })
+
+    handle.destroy()
+    Reflect.deleteProperty(window, '__publishedEditorStateProbe')
+  })
+
+  it('runs prepareCapture after create-phase tasks and drains prepare-phase tasks', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const packageData: ComponentPackageData = {
+      manifest: {
+        schemaVersion: 4,
+        runtimeApiVersion: 4,
+        id: 'capture-order-component',
+        name: '捕获顺序组件',
+        version: '1.0.0',
+        entry: 'runtime.js',
+        defaultSize: { width: 200, height: 60 },
+        minSize: { width: 100, height: 30 },
+        preserveAspectRatio: false,
+        supportedScopes: ['scene'],
+        renderMode: 'dom',
+        assets: {},
+        defaultProps: {},
+      },
+      runtimeSource: CAPTURE_ORDER_RUNTIME_CODE,
+      files: {},
+    }
+    const handle = mountPublishedComponent(container, {
+      container,
+      componentId: 'capture-order-component',
+      version: '1.0.0',
+      instanceId: 'inst-capture-order',
+      width: 200,
+      height: 60,
+      props: {},
+      components: { 'capture-order-component': packageData },
+      mode: 'capture',
+    })
+
+    expect(handle.ok).toBe(true)
+    const order = Reflect.get(window, '__publishedCaptureOrderProbe') as string[]
+    const pending = handle.waitForCaptureReady()
+    await Promise.resolve()
+    expect(order).toEqual([])
+    const resolveInitial = Reflect.get(window, '__publishedCaptureOrderResolve') as () => void
+    resolveInitial()
+    await expect(pending).resolves.toBeUndefined()
+    expect(order).toEqual(['initial', 'nested', 'prepare', 'prepare-task'])
+
+    handle.destroy()
+    Reflect.deleteProperty(window, '__publishedCaptureOrderProbe')
+    Reflect.deleteProperty(window, '__publishedCaptureOrderResolve')
   })
 })

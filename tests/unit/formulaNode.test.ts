@@ -14,6 +14,10 @@ import {
   selectActivePresentationStateId,
 } from '@/renderer/store/editorStore'
 import { materializeScene } from '@/shared/presentation'
+import {
+  analyzeFormulaNodeLayout,
+  renderFormulaNodeCanvas,
+} from '@/shared/formulaRenderer'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
@@ -67,6 +71,56 @@ function measuringContext(): CanvasRenderingContext2D {
       width: Math.max(8, Array.from(value).length * 12),
     })),
   } as unknown as CanvasRenderingContext2D
+}
+
+function deterministicFormulaCanvasContext(): CanvasRenderingContext2D & {
+  drawImage: ReturnType<typeof vi.fn>
+  fillText: ReturnType<typeof vi.fn>
+  lineTo: ReturnType<typeof vi.fn>
+  stroke: ReturnType<typeof vi.fn>
+} {
+  return {
+    arc: vi.fn(),
+    beginPath: vi.fn(),
+    clearRect: vi.fn(),
+    clip: vi.fn(),
+    closePath: vi.fn(),
+    drawImage: vi.fn(),
+    fill: vi.fn(),
+    fillRect: vi.fn(),
+    fillText: vi.fn(),
+    lineTo: vi.fn(),
+    measureText: vi.fn((value: string) => ({
+      width: Math.max(8, Array.from(value).length * 14),
+    })),
+    moveTo: vi.fn(),
+    quadraticCurveTo: vi.fn(),
+    rect: vi.fn(),
+    roundRect: vi.fn(),
+    restore: vi.fn(),
+    rotate: vi.fn(),
+    save: vi.fn(),
+    scale: vi.fn(),
+    stroke: vi.fn(),
+    strokeRect: vi.fn(),
+    translate: vi.fn(),
+    fillStyle: '',
+    strokeStyle: '',
+    font: '',
+    globalAlpha: 1,
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: 'high',
+    lineCap: 'butt',
+    lineJoin: 'miter',
+    lineWidth: 1,
+    textAlign: 'left',
+    textBaseline: 'alphabetic',
+  } as unknown as CanvasRenderingContext2D & {
+    drawImage: ReturnType<typeof vi.fn>
+    fillText: ReturnType<typeof vi.fn>
+    lineTo: ReturnType<typeof vi.fn>
+    stroke: ReturnType<typeof vi.fn>
+  }
 }
 
 function blankSlideProject(): CourseProjectDocument {
@@ -308,5 +362,48 @@ describe('Course Project V9 FormulaNode contract', () => {
     }))
     expect(report.summary.canExport).toBe(false)
     vi.unstubAllGlobals()
+  })
+
+  it('draws recursive layout deterministically and exposes exact overflow metrics', () => {
+    const context = deterministicFormulaCanvasContext()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    const formula = createFormulaNode({
+      width: 520,
+      height: 210,
+      ast: {
+        type: 'row',
+        children: [
+          {
+            type: 'fraction',
+            numerator: { type: 'token', value: '1' },
+            denominator: {
+              type: 'root',
+              radicand: { type: 'token', value: 'x' },
+            },
+          },
+          { type: 'operator', value: '+' },
+          {
+            type: 'script',
+            base: { type: 'token', value: 'y' },
+            superscript: { type: 'token', value: '2' },
+          },
+        ],
+      },
+    })
+
+    const rendered = renderFormulaNodeCanvas(formula, formula.width, formula.height, 2)
+    const analysis = analyzeFormulaNodeLayout(formula)
+
+    expect(rendered.canvas.width).toBe(formula.width * 2)
+    expect(rendered.canvas.height).toBe(formula.height * 2)
+    expect(rendered.contentWidth).toBeGreaterThan(0)
+    expect(rendered.contentHeight).toBeGreaterThan(formula.style.fontSize)
+    expect(analysis).toMatchObject({
+      overflowsWidth: false,
+      overflowsHeight: false,
+    })
+    expect(context.fillText).toHaveBeenCalled()
+    expect(context.stroke).toHaveBeenCalled()
+    expect(context.lineTo).toHaveBeenCalled()
   })
 })
