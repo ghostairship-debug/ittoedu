@@ -2,14 +2,19 @@ import { webcrypto } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { useEditorStore } from '../../src/renderer/store/editorStore'
+import {
+  selectActiveCourseProjectDocument,
+  useEditorStore,
+} from '../../src/renderer/store/editorStore'
 
 const sizeProbe = vi.hoisted(() => ({ forceWarning: false }))
+
+const fontProbe = vi.hoisted(() => ({ gate: null as Promise<void> | null }))
 
 const publishSourceProbe = vi.hoisted(() => ({ forceUnavailable: false }))
 
@@ -64,6 +69,19 @@ vi.mock('../../src/renderer/export/exportSize', async (importOriginal) => {
     utf8ByteLength: (value: string) => sizeProbe.forceWarning
       ? actual.SINGLE_HTML_WARNING_BYTES + 1
       : actual.utf8ByteLength(value),
+  }
+})
+
+vi.mock('../../src/renderer/export/bundledFontEmbedding', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../src/renderer/export/bundledFontEmbedding')
+  >()
+  return {
+    ...actual,
+    prepareBundledFontEmbedding: async () => {
+      if (fontProbe.gate) await fontProbe.gate
+      return actual.prepareBundledFontEmbedding()
+    },
   }
 })
 
@@ -313,6 +331,7 @@ beforeEach(() => {
     disconnect() {}
   })
   sizeProbe.forceWarning = false
+  fontProbe.gate = null
   publishSourceProbe.forceUnavailable = false
   deliveryProbe.publishedStandalone.mockClear()
   deliveryProbe.publishedWebPackage.mockClear()
@@ -552,5 +571,79 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
 
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
     expect(deliveryProbe.publishedStandalone).toHaveBeenCalledOnce()
+  })
+
+  it('re-runs preflight for the web package when a large single HTML is redirected', async () => {
+    loadBlankCourse()
+    const api = appApi()
+    window.desktopAPI = api
+    sizeProbe.forceWarning = true
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html'))
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 文件较大',
+    })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '导出网页包（推荐）' }))
+
+    expect(await screen.findByRole('alertdialog', {
+      name: '网页包 导出预检',
+    })).toBeVisible()
+    expect(api.exportWebPackage).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+    await waitFor(() => expect(api.exportWebPackage).toHaveBeenCalledOnce())
+  })
+
+  it('exports the snapshot that passed preflight even if the document changes before emit', async () => {
+    loadBlankCourse()
+    const original = selectActiveCourseProjectDocument(useEditorStore.getState())?.title
+    if (!original) throw new Error('expected an active course title')
+    let releaseFonts!: () => void
+    fontProbe.gate = new Promise<void>((resolve) => { releaseFonts = resolve })
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html'))
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    act(() => {
+      useEditorStore.getState().renameProject('预检后改名')
+    })
+    releaseFonts()
+
+    await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
+    const exported = deliveryProbe.publishedStandalone.mock.calls[0]?.[0] as
+      | { project: { title: string } }
+      | undefined
+    expect(exported?.project.title).toBe(original)
+  })
+
+  it('refuses to locate a preflight finding after the document changed', async () => {
+    loadCourseWithRemoteBackground()
+    const api = appApi()
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-single-html-online'))
+    expect(await screen.findByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })).toBeVisible()
+    expect(screen.getByText('online-remote-asset')).toBeVisible()
+    act(() => {
+      useEditorStore.getState().renameProject('定位前改名')
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: '定位' })[0]!)
+
+    expect(screen.queryByText(/已定位导出预检问题/)).toBeNull()
+    expect(await screen.findByText(/导出预检结果已过期/)).toBeVisible()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 })

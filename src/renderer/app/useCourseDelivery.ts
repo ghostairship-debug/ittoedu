@@ -220,12 +220,6 @@ export function useCourseDelivery(
   const pendingExportRef = useRef<PendingExport | null>(null)
   const pendingLargeHtmlRef = useRef<PendingLargeHtml | null>(null)
 
-  const requireSnapshot = useCallback((target: CourseDeliveryTarget): CourseDeliverySnapshot => {
-    const snapshot = portsRef.current.readCanonicalSnapshot()
-    if (!snapshot) throw courseDeliveryUnavailable(target)
-    return snapshot
-  }, [])
-
   const writeSingleHtml = useCallback(async (
     html: string,
     mode: SingleHtmlExportMode,
@@ -242,7 +236,8 @@ export function useCourseDelivery(
   }, [])
 
   const emitHtml = useCallback((
-    mode: SingleHtmlExportMode = 'offline-portable',
+    snapshot: CourseDeliverySnapshot,
+    mode: SingleHtmlExportMode,
   ) => {
     void portsRef.current.runBusy(async () => {
       // The builders are synchronous, so the bundled font bytes have to be in
@@ -250,7 +245,6 @@ export function useCourseDelivery(
       // there. Free after the first export of a session, and free in any host
       // whose byte source is already synchronous.
       await prepareBundledFontEmbedding()
-      const snapshot = requireSnapshot('single-html')
       const html = buildPublishedCourseStandaloneHtml(publishSources(snapshot), {
         playerBundle: loadPlayerBundle(),
         singleHtmlMode: mode,
@@ -263,12 +257,11 @@ export function useCourseDelivery(
       }
       await writeSingleHtml(html, mode, snapshot.project.title)
     }, '导出失败。请检查磁盘空间并重试。')
-  }, [requireSnapshot, writeSingleHtml])
+  }, [writeSingleHtml])
 
-  const emitWebPackage = useCallback(() => {
+  const emitWebPackage = useCallback((snapshot: CourseDeliverySnapshot) => {
     void portsRef.current.runBusy(async () => {
       portsRef.current.commitStatus('正在生成网页包…')
-      const snapshot = requireSnapshot('web-package')
       await prepareBundledFontEmbedding()
       const bytes = await buildPublishedCourseWebPackageAsync(
         publishSources(snapshot),
@@ -280,12 +273,11 @@ export function useCourseDelivery(
       })
       if (result) portsRef.current.commitStatus(`网页包已导出到 ${result.path}`)
     }, '网页包导出失败。请检查磁盘空间并重试。')
-  }, [requireSnapshot])
+  }, [])
 
-  const emitPptx = useCallback(() => {
+  const emitPptx = useCallback((snapshot: CourseDeliverySnapshot) => {
     void portsRef.current.runBusy(async () => {
       portsRef.current.commitStatus('正在生成可编辑 PPTX 对象…')
-      const snapshot = requireSnapshot('pptx')
       const built = await buildCoursePptx(publishSources(snapshot))
       if (built.bytes.byteLength === 0) {
         throw new Error(built.report.map((item) => item.message).join('\n') || '未能生成 PPTX')
@@ -304,11 +296,10 @@ export function useCourseDelivery(
         )
       }
     }, 'PPTX 导出失败。请减少大图片数量后重试。')
-  }, [requireSnapshot])
+  }, [])
 
-  const emitPdf = useCallback(() => {
+  const emitPdf = useCallback((snapshot: CourseDeliverySnapshot) => {
     void portsRef.current.runBusy(async () => {
-      const snapshot = requireSnapshot('pdf')
       portsRef.current.commitStatus('正在渲染 PDF 页面…')
       const artifacts = await buildCoursePrintArtifacts(publishSources(snapshot))
       const producerErrors = artifacts.report.filter((item) => item.severity === 'error')
@@ -346,7 +337,7 @@ export function useCourseDelivery(
         '请检查导出预检与混合打印计划后重试；本次不会回退到旧版 V8 Slide 快照。',
       )
     }, 'PDF 导出失败。请减少大图片数量后重试。')
-  }, [requireSnapshot])
+  }, [])
 
   const emitDocx = useCallback(() => {
     void portsRef.current.runBusy(async () => {
@@ -453,7 +444,16 @@ export function useCourseDelivery(
     const pending = pendingExportRef.current
     if (!report?.summary.canExport || !pending) return
     const current = portsRef.current.readCanonicalSnapshot()
-    if (current && !sameDeliveryIdentity(snapshotIdentity(current), pending.identity)) {
+    if (!current) {
+      // The preflighted snapshot is only emitted for the session that passed
+      // preflight; a session without a publishable document fails loud.
+      clearPreflight()
+      void portsRef.current.runBusy(async () => {
+        throw courseDeliveryUnavailable(pending.format)
+      }, '课程交付不可用。请重新打开课程工程后重试。')
+      return
+    }
+    if (!sameDeliveryIdentity(snapshotIdentity(current), pending.identity)) {
       pendingExportRef.current = {
         snapshot: current,
         identity: snapshotIdentity(current),
@@ -469,10 +469,10 @@ export function useCourseDelivery(
     }
     const singleHtmlMode = pending.singleHtmlMode ?? 'offline-portable'
     clearPreflight()
-    if (report.target === 'single-html') emitHtml(singleHtmlMode)
-    else if (report.target === 'web-package') emitWebPackage()
-    else if (report.target === 'pptx') emitPptx()
-    else emitPdf()
+    if (report.target === 'single-html') emitHtml(pending.snapshot, singleHtmlMode)
+    else if (report.target === 'web-package') emitWebPackage(pending.snapshot)
+    else if (report.target === 'pptx') emitPptx(pending.snapshot)
+    else emitPdf(pending.snapshot)
   }, [
     clearPreflight,
     emitHtml,
@@ -483,6 +483,17 @@ export function useCourseDelivery(
   ])
 
   const locatePreflightItem = useCallback((item: ExportPreflightItem) => {
+    const current = portsRef.current.readCanonicalSnapshot()
+    const pending = pendingExportRef.current
+    if (
+      !current
+      || !pending
+      || !sameDeliveryIdentity(snapshotIdentity(current), pending.identity)
+    ) {
+      portsRef.current.reportError('导出预检结果已过期：工程已修改，请重新执行导出预检。')
+      clearPreflight()
+      return
+    }
     portsRef.current.navigateFinding(item)
     portsRef.current.commitStatus(`已定位导出预检问题：${item.message}`)
     clearPreflight()
@@ -515,8 +526,8 @@ export function useCourseDelivery(
 
   const exportLargeHtmlAsWebPackage = useCallback(() => {
     cancelLargeHtml()
-    emitWebPackage()
-  }, [cancelLargeHtml, emitWebPackage])
+    exportCourse('web-package')
+  }, [cancelLargeHtml, exportCourse])
 
   useEffect(() => {
     if (!previewOpen || !previewHost) {

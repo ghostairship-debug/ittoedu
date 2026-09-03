@@ -73,6 +73,10 @@
 - `npx vitest run tests/integration/courseExportPreflightApp.test.tsx tests/integration/coursePdfExportApp.test.tsx tests/unit/coursePlayerTryRunFit.test.ts tests/unit/readModelBoundary.test.ts`
 - `npm run typecheck`
 
+## 2026-09-03 完成记录
+
+本节点已按上述执行版完成并提交：三条新测试红→绿（失败原因与执行版第 1 步预期一致），`requireSnapshot` 因无调用方而删除。执行版未覆盖的一处补充：`continuePreflightExport` 在 `readCanonicalSnapshot()` 为空时原本依赖 emit 内的 `requireSnapshot` 报 `courseDeliveryUnavailable`；改为发出 `pending.snapshot` 后，该分支改为在 `continuePreflightExport` 内直接 `clearPreflight()` 并以 `runBusy` 抛出同一错误，保住既有用例 "fails explicitly when V9 sources disappear after … preflight" 的 fail-loud 契约，不导出过期快照。
+
 ## Rollback / handoff
 
 单一提交，整体回滚。交接按指南第 6 节格式。
