@@ -20,6 +20,7 @@ import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useEditorKeyboardRouter } from './app/useEditorKeyboardRouter'
 import { useMediaImport } from './app/useMediaImport'
 import {
+  selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
   selectActiveScene,
   selectEditingNodes,
@@ -66,9 +67,14 @@ function readableError(error: unknown, fallback: string): string {
 }
 
 function captureCourseIdentity() {
-  const document = selectActiveCourseProjectDocument(useEditorStore.getState())
+  const state = useEditorStore.getState()
+  const document = selectActiveCourseProjectDocument(state)
   if (!document) return null
-  return { projectId: document.id, revision: document.revision }
+  return {
+    projectId: document.id,
+    revision: document.revision,
+    locationId: selectActiveCourseLocationId(state),
+  }
 }
 
 export default function App() {

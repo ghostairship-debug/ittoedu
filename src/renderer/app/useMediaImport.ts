@@ -32,6 +32,7 @@ import {
 export interface MediaImportIdentity {
   readonly projectId: string
   readonly revision: number
+  readonly locationId: string | null
 }
 
 export interface MediaLibraryTarget {
@@ -170,7 +171,9 @@ function sameIdentity(
   right: MediaImportIdentity | null,
 ): boolean {
   if (!left || !right) return left === right
-  return left.projectId === right.projectId && left.revision === right.revision
+  return left.projectId === right.projectId
+    && left.revision === right.revision
+    && left.locationId === right.locationId
 }
 
 function assertFreshIdentity(
@@ -314,6 +317,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
           if (!file) return
           assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换图片')
           const dimensions = await readImageDimensions(file.bytes, file.mimeType)
+          assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换图片')
           const imported = createImageAssetImport(file, { dimensions })
           const result = portsRef.current.replaceImageAtTarget(
             target,
@@ -352,6 +356,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
           },
           librarySnapshot,
         )
+        assertFreshIdentity(started, portsRef.current.captureIdentity(), '图片批量入库已取消')
         const issues = [...desktopRejections(batch.rejected), ...prepared.decodeFailures]
         const importPlan = planMediaBatchImport(
           mode,
@@ -438,6 +443,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
         },
         librarySnapshot,
       )
+      assertFreshIdentity(started, portsRef.current.captureIdentity(), '声音批量入库已取消')
       if (await tryInjectCandidateMedia({
         kind: 'audio',
         items: prepared.additions,
@@ -490,6 +496,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
         },
         librarySnapshot,
       )
+      assertFreshIdentity(started, portsRef.current.captureIdentity(), '视频批量入库已取消')
       const issues = [...desktopRejections(batch.rejected), ...prepared.decodeFailures]
       const importPlan = planMediaBatchImport(
         mode,

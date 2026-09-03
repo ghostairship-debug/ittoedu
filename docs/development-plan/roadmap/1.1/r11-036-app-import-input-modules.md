@@ -70,10 +70,10 @@
 
 ## Focused validation
 
-- `npx vitest run tests/unit/assetTransactions.test.ts tests/unit/editorActionRouting.test.ts tests/integration/mixedCrossSurfaceHistory.test.tsx tests/unit/readModelBoundary.test.ts tests/integration/courseMediaLibraryImportVerticalSlice.test.ts tests/integration/imageReplacementVerticalSlice.test.ts`
+- `npx vitest run tests/unit/assetTransactions.test.ts tests/unit/editorActionRouting.test.ts tests/integration/mixedCrossSurfaceHistory.test.tsx tests/unit/readModelBoundary.test.ts tests/integration/courseMediaLibraryImportVerticalSlice.test.ts tests/integration/imageReplacementVerticalSlice.test.ts tests/unit/useMediaImport.test.tsx`
 - `npm run typecheck`
 
-新增测试文件随本节点提交后，把它追加到上面第一条命令末尾。
+2026-09-03：本节点已按上述执行版完成并提交（`tests/unit/useMediaImport.test.tsx` 两条红→绿，失败点均为 `commitCandidateMedia` 被调用 1 次），测试文件已追加到第一条命令。结构事实的两处基数修正：`useMediaImport.ts` 的 `assertFreshIdentity(` 为 9（1 处定义 + 8 处调用；执行版少算了 `replace` 分支原有的一处），`useComponentLibrary.ts` 的计数在 `bb1f848` 与本节点提交后都是 2（定义 + :213 一处调用，:266/:385 不经该函数），该文件与 `useEditorKeyboardRouter.ts` 均无改动。
 
 ## Rollback / handoff
 
