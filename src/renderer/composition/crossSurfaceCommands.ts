@@ -50,9 +50,11 @@ import type {
   PrepareCourseProjectPersistenceResult,
 } from '../store/editorStore'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
-import type { GlobalLayerItem } from '../../shared/projectTypes'
 import type { TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
-import { findCourseSlideScene } from '../store/v9LayerMutations'
+import {
+  findCourseSlideScene,
+  type GlobalLayerSettingsPatch,
+} from '../store/v9LayerMutations'
 import {
   findGlobalTeacherController,
   type LayerCommandResult,
@@ -119,7 +121,7 @@ export type CrossSurfaceSlidePorts = {
   }): SlideCommandResult
   updateGlobalLayerSettings(
     nodeId: string,
-    patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+    patch: GlobalLayerSettingsPatch,
   ): void
   reorderNodes(nodeIds: string[]): void
   moveGlobalLayerOwner(fromId: string, toId: string): void
@@ -157,7 +159,7 @@ export type CrossSurfaceFlowPorts = {
   ensureTeacherController(): void
   patch(patch: { flowTextEdit?: null }): void
   activateBlock(locationId: string): boolean
-  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  updateGlobalLayerSettings(nodeId: string, patch: GlobalLayerSettingsPatch): void
   reorderNodes(nodeIds: string[]): void
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
@@ -210,7 +212,7 @@ export type CrossSurfaceSpatialPorts = {
   activateCameraFrame(frameId: string): boolean
   setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
   setScope(scope: 'global' | 'world'): void
-  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  updateGlobalLayerSettings(nodeId: string, patch: GlobalLayerSettingsPatch): void
   reorderNodes(nodeIds: string[]): void
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
@@ -720,7 +722,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
     updateGlobalLayerSettings(
       nodeId: string,
-      patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+      patch: GlobalLayerSettingsPatch,
     ) {
       dispatchActiveSurface(ports.detect(), {
         slide: () => ports.slide.updateGlobalLayerSettings(nodeId, patch),

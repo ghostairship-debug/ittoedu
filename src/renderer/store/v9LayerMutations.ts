@@ -9,13 +9,13 @@ import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherCo
 import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
 import type {
   CourseProjectDocument,
+  GlobalLayerPlane,
   LayerItem,
   LayerItemOverride,
   LocationVisibility,
   NativeLayerItem,
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
-import type { GlobalLayerVisibility } from '../../shared/projectTypes'
 import { commandTargetFromRow } from '../course/effectiveLayerProjection'
 import type { EffectiveLayerProjectionRow } from '../course/effectiveLayerProjection'
 import type { EffectiveLayerPropertyPatch } from '../course/effectiveLayerCommands'
@@ -26,6 +26,17 @@ import type {
   EditorCanvasNode,
   EditorCanvasNodePatch,
 } from '../phaser/editorCanvasNode'
+
+/** Slide-scene adapter input; persisted V9 visibility remains location-based. */
+export interface SlideSceneVisibility {
+  mode: 'all' | 'include' | 'exclude'
+  sceneIds: string[]
+}
+
+export interface GlobalLayerSettingsPatch {
+  layer?: GlobalLayerPlane
+  visibility?: SlideSceneVisibility
+}
 
 export function findCourseSlideScene(
   project: CourseProjectDocument,
@@ -680,7 +691,7 @@ export function sceneIdsToLocationIds(
 
 export function locationVisibilityFromScenePatch(
   document: CourseProjectDocument,
-  visibility: GlobalLayerVisibility,
+  visibility: SlideSceneVisibility,
 ): LocationVisibility {
   const remaining = document.locations.filter(
     (location) => location.kind === 'slide-scene' && location.stateId === undefined,
@@ -697,7 +708,7 @@ export function locationVisibilityFromScenePatch(
 export function projectGlobalVisibilityToSlides(
   document: CourseProjectDocument,
   visibility: LocationVisibility,
-): GlobalLayerVisibility | null {
+): SlideSceneVisibility | null {
   if (visibility.mode === 'all') return { mode: 'all', sceneIds: [] }
   const sceneIds = locationIdsToSceneIds(document, visibility.locationIds)
   if (sceneIds.length > 0) return { mode: visibility.mode, sceneIds }

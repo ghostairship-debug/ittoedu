@@ -51,8 +51,11 @@ import {
 } from '../../course/effectiveLayerCommands'
 import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
-import { commandTargetForRow, locationVisibilityFromScenePatch } from '../v9LayerMutations'
-import type { GlobalLayerItem } from '../../../shared/projectTypes'
+import {
+  commandTargetForRow,
+  locationVisibilityFromScenePatch,
+  type GlobalLayerSettingsPatch,
+} from '../v9LayerMutations'
 import {
   enterFlowGlobalAuthoring,
   commitFlowOverlayFormulaAst,
@@ -629,7 +632,7 @@ export function createFlowAuthoringSlice(
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   activateBlock(locationId: string): boolean
-  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  updateGlobalLayerSettings(nodeId: string, patch: GlobalLayerSettingsPatch): void
   reorderNodes(nodeIds: string[]): void
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
@@ -1698,7 +1701,7 @@ export function createFlowAuthoringSlice(
     },
     updateGlobalLayerSettings(
       nodeId: string,
-      patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+      patch: GlobalLayerSettingsPatch,
     ) {
       const session = flow.read().flowSession
       if (!session) return

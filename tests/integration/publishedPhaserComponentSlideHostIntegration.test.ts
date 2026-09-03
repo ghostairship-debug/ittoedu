@@ -155,7 +155,7 @@ import {
   PLAYER_AUTHORING_PROTOCOL_VERSION,
   type PlayerAuthoringHostMessage,
 } from '../../src/shared/playerAuthoringProtocol'
-import type { ExternalComponentNode } from '../../src/shared/projectTypes'
+import type { ComponentHostNode } from '../../src/player/surfaces/publishedComponentMount'
 import type { PublishedCourseComponent } from '../../src/shared/publishedCourseTypes'
 import {
   createPublishedPhaserComponentV2Fixture,
@@ -510,8 +510,8 @@ function authoringPhaserComponent(): ComponentPackageData {
 }
 
 function authoringComponentNode(
-  overrides: Partial<ExternalComponentNode> = {},
-): ExternalComponentNode {
+  overrides: Partial<ComponentHostNode> = {},
+) {
   return {
     id: 'phaser-authoring-instance',
     name: 'Phaser authoring instance',
@@ -978,7 +978,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
         throw new Error('expected Published authoring ready message')
       }
       const initialGameCount = globalThis.__fakePublishedPhaserGames!.length
-      const staleNode: ExternalComponentNode = {
+      const staleNode = {
         id: PUBLISHED_PHASER_COMPONENT_ITEM_ID,
         name: 'stale delayed authoring remount',
         type: 'external-component',

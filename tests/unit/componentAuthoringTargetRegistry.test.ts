@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ComponentAuthoringTargetRegistry,
+  type ComponentHostNode,
 } from '@/player/ComponentAuthoringTargetRegistry'
 import { componentManifestSchema } from '@/shared/componentSchema'
 import type {
@@ -8,7 +9,6 @@ import type {
   ComponentEditableTextBounds,
   ComponentManifestV4,
 } from '@/shared/componentTypes'
-import type { ExternalComponentNode } from '@/shared/projectTypes'
 
 const manifest = componentManifestSchema.parse({
   schemaVersion: 4,
@@ -47,8 +47,8 @@ const manifest = componentManifestSchema.parse({
 }) as ComponentManifestV4
 
 function node(
-  overrides: Partial<ExternalComponentNode> = {},
-): ExternalComponentNode {
+  overrides: Partial<ComponentHostNode> = {},
+) {
   return {
     id: 'component-one',
     name: '测试组件',

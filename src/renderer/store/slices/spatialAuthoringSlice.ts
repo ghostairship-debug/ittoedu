@@ -82,7 +82,6 @@ import {
 } from '../../course/effectiveLayerCommands'
 import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
-import type { GlobalLayerItem } from '../../../shared/projectTypes'
 import type { ShapeType, TextRun } from '../../../shared/contracts/native-v1'
 import {
   copySpatialClipboard,
@@ -100,6 +99,7 @@ import {
   isSpatialDirectRowPropertyPatch,
   locationVisibilityFromScenePatch,
   spatialLayerPropertyPatch,
+  type GlobalLayerSettingsPatch,
 } from '../v9LayerMutations'
 import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
 import {
@@ -653,7 +653,7 @@ export function createSpatialAuthoringSlice(
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   activateCameraFrame(frameId: string): boolean
   setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
-  updateGlobalLayerSettings(nodeId: string, patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>): void
+  updateGlobalLayerSettings(nodeId: string, patch: GlobalLayerSettingsPatch): void
   reorderNodes(nodeIds: string[]): void
   moveGlobalLayerOwner(fromId: string, toId: string): void
   setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
@@ -1751,7 +1751,7 @@ export function createSpatialAuthoringSlice(
     },
     updateGlobalLayerSettings(
       nodeId: string,
-      patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+      patch: GlobalLayerSettingsPatch,
     ) {
       const session = spatial.read().spatialSession
       if (!session) return kernel.failSessionless()

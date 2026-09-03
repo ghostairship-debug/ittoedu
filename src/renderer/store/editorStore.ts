@@ -5,10 +5,6 @@ import {
   type MotionDirection,
   type MotionEffect,
 } from '../../shared/interactionTypes'
-import type {
-  GlobalLayerItem,
-  GlobalLayerVisibility,
-} from '../../shared/projectTypes'
 import type { EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
 import type {
   AudioChannel,

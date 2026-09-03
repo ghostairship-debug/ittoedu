@@ -2,9 +2,11 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentManifestV4 } from '@/shared/componentTypes'
-import type { ExternalComponentNode } from '@/shared/projectTypes'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
-import { ComponentPropertiesEditor } from '@/renderer/ui/ComponentPropertiesEditor'
+import {
+  ComponentPropertiesEditor,
+  type ComponentPropertiesTarget,
+} from '@/renderer/ui/ComponentPropertiesEditor'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import {
   FontFamilyPicker,
@@ -80,7 +82,7 @@ const asset: AssetMeta = {
   byteLength: 10,
 }
 
-const baseNode: ExternalComponentNode = {
+const baseNode = {
   id: 'component-1',
   name: '属性组件',
   type: 'external-component',
@@ -143,7 +145,7 @@ const nestedManifest: ComponentManifestV4 = {
   }],
 }
 
-const nestedNode: ExternalComponentNode = {
+const nestedNode = {
   ...baseNode,
   id: 'component-nested',
   name: nestedManifest.name,
@@ -152,7 +154,7 @@ const nestedNode: ExternalComponentNode = {
 }
 
 function Harness() {
-  const [node, setNode] = useState(baseNode)
+  const [node, setNode] = useState<ComponentPropertiesTarget>(baseNode)
   return (
     <>
       <ComponentPropertiesEditor
@@ -167,7 +169,7 @@ function Harness() {
 }
 
 function NestedContentHarness() {
-  const [node, setNode] = useState(nestedNode)
+  const [node, setNode] = useState<ComponentPropertiesTarget>(nestedNode)
   return (
     <>
       <ComponentPropertiesEditor

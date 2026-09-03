@@ -6,10 +6,10 @@ import type {
 import type {
   PublishedCourseComponent,
 } from '../../src/shared/publishedCourseTypes'
-import type { ExternalComponentNode } from '../../src/shared/projectTypes'
 import {
   findComponentPackageSource,
   mountPublishedComponent,
+  type ComponentHostNode,
 } from '../../src/player/surfaces/publishedComponentMount'
 import { ComponentRegistry } from '../../src/player/ComponentRegistry'
 
@@ -166,8 +166,8 @@ window.CoursewareComponent.define({
 `
 
 function authoringNode(
-  overrides: Partial<ExternalComponentNode> = {},
-): ExternalComponentNode {
+  overrides: Partial<ComponentHostNode> = {},
+) {
   return {
     id: 'authoring-instance',
     name: '可编辑组件',

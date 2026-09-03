@@ -1,6 +1,5 @@
 import { synchronizeCourseTeacherControllerControls } from '../../../shared/teacherControllerConsistency'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { GlobalLayerItem } from '../../../shared/projectTypes'
 import type { SlidePresentationState } from '../../../shared/courseProjectTypes'
 import { rotatedRectangleAabb } from '../../../shared/geometry'
 export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
@@ -50,6 +49,7 @@ import {
   locationVisibilityFromScenePatch,
   sessionFromLayerResult,
   slideSurfaceLayerPropertyPatch,
+  type GlobalLayerSettingsPatch,
   v9NodePatchNeedsRoundTrip,
 } from '../v9LayerMutations'
 import type { SlideAuthoringPorts, SlidePersistExtra } from './slideAuthoringSlice'
@@ -753,7 +753,7 @@ export function createSlideOwnedCommands(
 
     updateGlobalLayerSettings(
       nodeId: string,
-      patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
+      patch: GlobalLayerSettingsPatch,
     ) {
       if (patch.layer !== undefined) {
         const backend = slide.read().slideBackend

@@ -1,9 +1,6 @@
-import type { LayerItem, ScopedLayerItem } from '../../shared/courseProjectTypes'
+import type { GlobalLayerPlane, LayerItem, ScopedLayerItem } from '../../shared/courseProjectTypes'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import type { EditorCanvasNode } from '../phaser/editorCanvasNode'
-import type {
-  GlobalLayerItem,
-} from '../../shared/projectTypes'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 
 export interface SlidePreviewNodeIdentity {
@@ -40,7 +37,7 @@ export type SlidePreviewPackageRecord = Record<string, {
 
 export interface SlidePreviewRebuildGlobalItem {
   readonly node: SlidePreviewIdentityNode
-  readonly layer: GlobalLayerItem['layer'] | string
+  readonly layer: GlobalLayerPlane | string
   readonly visibility: unknown
 }
 

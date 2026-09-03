@@ -6,5 +6,5 @@ Tasks: 2 · queued: 1 · blocked: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-020-v8-projection-owner-return](tasks/1.1/r11-020-v8-projection-owner-return.md) | queued | Codex | workspace-properties, published-producer | 消除 r11-053 扫描证实的 live V9 Editor/Player consumer 对 V8-only `GlobalLayerItem`、`GlobalLayerVisibility` 与 `ExternalComponentNode` 的类型依赖，改用 Course Project V9 / Published V2 / Component V4 已有的窄输入类型；不恢复 SceneNode 投影或新建兼容联合。 |
+| [r11-011-v8-schema-owner-return](tasks/1.1/r11-011-v8-schema-owner-return.md) | queued | Codex | contracts-schema | 消除 r11-053 扫描证实的 live Native/Playback 测试与 UI consumer 对 `shared/projectSchema.ts` 的依赖，改用 Native V1 / Playback V1 的窄 Schema；V8-only archive/player/model 仍保持待删事实，不改造为双模型 helper。 |
 | [r11-053-legacy-list](tasks/1.1/r11-053-legacy-list.md) | blocked | Integrator | legacy-inventory | 在 037z 与 052d 完成后的当前树上只运行一次 Legacy inventory 扫描，按 structured output 原子更新唯一台账的明细、计数、当前提交和 schema 强制的 product digest；在台账中形成 `LEG ID / 精确路径 / 当前 consumer=0 / replacement 测试` 删除表，不删除产品文件、不生成第二报告或文件 Hash。 |

@@ -9,7 +9,7 @@ import type {
   ComponentAuthoringTextTarget,
   ComponentPackageData,
 } from '@/shared/componentTypes'
-import type { ExternalComponentNode } from '@/shared/projectTypes'
+import type { EditorCanvasNode } from '@/renderer/phaser/editorCanvasNode'
 
 const packageId = 'com.example.session-copy'
 
@@ -44,8 +44,8 @@ function componentPackage(version = '4.0.0'): ComponentPackageData {
 }
 
 function componentNode(
-  overrides: Partial<ExternalComponentNode> = {},
-): ExternalComponentNode {
+  overrides: Partial<EditorCanvasNode> = {},
+): EditorCanvasNode {
   return {
     id: 'component-one',
     name: '文字组件',
