@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { analyzeInformationRelease } from '@/shared/informationRelease'
 import { analyzeVisualDensity } from '@/shared/visualDensity'
 import { collectCourseProjectHealth } from '@/shared/courseProjectHealth'
-import { collectProjectHealth } from '@/shared/projectHealth'
 import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
@@ -28,14 +27,6 @@ vi.mock('@/shared/visualDensity', async (importOriginal) => {
   }
 })
 
-vi.mock('@/shared/projectHealth', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/shared/projectHealth')>()
-  return {
-    ...actual,
-    collectProjectHealth: vi.fn(actual.collectProjectHealth),
-  }
-})
-
 vi.mock('@/shared/courseProjectHealth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/courseProjectHealth')>()
   return {
@@ -46,7 +37,6 @@ vi.mock('@/shared/courseProjectHealth', async (importOriginal) => {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  vi.mocked(collectProjectHealth).mockClear().mockReturnValue([])
   vi.mocked(collectCourseProjectHealth).mockClear().mockReturnValue([])
   vi.mocked(analyzeInformationRelease).mockClear()
   vi.mocked(analyzeVisualDensity).mockClear()
@@ -61,7 +51,6 @@ describe('ProjectHealthPanel on-demand analysis', () => {
       <ProjectHealthPanel open={false} onClose={onClose} />,
     )
 
-    expect(collectProjectHealth).not.toHaveBeenCalled()
     expect(collectCourseProjectHealth).not.toHaveBeenCalled()
     expect(analyzeInformationRelease).not.toHaveBeenCalled()
     expect(analyzeVisualDensity).not.toHaveBeenCalled()
@@ -81,7 +70,6 @@ describe('ProjectHealthPanel on-demand analysis', () => {
       assetFiles: selectMediaAssetFiles(latestState),
       componentFiles: componentPackagesToArchiveFiles(latestState.componentPackages),
     })
-    expect(collectProjectHealth).not.toHaveBeenCalled()
     expect(analyzeInformationRelease).not.toHaveBeenCalled()
     expect(analyzeVisualDensity).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '工程检查' })).toBeInTheDocument()
