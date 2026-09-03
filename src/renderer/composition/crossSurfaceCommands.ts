@@ -58,7 +58,6 @@ import { findCourseSlideScene, commandTargetForRow, locationVisibilityFromSceneP
 import { setGlobalLayerScenePlane } from '../course/globalLayerCommands'
 import {
   findGlobalTeacherController,
-  locateCourseLayer,
   moveEffectiveLayerOwner,
   reorderEffectiveLayerItems,
   setGlobalLayerLocationVisibility,
@@ -66,35 +65,10 @@ import {
   deleteEffectiveLayerItems,
   type LayerCommandResult,
 } from '../course/effectiveLayerCommands'
-import {
-  commitV9SlideContentEdit,
-  isV9SlideContentDraftDirty,
-  type V9SlideContentEditSession,
-  type V9SlideTextContentDraft,
-} from '../authoring/v9SlideContentEdit'
-import {
-  commitSpatialWorldContentEdit,
-  isSpatialWorldContentDraftDirty,
-  type SpatialWorldContentEditSession,
-} from '../authoring/spatialWorldAuthoring'
-import {
-  commitFlowTextEdit,
-  flowTextEditSelection,
-  isFlowTextDraftDirty,
-  markFlowTextComposing,
-  type FlowTextEditSession,
-} from '../authoring/flowTextEdit'
-import { isSlideAuthoringBackend } from '../store/slideBackendPort'
 import type { EffectiveLayerProjection } from '../course/effectiveLayerProjection'
-import {
-  exportCourseProjectArchiveBytes,
-  openCourseProjectArchiveBytes,
-} from '../store/slices/courseLifecycleSlice'
-import {
-  courseProjectStartsAsFlow,
-  openFlowAuthoringSession,
-} from '../project/createFlowCourseProject'
-import { courseProjectStartsAsSpatial } from '../project/createSpatialCourseProject'
+import type { V9SlideContentEditSession } from '../authoring/v9SlideContentEdit'
+import type { FlowTextEditSession } from '../authoring/flowTextEdit'
+import type { SpatialWorldContentEditSession } from '../authoring/spatialWorldAuthoring'
 import {
   createEditorSelectionSnapshot,
   resolveFlowDeleteRoute,
@@ -249,6 +223,11 @@ export type CrossSurfaceCommandPorts = {
   lifecycle: {
     read(): CourseLifecycleOwnedState
     patch(patch: Partial<CourseLifecycleOwnedState> & Record<string, unknown>): void
+    prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult
+    captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
+    acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
+    reopenArchive(bytes: Uint8Array): boolean
+    exportArchive(): Uint8Array | null
   }
   readResources(): CourseResourceState
   readActiveLocationId(): string | null
@@ -276,80 +255,6 @@ function openFlowAuthoringSessionAtLocation(
     history: createFlowEditorHistory(parsed),
     selection: selectFlowEditorBlock(parsed, location.id, location.blockId),
   }
-}
-
-function snapshotPersistence(
-  document: CourseProjectDocument,
-  resources: CourseResourceState,
-): CourseProjectPersistenceSnapshot {
-  return {
-    project: document,
-    assetFiles: { ...projectedAssetFiles(resources.courseAssetSidecar) },
-    componentPackages: { ...resources.componentPackages },
-  }
-}
-
-function applyNativeTextDraftToDocument(
-  document: CourseProjectDocument,
-  layerItemId: string,
-  draft: V9SlideTextContentDraft,
-): void {
-  const located = locateCourseLayer(document, layerItemId)
-  const item = located?.item
-  if (!item || item.kind !== 'native' || item.content.nativeType !== 'text') return
-  const data = item.content.data as { text: string; runs?: unknown }
-  data.text = draft.text
-  if (draft.runs) data.runs = structuredClone(draft.runs)
-  if (draft.width !== undefined) item.frame.width = draft.width
-  if (draft.height !== undefined) item.frame.height = draft.height
-}
-
-function materializeActiveDrafts(
-  document: CourseProjectDocument,
-  drafts: {
-    slide?: V9SlideContentEditSession | null
-    spatial?: SpatialWorldContentEditSession | null
-    flow?: {
-      readonly edit: FlowTextEditSession
-      readonly locationId: string
-    } | null
-  },
-): { readonly ok: true; readonly document: CourseProjectDocument } | {
-  readonly ok: false
-  readonly reason: string
-} {
-  let clone = structuredClone(document)
-  if (drafts.slide?.kind === 'text') {
-    applyNativeTextDraftToDocument(
-      clone,
-      drafts.slide.target.layerItemId,
-      drafts.slide.draft as V9SlideTextContentDraft,
-    )
-  }
-  if (drafts.spatial?.kind === 'text') {
-    applyNativeTextDraftToDocument(
-      clone,
-      drafts.spatial.target.layerItemId,
-      drafts.spatial.draft as V9SlideTextContentDraft,
-    )
-  }
-  if (drafts.flow && isFlowTextDraftDirty(drafts.flow.edit)) {
-    const edit = drafts.flow.edit.composing
-      ? markFlowTextComposing(drafts.flow.edit, false)
-      : drafts.flow.edit
-    if (edit.revision !== clone.revision) return { ok: false, reason: 'stale-revision' }
-    const committed = commitFlowTextEdit(
-      clone,
-      flowTextEditSelection(clone, drafts.flow.locationId, edit),
-      edit,
-      { expectedRevision: edit.revision },
-    )
-    if (!committed.ok || !committed.nextDocument) {
-      return { ok: false, reason: committed.reason ?? '无法物化活动 Flow 文字草稿' }
-    }
-    clone = committed.nextDocument
-  }
-  return { ok: true, document: clone }
 }
 
 function sameEditorSelectionSnapshot(
@@ -1170,47 +1075,11 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
 
     exportV9SlideCandidateArchive() {
-      const document = ports.kernel.tryReadDocument()
-      if (!document) return null
-      const resources = ports.readResources()
-      return exportCourseProjectArchiveBytes({
-        project: document,
-        assetFiles: (resources.courseAssetSidecar ?? emptyCourseAssetSidecar()).files,
-        componentPackages: resources.componentPackages,
-      })
+      return ports.lifecycle.exportArchive()
     },
 
     reopenV9SlideCandidateArchive(bytes: Uint8Array) {
-      try {
-        const archive = openCourseProjectArchiveBytes(bytes)
-        const componentPackages = archive.componentPackages
-        const preserve = {
-          sidecar: archive.sidecar,
-          componentPackages,
-          dirty: false,
-          statusMessage: `已打开“${archive.project.title}”`,
-          path: ports.lifecycle.read().projectPath,
-        }
-        if (courseProjectStartsAsSpatial(archive.project)) {
-          ports.spatial.applyBackend(openSpatialAuthoringSession(archive.project), preserve)
-          return true
-        }
-        if (courseProjectStartsAsFlow(archive.project)) {
-          ports.flow.applyBackend(openFlowAuthoringSession(archive.project), preserve)
-          return true
-        }
-        ports.slide.applyBackend(
-          createSlideAuthoringBackend(openSlideAuthoringSession(archive.project)),
-          preserve,
-        )
-        return true
-      } catch (error) {
-        ports.kernel.setFeedback({
-          errorMessage: error instanceof Error ? error.message : '无法打开课程工程',
-          statusMessage: null,
-        })
-        return false
-      }
+      return ports.lifecycle.reopenArchive(bytes)
     },
 
     createLiveEditorSelectionSnapshot(focus?: EditorFocusKind | EventTarget | null) {
@@ -1530,109 +1399,15 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
 
     prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult {
-      const surface = ports.detect()
-      if (surface === 'slide') {
-        const owned = ports.slide.read()
-        const backend = owned.slideBackend
-        const edit = owned.v9ContentEdit
-        if (edit && isSlideAuthoringBackend(backend)) {
-          if (edit.composing) return { ok: false, reason: 'composing' }
-          if (isV9SlideContentDraftDirty(edit)) {
-            if (edit.target.revision !== backend.getSession().history.present.revision) {
-              return { ok: false, reason: 'stale-revision' }
-            }
-            const result = commitV9SlideContentEdit(backend.getSession(), edit)
-            if (!result.ok) {
-              return { ok: false, reason: result.reason ?? '无法提交活动文字草稿' }
-            }
-            ports.slide.persist(result, { clearContentEdit: true })
-          } else {
-            ports.slide.patch({ v9ContentEdit: null })
-          }
-        }
-      } else if (surface === 'spatial') {
-        const owned = ports.spatial.read()
-        const session = owned.spatialSession
-        const edit = owned.spatialContentEdit
-        if (edit && session) {
-          if (edit.composing) return { ok: false, reason: 'composing' }
-          if (isSpatialWorldContentDraftDirty(edit)) {
-            if (edit.target.revision !== session.history.present.revision) {
-              return { ok: false, reason: 'stale-revision' }
-            }
-            const result = commitSpatialWorldContentEdit(session, edit)
-            if (!result.ok) {
-              return { ok: false, reason: result.reason ?? '无法提交活动文字草稿' }
-            }
-            ports.spatial.persist(result, { clearContentEdit: true })
-          } else {
-            ports.spatial.patch({ spatialContentEdit: null })
-          }
-        }
-      } else if (surface === 'flow') {
-        const owned = ports.flow.read()
-        const session = owned.flowSession
-        const edit = owned.flowTextEdit
-        if (edit && session) {
-          if (edit.composing) return { ok: false, reason: 'composing' }
-          if (!ports.flow.commitDraft()) {
-            return { ok: false, reason: '无法提交活动文字草稿' }
-          }
-        }
-      }
-      const document = ports.kernel.tryReadDocument()
-      if (!document) return { ok: false, reason: '当前会话没有课程工程' }
-      const resources = ports.readResources()
-      return {
-        ok: true,
-        snapshot: snapshotPersistence(document, resources),
-        token: {
-          document,
-          sidecar: resources.courseAssetSidecar,
-          componentPackages: resources.componentPackages,
-        },
-      }
+      return ports.lifecycle.prepareCourseProjectPersistence()
     },
 
     captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult {
-      const document = ports.kernel.tryReadDocument()
-      if (!document) return { ok: false, reason: '当前会话没有课程工程' }
-      const flowOwned = ports.flow.read()
-      const materialized = materializeActiveDrafts(document, {
-        slide: ports.slide.read().v9ContentEdit,
-        spatial: ports.spatial.read().spatialContentEdit,
-        flow: flowOwned.flowTextEdit && flowOwned.flowSession
-          ? {
-              edit: flowOwned.flowTextEdit,
-              locationId: flowOwned.flowSession.selection.locationId,
-            }
-          : null,
-      })
-      if (!materialized.ok) return materialized
-      return {
-        ok: true,
-        snapshot: snapshotPersistence(materialized.document, ports.readResources()),
-      }
+      return ports.lifecycle.captureCourseProjectRecoverySnapshot()
     },
 
     acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean {
-      const document = ports.kernel.tryReadDocument()
-      const resources = ports.readResources()
-      const allChangesSaved =
-        document === token.document
-        && resources.courseAssetSidecar === token.sidecar
-        && resources.componentPackages === token.componentPackages
-        && !ports.hasDirtyContentDraft()
-      ports.lifecycle.patch({
-        projectPath: path,
-        dirty: !allChangesSaved,
-      })
-      ports.kernel.setFeedback({
-        statusMessage: allChangesSaved
-          ? `已保存到 ${path}`
-          : '已保存启动保存时的版本；之后的修改尚未保存',
-      })
-      return allChangesSaved
+      return ports.lifecycle.acknowledgeCourseProjectSaved(path, token)
     },
   }
 

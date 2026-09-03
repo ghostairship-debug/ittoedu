@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037q-lifecycle-command-owner](tasks/1.1/r11-037q-lifecycle-command-owner.md) | queued | — | app-save-recovery | 把 archive 重开、草稿物化、保存准备、Recovery snapshot 与保存 ACK 从 `crossSurfaceCommands.ts` 迁到 `courseLifecycleSlice.ts`；各 Surface 仅提供草稿物化/提交接口，lifecycle 统一组合。 |
+| [r11-037r-surface-navigation-owner](tasks/1.1/r11-037r-surface-navigation-owner.md) | queued | — | none | 把 setSpatialGraphSelection、Flow block 激活和 Surface 特有导航分支迁回对应 slice；crossSurfaceCommands 仅保留通用路由。 |

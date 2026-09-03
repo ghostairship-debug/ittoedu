@@ -1438,6 +1438,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     persist: persistSpatialResult,
     applyBackend: applySpatialBackend,
   })
+  const detectSurface = () => detectActiveSurface({
+    spatialLocationId: get().spatialSession?.selection.locationId ?? null,
+    flowLocationId: get().flowSession?.selection.locationId ?? null,
+    slideLocationId: get().slideCandidateSnapshot?.locationId ?? null,
+    editingScope: get().editingScope,
+    composing: Boolean(
+      get().flowTextEdit?.composing ||
+      get().v9ContentEdit ||
+      get().spatialContentEdit ||
+      get().editingTextNodeId,
+    ),
+  })
   const courseLifecycleSlice = createCourseLifecycleSlice(kernel, {
     read: () => {
       const current = get()
@@ -1456,6 +1468,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       openSpatialAuthoringSession(project),
       extra,
     ),
+    detectSurface,
+    slide: slideAuthoringSlice,
+    spatial: spatialAuthoringSlice,
+    flow: flowAuthoringSlice,
+    readResources: () => readCourseResourceState(get()),
+    hasDirtyContentDraft: () => selectHasDirtyCourseContentDraft(get()),
   })
   const editorShellSlice = createEditorShellSlice(kernel, {
     read: () => {
@@ -1556,6 +1574,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return { projectPath: current.projectPath, dirty: current.dirty }
       },
       patch: (patch) => set(patch),
+      prepareCourseProjectPersistence: () => courseLifecycleSlice.prepareCourseProjectPersistence(),
+      captureCourseProjectRecoverySnapshot: () => courseLifecycleSlice.captureCourseProjectRecoverySnapshot(),
+      acknowledgeCourseProjectSaved: (path, token) => courseLifecycleSlice.acknowledgeCourseProjectSaved(path, token),
+      reopenArchive: (bytes) => courseLifecycleSlice.reopenArchive(bytes),
+      exportArchive: () => courseLifecycleSlice.exportArchive(),
     },
     readResources: () => readCourseResourceState(get()),
     readActiveLocationId: () => selectActiveCourseLocationId(get()),

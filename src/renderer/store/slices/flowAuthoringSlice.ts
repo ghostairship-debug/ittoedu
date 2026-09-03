@@ -63,6 +63,7 @@ import {
   formatFlowAuthoringTextStyle,
   flowTextEditSelection,
   isFlowTextDraftDirty,
+  markFlowTextComposing,
   type FlowTextEditSession,
 } from '../../authoring/flowTextEdit'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../../course/flowDocumentModel'
@@ -594,6 +595,8 @@ export function createFlowAuthoringSlice(
   renameFlowHeading(locationId: string, title: string): void
   renameFlowPage(surfaceId: string, title: string): void
   commitDraft(): boolean
+  commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
+  materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
   undo(): void
   redo(): void
   setScope(scope: 'global' | 'scene'): void
@@ -1365,6 +1368,40 @@ export function createFlowAuthoringSlice(
       }, { statusMessage: '已重命名页面' })
     },
     commitDraft,
+    commitDraftForPersistence(): { ok: true } | { ok: false; reason: string } {
+      const owned = flow.read()
+      const session = owned.flowSession
+      const edit = owned.flowTextEdit
+      if (edit && session) {
+        if (edit.composing) return { ok: false, reason: 'composing' }
+        if (!commitDraft()) {
+          return { ok: false, reason: '无法提交活动文字草稿' }
+        }
+      }
+      return { ok: true }
+    },
+    materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
+      const owned = flow.read()
+      const session = owned.flowSession
+      const edit = owned.flowTextEdit
+      if (!edit || !session || !isFlowTextDraftDirty(edit)) {
+        return { ok: true, document }
+      }
+      const activeEdit = edit.composing ? markFlowTextComposing(edit, false) : edit
+      if (activeEdit.revision !== document.revision) {
+        return { ok: false, reason: 'stale-revision' }
+      }
+      const committed = commitFlowTextEdit(
+        document,
+        flowTextEditSelection(document, session.selection.locationId, activeEdit),
+        activeEdit,
+        { expectedRevision: activeEdit.revision },
+      )
+      if (!committed.ok || !committed.nextDocument) {
+        return { ok: false, reason: committed.reason ?? '无法物化活动 Flow 文字草稿' }
+      }
+      return { ok: true, document: committed.nextDocument }
+    },
     undo() {
       const owned = flow.read()
       const session = owned.flowSession

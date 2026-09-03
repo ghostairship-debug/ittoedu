@@ -32,6 +32,7 @@ import {
 import { MAX_SCENE_NODES } from '../../../shared/constants'
 import {
   findGlobalTeacherController,
+  locateCourseLayer,
   restoreDefaultTeacherController,
   type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
@@ -44,6 +45,7 @@ import type { V9SlideClipboardPayload } from '../../course/v9SlideClipboard'
 import {
   isV9SlideContentDraftDirty,
   type V9SlideContentEditSession,
+  type V9SlideTextContentDraft,
 } from '../../authoring/v9SlideContentEdit'
 import {
   createSessionToken,
@@ -285,6 +287,8 @@ export function createSlideAuthoringSlice(
   duplicateScene(sceneId: string): void
   reorderScenes(sceneIds: string[]): void
   commitDraft(): SlideAuthoringBackend | null
+  commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
+  materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
   undo(): void
   redo(): void
   activateState(stateId: string | null): void
@@ -465,6 +469,43 @@ export function createSlideAuthoringSlice(
       }))
     },
     commitDraft,
+    commitDraftForPersistence(): { ok: true } | { ok: false; reason: string } {
+      const owned = slide.read()
+      const backend = owned.slideBackend
+      const edit = owned.v9ContentEdit
+      if (!edit || !isSlideAuthoringBackend(backend)) return { ok: true }
+      if (edit.composing) return { ok: false, reason: 'composing' }
+      if (isV9SlideContentDraftDirty(edit)) {
+        if (edit.target.revision !== backend.getSession().history.present.revision) {
+          return { ok: false, reason: 'stale-revision' }
+        }
+        const result = commitV9SlideContentEdit(backend.getSession(), edit)
+        if (!result.ok) {
+          return { ok: false, reason: result.reason ?? '无法提交活动文字草稿' }
+        }
+        slide.persist(result, { clearContentEdit: true })
+      } else {
+        slide.patch({ v9ContentEdit: null })
+      }
+      return { ok: true }
+    },
+    materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
+      const owned = slide.read()
+      const edit = owned.v9ContentEdit
+      if (!edit || edit.kind !== 'text') return { ok: true, document }
+      const clone = structuredClone(document)
+      const located = locateCourseLayer(clone, edit.target.layerItemId)
+      const item = located?.item
+      if (item && item.kind === 'native' && item.content.nativeType === 'text') {
+        const draft = edit.draft as V9SlideTextContentDraft
+        const data = item.content.data as { text: string; runs?: unknown }
+        data.text = draft.text
+        if (draft.runs) data.runs = structuredClone(draft.runs)
+        if (draft.width !== undefined) item.frame.width = draft.width
+        if (draft.height !== undefined) item.frame.height = draft.height
+      }
+      return { ok: true, document: clone }
+    },
     undo() {
       const backend = slide.read().slideBackend
       if (!isSlideAuthoringBackend(backend)) return

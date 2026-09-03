@@ -63,13 +63,16 @@ import {
   beginSpatialWorldContentEdit,
   commitSpatialWorldContentEdit,
   commitSpatialWorldTextRunStyle,
+  isSpatialWorldContentDraftDirty,
   markSpatialWorldContentComposing,
   updateSpatialWorldContentFormulaDraft,
   updateSpatialWorldContentTextDraft,
 } from '../../authoring/spatialWorldAuthoring'
+import type { V9SlideTextContentDraft } from '../../authoring/v9SlideContentEdit'
 import {
   deleteEffectiveLayerItems,
   findGlobalTeacherController,
+  locateCourseLayer,
   patchEffectiveLayerItems,
   restoreDefaultTeacherController,
   type LayerCommandResult,
@@ -612,6 +615,8 @@ export function createSpatialAuthoringSlice(
   ): SpatialCommandResult
   setSpatialPlaybackPathId(pathId: string | null): void
   commitDraft(): SpatialAuthoringSession | null
+  commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
+  materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
   undo(): void
   redo(): void
   setScope(scope: 'global' | 'world'): void
@@ -1384,6 +1389,43 @@ export function createSpatialAuthoringSlice(
       spatial.patch({ spatialPlaybackPathId: pathId })
     },
     commitDraft,
+    commitDraftForPersistence(): { ok: true } | { ok: false; reason: string } {
+      const owned = spatial.read()
+      const session = owned.spatialSession
+      const edit = owned.spatialContentEdit
+      if (!edit || !session) return { ok: true }
+      if (edit.composing) return { ok: false, reason: 'composing' }
+      if (isSpatialWorldContentDraftDirty(edit)) {
+        if (edit.target.revision !== session.history.present.revision) {
+          return { ok: false, reason: 'stale-revision' }
+        }
+        const result = commitSpatialWorldContentEdit(session, edit)
+        if (!result.ok) {
+          return { ok: false, reason: result.reason ?? '无法提交活动文字草稿' }
+        }
+        spatial.persist(result, { clearContentEdit: true })
+      } else {
+        spatial.patch({ spatialContentEdit: null })
+      }
+      return { ok: true }
+    },
+    materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
+      const owned = spatial.read()
+      const edit = owned.spatialContentEdit
+      if (!edit || edit.kind !== 'text') return { ok: true, document }
+      const clone = structuredClone(document)
+      const located = locateCourseLayer(clone, edit.target.layerItemId)
+      const item = located?.item
+      if (item && item.kind === 'native' && item.content.nativeType === 'text') {
+        const draft = edit.draft as V9SlideTextContentDraft
+        const data = item.content.data as { text: string; runs?: unknown }
+        data.text = draft.text
+        if (draft.runs) data.runs = structuredClone(draft.runs)
+        if (draft.width !== undefined) item.frame.width = draft.width
+        if (draft.height !== undefined) item.frame.height = draft.height
+      }
+      return { ok: true, document: clone }
+    },
     undo() {
       const session = spatial.read().spatialSession
       if (!session) return
