@@ -193,7 +193,10 @@ describe('teacher controller authoring ownership', () => {
     }))
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
     useEditorStore.getState().setEditingScope('scene')
-    const controller = createV9TeacherControllerAuthoringController()
+    const controller = createV9TeacherControllerAuthoringController({
+      readBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
+      commit: (run) => useEditorStore.getState().applySlideCandidateCommand(run),
+    })
     const point = {
       x: item.frame.x + item.frame.width / 2,
       y: item.frame.y + item.frame.height / 2,

@@ -101,7 +101,6 @@ import {
 } from './slices/spatialAuthoringSlice'
 import { createEditorShellSlice } from './slices/editorShellSlice'
 import { createCourseStructureSlice } from './slices/courseStructureSlice'
-import { bindTeacherControllerAuthoringPorts } from '../authoring/v9TeacherControllerAuthoring'
 import {
   applyEditorTransactionStep,
   createEditorTransactionStep,
@@ -1489,10 +1488,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     },
     patch: (patch) => set(patch),
-  })
-  bindTeacherControllerAuthoringPorts({
-    readBackend: () => selectSlideAuthoringBackend(get()),
-    commit: (run) => get().applySlideCandidateCommand(run),
   })
   const courseStructureSlice = createCourseStructureSlice(kernel, {
     readActiveLocationId: () => selectActiveCourseLocationId(get()),

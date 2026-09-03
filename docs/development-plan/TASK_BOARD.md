@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037u-teacher-controller-injection](tasks/1.1/r11-037u-teacher-controller-injection.md) | queued | — | none | 删除教师控制器的模块级 bind/service locator；两个工厂的 ports 改为必填。 |
+| [r11-037v-canvas-projection-owner](tasks/1.1/r11-037v-canvas-projection-owner.md) | queued | — | none | 新建 course/editorCanvasProjection.ts，迁入 Slide/Flow/Spatial 画布投影 helper、缓存与 effective projection；root selector 只委托。 |

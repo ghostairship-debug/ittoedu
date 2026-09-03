@@ -102,22 +102,8 @@ export type TeacherControllerAuthoringPorts = {
   commit(run: (session: SlideAuthoringSession) => SlideCommandResult): SlideCommandResult
 }
 
-let boundTeacherControllerAuthoringPorts: TeacherControllerAuthoringPorts | null = null
-
-export function bindTeacherControllerAuthoringPorts(
-  ports: TeacherControllerAuthoringPorts | null,
-): void {
-  boundTeacherControllerAuthoringPorts = ports
-}
-
 function v8Fallback(): TeacherControllerAuthoringResult {
   return { kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE }
-}
-
-function resolveTeacherControllerAuthoringPorts(
-  ports?: TeacherControllerAuthoringPorts,
-): TeacherControllerAuthoringPorts | null {
-  return ports ?? boundTeacherControllerAuthoringPorts
 }
 
 function viewportTransform(
@@ -490,16 +476,9 @@ function makeControllerTarget(
 }
 
 function applyCandidate(
-  ports: TeacherControllerAuthoringPorts | null,
+  ports: TeacherControllerAuthoringPorts,
   run: (session: SlideAuthoringSession) => SlideCommandResult,
 ): SlideCommandResult {
-  if (!ports) {
-    return {
-      ok: false,
-      reason: SLIDE_BACKEND_NOT_CANDIDATE,
-      historyEntry: false,
-    }
-  }
   return ports.commit(run)
 }
 
@@ -510,13 +489,12 @@ function applyCandidate(
  * writes one history entry through the injected commit port.
  */
 export function createV9TeacherControllerAuthoringController(
-  ports?: TeacherControllerAuthoringPorts,
+  ports: TeacherControllerAuthoringPorts,
 ) {
   let gesture: ControllerGesture | null = null
   let preview: StageRect | null = null
 
-  const activePorts = () => resolveTeacherControllerAuthoringPorts(ports)
-  const readCandidate = () => activePorts()?.readBackend() ?? null
+  const readCandidate = () => ports.readBackend()
   const resolveKind = (): TeacherControllerAuthoringKind =>
     readCandidate() ? 'v9-controller-candidate' : 'v8'
 
@@ -706,7 +684,7 @@ export function createV9TeacherControllerAuthoringController(
       ? safeAuthoringFrame(liveItem, rawFrame, active.rotation)
       : rawFrame
     const snapshot = backend.getSnapshot()
-    const command = applyCandidate(activePorts(), (session) =>
+    const command = applyCandidate(ports, (session) =>
       commitTeacherControllerAuthoringFrame(session, {
         layerItemId: active.layerItemId,
         frame,
@@ -752,11 +730,9 @@ export function createV9TeacherControllerAuthoringController(
 }
 
 export function resolveTeacherControllerAuthoringKind(
-  ports?: TeacherControllerAuthoringPorts,
+  ports: TeacherControllerAuthoringPorts,
 ): TeacherControllerAuthoringKind {
-  return resolveTeacherControllerAuthoringPorts(ports)?.readBackend()
-    ? 'v9-controller-candidate'
-    : 'v8'
+  return ports.readBackend() ? 'v9-controller-candidate' : 'v8'
 }
 
 export function clientDeltaToControllerWorld(

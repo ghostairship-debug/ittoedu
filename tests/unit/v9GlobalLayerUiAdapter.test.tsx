@@ -1216,7 +1216,10 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
 
     // With scope === 'scene', pointerDown on teacher controller returns no target or preview
     useEditorStore.getState().setEditingScope('scene')
-    const controller = createV9TeacherControllerAuthoringController()
+    const controller = createV9TeacherControllerAuthoringController({
+      readBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
+      commit: (run) => useEditorStore.getState().applySlideCandidateCommand(run),
+    })
     const transform = createStageViewportTransform(VIEW)
     const west = worldToClient(transform, { x: 190, y: 670 })
     const sceneDown = controller.pointerDown({ x: west.x, y: west.y }, VIEW)

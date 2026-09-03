@@ -34,6 +34,7 @@ import {
   commitTeacherControllerAuthoringFrame,
   createV9TeacherControllerAuthoringController,
   resolveTeacherControllerAuthoringKind,
+  type TeacherControllerAuthoringPorts,
 } from '@/renderer/authoring/v9TeacherControllerAuthoring'
 import {
   createSlideAuthoringBackend,
@@ -437,10 +438,18 @@ describe('v9 teacher controller authoring bridge', () => {
     useEditorStore.getState().clearV9SlideCandidateBackend()
   })
 
+  function storeTeacherControllerPorts(): TeacherControllerAuthoringPorts {
+    return {
+      readBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
+      commit: (run) => useEditorStore.getState().applySlideCandidateCommand(run),
+    }
+  }
+
   it('leaves the default V8 path when no candidate is injected', () => {
     useEditorStore.setState({ slideBackend: undefined as any })
-    const controller = createV9TeacherControllerAuthoringController()
-    expect(resolveTeacherControllerAuthoringKind()).toBe('v8')
+    const ports = storeTeacherControllerPorts()
+    const controller = createV9TeacherControllerAuthoringController(ports)
+    expect(resolveTeacherControllerAuthoringKind(ports)).toBe('v8')
     expect(selectSlideAuthoringBackend(useEditorStore.getState())).toBeNull()
     const down = controller.pointerDown({ x: 640, y: 670 }, VIEW)
     const move = controller.pointerMove({ x: 700, y: 680 }, VIEW)
@@ -454,7 +463,7 @@ describe('v9 teacher controller authoring bridge', () => {
   it('previews move/resize on pointermove and commits one history entry on pointerup', () => {
     injectCandidate()
     useEditorStore.getState().setEditingScope('global')
-    const controller = createV9TeacherControllerAuthoringController()
+    const controller = createV9TeacherControllerAuthoringController(storeTeacherControllerPorts())
     const start = controller.pointerDown({ x: 640, y: 670 }, VIEW)
     if (start.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
     expect(start.inert).toBe(true)
@@ -498,7 +507,7 @@ describe('v9 teacher controller authoring bridge', () => {
   it('resizes west by moving origin through the same viewport transform', () => {
     injectCandidate()
     useEditorStore.getState().setEditingScope('global')
-    const controller = createV9TeacherControllerAuthoringController()
+    const controller = createV9TeacherControllerAuthoringController(storeTeacherControllerPorts())
     const transform = createStageViewportTransform(VIEW)
     const west = worldToClient(transform, { x: 190, y: 670 })
     controller.pointerDown({ x: west.x, y: west.y }, VIEW)
@@ -517,7 +526,7 @@ describe('v9 teacher controller authoring bridge', () => {
   it('ignores pointerDown when editing scope is scene', () => {
     injectCandidate()
     useEditorStore.getState().setEditingScope('scene')
-    const controller = createV9TeacherControllerAuthoringController()
+    const controller = createV9TeacherControllerAuthoringController(storeTeacherControllerPorts())
     const start = controller.pointerDown({ x: 640, y: 670 }, VIEW)
     if (start.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
     expect(start.target).toBeUndefined()

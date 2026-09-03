@@ -163,7 +163,10 @@ describe('teacher controller authored bounds and recovery', () => {
     }))
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
     useEditorStore.getState().setEditingScope('global')
-    const controller = createV9TeacherControllerAuthoringController()
+    const controller = createV9TeacherControllerAuthoringController({
+      readBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
+      commit: (run) => useEditorStore.getState().applySlideCandidateCommand(run),
+    })
     const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
 
     controller.pointerDown({ x: 640, y: 670 }, VIEW)

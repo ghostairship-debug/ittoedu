@@ -1770,7 +1770,7 @@ export function createSpatialAuthoringSlice(
       const row = spatialRow(nodeId)
       if (!row || row.owner !== 'global') return
       if (patch.layer !== undefined) {
-        spatial.persist(setGlobalLayerScenePlane(
+        persistSpatialLayerCommand(spatial, setGlobalLayerScenePlane(
           session.history.present,
           commandTargetForRow(row),
           patch.layer,
@@ -1779,7 +1779,7 @@ export function createSpatialAuthoringSlice(
       }
       if (patch.visibility) {
         const live = spatial.read().spatialSession ?? session
-        spatial.persist(setGlobalLayerLocationVisibility(
+        persistSpatialLayerCommand(spatial, setGlobalLayerLocationVisibility(
           live.history.present,
           commandTargetForRow(row),
           locationVisibilityFromScenePatch(live.history.present, patch.visibility),
@@ -1793,7 +1793,7 @@ export function createSpatialAuthoringSlice(
       if (!session) return kernel.failSessionless()
       const first = spatialRow(nodeIds[0] ?? '')
       if (!first) return
-      spatial.persist(reorderEffectiveLayerItems(
+      persistSpatialLayerCommand(spatial, reorderEffectiveLayerItems(
         session.history.present,
         commandTargetForRow(first),
         nodeIds,
@@ -1812,7 +1812,7 @@ export function createSpatialAuthoringSlice(
         surfaceId: to.scopeToken.surfaceId,
         sceneId: to.scopeToken.sceneId,
       }
-      spatial.persist(moveEffectiveLayerOwner(
+      persistSpatialLayerCommand(spatial, moveEffectiveLayerOwner(
         session.history.present,
         commandTargetForRow(from),
         destination,
@@ -1828,7 +1828,7 @@ export function createSpatialAuthoringSlice(
       if (!session) return kernel.failSessionless()
       const row = spatialRow(nodeId)
       if (!row || row.owner !== 'global') return
-      spatial.persist(setGlobalLayerLocationVisibility(
+      persistSpatialLayerCommand(spatial, setGlobalLayerLocationVisibility(
         session.history.present,
         commandTargetForRow(row),
         visibility,
@@ -1841,7 +1841,7 @@ export function createSpatialAuthoringSlice(
       if (!session) return kernel.failSessionless()
       const row = spatialRow(nodeId)
       if (!row || row.owner !== 'global') return
-      spatial.persist(setGlobalLayerVisibleAtLocation(
+      persistSpatialLayerCommand(spatial, setGlobalLayerVisibleAtLocation(
         session.history.present,
         commandTargetForRow(row),
         visible,
