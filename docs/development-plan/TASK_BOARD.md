@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-060-final-legacy-zero](tasks/1.1/r11-060-final-legacy-zero.md) | queued | unassigned | none | 在 1.1 架构与删除范围冻结后，只运行一次正式 Legacy Zero 扫描，证明最终候选与已对账 inventory 一致且 V8、旧模块、旧引用与新增未归档命中全部为零。 |
+| [r11-061-final-regression](tasks/1.1/r11-061-final-regression.md) | queued | unassigned | none | 在最终产品代码与 Legacy inventory 冻结后，依次完成类型、全量产品行为与保全门，形成 1.1 engineering candidate 的最终自动化证据。 |
