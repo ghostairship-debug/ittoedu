@@ -133,7 +133,10 @@ export type RuntimeAuthoringPorts = {
     run: (session: SlideAuthoringSession) => SlideCommandResult,
     extra?: SlidePersistExtra,
   ): SlideCommandResult
-  persistProject(document: CourseProjectDocument, options?: { statusMessage?: string | null }): void
+  persistProject(document: CourseProjectDocument, options?: {
+    statusMessage?: string | null
+    historyEntry?: boolean
+  }): void
 }
 
 export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
@@ -855,6 +858,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       if (result.ok && result.nextDocument) {
         ports.persistProject(result.nextDocument, {
           statusMessage: result.reason ?? '成品控制设置已更新',
+          historyEntry: result.historyEntry,
         })
         return
       }
@@ -891,7 +895,10 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       const project = commitSlideProjectMutation(document, (draft) => {
         draft.designTokens = structuredClone(tokens)
       })
-      ports.persistProject(project, { statusMessage: '项目字体与色板 Token 已更新' })
+      ports.persistProject(project, {
+        statusMessage: '项目字体与色板 Token 已更新',
+        historyEntry: true,
+      })
     },
   }
 }

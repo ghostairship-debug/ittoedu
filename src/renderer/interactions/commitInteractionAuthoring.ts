@@ -104,7 +104,10 @@ export type InteractionAuthoringPorts = {
   read(): InteractionAuthoringState
   setFeedback(feedback: { errorMessage?: string | null; statusMessage?: string | null }): void
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
-  persistProject(document: CourseProjectDocument, options?: { statusMessage?: string | null }): void
+  persistProject(document: CourseProjectDocument, options?: {
+    statusMessage?: string | null
+    historyEntry?: boolean
+  }): void
   persistSlideCommand(
     run: (session: SlideAuthoringSession) => SlideCommandResult,
     extra?: SlidePersistExtra,
@@ -259,7 +262,10 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
         now: new Date().toISOString(),
       })
       if (result.ok) {
-        ports.persistProject(result.project, { statusMessage: result.statusMessage })
+        ports.persistProject(result.project, {
+          statusMessage: result.statusMessage,
+          historyEntry: result.historyEntry,
+        })
       } else {
         ports.setFeedback({ errorMessage: result.reason, statusMessage: null })
       }
