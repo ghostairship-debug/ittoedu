@@ -23,7 +23,7 @@ import type {
   CourseProjectDocument,
   FlowBlock,
 } from '@/shared/courseProjectTypes'
-import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 const PACKAGE_ID = 'com.example.mixed-component'

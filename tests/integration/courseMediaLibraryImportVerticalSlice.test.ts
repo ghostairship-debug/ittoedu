@@ -23,7 +23,7 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 
 const FIXTURE_ROOT = join(
   process.cwd(),

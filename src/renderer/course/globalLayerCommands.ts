@@ -19,7 +19,7 @@ import type {
   NativeLayerItem,
   ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
-import type { ProjectPlaybackSettings } from '../../shared/projectTypes'
+import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import {
   centerTeacherControllerAuthoringFrame,

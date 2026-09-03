@@ -12,7 +12,7 @@ import type {
   AssetMeta,
   ProjectAudioSettings,
   SoundDefinition,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/media-v1'
 import {
   selectAudioSettings,
   selectMediaAssetFiles,

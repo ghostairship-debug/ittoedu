@@ -3,7 +3,7 @@ import { componentManifestSchema } from '../../shared/componentSchema'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { UserFacingError } from '../../shared/errors'
-import type { EmbeddedComponentPackageMeta } from '../../shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
 import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
 import {
   parseComponentPackageFiles,

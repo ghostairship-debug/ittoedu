@@ -35,7 +35,7 @@ import type { MultiSelectionPropertiesContext } from '@/renderer/ui/properties/M
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
 

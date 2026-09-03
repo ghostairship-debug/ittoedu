@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import type { AssetMeta } from '../../shared/projectTypes'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { ComponentManifest, ComponentPackageData } from '../../shared/componentTypes'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { UserFacingError } from '../../shared/errors'

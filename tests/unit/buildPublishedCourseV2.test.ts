@@ -11,7 +11,7 @@ import type {
   ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {

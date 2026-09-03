@@ -20,7 +20,7 @@ import type {
   CourseSurfaceDocument,
   RuntimeLayerItem,
 } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { z } from 'zod'
 
 export type CourseRuntimeCarrier =

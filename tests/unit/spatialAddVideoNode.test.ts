@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 import type { SpatialSurfaceDocument } from '@/shared/courseProjectTypes'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { useEditorStore } from '@/renderer/store/editorStore'

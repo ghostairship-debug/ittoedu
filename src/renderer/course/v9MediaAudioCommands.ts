@@ -12,10 +12,10 @@ import type {
 import type {
   AudioChannel,
   AssetMeta,
-  ImageFit,
   ProjectAudioSettings,
   SoundDefinition,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/media-v1'
+import type { ImageFit } from '../../shared/contracts/native-v1'
 import type { EditorTransactionPlan } from '../authoring/editorTransaction'
 import {
   COURSE_AUTHORING_TARGET_REJECTION_REASONS,

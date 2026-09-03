@@ -6,15 +6,17 @@ import {
   type MotionEffect,
 } from '../../shared/interactionTypes'
 import type {
-  AudioChannel,
-  AssetMeta,
-  EmbeddedComponentPackageMeta,
   GlobalLayerItem,
   GlobalLayerVisibility,
-  ProjectDesignTokens,
+} from '../../shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
+import type {
+  AudioChannel,
+  AssetMeta,
   ProjectAudioSettings,
   SoundDefinition,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/media-v1'
+import type { ProjectDesignTokens } from '../../shared/contracts/design-v1'
 import type { ShapeType, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1/types'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'

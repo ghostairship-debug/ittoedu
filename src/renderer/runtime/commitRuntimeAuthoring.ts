@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import type { AssetMeta } from '../../shared/projectTypes'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
 import {
   createEditorTransactionStep,
 } from '../authoring/editorTransaction'
@@ -52,7 +52,7 @@ import {
 import { setSlideSimpleEntranceAnimation } from '../course/v9SlideContentCommands'
 import { updateCoursePlaybackSettings } from '../course/globalLayerCommands'
 import { commitSlideAuthoringHistory, commitSlideProjectMutation } from '../course/slideEditorCommands'
-import type { ProjectDesignTokens } from '../../shared/projectTypes'
+import type { ProjectDesignTokens } from '../../shared/contracts/design-v1'
 
 export type RuntimeAssetReplacementCommitResult =
   | {

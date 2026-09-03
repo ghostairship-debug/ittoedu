@@ -10,7 +10,7 @@ import {
   type CourseImportedAsset,
 } from '@/renderer/project/v9AssetAdapter'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 
 const CREATED_AT = '2026-08-24T00:00:00.000Z'
 const COMMITTED_AT = '2026-08-24T01:00:00.000Z'

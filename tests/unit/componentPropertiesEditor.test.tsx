@@ -2,7 +2,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentManifestV4 } from '@/shared/componentTypes'
-import type { AssetMeta, ExternalComponentNode } from '@/shared/projectTypes'
+import type { ExternalComponentNode } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { ComponentPropertiesEditor } from '@/renderer/ui/ComponentPropertiesEditor'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import {

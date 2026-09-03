@@ -4,7 +4,7 @@ import type {
   PresenterCommand,
   PresenterKeyBinding,
   ProjectPresenterSettings,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/playback-v1'
 
 interface DetectedKey {
   key: string

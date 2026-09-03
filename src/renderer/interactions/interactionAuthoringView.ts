@@ -10,7 +10,7 @@ import type {
   SlideSceneDocument,
   SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
-import type { SoundDefinition } from '@/shared/projectTypes'
+import type { SoundDefinition } from '@/shared/contracts/media-v1'
 
 export interface InteractionAuthoringNodeOption {
   readonly id: string

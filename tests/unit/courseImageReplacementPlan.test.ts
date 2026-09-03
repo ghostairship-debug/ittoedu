@@ -21,7 +21,7 @@ import {
 } from '@/renderer/course/v9MediaAudioCommands'
 import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 
 const FIXTURE_PATH = join(
   process.cwd(),

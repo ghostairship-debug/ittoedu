@@ -28,7 +28,7 @@ import type {
   CourseProjectDocument,
   RuntimeLayerItem,
 } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 
 const CREATED_AT = '2026-08-24T00:00:00.000Z'
 const ARCHIVE_TIME = '2026-08-24T12:00:00.000Z'

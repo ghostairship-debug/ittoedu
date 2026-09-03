@@ -13,7 +13,7 @@ import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { MediaTab } from '@/renderer/ui/MediaTab'
 import { NodesTab } from '@/renderer/ui/NodesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 import type { ComponentPackageData, ComponentScope } from '@/shared/componentTypes'
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])

@@ -2,7 +2,7 @@ import type {
   PresenterCommand,
   PresenterKeyBinding,
   ProjectPresenterSettings,
-} from '../shared/projectTypes'
+} from '../shared/contracts/playback-v1'
 
 const DEFAULT_DEDUPE_MS = 120
 

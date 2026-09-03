@@ -24,7 +24,7 @@ import type {
   CourseProjectDocument,
   LayerItem,
 } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 
 function activeHistory() {
   const state = useEditorStore.getState()

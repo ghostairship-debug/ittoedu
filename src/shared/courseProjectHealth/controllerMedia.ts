@@ -10,7 +10,7 @@ import type {
   LayerItem,
   SlideSceneDocument,
 } from '../courseProjectTypes'
-import type { AssetKind } from '../projectTypes'
+import type { AssetKind } from '../contracts/media-v1'
 import type { TeacherControllerAction } from '../contracts/native-v1'
 import {
   hasCourseDeliveryVisibleTeacherController,

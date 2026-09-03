@@ -8,7 +8,7 @@ import {
   type LayerItem,
   type NativeLayerItem,
 } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1'
 import {
   createImageAssetImport,
   createMediaAssetImport,

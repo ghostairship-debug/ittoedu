@@ -3,7 +3,7 @@ import { parseComponentPackageFiles } from '@/renderer/components/importComponen
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { UserFacingError } from '@/shared/errors'
-import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4'
 import {
   assertSafeArchivePath,
   componentArchiveRoot,

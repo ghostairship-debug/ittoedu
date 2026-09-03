@@ -2,9 +2,9 @@ import type { LayerItem, ScopedLayerItem } from '../../shared/courseProjectTypes
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import type { EditorCanvasNode } from '../phaser/editorCanvasNode'
 import type {
-  AssetMeta,
   GlobalLayerItem,
 } from '../../shared/projectTypes'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
 
 export interface SlidePreviewNodeIdentity {
   readonly id: string

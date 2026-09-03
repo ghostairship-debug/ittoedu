@@ -42,7 +42,7 @@ import {
   type CourseMediaLibraryImportFeedback,
   type CourseMediaLibraryImportPlanFailureCode,
 } from './courseMediaLibraryImport'
-import type { AudioChannel, ProjectAudioSettings } from '../../shared/projectTypes'
+import type { AudioChannel, ProjectAudioSettings } from '../../shared/contracts/media-v1'
 import {
   type CourseProjectRevisionTarget,
 } from '../authoring/courseAuthoringSession'
