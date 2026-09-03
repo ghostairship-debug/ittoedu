@@ -1,14 +1,14 @@
 import type {
   AudioChannel,
   ProjectAudioSettings,
-  ProjectDocument,
+  ProjectMediaSettings,
   SoundDefinition,
-  VideoNode,
-} from '../shared/projectTypes'
+} from '../shared/contracts/media-v1/types'
+import type { VideoNode } from '../shared/contracts/native-v1/types'
 import type {
   AudioActionTarget,
   AudioInteractionAction,
-} from '../shared/interactionTypes'
+} from '../shared/contracts/interaction-v1/types'
 import type {
   CourseEventBus,
   RuntimeEventDisposer,
@@ -31,11 +31,11 @@ export type AudioTarget = AudioActionTarget
 export type { AudioChannel, SoundDefinition }
 
 /**
- * V8 `ProjectDocument` and V9 `CourseProjectDocument` both carry
- * `media.audio`. The manager only reads that slice.
+ * Published V2 and Course Project V9 both carry the formal media-v1 slice.
+ * The manager deliberately reads no authoring document shape beyond it.
  */
 export type AudioManagerProjectSource = {
-  readonly media?: ProjectDocument['media']
+  readonly media?: ProjectMediaSettings
 }
 
 export interface AudioChangeEvent {
@@ -249,8 +249,8 @@ export class AudioManager implements CourseAudioApi {
   private unlockListenersInstalled = false
 
   constructor(
-    private readonly project: AudioManagerProjectSource,
-    private readonly resolveAssetUrl: (assetId: string) => string,
+    project: AudioManagerProjectSource,
+    private readonly resolveAssetUrl: (assetId: string) => string | undefined,
     private readonly events: CourseEventBus,
     options: AudioManagerOptions = {},
   ) {
@@ -351,7 +351,7 @@ export class AudioManager implements CourseAudioApi {
       }
     }
 
-    let source: string
+    let source: string | undefined
     try {
       source = this.resolveAssetUrl(definition.assetId)
     } catch (error) {

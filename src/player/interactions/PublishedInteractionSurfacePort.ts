@@ -1,4 +1,5 @@
 import type {
+  AudioInteractionAction,
   NodeMotionAction,
   VideoInteractionAction,
 } from '../../shared/contracts/interaction-v1/types'
@@ -69,6 +70,14 @@ export interface PublishedInteractionSurfacePort {
 export interface PublishedInteractionSessionPort {
   readonly courseState: Pick<CourseStateStore, 'get' | 'set'>
   currentSceneId(): string | null
+  executeAudioAction?(
+    action: AudioInteractionAction,
+    signal: AbortSignal,
+  ): PublishedInteractionPortResult
+  bindAudioEnded?(
+    soundId: string,
+    listener: () => void,
+  ): (() => void) | null
   goToScene(
     sceneId: string,
     targetStateId: string | undefined,
@@ -90,6 +99,7 @@ export type PublishedInteractionDiagnosticCode =
   | 'motion-failed'
   | 'navigation-failed'
   | 'course-state-failed'
+  | 'audio-failed'
   | 'video-failed'
   | 'execution-failed'
   | 'dispose-failed'

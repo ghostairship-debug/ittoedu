@@ -16,6 +16,8 @@ import {
   type PlayerHostMode,
 } from '../../shared/playerAuthoringProtocol'
 import { CourseStateStore } from '../CourseStateStore'
+import { AudioManager, type AudioPlaybackEvent } from '../AudioManager'
+import { CourseEventBus } from '../CourseEventBus'
 import { createPlayerComponentHostActions } from '../componentHostActions'
 import { TeacherControllerRuntimeSessionStore } from '../teacherControllerRuntimeSession'
 import { PublishedInteractionController } from '../interactions/PublishedInteractionController'
@@ -97,6 +99,10 @@ interface PublishedInteractionHostFactoryOptions {
   courseState?: CourseStateStore
   runtimeActions?: Readonly<RuntimeHostActions>
   componentActions?: Readonly<ComponentHostActions>
+  /** Whole-course Published audio truth; surfaces must not create a copy. */
+  audio?: AudioManager
+  /** Event source paired with the session audio owner. */
+  audioEvents?: CourseEventBus
 }
 
 type CreatePublishedSurfaceHostOptions = CreatePublishedDynamicHostsOptions
@@ -187,6 +193,7 @@ function createPublishedSurfaceHostInternal(
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      audio: options.audio,
       staticCapture: options.staticCapture,
       includeGlobalLayerItemsForStaticCapture:
         options.includeGlobalLayerItemsForStaticCapture,
@@ -208,6 +215,7 @@ function createPublishedSurfaceHostInternal(
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      audio: options.audio,
     })
   }
   return new SpatialPublishedAdapter(
@@ -229,6 +237,8 @@ function createPublishedSurfaceHostInternal(
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      initialMuted: options.audio?.muted(),
+      audioChangeSource: options.audioEvents,
       staticCapture: options.staticCapture,
       includeGlobalLayerItemsForStaticCapture:
         options.includeGlobalLayerItemsForStaticCapture,
@@ -644,6 +654,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   readonly #payload: PublishedCourseV2Payload
   readonly #services: SurfacePlayerServices
   readonly #courseState: CourseStateStore
+  readonly #audio: AudioManager
+  readonly #audioEvents: CourseEventBus
   readonly #staticCapture: boolean
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   readonly #interactionSessionPort: PublishedInteractionSessionPort
@@ -652,6 +664,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #terminalNavigationClaimed = false
   #terminalNavigationInvalidated = false
   #interactionDestroyStarted = false
+  #audioDestroyStarted = false
   #navigationGuardBypassTargetId: string | null = null
 
   constructor(
@@ -663,6 +676,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     globalInteractionVisibilityState: PublishedInteractionVisibilityState,
     globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner,
     courseState: CourseStateStore,
+    audio: AudioManager,
+    audioEvents: CourseEventBus,
     staticCapture: boolean,
   ) {
     super(player, navigator, hosts, globalRuntimeOwner)
@@ -670,11 +685,24 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#payload = payload
     this.#services = services
     this.#courseState = courseState
+    this.#audio = audio
+    this.#audioEvents = audioEvents
     this.#staticCapture = staticCapture
     this.#globalInteractionVisibilityState = globalInteractionVisibilityState
     this.#interactionSessionPort = {
       courseState: this.#courseState,
       currentSceneId: () => this.#currentSlideSceneId(),
+      executeAudioAction: (action, signal) => (
+        !signal.aborted
+        && !this.#interactionDestroyStarted
+        && this.#audio.execute(action)
+      ),
+      bindAudioEnded: (soundId, listener) => this.#audioEvents.on<AudioPlaybackEvent>(
+        'audio:ended',
+        (event) => {
+          if (!this.#interactionDestroyStarted && event?.soundId === soundId) listener()
+        },
+      ),
       goToScene: (sceneId, targetStateId, signal) => (
         this.#goToScene(sceneId, targetStateId, signal)
       ),
@@ -754,6 +782,11 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   async executeTeacherControllerAction(
     action: TeacherControllerAction,
   ): Promise<boolean | undefined> {
+    if (action.type === 'audio.toggle-mute') {
+      if (this.#staticCapture || this.#interactionDestroyStarted) return false
+      this.#audio.toggleMuted()
+      return true
+    }
     if (action.type === 'course.restart') {
       return this.#restartCourse(new AbortController().signal)
     }
@@ -790,6 +823,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   /** Navigator callback: every real/forced navigation invalidates the old generation. */
   handleBeforeNavigation(transition?: MixedNavigationTransition): void {
     if (transition) {
+      this.#audioEvents.emit('scene:leave', { sceneId: transition.current?.locationId })
       locationPreparedHost(this.#hostsById.get(transition.next.surfaceId))
         ?.preparePublishedLocation(transition.next.locationId, transition.forced)
     }
@@ -823,6 +857,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.clearNavigationFeedback()
     this.syncActiveSlot(state.surfaceId)
     this.movePublishedGlobalRuntimes(state.surfaceId)
+    this.#audioEvents.emit('scene:enter', { sceneId: state.locationId })
     this.#mountInteractionControllers()
   }
 
@@ -846,7 +881,15 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       this.#destroyInteractionControllers()
       this.#globalInteractionVisibilityState.reset()
     }
-    await super.destroy()
+    try {
+      await super.destroy()
+    } finally {
+      if (!this.#audioDestroyStarted) {
+        this.#audioDestroyStarted = true
+        this.#audio.destroy()
+        this.#audioEvents.dispose()
+      }
+    }
   }
 
   #destroyInteractionControllers(): void {
@@ -1136,6 +1179,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   async #restartCourse(signal: AbortSignal): Promise<boolean> {
     if (!this.navigator.current || !this.#claimTerminalNavigation(signal)) return false
+    this.#audioEvents.emit('course:restart')
     this.#navigationGuardBypassTargetId = this.#payload.startLocationId
     this.preparePublishedGlobalRuntimeRestart()
     try {
@@ -1303,6 +1347,16 @@ export function createPublishedCourseSession(
     ? new FrozenPublishedCourseStateStore(playback.courseState)
     : new CourseStateStore()
   if (!options.staticCapture) resetPublishedCourseState(courseState, playback.courseState)
+  const resolvePublishedAsset = options.resolveAsset
+    ?? options.services?.resolveAsset
+    ?? ((assetId: string) => playback.assets[assetId]?.url)
+  const audioEvents = new CourseEventBus()
+  const audio = new AudioManager(
+    playback,
+    resolvePublishedAsset,
+    audioEvents,
+    options.staticCapture ? { mode: 'capture' } : {},
+  )
   let session: PublishedInteractionCourseSession | null = null
   const restartCourse = (): Promise<boolean> => (
     session?.restartCourse() ?? Promise.resolve(false)
@@ -1339,6 +1393,8 @@ export function createPublishedCourseSession(
       executeTeacherControllerAction,
       deferTeacherControllerCourseReset: true,
       courseState,
+      audio,
+      audioEvents,
       ...(!options.staticCapture ? { runtimeActions, componentActions } : {}),
       staticCapture: options.staticCapture,
       includeGlobalLayerItemsForStaticCapture:
@@ -1363,9 +1419,7 @@ export function createPublishedCourseSession(
     ...options.services,
     getCourseState: (key) => courseState.get(key),
     setCourseState: (key, value) => courseState.set(key, value),
-    resolveAsset: options.resolveAsset
-      ?? options.services?.resolveAsset
-      ?? ((assetId) => playback.assets[assetId]?.url),
+    resolveAsset: resolvePublishedAsset,
   }
   const player = new CoursePlayer(hosts, {
     services,
@@ -1413,6 +1467,8 @@ export function createPublishedCourseSession(
     globalInteractionVisibilityState,
     globalRuntimeOwner,
     courseState,
+    audio,
+    audioEvents,
     options.staticCapture === true,
   )
   return session
@@ -1487,6 +1543,7 @@ class FlowPublishedAdapter implements SurfaceHost {
       courseState?: CourseStateStore
       runtimeActions?: Readonly<RuntimeHostActions>
       componentActions?: Readonly<ComponentHostActions>
+      audio?: AudioManager
     },
   ) {
     this.id = surfaceId
@@ -1507,6 +1564,7 @@ class FlowPublishedAdapter implements SurfaceHost {
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      audio: options.audio,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -1659,6 +1717,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
       courseState?: CourseStateStore
       runtimeActions?: Readonly<RuntimeHostActions>
       componentActions?: Readonly<ComponentHostActions>
+      initialMuted?: boolean
+      audioChangeSource?: CourseEventBus
       staticCapture?: boolean
       includeGlobalLayerItemsForStaticCapture?: boolean
     },
@@ -1683,6 +1743,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      initialMuted: options.initialMuted,
+      audioChangeSource: options.audioChangeSource,
       staticCapture: options.staticCapture,
       includeGlobalLayerItemsForStaticCapture:
         options.includeGlobalLayerItemsForStaticCapture,

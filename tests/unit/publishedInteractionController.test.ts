@@ -127,9 +127,24 @@ function sessionHarness(initialSceneId = 'scene_one') {
   const previousScene = vi.fn((_signal: AbortSignal) => true)
   const replayScene = vi.fn((_signal: AbortSignal) => true)
   const restartCourse = vi.fn((_signal: AbortSignal) => true)
+  const executeAudioAction = vi.fn((
+    _action: Extract<InteractionActionPayload, { type: `audio.${string}` }>,
+    _signal: AbortSignal,
+  ) => true)
+  const audioEndedListeners = new Map<string, Set<() => void>>()
   const session: PublishedInteractionSessionPort = {
     courseState,
     currentSceneId: () => sceneId,
+    executeAudioAction,
+    bindAudioEnded: (soundId, listener) => {
+      let listeners = audioEndedListeners.get(soundId)
+      if (!listeners) {
+        listeners = new Set()
+        audioEndedListeners.set(soundId, listeners)
+      }
+      listeners.add(listener)
+      return () => listeners?.delete(listener)
+    },
     goToScene,
     nextScene,
     previousScene,
@@ -143,7 +158,11 @@ function sessionHarness(initialSceneId = 'scene_one') {
     previousScene,
     replayScene,
     restartCourse,
+    executeAudioAction,
     courseState,
+    emitAudioEnded(soundId: string) {
+      for (const listener of [...(audioEndedListeners.get(soundId) ?? [])]) listener()
+    },
     setSceneId(next: string | null) {
       sceneId = next
     },
@@ -427,8 +446,8 @@ describe('PublishedInteractionController', () => {
       ]),
       enabled: false,
     }
-    const unsupportedAction = clickRule('audio_action', 'button', [
-      actionStep('audio_step', { type: 'audio.play', soundId: 'ding' }),
+    const unsupportedAction = clickRule('presentation_action', 'button', [
+      actionStep('presentation_step', { type: 'presentation.set', stateId: 'result' }),
       actionStep('motion_step', motion('node.enter', 'supported_answer')),
     ])
 
@@ -548,6 +567,50 @@ describe('PublishedInteractionController', () => {
 
     expect(() => controller.destroy()).not.toThrow()
     expect(diagnostics.map((item) => item.code)).toContain('dispose-failed')
+  })
+
+  it('routes audio actions through the course session and reacts to matching audio.ended', async () => {
+    const host = surfaceHarness()
+    const navigation = sessionHarness()
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    navigation.executeAudioAction.mockImplementation((action) => action.type !== 'audio.stop')
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      rules: [
+        clickRule('audio_route', 'button', [
+          actionStep('play', { type: 'audio.play', soundId: 'ding' }),
+          actionStep('stop', { type: 'audio.stop', target: { kind: 'all' } }),
+          actionStep('unreached', motion('node.enter', 'unreached')),
+        ]),
+        {
+          id: 'ding_ended',
+          enabled: true,
+          trigger: { type: 'audio.ended', soundId: 'ding' },
+          conditions: [],
+          actions: [actionStep('reveal', motion('node.enter', 'audio-ended-target'))],
+        },
+      ],
+      surface: host.surface,
+      session: navigation.session,
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+
+    host.listeners.get('button')?.()
+    await vi.waitFor(() => expect(navigation.executeAudioAction).toHaveBeenCalledTimes(2))
+    expect(host.executeNodeMotion).not.toHaveBeenCalled()
+    expect(diagnostics.map((item) => item.code)).toEqual(['audio-failed'])
+
+    navigation.emitAudioEnded('other')
+    navigation.emitAudioEnded('ding')
+    await vi.waitFor(() => expect(host.executeNodeMotion).toHaveBeenCalledTimes(1))
+    expect(host.executeNodeMotion.mock.calls[0]?.[0]).toMatchObject({
+      nodeId: 'audio-ended-target',
+    })
+
+    controller.destroy()
+    navigation.emitAudioEnded('ding')
+    await Promise.resolve()
+    expect(host.executeNodeMotion).toHaveBeenCalledTimes(1)
   })
 
   it('routes video actions only to the addressed node and diagnoses misses', async () => {

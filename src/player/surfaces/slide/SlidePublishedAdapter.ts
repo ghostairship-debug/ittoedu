@@ -75,6 +75,7 @@ import {
 import {
   PublishedSlideInteractionSurfacePort,
 } from './publishedSlideInteractionSurfacePort'
+import type { AudioManager } from '../../AudioManager'
 import {
   createPublishedSurfaceRuntimeSession,
   mountPublishedSurfaceRuntime,
@@ -708,6 +709,10 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #carrierEffects: PublishedCarrierSideEffects
   readonly #runtimeActions?: Readonly<RuntimeHostActions>
   readonly #componentActions?: Readonly<ComponentHostActions>
+  readonly #audio?: Pick<
+    AudioManager,
+    'muted' | 'toggleMuted' | 'registerVideo' | 'beginBackgroundAudioInterruption'
+  >
   #muted = false
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #slideInteractionPort: PublishedSlideInteractionSurfacePort | null = null
@@ -746,6 +751,10 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       courseState?: CourseStateStore
       runtimeActions?: Readonly<RuntimeHostActions>
       componentActions?: Readonly<ComponentHostActions>
+      audio?: Pick<
+        AudioManager,
+        'muted' | 'toggleMuted' | 'registerVideo' | 'beginBackgroundAudioInterruption'
+      >
     } = {},
   ) {
     this.#payload = clonePayload(payload)
@@ -772,6 +781,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#runtimeSession = createPublishedSurfaceRuntimeSession(options.courseState)
     this.#runtimeActions = options.runtimeActions
     this.#componentActions = options.componentActions
+    this.#audio = options.audio
     this.#carrierSideEffects = new PublishedCarrierSideEffectGate({
       courseState: this.#runtimeSession.courseState,
       runtimeActions: this.#runtimeActions,
@@ -1672,7 +1682,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     if (this.#videoHandles.has(nodeId)) return
     const video = wrap.querySelector('video')
     if (!video) return
-    const handle = mountPublishedNativeVideo(video, input)
+    const handle = mountPublishedNativeVideo(video, input, { audio: this.#audio })
     if (!handle) return
     this.#videoHandles.set(nodeId, handle)
     handle.subscribe('started', () => {
@@ -1729,7 +1739,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       getCurrentSceneId: () => this.#locationId,
       getStateLabel: () => null,
       getStatus: () => ({
-        muted: this.#muted,
+        muted: this.#audio?.muted() ?? this.#muted,
         fullscreen: Boolean(root.ownerDocument.fullscreenElement),
       }),
       getSession: () => this.#controllerSessionFor(input),
@@ -1769,7 +1779,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       }
     }
     if (action.type === 'audio.toggle-mute') {
-      this.#muted = !this.#muted
+      if (this.#audio) this.#audio.toggleMuted()
+      else this.#muted = !this.#muted
       for (const controller of this.#controllers) controller.refreshStatus()
       return
     }

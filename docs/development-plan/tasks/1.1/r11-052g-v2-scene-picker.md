@@ -1,6 +1,6 @@
 # r11-052g-v2-scene-picker V2 教师控制器整课场景目录
 
-- Status / Owner: blocked / Integrator（解除条件：r11-052f 完成并由协调者改为 queued）
+- Status / Owner: queued /
 - Outcome / Evidence: Native 合同、默认控制器和用户文档均承诺 `scene.open-picker`，但 `PublishedInteractionCourseSession.executeTeacherControllerAction` 当前对此返回 undefined；三个 Surface 的控制器因此点击无效。052f 完成后在非作者、非 capture 的 Published 整课会话挂载唯一 `ScenePickerOverlay`，不在各 Surface 复制实现。
 - Write scope: `src/player/ScenePickerOverlay.ts`；`src/player/surfaces/publishedDynamicHosts.ts`；`tests/unit/scenePickerOverlay.test.ts`；`tests/unit/publishedCourseNavigation.test.ts`。原则上不修改 Slide/Flow/Spatial host；若中央 `executeTeacherControllerAction` 现有类型无法承载则停止并列出阻断，不扩范围。
 - Write locks: published-producer

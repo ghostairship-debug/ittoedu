@@ -54,6 +54,8 @@ const textStyle = {
 }
 
 interface FixtureOptions {
+  assets?: PublishedCourseV2Payload['assets']
+  audioSounds?: NonNullable<PublishedCourseV2Payload['media']>['audio']['sounds']
   sceneALocationId?: string
   sceneBLocationStateId?: string
   sceneBDuplicateLocationId?: string
@@ -105,7 +107,15 @@ function textItem(
   }
 }
 
-function videoItem(id: string, order: number): PublishedNativeLayerItem {
+function videoItem(
+  id: string,
+  order: number,
+  options: {
+    muted?: boolean
+    volume?: number
+    backgroundAudioMode?: 'none' | 'duck' | 'pause' | 'stop'
+  } = {},
+): PublishedNativeLayerItem {
   return {
     ...layerBase(id, order),
     kind: 'native',
@@ -116,15 +126,15 @@ function videoItem(id: string, order: number): PublishedNativeLayerItem {
         fit: 'contain',
         autoplay: false,
         loop: false,
-        muted: true,
-        volume: 1,
+        muted: options.muted ?? true,
+        volume: options.volume ?? 1,
         playbackRate: 1,
         showControls: true,
         clickToToggle: true,
         startTime: 0,
         endTime: null,
         poster: { mode: 'video-frame', time: 0 },
-        backgroundAudioMode: 'none',
+        backgroundAudioMode: options.backgroundAudioMode ?? 'none',
       },
     },
   }
@@ -142,12 +152,20 @@ function controllerItem(id: string, order: number): PublishedNativeLayerItem {
         compact: true,
         collapsible: false,
         defaultCollapsed: false,
-        buttons: [{
-          id: 'next',
-          action: { type: 'scene.next' },
-          label: '下一页',
-          visible: true,
-        }],
+        buttons: [
+          {
+            id: 'next',
+            action: { type: 'scene.next' },
+            label: '下一页',
+            visible: true,
+          },
+          {
+            id: 'mute',
+            action: { type: 'audio.toggle-mute' },
+            label: '静音',
+            visible: true,
+          },
+        ],
         style: {
           backgroundColor: '#111827',
           backgroundOpacity: 0.9,
@@ -252,6 +270,7 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         mimeType: 'video/mp4',
         url: 'data:video/mp4;base64,AA==',
       },
+      ...options.assets,
     },
     components: {
       'component-owned': {
@@ -275,7 +294,7 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         defaultMuted: false,
         masterVolume: 1,
         channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
-        sounds: {},
+        sounds: options.audioSounds ?? {},
         narrationDucking: { enabled: false, musicVolume: 0.3, fadeMs: 0 },
       },
     },
@@ -441,6 +460,7 @@ afterEach(async () => {
   }
   document.body.replaceChildren()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('Published Interaction Slide host integration', () => {
@@ -1416,6 +1436,123 @@ describe('Published Interaction Slide host integration', () => {
       interactionType: 'scene.go',
     }))
     expect(payload).toEqual(before)
+  })
+
+  it('shares one Published audio session across interactions, controller mute and video interruption', async () => {
+    const createdAudio: HTMLAudioElement[] = []
+    vi.stubGlobal('Audio', function MockAudio(source?: string) {
+      const audio = document.createElement('audio')
+      if (source) audio.src = source
+      createdAudio.push(audio)
+      return audio
+    })
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(
+      function play(this: HTMLMediaElement) {
+        this.dispatchEvent(new Event('play'))
+        return Promise.resolve()
+      },
+    )
+    const pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(
+      function pause(this: HTMLMediaElement) {
+        this.dispatchEvent(new Event('pause'))
+      },
+    )
+    const endedTarget = textItem('audio-ended-target', 60, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      assets: {
+        'audio-music': { mimeType: 'audio/mpeg', url: 'data:audio/mpeg;base64,AA==' },
+        'audio-ding': { mimeType: 'audio/mpeg', url: 'data:audio/mpeg;base64,AQ==' },
+      },
+      audioSounds: {
+        music: {
+          id: 'music',
+          name: 'Music',
+          assetId: 'audio-music',
+          channel: 'music',
+          defaultVolume: 1,
+          defaultLoop: true,
+        },
+        ding: {
+          id: 'ding',
+          name: 'Ding',
+          assetId: 'audio-ding',
+          channel: 'sfx',
+          defaultVolume: 1,
+          defaultLoop: false,
+        },
+      },
+      sceneAItems: [
+        textItem('play-music', 10),
+        textItem('play-ding', 20),
+        videoItem('video-a', 30, {
+          muted: false,
+          volume: 0.5,
+          backgroundAudioMode: 'pause',
+        }),
+        controllerItem('controller-audio', 40),
+        endedTarget,
+      ],
+      sceneAInteractions: [
+        clickRule('play-music-rule', 'play-music', [
+          step('play-music-step', { type: 'audio.play', soundId: 'music' }),
+        ]),
+        clickRule('play-ding-rule', 'play-ding', [
+          step('play-ding-step', { type: 'audio.play', soundId: 'ding' }),
+        ]),
+        {
+          id: 'ding-ended-rule',
+          enabled: true,
+          trigger: { type: 'audio.ended', soundId: 'ding' },
+          conditions: [],
+          actions: [step('ding-ended-reveal', motion('node.enter', endedTarget.layerItemId))],
+        },
+      ],
+    })
+    payload.media.audio.channelVolumes.video = 0.4
+
+    const { container, session } = await mount(payload)
+    renderedItem(container, 'play-music').click()
+    await settle()
+    const music = createdAudio[0]!
+    expect(music).toBeDefined()
+
+    const video = renderedItem(container, 'video-a').querySelector('video')!
+    expect(video.volume).toBeCloseTo(0.5 * 0.4)
+    const musicPlayCount = play.mock.instances.filter((instance) => instance === music).length
+    video.dispatchEvent(new Event('playing'))
+    await settle()
+    expect(pause.mock.instances).toContain(music)
+
+    video.dispatchEvent(new Event('pause'))
+    await settle()
+    expect(play.mock.instances.filter((instance) => instance === music).length)
+      .toBe(musicPlayCount + 1)
+
+    const muteButton = container.querySelector<HTMLButtonElement>(
+      '[data-controller-button-id="mute"]',
+    )!
+    muteButton.click()
+    await settle()
+    expect(video.muted).toBe(true)
+    muteButton.click()
+    await settle()
+    expect(video.muted).toBe(false)
+
+    renderedItem(container, 'play-ding').click()
+    await settle()
+    const ding = createdAudio.find((audio) => audio.src.includes('AQ=='))
+    expect(ding).toBeDefined()
+    ding!.dispatchEvent(new Event('ended'))
+    await settle()
+    expectInteractionVisibility(renderedItem(container, endedTarget.layerItemId), true)
+
+    video.dispatchEvent(new Event('playing'))
+    const playsBeforeNavigation = play.mock.instances.filter((instance) => instance === music).length
+    await session.goToLocation(LOCATION_B_ID)
+    expect(play.mock.instances.filter((instance) => instance === music).length)
+      .toBe(playsBeforeNavigation + 1)
   })
 
   it('applies formal video fields and routes video actions to video events', async () => {

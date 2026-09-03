@@ -4,6 +4,11 @@ import type {
 import type {
   ReadonlyNativeRenderInput,
 } from '../../../shared/contracts/native-v1/types'
+import type {
+  AudioManager,
+  BackgroundAudioInterruption,
+  VideoAudioRegistration,
+} from '../../AudioManager'
 
 export type PublishedVideoInput = Extract<
   ReadonlyNativeRenderInput,
@@ -28,6 +33,8 @@ export interface PublishedNativeVideoHandle {
 export interface PublishedNativeVideoMountOptions {
   /** Capture/authoring stays inert: no playback, no events. */
   capture?: boolean
+  /** Whole-course audio owner; never created or copied by the Slide host. */
+  audio?: Pick<AudioManager, 'registerVideo' | 'beginBackgroundAudioInterruption'>
 }
 
 function clampUnit(value: number): number {
@@ -82,7 +89,26 @@ export function mountPublishedNativeVideo(
   let hasStarted = false
   let reportedPlaying = false
   let endedEmitted = false
+  let backgroundInterruption: BackgroundAudioInterruption | null = null
   const listeners = new Map<PublishedVideoEventKind, Set<PublishedVideoEventListener>>()
+  const audioRegistration: VideoAudioRegistration | null = options.audio?.registerVideo(video, {
+    nodeId,
+    volume: input.volume,
+    muted: input.muted,
+  }) ?? null
+
+  const releaseBackgroundInterruption = (): void => {
+    const interruption = backgroundInterruption
+    backgroundInterruption = null
+    interruption?.release()
+  }
+
+  const beginBackgroundInterruption = (): void => {
+    if (backgroundInterruption || input.backgroundAudioMode === 'none') return
+    backgroundInterruption = options.audio?.beginBackgroundAudioInterruption(
+      input.backgroundAudioMode,
+    ) ?? null
+  }
 
   const notify = (kind: PublishedVideoEventKind, seconds?: number): void => {
     if (destroyed || capture) return
@@ -177,6 +203,7 @@ export function mountPublishedNativeVideo(
         }
         case 'video.pause':
           if (!sourceAvailable()) return false
+          releaseBackgroundInterruption()
           return pauseElement()
         case 'video.restart': {
           if (!sourceAvailable()) return false
@@ -185,6 +212,7 @@ export function mountPublishedNativeVideo(
           } catch {
             return false
           }
+          releaseBackgroundInterruption()
           return beginPlayback(true)
         }
         case 'video.stop': {
@@ -194,6 +222,7 @@ export function mountPublishedNativeVideo(
           } catch {
             return false
           }
+          releaseBackgroundInterruption()
           hasStarted = false
           reportedPlaying = false
           endedEmitted = false
@@ -225,11 +254,14 @@ export function mountPublishedNativeVideo(
     },
     pause() {
       if (destroyed || capture) return
+      releaseBackgroundInterruption()
       pauseElement()
     },
     destroy() {
       if (destroyed) return
       destroyed = true
+      releaseBackgroundInterruption()
+      audioRegistration?.dispose()
       try {
         video.pause()
       } catch {
@@ -241,6 +273,7 @@ export function mountPublishedNativeVideo(
       video.removeEventListener('ended', onEnded)
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('loadedmetadata', onLoadedMetadata)
+      video.removeEventListener('error', onError)
       video.removeEventListener('click', onClickToggle)
     },
   }
@@ -266,11 +299,13 @@ export function mountPublishedNativeVideo(
     hasStarted = true
     reportedPlaying = true
     endedEmitted = false
+    beginBackgroundInterruption()
     notify('started')
   }
 
   function onPause(): void {
     if (destroyed || capture) return
+    releaseBackgroundInterruption()
     if (!hasStarted || !reportedPlaying) return
     reportedPlaying = false
     notify('paused')
@@ -278,6 +313,7 @@ export function mountPublishedNativeVideo(
 
   function onEnded(): void {
     if (destroyed || capture) return
+    releaseBackgroundInterruption()
     if (endedEmitted) return
     endedEmitted = true
     reportedPlaying = false
@@ -302,6 +338,7 @@ export function mountPublishedNativeVideo(
       if (!endedEmitted) {
         endedEmitted = true
         reportedPlaying = false
+        releaseBackgroundInterruption()
         pauseElement()
         notify('ended')
       }
@@ -315,11 +352,17 @@ export function mountPublishedNativeVideo(
     handle.execute({ type: 'video.toggle', nodeId })
   }
 
+  function onError(): void {
+    if (destroyed || capture) return
+    releaseBackgroundInterruption()
+  }
+
   video.addEventListener('playing', onPlaying)
   video.addEventListener('pause', onPause)
   video.addEventListener('ended', onEnded)
   video.addEventListener('timeupdate', onTimeUpdate)
   video.addEventListener('loadedmetadata', onLoadedMetadata)
+  video.addEventListener('error', onError)
   if (input.clickToToggle) video.addEventListener('click', onClickToggle)
   if (video.readyState >= 1) onLoadedMetadata()
 

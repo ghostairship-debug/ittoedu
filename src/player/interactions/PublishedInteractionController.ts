@@ -1,4 +1,5 @@
 import {
+  isAudioInteractionAction,
   isNodeMotionAction,
   isTerminalNavigationAction,
   isVideoInteractionAction,
@@ -46,6 +47,11 @@ const SUPPORTED_ACTION_TYPES = new Set<InteractionActionPayload['type']>([
   'scene.replay',
   'course.restart',
   'course-state.set',
+  'audio.play',
+  'audio.pause',
+  'audio.resume',
+  'audio.stop',
+  'audio.toggle-mute',
   'video.play',
   'video.pause',
   'video.restart',
@@ -102,6 +108,7 @@ export class PublishedInteractionController {
     diagnostic: PublishedInteractionDiagnostic,
   ) => void
   readonly #clickRules = new Map<string, InteractionRule[]>()
+  readonly #audioEndedRules = new Map<string, InteractionRule[]>()
   readonly #videoRules = new Map<string, InteractionRule[]>()
   readonly #videoTimes = new Map<string, number>()
   readonly #disposers: Array<() => void> = []
@@ -135,6 +142,7 @@ export class PublishedInteractionController {
       }
     }
     this.#clickRules.clear()
+    this.#audioEndedRules.clear()
     this.#videoRules.clear()
     this.#videoTimes.clear()
   }
@@ -142,7 +150,11 @@ export class PublishedInteractionController {
   #inspectAndBindRules(): void {
     for (const rule of this.#rules) {
       if (!rule.enabled) continue
-      if (rule.trigger.type !== 'node.click' && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)) {
+      if (
+        rule.trigger.type !== 'node.click'
+        && rule.trigger.type !== 'audio.ended'
+        && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)
+      ) {
         this.#diagnose({
           code: 'unsupported-trigger',
           severity: 'warning',
@@ -190,6 +202,12 @@ export class PublishedInteractionController {
         const rules = this.#clickRules.get(rule.trigger.nodeId) ?? []
         rules.push(rule)
         this.#clickRules.set(rule.trigger.nodeId, rules)
+        continue
+      }
+      if (rule.trigger.type === 'audio.ended') {
+        const rules = this.#audioEndedRules.get(rule.trigger.soundId) ?? []
+        rules.push(rule)
+        this.#audioEndedRules.set(rule.trigger.soundId, rules)
         continue
       }
       const kind = videoEventKindOf(rule.trigger)
@@ -258,6 +276,54 @@ export class PublishedInteractionController {
           cause,
         })
       }
+    }
+
+    for (const soundId of this.#audioEndedRules.keys()) {
+      try {
+        const bind = this.#session.bindAudioEnded
+        const dispose = typeof bind === 'function'
+          ? bind.call(this.#session, soundId, () => this.#handleAudioEnded(soundId))
+          : null
+        if (typeof dispose === 'function') {
+          this.#disposers.push(dispose)
+        } else {
+          this.#diagnose({
+            code: 'bind-unavailable',
+            severity: 'warning',
+            message: `Published 交互声音 ${soundId} 当前不可绑定 ended 事件`,
+            interactionType: 'audio.ended',
+          })
+        }
+      } catch (cause) {
+        this.#diagnose({
+          code: 'bind-failed',
+          severity: 'error',
+          message: `Published 交互声音 ${soundId} ended 事件绑定失败`,
+          interactionType: 'audio.ended',
+          cause,
+        })
+      }
+    }
+  }
+
+  #handleAudioEnded(soundId: string): void {
+    if (this.#destroyed) return
+    const rules = this.#audioEndedRules.get(soundId) ?? []
+    let currentScene: CurrentSceneResult | undefined
+    for (const rule of rules) {
+      const sceneConditions = rule.conditions.filter(
+        (condition) => condition.type === 'scene.in',
+      )
+      if (sceneConditions.length > 0) {
+        currentScene ??= this.#readCurrentScene(rule)
+        if (!currentScene.ok) continue
+        if (!sceneConditions.every((condition) => (
+          currentScene!.sceneId !== null
+          && condition.sceneIds.includes(currentScene!.sceneId)
+        ))) continue
+      }
+      if (!this.#matchesCourseStateConditions(rule, soundId)) continue
+      this.#startRule(rule)
     }
   }
 
@@ -483,6 +549,22 @@ export class PublishedInteractionController {
 
     try {
       let result: boolean | void
+      if (isAudioInteractionAction(action)) {
+        const execute = this.#session.executeAudioAction
+        if (typeof execute !== 'function') return 'completed'
+        result = await execute.call(this.#session, action, signal)
+        if (this.#destroyed || signal.aborted) return 'cancelled'
+        if (result === false) {
+          this.#reportActionFailure(
+            'audio-failed',
+            rule,
+            step,
+            `Published 交互动作 ${action.type} 未执行`,
+          )
+          return 'cancelled'
+        }
+        return 'completed'
+      }
       if (isVideoInteractionAction(action)) {
         const execute = this.#surface.executeVideoAction
         if (typeof execute !== 'function') return 'completed'
@@ -565,15 +647,18 @@ export class PublishedInteractionController {
       if (this.#destroyed || signal.aborted) return 'cancelled'
       const motion = isNodeMotionAction(action)
       const courseState = action.type === 'course-state.set'
+      const audio = isAudioInteractionAction(action)
       const video = isVideoInteractionAction(action)
       this.#reportActionFailure(
         motion
           ? 'motion-failed'
           : courseState
             ? 'course-state-failed'
-            : video
-              ? 'video-failed'
-              : 'navigation-failed',
+            : audio
+              ? 'audio-failed'
+              : video
+                ? 'video-failed'
+                : 'navigation-failed',
         rule,
         step,
         `Published 交互动作 ${action.type} 执行失败`,
@@ -586,7 +671,11 @@ export class PublishedInteractionController {
   #reportActionFailure(
     code: Extract<
       PublishedInteractionDiagnosticCode,
-      'motion-failed' | 'navigation-failed' | 'course-state-failed' | 'video-failed'
+      | 'motion-failed'
+      | 'navigation-failed'
+      | 'course-state-failed'
+      | 'audio-failed'
+      | 'video-failed'
     >,
     rule: InteractionRule,
     step: InteractionActionStep,
