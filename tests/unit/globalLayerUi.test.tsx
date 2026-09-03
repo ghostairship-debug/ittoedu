@@ -465,9 +465,24 @@ describe('Project V8 global-layer editor UI', () => {
 
   it('keeps the global Runtime inspector above a retained Spatial graph selection', () => {
     useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode()
+    useEditorStore.getState().addTextNode()
     const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!canonical) throw new Error('缺少 Spatial Course Project')
     const spatialProject = structuredClone(canonical)
+    const spatialSurface = spatialProject.surfaces.find(
+      (surface) => surface.type === 'spatial-2d',
+    )
+    if (spatialSurface?.type !== 'spatial-2d') {
+      throw new Error('缺少 Spatial surface')
+    }
+    const waypointIds = spatialSurface.world.layerItems.map((item) => item.layerItemId)
+    if (waypointIds.length < 2) throw new Error('缺少可组成路径的 world 图层项')
+    spatialSurface.world.paths = [{
+      id: 'retained-spatial-path',
+      name: '保留路线',
+      layerItemIds: waypointIds,
+    }]
     spatialProject.globalLayerItems.push({
       item: {
         kind: 'runtime',

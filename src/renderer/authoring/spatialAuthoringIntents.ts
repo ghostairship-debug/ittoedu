@@ -1,4 +1,4 @@
-import type { FormulaAstNode, TextRun, TextRunStyle } from '../../shared/projectTypes'
+import type { FormulaAstNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1/types'
 import type {
   SpatialPathStyle,
   SpatialRelationKind,
