@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "588afaec5ab42fb6d1f7ccfb181fab47de9d7d3a",
-    "reconciledScope": "054a 删除 shared contract 空壳后的当前产品树；confirmed observation、unknown 与 target reference 保持为零。",
-    "reconciledProductTreeDigest": "bff7a2fccfc5a94874438d08ae015cd752b025dcc24c2d326244466d6d9d9826"
+    "reconciledProductCommit": "733e7df6ae911d32af4ea35627d3dd6b0167b5ab",
+    "reconciledScope": "054b 删除旧 Player/payload 空壳后的当前产品树；Published Course V2、CoursePlayer 与 RuntimeHost 保持唯一当前路径。",
+    "reconciledProductTreeDigest": "7f2ae07c52125475ef1dc79787ef1077a15eddff4f5207a1ac12df34008cbf21"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
@@ -298,7 +298,7 @@
       ],
       "owner": "Preview / Export / Player",
       "status": "dead-candidate",
-      "currentFact": "正式重算确认 consumer=0、unknown=0、target reference=0；现存 file-absent target 是无副作用空模块，只等待 054 精确删除。",
+      "currentFact": "旧 Player/payload 五个 targets 已删除；同记录的七个 Export file targets 仍是零消费者空壳，等待 054c。",
       "evidence": [
         {
           "path": "src/player/index.ts",
@@ -1478,7 +1478,7 @@
         "tests/unit/publishedCourseProtocol.test.ts",
         "tests/integration/player-payload.test.ts"
       ],
-      "status": "pending"
+      "status": "removed"
     },
     {
       "id": "r11-054c-export-diagnostics-shells",
