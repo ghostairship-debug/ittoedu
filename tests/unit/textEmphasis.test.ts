@@ -16,6 +16,13 @@ import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 function materialized(
   scene: object,
   stateId?: string | null,
@@ -139,7 +146,7 @@ describe('Course Project V9 native text emphasis', () => {
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.addPresentationState('着重状态')
     const stateId = useEditorStore.getState().activePresentationStateId!
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().updateNode(nodeId, {
       runs: [{ start: 0, end: 2, style: { emphasis: false } }],
@@ -154,7 +161,7 @@ describe('Course Project V9 native text emphasis', () => {
     })
     expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
       .toBe(true)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
     useEditorStore.getState().undo()
     expect(materialized(
@@ -168,7 +175,7 @@ describe('Course Project V9 native text emphasis', () => {
     store.addTextNode()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
     if (node.type !== 'text') throw new Error('Expected text node')
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(node.id, 'canvas')
     store.updateTextEditDraft(
@@ -183,7 +190,7 @@ describe('Course Project V9 native text emphasis', () => {
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       runs: [{ start: 0, end: 2, style: { emphasis: true } }],
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
     useEditorStore.getState().undo()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0])

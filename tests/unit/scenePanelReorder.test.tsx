@@ -287,7 +287,7 @@ describe('ScenePanel course tree reorder', () => {
     ))).toHaveLength(frameCount)
     expect(useEditorStore.getState().spatialContentEdit).toBe(beforeConfirm.spatialContentEdit)
     expect(useEditorStore.getState().spatialSession).toBe(beforeConfirm.spatialSession)
-    expect(useEditorStore.getState().history).toBe(beforeConfirm.history)
+    expect(useEditorStore.getState().spatialSession?.history).toBe(beforeConfirm.spatialSession?.history)
     expect(useEditorStore.getState().courseAssetSidecarPast).toBe(beforeConfirm.courseAssetSidecarPast)
     expect(useEditorStore.getState().courseComponentPackagesPast)
       .toBe(beforeConfirm.courseComponentPackagesPast)

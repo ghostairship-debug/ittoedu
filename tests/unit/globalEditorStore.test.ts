@@ -12,12 +12,20 @@ import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectMediaAssetFiles,
   useEditorStore,
   selectCandidateGlobalLayerItems,
   selectSlideSceneList,
 } from '@/renderer/store/editorStore'
 
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
 
 function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
   return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
@@ -451,7 +459,7 @@ describe('Project V8 global-layer editor store', () => {
       visibility: { mode: 'exclude', sceneIds: [secondSceneId] },
       node: { type: 'text', text: '跨场景课程标题', height: 64 },
     })
-    expect(useEditorStore.getState().assetFiles.asset_global_logo).toEqual(
+    expect(selectMediaAssetFiles(useEditorStore.getState()).asset_global_logo).toEqual(
       new Uint8Array([1, 2, 3, 4]),
     )
 
@@ -654,37 +662,37 @@ describe('Course Project V9 cross-surface playback controls', () => {
       (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
     )
     if (!controller) throw new Error('缺少 Slide 教师控制器')
-    const initialPastCount = useEditorStore.getState().history.past.length
+    const initialPastCount = activeHistory().past.length
 
     useEditorStore.getState().ensureTeacherController()
 
     let state = useEditorStore.getState()
-    expect(state.history.past).toHaveLength(initialPastCount)
+    expect(activeHistory().past).toHaveLength(initialPastCount)
     expect(state.selectedNodeId).toBe(controller.item.layerItemId)
     expect(state.statusMessage).toBe('教师控制器已可用')
 
     state.updateNode(controller.item.layerItemId, { locked: true })
     state = useEditorStore.getState()
-    const lockedPastCount = state.history.past.length
+    const lockedPastCount = activeHistory().past.length
     expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === controller.item.layerItemId,
     )?.item.locked).toBe(true)
 
     state.ensureTeacherController()
     state = useEditorStore.getState()
-    expect(state.history.past).toHaveLength(lockedPastCount)
+    expect(activeHistory().past).toHaveLength(lockedPastCount)
     expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === controller.item.layerItemId,
     )?.item.locked).toBe(true)
 
     state.updatePlayback({ controls: 'none' })
     state = useEditorStore.getState()
-    expect(state.history.past).toHaveLength(lockedPastCount + 1)
+    expect(activeHistory().past).toHaveLength(lockedPastCount + 1)
     expect(selectActiveCourseProjectDocument(state)?.playback.controls).toBe('none')
 
     state.ensureTeacherController()
     state = useEditorStore.getState()
-    expect(state.history.past).toHaveLength(lockedPastCount + 2)
+    expect(activeHistory().past).toHaveLength(lockedPastCount + 2)
     expect(selectActiveCourseProjectDocument(state)?.playback.controls).toBe('canvas')
     expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === controller.item.layerItemId,

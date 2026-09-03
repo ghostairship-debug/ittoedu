@@ -17,6 +17,13 @@ function materialized(
   return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
 }
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 const TEST_COMPONENT_ID = 'com.example.mode-test'
 
 function createTestComponentPackage(): ComponentPackageData {
@@ -167,7 +174,7 @@ describe('simple and professional editor modes', () => {
   it('creates, updates, removes, and restores a complete entrance animation atomically', () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
     const nodeId = useEditorStore.getState().selectedNodeId!
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -198,7 +205,7 @@ describe('simple and professional editor modes', () => {
         },
       }],
     })
-    expect(state.history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(collectCourseProjectHealth(selectActiveCourseProjectDocument(state)!, {
       assetFiles: state.courseAssetSidecar?.files ?? {},
       componentFiles: {},
@@ -215,7 +222,7 @@ describe('simple and professional editor modes', () => {
       type: 'node.enter',
       effect: 'scale',
     })
-    expect(state.history.past).toHaveLength(historyBefore + 2)
+    expect(activeHistory().past).toHaveLength(historyBefore + 2)
 
     fireEvent.click(screen.getByRole('button', { name: '无' }))
 
@@ -224,7 +231,7 @@ describe('simple and professional editor modes', () => {
     node = scene.nodes.find((item) => item.id === nodeId)!
     expect(scene.interactions).toHaveLength(0)
     expect(node.playbackInitialVisibility).toBe('inherit')
-    expect(state.history.past).toHaveLength(historyBefore + 3)
+    expect(activeHistory().past).toHaveLength(historyBefore + 3)
 
     act(() => useEditorStore.getState().undo())
 
@@ -264,10 +271,7 @@ describe('simple and professional editor modes', () => {
         },
       }],
     })
-    useEditorStore.setState({
-      history: { past: [], future: [] },
-      dirty: false,
-    })
+    const historyBefore = activeHistory().past.length
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -281,7 +285,7 @@ describe('simple and professional editor modes', () => {
     expect(useEditorStore.getState().editorMode).toBe('professional')
     expect(useEditorStore.getState().activeTab).toBe('automation')
     expect(selectActiveScene(useEditorStore.getState()).interactions).toHaveLength(1)
-    expect(useEditorStore.getState().history.past).toHaveLength(0)
+    expect(activeHistory().past).toHaveLength(historyBefore)
   })
 
   it('does not claim an equivalent-shaped professional node activation rule', () => {
@@ -308,10 +312,7 @@ describe('simple and professional editor modes', () => {
         },
       }],
     })
-    useEditorStore.setState({
-      history: { past: [], future: [] },
-      dirty: false,
-    })
+    const historyBefore = activeHistory().past.length
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -330,7 +331,7 @@ describe('simple and professional editor modes', () => {
           },
         }],
       })
-    expect(useEditorStore.getState().history.past).toHaveLength(0)
+    expect(activeHistory().past).toHaveLength(historyBefore)
   })
 
   it('keeps simple entrance animations isolated between presentation states', () => {

@@ -23,6 +23,15 @@ import {
 } from '@/renderer/store/editorStore'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  if (state.spatialSession) return state.spatialSession.history
+  if (state.flowSession) return state.flowSession.history
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active Surface session')
+  return backend.getSession().history
+}
+
 type SurfaceKind = 'slide' | 'spatial' | 'flow'
 
 interface DraftFixture {
@@ -66,7 +75,7 @@ function createSlideFixture(): DraftFixture {
   if (!targetId) throw new Error('expected selected Slide text')
   const originalText = nativeText(activeDocument(), targetId)
   acknowledgeBaseline('slide-baseline.h5lesson')
-  const historyBeforeDraft = useEditorStore.getState().history.past.length
+  const historyBeforeDraft = activeHistory().past.length
   const begin = () => {
     useEditorStore.getState().beginTextEdit(targetId, 'properties')
   }
@@ -104,7 +113,7 @@ function createSpatialFixture(): DraftFixture {
   if (!targetId) throw new Error('expected selected Spatial text')
   const originalText = nativeText(activeDocument(), targetId)
   acknowledgeBaseline('spatial-baseline.h5lesson')
-  const historyBeforeDraft = useEditorStore.getState().history.past.length
+  const historyBeforeDraft = activeHistory().past.length
   const begin = () => {
     useEditorStore.getState().beginTextEdit(targetId, 'properties')
   }
@@ -146,7 +155,7 @@ function createFlowFixture(): DraftFixture {
   const targetId = paragraph.id
   const originalText = paragraph.text
   acknowledgeBaseline('flow-baseline.h5lesson')
-  const historyBeforeDraft = useEditorStore.getState().history.past.length
+  const historyBeforeDraft = activeHistory().past.length
   const begin = () => {
     const current = useEditorStore.getState().flowSession
     if (!current) throw new Error('expected Flow session')
@@ -219,14 +228,14 @@ describe('active Course Project text draft persistence', () => {
 
       const drafted = useEditorStore.getState()
       expect(selectHasUnsavedCourseChanges(drafted)).toBe(true)
-      expect(drafted.history.past).toHaveLength(fixture.historyBeforeDraft)
+      expect(activeHistory().past).toHaveLength(fixture.historyBeforeDraft)
       expect(fixture.read(activeDocument())).toBe(fixture.originalText)
 
       const recovery = drafted.captureCourseProjectRecoverySnapshot()
       expect(recovery.ok).toBe(true)
       if (!recovery.ok) throw new Error(recovery.reason)
       expect(fixture.read(recovery.snapshot.project)).toBe(nextText)
-      expect(useEditorStore.getState().history.past).toHaveLength(fixture.historyBeforeDraft)
+      expect(activeHistory().past).toHaveLength(fixture.historyBeforeDraft)
       expect(fixture.read(activeDocument())).toBe(fixture.originalText)
 
       const preparation = drafted.prepareCourseProjectPersistence()
@@ -234,14 +243,14 @@ describe('active Course Project text draft persistence', () => {
       if (!preparation.ok) throw new Error(preparation.reason)
       expect(fixture.read(preparation.snapshot.project)).toBe(nextText)
       expect(fixture.read(archiveAndReopen(preparation.snapshot))).toBe(nextText)
-      expect(useEditorStore.getState().history.past).toHaveLength(
+      expect(activeHistory().past).toHaveLength(
         fixture.historyBeforeDraft + 1,
       )
       expect(useEditorStore.getState().dirty).toBe(true)
 
       const secondPreparation = useEditorStore.getState().prepareCourseProjectPersistence()
       expect(secondPreparation.ok).toBe(true)
-      expect(useEditorStore.getState().history.past).toHaveLength(
+      expect(activeHistory().past).toHaveLength(
         fixture.historyBeforeDraft + 1,
       )
 
@@ -320,7 +329,7 @@ describe('active Course Project text draft persistence', () => {
         )
       }
       const documentAfterMutation = activeDocument()
-      const historyAfterMutation = useEditorStore.getState().history.past.length
+      const historyAfterMutation = activeHistory().past.length
       expect(documentAfterMutation.revision).toBeGreaterThan(revisionBeforeMutation)
       if (kind === 'slide') {
         expect(useEditorStore.getState().v9ContentEdit).toBeNull()
@@ -331,7 +340,7 @@ describe('active Course Project text draft persistence', () => {
       if (!preparation.ok) throw new Error(preparation.reason)
       expect(preparation.snapshot.project).toBe(documentAfterMutation)
       expect(fixture.read(preparation.snapshot.project)).toBe(fixture.originalText)
-      expect(useEditorStore.getState().history.past).toHaveLength(historyAfterMutation)
+      expect(activeHistory().past).toHaveLength(historyAfterMutation)
       expect(
         useEditorStore.getState().v9ContentEdit
         ?? useEditorStore.getState().spatialContentEdit
@@ -347,12 +356,12 @@ describe('active Course Project text draft persistence', () => {
     if (!edit) throw new Error('expected Slide edit')
 
     useEditorStore.getState().renameProject('dirty stale document')
-    const historyAfterRename = useEditorStore.getState().history.past.length
+    const historyAfterRename = activeHistory().past.length
     expect(useEditorStore.getState().v9ContentEdit).toBe(edit)
 
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     expect(preparation).toMatchObject({ ok: false, reason: 'stale-revision' })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyAfterRename)
+    expect(activeHistory().past).toHaveLength(historyAfterRename)
     expect(useEditorStore.getState().v9ContentEdit).toBe(edit)
   })
 
@@ -363,11 +372,11 @@ describe('active Course Project text draft persistence', () => {
     if (!edit) throw new Error('expected Slide edit')
     const composingEdit = { ...edit, composing: true }
     useEditorStore.setState({ v9ContentEdit: composingEdit })
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     expect(preparation).toMatchObject({ ok: false, reason: 'composing' })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().v9ContentEdit).toBe(composingEdit)
   })
 
@@ -403,11 +412,11 @@ describe('active Course Project text draft persistence', () => {
     if (!edit) throw new Error('expected Flow edit')
     const composingEdit = { ...edit, composing: true }
     useEditorStore.setState({ flowTextEdit: composingEdit })
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     expect(preparation.ok).toBe(false)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().flowTextEdit).toBe(composingEdit)
     expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
 
@@ -415,7 +424,7 @@ describe('active Course Project text draft persistence', () => {
     expect(recovery.ok).toBe(true)
     if (!recovery.ok) throw new Error(recovery.reason)
     expect(fixture.read(recovery.snapshot.project)).toBe('输入法组合中的文字')
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
   })
 
   it('materializes the Store-owned Flow formula draft for recovery and saves it once', () => {
@@ -454,7 +463,7 @@ describe('active Course Project text draft persistence', () => {
       hasSlots: false,
     })
     useEditorStore.getState().setFlowTextEdit(drafted)
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     const recovery = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
     expect(recovery.ok).toBe(true)
@@ -462,13 +471,13 @@ describe('active Course Project text draft persistence', () => {
     const recovered = flowSurfaceIn(recovery.snapshot.project, surface.id)
       .blocks.find((block) => block.id === formula.id)
     expect(recovered).toMatchObject({ type: 'formula', ast, accessibleText: 'a加b' })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
 
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     expect(preparation.ok).toBe(true)
     if (!preparation.ok) throw new Error(preparation.reason)
     expect(useEditorStore.getState().flowTextEdit).toBeNull()
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     const saved = flowSurfaceIn(preparation.snapshot.project, surface.id)
       .blocks.find((block) => block.id === formula.id)
     expect(saved).toMatchObject({ type: 'formula', ast, accessibleText: 'a加b' })

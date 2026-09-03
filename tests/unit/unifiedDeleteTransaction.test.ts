@@ -21,6 +21,15 @@ function activeDocument(): CourseProjectDocument {
   return document
 }
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  if (state.spatialSession) return state.spatialSession.history
+  if (state.flowSession) return state.flowSession.history
+  const backend = selectSlideAuthoringBackend(state)
+  if (!backend) throw new Error('expected active Surface session')
+  return backend.getSession().history
+}
+
 function firstSlideScene(document = activeDocument()): SlideSceneDocument {
   const surface = document.surfaces.find((candidate) => candidate.type === 'slide')
   const scene = surface?.type === 'slide' ? surface.scenes[0] : undefined
@@ -280,7 +289,7 @@ describe('unified Delete transaction', () => {
     const selectedIds = globalFirst ? [globalId, surfaceId] : [surfaceId, globalId]
     useEditorStore.getState().selectNodes(selectedIds)
     const before = activeDocument()
-    const historyCount = useEditorStore.getState().history.past.length
+    const historyCount = activeHistory().past.length
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
@@ -290,7 +299,7 @@ describe('unified Delete transaction', () => {
     expect(remaining.surface.has(surfaceId)).toBe(false)
     expect(remaining.global.has(globalId)).toBe(false)
     expect(after.revision).toBe(before.revision + 1)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyCount + 1)
+    expect(activeHistory().past).toHaveLength(historyCount + 1)
     expect(useEditorStore.getState().flowSession?.selection).toMatchObject({
       focus: 'idle',
       selectedOverlayIds: [],
@@ -310,7 +319,7 @@ describe('unified Delete transaction', () => {
     const ids = [...spatialWorldIds()]
     useEditorStore.getState().selectNodes(ids)
     const before = activeDocument()
-    const historyCount = useEditorStore.getState().history.past.length
+    const historyCount = activeHistory().past.length
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
@@ -319,7 +328,7 @@ describe('unified Delete transaction', () => {
     const remainingIds = spatialWorldIds(after)
     ids.forEach((id) => expect(remainingIds.has(id)).toBe(false))
     expect(after.revision).toBe(before.revision + 1)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyCount + 1)
+    expect(activeHistory().past).toHaveLength(historyCount + 1)
     expect(useEditorStore.getState().spatialSession?.selection.selectionIds).toEqual([])
 
     useEditorStore.getState().undo()

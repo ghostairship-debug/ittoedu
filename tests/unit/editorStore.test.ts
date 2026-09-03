@@ -33,6 +33,15 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  if (state.spatialSession) return state.spatialSession.history
+  if (state.flowSession) return state.flowSession.history
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active Surface session')
+  return backend.getSession().history
+}
+
 const imageMeta: AssetMeta = {
   id: 'asset_lesson_image',
   filename: 'lesson.png',
@@ -250,7 +259,6 @@ describe('Spatial command failure diagnostics', () => {
     expect(after.spatialSession?.history.present).toBe(documentBefore)
     expect(after.spatialSession?.history.present.revision).toBe(documentBefore.revision)
     expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
-    expect(after.history).toBe(before.history)
     expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
     expect(after.selectedNodeId).toBe(before.selectedNodeId)
     expect(after.dirty).toBe(before.dirty)
@@ -291,7 +299,6 @@ describe('Spatial command failure diagnostics', () => {
     expect(after.spatialSession).toBe(sessionBefore)
     expect(after.spatialSession?.history).toBe(sessionBefore.history)
     expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
-    expect(after.history).toBe(before.history)
     expect(after.selectedNodeIds).toBe(before.selectedNodeIds)
   })
 })
@@ -979,7 +986,7 @@ describe('scene operations', () => {
       '场景 3',
     ])
     expect(state.activeSceneId).toBe(selectSlideSceneList(state)[2]!.id)
-    expect(state.history.past).toHaveLength(2)
+    expect(activeHistory().past).toHaveLength(2)
     expect(state.dirty).toBe(true)
   })
 
@@ -989,7 +996,7 @@ describe('scene operations', () => {
 
     expect(initial.deleteScene(onlySceneId)).toBe(false)
     expect(selectSlideSceneList(useEditorStore.getState())).toHaveLength(1)
-    expect(useEditorStore.getState().history.past).toHaveLength(0)
+    expect(activeHistory().past).toHaveLength(0)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
@@ -1029,14 +1036,14 @@ describe('scene operations', () => {
   it('ignores invalid reorder requests without changing history', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    const historyLength = useEditorStore.getState().history.past.length
+    const historyLength = activeHistory().past.length
     const sceneIds = selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)
 
     store.reorderScenes([sceneIds[0]!, sceneIds[0]!])
     expect(selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)).toEqual(
       sceneIds,
     )
-    expect(useEditorStore.getState().history.past).toHaveLength(historyLength)
+    expect(activeHistory().past).toHaveLength(historyLength)
   })
 
   it('keeps a high defensive scene limit without the former 30-scene product cap', () => {
@@ -1077,7 +1084,7 @@ describe('scene operations', () => {
     store.addTextNode(80, 90)
     store.addRectangleNode(320, 240)
     const sourceNodes = activeScene().nodes.map((node) => structuredClone(node))
-    const historyBeforeDuplicate = useEditorStore.getState().history.past.length
+    const historyBeforeDuplicate = activeHistory().past.length
 
     store.duplicateScene(sourceId)
 
@@ -1094,7 +1101,7 @@ describe('scene operations', () => {
     )
     expect(state.activeSceneId).toBe(copy.id)
     expect(state.selectedNodeIds).toEqual([])
-    expect(state.history.past).toHaveLength(historyBeforeDuplicate + 1)
+    expect(activeHistory().past).toHaveLength(historyBeforeDuplicate + 1)
 
     const copiedText = copy.nodes.find((node) => node.type === 'text')
     expect(copiedText).toBeDefined()
@@ -1382,7 +1389,7 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     store.addRectangleNode()
     const nodeId = activeScene().nodes[0]!.id
-    const historyBeforeCommit = useEditorStore.getState().history.past.length
+    const historyBeforeCommit = activeHistory().past.length
 
     // Phaser pointermove is view-only; pointerup supplies one final Store patch.
     store.updateNode(nodeId, {
@@ -1392,7 +1399,7 @@ describe('node operations', () => {
       height: 222,
     })
 
-    expect(useEditorStore.getState().history.past).toHaveLength(
+    expect(activeHistory().past).toHaveLength(
       historyBeforeCommit + 1,
     )
     expect(activeScene().nodes[0]).toMatchObject({
@@ -1407,7 +1414,7 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
-    const historyBeforeCommit = useEditorStore.getState().history.past.length
+    const historyBeforeCommit = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     store.updateTextEditDraft(nodeId, '中', [], 80)
@@ -1418,13 +1425,13 @@ describe('node operations', () => {
       text: '中文文本\n第二行',
       height: 120,
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(
+    expect(activeHistory().past).toHaveLength(
       historyBeforeCommit,
     )
 
     store.commitTextEdit()
 
-    expect(useEditorStore.getState().history.past).toHaveLength(
+    expect(activeHistory().past).toHaveLength(
       historyBeforeCommit + 1,
     )
     expect(activeScene().nodes[0]).toMatchObject({
@@ -1442,21 +1449,21 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     store.updateTextEditDraft(nodeId, '画布编辑中的草稿', [], 80)
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('canvas')
 
     store.beginTextEdit(nodeId, 'canvas')
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('canvas')
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
 
     store.beginTextEdit(nodeId, 'properties')
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('properties')
     expect(useEditorStore.getState().editingTextNodeId).toBeNull()
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
@@ -1464,7 +1471,7 @@ describe('node operations', () => {
     store.updateTextEditDraft(nodeId, '属性栏最终文字', [], 80)
     store.commitTextEdit()
     expect(activeScene().nodes[0]).toMatchObject({ text: '属性栏最终文字' })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 2)
+    expect(activeHistory().past).toHaveLength(historyBefore + 2)
 
     store.undo()
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
@@ -1478,7 +1485,7 @@ describe('node operations', () => {
       style: { writingMode: 'vertical-lr', overflow: 'auto-height' },
     })
     const originalWidth = activeScene().nodes[0]!.width
-    const historyBeforeCommit = useEditorStore.getState().history.past.length
+    const historyBeforeCommit = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     store.updateTextEditDraft(nodeId, '竖排内容', [], 180, 96)
@@ -1489,12 +1496,12 @@ describe('node operations', () => {
       width: 128,
       height: 180,
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(
+    expect(activeHistory().past).toHaveLength(
       historyBeforeCommit,
     )
 
     store.commitTextEdit()
-    expect(useEditorStore.getState().history.past).toHaveLength(
+    expect(activeHistory().past).toHaveLength(
       historyBeforeCommit + 1,
     )
     store.undo()
@@ -1509,7 +1516,7 @@ describe('node operations', () => {
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
     acknowledgeCurrentSave('lesson.h5lesson')
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'properties')
     store.updateTextEditDraft(nodeId, '应被取消', [], 96)
@@ -1520,7 +1527,7 @@ describe('node operations', () => {
       text: '双击编辑文字',
       height: 80,
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
@@ -1531,14 +1538,14 @@ describe('node operations', () => {
     const textId = activeScene().nodes[0]!.id
     store.addRectangleNode()
     const rectangleId = activeScene().nodes[1]!.id
-    const historyBeforeNodeSwitch = useEditorStore.getState().history.past.length
+    const historyBeforeNodeSwitch = activeHistory().past.length
 
     store.selectNode(textId)
     store.beginTextEdit(textId, 'canvas')
     store.updateTextEditDraft(textId, '切换后仍保留', [], 80)
     store.selectNode(rectangleId)
 
-    expect(useEditorStore.getState().history.past).toHaveLength(
+    expect(activeHistory().past).toHaveLength(
       historyBeforeNodeSwitch + 1,
     )
     expect(activeScene().nodes[0]).toMatchObject({ text: '切换后仍保留' })
@@ -1561,25 +1568,25 @@ describe('node operations', () => {
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
     acknowledgeCurrentSave('before-draft.h5lesson')
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     store.updateTextEditDraft(nodeId, '保存时的当前文字', [], 80)
     expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+    expect(activeHistory().past).toHaveLength(historyBefore)
 
     const preparation = store.prepareCourseProjectPersistence()
     expect(preparation.ok).toBe(true)
     if (!preparation.ok) throw new Error(preparation.reason)
 
     expect(activeScene().nodes[0]).toMatchObject({ text: '保存时的当前文字' })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(useEditorStore.getState().v9ContentEdit).toBeNull()
     expect(useEditorStore.getState().dirty).toBe(true)
 
     const secondPreparation = store.prepareCourseProjectPersistence()
     expect(secondPreparation.ok).toBe(true)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
     expect(
       store.acknowledgeCourseProjectSaved('saved-draft.h5lesson', preparation.token),
@@ -1667,7 +1674,7 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     const component = sampleComponent()
     store.importComponentPackage(component)
-    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
 
     store.addExternalComponentNode(component.manifest.id, 350, 210)
     const node = activeScene().nodes[0]
@@ -1752,7 +1759,7 @@ describe('scene presentation states', () => {
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('答错')
     const stateId = useEditorStore.getState().activePresentationStateId!
-    const historyBeforeEdit = useEditorStore.getState().history.past.length
+    const historyBeforeEdit = activeHistory().past.length
 
     useEditorStore.getState().updateNode(nodeId, {
       x: 420,
@@ -1777,7 +1784,7 @@ describe('scene presentation states', () => {
       text: '请再试一次',
       style: { color: '#ef4444' },
     })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBeforeEdit + 1)
+    expect(activeHistory().past).toHaveLength(historyBeforeEdit + 1)
 
     useEditorStore.getState().undo()
     expect(materialized(activeScene(), stateId).nodes[0]).toMatchObject({
@@ -1856,13 +1863,13 @@ describe('scene presentation states', () => {
     useEditorStore.getState().updateNode(nodeId, { locked: true })
     useEditorStore.getState().selectNode(nodeId)
     const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
-    const beforeHistory = useEditorStore.getState().history.past
+    const beforeHistory = activeHistory().past
     const beforeSelection = useEditorStore.getState().selectedNodeIds
 
     useEditorStore.getState().deleteNode(nodeId)
 
     expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
-    expect(useEditorStore.getState().history.past).toBe(beforeHistory)
+    expect(activeHistory().past).toBe(beforeHistory)
     expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
     expect(materialized(activeScene(), stateId).nodes.find((node) => node.id === nodeId))
       .toMatchObject({ locked: true })
@@ -1885,14 +1892,14 @@ describe('scene presentation states', () => {
     useEditorStore.getState().setActivePresentationState(stateB)
     useEditorStore.getState().selectNode(nodeId)
     const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
-    const beforeHistory = useEditorStore.getState().history.past
+    const beforeHistory = activeHistory().past
     const beforeSelection = useEditorStore.getState().selectedNodeIds
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
     expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
-    expect(useEditorStore.getState().history.past).toBe(beforeHistory)
+    expect(activeHistory().past).toBe(beforeHistory)
     expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
     expect(activeScene().nodes.some((node) => node.id === nodeId)).toBe(true)
   })
@@ -1903,7 +1910,7 @@ describe('scene presentation states', () => {
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('完成')
     const stateId = useEditorStore.getState().activePresentationStateId!
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().beginTextEdit(nodeId, 'properties')
     useEditorStore.getState().updateTextEditDraft(nodeId, '状态文字', [], 96)
@@ -1914,7 +1921,7 @@ describe('scene presentation states', () => {
     expect(activeScene().nodes[0]).toMatchObject({ text: '双击编辑文字', height: 80 })
     useEditorStore.getState().commitTextEdit()
 
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(materialized(activeScene(), stateId).nodes[0]).toMatchObject({
       text: '状态文字',
       height: 96,
@@ -2166,7 +2173,7 @@ describe('multi-selection operations', () => {
         { nodeId: ids[2]!, patch: { x: 760, y: 430, width: 200, height: 160 } },
       ])
       store.selectNodes(ids)
-      const historyBefore = useEditorStore.getState().history.past.length
+      const historyBefore = activeHistory().past.length
 
       store.alignSelection(mode)
 
@@ -2182,7 +2189,7 @@ describe('multi-selection operations', () => {
       for (const value of alignedValues.slice(1)) {
         expect(value).toBeCloseTo(alignedValues[0]!)
       }
-      expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+      expect(activeHistory().past).toHaveLength(historyBefore + 1)
     },
   )
 
@@ -2351,14 +2358,14 @@ describe('multi-selection operations', () => {
     const [text, shape] = activeScene().nodes
     store.updateNode(text!.id, { locked: true })
     store.selectNodes([text!.id, shape!.id])
-    const historyBeforeCopy = useEditorStore.getState().history.past.length
+    const historyBeforeCopy = activeHistory().past.length
 
     store.copySelectedNodes()
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBeforeCopy)
+    expect(activeHistory().past).toHaveLength(historyBeforeCopy)
     expect(useEditorStore.getState().slideCandidateClipboard?.items).toHaveLength(2)
 
     store.updateNode(text!.id, { x: 600, text: '原节点已修改' })
-    const historyBeforePaste = useEditorStore.getState().history.past.length
+    const historyBeforePaste = activeHistory().past.length
     store.pasteNodes()
 
     const state = useEditorStore.getState()
@@ -2384,7 +2391,7 @@ describe('multi-selection operations', () => {
       locked: false,
     })
     expect(new Set(activeScene().nodes.map((node) => node.id)).size).toBe(4)
-    expect(state.history.past).toHaveLength(historyBeforePaste + 1)
+    expect(activeHistory().past).toHaveLength(historyBeforePaste + 1)
   })
 })
 
@@ -2396,9 +2403,9 @@ describe('history semantics', () => {
     const originalName = selectSlideSceneList(store)[0]!.name
     store.updateScene(sceneId, { name: '修改后的第一课' })
 
-    const entry = useEditorStore.getState().history.past[0]!
-    expect(entry.patches).toHaveLength(0)
-    expect(entry.inversePatches).toHaveLength(0)
+    const entry = activeHistory().past[0]!
+    expect('patches' in entry).toBe(false)
+    expect('inversePatches' in entry).toBe(false)
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.name).toBe('修改后的第一课')
     store.undo()
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.name).toBe(originalName)
@@ -2411,11 +2418,11 @@ describe('history semantics', () => {
 
     store.undo()
     expect(activeScene().nodes).toHaveLength(0)
-    expect(useEditorStore.getState().history.future).toHaveLength(1)
+    expect(activeHistory().future).toHaveLength(1)
 
     store.redo()
     expect(activeScene().nodes[0]!.id).toBe(nodeId)
-    expect(useEditorStore.getState().history.future).toHaveLength(0)
+    expect(activeHistory().future).toHaveLength(0)
   })
 
   it('limits undo history to 100 V9 entries and clears redo after a new commit', () => {
@@ -2426,31 +2433,31 @@ describe('history semantics', () => {
         backgroundColor: `#${index.toString(16).padStart(6, '0')}`,
       })
     }
-    expect(useEditorStore.getState().history.past).toHaveLength(100)
+    expect(activeHistory().past).toHaveLength(100)
 
     store.undo()
     store.undo()
-    expect(useEditorStore.getState().history.future).toHaveLength(2)
+    expect(activeHistory().future).toHaveLength(2)
     store.updateScene(sceneId, { name: '新提交' })
-    expect(useEditorStore.getState().history.future).toHaveLength(0)
-    expect(useEditorStore.getState().history.past).toHaveLength(99)
+    expect(activeHistory().future).toHaveLength(0)
+    expect(activeHistory().past).toHaveLength(99)
   })
 
   it('new and opened projects clear history while save keeps it', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const documentToLoad = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
-    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
 
     acknowledgeCurrentSave('C:\\course.h5lesson')
-    expect(useEditorStore.getState().history.past).toHaveLength(1)
+    expect(activeHistory().past).toHaveLength(1)
     expect(useEditorStore.getState().dirty).toBe(false)
 
     store.loadCourseProject(documentToLoad, 'C:\\course.h5lesson')
-    expect(useEditorStore.getState().history.past).toHaveLength(0)
+    expect(activeHistory().past).toHaveLength(0)
     store.addRectangleNode()
     store.createNewProject()
-    expect(useEditorStore.getState().history.past).toHaveLength(0)
+    expect(activeHistory().past).toHaveLength(0)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 })
