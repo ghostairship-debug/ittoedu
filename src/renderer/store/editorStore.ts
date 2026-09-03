@@ -24,12 +24,6 @@ import { UserFacingError } from '../../shared/errors'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
-  isCourseTeacherControllerLayerItem,
-  synchronizeCourseTeacherControllerControls,
-  synchronizeTeacherControllerControls,
-} from '../../shared/teacherControllerConsistency'
-import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
-import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   MAX_PROJECT_SCENES,
@@ -61,7 +55,6 @@ import {
   commitCourseResourceState,
   continuedCourseResourceStacks,
   emptyCourseResourceStacks,
-  projectedAssetFiles,
   readCourseResourceState,
   type CourseResourceHistoryContinuation,
   type CourseResourceState,
@@ -71,7 +64,6 @@ import {
   applySceneNodePatchToCourseOverride,
   applySceneNodePatchToLayerItem,
   commandTargetForRow,
-  constrainRoundTripTeacherControllerFrame,
   findCourseSlideScene,
   findMutableCourseLayerItem,
   isSpatialDirectRowPropertyPatch,
@@ -827,7 +819,7 @@ export interface EditorState {
   projectPath: string | null
   dirty: boolean
   history: HistoryState
-  assetFiles: Record<string, Uint8Array>
+  readonly assetFiles: Record<string, Uint8Array>
   componentPackages: Record<string, ComponentPackageData>
   editorMode: EditorMode
   activeTab: SidebarTab
@@ -1169,12 +1161,6 @@ export function selectHasUnsavedCourseChanges(state: EditorState): boolean {
   return state.dirty || selectHasDirtyCourseContentDraft(state)
 }
 
-export { editableComponentPackageId } from '../components/editableComponentPackage'
-export {
-  layoutMediaBatchNodes,
-  MAX_BATCH_CANVAS_ITEMS,
-} from '../project/mediaBatch'
-
 export const useEditorStore = create<EditorState>((set, get) => {
   const initialCourse = createBlankCourseProject()
   const initialBackend = createSlideAuthoringBackend(openSlideAuthoringSession(initialCourse))
@@ -1333,13 +1319,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     )
   }
 
-  const activeCourseDocument = (state: EditorState): CourseProjectDocument | null => (
-    state.spatialSession?.history.present
-    ?? state.flowSession?.history.present
-    ?? selectSlideAuthoringBackend(state)?.getSession().history.present
-    ?? null
-  )
-
   const persistProjectResourceTransaction = (
     step: EditorTransactionStep,
     statusMessage: string,
@@ -1410,7 +1389,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     read() {
       const state = get()
       return {
-        document: activeCourseDocument(state),
+        document: selectActiveCourseProjectDocument(state),
         sidecar: state.courseAssetSidecar,
         componentPackages: state.componentPackages,
         authoringSession: state.courseAuthoringSession,
@@ -1807,7 +1786,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
     projectPath: null,
     dirty: false,
     history: emptyHistory(),
-    assetFiles: {},
+    get assetFiles() {
+      return selectMediaAssetFiles(get())
+    },
     componentPackages: {},
     editorMode: loadEditorMode(),
     activeTab: 'elements',
@@ -2195,7 +2176,7 @@ export const selectMediaAssetFiles = (state: EditorState): Record<string, Uint8A
   if (state.spatialSession || state.flowSession || selectSlideAuthoringBackend(state)) {
     return state.courseAssetSidecar?.files ?? EMPTY_CANDIDATE_ASSET_FILES
   }
-  return state.assetFiles
+  return EMPTY_CANDIDATE_ASSET_FILES
 }
 
 export const selectAudioSettings = (state: EditorState) => {

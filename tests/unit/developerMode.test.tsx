@@ -5,8 +5,8 @@ import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sourc
 import { RightSidebar } from '../../src/renderer/ui/RightSidebar'
 import { DeveloperTab } from '../../src/renderer/ui/DeveloperTab'
 import { selectRuntimeSourceAuthoringView } from '../../src/renderer/runtime/runtimeSourceAuthoringView'
+import { editableComponentPackageId } from '../../src/renderer/components/editableComponentPackage'
 import {
-  editableComponentPackageId,
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
   selectActiveScene,

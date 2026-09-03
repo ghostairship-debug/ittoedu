@@ -37,7 +37,6 @@ export interface CourseResourceState {
   courseComponentPackagesPast: Record<string, ComponentPackageData>[]
   courseComponentPackagesFuture: Record<string, ComponentPackageData>[]
   componentPackages: Record<string, ComponentPackageData>
-  assetFiles: Record<string, Uint8Array>
 }
 
 export interface CourseResourceHistoryContinuation {
@@ -273,7 +272,6 @@ export function commitCourseResourceState(
   | 'courseComponentPackagesPast'
   | 'courseComponentPackagesFuture'
   | 'componentPackages'
-  | 'assetFiles'
 > {
   if (
     input.appliedResources
@@ -379,7 +377,6 @@ export function commitCourseResourceState(
     courseComponentPackagesPast: nextPackagePast,
     courseComponentPackagesFuture: nextPackageFuture,
     componentPackages: nextComponentPackages,
-    assetFiles: projectedAssetFiles(nextSidecar),
   }
 }
 
@@ -393,6 +390,5 @@ export function readCourseResourceState(
     courseComponentPackagesPast: state.courseComponentPackagesPast,
     courseComponentPackagesFuture: state.courseComponentPackagesFuture,
     componentPackages: state.componentPackages,
-    assetFiles: state.assetFiles,
   }
 }

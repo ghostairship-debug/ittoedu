@@ -52,7 +52,6 @@ export type EditorStoreKernel = {
       | 'courseComponentPackagesPast'
       | 'courseComponentPackagesFuture'
       | 'componentPackages'
-      | 'assetFiles'
     >,
   ): void
   applyResourceStep(input: {

@@ -89,7 +89,6 @@ import {
 } from '../editorStoreKernel'
 import {
   continuedCourseResourceStacks,
-  projectedAssetFiles,
   readCourseResourceState,
   type CourseResourceHistoryContinuation,
   type CourseResourceState,
@@ -455,7 +454,6 @@ export function applyFlowBackendState(
     projectPath: extra.path === undefined ? null : extra.path,
     statusMessage: extra.statusMessage ?? `已打开“${session.history.present.title}”`,
     componentPackages: extra.componentPackages ?? {},
-    assetFiles: projectedAssetFiles(sidecar),
   }
 }
 

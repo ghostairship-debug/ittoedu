@@ -9,16 +9,17 @@ import {
 import { buildAssetContentHashIndex } from '@/renderer/project/assetManager'
 import {
   commitMediaBatchImport,
+  layoutMediaBatchNodes,
+  MAX_BATCH_CANVAS_ITEMS,
   planMediaBatchImport,
 } from '@/renderer/project/mediaBatch'
 import {
-  layoutMediaBatchNodes,
-  MAX_BATCH_CANVAS_ITEMS,
   selectActiveScene,
   useEditorStore,
   selectActiveCourseProjectDocument,
   selectCandidateGlobalLayerItems,
   selectSlideSceneList,
+  selectMediaAssetFiles,
 } from '@/renderer/store/editorStore'
 
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -144,13 +145,13 @@ describe('batch media transactions', () => {
     state = useEditorStore.getState()
     expect(selectActiveScene(state).nodes).toHaveLength(0)
     expect(selectActiveCourseProjectDocument(state)!.assets).toEqual({})
-    expect(state.assetFiles).toEqual({})
+    expect(selectMediaAssetFiles(state)).toEqual({})
 
     store.redo()
     state = useEditorStore.getState()
     nodes = selectActiveScene(state).nodes
     expect(nodes).toHaveLength(3)
-    expect([...state.assetFiles.asset_a!]).toEqual([1, 2, 3, 4])
+    expect([...selectMediaAssetFiles(state).asset_a!]).toEqual([1, 2, 3, 4])
   })
 
   it('imports a media-library batch without creating nodes and undoes it once', () => {
@@ -166,14 +167,14 @@ describe('batch media transactions', () => {
 
     store.undo()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets).toEqual({})
-    expect(useEditorStore.getState().assetFiles).toEqual({})
+    expect(selectMediaAssetFiles(useEditorStore.getState())).toEqual({})
 
     store.redo()
     expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toEqual([
       'asset_library_a',
       'asset_library_b',
     ])
-    expect([...useEditorStore.getState().assetFiles.asset_library_b!])
+    expect([...selectMediaAssetFiles(useEditorStore.getState()).asset_library_b!])
       .toEqual([2, 2, 2, 2])
     expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
   })

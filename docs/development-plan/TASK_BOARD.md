@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037b-asset-mirror-and-root-forwards](tasks/1.1/r11-037b-asset-mirror-and-root-forwards.md) | queued | — | editor-store-history | 根级 `assetFiles` 镜像是冗余字段，素材真实来源是 sidecar；删除根级 `assetFiles` 镜像、无用局部函数和 root re-export，不碰历史事务中的 `HistoryResourceState.assetFiles`。 |
+| [r11-037c-history-unit-consumers-1](tasks/1.1/r11-037c-history-unit-consumers-1.md) | queued | — | editor-store-history | 迁移首批 8 个单元测试对 `useEditorStore.getState().history` 的读取，使其直接改读活动 Surface 会话的 history，产品代码不动。 |
