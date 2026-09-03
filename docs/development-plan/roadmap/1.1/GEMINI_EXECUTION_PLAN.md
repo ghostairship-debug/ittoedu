@@ -1,13 +1,20 @@
 # 1.1 剩余实施拆卡蓝图（Gemini）
 
-> 基线：`1bdcb3f`。本文件定义顺序和每卡边界，不保存 queued/active 状态。任务目录一次只实例化当前一张卡；上一卡完成后才按本蓝图创建下一张。执行规则见 [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)。
+> 当前检查点：`ee1f87e`。本文件定义顺序和每卡边界，不保存 queued/active 状态。任务目录可以保存已经裁定且依赖明确的 blocked 卡，但任一时点只能有一张 queued 卡。执行规则见 [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)。
 
 ## 1. 总顺序
 
 ```text
-036b 去重竞态返工
-→ 037a–037z Store / Owner 收口
-→ 052a–052d 旧成功测试迁移
+036b 去重竞态返工（已完成）
+→ 037a–037z Store / Owner 收口（已完成）
+→ 052a 与 052b 无争议部分（已完成）
+→ 052c 旧 token / 拒绝夹具迁移
+→ 052e V2 视频播放动作与事件
+→ 052f V2 视频 / 背景音乐会话
+→ 052g V2 scene.open-picker
+→ 052h V2 Slide scene-local Component hybrid
+→ 收口 052b 旧渲染器测试
+→ 052d 保全证据路径
 → 053 台账重算
 → 054a–054d 按精确清单删除
 → Codex 最终复查：055 → 060 → 061
@@ -18,8 +25,8 @@
 
 ## 2. 任务卡流转
 
-- 当前任务目录只保留一张 `queued` 卡。
-- 完成一张卡时，在同一提交中删除本卡、按本文件实例化下一卡并重新生成任务板；不创建单独“关闭卡”提交。
+- 当前任务目录只保留一张 `queued` 卡；已经裁定的后继实现卡可保持 `blocked`，但不得提前执行。
+- 完成 052c 时删除本卡，把 052e 从 blocked 改为 queued；052e–052h 每卡完成时删除本卡并只解锁下一卡；052h 完成后把 052b 改为 queued。每次都在同一实质提交中重新生成任务板，不创建单独“关闭卡”提交。
 - 如果卡的起始查询与预期不一致，保留本卡并停止，不创建下一卡。
 - 下表中的“目标测试”是一条命令，可同时列多个直接相关文件；产品 TypeScript 有变化时再单独运行 `npm run typecheck`。
 
@@ -235,9 +242,50 @@
 - 禁止改产品代码、Legacy scanner 或排除项。
 - 验证：只运行实际修改的测试文件。
 
+### r11-052e-v2-video-playback
+
+- 起始条件：052c 已完成；`paintPublishedNativeVideo` 的播放态仍只是裸 `<video controls>`，且 `PublishedInteractionController` 仍把视频触发器/动作诊断为 unsupported。任一事实已变化则停止并报告，不叠加第二实现。
+- 目标：在 Published V2 Slide scene-local Native 宿主建立一份有生命周期的视频句柄，完整消费 Native Video 字段；把 Interaction V1 的 `video.play/pause/restart/stop/toggle/seek` 与 `video.started/paused/ended/time` 接到当前视频 generation。
+- 写入：`src/player/surfaces/slide/publishedNativeRendering.ts`、允许新增 `src/player/surfaces/slide/publishedNativeVideoMount.ts` 与 `publishedSlideInteractionSurfacePort.ts`、`src/player/surfaces/slide/SlidePublishedAdapter.ts`、`src/player/interactions/PublishedInteractionSurfacePort.ts`、`src/player/interactions/PublishedInteractionController.ts`、`tests/unit/publishedInteractionController.test.ts`、`tests/integration/publishedInteractionSlideHostIntegration.test.ts`。
+- 实现：播放态应用 `autoplay/loop/muted/volume/playbackRate/startTime/endTime/showControls/clickToToggle/fit`；事件只来自当前句柄并携带 nodeId，重复 rerender/navigation/suspend/destroy 后旧句柄不能再触发规则；capture 仍只取封面且所有播放动作返回未执行，不自动播放、不发 started。不得通过 DOM id 查询任意节点，视频注册表由 Slide 宿主持有。
+- 验收：六类视频动作都路由到正确 node；四类视频触发器可启动 V2 规则；自然结束、暂停、隐藏、重挂载与销毁均清理监听/播放；原静态封面行为保持。
+- 目标测试：`npx vitest run tests/unit/publishedInteractionController.test.ts tests/integration/publishedInteractionSlideHostIntegration.test.ts`；产品 TypeScript 变化后再跑 `npm run typecheck`。
+- 停止：需要修改 V9/Published V2 wire、Flow/Spatial 视频 carrier、legacy `PlayerApp/renderVideoNode`，或需要建立第二 Interaction controller/event bus。
+
+### r11-052f-v2-video-background-audio
+
+- 起始条件：052e 已完成，V2 Slide 视频句柄已具有稳定 play/pause/end/destroy 生命周期；否则停止。
+- 目标：由 Published 整课会话唯一持有 AudioManager，使用 Published V2 `media.audio` 与资产解析；视频按 `backgroundAudioMode` 在真实播放生命周期获取/释放 interruption，教师控制器静音与 Interaction V1 audio 动作/`audio.ended` 使用同一会话音频真相。
+- 写入：`src/player/AudioManager.ts`、`src/player/surfaces/publishedDynamicHosts.ts`、`src/player/surfaces/slide/SlidePublishedAdapter.ts`、`src/player/surfaces/slide/publishedNativeRendering.ts`、052e 新增的视频 mount 文件、`src/player/interactions/PublishedInteractionSurfacePort.ts`、`src/player/interactions/PublishedInteractionController.ts`、`tests/unit/audioManager.test.ts`、`tests/unit/publishedInteractionController.test.ts`、`tests/integration/publishedInteractionSlideHostIntegration.test.ts`。
+- 实现：先把 AudioManager 的 `ProjectDocument/VideoNode` 类型依赖改到正式 media-v1/native-v1 合同，不保留 V8 type import；一个非作者 Published session 恰好一个 manager，capture 使用其既有 inert 语义，destroy 恰好一次。`duck/pause` token 可重入且在 pause/end/error/隐藏/重挂载/destroy 时释放，`stop` 不恢复已停止音乐；视频音量/静音注册与全局/频道音量使用同一 manager。
+- 验收：真实 V2 会话可用 Interaction 规则播放音乐，视频开始时应用四种 backgroundAudioMode，生命周期结束后恢复正确；`audio.toggle-mute` 在 Slide/Flow/Spatial 控制器都落到同一 session；迟到媒体事件不能复活已销毁音频状态。
+- 目标测试：`npx vitest run tests/unit/audioManager.test.ts tests/unit/publishedInteractionController.test.ts tests/integration/publishedInteractionSlideHostIntegration.test.ts`；再跑 `npm run typecheck`。
+- 停止：需要新增持久字段、复制 AudioManager、把音频状态放进 Surface 私有 Store，或修改 legacy Player 实现。
+
+### r11-052g-v2-scene-picker
+
+- 起始条件：052f 已完成；Published session 的 `executeTeacherControllerAction` 对 `scene.open-picker` 仍返回 undefined，且没有 session-owned picker。若已有唯一 V2 实现则停止。
+- 目标：在非作者、非 capture 的 Published 整课会话只挂载一个 `ScenePickerOverlay`，让任一 Surface 的教师控制器 `scene.open-picker` 打开同一目录。
+- 写入：`src/player/ScenePickerOverlay.ts`、`src/player/surfaces/publishedDynamicHosts.ts`、`tests/unit/scenePickerOverlay.test.ts`、`tests/unit/publishedCourseNavigation.test.ts`。不得修改三个 Surface 的本地导航实现，除非现有中央 `executeTeacherControllerAction` 类型无法编译；发生时停止报告。
+- 实现：目录按 `MixedCourseNavigator.listCatalog()` 顺序列出 location label/id，打开时以当前 location 标亮；选择复用教师控制器强制导航路径并进入目标 location 自带的初始 state，不写 Published payload/作者工程；任意导航、Esc、遮罩点击、销毁都关闭并清理焦点/监听。作者宿主与静态 capture 不创建目录。
+- 验收：Slide/Flow/Spatial/Mixed 上的全局控制器都能打开一个目录并跳到所选 location；选择可按教师控制器合同越过导航守卫；重复打开/切 Surface 不复制 overlay；destroy 后 DOM 与监听均为零。
+- 目标测试：`npx vitest run tests/unit/scenePickerOverlay.test.ts tests/unit/publishedCourseNavigation.test.ts`；再跑 `npm run typecheck`。
+- 停止：需要改变 `TeacherControllerAction`、Course Location 或 Published V2 wire，或要在每个 Surface 各建 picker。
+
+### r11-052h-v2-component-hybrid
+
+- 起始条件：052g 已完成；Component API 4 仍声明 `hybrid`，Slide 当前仍把它送入 DOM mount 并把 create context 硬编码为 `renderMode: 'dom'`。事实不符则停止。
+- 目标：只为 Published V2 Slide scene-local Component 建立一个同时提供 `dom.root` 与 `phaser.{Phaser,scene,root}` 的 hybrid 实例；同一 instance 只有一个 create/lifecycle/capture/generation/destroy。
+- 写入：`src/player/surfaces/publishedComponentMount.ts`、`src/player/surfaces/slide/publishedSlidePhaserComponentMount.ts`、`src/player/surfaces/slide/SlidePublishedAdapter.ts`、`tests/unit/publishedComponentMount.test.ts`、`tests/integration/publishedPhaserComponentSlideHostIntegration.test.ts`。
+- 实现：Slide scene-local `hybrid` 与 `phaser` 走同一 Phaser boot owner，但 hybrid 在同一 wrapper 建 DOM surface 并传入真实 hybrid context；props、resize、visibility、suspend/resume、capture、authoring target invalidation、错误隔离和 destroy 同步作用于这一实例。通用 DOM mount 只接受 `dom`；Flow、Spatial、global hybrid 本卡不扩展，必须显式 fallback/diagnostic，不能静默按 DOM 运行。
+- 验收：hybrid definition 的 create 恰好一次且同时拿到 DOM/Phaser 能力；更新、capture、重挂载和销毁不双生命周期、不泄漏 Canvas/DOM/事件；既有 dom 与 phaser 测试保持通过。
+- 目标测试：`npx vitest run tests/unit/publishedComponentMount.test.ts tests/integration/publishedPhaserComponentSlideHostIntegration.test.ts`；再跑 `npm run typecheck`。
+- 停止：需要支持 Flow/Spatial/global hybrid、修改 Component API 4/Published V2 schema，或建立两个 component instance 再同步状态。
+
 ### r11-052d-preservation-evidence-links
 
-- 目标：仅把因 052a–c 移动的 PM 测试路径更新到 `v1.1-preservation-map.json` 与 `PRESERVATION_MATRIX.md`，不改 PM 行为文字。
+- 起始条件：052e–052h 已完成，052b 已用 V2 测试承接并删除剩余旧测试；否则不得开始。
+- 目标：仅把因 052a–c 与四张 V2 补实现卡移动的 PM 测试路径更新到 `v1.1-preservation-map.json` 与 `PRESERVATION_MATRIX.md`，不改 PM 行为文字。
 - 验证：`npx vitest run tests/unit/preservationChecker.test.ts tests/unit/developmentRoadmap.test.ts` 与 `npm run check:development-roadmap`。
 - 禁止：运行 `check:preservation`；最终 061 才运行一次。
 

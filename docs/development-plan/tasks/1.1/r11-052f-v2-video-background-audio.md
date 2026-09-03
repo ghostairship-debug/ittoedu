@@ -1,0 +1,8 @@
+# r11-052f-v2-video-background-audio V2 视频与背景音乐会话闭环
+
+- Status / Owner: blocked / Integrator（解除条件：r11-052e 完成并由协调者改为 queued）
+- Outcome / Evidence: `AudioManager` 已有视频注册和 `beginBackgroundAudioInterruption` 的正确单体语义，但当前 Published V2 整课会话不持有它，V2 视频也未接入，因此 `backgroundAudioMode` 在真实 V2 Player 中无效。052e 完成后建立整课唯一音频会话，并把 Interaction V1 audio 动作/`audio.ended`、教师控制器静音与视频 interruption 接到同一真相。
+- Write scope: `src/player/AudioManager.ts`；`src/player/surfaces/publishedDynamicHosts.ts`；`src/player/surfaces/slide/SlidePublishedAdapter.ts`；`src/player/surfaces/slide/publishedNativeRendering.ts`；`src/player/surfaces/slide/publishedNativeVideoMount.ts`（若 052e 创建）；`src/player/interactions/PublishedInteractionSurfacePort.ts`；`src/player/interactions/PublishedInteractionController.ts`；`tests/unit/audioManager.test.ts`；`tests/unit/publishedInteractionController.test.ts`；`tests/integration/publishedInteractionSlideHostIntegration.test.ts`。禁止新增 Store/持久字段、修改 legacy Player 或复制 AudioManager；需要其他 Surface 产品文件时停止。
+- Write locks: published-producer
+- Acceptance: `AudioManager.ts` 不再 import `ProjectDocument`/`VideoNode` 等 V8 类型，改用 media-v1/native-v1 正式合同；一个非作者 Published session 恰好一个 manager，使用 Published `media.audio` 与同一资产解析，capture 保持 inert，destroy 恰好一次。`duck/pause` interruption 可重入，并在视频 pause/end/error/隐藏/重挂载/destroy 时各释放一次；`stop` 不恢复被停止音乐。`audio.play/pause/resume/stop/toggle-mute`、`audio.ended` 和教师控制器 `audio.toggle-mute` 使用该 manager；视频注册共享 master/channel/mute。完成时删除本卡，只把 `r11-052g-v2-scene-picker` 改为 queued 并重新生成任务板。
+- Validation: `npx vitest run tests/unit/audioManager.test.ts tests/unit/publishedInteractionController.test.ts tests/integration/publishedInteractionSlideHostIntegration.test.ts`；`npm run typecheck`。

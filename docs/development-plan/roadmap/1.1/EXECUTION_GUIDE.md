@@ -1,6 +1,6 @@
 # 1.1 Gemini 执行者指南
 
-> 生效日期：2026-09-03；当前起点：`1bdcb3f`。本指南只约束 1.1 剩余实施卡。完整拆卡蓝图见 [GEMINI_EXECUTION_PLAN.md](GEMINI_EXECUTION_PLAN.md)。
+> 生效日期：2026-09-03；当前检查点：`ee1f87e`，当前 queued 卡：`r11-052c-old-token-and-rejection-tests`。本指南只约束 1.1 剩余实施卡。完整拆卡蓝图见 [GEMINI_EXECUTION_PLAN.md](GEMINI_EXECUTION_PLAN.md)。
 
 ## 1. 执行方式
 

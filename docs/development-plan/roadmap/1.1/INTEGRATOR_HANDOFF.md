@@ -1,6 +1,43 @@
-# 1.1 Integrator handoff（接手审计修订：2026-09-03）
+# 1.1 Integrator handoff（当前检查点：2026-09-03）
 
-## 当前检查点（2026-09-03 Kimi 接力版，优先于下文一切旧节）
+## 当前检查点（HEAD `ee1f87e`，本节优先于全文件旧节）
+
+工作树干净，036b、037a–037z、052a 与 052b 无争议部分均已完成。任务板当前只有 `r11-052c-old-token-and-rejection-tests` 为 queued；`r11-052b-old-renderer-tests` 保持 blocked。现有成果可继续，不整体回滚，也不得直接进入 052d/053/054。
+
+052b 剩余三组旧测试已经由 Owner 裁定为 V2 产品缺口，不能删例收口：
+
+1. Slide Native Video 必须在 Published V2 支持正式字段、Interaction V1 六类视频动作、四类视频事件/触发器、capture inert 和 generation 清理；
+2. Published 整课会话必须唯一持有 AudioManager，让视频 `backgroundAudioMode`、Interaction audio、教师控制器静音共享同一真相；
+3. `scene.open-picker` 必须由整课 Published session 统一挂载一个 `ScenePickerOverlay`，覆盖 Slide/Flow/Spatial/Mixed，不在各 Surface 复制；
+4. Component API 4 `hybrid` 必须先补 Published V2 Slide scene-local 单实例 DOM+Phaser 宿主；Flow、Spatial、global 本轮不扩展并须明确 fallback/diagnostic。
+
+当前唯一实施顺序：
+
+```text
+r11-052c
+→ r11-052e-v2-video-playback
+→ r11-052f-v2-video-background-audio
+→ r11-052g-v2-scene-picker
+→ r11-052h-v2-component-hybrid
+→ 收口 r11-052b
+→ r11-052d
+→ r11-053
+→ r11-054a–054d
+→ Codex r11-055 → r11-060 → r11-061
+→ Owner r11-062
+```
+
+四张产品补实现卡已写入 `docs/development-plan/tasks/1.1/`，按依赖保持 blocked；052c 完成时只解锁 052e，之后逐卡只解锁下一张，始终保持一张 queued。每张产品卡只运行卡内 focused test 命令和 `npm run typecheck`，不得提前运行全量产品测试、preservation、legacy-zero、verify 或 Hash。
+
+四个 LEG-011 孤儿模块的决定也已固定：`src/shared/presentation.ts`、`informationRelease.ts`、`projectDiagnostics.ts`、`componentPackageLifecycle.ts` 在 052c 只删除重复测试；053 纳入精确删除目标并证明 consumer 为零，054 才删除产品文件。若 053 发现删除闭包外 consumer，停止回 Owner，不另立悬空卡。
+
+文档校验现状：任务板生成/check 已通过，当前为 6 卡、1 queued、5 blocked；`check:development-roadmap` 仍有一个在 `ee1f87e` 已存在的基线失败——`PRESERVATION_MATRIX.md` 的 PM-07 仍引用 052b 已删除的 `formulaCrossSurface.test.tsx`。该路径与后续视频/picker/hybrid 承接路径统一由 052d 一次更新；不得为提前求绿改 PM 行为文字或提前运行 preservation 门。
+
+下文从“Kimi 接力版”起均为历史审计记录，只用于解释旧决策，不得覆盖本节、当前任务卡、正式合同或源码事实。
+
+---
+
+## 历史检查点（2026-09-03 Kimi 接力版，已失效）
 
 **进度**：HEAD=`03ae8aa`（r11-037y 完成）。036b、037a–037y 全部完成；剩余 `037z → 052a–052d → 053 → 054a–054d`，最终 055/060/061 归 Codex、062 归 Owner（规则见 [GEMINI_EXECUTION_PLAN.md](GEMINI_EXECUTION_PLAN.md) 与 [EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)，不变）。
 
@@ -20,12 +57,12 @@
 1. 037y 已授权扩充并落地：`selectSelectedNodeIds` 引用记忆化（修复 App.tsx:97 无限重渲染）、`globalLayerUi.test.tsx` 两段裸 setState 已迁走、`selectEditingScope` 已补 flowSession 派生分支（`authoringScope==='global'?'global':'scene'`）。
 2. 052a 裁定：三文件测的 motion flush 排序/组件事件挂载缓冲/页面可见性缓存是 V1 Player 内部机制，实现代码本身是 LEG-002 删除目标 → 8 条用例按退役行为删除；2 条动画时长钳制用例迁往 `tests/unit/publishedDomInteractionSurfacePort.test.ts`（V2 有同款 `MAX_MOTION_DURATION_MS=10_000` 钳制但缺测试），承接名单扩充需记录在卡。三文件无 V8 拒绝用例需保留（`publishedCourseProtocol.test.ts:567` 已覆盖拒绝档）。PM map/matrix 对三文件零引用，052d 无需为 052a 更新。
 
-### 待 Owner 裁定事项（052b/052c 执行前必须先问）
+### 已裁定事项的历史问题记录（不得再提问）
 
-1. **052b 视频播放行为**：V2 slide 宿主只画 `<video controls>`，不支持播放动作路由、`video:started` 事件、背景音乐闪避 → `renderVideoNode.test.ts:312/:375/:396` 三例无 V2 宿主可迁。是 V2 合同有意收窄还是产品缺口（需补实现）？
-2. **052b scene.open-picker 场景目录**：文档承诺的教师控制器默认能力（USER_GUIDE.md:62,414；合同 native-v1/schema.ts:327），但 V2 各宿主均不处理，点击"场景目录"无效 → `teacherControllerActions.test.ts` 唯一用例无处可迁。疑似产品缺口。
-3. **052b hybrid renderMode**：组件双面渲染在 V2 无任何宿主/测试（publishedComponentMount.ts:580 硬编码 dom）。
-4. **052c 孤儿模块**：`src/shared/presentation.ts`、`informationRelease.ts`、`projectDiagnostics.ts`、`componentPackageLifecycle.ts` import LEG-011 目标 projectTypes.ts，各自唯一产品 consumer 均为 LEG 删除目标，但四者自身不在 LEG 清单 → 052c 删测试后若 053/054 不补删这四模块，LEG-011 永远无法清零。需裁定：补入 LEG 删除清单，还是另立后续卡。
+1. **052b 视频播放行为**：产品缺口。由 052e 补完整 V2 视频动作/事件/capture/lifecycle，052f 补整课 AudioManager 与背景音乐 interruption；不得删除旧断言代替实现。
+2. **052b scene.open-picker 场景目录**：产品缺口。由 052g 在 Published session 层复用唯一 `ScenePickerOverlay`；不得在三个 Surface 分别实现。
+3. **052b hybrid renderMode**：产品缺口。由 052h 只补 Slide scene-local 单实例 hybrid；Flow/Spatial/global 不在本轮支持范围，须明确失败而不是 DOM 静默降级。
+4. **052c 孤儿模块**：纳入 LEG-011 删除闭包。052c 只删重复测试，053 精确登记并复核 consumer，054 再删产品模块；不另立后续卡。
 
 ### 052b/052c 已预研的无争议处置（可直接执行部分）
 

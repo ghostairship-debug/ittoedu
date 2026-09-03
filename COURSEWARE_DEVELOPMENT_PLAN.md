@@ -99,9 +99,11 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 执行顺序为：正式合同与行为基线 → 以 `inventories/legacy-consumers.json` 建立只减不增的保守上界与扫描门 → 抽取仍有效的 Native/Design/Media 等领域合同 → 使 V9 Native 与 Published V2 Schema 独立 → 按写锁迁移 Editor、Published/Preview/Export/Diagnostics 与 Archive/Test lane → 清零 V8 镜像与双轨 writer → 抽取 Core resource/history → 依次迁移 Slide、Flow、Spatial state/action → 迁移 App router/lifecycle 与 Feature use case → 拆分 UI 与交付热点 → 以依赖棘轮证明组合根只接线 → 单一 writer 在集成候选原子复核 inventory → 按精确零 consumer 清单删除旧模块 → 固定候选执行零遗留、模块化、不可降级和发布门 → Owner 签署。
 
-2026-09-03 当前实现已完成 `r11-029`、`r11-032`、`r11-034`、`r11-035` 与 `r11-036` 的主体工作；复查发现 036 在媒体解码后的哈希去重 `await` 与最终提交之间仍缺一次 identity 核对，因此先执行 `r11-036b-media-dedupe-race`，再进入 Store 拆分。纯 Flow 课程的兼容格式是 DOCX，PPTX 只适用于含 Slide 场景或 Spatial 镜头的课程；当前 HEAD 已恢复该边界。
+2026-09-03 当前检查点为 `ee1f87e`。`r11-036b`、`r11-037a–037z`、`r11-052a` 和 `r11-052b` 的无争议部分已经完成，工作树干净；当前只有 `r11-052c-old-token-and-rejection-tests` 可执行。052b 剩余旧测试不是可直接删除的重复：源码与正式合同共同证明 Published V2 尚缺 Slide 视频动作/事件、视频与背景音乐会话协作、教师控制器 `scene.open-picker`，以及 Component API 4 的 Slide scene-local `hybrid` 宿主。四项必须先形成等价 V2 consumer，随后才能删除旧测试。纯 Flow 课程的兼容格式仍是 DOCX，PPTX 只适用于含 Slide 场景或 Spatial 镜头的课程。
 
-剩余实施统一遵循 `docs/development-plan/roadmap/1.1/EXECUTION_GUIDE.md` 与 `GEMINI_EXECUTION_PLAN.md`：`r11-036b → r11-037a–037z → r11-052a–052d → r11-053 → r11-054a–054d`。每次只实例化一张可立即执行的卡，每卡只跑一条最近层测试命令，并在产品 TypeScript 变化时跑 `typecheck`；实施阶段不运行全量产品测试、保全门、Legacy zero、verify、候选 Hash 或字节比较。全部实施完成后由 Codex 一次执行 `r11-055 → r11-060 → r11-061` 的最终结构审查、Legacy 零检查、全量产品测试与保全检查，再交 Owner 执行 `r11-062`。旧 W1–W9、052 A–E、053/054 candidate digest 与旧 deletion list 均不再授权执行。
+剩余实施统一遵循 `docs/development-plan/roadmap/1.1/EXECUTION_GUIDE.md` 与 `GEMINI_EXECUTION_PLAN.md`，当前唯一顺序为：`r11-052c → r11-052e-v2-video-playback → r11-052f-v2-video-background-audio → r11-052g-v2-scene-picker → r11-052h-v2-component-hybrid → 收口 r11-052b → r11-052d → r11-053 → r11-054a–054d`。任务目录可以保存这条依赖链上的 blocked 卡，但任一时点只能有一张 queued 卡；每卡只跑一条最近层测试命令，并在产品 TypeScript 变化时跑 `typecheck`。实施阶段不运行全量产品测试、保全门、Legacy zero、verify、候选 Hash 或字节比较。全部实施完成后由 Codex 一次执行 `r11-055 → r11-060 → r11-061` 的最终结构审查、Legacy 零检查、全量产品测试与保全检查，再交 Owner 执行 `r11-062`。旧 W1–W9、052 A–E、053/054 candidate digest 与旧 deletion list 均不再授权执行。
+
+052c 删除四个重复测试时不删除对应产品模块。`src/shared/presentation.ts`、`informationRelease.ts`、`projectDiagnostics.ts`、`componentPackageLifecycle.ts` 已由 Owner 裁定为 LEG-011 删除闭包：053 必须把它们纳入精确删除目标并重新证明 consumer 为零，054 才能删除；若 053 发现任一非删除闭包 consumer，必须停止并回到 Owner，不另开悬空清理路线。
 
 硬约束：
 
