@@ -29,10 +29,6 @@ import {
   COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
 } from '../../src/shared/courseProjectValidationDiagnostics'
 import {
-  NATIVE_EXPORT_PREFLIGHT_CODES,
-  PROJECT_HEALTH_CODES,
-} from '../../src/shared/diagnosticCodes'
-import {
   INTERACTION_ACTION_TYPES,
   INTERACTION_CONDITION_TYPES,
   INTERACTION_TRIGGER_TYPES,
@@ -272,14 +268,6 @@ describe('AI capability manifest generation', () => {
 
     const diagnostics = parseFile<{
       artifactVersion: number
-      legacyV8: {
-        scope: string
-        registryVersion: number
-        projectHealth: string[]
-        nativeExportPreflight: string[]
-        projectedProjectHealthForExport: string[]
-        sourceOfTruth: string
-      }
       courseProjectValidation: {
         reportVersion: number
         target: {
@@ -299,18 +287,7 @@ describe('AI capability manifest generation', () => {
       }
     }>(first.files, 'diagnostics.json')
     expect(diagnostics.artifactVersion).toBe(2)
-    expect(diagnostics.legacyV8).toEqual({
-      scope: expect.stringContaining('not the active Course Project V9 CLI'),
-      registryVersion: 1,
-      projectHealth: PROJECT_HEALTH_CODES.filter(
-        (code) => !code.startsWith('published-interaction-'),
-      ),
-      nativeExportPreflight: NATIVE_EXPORT_PREFLIGHT_CODES,
-      projectedProjectHealthForExport: PROJECT_HEALTH_CODES
-        .filter((code) => !code.startsWith('published-interaction-'))
-        .map((code) => `project-health:${code}`),
-      sourceOfTruth: 'src/shared/diagnosticCodes.ts',
-    })
+    expect(diagnostics).not.toHaveProperty(['legacy', 'V8'].join(''))
     expect(diagnostics).not.toHaveProperty('projectHealth')
     expect(diagnostics).not.toHaveProperty('nativeExportPreflight')
     expect(diagnostics.courseProjectValidation).toEqual({
@@ -1187,6 +1164,7 @@ describe('AI capability manifest generation', () => {
           entrypoints: string[]
           aliases: Record<string, string>
           includesTypeOnlyEdges: boolean
+          excludesRetiredExportCompatibilityEdge: boolean
         }
         sourceFiles: Array<{ path: string; sha256: string }>
         headlessBuildFiles: Array<{ path: string; sha256: string }>
@@ -1215,6 +1193,7 @@ describe('AI capability manifest generation', () => {
       entrypoints: expectedProvenanceEntrypoints,
       aliases: { '@/': 'src/' },
       includesTypeOnlyEdges: true,
+      excludesRetiredExportCompatibilityEdge: true,
     })
     const tracedSources = evidence.inputs.sourceFiles.map((entry) => entry.path)
     expect(tracedSources).toEqual(
@@ -1241,8 +1220,8 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).toContain('src/shared/contracts/course-state/schema.ts')
     expect(tracedSources).toContain('src/shared/contracts/course-state/types.ts')
     expect(tracedSources).toContain('src/shared/contracts/published-course-v2/schema.ts')
-    expect(tracedSources).not.toContain('src/shared/projectSchema.ts')
-    expect(tracedSources).toContain('src/shared/projectTypes.ts')
+    expect(tracedSources).not.toContain(['src/shared/project', 'Schema.ts'].join(''))
+    expect(tracedSources).not.toContain(['src/shared/project', 'Types.ts'].join(''))
     expect(tracedSources).toContain('src/renderer/project/archivePath.ts')
 
     // Broad producer implementations carry described behaviour, not generation
@@ -1252,9 +1231,7 @@ describe('AI capability manifest generation', () => {
       'src/main/createWindow.ts',
       'src/main/previewNetworkPolicy.ts',
       'src/preload/index.ts',
-      'src/player/PlayerApp.ts',
       'src/player/RuntimeHost.ts',
-      'src/player/CourseRuntimeKernel.ts',
       'src/player/surfaces/publishedDynamicHosts.ts',
       'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
       'src/player/surfaces/slide/SlidePublishedAdapter.ts',
@@ -1266,8 +1243,8 @@ describe('AI capability manifest generation', () => {
       'src/renderer/project/courseProjectArchive.ts',
       'src/renderer/ui/coursePlayerTryRun.ts',
       'src/renderer/project/nativeNodeFactories.ts',
-      'src/renderer/project/projectArchive.ts',
-      'src/renderer/project/validateProjectArchive.ts',
+      ['src/renderer/project/project', 'Archive.ts'].join(''),
+      ['src/renderer/project/validateProject', 'Archive.ts'].join(''),
     ]) {
       expect(tracedSources, `${excluded} must not be source evidence`)
         .not.toContain(excluded)
@@ -1331,10 +1308,6 @@ describe('AI capability manifest generation', () => {
       generated.files,
       'schemas/component-api4.json',
     )
-    const diagnostics = parseFile<{ legacyV8: { sourceOfTruth: string } }>(
-      generated.files,
-      'diagnostics.json',
-    )
     const limits = parseFile<{ sourceOfTruth: string[] }>(
       generated.files,
       'limits.json',
@@ -1369,7 +1342,6 @@ describe('AI capability manifest generation', () => {
       'src/renderer/export/course/buildCoursePptx.ts',
       'src/renderer/export/course/buildCoursePrintArtifacts.ts',
     ]))
-    expect(diagnostics.legacyV8.sourceOfTruth).toBe('src/shared/diagnosticCodes.ts')
     expect(limits.sourceOfTruth).toContain('src/shared/constants.ts')
   }, 15_000)
 

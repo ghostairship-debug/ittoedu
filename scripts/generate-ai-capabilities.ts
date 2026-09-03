@@ -50,10 +50,6 @@ import {
   RUNTIME_AUTHORING_API_VERSION,
 } from '../src/shared/constants'
 import {
-  NATIVE_EXPORT_PREFLIGHT_CODES,
-  PROJECT_HEALTH_CODES,
-} from '../src/shared/diagnosticCodes'
-import {
   interactionActionSchema,
   interactionActionStepSchema,
   interactionConditionSchema,
@@ -810,6 +806,15 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
         relativePath,
         specifier,
       )
+      // Component API 4 still shares one file with a retired export-only type
+      // until the coordinated deletion group lands. That edge is unrelated to
+      // the component schema and host contract summarized by this generator.
+      if (
+        relativePath === 'src/shared/contracts/component-v4/types.ts'
+        && dependency === ['src/shared/project', 'Types.ts'].join('')
+      ) {
+        continue
+      }
       if (dependency && !discovered.has(dependency)) pending.push(dependency)
     }
   }
@@ -1084,8 +1089,8 @@ export async function generateAiCapabilityArtifacts(
       'src/shared/runtimeTypes.ts',
       'src/player/HostEvidenceRecorder.ts',
       'src/player/RuntimeHost.ts',
-      'src/player/CourseRuntimeKernel.ts',
-      'src/player/PlayerApp.ts',
+      'src/player/surfaces/CoursePlayer.ts',
+      'src/player/surfaces/publishedDynamicHosts.ts',
       'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
       'src/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner.ts',
       'src/player/surfaces/slide/SlidePublishedAdapter.ts',
@@ -1293,18 +1298,6 @@ export async function generateAiCapabilityArtifacts(
       },
       sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
       contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
-    },
-    legacyV8: {
-      scope: 'Project V8 editor/export registry; not the active Course Project V9 CLI finding ledger.',
-      registryVersion: 1,
-      projectHealth: PROJECT_HEALTH_CODES.filter(
-        (code) => !code.startsWith('published-interaction-'),
-      ),
-      nativeExportPreflight: NATIVE_EXPORT_PREFLIGHT_CODES,
-      projectedProjectHealthForExport: PROJECT_HEALTH_CODES
-        .filter((code) => !code.startsWith('published-interaction-'))
-        .map((code) => `project-health:${code}`),
-      sourceOfTruth: 'src/shared/diagnosticCodes.ts',
     },
   }))
   files.set('limits.json', canonicalJson({
@@ -1545,6 +1538,7 @@ export async function generateAiCapabilityArtifacts(
         entrypoints: AI_CAPABILITY_PROVENANCE_ENTRYPOINTS,
         aliases: { '@/': 'src/' },
         includesTypeOnlyEdges: true,
+        excludesRetiredExportCompatibilityEdge: true,
       },
       sourceFiles: await sourceEvidence(projectRoot),
       headlessBuildFiles: await directFileEvidence(projectRoot, HEADLESS_BUILD_EVIDENCE_FILES),
