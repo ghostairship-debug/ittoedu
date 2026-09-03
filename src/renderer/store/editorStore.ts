@@ -1149,72 +1149,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     )
   }
 
-  const persistProjectResourceTransaction = (
-    step: EditorTransactionStep,
-    statusMessage: string,
-  ): boolean => {
-    const state = get()
-    if (state.spatialSession) {
-      const session = state.spatialSession
-      const history = commitSpatialEditorTransactionHistory(session.history, step)
-      persistSpatialResult(succeedSpatialCommand({
-        ...session,
-        history,
-      }, true), {
-        transactionStep: step,
-        statusMessage,
-      })
-      return true
-    }
-    if (state.flowSession) {
-      const session = state.flowSession
-      const history = commitFlowEditorTransactionHistory(session.history, step)
-      persistFlowResult({
-        ok: true,
-        nextDocument: step.nextDocument,
-        historyEntry: true,
-        selection: session.selection,
-      }, {
-        replaceHistory: history,
-        transactionStep: step,
-        statusMessage,
-      })
-      return true
-    }
-    const backend = selectSlideAuthoringBackend(state)
-    if (!backend) return false
-    const session = backend.getSession()
-    const authoringSession = state.courseAuthoringSession
-    persistCandidateResult({
-      ok: true,
-      nextSession: {
-        ...session,
-        history: commitSlideEditorTransactionHistory(session.history, step),
-      },
-      historyEntry: true,
-      selection: session.selection,
-      resourceTransition: {
-        resourceChanges: step.resourceChanges,
-        resourceDirection: 'forward',
-      },
-    }, {
-      transactionStep: step,
-      statusMessage,
-      ...(authoringSession
-        ? {
-            courseAuthoringSession: updateCourseAuthoringSessionItems(
-              updateCourseAuthoringSessionRevision(
-                authoringSession,
-                step.nextDocument.revision,
-              ),
-              authoringSession.itemIds,
-            ),
-          }
-        : {}),
-    })
-    return true
-  }
-
   const featurePorts: ImageAuthoringPorts = {
     read() {
       const state = get()
@@ -1236,7 +1170,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         hasSpatialSession: Boolean(state.spatialSession),
       }
     },
-    persistTransaction: persistProjectResourceTransaction,
+    persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
     persistCandidateResult: (result, extra) => {
       persistCandidateResult(result, extra)
     },
@@ -1356,6 +1290,48 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     },
     syncSelection: (selection) => set(selection),
+    persistDocument: (document, options) => {
+      const state = get()
+      const active = detectActiveSurface({
+        spatialLocationId: state.spatialSession?.selection.locationId ?? null,
+        flowLocationId: state.flowSession?.selection.locationId ?? null,
+        slideLocationId: state.slideCandidateSnapshot?.locationId ?? null,
+        editingScope: state.editingScope,
+        composing: Boolean(
+          state.flowTextEdit?.composing ||
+          state.v9ContentEdit ||
+          state.spatialContentEdit ||
+          state.editingTextNodeId,
+        ),
+      })
+      return dispatchActiveSurface<boolean>(active, {
+        slide: () => slideAuthoringSlice.persistDocument(document, options),
+        flow: () => flowAuthoringSlice.persistDocument(document, options),
+        spatial: () => spatialAuthoringSlice.persistDocument(document, options),
+        none: () => false,
+      })
+    },
+    persistTransaction: (step, statusMessage) => {
+      const state = get()
+      const active = detectActiveSurface({
+        spatialLocationId: state.spatialSession?.selection.locationId ?? null,
+        flowLocationId: state.flowSession?.selection.locationId ?? null,
+        slideLocationId: state.slideCandidateSnapshot?.locationId ?? null,
+        editingScope: state.editingScope,
+        composing: Boolean(
+          state.flowTextEdit?.composing ||
+          state.v9ContentEdit ||
+          state.spatialContentEdit ||
+          state.editingTextNodeId,
+        ),
+      })
+      return dispatchActiveSurface<boolean>(active, {
+        slide: () => slideAuthoringSlice.persistTransaction(step, statusMessage),
+        flow: () => flowAuthoringSlice.persistTransaction(step, statusMessage),
+        spatial: () => spatialAuthoringSlice.persistTransaction(step, statusMessage),
+        none: () => false,
+      })
+    },
   })
   const slideAuthoringSlice = createSlideAuthoringSlice(kernel, {
     read: () => {

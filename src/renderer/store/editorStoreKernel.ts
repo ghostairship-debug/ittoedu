@@ -65,6 +65,8 @@ export type EditorStoreKernel = {
   readDirty(): boolean
   readSelection(): EditorUiSelection
   syncSelection(selection: EditorUiSelection): void
+  persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   failSessionless(reason?: string): never
 }
 
@@ -77,6 +79,8 @@ export type EditorStoreKernelHost = {
   readDirty(): boolean
   readSelection(): EditorUiSelection
   syncSelection(selection: EditorUiSelection): void
+  persistDocument?(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
 }
 
 export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStoreKernel {
@@ -103,6 +107,12 @@ export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStor
     readDirty: host.readDirty,
     readSelection: host.readSelection,
     syncSelection: host.syncSelection,
+    persistDocument(document, options) {
+      return host.persistDocument ? host.persistDocument(document, options) : false
+    },
+    persistTransaction(step, statusMessage) {
+      return host.persistTransaction(step, statusMessage)
+    },
     failSessionless(reason = SESSIONLESS_COURSE_REASON): never {
       throw new Error(reason)
     },

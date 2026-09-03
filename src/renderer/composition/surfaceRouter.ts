@@ -159,13 +159,16 @@ export function dispatchActiveSurface<T>(
     slide: () => T
     flow: () => T
     spatial: () => T
-    sessionless: () => T
+    sessionless?: () => T
+    none?: () => T
   },
 ): T {
   if (surface === 'spatial') return handlers.spatial()
   if (surface === 'flow') return handlers.flow()
   if (surface === 'slide') return handlers.slide()
-  return handlers.sessionless()
+  if (handlers.sessionless) return handlers.sessionless()
+  if (handlers.none) return handlers.none()
+  throw new Error('未提供针对无活动表面（sessionless/none）的处理回调')
 }
 
 export type InactiveSurfaceClear = {

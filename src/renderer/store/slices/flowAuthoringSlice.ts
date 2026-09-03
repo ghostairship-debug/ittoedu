@@ -1,4 +1,5 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
+import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
 import type { TextRun, TextRunStyle } from '../../../shared/projectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
@@ -7,6 +8,7 @@ import { createImageAssetImport, createMediaAssetImport } from '../../project/as
 import type { FlowAuthoringSession } from '../../project/createFlowCourseProject'
 import {
   commitFlowEditorHistory,
+  commitFlowEditorTransactionHistory,
   flowEditorLegacyHistoryEntryCount,
   flowEditorRedoResourceTransition,
   flowEditorUndoResourceTransition,
@@ -619,6 +621,8 @@ export function createFlowAuthoringSlice(
     result: LayerCommandResult,
     extra?: { statusMessage?: string | null },
   ): FlowCommandResult | FlowSharedAuthoringResult | { readonly ok: false; readonly reason: string; readonly historyEntry: false }
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
 } {
   const missingSession = (): FlowCommandResult => ({
     ok: false,
@@ -1613,6 +1617,12 @@ export function createFlowAuthoringSlice(
     persistLayerCommand(result: LayerCommandResult, extra?: { statusMessage?: string | null }) {
       return persistFlowLayerCommand(flow, result, extra)
     },
+    persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean {
+      return persistFlowTransaction(flow, step, statusMessage)
+    },
+    persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean {
+      return persistFlowDocument(flow, document, options)
+    },
   }
 }
 
@@ -1665,4 +1675,43 @@ export function flowPersistSnapshotFrom(
     dirty,
     authoringSession,
   }
+}
+
+export function persistFlowTransaction(
+  flow: FlowAuthoringPorts,
+  step: EditorTransactionStep,
+  statusMessage: string,
+): boolean {
+  const session = flow.read().flowSession
+  if (!session) return false
+  const history = commitFlowEditorTransactionHistory(session.history, step)
+  flow.persist({
+    ok: true,
+    nextDocument: step.nextDocument,
+    historyEntry: true,
+    selection: session.selection,
+  }, {
+    replaceHistory: history,
+    transactionStep: step,
+    statusMessage,
+  })
+  return true
+}
+
+export function persistFlowDocument(
+  flow: FlowAuthoringPorts,
+  document: CourseProjectDocument,
+  options?: { statusMessage?: string | null; historyEntry?: boolean },
+): boolean {
+  const session = flow.read().flowSession
+  if (!session) return false
+  flow.persist({
+    ok: true,
+    nextDocument: document,
+    historyEntry: Boolean(options?.historyEntry),
+    selection: session.selection,
+  }, {
+    statusMessage: options?.statusMessage,
+  })
+  return true
 }

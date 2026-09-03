@@ -1,4 +1,5 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
+import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar } from '../../project/v9AssetAdapter'
 import {
@@ -50,6 +51,7 @@ import {
 } from '../../course/spatialEditorCommands'
 import {
   commitSpatialAuthoringHistory,
+  commitSpatialEditorTransactionHistory,
   rejectSpatialCommand,
   spatialAuthoringLegacyHistoryEntryCount,
   spatialAuthoringRedoResourceTransition,
@@ -644,6 +646,8 @@ export function createSpatialAuthoringSlice(
     result: LayerCommandResult,
     extra?: { statusMessage?: string | null; selectionIds?: readonly string[] },
   ): SpatialCommandResult
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
 } {
   const commitDraft = (): SpatialAuthoringSession | null => {
     const owned = spatial.read()
@@ -1620,6 +1624,12 @@ export function createSpatialAuthoringSlice(
     ) {
       return persistSpatialLayerCommand(spatial, result, extra)
     },
+    persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean {
+      return persistSpatialTransaction(spatial, step, statusMessage)
+    },
+    persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean {
+      return persistSpatialDocument(spatial, document, options)
+    },
   }
 }
 
@@ -1671,4 +1681,38 @@ export function spatialPersistSnapshotFrom(
     dirty,
     authoringSession,
   }
+}
+
+export function persistSpatialTransaction(
+  spatial: SpatialAuthoringPorts,
+  step: EditorTransactionStep,
+  statusMessage: string,
+): boolean {
+  const session = spatial.read().spatialSession
+  if (!session) return false
+  const history = commitSpatialEditorTransactionHistory(session.history, step)
+  spatial.persist(succeedSpatialCommand({
+    ...session,
+    history,
+  }, true), {
+    transactionStep: step,
+    statusMessage,
+  })
+  return true
+}
+
+export function persistSpatialDocument(
+  spatial: SpatialAuthoringPorts,
+  document: CourseProjectDocument,
+  options?: { statusMessage?: string | null; historyEntry?: boolean },
+): boolean {
+  const session = spatial.read().spatialSession
+  if (!session) return false
+  const history = options?.historyEntry
+    ? commitSpatialAuthoringHistory(session.history, document)
+    : { ...session.history, present: document }
+  spatial.persist(succeedSpatialCommand({ ...session, history }, Boolean(options?.historyEntry)), {
+    statusMessage: options?.statusMessage,
+  })
+  return true
 }

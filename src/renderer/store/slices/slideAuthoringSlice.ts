@@ -1,4 +1,5 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
+import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { createBlankCourseProject } from '../../project/createCourseProject'
@@ -13,6 +14,7 @@ import {
 } from '../../course/slideAuthoringBackend'
 import {
   commitSlideAuthoringHistory,
+  commitSlideEditorTransactionHistory,
   commitSlideProjectMutation,
   slideAuthoringLegacyHistoryEntryCount,
 } from '../../course/slideEditorCommands'
@@ -46,6 +48,7 @@ import {
 import {
   createSessionToken,
   updateCourseAuthoringSessionItems,
+  updateCourseAuthoringSessionRevision,
   type CourseAuthoringSession,
 } from '../../authoring/courseAuthoringSession'
 import type { EditorTransactionStep } from '../../authoring/editorTransaction'
@@ -310,6 +313,8 @@ export function createSlideAuthoringSlice(
   ensureTeacherController(): void
   persistLayerCommand(result: LayerCommandResult, extra?: SlidePersistExtra): SlideCommandResult
   persistMediaResult(result: CourseMediaCommandResult, currentErrorMessage?: string | null): CourseMediaCommandResult
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
 } & ReturnType<typeof createSlideOwnedCommands> {
   const runCandidateSession = (
     run: (session: SlideAuthoringSession) => SlideCommandResult,
@@ -727,6 +732,12 @@ export function createSlideAuthoringSlice(
     persistMediaResult(result: CourseMediaCommandResult, currentErrorMessage?: string | null): CourseMediaCommandResult {
       return persistSlideMediaResult(kernel, slide, result, currentErrorMessage ?? null)
     },
+    persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean {
+      return persistSlideTransaction(kernel, slide, step, statusMessage)
+    },
+    persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean {
+      return persistSlideDocument(slide, document, options)
+    },
     ...createSlideOwnedCommands(kernel, slide),
   }
 }
@@ -784,4 +795,66 @@ export function slidePersistSnapshotFrom(
     dirty,
     authoringSession,
   }
+}
+
+export function persistSlideTransaction(
+  kernel: EditorStoreKernel,
+  slide: SlideAuthoringPorts,
+  step: EditorTransactionStep,
+  statusMessage: string,
+): boolean {
+  const backend = slide.read().slideBackend
+  if (!isSlideAuthoringBackend(backend)) return false
+  const session = backend.getSession()
+  const authoringSession = kernel.readAuthoringSession()
+  slide.persist({
+    ok: true,
+    nextSession: {
+      ...session,
+      history: commitSlideEditorTransactionHistory(session.history, step),
+    },
+    historyEntry: true,
+    selection: session.selection,
+    resourceTransition: {
+      resourceChanges: step.resourceChanges,
+      resourceDirection: 'forward',
+    },
+  }, {
+    transactionStep: step,
+    statusMessage,
+    ...(authoringSession
+      ? {
+          courseAuthoringSession: updateCourseAuthoringSessionItems(
+            updateCourseAuthoringSessionRevision(
+              authoringSession,
+              step.nextDocument.revision,
+            ),
+            authoringSession.itemIds,
+          ),
+        }
+      : {}),
+  })
+  return true
+}
+
+export function persistSlideDocument(
+  slide: SlideAuthoringPorts,
+  document: CourseProjectDocument,
+  options?: { statusMessage?: string | null; historyEntry?: boolean },
+): boolean {
+  const backend = slide.read().slideBackend
+  if (!isSlideAuthoringBackend(backend)) return false
+  const session = backend.getSession()
+  const history = options?.historyEntry
+    ? commitSlideAuthoringHistory(session.history, document)
+    : { ...session.history, present: document }
+  slide.persist({
+    ok: true,
+    nextSession: { ...session, history },
+    historyEntry: Boolean(options?.historyEntry),
+    selection: session.selection,
+  }, {
+    statusMessage: options?.statusMessage,
+  })
+  return true
 }
