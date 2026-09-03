@@ -9,6 +9,55 @@ import type {
   SurfaceStatus,
 } from './SurfaceHost'
 import { toSurfaceError } from './SurfaceHost'
+import {
+  PUBLISHED_COURSE_FORMAT,
+  PUBLISHED_COURSE_VERSION,
+  type PublishedCourseV2Payload,
+} from '../../shared/publishedCourseTypes'
+
+export const PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR =
+  'Published Course V2 捕获入口只接受已解析的 V2 payload，不接受旧版播放器导出包、PlayerApp 或旧 Player payload。'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isLegacyPlayerPayload(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (typeof value.getCurrentSceneIndex === 'function' && isRecord(value.game)) {
+    return true
+  }
+  if (typeof value.waitForCaptureReady === 'function' && isRecord(value.game)) {
+    return true
+  }
+  const project = value.project
+  if (isRecord(project)) {
+    if (project.schemaVersion === 8 || Array.isArray(project.scenes)) return true
+  }
+  if (value.format === 'h5lesson-published') return true
+  if (Array.isArray(value.scenes) && value.schemaVersion === 8) return true
+  return false
+}
+
+export function isParsedPublishedCourseV2(
+  value: unknown,
+): value is PublishedCourseV2Payload {
+  if (!isRecord(value) || isLegacyPlayerPayload(value)) return false
+  return value.format === PUBLISHED_COURSE_FORMAT
+    && value.formatVersion === PUBLISHED_COURSE_VERSION
+    && value.sourceSchemaVersion === 9
+    && typeof value.courseId === 'string'
+    && Array.isArray(value.surfaces)
+    && Array.isArray(value.locations)
+}
+
+export function assertParsedPublishedCourseV2(
+  value: unknown,
+): asserts value is PublishedCourseV2Payload {
+  if (isLegacyPlayerPayload(value) || !isParsedPublishedCourseV2(value)) {
+    throw new Error(PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR)
+  }
+}
 
 interface SurfaceEntry {
   host: SurfaceHost
@@ -218,6 +267,19 @@ export class CoursePlayer {
     return result.ok
       ? { ok: true, value: captured }
       : { ok: false, failure: result.failure }
+  }
+
+  /**
+   * V2-only capture seam. Leftover player export envelopes and PlayerApp input
+   * fail before any host capture work.
+   */
+  async capturePublishedCourseV2Surface(
+    payload: unknown,
+    surfaceId: string,
+    request: SurfaceCaptureRequest,
+  ): Promise<SurfaceOperationResult<SurfaceCapture>> {
+    assertParsedPublishedCourseV2(payload)
+    return this.captureSurface(surfaceId, request)
   }
 
   async destroySurface(surfaceId: string): Promise<SurfaceOperationResult> {

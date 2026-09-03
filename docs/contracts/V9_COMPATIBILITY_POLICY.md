@@ -1,9 +1,9 @@
 # Course Project V9 兼容性与演进策略
 
 > 本文档规范 Course Project V9 的版本演进规则、格式兼容边界与向后兼容承诺。
-> 权威类型定义以 `src/shared/contracts/course-project-v9/` 与 `src/shared/contracts/published-course-v2/`（旧路径保留 re-export 桩）为准。
+> 权威类型定义以 `src/shared/contracts/course-project-v9/` 与 `src/shared/contracts/published-course-v2/` 为准；当前仍存在的旧路径 re-export 桩只是 1.1 迁移中间态，真实 consumer 清零后必须删除，不形成长期兼容路径。
 >
-> **软冻结（2026-08-19）**：Course Project V9 作者工程合同已软冻结。已有字段、判别器和语义不得改；允许声明过的可选增量字段。不承诺旧编辑器打开含新键的课。本冻结不等于 Editor 1.0 已发布。Published Course V2、Runtime、Component 不在本次冻结范围内。
+> **软冻结（2026-08-19）**：Course Project V9 作者工程合同已软冻结。已有字段、判别器和语义不得改；只允许声明过的可选增量字段，以及 Owner 逐项批准并在本文登记的窄联合类型例外。不承诺旧编辑器打开含新键或新分支的课。本冻结不等于 Editor 1.0 已发布。Published Course V2、Runtime、Component 不在本次冻结范围内。
 
 ---
 
@@ -13,13 +13,13 @@
 
 | 协议域 | 当前版本 | 权威常量 / 判别器 | 演进规则 |
 |---|---|---|---|
-| **Course Project** | Schema 9 | `COURSE_PROJECT_SCHEMA_VERSION = 9` | **已软冻结**：已有字段锁死；仅允许 additive 可选字段 |
-| **Published Course** | Version 2 | `PUBLISHED_COURSE_VERSION = 2` | 独立升级发布格式（本次未冻） |
+| **Course Project** | Schema 9 | `COURSE_PROJECT_SCHEMA_VERSION = 9` | **已软冻结**：已有字段锁死；允许 additive 可选字段及本文登记的 Table/Chart strict discriminator 窄例外 |
+| **Published Course** | Version 2 | `PUBLISHED_COURSE_VERSION = 2` | Table/Chart 使用匹配 strict 分支窄扩展，并与匹配 Player 成对交付 |
 | **Runtime Protocol** | API 2 / 3 | `runtimeApiVersion: 2 \| 3` | 支持 canvas-runtime 2 与 surface-runtime 3 |
 | **Component Protocol** | API 4 | `apiVersion: 4` | 独立升级组件规范 |
 
 ### 关于历史常量说明
-- `src/shared/constants.ts` 中的 `PROJECT_SCHEMA_VERSION = 8` 是历史 V8 遗留形状常量，**不是当前工程版本**。当前工程格式唯一真相为 `COURSE_PROJECT_SCHEMA_VERSION = 9`。
+- 1.1 执行前若 `src/shared/constants.ts` 中仍存在 `PROJECT_SCHEMA_VERSION = 8`，它只是待清零的历史 V8 遗留形状常量，**不是当前工程版本**。当前工程格式唯一真相为 `COURSE_PROJECT_SCHEMA_VERSION = 9`；1.1 完成时可执行代码、测试、脚本、示例、fixture、artifacts 与正式生成制品中不得再保留该旧格式常量或 consumer。
 - 产品 `package.json` 版本为 `1.0.0`；V9 Schema 软冻结不等于产品发布。教师 `accepted` 前，**不得宣称 Editor 1.0 已发布**。
 
 ---
@@ -33,6 +33,7 @@
   - `schemaVersion` 为非 9 的其他整数：判定为 `unsupported`。
   - 缺失 `schemaVersion` 或 JSON 结构损坏：判定为 `corrupted`。
 - **新建工程**：空白工程直接构造 V9 数据模型，禁止调用 V8 迁移函数。
+- **1.1 清零不是迁移支持**：1.1 删除可执行范围中的 V8 模型、Schema、archive、Player/Export payload、fixture 和测试工具链，但不恢复 V8 打开或导入。每个受支持行为必须先迁移到等价 V9/Published consumer，任何中间提交不得以删入口、删测试、删导出、静态化动态内容或 silent fallback 换取清零。
 
 ---
 
@@ -56,6 +57,7 @@
    - additive 仍是合同变更：单独提交、更新 `artifacts/contracts/`，不得混进教师手感/UI 提交。
 5. **不承诺旧二进制前向兼容**：含新可选键的课，未更新的编辑器可以因 `.strict()` 拒收。用户应更新到当前版本。
 6. **产品约定不是 Schema 收紧**：例如编辑器把 `startLocationId` 同步为大纲第一页，不得改成 Schema 新不变量去卡旧课。
+7. **窄联合类型例外必须逐项登记**：新增 discriminator 不是普通 additive 字段；只有本文记录的 Owner 决定才可实施，且必须保持旧 V9 可读、新分支 strict、旧 reader fail loud、作者与 Published 有效域闭合。一次例外不授权未来其它 discriminator。
 
 ### 3.1 2026-08-28 Owner 批准的 Interaction 窄扩展
 
@@ -71,6 +73,22 @@
 
 这是软冻结后的显式合同例外，不改变 `schemaVersion: 9` 或 `formatVersion: 2`，不授权为 surface/scene/world 项增加同名字段，也不引入全局项与本地项逐项交错排序。
 
+### 3.3 2026-09-02 Owner 批准的 Table/Chart strict discriminator 窄扩展
+
+产品 Owner 明确批准在 Course Project V9 的 `NativeElementContent` 严格联合类型中增加 `nativeType: 'table'` 与 `nativeType: 'chart'` 两个新分支，并在 Published Course V2 增加语义对等的严格分支。作者工程继续使用 `schemaVersion: 9`，发布继续使用 `formatVersion: 2`；不为这两个能力创建 V10 或 Published V3。
+
+该例外必须同时满足：
+
+1. 不修改既有六种 Native 的字段、判别器、缺省或语义；所有既有合法 V9 工程继续读取且行为不变。
+2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema，不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
+3. Table/Chart 不加入 legacy `SceneNode` / `SCENE_NODE_TYPES`。V9 Native data materializer、presentation `nativeData` override 校验与生成合同必须脱离旧 Scene Schema，同时保持既有 presentation override 合并语义不变。
+4. 含新分支的工程由不了解该分支的旧编辑器明确拒绝；不得静默丢字段、跳过元素、改写为旧类型或覆盖原工程。旧编辑器前向不兼容是已披露结果，用户须使用匹配版本。
+5. Published V2 payload 与匹配 Player 成对交付；旧 V2 reader/Player 遇到新分支必须明确失败，不承诺前向兼容，也不得静默隐藏或仅以无提示静态占位冒充支持。
+6. 作者 UI、Authoring Tools、保存重开、Preview、Published Player、HTML 和适用导出必须形成有效域闭环；静态格式不能完整表达时必须给出可见诊断或明确降级，不能丢数据。
+7. Course Project Schema、Published Schema、类型、生成合同、兼容政策和旧 reader 反例必须作为可整体审阅的合同变更交付；Table 与 Chart 的产品实现可分片，但任何分片不得提前宣称完整可用。
+
+本节只批准 Table/Chart 两个明确分支，不构成新增其它 Native、Interaction、Surface 或 Published discriminator 的通行授权。
+
 ---
 
 ## 4. V10 大版本迁移边界
@@ -83,5 +101,7 @@
 - 改变稳定标识（`layerItemId` / authoringAddress）生命周期定义。
 - 引入必须持久化至工程文件的完整协同模型或强制时间轴模型。
 - 删除或重解释现有必填字段。
+
+1.1 对 V8 可执行残留的清零只是删除不受支持的旧实现并迁移现有 consumer，不改变 V9 wire；Table/Chart 则由 3.3 节的明确窄例外覆盖。两者都不是创建 V10 的理由。
 
 > 注：Editor 1.0 不承诺读取未来的 V10+ 工程。

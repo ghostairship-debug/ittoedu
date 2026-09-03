@@ -17,6 +17,7 @@ import {
   worldToClient,
 } from '@/renderer/authoring/stageViewportTransform'
 import {
+  buildSpatialEditorView,
   createSpatialViewportOverlayTransform,
   createSpatialWorldViewTransform,
   openSpatialAuthoringSession,
@@ -374,5 +375,22 @@ describe('Spatial world vs viewport view transforms', () => {
     )!.item
     expect(item.frame).toMatchObject({ x: 230, y: 668, width: 900, height: 64 })
     expect(item.frame.x).not.toBe(-440)
+  })
+
+  it('builds world transform from typed view sessionCamera without writing the document', () => {
+    const project = fixture()
+    const view = buildSpatialEditorView({
+      project,
+      locationId: LOCATION_ID,
+      sessionCamera: { x: -400, y: 2000, zoom: 2 },
+    })
+    expect(view.sessionCamera).toEqual({ x: -400, y: 2000, zoom: 2 })
+    const transform = createSpatialWorldViewTransform(VIEWPORT, view.sessionCamera!)
+    expect(worldToClient(transform, { x: -400, y: 2000 })).toEqual({ x: 640, y: 360 })
+    const surface = project.surfaces.find((candidate) => candidate.type === 'spatial-2d')
+    expect(surface?.camera.home).toEqual({ x: 0, y: 0, zoom: 1 })
+    expect(view).not.toHaveProperty('paths')
+    expect(view.worldGraph.paths).toEqual([])
+    expect(view.visibilityRules).toEqual([])
   })
 })

@@ -1,15 +1,21 @@
 import { componentContentSha256 } from '../../../src/shared/componentContentIntegrity'
 import type { ComponentManifest } from '../../../src/shared/componentTypes'
+import type { AssetMeta } from '../../../src/shared/contracts/media-v1/types'
+import type { InteractionRule } from '../../../src/shared/interactionTypes'
+import { courseProjectDocumentSchema } from '../../../src/shared/courseProjectSchema'
 import type {
   ComponentLayerItem,
+  CourseAssetMeta,
   CourseProjectDocument,
   FlowBlock,
+  FlowSurfaceLayerEntry,
+  GlobalLayerEntry,
+  GlobalLayerPlane,
   NativeLayerItem,
   RuntimeLayerItem,
   ScopedLayerItem,
 } from '../../../src/shared/courseProjectTypes'
 import type { CourseProjectArchiveData } from '../../../src/renderer/project/courseProjectArchive'
-import type { AssetMeta } from '../../../src/shared/projectTypes'
 
 export const COURSE_PROJECT_V9_FIXTURE_MTIME = '2026-08-18T12:00:00.000Z'
 
@@ -260,8 +266,43 @@ function scoped(item: NativeLayerItem | ComponentLayerItem | RuntimeLayerItem): 
   return { item, visibility: { mode: 'all', locationIds: [] } }
 }
 
-function imageAsset(id: string, filename = `${id}.png`): AssetMeta {
+function globalEntry(
+  item: NativeLayerItem | ComponentLayerItem | RuntimeLayerItem,
+  plane: GlobalLayerPlane,
+): GlobalLayerEntry {
+  return { ...scoped(item), plane }
+}
+
+function clickRevealRule(id: string, nodeId: string, stateId: string, stateKey: string): InteractionRule {
   return {
+    id,
+    name: id,
+    enabled: true,
+    trigger: { type: 'node.click', nodeId },
+    conditions: [],
+    actions: [
+      {
+        id: `${id}-presentation`,
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'presentation.set', stateId },
+      },
+      {
+        id: `${id}-state`,
+        start: 'with-previous',
+        delayMs: 0,
+        action: { type: 'course-state.set', key: stateKey, value: true },
+      },
+    ],
+  }
+}
+
+function imageAsset(
+  id: string,
+  filename = `${id}.png`,
+  remote?: CourseAssetMeta['remote'],
+): CourseAssetMeta {
+  const meta: CourseAssetMeta = {
     id,
     filename,
     mimeType: 'image/png',
@@ -271,6 +312,8 @@ function imageAsset(id: string, filename = `${id}.png`): AssetMeta {
     width: 1,
     height: 1,
   }
+  if (remote) meta.remote = remote
+  return meta
 }
 
 function audioAsset(id: string): AssetMeta {
@@ -401,7 +444,11 @@ function emptyArchive(
   assetFiles: Record<string, Uint8Array> = {},
   componentFiles: CourseProjectArchiveData['componentFiles'] = {},
 ): CourseProjectArchiveData {
-  return { project, assetFiles, componentFiles }
+  return {
+    project: courseProjectDocumentSchema.parse(project),
+    assetFiles,
+    componentFiles,
+  }
 }
 
 function slideNative(): CourseProjectArchiveData {
@@ -432,7 +479,25 @@ function slideNative(): CourseProjectArchiveData {
           nativeImage('slide-badge', 3, 'badge'),
           nativeShape('slide-card', 4),
         ],
-        interactions: [],
+        interactions: [{
+          id: 'slide-native-enter',
+          name: '进入时淡入图片',
+          enabled: true,
+          trigger: { type: 'scene.enter' },
+          conditions: [],
+          actions: [{
+            id: 'slide-native-badge-enter',
+            start: 'after-previous',
+            delayMs: 0,
+            action: {
+              type: 'node.enter',
+              nodeId: 'slide-badge',
+              effect: 'fade',
+              durationMs: 240,
+              easing: 'ease-out',
+            },
+          }],
+        }],
       }],
     }],
   }
@@ -441,7 +506,9 @@ function slideNative(): CourseProjectArchiveData {
 
 function slidePresentationState(): CourseProjectArchiveData {
   const project: CourseProjectDocument = {
-    ...courseShell('v9-fixture-slide-presentation-state', 'V9 夹具 · Presentation State'),
+    ...courseShell('v9-fixture-slide-presentation-state', 'V9 夹具 · Presentation State', {
+      courseState: [{ key: 'answered', valueType: 'boolean', defaultValue: false }],
+    }),
     locations: [
       {
         id: 'location-hidden',
@@ -502,7 +569,7 @@ function slidePresentationState(): CourseProjectArchiveData {
             },
           ],
         },
-        interactions: [],
+        interactions: [clickRevealRule('rule-reveal-success', 'slide-title', 'state-success', 'answered')],
       }],
     }],
   }
@@ -517,9 +584,21 @@ function globalLayerTeacherController(): CourseProjectArchiveData {
         keyboardNavigation: true,
         presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
       },
+      courseState: [{ key: 'unlocked', valueType: 'boolean', defaultValue: true }],
+      navigationGuards: [{
+        id: 'guard-scene-2',
+        effect: 'block',
+        toLocationIds: ['location-scene-2'],
+        match: 'all',
+        conditions: [{ type: 'compare', key: 'unlocked', operator: 'eq', value: false }],
+        message: '未解锁',
+      }],
       globalLayerItems: [
-        scoped(nativeText('global-banner', 50, '全课横幅', { mode: 'absolute', x: 40, y: 16, width: 400, height: 48 })),
-        scoped(teacherController('teacher-controller-main', 80)),
+        globalEntry(
+          nativeText('global-banner', 50, '全课横幅', { mode: 'absolute', x: 40, y: 16, width: 400, height: 48 }),
+          'underlay',
+        ),
+        globalEntry(teacherController('teacher-controller-main', 80), 'overlay'),
       ],
     }),
     locations: [
@@ -589,7 +668,9 @@ function canvasRuntime(): CourseProjectArchiveData {
     },
   }
   const project: CourseProjectDocument = {
-    ...courseShell('v9-fixture-canvas-runtime', 'V9 夹具 · Canvas Runtime'),
+    ...courseShell('v9-fixture-canvas-runtime', 'V9 夹具 · Canvas Runtime', {
+      network: { connectOrigins: ['https://runtime.example.com'] },
+    }),
     assets: {
       'runtime-sprite': imageAsset('runtime-sprite'),
       'runtime-fallback': imageAsset('runtime-fallback'),
@@ -657,7 +738,9 @@ function surfaceRuntime(): CourseProjectArchiveData {
     },
   }
   const project: CourseProjectDocument = {
-    ...courseShell('v9-fixture-surface-runtime', 'V9 夹具 · Surface Runtime'),
+    ...courseShell('v9-fixture-surface-runtime', 'V9 夹具 · Surface Runtime', {
+      network: { connectOrigins: ['https://surface.example.com'] },
+    }),
     assets: {
       'surface-hero': imageAsset('surface-hero'),
       'surface-fallback': imageAsset('surface-fallback'),
@@ -825,6 +908,22 @@ function flowFixture(): CourseProjectArchiveData {
       blocks: [{ id: 'flow-section-note', type: 'paragraph', text: '本节可折叠。' }],
     },
   ]
+  const flowUnderlay = nativeText('flow-underlay-note', 10, '正文下层', {
+    mode: 'absolute',
+    x: 40,
+    y: 640,
+    width: 280,
+    height: 40,
+  })
+  flowUnderlay.paperSpace = 'paper'
+  const flowOverlay = nativeText('flow-overlay-note', 20, '讲义浮层', {
+    mode: 'absolute',
+    x: 930,
+    y: 32,
+    width: 300,
+    height: 52,
+  })
+  flowOverlay.paperSpace = 'viewport'
   const project: CourseProjectDocument = {
     ...courseShell('v9-fixture-flow', 'V9 夹具 · Flow'),
     assets: { 'flow-image': imageAsset('flow-image') },
@@ -840,7 +939,10 @@ function flowFixture(): CourseProjectArchiveData {
       id: 'surface-flow',
       title: '流式讲义',
       type: 'flow',
-      surfaceLayerItems: [],
+      surfaceLayerItems: [
+        { ...scoped(flowUnderlay), bodyPlane: 'underlay' } satisfies FlowSurfaceLayerEntry,
+        { ...scoped(flowOverlay), bodyPlane: 'overlay' } satisfies FlowSurfaceLayerEntry,
+      ],
       layout: { readingWidth: 760, wideContentWidth: 1120 },
       blocks,
     }],
@@ -851,7 +953,7 @@ function flowFixture(): CourseProjectArchiveData {
 function spatialFixture(): CourseProjectArchiveData {
   const project: CourseProjectDocument = {
     ...courseShell('v9-fixture-spatial', 'V9 夹具 · Spatial'),
-    globalLayerItems: [scoped(teacherController('global-teacher-controller', 100_000))],
+    globalLayerItems: [globalEntry(teacherController('global-teacher-controller', 100_000), 'overlay')],
     locations: [
       {
         id: 'location-home',
@@ -917,13 +1019,13 @@ function mixedFixture(): CourseProjectArchiveData {
   const project: CourseProjectDocument = {
     ...courseShell('v9-fixture-mixed', 'V9 夹具 · Mixed'),
     globalLayerItems: [
-      scoped(nativeText('global-banner', 900, '跨表面横幅', {
+      globalEntry(nativeText('global-banner', 900, '跨表面横幅', {
         mode: 'absolute',
         x: 40,
         y: 16,
         width: 360,
         height: 40,
-      })),
+      }), 'overlay'),
     ],
     locations: [
       {
@@ -1014,6 +1116,9 @@ function mixedFixture(): CourseProjectArchiveData {
 function multiAsset(): CourseProjectArchiveData {
   const project: CourseProjectDocument = {
     ...courseShell('v9-fixture-multi-asset', 'V9 夹具 · 多素材', {
+      network: {
+        connectOrigins: ['https://media.example.com', 'wss://media.example.com'],
+      },
       media: {
         audio: {
           defaultMuted: false,
@@ -1034,7 +1139,9 @@ function multiAsset(): CourseProjectArchiveData {
       },
     }),
     assets: {
-      photo: imageAsset('photo'),
+      photo: imageAsset('photo', 'photo.png', {
+        url: 'https://media.example.com/photo.png',
+      }),
       diagram: imageAsset('diagram'),
       voice: audioAsset('voice'),
       clip: videoAsset('clip'),
@@ -1081,70 +1188,70 @@ export function listCourseProjectV9Fixtures(): CourseProjectV9FixtureSpec[] {
       id: 'slide-native',
       filename: 'slide-native.h5lesson',
       title: 'Slide Native',
-      covers: ['Slide Native'],
+      covers: ['PM-02', 'PM-03', 'PM-07', 'PM-09', 'PM-10', 'PM-22', 'PM-26', 'PM-27'],
       data: slideNative(),
     },
     {
       id: 'slide-presentation-state',
       filename: 'slide-presentation-state.h5lesson',
       title: 'Slide Presentation State',
-      covers: ['Slide Presentation State'],
+      covers: ['PM-02', 'PM-03', 'PM-08', 'PM-09', 'PM-17'],
       data: slidePresentationState(),
     },
     {
       id: 'global-layer-teacher-controller',
       filename: 'global-layer-teacher-controller.h5lesson',
       title: 'Global Layer including teacher-controller',
-      covers: ['Global Layer including teacher-controller'],
+      covers: ['PM-02', 'PM-08', 'PM-09', 'PM-11'],
       data: globalLayerTeacherController(),
     },
     {
       id: 'canvas-runtime',
       filename: 'canvas-runtime.h5lesson',
       title: 'Canvas Runtime',
-      covers: ['Canvas Runtime'],
+      covers: ['PM-02', 'PM-15', 'PM-16', 'PM-17', 'PM-18', 'PM-28'],
       data: canvasRuntime(),
     },
     {
       id: 'surface-runtime',
       filename: 'surface-runtime.h5lesson',
       title: 'Surface Runtime',
-      covers: ['Surface Runtime'],
+      covers: ['PM-02', 'PM-15', 'PM-16', 'PM-18'],
       data: surfaceRuntime(),
     },
     {
       id: 'component',
       filename: 'component.h5lesson',
       title: 'Component',
-      covers: ['Component'],
+      covers: ['PM-02', 'PM-12', 'PM-14', 'PM-18', 'PM-19'],
       data: componentFixture(),
     },
     {
       id: 'flow',
       filename: 'flow.h5lesson',
       title: 'Flow',
-      covers: ['Flow'],
+      covers: ['PM-02', 'PM-04', 'PM-08', 'PM-24'],
       data: flowFixture(),
     },
     {
       id: 'spatial',
       filename: 'spatial.h5lesson',
       title: 'Spatial',
-      covers: ['Spatial'],
+      covers: ['PM-02', 'PM-05', 'PM-09'],
       data: spatialFixture(),
     },
     {
       id: 'mixed',
       filename: 'mixed.h5lesson',
       title: 'Mixed',
-      covers: ['Mixed'],
+      covers: ['PM-02', 'PM-06', 'PM-12', 'PM-18', 'PM-21', 'PM-23'],
       data: mixedFixture(),
     },
     {
       id: 'multi-asset',
       filename: 'multi-asset.h5lesson',
       title: '多素材',
-      covers: ['multi-asset'],
+      covers: ['PM-02', 'PM-07', 'PM-13', 'PM-16', 'PM-19', 'PM-20', 'PM-25'],
       data: multiAsset(),
     },
   ]

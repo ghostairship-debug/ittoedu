@@ -210,8 +210,8 @@ function persistentSnapshot(): PersistentSnapshot {
     ),
     activeHistoryDepth: state.slideBackend.getSession().history.past.length,
     storeHistoryDepth: state.history.past.length,
-    sidecarPastDepth: state.slideCandidateSidecarPast.length,
-    sidecarFutureDepth: state.slideCandidateSidecarFuture.length,
+    sidecarPastDepth: state.courseAssetSidecarPast.length,
+    sidecarFutureDepth: state.courseAssetSidecarFuture.length,
   })
 }
 

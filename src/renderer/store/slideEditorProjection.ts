@@ -5,7 +5,17 @@ import type {
   NativeLayerItem,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import type { SceneDocument, SceneNode, SceneNodeOverride } from '../../shared/projectTypes'
+import type {
+  EditorCanvasDocument,
+  EditorCanvasNode,
+  EditorCanvasPresentation,
+  EditorCanvasSceneView,
+} from '../phaser/editorCanvasNode'
+import type {
+  V9SlideContentEditSession,
+  V9SlideFormulaContentDraft,
+  V9SlideTextContentDraft,
+} from '../authoring/v9SlideContentEdit'
 import {
   buildSlideEditorView,
   type SlideAuthoringBackend,
@@ -43,7 +53,7 @@ function locationIdForScene(
   return location?.id ?? null
 }
 
-export function courseLayerItemToSceneNode(item: LayerItem): SceneNode | null {
+export function courseLayerItemToEditorCanvasNode(item: LayerItem): EditorCanvasNode | null {
   const base = {
     id: item.layerItemId,
     name: item.label,
@@ -73,12 +83,12 @@ export function courseLayerItemToSceneNode(item: LayerItem): SceneNode | null {
     ...base,
     type: native.content.nativeType,
     ...structuredClone(native.content.data),
-  } as SceneNode
+  } as EditorCanvasNode
 }
 
-function layerItemOverrideToNodeOverride(
+function layerItemOverrideToCanvasOverride(
   override: LayerItemOverride,
-): SceneNodeOverride {
+): Record<string, unknown> {
   const next: Record<string, unknown> = {}
   if (override.label !== undefined) next.name = override.label
   if (override.frame?.x !== undefined) next.x = override.frame.x
@@ -94,10 +104,10 @@ function layerItemOverrideToNodeOverride(
   }
   if (override.nativeData) Object.assign(next, structuredClone(override.nativeData))
   if (override.componentProps) next.props = structuredClone(override.componentProps)
-  return next as SceneNodeOverride
+  return next
 }
 
-export function projectV9EditingNodes(backend: SlideAuthoringBackend): SceneNode[] {
+export function projectV9EditingNodes(backend: SlideAuthoringBackend): EditorCanvasNode[] {
   const session = backend.getSession()
   const view = buildSlideEditorView({
     project: session.history.present,
@@ -106,65 +116,106 @@ export function projectV9EditingNodes(backend: SlideAuthoringBackend): SceneNode
   })
   return view.layers.flatMap((layer) => {
     if (layer.source !== session.scope) return []
-    const node = courseLayerItemToSceneNode(layer.item as LayerItem)
+    const node = courseLayerItemToEditorCanvasNode(layer.item as LayerItem)
     return node ? [node] : []
   })
+}
+
+/** Applies the local text/formula draft to the narrow active-scope V9 node view. */
+export function applyV9SlideContentDraft(
+  nodes: readonly EditorCanvasNode[],
+  edit: V9SlideContentEditSession | null,
+): EditorCanvasNode[] {
+  if (!edit) return [...nodes]
+  return nodes.map((node) => {
+    if (node.id !== edit.target.layerItemId) return node
+    if (edit.kind === 'text' && node.type === 'text') {
+      const draft = edit.draft as V9SlideTextContentDraft
+      return {
+        ...node,
+        text: draft.text,
+        runs: structuredClone(draft.runs),
+        ...(typeof draft.width === 'number' ? { width: draft.width } : {}),
+        ...(typeof draft.height === 'number' ? { height: draft.height } : {}),
+      }
+    }
+    if (edit.kind === 'formula' && node.type === 'formula') {
+      const draft = edit.draft as V9SlideFormulaContentDraft
+      return {
+        ...node,
+        ast: structuredClone(draft.ast),
+        ...(draft.accessibleText === undefined
+          ? {}
+          : { accessibleText: draft.accessibleText }),
+      }
+    }
+    return node
+  })
+}
+
+export function projectV9EditingNodesWithDraft(
+  backend: SlideAuthoringBackend,
+  edit: V9SlideContentEditSession | null,
+): EditorCanvasNode[] {
+  return applyV9SlideContentDraft(projectV9EditingNodes(backend), edit)
 }
 
 export function projectV9SceneDocument(
   backend: SlideAuthoringBackend,
   sceneId: string,
-): SceneDocument | null {
+): EditorCanvasSceneView | null {
   const surface = slideSurface(backend)
   const scene = surface?.scenes.find((candidate) => candidate.id === sceneId)
   const locationId = locationIdForScene(backend, sceneId)
   if (!surface || !scene || !locationId) return null
-  return {
+  const document: EditorCanvasDocument = {
     id: scene.id,
     name: scene.name,
     backgroundColor: scene.backgroundColor,
     backgroundAssetId: scene.backgroundAssetId,
     nodes: scene.layerItems.flatMap((item) => {
-      const node = courseLayerItemToSceneNode(item)
+      const node = courseLayerItemToEditorCanvasNode(item)
       return node ? [node] : []
     }),
+  }
+  const presentation: EditorCanvasPresentation | undefined = scene.presentation
+    ? {
+        initialStateId: scene.presentation.initialStateId,
+        thumbnailStateId: scene.presentation.thumbnailStateId,
+        states: scene.presentation.states.map((state) => ({
+          id: state.id,
+          name: state.name,
+          ...(state.description === undefined ? {} : { description: state.description }),
+          ...(state.backgroundColor === undefined
+            ? {}
+            : { backgroundColor: state.backgroundColor }),
+          ...(state.backgroundAssetId === undefined
+            ? {}
+            : { backgroundAssetId: state.backgroundAssetId }),
+          nodeOverrides: Object.fromEntries(
+            Object.entries(state.layerItemOverrides).map(([id, override]) => [
+              id,
+              layerItemOverrideToCanvasOverride(override),
+            ]),
+          ),
+          ...(state.layerItemOrder
+            ? { nodeOrder: [...state.layerItemOrder] }
+            : {}),
+        })),
+      }
+    : undefined
+  return {
+    ...document,
     interactions: structuredClone(scene.interactions),
-    ...(scene.presentation
-      ? {
-          presentation: {
-            initialStateId: scene.presentation.initialStateId,
-            thumbnailStateId: scene.presentation.thumbnailStateId,
-            states: scene.presentation.states.map((state) => ({
-              id: state.id,
-              name: state.name,
-              ...(state.description === undefined ? {} : { description: state.description }),
-              ...(state.backgroundColor === undefined
-                ? {}
-                : { backgroundColor: state.backgroundColor }),
-              ...(state.backgroundAssetId === undefined
-                ? {}
-                : { backgroundAssetId: state.backgroundAssetId }),
-              nodeOverrides: Object.fromEntries(
-                Object.entries(state.layerItemOverrides).map(([id, override]) => [
-                  id,
-                  layerItemOverrideToNodeOverride(override),
-                ]),
-              ),
-              ...(state.layerItemOrder
-                ? { nodeOrder: [...state.layerItemOrder] }
-                : {}),
-            })),
-          },
-        }
-      : {}),
+    ...(presentation ? { presentation } : {}),
   }
 }
 
-export function projectV9ActiveScene(backend: SlideAuthoringBackend): SceneDocument | null {
+export function projectV9ActiveScene(backend: SlideAuthoringBackend): EditorCanvasSceneView | null {
   return projectV9SceneDocument(backend, backend.getSnapshot().sceneId)
 }
 
-export function projectV9SlideScenes(backend: SlideAuthoringBackend): SceneDocument[] {
+export function projectV9SlideScenes(backend: SlideAuthoringBackend): EditorCanvasSceneView[] {
   const surface = slideSurface(backend)
   if (!surface) return []
   return surface.scenes.flatMap((scene) => {

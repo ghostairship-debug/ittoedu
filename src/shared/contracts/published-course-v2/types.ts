@@ -17,11 +17,9 @@ import type {
   SpatialSemanticZoomRule,
 } from '../course-project-v9/types'
 import type { InteractionRule } from '../interaction-v1/types'
-import type {
-  ProjectDesignTokens,
-  ProjectMediaSettings,
-  ProjectPlaybackSettings,
-} from '../../projectTypes'
+import type { ProjectDesignTokens } from '../design-v1/types'
+import type { ProjectMediaSettings } from '../media-v1/types'
+import type { ProjectPlaybackSettings } from '../playback-v1/types'
 import type { RuntimeRenderMode } from '../runtime/types'
 
 export const PUBLISHED_COURSE_FORMAT = 'h5course-published' as const

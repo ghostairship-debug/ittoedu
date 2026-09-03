@@ -8,7 +8,7 @@ import type {
 } from '../../../shared/runtimeTypes'
 import type { RuntimeHost, RuntimeMountEnvironment } from '../../RuntimeHost'
 import type { RuntimeRegistry } from '../../RuntimeRegistry'
-import { decodePublishedCode } from '../../publishedLesson'
+import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import type {
   PublishedRuntimeAuthoringMountOptions,
 } from './publishedSurfaceRuntimeAuthoringTargets'

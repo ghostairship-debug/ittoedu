@@ -1,16 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addPptxTextNode } from '@/renderer/export/pptxTextAndShape'
-import { createProject, createTextNode } from '@/renderer/project/createProject'
+import { createTextNode, type TextNodeOptions } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
-  createProjectArchive,
-  openProjectArchive,
-} from '@/renderer/project/projectArchive'
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
 import {
   selectActiveScene,
   useEditorStore,
+  selectActiveCourseProjectDocument,
 } from '@/renderer/store/editorStore'
 import { materializeScene } from '@/shared/presentation'
-import { projectDocumentSchema } from '@/shared/projectSchema'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
+
+function materialized(
+  scene: object,
+  stateId?: string | null,
+) {
+  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
+}
 
 function canvasContext(): CanvasRenderingContext2D {
   return {
@@ -32,6 +43,38 @@ function canvasContext(): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D
 }
 
+function blankSlideProject(): CourseProjectDocument {
+  return createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+}
+
+function slideScene(project: CourseProjectDocument) {
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  const scene = surface.scenes[0]
+  if (!scene) throw new Error('expected slide scene')
+  return scene
+}
+
+type TextLayerItem = NativeLayerItem & {
+  kind: 'native'
+  content: Extract<NativeLayerItem['content'], { nativeType: 'text' }>
+}
+
+function addTextLayer(
+  project: CourseProjectDocument,
+  options: TextNodeOptions,
+): TextLayerItem {
+  const item = sceneNodeToCourseLayerItem(
+    createTextNode(options),
+    slideScene(project).layerItems.length,
+  )
+  if (item.kind !== 'native' || item.content.nativeType !== 'text') {
+    throw new Error('expected text layer item')
+  }
+  slideScene(project).layerItems.push(item)
+  return item as TextLayerItem
+}
+
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
@@ -40,44 +83,53 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Project V8 native text emphasis', () => {
-  it('normalizes a missing V8 node default and preserves run-level semantics', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const node = createTextNode({
+describe('Course Project V9 native text emphasis', () => {
+  it('normalizes a missing node default and preserves run-level semantics', () => {
+    const project = blankSlideProject()
+    const item = addTextLayer(project, {
       text: '春风',
       runs: [{ start: 0, end: 1, style: { emphasis: true } }],
     })
-    Reflect.deleteProperty(node.style, 'emphasis')
-    project.scenes[0]!.nodes.push(node)
+    Reflect.deleteProperty(item.content.data.style, 'emphasis')
 
-    const parsed = projectDocumentSchema.parse(project)
-    const restored = parsed.scenes[0]!.nodes[0]
+    const parsed = courseProjectDocumentSchema.parse(project)
+    const restored = slideScene(parsed).layerItems[0]
     expect(restored).toMatchObject({
-      type: 'text',
-      style: { emphasis: false },
-      runs: [{ start: 0, end: 1, style: { emphasis: true } }],
+      kind: 'native',
+      content: {
+        nativeType: 'text',
+        data: {
+          style: { emphasis: false },
+          runs: [{ start: 0, end: 1, style: { emphasis: true } }],
+        },
+      },
     })
   })
 
   it('stores node and run emphasis through a .h5lesson save/open round trip', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.scenes[0]!.nodes.push(createTextNode({
+    const project = blankSlideProject()
+    addTextLayer(project, {
       text: '重点内容',
       runs: [{ start: 2, end: 4, style: { emphasis: false } }],
       style: { emphasis: true },
-    }))
+    })
 
-    const archive = createProjectArchive({
+    const archive = createCourseProjectArchive({
       project,
       assetFiles: {},
       componentFiles: {},
     })
-    const restored = openProjectArchive(archive).project.scenes[0]!.nodes[0]
+    const restored = slideScene(openCourseProjectArchive(archive).project).layerItems[0]
 
     expect(restored).toMatchObject({
-      type: 'text',
-      style: { emphasis: true },
-      runs: [{ start: 2, end: 4, style: { emphasis: false } }],
+      kind: 'native',
+      content: {
+        nativeType: 'text',
+        data: {
+          style: { emphasis: true },
+          runs: [{ start: 2, end: 4, style: { emphasis: false } }],
+        },
+      },
     })
   })
 
@@ -96,16 +148,16 @@ describe('Project V8 native text emphasis', () => {
 
     const scene = selectActiveScene(useEditorStore.getState())
     expect(scene.nodes[0]).toMatchObject({ style: { emphasis: false }, runs: [] })
-    expect(materializeScene(scene, stateId).nodes[0]).toMatchObject({
+    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
       style: { emphasis: true },
       runs: [{ start: 0, end: 2, style: { emphasis: false } }],
     })
-    expect(projectDocumentSchema.safeParse(useEditorStore.getState().project).success)
+    expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
       .toBe(true)
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
 
     useEditorStore.getState().undo()
-    expect(materializeScene(
+    expect(materialized(
       selectActiveScene(useEditorStore.getState()),
       stateId,
     ).nodes[0]).toMatchObject({ style: { emphasis: false }, runs: [] })
@@ -121,7 +173,7 @@ describe('Project V8 native text emphasis', () => {
     store.beginTextEdit(node.id, 'canvas')
     store.updateTextEditDraft(
       node.id,
-      node.text,
+      node.text ?? '',
       [{ start: 0, end: 2, style: { emphasis: true } }],
       node.height,
       node.width,

@@ -1,4 +1,4 @@
-import type { TextRun, TextRunStyle } from './projectTypes'
+import type { TextRun, TextRunStyle } from './contracts/native-v1/types'
 
 function normalizeStyle(style: TextRunStyle): TextRunStyle {
   return {

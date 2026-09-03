@@ -15,7 +15,7 @@ import type {
 import type { PublishedRuntimeLayerItem } from '../../../shared/publishedCourseTypes'
 import { CourseEventBus } from '../../CourseEventBus'
 import { CourseStateStore } from '../../CourseStateStore'
-import { decodePublishedCode } from '../../publishedLesson'
+import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
 import {
   PublishedCaptureBarrier,

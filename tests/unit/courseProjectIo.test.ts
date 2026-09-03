@@ -4,10 +4,15 @@ import { createBlankCourseProject } from '@/renderer/project/createCourseProject
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
+  openCourseProjectArchive,
   openCourseProjectArchiveAsync,
 } from '@/renderer/project/courseProjectArchive'
-import { openDefaultCourseProjectAsync } from '@/renderer/project/courseProjectIo'
+import {
+  openDefaultCourseProject,
+  openDefaultCourseProjectAsync,
+} from '@/renderer/project/courseProjectIo'
 import type { CourseProjectArchiveData } from '@/renderer/project/courseProjectArchive'
+import { saveProject, saveProjectAsync } from '@/renderer/project/saveProject'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 const archiveProbe = vi.hoisted(() => ({
@@ -31,6 +36,20 @@ function componentArchiveData(): CourseProjectArchiveData {
   const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'component')
   if (!fixture) throw new Error('component Course Project V9 fixture is missing')
   return fixture.data
+}
+
+function archiveBytesByKey(files: Record<string, Uint8Array>): Record<string, number[]> {
+  return Object.fromEntries(
+    Object.entries(files).map(([key, bytes]) => [key, [...bytes]]),
+  )
+}
+
+function componentArchiveBytes(
+  files: Record<string, Record<string, Uint8Array>>,
+): Record<string, Record<string, number[]>> {
+  return Object.fromEntries(
+    Object.entries(files).map(([key, packageFiles]) => [key, archiveBytesByKey(packageFiles)]),
+  )
 }
 
 function createLargeCourseArchive(byteLength = 12 * 1024 * 1024): Uint8Array {
@@ -61,6 +80,23 @@ function createLargeCourseArchive(byteLength = 12 * 1024 * 1024): Uint8Array {
 
 beforeEach(() => {
   archiveProbe.detectCalls = 0
+})
+
+describe('default Course Project V9 sync open', () => {
+  it('uses the V9 archive parser directly without a second format-detection unzip', () => {
+    const source = componentArchiveData()
+    const bytes = createCourseProjectArchive(source, { mtime: FIXTURE_MTIME })
+    const expected = openCourseProjectArchive(bytes)
+
+    detectCourseProjectArchiveFormat(bytes)
+    expect(archiveProbe.detectCalls).toBe(1)
+    archiveProbe.detectCalls = 0
+
+    const opened = openDefaultCourseProject(bytes)
+
+    expect(archiveProbe.detectCalls).toBe(0)
+    expect(opened).toEqual(expected)
+  })
 })
 
 describe('default Course Project V9 async open', () => {
@@ -156,4 +192,36 @@ describe('default Course Project V9 async open', () => {
     expect(result.assetFiles['large-video']?.byteLength).toBe(12 * 1024 * 1024)
     expect(archiveProbe.detectCalls).toBe(0)
   }, 30_000)
+})
+
+describe('explicit Course Project V9 save helper', () => {
+  it('updates updatedAt through the explicit save helper without mutating input', () => {
+    const source = structuredClone(componentArchiveData())
+    const originalTimestamp = source.project.updatedAt
+    const saved = saveProject(source, '2026-07-21T01:02:03.000Z')
+
+    expect(source.project.updatedAt).toBe(originalTimestamp)
+    expect(saved.project.updatedAt).toBe('2026-07-21T01:02:03.000Z')
+    const reopened = openDefaultCourseProject(saved.bytes)
+    expect(reopened.project.updatedAt).toBe('2026-07-21T01:02:03.000Z')
+    expect(archiveBytesByKey(reopened.assetFiles)).toEqual(archiveBytesByKey(source.assetFiles))
+    expect(componentArchiveBytes(reopened.componentFiles)).toEqual(
+      componentArchiveBytes(source.componentFiles),
+    )
+  })
+
+  it('异步保存更新时间戳但不修改输入工程', async () => {
+    const source = structuredClone(componentArchiveData())
+    const originalUpdatedAt = source.project.updatedAt
+    const saved = await saveProjectAsync(source, '2026-07-22T01:02:03.000Z')
+
+    expect(source.project.updatedAt).toBe(originalUpdatedAt)
+    expect(saved.project.updatedAt).toBe('2026-07-22T01:02:03.000Z')
+    const reopened = await openDefaultCourseProjectAsync(saved.bytes)
+    expect(reopened.project.updatedAt).toBe('2026-07-22T01:02:03.000Z')
+    expect(archiveBytesByKey(reopened.assetFiles)).toEqual(archiveBytesByKey(source.assetFiles))
+    expect(componentArchiveBytes(reopened.componentFiles)).toEqual(
+      componentArchiveBytes(source.componentFiles),
+    )
+  })
 })

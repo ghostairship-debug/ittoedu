@@ -378,10 +378,10 @@ function activeTransactionAssetIds(): string[] {
 function resourceSnapshotDepths() {
   const state = useEditorStore.getState()
   return {
-    sidecarPast: state.slideCandidateSidecarPast.length,
-    sidecarFuture: state.slideCandidateSidecarFuture.length,
-    componentPast: state.slideCandidateComponentPackagesPast.length,
-    componentFuture: state.slideCandidateComponentPackagesFuture.length,
+    sidecarPast: state.courseAssetSidecarPast.length,
+    sidecarFuture: state.courseAssetSidecarFuture.length,
+    componentPast: state.courseComponentPackagesPast.length,
+    componentFuture: state.courseComponentPackagesFuture.length,
   }
 }
 
@@ -495,19 +495,19 @@ function authoritativeWriteSnapshot() {
   const active = activeHistory()
   return {
     project: structuredClone(activeProject()),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     files: byteMap(selectMediaAssetFiles(state)),
     activeHistory: structuredClone(active.history),
     storeHistory: structuredClone(state.history),
-    sidecarPast: state.slideCandidateSidecarPast.map(
+    sidecarPast: state.courseAssetSidecarPast.map(
       (sidecar) => byteMap(sidecar.files),
     ),
-    sidecarFuture: state.slideCandidateSidecarFuture.map(
+    sidecarFuture: state.courseAssetSidecarFuture.map(
       (sidecar) => byteMap(sidecar.files),
     ),
     componentPackages: structuredClone(state.componentPackages),
-    componentPast: structuredClone(state.slideCandidateComponentPackagesPast),
-    componentFuture: structuredClone(state.slideCandidateComponentPackagesFuture),
+    componentPast: structuredClone(state.courseComponentPackagesPast),
+    componentFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     selection: selectionSnapshot(),
     dirty: state.dirty,

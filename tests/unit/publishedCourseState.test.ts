@@ -144,4 +144,21 @@ describe('Published course state and navigation guards', () => {
     second.courseState?.set('answer', 6)
     expect(store.get('answer')).toBe(5)
   })
+
+  it('emits set and clear changes when course state is written and reset', () => {
+    const changes = vi.fn()
+    const store = new CourseStateStore(changes)
+    store.set('score', { value: 8 })
+    expect(store.get('score')).toEqual({ value: 8 })
+    expect(changes).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'set',
+      key: 'score',
+    }))
+
+    store.clear()
+    expect(store.get('score')).toBeUndefined()
+    expect(changes).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'clear',
+    }))
+  })
 })

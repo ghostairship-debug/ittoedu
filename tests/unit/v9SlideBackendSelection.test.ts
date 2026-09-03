@@ -180,7 +180,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     expect(selectSlideAuthoringBackend(state)).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(state)).not.toBeNull()
     expect(selectSlideAuthoringDocument(state)?.schemaVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
-    expect(state.project.schemaVersion).toBe(8)
+    expect(selectActiveCourseProjectDocument(state)?.schemaVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
 
     const documentBefore = selectSlideAuthoringDocument(useEditorStore.getState())
     const revisionBefore = documentBefore?.revision ?? 0
@@ -215,7 +215,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     expect(selectSlideAuthoringSnapshot(injected)).toEqual(backend.getSnapshot())
     expect(selectSlideAuthoringDocument(injected)?.schemaVersion).toBe(9)
     expect(selectSlideAuthoringDocument(injected)?.id).toBe('r2-seam-slide-candidate')
-    expect(injected.project.schemaVersion).toBe(8)
+    expect(selectActiveCourseProjectDocument(injected)?.schemaVersion).toBe(9)
 
     const added = injected.runSlideCandidateCommand((candidate) =>
       candidate.addScene({

@@ -6,7 +6,7 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import { transformFlowOverlayFrame } from '@/renderer/course/flowSharedAuthoringAdapters'

@@ -15,6 +15,11 @@ export {
   type CourseProjectV9FixtureId,
   type CourseProjectV9FixtureSpec,
 } from './sources'
+export {
+  COURSE_PROJECT_REJECTION_INPUTS,
+  COURSE_PROJECT_REJECTION_KIND,
+  type CourseProjectRejectionKind,
+} from './rejection'
 
 export function courseProjectV9FixtureRoot(): string {
   return FIXTURE_ROOT

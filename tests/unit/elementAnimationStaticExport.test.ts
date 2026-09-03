@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createProject,
-  createTeacherControllerNode,
-} from '../../src/renderer/project/createProject'
-
+import { createTeacherControllerNode } from '../../src/renderer/project/nativeNodeFactories'
 import { renderSceneCanvas } from '../../src/renderer/export/renderSceneImages'
+import { createDefaultScenePresentation } from '../../src/shared/presentation'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -48,7 +45,6 @@ describe('playback initial visibility static export semantics', () => {
       context as unknown as CanvasRenderingContext2D,
     )
 
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createTeacherControllerNode({
       id: 'animated-static-node',
       x: 300,
@@ -59,9 +55,27 @@ describe('playback initial visibility static export semantics', () => {
       includeInStaticExports: false,
       playbackInitialVisibility: 'hidden',
     })
-    project.scenes[0]!.nodes = [node]
+    const scene = {
+      id: 'scene',
+      name: '场景 1',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      nodes: [node],
+      presentation: createDefaultScenePresentation(),
+      interactions: [],
+    }
 
-    await renderSceneCanvas(project, project.scenes[0]!, {}, 1)
+    await renderSceneCanvas(
+      {
+        canvas: { width: 1280, height: 720 },
+        assets: {},
+        globalLayer: [],
+        scenes: [scene],
+      } as never,
+      scene as never,
+      {},
+      1,
+    )
 
     expect(translate).toHaveBeenCalledWith(
       node.x + node.width / 2,

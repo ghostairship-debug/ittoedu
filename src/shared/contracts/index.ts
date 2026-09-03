@@ -10,3 +10,9 @@ export type {
   ProjectMediaSettings,
 } from './media-v1'
 export * from './design-v1'
+export type {
+  PresenterCommand,
+  PresenterKeyBinding,
+  ProjectPresenterSettings,
+  ProjectPlaybackSettings,
+} from './playback-v1'

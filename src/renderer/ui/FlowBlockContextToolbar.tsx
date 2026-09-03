@@ -28,7 +28,7 @@ import {
   FONT_FAMILY_SOURCE_TAGS,
   fontFamilySource,
   type FontFamilySource,
-} from './PropertiesTab'
+} from './properties/PropertyControls'
 
 export type FlowBlockContextCommand =
   | { type: 'range-style'; style: TextRunStyle }

@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createRectangleNode } from '@/renderer/project/createProject'
+import { createRectangleNode } from '@/renderer/project/nativeNodeFactories'
 import {
   COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
   COURSE_PROJECT_VALIDATION_FATAL_CODES,
   COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER,
   resolveSchemaValidCourseProjectDiagnosticTarget,
 } from '@/shared/courseProjectValidationDiagnostics'
+import { COURSE_PROJECT_HEALTH_FINDING_CATALOG } from '@/shared/courseProjectHealth'
+import { PROJECT_HEALTH_CODES } from '@/shared/diagnosticCodes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 
 function projectWithSceneLayer() {
@@ -137,6 +139,7 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'asset-bytes-missing',
       'asset-kind-mismatch',
       'asset-metadata-missing',
+      'asset-reference-analysis-incomplete',
       'asset-reference-missing',
       'asset-unused',
       'component-asset-bytes-missing',
@@ -145,26 +148,38 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'component-manifest-identity-mismatch',
       'component-metadata-missing',
       'component-package-hash-missing',
+      'component-package-missing',
       'component-package-source-missing',
       'component-package-unused',
       'component-protocol',
       'component-thumbnail-missing',
+      'component-version-missing',
+      'controller-button-id-duplicate',
       'controller-required-for-canvas',
       'controller-scene-target-missing',
       'controller-state-target-missing',
       'controller-visible-while-disabled',
       'duplicate-stable-id',
       'global-interaction-state-target-partial',
+      'global-node-id-duplicate',
+      'global-visibility-scene-reference-missing',
       'information-release-hidden-self-trigger',
       'information-release-hidden-unreachable',
+      'initial-state-reference-missing',
+      'interaction-action-id-duplicate',
       'interaction-action-reference-missing',
       'interaction-animation-self-loop',
       'interaction-enter-target-initially-visible',
+      'interaction-navigation-not-terminal',
+      'interaction-node-reference-missing',
       'interaction-node-type-mismatch',
+      'interaction-rule-id-duplicate',
       'interaction-scene-reference-missing',
+      'interaction-sound-reference-missing',
       'interaction-state-reference-missing',
       'looping-video-ended-unreachable',
       'migration-marker',
+      'node-id-duplicate',
       'online-connect-origin-undeclared',
       'online-connect-origin-unresolved',
       'online-remote-asset',
@@ -183,11 +198,15 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'runtime-protocol',
       'runtime-static-fallback-missing',
       'scene-id-duplicate',
+      'scene-required',
       'sound-id-mismatch',
+      'state-id-duplicate',
+      'state-node-reference-missing',
       'static-export-info',
       'static-export-interactions-omitted',
       'static-export-preflight',
       'static-export-warning',
+      'thumbnail-state-reference-missing',
       'v8-field',
       'video-click-interaction-conflict',
     ])
@@ -195,6 +214,7 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       ({ status }) => status === 'active',
     ).map(({ code }) => code)).toEqual([
       'asset-kind-mismatch',
+      'asset-reference-analysis-incomplete',
       'asset-reference-missing',
       'asset-unused',
       'component-package-hash-missing',
@@ -239,5 +259,16 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'archive-shadowed',
       'upstream-filtered',
     ]))
+    const ledgerCodes = new Set(
+      COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER.map(({ code }) => code),
+    )
+    for (const code of PROJECT_HEALTH_CODES) {
+      expect(ledgerCodes.has(code), `V8 health code missing from V9 catalog: ${code}`).toBe(true)
+    }
+    for (const [code, spec] of Object.entries(COURSE_PROJECT_HEALTH_FINDING_CATALOG)) {
+      const entry = COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER.find((item) => item.code === code)
+      expect(entry, `health catalog code missing from ledger: ${code}`).toBeDefined()
+      expect(entry?.status).toBe(spec.status)
+    }
   })
 })

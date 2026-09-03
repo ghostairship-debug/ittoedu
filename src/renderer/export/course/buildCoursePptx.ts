@@ -1,4 +1,7 @@
 import { APP_COMPANY, APP_NAME } from '../../../shared/constants'
+import type { ImageNode } from '../../../shared/contracts/native-v1/types'
+import { renderImageNodeCanvas } from '../../../shared/imageEffects'
+import { nativeRenderInputFromPublishedItem } from '../../../player/surfaces/slide/publishedNativeRendering'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
@@ -7,12 +10,14 @@ import type {
   PublishedSlideSurface,
   PublishedSpatialSurface,
 } from '../../../shared/publishedCourseTypes'
-import type { SceneNode } from '../../../shared/projectTypes'
 import {
+  clamp,
   pptxColor,
   pptxNodePosition,
   pptxRotation,
   pptxTransparency,
+  pptxComponentSnapshotKey,
+  pptxGlobalComponentSnapshotKey,
   WIDE_SLIDE_HEIGHT,
   WIDE_SLIDE_WIDTH,
   type CanvasScale,
@@ -25,16 +30,27 @@ import {
   addPptxTextNode,
 } from '../pptxTextAndShape'
 import {
+  buildPublishedCourseV2Payload,
+  type CoursePublishSources,
+} from './buildPublishedCourse'
+import { isParsedPublishedCourseV2 } from '../../../player/surfaces/CoursePlayer'
+import {
+  renderPublishedSpatialFrameSvg,
+} from '../../../player/surfaces/spatial/publishedSpatialStaticRendering'
+import {
   auditCourseExportAssets,
   auditCourseExportFonts,
   buildCourseExportPageList,
   composePublishedSlideStaticPage,
   isPureSlidePublishedCourse,
-  renderPublishedSpatialFrameSvg,
-  SPATIAL_EXPORT_VIEWPORT,
   type CourseExportPage,
   type CourseExportReportItem,
 } from './buildCoursePrintArtifacts'
+import { renderPptxComponentSnapshots } from '../renderPptxComponentSnapshots'
+import {
+  pptxRuntimeSnapshotKey,
+  renderPptxRuntimeSnapshots,
+} from '../renderPptxRuntimeSnapshots'
 
 export interface BuildCoursePptxOptions {
   captureDynamicItem?: (input: {
@@ -44,6 +60,11 @@ export interface BuildCoursePptxOptions {
     locationId: string
     item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' }>
   }) => string | undefined | Promise<string | undefined>
+  /** Test/host seam; production uses the formal Native image renderer. */
+  renderNativeImage?: (input: {
+    node: ImageNode
+    assetDataUrl: string
+  }) => string | Promise<string>
   onWarning?(message: string): void
 }
 
@@ -53,6 +74,92 @@ export interface CoursePptxResult {
   pages: CourseExportPage[]
   warnings: string[]
   report: CourseExportReportItem[]
+}
+
+export type BuildCoursePptxInput = CoursePublishSources | PublishedCourseV2Payload
+
+const MAX_IMAGE_RENDER_RESOLUTION = 4
+const MAX_IMAGE_RENDER_PIXELS = 8_000_000
+
+async function loadPublishedImage(
+  assetDataUrl: string,
+): Promise<HTMLImageElement> {
+  const image = new Image()
+  if (typeof image.decode === 'function') {
+    image.src = assetDataUrl
+    await image.decode()
+    return image
+  }
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () => reject(new Error('图片素材无法解码'))
+    image.src = assetDataUrl
+  })
+  return image
+}
+
+async function renderNativeImageForPptx(
+  node: ImageNode,
+  assetDataUrl: string,
+  imageCache: Map<string, HTMLImageElement>,
+  renderer?: BuildCoursePptxOptions['renderNativeImage'],
+): Promise<string> {
+  if (renderer) {
+    const rendered = await renderer({ node, assetDataUrl })
+    if (!rendered.startsWith('data:image/')) {
+      throw new Error('Native 图片渲染器没有返回图片')
+    }
+    return rendered
+  }
+
+  let source = imageCache.get(node.assetId)
+  if (!source) {
+    source = await loadPublishedImage(assetDataUrl)
+    imageCache.set(node.assetId, source)
+  }
+  const sourceWidth = source.naturalWidth || node.width
+  const sourceHeight = source.naturalHeight || node.height
+  const sourceResolution = Math.max(
+    sourceWidth / Math.max(1, node.width),
+    sourceHeight / Math.max(1, node.height),
+  )
+  const pixelLimitResolution = Math.sqrt(
+    MAX_IMAGE_RENDER_PIXELS / Math.max(1, node.width * node.height),
+  )
+  const renderResolution = clamp(
+    Math.min(sourceResolution, pixelLimitResolution),
+    1,
+    MAX_IMAGE_RENDER_RESOLUTION,
+  )
+  const canvas = renderImageNodeCanvas(
+    source,
+    sourceWidth,
+    sourceHeight,
+    node,
+    node.width,
+    node.height,
+    renderResolution,
+  )
+  const data = canvas.toDataURL('image/png')
+  canvas.width = 1
+  canvas.height = 1
+  return data
+}
+
+function isCoursePublishSources(input: object): input is CoursePublishSources {
+  if (!('project' in input) || !('assetFiles' in input) || !('components' in input)) {
+    return false
+  }
+  const project = (input as { project?: { schemaVersion?: unknown } }).project
+  return project?.schemaVersion === 9
+}
+
+function resolvePublishedCourseForPptx(input: BuildCoursePptxInput): PublishedCourseV2Payload {
+  if (isParsedPublishedCourseV2(input)) return input
+  if (isCoursePublishSources(input)) return buildPublishedCourseV2Payload(input)
+  throw new Error(
+    'PPTX 只接受 Course Project V9 发布源或已解析的 Published Course V2，不接受旧版导出包。',
+  )
 }
 
 function pushReport(
@@ -70,22 +177,25 @@ function resolvePublishedAssetData(
   return url?.startsWith('data:') ? url : undefined
 }
 
-function nativeSceneNode(item: PublishedNativeLayerItem): SceneNode {
-  return {
-    ...structuredClone(item.content.data),
-    id: item.layerItemId,
-    name: item.layerItemId,
-    type: item.content.nativeType,
-    x: item.frame.x,
-    y: item.frame.y,
-    width: item.frame.width,
-    height: item.frame.height,
-    rotation: item.rotation,
-    opacity: item.opacity,
-    visible: item.visible,
-    locked: false,
-    playbackInitialVisibility: item.playbackInitialVisibility,
-  } as SceneNode
+function isGlobalPublishedItem(
+  published: PublishedCourseV2Payload,
+  layerItemId: string,
+): boolean {
+  return published.globalLayerItems.some((entry) => entry.item.layerItemId === layerItemId)
+}
+
+function publishedDynamicSnapshotKey(
+  published: PublishedCourseV2Payload,
+  scene: PublishedSlideScene,
+  item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' }>,
+): string {
+  const global = isGlobalPublishedItem(published, item.layerItemId)
+  if (item.kind === 'component') {
+    return global
+      ? pptxGlobalComponentSnapshotKey(scene.id, item.layerItemId)
+      : pptxComponentSnapshotKey(scene.id, item.layerItemId)
+  }
+  return pptxRuntimeSnapshotKey(scene.id, item.layerItemId, global)
 }
 
 function addImage(
@@ -140,18 +250,41 @@ async function addNativeItem(
   published: PublishedCourseV2Payload,
   scale: CanvasScale,
   sceneWarnings: string[],
+  imageCache: Map<string, HTMLImageElement>,
+  options: BuildCoursePptxOptions,
+  report: CourseExportReportItem[],
+  pageId: string,
 ): Promise<void> {
-  const node = nativeSceneNode(item)
+  const node = nativeRenderInputFromPublishedItem(item)
   if (!node.visible) return
   if (node.type === 'text') addPptxTextNode(slide, node, scale)
   else if (node.type === 'formula') addPptxFormulaNode(slide, node, scale)
   else if (node.type === 'shape') addPptxShapeNode(slide, node, scale)
   else if (node.type === 'image') {
-    const data = resolvePublishedAssetData(published, node.assetId)
-    if (data) addImage(slide, item, data, scale, '可编辑图片')
-    else {
+    const assetDataUrl = resolvePublishedAssetData(published, node.assetId)
+    if (!assetDataUrl) {
       addPlaceholder(slide, item, scale, `图片素材缺失\n${node.assetId}`)
       sceneWarnings.push(`图片“${item.layerItemId}”的素材 ${node.assetId} 缺失。`)
+      return
+    }
+    try {
+      const rendered = await renderNativeImageForPptx(
+        node,
+        assetDataUrl,
+        imageCache,
+        options.renderNativeImage,
+      )
+      addImage(slide, item, rendered, scale, '可编辑图片')
+    } catch (cause) {
+      const message = `图片“${item.layerItemId}”无法保留裁剪与效果：${cause instanceof Error ? cause.message : String(cause)}`
+      addPlaceholder(slide, item, scale, `图片处理失败\n${item.layerItemId}`)
+      sceneWarnings.push(message)
+      pushReport(report, {
+        severity: 'warning',
+        message,
+        pageId,
+        assetId: node.assetId,
+      })
     }
   } else if (node.type === 'video') {
     addPlaceholder(slide, item, scale, `▶ 视频\n${item.layerItemId}`)
@@ -173,6 +306,11 @@ async function addNativeItem(
       valign: 'middle',
       objectName: `${item.layerItemId} · 教师控制器`,
     })
+  } else {
+    addPlaceholder(slide, item, scale, `不受支持的原生对象\n${item.layerItemId}`)
+    sceneWarnings.push(
+      `原生对象“${item.layerItemId}”没有 PPTX 原生映射，已使用可选择占位，未静默省略。`,
+    )
   }
 }
 
@@ -198,6 +336,131 @@ function addWarningNote(slide: PptxSlide, warnings: readonly string[]): void {
   slide.addNotes(text)
 }
 
+export interface CoursePptxSpatialNotice {
+  severity: 'warning' | 'info'
+  source: 'world' | 'surface'
+  itemIndex: number
+  layerItemId: string
+  assetId?: string
+  message: string
+}
+
+function locationVisibilityApplies(
+  visibility: PublishedSpatialSurface['surfaceLayerItems'][number]['visibility'],
+  locationId: string | undefined,
+): boolean {
+  if (!locationId || visibility.mode === 'all') return true
+  const listed = visibility.locationIds.includes(locationId)
+  return visibility.mode === 'include' ? listed : !listed
+}
+
+function omittedFromStaticPptx(item: PublishedLayerItem): boolean {
+  return item.kind === 'native'
+    && item.content.nativeType === 'teacher-controller'
+    && !item.content.data.includeInStaticExports
+}
+
+function publishedSpatialWorldNotice(
+  item: PublishedLayerItem,
+  itemIndex: number,
+  resolveAsset: (assetId: string) => string | undefined,
+): CoursePptxSpatialNotice | null {
+  if (!item.visible || omittedFromStaticPptx(item)) return null
+  const base = {
+    source: 'world' as const,
+    itemIndex,
+    layerItemId: item.layerItemId,
+  }
+  if (item.kind === 'component' || item.kind === 'runtime') {
+    const fallbackId = item.kind === 'component'
+      ? item.staticFallbackAssetId
+      : item.runtime.staticFallback?.assetId
+    if (fallbackId && resolveAsset(fallbackId)) {
+      return {
+        ...base,
+        severity: 'info',
+        assetId: fallbackId,
+        message: `Spatial ${item.kind === 'component' ? '组件' : '运行时'}“${item.layerItemId}”在 PPTX 镜头中使用作者静态后备。`,
+      }
+    }
+    return {
+      ...base,
+      severity: 'warning',
+      ...(fallbackId ? { assetId: fallbackId } : {}),
+      message: `Spatial ${item.kind === 'component' ? '组件' : '运行时'}“${item.layerItemId}”缺少可用静态后备，PPTX 镜头使用可见占位。`,
+    }
+  }
+  if (item.content.nativeType === 'text') {
+    return {
+      ...base,
+      severity: 'info',
+      message: `Spatial 文字“${item.layerItemId}”在 PPTX 镜头中按静态简化样式呈现。`,
+    }
+  }
+  if (item.content.nativeType === 'image') {
+    const image = item.content.data
+    if (!resolveAsset(image.assetId)) {
+      return {
+        ...base,
+        severity: 'warning',
+        assetId: image.assetId,
+        message: `Spatial 图片“${item.layerItemId}”的素材 ${image.assetId} 缺失，PPTX 镜头使用可见占位。`,
+      }
+    }
+    const simplified = image.fit !== 'contain'
+      || image.crop.left !== 0
+      || image.crop.top !== 0
+      || image.crop.right !== 0
+      || image.crop.bottom !== 0
+      || image.cropX !== 0.5
+      || image.cropY !== 0.5
+      || image.flipX
+      || image.flipY
+      || image.cornerRadius !== 0
+      || image.feather.amount !== 0
+    return simplified
+      ? {
+          ...base,
+          severity: 'warning',
+          assetId: image.assetId,
+          message: `Spatial 图片“${item.layerItemId}”在 PPTX 镜头中按 contain 静态图呈现，裁剪、翻转、圆角或羽化效果不会完整保留。`,
+        }
+      : null
+  }
+  return {
+    ...base,
+    severity: 'warning',
+    message: `Spatial 原生对象“${item.layerItemId}”（${item.content.nativeType}）没有 PPTX 镜头映射，已明确省略。`,
+  }
+}
+
+/** Producer facts shared by the PPTX builder and its V9 preflight adapter. */
+export function collectPublishedPptxSpatialNotices(
+  surface: PublishedSpatialSurface,
+  resolveAsset: (assetId: string) => string | undefined,
+  locationId?: string,
+): CoursePptxSpatialNotice[] {
+  const notices = surface.world.layerItems.flatMap((item, itemIndex) => {
+    const notice = publishedSpatialWorldNotice(item, itemIndex, resolveAsset)
+    return notice ? [notice] : []
+  })
+  surface.surfaceLayerItems.forEach((entry, itemIndex) => {
+    if (
+      !entry.item.visible
+      || omittedFromStaticPptx(entry.item)
+      || !locationVisibilityApplies(entry.visibility, locationId)
+    ) return
+    notices.push({
+      severity: 'warning',
+      source: 'surface',
+      itemIndex,
+      layerItemId: entry.item.layerItemId,
+      message: `Spatial 表面浮层“${entry.item.layerItemId}”没有 PPTX 镜头映射，已明确省略。`,
+    })
+  })
+  return notices
+}
+
 async function addSlideScenePage(
   pptx: InstanceType<(typeof import('pptxgenjs'))['default']>,
   published: PublishedCourseV2Payload,
@@ -207,6 +470,8 @@ async function addSlideScenePage(
   includeGlobalLayerItems: boolean,
   options: BuildCoursePptxOptions,
   report: CourseExportReportItem[],
+  precomputedSnapshots: ReadonlyMap<string, string>,
+  imageCache: Map<string, HTMLImageElement>,
 ): Promise<string[]> {
   const scale: CanvasScale = {
     x: WIDE_SLIDE_WIDTH / surface.canvas.width,
@@ -248,18 +513,34 @@ async function addSlideScenePage(
   }
   for (const item of composition.items) {
     if (item.kind === 'native') {
-      await addNativeItem(slide, item, published, scale, sceneWarnings)
+      await addNativeItem(
+        slide,
+        item,
+        published,
+        scale,
+        sceneWarnings,
+        imageCache,
+        options,
+        report,
+        page.id,
+      )
       continue
     }
     let captured: string | undefined
     try {
-      captured = await options.captureDynamicItem?.({
-        published,
-        surface,
-        scene,
-        locationId: page.locationId,
-        item,
-      })
+      if (options.captureDynamicItem) {
+        captured = await options.captureDynamicItem({
+          published,
+          surface,
+          scene,
+          locationId: page.locationId,
+          item,
+        })
+      } else {
+        captured = precomputedSnapshots.get(
+          publishedDynamicSnapshotKey(published, scene, item),
+        )
+      }
     } catch (cause) {
       const message = `${item.kind} “${item.layerItemId}”实例快照失败：${cause instanceof Error ? cause.message : String(cause)}`
       sceneWarnings.push(message)
@@ -292,7 +573,24 @@ function addSpatialFramePage(
   surface: PublishedSpatialSurface,
   page: CourseExportPage,
   report: CourseExportReportItem[],
+  warnings: string[],
+  options: BuildCoursePptxOptions,
 ): boolean {
+  const notices = collectPublishedPptxSpatialNotices(
+    surface,
+    (assetId) => resolvePublishedAssetData(published, assetId),
+    page.locationId,
+  )
+  notices.forEach((notice) => {
+    warnings.push(notice.message)
+    options.onWarning?.(notice.message)
+    pushReport(report, {
+      severity: notice.severity,
+      message: notice.message,
+      pageId: page.id,
+      ...(notice.assetId ? { assetId: notice.assetId } : {}),
+    })
+  })
   const { svg, viewport } = renderPublishedSpatialFrameSvg(
     surface,
     page.cameraFrameId,
@@ -331,15 +629,50 @@ function addSpatialFramePage(
     objectName: `${page.title} · Spatial 镜头`,
     altText: `${page.title}（Spatial 镜头 ${viewport.width}×${viewport.height}）`,
   })
-  slide.addNotes(`Spatial 镜头 ${page.cameraFrameId ?? 'home'}，视口 ${viewport.width}×${viewport.height}，未把无限 world 裁成单张 1280×720。`)
+  slide.addNotes([
+    `Spatial 镜头 ${page.cameraFrameId ?? 'home'}，视口 ${viewport.width}×${viewport.height}，未把无限 world 裁成单张 1280×720。`,
+    ...notices.map((notice) => `静态导出提示：${notice.message}`),
+  ].join('\n'))
   return true
 }
 
-/** Build PPTX bytes from Published Course V2 page list. */
-export async function buildCoursePptx(
+async function collectPublishedDynamicSnapshots(
   published: PublishedCourseV2Payload,
+  includeGlobalLayerItems: boolean,
+  report: CourseExportReportItem[],
+  warnings: string[],
+  onWarning?: (message: string) => void,
+): Promise<Map<string, string>> {
+  const snapshots = new Map<string, string>()
+  const recordFailure = (kind: 'component' | 'runtime', id: string, error: unknown): void => {
+    const message = `${kind} “${id}”实例快照失败：${error instanceof Error ? error.message : String(error)}`
+    warnings.push(message)
+    pushReport(report, { severity: 'warning', message })
+    onWarning?.(message)
+  }
+  const componentSnapshots = await renderPptxComponentSnapshots(published, {
+    includeGlobalLayerItems,
+    onFailure(failure) {
+      recordFailure('component', failure.nodeId, failure.error)
+    },
+  })
+  const runtimeSnapshots = await renderPptxRuntimeSnapshots(published, {
+    includeGlobalLayerItems,
+    onFailure(failure) {
+      recordFailure('runtime', failure.layerItemId, failure.error)
+    },
+  })
+  componentSnapshots.forEach((value, key) => snapshots.set(key, value))
+  runtimeSnapshots.forEach((value, key) => snapshots.set(key, value))
+  return snapshots
+}
+
+/** Build PPTX bytes from Course Project V9 sources, or an already-parsed Published V2. */
+export async function buildCoursePptx(
+  input: BuildCoursePptxInput,
   options: BuildCoursePptxOptions = {},
 ): Promise<CoursePptxResult> {
+  const published = resolvePublishedCourseForPptx(input)
   const report: CourseExportReportItem[] = []
   const warnings: string[] = []
   const pages = buildCourseExportPageList(published)
@@ -372,6 +705,17 @@ export async function buildCoursePptx(
     pushReport(report, { severity: 'info', message, pageId: page.id })
     options.onWarning?.(message)
   }
+
+  const precomputedSnapshots = options.captureDynamicItem
+    ? new Map<string, string>()
+    : await collectPublishedDynamicSnapshots(
+      published,
+      pureSlide,
+      report,
+      warnings,
+      options.onWarning,
+    )
+  const imageCache = new Map<string, HTMLImageElement>()
 
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
@@ -407,6 +751,8 @@ export async function buildCoursePptx(
       pureSlide,
       options,
       report,
+      precomputedSnapshots,
+      imageCache,
     ))
     slideCount += 1
   }
@@ -416,7 +762,15 @@ export async function buildCoursePptx(
       candidate.id === page.surfaceId && candidate.type === 'spatial-2d'
     ))
     if (!surface) continue
-    if (addSpatialFramePage(pptx, published, surface, page, report)) slideCount += 1
+    if (addSpatialFramePage(
+      pptx,
+      published,
+      surface,
+      page,
+      report,
+      warnings,
+      options,
+    )) slideCount += 1
   }
 
   if (slideCount === 0) {
@@ -438,5 +792,3 @@ export async function buildCoursePptx(
 
   return { bytes, slideCount, pages, warnings, report }
 }
-
-export { SPATIAL_EXPORT_VIEWPORT }

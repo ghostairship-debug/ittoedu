@@ -83,6 +83,7 @@ import {
 import {
   type SpatialEditorView,
 } from '../course/spatialEditorView'
+import type { CourseAuthoringTarget } from './courseAuthoringSession'
 import {
   adaptV9SpatialEditorLayers,
   hitTestV9SpatialLayerItems,
@@ -228,6 +229,7 @@ function editorView(session: SpatialAuthoringSession): SpatialEditorView {
   return buildSpatialEditorView({
     project: session.history.present,
     locationId: session.selection.locationId,
+    sessionCamera: session.sessionCamera,
   })
 }
 
@@ -1097,6 +1099,8 @@ export interface SpatialWorldContentEditSession {
   readonly kind: SpatialWorldContentEditKind
   readonly source: SpatialWorldContentEditSource
   readonly target: SpatialAuthoringTarget
+  /** Exact product target captured when this edit began. Product UI commands require it. */
+  readonly courseTarget?: CourseAuthoringTarget
   readonly composing: boolean
   readonly pendingAction: Exclude<SpatialWorldContentEditAction, 'ignore' | 'defer'> | null
   readonly original: V9SlideTextContentSnapshot | V9SlideFormulaContentSnapshot

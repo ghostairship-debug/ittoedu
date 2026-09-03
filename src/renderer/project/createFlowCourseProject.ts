@@ -10,8 +10,7 @@ import {
   type FlowEditorHistory,
   type FlowEditorSelection,
 } from '../course/flowEditorSlice'
-import { createBlankCourseProject } from './createCourseProject'
-import type { CreateProjectOptions } from './createProject'
+import { createBlankCourseProject, type CreateProjectOptions } from './createCourseProject'
 
 export interface FlowAuthoringSession {
   readonly history: FlowEditorHistory

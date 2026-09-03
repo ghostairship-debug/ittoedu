@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useEffect, useState } from 'react'
-import type { ProjectDesignTokens } from '../../shared/projectTypes'
+import type { ProjectDesignTokens } from '../../shared/contracts/design-v1/types'
 import { ColorInput } from './ColorInput'
 
 interface DesignTokensEditorProps {

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -48,6 +48,96 @@ function sliceBetween(text: string, first: string, second: string): string {
   return text.slice(start, end)
 }
 
+const STORE_COMPOSITION_ADAPTERS = [
+  'src/renderer/App.tsx',
+  'src/renderer/composition/crossSurfaceCommands.ts',
+  'src/renderer/composition/properties/PropertiesAuthoringReadModel.ts',
+  'src/renderer/composition/properties/usePropertiesAuthoringBinding.tsx',
+  'src/renderer/dev/v9CandidateSmokeInject.ts',
+  'src/renderer/diagnostics/projectHealthNavigation.ts',
+  'src/renderer/main.tsx',
+  'src/renderer/ui/AutomationTab.tsx',
+  'src/renderer/ui/ComponentsTab.tsx',
+  'src/renderer/ui/DeveloperTab.tsx',
+  'src/renderer/ui/ElementsTab.tsx',
+  'src/renderer/ui/MediaTab.tsx',
+  'src/renderer/ui/NodesTab.tsx',
+  'src/renderer/ui/ProjectHealthPanel.tsx',
+  'src/renderer/ui/RightSidebar.tsx',
+  'src/renderer/ui/ScenePanel.tsx',
+  'src/renderer/ui/SceneStateStrip.tsx',
+  'src/renderer/ui/SceneThumbnail.tsx',
+  'src/renderer/ui/SimpleEntranceAnimationEditor.tsx',
+  'src/renderer/ui/TopToolbar.tsx',
+  'src/renderer/ui/Workspace.tsx',
+] as const
+
+function compositionRootFactory(text: string): string {
+  return sliceBetween(
+    text,
+    'export const useEditorStore = create<EditorState>((set, get) => {',
+    '\nlet cachedSlideUiPresent',
+  )
+}
+
+function runtimeImportSpecifiers(text: string): string[] {
+  return [...text.matchAll(
+    /(?:^|\n)(?:import|export)\s+(?!type\b)[\s\S]*?from\s+['"]([^'"]+)['"]/g,
+  )].map((match) => match[1]!)
+}
+
+function resolveLocalImport(fromFile: string, specifier: string): string | null {
+  if (!specifier.startsWith('.')) return null
+  const absolute = resolve(join(root, fromFile, '..'), specifier)
+  for (const candidate of [
+    `${absolute}.ts`,
+    `${absolute}.tsx`,
+    join(absolute, 'index.ts'),
+    join(absolute, 'index.tsx'),
+  ]) {
+    if (existsSync(candidate)) return relative(root, candidate).replace(/\\/g, '/')
+  }
+  return null
+}
+
+function editorStoreConsumers(): string[] {
+  return filesUnder('src').filter((path) => {
+    if (path === 'src/renderer/store/editorStore.ts') return false
+    const text = source(path)
+    return /from\s+['"][^'"]*editorStore['"]/.test(text) || /\buseEditorStore\b/.test(text)
+  })
+}
+
+function runtimeCyclesAmong(entryFiles: readonly string[]): string[] {
+  const nodes = new Set(entryFiles)
+  const edges = new Map<string, string[]>()
+  for (const file of entryFiles) {
+    edges.set(file, runtimeImportSpecifiers(source(file)).flatMap((specifier) => {
+      const resolved = resolveLocalImport(file, specifier)
+      return resolved && nodes.has(resolved) ? [resolved] : []
+    }))
+  }
+  const cycles: string[] = []
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const stack: string[] = []
+  const visit = (node: string): void => {
+    if (visiting.has(node)) {
+      cycles.push([...stack.slice(stack.indexOf(node)), node].join(' -> '))
+      return
+    }
+    if (visited.has(node)) return
+    visiting.add(node)
+    stack.push(node)
+    for (const next of edges.get(node) ?? []) visit(next)
+    stack.pop()
+    visiting.delete(node)
+    visited.add(node)
+  }
+  for (const file of entryFiles) visit(file)
+  return cycles
+}
+
 describe('ARCH-1 dependency ratchet', () => {
   it('keeps Core identity and transaction seams independent of concrete Surfaces and Features', () => {
     for (const path of [
@@ -88,15 +178,18 @@ describe('ARCH-1 dependency ratchet', () => {
   it('locks the image use-case onto the target planner and one transaction path', () => {
     const app = source('src/renderer/App.tsx')
     const store = source('src/renderer/store/editorStore.ts')
+    const media = source('src/renderer/media/commitCourseMediaAuthoring.ts')
     expect(app).toContain('captureImageReplacementTarget()')
     expect(app).toContain('replaceImageAssetAtTarget(')
     expect(app).not.toMatch(/\breplaceImageAsset\(/)
+    expect(store).toContain('...mediaAuthoringActions')
+    expect(store).not.toMatch(/planCourseImageReplacement\(/)
 
-    const start = store.indexOf('    replaceImageAssetAtTarget(target, asset, bytes) {')
-    const end = store.indexOf('\n    importSound(', start)
+    const start = media.indexOf('export function commitCourseImageReplacement(')
+    const end = media.indexOf('\nexport function createMediaAuthoringActions(', start)
     expect(start).toBeGreaterThanOrEqual(0)
     expect(end).toBeGreaterThan(start)
-    const useCase = store.slice(start, end)
+    const useCase = media.slice(start, end)
     expect(useCase).toContain('planCourseImageReplacement({')
     expect(useCase).toContain('createEditorTransactionStep(document, planned.plan)')
     expect(useCase).toContain('commitSlideEditorTransactionHistory(session.history, step)')
@@ -137,69 +230,75 @@ describe('ARCH-2 resource-safety ratchet', () => {
 
   it('locks Media and Components onto target-based project resource transactions', () => {
     const store = source('src/renderer/store/editorStore.ts')
-    expect(store).toContain('planCourseMediaLibraryImport({')
-    expect(store).toContain('planCourseComponentPackageReplacement({')
-    expect(store).toContain('persistProjectResourceTransaction(')
+    const media = source('src/renderer/media/commitCourseMediaAuthoring.ts')
+    const components = source('src/renderer/components/commitComponentPackageAuthoring.ts')
+    expect(media).toContain('planCourseMediaLibraryImport({')
+    expect(components).toContain('planCourseComponentPackageReplacement({')
+    expect(store).toMatch(/persistProjectResourceTransaction\s*=\s*\(/)
+    expect(media).toContain('    importAssets(items: ImportedAssetBatchItem[]) {')
+    expect(store).not.toContain('planCourseMediaLibraryImport({')
+    expect(store).not.toContain('planCourseComponentPackageReplacement({')
     expect(store).not.toContain('planComponentPackageReplacement(')
     expect(store).not.toContain('retargetCourseComponentInstances')
     expect(store).not.toContain('for (const item of items) get().importAsset')
     expect(store).not.toContain('importCourseMediaAssets')
     for (const compatibilityField of [
-      'slideCandidateSidecarPast',
-      'slideCandidateSidecarFuture',
-      'slideCandidateComponentPackagesPast',
-      'slideCandidateComponentPackagesFuture',
+      'courseAssetSidecarPast',
+      'courseAssetSidecarFuture',
+      'courseComponentPackagesPast',
+      'courseComponentPackagesFuture',
     ]) {
       expect(store).toContain(compatibilityField)
     }
 
-    const importStart = store.indexOf('    importAssets(items) {')
-    const importEnd = store.indexOf('\n    captureImageReplacementTarget()', importStart)
+    const importStart = media.indexOf('    importAssets(items: ImportedAssetBatchItem[]) {')
+    const importEnd = media.indexOf('\n    importSounds(', importStart)
     expect(importStart).toBeGreaterThanOrEqual(0)
     expect(importEnd).toBeGreaterThan(importStart)
-    expect(store.slice(importStart, importEnd)).not.toContain('importCourseMediaAssets')
+    expect(media.slice(importStart, importEnd)).not.toContain('importCourseMediaAssets')
 
-    const replaceStart = store.indexOf('    replaceComponentPackage(packageId, packageData) {')
-    const replaceEnd = store.indexOf('\n    createEditableComponentCopy(', replaceStart)
+    const replaceStart = components.indexOf('    replaceComponentPackage(packageId: string, packageData: ComponentPackageData) {')
+    const replaceEnd = components.indexOf('\n  }\n}', replaceStart)
     expect(replaceStart).toBeGreaterThanOrEqual(0)
     expect(replaceEnd).toBeGreaterThan(replaceStart)
-    const replacement = store.slice(replaceStart, replaceEnd)
+    const replacement = components.slice(replaceStart, replaceEnd)
     expect(replacement).toContain('commitComponentReplacementAtTarget(')
     expect(replacement).not.toMatch(/runV9DocumentMutation|\bcommit\(/)
   })
 
   it('captures async App targets before Media and Components package reads', () => {
-    const app = source('src/renderer/App.tsx')
-    const image = app.slice(
-      app.indexOf('const selectAndImportImage'),
-      app.indexOf('const selectImageAsset'),
+    const media = source('src/renderer/app/useMediaImport.ts')
+    const image = media.slice(
+      media.indexOf('const selectAndImportImage'),
+      media.indexOf('const selectImageAsset'),
     )
-    expectBefore(image, 'captureMediaLibraryImportTarget()', 'selectImages()')
+    expectBefore(image, 'captureLibraryTarget()', 'selectImages()')
 
-    const video = app.slice(
-      app.indexOf('const selectAndImportVideo'),
-      app.indexOf('const handleImportComponent'),
+    const video = media.slice(
+      media.indexOf('const selectAndImportVideo'),
+      media.indexOf('const clearBatchSummary'),
     )
-    expectBefore(video, 'captureMediaLibraryImportTarget()', 'selectVideos()')
+    expectBefore(video, 'captureLibraryTarget()', 'selectVideos()')
 
-    const manual = app.slice(
-      app.indexOf('const handleReplaceComponent'),
-      app.indexOf('const performComponentReplacement'),
+    const components = source('src/renderer/app/useComponentLibrary.ts')
+    const manual = components.slice(
+      components.indexOf('const replacePackage'),
+      components.indexOf('const confirmReplacement'),
     )
     expectBefore(
       manual,
-      'captureComponentPackageReplacementTarget(packageId)',
+      'captureReplacementTarget(packageId)',
       'selectComponentPackage()',
     )
 
-    const catalog = app.slice(
-      app.indexOf('const performCatalogPackageOperation'),
-      app.indexOf('const requestCatalogPackageBatch'),
+    const catalog = components.slice(
+      components.indexOf('const performCatalogPackageOperation'),
+      components.indexOf('const addCatalogPackages'),
     )
     expectBefore(
       catalog,
-      'captureComponentPackageReplacementTarget',
-      'readComponentCatalogPackage',
+      'captureReplacementTarget(updateEntry.packageId)',
+      'readCatalogPackage({',
     )
   })
 })
@@ -209,7 +308,27 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     const runtimeFiles = filesUnder('src/renderer/runtime')
     const runtimeCorpus = runtimeFiles.map(source).join('\n')
     const sourceCorpus = filesUnder('src').map(source).join('\n')
+    const runtimeCommit = source('src/renderer/runtime/commitRuntimeAuthoring.ts')
     const store = source('src/renderer/store/editorStore.ts')
+    expect(store).toContain('...runtimeAuthoringActions')
+    expect(store).not.toMatch(/planRuntimeSourceUpdate\(/)
+    expect(store).not.toMatch(/planRuntimeContentTextUpdate\(/)
+    expect(store).not.toMatch(/planRuntimePropertyUpdate\(/)
+    expect(store).not.toMatch(/planRuntimeTemplateCreation\(/)
+    expect(store).not.toMatch(/planCourseRuntimeAssetReplacement\(/)
+
+    for (const [start, end, planner] of [
+      ['  const commitRuntimeSourceAtTarget = (', '  const captureRuntimeContentTextTarget = (', 'planRuntimeSourceUpdate({'],
+      ['  const updateRuntimeContentTextAtTarget = (', '  const rejectRuntimePropertyAuthoring = (', 'planRuntimeContentTextUpdate({'],
+      ['  const updateRuntimePropertyAtTarget = (', '  const rejectRuntimeTemplateCreation = (', 'planRuntimePropertyUpdate({'],
+      ['  const createRuntimeTemplateAtTarget = (', '  const captureRuntimeAssetReplacementTarget = (', 'planRuntimeTemplateCreation({'],
+      ['  const replaceRuntimeAssetAtTarget = (', '    updateRuntimeSourceAtTarget: commitRuntimeSourceAtTarget', 'planCourseRuntimeAssetReplacement({'],
+    ] as const) {
+      const useCase = sliceBetween(runtimeCommit, start, end)
+      expect(useCase, planner).toContain(planner)
+      expect(useCase, start).toContain('createEditorTransactionStep(')
+      expect(useCase, start).toContain('persistTransaction(')
+    }
 
     const pureRuntimeFiles = new Set([
       ...runtimeFiles.filter((candidate) => (
@@ -242,18 +361,6 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     const readProjection = ['course', runtimeWord, 'To', 'Document'].join('')
     expect(countLiteral(sourceCorpus, readProjection)).toBe(3)
 
-    for (const [start, end, planner] of [
-      ['  const commitRuntimeSourceAtTarget = (', '  const commitRuntimeContentTextAtTarget = (', 'planRuntimeSourceUpdate({'],
-      ['  const commitRuntimeContentTextAtTarget = (', '  const commitRuntimePropertyAtTarget = (', 'planRuntimeContentTextUpdate({'],
-      ['  const commitRuntimePropertyAtTarget = (', '  const rejectRuntimeTemplateCreation = (', 'planRuntimePropertyUpdate({'],
-      ['  const commitRuntimeTemplateCreationAtTarget = (', '  const rejectInteractionAuthoring = (', 'planRuntimeTemplateCreation({'],
-      ['  const commitRuntimeAssetReplacementAtTarget = (', '  const persistFlowLayerCommand = (', 'planCourseRuntimeAssetReplacement({'],
-    ] as const) {
-      const useCase = sliceBetween(store, start, end)
-      expect(useCase, planner).toContain(planner)
-      expect(useCase, start).toContain('createEditorTransactionStep(')
-      expect(useCase, start).toContain('persistProjectResourceTransaction(')
-    }
     expect(runtimeCorpus).not.toMatch(/\bRuntimeDocument\b/)
 
     const templateUiConsumers = filesUnder('src/renderer/ui').filter((path) => (
@@ -275,21 +382,25 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
       )), path).toEqual([])
     }
 
-    const store = source('src/renderer/store/editorStore.ts')
+    const interactions = source('src/renderer/interactions/commitInteractionAuthoring.ts')
     const applyTemplate = sliceBetween(
-      store,
-      '    applyInteractionTemplateAtTarget(target, template) {',
-      '    updateInteractionRuleAtTarget(target, ruleId, patch) {',
+      interactions,
+      '    applyInteractionTemplateAtTarget(',
+      '    updateInteractionRuleAtTarget(',
     )
     expect(applyTemplate).toContain('planApplyInteractionTemplate({')
     expect(applyTemplate).toContain('persistInteractionAuthoringPlan(')
     const updateRule = sliceBetween(
-      store,
-      '    updateInteractionRuleAtTarget(target, ruleId, patch) {',
-      '    addInteractionRule(sceneId, rule) {',
+      interactions,
+      '    updateInteractionRuleAtTarget(',
+      '  }\n}',
     )
     expect(updateRule).toContain('planUpdateInteractionRule({')
     expect(updateRule).toContain('persistInteractionAuthoringPlan(')
+    const store = source('src/renderer/store/editorStore.ts')
+    expect(store).toContain('...interactionAuthoringActions')
+    expect(store).not.toMatch(/planApplyInteractionTemplate\(/)
+    expect(store).not.toMatch(/planUpdateInteractionRule\(/)
 
     const automation = source('src/renderer/ui/AutomationTab.tsx')
     expect(automation).toContain('applyInteractionTemplateAtTarget(authoringTarget, {')
@@ -302,7 +413,6 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     ))
     expect(rawUiConsumers).toEqual([
       'src/renderer/ui/DeveloperTab.tsx',
-      'src/renderer/ui/PropertiesTab.tsx',
     ])
   })
 
@@ -332,27 +442,237 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
   })
 
   it('keeps global playback actions on canonical V9 Surface histories', () => {
-    const store = source('src/renderer/store/editorStore.ts')
+    const runtime = source('src/renderer/runtime/commitRuntimeAuthoring.ts')
     const updatePlayback = sliceBetween(
-      store,
-      '    updatePlayback(patch) {',
-      '    updateDesignTokens(tokens) {',
+      runtime,
+      '    updatePlayback(patch: Parameters<typeof updateCoursePlaybackSettings>[1]) {',
+      '    updateDesignTokens(tokens: ProjectDesignTokens) {',
     )
     expect(updatePlayback).toContain('updateCoursePlaybackSettings(')
-    expect(updatePlayback).toContain('persistSpatialLayerCommand(')
-    expect(updatePlayback).toContain('persistFlowLayerCommand(')
-    expect(updatePlayback).toContain('persistLayerCommand(')
+    expect(updatePlayback).toContain('persistProject(')
     expect(updatePlayback).not.toMatch(/\bcommit\(/)
 
-    const ensureTeacherController = sliceBetween(
-      store,
-      '    ensureTeacherController() {',
-      '    addExternalComponentNode(packageId, x, y, presetId) {',
+    const slide = source('src/renderer/store/slices/slideAuthoringSlice.ts')
+    const flow = source('src/renderer/store/slices/flowAuthoringSlice.ts')
+    const spatial = source('src/renderer/store/slices/spatialAuthoringSlice.ts')
+    expect(slide).toContain('restoreDefaultTeacherController(')
+    expect(flow).toContain('restoreDefaultTeacherController(')
+    expect(spatial).toContain('restoreDefaultTeacherController(')
+  })
+
+  it('owns Surface persist writers in slices and clears V8 project/sidecar names', () => {
+    const store = source('src/renderer/store/editorStore.ts')
+    const srcCorpus = filesUnder('src').map(source).join('\n')
+    expect(srcCorpus).not.toMatch(/slideCandidateSidecar/)
+    expect(srcCorpus).not.toMatch(/derivedV8ProjectFrom/)
+    expect(srcCorpus).not.toMatch(/projectCandidatePreviewDocument/)
+    expect(store).not.toMatch(/\bproduce\(/)
+    expect(store).not.toMatch(/\bcreateCourseProjectArchive\b/)
+    expect(store).not.toMatch(/\bopenCourseProjectArchive\b/)
+    expect(store).not.toMatch(/planMedia[A-Z]/)
+    expect(source('src/renderer/store/slices/slideAuthoringSlice.ts')).toContain('persistSlideCandidateResult')
+    expect(source('src/renderer/store/slices/flowAuthoringSlice.ts')).toContain('export function persistFlowResult')
+    expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).toContain('export function persistSpatialResult')
+    expect(source('src/renderer/store/courseResourceState.ts')).toContain('commitCourseResourceState')
+    expect(source('src/renderer/composition/surfaceRouter.ts')).toContain('planActivateCourseLocation')
+    expect(source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')).not.toMatch(/\buseEditorStore\b/)
+    expect(source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')).toContain('TeacherControllerAuthoringPorts')
+  })
+})
+
+describe('r11-055 architecture modularity gate', () => {
+  it('keeps editorStore.ts as a Zustand composition root without planner or document mutation', () => {
+    const store = source('src/renderer/store/editorStore.ts')
+    const factory = compositionRootFactory(store)
+    expect(factory).toContain('...slideAuthoringSlice')
+    expect(factory).toContain('...flowAuthoringSlice')
+    expect(factory).toContain('...spatialAuthoringSlice')
+    expect(factory).toContain('...courseLifecycleSlice')
+    expect(factory).toContain('...editorShellSlice')
+    expect(factory).toContain('...runtimeAuthoringActions')
+    expect(factory).toContain('...mediaAuthoringActions')
+    expect(factory).toContain('...componentAuthoringActions')
+    expect(factory).toContain('...interactionAuthoringActions')
+    expect(factory).toContain('...crossSurfaceCommands')
+    expect(factory).toContain('createRuntimeAuthoringActions(')
+    expect(factory).toContain('createMediaAuthoringActions(')
+    expect(factory).toContain('createComponentAuthoringActions(')
+    expect(factory).toContain('createInteractionAuthoringActions(')
+    expect(factory).toContain('createCrossSurfaceCommands(')
+    expect(factory).toContain('createEditorStoreKernel(')
+    expect(factory).not.toMatch(/\bplan[A-Z]\w+\(/)
+    expect(factory).not.toMatch(/\bproduce\(/)
+    expect(factory).not.toMatch(
+      /\b(?:addSlide(?:Text|Image|Video|Shape|Formula|Component)Layer|executeFlowEditorCommand|commitSlideProjectMutation|runV9DocumentMutation)\(/,
     )
-    expect(ensureTeacherController).toContain('restoreDefaultTeacherController(')
-    expect(ensureTeacherController).toContain('persistSpatialLayerCommand(')
-    expect(ensureTeacherController).toContain('persistFlowLayerCommand(')
-    expect(ensureTeacherController).toContain('persistLayerCommand(')
-    expect(ensureTeacherController).not.toMatch(/\bcommit\(/)
+    expect(store).not.toMatch(/export \* from/)
+    expectBefore(
+      store,
+      'export const useEditorStore = create<EditorState>((set, get) => {',
+      'export const selectActiveScene',
+    )
+    expect(store).toContain("'无限画布'")
+    expect(store).toContain("'流式讲义'")
+  })
+
+  it('keeps slices and Feature use cases free of root Store, EditorState, and raw zustand', () => {
+    const sliceFiles = filesUnder('src/renderer/store/slices')
+    const useCaseFiles = [
+      'src/renderer/runtime/commitRuntimeAuthoring.ts',
+      'src/renderer/media/commitCourseMediaAuthoring.ts',
+      'src/renderer/components/commitComponentPackageAuthoring.ts',
+      'src/renderer/interactions/commitInteractionAuthoring.ts',
+      'src/renderer/authoring/v9TeacherControllerAuthoring.ts',
+      'src/renderer/composition/surfaceRouter.ts',
+      'src/renderer/store/editorStoreKernel.ts',
+      'src/renderer/store/courseResourceState.ts',
+    ]
+    for (const path of [...sliceFiles, ...useCaseFiles]) {
+      const text = source(path)
+      expect(text, path).not.toMatch(/\buseEditorStore\b/)
+      expect(text, path).not.toMatch(/\bEditorState\b/)
+      expect(importSpecifiers(text).filter((specifier) => /editorStore(?:\.ts)?$/.test(specifier)), path).toEqual([])
+      expect(text, path).not.toMatch(/from ['"]zustand['"]/)
+    }
+    expect(source('src/renderer/composition/crossSurfaceCommands.ts')).not.toMatch(/\buseEditorStore\b/)
+    expect(source('src/renderer/composition/crossSurfaceCommands.ts')).not.toMatch(/\bEditorState\b/)
+    expect(runtimeImportSpecifiers(source('src/renderer/composition/crossSurfaceCommands.ts')).filter(
+      (specifier) => /editorStore(?:\.ts)?$/.test(specifier),
+    )).toEqual([])
+    expect(source('src/renderer/store/slices/slideAuthoringSlice.ts')).toContain('kernel: EditorStoreKernel')
+    expect(source('src/renderer/store/slices/flowAuthoringSlice.ts')).toContain('kernel: EditorStoreKernel')
+    expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).toContain('kernel: EditorStoreKernel')
+    expect(source('src/renderer/store/slices/courseLifecycleSlice.ts')).toContain('_kernel: EditorStoreKernel')
+    expect(source('src/renderer/store/slices/editorShellSlice.ts')).toContain('kernel: EditorStoreKernel')
+  })
+
+  it('keeps App hooks, Core kernel, and contracts free of Store and reverse Feature edges', () => {
+    for (const path of [
+      'src/renderer/app/useCourseProjectLifecycle.ts',
+      'src/renderer/app/useCourseDelivery.ts',
+      'src/renderer/app/useMediaImport.ts',
+      'src/renderer/app/useComponentLibrary.ts',
+      'src/renderer/app/useEditorKeyboardRouter.ts',
+    ]) {
+      const text = source(path)
+      expect(text, path).not.toMatch(/\buseEditorStore\b/)
+      expect(importSpecifiers(text).filter((specifier) => /editorStore/.test(specifier)), path).toEqual([])
+    }
+    const app = source('src/renderer/App.tsx')
+    expect(app).toContain('useCourseProjectLifecycle')
+    expect(app).toContain('useCourseDelivery')
+    expect(app).toContain('useMediaImport')
+    expect(app).toContain('useComponentLibrary')
+    expect(app).toContain('useEditorKeyboardRouter')
+
+    for (const path of [
+      'src/renderer/store/editorStoreKernel.ts',
+      'src/renderer/store/courseResourceState.ts',
+      'src/renderer/authoring/courseAuthoringSession.ts',
+      'src/renderer/authoring/editorTransaction.ts',
+      'src/renderer/composition/surfaceRouter.ts',
+    ]) {
+      const imports = importSpecifiers(source(path))
+      expect(imports.filter((specifier) => (
+        /(?:^|\/)ui\//.test(specifier) ||
+        /(?:^|\/)components\//.test(specifier) ||
+        /editorStore(?:\.ts)?$/.test(specifier)
+      )), path).toEqual([])
+    }
+
+    for (const path of filesUnder('src/shared/contracts')) {
+      expect(importSpecifiers(source(path)).filter((specifier) => (
+        /(?:^|\/)renderer\//.test(specifier) || /(?:^|\/)player\//.test(specifier)
+      )), path).toEqual([])
+    }
+  })
+
+  it('owns Slide Native painter and Course package analysis/preflight/emitter on single files', () => {
+    const painter = source('src/player/surfaces/slide/publishedNativeRendering.ts')
+    expect(painter).toContain('export function paintPublishedNativeRenderInput')
+    expect(painter).toContain('freezeRenderSnapshot')
+    expect(painter).toContain('readonlyNativeRenderInputFromPublishedItem')
+    expect(painter).not.toMatch(/\buseEditorStore\b/)
+    expect(painter).not.toMatch(/\b(?:SceneNode|ProjectDocument|schemaVersion|writer|session)\b/)
+    expect(importSpecifiers(painter).filter((specifier) => (
+      /editorStore|sceneAssets|renderNode|PlayerScene|projectTypes|projectSchema|course-project-v9\/schema/.test(specifier)
+    ))).toEqual([])
+    const slideAdapter = source('src/player/surfaces/slide/SlidePublishedAdapter.ts')
+    expect(slideAdapter).toContain("from './publishedNativeRendering'")
+    expect(slideAdapter).toContain('readonlyNativeRenderInputFromPublishedItem')
+    expect(importSpecifiers(slideAdapter).filter((specifier) => (
+      /sceneAssets|renderNode|PlayerScene|\/projectTypes|projectSchema|canvasShapeRenderer|imageEffects|publishedNativeText|publishedFormula/.test(specifier)
+    ))).toEqual([])
+    expect(slideAdapter).not.toMatch(/case ['"](?:text|formula|image|video|shape|teacher-controller)['"]/)
+
+    const analysis = source('src/renderer/export/course/coursePackageScriptAnalysis.ts')
+    expect(analysis).toContain("from 'acorn'")
+    expect(analysis).not.toMatch(/\buseEditorStore\b/)
+    expect(analysis).not.toMatch(/buildCoursePackages|zipSync|COURSE_PLAYER_CSS/)
+
+    const preflight = source('src/renderer/export/course/coursePackagePreflight.ts')
+    expect(preflight).toContain('export function collectCoursePackageExportPreflight')
+    expect(preflight).not.toMatch(/\buseEditorStore\b/)
+    expect(preflight).not.toMatch(/from ['"]acorn['"]/)
+
+    const emitter = source('src/renderer/export/course/buildCoursePackages.ts')
+    expect(emitter).toContain("from './coursePackageScriptAnalysis'")
+    expect(emitter).toContain("from './coursePackagePreflight'")
+    expect(emitter).not.toMatch(/from ['"]acorn['"]/)
+    expect(emitter).not.toMatch(/\buseEditorStore\b/)
+  })
+
+  it('keeps one Zustand store, V9 history depth, and fail-loud V8 load without a second writer', () => {
+    const zustandFiles = filesUnder('src').filter((path) => (
+      /from ['"]zustand['"]/.test(source(path))
+    ))
+    expect(zustandFiles).toEqual(['src/renderer/store/editorStore.ts'])
+
+    const srcFiles = filesUnder('src')
+    expect(srcFiles.filter((path) => source(path).includes('v9HistoryToStoreHistory'))).toEqual([])
+    expect(srcFiles.filter((path) => source(path).includes('migrateProjectV8ToCourseProjectV9'))).toEqual([
+      'src/shared/courseProjectModel.ts',
+    ])
+    expect(existsSync(join(root, 'tests/helpers/projectV8.ts'))).toBe(false)
+
+    const kernel = source('src/renderer/store/editorStoreKernel.ts')
+    expect(kernel).toContain('export function storeHistoryFromSessionLengths(')
+    expect(source('src/renderer/store/slices/slideAuthoringSlice.ts')).toContain('storeHistoryFromSessionLengths(')
+    expect(source('src/renderer/store/slices/flowAuthoringSlice.ts')).toContain('storeHistoryFromSessionLengths(')
+    expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).toContain('storeHistoryFromSessionLengths(')
+
+    const lifecycle = source('src/renderer/store/slices/courseLifecycleSlice.ts')
+    expect(lifecycle).toContain("throw new Error('V8 工程不能打开或导入。请使用 loadCourseProject 与 Course Project V9。')")
+    expect(lifecycle).not.toMatch(/\bmigrateProjectV8ToCourseProjectV9\(/)
+
+    const consumers = editorStoreConsumers()
+    expect(consumers.filter((path) => !(STORE_COMPOSITION_ADAPTERS as readonly string[]).includes(path))).toEqual([])
+    expect(consumers.length).toBeLessThanOrEqual(STORE_COMPOSITION_ADAPTERS.length)
+  })
+
+  it('clears the teacher-controller Store cycle and known runtime SCCs among Store owners', () => {
+    const teacher = source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')
+    expect(teacher).not.toMatch(/\buseEditorStore\b/)
+    expect(runtimeImportSpecifiers(teacher).filter((specifier) => /editorStore/.test(specifier))).toEqual([])
+
+    const cycles = runtimeCyclesAmong([
+      'src/renderer/store/editorStore.ts',
+      'src/renderer/store/editorStoreKernel.ts',
+      'src/renderer/store/courseResourceState.ts',
+      'src/renderer/store/slices/slideAuthoringSlice.ts',
+      'src/renderer/store/slices/slideOwnedCommands.ts',
+      'src/renderer/store/slices/flowAuthoringSlice.ts',
+      'src/renderer/store/slices/spatialAuthoringSlice.ts',
+      'src/renderer/store/slices/courseLifecycleSlice.ts',
+      'src/renderer/store/slices/editorShellSlice.ts',
+      'src/renderer/composition/crossSurfaceCommands.ts',
+      'src/renderer/composition/surfaceRouter.ts',
+      'src/renderer/authoring/v9TeacherControllerAuthoring.ts',
+      'src/renderer/runtime/commitRuntimeAuthoring.ts',
+      'src/renderer/media/commitCourseMediaAuthoring.ts',
+      'src/renderer/components/commitComponentPackageAuthoring.ts',
+      'src/renderer/interactions/commitInteractionAuthoring.ts',
+    ])
+    expect(cycles).toEqual([])
   })
 })

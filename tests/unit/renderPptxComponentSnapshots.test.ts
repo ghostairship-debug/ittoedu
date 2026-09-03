@@ -1,265 +1,199 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExportPayload } from '../../src/shared/componentTypes'
-import {
-  createExternalComponentNode,
-  createProject,
-  createScene,
-} from '../../src/renderer/project/createProject'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+import type { CoursePublishSources } from '../../src/renderer/export/course/buildPublishedCourse'
+import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import {
   pptxComponentSnapshotKey,
   pptxGlobalComponentSnapshotKey,
 } from '../../src/renderer/export/pptxShared'
+import {
+  PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR,
+} from '../../src/player/surfaces/CoursePlayer'
+import {
+  listCourseProjectV9Fixtures,
+  type CourseProjectV9FixtureId,
+} from '../fixtures/course-project-v9'
+import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
+import type { PublishedCourseV2Payload } from '../../src/shared/publishedCourseTypes'
 
-const playerCalls = vi.hoisted(() => [] as Array<{
-  payload: ExportPayload
-  options: Record<string, unknown>
+const captureCalls = vi.hoisted(() => [] as Array<{
+  payload: unknown
+  locationId?: string
+  surfaceId?: string
+  layerItemId?: string
+  includeGlobalLayerItems?: boolean
 }>)
-const rendererCalls = vi.hoisted(() => ({
-  snapshot: vi.fn(),
-  snapshotArea: vi.fn(),
-  snapshotAttempts: 0,
-  failAt: new Set<number>(),
-}))
-const playerMetrics = vi.hoisted(() => ({
+const captureFailAt = vi.hoisted(() => new Set<number>())
+const captureMetrics = vi.hoisted(() => ({
   active: 0,
   maxActive: 0,
   destroyed: 0,
 }))
 
-vi.mock('../../src/player/PlayerApp', () => ({
-  PlayerApp: class FakePlayerApp {
-    private currentIndex = 0
-    private destroyed = false
-    game = {
-      scene: {
-        getScene: () => ({ load: { isLoading: () => false } }),
-      },
-      renderer: {
-        snapshot: (
-          callback: (snapshot: HTMLImageElement) => void,
-        ) => {
-          rendererCalls.snapshot()
-          const attempt = rendererCalls.snapshotAttempts
-          rendererCalls.snapshotAttempts += 1
-          if (rendererCalls.failAt.has(attempt)) {
-            throw new Error(`component capture ${attempt} failed`)
-          }
-          const image = new Image()
-          image.src = 'data:image/png;base64,U05BUFNIT1Q='
-          callback(image)
-        },
-        snapshotArea: (
-          _x: number,
-          _y: number,
-          _width: number,
-          _height: number,
-          callback: (snapshot: HTMLImageElement) => void,
-        ) => {
-          rendererCalls.snapshotArea()
-          const image = new Image()
-          image.src = 'data:image/png;base64,U05BUFNIT1Q='
-          callback(image)
-        },
-      },
-    }
-
-    constructor(
-      payload: ExportPayload,
-      root: HTMLElement,
-      options: Record<string, unknown>,
-    ) {
-      playerCalls.push({ payload, options })
-      playerMetrics.active += 1
-      playerMetrics.maxActive = Math.max(
-        playerMetrics.maxActive,
-        playerMetrics.active,
-      )
-      const stage = document.createElement('section')
-      stage.className = 'lesson-stage'
-      const canvasHost = document.createElement('div')
-      canvasHost.className = 'lesson-canvas-host'
-      stage.append(canvasHost)
-      root.append(stage)
-    }
-
-    getCurrentSceneIndex(): number {
-      return this.currentIndex
-    }
-
-    goToScene(index: number): boolean {
-      this.currentIndex = index
-      return true
-    }
-
-    waitForCaptureReady(): Promise<void> {
-      return Promise.resolve()
-    }
-
-    destroy(): void {
-      if (this.destroyed) return
-      this.destroyed = true
-      playerMetrics.active -= 1
-      playerMetrics.destroyed += 1
-    }
-  },
-}))
+vi.mock('../../src/renderer/export/playerCapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/export/playerCapture')>()
+  return {
+    ...actual,
+    capturePublishedCourseV2Stage: vi.fn(async (input: {
+      payload: unknown
+      locationId?: string
+      surfaceId?: string
+      layerItemId?: string
+      includeGlobalLayerItems?: boolean
+    }) => {
+      captureMetrics.active += 1
+      captureMetrics.maxActive = Math.max(captureMetrics.maxActive, captureMetrics.active)
+      try {
+        const attempt = captureCalls.length
+        captureCalls.push(input)
+        if (captureFailAt.has(attempt)) {
+          throw new Error(`component capture ${attempt} failed`)
+        }
+        return 'data:image/png;base64,VTI='
+      } finally {
+        captureMetrics.active -= 1
+        captureMetrics.destroyed += 1
+      }
+    }),
+  }
+})
 
 import { renderPptxComponentSnapshots } from '../../src/renderer/export/renderPptxComponentSnapshots'
 
-beforeEach(() => {
-  playerCalls.length = 0
-  playerMetrics.active = 0
-  playerMetrics.maxActive = 0
-  playerMetrics.destroyed = 0
-  rendererCalls.snapshotAttempts = 0
-  rendererCalls.failAt.clear()
-  vi.clearAllMocks()
-  vi.useFakeTimers()
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
-    window.setTimeout(() => callback(performance.now()), 0))
-})
+function v9Sources(id: CourseProjectV9FixtureId): CoursePublishSources {
+  const fixture = listCourseProjectV9Fixtures().find((candidate) => candidate.id === id)
+  if (!fixture) throw new Error(`missing Course Project V9 fixture ${id}`)
+  return {
+    project: structuredClone(fixture.data.project),
+    assetFiles: { ...fixture.data.assetFiles },
+    components: Object.keys(fixture.data.componentFiles).length === 0
+      ? {}
+      : componentPackagesFromArchive(fixture.data.project, fixture.data.componentFiles),
+  }
+}
 
-afterEach(() => {
-  vi.useRealTimers()
-  vi.unstubAllGlobals()
+function publishedFrom(id: CourseProjectV9FixtureId): PublishedCourseV2Payload {
+  return buildPublishedCourseV2Payload(v9Sources(id))
+}
+
+function dynamicItems(payload: unknown): Array<{ kind: string; layerItemId: string }> {
+  const published = payload as PublishedCourseV2Payload
+  const surface = published.surfaces[0]
+  if (!surface || surface.type !== 'slide') return []
+  return [
+    ...surface.scenes.flatMap((scene) => scene.layerItems),
+    ...surface.surfaceLayerItems.map((entry) => entry.item),
+    ...published.globalLayerItems.map((entry) => entry.item),
+  ].filter((item) => item.kind === 'component' || item.kind === 'runtime')
+}
+
+beforeEach(() => {
+  captureCalls.length = 0
+  captureFailAt.clear()
+  captureMetrics.active = 0
+  captureMetrics.maxActive = 0
+  captureMetrics.destroyed = 0
+  vi.clearAllMocks()
 })
 
 describe('PPTX component snapshot capture semantics', () => {
-  it('starts the isolated Player in capture mode so playback-only hiding cannot leak into snapshots', async () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const node = createExternalComponentNode({
-      id: 'animated-component',
-      component: { packageId: 'com.example.animated', version: '1.0.0' },
-      playbackInitialVisibility: 'hidden',
-    })
-    project.scenes[0]!.nodes = [node]
-    const payload: ExportPayload = { project, assets: {}, components: {} }
-
-    const pending = renderPptxComponentSnapshots(payload)
-    await vi.runAllTimersAsync()
-    const snapshots = await pending
-
-    expect(playerCalls).toHaveLength(1)
-    expect(playerCalls[0]!.options).toMatchObject({
-      transparent: true,
-      controls: false,
-      mode: 'capture',
-    })
-    expect(playerCalls[0]!.payload.project.scenes[0]!.nodes[0]).toMatchObject({
-      id: node.id,
-      x: 0,
-      y: 0,
-      visible: true,
-      playbackInitialVisibility: 'hidden',
-    })
-    expect(snapshots.get(pptxComponentSnapshotKey(
-      project.scenes[0]!.id,
-      node.id,
-    ))).toBe('data:image/png;base64,U05BUFNIT1Q=')
-    expect(rendererCalls.snapshot).toHaveBeenCalledOnce()
-    expect(rendererCalls.snapshotArea).not.toHaveBeenCalled()
+  it('rejects a retired V8-era export package without probing PlayerApp', async () => {
+    await expect(renderPptxComponentSnapshots({
+      project: { schemaVersion: 8, scenes: [] },
+      assets: {},
+      components: {},
+    })).rejects.toThrow(PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR)
+    expect(captureCalls).toHaveLength(0)
   })
 
-  it('逐实例销毁 Player，避免场景与全局组件并发持久化', async () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
-    const sceneNodes = project.scenes.map((scene, index) => {
-      const node = createExternalComponentNode({
-        id: `scene-component-${index + 1}`,
-        width: 320,
-        height: 180,
-        component: { packageId: 'com.example.scene', version: '1.0.0' },
-      })
-      scene.nodes = [node]
-      return node
-    })
-    const globalNode = createExternalComponentNode({
-      id: 'global-component',
-      width: 320,
-      height: 180,
-      component: { packageId: 'com.example.global', version: '1.0.0' },
-    })
-    project.globalLayer = [{
-      node: globalNode,
-      layer: 'overlay',
-      visibility: { mode: 'all', sceneIds: [] },
-    }]
-    const payload: ExportPayload = { project, assets: {}, components: {} }
+  it('captures the V9 component fixture through the Published V2 seam', async () => {
+    const published = publishedFrom('component')
+    const snapshots = await renderPptxComponentSnapshots(published)
 
-    const pending = renderPptxComponentSnapshots(payload)
-    await vi.runAllTimersAsync()
-    const snapshots = await pending
+    expect(captureCalls).toHaveLength(1)
+    expect(captureCalls[0]).toMatchObject({
+      locationId: published.startLocationId,
+      layerItemId: 'slide-quiz',
+    })
+    expect(dynamicItems(captureCalls[0]!.payload)).toMatchObject([
+      { kind: 'component', layerItemId: 'slide-quiz' },
+    ])
+    expect(snapshots.get(pptxComponentSnapshotKey('scene-1', 'slide-quiz')))
+      .toBe('data:image/png;base64,VTI=')
+  })
 
-    // Entry order remains scene component, then its visible global component,
-    // repeated for each authored scene. Every isolated payload contains only
-    // the one component instance being captured.
-    expect(playerCalls).toHaveLength(4)
-    expect(playerMetrics).toEqual({ active: 0, maxActive: 1, destroyed: 4 })
-    for (const { payload: isolated } of playerCalls) {
-      expect(isolated.project.scenes).toHaveLength(1)
-      const componentCount = isolated.project.scenes[0]!.nodes.filter(
-        (node) => node.type === 'external-component',
-      ).length + isolated.project.globalLayer.filter(
-        (item) => item.node.type === 'external-component',
-      ).length
-      expect(componentCount).toBe(1)
+  it('isolates each component instance and never keeps two captures alive', async () => {
+    const sources = v9Sources('component')
+    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const quiz = slide.scenes[0]!.layerItems.find((item): item is ComponentLayerItem => (
+      item.kind === 'component'
+    ))
+    if (!quiz) throw new Error('expected component item')
+    slide.scenes[0]!.layerItems.push({
+      ...structuredClone(quiz),
+      layerItemId: 'slide-quiz-2',
+      order: quiz.order + 1,
+      frame: { ...quiz.frame, y: quiz.frame.y + 260 },
+    })
+    sources.project.globalLayerItems.push({
+      item: {
+        ...structuredClone(quiz),
+        layerItemId: 'global-quiz',
+        order: 900,
+      },
+      visibility: { mode: 'all', locationIds: [] },
+      plane: 'overlay',
+    })
+    const published = buildPublishedCourseV2Payload(sources)
+
+    const snapshots = await renderPptxComponentSnapshots(published)
+
+    expect(captureCalls).toHaveLength(3)
+    expect(captureMetrics).toEqual({ active: 0, maxActive: 1, destroyed: 3 })
+    for (const call of captureCalls) {
+      expect(dynamicItems(call.payload)).toHaveLength(1)
     }
-
-    project.scenes.forEach((scene, index) => {
-      expect(snapshots.has(pptxComponentSnapshotKey(
-        scene.id,
-        sceneNodes[index]!.id,
-      ))).toBe(true)
-      expect(snapshots.has(pptxGlobalComponentSnapshotKey(
-        scene.id,
-        globalNode.id,
-      ))).toBe(true)
-    })
+    expect(snapshots.has(pptxComponentSnapshotKey('scene-1', 'slide-quiz'))).toBe(true)
+    expect(snapshots.has(pptxComponentSnapshotKey('scene-1', 'slide-quiz-2'))).toBe(true)
+    expect(snapshots.has(pptxGlobalComponentSnapshotKey('scene-1', 'global-quiz'))).toBe(true)
   })
 
   it('单个组件快照失败时保留前后实例，并只报告失败实例', async () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.scenes.push(
-      createScene({ id: 'scene-2', name: '场景 2' }),
-      createScene({ id: 'scene-3', name: '场景 3' }),
+    const sources = v9Sources('component')
+    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const quiz = slide.scenes[0]!.layerItems.find((item): item is ComponentLayerItem => (
+      item.kind === 'component'
+    ))
+    if (!quiz) throw new Error('expected component item')
+    slide.scenes[0]!.layerItems.push(
+      {
+        ...structuredClone(quiz),
+        layerItemId: 'slide-quiz-2',
+        order: quiz.order + 1,
+      },
+      {
+        ...structuredClone(quiz),
+        layerItemId: 'slide-quiz-3',
+        order: quiz.order + 2,
+      },
     )
-    const nodes = project.scenes.map((scene, index) => {
-      const node = createExternalComponentNode({
-        id: `isolated-component-${index + 1}`,
-        component: { packageId: 'com.example.isolated', version: '1.0.0' },
-      })
-      scene.nodes = [node]
-      return node
-    })
-    const payload: ExportPayload = { project, assets: {}, components: {} }
+    const published = buildPublishedCourseV2Payload(sources)
     const onFailure = vi.fn()
-    rendererCalls.failAt.add(1)
+    captureFailAt.add(1)
 
-    const pending = renderPptxComponentSnapshots(payload, { onFailure })
-    await vi.runAllTimersAsync()
-    const snapshots = await pending
+    const snapshots = await renderPptxComponentSnapshots(published, { onFailure })
 
-    expect(snapshots.has(pptxComponentSnapshotKey(
-      project.scenes[0]!.id,
-      nodes[0]!.id,
-    ))).toBe(true)
-    expect(snapshots.has(pptxComponentSnapshotKey(
-      project.scenes[1]!.id,
-      nodes[1]!.id,
-    ))).toBe(false)
-    expect(snapshots.has(pptxComponentSnapshotKey(
-      project.scenes[2]!.id,
-      nodes[2]!.id,
-    ))).toBe(true)
+    expect(snapshots.has(pptxComponentSnapshotKey('scene-1', 'slide-quiz'))).toBe(true)
+    expect(snapshots.has(pptxComponentSnapshotKey('scene-1', 'slide-quiz-2'))).toBe(false)
+    expect(snapshots.has(pptxComponentSnapshotKey('scene-1', 'slide-quiz-3'))).toBe(true)
     expect(onFailure).toHaveBeenCalledOnce()
     expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({
-      snapshotKey: pptxComponentSnapshotKey(
-        project.scenes[1]!.id,
-        nodes[1]!.id,
-      ),
-      sceneId: project.scenes[1]!.id,
-      nodeId: nodes[1]!.id,
+      snapshotKey: pptxComponentSnapshotKey('scene-1', 'slide-quiz-2'),
+      sceneId: 'scene-1',
+      nodeId: 'slide-quiz-2',
     }))
-    expect(playerMetrics).toEqual({ active: 0, maxActive: 1, destroyed: 3 })
+    expect(captureMetrics).toEqual({ active: 0, maxActive: 1, destroyed: 3 })
   })
 })

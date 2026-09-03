@@ -5,7 +5,7 @@ import type {
   ComponentCreateContextV4Dom,
   ComponentEditorProperty,
 } from '@/shared/componentTypes'
-import type { ExternalComponentNode } from '@/shared/projectTypes'
+import type { EditorCanvasNode } from '@/renderer/phaser/editorCanvasNode'
 import { materializeScene } from '@/shared/presentation'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '@/main/componentCatalogScanner'
 import { componentPackagesFromArchive, componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
@@ -24,6 +24,13 @@ import {
   selectMediaAssetFiles,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+
+function materialized(
+  scene: object,
+  stateId?: string | null,
+) {
+  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
+}
 
 const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
   ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR)
@@ -104,10 +111,18 @@ function textProperty(component: ImportedComponentPackage): Extract<
   ))
 }
 
-function activeExternalNodes(): ExternalComponentNode[] {
-  return selectActiveScene(useEditorStore.getState()).nodes.filter(
-    (node): node is ExternalComponentNode => node.type === 'external-component',
-  )
+type CatalogCanvasComponent = EditorCanvasNode & {
+  type: 'external-component'
+  component: { packageId: string; version: string }
+  props: Record<string, unknown>
+}
+
+function isCatalogCanvasComponent(node: EditorCanvasNode): node is CatalogCanvasComponent {
+  return node.type === 'external-component' && node.component != null && node.props != null
+}
+
+function activeExternalNodes(): CatalogCanvasComponent[] {
+  return selectActiveScene(useEditorStore.getState()).nodes.filter(isCatalogCanvasComponent)
 }
 
 async function loadCatalogPackages(): Promise<ImportedComponentPackage[]> {
@@ -206,17 +221,17 @@ catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩�
     }
 
     const scene = selectActiveScene(useEditorStore.getState())
-    const materialized = materializeScene(scene, stateId)
+    const materializedScene = materialized(scene, stateId)
     for (const [index, component] of packages.entries()) {
       const property = textProperty(component)
       if (!property) continue
       const base = scene.nodes.find(
-        (node): node is ExternalComponentNode =>
-          node.type === 'external-component' && node.component.packageId === component.manifest.id,
+        (node): node is CatalogCanvasComponent =>
+          isCatalogCanvasComponent(node) && node.component.packageId === component.manifest.id,
       )!
-      const effective = materialized.nodes.find(
-        (node): node is ExternalComponentNode =>
-          node.type === 'external-component' && node.component.packageId === component.manifest.id,
+      const effective = materializedScene.nodes.find(
+        (node): node is CatalogCanvasComponent =>
+          isCatalogCanvasComponent(node) && node.component.packageId === component.manifest.id,
       )!
       expect(getPath(base.props, property.key)).toBe(`基础属性编辑 ${index + 1} · ${component.manifest.name}`)
       expect(getPath(effective.props, property.key)).toBe(`状态属性编辑 ${index + 1} · ${component.manifest.name}`)

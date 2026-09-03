@@ -243,7 +243,11 @@ describe('shared ↔ renderer ↔ raw Published V2 composition parity', () => {
       })
     } else {
       expectCompositionParity(shared, composeSpatialEditorLocation({ project, locationId }))
-      const view = buildSpatialEditorView({ project, locationId })
+      const view = buildSpatialEditorView({
+        project,
+        locationId,
+        sessionCamera: { x: 0, y: 0, zoom: 1 },
+      })
       expect(view.layers.map((layer) => ({
         id: layer.selectionId,
         globalPlane: layer.globalPlane,

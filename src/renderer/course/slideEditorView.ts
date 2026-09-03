@@ -120,6 +120,18 @@ export function composeSlideEditorLocation(input: {
   return composeCourseProjectLocation(input)
 }
 
+/** Thumbnail state for a Slide location: authored thumbnail, else initial, else location. */
+export function resolveSlideThumbnailStateId(
+  project: CourseProjectDocument,
+  locationId: string,
+): string | null {
+  const { location, scene } = resolveSlide(project, locationId)
+  return scene.presentation?.thumbnailStateId
+    ?? scene.presentation?.initialStateId
+    ?? location.stateId
+    ?? null
+}
+
 export function buildSlideEditorView(input: BuildSlideEditorViewInput): SlideEditorView {
   const { project, locationId } = input
   const { location, surface, scene } = resolveSlide(project, locationId)

@@ -3,7 +3,7 @@ import { componentManifestSchema } from '@/shared/componentSchema'
 import { COMPONENT_RUNTIME_API_VERSION, COMPONENT_SCHEMA_VERSION } from '@/shared/constants'
 import { UserFacingError } from '@/shared/errors'
 import type { ComponentManifest, ComponentPackageData } from '@/shared/componentTypes'
-import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4/types'
 import {
   assertSafeArchivePath,
   componentArchiveRoot,

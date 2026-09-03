@@ -1,11 +1,9 @@
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import { SceneThumbnail } from '../../src/renderer/ui/SceneThumbnail'
+import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
-import {
-  createExternalComponentNode,
-  createScene,
-} from '../../src/renderer/project/createProject'
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
@@ -55,30 +53,48 @@ describe('scene thumbnail playback visibility semantics', () => {
       context as unknown as CanvasRenderingContext2D,
     )
 
-    const scene = createScene({ id: 'thumbnail-animation' })
-    const node = createExternalComponentNode({
-      id: 'animated-thumbnail-node',
-      x: 280,
-      y: 160,
-      width: 400,
-      height: 200,
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    const node: ComponentLayerItem = {
+      layerItemId: 'animated-thumbnail-node',
+      label: 'animated-thumbnail-node',
+      frame: { mode: 'absolute', x: 280, y: 160, width: 400, height: 200 },
+      order: 1,
+      visible: true,
+      locked: false,
+      rotation: 0,
       opacity: 0.64,
-      component: { packageId: 'com.example.card', version: '1.0.0' },
+      hitPolicy: 'auto',
       playbackInitialVisibility: 'hidden',
-    })
-    scene.nodes = [node]
+      kind: 'component',
+      component: { packageId: 'com.example.card', version: '1.0.0' },
+      props: {},
+    }
+    surface.scenes[0]!.layerItems = [node]
+    project.componentPackages = {
+      'com.example.card': {
+        packageId: 'com.example.card',
+        version: '1.0.0',
+        name: 'Card',
+        manifestPath: 'components/com.example.card/manifest.json',
+        runtimePath: 'components/com.example.card/runtime.js',
+        contentSha256: 'a'.repeat(64),
+      },
+    }
+    useEditorStore.getState().loadCourseProject(project, null, {}, {})
 
-    render(<SceneThumbnail scene={scene} />)
+    render(<SceneThumbnail locationId={project.startLocationId} />)
     await waitFor(() => expect(translate).toHaveBeenCalled())
 
     const thumbnailScale = 160 / 1280
     expect(translate).toHaveBeenCalledWith(
-      (node.x + node.width / 2) * thumbnailScale,
-      (node.y + node.height / 2) * thumbnailScale,
+      (node.frame.x + node.frame.width / 2) * thumbnailScale,
+      (node.frame.y + node.frame.height / 2) * thumbnailScale,
     )
     expect(translate).not.toHaveBeenCalledWith(
-      (node.x + node.width / 2 - 48) * thumbnailScale,
-      (node.y + node.height / 2) * thumbnailScale,
+      (node.frame.x + node.frame.width / 2 - 48) * thumbnailScale,
+      (node.frame.y + node.frame.height / 2) * thumbnailScale,
     )
     expect(alphaValues).toContain(node.opacity)
     expect(alphaValues).not.toContain(0)

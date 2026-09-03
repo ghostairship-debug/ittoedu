@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -45,7 +48,12 @@ import {
   adaptV9SpatialLayerHit,
   hitTestV9SpatialLayerItems,
 } from '@/renderer/phaser/v9SpatialHitAdapter'
-import { buildSpatialEditorView } from '@/renderer/course/spatialEditorView'
+import {
+  assertActiveSpatialEditorView,
+  buildSpatialEditorView,
+  isSpatialEditorLocationKind,
+  SPATIAL_SESSIONLESS_ERROR,
+} from '@/renderer/course/spatialEditorView'
 
 /**
  * Proves Spatial world authoring adapter: hit order, transform, insert, double-click.
@@ -460,6 +468,7 @@ describe('Spatial world authoring adapter', () => {
     const composed = buildSpatialEditorView({
       project: hitProject,
       locationId: LOCATION_ID,
+      sessionCamera: host.session().sessionCamera,
     })
     const targets = composed.layers.map(adaptV9SpatialLayerHit)
     const sharedPoint = {
@@ -488,6 +497,7 @@ describe('Spatial world authoring adapter', () => {
     const passThroughTargets = buildSpatialEditorView({
       project: passThroughProject,
       locationId: LOCATION_ID,
+      sessionCamera: host.session().sessionCamera,
     }).layers.map(adaptV9SpatialLayerHit)
     expect(hitTestV9SpatialLayerItems(passThroughTargets, sharedPoint)?.layerItemId)
       .toBe('world-text')
@@ -509,7 +519,6 @@ describe('Spatial world authoring adapter', () => {
     expect(down.targets?.[0]?.authoringAddress).toBe(makeAuthoringAddress({
       projectId: 'r5b-spatial-world',
       scope: 'global',
-      surfaceId: SURFACE_ID,
       carrier: 'native',
       layerItemId: 'global-teacher-controller',
       field: 'item',
@@ -585,6 +594,7 @@ describe('Spatial world authoring adapter', () => {
     const view = buildSpatialEditorView({
       project: host.session().history.present,
       locationId: LOCATION_ID,
+      sessionCamera: host.session().sessionCamera,
     })
     const hits = view.layers.map(adaptV9SpatialLayerHit)
     expect(hitTestV9SpatialLayerItems(hits, {
@@ -794,5 +804,118 @@ describe('Spatial world authoring adapter', () => {
       layerItemId: 'world-image',
     })
     expect(refused.ok).toBe(false)
+  })
+})
+
+describe('SpatialEditorView identities and Workspace Spatial reads', () => {
+  it('exposes owner, camera, path, relation and visibility identities without R5-A top-level keys', () => {
+    const project = structuredClone(fixture())
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    surface.world.paths = [{
+      id: 'path-explore',
+      name: '探索',
+      layerItemIds: ['world-text', 'world-image'],
+    }]
+    surface.world.relations = [{
+      id: 'rel-text-image',
+      sourceLayerItemId: 'world-text',
+      targetLayerItemId: 'world-image',
+      kind: 'arrow',
+    }]
+    surface.semanticZoom = [{
+      id: 'zoom-text',
+      layerItemIds: ['world-text'],
+      minZoom: 0,
+      maxZoom: 2,
+      visible: true,
+    }]
+    const parsed = courseProjectDocumentSchema.parse(project)
+    const view = buildSpatialEditorView({
+      project: parsed,
+      locationId: LOCATION_ID,
+      sessionCamera: { x: 12, y: -8, zoom: 1.5 },
+    })
+
+    expect(view).not.toHaveProperty('paths')
+    expect(view).not.toHaveProperty('relations')
+    expect(view).not.toHaveProperty('semanticZoom')
+    expect(view.worldGraph.paths.map((entry) => entry.pathId)).toEqual(['path-explore'])
+    expect(view.worldGraph.relations.map((entry) => entry.relationId)).toEqual(['rel-text-image'])
+    expect(view.visibilityRules.map((rule) => rule.id)).toEqual(['zoom-text'])
+    expect(view.camera.activeFrame.id).toBe('camera-home')
+    expect(view.activeLocation.cameraFrameId).toBe('camera-home')
+    expect(view.sessionCamera).toEqual({ x: 12, y: -8, zoom: 1.5 })
+    expect(parsed.surfaces[0] && parsed.surfaces[0].type === 'spatial-2d'
+      ? parsed.surfaces[0].camera.home
+      : null).toEqual({ x: 0, y: 0, zoom: 1 })
+    expect(Object.isFrozen(view)).toBe(true)
+
+    const world = view.layers.find((layer) => layer.selectionId === 'world-text')
+    const surfaceLayer = view.layers.find((layer) => layer.selectionId === 'surface-shared')
+    const hud = view.layers.find((layer) => layer.selectionId === 'global-hud')
+    expect(world).toMatchObject({
+      owner: 'world',
+      ownerKey: `world:${SURFACE_ID}`,
+      coordinateSpace: 'world',
+      locked: false,
+    })
+    expect(world?.authoringAddress).toBe(makeAuthoringAddress({
+      projectId: parsed.id,
+      scope: 'surface',
+      surfaceId: SURFACE_ID,
+      carrier: 'native',
+      layerItemId: 'world-text',
+      field: 'content.data.text',
+    }))
+    expect(surfaceLayer?.owner).toBe('surface')
+    expect(hud?.owner).toBe('global')
+    expect(hud?.ownerKey).toBe('global')
+    expect(JSON.stringify(view)).not.toMatch(/hitId/)
+
+    expect(() => assertActiveSpatialEditorView({
+      ...view,
+      locationId: '',
+      activeLocation: { ...view.activeLocation, locationId: '' },
+    })).toThrow(SPATIAL_SESSIONLESS_ERROR)
+    expect(isSpatialEditorLocationKind('spatial-camera')).toBe(true)
+    expect(isSpatialEditorLocationKind('spatial-frames')).toBe(false)
+    expect(isSpatialEditorLocationKind('flow-block')).toBe(false)
+    expect(isSpatialEditorLocationKind('slide-scene')).toBe(false)
+  })
+
+  it('Spatial Workspace branch no longer projects SceneNode or old editing nodes', () => {
+    const shell = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/SpatialLocationWorkspace.tsx'),
+      'utf8',
+    )
+    const connector = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/SpatialWorkspaceConnector.tsx'),
+      'utf8',
+    )
+    const route = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/WorkspaceRouteContext.ts'),
+      'utf8',
+    )
+    expect(shell).not.toMatch(/courseLayerItemToSceneNode/)
+    expect(shell).not.toMatch(/selectEditingNodes/)
+    expect(shell).not.toMatch(/selectSelectedNode/)
+    expect(shell).not.toMatch(/useEditorStore/)
+    expect(shell).not.toMatch(/from ['"][^'"]*editorStore['"]/)
+    expect(shell).toMatch(/createSpatialWorldTargetAuthoringController/)
+    expect(shell).not.toMatch(/createSpatialWorldAuthoringController/)
+    expect(shell).not.toMatch(/SpatialWorldAuthoringHost|authoringHost/)
+    expect(shell).not.toMatch(/\bgetSession\b|\bsetSession\b/)
+    expect(shell).not.toMatch(/runSpatialCommand|applySpatialAuthoringSession/)
+    expect(shell).toMatch(/materializeNativeLayerItem/)
+    expect(shell).not.toMatch(/SPATIAL_SESSIONLESS_ERROR/)
+    expect(shell).not.toMatch(/spatial-workspace-sessionless/)
+    expect(route).toMatch(/expectedSurfaceType !== 'spatial-2d'/)
+    expect(connector).toMatch(/SPATIAL_SESSIONLESS_ERROR/)
+    expect(connector).toMatch(/spatial-workspace-sessionless/)
+    expect(route).toMatch(/locationSurfaceType/)
+    expect(connector).not.toMatch(/hitTestV9SpatialLayerItems/)
+    expect(connector).not.toMatch(/function SpatialSelectionOverlay/)
+    expect(connector).not.toMatch(/createSpatialWorldViewTransform/)
   })
 })

@@ -27,6 +27,21 @@ import {
   SpatialCommandError,
   undoSpatialAuthoringHistory,
 } from '@/renderer/course/spatialAuthoringHistory'
+import {
+  commitSlideActionTransaction,
+  commitSlideAuthoringHistory,
+  commitSlideEditorTransactionHistory,
+  createSlideAuthoringHistory,
+  isSlideAuthoringTransactionFrame,
+  redoSlideAuthoringHistory,
+  SLIDE_REJECT_STALE_REVISION,
+  SlideCommandError,
+  slideAuthoringLegacyHistoryEntryCount,
+  slideAuthoringRedoResourceTransition,
+  slideAuthoringUndoResourceTransition,
+  undoSlideAuthoringHistory,
+} from '@/renderer/course/slideEditorCommands'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { applyHistoryResourceChanges } from '@/renderer/store/history'
@@ -51,6 +66,16 @@ function flowProject(): CourseProjectDocument {
 function spatialProject(): CourseProjectDocument {
   return createBlankSpatialCourseProject({
     id: 'spatial-resource-history',
+    now: NOW,
+    controls: 'none',
+    includeDefaultController: false,
+    idFactory: sequentialIdFactory(),
+  })
+}
+
+function slideProject(): CourseProjectDocument {
+  return createBlankCourseProject({
+    id: 'slide-resource-history',
     now: NOW,
     controls: 'none',
     includeDefaultController: false,
@@ -319,6 +344,114 @@ describe('Spatial resource-aware authoring history', () => {
     expect(() => commitSpatialEditorTransactionHistory(history, staleStep))
       .toThrowError(expect.objectContaining<Partial<SpatialCommandError>>({
         reason: SPATIAL_REJECT_STALE_REVISION,
+      }))
+  })
+})
+
+describe('Slide resource-aware authoring history', () => {
+  it('mixes legacy documents with a cloned transaction frame and exact resource transitions', () => {
+    const initial = slideProject()
+    const legacy = nextDocument(initial, 'legacy')
+    const transactional = nextDocument(legacy, 'transactional')
+    const sourceBytes = new Uint8Array([1, 2, 3])
+    const step = createEditorTransactionStep(legacy, {
+      projectId: legacy.id,
+      baseRevision: legacy.revision,
+      nextDocument: transactional,
+      resourceChanges: {
+        assetFileChanges: [{ assetId: 'slide-image', after: sourceBytes }],
+      },
+    })
+    if (!step) throw new Error('Expected a non-empty transaction step')
+
+    let history = createSlideAuthoringHistory(initial)
+    history = commitSlideAuthoringHistory(history, legacy)
+    history = commitSlideEditorTransactionHistory(history, step)
+
+    expect(history.present).toBe(step.nextDocument)
+    expect(history.past).toHaveLength(2)
+    expect(history.past[0]).toBe(initial)
+    const frame = history.past[1]!
+    expect(isSlideAuthoringTransactionFrame(frame)).toBe(true)
+    if (!isSlideAuthoringTransactionFrame(frame)) throw new Error('Expected transaction frame')
+    expect(frame.document).toBe(legacy)
+    expect(frame.resourceChanges).not.toBe(step.resourceChanges)
+    expect(frame.resourceChanges.assetFileChanges![0]!.after)
+      .not.toBe(step.resourceChanges.assetFileChanges![0]!.after)
+
+    sourceBytes[0] = 99
+    expect([...frame.resourceChanges.assetFileChanges![0]!.after!]).toEqual([1, 2, 3])
+
+    const populatedResources = applyHistoryResourceChanges({
+      componentPackages: {},
+      assetFiles: {},
+    }, step.resourceChanges, 'forward')
+    const undoTransition = slideAuthoringUndoResourceTransition(history)
+    expect(undoTransition?.resourceDirection).toBe('inverse')
+    const revertedResources = applyHistoryResourceChanges(
+      populatedResources,
+      undoTransition!.resourceChanges,
+      undoTransition!.resourceDirection,
+    )
+    expect(revertedResources.assetFiles['slide-image']).toBeUndefined()
+
+    history = undoSlideAuthoringHistory(history)
+    expect(history.present.title).toBe('legacy')
+    const redoTransition = slideAuthoringRedoResourceTransition(history)
+    expect(redoTransition?.resourceDirection).toBe('forward')
+    const restoredResources = applyHistoryResourceChanges(
+      revertedResources,
+      redoTransition!.resourceChanges,
+      redoTransition!.resourceDirection,
+    )
+    expect([...restoredResources.assetFiles['slide-image']!]).toEqual([1, 2, 3])
+
+    history = redoSlideAuthoringHistory(history)
+    expect(history.present.title).toBe('transactional')
+    expect(slideAuthoringRedoResourceTransition(history)).toBeUndefined()
+  })
+
+  it('keeps empty-delta action frames, delta-to-legacy counting, the 100-step cap, and stale rejection', () => {
+    const initial = slideProject()
+    let history = createSlideAuthoringHistory(initial)
+
+    const actionDocument = nextDocument(initial, 'slide-action')
+    const committed = commitSlideActionTransaction(history, actionDocument)
+    if (!committed) throw new Error('Expected a Slide action transaction')
+    history = committed.history
+    expect(committed.resourceTransition.resourceDirection).toBe('forward')
+    expect(isSlideAuthoringTransactionFrame(history.past[0]!)).toBe(true)
+    expect(slideAuthoringLegacyHistoryEntryCount(history.past)).toBe(0)
+
+    history = commitSlideAuthoringHistory(history, nextDocument(history.present, 'slide-legacy'))
+    expect(slideAuthoringLegacyHistoryEntryCount(history.past)).toBe(1)
+    expect(slideAuthoringUndoResourceTransition(history)).toBeUndefined()
+
+    history = undoSlideAuthoringHistory(history)
+    expect(slideAuthoringLegacyHistoryEntryCount(history.past)).toBe(0)
+    expect(slideAuthoringLegacyHistoryEntryCount(history.future)).toBe(1)
+    expect(history.future).toHaveLength(1)
+    history = commitSlideAuthoringHistory(history, nextDocument(history.present, 'slide-branch'))
+    expect(history.future).toEqual([])
+    expect(slideAuthoringLegacyHistoryEntryCount(history.past)).toBe(1)
+
+    for (let index = 1; index <= 100; index += 1) {
+      history = commitSlideAuthoringHistory(history, nextDocument(history.present, `slide-${index}`))
+    }
+    expect(history.past).toHaveLength(100)
+    expect(slideAuthoringLegacyHistoryEntryCount(history.past)).toBe(100)
+
+    const staleBase = nextDocument(history.present, 'stale-base')
+    const staleStep = createEditorTransactionStep(staleBase, {
+      projectId: staleBase.id,
+      baseRevision: staleBase.revision,
+      nextDocument: nextDocument(staleBase, 'stale-next'),
+      resourceChanges: {},
+    })
+    if (!staleStep) throw new Error('Expected a non-empty stale step')
+    expect(() => commitSlideEditorTransactionHistory(history, staleStep))
+      .toThrowError(expect.objectContaining<Partial<SlideCommandError>>({
+        reason: SLIDE_REJECT_STALE_REVISION,
       }))
   })
 })

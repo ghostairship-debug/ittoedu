@@ -26,7 +26,7 @@ import { createBlankCourseProject } from '../src/renderer/project/createCoursePr
 import {
   createExternalComponentNode,
   createTextNode,
-} from '../src/renderer/project/createProject'
+} from '../src/renderer/project/nativeNodeFactories'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,

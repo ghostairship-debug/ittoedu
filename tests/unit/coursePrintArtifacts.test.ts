@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -6,28 +6,95 @@ import {
   addCourseFlowPage,
   addCourseSpatialPage,
 } from '@/renderer/course/courseLocationCommands'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
+import { buildPublishedCourseV2Payload, type CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
 import {
   buildCourseExportPageList,
   buildCoursePrintArtifacts,
   composePublishedSlideStaticPage,
-  renderPublishedSpatialFrameSvg,
-  SPATIAL_EXPORT_VIEWPORT,
 } from '@/renderer/export/course/buildCoursePrintArtifacts'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
 import {
   buildFlowPrintPlan,
+  flowPrintOmittedOverlayMessage,
   flowPrintPlanHasRuntimeToc,
   renderFlowPrintBodyHtml,
   renderFlowPrintHtml,
 } from '@/renderer/export/course/flowPrintPlan'
+import { adaptCoursePdfProducerFindings } from '@/renderer/export/exportPreflight'
+import { createPublishedCourseV2PrintCaptureSession } from '@/renderer/export/playerCapture'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
+import {
+  listCourseProjectV9Fixtures,
+  type CourseProjectV9FixtureId,
+} from '../fixtures/course-project-v9'
+
+const printCapture = vi.hoisted(() => ({
+  create: vi.fn(),
+  capturePage: vi.fn(),
+  destroy: vi.fn(),
+}))
+
+vi.mock('@/renderer/export/playerCapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/export/playerCapture')>()
+  return {
+    ...actual,
+    createPublishedCourseV2PrintCaptureSession: printCapture.create,
+  }
+})
 
 const NOW = '2026-08-17T12:00:00.000Z'
 const ASSET_BYTES = new Uint8Array([1, 2, 3, 4])
+const V2_CAPTURE_IMAGE = 'data:image/png;base64,AA=='
+const SPATIAL_CAPTURE_IMAGE = 'data:image/png;base64,AQ=='
+
+function surfaceCapture(
+  content: string,
+  width: number,
+  height: number,
+  warnings: string[] = [],
+) {
+  return {
+    format: 'data-url' as const,
+    content,
+    width,
+    height,
+    warnings,
+  }
+}
+
+function defaultCaptureForRequest(request: { width?: number; height?: number }) {
+  const isSpatial = request.width === 1120 && request.height === 760
+  return surfaceCapture(
+    isSpatial ? SPATIAL_CAPTURE_IMAGE : V2_CAPTURE_IMAGE,
+    request.width ?? 1280,
+    request.height ?? 720,
+  )
+}
+
+beforeEach(() => {
+  printCapture.capturePage.mockReset().mockImplementation(defaultCaptureForRequest)
+  printCapture.destroy.mockReset().mockResolvedValue(undefined)
+  printCapture.create.mockReset().mockResolvedValue({
+    capturePage: printCapture.capturePage,
+    destroy: printCapture.destroy,
+  })
+})
+
+function v9Sources(id: CourseProjectV9FixtureId): CoursePublishSources {
+  const fixture = listCourseProjectV9Fixtures().find((candidate) => candidate.id === id)
+  if (!fixture) throw new Error(`missing Course Project V9 fixture ${id}`)
+  return {
+    project: structuredClone(fixture.data.project),
+    assetFiles: { ...fixture.data.assetFiles },
+    components: Object.keys(fixture.data.componentFiles).length === 0
+      ? {}
+      : componentPackagesFromArchive(fixture.data.project, fixture.data.componentFiles),
+  }
+}
 
 function mixedPublishedFixture() {
   let project = createBlankCourseProject({ now: NOW, includeDefaultController: true })
@@ -96,34 +163,37 @@ describe('buildCoursePrintArtifacts', () => {
     expect(docxXml).not.toContain('打开目录')
 
     const spatialSurface = published.surfaces.find((surface) => surface.type === 'spatial-2d')
-    if (spatialSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
-    const { svg, viewport } = renderPublishedSpatialFrameSvg(
-      spatialSurface,
-      spatialSurface.camera.frames[0]?.id,
-      () => undefined,
-    )
-    expect(viewport).toEqual(SPATIAL_EXPORT_VIEWPORT)
-    expect(viewport.width).not.toBe(1280)
-    expect(viewport.height).not.toBe(720)
-    expect(svg).toContain('data-spatial-viewport="1120x760"')
-
-    const includeGlobalLayerItems: Array<boolean | undefined> = []
+    const slideSurface = published.surfaces.find((surface) => surface.type === 'slide')
+    if (spatialSurface?.type !== 'spatial-2d' || slideSurface?.type !== 'slide') {
+      throw new Error('expected Slide and Spatial surfaces')
+    }
     const result = await buildCoursePrintArtifacts(published, {
       resolveAssetBytes: (assetId) => ({
         bytes: ASSET_BYTES,
         mimeType: published.assets[assetId]?.mimeType ?? 'application/octet-stream',
       }),
-      captureSlideScene: (input) => {
-        includeGlobalLayerItems.push(input.includeGlobalLayerItems)
-        return 'data:image/png;base64,AA=='
-      },
     })
 
     expect(buildCourseExportPageList(published).length).toBeGreaterThan(0)
     expect(result.files.some((file) => file.kind === 'flow-print-html')).toBe(true)
     expect(result.files.some((file) => file.kind === 'docx')).toBe(true)
     expect(result.report.some((item) => item.message.includes('全局图层'))).toBe(true)
-    expect(includeGlobalLayerItems).toEqual([false])
+    expect(printCapture.create).toHaveBeenCalledOnce()
+    expect(printCapture.create).toHaveBeenCalledWith(expect.objectContaining({
+      includeGlobalLayerItems: false,
+    }))
+    expect(printCapture.capturePage).toHaveBeenCalledTimes(2)
+    expect(printCapture.capturePage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      surfaceId: spatialSurface.id,
+      width: 1120,
+      height: 760,
+    }))
+    expect(printCapture.capturePage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      surfaceId: slideSurface.id,
+      width: 1280,
+      height: 720,
+    }))
+    expect(printCapture.destroy).toHaveBeenCalledOnce()
 
     const mixedHtml = new TextDecoder().decode(
       result.files.find((file) => file.kind === 'flow-print-html')!.bytes,
@@ -131,7 +201,11 @@ describe('buildCoursePrintArtifacts', () => {
     expect(mixedHtml).not.toContain('全局')
     expect(mixedHtml).not.toContain(project.globalLayerItems[0]?.item.layerItemId ?? 'missing-global')
     expect(mixedHtml).not.toContain('flow-runtime-toc')
-    expect(mixedHtml).toContain('data-spatial-viewport="1120x760"')
+    expect(mixedHtml).toContain(SPATIAL_CAPTURE_IMAGE)
+    expect(mixedHtml).toContain(V2_CAPTURE_IMAGE)
+    expect(mixedHtml).toContain('data-capture-width="1120" data-capture-height="760"')
+    expect(mixedHtml).toContain('data-capture-width="1280" data-capture-height="720"')
+    expect(mixedHtml).toMatch(/\.course-visual-print-capture\{[^}]*object-fit:contain/)
 
     const pdfHtml = new TextDecoder().decode(
       result.files.find((file) => file.kind === 'pdf-html')!.bytes,
@@ -141,22 +215,15 @@ describe('buildCoursePrintArtifacts', () => {
     expect(pdfHtml.match(/<body\b/gi)).toHaveLength(1)
     expect(pdfHtml.match(/class="page /g)).toHaveLength(result.pages.length)
     expect(pdfHtml).toContain('@page{size:A4 landscape;margin:0}')
-    expect(pdfHtml).toContain('class="course-slide-print-canvas"')
-    expect(pdfHtml).toMatch(/\.course-slide-print-canvas\{[^}]*transform:scale\(0\.\d+\)/)
-    expect(pdfHtml).toContain('.course-spatial-print-page svg{display:block;width:100%;height:100%}')
-    expect(pdfHtml).toContain('.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere}')
+    expect(pdfHtml).toContain('class="course-visual-print-canvas course-slide-print-canvas"')
+    expect(pdfHtml).toContain('class="course-visual-print-canvas course-spatial-print-canvas"')
+    expect(pdfHtml).toContain('.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere;')
     expect(pdfHtml).toContain('course-slide-print-page')
     expect(pdfHtml).toContain('flow-print-document')
-    expect(pdfHtml).toContain('data-spatial-viewport="1120x760"')
+    expect(pdfHtml).toBe(mixedHtml)
     expect([
-      ...pdfHtml.matchAll(
-        /<section class="page (course-slide-print-page|flow-print-document|course-spatial-print-page)"/g,
-      ),
-    ].map((match) => match[1])).toEqual(result.pages.map((page) => ({
-      'slide-scene': 'course-slide-print-page',
-      'flow-document': 'flow-print-document',
-      'spatial-frame': 'course-spatial-print-page',
-    })[page.kind]))
+      ...pdfHtml.matchAll(/<section class="page [^"]*"[^>]*data-page-id="([^"]+)"/g),
+    ].map((match) => match[1])).toEqual(result.pages.map((page) => page.id))
 
     const nativePublished = structuredClone(published)
     if (!nativePublished.mixedPrintPlan) throw new Error('expected mixed print plan')
@@ -166,7 +233,7 @@ describe('buildCoursePrintArtifacts', () => {
       nativeResult.files.find((file) => file.kind === 'pdf-html')!.bytes,
     )
     expect(nativePdf).toContain('@page{size:13.333333in 7.5in;margin:0}')
-    expect(nativePdf).toContain('transform:scale(1.000000)')
+    expect(nativePdf).toContain('object-fit:contain')
   })
 
   it('selects semantic Flow, image Spatial, and retained pure-Slide PDF inputs', async () => {
@@ -194,12 +261,14 @@ describe('buildCoursePrintArtifacts', () => {
     const spatialPdf = new TextDecoder().decode(
       spatialResult.files.find((file) => file.kind === 'pdf-html')!.bytes,
     )
-    expect(spatialPdf).toContain('<img src="data:image/svg+xml')
-    expect(spatialPdf).not.toContain('course-spatial-print-page')
+    expect(spatialPdf).toContain('course-spatial-print-page')
+    expect(spatialPdf).toContain(SPATIAL_CAPTURE_IMAGE)
+    expect(spatialPdf).toContain('data-capture-width="1120" data-capture-height="760"')
+    expect(spatialPdf).toContain('object-fit:contain')
+    expect(spatialPdf).toContain('@page{size:A4 landscape;margin:0}')
+    expect(spatialPdf).not.toContain('@page { size: 13.333in 7.5in')
 
     const slideProject = createBlankCourseProject({ now: NOW, includeDefaultController: true })
-    const controllerId = slideProject.globalLayerItems[0]?.item.layerItemId
-    if (!controllerId) throw new Error('expected global teacher controller')
     const globalText = sceneNodeToCourseLayerItem(createTextNode({
       id: 'global-print-text',
       text: '纯 Slide 全局页脚',
@@ -217,29 +286,26 @@ describe('buildCoursePrintArtifacts', () => {
       assetFiles: {},
       components: {},
     })
-    const slideResult = await buildCoursePrintArtifacts(slide)
-    expect(slideResult.files.some((file) => file.kind === 'pdf-html')).toBe(false)
-    const slidePrintHtml = new TextDecoder().decode(
-      slideResult.files.find((file) => file.kind === 'flow-print-html')!.bytes,
-    )
-    expect(slidePrintHtml).toContain('纯 Slide 全局页脚')
-    expect(slidePrintHtml).toContain(globalText.layerItemId)
-    expect(slidePrintHtml).not.toContain(controllerId)
-
     const captureGlobalFlags: Array<boolean | undefined> = []
     const captureLocationIds: Array<string | undefined> = []
     const capturedSlideResult = await buildCoursePrintArtifacts(slide, {
       captureSlideScene: (input) => {
         captureGlobalFlags.push(input.includeGlobalLayerItems)
         captureLocationIds.push(input.locationId)
-        return 'data:image/png;base64,AA=='
+        return surfaceCapture(V2_CAPTURE_IMAGE, 1280, 720)
       },
     })
     const capturedSlidePdf = new TextDecoder().decode(
       capturedSlideResult.files.find((file) => file.kind === 'pdf-html')!.bytes,
     )
     expect(capturedSlidePdf).toContain('<img src="data:image/png;base64,AA=="')
+    expect(capturedSlidePdf).toContain('data-capture-width="1280" data-capture-height="720"')
+    expect(capturedSlidePdf).toContain('object-fit: contain')
     expect(capturedSlidePdf).not.toContain('course-slide-print-page')
+    const capturedSlidePrint = new TextDecoder().decode(
+      capturedSlideResult.files.find((file) => file.kind === 'flow-print-html')!.bytes,
+    )
+    expect(capturedSlidePrint).toContain('data-capture-width="1280" data-capture-height="720"')
     expect(captureGlobalFlags).toEqual([true])
     expect(captureLocationIds).toEqual([slide.startLocationId])
     expect(capturedSlideResult.report.some((item) => (
@@ -281,7 +347,7 @@ describe('buildCoursePrintArtifacts', () => {
     await buildCoursePrintArtifacts(published, {
       captureSlideScene: ({ locationId }) => {
         capturedLocationIds.push(locationId)
-        return 'data:image/png;base64,AA=='
+        return surfaceCapture(V2_CAPTURE_IMAGE, 1280, 720)
       },
     })
     expect(capturedLocationIds).toEqual(['course-order-first-location'])
@@ -387,5 +453,294 @@ describe('buildCoursePrintArtifacts', () => {
       message: expect.stringContaining('没有课程位置'),
     }))
     expect(result.files.some((file) => file.kind === 'pdf-html')).toBe(false)
+  })
+
+  it('fails closed without either printable HTML artifact when a Spatial capture fails', async () => {
+    const sources = v9Sources('mixed')
+    printCapture.capturePage.mockImplementation((request: { width?: number; height?: number }) => {
+      if (request.width === 1120 && request.height === 760) {
+        throw new Error('spatial capture generation failed')
+      }
+      return defaultCaptureForRequest(request)
+    })
+    const result = await buildCoursePrintArtifacts(sources)
+
+    expect(result.report).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      message: expect.stringContaining('spatial capture generation failed'),
+    }))
+    expect(result.files.some((file) => file.kind === 'pdf-html')).toBe(false)
+    expect(result.files.some((file) => file.kind === 'flow-print-html')).toBe(false)
+    expect(printCapture.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('retains Published V2 capture warnings as page-scoped producer facts', async () => {
+    printCapture.capturePage.mockImplementation((request) => {
+      const capture = defaultCaptureForRequest(request)
+      return { ...capture, warnings: ['已使用确定性静态后备'] }
+    })
+
+    const result = await buildCoursePrintArtifacts(v9Sources('spatial'))
+
+    expect(result.report.filter((item) => item.message.includes('已使用确定性静态后备')))
+      .toEqual(result.pages.map((page) => expect.objectContaining({
+        severity: 'warning',
+        pageId: page.id,
+      })))
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('已使用确定性静态后备'),
+    ]))
+    expect(result.files.some((file) => file.kind === 'pdf-html')).toBe(true)
+  })
+})
+
+describe('r11-042 V9 fixture print facts', () => {
+  it('records Slide/Flow/Spatial/Mixed page, size, background, overlay and dynamic facts', async () => {
+    const slide = await buildCoursePrintArtifacts(v9Sources('slide-native'))
+    expect(slide.pages.map((page) => page.kind)).toEqual(['slide-scene'])
+    expect(printCapture.create).toHaveBeenCalledOnce()
+    expect(printCapture.capturePage).toHaveBeenCalledWith({
+      locationId: 'location-scene-1',
+      surfaceId: 'surface-slide',
+      width: 1280,
+      height: 720,
+    })
+    expect(printCapture.destroy).toHaveBeenCalledOnce()
+    const slidePdf = new TextDecoder().decode(
+      slide.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+    expect(slidePdf).toContain(V2_CAPTURE_IMAGE)
+    expect(slidePdf).toContain('@page { size: 13.333in 7.5in; margin: 0; }')
+    const slidePrint = new TextDecoder().decode(
+      slide.files.find((file) => file.kind === 'flow-print-html')!.bytes,
+    )
+    expect(slidePrint).toContain('course-slide-print-canvas')
+    expect(slidePrint).toContain(V2_CAPTURE_IMAGE)
+    expect(slidePrint).toContain('data-capture-width="1280" data-capture-height="720"')
+    expect(slidePrint).toContain('background:#fff')
+    expect(slidePrint).not.toContain('global-banner')
+
+    printCapture.create.mockClear()
+    printCapture.capturePage.mockClear()
+    printCapture.destroy.mockClear()
+    const flowSources = v9Sources('flow')
+    const flowProjectSurface = flowSources.project.surfaces.find((surface) => surface.type === 'flow')
+    if (!flowProjectSurface || flowProjectSurface.type !== 'flow') throw new Error('expected Flow project')
+    flowProjectSurface.backgroundColor = '#345678'
+    const flow = await buildCoursePrintArtifacts(flowSources)
+    expect(printCapture.create).not.toHaveBeenCalled()
+    expect(flow.pages.map((page) => page.kind)).toEqual(['flow-document'])
+    const flowPdf = new TextDecoder().decode(
+      flow.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+    expect(flowPdf).toContain('class="page flow-print-document"')
+    expect(flowPdf).toContain('@page{size:A4 portrait;margin:0}')
+    expect(flowPdf).toContain('流式讲义')
+    expect(flowPdf).toContain('background:#345678')
+    expect(flowPdf).toContain('data-flow-floating-layers="omitted"')
+    expect(flowPdf).toContain('data-flow-omitted-floating-layer-count="2"')
+    expect(flowPdf).not.toContain('讲义浮层')
+    const publishedFlow = buildPublishedCourseV2Payload(flowSources).surfaces.find(
+      (surface) => surface.type === 'flow',
+    )
+    if (!publishedFlow || publishedFlow.type !== 'flow') throw new Error('expected Flow fixture')
+    const plan = buildFlowPrintPlan(publishedFlow)
+    expect(flowPrintOmittedOverlayMessage(plan)).toContain('2 个浮层不进入语义分页')
+    expect(flow.report.some((item) => item.message.includes('浮层不进入语义分页'))).toBe(true)
+
+    const spatialSources = v9Sources('spatial')
+    const spatialProjectSurface = spatialSources.project.surfaces.find(
+      (surface) => surface.type === 'spatial-2d',
+    )
+    if (!spatialProjectSurface || spatialProjectSurface.type !== 'spatial-2d') {
+      throw new Error('expected Spatial project')
+    }
+    spatialProjectSurface.backgroundColor = '#654321'
+    spatialProjectSurface.surfaceLayerItems.push({
+      item: sceneNodeToCourseLayerItem(createTextNode({
+        id: 'spatial-surface-marker',
+        text: '空间浮层',
+        x: 20,
+        y: 20,
+        width: 200,
+        height: 48,
+      }), 950),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    printCapture.create.mockClear()
+    printCapture.capturePage.mockClear()
+    printCapture.destroy.mockClear()
+    const spatial = await buildCoursePrintArtifacts(spatialSources)
+    expect(spatial.pages.map((page) => page.kind)).toEqual(['spatial-frame', 'spatial-frame'])
+    expect(printCapture.create).toHaveBeenCalledOnce()
+    expect(printCapture.capturePage).toHaveBeenCalledTimes(2)
+    expect(printCapture.capturePage.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({
+        frameId: 'camera-home',
+        width: 1120,
+        height: 760,
+      }),
+      expect.objectContaining({
+        frameId: 'camera-detail',
+        width: 1120,
+        height: 760,
+      }),
+    ])
+    expect(printCapture.destroy).toHaveBeenCalledOnce()
+    const spatialPrint = new TextDecoder().decode(
+      spatial.files.find((file) => file.kind === 'flow-print-html')!.bytes,
+    )
+    expect(spatialPrint.match(new RegExp(SPATIAL_CAPTURE_IMAGE, 'g'))).toHaveLength(2)
+    expect(spatialPrint.match(/data-capture-width="1120" data-capture-height="760"/g))
+      .toHaveLength(2)
+    expect(spatialPrint).toContain('object-fit:contain')
+    const spatialPdf = new TextDecoder().decode(
+      spatial.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+    expect(spatialPdf).toBe(spatialPrint)
+    expect(spatialPdf).toContain('course-spatial-print-page')
+    expect(spatial.pages).toHaveLength(2)
+
+    printCapture.create.mockClear()
+    printCapture.capturePage.mockClear()
+    printCapture.destroy.mockClear()
+    const mixed = await buildCoursePrintArtifacts(v9Sources('mixed'))
+    expect(mixed.pages.map((page) => page.kind)).toEqual([
+      'slide-scene',
+      'flow-document',
+      'spatial-frame',
+    ])
+    const mixedPdf = new TextDecoder().decode(
+      mixed.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+    const mixedPrint = new TextDecoder().decode(
+      mixed.files.find((file) => file.kind === 'flow-print-html')!.bytes,
+    )
+    expect(mixedPdf).toBe(mixedPrint)
+    expect(printCapture.create).toHaveBeenCalledOnce()
+    expect(printCapture.capturePage).toHaveBeenCalledTimes(2)
+    expect(printCapture.capturePage.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({ width: 1280, height: 720 }),
+      expect.objectContaining({ width: 1120, height: 760 }),
+    ])
+    expect(mixedPdf).toContain('@page{size:13.333333in 7.5in;margin:0}')
+    expect(mixedPdf).toContain('alt="演示页"')
+    expect(mixedPdf).toContain('讲义标题')
+    expect(mixedPdf).toContain('course-slide-print-canvas')
+    expect(mixedPdf).toContain('course-spatial-print-canvas')
+    expect(mixedPdf).toContain('background:#ffffff')
+    expect(mixedPdf).toContain('data-published-v2-capture="true"')
+    expect(mixedPdf).toContain(V2_CAPTURE_IMAGE)
+    expect(mixedPdf).toContain(SPATIAL_CAPTURE_IMAGE)
+    expect(mixedPdf).toContain('data-capture-width="1280" data-capture-height="720"')
+    expect(mixedPdf).toContain('data-capture-width="1120" data-capture-height="760"')
+    expect(mixedPdf).toContain('object-fit:contain')
+    expect(mixedPdf).not.toContain('跨表面横幅')
+    expect([
+      ...mixedPdf.matchAll(/<section class="page [^"]*"[^>]*data-page-id="([^"]+)"/g),
+    ].map((match) => match[1])).toEqual(mixed.pages.map((page) => page.id))
+    expect(mixed.report.some((item) => item.message.includes('全局图层'))).toBe(true)
+
+    printCapture.create.mockClear()
+    printCapture.capturePage.mockClear()
+    printCapture.destroy.mockClear()
+    const component = await buildCoursePrintArtifacts(v9Sources('component'))
+    expect(component.report.some((item) => (
+      item.message.includes('slide-quiz') && item.message.includes('静态后备图')
+    ))).toBe(false)
+    expect(new TextDecoder().decode(
+      component.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )).toContain(V2_CAPTURE_IMAGE)
+    expect(createPublishedCourseV2PrintCaptureSession).toHaveBeenCalled()
+  })
+
+  it('rejects Legacy ExportPayload instead of restoring renderProjectSceneImages', async () => {
+    await expect(buildCoursePrintArtifacts({
+      project: { schemaVersion: 8, scenes: [] },
+      assets: {},
+      components: {},
+    } as never)).rejects.toThrow(/Published Course V2|V9 发布源|Legacy Project/)
+    expect(printCapture.create).not.toHaveBeenCalled()
+  })
+
+  it('adapts PDF producer facts without copying health rules', async () => {
+    const mixed = v9Sources('mixed')
+    const mixedFindings = adaptCoursePdfProducerFindings(mixed.project, {
+      assetFiles: mixed.assetFiles,
+      components: mixed.components,
+    }, [])
+    expect(mixedFindings.some((item) => (
+      item.code === 'static-export-info'
+      && item.message.includes('全局图层与教师控制器默认不写入 PDF')
+    ))).toBe(true)
+
+    const flow = v9Sources('flow')
+    const flowFindings = adaptCoursePdfProducerFindings(flow.project, {
+      assetFiles: flow.assetFiles,
+      components: flow.components,
+    }, [])
+    expect(flowFindings.some((item) => (
+      item.code === 'static-export-info'
+      && item.message.includes('浮层不进入语义分页')
+    ))).toBe(true)
+
+    const component = v9Sources('component')
+    const componentFindings = adaptCoursePdfProducerFindings(component.project, {
+      assetFiles: component.assetFiles,
+      components: component.components,
+    }, [])
+    expect(componentFindings.some((item) => (
+      item.message.includes('slide-quiz') && item.message.includes('静态后备图')
+    ))).toBe(false)
+
+    const spatialComponent = v9Sources('spatial')
+    const componentItem = component.project.surfaces
+      .flatMap((surface) => surface.type === 'slide'
+        ? surface.scenes.flatMap((scene) => scene.layerItems)
+        : [])
+      .find((item) => item.kind === 'component')
+    const spatialSurface = spatialComponent.project.surfaces.find(
+      (surface) => surface.type === 'spatial-2d',
+    )
+    if (!componentItem || !spatialSurface || spatialSurface.type !== 'spatial-2d') {
+      throw new Error('expected Component and Spatial fixtures')
+    }
+    const spatialComponentItem = structuredClone(componentItem)
+    spatialComponentItem.frame = {
+      ...spatialComponentItem.frame,
+      mode: 'absolute',
+      x: 0,
+      y: 0,
+    }
+    spatialComponentItem.order = spatialSurface.world.layerItems.reduce(
+      (highest, item) => Math.max(highest, item.order),
+      -1,
+    ) + 1
+    spatialSurface.world.layerItems.push(spatialComponentItem)
+    Object.assign(spatialComponent.project.assets, component.project.assets)
+    Object.assign(spatialComponent.project.componentPackages, component.project.componentPackages)
+    Object.assign(spatialComponent.assetFiles, component.assetFiles)
+    Object.assign(spatialComponent.components, component.components)
+
+    const spatialBuilt = await buildCoursePrintArtifacts(spatialComponent)
+    const fallbackMessage = spatialBuilt.report.find((item) => (
+      item.message.includes('slide-quiz') && item.message.includes('Spatial PDF')
+    ))?.message
+    expect(fallbackMessage).toContain('静态后备图')
+    const spatialComponentPdf = new TextDecoder().decode(
+      spatialBuilt.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+    expect(spatialComponentPdf).toContain(SPATIAL_CAPTURE_IMAGE)
+    expect(spatialComponentPdf).toContain('data-capture-width="1120" data-capture-height="760"')
+
+    const spatialComponentFindings = adaptCoursePdfProducerFindings(
+      spatialComponent.project,
+      {
+        assetFiles: spatialComponent.assetFiles,
+        components: spatialComponent.components,
+      },
+      [],
+    )
+    expect(spatialComponentFindings.some((item) => item.message === fallbackMessage)).toBe(true)
   })
 })

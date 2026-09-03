@@ -1,4 +1,3 @@
-import type { SceneNode } from '../../shared/projectTypes'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { MIN_NODE_SIZE } from '../../shared/constants'
 import {
@@ -18,12 +17,9 @@ import {
   type StageViewportTransformOptions,
 } from '../authoring/stageViewportTransform'
 import {
+  executeSlideAuthoringCommand,
   SLIDE_BACKEND_NOT_CANDIDATE,
 } from '../store/slideBackendPort'
-import {
-  selectSlideAuthoringBackend,
-  useEditorStore,
-} from '../store/editorStore'
 import {
   buildSlideEditorView,
   type SlideAuthoringTarget,
@@ -37,11 +33,10 @@ import {
   marqueeHitV9SlideLayerItems,
   type V9SlideHitTarget,
 } from '../phaser/v9SlideHitAdapter'
-
 const MARQUEE_MIN_SIZE = 3
 const HANDLE_HIT_RADIUS = 10
 
-export type SlideWorkspaceBackendKind = 'v8' | 'slide-authoring'
+export type SlideWorkspaceBackendKind = 'slide-authoring' | 'unavailable'
 
 export interface SlideAuthoringPointer {
   readonly x: number
@@ -53,7 +48,7 @@ export interface SlideAuthoringPointer {
 
 export type SlideWorkspaceAuthoringResult =
   | {
-      readonly kind: 'v8'
+      readonly kind: 'unavailable'
       readonly reason: typeof SLIDE_BACKEND_NOT_CANDIDATE
     }
   | {
@@ -65,6 +60,16 @@ export type SlideWorkspaceAuthoringResult =
       readonly marquee?: StageRect | null
       readonly hit?: V9SlideHitTarget | null
     }
+
+export interface SlideWorkspaceCommandPort {
+  run(run: (backend: SlideAuthoringBackend) => SlideCommandResult): SlideCommandResult
+  afterSelectLayers?(command: SlideCommandResult): void
+}
+
+export interface SlideWorkspaceAuthoringPorts {
+  readonly getBackend: () => SlideAuthoringBackend | null
+  readonly commandPort: SlideWorkspaceCommandPort
+}
 
 interface MoveGesture {
   readonly type: 'move'
@@ -94,26 +99,15 @@ interface MarqueeGesture {
 
 type SlideAuthoringGesture = MoveGesture | ResizeGesture | RotateGesture | MarqueeGesture
 
-function v8Fallback(): SlideWorkspaceAuthoringResult {
-  return { kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE }
+const UNAVAILABLE_RESULT: SlideWorkspaceAuthoringResult = {
+  kind: 'unavailable',
+  reason: SLIDE_BACKEND_NOT_CANDIDATE,
 }
 
-function readCandidate(): SlideAuthoringBackend | null {
-  return selectSlideAuthoringBackend(useEditorStore.getState())
-}
-
-function runCandidate(
-  run: (backend: SlideAuthoringBackend) => SlideCommandResult,
-): SlideCommandResult {
-  return useEditorStore.getState().runSlideCandidateCommand(run)
-}
-
-/** Canvas selectLayers only. Empty selection keeps the current tab (unlike activateScene / transform). */
-function revealPropertiesAfterSelectLayers(command: SlideCommandResult): void {
-  if (!command.ok) return
-  const store = useEditorStore.getState()
-  if (store.selectedNodeIds.length === 0) return
-  store.setActiveTab('properties')
+const MISSING_BACKEND_COMMAND: SlideCommandResult = {
+  ok: false,
+  reason: SLIDE_BACKEND_NOT_CANDIDATE,
+  historyEntry: false,
 }
 
 function viewportTransform(
@@ -269,7 +263,7 @@ function nativeLayerLocksAspect(
     locationId: session.selection.locationId,
     stateId: session.selection.stateId,
   })
-  const layer = view.layers.find((candidate) => candidate.selectionId === nodeId)
+  const layer = view.layers.find((item) => item.selectionId === nodeId)
   if (!layer || layer.item.kind !== 'native') return false
   if (layer.item.content.nativeType === 'image') {
     return layer.item.content.data.preserveAspectRatio
@@ -389,26 +383,38 @@ function marqueeRect(start: StagePoint, world: StagePoint): StageRect {
 }
 
 /**
- * Slide canvas hit / selection / transform kernel for the V9 candidate.
- * Default V8 (`selectSlideAuthoringBackend === null`) returns `{ kind: 'v8' }`
- * and never reports a successful command — Workspace must keep its existing path.
+ * Slide canvas hit / selection / transform kernel.
+ * Callers inject the live V9 backend and command port; there is no Store or V8 path.
+ * Each controller receives its own live ports without importing Store.
  */
-export function createSlideWorkspaceAuthoringController() {
+export function createSlideWorkspaceAuthoringController(
+  ports: SlideWorkspaceAuthoringPorts,
+) {
   let gesture: SlideAuthoringGesture | null = null
   let preview: SlideEditorNodeTransform[] | null = null
 
+  const readBackend = (): SlideAuthoringBackend | null => ports.getBackend()
+
+  const runCommand = (
+    run: (backend: SlideAuthoringBackend) => SlideCommandResult,
+  ): SlideCommandResult => {
+    const backend = readBackend()
+    if (!backend) return MISSING_BACKEND_COMMAND
+    return ports.commandPort.run((current) => run(current))
+  }
+
   const resolveKind = (): SlideWorkspaceBackendKind =>
-    readCandidate() ? 'slide-authoring' : 'v8'
+    readBackend() ? 'slide-authoring' : 'unavailable'
 
   const currentTargets = (): SlideAuthoringTarget[] => {
-    const backend = readCandidate()
+    const backend = readBackend()
     return backend ? makeTargets(backend) : []
   }
 
   const overlayGeometry = (
     options: StageViewportTransformOptions,
   ): StageSelectionOverlayGeometry | null => {
-    const backend = readCandidate()
+    const backend = readBackend()
     return backend ? overlayForSelection(backend, options, preview ?? undefined) : null
   }
 
@@ -417,25 +423,26 @@ export function createSlideWorkspaceAuthoringController() {
     options: StageViewportTransformOptions,
     additive = false,
   ): SlideWorkspaceAuthoringResult => {
-    const backend = readCandidate()
-    if (!backend) return v8Fallback()
-    const command = runCandidate((candidate) =>
-      candidate.selectLayers(layerItemIds, additive, {
-        expectedRevision: candidate.getSnapshot().revision,
+    const backend = readBackend()
+    if (!backend) return UNAVAILABLE_RESULT
+    const command = runCommand((current) =>
+      current.selectLayers(layerItemIds, additive, {
+        expectedRevision: current.getSnapshot().revision,
       }),
     )
-    revealPropertiesAfterSelectLayers(command)
+    ports.commandPort.afterSelectLayers?.(command)
     gesture = null
     preview = null
-    return v9Result(backend, options, { command })
+    const next = readBackend() ?? backend
+    return v9Result(next, options, { command })
   }
 
   const pointerDown = (
     pointer: SlideAuthoringPointer,
     options: StageViewportTransformOptions,
   ): SlideWorkspaceAuthoringResult => {
-    const backend = readCandidate()
-    if (!backend) return v8Fallback()
+    const backend = readBackend()
+    if (!backend) return UNAVAILABLE_RESULT
     const world = pointerToWorld(pointer, options)
     const handle = hitHandle(backend, world)
     const writable = writableNativeTransforms(backend)
@@ -471,13 +478,14 @@ export function createSlideWorkspaceAuthoringController() {
 
     const hit = hitTestV9SlideLayerItems(layerTargets(backend), world)
     if (hit) {
-      const command = runCandidate((candidate) =>
-        candidate.selectLayers([hit.layerItemId], pointer.additive === true, {
-          expectedRevision: candidate.getSnapshot().revision,
+      const command = runCommand((current) =>
+        current.selectLayers([hit.layerItemId], pointer.additive === true, {
+          expectedRevision: current.getSnapshot().revision,
         }),
       )
-      revealPropertiesAfterSelectLayers(command)
-      const nextWritable = writableNativeTransforms(backend)
+      ports.commandPort.afterSelectLayers?.(command)
+      const live = readBackend() ?? backend
+      const nextWritable = writableNativeTransforms(live)
       if (nextWritable.length > 0 && !hit.locked) {
         gesture = {
           type: 'move',
@@ -489,7 +497,7 @@ export function createSlideWorkspaceAuthoringController() {
         gesture = null
         preview = null
       }
-      return v9Result(backend, options, { command, preview: preview ?? undefined, hit })
+      return v9Result(live, options, { command, preview: preview ?? undefined, hit })
     }
 
     gesture = {
@@ -505,8 +513,8 @@ export function createSlideWorkspaceAuthoringController() {
     pointer: SlideAuthoringPointer,
     options: StageViewportTransformOptions,
   ): SlideWorkspaceAuthoringResult => {
-    const backend = readCandidate()
-    if (!backend) return v8Fallback()
+    const backend = readBackend()
+    if (!backend) return UNAVAILABLE_RESULT
     const world = pointerToWorld(pointer, options)
     if (!gesture) return v9Result(backend, options)
 
@@ -529,8 +537,8 @@ export function createSlideWorkspaceAuthoringController() {
     pointer: SlideAuthoringPointer,
     options: StageViewportTransformOptions,
   ): SlideWorkspaceAuthoringResult => {
-    const backend = readCandidate()
-    if (!backend) return v8Fallback()
+    const backend = readBackend()
+    if (!backend) return UNAVAILABLE_RESULT
     const world = pointerToWorld(pointer, options)
     const active = gesture
     gesture = null
@@ -546,16 +554,16 @@ export function createSlideWorkspaceAuthoringController() {
       const hits = moved
         ? marqueeHitV9SlideLayerItems(layerTargets(backend), rect)
         : []
-      const command = runCandidate((candidate) =>
-        candidate.selectLayers(
-          hits.map((hit) => hit.layerItemId),
+      const command = runCommand((current) =>
+        current.selectLayers(
+          hits.map((item) => item.layerItemId),
           active.additive,
-          { expectedRevision: candidate.getSnapshot().revision },
+          { expectedRevision: current.getSnapshot().revision },
         ),
       )
-      revealPropertiesAfterSelectLayers(command)
+      ports.commandPort.afterSelectLayers?.(command)
       preview = null
-      return v9Result(backend, options, { command, marquee: null })
+      return v9Result(readBackend() ?? backend, options, { command, marquee: null })
     }
 
     const next = active.type === 'move'
@@ -565,13 +573,13 @@ export function createSlideWorkspaceAuthoringController() {
         : previewRotate(active, world)
     preview = null
     const snapshot = backend.getSnapshot()
-    const command = runCandidate((candidate) =>
-      candidate.transformNativeLayers(
+    const command = runCommand((current) =>
+      current.transformNativeLayers(
         { nodes: next },
         { expectedRevision: snapshot.revision },
       ),
     )
-    return v9Result(backend, options, { command, preview: undefined })
+    return v9Result(readBackend() ?? backend, options, { command, preview: undefined })
   }
 
   /**
@@ -582,16 +590,16 @@ export function createSlideWorkspaceAuthoringController() {
     nodes: readonly SlideEditorNodeTransform[],
     options: StageViewportTransformOptions,
   ): SlideWorkspaceAuthoringResult => {
-    const backend = readCandidate()
-    if (!backend) return v8Fallback()
+    const backend = readBackend()
+    if (!backend) return UNAVAILABLE_RESULT
     const snapshot = backend.getSnapshot()
-    const command = runCandidate((candidate) =>
-      candidate.transformNativeLayers(
+    const command = runCommand((current) =>
+      current.transformNativeLayers(
         { nodes },
         { expectedRevision: snapshot.revision },
       ),
     )
-    return v9Result(backend, options, { command })
+    return v9Result(readBackend() ?? backend, options, { command })
   }
 
   return {
@@ -604,25 +612,39 @@ export function createSlideWorkspaceAuthoringController() {
     pointerUp,
     transformSelection,
     previewTransforms: () => preview,
+    hitTargets: () => {
+      const backend = readBackend()
+      return backend ? layerTargets(backend) : []
+    },
   }
 }
 
-export function resolveSlideWorkspaceAuthoringKind(): SlideWorkspaceBackendKind {
-  return readCandidate() ? 'slide-authoring' : 'v8'
+export function resolveSlideWorkspaceAuthoringKind(
+  backend?: SlideAuthoringBackend | null,
+): SlideWorkspaceBackendKind {
+  return backend ? 'slide-authoring' : 'unavailable'
 }
 
-export function listSlideWorkspaceHitTargets(): V9SlideHitTarget[] {
-  const backend = readCandidate()
+export function listSlideWorkspaceHitTargets(
+  backend: SlideAuthoringBackend | null,
+): V9SlideHitTarget[] {
   return backend ? layerTargets(backend) : []
 }
 
-export function mergeSlidePreviewIntoNodes(
-  nodes: readonly SceneNode[],
+export function mergeSlidePreviewIntoNodes<T extends {
+  readonly id: string
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly rotation: number
+}>(
+  nodes: readonly T[],
   preview: readonly SlideEditorNodeTransform[] | undefined,
-): SceneNode[] {
+): T[] {
   if (!preview || preview.length === 0) return []
   const byId = new Map(preview.map((item) => [item.nodeId, item]))
-  const next: SceneNode[] = []
+  const next: T[] = []
   for (const node of nodes) {
     const transform = byId.get(node.id)
     if (!transform) continue
@@ -638,4 +660,4 @@ export function mergeSlidePreviewIntoNodes(
   return next
 }
 
-export { SLIDE_BACKEND_NOT_CANDIDATE }
+export { executeSlideAuthoringCommand, SLIDE_BACKEND_NOT_CANDIDATE }

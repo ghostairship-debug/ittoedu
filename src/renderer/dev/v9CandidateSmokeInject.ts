@@ -6,7 +6,7 @@ import {
   type ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
-import { createTeacherControllerNode } from '../project/createProject'
+import { createTeacherControllerNode } from '../project/nativeNodeFactories'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,

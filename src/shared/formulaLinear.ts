@@ -1,4 +1,4 @@
-import type { FormulaAstNode } from './projectTypes'
+import type { FormulaAstNode } from './contracts/native-v1/types'
 
 /** Visible slot marker used by the authoring templates. It is never persisted. */
 export const FORMULA_SLOT = '□'

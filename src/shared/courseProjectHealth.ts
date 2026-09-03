@@ -13,6 +13,9 @@ import {
 import {
   collectCourseProjectInteractionHealth,
 } from './courseProjectHealth/interaction'
+import {
+  collectCourseProjectStableIdHealth,
+} from './courseProjectHealth/stableIds'
 import type {
   CourseProjectHealthArchiveFiles,
   CourseProjectHealthFinding,
@@ -21,10 +24,15 @@ import type {
 import type { CourseProjectDocument } from './courseProjectTypes'
 
 export * from './courseProjectHealth/types'
+export {
+  COURSE_PROJECT_FORMAT_PREFLIGHT_ADAPTERS,
+  COURSE_PROJECT_HEALTH_FINDING_CATALOG,
+} from './courseProjectHealth/catalog'
 export { collectCourseProjectComponentHealth } from './courseProjectHealth/component'
 export { collectCourseProjectControllerMediaHealth } from './courseProjectHealth/controllerMedia'
 export { collectCourseProjectInteractionHealth } from './courseProjectHealth/interaction'
 export { collectCourseProjectRuntimeHealth } from './courseProjectHealth/runtime'
+export { collectCourseProjectStableIdHealth } from './courseProjectHealth/stableIds'
 
 /**
  * V9-native, read-only semantic health collection for a schema-valid project
@@ -35,6 +43,7 @@ export function collectCourseProjectHealth(
   archiveFiles: CourseProjectHealthArchiveFiles,
 ): CourseProjectHealthFinding[] {
   return finalizeCourseProjectHealthFindings(project, [
+    ...collectCourseProjectStableIdHealth(project, archiveFiles),
     ...collectCourseProjectRuntimeHealth(project, archiveFiles),
     ...collectCourseProjectInteractionHealth(project, archiveFiles),
     ...collectCourseProjectComponentHealth(project, archiveFiles),

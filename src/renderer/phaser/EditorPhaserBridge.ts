@@ -1,8 +1,8 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type {
-  SceneDocument,
-  SceneNode,
-} from '../../shared/projectTypes'
+  EditorCanvasDocument,
+  EditorCanvasNode,
+} from './editorCanvasNode'
 import type { StagePoint } from '../authoring/stageViewportTransform'
 import type { EditorScene } from './EditorScene'
 import {
@@ -61,7 +61,7 @@ export class EditorPhaserBridge {
   private editingTextNodeId: string | null = null
   private pending:
     | {
-        document: SceneDocument
+        document: EditorCanvasDocument
         components: Record<string, ComponentPackageData>
       }
     | undefined
@@ -87,7 +87,7 @@ export class EditorPhaserBridge {
 
   private loadDocument(
     scene: EditorScene,
-    document: SceneDocument,
+    document: EditorCanvasDocument,
     components: Record<string, ComponentPackageData>,
   ): void {
     scene.loadDocument(document, components)
@@ -100,7 +100,7 @@ export class EditorPhaserBridge {
   }
 
   loadScene(
-    document: SceneDocument,
+    document: EditorCanvasDocument,
     components: Record<string, ComponentPackageData>,
   ): void {
     if (!this.scene) {
@@ -110,10 +110,10 @@ export class EditorPhaserBridge {
     this.loadDocument(this.scene, document, components)
   }
 
-  applyNode(node: SceneNode): void {
+  applyNode(node: EditorCanvasNode): void {
     this.scene?.applyNode(node)
   }
-  addNode(node: SceneNode): void {
+  addNode(node: EditorCanvasNode): void {
     this.scene?.addNode(node)
   }
   removeNode(nodeId: string): void {

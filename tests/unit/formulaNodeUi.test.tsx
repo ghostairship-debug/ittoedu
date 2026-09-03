@@ -15,7 +15,7 @@ import type { FormulaNode } from '@/shared/projectTypes'
 function formulaNode(): FormulaNode {
   const node = selectActiveScene(useEditorStore.getState()).nodes[0]
   if (node?.type !== 'formula') throw new Error('Expected FormulaNode')
-  return node
+  return node as FormulaNode
 }
 
 function drawingContext(): CanvasRenderingContext2D {

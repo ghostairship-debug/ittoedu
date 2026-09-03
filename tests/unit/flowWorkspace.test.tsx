@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -12,25 +15,50 @@ import {
   FLOW_MEDIA_INLINE_SIZE_REFERENCE,
   resolveFlowMediaLayoutProjection,
 } from '@/shared/flowMediaLayout'
-import { createTextNode } from '@/renderer/project/createProject'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
-import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { flowSurfaceIn, syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import {
+  buildFlowEditorView,
+  captureFlowEditorAuthoringTarget,
+  FLOW_SESSIONLESS_ERROR,
+} from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
-import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
-import { extractFlowRichTextFromEditor } from '@/renderer/authoring/flowTextEdit'
+import { FlowWorkspace as ProductFlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
+import { Workspace } from '@/renderer/ui/Workspace'
 import { useEditorStore } from '@/renderer/store/editorStore'
+import {
+  extractFlowRichTextFromEditor,
+  updateFlowTextDraft,
+  type FlowFormulaDraft,
+  type FlowTextEditSession,
+} from '@/renderer/authoring/flowTextEdit'
 import type { FlowCommandResult } from '@/renderer/course/flowEditorCommands'
 import type { FlowEditorSelection } from '@/renderer/course/flowEditorSlice'
 
+vi.mock('@/renderer/phaser/createEditorGame', () => ({
+  createEditorGame: () => ({
+    bridge: {},
+    game: { scale: { refresh: () => undefined } },
+    destroy: () => undefined,
+  }),
+}))
+
+vi.mock('@/renderer/ui/flowLocationTryRun', () => ({
+  mountFlowLocationTryRun: vi.fn(async () => ({ destroy: vi.fn() })),
+}))
+
 /**
  * Proves Flow paper hit-testing, in-place editing, context toolbar, and formula dialog.
- * Does not prove Workspace.tsx wiring, PropertiesTab, MediaTab, Player, or default open/save.
+ * Also proves the root Workspace sessionless dispatch; it does not cover
+ * PropertiesTab, MediaTab, Player, or default open/save.
  */
 const NOW = '2026-08-17T17:10:00.000Z'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  useEditorStore.getState().createNewProject()
 })
 
 beforeEach(() => {
@@ -217,7 +245,175 @@ function renderPaper(project = createFlowProject(), selection: FlowEditorSelecti
   return { ...result, project, view, onProjectChange, onSelectionChange, onTextEditChange }
 }
 
+function beginStoreFormulaDraft(input: {
+  source: string
+  valid: boolean
+  ast?: FlowFormulaDraft['ast']
+  accessibleText?: string
+}) {
+  useEditorStore.getState().createNewFlowProject()
+  useEditorStore.getState().addFormulaNode()
+  const session = useEditorStore.getState().flowSession
+  const authoring = useEditorStore.getState().courseAuthoringSession
+  if (!session || !authoring) throw new Error('expected Flow authoring session')
+  const formula = flowSurfaceIn(
+    session.history.present,
+    session.selection.surfaceId,
+  ).blocks.find((block) => block.type === 'formula')
+  if (!formula || formula.type !== 'formula') throw new Error('expected Flow formula')
+  const target = captureFlowEditorAuthoringTarget({
+    view: buildFlowEditorView({
+      project: session.history.present,
+      locationId: session.selection.locationId,
+    }),
+    sessionToken: authoring.token,
+    target: { kind: 'block', blockId: formula.id },
+  })
+  const begun = useEditorStore.getState().runFlowAuthoringIntent(target, {
+    kind: 'begin-formula-edit',
+  })
+  if (!begun.ok || !begun.edit || begun.edit.kind !== 'formula') {
+    throw new Error('expected Flow formula edit')
+  }
+  const original = begun.edit.draft as FlowFormulaDraft
+  const draft = updateFlowTextDraft(begun.edit, {
+    ...original,
+    source: input.source,
+    ast: input.ast ?? original.ast,
+    accessibleText: input.accessibleText ?? original.accessibleText,
+    valid: input.valid,
+    hasSlots: false,
+  })
+  const updated = useEditorStore.getState().runFlowAuthoringIntent(target, {
+    kind: 'update-text-edit',
+    expectedEdit: begun.edit,
+    edit: draft,
+  })
+  if (!updated.ok) throw new Error(updated.reason ?? 'expected formula draft update')
+  return { formula, draft }
+}
+
 describe('FlowWorkspace paper', () => {
+  it('root Workspace keeps a missing Flow session in the Flow fail-loud shell', () => {
+    useEditorStore.getState().createNewFlowProject()
+    expect(useEditorStore.getState().courseAuthoringSession?.token.surfaceType).toBe('flow')
+    useEditorStore.setState({ flowSession: null })
+
+    render(
+      <Workspace
+        onAddImage={() => undefined}
+        onAddVideo={() => undefined}
+        onSelectImageAsset={async () => null}
+      />,
+    )
+
+    expect(screen.getByTestId('flow-workspace-sessionless')).toHaveTextContent(
+      FLOW_SESSIONLESS_ERROR,
+    )
+    expect(screen.queryByTestId('slide-workspace-sessionless')).not.toBeInTheDocument()
+  })
+
+  it('commits a valid Store-owned formula once before root Workspace enters try-run', async () => {
+    const ast = {
+      type: 'row' as const,
+      children: [
+        { type: 'token' as const, value: 'y' },
+        { type: 'operator' as const, value: '+' },
+        { type: 'token' as const, value: '2' },
+      ],
+    }
+    const { formula } = beginStoreFormulaDraft({
+      source: 'y+2',
+      valid: true,
+      ast,
+      accessibleText: 'y加2',
+    })
+    const historyBefore = useEditorStore.getState().flowSession!.history.past.length
+    render(
+      <Workspace
+        onAddImage={() => undefined}
+        onAddVideo={() => undefined}
+        onSelectImageAsset={async () => null}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '当前位置试运行' }))
+
+    await waitFor(() => expect(useEditorStore.getState().canvasMode).toBe('run'))
+    const after = useEditorStore.getState().flowSession!
+    expect(after.history.past).toHaveLength(historyBefore + 1)
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    expect(flowSurfaceIn(after.history.present, after.selection.surfaceId).blocks)
+      .toContainEqual(expect.objectContaining({
+        id: formula.id,
+        type: 'formula',
+        ast,
+        accessibleText: 'y加2',
+      }))
+  })
+
+  it('keeps an invalid formula edit intact and refuses root Workspace try-run', () => {
+    const { draft } = beginStoreFormulaDraft({ source: '\\frac{x}', valid: false })
+    const before = useEditorStore.getState()
+    const beforeSession = before.flowSession!
+    render(
+      <Workspace
+        onAddImage={() => undefined}
+        onAddVideo={() => undefined}
+        onSelectImageAsset={async () => null}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '当前位置试运行' }))
+
+    const after = useEditorStore.getState()
+    expect(after.canvasMode).toBe('edit')
+    expect(after.flowTextEdit).toBe(draft)
+    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
+    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
+    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
+    expect(after.errorMessage).toMatch(/公式|修复|占位符/)
+  })
+
+  it('does not import legacy projectTypes or projectSchema', () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/FlowWorkspace.tsx'),
+      'utf8',
+    )
+    expect(source).not.toMatch(/projectTypes/)
+    expect(source).not.toMatch(/projectSchema/)
+    expect(source).not.toMatch(/editorStore/)
+    expect(source).not.toMatch(/useEditorStore/)
+    expect(source).toMatch(/shared\/contracts\/native-v1/)
+    expect(source).toMatch(/useFlowTextAuthoringController/)
+    expect(source).toMatch(/FlowOverlayAuthoringLayer/)
+  })
+
+  it('fails loud without an active Flow location instead of falling back to a V8 project', () => {
+    const project = createFlowProject()
+    const view = {
+      ...buildFlowEditorView({ project, locationId: 'h1' }),
+      locationId: '',
+      activeBlockId: '',
+      activeLocation: {
+        locationId: '',
+        surfaceId: '',
+        blockId: '',
+        label: '',
+      },
+    }
+    expect(() => render(
+      <ProductFlowWorkspace
+        view={view}
+        sessionToken={{ locationId: 'h1', surfaceType: 'flow', revision: project.revision, generation: 1 }}
+        assets={project.assets}
+        selection={null}
+        textEdit={null}
+        commands={{ run: () => ({ ok: false, historyEntry: false }) }}
+      />,
+    )).toThrow(FLOW_SESSIONLESS_ERROR)
+  })
+
   it('paints idle paragraph runs instead of plain text', () => {
     renderPaper()
     const rich = screen.getByTestId('flow-block-p-body').querySelector('[data-flow-rich-text="true"]')
@@ -237,6 +433,16 @@ describe('FlowWorkspace paper', () => {
     const overlay = screen.getByTestId('flow-authoring-layer-overlay')
     const selectionPlane = screen.getByTestId('flow-authoring-selection-plane')
     expect(workspace.getAttribute('data-flow-not-slide-stage')).toBe('true')
+    expect(workspace.getAttribute('data-flow-project-id')).toBe('flow-workspace')
+    expect(workspace.getAttribute('data-flow-location-id')).toBe('h1')
+    expect(workspace.getAttribute('data-flow-surface-id')).toBe('flow')
+    expect(workspace.getAttribute('data-flow-active-block-id')).toBe('h1')
+    expect(screen.getByTestId('flow-block-p-body').getAttribute('data-flow-layer-kind')).toBe('document-block')
+    expect(screen.getByTestId('flow-block-formula-1').getAttribute('data-flow-layer-kind')).toBe('document-block')
+    expect(screen.getByTestId('flow-layer-card-overlay-text').getAttribute('data-flow-overlay-owner')).toBe('surface')
+    expect(screen.getByTestId('flow-layer-card-overlay-text').getAttribute('data-flow-overlay-owner-key')).toBe('surface:flow')
+    expect(screen.getByTestId('flow-layer-card-global-overlay').getAttribute('data-flow-overlay-owner')).toBe('global')
+    expect(screen.getByTestId('flow-layer-card-global-underlay').getAttribute('data-flow-overlay-locked')).toBe('false')
     expect(paper.getAttribute('data-flow-reading-width')).toBe('760')
     expect(paper).toHaveStyle({ maxWidth: '760px', background: 'transparent' })
     expect(scroll).toHaveStyle({ overflow: 'auto', zIndex: '2' })
@@ -284,6 +490,67 @@ describe('FlowWorkspace paper', () => {
     expect(chrome.parentElement).toBe(screen.getByTestId('flow-authoring-selection-plane'))
     expect(chrome).toHaveAttribute('role', 'button')
     expect(chrome.querySelector('[data-handle]')).not.toBeNull()
+  })
+
+  it('keeps the original pointer gesture alive when selecting an overlay rerenders its chrome', () => {
+    const project = createFlowProject()
+    const overlay = project.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay',
+    )
+    if (!overlay) throw new Error('expected global overlay')
+    overlay.item.frame = { mode: 'absolute', x: 300, y: 200, width: 200, height: 80 }
+    const { onProjectChange, onSelectionChange } = renderPaper(project)
+    const plane = screen.getByTestId('flow-authoring-layer-overlay')
+    vi.spyOn(plane, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1280,
+      bottom: 720,
+      width: 1280,
+      height: 720,
+      toJSON: () => ({}),
+    })
+    const visual = screen.getByTestId('flow-layer-card-global-overlay')
+    const setPointerCapture = vi.fn()
+    const releasePointerCapture = vi.fn()
+    Object.assign(visual, {
+      setPointerCapture,
+      hasPointerCapture: () => true,
+      releasePointerCapture,
+    })
+
+    fireEvent.pointerDown(visual, {
+      button: 0,
+      pointerId: 7,
+      clientX: 350,
+      clientY: 240,
+    })
+    expect(onSelectionChange).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('flow-layer-card-global-overlay')).toBe(visual)
+    expect(screen.getByTestId('flow-layer-selection-global-overlay')).toBeTruthy()
+    expect(setPointerCapture).toHaveBeenCalledWith(7)
+
+    fireEvent.pointerMove(visual, {
+      pointerId: 7,
+      clientX: 370,
+      clientY: 250,
+    })
+    fireEvent.pointerUp(visual, {
+      pointerId: 7,
+      clientX: 370,
+      clientY: 250,
+    })
+
+    expect(releasePointerCapture).toHaveBeenCalledWith(7)
+    expect(onProjectChange).toHaveBeenCalledTimes(1)
+    const result = onProjectChange.mock.calls[0]?.[0]
+    expect(result).toMatchObject({ ok: true, historyEntry: true })
+    const moved = result?.nextDocument?.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-overlay',
+    )
+    expect(moved?.item.frame).toMatchObject({ x: 320, y: 210, width: 200, height: 80 })
   })
 
   it('scrolls paper-space visuals in every physical plane while viewport visuals stay fixed', () => {
@@ -648,7 +915,7 @@ describe('FlowWorkspace paper', () => {
   })
 
   it('keeps the formula body target stable across selection rerender and opens on a second real click', () => {
-    const { onSelectionChange, onTextEditChange, project, rerender } = renderPaper()
+    const { onProjectChange, onSelectionChange, onTextEditChange, project, rerender } = renderPaper()
     const explicitEntry = screen.getByRole('button', { name: '编辑公式' })
     expect(explicitEntry).toBeVisible()
     fireEvent.click(explicitEntry)
@@ -671,6 +938,7 @@ describe('FlowWorkspace paper', () => {
           project={project}
           view={buildFlowEditorView({ project, locationId: 'h1' })}
           selection={selected ?? null}
+          onProjectChange={onProjectChange}
           onSelectionChange={onSelectionChange}
           onTextEditChange={onTextEditChange}
         />
@@ -687,6 +955,33 @@ describe('FlowWorkspace paper', () => {
       blockId: 'formula-1',
     })
     expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
+
+    onProjectChange.mockClear()
+    fireEvent.change(screen.getByRole('textbox', { name: '公式内容（线性输入）' }), {
+      target: { value: 'a-b' },
+    })
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toMatchObject({
+      kind: 'formula',
+      draft: {
+        source: 'a-b',
+        valid: true,
+        ast: {
+          type: 'row',
+          children: [
+            { type: 'token', value: 'a' },
+            { type: 'operator', value: '-' },
+            { type: 'token', value: 'b' },
+          ],
+        },
+      },
+    })
+    expect(onProjectChange).not.toHaveBeenCalled()
+    const applyFormula = screen.getByRole('button', { name: '应用公式' })
+    expect(applyFormula).toBeEnabled()
+    fireEvent.click(applyFormula)
+    expect(onProjectChange).toHaveBeenCalledTimes(1)
+    expect(onProjectChange.mock.calls[0]?.[0]).toMatchObject({ ok: true, historyEntry: true })
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toBeNull()
   })
 
   it('does not commit IME text until composition ends', async () => {
@@ -796,38 +1091,48 @@ describe('FlowWorkspace paper', () => {
     }
   })
 
-  it('syncs store flowTextEdit updates to local inline editor during in-place editing', async () => {
+  it('syncs controlled textEdit updates to local inline editor during in-place editing', async () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
       focus: 'text',
       textRange: { blockId: 'p-body', start: 0, end: 4 },
     })
-    const { onSelectionChange } = renderPaper(project, selection)
-    const editor = screen.getByTestId('flow-inline-editor')
-    expect(editor).toBeTruthy()
+    const { rerender, view, onSelectionChange, onProjectChange, onTextEditChange } = renderPaper(project, selection)
+    expect(screen.getByTestId('flow-inline-editor')).toBeTruthy()
 
-    useEditorStore.setState({
-      flowTextEdit: {
-        kind: 'rich-text',
-        source: 'properties',
-        blockId: 'p-body',
-        surfaceId: 'flow',
-        parentId: null,
-        field: 'text',
-        composing: false,
-        pendingAction: null,
-        revision: 1,
-        original: { text: '阅读任务', runs: [{ start: 0, end: 2, style: { bold: true } }] },
-        draft: {
-          text: '阅读任务',
-          runs: [
-            { start: 0, end: 2, style: { bold: true } },
-            { start: 0, end: 4, style: { italic: true } },
-          ],
-        },
-        range: { start: 0, end: 4 },
+    const textEdit: FlowTextEditSession = {
+      kind: 'rich-text',
+      source: 'properties',
+      blockId: 'p-body',
+      surfaceId: 'flow',
+      parentId: null,
+      field: 'text',
+      composing: false,
+      pendingAction: null,
+      revision: 1,
+      original: { text: '阅读任务', runs: [{ start: 0, end: 2, style: { bold: true } }] },
+      draft: {
+        text: '阅读任务',
+        runs: [
+          { start: 0, end: 2, style: { bold: true } },
+          { start: 0, end: 4, style: { italic: true } },
+        ],
       },
-    })
+      range: { start: 0, end: 4 },
+    }
+    rerender(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={project}
+          view={view}
+          selection={selection}
+          textEdit={textEdit}
+          onProjectChange={onProjectChange}
+          onSelectionChange={onSelectionChange}
+          onTextEditChange={onTextEditChange}
+        />
+      </div>,
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -840,29 +1145,37 @@ describe('FlowWorkspace paper', () => {
       focus: 'text',
       textRange: { blockId: 'p-body', start: 0, end: 4 },
     })
-    useEditorStore.setState({ flowTextEdit: null })
-    const { onTextEditChange } = renderPaper(project, selection)
+    const { rerender, view, onProjectChange, onSelectionChange, onTextEditChange } = renderPaper(project, selection)
     await waitFor(() => expect(screen.getByTestId('flow-inline-editor')).toBeTruthy())
     const mirroredEdit = onTextEditChange.mock.calls.at(-1)?.[0]
     expect(mirroredEdit).toBeTruthy()
-    useEditorStore.setState({ flowTextEdit: mirroredEdit })
-    await waitFor(() => expect(useEditorStore.getState().flowTextEdit).toBe(mirroredEdit))
     const publishesBeforeClear = onTextEditChange.mock.calls.length
 
-    useEditorStore.setState({ flowTextEdit: null })
+    rerender(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={project}
+          view={view}
+          selection={selection}
+          textEdit={null}
+          onProjectChange={onProjectChange}
+          onSelectionChange={onSelectionChange}
+          onTextEditChange={onTextEditChange}
+        />
+      </div>,
+    )
 
     await waitFor(() => expect(screen.queryByTestId('flow-inline-editor')).toBeNull())
     expect(onTextEditChange).toHaveBeenCalledTimes(publishesBeforeClear)
   })
 
-  it('drops a pending focusout commit after the Store has already finalized the Flow draft', async () => {
+  it('drops a pending focusout commit after the parent has already finalized the Flow draft', async () => {
     const project = createFlowProject()
     const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], {
       focus: 'text',
       textRange: { blockId: 'p-body', start: 0, end: 4 },
     })
-    useEditorStore.setState({ flowTextEdit: null })
-    const { onProjectChange, onTextEditChange } = renderPaper(project, selection)
+    const { rerender, view, onProjectChange, onSelectionChange, onTextEditChange } = renderPaper(project, selection)
     await waitFor(() => expect(screen.getByTestId('flow-inline-editor')).toBeTruthy())
 
     const editor = screen.getByTestId('flow-inline-editor')
@@ -870,14 +1183,24 @@ describe('FlowWorkspace paper', () => {
     fireEvent.input(editor)
     const mirroredEdit = onTextEditChange.mock.calls.at(-1)?.[0]
     expect(mirroredEdit).toBeTruthy()
-    useEditorStore.setState({ flowTextEdit: mirroredEdit })
-    await waitFor(() => expect(useEditorStore.getState().flowTextEdit).toBe(mirroredEdit))
 
     editor.ownerDocument.dispatchEvent(new FocusEvent('focusout', {
       bubbles: true,
       relatedTarget: document.body,
     }))
-    useEditorStore.setState({ flowTextEdit: null })
+    rerender(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={project}
+          view={view}
+          selection={selection}
+          textEdit={null}
+          onProjectChange={onProjectChange}
+          onSelectionChange={onSelectionChange}
+          onTextEditChange={onTextEditChange}
+        />
+      </div>,
+    )
 
     await waitFor(() => expect(screen.queryByTestId('flow-inline-editor')).toBeNull())
     await new Promise((resolve) => setTimeout(resolve, 10))

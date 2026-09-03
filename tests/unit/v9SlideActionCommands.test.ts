@@ -4,13 +4,14 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  type ComponentLayerItem,
   type CourseProjectDocument,
   type NativeLayerItem,
   type RuntimeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import type { InteractionRule } from '@/shared/interactionTypes'
-import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
@@ -30,16 +31,19 @@ import {
   addSlideSceneInteractionRule,
   copySlideGlobalClipboard,
   deleteSlideSceneLayers,
+  duplicateSlideGlobalLayers,
   duplicateSlideSceneLayers,
   executeSlideSceneAction,
   nudgeSlideSceneLayers,
   patchSlideSceneLayers,
   pasteSlideGlobalLayers,
+  pasteSlideSceneLayers,
   reorderSlideSceneLayers,
   selectAllSlideSceneLayers,
   shouldIgnoreSlideLayerDeleteForFocus,
   classifySlideAuthoringFocus,
 } from '@/renderer/course/v9SlideActionCommands'
+import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
 import {
   addSlideInteractionRule,
   SLIDE_INTERACTION_GLOBAL_WRITE_REASON,
@@ -94,6 +98,84 @@ function nativeText(
       nativeType: 'text',
       data: { text, runs: [], style: textStyle() },
     },
+  }
+}
+
+function nativeImage(
+  layerItemId: string,
+  order: number,
+  assetId: string,
+): NativeLayerItem {
+  return {
+    layerItemId,
+    label: '照片',
+    frame: { mode: 'absolute', x: 520, y: 80, width: 240, height: 160 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'image',
+      data: {
+        assetId,
+        preserveAspectRatio: true,
+        fit: 'contain',
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        cropX: 0.5,
+        cropY: 0.5,
+        flipX: false,
+        flipY: false,
+        cornerRadius: 0,
+        feather: { amount: 0, mode: 'rectangle' },
+        safeAreas: [],
+      },
+    },
+  }
+}
+
+function sceneComponent(layerItemId: string, order: number): ComponentLayerItem {
+  return {
+    layerItemId,
+    label: '积分器',
+    frame: { mode: 'absolute', x: 400, y: 160, width: 240, height: 180 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'component',
+    component: { packageId: 'component.quiz', version: '4.0.0' },
+    props: { title: '画布内积分器' },
+  }
+}
+
+function photoAsset() {
+  return {
+    id: 'asset-photo',
+    filename: 'photo.png',
+    mimeType: 'image/png',
+    kind: 'image' as const,
+    path: 'assets/photo.png',
+    byteLength: 8,
+    width: 800,
+    height: 600,
+  }
+}
+
+function quizPackageMeta() {
+  return {
+    packageId: 'component.quiz',
+    version: '4.0.0',
+    name: 'Quiz',
+    manifestPath: 'components/component.quiz/manifest.json',
+    runtimePath: 'components/component.quiz/runtime.js',
+    contentSha256: '1'.repeat(64),
   }
 }
 
@@ -353,6 +435,17 @@ describe('V9 Slide scene actions', () => {
       'slide-runtime',
     ])
 
+    const foreign = executeSlideSceneAction('paste', selected, {
+      clipboard: { ...copied.clipboard, projectId: 'another-project' },
+      now: NOW,
+    })
+    expect(foreign).toMatchObject({
+      ok: false,
+      reason: '剪贴板不属于当前课件，请重新复制',
+      historyEntry: false,
+    })
+    expect(foreign.nextSession?.history.present).toBe(session.history.present)
+
     const pasted = executeSlideSceneAction('paste', selected, {
       clipboard: copied.clipboard,
       now: NOW,
@@ -605,5 +698,143 @@ describe('V9 Slide scene actions', () => {
       ...clickRule('missing', 'gone', 'action-gone'),
     }])
     expect(warnings.missing).toEqual([expect.stringMatching(/已删除的元素/)])
+  })
+})
+
+describe('V9 Slide action transactions and clipboard resources', () => {
+  it('commits delete, paste and duplicate as one transaction frame with resourceTransition', () => {
+    const session = select(openSlideAuthoringSession(v9SlideFixture()), ['slide-title'])
+    const deleted = deleteSlideSceneLayers(session, ['slide-title'], { now: NOW })
+    const afterDelete = requireSession(deleted)
+    expect(deleted.historyEntry).toBe(true)
+    expect(deleted.resourceTransition?.resourceDirection).toBe('forward')
+    expect(afterDelete.history.present.revision).toBe(2)
+    expect(isSlideAuthoringTransactionFrame(afterDelete.history.past.at(-1)!)).toBe(true)
+
+    const copied = executeSlideSceneAction('copy', select(session, ['slide-runtime']))
+    expect(copied.clipboard?.resourceReferences).toEqual({
+      assetIds: [],
+      componentPackages: [],
+    })
+    const pasted = pasteSlideSceneLayers(session, copied.clipboard, { now: NOW })
+    const afterPaste = requireSession(pasted)
+    expect(pasted.resourceTransition?.resourceDirection).toBe('forward')
+    expect(afterPaste.history.present.revision).toBe(2)
+    expect(isSlideAuthoringTransactionFrame(afterPaste.history.past.at(-1)!)).toBe(true)
+
+    const duplicated = duplicateSlideSceneLayers(session, ['slide-title'], { now: NOW })
+    const afterDup = requireSession(duplicated)
+    expect(duplicated.resourceTransition?.resourceDirection).toBe('forward')
+    expect(afterDup.history.present.revision).toBe(2)
+    expect(isSlideAuthoringTransactionFrame(afterDup.history.past.at(-1)!)).toBe(true)
+  })
+
+  it('rejects paste when clipboard resource references are missing or tampered', () => {
+    const project = courseProjectDocumentSchema.parse({
+      ...v9SlideFixture(),
+      assets: { 'asset-photo': photoAsset() },
+    })
+    const scene = project.surfaces[0]
+    if (!scene || scene.type !== 'slide') throw new Error('expected slide')
+    scene.scenes[0]!.layerItems.push(nativeImage('slide-photo', 4, 'asset-photo'))
+    const session = select(
+      openSlideAuthoringSession(courseProjectDocumentSchema.parse(project)),
+      ['slide-photo'],
+    )
+    const clipboard = executeSlideSceneAction('copy', session).clipboard
+    if (!clipboard || clipboard.sourceScope !== 'scene') {
+      throw new Error('expected scene clipboard')
+    }
+    expect(clipboard.resourceReferences.assetIds).toEqual(['asset-photo'])
+
+    const missingAsset = pasteSlideSceneLayers(session, {
+      ...clipboard,
+      resourceReferences: {
+        ...clipboard.resourceReferences,
+        assetIds: [...clipboard.resourceReferences.assetIds, 'missing-asset'],
+      },
+    }, { now: NOW })
+    expect(missingAsset).toMatchObject({
+      ok: false,
+      reason: '剪贴板资源引用已失效，请重新复制',
+      historyEntry: false,
+    })
+    expect(missingAsset.nextSession?.history.present).toBe(session.history.present)
+
+    const absentProject = v9SlideFixture()
+    const absentSession = select(
+      openSlideAuthoringSession(absentProject),
+      ['slide-title'],
+    )
+    const absentPaste = pasteSlideSceneLayers(absentSession, clipboard, { now: NOW })
+    expect(absentPaste).toMatchObject({
+      ok: false,
+      reason: '复制内容引用的素材已失效：asset-photo',
+      historyEntry: false,
+    })
+    expect(absentPaste.nextSession?.history.present).toBe(absentSession.history.present)
+  })
+
+  it('copies and pastes a scene Component with package references and new ids', () => {
+    const project = courseProjectDocumentSchema.parse({
+      ...v9SlideFixture(),
+      componentPackages: { 'component.quiz': quizPackageMeta() },
+    })
+    const scene = project.surfaces[0]
+    if (!scene || scene.type !== 'slide') throw new Error('expected slide')
+    scene.scenes[0]!.layerItems.push(sceneComponent('slide-component', 4))
+    const session = select(
+      openSlideAuthoringSession(courseProjectDocumentSchema.parse(project)),
+      ['slide-component'],
+    )
+    const copied = executeSlideSceneAction('copy', session)
+    expect(copied.clipboard?.resourceReferences.componentPackages).toEqual([
+      { packageId: 'component.quiz', version: '4.0.0' },
+    ])
+    const pasted = requireSession(pasteSlideSceneLayers(session, copied.clipboard, { now: NOW }))
+    expect(pasted.history.present.revision).toBe(2)
+    expect(pasted.selection.selectionIds[0]).not.toBe('slide-component')
+    const pastedItem = sceneOf(pasted).layerItems.find(
+      (item) => item.layerItemId === pasted.selection.selectionIds[0],
+    )
+    expect(pastedItem?.kind).toBe('component')
+    if (pastedItem?.kind === 'component') {
+      expect(pastedItem.component).toEqual({ packageId: 'component.quiz', version: '4.0.0' })
+    }
+  })
+
+  it('duplicates global layers with new ids and rewritten Runtime nodeBindings', () => {
+    const project = v9SlideFixture()
+    project.globalLayerItems.push({
+      item: runtimeBoundTo('global-runtime', 60, 'global-banner'),
+      visibility: { mode: 'include', locationIds: ['location-scene-1'] },
+      plane: 'underlay',
+    })
+    const globalSession = select(
+      requireSession(setSlideEditingScope(
+        openSlideAuthoringSession(project),
+        'global',
+      )),
+      ['global-banner', 'global-runtime'],
+    )
+    const duplicated = duplicateSlideGlobalLayers(
+      globalSession,
+      ['global-banner', 'global-runtime'],
+      { now: NOW },
+    )
+    const after = requireSession(duplicated)
+    expect(duplicated.resourceTransition?.resourceDirection).toBe('forward')
+    expect(after.history.present.revision).toBe(2)
+    expect(isSlideAuthoringTransactionFrame(after.history.past.at(-1)!)).toBe(true)
+    const ids = after.selection.selectionIds
+    expect(ids).toHaveLength(2)
+    expect(ids.some((id) => id === 'global-banner' || id === 'global-runtime')).toBe(false)
+    const runtime = after.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === ids[1],
+    )?.item
+    expect(runtime?.kind).toBe('runtime')
+    if (runtime?.kind === 'runtime') {
+      expect(runtime.runtime.nodeBindings?.target).toBe(ids[0])
+    }
   })
 })

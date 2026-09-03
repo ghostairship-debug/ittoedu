@@ -1,25 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildPublishedLessonPayload } from '@/renderer/export/buildPublishedLesson'
-import { collectExportPreflight } from '@/renderer/export/exportPreflight'
+import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
+import { createFormulaNode, type FormulaNodeOptions } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
-  createFormulaNode,
-  createProject,
-} from '@/renderer/project/createProject'
-import {
-  createProjectArchive,
-  openProjectArchive,
-} from '@/renderer/project/projectArchive'
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
 import {
   selectActiveScene,
   useEditorStore,
+  selectActiveCourseProjectDocument,
 } from '@/renderer/store/editorStore'
-import { publishedLessonToExportPayload } from '@/player/publishedLesson'
 import { materializeScene } from '@/shared/presentation'
-import {
-  formulaAstSchema,
-  projectDocumentSchema,
-} from '@/shared/projectSchema'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
+import { formulaAstSchema } from '@/shared/contracts/native-v1/schema'
 import type { FormulaAstNode } from '@/shared/projectTypes'
+
+function materialized(
+  scene: object,
+  stateId?: string | null,
+) {
+  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
+}
 
 const completeAst: FormulaAstNode = {
   type: 'row',
@@ -56,12 +61,59 @@ function measuringContext(): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D
 }
 
+function blankSlideProject(): CourseProjectDocument {
+  return createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+}
+
+function slideScene(project: CourseProjectDocument) {
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  const scene = surface.scenes[0]
+  if (!scene) throw new Error('expected slide scene')
+  return scene
+}
+
+type FormulaLayerItem = NativeLayerItem & {
+  kind: 'native'
+  content: Extract<NativeLayerItem['content'], { nativeType: 'formula' }>
+}
+
+function addFormulaLayer(
+  project: CourseProjectDocument,
+  options: FormulaNodeOptions,
+): FormulaLayerItem {
+  const item = sceneNodeToCourseLayerItem(
+    createFormulaNode(options),
+    slideScene(project).layerItems.length,
+  )
+  if (item.kind !== 'native' || item.content.nativeType !== 'formula') {
+    throw new Error('expected formula layer item')
+  }
+  slideScene(project).layerItems.push(item)
+  return item as FormulaLayerItem
+}
+
+function publishedFormula(project: CourseProjectDocument) {
+  const published = buildPublishedCourseV2Payload({
+    project,
+    assetFiles: {},
+    components: {},
+  })
+  const surface = published.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('expected published slide')
+  const item = surface.scenes[0]!.layerItems[0]
+  if (!item || item.kind !== 'native' || item.content.nativeType !== 'formula') {
+    throw new Error('expected published formula')
+  }
+  return item.content.data
+}
+
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
   vi.restoreAllMocks()
 })
 
-describe('Project V8 FormulaNode contract', () => {
+describe('Course Project V9 FormulaNode contract', () => {
   it('accepts every minimum AST kind and rejects semantically empty scripts', () => {
     expect(formulaAstSchema.parse(completeAst)).toEqual(completeAst)
     expect(formulaAstSchema.safeParse({
@@ -69,24 +121,26 @@ describe('Project V8 FormulaNode contract', () => {
       base: { type: 'token', value: 'x' },
     }).success).toBe(false)
 
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.scenes[0]!.nodes.push(createFormulaNode({
+    const project = blankSlideProject()
+    addFormulaLayer(project, {
       id: 'formula-node-1',
       formulaId: 'lesson.quadratic:answer-1',
       accessibleText: '三次根号 x 除以 y 的平方下标 i，等于一',
       ast: completeAst,
       style: { fontSize: 52, color: '#123456', align: 'right' },
-    }))
-    expect(projectDocumentSchema.safeParse(project).success).toBe(true)
+    })
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
 
     const invalid = structuredClone(project)
-    const node = invalid.scenes[0]!.nodes[0]
-    if (node?.type !== 'formula') throw new Error('Expected FormulaNode')
-    node.ast = {
+    const node = slideScene(invalid).layerItems[0]
+    if (!node || node.kind !== 'native' || node.content.nativeType !== 'formula') {
+      throw new Error('Expected FormulaNode')
+    }
+    node.content.data.ast = {
       type: 'script',
       base: { type: 'token', value: 'x' },
     }
-    const result = projectDocumentSchema.safeParse(invalid)
+    const result = courseProjectDocumentSchema.safeParse(invalid)
     expect(result.success).toBe(false)
     if (!result.success) {
       expect(result.error.issues.some(({ message }) => (
@@ -95,42 +149,40 @@ describe('Project V8 FormulaNode contract', () => {
     }
   })
 
-  it('preserves semantic identity through archive and PublishedLesson round trips', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const formula = createFormulaNode({
+  it('preserves semantic identity through archive and Published Course V2 round trips', () => {
+    const project = blankSlideProject()
+    const formula = addFormulaLayer(project, {
       id: 'formula-node-roundtrip',
       formulaId: 'math.energy.conservation',
       accessibleText: 'E 等于 m c 的平方',
       ast: completeAst,
     })
-    project.scenes[0]!.nodes.push(formula)
 
-    const archive = createProjectArchive({
+    const archive = createCourseProjectArchive({
       project,
       assetFiles: {},
       componentFiles: {},
     })
-    const reopened = openProjectArchive(archive).project
-    expect(reopened.scenes[0]!.nodes[0]).toMatchObject({
-      type: 'formula',
-      formulaId: formula.formulaId,
-      accessibleText: formula.accessibleText,
-      ast: completeAst,
+    const reopened = openCourseProjectArchive(archive).project
+    const restoredItem = slideScene(reopened).layerItems[0]
+    expect(restoredItem).toMatchObject({
+      kind: 'native',
+      content: {
+        nativeType: 'formula',
+        data: {
+          formulaId: formula.content.data.formulaId,
+          accessibleText: formula.content.data.accessibleText,
+          ast: completeAst,
+        },
+      },
     })
 
-    const published = buildPublishedLessonPayload({
-      project,
-      assets: {},
-      components: {},
-    })
-    const restored = publishedLessonToExportPayload(published).project
-    expect(restored.scenes[0]!.nodes[0]).toMatchObject({
-      type: 'formula',
-      formulaId: formula.formulaId,
-      accessibleText: formula.accessibleText,
+    expect(publishedFormula(reopened)).toMatchObject({
+      formulaId: formula.content.data.formulaId,
+      accessibleText: formula.content.data.accessibleText,
       ast: completeAst,
     })
-    expect(projectDocumentSchema.safeParse(restored).success).toBe(true)
+    expect(courseProjectDocumentSchema.safeParse(reopened).success).toBe(true)
   })
 
   it('uses the normal state-override and undo/redo command path', () => {
@@ -155,7 +207,7 @@ describe('Project V8 FormulaNode contract', () => {
       formulaId,
       accessibleText: 'x 的平方加二分之一',
     })
-    expect(materializeScene(scene, stateId).nodes[0]).toMatchObject({
+    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
       type: 'formula',
       formulaId,
       accessibleText: '答案为一',
@@ -166,16 +218,16 @@ describe('Project V8 FormulaNode contract', () => {
 
     useEditorStore.getState().undo()
     scene = selectActiveScene(useEditorStore.getState())
-    expect(materializeScene(scene, stateId).nodes[0]).toMatchObject({
+    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
       accessibleText: 'x 的平方加二分之一',
     })
     useEditorStore.getState().redo()
     scene = selectActiveScene(useEditorStore.getState())
-    expect(materializeScene(scene, stateId).nodes[0]).toMatchObject({
+    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
       accessibleText: '答案为一',
       formulaId,
     })
-    expect(projectDocumentSchema.safeParse(useEditorStore.getState().project).success)
+    expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
       .toBe(true)
   })
 
@@ -183,15 +235,15 @@ describe('Project V8 FormulaNode contract', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       measuringContext(),
     )
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const fitting = createFormulaNode({
+    const project = blankSlideProject()
+    const fitting = addFormulaLayer(project, {
       id: 'formula-fitting',
       formulaId: 'formula.fitting',
       width: 500,
       height: 200,
       ast: { type: 'token', value: 'x' },
     })
-    const clipped = createFormulaNode({
+    const clipped = addFormulaLayer(project, {
       id: 'formula-clipped',
       formulaId: 'formula.clipped',
       width: 24,
@@ -199,22 +251,22 @@ describe('Project V8 FormulaNode contract', () => {
       style: { fontSize: 80 },
       ast: completeAst,
     })
-    project.scenes[0]!.nodes.push(fitting, clipped)
 
-    const report = collectExportPreflight(
+    const report = collectCourseProjectExportPreflight(
       project,
       'pptx',
       { assetFiles: {}, components: {} },
       new Date('2026-08-11T00:00:00.000Z'),
+      { playerBundle: '/* player */' },
     )
     expect(report.items).toContainEqual(expect.objectContaining({
       code: 'pptx-formula-rasterized',
-      nodeId: fitting.id,
+      nodeId: fitting.layerItemId,
       severity: 'info',
     }))
     expect(report.items).toContainEqual(expect.objectContaining({
       code: 'formula-content-overflow-estimated',
-      nodeId: clipped.id,
+      nodeId: clipped.layerItemId,
       severity: 'warning',
     }))
     expect(report.summary.canExport).toBe(true)
@@ -225,24 +277,25 @@ describe('Project V8 FormulaNode contract', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       measuringContext(),
     )
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const clipped = createFormulaNode({
+    const project = blankSlideProject()
+    const clipped = addFormulaLayer(project, {
       id: 'formula-browser-clipped',
       width: 24,
       height: 24,
       style: { fontSize: 80 },
       ast: completeAst,
     })
-    project.scenes[0]!.nodes.push(clipped)
 
-    const report = collectExportPreflight(
+    const report = collectCourseProjectExportPreflight(
       project,
       'pptx',
       { assetFiles: {}, components: {} },
+      new Date('2026-08-11T00:00:00.000Z'),
+      { playerBundle: '/* player */' },
     )
     expect(report.items).toContainEqual(expect.objectContaining({
       code: 'formula-content-overflow',
-      nodeId: clipped.id,
+      nodeId: clipped.layerItemId,
       severity: 'error',
     }))
     expect(report.summary.canExport).toBe(false)

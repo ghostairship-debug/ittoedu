@@ -7,8 +7,10 @@ import {
   createRectangleNode,
   createTeacherControllerNode,
   createVideoNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
 import {
+  COURSE_PROJECT_FORMAT_PREFLIGHT_ADAPTERS,
+  COURSE_PROJECT_HEALTH_FINDING_CATALOG,
   collectCourseProjectHealth,
   collectCourseProjectInteractionHealth,
   collectCourseProjectRuntimeHealth,
@@ -1212,5 +1214,80 @@ describe('V9-native Course Project health', () => {
     expect(collectCourseProjectHealth(project, EMPTY_FILES).map(({ code }) => code)).toContain(
       'controller-visible-while-disabled',
     )
+  })
+
+  it('warns when a schema-valid component instance lacks opened package files', () => {
+    const project = blankProject()
+    const { scene } = slide(project)
+    const imported = parseComponentPackageFiles(componentArchiveFiles('com.example.incomplete'))
+    project.componentPackages[imported.metadata.packageId] = imported.metadata
+    scene.layerItems.push({
+      layerItemId: 'incomplete-component',
+      label: imported.metadata.name,
+      frame: { mode: 'absolute', x: 0, y: 0, width: 320, height: 180 },
+      order: 0,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      kind: 'component',
+      component: {
+        packageId: imported.metadata.packageId,
+        version: imported.metadata.version,
+      },
+      props: {},
+    })
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    expect(collectCourseProjectHealth(project, EMPTY_FILES)).toContainEqual(
+      expect.objectContaining({
+        code: 'asset-reference-analysis-incomplete',
+        severity: 'warning',
+      }),
+    )
+  })
+
+  it('reports duplicate layer identities across disjoint surface owners', () => {
+    const project = blankProject()
+    const { scene } = slide(project)
+    const { spatial } = addFlowAndSpatial(project)
+    const shared = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'shared-layer',
+      name: '跨 Surface 图层',
+    }), 0)
+    scene.layerItems.push(shared)
+    spatial.world.layerItems.push(structuredClone(shared))
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    expect(collectCourseProjectHealth(project, EMPTY_FILES)).toContainEqual(
+      expect.objectContaining({
+        code: 'duplicate-stable-id',
+        severity: 'error',
+        message: '稳定 ID 重复：layer:shared-layer',
+      }),
+    )
+  })
+
+  it('pins 041–043 adapter contract names without wiring format producers here', () => {
+    expect(COURSE_PROJECT_FORMAT_PREFLIGHT_ADAPTERS).toEqual({
+      pptx: {
+        adapter: 'adaptCoursePptxProducerFindings',
+        owner: 'r11-041',
+        source: 'src/renderer/export/exportPreflight.ts',
+      },
+      pdf: {
+        adapter: 'adaptCoursePdfProducerFindings',
+        owner: 'r11-042',
+        source: 'src/renderer/export/exportPreflight.ts',
+      },
+      htmlWeb: {
+        adapter: 'adaptCourseHtmlWebProducerFindings',
+        owner: 'r11-043',
+        source: 'src/renderer/export/exportPreflight.ts',
+      },
+    })
+    expect(COURSE_PROJECT_HEALTH_FINDING_CATALOG['asset-kind-mismatch'].severity).toBe('error')
   })
 })

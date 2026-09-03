@@ -1,3 +1,8 @@
+/**
+ * V8-shaped, read-only collector retained for leftover tests and App fallback
+ * until r11-054. Product GUI, CLI and saved-report truth is
+ * `collectCourseProjectHealth`.
+ */
 import { collectComponentPackageUsages } from './componentPackageLifecycle'
 import { collectProjectDiagnostics } from './projectDiagnostics'
 import {
@@ -28,6 +33,8 @@ import {
 import type { ProjectHealthCode } from './diagnosticCodes'
 import { compareStableStrings } from './stableOrder'
 import { hasDeliveryVisibleTeacherController } from './teacherControllerConsistency'
+import { summarizeCourseProjectHealth } from './courseProjectHealth'
+import type { CourseProjectHealthSummary } from './courseProjectHealth'
 
 export type ProjectHealthSeverity = 'error' | 'warning' | 'info'
 export type ProjectHealthScope =
@@ -61,13 +68,7 @@ export interface ProjectHealthDiagnostic extends ProjectHealthLocation {
   message: string
 }
 
-export interface ProjectHealthSummary {
-  error: number
-  warning: number
-  info: number
-  total: number
-  canExport: boolean
-}
+export type ProjectHealthSummary = CourseProjectHealthSummary
 
 interface HealthCollector {
   diagnostics: ProjectHealthDiagnostic[]
@@ -1200,18 +1201,7 @@ export function collectProjectHealth(
 }
 
 export function summarizeProjectHealth(
-  diagnostics: readonly ProjectHealthDiagnostic[],
+  diagnostics: readonly Pick<ProjectHealthDiagnostic, 'severity'>[],
 ): ProjectHealthSummary {
-  const summary: ProjectHealthSummary = {
-    error: 0,
-    warning: 0,
-    info: 0,
-    total: diagnostics.length,
-    canExport: true,
-  }
-  diagnostics.forEach((diagnostic) => {
-    summary[diagnostic.severity] += 1
-  })
-  summary.canExport = summary.error === 0
-  return summary
+  return summarizeCourseProjectHealth(diagnostics)
 }

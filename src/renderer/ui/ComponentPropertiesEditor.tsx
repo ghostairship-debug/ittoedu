@@ -12,15 +12,17 @@ import {
   resolveComponentPresetProps,
   setComponentPropValue,
 } from '../../shared/componentProps'
-import type {
-  AssetMeta,
-  ExternalComponentNode,
-} from '../../shared/projectTypes'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
 import { SlidersHorizontal } from 'lucide-react'
+
+export interface ComponentPropertiesTarget {
+  readonly id: string
+  readonly props: Record<string, unknown>
+}
 
 export interface ComponentPropertiesEditorProps {
   manifest: ComponentManifest
-  node: ExternalComponentNode
+  node: ComponentPropertiesTarget
   assets: Readonly<Record<string, AssetMeta>>
   onChange(nextProps: Record<string, unknown>): void
 }
@@ -39,7 +41,7 @@ function FieldDescription({ value }: { value?: string }) {
 
 interface PropertyFieldProps {
   field: ComponentEditorProperty
-  node: ExternalComponentNode
+  node: ComponentPropertiesTarget
   effectiveProps: Readonly<Record<string, unknown>>
   assets: Readonly<Record<string, AssetMeta>>
   onChange(nextProps: Record<string, unknown>): void

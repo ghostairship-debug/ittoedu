@@ -234,6 +234,65 @@ describe('ScenePanel course tree reorder', () => {
     expect(useEditorStore.getState().spatialSession?.selection.locationId).toBe(cameras[1]!.locationId)
   })
 
+  it('keeps a delayed camera delete bound to the captured revision', () => {
+    const store = useEditorStore.getState()
+    store.createNewSpatialProject()
+    store.runSpatialCommand((session) => addSpatialCameraFrameFromSession(session, { name: '远景' }))
+    render(<ScenePanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: '删除镜头 远景' }))
+    store.addTextNode()
+    const beforeConfirm = useEditorStore.getState()
+    const frameCount = courseDocument().surfaces.flatMap((surface) => (
+      surface.type === 'spatial-2d' ? surface.camera.frames : []
+    )).length
+    fireEvent.click(screen.getByRole('button', { name: '删除镜头' }))
+
+    expect(courseDocument().surfaces.flatMap((surface) => (
+      surface.type === 'spatial-2d' ? surface.camera.frames : []
+    ))).toHaveLength(frameCount)
+    expect(useEditorStore.getState().spatialSession).toBe(beforeConfirm.spatialSession)
+    expect(useEditorStore.getState().courseAssetSidecarPast).toBe(beforeConfirm.courseAssetSidecarPast)
+    expect(useEditorStore.getState().courseComponentPackagesPast)
+      .toBe(beforeConfirm.courseComponentPackagesPast)
+  })
+
+  it('rejects a delayed camera delete when a content draft opens after the dialog', () => {
+    const store = useEditorStore.getState()
+    store.createNewSpatialProject()
+    store.addTextNode()
+    const textId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
+    if (!textId) throw new Error('expected Spatial text layer')
+    store.runSpatialCommand((session) => addSpatialCameraFrameFromSession(session, { name: '远景' }))
+    render(<ScenePanel />)
+
+    const revisionAtOpen = courseDocument().revision
+    fireEvent.click(screen.getByRole('button', { name: '删除镜头 远景' }))
+    store.beginTextEdit(textId, 'properties')
+    store.updateTextEditDraft(textId, '弹窗后打开的草稿', [])
+    const beforeConfirm = useEditorStore.getState()
+    const frameCount = courseDocument().surfaces.flatMap((surface) => (
+      surface.type === 'spatial-2d' ? surface.camera.frames : []
+    )).length
+    expect(courseDocument().revision).toBe(revisionAtOpen)
+    expect(beforeConfirm.spatialContentEdit?.kind).toBe('text')
+    if (beforeConfirm.spatialContentEdit?.kind !== 'text') throw new Error('expected text draft')
+    if (!('text' in beforeConfirm.spatialContentEdit.draft)) throw new Error('expected text draft data')
+    expect(beforeConfirm.spatialContentEdit.draft.text).toBe('弹窗后打开的草稿')
+
+    fireEvent.click(screen.getByRole('button', { name: '删除镜头' }))
+
+    expect(courseDocument().surfaces.flatMap((surface) => (
+      surface.type === 'spatial-2d' ? surface.camera.frames : []
+    ))).toHaveLength(frameCount)
+    expect(useEditorStore.getState().spatialContentEdit).toBe(beforeConfirm.spatialContentEdit)
+    expect(useEditorStore.getState().spatialSession).toBe(beforeConfirm.spatialSession)
+    expect(useEditorStore.getState().history).toBe(beforeConfirm.history)
+    expect(useEditorStore.getState().courseAssetSidecarPast).toBe(beforeConfirm.courseAssetSidecarPast)
+    expect(useEditorStore.getState().courseComponentPackagesPast)
+      .toBe(beforeConfirm.courseComponentPackagesPast)
+  })
+
   it('labels flow and spatial primary add actions without 新增页面', () => {
     const store = useEditorStore.getState()
     store.createNewFlowProject()

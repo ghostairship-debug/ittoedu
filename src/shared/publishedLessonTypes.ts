@@ -7,10 +7,10 @@ import type { InteractionRule } from './interactionTypes'
 import type {
   DeepPartial,
   GlobalLayerVisibility,
-  ProjectMediaSettings,
-  ProjectPlaybackSettings,
   SceneNode,
 } from './projectTypes'
+import type { ProjectMediaSettings } from './contracts/media-v1/types'
+import type { ProjectPlaybackSettings } from './contracts/playback-v1/types'
 import type {
   RuntimeLayer,
   RuntimeRenderMode,

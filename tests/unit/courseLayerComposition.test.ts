@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { composeCourseProjectLocation } from '@/shared/courseLayerComposition'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import type {
   CourseProjectDocument,
   LayerItem,

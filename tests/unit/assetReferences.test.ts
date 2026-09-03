@@ -1,19 +1,20 @@
 import { describe, expect, it } from 'vitest'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { planCourseMediaLibraryImport } from '@/renderer/media/courseMediaLibraryImport'
+import type { ComponentPackageData } from '@/shared/componentTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1/types'
+import type {
+  ComponentLayerItem,
+  CourseProjectDocument,
+  NativeLayerItem,
+  RuntimeLayerItem,
+  SlideSceneDocument,
+} from '@/shared/courseProjectTypes'
+import { listCourseAssetReferences } from '@/renderer/project/v9AssetAdapter'
 import {
-  analyzeProjectAssetReferences,
-  collectReferencedProjectAssetIds,
-  collectUnusedProjectAssetIds,
-} from '@/shared/assetReferences'
-import type { AssetMeta } from '@/shared/projectTypes'
-import {
-  createExternalComponentNode,
-  createImageNode,
-  createProject,
-  createVideoNode,
-} from '@/renderer/project/createProject'
-import { collectProjectHealth } from '@/shared/projectHealth'
-import { collectPublishedProjectAssetIds } from '@/renderer/export/buildPublishedLesson'
-import { useEditorStore } from '@/renderer/store/editorStore'
+  selectActiveCourseProjectDocument,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 
 function asset(id: string, kind: AssetMeta['kind'] = 'image'): AssetMeta {
   return {
@@ -26,196 +27,309 @@ function asset(id: string, kind: AssetMeta['kind'] = 'image'): AssetMeta {
   }
 }
 
-describe('project asset reference graph', () => {
-  it('covers base/state/global/sound/runtime and reports exact locations', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const scene = project.scenes[0]!
-    const ids = [
-      'scene-bg', 'state-bg', 'base-image', 'state-image', 'global-video',
-      'poster', 'sound', 'runtime-binding', 'runtime-fallback',
-      'runtime-content', 'runtime-source', 'unused',
-    ]
-    ids.forEach((id) => { project.assets[id] = asset(id) })
-    project.assets['global-video'] = asset('global-video', 'video')
-    project.assets.sound = asset('sound', 'audio')
-    scene.backgroundAssetId = 'scene-bg'
-    const image = createImageNode('base-image')
-    scene.nodes.push(image)
-    const state = scene.presentation!.states[0]!
-    state.backgroundAssetId = 'state-bg'
-    state.nodeOverrides[image.id] = { assetId: 'state-image' }
-    const video = createVideoNode({ assetId: 'global-video' })
-    video.poster = { mode: 'image', time: 0, assetId: 'poster' }
-    project.globalLayer.push({
-      node: video,
-      layer: 'overlay',
-      visibility: { mode: 'all', sceneIds: [] },
-    })
-    project.media.audio.sounds.sound = {
-      id: 'sound', name: 'Sound', assetId: 'sound', channel: 'sfx',
-      defaultVolume: 1, defaultLoop: false,
-    }
-    scene.runtime = {
+function firstSlideScene(project: CourseProjectDocument): SlideSceneDocument {
+  const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
+  const scene = surface?.type === 'slide' ? surface.scenes[0] : undefined
+  if (!scene) throw new Error('Expected a V9 Slide scene')
+  return scene
+}
+
+function layerBase(layerItemId: string, order: number) {
+  return {
+    layerItemId,
+    label: layerItemId,
+    frame: { mode: 'absolute' as const, x: 40, y: 40, width: 320, height: 180 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto' as const,
+    playbackInitialVisibility: 'inherit' as const,
+  }
+}
+
+function imageLayer(layerItemId: string, assetId: string, order = 0): NativeLayerItem {
+  return {
+    ...layerBase(layerItemId, order),
+    kind: 'native',
+    content: {
+      nativeType: 'image',
+      data: {
+        assetId,
+        preserveAspectRatio: true,
+        fit: 'contain',
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        cropX: 0.5,
+        cropY: 0.5,
+        flipX: false,
+        flipY: false,
+        cornerRadius: 0,
+        feather: { amount: 0, mode: 'rectangle' },
+        safeAreas: [],
+      },
+    },
+  }
+}
+
+function videoLayer(
+  layerItemId: string,
+  assetId: string,
+  posterAssetId: string,
+): NativeLayerItem {
+  return {
+    ...layerBase(layerItemId, 5),
+    kind: 'native',
+    content: {
+      nativeType: 'video',
+      data: {
+        assetId,
+        fit: 'contain',
+        autoplay: false,
+        loop: false,
+        muted: false,
+        volume: 1,
+        playbackRate: 1,
+        showControls: true,
+        clickToToggle: true,
+        startTime: 0,
+        endTime: null,
+        poster: { mode: 'video-frame', time: 0, assetId: posterAssetId },
+        backgroundAudioMode: 'none',
+      },
+    },
+  }
+}
+
+function runtimeLayer(layerItemId: string, contentId: string, sourceId: string): RuntimeLayerItem {
+  return {
+    ...layerBase(layerItemId, 10),
+    kind: 'runtime',
+    runtime: {
+      protocol: 'canvas-runtime',
       runtimeApiVersion: 2,
-      enabled: true,
+      enabled: false,
       renderMode: 'dom',
-      assets: { photo: { assetId: 'runtime-binding' } },
-      staticFallback: { assetId: 'runtime-fallback', coverage: 'runtime-layer', layer: 'overlay' },
-      content: { values: { nested: 'runtime-content' } },
-      source: `ctx.projectAssetUrl('runtime\\u002dsource')`,
-    }
+      source: `CoursewareRuntime.define({create(ctx){ctx.projectAssetUrl('${sourceId}')}})`,
+      content: { values: { nested: contentId } },
+      assets: {},
+    },
+  }
+}
 
-    const analysis = analyzeProjectAssetReferences(project)
-    const referenced = new Set(analysis.graph.keys())
-    expect(referenced).toEqual(new Set(ids.filter((id) => id !== 'unused')))
-    expect(analysis.graph.get('state-image')).toContainEqual(expect.objectContaining({
-      kind: 'node-image',
-      certainty: 'direct',
-      sceneId: scene.id,
-      stateId: state.id,
-      nodeId: image.id,
-      path: expect.arrayContaining(['nodeOverrides', image.id, 'assetId']),
-    }))
-    expect(analysis.graph.get('runtime-source')).toContainEqual(expect.objectContaining({
-      kind: 'runtime-source', certainty: 'conservative',
-    }))
-    expect(collectUnusedProjectAssetIds(project)).toEqual(new Set(['unused']))
-  })
+function componentLayer(packageId: string): ComponentLayerItem {
+  return {
+    ...layerBase('component-layer', 20),
+    kind: 'component',
+    component: { packageId, version: '4.0.0' },
+    props: { cover: 'component-base' },
+  }
+}
 
-  it('covers nested component props, manifest image defaults and runtime source', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    ;['prop-image', 'state-prop-image', 'default-image', 'source-image', 'unrelated'].forEach((id) => {
-      project.assets[id] = asset(id)
-    })
-    const node = createExternalComponentNode({
-      component: { packageId: 'com.test.media', version: '4.0.0' },
-      props: { nested: { image: 'prop-image' } },
-    })
-    project.scenes[0]!.nodes.push(node)
-    const state = project.scenes[0]!.presentation!.states[0]!
-    state.nodeOverrides[node.id] = {
-      props: { nested: { image: 'state-prop-image' } },
-    }
-    project.componentPackages['com.test.media'] = {
-      packageId: 'com.test.media', version: '4.0.0', name: 'Media',
-      manifestPath: 'components/com.test.media/manifest.json',
-      runtimePath: 'components/com.test.media/runtime.js',
-      contentSha256: '0'.repeat(64),
-    }
-    const components = {
-      'com.test.media': {
-        manifest: {
-          schemaVersion: 4 as const,
-          runtimeApiVersion: 4 as const,
-          id: 'com.test.media', name: 'Media', version: '4.0.0',
-          entry: 'runtime.js', defaultSize: { width: 100, height: 100 },
-          minSize: { width: 10, height: 10 }, preserveAspectRatio: false,
-          assets: {}, supportedScopes: ['scene' as const], renderMode: 'dom' as const,
-          defaultProps: { cover: 'default-image' },
-          editor: { properties: [{ key: 'cover', label: 'Cover', type: 'image' as const }] },
-        },
-        runtimeSource: `ctx.projectAssetUrl('source-image')`,
+function componentPackage(packageId: string): ComponentPackageData {
+  return {
+    manifest: {
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
+      id: packageId,
+      name: 'Asset component',
+      version: '4.0.0',
+      entry: 'runtime.js',
+      defaultSize: { width: 320, height: 180 },
+      minSize: { width: 80, height: 45 },
+      preserveAspectRatio: false,
+      supportedScopes: ['scene'],
+      renderMode: 'dom',
+      assets: {},
+      defaultProps: { defaultCover: 'component-default' },
+      editor: {
+        properties: [
+          { key: 'cover', label: 'Cover', type: 'image' },
+          { key: 'defaultCover', label: 'Default cover', type: 'image' },
+        ],
       },
-    }
+    },
+    runtimeSource: "CoursewareComponent.define({create(ctx){ctx.projectAssetUrl('component-source')}})",
+    files: {},
+  }
+}
 
-    const graph = analyzeProjectAssetReferences(project, { componentPackages: components }).graph
-    expect(graph.get('prop-image')).toContainEqual(expect.objectContaining({
-      kind: 'component-prop', certainty: 'conservative', nodeId: node.id,
-    }))
-    expect(graph.get('default-image')).toContainEqual(expect.objectContaining({
-      kind: 'component-manifest-default', certainty: 'direct',
-    }))
-    expect(graph.get('source-image')).toContainEqual(expect.objectContaining({
-      kind: 'component-runtime-source', certainty: 'conservative',
-    }))
-    expect(graph.get('state-prop-image')).toContainEqual(expect.objectContaining({
-      kind: 'component-prop', certainty: 'conservative',
-      stateId: state.id, nodeId: node.id,
-    }))
-    expect(collectUnusedProjectAssetIds(project, { componentPackages: components }))
-      .toEqual(new Set(['unrelated']))
-  })
+function addAssets(project: CourseProjectDocument, ...ids: string[]): void {
+  ids.forEach((id) => { project.assets[id] = asset(id) })
+}
 
-  it('does not treat missing component context as permission to delete', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.assets.protected = asset('protected')
-    const node = createExternalComponentNode({
-      component: { packageId: 'missing', version: '4.0.0' },
-    })
-    project.scenes[0]!.nodes.push(node)
+function loadProject(
+  project: CourseProjectDocument,
+  componentPackages: Record<string, ComponentPackageData> = {},
+): void {
+  const files = Object.fromEntries(Object.values(project.assets).map((meta) => [
+    meta.id,
+    new Uint8Array(meta.byteLength),
+  ]))
+  useEditorStore.getState().loadCourseProject(project, null, files, componentPackages)
+}
 
-    const analysis = analyzeProjectAssetReferences(project)
-    expect(analysis.missingComponentContexts).toContainEqual(expect.objectContaining({
-      packageId: 'missing', nodeId: node.id,
-    }))
-    expect(collectReferencedProjectAssetIds(project)).toContain('protected')
-    expect(analysis.graph.get('protected')).toContainEqual(expect.objectContaining({
-      kind: 'component-context-unavailable', certainty: 'conservative',
-    }))
-  })
-
-  it('keeps explicit manifest image fields direct even when the asset is missing', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const node = createExternalComponentNode({
-      component: { packageId: 'com.test.missing-image', version: '4.0.0' },
-      props: { cover: 'missing-project-asset' },
-    })
-    project.scenes[0]!.nodes.push(node)
-    const components = {
-      recordKey: {
-        manifest: {
-          schemaVersion: 4 as const, runtimeApiVersion: 4 as const,
-          id: 'com.test.missing-image', name: 'Missing image', version: '4.0.0',
-          entry: 'runtime.js', defaultSize: { width: 100, height: 100 },
-          minSize: { width: 10, height: 10 }, preserveAspectRatio: false,
-          assets: {}, defaultProps: {}, supportedScopes: ['scene' as const],
-          renderMode: 'dom' as const,
-          editor: { properties: [{ key: 'cover', label: 'Cover', type: 'image' as const }] },
-        },
-        runtimeSource: '',
-      },
-    }
-
-    expect(analyzeProjectAssetReferences(project, { componentPackages: components })
-      .graph.get('missing-project-asset')).toContainEqual(expect.objectContaining({
-        kind: 'component-prop', certainty: 'direct', nodeId: node.id,
-      }))
-  })
-
-  it('keeps graph, deletion, unused diagnostics, and publishing projection aligned', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+describe('project asset reference graph', () => {
+  it('keeps V9 deletion aligned with referenced assets', () => {
     const referenced = asset('referenced')
     const unused = asset('unused')
-    project.assets.referenced = referenced
-    project.assets.unused = unused
-    project.scenes[0]!.nodes.push(createImageNode('referenced'))
-    const components = {}
-    const graphIds = collectReferencedProjectAssetIds(project, {
-      componentPackages: components,
-      includeDisabledRuntimes: false,
-    })
-    const healthUnused = new Set(collectProjectHealth(project, components)
-      .filter(({ code }) => code === 'asset-unused')
-      .map(({ assetId }) => assetId))
-    const publishedIds = collectPublishedProjectAssetIds({
-      project,
-      assets: {
-        referenced: { mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==' },
-        unused: { mimeType: 'image/png', dataUrl: 'data:image/png;base64,AA==' },
-      },
-      components,
-    })
-    useEditorStore.getState().loadProject(project, null, {
-      referenced: new Uint8Array([1]),
-      unused: new Uint8Array([2]),
-    })
-    const deleteBlocked = new Set(Object.keys(project.assets).filter((assetId) => (
+    const store = useEditorStore.getState()
+    store.createNewProject()
+    store.addImageNode(referenced, new Uint8Array(referenced.byteLength))
+    store.importAsset(unused, new Uint8Array(unused.byteLength))
+
+    const project = selectActiveCourseProjectDocument(useEditorStore.getState())
+    if (!project) throw new Error('Expected a live V9 project')
+    expect(listCourseAssetReferences(project, referenced.id)).toEqual([
+      expect.objectContaining({ kind: 'native-image', assetId: referenced.id }),
+    ])
+    expect(listCourseAssetReferences(project, unused.id)).toEqual([])
+
+    const deleteBlocked = new Set(['referenced', 'unused'].filter((assetId) => (
       !useEditorStore.getState().deleteAsset(assetId)
     )))
+    expect(deleteBlocked).toEqual(new Set(['referenced']))
+  })
 
-    expect(new Set(graphIds)).toEqual(new Set(['referenced']))
-    expect(deleteBlocked).toEqual(new Set(graphIds))
-    expect(healthUnused).toEqual(new Set(['unused']))
-    expect(publishedIds).toEqual(new Set(graphIds))
+  it('protects assets materialized only by a named-state native override', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'base-image', 'state-image')
+    const scene = firstSlideScene(project)
+    const image = imageLayer('stateful-image', 'base-image')
+    scene.layerItems.push(image)
+    scene.presentation!.states[0]!.layerItemOverrides[image.layerItemId] = {
+      nativeData: { assetId: 'state-image' },
+    }
+    loadProject(project)
+
+    expect(useEditorStore.getState().deleteAsset('state-image')).toBe(false)
+    expect(useEditorStore.getState().errorMessage).toContain('nativeData.assetId')
+  })
+
+  it('protects a persisted video poster asset regardless of poster capture mode', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'video-asset', 'video-poster')
+    firstSlideScene(project).layerItems.push(videoLayer(
+      'video-with-persisted-poster',
+      'video-asset',
+      'video-poster',
+    ))
+    loadProject(project)
+
+    expect(listCourseAssetReferences(project, 'video-poster')).toContainEqual(
+      expect.objectContaining({
+        kind: 'video-poster',
+        path: expect.arrayContaining(['poster', 'assetId']),
+      }),
+    )
+    expect(useEditorStore.getState().deleteAsset('video-poster')).toBe(false)
+  })
+
+  it('protects known ids in disabled Runtime content and quoted source', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'runtime-content', 'runtime-source')
+    firstSlideScene(project).layerItems.push(runtimeLayer(
+      'runtime-layer',
+      'runtime-content',
+      'runtime-source',
+    ))
+    loadProject(project)
+
+    expect(useEditorStore.getState().deleteAsset('runtime-content')).toBe(false)
+    expect(useEditorStore.getState().errorMessage).toContain('content.values')
+    expect(useEditorStore.getState().deleteAsset('runtime-source')).toBe(false)
+    expect(useEditorStore.getState().errorMessage).toContain('source')
+  })
+
+  it('protects component props, defaults, state overrides, and runtime source', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const packageId = 'com.test.asset-closure'
+    addAssets(
+      project,
+      'component-base',
+      'component-default',
+      'component-state',
+      'component-source',
+    )
+    project.componentPackages[packageId] = {
+      packageId,
+      version: '4.0.0',
+      name: 'Asset component',
+      manifestPath: `components/${packageId}/manifest.json`,
+      runtimePath: `components/${packageId}/runtime.js`,
+      contentSha256: '0'.repeat(64),
+    }
+    const scene = firstSlideScene(project)
+    const component = componentLayer(packageId)
+    scene.layerItems.push(component)
+    scene.presentation!.states[0]!.layerItemOverrides[component.layerItemId] = {
+      componentProps: { cover: 'component-state' },
+    }
+    const packages = { [packageId]: componentPackage(packageId) }
+    expect(listCourseAssetReferences(project, 'component-state', {
+      componentPackages: packages,
+    })).toContainEqual(expect.objectContaining({
+      kind: 'component-prop',
+      path: expect.arrayContaining(['componentProps', 'cover']),
+    }))
+    loadProject(project, packages)
+
+    for (const id of [
+      'component-base',
+      'component-default',
+      'component-state',
+      'component-source',
+    ]) {
+      expect(useEditorStore.getState().deleteAsset(id), id).toBe(false)
+    }
+  })
+
+  it('fails closed when a V9 component lacks matching executable context', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const packageId = 'com.test.missing-context'
+    addAssets(project, 'possibly-referenced')
+    project.componentPackages[packageId] = {
+      packageId,
+      version: '4.0.0',
+      name: 'Missing context',
+      manifestPath: `components/${packageId}/manifest.json`,
+      runtimePath: `components/${packageId}/runtime.js`,
+      contentSha256: '0'.repeat(64),
+    }
+    const component = componentLayer(packageId)
+    component.props = {}
+    firstSlideScene(project).layerItems.push(component)
+    loadProject(project)
+
+    expect(useEditorStore.getState().deleteAsset('possibly-referenced')).toBe(false)
+    expect(useEditorStore.getState().errorMessage).toContain('component')
+  })
+
+  it('preserves existing V9 remote delivery metadata while importing local media', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    project.assets.remote = {
+      ...asset('remote'),
+      remote: { url: 'https://cdn.example.test/remote.png' },
+    }
+    const imported = asset('imported')
+    const result = planCourseMediaLibraryImport({
+      project,
+      sidecar: { files: { remote: new Uint8Array(project.assets.remote.byteLength) } },
+      items: [{ meta: imported, bytes: new Uint8Array(imported.byteLength) }],
+      projectId: project.id,
+      baseRevision: project.revision,
+      now: '2026-09-03T00:00:00.000Z',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok || result.status !== 'planned') {
+      throw new Error('Expected a media import transaction plan')
+    }
+    expect(result.plan.nextDocument.assets.remote?.remote).toEqual({
+      url: 'https://cdn.example.test/remote.png',
+    })
+    expect(project.assets.remote.remote).toEqual({
+      url: 'https://cdn.example.test/remote.png',
+    })
   })
 })

@@ -13,7 +13,17 @@ import {
   mergeComponentProps,
   resolveComponentEditorProperties,
 } from '../shared/componentProps'
-import type { ExternalComponentNode } from '../shared/projectTypes'
+
+export interface ComponentHostNode {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  visible: boolean
+  props: Record<string, unknown>
+}
 
 export type ComponentAuthoringTargetsChangedHandler = (
   update: Readonly<ComponentAuthoringTargetUpdate>,
@@ -21,7 +31,7 @@ export type ComponentAuthoringTargetsChangedHandler = (
 
 export interface ComponentAuthoringTargetRegistryOptions {
   manifest: ComponentManifest
-  node: ExternalComponentNode
+  node: ComponentHostNode
   scope: ComponentScope
   sceneId?: string
   domRoot?: HTMLElement
@@ -146,7 +156,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   private mutationObserver: MutationObserver | null = null
   private resizeObserver: ResizeObserver | null = null
   private readonly resizeObservedElements = new Set<Element>()
-  private node: ExternalComponentNode
+  private node: ComponentHostNode
   private domRoot: HTMLElement | undefined
   private previousTargets:
     ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> | null = null
@@ -183,7 +193,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     }
   }
 
-  update(node: ExternalComponentNode): void {
+  update(node: ComponentHostNode): void {
     if (this.destroyed) return
     if (node.id !== this.node.id) {
       throw new Error('组件画布目标不能切换到另一个节点实例')

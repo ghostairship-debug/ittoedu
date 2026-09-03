@@ -195,6 +195,129 @@ afterEach(() => {
 })
 
 describe('Spatial product shell wiring', () => {
+  it('keeps the exact Spatial text lease while IME composition blocks selection changes', async () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode(60, 80)
+    useEditorStore.getState().addTextNode(320, 220)
+    const textIds = spatialSurface().world.layerItems.flatMap((item) => (
+      item.kind === 'native' && item.content.nativeType === 'text'
+        ? [item.layerItemId]
+        : []
+    )).slice(-2)
+    expect(textIds).toHaveLength(2)
+    const [firstId, secondId] = textIds as [string, string]
+    const initial = useEditorStore.getState().spatialSession!
+    const fixedDocument = structuredClone(initial.history.present)
+    for (const id of textIds) {
+      const located = locateCourseLayer(fixedDocument, id)
+      if (
+        !located
+        || located.item.kind !== 'native'
+        || located.item.content.nativeType !== 'text'
+      ) throw new Error('expected Spatial text')
+      located.item.content.data.style.overflow = 'fixed'
+    }
+    useEditorStore.getState().applySpatialAuthoringSession(openSpatialAuthoringSession(
+      fixedDocument,
+      { locationId: initial.selection.locationId },
+    ))
+    act(() => useEditorStore.getState().selectNode(firstId))
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    const textarea = screen.getByLabelText('文字内容') as HTMLTextAreaElement
+    const original = textarea.value
+    const draft = `${original}组合输入`
+    fireEvent.focus(textarea)
+    fireEvent.compositionStart(textarea)
+    fireEvent.change(textarea, { target: { value: draft } })
+    const composing = useEditorStore.getState()
+    const composingSession = composing.spatialSession!
+    expect(composing.spatialContentEdit).toMatchObject({
+      kind: 'text',
+      composing: true,
+      target: { layerItemId: firstId },
+    })
+
+    act(() => {
+      const store = useEditorStore.getState()
+      store.selectNode(secondId)
+      store.beginTextEdit(secondId, 'canvas')
+    })
+    const blocked = useEditorStore.getState()
+    expect(blocked.spatialSession).toBe(composingSession)
+    expect(blocked.spatialSession?.selection.selectionIds).toEqual([firstId])
+    expect(blocked.spatialSession?.history).toBe(composingSession.history)
+    expect(blocked.spatialContentEdit).toBe(composing.spatialContentEdit)
+    expect(locateCourseLayer(blocked.spatialSession!.history.present, firstId)?.item)
+      .toEqual(locateCourseLayer(composingSession.history.present, firstId)?.item)
+
+    fireEvent.compositionEnd(textarea, { data: '入' })
+    fireEvent.blur(textarea)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const committed = useEditorStore.getState()
+    expect(committed.spatialContentEdit).toBeNull()
+    expect(committed.spatialSession?.history.present.revision)
+      .toBe(composingSession.history.present.revision + 1)
+    expect(committed.spatialSession?.history.past)
+      .toHaveLength(composingSession.history.past.length + 1)
+    expect(locateCourseLayer(committed.spatialSession!.history.present, firstId)?.item)
+      .toMatchObject({ content: { data: { text: draft } } })
+
+    act(() => useEditorStore.getState().selectNode(secondId))
+    expect(useEditorStore.getState().spatialSession?.selection.selectionIds).toEqual([secondId])
+    const secondTextarea = screen.getByLabelText('文字内容') as HTMLTextAreaElement
+    const secondDraft = `${secondTextarea.value}可继续编辑`
+    fireEvent.focus(secondTextarea)
+    fireEvent.change(secondTextarea, { target: { value: secondDraft } })
+    fireEvent.blur(secondTextarea)
+    expect(useEditorStore.getState().spatialContentEdit).toBeNull()
+    expect(locateCourseLayer(
+      useEditorStore.getState().spatialSession!.history.present,
+      secondId,
+    )?.item).toMatchObject({ content: { data: { text: secondDraft } } })
+  })
+
+  it('preflights stale Spatial selection callbacks before committing the active draft', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTextNode(80, 100)
+    const nodeId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
+    if (!nodeId) throw new Error('expected Spatial text')
+    useEditorStore.getState().beginTextEdit(nodeId, 'properties')
+    const node = selectEditingNodes(useEditorStore.getState()).find((item) => item.id === nodeId)
+    if (!node || node.type !== 'text') throw new Error('expected Spatial text view')
+    useEditorStore.getState().updateTextEditDraft(
+      nodeId,
+      `${node.text}未提交`,
+      node.runs ?? [],
+      node.height,
+      node.width,
+    )
+    const graphSelection = { kind: 'path' as const, id: 'retained-path-selection' }
+    useEditorStore.setState({ spatialGraphSelection: graphSelection })
+    const before = useEditorStore.getState()
+    const session = before.spatialSession!
+    const edit = before.spatialContentEdit
+
+    act(() => useEditorStore.getState().selectNode('stale-spatial-layer'))
+    let after = useEditorStore.getState()
+    expect(after.spatialSession).toBe(session)
+    expect(after.spatialSession?.history).toBe(session.history)
+    expect(after.spatialSession?.selection).toBe(session.selection)
+    expect(after.spatialContentEdit).toBe(edit)
+    expect(after.spatialGraphSelection).toBe(graphSelection)
+
+    act(() => useEditorStore.getState().selectNodes(['stale-spatial-layer']))
+    after = useEditorStore.getState()
+    expect(after.spatialSession).toBe(session)
+    expect(after.spatialSession?.history).toBe(session.history)
+    expect(after.spatialSession?.selection).toBe(session.selection)
+    expect(after.spatialContentEdit).toBe(edit)
+    expect(after.spatialGraphSelection).toBe(graphSelection)
+  })
+
+
   it('keeps default new project on Slide and adds a visible blank Spatial entry', () => {
     const slide = spatialDocument()
     expect(slide.surfaces[0]?.type).toBe('slide')
@@ -587,8 +710,8 @@ describe('Spatial product shell wiring', () => {
     if (!openedEdit || openedEdit.kind !== 'text') throw new Error('expected Spatial text edit')
     useEditorStore.getState().updateTextEditDraft(
       fixture.worldItemId,
-      `${worldText.text} · 未提交草稿`,
-      worldText.runs,
+      `${worldText.text ?? ''} · 未提交草稿`,
+      worldText.runs ?? [],
       worldText.height,
       worldText.width,
     )
@@ -669,7 +792,7 @@ describe('Spatial product shell wiring', () => {
     useEditorStore.getState().addTextNode()
     const text = selectEditingNodes(useEditorStore.getState()).find((node) => node.type === 'text')
     if (!text || text.type !== 'text') throw new Error('expected default Spatial text')
-    expect(text.style.overflow).toBe('auto-height')
+    expect(text.style?.overflow).toBe('auto-height')
     act(() => useEditorStore.getState().selectNode(text.id))
     render(<PropertiesTab onReplaceImage={() => undefined} />)
 

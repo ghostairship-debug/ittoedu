@@ -21,7 +21,7 @@ import {
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import { selectSlideAuthoringBackend, useEditorStore } from '@/renderer/store/editorStore'
-import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
 import {
   TeacherControllerAuthoringChrome,
   teacherControllerAuthoringPreviewCollapsed,

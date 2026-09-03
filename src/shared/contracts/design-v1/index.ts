@@ -2,4 +2,5 @@ export type {
   ProjectFontToken,
   ProjectColorToken,
   ProjectDesignTokens,
-} from '../../projectTypes'
+} from './types'
+export { courseProjectDesignTokensSchema, projectDesignTokensSchema } from './schema'

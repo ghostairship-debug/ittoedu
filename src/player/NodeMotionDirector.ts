@@ -4,7 +4,7 @@ import type {
   MotionEasing,
   NodeMotionAction,
 } from '../shared/interactionTypes'
-import type { SceneNode } from '../shared/projectTypes'
+import type { NativeRenderableBase } from '../shared/contracts/native-v1/types'
 import type {
   CourseEventBus,
   RuntimeExecutionMode,
@@ -15,6 +15,11 @@ const SLIDE_DISTANCE = 48
 const SCALE_MULTIPLIER = 0.84
 const AUTHORING_EXIT_PREVIEW_HOLD_MS = 180
 const AUTHORING_PREVIEW_WATCHDOG_GRACE_MS = 500
+
+export type MotionRenderableNode = Pick<
+  NativeRenderableBase,
+  'id' | 'visible' | 'playbackInitialVisibility' | 'x' | 'y' | 'width' | 'height' | 'opacity'
+>
 
 interface MotionFrame {
   x: number
@@ -32,7 +37,7 @@ interface ActiveMotion {
 
 interface MotionRecord {
   handle: RenderedNodeHandle
-  node: SceneNode
+  node: MotionRenderableNode
   eligible: boolean
   runtimeVisible: boolean
   frame: MotionFrame
@@ -70,10 +75,8 @@ export interface PlayNodeMotionOptions {
   animateInCapture?: boolean
 }
 
-function playbackStartsHidden(node: SceneNode): boolean {
-  return (node as SceneNode & {
-    playbackInitialVisibility?: 'inherit' | 'hidden'
-  }).playbackInitialVisibility === 'hidden'
+function playbackStartsHidden(node: MotionRenderableNode): boolean {
+  return node.playbackInitialVisibility === 'hidden'
 }
 
 function easingName(easing: MotionEasing): string {
@@ -113,7 +116,7 @@ function systemPrefersReducedMotion(): boolean {
 }
 
 /**
- * Owns transient playback visibility without mutating SceneNode.visible or a
+ * Owns transient playback visibility without mutating NativeRenderInput.visible or a
  * presentation state. Scene and global scopes deliberately use separate
  * instances so scene teardown cannot reset persistent global motion results.
  */
@@ -147,7 +150,7 @@ export class NodeMotionDirector {
 
   register(
     handle: RenderedNodeHandle,
-    node: SceneNode,
+    node: MotionRenderableNode,
     eligible = node.visible,
     activationSceneId = this.sceneId,
   ): void {
@@ -195,7 +198,7 @@ export class NodeMotionDirector {
 
   update(
     handle: RenderedNodeHandle,
-    node: SceneNode,
+    node: MotionRenderableNode,
     eligible = node.visible,
     options: UpdateNodeMotionOptions = {},
   ): void {
@@ -544,7 +547,7 @@ export class NodeMotionDirector {
   }
 
   private frameFor(
-    node: SceneNode,
+    node: MotionRenderableNode,
     handle: RenderedNodeHandle,
   ): MotionFrame {
     if (handle.motionRoot) {

@@ -3,29 +3,27 @@ import { collectProjectDiagnostics } from '@/shared/projectDiagnostics'
 import type { InteractionRule } from '@/shared/interactionTypes'
 import type { ProjectDocument, SceneDocument } from '@/shared/projectTypes'
 import {
-  createProject,
   createVideoNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
+import { createDefaultScenePresentation } from '@/shared/presentation'
 
 function projectWithVideo(
   options: Parameters<typeof createVideoNode>[0] = { assetId: 'asset_video' },
-): { project: ProjectDocument; scene: SceneDocument } {
-  const project = createProject({
-    id: 'project',
-    includeDefaultController: false,
-    controls: 'none',
-    now: '2026-07-22T00:00:00.000Z',
-    idFactory: () => 'fixed',
-  })
-  const scene = project.scenes[0]!
-  scene.id = 'scene'
-  scene.name = '视频场景'
-  scene.nodes = [createVideoNode({
-    id: 'video',
-    name: '示范视频',
-    ...options,
-  })]
-  return { project, scene }
+): { project: Pick<ProjectDocument, 'scenes'>; scene: SceneDocument } {
+  const scene: SceneDocument = {
+    id: 'scene',
+    name: '视频场景',
+    backgroundColor: '#ffffff',
+    backgroundAssetId: null,
+    nodes: [createVideoNode({
+      id: 'video',
+      name: '示范视频',
+      ...options,
+    })],
+    presentation: createDefaultScenePresentation(),
+    interactions: [],
+  }
+  return { project: { scenes: [scene] }, scene }
 }
 
 function interaction(

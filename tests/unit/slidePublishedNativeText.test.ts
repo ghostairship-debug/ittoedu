@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { paintPublishedNativeText } from '../../src/player/surfaces/publishedNativeText'
+import {
+  nativeMediaAssetIds,
+  paintPublishedNativeRenderInput,
+  readonlyNativeRenderInputFromV9Item,
+} from '../../src/player/surfaces/slide/publishedNativeRendering'
 import { SlidePublishedAdapter } from '../../src/player/surfaces/slide/SlidePublishedAdapter'
-import type { NativeElementContent } from '../../src/shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  NativeElementContent,
+  NativeLayerItem,
+} from '../../src/shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../../src/shared/publishedCourseTypes'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 type TextNodeData = Extract<NativeElementContent, { nativeType: 'text' }>['data']
 
@@ -41,6 +51,25 @@ function createTextData(
     ...rest,
     style: { ...defaultTextStyle(), ...style },
   }
+}
+
+function nativeItemsIn(project: CourseProjectDocument): NativeLayerItem[] {
+  const items = project.globalLayerItems.map((entry) => entry.item)
+  for (const surface of project.surfaces) {
+    items.push(...surface.surfaceLayerItems.map((entry) => entry.item))
+    if (surface.type === 'slide') {
+      for (const scene of surface.scenes) items.push(...scene.layerItems)
+    } else if (surface.type === 'spatial-2d') {
+      items.push(...surface.world.layerItems)
+    }
+  }
+  return items.filter((item): item is NativeLayerItem => item.kind === 'native')
+}
+
+function expectFrozenTree(value: unknown): void {
+  if (!value || typeof value !== 'object') return
+  expect(Object.isFrozen(value)).toBe(true)
+  for (const child of Object.values(value)) expectFrozenTree(child)
 }
 
 describe('paintPublishedNativeText', () => {
@@ -349,5 +378,122 @@ describe('paintPublishedNativeText', () => {
     expect(spans[2]?.style.fontWeight).toBe('400')
 
     await adapter.destroy()
+  })
+
+  it('paints published text through the Native render-input owner', () => {
+    const wrap = document.createElement('div')
+    const data = createTextData({
+      text: 'Owner Text',
+      runs: [{ start: 0, end: 5, style: { bold: true } }],
+    })
+    paintPublishedNativeRenderInput(
+      wrap,
+      {
+        id: 'text-owner',
+        name: 'text-owner',
+        type: 'text',
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 80,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        locked: false,
+        playbackInitialVisibility: 'inherit',
+        text: data.text,
+        runs: data.runs,
+        style: data.style,
+      },
+      { resolveAsset: () => undefined },
+    )
+    expect(wrap.dataset.nativeType).toBe('text')
+    const spans = Array.from(wrap.querySelectorAll('span'))
+    expect(spans.map((span) => span.textContent).join('')).toBe('Owner Text')
+    expect(spans[0]?.style.fontWeight).toBe('700')
+    expect(spans[1]?.style.fontWeight).toBe('400')
+  })
+
+  it('materializes all six Native variants as detached frozen snapshots', () => {
+    const items = listCourseProjectV9Fixtures().flatMap((fixture) => (
+      nativeItemsIn(fixture.data.project)
+    ))
+    const nativeTypes = [
+      'text',
+      'formula',
+      'image',
+      'video',
+      'shape',
+      'teacher-controller',
+    ] as const
+
+    for (const nativeType of nativeTypes) {
+      const source = items.find((item) => item.content.nativeType === nativeType)
+      if (!source) throw new Error(`missing ${nativeType} fixture`)
+      const before = structuredClone(source)
+      const input = readonlyNativeRenderInputFromV9Item(source)
+      expect(input).toMatchObject({
+        id: source.layerItemId,
+        name: source.label,
+        type: nativeType,
+        x: source.frame.x,
+        y: source.frame.y,
+        width: source.frame.width,
+        height: source.frame.height,
+        rotation: source.rotation,
+        opacity: source.opacity,
+        visible: source.visible,
+        locked: source.locked,
+        playbackInitialVisibility: source.playbackInitialVisibility,
+      })
+      expectFrozenTree(input)
+      expect(() => {
+        ;(input as { name: string }).name = 'mutated snapshot'
+      }).toThrow()
+      expect(source).toEqual(before)
+
+      const data = source.content.data as Record<string, unknown>
+      const snapshot = input as unknown as Record<string, unknown>
+      for (const [key, nested] of Object.entries(data)) {
+        if (nested && typeof nested === 'object') expect(snapshot[key]).not.toBe(nested)
+      }
+    }
+
+    const controllerSource = items.find((item) => (
+      item.content.nativeType === 'teacher-controller'
+    ))
+    if (!controllerSource || controllerSource.content.nativeType !== 'teacher-controller') {
+      throw new Error('missing controller fixture')
+    }
+    const controller = readonlyNativeRenderInputFromV9Item(controllerSource)
+    if (controller.type !== 'teacher-controller') throw new Error('expected controller input')
+    expect(controller.buttons.map((button) => button.action))
+      .toEqual(controllerSource.content.data.buttons.map((button) => button.action))
+
+    const imageSource = items.find((item) => item.content.nativeType === 'image')
+    if (!imageSource || imageSource.content.nativeType !== 'image') {
+      throw new Error('missing image fixture')
+    }
+    const image = readonlyNativeRenderInputFromV9Item(imageSource)
+    expect(nativeMediaAssetIds(image)).toEqual([imageSource.content.data.assetId])
+
+    const videoSource = items.find((item) => item.content.nativeType === 'video')
+    if (!videoSource || videoSource.content.nativeType !== 'video') {
+      throw new Error('missing video fixture')
+    }
+    const videoWithPoster = structuredClone(videoSource)
+    if (videoWithPoster.content.nativeType !== 'video') {
+      throw new Error('expected cloned video fixture')
+    }
+    videoWithPoster.content.data.poster = {
+      mode: 'image',
+      time: 0,
+      assetId: 'poster-detached',
+    }
+    const video = readonlyNativeRenderInputFromV9Item(videoWithPoster)
+    expect(nativeMediaAssetIds(video)).toEqual([
+      videoSource.content.data.assetId,
+      'poster-detached',
+    ])
   })
 })

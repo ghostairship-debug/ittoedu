@@ -30,14 +30,25 @@ export type PublishedAuthoringPatchResult =
     }
 
 /**
+ * Internal command lease supplied by the coordinator after it has validated
+ * the V1 wire/session/context ordering. It is not a second authoring command.
+ */
+export interface PublishedAuthoringPatchIdentity {
+  readonly revision: number
+  readonly generation: number
+}
+
+/**
  * The Published surface owns transient painting; this coordinator only owns
  * the existing authoring protocol's session, ordering, and response rules.
  */
 export interface PublishedAuthoringPatchSurface {
   getAuthoringContext(): PlayerAuthoringContext
+  getAuthoringGeneration(): number
   applyAuthoringPatch(
     context: PlayerAuthoringContext,
     patch: PlayerAuthoringPatch,
+    identity: PublishedAuthoringPatchIdentity,
   ): Promise<PublishedAuthoringPatchResult> | PublishedAuthoringPatchResult
 }
 
@@ -216,12 +227,24 @@ export class PublishedAuthoringSessionCoordinator {
       )
     }
 
+    let generation: number
+    try {
+      generation = this.#surface.getAuthoringGeneration()
+    } catch (error) {
+      return authoringError(
+        command,
+        'update-failed',
+        `无法读取 Published 编辑世代：${this.#errorDetail(error)}`,
+      )
+    }
+
     const lifecycleRevision = this.#lifecycleRevision
     let result: PublishedAuthoringPatchResult
     try {
       result = await this.#surface.applyAuthoringPatch(
         command.context,
         command.patch,
+        { revision: command.revision, generation },
       )
     } catch (error) {
       if (
@@ -241,6 +264,23 @@ export class PublishedAuthoringSessionCoordinator {
       lifecycleRevision !== this.#lifecycleRevision
     ) {
       return this.#notReady(command)
+    }
+    let currentGeneration: number
+    try {
+      currentGeneration = this.#surface.getAuthoringGeneration()
+    } catch (error) {
+      return authoringError(
+        command,
+        'update-failed',
+        `无法复核 Published 编辑世代：${this.#errorDetail(error)}`,
+      )
+    }
+    if (currentGeneration !== generation) {
+      return authoringError(
+        command,
+        'stale-revision',
+        `编辑世代 ${generation} 已过期，Published 画面已被重新生成。`,
+      )
     }
     if (!result.ok) {
       return authoringError(command, result.code, result.message)

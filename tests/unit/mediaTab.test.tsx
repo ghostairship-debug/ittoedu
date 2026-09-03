@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AssetMeta } from '@/shared/projectTypes'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { useEditorStore,
+  selectActiveCourseProjectDocument,
+  selectActiveScene,
+} from '@/renderer/store/editorStore'
 import {
   formatMediaDuration,
   formatMediaSize,
@@ -129,7 +132,7 @@ describe('MediaTab', () => {
     })
     fireEvent.click(screen.getByLabelText('旁白播放时压低背景音乐'))
 
-    expect(useEditorStore.getState().project.media.audio).toMatchObject({
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio).toMatchObject({
       defaultMuted: true,
       masterVolume: 0.72,
       channelVolumes: {
@@ -147,11 +150,11 @@ describe('MediaTab', () => {
 
     useEditorStore.getState().undo()
     expect(
-      useEditorStore.getState().project.media.audio.narrationDucking.enabled,
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.narrationDucking.enabled,
     ).toBe(true)
     useEditorStore.getState().redo()
     expect(
-      useEditorStore.getState().project.media.audio.narrationDucking.enabled,
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.narrationDucking.enabled,
     ).toBe(false)
   })
 
@@ -178,7 +181,7 @@ describe('MediaTab', () => {
     fireEvent.click(screen.getByLabelText('“檐下雨声”默认循环'))
 
     expect(
-      useEditorStore.getState().project.media.audio.sounds[soundId],
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.sounds[soundId],
     ).toMatchObject({
       name: '檐下雨声',
       channel: 'music',
@@ -202,9 +205,9 @@ describe('MediaTab', () => {
     fireEvent.click(screen.getByRole('button', {
       name: '将视频“lesson.mp4”添加到画布',
     }))
-    const videoNode = useEditorStore
-      .getState()
-      .project.scenes[0]!.nodes.find((node) => node.type === 'video')
+    const videoNode = selectActiveScene(useEditorStore.getState()).nodes.find(
+      (node) => node.type === 'video',
+    )
     expect(videoNode).toMatchObject({
       type: 'video',
       assetId: videoAsset.id,
@@ -213,7 +216,7 @@ describe('MediaTab', () => {
     })
 
     fireEvent.click(screen.getByLabelText('删除图片“diagram.png”'))
-    expect(useEditorStore.getState().project.assets[imageAsset.id]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageAsset.id]).toBeUndefined()
     expect(useEditorStore.getState().assetFiles[imageAsset.id]).toBeUndefined()
   })
 
@@ -225,9 +228,9 @@ describe('MediaTab', () => {
       name: '将图片“diagram.png”添加到画布',
     }))
 
-    const imageNode = useEditorStore
-      .getState()
-      .project.scenes[0]!.nodes.find((node) => node.type === 'image')
+    const imageNode = selectActiveScene(useEditorStore.getState()).nodes.find(
+      (node) => node.type === 'image',
+    )
     expect(imageNode).toMatchObject({
       type: 'image',
       assetId: imageAsset.id,
@@ -239,13 +242,13 @@ describe('MediaTab', () => {
   it('删除声音定义，并在素材字节缺失时禁用视频添加', () => {
     const soundId = seedAssets()
     useEditorStore.setState((state) => {
-      const sidecar = state.slideCandidateSidecar
+      const sidecar = state.courseAssetSidecar
       const files = { ...(sidecar?.files ?? {}) }
       delete files[videoAsset.id]
       const assetFiles = { ...state.assetFiles }
       delete assetFiles[videoAsset.id]
       return {
-        slideCandidateSidecar: sidecar
+        courseAssetSidecar: sidecar
           ? { ...sidecar, files }
           : sidecar,
         assetFiles,
@@ -258,7 +261,7 @@ describe('MediaTab', () => {
     })).toBeDisabled()
     fireEvent.click(screen.getByLabelText('删除声音“雨声”'))
     expect(
-      useEditorStore.getState().project.media.audio.sounds[soundId],
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.sounds[soundId],
     ).toBeUndefined()
   })
 })

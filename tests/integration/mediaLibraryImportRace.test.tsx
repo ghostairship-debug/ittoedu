@@ -210,10 +210,10 @@ function resourceSnapshot(): ResourceSnapshot {
     files: byteMap(selectMediaAssetFiles(state)),
     activeHistoryDepth: state.slideBackend.getSession().history.past.length,
     storeHistoryDepth: state.history.past.length,
-    sidecarPastDepth: state.slideCandidateSidecarPast.length,
-    sidecarFutureDepth: state.slideCandidateSidecarFuture.length,
-    componentPastDepth: state.slideCandidateComponentPackagesPast.length,
-    componentFutureDepth: state.slideCandidateComponentPackagesFuture.length,
+    sidecarPastDepth: state.courseAssetSidecarPast.length,
+    sidecarFutureDepth: state.courseAssetSidecarFuture.length,
+    componentPastDepth: state.courseComponentPackagesPast.length,
+    componentFutureDepth: state.courseComponentPackagesFuture.length,
   }
 }
 

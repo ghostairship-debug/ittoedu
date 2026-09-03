@@ -1,10 +1,16 @@
 export {
-  courseLayerItemToSceneNode,
+  courseLayerItemToEditorCanvasNode,
   projectV9ActiveScene,
   projectV9EditingNodes,
   projectV9SceneDocument,
   projectV9SlideScenes,
 } from '../../store/slideEditorProjection'
+
+export type {
+  EditorCanvasDocument,
+  EditorCanvasNode,
+  EditorCanvasSceneView,
+} from '../../phaser/editorCanvasNode'
 
 export {
   EFFECTIVE_LAYER_LOCKED_WRITE_REASON,

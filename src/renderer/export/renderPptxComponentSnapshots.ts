@@ -1,35 +1,35 @@
-import type { ExportPayload } from '../../shared/componentTypes'
+import {
+  assertParsedPublishedCourseV2,
+  PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR,
+} from '../../player/surfaces/CoursePlayer'
 import type {
-  ExternalComponentNode,
-  GlobalLayerItem,
-  SceneDocument,
-} from '../../shared/projectTypes'
-import { PlayerApp } from '../../player/PlayerApp'
+  PublishedCourseV2Payload,
+  PublishedLayerItem,
+  PublishedSlideScene,
+  PublishedSlideSurface,
+} from '../../shared/publishedCourseTypes'
+import {
+  composePublishedSlideStaticPage,
+  isPureSlidePublishedCourse,
+  buildCourseExportPageList,
+} from './course/buildCoursePrintArtifacts'
+import { capturePublishedCourseV2Stage } from './playerCapture'
 import {
   pptxComponentSnapshotKey,
   pptxGlobalComponentSnapshotKey,
 } from './pptxShared'
-import { isGlobalLayerItemVisibleForScene } from './exportPayloadSupport'
-import { materializeScene } from '../../shared/presentation'
-import {
-  capturePlayerStage,
-  createHiddenPlayerRoot,
-  sizeHiddenPlayerStage,
-  waitForPlayerCaptureReady,
-  waitForPlayerScene,
-} from './playerCapture'
 
-type GlobalComponentLayerItem = GlobalLayerItem & {
-  node: ExternalComponentNode
-}
+export { PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR }
+
+type PublishedComponentItem = Extract<PublishedLayerItem, { kind: 'component' }>
 
 interface ComponentSnapshotEntry {
-  renderIndex: number
-  sceneId: string
-  node: ExternalComponentNode
-  renderSceneId: string
+  surface: PublishedSlideSurface
+  scene: PublishedSlideScene
+  locationId: string
+  item: PublishedComponentItem
   snapshotKey: string
-  globalItem?: GlobalComponentLayerItem
+  global: boolean
 }
 
 export interface PptxComponentSnapshotFailure {
@@ -41,208 +41,157 @@ export interface PptxComponentSnapshotFailure {
 }
 
 export interface RenderPptxComponentSnapshotsOptions {
+  includeGlobalLayerItems?: boolean
   onFailure?(failure: PptxComponentSnapshotFailure): void
 }
 
-async function cropSnapshot(
-  dataUrl: string,
-  width: number,
-  height: number,
-  sourceWidth: number,
-  sourceHeight: number,
-): Promise<string> {
-  if (
-    Math.ceil(width) === Math.ceil(sourceWidth) &&
-    Math.ceil(height) === Math.ceil(sourceHeight)
-  ) {
-    return dataUrl
-  }
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const candidate = new Image()
-    candidate.onload = () => resolve(candidate)
-    candidate.onerror = () => reject(new Error('组件合成快照无法重新读取'))
-    candidate.src = dataUrl
-  })
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.ceil(width))
-  canvas.height = Math.max(1, Math.ceil(height))
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('无法创建组件快照裁剪画布')
-  context.drawImage(image, 0, 0)
-  return canvas.toDataURL('image/png')
+function isGlobalLayerItem(
+  published: PublishedCourseV2Payload,
+  layerItemId: string,
+): boolean {
+  return published.globalLayerItems.some((entry) => entry.item.layerItemId === layerItemId)
 }
 
-function isolatedScene(
-  entry: ComponentSnapshotEntry,
-): SceneDocument {
+/** Isolate one component instance so capture cannot inherit sibling side effects. */
+export function isolatePublishedDynamicItemPayload(
+  published: PublishedCourseV2Payload,
+  input: {
+    surface: PublishedSlideSurface
+    scene: PublishedSlideScene
+    locationId: string
+    layerItemId: string
+    includeGlobalLayerItems: boolean
+  },
+): PublishedCourseV2Payload {
+  const location = published.locations.find((candidate) => (
+    candidate.id === input.locationId
+    && candidate.kind === 'slide-scene'
+    && candidate.surfaceId === input.surface.id
+    && candidate.sceneId === input.scene.id
+  ))
+  if (!location) {
+    throw new Error(`Published 静态捕获找不到 Slide 位置“${input.locationId}”`)
+  }
+  const scene = structuredClone(input.scene)
+  const surface = structuredClone(input.surface)
+  surface.scenes = [scene]
+  const globalLayerItems = input.includeGlobalLayerItems
+    ? structuredClone(published.globalLayerItems)
+    : []
+  const { layerItemId } = input
+  const sceneMatches = scene.layerItems.filter((item) => item.layerItemId === layerItemId)
+  const surfaceMatches = surface.surfaceLayerItems.filter((entry) => (
+    entry.item.layerItemId === layerItemId
+  ))
+  const globalMatches = globalLayerItems.filter((entry) => (
+    entry.item.layerItemId === layerItemId
+  ))
+  const matches = sceneMatches.length + surfaceMatches.length + globalMatches.length
+  if (matches !== 1) {
+    throw new Error(matches === 0
+      ? `Published 静态捕获找不到动态图层“${layerItemId}”`
+      : `Published 静态捕获发现重复动态图层“${layerItemId}”`)
+  }
+  const target = sceneMatches[0]
+    ?? surfaceMatches[0]?.item
+    ?? globalMatches[0]?.item
+  if (!target || (target.kind !== 'component' && target.kind !== 'runtime')) {
+    throw new Error(`Published 图层“${layerItemId}”不是可实例捕获的动态图层`)
+  }
+  scene.layerItems = sceneMatches
+  surface.surfaceLayerItems = surfaceMatches
   return {
-    id: entry.renderSceneId,
-    name: entry.node.name,
-    backgroundColor: '#000000',
-    backgroundAssetId: null,
-    interactions: [],
-    nodes: entry.globalItem
-      ? []
-      : [
-          {
-            ...entry.node,
-            props: structuredClone(entry.node.props),
-            x: 0,
-            y: 0,
-            rotation: 0,
-            opacity: 1,
-            visible: true,
-          },
-        ],
+    ...structuredClone(published),
+    surfaces: [surface],
+    locations: [structuredClone(location)],
+    startLocationId: location.id,
+    globalLayerItems: globalMatches,
   }
 }
 
-function isolatedGlobalLayer(entry: ComponentSnapshotEntry): GlobalLayerItem[] {
-  if (!entry.globalItem) return []
-  return [{
-    ...entry.globalItem,
-    node: {
-      ...entry.node,
-      id: `pptx-global-component-${entry.renderIndex}-${entry.node.id}`,
-      props: structuredClone(entry.node.props),
-      x: 0,
-      y: 0,
-      rotation: 0,
-      opacity: 1,
-      visible: true,
-    },
-    visibility: {
-      mode: 'include' as const,
-      sceneIds: [entry.renderSceneId],
-    },
-  }]
+function listPublishedComponentEntries(
+  published: PublishedCourseV2Payload,
+  includeGlobalLayerItems: boolean,
+): ComponentSnapshotEntry[] {
+  const entries: ComponentSnapshotEntry[] = []
+  const seen = new Set<string>()
+  for (const page of buildCourseExportPageList(published)) {
+    if (page.kind !== 'slide-scene' || !page.sceneId || !page.locationId) continue
+    const surface = published.surfaces.find((candidate): candidate is PublishedSlideSurface => (
+      candidate.id === page.surfaceId && candidate.type === 'slide'
+    ))
+    if (!surface) continue
+    const scene = surface.scenes.find((candidate) => candidate.id === page.sceneId)
+    if (!scene) continue
+    const composition = composePublishedSlideStaticPage(
+      published,
+      surface,
+      scene,
+      { includeGlobalLayerItems, locationId: page.locationId },
+    )
+    for (const item of composition.items) {
+      if (item.kind !== 'component' || !item.visible) continue
+      const global = isGlobalLayerItem(published, item.layerItemId)
+      const snapshotKey = global
+        ? pptxGlobalComponentSnapshotKey(scene.id, item.layerItemId)
+        : pptxComponentSnapshotKey(scene.id, item.layerItemId)
+      if (seen.has(snapshotKey)) continue
+      seen.add(snapshotKey)
+      entries.push({
+        surface,
+        scene,
+        locationId: page.locationId,
+        item,
+        snapshotKey,
+        global,
+      })
+    }
+  }
+  return entries
 }
 
 /**
- * External components are executable Phaser, DOM or Hybrid content and cannot
- * be represented as editable DrawingML. Render each visible instance through
- * the real Player compositor so it remains an independent PowerPoint picture.
+ * External components cannot be represented as editable DrawingML. Capture each
+ * visible instance through the Published V2 CoursePlayer seam so it remains an
+ * independent PowerPoint picture. Retired V8 player export packages fail loud.
  */
 export async function renderPptxComponentSnapshots(
-  payload: ExportPayload,
+  payload: unknown,
   options: RenderPptxComponentSnapshotsOptions = {},
 ): Promise<Map<string, string>> {
-  const entries: ComponentSnapshotEntry[] = []
-  for (const scene of payload.project.scenes) {
-    for (const node of materializeScene(scene).nodes) {
-      if (node.type === 'external-component' && node.visible) {
-        const index = entries.length
-        entries.push({
-          renderIndex: index,
-          sceneId: scene.id,
-          node,
-          renderSceneId: `pptx-component-${index}-${scene.id}`,
-          snapshotKey: pptxComponentSnapshotKey(scene.id, node.id),
-        })
-      }
-    }
-    for (const item of payload.project.globalLayer) {
-      if (
-        item.node.type === 'external-component' &&
-        item.node.visible &&
-        isGlobalLayerItemVisibleForScene(item, scene.id)
-      ) {
-        const index = entries.length
-        const globalItem: GlobalComponentLayerItem = {
-          ...item,
-          node: item.node,
-        }
-        entries.push({
-          renderIndex: index,
-          sceneId: scene.id,
-          node: item.node,
-          renderSceneId: `pptx-global-component-${index}-${scene.id}`,
-          snapshotKey: pptxGlobalComponentSnapshotKey(
-            scene.id,
-            item.node.id,
-          ),
-          globalItem,
-        })
-      }
-    }
-  }
-  if (entries.length === 0) return new Map()
-
-  const renderWidth = Math.max(
-    1,
-    ...entries.map(({ node }) => Math.ceil(node.width)),
-  )
-  const renderHeight = Math.max(
-    1,
-    ...entries.map(({ node }) => Math.ceil(node.height)),
-  )
+  assertParsedPublishedCourseV2(payload)
+  const includeGlobalLayerItems = options.includeGlobalLayerItems
+    ?? isPureSlidePublishedCourse(payload)
+  const entries = listPublishedComponentEntries(payload, includeGlobalLayerItems)
   const snapshots = new Map<string, string>()
   for (const entry of entries) {
-    // A Player eagerly mounts every persistent global component. Keeping one
-    // entry per Player bounds WebGL contexts, subscriptions and timers to one
-    // authored instance, and also prevents one component's courseState writes
-    // from influencing a later snapshot.
-    const isolatedPayload: ExportPayload = {
-      project: {
-        ...payload.project,
-        globalRuntime: undefined,
-        globalInteractions: [],
-        globalLayer: isolatedGlobalLayer(entry),
-        scenes: [isolatedScene(entry)],
-      },
-      assets: payload.assets,
-      components: payload.components,
-    }
-    let root: HTMLDivElement | null = null
-    let player: PlayerApp | null = null
     try {
-      root = createHiddenPlayerRoot(renderWidth, renderHeight)
-      player = new PlayerApp(isolatedPayload, root, {
-        transparent: true,
-        renderWidth,
-        renderHeight,
-        controls: false,
-        // Host entrance effects must never leak an intermediate frame into a
-        // static PowerPoint component snapshot.
-        mode: 'capture',
+      const isolated = isolatePublishedDynamicItemPayload(payload, {
+        surface: entry.surface,
+        scene: entry.scene,
+        locationId: entry.locationId,
+        layerItemId: entry.item.layerItemId,
+        includeGlobalLayerItems: entry.global,
       })
-      sizeHiddenPlayerStage(root, renderWidth, renderHeight)
-      await waitForPlayerScene(player, 0)
-      await waitForPlayerCaptureReady(player)
-      const composed = await capturePlayerStage(
-        player,
-        root,
-        renderWidth,
-        renderHeight,
-      )
-      snapshots.set(
-        entry.snapshotKey,
-        await cropSnapshot(
-          composed,
-          entry.node.width,
-          entry.node.height,
-          renderWidth,
-          renderHeight,
-        ),
-      )
+      const captured = await capturePublishedCourseV2Stage({
+        payload: isolated,
+        locationId: entry.locationId,
+        surfaceId: entry.surface.id,
+        layerItemId: entry.item.layerItemId,
+        includeGlobalLayerItems: entry.global,
+      })
+      if (!captured.startsWith('data:image/')) {
+        throw new Error('组件捕获没有返回图片')
+      }
+      snapshots.set(entry.snapshotKey, captured)
     } catch (error) {
       options.onFailure?.({
         snapshotKey: entry.snapshotKey,
-        sceneId: entry.sceneId,
-        nodeId: entry.node.id,
-        label: entry.node.name,
+        sceneId: entry.scene.id,
+        nodeId: entry.item.layerItemId,
+        label: entry.item.layerItemId,
         error,
       })
-    } finally {
-      try {
-        player?.destroy()
-      } catch (error) {
-        console.warn(
-          `PPTX 组件“${entry.node.name}”快照 Player 清理失败`,
-          error,
-        )
-      }
-      root?.remove()
     }
   }
   return snapshots

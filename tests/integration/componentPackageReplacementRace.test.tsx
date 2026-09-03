@@ -317,10 +317,10 @@ function writeSnapshot(): ReplacementWriteSnapshot {
     componentPackages: state.componentPackages,
     activeHistory: state.slideBackend.getSession().history,
     storeHistory: state.history,
-    sidecarPast: state.slideCandidateSidecarPast,
-    sidecarFuture: state.slideCandidateSidecarFuture,
-    componentPast: state.slideCandidateComponentPackagesPast,
-    componentFuture: state.slideCandidateComponentPackagesFuture,
+    sidecarPast: state.courseAssetSidecarPast,
+    sidecarFuture: state.courseAssetSidecarFuture,
+    componentPast: state.courseComponentPackagesPast,
+    componentFuture: state.courseComponentPackagesFuture,
   })
 }
 

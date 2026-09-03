@@ -16,10 +16,11 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { BUNDLED_TEXT_FONT_FAMILY } from '@/shared/fonts/bundledFontFamilies'
-import { buildStandaloneHtml } from '@/renderer/export/buildStandaloneHtml'
-import { createProject, createTextNode } from '@/renderer/project/createProject'
-import type { ExportPayload } from '@/shared/componentTypes'
+import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 
 const repoRoot = resolve(__dirname, '..', '..')
 const scriptsDirectory = join(repoRoot, 'scripts')
@@ -29,10 +30,10 @@ const BYTE_SOURCE = 'src/renderer/export/bundledFontEmbedSourceNode'
  * The builder families that emit `@font-face` and an OFL notice.
  *
  * `course/` covers the V9 course packages and the two `build*` modules cover the
- * V8 single file and web package; a script importing any of them can produce an
- * artifact with fonts in it. The rest of `src/renderer/export/` — sizes,
- * preflight, payload shaping — cannot, so requiring the source there would be
- * noise.
+ * leftover V8 single file and web package until r11-054 deletes those files; a
+ * script importing any of them can produce an artifact with fonts in it. The
+ * rest of `src/renderer/export/` — sizes, preflight, payload shaping — cannot,
+ * so requiring the source there would be noise.
  */
 const PACKAGING_IMPORT = /from '\.\.\/src\/renderer\/export\/(course|buildStandaloneHtml|buildWebPackage)/
 
@@ -66,14 +67,23 @@ describe('Node 导出宿主的字体接线', () => {
     // could put bytes within reach of a synchronous builder, and no host had it.
     await import('../../scripts/build-interactive-lesson')
 
-    const project = createProject({ now: '2026-08-26T00:00:00.000Z', idFactory: idFactory() })
+    const project = createBlankCourseProject({
+      now: '2026-08-26T00:00:00.000Z',
+      includeDefaultController: false,
+      controls: 'none',
+      idFactory: idFactory(),
+    })
     const node = createTextNode({ x: 10, y: 10, idFactory: idFactory() })
     node.text = '课件正文'
     node.style.fontFamily = `"${BUNDLED_TEXT_FONT_FAMILY}", sans-serif`
-    project.scenes[0]!.nodes.push(node)
-    const payload: ExportPayload = { project, assets: {}, components: {} }
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    slide.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(node, 10))
 
-    const html = buildStandaloneHtml(payload, 'window.__PLAYER_PLACEHOLDER__=true;')
+    const html = buildPublishedCourseStandaloneHtml(
+      { project, assetFiles: {}, components: {} },
+      'window.__PLAYER_PLACEHOLDER__=true;',
+    )
     expect([...html.matchAll(/@font-face/g)]).not.toHaveLength(0)
     expect(html).toContain('SIL Open Font License, Version 1.1')
   })

@@ -9,7 +9,8 @@ import {
   type VideoActionCommands,
 } from '@/player/renderVideoNode'
 import { CourseEventBus } from '@/player/CourseEventBus'
-import { createProject, createVideoNode } from '@/renderer/project/createProject'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createVideoNode } from '@/renderer/project/nativeNodeFactories'
 
 vi.mock('phaser', () => ({
   Math: {
@@ -215,7 +216,11 @@ function sceneHarness() {
 }
 
 function contextHarness(events: CourseEventBus) {
-  const project = createProject({ idFactory: () => 'fixed' })
+  const project = createBlankCourseProject({
+    includeDefaultController: false,
+    controls: 'none',
+    idFactory: () => 'fixed',
+  })
   const registration = { update: vi.fn(), dispose: vi.fn() }
   const registerVideo = vi.fn(() => registration)
   const interruptionReleases: ReturnType<typeof vi.fn>[] = []
@@ -224,6 +229,7 @@ function contextHarness(events: CourseEventBus) {
     interruptionReleases.push(release)
     return { release }
   })
+  const sceneId = project.startLocationId
   const context = {
     payload: {
       project,
@@ -241,7 +247,7 @@ function contextHarness(events: CourseEventBus) {
     events,
     audio: { registerVideo, beginBackgroundAudioInterruption },
     mode: 'preview',
-    sceneId: project.scenes[0]!.id,
+    sceneId,
     textureKey: (assetId: string) => `asset:${assetId}`,
   } as unknown as RenderNodeContext
   return {
@@ -250,7 +256,7 @@ function contextHarness(events: CourseEventBus) {
     registerVideo,
     beginBackgroundAudioInterruption,
     interruptionReleases,
-    sceneId: project.scenes[0]!.id,
+    sceneId,
   }
 }
 

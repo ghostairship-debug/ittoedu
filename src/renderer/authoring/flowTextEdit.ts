@@ -1,5 +1,5 @@
 import { applyTextRunStyle, remapTextRuns, toggleTextRunEmphasis } from '../../shared/textRuns'
-import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
+import { formulaAstToAccessibleText, serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode, FormulaNode, TextRun, TextRunStyle } from '../../shared/projectTypes'
 import type {
   CourseProjectDocument,
@@ -50,6 +50,10 @@ export interface FlowPlainTextDraft {
 export interface FlowFormulaDraft {
   readonly ast: FormulaAstNode
   readonly accessibleText: string
+  /** Raw linear input is Store-owned so save/recovery never races a local dialog draft. */
+  readonly source: string
+  readonly valid: boolean
+  readonly hasSlots: boolean
 }
 
 export interface FlowTextEditSession {
@@ -282,6 +286,9 @@ export function readFlowEditableContent(
       content: {
         ast: structuredClone(block.ast),
         accessibleText: block.accessibleText,
+        source: serializeFormulaAst(block.ast),
+        valid: true,
+        hasSlots: false,
       },
     }
   }
@@ -459,6 +466,7 @@ export function applyFlowTextEditGesture(input: {
   readonly gesture: FlowTextEditGesture
   readonly locationId?: string
   readonly offset?: number
+  readonly end?: number
   readonly listItemId?: string
   readonly tableRowId?: string
   readonly tableColumnId?: string
@@ -478,7 +486,7 @@ export function applyFlowTextEditGesture(input: {
     range: {
       blockId: input.blockId,
       start: offset,
-      end: offset,
+      end: input.end ?? offset,
       ...(input.listItemId ? { listItemId: input.listItemId } : {}),
       ...(input.tableRowId ? { tableRowId: input.tableRowId } : {}),
       ...(input.tableColumnId ? { tableColumnId: input.tableColumnId } : {}),
@@ -501,6 +509,9 @@ export function beginFlowFormulaEdit(input: {
   const original: FlowFormulaDraft = {
     ast: structuredClone(block.ast),
     accessibleText: block.accessibleText,
+    source: serializeFormulaAst(block.ast),
+    valid: true,
+    hasSlots: false,
   }
   return {
     ok: true,
@@ -533,6 +544,9 @@ export function updateFlowTextDraft(
       draft: {
         ast: structuredClone(draft.ast),
         accessibleText: draft.accessibleText ?? formulaAstToAccessibleText(draft.ast),
+        source: draft.source,
+        valid: draft.valid,
+        hasSlots: draft.hasSlots,
       },
       range: edit.range,
     })
@@ -758,7 +772,35 @@ export function resolveFlowTextHistoryAction(input: {
 }
 
 export function isFlowTextDraftDirty(edit: FlowTextEditSession): boolean {
+  if (edit.kind === 'formula') {
+    const original = edit.original as FlowFormulaDraft
+    const draft = edit.draft as FlowFormulaDraft
+    if (!draft.valid) return draft.source !== original.source
+    return !sameJson(original.ast, draft.ast)
+      || original.accessibleText !== draft.accessibleText
+  }
   return !sameJson(edit.original, edit.draft)
+}
+
+export function flowTextEditSelection(
+  document: CourseProjectDocument,
+  locationId: string,
+  edit: FlowTextEditSession,
+): FlowEditorSelection {
+  if (edit.kind === 'formula') {
+    return selectFlowEditorBlocks(document, locationId, [edit.blockId])
+  }
+  return selectFlowEditorBlocks(document, locationId, [edit.blockId], {
+    focus: 'text',
+    textRange: {
+      blockId: edit.blockId,
+      start: edit.range.start,
+      end: edit.range.end,
+      ...(edit.listItemId ? { listItemId: edit.listItemId } : {}),
+      ...(edit.tableRowId ? { tableRowId: edit.tableRowId } : {}),
+      ...(edit.tableColumnId ? { tableColumnId: edit.tableColumnId } : {}),
+    },
+  })
 }
 
 function writeNestedRichText(
@@ -808,6 +850,12 @@ export function commitFlowTextEdit(
 
   if (edit.kind === 'formula') {
     const draft = edit.draft as FlowFormulaDraft
+    if (!draft.valid) {
+      return failCommand(
+        draft.hasSlots ? '请先补全公式占位符' : '请先修复公式输入错误',
+        { nextEdit: edit },
+      )
+    }
     const accessibleText = draft.accessibleText || formulaAstToAccessibleText(draft.ast)
     const result = updateFlowEditorBlock(document, {
       surfaceId: edit.surfaceId,

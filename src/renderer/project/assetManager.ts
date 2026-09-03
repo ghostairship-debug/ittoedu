@@ -9,9 +9,8 @@ import type { SelectedImageResult, SelectedMediaResult } from '@/shared/ipcTypes
 import type {
   AssetKind,
   AssetMeta,
-  ProjectDocument,
   RuntimeAssetMap,
-} from '@/shared/projectTypes'
+} from '@/shared/contracts/media-v1/types'
 import type { BlobUrlRegistry } from './blobUrlRegistry'
 
 const MIME_EXTENSION: Record<(typeof SUPPORTED_IMAGE_MIME_TYPES)[number], string> = {
@@ -265,7 +264,7 @@ export async function readMediaMetadata(
 }
 
 export function createRuntimeAssetMap(
-  project: Pick<ProjectDocument, 'assets'>,
+  project: { assets: Record<string, AssetMeta> },
   assetFiles: Readonly<Record<string, Uint8Array>>,
   blobUrlRegistry: BlobUrlRegistry,
 ): RuntimeAssetMap {

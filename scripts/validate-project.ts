@@ -9,13 +9,12 @@ import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   collectCoursePackageExportPreflight,
   type CoursePackagePreflightItem,
-} from '../src/renderer/export/course/buildCoursePackages'
-import { buildPublishedCourseV2Payload } from '../src/renderer/export/course/buildPublishedCourse'
+} from '../src/renderer/export/course/coursePackagePreflight'
 import {
-  auditCourseExportAssets,
-  buildCourseExportPageList,
-  type CourseExportReportItem,
-} from '../src/renderer/export/course/buildCoursePrintArtifacts'
+  adaptCoursePdfProducerFindings,
+  adaptCoursePptxProducerFindings,
+  type CourseExportFormatFinding,
+} from '../src/renderer/export/exportPreflight'
 import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
@@ -240,7 +239,7 @@ function withDiagnosticTargets(
 ): CourseProjectValidationFinding[] {
   return items.map((item) => ({
     ...item,
-    target: resolveSchemaValidCourseProjectDiagnosticTarget(project, item),
+    target: item.target ?? resolveSchemaValidCourseProjectDiagnosticTarget(project, item),
   }))
 }
 
@@ -297,37 +296,6 @@ function visitLayerItems(
       })
     }
   })
-}
-
-function collectStableIdIssues(
-  project: CourseProjectDocument,
-): CourseProjectValidationFinding[] {
-  const issues: CourseProjectValidationFinding[] = []
-  const seen = new Map<string, Array<string | number>>()
-  const remember = (id: string, path: Array<string | number>): void => {
-    const previous = seen.get(id)
-    if (previous) {
-      issues.push({
-        severity: 'error',
-        code: 'duplicate-stable-id',
-        message: `稳定 ID 重复：${id}`,
-        path,
-      })
-      return
-    }
-    seen.set(id, path)
-  }
-  remember(`project:${project.id}`, ['id'])
-  project.locations.forEach((location, index) => {
-    remember(`location:${location.id}`, ['locations', index, 'id'])
-  })
-  project.surfaces.forEach((surface, surfaceIndex) => {
-    remember(`surface:${surface.id}`, ['surfaces', surfaceIndex, 'id'])
-  })
-  visitLayerItems(project, (item, path) => {
-    remember(`layer:${item.layerItemId}`, [...path, 'layerItemId'])
-  })
-  return issues
 }
 
 function collectMigrationMarkerIssues(
@@ -452,18 +420,15 @@ function mapPackagePreflightItems(
     }))
 }
 
-function mapPrintItems(
-  items: readonly CourseExportReportItem[],
+function mapStaticFormatItems(
+  items: readonly CourseExportFormatFinding[],
 ): CourseProjectValidationFinding[] {
   return items.map((item) => ({
     severity: item.severity,
-    code: item.severity === 'error'
-      ? 'static-export-preflight'
-      : item.severity === 'warning'
-        ? 'static-export-warning'
-        : 'static-export-info',
+    code: item.code as CourseProjectValidationFinding['code'],
     message: item.message,
-    ...(item.assetId ? { path: ['assets', item.assetId] } : {}),
+    ...(item.path ? { path: [...item.path] } : {}),
+    ...(item.diagnosticTarget ? { target: item.diagnosticTarget } : {}),
   }))
 }
 
@@ -524,51 +489,22 @@ function collectExportReports(
       generatedAt,
     ).items,
   )
-  const printItems: CourseProjectValidationFinding[] = []
-  try {
-    const published = buildPublishedCourseV2Payload({
-      project: archive.project,
-      assetFiles: archive.assetFiles,
-      components,
-    })
-    const rawPrint: CourseExportReportItem[] = []
-    auditCourseExportAssets(published, rawPrint, (assetId) => {
-      const bytes = archive.assetFiles[assetId]
-      if (!bytes) return undefined
-      return {
-        filename: archive.project.assets[assetId]?.filename ?? `${assetId}.bin`,
-        mimeType: archive.project.assets[assetId]?.mimeType ?? 'application/octet-stream',
-        bytes,
-      }
-    })
-    printItems.push(...mapPrintItems(rawPrint))
-    if (buildCourseExportPageList(published).length === 0) {
-      printItems.push({
-        severity: 'error',
-        code: 'static-export-preflight',
-        message: '当前 Course Project V9 没有可导出的 PDF/PPTX 页面。',
-      })
-    }
-    const hasInteractions =
-      archive.project.globalInteractions.length > 0 ||
-      archive.project.surfaces.some((surface) => (
-        surface.type === 'slide' &&
-        surface.scenes.some((scene) => scene.interactions.length > 0)
-      ))
-    if (hasInteractions) {
-      printItems.push({
-        severity: 'info',
-        code: 'static-export-interactions-omitted',
-        message: '声明式互动不会写入 PDF/PPTX 静态导出。',
-      })
-    }
-  } catch (error) {
-    printItems.push({
-      severity: 'error',
-      code: 'static-export-preflight',
-      message: error instanceof Error ? error.message : 'Published Course V2 预检失败。',
-    })
-  }
+  const htmlProducerItems = htmlItems.map((item): CourseExportFormatFinding => ({
+    severity: item.severity,
+    code: item.code as CourseExportFormatFinding['code'],
+    message: item.message,
+    ...(item.path ? { path: item.path } : {}),
+  }))
+  const pdfItems = mapStaticFormatItems(adaptCoursePdfProducerFindings(
+    archive.project,
+    resources,
+    htmlProducerItems,
+  ))
+  const pptxItems = mapStaticFormatItems(adaptCoursePptxProducerFindings(
+    archive.project,
+    resources,
+    htmlProducerItems,
+  ))
 
   const toReport = (
     target: CourseProjectExportTarget,
@@ -588,8 +524,8 @@ function collectExportReports(
   return {
     'single-html': toReport('single-html', htmlItems),
     'web-package': toReport('web-package', webItems),
-    pdf: toReport('pdf', printItems),
-    pptx: toReport('pptx', printItems),
+    pdf: toReport('pdf', pdfItems),
+    pptx: toReport('pptx', pptxItems),
   }
 }
 
@@ -694,19 +630,15 @@ export function validateCourseProjectArchiveBytes(
     archive.project,
     collectMigrationMarkerIssues(archive.project),
   )
-  const stableIdIssues = withDiagnosticTargets(
-    archive.project,
-    collectStableIdIssues(archive.project),
-  )
   const protocolIssues = withDiagnosticTargets(
     archive.project,
     collectProtocolIssues(archive.project, archive),
   )
   const v9ProjectHealth = collectCourseProjectHealth(archive.project, archive)
+  const stableIdIssues = v9ProjectHealth.filter((item) => item.code === 'duplicate-stable-id')
   const healthItems = [
     ...v8Fields,
     ...migrationMarkers,
-    ...stableIdIssues,
     ...protocolIssues,
     ...v9ProjectHealth,
   ]

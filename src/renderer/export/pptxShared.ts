@@ -1,5 +1,4 @@
 import type PptxGenJS from 'pptxgenjs'
-import type { SceneNode } from '../../shared/projectTypes'
 
 export const WIDE_SLIDE_WIDTH = 13.333
 export const WIDE_SLIDE_HEIGHT = 7.5
@@ -10,6 +9,21 @@ export type PptxSlide = ReturnType<PptxGenJS['addSlide']>
 export interface CanvasScale {
   x: number
   y: number
+}
+
+/** Narrow DrawingML identity; both retired V8 nodes and formal Native inputs satisfy it. */
+export interface PptxObjectIdentity {
+  readonly id: string
+  readonly name: string
+  readonly type: string
+}
+
+/** Narrow geometry needed by PPTX helpers; it is not a persisted node contract. */
+export interface PptxObjectFrame {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
 }
 
 export function clamp(value: number, minimum: number, maximum: number): number {
@@ -52,7 +66,7 @@ export function pptxRotation(degrees: number): number {
   return normalized < 0 ? normalized + 360 : normalized
 }
 
-export function pptxObjectName(node: SceneNode): string {
+export function pptxObjectName(node: PptxObjectIdentity): string {
   const label = node.name.trim()
     || (node.type === 'external-component' ? '互动组件' : node.type)
   return label + ' · ' + node.id
@@ -73,7 +87,7 @@ export function pptxGlobalComponentSnapshotKey(
 }
 
 export function pptxNodePosition(
-  node: Pick<SceneNode, 'x' | 'y' | 'width' | 'height'>,
+  node: PptxObjectFrame,
   scale: CanvasScale,
 ): Pick<PptxGenJS.PositionProps, 'x' | 'y' | 'w' | 'h'> {
   return {

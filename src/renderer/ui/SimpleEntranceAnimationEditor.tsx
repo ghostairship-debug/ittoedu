@@ -1,12 +1,11 @@
 import { AlertTriangle, Play, Sparkles } from 'lucide-react'
-import { isNodeMotionAction, type MotionDirection, type MotionEffect } from '../../shared/interactionTypes'
-import type { SceneDocument, SceneNode } from '../../shared/projectTypes'
+import { isNodeMotionAction, type InteractionRule, type MotionDirection, type MotionEffect } from '../../shared/interactionTypes'
 import { requestNodeMotionPreview } from '../phaser/elementAnimationPreviewBus'
 import {
   findSimpleEntranceAnimationRule,
   hasAdvancedEntranceAnimation,
-  useEditorStore,
-} from '../store/editorStore'
+  type SlideSimpleEntranceAnimationConfig,
+} from '../course/v9SlideContentCommands'
 
 const EFFECTS: Array<{
   value: MotionEffect
@@ -42,24 +41,23 @@ const DELAYS = [
 ]
 
 interface SimpleEntranceAnimationEditorProps {
-  scene: SceneDocument
-  node: SceneNode
+  layerItemId: string
+  interactions: readonly InteractionRule[]
   activeStateId: string | null
+  onChange(config: SlideSimpleEntranceAnimationConfig | null): void
+  onOpenProfessional(): void
 }
 
 export function SimpleEntranceAnimationEditor({
-  scene,
-  node,
+  layerItemId,
+  interactions,
   activeStateId,
+  onChange,
+  onOpenProfessional,
 }: SimpleEntranceAnimationEditorProps) {
-  const setSimpleEntranceAnimation = useEditorStore(
-    (state) => state.setSimpleEntranceAnimation,
-  )
-  const setEditorMode = useEditorStore((state) => state.setEditorMode)
-  const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const rule = findSimpleEntranceAnimationRule(
-    scene.interactions,
-    node.id,
+    interactions,
+    layerItemId,
     activeStateId,
   )
   const step = rule?.actions[0]
@@ -71,10 +69,16 @@ export function SimpleEntranceAnimationEditor({
   const durationMs = action?.durationMs ?? 320
   const delayMs = step?.delayMs ?? 0
   const hasAdvancedRule = hasAdvancedEntranceAnimation(
-    scene.interactions,
-    node.id,
+    interactions,
+    layerItemId,
     activeStateId,
   )
+
+  const writeEntrance = (
+    config: SlideSimpleEntranceAnimationConfig | null,
+  ) => {
+    onChange(config)
+  }
 
   const apply = (
     nextEffect: Exclude<MotionEffect, 'none'>,
@@ -84,7 +88,7 @@ export function SimpleEntranceAnimationEditor({
       delayMs?: number
     } = {},
   ) => {
-    setSimpleEntranceAnimation(node.id, {
+    writeEntrance({
       effect: nextEffect,
       direction: nextEffect === 'slide'
         ? patch.direction ?? direction
@@ -108,10 +112,7 @@ export function SimpleEntranceAnimationEditor({
         <button
           type="button"
           className="secondary-button"
-          onClick={() => {
-            setEditorMode('professional')
-            setActiveTab('automation')
-          }}
+          onClick={onOpenProfessional}
         >
           打开专业规则
         </button>
@@ -146,7 +147,7 @@ export function SimpleEntranceAnimationEditor({
             className={effect === item.value ? 'is-active' : ''}
             aria-pressed={effect === item.value}
             onClick={() => {
-              if (item.value === 'none') setSimpleEntranceAnimation(node.id, null)
+              if (item.value === 'none') writeEntrance(null)
               else apply(item.value)
             }}
           >

@@ -8,23 +8,34 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { ensureScenePresentation } from '../../shared/presentation'
-import type { ScenePresentationState } from '../../shared/projectTypes'
-import { selectActiveScene, useEditorStore } from '../store/editorStore'
+import { ensureSlidePresentation } from '../../shared/contracts/course-project-v9/presentation'
+import type { SlidePresentationState } from '../../shared/courseProjectTypes'
+import {
+  selectSlideAuthoringDocument,
+  selectSlideAuthoringSnapshot,
+  useEditorStore,
+} from '../store/editorStore'
 import { ConfirmDialog } from './ConfirmDialog'
 
 type PendingAction = 'delete' | 'reset' | null
 
-function countStateOverrides(state: ScenePresentationState): number {
-  let count = Object.keys(state.nodeOverrides).length
-  if (Object.prototype.hasOwnProperty.call(state, 'backgroundColor')) count += 1
-  if (Object.prototype.hasOwnProperty.call(state, 'backgroundAssetId')) count += 1
-  if (Object.prototype.hasOwnProperty.call(state, 'nodeOrder')) count += 1
+function countStateOverrides(state: SlidePresentationState): number {
+  let count = Object.keys(state.layerItemOverrides).length
+  if (state.backgroundColor !== undefined) count += 1
+  if (state.backgroundAssetId !== undefined) count += 1
+  if (state.layerItemOrder !== undefined) count += 1
   return count
 }
 
 export function SceneStateStrip() {
-  const scene = useEditorStore(selectActiveScene)
+  const document = useEditorStore(selectSlideAuthoringDocument)
+  const snapshot = useEditorStore(selectSlideAuthoringSnapshot)
+  const scene = useMemo(() => {
+    if (!document || !snapshot) return null
+    const surface = document.surfaces.find((candidate) => candidate.id === snapshot.surfaceId)
+    if (!surface || surface.type !== 'slide') return null
+    return surface.scenes.find((candidate) => candidate.id === snapshot.sceneId) ?? null
+  }, [document, snapshot])
   const editingScope = useEditorStore((state) => state.editingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
   const setEditorMode = useEditorStore((state) => state.setEditorMode)
@@ -58,21 +69,21 @@ export function SceneStateStrip() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
 
   const presentation = useMemo(
-    () => ensureScenePresentation(scene),
+    () => scene ? ensureSlidePresentation(scene) : null,
     [scene],
   )
-  const activeState = activeStateId === null
+  const activeState = activeStateId === null || !presentation
     ? null
     : presentation.states.find((state) => state.id === activeStateId) ?? null
 
   useEffect(() => {
     if (
       editingStateId &&
-      !presentation.states.some((state) => state.id === editingStateId)
+      !presentation?.states.some((state) => state.id === editingStateId)
     ) {
       setEditingStateId(null)
     }
-  }, [editingStateId, presentation.states])
+  }, [editingStateId, presentation])
 
   const startRename = () => {
     if (!activeState) return
@@ -86,6 +97,8 @@ export function SceneStateStrip() {
     }
     setEditingStateId(null)
   }
+
+  if (!scene || !presentation) return null
 
   if (editingScope === 'global') {
     return (

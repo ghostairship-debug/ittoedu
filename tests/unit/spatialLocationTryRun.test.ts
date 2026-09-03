@@ -5,7 +5,7 @@ import {
   type CourseProjectDocument,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createVideoNode } from '@/renderer/project/createProject'
+import { createVideoNode } from '@/renderer/project/nativeNodeFactories'
 import { mountSpatialLocationTryRun } from '@/renderer/ui/spatialLocationTryRun'
 
 const NOW = '2026-08-18T22:00:00.000Z'

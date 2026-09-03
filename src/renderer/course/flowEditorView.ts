@@ -1,9 +1,17 @@
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
+import { ownerKeyFor } from '../authoring/courseAuthoringScope'
+import {
+  captureCourseAuthoringTarget,
+  type CourseAuthoringSessionToken,
+  type CourseAuthoringTarget,
+} from '../authoring/courseAuthoringSession'
 import {
   composeCourseProjectLocation,
   type CourseLayerComposition,
 } from '../../shared/courseLayerComposition'
+import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
 import type {
+  CourseLocation,
   CourseProjectDocument,
   FlowBlock,
   FlowBodyLayerPlane,
@@ -30,8 +38,11 @@ export type DeepReadonly<T> =
       T extends object ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> } :
         T
 
+export const FLOW_SESSIONLESS_ERROR = '没有活动的 Flow 编辑会话，不能从旧工程恢复界面'
+
 export interface FlowBlockView {
   readonly blockId: string
+  readonly locationId: string | null
   readonly parentId: string | null
   readonly depth: number
   readonly index: number
@@ -55,9 +66,13 @@ export interface FlowOutlineEntry {
 }
 
 export type FlowOverlayLayerSource = 'global' | 'surface'
+export type FlowOverlayOwner = FlowOverlayLayerSource
 
 export interface FlowEditorLayerView {
   readonly source: FlowOverlayLayerSource
+  /** Storage owner. Flow overlays are only global or surface; never scene/world. */
+  readonly owner: FlowOverlayOwner
+  readonly ownerKey: string
   /** Exact canonical/legacy-resolved plane for globals; surface entries carry null. */
   readonly globalPlane: GlobalLayerPlane | null
   /** Surface overlay plane around the semantic body; globals carry null. */
@@ -66,6 +81,7 @@ export interface FlowEditorLayerView {
   readonly stackOrder: number
   readonly scopedVisible: boolean
   readonly effectiveVisible: boolean
+  readonly locked: boolean
   readonly selectionId: string
   readonly authoringAddress: string
   readonly item: DeepReadonly<LayerItem>
@@ -87,13 +103,30 @@ export interface FlowCourseTreePage {
   readonly headings: readonly FlowCourseTreeHeading[]
 }
 
+export interface FlowActiveLocation {
+  readonly locationId: string
+  readonly surfaceId: string
+  readonly blockId: string
+  readonly label: string
+}
+
+export interface FlowNavigationLocation {
+  readonly locationId: string
+  readonly label: string
+  readonly kind: CourseLocation['kind']
+  readonly surfaceId: string
+}
+
 export interface FlowEditorView {
   readonly projectId: string
   readonly revision: number
   readonly locationId: string
   readonly surfaceId: string
   readonly surfaceTitle: string
+  readonly backgroundColor: string
   readonly activeBlockId: string
+  readonly activeLocation: FlowActiveLocation
+  readonly navigationLocations: readonly FlowNavigationLocation[]
   readonly layout: DeepReadonly<FlowSurfaceDocument['layout']>
   readonly blocks: readonly FlowBlockView[]
   readonly outline: readonly FlowOutlineEntry[]
@@ -101,9 +134,80 @@ export interface FlowEditorView {
   readonly overlayLayers: readonly FlowEditorLayerView[]
 }
 
+export type FlowCourseTreeSource = Pick<
+  CourseProjectDocument,
+  'id' | 'startLocationId' | 'locations' | 'surfaces'
+>
+
 export interface BuildFlowEditorViewInput {
   readonly project: CourseProjectDocument
   readonly locationId: string
+}
+
+export type FlowEditorAuthoringTargetInput =
+  | { readonly kind: 'surface' }
+  | { readonly kind: 'block'; readonly blockId: string }
+  | { readonly kind: 'overlay'; readonly layerItemId: string }
+
+export function flowSurfaceAuthoringAddress(view: Pick<FlowEditorView, 'projectId' | 'surfaceId'>): string {
+  return `flow-surface:${view.projectId}:${view.surfaceId}`
+}
+
+/**
+ * Captures the exact Flow owner/item identity shown by one immutable view.
+ * Callers must retain this target across delayed text/gesture completion.
+ */
+export function captureFlowEditorAuthoringTarget(input: {
+  readonly view: FlowEditorView
+  readonly sessionToken: CourseAuthoringSessionToken
+  readonly target: FlowEditorAuthoringTargetInput
+}): CourseAuthoringTarget {
+  const { view, sessionToken, target } = input
+  if (
+    sessionToken.surfaceType !== 'flow'
+    || sessionToken.locationId !== view.locationId
+    || sessionToken.revision !== view.revision
+  ) {
+    throw new Error(FLOW_SESSIONLESS_ERROR)
+  }
+  if (target.kind === 'surface') {
+    return captureCourseAuthoringTarget({
+      sessionToken,
+      projectId: view.projectId,
+      surfaceId: view.surfaceId,
+      stateId: null,
+      owner: 'surface',
+      ownerKey: ownerKeyFor('surface', view.surfaceId, null),
+      itemId: view.surfaceId,
+      authoringAddress: flowSurfaceAuthoringAddress(view),
+    })
+  }
+  if (target.kind === 'block') {
+    const block = view.blocks.find((entry) => entry.blockId === target.blockId)
+    if (!block) throw new Error(`找不到 Flow 块：${target.blockId}`)
+    return captureCourseAuthoringTarget({
+      sessionToken,
+      projectId: view.projectId,
+      surfaceId: view.surfaceId,
+      stateId: null,
+      owner: 'surface',
+      ownerKey: ownerKeyFor('surface', view.surfaceId, null),
+      itemId: block.blockId,
+      authoringAddress: block.authoringAddress,
+    })
+  }
+  const layer = view.overlayLayers.find((entry) => entry.selectionId === target.layerItemId)
+  if (!layer) throw new Error(`找不到 Flow 浮层：${target.layerItemId}`)
+  return captureCourseAuthoringTarget({
+    sessionToken,
+    projectId: view.projectId,
+    surfaceId: view.surfaceId,
+    stateId: null,
+    owner: layer.owner,
+    ownerKey: layer.ownerKey,
+    itemId: layer.selectionId,
+    authoringAddress: layer.authoringAddress,
+  })
 }
 
 function deepFreeze<T>(value: T): DeepReadonly<T> {
@@ -142,18 +246,22 @@ function overlayLayerView(
   flowBodyPlane: FlowBodyLayerPlane | null,
   stackOrder: number,
 ): FlowEditorLayerView {
+  const owner = source
   return {
     source,
+    owner,
+    ownerKey: ownerKeyFor(owner, surfaceId, null),
     globalPlane,
     flowBodyPlane,
     stackOrder,
     scopedVisible,
     effectiveVisible: scopedVisible && item.visible,
+    locked: item.locked,
     selectionId: item.layerItemId,
     authoringAddress: makeAuthoringAddress({
       projectId,
-      scope: source === 'global' ? 'global' : 'surface',
-      surfaceId: source === 'global' ? undefined : surfaceId,
+      scope: owner === 'global' ? 'global' : 'surface',
+      surfaceId: owner === 'global' ? undefined : surfaceId,
       carrier: item.kind === 'component' ? 'component' : item.kind === 'runtime' ? 'runtime' : 'native',
       layerItemId: item.layerItemId,
       field: 'item',
@@ -170,7 +278,21 @@ export function composeFlowEditorLocation(input: {
   return composeCourseProjectLocation({ ...input, stateId: null })
 }
 
-export function listFlowCourseTreePages(project: CourseProjectDocument): FlowCourseTreePage[] {
+export function assertActiveFlowEditorView(view: FlowEditorView): void {
+  if (
+    !view.projectId
+    || !view.locationId
+    || !view.surfaceId
+    || !view.activeBlockId
+    || view.activeLocation.locationId !== view.locationId
+    || view.activeLocation.surfaceId !== view.surfaceId
+    || view.activeLocation.blockId !== view.activeBlockId
+  ) {
+    throw new Error(FLOW_SESSIONLESS_ERROR)
+  }
+}
+
+export function listFlowCourseTreePages(project: FlowCourseTreeSource): FlowCourseTreePage[] {
   return project.surfaces.flatMap((surface) => {
     if (surface.type !== 'flow') return []
     const locations = project.locations
@@ -230,6 +352,7 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     })
     blocks.push({
       blockId: block.id,
+      locationId: locationByBlockId.get(block.id) ?? null,
       parentId,
       depth,
       index,
@@ -289,17 +412,32 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     }
   }
 
-  return deepFreeze({
+  const view = deepFreeze({
     projectId: project.id,
     revision: project.revision,
     locationId,
     surfaceId: surface.id,
     surfaceTitle: surface.title,
+    backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
     activeBlockId: location.blockId,
+    activeLocation: {
+      locationId,
+      surfaceId: surface.id,
+      blockId: location.blockId,
+      label: location.label,
+    },
+    navigationLocations: project.locations.map((candidate) => ({
+      locationId: candidate.id,
+      label: candidate.label,
+      kind: candidate.kind,
+      surfaceId: candidate.surfaceId,
+    })),
     layout: { ...surface.layout },
     blocks,
     outline,
     courseTree,
     overlayLayers,
   })
+  assertActiveFlowEditorView(view)
+  return view
 }

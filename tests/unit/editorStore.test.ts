@@ -7,15 +7,14 @@ import { materializeScene } from '@/shared/presentation'
 import {
   createExternalComponentNode,
   createImageNode,
-  createProject,
   createTextNode,
-} from '@/renderer/project/createProject'
-import { createProjectArchive } from '@/renderer/project/projectArchive'
+} from '@/renderer/project/nativeNodeFactories'
 import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import { openDefaultCourseProject } from '@/renderer/project/courseProjectIo'
+import { COURSE_PROJECT_REJECTION_INPUTS } from '../fixtures/course-project-v9'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
 import { addSpatialCameraFrameFromSession } from '@/renderer/course/spatialCameraCommands'
@@ -30,6 +29,7 @@ import {
   selectSlideBackendKind,
   selectSlideAuthoringDocument,
   selectSlideSceneList,
+  selectActiveCourseProjectDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -72,6 +72,13 @@ function sampleComponent(): ComponentPackageData {
 
 function activeScene() {
   return selectActiveScene(useEditorStore.getState())
+}
+
+function materialized(
+  scene: ReturnType<typeof selectActiveScene>,
+  stateId?: string | null,
+) {
+  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
 }
 
 function visualBounds(node: {
@@ -124,7 +131,9 @@ describe('default Course Project V9 persistence', () => {
     expect(selectSlideAuthoringDocument(state)?.schemaVersion).toBe(
       COURSE_PROJECT_SCHEMA_VERSION,
     )
-    expect(state.project.schemaVersion).toBe(8)
+    expect(selectActiveCourseProjectDocument(state)?.schemaVersion).toBe(
+      COURSE_PROJECT_SCHEMA_VERSION,
+    )
   })
 
   it('saves a zip that openCourseProjectArchive can reopen', () => {
@@ -141,11 +150,7 @@ describe('default Course Project V9 persistence', () => {
   })
 
   it('does not silently open a V8 zip as V9', () => {
-    const v8Bytes = createProjectArchive({
-      project: createProject(),
-      assetFiles: {},
-      componentFiles: {},
-    })
+    const v8Bytes = COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
     expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
     expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/格式版本|版本不支持/)
     expect(() => openDefaultCourseProject(v8Bytes)).toThrow(/格式版本|版本不支持/)
@@ -158,21 +163,21 @@ describe('default Course Project V9 persistence', () => {
     store.addTextNode(40, 50)
     const nodeId = selectEditingNodes(useEditorStore.getState())[0]!.id
     let state = useEditorStore.getState()
-    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+    expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .toContainEqual(expect.objectContaining({ id: nodeId }))
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
       .toContain(nodeId)
 
     store.undo()
     state = useEditorStore.getState()
-    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+    expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .not.toContainEqual(expect.objectContaining({ id: nodeId }))
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
       .not.toContain(nodeId)
 
     store.redo()
     state = useEditorStore.getState()
-    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+    expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .toContainEqual(expect.objectContaining({ id: nodeId }))
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
       .toContain(nodeId)
@@ -182,13 +187,13 @@ describe('default Course Project V9 persistence', () => {
     const secondSceneId = state.activeSceneId
     expect(selectSlideSceneList(state).find((scene) => scene.id === secondSceneId)?.nodes)
       .toEqual([])
-    expect(state.project.scenes.find((scene) => scene.id === secondSceneId)?.nodes)
+    expect(selectSlideSceneList(state).find((scene) => scene.id === secondSceneId)?.nodes)
       .toEqual([])
 
     store.setActiveScene(firstSceneId)
     state = useEditorStore.getState()
     expect(state.activeSceneId).toBe(firstSceneId)
-    expect(state.project.scenes.find((scene) => scene.id === firstSceneId)?.nodes)
+    expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .toContainEqual(expect.objectContaining({ id: nodeId }))
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
       .toContain(nodeId)
@@ -423,7 +428,7 @@ describe('Spatial canonical property updates', () => {
     const beforeNoop = useEditorStore.getState().spatialSession!
     useEditorStore.getState().updateNodes([{
       nodeId: second.id,
-      patch: { opacity: second.opacity, style: { bold: second.style.bold } },
+      patch: { opacity: second.opacity, style: { bold: Boolean(second.style?.bold) } },
     }])
     expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
     expect(useEditorStore.getState().spatialSession?.history).toBe(beforeNoop.history)
@@ -968,47 +973,47 @@ describe('scene operations', () => {
     store.addScene()
 
     const state = useEditorStore.getState()
-    expect(state.project.scenes.map((scene) => scene.name)).toEqual([
+    expect(selectSlideSceneList(state).map((scene) => scene.name)).toEqual([
       '场景 1',
       '场景 2',
       '场景 3',
     ])
-    expect(state.activeSceneId).toBe(state.project.scenes[2]!.id)
+    expect(state.activeSceneId).toBe(selectSlideSceneList(state)[2]!.id)
     expect(state.history.past).toHaveLength(2)
     expect(state.dirty).toBe(true)
   })
 
   it('never deletes the final scene and does not create a no-op history entry', () => {
     const initial = useEditorStore.getState()
-    const onlySceneId = initial.project.scenes[0]!.id
+    const onlySceneId = selectSlideSceneList(initial)[0]!.id
 
     expect(initial.deleteScene(onlySceneId)).toBe(false)
-    expect(useEditorStore.getState().project.scenes).toHaveLength(1)
+    expect(selectSlideSceneList(useEditorStore.getState())).toHaveLength(1)
     expect(useEditorStore.getState().history.past).toHaveLength(0)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
   it('renames, recolours, reorders, and deletes scenes with undoable commits', () => {
     const store = useEditorStore.getState()
-    const firstId = store.project.scenes[0]!.id
+    const firstId = selectSlideSceneList(store)[0]!.id
     store.addScene()
-    const secondId = useEditorStore.getState().project.scenes[1]!.id
+    const secondId = selectSlideSceneList(useEditorStore.getState())[1]!.id
     store.addScene()
-    const thirdId = useEditorStore.getState().project.scenes[2]!.id
+    const thirdId = selectSlideSceneList(useEditorStore.getState())[2]!.id
 
     store.updateScene(secondId, {
       name: '  练习场景  ',
       backgroundColor: '#f3f4f6',
     })
     expect(
-      useEditorStore.getState().project.scenes.find((scene) => scene.id === secondId),
+      selectSlideSceneList(useEditorStore.getState()).find((scene) => scene.id === secondId),
     ).toMatchObject({
       name: '练习场景',
       backgroundColor: '#f3f4f6',
     })
 
     store.reorderScenes([thirdId, firstId, secondId])
-    expect(useEditorStore.getState().project.scenes.map((scene) => scene.id)).toEqual([
+    expect(selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)).toEqual([
       thirdId,
       firstId,
       secondId,
@@ -1017,7 +1022,7 @@ describe('scene operations', () => {
     store.setActiveScene(thirdId)
     expect(store.deleteScene(thirdId)).toBe(true)
     const state = useEditorStore.getState()
-    expect(state.project.scenes.map((scene) => scene.id)).toEqual([firstId, secondId])
+    expect(selectSlideSceneList(state).map((scene) => scene.id)).toEqual([firstId, secondId])
     expect(state.activeSceneId).toBe(firstId)
   })
 
@@ -1025,12 +1030,10 @@ describe('scene operations', () => {
     const store = useEditorStore.getState()
     store.addScene()
     const historyLength = useEditorStore.getState().history.past.length
-    const sceneIds = useEditorStore
-      .getState()
-      .project.scenes.map((scene) => scene.id)
+    const sceneIds = selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)
 
     store.reorderScenes([sceneIds[0]!, sceneIds[0]!])
-    expect(useEditorStore.getState().project.scenes.map((scene) => scene.id)).toEqual(
+    expect(selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)).toEqual(
       sceneIds,
     )
     expect(useEditorStore.getState().history.past).toHaveLength(historyLength)
@@ -1064,13 +1067,13 @@ describe('scene operations', () => {
     store.addScene()
 
     const state = useEditorStore.getState()
-    expect(state.project.scenes).toHaveLength(MAX_PROJECT_SCENES)
+    expect(selectSlideSceneList(state)).toHaveLength(MAX_PROJECT_SCENES)
     expect(state.errorMessage).toContain(`${MAX_PROJECT_SCENES} 个场景上限`)
   })
 
   it('duplicates a scene with independent scene and node identities', () => {
     const store = useEditorStore.getState()
-    const sourceId = store.project.scenes[0]!.id
+    const sourceId = selectSlideSceneList(store)[0]!.id
     store.addTextNode(80, 90)
     store.addRectangleNode(320, 240)
     const sourceNodes = activeScene().nodes.map((node) => structuredClone(node))
@@ -1079,8 +1082,8 @@ describe('scene operations', () => {
     store.duplicateScene(sourceId)
 
     const state = useEditorStore.getState()
-    const source = state.project.scenes[0]!
-    const copy = state.project.scenes[1]!
+    const source = selectSlideSceneList(state)[0]!
+    const copy = selectSlideSceneList(state)[1]!
     expect(copy).toMatchObject({ name: `${source.name} 副本` })
     expect(copy.id).not.toBe(source.id)
     expect(copy.nodes.map((node) => node.id)).not.toEqual(
@@ -1097,7 +1100,7 @@ describe('scene operations', () => {
     expect(copiedText).toBeDefined()
     store.updateNode(copiedText!.id, { text: '副本独立修改' })
     expect(
-      useEditorStore.getState().project.scenes[0]!.nodes.find(
+      selectSlideSceneList(useEditorStore.getState())[0]!.nodes.find(
         (node) => node.type === 'text',
       ),
     ).toMatchObject({ text: '双击编辑文字' })
@@ -1551,7 +1554,7 @@ describe('node operations', () => {
     store.setActiveScene(secondSceneId)
 
     expect(
-      useEditorStore.getState().project.scenes[0]!.nodes[0],
+      selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0],
     ).toMatchObject({ text: '切场景前提交' })
     expect(useEditorStore.getState().textEditSession).toBeNull()
   })
@@ -1612,12 +1615,12 @@ describe('node operations', () => {
     store.undo()
 
     expect(activeScene().nodes).toHaveLength(0)
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
 
     store.redo()
     expect(activeScene().nodes).toHaveLength(1)
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([1, 2, 3, 4])
   })
 
@@ -1629,7 +1632,7 @@ describe('node operations', () => {
     store.undo()
 
     expect(activeScene().nodes).toHaveLength(0)
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([...bytes])
   })
 
@@ -1638,14 +1641,14 @@ describe('node operations', () => {
     const bytes = new Uint8Array([1, 2, 3, 4])
     store.importAsset(imageMeta, bytes)
     expect(store.deleteAsset(imageMeta.id)).toBe(true)
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
 
     store.undo()
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([...bytes])
     store.redo()
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
   })
 
@@ -1653,14 +1656,14 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     const bytes = new Uint8Array([1, 2, 3, 4])
     store.importAsset(imageMeta, bytes)
-    expect(store.project.scenes[0]!.nodes).toHaveLength(0)
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect(selectSlideSceneList(store)[0]!.nodes).toHaveLength(0)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
 
     store.undo()
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
     store.redo()
-    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([...bytes])
   })
 
@@ -1688,7 +1691,7 @@ describe('node operations', () => {
     store.undo()
     expect(activeScene().nodes).toHaveLength(0)
     expect(
-      useEditorStore.getState().project.componentPackages['com.example.counter'],
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.componentPackages['com.example.counter'],
     ).toBeDefined()
     expect(
       useEditorStore.getState().componentPackages['com.example.counter'],
@@ -1696,7 +1699,7 @@ describe('node operations', () => {
 
     store.undo()
     expect(
-      useEditorStore.getState().project.componentPackages['com.example.counter'],
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.componentPackages['com.example.counter'],
     ).toBeUndefined()
     expect(
       useEditorStore.getState().componentPackages['com.example.counter'],
@@ -1767,7 +1770,7 @@ describe('scene presentation states', () => {
       text: '双击编辑文字',
       style: { color: '#1f2937' },
     })
-    expect(materializeScene(scene, stateId).nodes[0]).toMatchObject({
+    expect(materialized(scene, stateId).nodes[0]).toMatchObject({
       x: 420,
       text: '请再试一次',
       style: { color: '#ef4444' },
@@ -1781,7 +1784,7 @@ describe('scene presentation states', () => {
     expect(useEditorStore.getState().history.past).toHaveLength(historyBeforeEdit + 1)
 
     useEditorStore.getState().undo()
-    expect(materializeScene(activeScene(), stateId).nodes[0]).toMatchObject({
+    expect(materialized(activeScene(), stateId).nodes[0]).toMatchObject({
       x: 80,
       text: '双击编辑文字',
     })
@@ -1802,7 +1805,7 @@ describe('scene presentation states', () => {
       type: 'shape',
       x: 404,
     } as never)
-    expect(materializeScene(activeScene(), stateId).nodes[0]).toMatchObject({
+    expect(materialized(activeScene(), stateId).nodes[0]).toMatchObject({
       id: nodeId,
       type: 'text',
       x: 404,
@@ -1820,7 +1823,7 @@ describe('scene presentation states', () => {
     const stateOwnedId = sceneAfterAdd.nodes.find((node) => node.id !== inheritedId)!.id
 
     expect(sceneAfterAdd.nodes.find((node) => node.id === stateOwnedId)).toMatchObject({ visible: false })
-    expect(materializeScene(sceneAfterAdd, stateId).nodes.find((node) => node.id === stateOwnedId))
+    expect(materialized(sceneAfterAdd, stateId).nodes.find((node) => node.id === stateOwnedId))
       .toMatchObject({
       visible: true,
       x: 120,
@@ -1836,7 +1839,7 @@ describe('scene presentation states', () => {
 
     useEditorStore.getState().deleteNode(inheritedId)
     expect(activeScene().nodes).toHaveLength(1)
-    expect(materializeScene(activeScene(), stateId).nodes.find((node) => node.id === inheritedId))
+    expect(materialized(activeScene(), stateId).nodes.find((node) => node.id === inheritedId))
       .toMatchObject({
       visible: false,
     })
@@ -1865,7 +1868,7 @@ describe('scene presentation states', () => {
     expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
     expect(useEditorStore.getState().history.past).toBe(beforeHistory)
     expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
-    expect(materializeScene(activeScene(), stateId).nodes.find((node) => node.id === nodeId))
+    expect(materialized(activeScene(), stateId).nodes.find((node) => node.id === nodeId))
       .toMatchObject({ locked: true })
     expect(useEditorStore.getState().errorMessage).toBe('locked')
   })
@@ -1916,12 +1919,12 @@ describe('scene presentation states', () => {
     useEditorStore.getState().commitTextEdit()
 
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
-    expect(materializeScene(activeScene(), stateId).nodes[0]).toMatchObject({
+    expect(materialized(activeScene(), stateId).nodes[0]).toMatchObject({
       text: '状态文字',
       height: 96,
     })
     useEditorStore.getState().undo()
-    expect(materializeScene(activeScene(), stateId).nodes[0]).toMatchObject({
+    expect(materialized(activeScene(), stateId).nodes[0]).toMatchObject({
       text: '双击编辑文字',
       height: 80,
     })
@@ -1964,14 +1967,14 @@ describe('scene presentation states', () => {
     useEditorStore.getState().updateNode(baseOrder[0]!, { x: 777 })
     useEditorStore.getState().reorderNodes(stateOrder)
     expect(activeScene().nodes.map((node) => node.id)).toEqual(baseOrder)
-    expect(materializeScene(activeScene(), stateId).nodes.map((node) => node.id))
+    expect(materialized(activeScene(), stateId).nodes.map((node) => node.id))
       .toEqual(stateOrder)
 
     useEditorStore.getState().undo()
-    expect(materializeScene(activeScene(), stateId).nodes.map((node) => node.id))
+    expect(materialized(activeScene(), stateId).nodes.map((node) => node.id))
       .toEqual(baseOrder)
     useEditorStore.getState().redo()
-    expect(materializeScene(activeScene(), stateId).nodes.map((node) => node.id))
+    expect(materialized(activeScene(), stateId).nodes.map((node) => node.id))
       .toEqual(stateOrder)
 
     useEditorStore.getState().reorderNodes(baseOrder)
@@ -2046,7 +2049,7 @@ describe('scene presentation states', () => {
 
     store.setActiveScene(targetSceneId)
     expect(store.deletePresentationState(targetStateId)).toBe(true)
-    const sourceRule = useEditorStore.getState().project.scenes.find(
+    const sourceRule = selectSlideSceneList(useEditorStore.getState()).find(
       (scene) => scene.id === sourceSceneId,
     )!.interactions[0]!
     expect(sourceRule.actions[0]).toEqual({
@@ -2060,7 +2063,7 @@ describe('scene presentation states', () => {
     })
 
     store.undo()
-    const restoredRule = useEditorStore.getState().project.scenes.find(
+    const restoredRule = selectSlideSceneList(useEditorStore.getState()).find(
       (scene) => scene.id === sourceSceneId,
     )!.interactions[0]!
     expect(restoredRule.actions[0]!.action).toMatchObject({ targetStateId })
@@ -2357,7 +2360,6 @@ describe('multi-selection operations', () => {
     store.copySelectedNodes()
     expect(useEditorStore.getState().history.past).toHaveLength(historyBeforeCopy)
     expect(useEditorStore.getState().slideCandidateClipboard?.items).toHaveLength(2)
-    expect(useEditorStore.getState().clipboardNodes).toHaveLength(0)
 
     store.updateNode(text!.id, { x: 600, text: '原节点已修改' })
     const historyBeforePaste = useEditorStore.getState().history.past.length
@@ -2394,16 +2396,16 @@ describe('history semantics', () => {
   it('records V9 history as capped snapshot steps instead of V8 immer patches', () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     const store = useEditorStore.getState()
-    const sceneId = store.project.scenes[0]!.id
-    const originalName = store.project.scenes[0]!.name
+    const sceneId = selectSlideSceneList(store)[0]!.id
+    const originalName = selectSlideSceneList(store)[0]!.name
     store.updateScene(sceneId, { name: '修改后的第一课' })
 
     const entry = useEditorStore.getState().history.past[0]!
-    expect(entry.patches).toHaveLength(1)
-    expect(entry.inversePatches).toHaveLength(1)
-    expect(useEditorStore.getState().project.scenes[0]!.name).toBe('修改后的第一课')
+    expect(entry.patches).toHaveLength(0)
+    expect(entry.inversePatches).toHaveLength(0)
+    expect(selectSlideSceneList(useEditorStore.getState())[0]!.name).toBe('修改后的第一课')
     store.undo()
-    expect(useEditorStore.getState().project.scenes[0]!.name).toBe(originalName)
+    expect(selectSlideSceneList(useEditorStore.getState())[0]!.name).toBe(originalName)
   })
 
   it('undoes an addition and redo restores it', () => {
@@ -2422,7 +2424,7 @@ describe('history semantics', () => {
 
   it('limits undo history to 100 V9 entries and clears redo after a new commit', () => {
     const store = useEditorStore.getState()
-    const sceneId = store.project.scenes[0]!.id
+    const sceneId = selectSlideSceneList(store)[0]!.id
     for (let index = 0; index < 110; index += 1) {
       store.updateScene(sceneId, {
         backgroundColor: `#${index.toString(16).padStart(6, '0')}`,

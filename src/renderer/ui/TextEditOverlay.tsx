@@ -14,6 +14,7 @@ interface TextEditOverlayProps {
   onPreview(text: string, runs: TextRun[]): void
   onCommit(text: string, runs: TextRun[]): void
   onCancel(): void
+  onCompositionChange?(composing: boolean): void
 }
 
 interface OverlayMetrics {
@@ -267,6 +268,7 @@ export function TextEditOverlay({
   onPreview,
   onCommit,
   onCancel,
+  onCompositionChange,
 }: TextEditOverlayProps) {
   const [metrics, setMetrics] = useState<OverlayMetrics | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -583,9 +585,11 @@ export function TextEditOverlay({
         onCompositionStart={() => {
           composingRef.current = true
           pendingBlurRef.current = false
+          onCompositionChange?.(true)
         }}
         onCompositionEnd={() => {
           composingRef.current = false
+          onCompositionChange?.(false)
           const value = read()
           publish(value.text, value.runs)
           if (pendingBlurRef.current) {

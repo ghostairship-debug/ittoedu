@@ -8,6 +8,7 @@ import {
   selectActiveCourseProjectDocument,
   selectHasUnsavedCourseChanges,
   useEditorStore,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
 
 vi.mock('@/renderer/ui/Workspace', () => ({
@@ -162,7 +163,7 @@ function createActiveSlideDraft(text: string): string {
   useEditorStore
     .getState()
     .acknowledgeCourseProjectSaved('baseline.h5lesson', baseline.token)
-  const node = useEditorStore.getState().project.scenes
+  const node = selectSlideSceneList(useEditorStore.getState())
     .flatMap((scene) => scene.nodes)
     .find((candidate) => candidate.id === layerItemId)
   if (!node || node.type !== 'text') throw new Error('expected projected text node')
@@ -170,7 +171,7 @@ function createActiveSlideDraft(text: string): string {
   useEditorStore.getState().updateTextEditDraft(
     layerItemId,
     text,
-    node.runs,
+    node.runs ?? [],
     node.height,
     node.width,
   )
@@ -220,7 +221,7 @@ describe('App draft save transaction', () => {
     await waitFor(() => expect(harness.saveProject).toHaveBeenCalledOnce())
     const input = harness.saveProject.mock.calls[0]?.[0]
 
-    const node = useEditorStore.getState().project.scenes
+    const node = selectSlideSceneList(useEditorStore.getState())
       .flatMap((scene) => scene.nodes)
       .find((candidate) => candidate.id === layerItemId)
     if (!node || node.type !== 'text') throw new Error('expected projected text node')
@@ -228,7 +229,7 @@ describe('App draft save transaction', () => {
     useEditorStore.getState().updateTextEditDraft(
       layerItemId,
       '写盘期间版本 B',
-      node.runs,
+      node.runs ?? [],
       node.height,
       node.width,
     )
@@ -256,7 +257,7 @@ describe('App draft save transaction', () => {
 
     const closeResult = harness.closeHandler()!()
     await waitFor(() => expect(harness.saveProject).toHaveBeenCalledOnce())
-    const node = useEditorStore.getState().project.scenes
+    const node = selectSlideSceneList(useEditorStore.getState())
       .flatMap((scene) => scene.nodes)
       .find((candidate) => candidate.id === layerItemId)
     if (!node || node.type !== 'text') throw new Error('expected projected text node')
@@ -264,7 +265,7 @@ describe('App draft save transaction', () => {
     useEditorStore.getState().updateTextEditDraft(
       layerItemId,
       '关闭期间版本 B',
-      node.runs,
+      node.runs ?? [],
       node.height,
       node.width,
     )

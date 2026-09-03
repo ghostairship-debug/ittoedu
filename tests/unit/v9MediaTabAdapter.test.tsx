@@ -141,7 +141,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
       { duration: 1.25 },
     )
     const document = selectSlideAuthoringDocument(useEditorStore.getState())!
-    const sidecar = useEditorStore.getState().slideCandidateSidecar!
+    const sidecar = useEditorStore.getState().courseAssetSidecar!
     const imageDeduped = await dedupeCourseMediaImports(
       'image',
       document.assets,

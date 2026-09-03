@@ -4,14 +4,13 @@ import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createProject } from '@/renderer/project/createProject'
-import { createProjectArchive } from '@/renderer/project/projectArchive'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
 } from '@/renderer/project/courseProjectArchive'
 import { shouldOfferCourseProjectRecovery } from '@/renderer/project/courseProjectLifecycle'
+import { COURSE_PROJECT_REJECTION_INPUTS } from '../fixtures/course-project-v9'
 import { REBUILD_USER_DATA_DIRECTORY_NAME } from '../../src/main/applicationIdentity'
 import {
   readRecoveryProject,
@@ -33,13 +32,7 @@ vi.mock('electron', () => ({
 }))
 
 function makeV8ArchiveBytes(): Uint8Array {
-  const project = createProject({
-    id: 'legacy-recovery',
-    title: '旧版恢复探针',
-    includeDefaultController: false,
-    controls: 'none',
-  })
-  return createProjectArchive({ project, assetFiles: {}, componentFiles: {} })
+  return COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
 }
 
 function makeV9ArchiveBytes(): Uint8Array {

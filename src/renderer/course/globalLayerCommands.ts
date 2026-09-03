@@ -26,7 +26,7 @@ import {
   teacherControllerAuthoringRecoveryBounds,
 } from '../../shared/teacherControllerLayout'
 import type { DeepReadonly } from './slideEditorView'
-import { createTeacherControllerNode } from '../project/createProject'
+import { createTeacherControllerNode } from '../project/nativeNodeFactories'
 import {
   restoreCourseTeacherControllerLayer,
   synchronizeCourseTeacherControllerControls,

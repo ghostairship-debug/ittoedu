@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AssetMeta, SceneNode } from '@/shared/projectTypes'
+import type { AssetMeta } from '@/shared/projectTypes'
 import { MAX_SCENE_NODES } from '@/shared/constants'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createImageNode,
-  createProject,
   createTextNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
 import { buildAssetContentHashIndex } from '@/renderer/project/assetManager'
 import {
   commitMediaBatchImport,
@@ -16,7 +16,28 @@ import {
   MAX_BATCH_CANVAS_ITEMS,
   selectActiveScene,
   useEditorStore,
+  selectActiveCourseProjectDocument,
+  selectCandidateGlobalLayerItems,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
+
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+import type { CourseProjectDocument, SlideSurfaceDocument } from '@/shared/courseProjectTypes'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
+    ...entry,
+    layer: entry.plane ?? 'overlay',
+    visibility: {
+      mode: entry.visibility.mode,
+      sceneIds: entry.visibility.locationIds,
+    },
+    node: courseLayerItemToEditorCanvasNode(entry.item)!,
+  }))
+}
+
 
 function image(id: string, width: number, height: number): AssetMeta {
   return {
@@ -31,7 +52,7 @@ function image(id: string, width: number, height: number): AssetMeta {
   }
 }
 
-function rectangle(node: SceneNode): {
+function rectangle(node: { x: number; y: number; width: number; height: number }): {
   left: number
   top: number
   right: number
@@ -45,7 +66,10 @@ function rectangle(node: SceneNode): {
   }
 }
 
-function overlaps(left: SceneNode, right: SceneNode): boolean {
+function overlaps(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
   const a = rectangle(left)
   const b = rectangle(right)
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
@@ -99,7 +123,7 @@ describe('batch media transactions', () => {
     expect(state.history.past).toHaveLength(historyBefore + 1)
     expect(state.activeTab).toBe('elements')
     expect(state.selectedNodeIds).toEqual(nodeIds)
-    expect(Object.keys(state.project.assets)).toEqual([
+    expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
       'asset_a',
       'asset_b',
       'asset_c',
@@ -119,7 +143,7 @@ describe('batch media transactions', () => {
     store.undo()
     state = useEditorStore.getState()
     expect(selectActiveScene(state).nodes).toHaveLength(0)
-    expect(state.project.assets).toEqual({})
+    expect(selectActiveCourseProjectDocument(state)!.assets).toEqual({})
     expect(state.assetFiles).toEqual({})
 
     store.redo()
@@ -137,15 +161,15 @@ describe('batch media transactions', () => {
     ])
 
     expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
-    expect(Object.keys(useEditorStore.getState().project.assets)).toHaveLength(2)
+    expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toHaveLength(2)
     expect(useEditorStore.getState().history.past).toHaveLength(1)
 
     store.undo()
-    expect(useEditorStore.getState().project.assets).toEqual({})
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets).toEqual({})
     expect(useEditorStore.getState().assetFiles).toEqual({})
 
     store.redo()
-    expect(Object.keys(useEditorStore.getState().project.assets)).toEqual([
+    expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toEqual([
       'asset_library_a',
       'asset_library_b',
     ])
@@ -172,19 +196,27 @@ describe('batch media transactions', () => {
 
     const state = useEditorStore.getState()
     expect(selectActiveScene(state).nodes).toHaveLength(0)
-    expect(Object.keys(state.project.assets)).toHaveLength(items.length)
+    expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toHaveLength(items.length)
     expect(state.selectedNodeIds).toEqual([])
     expect(state.history.past).toHaveLength(1)
   })
 
+function firstSlideScene(project: CourseProjectDocument) {
+  const surface = project.surfaces.find((candidate): candidate is SlideSurfaceDocument => (
+    candidate.type === 'slide'
+  ))
+  if (!surface?.scenes[0]) throw new Error('expected Slide scene')
+  return surface.scenes[0]
+}
+
   it('falls back to the library instead of reporting false placement near the node limit', () => {
-    const project = createProject()
-    project.scenes[0]!.nodes = Array.from(
-      { length: MAX_SCENE_NODES - 1 },
-      () => createTextNode(),
-    )
+    const project = createBlankCourseProject()
+    const scene = firstSlideScene(project)
+    scene.layerItems = Array.from({ length: MAX_SCENE_NODES - 1 }, (_, index) => (
+      sceneNodeToCourseLayerItem(createTextNode(), index + 1)
+    ))
     const store = useEditorStore.getState()
-    store.loadProject(project, null)
+    store.loadCourseProject(project, null)
     store.setActiveTab('elements')
     const items = [
       { meta: image('asset_capacity_a', 800, 600), bytes: Uint8Array.from([1, 1, 1, 1]) },
@@ -212,7 +244,7 @@ describe('batch media transactions', () => {
       libraryFallback: 'scene-capacity',
     })
     expect(selectActiveScene(state).nodes).toHaveLength(MAX_SCENE_NODES - 1)
-    expect(Object.keys(state.project.assets)).toEqual([
+    expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
       'asset_capacity_a',
       'asset_capacity_b',
     ])
@@ -264,17 +296,17 @@ describe('continuous insertion context', () => {
   })
 
   it('keeps the insertion tab when creating a missing teacher controller and opens properties when restoring it', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const store = useEditorStore.getState()
-    store.loadProject(project, null)
+    store.loadCourseProject(project, null)
     store.setActiveTab('elements')
     store.ensureTeacherController()
 
     const state = useEditorStore.getState()
     expect(state.activeTab).toBe('elements')
-    expect(state.project.globalLayer).toHaveLength(1)
-    expect(state.project.globalLayer[0]!.node.type).toBe('teacher-controller')
-    expect(state.selectedNodeId).toBe(state.project.globalLayer[0]!.node.id)
+    expect(projectedGlobalLayer(state)).toHaveLength(1)
+    expect(projectedGlobalLayer(state)[0]!.node.type).toBe('teacher-controller')
+    expect(state.selectedNodeId).toBe(projectedGlobalLayer(state)[0]!.node.id)
     expect(state.editingScope).toBe('global')
 
     store.updatePlayback({ controls: 'none' })
@@ -283,6 +315,6 @@ describe('continuous insertion context', () => {
 
     const restoredState = useEditorStore.getState()
     expect(restoredState.activeTab).toBe('properties')
-    expect(restoredState.selectedNodeId).toBe(restoredState.project.globalLayer[0]!.node.id)
+    expect(restoredState.selectedNodeId).toBe(projectedGlobalLayer(restoredState)[0]!.node.id)
   })
 })

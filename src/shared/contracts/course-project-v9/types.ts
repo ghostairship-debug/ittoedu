@@ -9,22 +9,19 @@ export type {
   CourseStateScalar,
 } from '../course-state/types'
 import type {
-  BaseNode,
-  EmbeddedComponentPackageMeta,
   FormulaAstNode,
-  FormulaNode,
-  ImageNode,
-  ProjectDesignTokens,
-  ProjectMediaSettings,
-  ProjectPlaybackSettings,
-  SceneNode,
-  ShapeNode,
-  TeacherControllerNode,
-  TextNode,
+  NativeFormulaContent,
+  NativeImageContent,
+  NativeShapeContent,
+  NativeTeacherControllerContent,
+  NativeTextContent,
+  NativeVideoContent,
   TextRun,
-  VideoNode,
-  AssetMeta,
-} from '../../projectTypes'
+} from '../native-v1/types'
+import type { ProjectDesignTokens } from '../design-v1/types'
+import type { AssetMeta, ProjectMediaSettings } from '../media-v1/types'
+import type { ProjectPlaybackSettings } from '../playback-v1/types'
+import type { EmbeddedComponentPackageMeta } from '../component-v4/types'
 import type { RuntimeRenderMode } from '../runtime/types'
 
 export const COURSE_PROJECT_SCHEMA_VERSION = 9 as const
@@ -72,18 +69,13 @@ export interface LayerItemBase {
   paperSpace?: 'viewport' | 'paper'
 }
 
-type NativeNodeData<T extends SceneNode> = Omit<T, keyof BaseNode>
-
 export type NativeElementContent =
-  | { nativeType: 'text'; data: NativeNodeData<TextNode> }
-  | { nativeType: 'formula'; data: NativeNodeData<FormulaNode> }
-  | { nativeType: 'image'; data: NativeNodeData<ImageNode> }
-  | { nativeType: 'video'; data: NativeNodeData<VideoNode> }
-  | { nativeType: 'shape'; data: NativeNodeData<ShapeNode> }
-  | {
-      nativeType: 'teacher-controller'
-      data: NativeNodeData<TeacherControllerNode>
-    }
+  | { nativeType: 'text'; data: NativeTextContent }
+  | { nativeType: 'formula'; data: NativeFormulaContent }
+  | { nativeType: 'image'; data: NativeImageContent }
+  | { nativeType: 'video'; data: NativeVideoContent }
+  | { nativeType: 'shape'; data: NativeShapeContent }
+  | { nativeType: 'teacher-controller'; data: NativeTeacherControllerContent }
 
 export interface NativeLayerItem extends LayerItemBase {
   kind: 'native'

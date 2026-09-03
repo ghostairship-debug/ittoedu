@@ -24,14 +24,21 @@ import {
   mergeComponentProps,
   resolveComponentEditorState,
 } from '../../shared/componentProps'
-import type { ExternalComponentNode } from '../../shared/projectTypes'
-import { ComponentRegistry } from '../ComponentRegistry'
 import {
   ComponentAuthoringTargetRegistry,
   type ComponentAuthoringTargetsChangedHandler,
+  type ComponentHostNode as ComponentAuthoringHostNode,
 } from '../ComponentAuthoringTargetRegistry'
+
+export interface ComponentHostNode extends ComponentAuthoringHostNode {
+  component: {
+    packageId: string
+    version: string
+  }
+}
+import { ComponentRegistry } from '../ComponentRegistry'
 import { createPlayerComponentHostActions } from '../componentHostActions'
-import { decodePublishedCode } from '../publishedLesson'
+import { decodePublishedCode } from '../decodePublishedExecutableCode'
 import {
   PublishedCaptureBarrier,
   registerPublishedCaptureResource,
@@ -63,7 +70,7 @@ export interface PublishedComponentMountOptions {
   presentation?: ComponentCreateContextV4['presentation']
   emit?: (eventName: string, payload?: unknown) => void
   authoring?: {
-    node: ExternalComponentNode
+    node: ComponentHostNode
     onTargetsChanged: ComponentAuthoringTargetsChangedHandler
   }
   reportError?: (
@@ -83,7 +90,7 @@ export interface PublishedComponentMountHandle {
   restoreAfterCapture(): void
   resize(width: number, height: number): void
   updateProps(props: Record<string, unknown>): void
-  updateAuthoringNode(node: ExternalComponentNode): void
+  updateAuthoringNode(node: ComponentHostNode): void
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -104,7 +111,7 @@ export type PublishedComponentContextBase = Omit<
 export interface PublishedComponentContextResources {
   readonly context: PublishedComponentContextBase
   waitForCaptureReady(prepareCapture?: () => void | Promise<void>): Promise<void>
-  updateAuthoringNode(node: ExternalComponentNode): void
+  updateAuthoringNode(node: ComponentHostNode): void
   updateAuthoringSize(width: number, height: number): void
   updateAuthoringProps(props: Record<string, unknown>): void
   invalidateAuthoringTargets(): void
@@ -416,7 +423,7 @@ export function createPublishedComponentContextResources(
       ...(authoringTargets ? { editor: authoringTargets } : {}),
     },
     waitForCaptureReady: (prepareCapture) => captureBarrier.waitForReady(prepareCapture),
-    updateAuthoringNode(node: ExternalComponentNode) {
+    updateAuthoringNode(node: ComponentHostNode) {
       if (!authoringTargets) return
       authoringTargets.update(node)
       authoringNode = node
@@ -641,7 +648,7 @@ export function mountPublishedComponent(
       resources.updateAuthoringProps(nextProps)
       resources.invalidateAuthoringTargets()
     },
-    updateAuthoringNode(node: ExternalComponentNode) {
+    updateAuthoringNode(node: ComponentHostNode) {
       resources.updateAuthoringNode(node)
     },
     setVisible(visible: boolean) {

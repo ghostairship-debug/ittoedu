@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { decodePublishedCode } from '@/player/publishedLesson'
+import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
@@ -18,12 +18,29 @@ import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
   useEditorStore,
+  selectCandidateGlobalLayerItems,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
   RuntimeLayerItem,
 } from '@/shared/courseProjectTypes'
+
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
+    ...entry,
+    layer: entry.plane ?? 'overlay',
+    visibility: {
+      mode: entry.visibility.mode,
+      sceneIds: entry.visibility.locationIds,
+    },
+    node: courseLayerItemToEditorCanvasNode(entry.item)!,
+  }))
+}
+
 
 const CREATED_AT = '2026-08-24T00:00:00.000Z'
 const ARCHIVE_TIME = '2026-08-24T12:00:00.000Z'
@@ -310,15 +327,15 @@ function authoritativeSnapshot() {
   const state = useEditorStore.getState()
   return {
     project: structuredClone(activeProject()),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
     storeHistory: structuredClone(state.history),
     mediaFiles: byteMap(selectMediaAssetFiles(state)),
     componentPackages: structuredClone(state.componentPackages),
-    sidecarPast: structuredClone(state.slideCandidateSidecarPast),
-    sidecarFuture: structuredClone(state.slideCandidateSidecarFuture),
-    componentPast: structuredClone(state.slideCandidateComponentPackagesPast),
-    componentFuture: structuredClone(state.slideCandidateComponentPackagesFuture),
+    sidecarPast: structuredClone(state.courseAssetSidecarPast),
+    sidecarFuture: structuredClone(state.courseAssetSidecarFuture),
+    componentPast: structuredClone(state.courseComponentPackagesPast),
+    componentFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     dirty: state.dirty,
   }

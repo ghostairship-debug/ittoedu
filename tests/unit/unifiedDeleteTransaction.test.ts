@@ -8,8 +8,10 @@ import type {
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
+import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
 import {
   selectActiveCourseProjectDocument,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -56,7 +58,8 @@ describe('unified Delete transaction', () => {
     const ids = firstSlideScene().layerItems.map((item) => item.layerItemId)
     store.selectNodes(ids)
     const before = activeDocument()
-    const historyCount = useEditorStore.getState().history.past.length
+    const historyCount = selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past.length
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
@@ -65,8 +68,12 @@ describe('unified Delete transaction', () => {
     const remainingIds = new Set(firstSlideScene(after).layerItems.map((item) => item.layerItemId))
     ids.forEach((id) => expect(remainingIds.has(id)).toBe(false))
     expect(after.revision).toBe(before.revision + 1)
-    expect(useEditorStore.getState().history.past).toHaveLength(historyCount + 1)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past).toHaveLength(historyCount + 1)
     expect(useEditorStore.getState().selectedNodeIds).toEqual([])
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
+    const lastFrame = backend?.getSession().history.past.at(-1)
+    expect(lastFrame && isSlideAuthoringTransactionFrame(lastFrame)).toBe(true)
 
     useEditorStore.getState().undo()
     expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
@@ -82,14 +89,16 @@ describe('unified Delete transaction', () => {
     if (!stale) throw new Error('expected selection snapshot')
     store.updateNode(nodeId, { x: 420 })
     const beforeDocument = activeDocument()
-    const beforeHistory = useEditorStore.getState().history.past
+    const beforeHistory = selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past
     const beforeSelection = useEditorStore.getState().selectedNodeIds
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
     expect(activeDocument()).toBe(beforeDocument)
-    expect(useEditorStore.getState().history.past).toBe(beforeHistory)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past).toBe(beforeHistory)
     expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
     expect(firstSlideScene().layerItems.some((item) => item.layerItemId === nodeId)).toBe(true)
   })
@@ -102,14 +111,16 @@ describe('unified Delete transaction', () => {
     store.updateNode(ids[1]!, { locked: true })
     store.selectNodes(ids)
     const beforeDocument = activeDocument()
-    const beforeHistory = useEditorStore.getState().history.past
+    const beforeHistory = selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past
     const beforeSelection = useEditorStore.getState().selectedNodeIds
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
     expect(result.ok).toBe(false)
     expect(activeDocument()).toBe(beforeDocument)
-    expect(useEditorStore.getState().history.past).toBe(beforeHistory)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
+      .getSession().history.past).toBe(beforeHistory)
     expect(useEditorStore.getState().selectedNodeIds).toBe(beforeSelection)
     expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
       .toEqual(expect.arrayContaining(ids))

@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeInformationRelease } from '../../src/shared/informationRelease'
 import type { InteractionRule } from '../../src/shared/interactionTypes'
-import {
-  createProject,
-  createTextNode,
-} from '../../src/renderer/project/createProject'
+import { createDefaultScenePresentation } from '../../src/shared/presentation'
+import type { ProjectDocument, SceneDocument } from '../../src/shared/projectTypes'
+import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+
+function blankReleaseProject(): ProjectDocument {
+  const scene: SceneDocument = {
+    id: 'scene_1',
+    name: '场景 1',
+    backgroundColor: '#ffffff',
+    backgroundAssetId: null,
+    nodes: [],
+    presentation: createDefaultScenePresentation(),
+    interactions: [],
+  }
+  return { scenes: [scene] } as ProjectDocument
+}
 
 function revealRule(
   id: string,
@@ -33,7 +45,7 @@ function revealRule(
 
 describe('information release inspector', () => {
   it('finds a reachable staged reveal from an initially visible trigger', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = blankReleaseProject()
     const scene = project.scenes[0]!
     const button = createTextNode({ id: 'button', name: '继续', text: '继续' })
     const detail = createTextNode({
@@ -62,7 +74,7 @@ describe('information release inspector', () => {
   })
 
   it('does not treat clicking an invisible node as a reachable self reveal', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = blankReleaseProject()
     const scene = project.scenes[0]!
     const hidden = createTextNode({
       id: 'hidden',
@@ -82,7 +94,7 @@ describe('information release inspector', () => {
   })
 
   it('evaluates presentation conditions per authored state', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = blankReleaseProject()
     const scene = project.scenes[0]!
     const hidden = createTextNode({
       id: 'conditional',
@@ -108,7 +120,7 @@ describe('information release inspector', () => {
   })
 
   it('treats scene.enter as reachable when navigation targets a non-initial state', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = blankReleaseProject()
     const scene = project.scenes[0]!
     const hidden = createTextNode({
       id: 'direct-target-detail',

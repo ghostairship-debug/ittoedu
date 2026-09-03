@@ -4,7 +4,7 @@ import type {
   MotionEasing,
   NodeMotionAction,
 } from '../../../shared/interactionTypes'
-import type { SceneNode } from '../../../shared/projectTypes'
+import type { EditorCanvasNode } from '../editorCanvasNode'
 
 const MOTION_SLIDE_DISTANCE = 48
 const MOTION_SCALE_MULTIPLIER = 0.84
@@ -40,7 +40,7 @@ export interface AdapterBounds {
   rotation: number
 }
 
-export interface NodeAdapter<T extends SceneNode = SceneNode> {
+export interface NodeAdapter<T extends EditorCanvasNode = EditorCanvasNode> {
   readonly nodeId: string
   readonly interactionTarget: Phaser.GameObjects.Zone
   getNode(): T
@@ -56,7 +56,7 @@ export interface NodeAdapter<T extends SceneNode = SceneNode> {
   destroy(): void
 }
 
-export abstract class BaseNodeAdapter<T extends SceneNode>
+export abstract class BaseNodeAdapter<T extends EditorCanvasNode = EditorCanvasNode>
   implements NodeAdapter<T>
 {
   readonly nodeId: string

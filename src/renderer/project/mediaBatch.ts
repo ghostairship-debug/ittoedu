@@ -135,3 +135,19 @@ export function layoutMediaBatchFrames(
     }
   })
 }
+
+/** Same canvas batch cap as V8 `MAX_BATCH_CANVAS_ITEMS`. */
+export const MAX_BATCH_CANVAS_ITEMS = MEDIA_BATCH_CANVAS_LIMIT
+
+/**
+ * Deterministic, non-overlapping layout for a small import batch.
+ * Every returned node stays inside the fixed canvas.
+ */
+export function layoutMediaBatchNodes<T extends MediaBatchFrameInput>(nodes: T[]): T[] {
+  if (nodes.length <= 1) return nodes
+  const frames = layoutMediaBatchFrames(nodes)
+  return nodes.map((node, index) => ({
+    ...node,
+    ...frames[index]!,
+  }))
+}

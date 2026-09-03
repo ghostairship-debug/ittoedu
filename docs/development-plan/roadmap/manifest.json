@@ -1,0 +1,1943 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "id": "r11-000-authority-contracts",
+      "release": "1.1",
+      "title": "锁定 1.1 执行权威",
+      "dependencies": [],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.1/r11-000-authority-contracts.md"
+    },
+    {
+      "id": "r11-001-preservation-baseline",
+      "release": "1.1",
+      "title": "建立不可降级行为基线",
+      "dependencies": [
+        "r11-000-authority-contracts"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.1/r11-001-preservation-baseline.md"
+    },
+    {
+      "id": "r11-002-legacy-inventory-zero-check",
+      "release": "1.1",
+      "title": "刷新唯一 Legacy 台账与零门",
+      "dependencies": [
+        "r11-001-preservation-baseline"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "legacy-inventory"
+      ],
+      "spec": "1.1/r11-002-legacy-inventory-zero-check.md"
+    },
+    {
+      "id": "r11-010-domain-contract-extraction",
+      "release": "1.1",
+      "title": "抽取仍有效的领域合同",
+      "dependencies": [
+        "r11-002-legacy-inventory-zero-check"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.1/r11-010-domain-contract-extraction.md"
+    },
+    {
+      "id": "r11-011-v9-native-schema-independence",
+      "release": "1.1",
+      "title": "解除 V9 Native 对旧 Scene Schema 的依赖",
+      "dependencies": [
+        "r11-010-domain-contract-extraction"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.1/r11-011-v9-native-schema-independence.md"
+    },
+    {
+      "id": "r11-012-published-v2-schema-independence",
+      "release": "1.1",
+      "title": "解除 Published V2 对旧工程模型的依赖",
+      "dependencies": [
+        "r11-011-v9-native-schema-independence"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "published-producer"
+      ],
+      "spec": "1.1/r11-012-published-v2-schema-independence.md"
+    },
+    {
+      "id": "r11-013-shared-native-consumers",
+      "release": "1.1",
+      "title": "迁移共享 Native consumer",
+      "dependencies": [
+        "r11-012-published-v2-schema-independence"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-013-shared-native-consumers.md"
+    },
+    {
+      "id": "r11-014-media-design-component-consumers",
+      "release": "1.1",
+      "title": "迁移 Media/Design/Component consumer",
+      "dependencies": [
+        "r11-012-published-v2-schema-independence"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.1/r11-014-media-design-component-consumers.md"
+    },
+    {
+      "id": "r11-020-slide-effective-read-model",
+      "release": "1.1",
+      "title": "Slide 使用只读 V9 effective view",
+      "dependencies": [
+        "r11-013-shared-native-consumers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-020-slide-effective-read-model.md"
+    },
+    {
+      "id": "r11-021-slide-properties-editors",
+      "release": "1.1",
+      "title": "属性与高级编辑器使用 V9 view/command",
+      "dependencies": [
+        "r11-020-slide-effective-read-model"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-021-slide-properties-editors.md"
+    },
+    {
+      "id": "r11-022-slide-actions",
+      "release": "1.1",
+      "title": "Slide 动作完全走 V9 command/history",
+      "dependencies": [
+        "r11-020-slide-effective-read-model"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history"
+      ],
+      "spec": "1.1/r11-022-slide-actions.md"
+    },
+    {
+      "id": "r11-023-flow-viewstate",
+      "release": "1.1",
+      "title": "Flow 视图只读 V9 session",
+      "dependencies": [
+        "r11-013-shared-native-consumers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-023-flow-viewstate.md"
+    },
+    {
+      "id": "r11-024-spatial-viewstate",
+      "release": "1.1",
+      "title": "Spatial 视图只读 V9 session",
+      "dependencies": [
+        "r11-013-shared-native-consumers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-024-spatial-viewstate.md"
+    },
+    {
+      "id": "r11-025-editor-store-v9-only",
+      "release": "1.1",
+      "title": "Surface Store 清除 V8 镜像与旧 writer",
+      "dependencies": [
+        "r11-026-slide-properties-modules",
+        "r11-029-slide-workspace-modules"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-025-editor-store-v9-only.md"
+    },
+    {
+      "id": "r11-026-slide-properties-modules",
+      "release": "1.1",
+      "title": "Slide 与全局属性形成真实模块边界",
+      "dependencies": [
+        "r11-021-slide-properties-editors",
+        "r11-027-flow-authoring-modules",
+        "r11-028-spatial-authoring-modules"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-026-slide-properties-modules.md"
+    },
+    {
+      "id": "r11-027-flow-authoring-modules",
+      "release": "1.1",
+      "title": "Flow Workspace、文本、Overlay 与属性解耦",
+      "dependencies": [
+        "r11-023-flow-viewstate"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-027-flow-authoring-modules.md"
+    },
+    {
+      "id": "r11-028-spatial-authoring-modules",
+      "release": "1.1",
+      "title": "Spatial Workspace 与属性形成独立模块",
+      "dependencies": [
+        "r11-024-spatial-viewstate"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-028-spatial-authoring-modules.md"
+    },
+    {
+      "id": "r11-029-slide-workspace-modules",
+      "release": "1.1",
+      "title": "Slide Workspace、动态目标与画布控制器解耦",
+      "dependencies": [
+        "r11-022-slide-actions",
+        "r11-027-flow-authoring-modules",
+        "r11-028-spatial-authoring-modules",
+        "r11-033-runtime-authoring-preview-v2"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-029-slide-workspace-modules.md"
+    },
+    {
+      "id": "r11-030-native-render-boundary",
+      "release": "1.1",
+      "title": "建立非持久化 Native render input",
+      "dependencies": [
+        "r11-013-shared-native-consumers",
+        "r11-014-media-design-component-consumers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-030-native-render-boundary.md"
+    },
+    {
+      "id": "r11-031-published-slide-player",
+      "release": "1.1",
+      "title": "Slide Player 直接消费 Published/V9 模型",
+      "dependencies": [
+        "r11-012-published-v2-schema-independence",
+        "r11-030-native-render-boundary"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-031-published-slide-player.md"
+    },
+    {
+      "id": "r11-032-player-v2-only-entry",
+      "release": "1.1",
+      "title": "Player 入口只接受 Published V2",
+      "dependencies": [
+        "r11-033-runtime-authoring-preview-v2",
+        "r11-041-pptx-v2-only",
+        "r11-042-pdf-v2-only",
+        "r11-043-html-web-v2-only"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-032-player-v2-only-entry.md"
+    },
+    {
+      "id": "r11-033-runtime-authoring-preview-v2",
+      "release": "1.1",
+      "title": "作者预览切换到 Published V2",
+      "dependencies": [
+        "r11-014-media-design-component-consumers",
+        "r11-031-published-slide-player",
+        "r11-050-v9-fixture-foundation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "published-producer"
+      ],
+      "spec": "1.1/r11-033-runtime-authoring-preview-v2.md"
+    },
+    {
+      "id": "r11-034-app-project-lifecycle-module",
+      "release": "1.1",
+      "title": "App 打开、保存与 Recovery 形成生命周期模块",
+      "dependencies": [
+        "r11-025-editor-store-v9-only",
+        "r11-051-v9-archive-only"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-034-app-project-lifecycle-module.md"
+    },
+    {
+      "id": "r11-035-app-delivery-module",
+      "release": "1.1",
+      "title": "App Preview、Preflight 与导出形成 Delivery 模块",
+      "dependencies": [
+        "r11-025-editor-store-v9-only",
+        "r11-032-player-v2-only-entry"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer",
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-035-app-delivery-module.md"
+    },
+    {
+      "id": "r11-036-app-import-input-modules",
+      "release": "1.1",
+      "title": "App 素材/组件导入与全局输入路由解耦",
+      "dependencies": [
+        "r11-014-media-design-component-consumers",
+        "r11-025-editor-store-v9-only"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-036-app-import-input-modules.md"
+    },
+    {
+      "id": "r11-037-editor-store-owner-modularization",
+      "release": "1.1",
+      "title": "按 Owner 拆 Store 并清除最后旧工程真相",
+      "dependencies": [
+        "r11-025-editor-store-v9-only",
+        "r11-032-player-v2-only-entry",
+        "r11-034-app-project-lifecycle-module",
+        "r11-035-app-delivery-module",
+        "r11-036-app-import-input-modules"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.1/r11-037-editor-store-owner-modularization.md"
+    },
+    {
+      "id": "r11-040-v9-health-preflight",
+      "release": "1.1",
+      "title": "统一 V9 diagnostics 与导出预检",
+      "dependencies": [
+        "r11-013-shared-native-consumers",
+        "r11-014-media-design-component-consumers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-040-v9-health-preflight.md"
+    },
+    {
+      "id": "r11-041-pptx-v2-only",
+      "release": "1.1",
+      "title": "PPTX 只消费 Published V2/capture",
+      "dependencies": [
+        "r11-031-published-slide-player",
+        "r11-040-v9-health-preflight",
+        "r11-050-v9-fixture-foundation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-041-pptx-v2-only.md"
+    },
+    {
+      "id": "r11-042-pdf-v2-only",
+      "release": "1.1",
+      "title": "PDF 只消费 Published V2 print/capture",
+      "dependencies": [
+        "r11-031-published-slide-player",
+        "r11-040-v9-health-preflight",
+        "r11-050-v9-fixture-foundation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-042-pdf-v2-only.md"
+    },
+    {
+      "id": "r11-043-html-web-v2-only",
+      "release": "1.1",
+      "title": "HTML/Web Package 只携带 Published V2",
+      "dependencies": [
+        "r11-031-published-slide-player",
+        "r11-040-v9-health-preflight",
+        "r11-050-v9-fixture-foundation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.1/r11-043-html-web-v2-only.md"
+    },
+    {
+      "id": "r11-050-v9-fixture-foundation",
+      "release": "1.1",
+      "title": "建立 V9/Published 测试基础",
+      "dependencies": [
+        "r11-011-v9-native-schema-independence",
+        "r11-012-published-v2-schema-independence"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.1/r11-050-v9-fixture-foundation.md"
+    },
+    {
+      "id": "r11-051-v9-archive-only",
+      "release": "1.1",
+      "title": "保存、打开与校验只支持 V9 archive",
+      "dependencies": [
+        "r11-050-v9-fixture-foundation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery"
+      ],
+      "spec": "1.1/r11-051-v9-archive-only.md"
+    },
+    {
+      "id": "r11-052-supported-test-migration",
+      "release": "1.1",
+      "title": "测试只证明受支持 V9/V2 行为",
+      "dependencies": [
+        "r11-037-editor-store-owner-modularization"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.1/r11-052-supported-test-migration.md"
+    },
+    {
+      "id": "r11-055-architecture-modularity-gate",
+      "release": "1.1",
+      "title": "证明 Owner 模块化与依赖方向收口",
+      "dependencies": [
+        "r11-037-editor-store-owner-modularization",
+        "r11-052-supported-test-migration"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.1/r11-055-architecture-modularity-gate.md"
+    },
+    {
+      "id": "r11-053-legacy-inventory-reconciliation",
+      "release": "1.1",
+      "title": "在集成 HEAD 原子复核 Legacy 台账",
+      "dependencies": [
+        "r11-055-architecture-modularity-gate"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "legacy-inventory"
+      ],
+      "spec": "1.1/r11-053-legacy-inventory-reconciliation.md"
+    },
+    {
+      "id": "r11-054-delete-legacy-modules",
+      "release": "1.1",
+      "title": "按复核清单删除零 consumer 旧模块",
+      "dependencies": [
+        "r11-053-legacy-inventory-reconciliation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "contracts-schema",
+        "legacy-inventory",
+        "editor-store-history",
+        "published-producer",
+        "generated-index"
+      ],
+      "spec": "1.1/r11-054-delete-legacy-modules.md"
+    },
+    {
+      "id": "r11-060-zero-gate",
+      "release": "1.1",
+      "title": "证明可执行作用域零遗留",
+      "dependencies": [
+        "r11-054-delete-legacy-modules"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.1/r11-060-zero-gate.md"
+    },
+    {
+      "id": "r11-061-no-regression-candidate",
+      "release": "1.1",
+      "title": "固定 1.1 无回归候选",
+      "dependencies": [
+        "r11-060-zero-gate"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.1/r11-061-no-regression-candidate.md"
+    },
+    {
+      "id": "r11-062-owner-release",
+      "release": "1.1",
+      "title": "Owner 验收并发布 1.1",
+      "dependencies": [
+        "r11-061-no-regression-candidate"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.1/r11-062-owner-release.md"
+    },
+    {
+      "id": "r12-000-native-contract",
+      "release": "1.2",
+      "title": "定义 Table / Chart 的 V9 Native 严格分支与 Published V2 窄增量",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-010-table-core",
+      "release": "1.2",
+      "title": "Factory、Command、History 支持稳定行 / 列 / 单元格身份、增删重排、宽高和样式",
+      "dependencies": [
+        "r12-000-native-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "editor-store-history"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-011-table-authoring-delivery",
+      "release": "1.2",
+      "title": "Table 编辑 UI、键盘路径、保存重开、Player、HTML 与原生 PPTX 闭环",
+      "dependencies": [
+        "r12-010-table-core"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "published-producer"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-020-chart-core",
+      "release": "1.2",
+      "title": "Factory、Command、History 支持 bar / line / area / pie / donut 及可编辑数据",
+      "dependencies": [
+        "r12-000-native-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "editor-store-history"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-021-chart-authoring-delivery",
+      "release": "1.2",
+      "title": "Chart 编辑 UI、保存重开、Published、Player 与 HTML 闭环",
+      "dependencies": [
+        "r12-020-chart-core"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "published-producer"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-030-line-authoring",
+      "release": "1.2",
+      "title": "Line 支持直接绘制、端点、折点、吸附与细线命中",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-040-background-authoring",
+      "release": "1.2",
+      "title": "背景编辑覆盖 Scene、命名状态、Slide Surface，并保持既有 Flow / Spatial 行为",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-050-native-closure",
+      "release": "1.2",
+      "title": "统一补齐诊断、Capability、无障碍、Published 与导出 preflight",
+      "dependencies": [
+        "r12-011-table-authoring-delivery",
+        "r12-021-chart-authoring-delivery",
+        "r12-030-line-authoring",
+        "r12-040-background-authoring"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "published-producer"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r12-060-release",
+      "release": "1.2",
+      "title": "固定课例通过人工闭环并发布 1.2 源码 tag",
+      "dependencies": [
+        "r12-050-native-closure"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.2/README.md"
+    },
+    {
+      "id": "r13-000-recipe-contract",
+      "release": "1.3",
+      "title": "定义 Recipe 输入、普通 V9 展开结果、槽位与容量策略",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-010-cover-recipe",
+      "release": "1.3",
+      "title": "`cover-v1` 生成可编辑封面骨架",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-011-concept-recipe",
+      "release": "1.3",
+      "title": "`concept-v1` 生成概念讲解骨架",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-012-worked-example-recipe",
+      "release": "1.3",
+      "title": "`worked-example-v1` 生成分步例题骨架",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-020-step-reveal-recipe",
+      "release": "1.3",
+      "title": "`step-reveal-v1` 生成声明式逐步揭示互动",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-021-choice-feedback-recipe",
+      "release": "1.3",
+      "title": "`choice-feedback-v1` 生成选择与反馈互动",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-022-classify-sort-recipe",
+      "release": "1.3",
+      "title": "`classify-sort-v1` 生成分类 / 排序互动",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-030-reference-clone",
+      "release": "1.3",
+      "title": "从参考页复制可编辑骨架而非复制隐藏状态",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-040-batch-replace",
+      "release": "1.3",
+      "title": "在明确范围内预览并批量查找替换",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-041-token-apply",
+      "release": "1.3",
+      "title": "将 Design Token 应用于明确对象范围",
+      "dependencies": [
+        "r13-000-recipe-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-050-fast-diagnostics",
+      "release": "1.3",
+      "title": "提供面向教师的快速诊断入口与可定位结果",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "workspace-properties"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r13-060-release",
+      "release": "1.3",
+      "title": "固定课例通过六种 Recipe 与生产力工具人工闭环并发布 1.3 源码 tag",
+      "dependencies": [
+        "r13-010-cover-recipe",
+        "r13-011-concept-recipe",
+        "r13-012-worked-example-recipe",
+        "r13-020-step-reveal-recipe",
+        "r13-021-choice-feedback-recipe",
+        "r13-022-classify-sort-recipe",
+        "r13-030-reference-clone",
+        "r13-040-batch-replace",
+        "r13-041-token-apply",
+        "r13-050-fast-diagnostics",
+        "r12-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.3/README.md"
+    },
+    {
+      "id": "r14-000-target-wire",
+      "release": "1.4",
+      "title": "`AuthoringToolTargetWireV1` 无损表达 update target，并为 create 提供独立 scope",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-001-tool-receipt",
+      "release": "1.4",
+      "title": "统一工具回执、revision / stale、history 与 resource transaction",
+      "dependencies": [
+        "r14-000-target-wire"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "editor-store-history"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-010-component-registry-identity",
+      "release": "1.4",
+      "title": "硬门 1：Component Registry 区分工程、package、version、source 与 content identity",
+      "dependencies": [
+        "r14-000-target-wire"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-011-dynamic-asset-closure",
+      "release": "1.4",
+      "title": "硬门 2：Runtime / Component 的 direct project asset 引用进入 Published asset closure",
+      "dependencies": [
+        "r14-000-target-wire"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-012-lifecycle-visible-failure",
+      "release": "1.4",
+      "title": "硬门 3：动态实例异常时销毁或隔离旧实例并显示静态 fallback / 可见错误",
+      "dependencies": [
+        "r14-000-target-wire"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-020-slide-tools",
+      "release": "1.4",
+      "title": "正式工具覆盖演示页 Native 对象、页面、状态与声明式互动写入",
+      "dependencies": [
+        "r14-000-target-wire",
+        "r14-001-tool-receipt"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-021-flow-tools",
+      "release": "1.4",
+      "title": "正式工具覆盖 Flow 正文结构和内嵌内容",
+      "dependencies": [
+        "r14-000-target-wire",
+        "r14-001-tool-receipt"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-022-spatial-tools",
+      "release": "1.4",
+      "title": "正式工具覆盖 Spatial object、camera、path 与 relation",
+      "dependencies": [
+        "r14-000-target-wire",
+        "r14-001-tool-receipt"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-023-course-global-tools",
+      "release": "1.4",
+      "title": "正式工具覆盖 course global、background 与 network",
+      "dependencies": [
+        "r14-000-target-wire",
+        "r14-001-tool-receipt"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "workspace-properties"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-030-dynamic-code-tools",
+      "release": "1.4",
+      "title": "在三个硬门通过后开放 Component / Runtime 源码与配置工具",
+      "dependencies": [
+        "r14-000-target-wire",
+        "r14-001-tool-receipt",
+        "r14-010-component-registry-identity",
+        "r14-011-dynamic-asset-closure",
+        "r14-012-lifecycle-visible-failure"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "published-producer"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-040-builder-v2",
+      "release": "1.4",
+      "title": "Builder V2 通过稳定 Facade 组合三 Surface、Recipe 与动态载体工具",
+      "dependencies": [
+        "r12-060-release",
+        "r13-060-release",
+        "r14-020-slide-tools",
+        "r14-021-flow-tools",
+        "r14-022-spatial-tools",
+        "r14-023-course-global-tools",
+        "r14-030-dynamic-code-tools"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-041-builder-v1-compat",
+      "release": "1.4",
+      "title": "Builder V1 在迁移窗口继续工作且不形成第二条写入路径",
+      "dependencies": [
+        "r14-040-builder-v2"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-050-weak-model-vertical",
+      "release": "1.4",
+      "title": "用受限策划输入完成 Builder V2 端到端弱模型 / 低信息垂直验证",
+      "dependencies": [
+        "r14-040-builder-v2",
+        "r14-041-builder-v1-compat"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r14-060-release",
+      "release": "1.4",
+      "title": "固定课例通过三 Surface、动态载体和 Builder 人工闭环并发布 1.4 源码 tag",
+      "dependencies": [
+        "r14-050-weak-model-vertical"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.4/README.md"
+    },
+    {
+      "id": "r15-000-material-contract",
+      "release": "1.5",
+      "title": "定义本地材料记录、工程关联、引用与删除语义",
+      "dependencies": [
+        "r14-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "main-preload"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-010-material-repository",
+      "release": "1.5",
+      "title": "应用本地材料可导入、读取、检索、定位和删除",
+      "dependencies": [
+        "r15-000-material-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-020-material-tools-citations",
+      "release": "1.5",
+      "title": "Authoring Tools 可引用材料并写入可见、可携带来源",
+      "dependencies": [
+        "r15-010-material-repository"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-030-pptx-import",
+      "release": "1.5",
+      "title": "受限 PPTX 解析、资源限制、不支持项报告与 document + sidecar 原子提交",
+      "dependencies": [
+        "r14-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "editor-store-history"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-040-style-remix",
+      "release": "1.5",
+      "title": "复制参考页可编辑骨架并用明确槽位替换内容",
+      "dependencies": [
+        "r13-060-release",
+        "r14-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-050-content-qa",
+      "release": "1.5",
+      "title": "数学、答案一致性、图表正文一致性和来源定位进入可导航 QA",
+      "dependencies": [
+        "r14-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-060-release",
+      "release": "1.5",
+      "title": "固定课例通过材料、PPTX、Remix 与内容 QA 人工闭环并发布 1.5 源码 tag",
+      "dependencies": [
+        "r15-020-material-tools-citations",
+        "r15-030-pptx-import",
+        "r15-040-style-remix",
+        "r15-050-content-qa"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-900-openmaic-review",
+      "release": "1.5",
+      "title": "评估 OpenMAIC 与当前合同的可复用边界并形成采用 / 不采用记录",
+      "dependencies": [
+        "r14-060-release"
+      ],
+      "optional": true,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-901-openmaic-bridge",
+      "release": "1.5",
+      "title": "在评估通过时提供隔离桥接原型",
+      "dependencies": [
+        "r15-900-openmaic-review",
+        "r15-040-style-remix"
+      ],
+      "optional": true,
+      "writeLocks": [
+        "app-save-recovery"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r16-000-cli-adapter-contract",
+      "release": "1.6",
+      "title": "定义 `LocalAgentCliAdapterV1`、标准事件和错误分类",
+      "dependencies": [
+        "r11-062-owner-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-010-secure-process-launcher",
+      "release": "1.6",
+      "title": "Windows 使用解析后的明确 executable + args 启动和停止 CLI",
+      "dependencies": [
+        "r16-000-cli-adapter-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-011-codex-adapter",
+      "release": "1.6",
+      "title": "Codex CLI 探测、版本、启动、流式、恢复、取消与错误归一化",
+      "dependencies": [
+        "r16-000-cli-adapter-contract",
+        "r16-010-secure-process-launcher"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-012-claude-adapter",
+      "release": "1.6",
+      "title": "Claude CLI 探测、版本、启动、流式、恢复、取消与错误归一化",
+      "dependencies": [
+        "r16-000-cli-adapter-contract",
+        "r16-010-secure-process-launcher"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-013-opencode-adapter",
+      "release": "1.6",
+      "title": "OpenCode CLI 探测、版本、启动、流式、恢复、取消与错误归一化",
+      "dependencies": [
+        "r16-000-cli-adapter-contract",
+        "r16-010-secure-process-launcher"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-020-local-session-store",
+      "release": "1.6",
+      "title": "在应用 userData 的版本化目录保存配置、会话映射和事件记录",
+      "dependencies": [
+        "r15-000-material-contract",
+        "r16-000-cli-adapter-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-030-cli-lifecycle",
+      "release": "1.6",
+      "title": "三种 adapter 共用单一会话状态机与 backpressure / crash / cancel 处理",
+      "dependencies": [
+        "r16-011-codex-adapter",
+        "r16-012-claude-adapter",
+        "r16-013-opencode-adapter",
+        "r16-020-local-session-store"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-031-hidden-manual-isolation",
+      "release": "1.6",
+      "title": "普通构建隐藏 AI 入口，并证明 CLI 故障不影响人工工作流",
+      "dependencies": [
+        "r16-030-cli-lifecycle"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-040-release",
+      "release": "1.6",
+      "title": "固定课例验证隐藏 CLI 内核与人工隔离并发布 1.6 源码 tag",
+      "dependencies": [
+        "r16-031-hidden-manual-isolation",
+        "r15-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r17-000-generation-contract",
+      "release": "1.7",
+      "title": "定义生成请求、载体阶梯、候选、准入回执与原子提交协议",
+      "dependencies": [
+        "r13-060-release",
+        "r14-060-release",
+        "r15-060-release",
+        "r16-040-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "main-preload"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-010-staging-workspace",
+      "release": "1.7",
+      "title": "为每个 session / candidate 建立事务 staging、摄取与确定清理语义",
+      "dependencies": [
+        "r17-000-generation-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-011-static-admission",
+      "release": "1.7",
+      "title": "自动检查编译、协议、依赖、资产闭包、origin、资源上限与静态 fallback",
+      "dependencies": [
+        "r17-010-staging-workspace"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "contracts-schema"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-012-host-smoke-admission",
+      "release": "1.7",
+      "title": "在真实 Component / Runtime 宿主执行 mount / update / interaction / destroy smoke",
+      "dependencies": [
+        "r17-011-static-admission"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-producer",
+        "main-preload"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-013-host-candidate-commit",
+      "release": "1.7",
+      "title": "宿主把严格生成候选映射为 1.4 命令并原子提交",
+      "dependencies": [
+        "r17-000-generation-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-020-single-page",
+      "release": "1.7",
+      "title": "CLI Agent 生成一页候选并由宿主提交",
+      "dependencies": [
+        "r17-013-host-candidate-commit"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-021-whole-course",
+      "release": "1.7",
+      "title": "CLI Agent 从已确认两份 Markdown 生成整课",
+      "dependencies": [
+        "r17-020-single-page"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "editor-store-history",
+        "generated-index"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-022-local-edit",
+      "release": "1.7",
+      "title": "CLI Agent 为 canonical target 生成局部修改候选",
+      "dependencies": [
+        "r17-020-single-page"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-023-generated-carriers",
+      "release": "1.7",
+      "title": "Generated Component / Runtime 候选经 gate 后由宿主注册",
+      "dependencies": [
+        "r17-012-host-smoke-admission",
+        "r17-020-single-page"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "published-producer",
+        "editor-store-history"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-030-single-repair",
+      "release": "1.7",
+      "title": "对风险页执行有界、可停止的局部自动修复",
+      "dependencies": [
+        "r17-021-whole-course",
+        "r17-022-local-edit",
+        "r17-023-generated-carriers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-040-generation-benchmark",
+      "release": "1.7",
+      "title": "固定用例量化载体选择、成功率、延迟、失败零写入和人工可编辑性",
+      "dependencies": [
+        "r17-030-single-repair"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-060-release",
+      "release": "1.7",
+      "title": "固定课例通过生成 / 编辑 / 动态载体人工闭环并发布 1.7 源码 tag",
+      "dependencies": [
+        "r17-040-generation-benchmark"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r18-000-mcp-authoring-server",
+      "release": "1.8",
+      "title": "提供版本化 session-scoped MCP server、鉴权上下文和统一错误 / receipt envelope",
+      "dependencies": [
+        "r17-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "contracts-schema"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-010-context-read-tools",
+      "release": "1.8",
+      "title": "提供当前选择、当前页、整课、材料和能力 / 诊断只读上下文",
+      "dependencies": [
+        "r18-000-mcp-authoring-server"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-011-write-tool-mapping",
+      "release": "1.8",
+      "title": "把 1.4 正式 Surface / global / dynamic 工具映射为 MCP tools",
+      "dependencies": [
+        "r18-000-mcp-authoring-server",
+        "r14-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "contracts-schema",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-020-neutral-agent-profile",
+      "release": "1.8",
+      "title": "定义不含模型循环的中立 profile 并生成 CLI 会话配置",
+      "dependencies": [
+        "r18-010-context-read-tools",
+        "r18-011-write-tool-mapping"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-021-codex-profile",
+      "release": "1.8",
+      "title": "Codex 使用中立 profile 启动其原生 Agent / tool loop",
+      "dependencies": [
+        "r18-020-neutral-agent-profile",
+        "r16-011-codex-adapter"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-022-claude-profile",
+      "release": "1.8",
+      "title": "Claude 使用中立 profile 启动其原生 Agent / tool loop",
+      "dependencies": [
+        "r18-020-neutral-agent-profile",
+        "r16-012-claude-adapter"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-023-opencode-profile",
+      "release": "1.8",
+      "title": "OpenCode 使用中立 profile 启动其原生 Agent / tool loop",
+      "dependencies": [
+        "r18-020-neutral-agent-profile",
+        "r16-013-opencode-adapter"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-030-course-skills",
+      "release": "1.8",
+      "title": "提供 `course-design`、`course-build`、`qa-repair`、`style-remix` 产品 Skills",
+      "dependencies": [
+        "r18-020-neutral-agent-profile"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-031-editing-craft-skills",
+      "release": "1.8",
+      "title": "提供 `pro-editing`、`visual-craft`、`interaction-craft` 产品 Skills",
+      "dependencies": [
+        "r18-020-neutral-agent-profile"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-040-staging-file-boundary",
+      "release": "1.8",
+      "title": "启用文件工具的 CLI profile 通过当前 session staging 摄取约束",
+      "dependencies": [
+        "r18-020-neutral-agent-profile",
+        "r17-010-staging-workspace"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-041-human-concurrency",
+      "release": "1.8",
+      "title": "人工编辑与 Agent 工具调用以 revision / session generation 正确并发",
+      "dependencies": [
+        "r18-011-write-tool-mapping"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "editor-store-history",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-050-three-cli-benchmark",
+      "release": "1.8",
+      "title": "三种 CLI 在同一 profile / 固定课例上完成可比构建与局部修改",
+      "dependencies": [
+        "r18-021-codex-profile",
+        "r18-022-claude-profile",
+        "r18-023-opencode-profile",
+        "r18-030-course-skills",
+        "r18-031-editing-craft-skills",
+        "r18-040-staging-file-boundary",
+        "r18-041-human-concurrency"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-060-release",
+      "release": "1.8",
+      "title": "固定课例通过三 CLI、MCP、Skills 与并发人工闭环并发布 1.8 源码 tag",
+      "dependencies": [
+        "r18-050-three-cli-benchmark"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r19-000-chat-shell",
+      "release": "1.9",
+      "title": "内部 Chat shell 显示会话、输入、运行状态和 adapter 身份",
+      "dependencies": [
+        "r18-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-010-context-references",
+      "release": "1.9",
+      "title": "消息可显式引用当前选择、当前页、整课和材料",
+      "dependencies": [
+        "r19-000-chat-shell",
+        "r18-010-context-read-tools"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-020-tool-timeline",
+      "release": "1.9",
+      "title": "时间线按序显示 text、tool call / result、receipt、usage 与终态",
+      "dependencies": [
+        "r19-000-chat-shell",
+        "r18-000-mcp-authoring-server"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-021-safe-markdown-formula",
+      "release": "1.9",
+      "title": "Chat 消息和公式安全、可复制、可访问地渲染",
+      "dependencies": [
+        "r19-000-chat-shell"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-030-stop-undo-stale",
+      "release": "1.9",
+      "title": "变更预览、Stop、迟到结果防护、stale 提示与 AI 写入 Undo 闭环",
+      "dependencies": [
+        "r19-020-tool-timeline",
+        "r18-041-human-concurrency"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-040-session-persistence-deletion",
+      "release": "1.9",
+      "title": "会话恢复、迁移/损坏隔离、Save As 隔离和范围删除",
+      "dependencies": [
+        "r19-000-chat-shell",
+        "r16-020-local-session-store"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "workspace-properties"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-050-internal-dogfood",
+      "release": "1.9",
+      "title": "用真实课例完成端到端内部 Dogfood 与问题分级",
+      "dependencies": [
+        "r19-010-context-references",
+        "r19-020-tool-timeline",
+        "r19-021-safe-markdown-formula",
+        "r19-030-stop-undo-stale",
+        "r19-040-session-persistence-deletion"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-060-release",
+      "release": "1.9",
+      "title": "固定课例通过内部工作台人工闭环并发布 1.9 源码 tag",
+      "dependencies": [
+        "r19-050-internal-dogfood"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r20-000-public-governance",
+      "release": "2.0",
+      "title": "锁定内部生产可见性、支持矩阵、数据边界、错误分类与发布政策",
+      "dependencies": [
+        "r19-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "generated-index",
+        "workspace-properties"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-010-cli-setup-ui",
+      "release": "2.0",
+      "title": "内部生产设置页完成自动探测、自定义路径、版本、登录指引与诊断",
+      "dependencies": [
+        "r20-000-public-governance",
+        "r16-030-cli-lifecycle"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-011-first-use-risk-notice",
+      "release": "2.0",
+      "title": "首次外部 CLI 使用前显示一般数据发送风险并记录本地确认",
+      "dependencies": [
+        "r20-000-public-governance"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-020-public-authoring",
+      "release": "2.0",
+      "title": "正式开放 Chat、生成、局部编辑、timeline、Stop、Undo 与 stale 体验",
+      "dependencies": [
+        "r20-010-cli-setup-ui",
+        "r20-011-first-use-risk-notice",
+        "r19-030-stop-undo-stale"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "main-preload",
+        "editor-store-history"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-021-profile-controls",
+      "release": "2.0",
+      "title": "教师可选择 CLI、内置 profile / Skills 和允许的上下文范围",
+      "dependencies": [
+        "r20-000-public-governance",
+        "r18-050-three-cli-benchmark"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "workspace-properties"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-022-materials-privacy-controls",
+      "release": "2.0",
+      "title": "材料引用、会话删除、Save As 隔离和 CLI 历史差异成为公共控制",
+      "dependencies": [
+        "r20-011-first-use-risk-notice",
+        "r15-020-material-tools-citations",
+        "r19-040-session-persistence-deletion"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "workspace-properties"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-030-docs-accessibility",
+      "release": "2.0",
+      "title": "完成内部设置 / Chat / timeline 的键盘、读屏、错误恢复与用户文档",
+      "dependencies": [
+        "r20-020-public-authoring",
+        "r20-021-profile-controls",
+        "r20-022-materials-privacy-controls"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-properties",
+        "generated-index"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-040-three-cli-acceptance",
+      "release": "2.0",
+      "title": "三种真实 CLI 在同一固定课例完成同一生成与局部编辑矩阵",
+      "dependencies": [
+        "r20-020-public-authoring",
+        "r20-021-profile-controls",
+        "r20-022-materials-privacy-controls"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-050-owner-acceptance",
+      "release": "2.0",
+      "title": "Owner 用固定课例完成内部生产端到端视觉、互动、数据边界与人工回退验收",
+      "dependencies": [
+        "r20-030-docs-accessibility",
+        "r20-040-three-cli-acceptance"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
+      "id": "r20-060-release",
+      "release": "2.0",
+      "title": "发布 2.0 内部源码 tag 与固定课例离线 HTML",
+      "dependencies": [
+        "r20-050-owner-acceptance"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "none"
+      ],
+      "spec": "2.0/README.md"
+    }
+  ]
+}

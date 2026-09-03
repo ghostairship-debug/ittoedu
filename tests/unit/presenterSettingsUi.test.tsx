@@ -1,8 +1,11 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { useEditorStore,
+  selectActiveCourseProjectDocument,
+} from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { projectDocumentSchema } from '@/shared/projectSchema'
 
 beforeEach(() => {
@@ -23,12 +26,12 @@ describe('presenter settings editor', () => {
     })
     expect(screen.getByTestId('controller-consistency-notice'))
       .toHaveTextContent('已从成品中隐藏')
-    expect(useEditorStore.getState().project.playback.controls).toBe('none')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('none')
 
     fireEvent.click(screen.getByRole('button', {
       name: '恢复并显示教师控制器',
     }))
-    expect(useEditorStore.getState().project.playback.controls).toBe('canvas')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('canvas')
     expect(screen.queryByTestId('controller-consistency-notice')).not.toBeInTheDocument()
   })
 
@@ -38,13 +41,13 @@ describe('presenter settings editor', () => {
     const enabled = screen.getByLabelText('启用翻页笔 PageUp/PageDown')
     expect(enabled).toBeChecked()
     fireEvent.click(enabled)
-    expect(useEditorStore.getState().project.playback.presenter.enabled).toBe(false)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter.enabled).toBe(false)
 
     fireEvent.click(enabled)
     fireEvent.change(screen.getByLabelText('翻页笔推进方式'), {
       target: { value: 'authored-command' },
     })
-    expect(useEditorStore.getState().project.playback.presenter).toMatchObject({
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter).toMatchObject({
       enabled: true,
       strategy: 'authored-command',
     })
@@ -65,7 +68,7 @@ describe('presenter settings editor', () => {
     expect(screen.getByRole('status')).toHaveTextContent('code=KeyB')
 
     fireEvent.click(screen.getByRole('button', { name: '保存为前进键' }))
-    let bindings = useEditorStore.getState().project.playback.presenter.additionalBindings
+    let bindings = selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter.additionalBindings
     expect(bindings).toEqual([expect.objectContaining({
       command: 'next',
       key: 'b',
@@ -73,7 +76,7 @@ describe('presenter settings editor', () => {
     })])
 
     fireEvent.click(screen.getByRole('button', { name: '保存为后退键' }))
-    bindings = useEditorStore.getState().project.playback.presenter.additionalBindings
+    bindings = selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter.additionalBindings
     expect(bindings).toHaveLength(1)
     expect(bindings[0]?.command).toBe('previous')
 
@@ -81,7 +84,7 @@ describe('presenter settings editor', () => {
       name: '删除附加按键 Ctrl + b',
     }))
     expect(
-      useEditorStore.getState().project.playback.presenter.additionalBindings,
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter.additionalBindings,
     ).toEqual([])
   })
 
@@ -97,7 +100,7 @@ describe('presenter settings editor', () => {
     expect(screen.queryByRole('button', { name: '保存为前进键' }))
       .not.toBeInTheDocument()
     expect(
-      useEditorStore.getState().project.playback.presenter.additionalBindings,
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter.additionalBindings,
     ).toEqual([])
   })
 
@@ -110,10 +113,10 @@ describe('presenter settings editor', () => {
     expect(screen.getByRole('button', { name: '保存为前进键' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: '保存为前进键' }))
 
-    const binding = useEditorStore.getState().project.playback.presenter
+    const binding = selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.presenter
       .additionalBindings[0]
     expect(binding).toMatchObject({ key: 'PageDown', ctrlKey: true })
-    expect(projectDocumentSchema.safeParse(useEditorStore.getState().project).success)
+    expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
       .toBe(true)
   })
 })

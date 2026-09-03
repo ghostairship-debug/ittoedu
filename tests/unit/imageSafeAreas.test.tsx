@@ -1,11 +1,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { projectDocumentSchema, sceneNodeSchema } from '../../src/shared/projectSchema'
-import {
-  createImageNode,
-  createProject,
-} from '../../src/renderer/project/createProject'
-import { selectActiveScene, useEditorStore } from '../../src/renderer/store/editorStore'
+import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
+import { sceneNodeSchema } from '../../src/shared/projectSchema'
+import { createImageNode } from '../../src/renderer/project/nativeNodeFactories'
+import { selectActiveScene, useEditorStore,
+  selectActiveCourseProjectDocument,
+  selectSlideSceneList,
+} from '../../src/renderer/store/editorStore'
 import { PropertiesTab } from '../../src/renderer/ui/PropertiesTab'
 
 afterEach(cleanup)
@@ -37,7 +38,6 @@ describe('image safe-area metadata', () => {
     delete legacy.safeAreas
     expect(sceneNodeSchema.parse(legacy)).toMatchObject({ safeAreas: [] })
 
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
     image.safeAreas = [{
       id: 'subject',
       label: '人物主体',
@@ -46,8 +46,7 @@ describe('image safe-area metadata', () => {
       width: 0.5,
       height: 0.8,
     }]
-    project.scenes[0]!.nodes.push(image)
-    expect(projectDocumentSchema.safeParse(project)).toMatchObject({ success: false })
+    expect(sceneNodeSchema.safeParse(image)).toMatchObject({ success: false })
   })
 
   it('adds, edits, removes, and undoes a stable safe area from image properties', () => {
@@ -74,14 +73,14 @@ describe('image safe-area metadata', () => {
       ({ id }) => id === nodeId,
     )
     if (node?.type !== 'image') throw new Error('Expected image node')
-    expect(node.safeAreas[0]!.x).toBe(0.15)
+    expect(node.safeAreas?.[0]!.x).toBe(0.15)
 
     useEditorStore.getState().undo()
     node = selectActiveScene(useEditorStore.getState()).nodes.find(
       ({ id }) => id === nodeId,
     )
     if (node?.type !== 'image') throw new Error('Expected image node')
-    expect(node.safeAreas[0]!.x).toBe(0.1)
+    expect(node.safeAreas?.[0]!.x).toBe(0.1)
 
     fireEvent.click(screen.getByRole('button', { name: '删除安全区 安全区 1' }))
     node = selectActiveScene(useEditorStore.getState()).nodes.find(
@@ -112,7 +111,7 @@ describe('image safe-area metadata', () => {
       ({ id }) => id === nodeId,
     )
     expect(node?.type === 'image' ? node.safeAreas : []).toHaveLength(16)
-    expect(projectDocumentSchema.safeParse(useEditorStore.getState().project).success)
+    expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
       .toBe(true)
   })
 })

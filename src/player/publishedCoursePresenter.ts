@@ -1,5 +1,4 @@
 import type { PublishedCourseV2Payload } from '../shared/publishedCourseTypes'
-import { PlayerApp } from './PlayerApp'
 import { PlayerPresenterInput } from './PlayerPresenterInput'
 import type { PublishedCourseSession } from './surfaces/publishedDynamicHosts'
 
@@ -12,15 +11,24 @@ function readPublishedIndex(session: PublishedCourseSession): number {
 }
 
 /**
- * Delivery Presenter for Published Course V2: expose the existing Player
- * scene-index bridge and keyboard navigation
- * without switching the package back to Project V8 `__H5_LESSON_PAYLOAD__`.
+ * Delivery presenter for a Published Course V2 session: keyboard navigation
+ * and a location-index bridge. This is not PlayerApp and does not wrap a
+ * V8 Project/Scene payload.
  */
+export interface PublishedCoursePresenter {
+  readonly session: PublishedCourseSession
+  getCurrentSceneIndex(): number
+  goToScene(index: number): boolean
+  replayScene(): boolean
+  waitForCaptureReady(): Promise<void>
+  destroy(): void
+}
+
 export function attachPublishedCoursePresenter(
   root: HTMLElement,
   session: PublishedCourseSession,
   payload: PublishedCourseV2Payload,
-): void {
+): PublishedCoursePresenter {
   const totalScenes = Math.max(1, session.listCatalog().length)
   const presenter = payload.playback.presenter
 
@@ -69,11 +77,8 @@ export function attachPublishedCoursePresenter(
     presenterInput.setIndex(readIndex())
   }
 
-  const scenes = payload.locations.map((location) => ({
-    id: location.id,
-    name: location.label,
-  }))
-  const bridge = {
+  const publishedPresenter: PublishedCoursePresenter = {
+    session,
     getCurrentSceneIndex: readIndex,
     goToScene: (index: number) => goToIndex(index),
     replayScene,
@@ -86,21 +91,16 @@ export function attachPublishedCoursePresenter(
         })
       }
     },
-    payload: {
-      project: { scenes },
-    },
-    get playerScene() {
-      const renderedNodes = [...root.querySelectorAll<HTMLElement>('[data-native-type]')].map(
-        (element) => ({ type: element.dataset.nativeType }),
-      )
-      return { renderedNodes }
-    },
     destroy: () => {
       if (destroyed) return
       destroyed = true
       presenterInput?.destroy()
+      if (window.__H5_LESSON_PLAYER__ === publishedPresenter) {
+        delete window.__H5_LESSON_PLAYER__
+      }
       void session.destroy()
     },
   }
-  window.__H5_LESSON_PLAYER__ = bridge as unknown as PlayerApp
+  window.__H5_LESSON_PLAYER__ = publishedPresenter
+  return publishedPresenter
 }

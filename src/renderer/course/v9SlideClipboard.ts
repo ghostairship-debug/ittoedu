@@ -38,9 +38,18 @@ export interface V9SlideGlobalClipboardItem {
   readonly entry: Omit<GlobalLayerEntry, 'plane'> & { readonly plane: GlobalLayerPlane }
 }
 
+export interface V9SlideClipboardResourceReferences {
+  readonly assetIds: readonly string[]
+  readonly componentPackages: readonly {
+    readonly packageId: string
+    readonly version: string
+  }[]
+}
+
 interface V9SlideClipboardPayloadBase {
   readonly projectId: string
   readonly interactions: readonly InteractionRule[]
+  readonly resourceReferences: V9SlideClipboardResourceReferences
 }
 
 export interface V9SlideLocalClipboardPayload extends V9SlideClipboardPayloadBase {
@@ -169,6 +178,61 @@ export function sortSlideSceneLayerItems(scene: SlideSceneDocument): void {
   scene.layerItems.sort((left, right) =>
     left.order - right.order || left.layerItemId.localeCompare(right.layerItemId),
   )
+}
+
+export function collectSlideClipboardResourceReferences(
+  items: readonly LayerItem[],
+): V9SlideClipboardResourceReferences {
+  const assetIds = new Set<string>()
+  const packages = new Map<string, string>()
+  for (const item of items) {
+    if (item.kind === 'component') {
+      packages.set(item.component.packageId, item.component.version)
+      if (item.staticFallbackAssetId) assetIds.add(item.staticFallbackAssetId)
+      continue
+    }
+    if (item.kind === 'runtime') {
+      Object.values(item.runtime.assets).forEach(({ assetId }) => assetIds.add(assetId))
+      if (item.runtime.staticFallback?.assetId) assetIds.add(item.runtime.staticFallback.assetId)
+      continue
+    }
+    if (item.content.nativeType === 'image') {
+      assetIds.add(item.content.data.assetId)
+    } else if (item.content.nativeType === 'video') {
+      assetIds.add(item.content.data.assetId)
+      if (item.content.data.poster.assetId) assetIds.add(item.content.data.poster.assetId)
+    }
+  }
+  return {
+    assetIds: [...assetIds].sort(),
+    componentPackages: [...packages]
+      .map(([packageId, version]) => ({ packageId, version }))
+      .sort((left, right) => left.packageId.localeCompare(right.packageId)),
+  }
+}
+
+export function validateSlideClipboardResourceReferences(
+  project: CourseProjectDocument,
+  references: V9SlideClipboardResourceReferences,
+): void {
+  for (const assetId of references.assetIds) {
+    if (!project.assets[assetId]) throw new Error(`复制内容引用的素材已失效：${assetId}`)
+  }
+  for (const reference of references.componentPackages) {
+    const current = project.componentPackages[reference.packageId]
+    if (!current || current.version !== reference.version) {
+      throw new Error(
+        `复制内容引用的组件已失效：${reference.packageId}@${reference.version}`,
+      )
+    }
+  }
+}
+
+function sameResourceReferences(
+  left: V9SlideClipboardResourceReferences,
+  right: V9SlideClipboardResourceReferences,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 function collectCopiedInteractionRules(
@@ -321,15 +385,21 @@ export function copySlideSceneClipboard(
     session.selection.locationId,
   )
   const sourceIds = new Set(uniqueIds)
+  const items = uniqueIds.map((layerItemId) => ({
+    item: structuredClone(byId.get(layerItemId)!.item) as LayerItem,
+  }))
+  const resourceReferences = collectSlideClipboardResourceReferences(
+    items.map((entry) => entry.item),
+  )
+  validateSlideClipboardResourceReferences(session.history.present, resourceReferences)
   return {
     projectId: session.history.present.id,
     sourceScope: 'scene',
-    items: uniqueIds.map((layerItemId) => ({
-      item: structuredClone(byId.get(layerItemId)!.item) as LayerItem,
-    })),
+    items,
     interactions: collectCopiedInteractionRules(scene.interactions, sourceIds).map(
       (rule) => structuredClone(rule),
     ),
+    resourceReferences,
   }
 }
 
@@ -363,18 +433,24 @@ export function copySlideGlobalClipboard(
   }
   const effectivePlanes = resolveEffectiveGlobalLayerPlanes(project.globalLayerItems)
   const sourceIds = new Set(uniqueIds)
+  const items = uniqueIds.map((layerItemId) => {
+    const entry = structuredClone(byId.get(layerItemId)!)
+    const plane = effectivePlanes.get(layerItemId)
+    if (!plane) throw new Error(`找不到全局图层平面：${layerItemId}`)
+    return { entry: { ...entry, plane } }
+  })
+  const resourceReferences = collectSlideClipboardResourceReferences(
+    items.map(({ entry }) => entry.item),
+  )
+  validateSlideClipboardResourceReferences(project, resourceReferences)
   return {
     projectId: project.id,
     sourceScope: 'global',
-    items: uniqueIds.map((layerItemId) => {
-      const entry = structuredClone(byId.get(layerItemId)!)
-      const plane = effectivePlanes.get(layerItemId)
-      if (!plane) throw new Error(`找不到全局图层平面：${layerItemId}`)
-      return { entry: { ...entry, plane } }
-    }),
+    items,
     interactions: collectCopiedInteractionRules(project.globalInteractions, sourceIds).map(
       (rule) => structuredClone(rule),
     ),
+    resourceReferences,
   }
 }
 
@@ -396,6 +472,16 @@ export function mutatePasteSlideSceneClipboard(
   if (clipboard.sourceScope !== 'scene') {
     throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, SLIDE_CLIPBOARD_WRONG_OWNER_REASON)
   }
+  if (clipboard.projectId !== draft.id) {
+    throw new Error('剪贴板不属于当前课件，请重新复制')
+  }
+  const derivedReferences = collectSlideClipboardResourceReferences(
+    clipboard.items.map((entry) => entry.item),
+  )
+  if (!sameResourceReferences(derivedReferences, clipboard.resourceReferences)) {
+    throw new Error('剪贴板资源引用已失效，请重新复制')
+  }
+  validateSlideClipboardResourceReferences(draft, clipboard.resourceReferences)
   const { surface, scene } = requireSlideLocation(draft, input.locationId)
   if (scene.layerItems.length + clipboard.items.length > MAX_SCENE_NODES) {
     throw new Error(`粘贴后将超过每场景 ${MAX_SCENE_NODES} 个图层的上限。`)
@@ -452,6 +538,13 @@ export function mutatePasteSlideGlobalClipboard(
   if (clipboard.items.some(({ entry }) => isCourseTeacherControllerLayerItem(entry.item))) {
     throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
   }
+  const derivedReferences = collectSlideClipboardResourceReferences(
+    clipboard.items.map(({ entry }) => entry.item),
+  )
+  if (!sameResourceReferences(derivedReferences, clipboard.resourceReferences)) {
+    throw new Error('剪贴板资源引用已失效，请重新复制')
+  }
+  validateSlideClipboardResourceReferences(draft, clipboard.resourceReferences)
   const idMap = new Map<string, string>()
   for (const { entry } of clipboard.items) {
     idMap.set(

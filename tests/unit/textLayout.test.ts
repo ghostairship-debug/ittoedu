@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTextNode } from '@/renderer/project/createProject'
-import { renderTextNodeCanvas } from '@/shared/textLayout'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { nativeRenderInputFromV9Item } from '@/player/surfaces/slide/publishedNativeRendering'
+import { analyzeTextNodeLayout, renderTextNodeCanvas } from '@/shared/textLayout'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
+import type { NativeLayerItem } from '@/shared/courseProjectTypes'
 
 type FillTextCall = [text: string, x: number, y: number]
 type ArcCall = [x: number, y: number, radius: number, start: number, end: number]
@@ -165,4 +168,36 @@ describe('direction-aware text layout', () => {
       expect(arcCalls[0]![0]).toBeGreaterThan(firstCharacter[1])
     },
   )
+})
+
+describe('V9 NativeRenderInput text layout', () => {
+  it('shrinks the same fixture text for authoring input and TextNode analysis', () => {
+    const fixture = listCourseProjectV9Fixtures().find((entry) => entry.id === 'slide-native')
+    if (!fixture) throw new Error('missing slide-native fixture')
+    const project = structuredClone(fixture.data.project)
+    const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
+    const item = surface?.type === 'slide'
+      ? surface.scenes[0]?.layerItems.find((layer) => layer.layerItemId === 'slide-title')
+      : undefined
+    if (!item || item.kind !== 'native' || item.content.nativeType !== 'text') {
+      throw new Error('expected slide-title text')
+    }
+    item.content.data.style.overflow = 'shrink'
+    item.content.data.style.fontSize = 40
+    item.content.data.style.padding = 0
+    item.content.data.style.lineSpacing = 0
+    item.content.data.text = '甲乙丙丁戊己庚辛壬癸'.repeat(6)
+    item.frame.width = 120
+    item.frame.height = 40
+    const input = nativeRenderInputFromV9Item(item as NativeLayerItem)
+    expect(input.type).toBe('text')
+    if (input.type !== 'text') return
+    const fromInput = analyzeTextNodeLayout(input)
+    const fromNode = analyzeTextNodeLayout({
+      ...input,
+    })
+    expect(fromInput.fontSize).toBe(fromNode.fontSize)
+    expect(fromInput.fontSize).toBeLessThan(40)
+    expect(fromInput.fontSize).toBeGreaterThanOrEqual(8)
+  })
 })

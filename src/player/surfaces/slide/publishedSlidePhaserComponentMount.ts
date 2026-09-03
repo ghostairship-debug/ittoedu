@@ -1,13 +1,13 @@
 import type * as PhaserTypes from 'phaser'
 import { tryCreateComponentLifecycle } from '../../../shared/componentLifecycleGuard'
 import { mergeComponentProps, resolveComponentEditorState } from '../../../shared/componentProps'
-import type { ExternalComponentNode } from '../../../shared/projectTypes'
 import { ComponentRegistry } from '../../ComponentRegistry'
 import {
   createPublishedComponentContextResources,
   createPublishedComponentFallbackElement,
   reportPublishedComponentError,
   resolvePublishedComponent,
+  type ComponentHostNode,
   type PublishedComponentContextResources,
   type PublishedComponentMountHandle,
   type PublishedComponentMountOptions,
@@ -400,7 +400,7 @@ export function mountPublishedSlidePhaserComponent(
       resources?.updateAuthoringProps(props)
       resources?.invalidateAuthoringTargets()
     },
-    updateAuthoringNode(node: ExternalComponentNode) {
+    updateAuthoringNode(node: ComponentHostNode) {
       if (destroyed || quarantined) return
       currentAuthoringNode = node
       resources?.updateAuthoringNode(node)

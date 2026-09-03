@@ -1,4 +1,4 @@
-import type { ArrowHead, ShapeNode } from './projectTypes'
+import type { ArrowHead, ShapeNode } from './contracts/native-v1/types'
 
 interface Point { x: number; y: number }
 

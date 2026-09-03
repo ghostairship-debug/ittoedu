@@ -6,31 +6,26 @@ import {
 } from '../course-state/schema'
 import { courseStateScalarType } from '../course-state/types'
 export { courseStateDeclarationSchema } from '../course-state/schema'
+import { formulaAstSchema, nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
+import type { NativeRenderInput } from '../native-v1/types'
+import { courseProjectEmbeddedComponentPackageMetaSchema } from '../component-v4/schema'
+import { courseProjectDesignTokensSchema } from '../design-v1/schema'
 import {
-  formulaAstSchema,
-  projectDocumentSchema,
-  sceneNodeSchema,
-} from '../../projectSchema'
-import type {
-  BaseNode,
-  EmbeddedComponentPackageMeta,
-  ProjectDesignTokens,
-  ProjectDocument,
-  ProjectMediaSettings,
-  ProjectPlaybackSettings,
-  SceneNode,
-} from '../../projectTypes'
+  courseProjectAssetMetaSchema,
+  courseProjectMediaSettingsSchema,
+} from '../media-v1/schema'
+import { courseProjectPlaybackSettingsSchema } from '../playback-v1/schema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   FLOW_BODY_LAYER_PLANES,
   GLOBAL_LAYER_PLANES,
-  type CourseAssetMeta,
   type GlobalLayerEntry,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
   type FlowSurfaceLayerEntry,
   type LayerItem,
+  type NativeLayerItem,
   type MixedPrintEntry,
   type ScopedLayerItem,
 } from './types'
@@ -39,10 +34,16 @@ const finiteNumber = z.number().finite()
 const unitInterval = finiteNumber.min(0).max(1)
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const stableIdSchema = z.string().trim().min(1).max(240)
-const portablePathSchema = z.string().min(1).refine(
-  (value) => !/^(?:[a-zA-Z]:[\\/]|[\\/]{2}|\/)/.test(value),
-  'Path must be project-relative',
-)
+
+export {
+  courseProjectDesignTokensSchema as courseDesignTokensSchema,
+} from '../design-v1/schema'
+export {
+  courseProjectMediaSettingsSchema as courseMediaSchema,
+} from '../media-v1/schema'
+export {
+  courseProjectPlaybackSettingsSchema as coursePlaybackSchema,
+} from '../playback-v1/schema'
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -144,107 +145,32 @@ const layerItemBaseFields = {
   paperSpace: z.enum(['viewport', 'paper']).optional(),
 } as const
 
-const nativeBaseKeys = new Set([
-  'id',
-  'name',
-  'type',
-  'x',
-  'y',
-  'width',
-  'height',
-  'rotation',
-  'opacity',
-  'visible',
-  'locked',
-  'playbackInitialVisibility',
-])
-
-const unsupportedNativeTypes = new Set(['external-component'])
-
-type NativeType = Exclude<SceneNode['type'], 'external-component'>
-type NativeData<T extends NativeType> = Omit<
-  Extract<SceneNode, { type: T }>,
-  keyof BaseNode
->
-
-function createNativeDataSchema<T extends NativeType>(
-  nativeType: T,
-): z.ZodType<NativeData<T>> {
-  return z.unknown().transform((input, context) => {
-    if (!isPlainRecord(input)) {
-      context.addIssue({ code: 'custom', message: 'Native data must be an object' })
-      return z.NEVER
-    }
-    const forbiddenKey = Object.keys(input).find((key) => nativeBaseKeys.has(key))
-    if (forbiddenKey) {
-      context.addIssue({
-        code: 'custom',
-        message: `Native data cannot shadow layer field: ${forbiddenKey}`,
-      })
-      return z.NEVER
-    }
-    const candidate = {
-      ...input,
-      id: '__schema_native__',
-      name: '__schema_native__',
-      type: nativeType,
-      x: 0,
-      y: 0,
-      width: 100,
-      height: 100,
-      rotation: 0,
-      opacity: 1,
-      visible: true,
-      locked: false,
-      playbackInitialVisibility: 'inherit',
-    }
-    const parsed = sceneNodeSchema.safeParse(candidate)
-    if (!parsed.success || parsed.data.type !== nativeType) {
-      context.addIssue({
-        code: 'custom',
-        message: `Invalid ${nativeType} native data: ${parsed.success ? 'wrong discriminator' : parsed.error.issues[0]?.message}`,
-      })
-      return z.NEVER
-    }
-    const data = Object.fromEntries(
-      Object.entries(parsed.data).filter(([key]) => !nativeBaseKeys.has(key)),
-    )
-    const unknownPath = findUnknownInputPath(input, data)
-    if (unknownPath) {
-      context.addIssue({
-        code: 'custom',
-        message: `${nativeType} native data contains an unknown field: ${unknownPath}`,
-      })
-      return z.NEVER
-    }
-    return data as NativeData<T>
-  }) as z.ZodType<NativeData<T>>
-}
+const nativeBaseKeys = new Set<string>(NATIVE_RENDERABLE_BASE_KEYS)
 
 export const nativeElementContentSchema = z.discriminatedUnion('nativeType', [
   z.object({
     nativeType: z.literal('text'),
-    data: createNativeDataSchema('text'),
+    data: nativeContentSchemaByType.text,
   }).strict(),
   z.object({
     nativeType: z.literal('formula'),
-    data: createNativeDataSchema('formula'),
+    data: nativeContentSchemaByType.formula,
   }).strict(),
   z.object({
     nativeType: z.literal('image'),
-    data: createNativeDataSchema('image'),
+    data: nativeContentSchemaByType.image,
   }).strict(),
   z.object({
     nativeType: z.literal('video'),
-    data: createNativeDataSchema('video'),
+    data: nativeContentSchemaByType.video,
   }).strict(),
   z.object({
     nativeType: z.literal('shape'),
-    data: createNativeDataSchema('shape'),
+    data: nativeContentSchemaByType.shape,
   }).strict(),
   z.object({
     nativeType: z.literal('teacher-controller'),
-    data: createNativeDataSchema('teacher-controller'),
+    data: nativeContentSchemaByType['teacher-controller'],
   }).strict(),
 ])
 
@@ -335,13 +261,11 @@ export const layerItemSchema: z.ZodType<LayerItem> = z.discriminatedUnion('kind'
 ])
 
 export function materializeNativeLayerItem(
-  item: Extract<LayerItem, { kind: 'native' }>,
-): SceneNode {
-  return {
-    ...item.content.data,
+  item: NativeLayerItem,
+): NativeRenderInput {
+  const layout = {
     id: item.layerItemId,
     name: item.label,
-    type: item.content.nativeType,
     x: item.frame.x,
     y: item.frame.y,
     width: item.frame.width,
@@ -351,7 +275,21 @@ export function materializeNativeLayerItem(
     visible: item.visible,
     locked: item.locked,
     playbackInitialVisibility: item.playbackInitialVisibility,
-  } as SceneNode
+  } as const
+  switch (item.content.nativeType) {
+    case 'text':
+      return { ...item.content.data, ...layout, type: 'text' }
+    case 'formula':
+      return { ...item.content.data, ...layout, type: 'formula' }
+    case 'image':
+      return { ...item.content.data, ...layout, type: 'image' }
+    case 'video':
+      return { ...item.content.data, ...layout, type: 'video' }
+    case 'shape':
+      return { ...item.content.data, ...layout, type: 'shape' }
+    case 'teacher-controller':
+      return { ...item.content.data, ...layout, type: 'teacher-controller' }
+  }
 }
 
 export function addCanonicalLayerOrderIssues(
@@ -557,27 +495,16 @@ export const slideSceneSchema = z.object({
             message: 'nativeData cannot shadow stable layer fields',
           })
         } else {
-          const baseNode = materializeNativeLayerItem(item)
           const candidate = mergeCourseNativeData(
-            baseNode as unknown as Record<string, unknown>,
+            item.content.data as unknown as Record<string, unknown>,
             override.nativeData,
           )
-          const parsed = sceneNodeSchema.safeParse(candidate)
-          const unknownPath = parsed.success
-            ? findUnknownInputPath(candidate, parsed.data)
-            : undefined
-          if (
-            !parsed.success ||
-            unsupportedNativeTypes.has(parsed.data.type) ||
-            parsed.data.type !== baseNode.type ||
-            unknownPath
-          ) {
+          const parsed = nativeContentSchemaByType[item.content.nativeType].safeParse(candidate)
+          if (!parsed.success) {
             context.addIssue({
               code: 'custom',
               path: ['presentation', 'states', stateIndex, 'layerItemOverrides', itemId, 'nativeData'],
-              message: parsed.success
-                ? `Invalid native override${unknownPath ? `; unknown field: ${unknownPath}` : ''}`
-                : `Invalid native override: ${parsed.error.issues[0]?.message}`,
+              message: `Invalid native override: ${parsed.error.issues[0]?.message}`,
             })
           }
         }
@@ -1034,18 +961,6 @@ export const courseSurfaceSchema: z.ZodType<CourseSurfaceDocument> = z.discrimin
   spatialSurfaceSchema,
 ])
 
-const assetRemoteDeliveryUrlSchema = z.string().trim().min(1).max(2_000).refine(
-  (value) => {
-    try {
-      const url = new URL(value)
-      return url.protocol === 'https:' && url.username === '' && url.password === ''
-    } catch {
-      return false
-    }
-  },
-  'Remote asset delivery URL must be an https URL without credentials',
-)
-
 /**
  * Normalized exact network origin: `https:`/`wss:` only, no wildcard, no
  * userinfo, no path/query/fragment. Requiring the string to equal its URL
@@ -1079,105 +994,6 @@ export const courseNetworkDeclarationSchema = z.object({
     })
   }
 })
-
-const assetMetaSchema: z.ZodType<CourseAssetMeta> = z.object({
-  id: stableIdSchema,
-  filename: z.string().trim().min(1).max(500),
-  mimeType: z.string().trim().min(1).max(200),
-  kind: z.enum(['image', 'audio', 'video']),
-  path: portablePathSchema,
-  byteLength: z.number().int().nonnegative(),
-  width: finiteNumber.positive().optional(),
-  height: finiteNumber.positive().optional(),
-  duration: finiteNumber.nonnegative().optional(),
-  remote: z.object({
-    url: assetRemoteDeliveryUrlSchema,
-  }).strict().optional(),
-}).strict()
-
-const componentPackageSchema: z.ZodType<EmbeddedComponentPackageMeta> = z.object({
-  packageId: stableIdSchema,
-  version: z.string().trim().min(1).max(100),
-  name: z.string().trim().min(1).max(500),
-  manifestPath: portablePathSchema,
-  runtimePath: portablePathSchema,
-  thumbnailPath: portablePathSchema.optional(),
-  contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-  importedAt: z.string().datetime().optional(),
-  sourceLabel: z.string().trim().min(1).max(200).optional(),
-  editableCopy: z.boolean().optional(),
-  sourcePackageId: stableIdSchema.optional(),
-}).strict().superRefine((metadata, context) => {
-  const provenance = [metadata.sha256, metadata.importedAt, metadata.sourceLabel]
-  const present = provenance.filter((value) => value !== undefined).length
-  if (present > 0 && present < provenance.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['sha256'],
-      message: 'Component provenance must include sha256, importedAt and sourceLabel together',
-    })
-  }
-})
-
-const designTokenIdSchema = z.string().regex(/^[a-z][a-z0-9._-]*$/)
-export const courseDesignTokensSchema: z.ZodType<ProjectDesignTokens> = z.object({
-  fonts: z.array(z.object({
-    id: designTokenIdSchema,
-    label: z.string().trim().min(1).max(80),
-    fontFamily: z.string().trim().min(1).max(300),
-  }).strict()).max(64),
-  colors: z.array(z.object({
-    id: designTokenIdSchema,
-    label: z.string().trim().min(1).max(80),
-    color: colorSchema,
-  }).strict()).max(256),
-}).strict()
-
-export const courseMediaSchema: z.ZodType<ProjectMediaSettings> = z.object({
-  audio: z.object({
-    defaultMuted: z.boolean(),
-    masterVolume: unitInterval,
-    channelVolumes: z.object({
-      music: unitInterval,
-      narration: unitInterval,
-      sfx: unitInterval,
-      ui: unitInterval,
-      video: unitInterval,
-    }).strict(),
-    sounds: z.record(z.string(), z.object({
-      id: stableIdSchema,
-      name: z.string().trim().min(1).max(200),
-      assetId: stableIdSchema,
-      channel: z.enum(['music', 'narration', 'sfx', 'ui']),
-      defaultVolume: unitInterval,
-      defaultLoop: z.boolean(),
-    }).strict()),
-    narrationDucking: z.object({
-      enabled: z.boolean(),
-      musicVolume: unitInterval,
-      fadeMs: finiteNumber.nonnegative().max(10_000),
-    }).strict(),
-  }).strict(),
-}).strict()
-
-export const coursePlaybackSchema: z.ZodType<ProjectPlaybackSettings> = z.object({
-  controls: z.enum(['canvas', 'none']),
-  keyboardNavigation: z.boolean(),
-  presenter: z.object({
-    enabled: z.boolean(),
-    strategy: z.enum(['scene-navigation', 'authored-command']),
-    additionalBindings: z.array(z.object({
-      id: stableIdSchema,
-      command: z.enum(['next', 'previous']),
-      key: z.string().min(1).max(64),
-      altKey: z.boolean(),
-      ctrlKey: z.boolean(),
-      shiftKey: z.boolean(),
-      metaKey: z.boolean(),
-    }).strict()).max(32),
-  }).strict(),
-}).strict()
 
 export const courseNavigationGuardSchema = z.object({
   id: stableIdSchema,
@@ -1262,12 +1078,12 @@ export const courseProjectDocumentSchema = z.object({
   title: z.string().trim().min(1).max(500),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  assets: z.record(z.string(), assetMetaSchema),
-  componentPackages: z.record(z.string(), componentPackageSchema),
+  assets: z.record(z.string(), courseProjectAssetMetaSchema),
+  componentPackages: z.record(z.string(), courseProjectEmbeddedComponentPackageMetaSchema),
   network: courseNetworkDeclarationSchema.optional(),
-  designTokens: courseDesignTokensSchema,
-  media: courseMediaSchema,
-  playback: coursePlaybackSchema,
+  designTokens: courseProjectDesignTokensSchema,
+  media: courseProjectMediaSettingsSchema,
+  playback: courseProjectPlaybackSettingsSchema,
   courseState: z.array(courseStateDeclarationSchema).max(10_000),
   navigationGuards: z.array(courseNavigationGuardSchema).max(10_000),
   locations: z.array(courseLocationSchema).min(1).max(100_000),
@@ -1579,9 +1395,3 @@ export const courseProjectDocumentSchema = z.object({
 
 const _courseProjectSchemaTypeContract: z.ZodType<CourseProjectDocument> = courseProjectDocumentSchema
 void _courseProjectSchemaTypeContract
-
-/** Explicit input boundary for callers that need to distinguish V8 from V9. */
-export const authoringProjectVersionSchema = z.union([
-  strictExistingSchema(projectDocumentSchema, 'Project V8'),
-  courseProjectDocumentSchema,
-])

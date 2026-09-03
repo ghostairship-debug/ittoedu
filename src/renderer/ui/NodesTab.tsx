@@ -39,14 +39,14 @@ import {
   Sigma,
 } from 'lucide-react'
 import type { CourseSurfaceType, FlowBodyLayerPlane } from '../../shared/courseProjectTypes'
-import type { SceneNode } from '../../shared/projectTypes'
+import type { EditorCanvasNode } from '../phaser/editorCanvasNode'
 import {
   SPATIAL_CROSS_COORDINATE_MOVE_REASON,
   isSpatialCrossCoordinateOwnerMove,
 } from '../course/effectiveLayerCommands'
 import { patchFlowOverlayBodyPlane } from '../course/flowSharedAuthoringAdapters'
 import {
-  courseLayerItemToSceneNode,
+  courseLayerItemToEditorCanvasNode,
   describeLayerImpact,
   visualFrontToBackRows,
   type EffectiveLayerProjectionRow,
@@ -70,7 +70,7 @@ const nodeIcon = {
   'external-component': Box,
 } as const
 
-type NodesTabRowNode = Pick<SceneNode, 'id' | 'name' | 'type' | 'visible' | 'locked'>
+type NodesTabRowNode = Pick<EditorCanvasNode, 'id' | 'name' | 'type' | 'visible' | 'locked'>
 
 interface SortableNodeProps {
   node: NodesTabRowNode
@@ -359,7 +359,7 @@ function FlowBodyBoundaryRow() {
 }
 
 function rowAsNode(row: EffectiveLayerProjectionRow): NodesTabRowNode {
-  const projected = courseLayerItemToSceneNode(row.item)
+  const projected = courseLayerItemToEditorCanvasNode(row.item)
   if (projected) return projected
   return {
     id: row.id,

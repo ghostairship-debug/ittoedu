@@ -161,6 +161,15 @@ function addLayerAssetChecks(
     return false
   }
   if (item.kind === 'component') {
+    if (!manifest) {
+      drafts.push({
+        severity: 'warning',
+        code: 'asset-reference-analysis-incomplete',
+        message: `组件“${item.component.packageId}@${item.component.version}”缺少可执行包上下文；素材引用分析已保守降级，删除不会因此放行。`,
+        ...common,
+        path: [...path, 'component'],
+      })
+    }
     addAssetCheck(
       project,
       drafts,
@@ -451,6 +460,15 @@ function addFlowAssetChecks(
       false,
     )
   } else if (block.type === 'component') {
+    if (!manifest) {
+      drafts.push({
+        severity: 'warning',
+        code: 'asset-reference-analysis-incomplete',
+        message: `组件“${block.component.packageId}@${block.component.version}”缺少可执行包上下文；素材引用分析已保守降级，删除不会因此放行。`,
+        path: [...path, 'component'],
+        surfaceId,
+      })
+    }
     addAssetCheck(
       project,
       drafts,
@@ -602,6 +620,15 @@ export function collectCourseProjectControllerMediaHealth(
             item.component.packageId,
             item.component.version,
           )
+          if (!manifest) {
+            drafts.push({
+              severity: 'warning',
+              code: 'asset-reference-analysis-incomplete',
+              message: `组件“${item.component.packageId}@${item.component.version}”缺少可执行包上下文；素材引用分析已保守降级，删除不会因此放行。`,
+              ...location,
+              path: [...location.path, 'componentProps'],
+            })
+          }
           addComponentPropAssets(
             project,
             drafts,

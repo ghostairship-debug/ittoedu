@@ -1,5 +1,59 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "scannerContract": {
+    "version": "legacy-consumers-v3",
+    "scope": {
+      "roots": [
+        "src",
+        "tests",
+        "scripts",
+        "examples",
+        "artifacts"
+      ],
+      "standaloneFiles": [
+        "package.json"
+      ],
+      "moduleReferenceAliases": {
+        "@/": "src/"
+      },
+      "textExtensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".json",
+        ".html"
+      ],
+      "archiveEntries": [
+        {
+          "extension": ".h5lesson",
+          "entry": "project.json"
+        }
+      ],
+      "excludedDirectoryNames": [
+        "node_modules",
+        "dist",
+        "dist-electron",
+        "dist-player",
+        "dist-renderer",
+        "coverage",
+        "output",
+        "release",
+        ".git",
+        ".playwright-cli"
+      ],
+      "scanExclusions": [
+        "artifacts/release-evidence/v1.1/**"
+      ],
+      "productDigestExclusions": [
+        "docs/development-plan/inventories/legacy-consumers.json",
+        "artifacts/release-evidence/v1.1/**"
+      ]
+    },
+    "scopeDigest": "8a727407476808e5f81119a87762dda82c76500a3252dd6d221688d9fe5dddcd",
+    "queryCatalogDigest": "092b6a7dfba5c579145e424f060774587996e563bb7b27780caaad67b9de1a29"
+  },
   "baseline": {
     "baselineCommit": "6893d25449511ef281c9399d6dd740d126a25bb6",
     "claimCommit": "3bb5c746dd46e6b2b4e7a2110c6fc6b2d67e44dd",
@@ -8,7 +62,10 @@
       "This is an evidence-backed starting inventory, not a claim that future static indexing cannot discover more consumers.",
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
-    ]
+    ],
+    "reconciledProductCommit": "018d3df56c0f0e26f0c00b9e2cc16da69be83a05",
+    "reconciledScope": "Machine scope is scannerContract.scope at legacy-consumers-v3, including exact source-path to file-absent-target module references resolved through relative paths, repository-relative paths, and the declared @/ alias. Product digest covers the current working-tree src, tests, scripts, examples, artifacts, and package.json, excluding only the declared build/cache directories, this inventory outside product roots, and artifacts/release-evidence/v1.1/**. The commit is the nearest product audit pointer; the digest is the exact dirty integration candidate identity.",
+    "reconciledProductTreeDigest": "8b2b17d008cf1c9f7a19b3326fbc757151ed670556837a3fec48616ce7a579bf"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
@@ -20,165 +77,192 @@
     "cacheAsyncGeneratedOrPackaging": "Cache, delayed callback, async flush, generated artifact, embedded bundle, or packaged artifact relation."
   },
   "startingCounts": {
-    "recordCount": 10,
+    "recordCount": 11,
     "byStatus": {
-      "active-debt": 5,
-      "reachability-unproven": 2,
-      "retained-compatibility": 2,
-      "dead-candidate": 1
+      "active-debt": 7,
+      "removed": 2,
+      "retained-compatibility": 2
     },
     "confirmedConsumerRelationsByCategory": {
-      "staticImportsOrReferences": 25,
-      "dynamicStringIpcOrConfig": 8,
-      "playerPreviewOrExport": 20,
-      "buildFixtureOrRelease": 13,
-      "persistedRecoveryOrCrossVersion": 7,
-      "testConsumers": 32,
-      "cacheAsyncGeneratedOrPackaging": 11
+      "staticImportsOrReferences": 66,
+      "dynamicStringIpcOrConfig": 2,
+      "playerPreviewOrExport": 36,
+      "buildFixtureOrRelease": 6,
+      "persistedRecoveryOrCrossVersion": 3,
+      "testConsumers": 106,
+      "cacheAsyncGeneratedOrPackaging": 10
     },
-    "confirmedConsumerRelationCount": 116,
-    "uniqueConfirmedConsumerEndpointCount": 104,
+    "confirmedConsumerRelationCount": 229,
+    "uniqueConfirmedConsumerEndpointCount": 221,
     "countDefinition": "A relation is one object in consumerCategories.<category>.confirmed. Unique endpoints are path#symbol pairs across those relations.",
     "reproduce": "node -e \"const x=require('./docs/development-plan/inventories/legacy-consumers.json');const cats=Object.keys(x.consumerCategoryDefinitions);const rel=Object.fromEntries(cats.map(c=>[c,x.records.flatMap(r=>r.consumerCategories[c].confirmed).length]));const status={};const ep=new Set();for(const r of x.records){status[r.status]=(status[r.status]||0)+1;for(const c of cats)for(const e of r.consumerCategories[c].confirmed)ep.add(e.path+'#'+e.symbol)}console.log(JSON.stringify({recordCount:x.records.length,byStatus:status,confirmedConsumerRelationsByCategory:rel,confirmedConsumerRelationCount:Object.values(rel).reduce((a,b)=>a+b,0),uniqueConfirmedConsumerEndpointCount:ep.size},null,2))\""
   },
   "records": [
     {
       "id": "LEG-001",
-      "legacyTarget": {
-        "kind": "read-only-projection-and-duplicate-state",
-        "path": "src/renderer/store/editorStore.ts",
-        "symbols": [
-          "EditorState.project",
-          "projectCandidatePreviewDocument",
-          "derivedV8ProjectFromBackend",
-          "slideCandidateUi",
-          "v9HistoryToStoreHistory"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-001-editor-store-symbols",
+          "kind": "read-only-projection-and-duplicate-state",
+          "path": "src/renderer/store/editorStore.ts",
+          "expectation": "symbol-absent",
+          "symbols": [
+            "EditorState.project",
+            "projectCandidatePreviewDocument",
+            "derivedV8ProjectFromBackend",
+            "slideCandidateUi",
+            "v9HistoryToStoreHistory"
+          ]
+        },
+        {
+          "expectationId": "LEG-001-scene-node-projection",
+          "kind": "legacy-scene-node-projection",
+          "path": "src/renderer/store/slideEditorProjection.ts",
+          "expectation": "symbol-absent",
+          "symbols": [
+            "courseLayerItemToSceneNode"
+          ]
+        }
+      ],
       "owner": "Editor Store / History",
       "status": "active-debt",
-      "currentFact": "The active V9 session is canonical for save/publish, while editorStore also rebuilds and exposes a schemaVersion 8 ProjectDocument projection for UI and Legacy consumers.",
+      "currentFact": "EditorState.project, projectCandidatePreviewDocument, derivedV8ProjectFrom*, slideCandidateUi, v9HistoryToStoreHistory, and slideCandidateSidecar* are gone from src/. Save/open remain V9. The V8 SceneNode Phaser overlay helper courseLayerItemToSceneNode still exists in slideEditorProjection.ts and is imported by Store slices, NodesTab, DeveloperTab, and SlideLocationWorkspace. This record is not zero.",
       "evidence": [
         {
-          "path": "src/renderer/store/editorStore.ts",
-          "symbol": "selectActiveCourseProjectDocument",
-          "note": "Selects exactly one active V9 session document."
+          "path": "src/renderer/store/slideEditorProjection.ts",
+          "symbol": "courseLayerItemToSceneNode",
+          "note": "Projects a V9 LayerItem into a V8 SceneNode for the Phaser overlay."
         },
         {
-          "path": "src/renderer/store/editorStore.ts",
-          "symbol": "projectCandidatePreviewDocument",
-          "note": "Constructs a schemaVersion 8 ProjectDocument."
+          "path": "src/renderer/ui/workspaces/SlideLocationWorkspace.tsx",
+          "symbol": "courseLayerItemToSceneNode",
+          "note": "Product Slide workspace still consumes the overlay helper."
         },
         {
-          "path": "src/renderer/App.tsx",
-          "symbol": "currentCourseArchiveData",
-          "note": "V9 save path bypasses the projection and reads the active V9 document."
+          "path": "src/renderer/project/courseProjectIo.ts",
+          "symbol": "openDefaultCourseProject",
+          "note": "Product open/save remain V9."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [
             {
-              "path": "src/renderer/store/editorStore.ts",
-              "symbol": "applyV9Backend",
-              "use": "Writes the derived V8 project into EditorState.project."
+              "path": "src/renderer/course/read-model/index.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Re-exports the overlay helper."
             },
             {
               "path": "src/renderer/store/editorStore.ts",
-              "symbol": "persistCandidateResult",
-              "use": "Refreshes EditorState.project and synthetic UI history after Slide V9 commands."
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Composition root still projects overlay nodes."
             },
             {
-              "path": "src/renderer/ui/Workspace.tsx",
-              "symbol": "globalLayer",
-              "use": "Reads projected V8 globalLayer for Slide authoring composition."
+              "path": "src/renderer/store/slices/slideOwnedCommands.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Slide owned commands still project overlay nodes."
             },
             {
-              "path": "src/renderer/ui/PropertiesTab.tsx",
-              "symbol": "PropertiesTab",
-              "use": "Reads EditorState.project assets, diagnostics, and V8 fallbacks."
-            }
-          ],
-          "unknowns": [
-            "Raw state.project reads beyond the high-risk paths remain candidates for generated repo-index enumeration."
-          ]
-        },
-        "dynamicStringIpcOrConfig": {
-          "confirmed": [],
-          "unknowns": [
-            "No dynamic or IPC lookup of projectCandidatePreviewDocument was found by exact tracked-text search."
-          ]
-        },
-        "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExportPptx",
-              "use": "Uses the projection for the Slide-only Legacy PPTX branch."
+              "path": "src/renderer/store/slices/spatialAuthoringSlice.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Spatial authoring still projects overlay nodes."
             },
             {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExportPdf",
-              "use": "Uses the projection for raster/no-source PDF branches."
+              "path": "src/renderer/store/slideEditorProjection.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Defines the LayerItem→SceneNode Phaser overlay helper."
             },
             {
-              "path": "src/renderer/ui/Workspace.tsx",
-              "symbol": "syncCompleteAuthoringSnapshot",
-              "use": "Projects global nodes for the legacy Player authoring snapshot."
+              "path": "src/renderer/store/v9LayerMutations.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Layer mutations still round-trip through SceneNode."
             },
             {
-              "path": "src/renderer/ui/Workspace.tsx",
-              "symbol": "Workspace",
-              "use": "Builds the legacy runtime-authoring preview from the projection."
+              "path": "src/renderer/ui/DeveloperTab.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Developer tools still consume the overlay helper."
+            },
+            {
+              "path": "src/renderer/ui/NodesTab.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Layer list still reads projected SceneNode fields."
+            },
+            {
+              "path": "src/renderer/ui/workspaces/SlideLocationWorkspace.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Slide canvas overlay still consumes the helper."
             }
           ],
           "unknowns": []
         },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [],
+          "unknowns": []
+        },
         "buildFixtureOrRelease": {
           "confirmed": [],
-          "unknowns": [
-            "Build/release consumers use the V8 archive/export pipeline recorded in LEG-002 and LEG-008 rather than importing this Store projection."
-          ]
+          "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
           "confirmed": [],
-          "unknowns": [
-            "The projection is not serialized by currentCourseArchiveData; no persisted compatibility obligation for this in-memory field is confirmed."
-          ]
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/unit/v9SlideBackendSelection.test.ts",
-              "symbol": "selectActiveCourseProjectDocument",
-              "use": "Characterizes V9 selection while Store projection remains present."
+              "path": "tests/integration/courseRuntimeSourceAuthoringVerticalSlice.test.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
             },
             {
-              "path": "tests/unit/v9GlobalLayerUiAdapter.test.tsx",
-              "symbol": "project",
-              "use": "Asserts projected global-layer UI behavior."
+              "path": "tests/integration/runtimeContentTextAuthoringVerticalSlice.test.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
             },
             {
-              "path": "tests/unit/assetTransactions.test.ts",
-              "symbol": "project",
-              "use": "Asserts media results through EditorState.project and assetFiles."
+              "path": "tests/integration/runtimePropertyAuthoringVerticalSlice.test.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/batchMediaAndInsertion.test.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/componentPackageManagement.test.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/globalEditorStore.test.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/globalLayerUi.test.tsx",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/publishedCourseNavigation.test.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
+            },
+            {
+              "path": "tests/unit/spatialWorkspaceAuthoring.test.ts",
+              "symbol": "courseLayerItemToSceneNode",
+              "use": "Still calls the overlay helper."
             }
           ],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
-          "confirmed": [
-            {
-              "path": "src/renderer/store/editorStore.ts",
-              "symbol": "slideCandidateUi",
-              "use": "Cached projection used to keep React snapshots stable."
-            },
-            {
-              "path": "src/renderer/store/editorStore.ts",
-              "symbol": "slideCandidateSidecarPast",
-              "use": "Parallel resource snapshot stack synchronized with Slide history."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         }
       },
@@ -198,18 +282,22 @@
             "symbol": "buildPublishedCourseV2Payload"
           }
         ],
-        "notes": "Save, full preview and HTML/Web publish read V9. UI/history, Slide-only PPTX, PDF and authoring-preview projection consumers still require migration."
+        "notes": "V9 selectors and Published V2 delivery exist. Phaser overlay still requires courseLayerItemToSceneNode; do not mark LEG-001 zero while those product callers remain."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
         "state": "nonzero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'projectCandidatePreviewDocument' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 10
+            "command": "(git grep -n -I -F -- 'courseLayerItemToSceneNode' -- src tests | Measure-Object).Count",
+            "observedMatches": 18
+          },
+          {
+            "command": "(git grep -n -I -F -- 'projectCandidatePreviewDocument' -- src | Measure-Object).Count",
+            "observedMatches": 0
           }
         ],
-        "requiredForRemoval": "All projection consumers and EditorState.project reads must use V9 selectors/view models; exact target references must be zero."
+        "requiredForRemoval": "Product and test callers of courseLayerItemToSceneNode must be zero, or the helper must be replaced by a V9 overlay model, before deletion."
       },
       "persistedCompatibility": {
         "status": "none-confirmed",
@@ -223,9 +311,9 @@
         "unknowns": []
       },
       "tests": [
-        "tests/unit/v9SlideBackendSelection.test.ts",
-        "tests/unit/readModelBoundary.test.ts",
-        "tests/unit/courseProjectRoundTrip.test.ts"
+        "tests/unit/v9SlideProductIntegration.test.tsx",
+        "tests/unit/spatialWorkspaceAuthoring.test.ts",
+        "tests/unit/readModelBoundary.test.ts"
       ],
       "stableSince": {
         "status": "not-established",
@@ -238,58 +326,100 @@
       },
       "indexImpact": "semantic-update",
       "unknowns": [
-        "Generated repo-index has not yet enumerated every raw Store consumer."
+        "Whether Phaser overlay can consume NativeRenderableNode/LayerItem directly without SceneNode is not established; r11-053 does not invent that replacement."
       ]
     },
     {
       "id": "LEG-002",
-      "legacyTarget": {
-        "kind": "legacy-export-payload-and-player-pipeline",
-        "path": "src/renderer/export/buildExportPayload.ts",
-        "symbols": [
-          "buildExportPayload",
-          "ExportPayload",
-          "buildStandaloneHtml",
-          "PlayerApp"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-002-build-export-payload",
+          "kind": "legacy-export-payload",
+          "path": "src/renderer/export/buildExportPayload.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-build-standalone-html",
+          "kind": "legacy-standalone-html",
+          "path": "src/renderer/export/buildStandaloneHtml.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-build-published-lesson",
+          "kind": "legacy-published-lesson",
+          "path": "src/renderer/export/buildPublishedLesson.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-build-web-package",
+          "kind": "legacy-web-package",
+          "path": "src/renderer/export/buildWebPackage.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-export-payload-support",
+          "kind": "legacy-export-support",
+          "path": "src/renderer/export/exportPayloadSupport.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-player-app",
+          "kind": "legacy-player-app",
+          "path": "src/player/PlayerApp.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-player-scene",
+          "kind": "legacy-player-scene",
+          "path": "src/player/PlayerScene.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-runtime-kernel",
+          "kind": "legacy-runtime-kernel",
+          "path": "src/player/CourseRuntimeKernel.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-player-payload",
+          "kind": "legacy-player-payload",
+          "path": "src/player/payload.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-002-published-lesson",
+          "kind": "legacy-player-published-lesson",
+          "path": "src/player/publishedLesson.ts",
+          "expectation": "file-absent"
+        }
+      ],
       "owner": "Preview / Export / Player",
       "status": "active-debt",
-      "currentFact": "Published Course V2 is the course delivery and release-benchmark path. Runtime authoring preview, one retained App static-export branch, PlayerApp and focused contract tests still construct the older ExportPayload pipeline; committed sample, portability and render-host release fixtures no longer do. This is no longer only technical debt: verified on 2026-08-26, the split produces teacher-visible divergence between the editing canvas and try-run/course-preview/web export of the same project. (1) Auto-shrink text: src/shared/textLayout.ts implements shrink-to-fit, auto-height and clipping, but no file under src/player/surfaces/ imports it, so a text box set to auto-shrink shrinks on the editing canvas and overflows-then-clips everywhere on the Published side. (2) Fonts: bundled font faces are installed only into the top-level document, and the editing canvas runs in a separate blob: Document that does not inherit them, so after the formula font stack change the canvas falls back while every Published surface uses the bundled face; worse, the result depends on session state, because once an export has run in the session the cached font bytes flip the canvas to the new face on the same machine and the same project. (3) Remote assets: the editing canvas is fed local bytes handed into the iframe while try-run fetches the remote URL, so the two hosts can render different bytes. No oracle anywhere in the repo renders the same node in both hosts and compares the results, and no assertion requires the preview document's declared font-face set to cover the top-level document's, so none of this is caught by tests.",
+      "currentFact": "src/player/index.ts no longer constructs PlayerApp and is Published Course V2-only. App/Workspace no longer call buildExportPayload or buildStandaloneHtml. PlayerApp.ts, payload.ts, publishedLesson.ts, buildExportPayload.ts, and buildStandaloneHtml.ts remain on disk. Product playerCapture.ts still import-types PlayerApp and exports PlayerApp-typed helpers. decodePublishedCode from publishedLesson.ts is still used by Published Runtime/Component mounts. tests/e2e/window.d.ts still import-types PlayerApp. This record is not zero.",
       "evidence": [
-        {
-          "path": "src/renderer/ui/Workspace.tsx",
-          "symbol": "Workspace",
-          "note": "Creates runtime authoring preview resources from ExportPayload."
-        },
         {
           "path": "src/player/index.ts",
           "symbol": "startPlayer",
-          "note": "Accepts ExportPayload or PublishedLessonPayload and creates PlayerApp."
+          "note": "V2-only entry; does not construct PlayerApp."
         },
         {
-          "path": "src/renderer/export/course/buildPublishedCourse.ts",
-          "symbol": "buildPublishedCourseV2Payload",
-          "note": "Existing one-way V2 replacement for course delivery."
+          "path": "src/renderer/export/playerCapture.ts",
+          "symbol": "PlayerApp",
+          "note": "Still import-types PlayerApp and keeps PlayerApp-typed capture helpers beside the V2 capture path."
+        },
+        {
+          "path": "src/player/surfaces/publishedComponentMount.ts",
+          "symbol": "decodePublishedCode",
+          "note": "Published Runtime/Component mounts still import publishedLesson.ts."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [
             {
-              "path": "src/renderer/App.tsx",
-              "symbol": "buildExportPayload",
-              "use": "Imported for retained static-export Legacy branches."
-            },
-            {
-              "path": "src/renderer/ui/Workspace.tsx",
-              "symbol": "buildStandaloneHtml",
-              "use": "Builds the isolated Runtime authoring iframe document."
-            },
-            {
-              "path": "src/player/index.ts",
-              "symbol": "startPlayer",
-              "use": "Normalizes and mounts the Legacy payload into PlayerApp."
+              "path": "src/renderer/export/playerCapture.ts",
+              "symbol": "PlayerApp",
+              "use": "Product capture module still import-types PlayerApp and types helpers on it."
             }
           ],
           "unknowns": []
@@ -301,49 +431,228 @@
         "playerPreviewOrExport": {
           "confirmed": [
             {
-              "path": "src/renderer/ui/Workspace.tsx",
-              "symbol": "createRuntimePreviewPayloadResources",
-              "use": "Transfers ExportPayload assets/components into the authoring iframe."
+              "path": "src/player/payload.ts",
+              "symbol": "ExportPayload",
+              "use": "Legacy payload parser remains on disk."
             },
             {
-              "path": "src/renderer/export/buildStandaloneHtml.ts",
-              "symbol": "buildStandaloneHtml",
-              "use": "Embeds the Legacy payload and player bundle."
+              "path": "src/player/payload.ts",
+              "symbol": "target-reference:LEG-002-published-lesson",
+              "use": "References file-absent target src/player/publishedLesson.ts via ./publishedLesson."
             },
             {
               "path": "src/player/PlayerApp.ts",
               "symbol": "PlayerApp",
-              "use": "Legacy player host used by exported payloads and authoring preview."
+              "use": "Legacy player host file remains and is still type-imported by capture."
+            },
+            {
+              "path": "src/player/PlayerApp.ts",
+              "symbol": "target-reference:LEG-002-player-scene",
+              "use": "References file-absent target src/player/PlayerScene.ts via ./PlayerScene."
+            },
+            {
+              "path": "src/player/PlayerApp.ts",
+              "symbol": "target-reference:LEG-002-runtime-kernel",
+              "use": "References file-absent target src/player/CourseRuntimeKernel.ts via ./CourseRuntimeKernel."
+            },
+            {
+              "path": "src/player/PlayerScene.ts",
+              "symbol": "target-reference:LEG-002-runtime-kernel",
+              "use": "References file-absent target src/player/CourseRuntimeKernel.ts via ./CourseRuntimeKernel."
+            },
+            {
+              "path": "src/player/surfaces/CoursePlayer.ts",
+              "symbol": "ExportPayload|PlayerApp",
+              "use": "Fail-loud V2 capture seam still names ExportPayload."
+            },
+            {
+              "path": "src/renderer/export/buildExportPayload.ts",
+              "symbol": "buildExportPayload",
+              "use": "Legacy ExportPayload builder remains on disk."
+            },
+            {
+              "path": "src/renderer/export/buildExportPayload.ts",
+              "symbol": "target-reference:LEG-002-export-payload-support",
+              "use": "References file-absent target src/renderer/export/exportPayloadSupport.ts via ./exportPayloadSupport."
+            },
+            {
+              "path": "src/renderer/export/buildPptx.ts",
+              "symbol": "target-reference:LEG-002-export-payload-support",
+              "use": "References file-absent target src/renderer/export/exportPayloadSupport.ts via ./exportPayloadSupport."
+            },
+            {
+              "path": "src/renderer/export/buildPublishedLesson.ts",
+              "symbol": "target-reference:LEG-002-export-payload-support",
+              "use": "References file-absent target src/renderer/export/exportPayloadSupport.ts via ./exportPayloadSupport."
+            },
+            {
+              "path": "src/renderer/export/buildStandaloneHtml.ts",
+              "symbol": "buildStandaloneHtml",
+              "use": "Legacy standalone HTML builder remains on disk."
+            },
+            {
+              "path": "src/renderer/export/buildStandaloneHtml.ts",
+              "symbol": "target-reference:LEG-002-build-published-lesson",
+              "use": "References file-absent target src/renderer/export/buildPublishedLesson.ts via ./buildPublishedLesson."
+            },
+            {
+              "path": "src/renderer/export/buildWebPackage.ts",
+              "symbol": "target-reference:LEG-002-build-published-lesson",
+              "use": "References file-absent target src/renderer/export/buildPublishedLesson.ts via ./buildPublishedLesson."
+            },
+            {
+              "path": "src/renderer/export/renderSceneImages.ts",
+              "symbol": "target-reference:LEG-002-export-payload-support",
+              "use": "References file-absent target src/renderer/export/exportPayloadSupport.ts via ./exportPayloadSupport."
             }
           ],
           "unknowns": []
         },
         "buildFixtureOrRelease": {
-          "confirmed": [],
+          "confirmed": [
+            {
+              "path": "scripts/generate-ai-capabilities.ts",
+              "symbol": "CourseRuntimeKernel|PlayerApp",
+              "use": "Capability generation still publishes legacy Player/Runtime source paths."
+            },
+            {
+              "path": "scripts/generate-ai-capabilities.ts",
+              "symbol": "target-reference:LEG-002-player-app",
+              "use": "References file-absent target src/player/PlayerApp.ts via src/player/PlayerApp.ts."
+            },
+            {
+              "path": "scripts/generate-ai-capabilities.ts",
+              "symbol": "target-reference:LEG-002-runtime-kernel",
+              "use": "References file-absent target src/player/CourseRuntimeKernel.ts via src/player/CourseRuntimeKernel.ts."
+            }
+          ],
           "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
           "confirmed": [],
-          "unknowns": [
-            "No explicit promise to keep loading arbitrary historical ExportPayload files was found; committed artifacts and tests are the confirmed obligation."
-          ]
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/unit/export.test.ts",
-              "symbol": "buildExportPayload",
-              "use": "Direct Legacy export contract tests."
+              "path": "tests/e2e/window.d.ts",
+              "symbol": "PlayerApp",
+              "use": "E2E window bridge still import-types PlayerApp."
             },
             {
-              "path": "tests/unit/runtimeExport.test.ts",
-              "symbol": "buildExportPayload",
-              "use": "Runtime export and standalone HTML tests."
+              "path": "tests/integration/architectureBaselineFlows.test.tsx",
+              "symbol": "PlayerApp",
+              "use": "Negative probe asserts player/index.ts does not contain new PlayerApp."
+            },
+            {
+              "path": "tests/integration/courseExportPreflightApp.test.tsx",
+              "symbol": "buildStandaloneHtml",
+              "use": "Still vi.mock-imports the legacy standalone HTML module."
             },
             {
               "path": "tests/integration/player-payload.test.ts",
               "symbol": "ExportPayload",
-              "use": "Legacy payload parsing/loading tests."
+              "use": "Fail-loud test still names ExportPayload."
+            },
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "CourseRuntimeKernel|PlayerApp",
+              "use": "Capability contract still asserts legacy source paths."
+            },
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "target-reference:LEG-002-player-app",
+              "use": "References file-absent target src/player/PlayerApp.ts via src/player/PlayerApp.ts."
+            },
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "target-reference:LEG-002-runtime-kernel",
+              "use": "References file-absent target src/player/CourseRuntimeKernel.ts via src/player/CourseRuntimeKernel.ts."
+            },
+            {
+              "path": "tests/unit/architectureDependencyRatchet.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Architecture ratchet still names the legacy PlayerScene owner."
+            },
+            {
+              "path": "tests/unit/architectureDependencyRatchet.test.ts",
+              "symbol": "target-reference:LEG-002-player-scene",
+              "use": "References file-absent target src/player/PlayerScene.ts via src/player/PlayerScene.ts."
+            },
+            {
+              "path": "tests/unit/coursePptxExport.test.ts",
+              "symbol": "buildExportPayload",
+              "use": "Negative probe still names buildExportPayload; scanner token hit."
+            },
+            {
+              "path": "tests/unit/nodeExportHostFontWiring.test.ts",
+              "symbol": "buildStandaloneHtml",
+              "use": "Packaging regex still names buildStandaloneHtml."
+            },
+            {
+              "path": "tests/unit/playerAuthoringProtocol.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Authoring protocol test still names the legacy PlayerScene owner."
+            },
+            {
+              "path": "tests/unit/playerCapture.test.ts",
+              "symbol": "PlayerApp",
+              "use": "Capture tests still import the PlayerApp type."
+            },
+            {
+              "path": "tests/unit/playerHostActions.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Host action test still imports the legacy PlayerScene owner."
+            },
+            {
+              "path": "tests/unit/playerSceneAnimationMode.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Legacy PlayerScene animation-mode success test."
+            },
+            {
+              "path": "tests/unit/playerSceneAnimationMode.test.ts",
+              "symbol": "target-reference:LEG-002-player-scene",
+              "use": "References file-absent target src/player/PlayerScene.ts via ../../src/player/PlayerScene."
+            },
+            {
+              "path": "tests/unit/playerSceneAssets.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Legacy PlayerScene asset test."
+            },
+            {
+              "path": "tests/unit/playerSceneComponentEventBuffer.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Legacy PlayerScene component event lifecycle test."
+            },
+            {
+              "path": "tests/unit/playerSceneComponentEventBuffer.test.ts",
+              "symbol": "target-reference:LEG-002-player-scene",
+              "use": "References file-absent target src/player/PlayerScene.ts via ../../src/player/PlayerScene."
+            },
+            {
+              "path": "tests/unit/playerSceneMotionLifecycle.test.ts",
+              "symbol": "PlayerScene",
+              "use": "Legacy PlayerScene motion lifecycle test."
+            },
+            {
+              "path": "tests/unit/playerSceneMotionLifecycle.test.ts",
+              "symbol": "target-reference:LEG-002-player-scene",
+              "use": "References file-absent target src/player/PlayerScene.ts via ../../src/player/PlayerScene."
+            },
+            {
+              "path": "tests/unit/publishedCourseNavigation.test.ts",
+              "symbol": "PlayerApp",
+              "use": "Navigation test still names the legacy PlayerApp."
+            },
+            {
+              "path": "tests/unit/renderPptxComponentSnapshots.test.ts",
+              "symbol": "PlayerApp",
+              "use": "PPTX component fallback test still names the legacy PlayerApp."
+            },
+            {
+              "path": "tests/unit/renderPptxRuntimeSnapshots.test.ts",
+              "symbol": "PlayerApp",
+              "use": "PPTX runtime fallback test still names the legacy PlayerApp."
             }
           ],
           "unknowns": []
@@ -351,19 +660,19 @@
         "cacheAsyncGeneratedOrPackaging": {
           "confirmed": [
             {
-              "path": "src/renderer/preview/runtimePreviewPayload.ts",
-              "symbol": "createRuntimePreviewPayloadResources",
-              "use": "Creates transferable asset state for an asynchronous iframe preview."
+              "path": "artifacts/ai-capabilities/schemas/runtime-api2.json",
+              "symbol": "CourseRuntimeKernel|PlayerApp",
+              "use": "Generated capability schema still embeds legacy source paths."
             },
             {
-              "path": "src/renderer/preview/runtimePreviewLifecycle.ts",
-              "symbol": "releaseRuntimePreviewResources",
-              "use": "Owns asynchronous cleanup of generated preview resources."
+              "path": "artifacts/ai-capabilities/schemas/runtime-api2.json",
+              "symbol": "target-reference:LEG-002-player-app",
+              "use": "References file-absent target src/player/PlayerApp.ts via src/player/PlayerApp.ts."
             },
             {
-              "path": "vite.renderer.config.ts",
-              "symbol": "playerBundlePlugin",
-              "use": "Embeds the separately built Player IIFE into renderer/export flows."
+              "path": "artifacts/ai-capabilities/schemas/runtime-api2.json",
+              "symbol": "target-reference:LEG-002-runtime-kernel",
+              "use": "References file-absent target src/player/CourseRuntimeKernel.ts via src/player/CourseRuntimeKernel.ts."
             }
           ],
           "unknowns": []
@@ -381,18 +690,22 @@
             "symbol": "createPublishedCourseSession"
           }
         ],
-        "notes": "Course delivery, current samples, Windows portability and the render-host release benchmark use V9/V2 replacements. Runtime authoring preview and one retained App static-export branch still require the Legacy payload until separately characterized."
+        "notes": "Course delivery, try-run, and player entry use Published V2. playerCapture still type-depends on PlayerApp; publishedLesson.decodePublishedCode is still a product import. r11-054 must not delete PlayerApp.ts or publishedLesson.ts while those remain."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
         "state": "nonzero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'buildExportPayload' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 13
+            "command": "(git grep -n -I -F -- 'PlayerApp' -- src/renderer/export/playerCapture.ts tests/e2e/window.d.ts | Measure-Object).Count",
+            "observedMatches": 2
+          },
+          {
+            "command": "(git grep -n -I -F -- 'buildExportPayload' -- src tests | Measure-Object).Count",
+            "observedMatches": 4
           }
         ],
-        "requiredForRemoval": "Migrate or explicitly retain every authoring-preview, build, fixture, portability, test, generated artifact, and PlayerApp consumer."
+        "requiredForRemoval": "playerCapture and window.d.ts must stop import-typing PlayerApp; published dynamic mounts must stop importing publishedLesson.ts; leftover builders must have zero product/test imports."
       },
       "persistedCompatibility": {
         "status": "none-confirmed",
@@ -416,21 +729,23 @@
         "strategy": "Restore the last migrated consumer adapter only; keep the V2 producer unchanged."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "Whether Runtime authoring can consume Published V2 without losing patch/snapshot semantics requires characterization."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-003",
-      "legacyTarget": {
-        "kind": "removed-no-source-app-delivery-fallback",
-        "path": "src/renderer/App.tsx",
-        "symbols": [
-          "courseDeliveryUnavailable",
-          "handlePreview",
-          "handleExportWebPackage"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-003-app-delivery-fallback",
+          "kind": "removed-no-source-app-delivery-fallback",
+          "path": "src/renderer/App.tsx",
+          "expectation": "symbol-absent",
+          "symbols": [
+            "courseDeliveryUnavailable",
+            "handlePreview",
+            "handleExportWebPackage"
+          ]
+        }
+      ],
       "owner": "App / Preview / Export",
       "status": "removed",
       "currentFact": "Normal V9 lifecycle characterization at f3fd31f proves new/open/Mixed navigation/replacement/restore always has exactly one active V9 document. Product commit 63fbf66 removed the unreachable Legacy HTML/Web/full-preview fallback and its exclusive desktop preview IPC/window/protocol chain; abnormal source-null now reports unavailable explicitly.",
@@ -466,15 +781,11 @@
         },
         "buildFixtureOrRelease": {
           "confirmed": [],
-          "unknowns": [
-            "No build/release script calls the App branch directly."
-          ]
+          "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
           "confirmed": [],
-          "unknowns": [
-            "No authoring archive compatibility obligation for a sessionless V9 state is documented."
-          ]
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [],
@@ -509,14 +820,14 @@
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
-        "state": "removed-exact-zero",
+        "state": "zero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'preview:open' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "command": "(git grep -n -I -F -- 'preview:open' -- src tests scripts examples | Measure-Object).Count",
             "observedMatches": 0
           },
           {
-            "command": "(git grep -n -I -F -- 'openPreviewWindow' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "command": "(git grep -n -I -F -- 'openPreviewWindow' -- src tests scripts examples | Measure-Object).Count",
             "observedMatches": 0
           }
         ],
@@ -550,114 +861,84 @@
     },
     {
       "id": "LEG-004",
-      "legacyTarget": {
-        "kind": "legacy-slide-pptx-branch",
-        "path": "src/renderer/App.tsx",
-        "symbols": [
-          "handleExportPptx",
-          "isSlideOnlyCourseProject",
-          "buildExportPayload",
-          "buildPptx"
-        ]
-      },
-      "owner": "Export",
-      "status": "active-debt",
-      "currentFact": "Mixed/non-Slide-only V9 uses buildCoursePptx, but a Slide-only V9 with a V8 projection is routed through buildExportPayload + buildPptx.",
-      "evidence": [
+      "legacyTargets": [
         {
+          "expectationId": "LEG-004-app-pptx-branch",
+          "kind": "legacy-slide-pptx-branch",
           "path": "src/renderer/App.tsx",
-          "symbol": "handleExportPptx",
-          "note": "The slideOnlyCourse condition bypasses buildCoursePptx."
+          "expectation": "symbol-absent",
+          "symbols": [
+            "handleExportPptx",
+            "isSlideOnlyCourseProject",
+            "buildExportPayload",
+            "buildPptx"
+          ]
         },
         {
-          "path": "src/renderer/export/course/buildCoursePptx.ts",
+          "expectationId": "LEG-004-build-pptx",
+          "kind": "legacy-pptx-builder",
+          "path": "src/renderer/export/buildPptx.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-004-pptx-shared-scene-node",
+          "kind": "legacy-pptx-scene-node",
+          "path": "src/renderer/export/pptxShared.ts",
+          "expectation": "symbol-absent",
+          "symbols": [
+            "SceneNode"
+          ]
+        }
+      ],
+      "owner": "Export",
+      "status": "active-debt",
+      "currentFact": "Product PPTX export uses buildCoursePptx from useCourseDelivery. App no longer calls buildPptx. V2 PDF print still imports buildPdfPrintHtml from buildPptx.ts, so that module is not a zero-consumer deletion candidate.",
+      "evidence": [
+        {
+          "path": "src/renderer/app/useCourseDelivery.ts",
           "symbol": "buildCoursePptx",
-          "note": "Existing Published V2 PPTX path."
+          "note": "Product PPTX path."
+        },
+        {
+          "path": "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+          "symbol": "buildPdfPrintHtml",
+          "note": "V2 PDF still imports the HTML wrapper from the legacy PPTX module."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [
             {
-              "path": "src/renderer/App.tsx",
-              "symbol": "buildPptx",
-              "use": "Direct Legacy PPTX builder call for Slide-only."
-            },
-            {
               "path": "src/renderer/export/buildPptx.ts",
               "symbol": "buildPptx",
-              "use": "Consumes ExportPayload/ProjectDocument scene nodes."
+              "use": "Legacy PPTX builder file remains."
             }
           ],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
-          "confirmed": [
-            {
-              "path": "src/preload/index.ts",
-              "symbol": "export:write-binary",
-              "use": "Writes the generated PPTX bytes."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExportPptx",
-              "use": "User-visible PPTX export branch."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "buildFixtureOrRelease": {
-          "confirmed": [
-            {
-              "path": "scripts/verify-release.ts",
-              "symbol": "exportedPptx",
-              "use": "Release workflow checks a generated PPTX, but the current fixture is V8 and does not prove V9 Slide replacement parity."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
-          "confirmed": [
-            {
-              "path": "src/main/ipc.ts",
-              "symbol": "export:write-binary",
-              "use": "Persists PPTX bytes selected by the renderer branch."
-            }
-          ],
-          "unknowns": [
-            "No reader for previously generated PPTX is part of the editor; output-semantic parity still must be preserved."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "testConsumers": {
-          "confirmed": [
-            {
-              "path": "tests/unit/export.test.ts",
-              "symbol": "buildPptx",
-              "use": "Legacy PPTX builder behavior."
-            },
-            {
-              "path": "tests/unit/runtimeExport.test.ts",
-              "symbol": "buildPptx",
-              "use": "Legacy Runtime/component staticization behavior."
-            },
-            {
-              "path": "tests/unit/coursePptxExport.test.ts",
-              "symbol": "buildCoursePptx",
-              "use": "Published V2 replacement behavior."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
           "confirmed": [],
-          "unknowns": [
-            "No PPTX-specific cache was confirmed; output generation remains asynchronous."
-          ]
+          "unknowns": []
         }
       },
       "replacement": {
@@ -668,18 +949,22 @@
             "symbol": "buildCoursePptx"
           }
         ],
-        "notes": "Characterize editable-object and warning parity before routing Slide-only V9 through the V2 path."
+        "notes": "PPTX carrier is buildCoursePptx (PM-22). Do not delete buildPptx.ts while buildCoursePrintArtifacts imports buildPdfPrintHtml from it."
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
         "state": "nonzero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'buildPptx' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 12
+            "command": "(git grep -n -I -F -- 'buildPdfPrintHtml' -- src | Measure-Object).Count",
+            "observedMatches": 2
+          },
+          {
+            "command": "(git grep -n -I -F -- 'from \\'../buildPptx\\'' -- src | Measure-Object).Count",
+            "observedMatches": 1
           }
         ],
-        "requiredForRemoval": "The App Slide-only branch and Legacy builder consumers must reach zero or be split into an explicitly retained non-product tool record."
+        "requiredForRemoval": "Move or replace buildPdfPrintHtml so V2 print no longer imports src/renderer/export/buildPptx.ts, then re-scan."
       },
       "persistedCompatibility": {
         "status": "output-semantics-required",
@@ -707,124 +992,152 @@
         "strategy": "Restore only the Slide-only adapter branch if V2 PPTX output parity regresses."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "The precise user-visible parity delta between the two PPTX builders has not been characterized in a representative Slide-heavy fixture."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-005",
-      "legacyTarget": {
-        "kind": "legacy-pdf-raster-fallback",
-        "path": "src/renderer/App.tsx",
-        "symbols": [
-          "handleExportPdf",
-          "renderProjectSceneImages"
-        ]
-      },
-      "owner": "Export",
-      "status": "active-debt",
-      "currentFact": "PDF first builds Published V2 print artifacts. Legal pure-Slide V9 projects normally lack pdf-html because App has no capture callback, so they still use the V8-projected raster path. The unreachable source-null V8 payload plus Runtime raster branch was removed by LEG-005A and now fails closed.",
-      "evidence": [
+      "legacyTargets": [
         {
+          "expectationId": "LEG-005-app-pdf-fallback",
+          "kind": "legacy-pdf-raster-fallback",
           "path": "src/renderer/App.tsx",
-          "symbol": "handleExportPdf",
-          "note": "Contains the V2-first path and the retained legal pure-Slide raster fallback; source-null now reports PDF unavailable."
+          "expectation": "symbol-absent",
+          "symbols": [
+            "handleExportPdf",
+            "renderProjectSceneImages"
+          ]
         },
         {
-          "path": "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+          "expectationId": "LEG-005-render-scene-images",
+          "kind": "legacy-scene-rasterizer",
+          "path": "src/renderer/export/renderSceneImages.ts",
+          "expectation": "file-absent"
+        }
+      ],
+      "owner": "Export",
+      "status": "active-debt",
+      "currentFact": "Product PDF uses buildCoursePrintArtifacts. App no longer calls renderProjectSceneImages. The raster module remains on disk and several tests still vi.mock that module path. Negative probes still name the function. This record is not zero.",
+      "evidence": [
+        {
+          "path": "src/renderer/app/useCourseDelivery.ts",
           "symbol": "buildCoursePrintArtifacts",
-          "note": "Existing V2-first print artifact path."
+          "note": "Product PDF path."
+        },
+        {
+          "path": "src/renderer/export/renderSceneImages.ts",
+          "symbol": "renderProjectSceneImages",
+          "note": "Legacy raster module remains on disk."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [
             {
-              "path": "src/renderer/App.tsx",
-              "symbol": "renderProjectSceneImages",
-              "use": "V8 raster fallback for V9 sources when print artifacts lack pdf-html."
-            },
-            {
               "path": "src/renderer/export/renderSceneImages.ts",
               "symbol": "renderProjectSceneImages",
-              "use": "Renders ProjectDocument scenes."
+              "use": "Legacy V8 raster module remains."
             }
           ],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
-          "confirmed": [
-            {
-              "path": "src/preload/index.ts",
-              "symbol": "export:write-pdf",
-              "use": "Sends print HTML to main-process PDF export."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExportPdf",
-              "use": "User-visible PDF export."
-            },
-            {
-              "path": "src/main/pdfExport.ts",
-              "symbol": "exportPdf",
-              "use": "Consumes renderer print HTML."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "buildFixtureOrRelease": {
-          "confirmed": [
-            {
-              "path": "scripts/verify-release.ts",
-              "symbol": "exportedPdf",
-              "use": "Release workflow checks a PDF produced from retained V8 fixtures."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
-          "confirmed": [
-            {
-              "path": "src/main/pdfExport.ts",
-              "symbol": "exportPdf",
-              "use": "Persists PDF output; no editor read-back path is present."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/unit/playerCapture.test.ts",
-              "symbol": "capture",
-              "use": "Legacy scene/runtime capture behavior."
+              "path": "tests/integration/componentPackageReplacementRace.test.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "Still mocks the legacy raster module."
             },
             {
-              "path": "tests/unit/runtimeExport.test.ts",
-              "symbol": "buildPptx",
-              "use": "Shares Legacy staticization inputs used by raster exports."
+              "path": "tests/integration/componentPackageReplacementRace.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
+            },
+            {
+              "path": "tests/integration/courseExportPreflightApp.test.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "Still mocks the legacy raster module."
+            },
+            {
+              "path": "tests/integration/courseExportPreflightApp.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
+            },
+            {
+              "path": "tests/integration/coursePdfExportApp.test.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "Still mocks the legacy raster module."
+            },
+            {
+              "path": "tests/integration/coursePdfExportApp.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
+            },
+            {
+              "path": "tests/integration/imageReplacementRaceCharacterization.test.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "Still mocks the legacy raster module."
+            },
+            {
+              "path": "tests/integration/imageReplacementRaceCharacterization.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
+            },
+            {
+              "path": "tests/integration/mediaLibraryImportRace.test.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "Still mocks the legacy raster module."
+            },
+            {
+              "path": "tests/integration/mediaLibraryImportRace.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
             },
             {
               "path": "tests/unit/coursePrintArtifacts.test.ts",
-              "symbol": "buildCoursePrintArtifacts",
-              "use": "Published V2 replacement behavior."
+              "symbol": "renderProjectSceneImages",
+              "use": "Negative probe still names renderProjectSceneImages."
+            },
+            {
+              "path": "tests/unit/elementAnimationStaticExport.test.ts",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
+            },
+            {
+              "path": "tests/unit/formulaCrossSurface.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via ../../src/renderer/export/renderSceneImages."
+            },
+            {
+              "path": "tests/unit/spatialProductIntegration.test.tsx",
+              "symbol": "renderProjectSceneImages",
+              "use": "Still mocks the legacy raster module."
+            },
+            {
+              "path": "tests/unit/spatialProductIntegration.test.tsx",
+              "symbol": "target-reference:LEG-005-render-scene-images",
+              "use": "References file-absent target src/renderer/export/renderSceneImages.ts via @/renderer/export/renderSceneImages."
             }
           ],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
-          "confirmed": [
-            {
-              "path": "src/main/pdfExport.ts",
-              "symbol": "exportPdf",
-              "use": "Creates and closes an asynchronous print window."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         }
       },
@@ -836,22 +1149,18 @@
             "symbol": "buildCoursePrintArtifacts"
           }
         ],
-        "notes": "The source-null Runtime raster is removed. Replace the retained legal pure-Slide raster only after V2 capture/staticization and warning parity cover native, global, Component and Runtime content."
+        "notes": "PDF carrier is buildCoursePrintArtifacts (PM-23). Tests still mock the old raster module; do not mark zero while those imports remain."
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
-        "state": "nonzero-retained",
+        "state": "nonzero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'renderProjectSceneImages' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 9
-          },
-          {
-            "command": "(git grep -n -I -F -- 'renderProjectSceneImagesWithRuntime' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 0
+            "command": "(git grep -n -I -F -- 'renderProjectSceneImages' -- src tests | Measure-Object).Count",
+            "observedMatches": 8
           }
         ],
-        "requiredForRemoval": "The retained pure-Slide raster and direct ProjectDocument consumers may reach zero only after V2 capture/staticization and warning parity are verified; the removed source-null Runtime raster symbol must stay at zero."
+        "requiredForRemoval": "Zero product/test imports or mocks of renderSceneImages.ts, then the module may enter the 054 list."
       },
       "persistedCompatibility": {
         "status": "output-semantics-required",
@@ -879,132 +1188,102 @@
         "strategy": "Restore only the characterized raster adapter if V2 print output fails; keep the V2-first path."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "V2 static capture does not yet cover the visual and warning semantics required to replace the legal pure-Slide raster path."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-006",
-      "legacyTarget": {
-        "kind": "legacy-export-preflight",
-        "path": "src/renderer/export/exportPreflight.ts",
-        "symbols": [
-          "ExportPreflightReport",
-          "collectExportPreflight"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-006-export-preflight-symbols",
+          "kind": "legacy-export-preflight",
+          "path": "src/renderer/export/exportPreflight.ts",
+          "expectation": "symbol-absent",
+          "symbols": [
+            "ExportPreflightReport",
+            "collectExportPreflight"
+          ]
+        }
+      ],
       "owner": "Diagnostics / Export",
       "status": "active-debt",
-      "currentFact": "ExportPreflightReport remains a schemaVersion 8 App consumer. SEM-B4A extracted its Slide visual rules behind a shape-neutral composition input and added a headless Course Project V9 adapter driven only by shared location composition; no GUI/export route has switched and the Legacy report remains active debt.",
+      "currentFact": "Product delivery uses collectCourseProjectExportPreflight from exportPreflight.ts (schemaVersion 8|9 report). GUI ExportPreflightDialog still types that report. V8 collectExportPreflight remains in the same file and is still called by focused tests. The module cannot be deleted. This record is not zero.",
       "evidence": [
         {
-          "path": "src/renderer/export/exportPreflight.ts",
+          "path": "src/renderer/app/useCourseDelivery.ts",
+          "symbol": "collectCourseProjectExportPreflight",
+          "note": "Product export preflight."
+        },
+        {
+          "path": "src/renderer/ui/ExportPreflightDialog.tsx",
           "symbol": "ExportPreflightReport",
-          "note": "Declares schemaVersion: 8."
-        },
-        {
-          "path": "src/renderer/App.tsx",
-          "symbol": "handleExport",
-          "note": "Calls collectExportPreflight(state.project, ...) before optional V9 merge."
-        },
-        {
-          "path": "src/renderer/export/slideVisualPreflight.ts",
-          "symbol": "collectCourseProjectSlideVisualPreflight",
-          "note": "Headless V9 Slide visual adapter reuses the same rules and consumes membership, materialization, background and order from composeCourseProjectLocation."
+          "note": "GUI still renders the shared report shape."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [
             {
-              "path": "src/renderer/App.tsx",
-              "symbol": "handleExport",
-              "use": "Always computes the V8 base report."
+              "path": "src/renderer/app/useCourseDelivery.ts",
+              "symbol": "ExportPreflightReport",
+              "use": "Course delivery still imports the legacy preflight report shape."
             },
             {
-              "path": "src/renderer/project/validateProjectArchive.ts",
-              "symbol": "validateProjectArchiveBytes",
-              "use": "Computes four V8 export preflight reports."
+              "path": "src/renderer/export/exportPreflight.ts",
+              "symbol": "collectExportPreflight",
+              "use": "V8 collector remains in the same module as the V9 adapter."
             },
             {
               "path": "src/renderer/ui/ExportPreflightDialog.tsx",
-              "symbol": "ExportPreflightDialog",
-              "use": "Renders the Legacy report shape."
+              "symbol": "ExportPreflightReport",
+              "use": "GUI still consumes ExportPreflightReport from the LEG-006 module."
             }
           ],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
           "confirmed": [],
-          "unknowns": [
-            "No IPC channel reads the report; App may export it as generic binary JSON."
-          ]
+          "unknowns": []
         },
         "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "src/renderer/export/exportPreflight.ts",
-              "symbol": "collectExportPreflight",
-              "use": "Analyzes single-html, web-package, pdf, and pptx targets."
-            },
-            {
-              "path": "src/renderer/export/course/buildCoursePackages.ts",
-              "symbol": "collectCoursePackageExportPreflight",
-              "use": "V9 HTML/Web report merged into the V8 base report."
-            }
-          ],
-          "unknowns": [
-            "A V9-native Slide visual adapter exists, but complete PPTX/PDF resources, static-format semantics, report routing and GUI consumption are not migrated."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "buildFixtureOrRelease": {
           "confirmed": [],
-          "unknowns": [
-            "No release verifier directly imports collectExportPreflight."
-          ]
+          "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
-          "confirmed": [
-            {
-              "path": "src/renderer/App.tsx",
-              "symbol": "saveExportPreflightReport",
-              "use": "Allows users to persist the report as JSON."
-            }
-          ],
-          "unknowns": [
-            "No reader or compatibility policy for previously exported preflight JSON was found."
-          ]
+          "confirmed": [],
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/unit/exportPreflight.test.ts",
+              "path": "tests/integration/courseExportPreflightApp.test.tsx",
               "symbol": "collectExportPreflight",
-              "use": "Direct Legacy preflight tests."
-            },
-            {
-              "path": "tests/unit/exportPreflightUi.test.tsx",
-              "symbol": "ExportPreflightDialog",
-              "use": "Legacy report UI tests."
-            },
-            {
-              "path": "tests/unit/formulaNode.test.ts",
-              "symbol": "collectExportPreflight",
-              "use": "Formula export diagnostics through the Legacy report."
+              "use": "App integration still mocks/calls collectExportPreflight."
             },
             {
               "path": "tests/unit/courseSlidePreflightParity.test.ts",
-              "symbol": "Slide export-preflight parity",
-              "use": "Pins the fixed-time V8 report item-for-item, proves representable V8/V9 parity and quantifies projection-only deltas."
+              "symbol": "collectExportPreflight",
+              "use": "Parity tests still call the V8 collector."
+            },
+            {
+              "path": "tests/unit/exportPreflight.test.ts",
+              "symbol": "collectExportPreflight",
+              "use": "Still calls the V8 collector."
+            },
+            {
+              "path": "tests/unit/exportPreflightUi.test.tsx",
+              "symbol": "ExportPreflightReport",
+              "use": "GUI tests still consume the report dialog."
             }
           ],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
           "confirmed": [],
-          "unknowns": [
-            "No cache or generated artifact directly owns this report."
-          ]
+          "unknowns": []
         }
       },
       "replacement": {
@@ -1019,18 +1298,18 @@
             "symbol": "collectCourseProjectSlideVisualPreflight"
           }
         ],
-        "notes": "HTML/Web V9 preflight exists. SEM-B4A establishes only the shared Slide visual-rule seam and a headless V9 adapter; App routing, complete PDF/PPTX semantics and exported-report compatibility still block removal."
+        "notes": "V9 adapter exists inside the same file. Splitting or deleting collectExportPreflight is not this task; the module still has product and test consumers."
       },
       "targetRemovalPhase": "ARCH-4",
       "zeroReferenceEvidence": {
         "state": "nonzero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'collectExportPreflight' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 23
+            "command": "(git grep -n -I -F -- 'collectExportPreflight' -- src tests | Measure-Object).Count",
+            "observedMatches": 4
           }
         ],
-        "requiredForRemoval": "App, validator, UI, tests, exported-report semantics, and every target adapter must migrate; exact references must be zero."
+        "requiredForRemoval": "Product/GUI must not need this module path, and V8 collectExportPreflight tests must migrate or drop, before deletion."
       },
       "persistedCompatibility": {
         "status": "report-export-confirmed-reader-unknown",
@@ -1064,75 +1343,65 @@
         "strategy": "Restore the previous target adapter and report mapping if V9 diagnostics lose a supported warning or navigation target."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "Complete V9-native PPTX/PDF preflight routing and exported-report compatibility are not yet specified; the SEM-B4A adapter is intentionally headless."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-007",
-      "legacyTarget": {
-        "kind": "legacy-project-health",
-        "path": "src/shared/projectHealth.ts",
-        "symbols": [
-          "collectProjectHealth",
-          "ProjectHealthDiagnostic"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-007-project-health-module",
+          "kind": "legacy-project-health",
+          "path": "src/shared/projectHealth.ts",
+          "expectation": "file-absent"
+        }
+      ],
       "owner": "Diagnostics",
       "status": "active-debt",
-      "currentFact": "App, ProjectHealthPanel, and export preflight still consume the V8 collectProjectHealth over the V8-shaped ProjectDocument projection; the legacy validator src/renderer/project/validateProjectArchive.ts was deleted with LEG-010, and scripts/validate-project.ts now uses the V9 collectCourseProjectHealth, so the GUI and the CLI emit two separate diagnostic code sets.",
+      "currentFact": "GUI ProjectHealthPanel uses collectCourseProjectHealth. TopToolbar still types ProjectHealthSummary from projectHealth.ts. projectHealthNavigation still import-types ProjectHealthDiagnostic from the V8 collector module. exportPreflight.ts still calls collectProjectHealth for the V8 report. Focused tests still call collectProjectHealth. This record is not zero.",
       "evidence": [
+        {
+          "path": "src/renderer/ui/ProjectHealthPanel.tsx",
+          "symbol": "collectCourseProjectHealth",
+          "note": "Product health panel is V9."
+        },
         {
           "path": "src/shared/projectHealth.ts",
           "symbol": "collectProjectHealth",
-          "note": "Accepts ProjectDocument and component packages."
-        },
-        {
-          "path": "src/renderer/App.tsx",
-          "symbol": "projectHealthDiagnostics",
-          "note": "Runs on EditorState.project in a memo."
+          "note": "V8 collector retained for leftover tests and V8 preflight."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [
             {
-              "path": "src/renderer/App.tsx",
-              "symbol": "projectHealthDiagnostics",
-              "use": "Realtime health over the V8 projection."
-            },
-            {
-              "path": "src/renderer/ui/ProjectHealthPanel.tsx",
-              "symbol": "ProjectHealthPanel",
-              "use": "Recomputes and renders V8 health."
+              "path": "src/renderer/diagnostics/projectHealthNavigation.ts",
+              "symbol": "ProjectHealthDiagnostic",
+              "use": "Still import-types the V8 diagnostic from projectHealth.ts."
             },
             {
               "path": "src/renderer/export/exportPreflight.ts",
-              "symbol": "collectExportPreflight",
-              "use": "Merges project-health findings into export preflight."
+              "symbol": "collectProjectHealth",
+              "use": "V8 export preflight still calls collectProjectHealth."
             },
             {
-              "path": "src/renderer/project/validateProjectArchive.ts",
-              "symbol": "validateProjectArchiveBytes",
-              "use": "Legacy archive health report."
+              "path": "src/renderer/ui/TopToolbar.tsx",
+              "symbol": "ProjectHealthSummary",
+              "use": "Still import-types ProjectHealthSummary from projectHealth.ts."
+            },
+            {
+              "path": "src/shared/projectHealth.ts",
+              "symbol": "collectProjectHealth",
+              "use": "V8 collector module remains."
             }
           ],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
           "confirmed": [],
-          "unknowns": [
-            "No dynamic or IPC caller was found by exact tracked-text search."
-          ]
+          "unknowns": []
         },
         "playerPreviewOrExport": {
-          "confirmed": [
-            {
-              "path": "src/renderer/export/exportPreflight.ts",
-              "symbol": "collectExportPreflight",
-              "use": "Projects health codes into export-target diagnostics."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "buildFixtureOrRelease": {
@@ -1141,43 +1410,40 @@
         },
         "persistedRecoveryOrCrossVersion": {
           "confirmed": [],
-          "unknowns": [
-            "The collector is read-only and no persisted health document is a V9 contract field."
-          ]
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/unit/projectHealth.test.ts",
-              "symbol": "collectProjectHealth",
-              "use": "Direct Legacy health tests."
-            },
-            {
               "path": "tests/unit/assetReferences.test.ts",
               "symbol": "collectProjectHealth",
-              "use": "Asset-reference health tests."
+              "use": "Still calls collectProjectHealth."
+            },
+            {
+              "path": "tests/unit/projectHealth.test.ts",
+              "symbol": "collectProjectHealth",
+              "use": "Direct V8 health tests remain."
+            },
+            {
+              "path": "tests/unit/projectHealthPanel.test.tsx",
+              "symbol": "collectProjectHealth",
+              "use": "Still names collectProjectHealth."
+            },
+            {
+              "path": "tests/unit/projectHealthPanel.test.tsx",
+              "symbol": "target-reference:LEG-007-project-health-module",
+              "use": "References file-absent target src/shared/projectHealth.ts via @/shared/projectHealth."
             },
             {
               "path": "tests/unit/teacherControllerConsistency.test.ts",
               "symbol": "collectProjectHealth",
-              "use": "Controller consistency checks through Legacy health."
+              "use": "Still calls collectProjectHealth."
             }
           ],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
-          "confirmed": [
-            {
-              "path": "artifacts/ai-capabilities/diagnostics.json",
-              "symbol": "projectHealth",
-              "use": "Generated product capability registry publishes the current health codes."
-            },
-            {
-              "path": "scripts/generate-ai-capabilities.ts",
-              "symbol": "PROJECT_HEALTH_CODES",
-              "use": "Generates diagnostics capability output from the current registry."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         }
       },
@@ -1193,18 +1459,18 @@
             "symbol": "runValidateProjectCli"
           }
         ],
-        "notes": "These are partial V9 diagnostics, not a complete replacement for realtime structural health/navigation."
+        "notes": "V9 collectCourseProjectHealth is the GUI/CLI truth. The V8 module remains because types and tests still import it."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
         "state": "nonzero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'collectProjectHealth' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 34
+            "command": "(git grep -n -I -F -- 'collectProjectHealth' -- src tests | Measure-Object).Count",
+            "observedMatches": 7
           }
         ],
-        "requiredForRemoval": "Migrate App, panel, export, fixture, tests, and generated diagnostic-code provenance to V9 rules; exact references must be zero or split into a retained primitive."
+        "requiredForRemoval": "Move remaining types to the V9 health module and drop V8 collector tests before deletion."
       },
       "persistedCompatibility": {
         "status": "none-as-project-field",
@@ -1234,55 +1500,36 @@
         "strategy": "Restore the previous read-only collector adapter if a V9 rule loses a current actionable diagnostic; never write diagnostics into the project."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "The complete V9 structural diagnostic code mapping and performance budget are not yet established."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-008",
-      "legacyTarget": {
-        "kind": "retained-v8-archive-test-toolchain",
-        "path": "src/renderer/project/projectArchive.ts",
-        "symbols": [
-          "createProjectArchive",
-          "openProjectArchive",
-          "ProjectDocument"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-008-v8-project-archive",
+          "kind": "retained-v8-archive-test-toolchain",
+          "path": "src/renderer/project/projectArchive.ts",
+          "expectation": "file-absent"
+        }
+      ],
       "owner": "Tooling / Release",
-      "status": "retained-compatibility",
-      "currentFact": "The product open path rejects V8. The committed sample, Windows portability verifier, render-host benchmark and release verifier now use Course Project V9 / Published Course V2, and the old render-host V8 artifacts are deleted. The archive implementation remains only for isolated adapters, feature round-trip tests, corruption tests and explicit V8/V9 format-isolation or rejection fixtures.",
+      "status": "dead-candidate",
+      "currentFact": "openProject.ts and saveProject.ts are V9-only. Working-tree scan finds createProjectArchive/openProjectArchive only inside src/renderer/project/projectArchive.ts. No product, script, or test file imports the module. The file still exists, so status is dead-candidate rather than removed.",
       "evidence": [
         {
-          "path": "src/renderer/project/courseProjectIo.ts",
+          "path": "src/renderer/project/openProject.ts",
           "symbol": "openDefaultCourseProject",
-          "note": "Current product open accepts only V9."
+          "note": "Product open is V9."
         },
         {
-          "path": "tests/unit/projectArchive.test.ts",
-          "symbol": "createProjectArchive / openProjectArchive",
-          "note": "Retained V8 archive round-trip, integrity and traversal-defense contract."
-        },
-        {
-          "path": "tests/unit/projectFormatIsolation.test.ts",
-          "symbol": "createProjectArchive",
-          "note": "Builds an explicit V8 input only to prove the V9 product opener rejects it."
+          "path": "src/renderer/project/saveProject.ts",
+          "symbol": "createCourseProjectArchive",
+          "note": "Product save is V9."
         }
       ],
       "consumerCategories": {
         "staticImportsOrReferences": {
-          "confirmed": [
-            {
-              "path": "src/renderer/project/openProject.ts",
-              "symbol": "openProjectArchive",
-              "use": "Legacy project-open adapter outside the V9 product path."
-            },
-            {
-              "path": "src/renderer/project/saveProject.ts",
-              "symbol": "createProjectArchive",
-              "use": "Legacy project-save adapter outside the V9 product path."
-            }
-          ],
+          "confirmed": [],
           "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
@@ -1304,54 +1551,9 @@
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/unit/projectArchive.test.ts",
-              "symbol": "createProjectArchive",
-              "use": "Direct V8 archive security/round-trip tests."
-            },
-            {
-              "path": "tests/unit/asyncArchive.test.ts",
-              "symbol": "createProjectArchiveAsync",
-              "use": "Async V8 archive tests."
-            },
-            {
-              "path": "tests/unit/componentContentIntegrity.test.ts",
-              "symbol": "createProjectArchive / openProjectArchive",
-              "use": "Rejects component bytes whose content no longer matches V8 metadata."
-            },
-            {
-              "path": "tests/unit/courseProjectArchive.test.ts",
-              "symbol": "createProjectArchive / openProjectArchive",
-              "use": "Proves the V8 and V9 archive parsers remain format-isolated."
-            },
-            {
-              "path": "tests/unit/courseProjectMigration.test.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds an explicit V8 migration input for rejection/migration characterization."
-            },
-            {
-              "path": "tests/unit/editorStore.test.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds a V8 input to prove the active Store open path rejects it."
-            },
-            {
-              "path": "tests/unit/formulaNode.test.ts",
-              "symbol": "createProjectArchive / openProjectArchive",
-              "use": "Retained V8 formula-node archive round-trip coverage."
-            },
-            {
-              "path": "tests/unit/projectFormatIsolation.test.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds a V8 archive solely to prove product V9 format isolation."
-            },
-            {
-              "path": "tests/unit/textEmphasis.test.ts",
-              "symbol": "createProjectArchive / openProjectArchive",
-              "use": "Retained V8 text-emphasis archive round-trip coverage."
-            },
-            {
-              "path": "tests/unit/validateProject.test.ts",
-              "symbol": "createProjectArchive",
-              "use": "Builds V8 archive inputs for CLI format-rejection diagnostics."
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "target-reference:LEG-008-v8-project-archive",
+              "use": "References file-absent target src/renderer/project/projectArchive.ts via src/renderer/project/projectArchive.ts."
             }
           ],
           "unknowns": []
@@ -1362,7 +1564,7 @@
         }
       },
       "replacement": {
-        "status": "v9-product-and-release-fixtures-complete-retained-tests-remain",
+        "status": "v9-product-complete-module-file-remains",
         "paths": [
           {
             "path": "scripts/build-render-host-benchmark.ts",
@@ -1377,22 +1579,22 @@
             "symbol": "renderHostBenchmarkProject / renderHostBenchmarkPublished"
           }
         ],
-        "notes": "All committed sample, portability, render-host and release-verifier consumers use V9/V2. The remaining archive implementation is retained only for isolated adapters and focused tests; it must not be reconnected to the product open path."
+        "notes": "Replacement is courseProjectArchive.ts / courseProjectIo.ts. r11-054 may delete projectArchive.ts after re-running the zero query."
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
-        "state": "nonzero-retained",
+        "state": "zero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'openProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 29
+            "command": "(git grep -n -I -F -- 'openProjectArchive' -- src tests scripts examples | Measure-Object).Count",
+            "observedMatches": 1
           },
           {
-            "command": "(git grep -n -I -F -- 'createProjectArchive' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 45
+            "command": "(git grep -n -I -F -- 'createProjectArchive' -- src tests scripts examples | Measure-Object).Count",
+            "observedMatches": 1
           }
         ],
-        "requiredForRemoval": "Remove or migrate the isolated open/save adapters and every focused archive, feature round-trip, corruption and format-isolation test without weakening product V8 rejection. Current release fixtures are no longer a blocker."
+        "requiredForRemoval": "Satisfied for consumers: the only remaining matches are the module file itself. Delete the file in r11-054; do not write status removed while the file exists."
       },
       "persistedCompatibility": {
         "status": "none-confirmed",
@@ -1418,22 +1620,21 @@
         "strategy": "Restore a migrated tooling fixture independently; never reconnect openProjectArchive to the product V9 open route."
       },
       "indexImpact": "semantic-update",
-      "unknowns": [
-        "Whether the isolated V8 feature round-trip tests should later move to schema-level unit fixtures requires a separate measured task; no current release artifact depends on them."
-      ]
+      "unknowns": []
     },
     {
       "id": "LEG-009",
-      "legacyTarget": {
-        "kind": "retained-v8-test-factory",
-        "path": "tests/helpers/projectV8.ts",
-        "symbols": [
-          "createProjectV8Fields"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-009-v8-test-factory",
+          "kind": "retained-v8-test-factory",
+          "path": "tests/helpers/projectV8.ts",
+          "expectation": "file-absent"
+        }
+      ],
       "owner": "Test Tooling",
-      "status": "retained-compatibility",
-      "currentFact": "A shared Project V8 field factory supports tests for the retained Legacy payload, player, archive, runtime, and Web package paths.",
+      "status": "removed",
+      "currentFact": "tests/helpers/projectV8.ts is absent from the working tree and createProjectV8Fields has zero matches under src/tests/scripts/examples. Parent V8 success tests that imported it are also gone.",
       "evidence": [
         {
           "path": "tests/helpers/projectV8.ts",
@@ -1444,9 +1645,7 @@
       "consumerCategories": {
         "staticImportsOrReferences": {
           "confirmed": [],
-          "unknowns": [
-            "This helper is test-only; its direct consumers are recorded in testConsumers."
-          ]
+          "unknowns": []
         },
         "dynamicStringIpcOrConfig": {
           "confirmed": [],
@@ -1454,63 +1653,22 @@
         },
         "playerPreviewOrExport": {
           "confirmed": [],
-          "unknowns": [
-            "The helper itself is not shipped; tests exercise the Legacy player/export paths recorded in LEG-002."
-          ]
+          "unknowns": []
         },
         "buildFixtureOrRelease": {
           "confirmed": [],
-          "unknowns": [
-            "No script outside tests imports this helper."
-          ]
+          "unknowns": []
         },
         "persistedRecoveryOrCrossVersion": {
           "confirmed": [],
-          "unknowns": [
-            "No product persistence obligation; it creates in-memory test values."
-          ]
+          "unknowns": []
         },
         "testConsumers": {
           "confirmed": [
             {
-              "path": "tests/integration/player-payload.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy payload parsing tests."
-            },
-            {
-              "path": "tests/unit/courseRuntimeKernel.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy runtime kernel fixture."
-            },
-            {
-              "path": "tests/unit/courseRuntimeKernelLifecycle.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy runtime lifecycle fixture."
-            },
-            {
-              "path": "tests/unit/export.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy export fixture."
-            },
-            {
-              "path": "tests/unit/projectArchive.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "V8 archive fixture."
-            },
-            {
-              "path": "tests/unit/publishedLesson.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy published lesson fixture."
-            },
-            {
-              "path": "tests/unit/runtimeExport.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy Runtime export fixture."
-            },
-            {
-              "path": "tests/unit/webPackageExport.test.ts",
-              "symbol": "createProjectV8Fields",
-              "use": "Legacy Web package fixture."
+              "path": "tests/unit/architectureDependencyRatchet.test.ts",
+              "symbol": "target-reference:LEG-009-v8-test-factory",
+              "use": "References file-absent target tests/helpers/projectV8.ts via tests/helpers/projectV8.ts."
             }
           ],
           "unknowns": []
@@ -1532,14 +1690,14 @@
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
-        "state": "nonzero-retained",
+        "state": "zero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'createProjectV8Fields' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
-            "observedMatches": 17
+            "command": "(git grep -n -I -F -- 'createProjectV8Fields' -- src tests scripts examples | Measure-Object).Count",
+            "observedMatches": 0
           }
         ],
-        "requiredForRemoval": "All eight test files must migrate or be deleted with their parent Legacy behavior; helper references must then be zero."
+        "requiredForRemoval": "Satisfied: helper file and consumers are already gone. Not a r11-054 deletion candidate."
       },
       "persistedCompatibility": {
         "status": "none-test-only",
@@ -1567,13 +1725,14 @@
     },
     {
       "id": "LEG-010",
-      "legacyTarget": {
-        "kind": "removed-v8-validator",
-        "path": "src/renderer/project/validateProjectArchive.ts",
-        "symbols": [
-          "validateProjectArchiveBytes"
-        ]
-      },
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-010-v8-validator",
+          "kind": "removed-v8-validator",
+          "path": "src/renderer/project/validateProjectArchive.ts",
+          "expectation": "file-absent"
+        }
+      ],
       "owner": "Diagnostics / Tooling",
       "status": "removed",
       "currentFact": "ARCH-5 removed the entire isolated V8 archive-validation module at 3bcbebf after all nine exports had zero external consumers; current package validation remains on the Course Project V9 CLI. The pre-consolidation deletion gate is recoverable from Git history at a7d11e9:docs/development-plan/baselines/ARCH_5_DELETION_ADMISSION_REPORT.md.",
@@ -1611,7 +1770,13 @@
           "unknowns": []
         },
         "testConsumers": {
-          "confirmed": [],
+          "confirmed": [
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "target-reference:LEG-010-v8-validator",
+              "use": "References file-absent target src/renderer/project/validateProjectArchive.ts via src/renderer/project/validateProjectArchive.ts."
+            }
+          ],
           "unknowns": []
         },
         "cacheAsyncGeneratedOrPackaging": {
@@ -1639,10 +1804,10 @@
       },
       "targetRemovalPhase": "ARCH-5",
       "zeroReferenceEvidence": {
-        "state": "removed-exact-zero",
+        "state": "zero",
         "queries": [
           {
-            "command": "(git grep -n -I -F -- 'validateProjectArchiveBytes' -- 'src/**' 'scripts/**' 'tests/**' 'examples/**' | Measure-Object).Count",
+            "command": "(git grep -n -I -F -- 'validateProjectArchiveBytes' -- src tests scripts examples | Measure-Object).Count",
             "observedMatches": 0
           }
         ],
@@ -1673,6 +1838,1559 @@
       },
       "indexImpact": "semantic-updated",
       "unknowns": []
+    },
+    {
+      "id": "LEG-011",
+      "legacyTargets": [
+        {
+          "expectationId": "LEG-011-project-types",
+          "kind": "remaining-v8-type-owner",
+          "path": "src/shared/projectTypes.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-011-project-schema",
+          "kind": "remaining-v8-schema-owner",
+          "path": "src/shared/projectSchema.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-011-create-project",
+          "kind": "remaining-v8-factory",
+          "path": "src/renderer/project/createProject.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-011-schema-type-contract",
+          "kind": "remaining-v8-schema-contract",
+          "path": "src/shared/projectSchemaTypeContract.ts",
+          "expectation": "file-absent"
+        },
+        {
+          "expectationId": "LEG-011-course-project-model-symbols",
+          "kind": "mixed-v8-model-host",
+          "path": "src/shared/courseProjectModel.ts",
+          "expectation": "symbol-absent",
+          "symbols": [
+            "ProjectDocument",
+            "SceneNode",
+            "SceneNodeOverride",
+            "migrateProjectV8ToCourseProjectV9",
+            "projectDocumentSchema"
+          ]
+        }
+      ],
+      "owner": "Integrator",
+      "status": "active-debt",
+      "currentFact": "r11-053 re-scan of LEGACY_SCAN_TOKENS on the integrated working tree. Phaser overlay, createProject node factories, projectTypes, V8 health/schema modules, and many tests still match. New slice/composition files introduced by 1.1 modularization are added. This record is not zero.",
+      "evidence": [
+        {
+          "path": "scripts/check-legacy-consumers.ts",
+          "symbol": "scanTokenHits",
+          "note": "Bare-token scanner over src, tests, scripts, examples, artifacts, and package.json."
+        }
+      ],
+      "consumerCategories": {
+        "staticImportsOrReferences": {
+          "confirmed": [
+            {
+              "path": "src/renderer/authoring/componentTextEditSession.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/authoring/flowTextEdit.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/authoring/spatialWorldAuthoring.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/components/commitComponentPackageAuthoring.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/components/editableComponentPackage.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/composition/crossSurfaceCommands.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer after 1.1 modularization."
+            },
+            {
+              "path": "src/renderer/composition/crossSurfaceCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/courseReferenceCleanup.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/effectiveLayerCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/flowEditorCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/flowSharedAuthoringAdapters.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/course/flowSharedAuthoringAdapters.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/globalLayerCommands.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/course/globalLayerCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/slideAuthoringBackend.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/slideInteractionView.ts",
+              "symbol": "SceneDocument|ScenePresentation",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/course/spatialEditorCommands.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/course/spatialEditorCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/v9MediaAudioCommands.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/course/v9MediaAudioCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/course/v9SlideContentCommands.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/dev/v9CandidateSmokeInject.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/diagnostics/projectHealthNavigation.ts",
+              "symbol": "ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/interactions/interactionAuthoringView.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/media/commitCourseMediaAuthoring.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/phaser/adapters/NodeAdapter.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/phaser/adapters/ProxyNodeAdapter.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/phaser/EditorPhaserBridge.ts",
+              "symbol": "SceneDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/phaser/EditorScene.ts",
+              "symbol": "SceneDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/project/courseProjectArchive.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/project/createCourseProject.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/project/createFlowCourseProject.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/project/createProject.ts",
+              "symbol": "PROJECT_SCHEMA_VERSION|ProjectDocument|SceneDocument|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/project/createSpatialCourseProject.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/project/projectArchive.ts",
+              "symbol": "PROJECT_SCHEMA_VERSION|ProjectDocument|projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/project/projectArchive.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via @/shared/projectSchema."
+            },
+            {
+              "path": "src/renderer/project/projectArchive.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/runtime/commitRuntimeAuthoring.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/runtime/courseRuntimeTransactions.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/store/editorStore.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/store/slices/courseLifecycleSlice.ts",
+              "symbol": "ProjectDocument",
+              "use": "Fail-loud V8 open path still names ProjectDocument."
+            },
+            {
+              "path": "src/renderer/store/slices/flowAuthoringSlice.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer after 1.1 modularization."
+            },
+            {
+              "path": "src/renderer/store/slices/flowAuthoringSlice.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/store/slices/slideAuthoringSlice.ts",
+              "symbol": "createProject",
+              "use": "Still imports node factories from createProject.ts."
+            },
+            {
+              "path": "src/renderer/store/slices/slideAuthoringSlice.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/store/slices/slideOwnedCommands.ts",
+              "symbol": "SceneNode|ScenePresentationState",
+              "use": "Scanner-confirmed remaining consumer after 1.1 modularization."
+            },
+            {
+              "path": "src/renderer/store/slices/slideOwnedCommands.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/store/slices/spatialAuthoringSlice.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer after 1.1 modularization."
+            },
+            {
+              "path": "src/renderer/store/slices/spatialAuthoringSlice.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/store/slideEditorProjection.ts",
+              "symbol": "SceneDocument|SceneNode|SceneNodeOverride",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/store/v9LayerMutations.ts",
+              "symbol": "SceneNode|SceneNodeOverride",
+              "use": "Scanner-confirmed remaining consumer after 1.1 modularization."
+            },
+            {
+              "path": "src/renderer/store/v9LayerMutations.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/DeveloperTab.tsx",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/ui/ElementsTab.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/ui/ElementsTab.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/FlowBlockContextToolbar.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/FormulaAuthoringEditor.tsx",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via ../../shared/projectSchema."
+            },
+            {
+              "path": "src/renderer/ui/FormulaAuthoringEditor.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/FormulaEditDialog.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/MediaTab.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/NodesTab.tsx",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/ui/PresenterSettingsEditor.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/SceneStateStrip.tsx",
+              "symbol": "ScenePresentationState",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/ui/SceneStateStrip.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/TextEditOverlay.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/ui/workspaceSlidePreviewRebuild.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/ui/workspaceSlidePreviewRebuild.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/shared/assetReferences.ts",
+              "symbol": "ProjectDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/assetReferences.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/componentPackageLifecycle.ts",
+              "symbol": "ProjectDocument|SceneDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/componentPackageLifecycle.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/constants.ts",
+              "symbol": "PROJECT_SCHEMA_VERSION",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/contracts/component-v4/types.ts",
+              "symbol": "ExportPayload|ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/contracts/component-v4/types.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../projectTypes."
+            },
+            {
+              "path": "src/shared/contracts/course-project-v9/schema.ts",
+              "symbol": "projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/contracts/course-project-v9/schema.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via ../../projectSchema."
+            },
+            {
+              "path": "src/shared/courseProjectHealth/controllerMedia.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../projectTypes."
+            },
+            {
+              "path": "src/shared/courseProjectModel.ts",
+              "symbol": "ProjectDocument|SceneNode|SceneNodeOverride|migrateProjectV8ToCourseProjectV9|projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/courseProjectModel.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via ./projectSchema."
+            },
+            {
+              "path": "src/shared/courseProjectModel.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/imageEffects.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/informationRelease.ts",
+              "symbol": "ProjectDocument|SceneDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/informationRelease.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/playerAuthoringProtocol.ts",
+              "symbol": "SceneNode|sceneNodeSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/presentation.ts",
+              "symbol": "SceneDocument|SceneNode|SceneNodeOverride|ScenePresentation|ScenePresentationState",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/presentation.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/projectDiagnostics.ts",
+              "symbol": "ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/projectDiagnostics.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/projectHealth.ts",
+              "symbol": "ProjectDocument|SceneDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/projectHealth.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/projectSchema.ts",
+              "symbol": "SceneNode|projectDocumentSchema|sceneNodeSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/projectSchema.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/projectSchemaTypeContract.ts",
+              "symbol": "ProjectDocument|projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/projectSchemaTypeContract.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via ./projectSchema."
+            },
+            {
+              "path": "src/shared/projectSchemaTypeContract.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/projectTypes.ts",
+              "symbol": "ProjectDocument|SceneDocument|SceneNode|SceneNodeOverride|ScenePresentation|ScenePresentationState",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/publishedLessonTypes.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/publishedLessonTypes.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            },
+            {
+              "path": "src/shared/visualDensity.ts",
+              "symbol": "ProjectDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/shared/visualDensity.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ./projectTypes."
+            }
+          ],
+          "unknowns": []
+        },
+        "dynamicStringIpcOrConfig": {
+          "confirmed": [],
+          "unknowns": []
+        },
+        "playerPreviewOrExport": {
+          "confirmed": [
+            {
+              "path": "src/player/AudioManager.ts",
+              "symbol": "ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/AudioManager.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/player/CourseRuntimeKernel.ts",
+              "symbol": "ExportPayload|SceneDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/CourseRuntimeKernel.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/player/globalLayerVisibility.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/player/index.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "src/player/payload.ts",
+              "symbol": "projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/payload.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via ../shared/projectSchema."
+            },
+            {
+              "path": "src/player/PlayerPresenterInput.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/player/PlayerScene.ts",
+              "symbol": "ExportPayload|SceneDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/PlayerScene.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/player/publishedLesson.ts",
+              "symbol": "ExportPayload|ProjectDocument|SceneNode|SceneNodeOverride",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/publishedLesson.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/player/renderNode.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/surfaces/flow/flowModel.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/player/surfaces/flow/FlowSurfaceHost.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/player/surfaces/publishedDynamicHosts.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/player/surfaces/publishedFormula.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/player/surfaces/publishedNativeText.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/player/surfaces/slide/publishedSlideAuthoringPatch.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/player/surfaces/spatial/SpatialSurfaceHost.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../../shared/projectTypes."
+            },
+            {
+              "path": "src/player/teacherControllerDom.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/buildExportPayload.ts",
+              "symbol": "ExportPayload|ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/buildExportPayload.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/buildPptx.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/buildPublishedLesson.ts",
+              "symbol": "ExportPayload|SceneNode|SceneNodeOverride",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/buildPublishedLesson.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/buildWebPackage.ts",
+              "symbol": "ExportPayload|ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/buildWebPackage.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/course/buildCoursePptx.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "src/renderer/export/exportPayloadSupport.ts",
+              "symbol": "ExportPayload|ProjectDocument|SceneDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/exportPayloadSupport.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/pptxImages.ts",
+              "symbol": "ExportPayload|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/pptxImages.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/pptxShared.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/pptxShared.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/pptxTextAndShape.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/renderPptxComponentSnapshots.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/renderPptxRuntimeSnapshots.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "src/renderer/export/renderSceneImages.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../shared/projectTypes."
+            },
+            {
+              "path": "src/renderer/export/slideVisualPreflight.ts",
+              "symbol": "ProjectDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            }
+          ],
+          "unknowns": []
+        },
+        "buildFixtureOrRelease": {
+          "confirmed": [
+            {
+              "path": "examples/render-host-benchmark/render-host-benchmark-v2.html",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "scripts/build-component-catalog-matrix.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "scripts/build-interactive-lesson.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "scripts/repo-index/fixtures/adapter/src/index.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "scripts/run-courseware-authoring.ts",
+              "symbol": "ProjectDocument",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "scripts/validate-project.ts",
+              "symbol": "legacy-whole-canvas|legacy-runtime-v2",
+              "use": "Project validator still carries explicit legacy discriminator handling."
+            }
+          ],
+          "unknowns": []
+        },
+        "persistedRecoveryOrCrossVersion": {
+          "confirmed": [],
+          "unknowns": []
+        },
+        "testConsumers": {
+          "confirmed": [
+            {
+              "path": "tests/e2e/componentCatalogMatrix.spec.ts",
+              "symbol": "导入旧版工程",
+              "use": "E2E rejection path still names legacy project import."
+            },
+            {
+              "path": "tests/e2e/editor.spec.ts",
+              "symbol": "导入旧版工程",
+              "use": "Editor E2E rejection path still names legacy project import."
+            },
+            {
+              "path": "tests/e2e/window.d.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/integration/courseMediaLibraryImportVerticalSlice.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/integration/courseRuntimeAssetReplacementVerticalSlice.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/integration/courseRuntimeSourceAuthoringVerticalSlice.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/integration/imageReplacementVerticalSlice.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/integration/publishedPhaserComponentSlideHostIntegration.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via src/shared/projectSchema.ts."
+            },
+            {
+              "path": "tests/unit/aiCapabilities.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via src/shared/projectTypes.ts."
+            },
+            {
+              "path": "tests/unit/architectureDependencyRatchet.test.ts",
+              "symbol": "ProjectDocument|projectCandidatePreviewDocument|v9HistoryToStoreHistory|migrateProjectV8ToCourseProjectV9",
+              "use": "Negative ratchet still names frozen tokens."
+            },
+            {
+              "path": "tests/unit/assetReferences.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/assetTransactions.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/assetTransactions.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/asyncWebPackage.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/audioManager.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/batchMediaAndInsertion.test.ts",
+              "symbol": "SceneNode|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/batchMediaAndInsertion.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/buildPublishedCourseV2.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/buildPublishedCourseV2.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/bundledFontExportEmbedding.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/componentAuthoringTargetRegistry.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/componentPackage.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/componentPackageLifecycle.test.ts",
+              "symbol": "ProjectDocument|SceneDocument|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/componentPackageLifecycle.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/componentPropertiesEditor.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/componentTextEditSession.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/courseComponentPackageTransactions.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/courseImageReplacementPlan.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/courseLayerComposition.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/courseLocationCommands.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/courseMediaLibraryImportPlan.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/coursePrintArtifacts.test.ts",
+              "symbol": "ExportPayload",
+              "use": "Print artifact fail-loud coverage still names ExportPayload."
+            },
+            {
+              "path": "tests/unit/courseProjectArchive.test.ts",
+              "symbol": "createProject|导入旧版工程",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/courseProjectCoreContract.test.ts",
+              "symbol": "createProject|migrateProjectV8ToCourseProjectV9|legacy-runtime-v2",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/courseProjectHealth.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/courseProjectTopLevelFields.test.ts",
+              "symbol": "PROJECT_SCHEMA_VERSION",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/courseProjectValidationDiagnostics.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/courseRuntimeTransactions.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/coursewareAuthoringRunner.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/coursewareSkillsInstaller.test.ts",
+              "symbol": "build-project-v8-courseware",
+              "use": "Skill installer coverage still names the retired V8 builder."
+            },
+            {
+              "path": "tests/unit/designTokens.test.tsx",
+              "symbol": "createProject|projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/editorFormattingUi.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/editorStore.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/editorStore.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/effectiveLayerCommands.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/effectiveLayerProjection.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/elementAnimationStaticExport.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/export.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/flowEditorCommands.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowEditorView.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowFormulaProperties.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowInlineTextEditor.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowMediaBlockEdit.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/flowOverlayTransform.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowProductIntegration.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/flowSharedAuthoringAdapters.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowSurfaceHost.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/flowUnifiedLayerEntry.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/flowUnifiedLayers.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowWorkspace.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/flowWorkspaceMedia.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/formulaCrossSurface.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/formulaLinear.test.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via @/shared/projectSchema."
+            },
+            {
+              "path": "tests/unit/formulaLinear.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/formulaNode.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/formulaNodeUi.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/imageSafeAreas.test.tsx",
+              "symbol": "createProject|projectDocumentSchema|sceneNodeSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/imageSafeAreas.test.tsx",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via ../../src/shared/projectSchema."
+            },
+            {
+              "path": "tests/unit/informationRelease.test.ts",
+              "symbol": "ProjectDocument|SceneDocument|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/informationRelease.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/interactionEditor.test.tsx",
+              "symbol": "SceneDocument|SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/interactionEditor.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/mediaTab.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/nodeAdapterAnimation.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/nodeExportHostFontWiring.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/nodeMotionDirector.test.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/nodeMotionDirector.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/playerAuthoringProtocol.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/playerComponentV4Render.test.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/playerComponentV4Render.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/playerSceneComponentEventBuffer.test.ts",
+              "symbol": "ExportPayload|ProjectDocument|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/playerSceneComponentEventBuffer.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/playerSceneMotionLifecycle.test.ts",
+              "symbol": "ExportPayload|ProjectDocument|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/playerSceneMotionLifecycle.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/presentation.test.ts",
+              "symbol": "SceneDocument|createProject|projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/presentation.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/presenterSettingsUi.test.tsx",
+              "symbol": "projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/presenterSettingsUi.test.tsx",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via @/shared/projectSchema."
+            },
+            {
+              "path": "tests/unit/projectArchive.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/projectDiagnostics.test.ts",
+              "symbol": "ProjectDocument|SceneDocument|createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/projectDiagnostics.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/projectHealthNavigation.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/projectV8Schema.test.ts",
+              "symbol": "createProject|projectDocumentSchema",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/publishedAuthoringSession.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/publishedComponentMount.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/publishedCourseNavigation.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/publishedCourseProtocol.test.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer."
+            },
+            {
+              "path": "tests/unit/publishedSlideAuthoringPatch.test.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer."
+            },
+            {
+              "path": "tests/unit/renderPptxComponentSnapshots.test.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/renderPptxRuntimeSnapshots.test.ts",
+              "symbol": "ExportPayload",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/renderVideoNode.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/repoIndexGenerator.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via src/shared/projectTypes.ts."
+            },
+            {
+              "path": "tests/unit/repoIndexSemantic.test.ts",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via src/shared/projectSchema.ts."
+            },
+            {
+              "path": "tests/unit/repoIndexTypeScriptAdapter.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes, src/shared/projectTypes.ts."
+            },
+            {
+              "path": "tests/unit/runtimeTemplateLifecycleIntegration.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/sceneStateUi.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/slidePreviewRebuildKey.test.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/slidePreviewRebuildKey.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/spatialAddVideoNode.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/spatialLocationTryRun.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/spatialProductIntegration.test.tsx",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/spatialSurfaceHost.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/spatialWorkspaceAuthoring.test.ts",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer."
+            },
+            {
+              "path": "tests/unit/teacherControllerLayout.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/teacherControllerLayout.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via ../../src/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/teacherControllerRuntimeSession.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/textEmphasis.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/textLayout.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/textRuns.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/v9GlobalLayerUiAdapter.test.tsx",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/v9MediaAudioCommands.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/v9SlideActionCommands.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/v9SlideContentCommands.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "tests/unit/v9SlideTextTransaction.test.ts",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via @/shared/projectTypes."
+            },
+            {
+              "path": "tests/unit/validateProject.test.ts",
+              "symbol": "createProject|legacy-whole-canvas|legacy-runtime-v2",
+              "use": "Scanner-confirmed remaining consumer at r11-053 re-scan."
+            },
+            {
+              "path": "tests/unit/visualDensity.test.ts",
+              "symbol": "createProject",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            }
+          ],
+          "unknowns": []
+        },
+        "cacheAsyncGeneratedOrPackaging": {
+          "confirmed": [
+            {
+              "path": "artifacts/ai-capabilities/generation-evidence.json",
+              "symbol": "target-reference:LEG-011-project-schema",
+              "use": "References file-absent target src/shared/projectSchema.ts via src/shared/projectSchema.ts."
+            },
+            {
+              "path": "artifacts/ai-capabilities/generation-evidence.json",
+              "symbol": "target-reference:LEG-011-project-types",
+              "use": "References file-absent target src/shared/projectTypes.ts via src/shared/projectTypes.ts."
+            },
+            {
+              "path": "artifacts/component-catalog-matrix/component-catalog-v9-matrix.html",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            },
+            {
+              "path": "artifacts/photosynthesis-lesson/photosynthesis-interactive-lesson.html",
+              "symbol": "SceneNode",
+              "use": "Scanner-confirmed remaining consumer at r11-002 freeze; later lanes may only reduce this set."
+            }
+          ],
+          "unknowns": []
+        }
+      },
+      "replacement": {
+        "status": "later-1-1-lanes",
+        "paths": [
+          {
+            "path": "src/shared/contracts/native-v1/index.ts",
+            "symbol": "NativeRenderableNode"
+          },
+          {
+            "path": "src/shared/contracts/course-project-v9/types.ts",
+            "symbol": "CourseProjectDocument"
+          },
+          {
+            "path": "src/shared/contracts/published-course-v2/types.ts",
+            "symbol": "PublishedCourseV2Payload"
+          }
+        ],
+        "notes": "Native/V9/Published replacements exist per surface, but SceneNode, createProject, ProjectDocument, and ExportPayload tokens still have product and test hits. r11-053 does not mark this record zero."
+      },
+      "targetRemovalPhase": "1.1",
+      "zeroReferenceEvidence": {
+        "state": "nonzero",
+        "queries": [
+          {
+            "command": "npx tsx -e \"import { scanTokenHits } from './scripts/check-legacy-consumers.ts'; console.log(scanTokenHits(process.cwd()).length)\"",
+            "observedMatches": 760
+          }
+        ],
+        "requiredForRemoval": "All listed paths must stop matching LEGACY_SCAN_TOKENS before this record can be zero."
+      },
+      "persistedCompatibility": {
+        "status": "none-confirmed",
+        "evidence": [
+          "docs/contracts/V9_COMPATIBILITY_POLICY.md"
+        ],
+        "unknowns": []
+      },
+      "tests": [
+        "tests/unit/legacyInventoryChecker.test.ts"
+      ],
+      "stableSince": {
+        "status": "r11-002-freeze",
+        "wave": "1.1",
+        "evidence": [
+          "scripts/check-legacy-consumers.ts"
+        ]
+      },
+      "rollback": {
+        "commit": "HEAD",
+        "strategy": "Revert only this freeze record; do not restore deleted product consumers."
+      },
+      "indexImpact": "semantic-update",
+      "unknowns": []
     }
-  ]
+  ],
+  "reconciledCounts": {
+    "recordCount": 11,
+    "byStatus": {
+      "active-debt": 7,
+      "removed": 3,
+      "dead-candidate": 1
+    },
+    "confirmedConsumerRelationsByCategory": {
+      "staticImportsOrReferences": 119,
+      "dynamicStringIpcOrConfig": 0,
+      "playerPreviewOrExport": 56,
+      "buildFixtureOrRelease": 9,
+      "persistedRecoveryOrCrossVersion": 0,
+      "testConsumers": 188,
+      "cacheAsyncGeneratedOrPackaging": 7
+    },
+    "confirmedConsumerRelationCount": 379,
+    "uniqueConfirmedConsumerEndpointCount": 379
+  }
 }

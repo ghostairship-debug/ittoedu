@@ -298,6 +298,26 @@ export interface ComponentDefinitionV4 {
   create(context: ComponentCreateContextV4): ComponentInstanceLifecycle
 }
 
+export interface EmbeddedComponentPackageMeta {
+  packageId: string
+  version: string
+  name: string
+  manifestPath: string
+  runtimePath: string
+  thumbnailPath?: string
+  /** Canonical SHA-256 of all embedded component paths and bytes. */
+  contentSha256: string
+  /** SHA-256 of the exact .h5component bytes selected from a catalog or file. */
+  sha256?: string
+  /** ISO timestamp recorded when the executable package entered this project. */
+  importedAt?: string
+  /** Human-readable catalog/source label; never an external absolute path. */
+  sourceLabel?: string
+  /** Explicit authoring provenance; imported third-party packages default to read-only. */
+  editableCopy?: boolean
+  sourcePackageId?: string
+}
+
 export interface ComponentPackageData {
   manifest: ComponentManifest
   runtimeSource: string

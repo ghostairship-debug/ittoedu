@@ -12,17 +12,7 @@ import {
   summarizeCourseProjectHealth,
   type CourseProjectHealthFinding,
 } from '../../shared/courseProjectHealth'
-import { analyzeInformationRelease } from '../../shared/informationRelease'
-import { analyzeVisualDensity } from '../../shared/visualDensity'
-import {
-  collectProjectHealth,
-  summarizeProjectHealth,
-  type ProjectHealthDiagnostic,
-} from '../../shared/projectHealth'
-import {
-  resolveCourseProjectHealthRoute,
-  resolveProjectHealthRoute,
-} from '../diagnostics/projectHealthNavigation'
+import { resolveCourseProjectHealthRoute } from '../diagnostics/projectHealthNavigation'
 import { componentPackagesToArchiveFiles } from '../components/componentPackageStore'
 import {
   selectActiveCourseProjectDocument,
@@ -41,6 +31,8 @@ const severityLabel = {
   warning: '提醒',
   info: '建议',
 } as const
+
+const severityOrder = ['error', 'warning', 'info'] as const
 
 function SeverityIcon({ severity }: { severity: 'error' | 'warning' | 'info' }) {
   if (severity === 'error') return <CircleAlert size={17} aria-hidden="true" />
@@ -67,65 +59,38 @@ function OpenProjectHealthPanel({
   onClose,
   onExportDiagnostics,
 }: Omit<ProjectHealthPanelProps, 'open'>) {
-  const project = useEditorStore((state) => state.project)
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const assetFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore((state) => state.componentPackages)
-  const courseDiagnostics = useMemo(
+  const diagnostics = useMemo(
     () => courseProject
       ? collectCourseProjectHealth(courseProject, {
           assetFiles,
           componentFiles: componentPackagesToArchiveFiles(componentPackages),
         })
-      : null,
+      : [],
     [assetFiles, componentPackages, courseProject],
   )
-  const legacyDiagnostics = useMemo(
-    () => courseProject ? null : collectProjectHealth(project, componentPackages),
-    [componentPackages, courseProject, project],
-  )
-  const diagnostics = courseDiagnostics ?? legacyDiagnostics ?? []
   const summary = useMemo(
-    () => courseDiagnostics
-      ? summarizeCourseProjectHealth(courseDiagnostics)
-      : summarizeProjectHealth(legacyDiagnostics ?? []),
-    [courseDiagnostics, legacyDiagnostics],
+    () => summarizeCourseProjectHealth(diagnostics),
+    [diagnostics],
   )
-  const informationRelease = useMemo(
-    () => courseProject ? null : analyzeInformationRelease(project),
-    [courseProject, project],
-  )
-  const visualDensity = useMemo(
-    () => courseProject ? null : analyzeVisualDensity(project),
-    [courseProject, project],
+  const grouped = useMemo(
+    () => severityOrder.map((severity) => ({
+      severity,
+      items: diagnostics.filter((item) => item.severity === severity),
+    })).filter((group) => group.items.length > 0),
+    [diagnostics],
   )
 
-  const locate = (diagnostic: ProjectHealthDiagnostic | CourseProjectHealthFinding) => {
-    if (courseProject) {
-      const route = resolveCourseProjectHealthRoute(
-        courseProject,
-        diagnostic as CourseProjectHealthFinding,
-      )
-      const store = useEditorStore.getState()
-      if (route.locationId) store.activateCourseLocation(route.locationId)
-      store.setEditingScope(route.scope)
-      if (route.layerItemId) store.selectNode(route.layerItemId)
-      if (route.tab === 'automation' || route.tab === 'components') {
-        store.setEditorMode('professional')
-      }
-      store.setActiveTab(route.tab)
-      store.setStatus(`已定位：${diagnostic.message}`)
-      onClose()
-      return
-    }
-    const legacyDiagnostic = diagnostic as ProjectHealthDiagnostic
-    const route = resolveProjectHealthRoute(project, legacyDiagnostic)
+  const locate = (diagnostic: CourseProjectHealthFinding) => {
+    if (!courseProject) return
+    const route = resolveCourseProjectHealthRoute(courseProject, diagnostic)
     const store = useEditorStore.getState()
+    if (route.locationId) store.activateCourseLocation(route.locationId)
     store.setEditingScope(route.scope)
-    if (route.sceneId) store.setActiveScene(route.sceneId)
-    if (route.stateId !== undefined) store.setActivePresentationState(route.stateId)
-    if (route.nodeId) store.selectNode(route.nodeId)
-    if (route.tab === 'automation' || legacyDiagnostic.scope === 'component-package') {
+    if (route.layerItemId) store.selectNode(route.layerItemId)
+    if (route.tab === 'automation' || route.tab === 'components') {
       store.setEditorMode('professional')
     }
     store.setActiveTab(route.tab)
@@ -157,47 +122,6 @@ function OpenProjectHealthPanel({
           <span className="is-info"><Info size={15} />{summary.info} 个建议</span>
         </div>
 
-        {informationRelease && <details className="information-release-summary">
-          <summary>
-            信息释放（只读） · {informationRelease.summary.stateCount} 个状态，
-            {informationRelease.summary.revealedCount} 个分步显示，
-            {informationRelease.summary.hiddenWithoutRevealCount} 个未连通隐藏节点
-          </summary>
-          <p>按现有场景、状态和交互规则分析可能的显示路径；运行时、媒体和组件事件只按“可能发生”计算，不模拟真实授课。</p>
-          <div className="information-release-grid" role="table" aria-label="信息释放状态概览">
-            {informationRelease.states.map((state) => (
-              <div className="information-release-row" role="row" key={`${state.sceneId}:${state.stateId}`}>
-                <strong role="cell">{state.sceneName} / {state.stateName}</strong>
-                <span role="cell">初始可见 {state.initialVisibleNodeIds.length}</span>
-                <span role="cell">分步显示 {state.revealSteps.length}</span>
-                <span role="cell" className={state.hiddenWithoutRevealNodeIds.length > 0 ? 'is-warning' : ''}>
-                  未连通 {state.hiddenWithoutRevealNodeIds.length}
-                </span>
-              </div>
-            ))}
-          </div>
-        </details>}
-
-        {visualDensity && <details className="information-release-summary visual-density-summary">
-          <summary>
-            视觉密度（启发式） · 最高 {visualDensity.summary.maximumScore}/100，
-            {visualDensity.summary.denseStateCount} 个高密度状态
-          </summary>
-          <p>分数只汇总对象数量、文字量、面积占用和明显重叠，不判断教学重点或视觉质量，也不会阻断导出。</p>
-          <div className="information-release-grid" role="table" aria-label="视觉密度状态概览">
-            {visualDensity.states.map((state) => (
-              <div className="information-release-row visual-density-row" role="row" key={`${state.sceneId}:${state.stateId}`}>
-                <strong role="cell">{state.sceneName} / {state.stateName}</strong>
-                <span role="cell">对象 {state.visibleNodeCount}</span>
-                <span role="cell">文字 {state.textCharacterCount}</span>
-                <span role="cell" className={state.band === 'dense' ? 'is-warning' : ''}>
-                  {state.score}/100 · {state.band === 'dense' ? '高' : state.band === 'balanced' ? '中' : '低'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </details>}
-
         <div className="project-health-panel__body">
           {diagnostics.length === 0 ? (
             <div className="project-health-empty">
@@ -206,24 +130,30 @@ function OpenProjectHealthPanel({
               <span>当前引用关系和交付配置完整。</span>
             </div>
           ) : (
-            <ol className="project-health-list">
-              {diagnostics.map((diagnostic, index) => (
-                <li
-                  key={`${diagnostic.code}:${diagnostic.path.join('.')}:${index}`}
-                  className={`project-health-issue is-${diagnostic.severity}`}
-                >
-                  <SeverityIcon severity={diagnostic.severity} />
-                  <span className="project-health-issue__content">
-                    <strong>{severityLabel[diagnostic.severity]}</strong>
-                    <span>{diagnostic.message}</span>
-                    <small>{diagnostic.code}</small>
-                  </span>
-                  <button type="button" onClick={() => locate(diagnostic)}>
-                    <LocateFixed size={14} />定位
-                  </button>
-                </li>
-              ))}
-            </ol>
+            grouped.map((group) => (
+              <ol
+                key={group.severity}
+                className="project-health-list"
+                aria-label={severityLabel[group.severity]}
+              >
+                {group.items.map((diagnostic, index) => (
+                  <li
+                    key={`${diagnostic.code}:${diagnostic.path.join('.')}:${index}`}
+                    className={`project-health-issue is-${diagnostic.severity}`}
+                  >
+                    <SeverityIcon severity={diagnostic.severity} />
+                    <span className="project-health-issue__content">
+                      <strong>{severityLabel[diagnostic.severity]}</strong>
+                      <span>{diagnostic.message}</span>
+                      <small>{diagnostic.code}</small>
+                    </span>
+                    <button type="button" onClick={() => locate(diagnostic)}>
+                      <LocateFixed size={14} />定位
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ))
           )}
         </div>
 

@@ -15,7 +15,23 @@ import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
   useEditorStore,
+  selectCandidateGlobalLayerItems,
 } from '../../src/renderer/store/editorStore'
+
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
+    ...entry,
+    layer: entry.plane ?? 'overlay',
+    visibility: {
+      mode: entry.visibility.mode,
+      sceneIds: entry.visibility.locationIds,
+    },
+    node: courseLayerItemToEditorCanvasNode(entry.item)!,
+  }))
+}
+
 
 const PACKAGE_ID = 'com.example.managed'
 
@@ -147,7 +163,7 @@ describe('editorStore component package management', () => {
     state.undo()
     state = useEditorStore.getState()
     expect(state.componentPackages).toEqual({})
-    expect(state.project.componentPackages).toEqual({})
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages).toEqual({})
 
     state.redo()
     state = useEditorStore.getState()
@@ -162,18 +178,18 @@ describe('editorStore component package management', () => {
 
     expect(store.deleteComponentPackage(PACKAGE_ID)).toBe(true)
     let state = useEditorStore.getState()
-    expect(state.project.componentPackages[PACKAGE_ID]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.history.past).toHaveLength(2)
 
     state.undo()
     state = useEditorStore.getState()
-    expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
     expectComponentPackageContents(state.componentPackages[PACKAGE_ID], imported)
 
     state.redo()
     state = useEditorStore.getState()
-    expect(state.project.componentPackages[PACKAGE_ID]).toBeUndefined()
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.componentPackages[PACKAGE_ID]).toBeUndefined()
   })
 
@@ -183,12 +199,12 @@ describe('editorStore component package management', () => {
     store.addExternalComponentNode(PACKAGE_ID)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
-    const before = structuredClone(useEditorStore.getState().project)
+    const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     const historyBefore = useEditorStore.getState().history.past.length
 
     expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID)).toBe(false)
     const state = useEditorStore.getState()
-    expect(state.project).toEqual(before)
+    expect(selectActiveCourseProjectDocument(state)!).toEqual(before)
     expect(state.componentPackages[PACKAGE_ID]).toBeDefined()
     expect(state.history.past).toHaveLength(historyBefore)
     expect(state.errorMessage).toContain('1 个场景实例和 1 个全局实例')
@@ -285,7 +301,7 @@ describe('editorStore component package management', () => {
     })
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
-    const globalNodeId = useEditorStore.getState().project.globalLayer
+    const globalNodeId = projectedGlobalLayer(useEditorStore.getState())
       .find(({ node }) => node.type === 'external-component')!.node.id
     useEditorStore.getState().updateNode(globalNodeId, {
       props: { label: '全局自定义', theme: 'dark' },
@@ -296,7 +312,7 @@ describe('editorStore component package management', () => {
     let state = useEditorStore.getState()
     expect(state.history.past).toHaveLength(historyBefore + 1)
     expect(state.activeTab).toBe('components')
-    expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
     expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
     expect(state.componentPackages[PACKAGE_ID]).not.toBe(second)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
@@ -304,7 +320,7 @@ describe('editorStore component package management', () => {
         component: { packageId: PACKAGE_ID, version: '2.0.0' },
         props: { label: '场景自定义', score: 7 },
       })
-    expect(state.project.globalLayer.find(({ node }) => node.id === globalNodeId)?.node)
+    expect(projectedGlobalLayer(state).find(({ node }) => node.id === globalNodeId)?.node)
       .toMatchObject({
         component: { packageId: PACKAGE_ID, version: '2.0.0' },
         props: { label: '全局自定义', theme: 'dark' },
@@ -312,7 +328,7 @@ describe('editorStore component package management', () => {
 
     state.undo()
     state = useEditorStore.getState()
-    expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
     expect(state.componentPackages[PACKAGE_ID]).toEqual(first)
     expect(state.componentPackages[PACKAGE_ID]).not.toBe(first)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
@@ -323,7 +339,7 @@ describe('editorStore component package management', () => {
 
     state.redo()
     state = useEditorStore.getState()
-    expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
     expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
     expect(state.componentPackages[PACKAGE_ID]).not.toBe(second)
   })
@@ -334,7 +350,7 @@ describe('editorStore component package management', () => {
     store.importComponentPackage(first)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
-    const before = structuredClone(useEditorStore.getState().project)
+    const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     const historyBefore = useEditorStore.getState().history.past.length
 
     expect(() => useEditorStore.getState().replaceComponentPackage(
@@ -347,7 +363,7 @@ describe('editorStore component package management', () => {
     )).toThrow('全局层')
 
     const state = useEditorStore.getState()
-    expect(state.project).toEqual(before)
+    expect(selectActiveCourseProjectDocument(state)!).toEqual(before)
     expect(state.componentPackages[PACKAGE_ID]).toBe(first)
     expect(state.history.past).toHaveLength(historyBefore)
   })

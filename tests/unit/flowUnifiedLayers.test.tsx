@@ -7,7 +7,7 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTeacherControllerNode, createTextNode } from '@/renderer/project/createProject'
+import { createTeacherControllerNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import {
   flowBlockLayerMembership,

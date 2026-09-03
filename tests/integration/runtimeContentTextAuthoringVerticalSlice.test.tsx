@@ -18,6 +18,8 @@ import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
   useEditorStore,
+  selectCandidateGlobalLayerItems,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
 import { Workspace } from '@/renderer/ui/Workspace'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -32,20 +34,56 @@ import {
 import type { PlayerAuthoringHostMessage } from '@/shared/playerAuthoringProtocol'
 import type { RuntimeAuthoringTarget } from '@/shared/runtimeTypes'
 
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
+    ...entry,
+    layer: entry.plane ?? 'overlay',
+    visibility: {
+      mode: entry.visibility.mode,
+      sceneIds: entry.visibility.locationIds,
+    },
+    node: courseLayerItemToEditorCanvasNode(entry.item)!,
+  }))
+}
+
+
 const publishedAuthoringHarness = vi.hoisted(() => ({
   latestRevision: -1,
   onMessage: null as ((message: PlayerAuthoringHostMessage) => void) | null,
+  mounts: [] as Array<{
+    scope: 'scene' | 'surface' | 'global'
+    stateId: string | null
+    sessionId: string
+    onMessage: ((message: PlayerAuthoringHostMessage) => void) | null
+    readyContext: { sceneId: string; stateId: string | null } | null
+    destroyCalls: number
+    ready: boolean
+  }>,
 }))
 
 vi.mock('@/renderer/ui/coursePlayerTryRun', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/renderer/ui/coursePlayerTryRun')>()
   return {
     ...actual,
-    mountPublishedCourseAuthoring: (
+    mountPublishedCourseAuthoring: async (
       input: Parameters<typeof actual.mountPublishedCourseAuthoring>[0],
     ) => {
-      publishedAuthoringHarness.onMessage = input.onMessage
+      const record = {
+        scope: input.scope,
+        stateId: input.stateId,
+        sessionId: input.sessionId,
+        onMessage: null as ((message: PlayerAuthoringHostMessage) => void) | null,
+        readyContext: null as { sceneId: string; stateId: string | null } | null,
+        destroyCalls: 0,
+        ready: false,
+      }
+      const onMessage = input.onMessage
         ? (message: PlayerAuthoringHostMessage) => {
+            if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
+              record.readyContext = { ...message.context }
+            }
             if ('revision' in message && typeof message.revision === 'number') {
               publishedAuthoringHarness.latestRevision = Math.max(
                 publishedAuthoringHarness.latestRevision,
@@ -55,7 +93,20 @@ vi.mock('@/renderer/ui/coursePlayerTryRun', async (importOriginal) => {
             input.onMessage?.(message)
           }
         : null
-      return actual.mountPublishedCourseAuthoring(input)
+      publishedAuthoringHarness.onMessage = onMessage
+      record.onMessage = onMessage
+      publishedAuthoringHarness.mounts.push(record)
+      const session = await actual.mountPublishedCourseAuthoring({
+        ...input,
+        ...(onMessage ? { onMessage } : {}),
+      })
+      const destroy = session.destroy.bind(session)
+      session.destroy = async () => {
+        record.destroyCalls += 1
+        await destroy()
+      }
+      record.ready = true
+      return session
     },
   }
 })
@@ -478,10 +529,10 @@ function targetForStore(source: RuntimeContentFixture): CourseRuntimeContentText
 function compatibilityDepths() {
   const state = useEditorStore.getState()
   return {
-    sidecarPast: state.slideCandidateSidecarPast.length,
-    sidecarFuture: state.slideCandidateSidecarFuture.length,
-    componentPast: state.slideCandidateComponentPackagesPast.length,
-    componentFuture: state.slideCandidateComponentPackagesFuture.length,
+    sidecarPast: state.courseAssetSidecarPast.length,
+    sidecarFuture: state.courseAssetSidecarFuture.length,
+    componentPast: state.courseComponentPackagesPast.length,
+    componentFuture: state.courseComponentPackagesFuture.length,
   }
 }
 
@@ -495,7 +546,7 @@ function authoritativeSnapshot() {
   const state = useEditorStore.getState()
   return {
     project: structuredClone(activeProject()),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
     storeHistory: structuredClone(state.history),
     files: byteMap(selectMediaAssetFiles(state)),
@@ -583,6 +634,7 @@ beforeEach(() => {
   targetRevision = 0
   publishedAuthoringHarness.latestRevision = -1
   publishedAuthoringHarness.onMessage = null
+  publishedAuthoringHarness.mounts.length = 0
   vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(PREVIEW_TOKEN)
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:runtime-content-preview')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
@@ -802,6 +854,133 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
 })
 
 describe('ARCH-2 Workspace Runtime content text binding', () => {
+  it('serially remounts the Published authoring host across scene, surface and global owners', async () => {
+    const source = loadFixture('slide-surface', { visible: true })
+    const spies = installWorkspaceWriteSpies()
+    let uuidSequence = 100
+    vi.mocked(globalThis.crypto.randomUUID).mockImplementation(() => {
+      uuidSequence += 1
+      return `00000000-0000-4000-8000-${String(uuidSequence).padStart(12, '0')}`
+    })
+
+    render(
+      <Workspace
+        onAddImage={() => undefined}
+        onAddVideo={() => undefined}
+        onSelectImageAsset={async () => null}
+      />,
+    )
+    await waitFor(() => {
+      expect(publishedAuthoringHarness.mounts).toHaveLength(1)
+      expect(publishedAuthoringHarness.mounts[0]).toMatchObject({
+        scope: 'scene',
+        destroyCalls: 0,
+        ready: true,
+      })
+    })
+    const previous = publishedAuthoringHarness.mounts[0]!
+
+    await act(async () => {
+      useEditorStore.getState().selectNode(source.itemId)
+    })
+    await waitFor(() => {
+      expect(useEditorStore.getState().slideBackend?.getSnapshot().scope).toBe('surface')
+      expect(publishedAuthoringHarness.mounts).toHaveLength(2)
+      expect(previous.destroyCalls).toBe(1)
+      expect(publishedAuthoringHarness.mounts[1]).toMatchObject({
+        scope: 'surface',
+        destroyCalls: 0,
+        ready: true,
+      })
+      expect(publishedAuthoringHarness.mounts[1]?.readyContext).toEqual({
+        sceneId: useEditorStore.getState().activeSceneId,
+        stateId: publishedAuthoringHarness.mounts[1]?.stateId,
+      })
+    })
+    const current = publishedAuthoringHarness.mounts[1]!
+    expect(current.sessionId).not.toBe(previous.sessionId)
+
+    const beforeStaleMessage = authoritativeSnapshot()
+    await act(async () => {
+      previous.onMessage?.({
+        type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
+        protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+        sessionId: previous.sessionId,
+        revision: 99,
+        update: {
+          revision: 99,
+          scope: 'scene',
+          sceneId: useEditorStore.getState().activeSceneId,
+          targets: [{
+            targetId: 'runtime:surface:stale',
+            nodeId: source.itemId,
+            scope: 'scene',
+            sceneId: useEditorStore.getState().activeSceneId,
+            kind: 'text',
+            key: CONTENT_KEY,
+            label: '过期表面课程标题',
+            multiline: false,
+            layer: 'overlay',
+            source: 'registered',
+            bounds: { x: 100, y: 90, width: 320, height: 48 },
+          }],
+        },
+      })
+    })
+    expect(screen.queryByRole('button', {
+      name: '过期表面课程标题，双击编辑文字',
+    })).not.toBeInTheDocument()
+    expect(spies.capture).not.toHaveBeenCalled()
+    expect(spies.update).not.toHaveBeenCalled()
+    expect(authoritativeSnapshot()).toEqual(beforeStaleMessage)
+
+    const currentRevision = publishedAuthoringHarness.latestRevision + 1
+    await act(async () => {
+      current.onMessage?.({
+        type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
+        protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+        sessionId: current.sessionId,
+        revision: currentRevision,
+        update: {
+          revision: currentRevision,
+          scope: 'scene',
+          sceneId: useEditorStore.getState().activeSceneId,
+          targets: [{
+            targetId: 'runtime:surface:current',
+            nodeId: source.itemId,
+            scope: 'scene',
+            sceneId: useEditorStore.getState().activeSceneId,
+            kind: 'text',
+            key: CONTENT_KEY,
+            label: '表面课程标题',
+            multiline: false,
+            layer: 'overlay',
+            source: 'registered',
+            bounds: { x: 100, y: 90, width: 320, height: 48 },
+          }],
+        },
+      })
+    })
+    expect(await screen.findByRole('button', {
+      name: '表面课程标题，双击编辑文字',
+    })).toBeInTheDocument()
+
+    await act(async () => {
+      useEditorStore.getState().setEditingScope('global')
+    })
+    await waitFor(() => {
+      expect(useEditorStore.getState().slideBackend?.getSnapshot().scope).toBe('global')
+      expect(publishedAuthoringHarness.mounts).toHaveLength(3)
+      expect(current.destroyCalls).toBe(1)
+      expect(publishedAuthoringHarness.mounts[2]).toMatchObject({
+        scope: 'global',
+        destroyCalls: 0,
+        ready: true,
+      })
+    })
+    expect(publishedAuthoringHarness.mounts[2]?.sessionId).not.toBe(current.sessionId)
+  })
+
   it.each(['slide-scene', 'slide-global'] as const)(
     'captures %s before opening and commits only through the canonical typed action',
     async (fixtureKind) => {

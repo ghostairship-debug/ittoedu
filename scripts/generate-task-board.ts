@@ -11,26 +11,21 @@ export type TaskStatus = (typeof taskStatuses)[number]
 
 const taskStatusSet = new Set<string>(taskStatuses)
 
-export const taskRisks = ['S1', 'S2'] as const
-
-export type TaskRisk = (typeof taskRisks)[number]
-
-const taskRiskSet = new Set<string>(taskRisks)
-
-export const hotspotTags = [
+export const writeLockTags = [
   'none',
   'editor-store-history',
   'app-save-recovery',
   'workspace-properties',
   'published-producer',
   'contracts-schema',
+  'legacy-inventory',
   'main-preload',
   'generated-index',
 ] as const
 
-export type HotspotTag = (typeof hotspotTags)[number]
+export type WriteLockTag = (typeof writeLockTags)[number]
 
-const hotspotTagSet = new Set<string>(hotspotTags)
+const writeLockTagSet = new Set<string>(writeLockTags)
 
 export interface TaskBoardRecord {
   id: string
@@ -38,13 +33,11 @@ export interface TaskBoardRecord {
   cardPath: string
   status: TaskStatus
   owner: string
-  risk: TaskRisk
-  hotspots: HotspotTag[]
+  writeLocks: WriteLockTag[]
   outcome: string
   writeScope: string
   acceptance: string
-  focusedValidation: string
-  safetyRollback: string
+  validation: string
 }
 
 function readBulletField(markdown: string, label: string): string {
@@ -71,42 +64,31 @@ export function parseTaskCard(markdown: string, cardPath: string): TaskBoardReco
     throw new Error(`active 任务必须有唯一 Owner：${cardPath}`)
   }
 
-  const riskHotspot = readBulletField(markdown, 'Risk / Hotspot')
-  if (!riskHotspot) throw new Error(`任务卡缺少字段 “Risk / Hotspot”：${cardPath}`)
-  const riskHotspotSplit = riskHotspot.split('/')
-  const risk = riskHotspotSplit[0]?.trim() ?? ''
-  if (!taskRiskSet.has(risk)) {
-    throw new Error(`风险级别无效（建卡任务只允许 S1 | S2）：${risk || '<空>'}（${cardPath}）`)
-  }
-  const hotspotText = riskHotspotSplit.slice(1).join('/').trim()
-  const hotspots = hotspotText
-    ? hotspotText.split(',').map((tag) => tag.trim()).filter(Boolean)
+  const writeLockText = readBulletField(markdown, 'Write locks')
+  if (!writeLockText) throw new Error(`任务卡缺少字段 “Write locks”：${cardPath}`)
+  const writeLocks = writeLockText
+    ? writeLockText.split(',').map((tag) => tag.trim()).filter(Boolean)
     : []
-  if (hotspots.length === 0) {
-    throw new Error(`Hotspot 不能为空；非热点任务写 none：${cardPath}`)
+  if (writeLocks.length === 0) {
+    throw new Error(`Write locks 不能为空；无共享写锁时写 none：${cardPath}`)
   }
-  for (const tag of hotspots) {
-    if (!hotspotTagSet.has(tag)) {
-      throw new Error(`未知热点标签：${tag}（${cardPath}；允许值：${hotspotTags.join(' | ')}）`)
+  for (const tag of writeLocks) {
+    if (!writeLockTagSet.has(tag)) {
+      throw new Error(`未知写锁标签：${tag}（${cardPath}；允许值：${writeLockTags.join(' | ')}）`)
     }
   }
-  if (hotspots.includes('none') && hotspots.length > 1) {
-    throw new Error(`Hotspot 为 none 时不得再列其他标签：${cardPath}`)
+  if (writeLocks.includes('none') && writeLocks.length > 1) {
+    throw new Error(`Write locks 为 none 时不得再列其他标签：${cardPath}`)
   }
 
-  const outcome = readBulletField(markdown, 'Outcome / Why now')
-  if (!outcome) throw new Error(`任务卡缺少字段 “Outcome / Why now”：${cardPath}`)
-  const writeScope = readBulletField(markdown, 'Write scope / Baseline')
-  if (!writeScope) throw new Error(`任务卡缺少字段 “Write scope / Baseline”：${cardPath}`)
+  const outcome = readBulletField(markdown, 'Outcome / Evidence')
+  if (!outcome) throw new Error(`任务卡缺少字段 “Outcome / Evidence”：${cardPath}`)
+  const writeScope = readBulletField(markdown, 'Write scope')
+  if (!writeScope) throw new Error(`任务卡缺少字段 “Write scope”：${cardPath}`)
   const acceptance = readBulletField(markdown, 'Acceptance')
   if (!acceptance) throw new Error(`任务卡缺少字段 “Acceptance”：${cardPath}`)
-  const focusedValidation = readBulletField(markdown, 'Focused validation')
-  if (!focusedValidation) throw new Error(`任务卡缺少字段 “Focused validation”：${cardPath}`)
-
-  const safetyRollback = readBulletField(markdown, 'S2 safety / rollback')
-  if (risk === 'S2' && !safetyRollback) {
-    throw new Error(`S2 任务必须填写 “S2 safety / rollback”：${cardPath}`)
-  }
+  const validation = readBulletField(markdown, 'Validation')
+  if (!validation) throw new Error(`任务卡缺少字段 “Validation”：${cardPath}`)
 
   return {
     id,
@@ -114,13 +96,11 @@ export function parseTaskCard(markdown: string, cardPath: string): TaskBoardReco
     cardPath,
     status: status as TaskStatus,
     owner,
-    risk: risk as TaskRisk,
-    hotspots: hotspots as HotspotTag[],
+    writeLocks: writeLocks as WriteLockTag[],
     outcome,
     writeScope,
     acceptance,
-    focusedValidation,
-    safetyRollback,
+    validation,
   }
 }
 
@@ -159,16 +139,16 @@ export async function readTaskCards(projectRoot: string): Promise<TaskBoardRecor
     records.push(record)
   }
 
-  const activeHotspotOwners = new Map<string, string>()
+  const activeLockOwners = new Map<string, string>()
   for (const record of records) {
     if (record.status !== 'active') continue
-    for (const tag of record.hotspots) {
+    for (const tag of record.writeLocks) {
       if (tag === 'none') continue
-      const existing = activeHotspotOwners.get(tag)
+      const existing = activeLockOwners.get(tag)
       if (existing) {
-        throw new Error(`热点并发冲突：${tag} 同时出现在 active 任务 ${existing} 与 ${record.id} 上`)
+        throw new Error(`写锁并发冲突：${tag} 同时出现在 active 任务 ${existing} 与 ${record.id} 上`)
       }
-      activeHotspotOwners.set(tag, record.id)
+      activeLockOwners.set(tag, record.id)
     }
   }
 
@@ -192,17 +172,17 @@ export function renderTaskBoard(records: readonly TaskBoardRecord[]): string {
     .join(' · ')
   const rows = records.map((record) => {
     const link = `[${escapeTableCell(record.id)}](${record.cardPath.replace('docs/development-plan/', '')})`
-    return `| ${link} | ${record.status} | ${escapeTableCell(record.owner || '—')} | ${record.risk} | ${escapeTableCell(record.hotspots.join(', '))} | ${escapeTableCell(record.outcome)} |`
+    return `| ${link} | ${record.status} | ${escapeTableCell(record.owner || '—')} | ${escapeTableCell(record.writeLocks.join(', '))} | ${escapeTableCell(record.outcome)} |`
   })
   return [
     '# Active Task Board',
     '',
-    '> Generated by `npm run generate:task-board`. 当前活跃任务摘要（queued/active/blocked）；完成的任务随实质提交删除卡文件，完成事实由 product commit 承载。本文件不可手改。',
+    '> Generated by `npm run generate:task-board`. 当前协调任务摘要（queued/active/blocked）；完成后删除卡，完成事实由实质 diff / commit 与检查结果承载。本文件不可手改。',
     '',
     `Tasks: ${records.length}${nonZeroCounts ? ` · ${nonZeroCounts}` : ''}`,
     '',
-    '| Task | Status | Owner | Risk | Hotspot | Outcome |',
-    '|---|---|---|---|---|---|',
+    '| Task | Status | Owner | Write locks | Outcome |',
+    '|---|---|---|---|---|',
     ...rows,
     '',
   ].join('\n')

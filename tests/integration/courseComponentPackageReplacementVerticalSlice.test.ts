@@ -187,10 +187,10 @@ function componentResourceSnapshot() {
 function resourceSnapshotDepths() {
   const state = useEditorStore.getState()
   return {
-    sidecarPast: state.slideCandidateSidecarPast.length,
-    sidecarFuture: state.slideCandidateSidecarFuture.length,
-    componentPast: state.slideCandidateComponentPackagesPast.length,
-    componentFuture: state.slideCandidateComponentPackagesFuture.length,
+    sidecarPast: state.courseAssetSidecarPast.length,
+    sidecarFuture: state.courseAssetSidecarFuture.length,
+    componentPast: state.courseComponentPackagesPast.length,
+    componentFuture: state.courseComponentPackagesFuture.length,
   }
 }
 
@@ -393,15 +393,15 @@ function authoritativeWriteSnapshot() {
   const active = activeHistory()
   return {
     project: structuredClone(activeProject()),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     assetFiles: byteMap(selectMediaAssetFiles(state)),
     componentPackages: componentResourceSnapshot(),
     activeHistory: structuredClone(active.history),
     storeHistory: structuredClone(state.history),
-    sidecarPast: state.slideCandidateSidecarPast.map((sidecar) => byteMap(sidecar.files)),
-    sidecarFuture: state.slideCandidateSidecarFuture.map((sidecar) => byteMap(sidecar.files)),
-    componentPast: structuredClone(state.slideCandidateComponentPackagesPast),
-    componentFuture: structuredClone(state.slideCandidateComponentPackagesFuture),
+    sidecarPast: state.courseAssetSidecarPast.map((sidecar) => byteMap(sidecar.files)),
+    sidecarFuture: state.courseAssetSidecarFuture.map((sidecar) => byteMap(sidecar.files)),
+    componentPast: structuredClone(state.courseComponentPackagesPast),
+    componentFuture: structuredClone(state.courseComponentPackagesFuture),
     selection: selectionSnapshot(),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     dirty: state.dirty,

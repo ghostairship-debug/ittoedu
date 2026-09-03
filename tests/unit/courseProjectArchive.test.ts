@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { strToU8, unzipSync, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import { createImageNode, createProject } from '@/renderer/project/createProject'
+import { createImageNode } from '@/renderer/project/nativeNodeFactories'
 import { createBlankCourseProject, createCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createCourseProjectArchive,
@@ -17,12 +17,12 @@ import {
   shouldMarkCourseProjectDirty,
   shouldOfferCourseProjectRecovery,
 } from '@/renderer/project/courseProjectLifecycle'
-import { createProjectArchive, openProjectArchive } from '@/renderer/project/projectArchive'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { ComponentManifest } from '@/shared/componentTypes'
 import { UserFacingError } from '@/shared/errors'
+import { COURSE_PROJECT_REJECTION_INPUTS } from '../fixtures/course-project-v9'
 
 const NOW = '2026-08-17T12:00:00.000Z'
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/course-project-v9')
@@ -55,18 +55,7 @@ function makeComponentFiles(): Record<string, Uint8Array> {
 }
 
 function makeV8ArchiveBytes() {
-  const project = createProject({
-    id: 'legacy-archive',
-    title: '旧版归档',
-    now: NOW,
-    includeDefaultController: false,
-    controls: 'none',
-  })
-  return createProjectArchive({
-    project,
-    assetFiles: {},
-    componentFiles: {},
-  }, { mtime: NOW })
+  return COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
 }
 
 function attachComponent(data: CourseProjectArchiveData): CourseProjectArchiveData {
@@ -167,7 +156,7 @@ describe('Course Project V9 archive', () => {
 
     expect(detectCourseProjectArchiveFormat(v8Bytes)).toMatchObject({
       kind: 'unsupported',
-      identity: { schemaVersion: 8, projectId: 'legacy-archive' },
+      identity: { schemaVersion: 8, projectId: 'v8-rejection' },
     })
     expect(detectCourseProjectArchiveFormat(v9Bytes)).toMatchObject({
       kind: 'v9',
@@ -206,7 +195,6 @@ describe('Course Project V9 archive', () => {
       }
     }).toThrow(UserFacingError)
 
-    expect(() => openProjectArchive(v9Bytes)).toThrow(/V9/)
     expect(() => openCourseProjectArchive(v9Bytes)).not.toThrow()
 
     const missingAsset = unzipSync(v9Bytes)
@@ -255,6 +243,125 @@ describe('Course Project V9 archive', () => {
       recovery: inspectCourseProjectArchiveIdentity(v9Bytes),
       official: null,
     })).toBe('offer')
+  })
+
+  it('writes only portable relative archive paths and no local absolute path', () => {
+    const bytes = createCourseProjectArchive(makeBlankV9ArchiveData(), { mtime: NOW })
+    const files = unzipSync(bytes)
+    expect(Object.keys(files)).toEqual(
+      expect.arrayContaining([
+        'project.json',
+        'assets/diagram.bin',
+        'components/com.example.archive-chart@1.2.3/manifest.json',
+        'components/com.example.archive-chart@1.2.3/runtime.js',
+      ]),
+    )
+    for (const path of Object.keys(files)) {
+      expect(path).not.toMatch(/^(?:[a-zA-Z]:|\/|\\\\)/)
+      expect(path.split('/')).not.toContain('..')
+    }
+    expect(strFromU8(files['project.json']!)).not.toContain('C:\\')
+  })
+
+  it.each(['../outside.txt', 'assets/../../outside.txt', 'C:/outside.txt', '\\\\host\\x'])(
+    'rejects an unsafe ZIP entry before reading content: %s',
+    (unsafePath) => {
+      const validBytes = createCourseProjectArchive(makeBlankV9ArchiveData(), { mtime: NOW })
+      const files = unzipSync(validBytes)
+      files[unsafePath] = new Uint8Array([1])
+      const malicious = zipSync(files)
+
+      expect(() => openCourseProjectArchive(malicious)).toThrow(UserFacingError)
+      try {
+        openCourseProjectArchive(malicious)
+      } catch (error) {
+        expect(error).toBeInstanceOf(UserFacingError)
+        expect((error as UserFacingError).message).toMatch(/不安全|路径穿越|无效路径/)
+      }
+    },
+  )
+
+  it('rejects missing declared binary files on save', () => {
+    const source = makeBlankV9ArchiveData()
+    delete source.assetFiles.diagram
+    expect(() => createCourseProjectArchive(source)).toThrowError(
+      expect.objectContaining({
+        title: '课程工程保存失败',
+        message: expect.stringContaining('缺少二进制内容'),
+      }),
+    )
+  })
+
+  it('round-trips scene.go targetStateId and rejects a missing presentation background asset', () => {
+    const source = makeBlankV9ArchiveData()
+    const surface = source.project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+    const firstScene = surface.scenes[0]!
+    surface.scenes.push({
+      id: 'scene_target',
+      name: '目标场景',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      layerItems: [],
+      presentation: {
+        initialStateId: 'state_detail',
+        states: [{ id: 'state_detail', name: '详情', layerItemOverrides: {} }],
+      },
+      interactions: [],
+    })
+    source.project.locations.push({
+      id: 'location-target',
+      label: '目标场景',
+      kind: 'slide-scene',
+      surfaceId: surface.id,
+      sceneId: 'scene_target',
+    })
+    firstScene.interactions.push({
+      id: 'go_to_detail',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [],
+      actions: [{
+        id: 'go_to_detail_action',
+        start: 'after-previous',
+        delayMs: 0,
+        action: {
+          type: 'scene.go',
+          sceneId: 'scene_target',
+          targetStateId: 'state_detail',
+        },
+      }],
+    })
+
+    const restored = openCourseProjectArchive(createCourseProjectArchive(source, { mtime: NOW }))
+    expect(restored.project.surfaces[0]).toMatchObject({
+      type: 'slide',
+      scenes: [
+        {
+          interactions: [{
+            actions: [{
+              id: 'go_to_detail_action',
+              start: 'after-previous',
+              delayMs: 0,
+              action: {
+                type: 'scene.go',
+                sceneId: 'scene_target',
+                targetStateId: 'state_detail',
+              },
+            }],
+          }],
+        },
+        { id: 'scene_target' },
+      ],
+    })
+
+    firstScene.presentation!.states[0]!.backgroundAssetId = 'missing_background'
+    expect(() => createCourseProjectArchive(source)).toThrowError(
+      expect.objectContaining({
+        title: '课程工程保存失败',
+        message: expect.stringContaining('missing_background'),
+      }),
+    )
   })
 })
 

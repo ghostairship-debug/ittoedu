@@ -101,18 +101,16 @@ export async function mountPublishedCourseTryRun(
     assetFiles: input.assetFiles,
     components: input.components,
   }
-  // Authoring and playback consume the same locally embedded Published
-  // payload. Network declarations remain a playback-preview lease, derived
-  // only from URLs that actually survived publishing plus explicit origins.
+  // Authoring and playback execute the same Published closure in this
+  // document, so both lease only URLs that survived publishing plus the
+  // project's exact declared origins.
   const playback = input.authoring === undefined
   if (!playback && input.initialPresentationStateId != null) {
     throw new Error('Published 作者宿主不能接收试运行初始命名状态。')
   }
   const published = buildPublishedCourseTryRunPayload(publishSources)
-  const remoteAssetUrls = playback ? previewRemoteAssetUrls(published) : []
-  const connectOrigins = playback
-    ? input.project.network?.connectOrigins ?? []
-    : []
+  const remoteAssetUrls = previewRemoteAssetUrls(published)
+  const connectOrigins = input.project.network?.connectOrigins ?? []
   const networkRequired = remoteAssetUrls.length > 0 || connectOrigins.length > 0
   const leaseId = nextPreviewNetworkLeaseId()
   const desktop = window.desktopAPI

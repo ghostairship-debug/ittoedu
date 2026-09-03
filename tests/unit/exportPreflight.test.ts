@@ -1,16 +1,39 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  collectCourseProjectExportPreflight,
-  collectExportPreflight,
-} from '@/renderer/export/exportPreflight'
+import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createImageNode,
-  createProject,
   createTextNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import type {
+  CourseProjectDocument,
+  NativeLayerItem,
+  SlideSurfaceDocument,
+} from '@/shared/courseProjectTypes'
 
 const emptyResources = { assetFiles: {}, components: {} }
+const playerBundle = '/* player */'
+
+function slideSurface(project: CourseProjectDocument): SlideSurfaceDocument {
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+  return surface
+}
+
+function addTextLayer(
+  project: CourseProjectDocument,
+  node: ReturnType<typeof createTextNode>,
+  order?: number,
+): NativeLayerItem {
+  const scene = slideSurface(project).scenes[0]!
+  const item = sceneNodeToCourseLayerItem(node, order ?? scene.layerItems.length + 1)
+  if (item.kind !== 'native' || item.content.nativeType !== 'text') {
+    throw new Error('expected text layer item')
+  }
+  scene.layerItems.push(item)
+  return item
+}
 
 describe('export preflight', () => {
   it('projects only V9 health findings with stable targets for a current course', () => {
@@ -18,8 +41,7 @@ describe('export preflight', () => {
       includeDefaultController: false,
       controls: 'none',
     })
-    const surface = project.surfaces[0]
-    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const surface = slideSurface(project)
     surface.scenes[0]!.interactions.push({
       id: 'missing-animation-action',
       enabled: true,
@@ -38,7 +60,7 @@ describe('export preflight', () => {
       'single-html',
       emptyResources,
       new Date('2026-08-27T00:00:00.000Z'),
-      { playerBundle: '/* player */' },
+      { playerBundle },
     )
 
     expect(report).toMatchObject({
@@ -60,8 +82,11 @@ describe('export preflight', () => {
     expect(report.items.map(({ code }) => code)).not.toContain('project-health:v8-field')
   })
 
-  it('aggregates unused assets without changing publishing semantics', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+  it('reports unused V9 assets as catalog info without blocking export', () => {
+    const project = createBlankCourseProject({
+      includeDefaultController: false,
+      controls: 'none',
+    })
     project.assets.first = {
       id: 'first', filename: 'first.png', mimeType: 'image/png',
       kind: 'image', path: 'assets/first.png', byteLength: 20,
@@ -71,24 +96,30 @@ describe('export preflight', () => {
       kind: 'image', path: 'assets/second.png', byteLength: 30,
     }
 
-    const report = collectExportPreflight(project, 'single-html', {
-      assetFiles: {
-        first: new Uint8Array(20),
-        second: new Uint8Array(30),
+    const report = collectCourseProjectExportPreflight(
+      project,
+      'single-html',
+      {
+        assetFiles: {
+          first: new Uint8Array(20),
+          second: new Uint8Array(30),
+        },
+        components: {},
       },
-      components: {},
-    })
-    expect(report.items.filter(({ code }) => code === 'asset-unused-summary'))
-      .toEqual([expect.objectContaining({
-        severity: 'info',
-        message: expect.stringContaining('2 个未引用素材，共 50 字节'),
-      })])
-    expect(report.items.some(({ code }) => code === 'project-health:asset-unused'))
-      .toBe(false)
+      new Date(),
+      { playerBundle },
+    )
+    const unused = report.items.filter(({ code }) => code === 'project-health:asset-unused')
+    expect(unused).toHaveLength(2)
+    expect(unused.every(({ severity }) => severity === 'info')).toBe(true)
+    expect(report.summary.canExport).toBe(true)
   })
 
   it('reports missing embedded asset bytes as a blocking error', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = createBlankCourseProject({
+      includeDefaultController: false,
+      controls: 'none',
+    })
     project.assets.hero = {
       id: 'hero',
       filename: 'hero.png',
@@ -99,12 +130,14 @@ describe('export preflight', () => {
       width: 100,
       height: 100,
     }
+    slideSurface(project).scenes[0]!.backgroundAssetId = 'hero'
 
-    const report = collectExportPreflight(
+    const report = collectCourseProjectExportPreflight(
       project,
       'single-html',
       emptyResources,
       new Date('2026-08-10T00:00:00.000Z'),
+      { playerBundle },
     )
 
     expect(report.items).toContainEqual(expect.objectContaining({
@@ -123,16 +156,26 @@ describe('export preflight', () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
       .mockReturnValue(context)
     vi.stubGlobal('navigator', { userAgent: 'Chrome' })
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = createBlankCourseProject({
+      includeDefaultController: false,
+      controls: 'none',
+    })
     const outside = createTextNode({ x: 1400, y: 20, width: 200, height: 80 })
     outside.text = '画布外文字'
     const overflow = createTextNode({ x: 20, y: 20, width: 120, height: 28 })
     overflow.text = '这是一段一定会在很窄很矮的文本框中产生多行溢出的测试文字'
     overflow.style.fontSize = 18
     overflow.style.overflow = 'fixed'
-    project.scenes[0]!.nodes.push(outside, overflow)
+    addTextLayer(project, outside, 1)
+    addTextLayer(project, overflow, 2)
 
-    const report = collectExportPreflight(project, 'pdf', emptyResources)
+    const report = collectCourseProjectExportPreflight(
+      project,
+      'pdf',
+      emptyResources,
+      new Date(),
+      { playerBundle },
+    )
     const codes = report.items.map(({ code }) => code)
 
     expect(codes).toContain('node-fully-outside-canvas')
@@ -147,100 +190,13 @@ describe('export preflight', () => {
     vi.unstubAllGlobals()
   })
 
-  it('blocks explicit external network dependencies in enabled runtimes', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: 'CoursewareRuntime.define({ create(){ fetch("https://example.com/data") } })',
-      content: { values: {} },
-      assets: {},
-    }
-
-    const report = collectExportPreflight(project, 'web-package', emptyResources)
-
-    expect(report.items).toContainEqual(expect.objectContaining({
-      severity: 'error',
-      code: 'runtime-external-network',
-    }))
-  })
-
-  it('blocks relative and dynamically resolved network API calls', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: 'CoursewareRuntime.define({ create(){ return fetch("/api/lesson") } })',
-      content: { values: {} },
-      assets: {},
-    }
-
-    const report = collectExportPreflight(project, 'web-package', emptyResources)
-    expect(report.items).toContainEqual(expect.objectContaining({
-      severity: 'error',
-      code: 'runtime-external-network',
-    }))
-  })
-
-  it('warns but does not block a URL that is only displayed as attribution text', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: [
-        'CoursewareRuntime.define({ create(){',
-        'const attribution = "来源：https://example.com/reference";',
-        'return { attribution, destroy(){} };',
-        '} })',
-      ].join('\n'),
-      content: { values: {} },
-      assets: {},
-    }
-
-    const report = collectExportPreflight(project, 'single-html', emptyResources)
-    expect(report.items).toContainEqual(expect.objectContaining({
-      severity: 'warning',
-      code: 'runtime-external-url-reference',
-    }))
-    expect(report.items).not.toContainEqual(expect.objectContaining({
-      code: 'runtime-external-network',
-    }))
-    expect(report.summary.canExport).toBe(true)
-  })
-
-  it('does not mistake SVG namespaces or authored double-slash text for network access', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: [
-        'CoursewareRuntime.define({ create(){',
-        "const pause = '//';",
-        "document.createElementNS('http://www.w3.org/2000/svg', 'svg');",
-        'return { destroy(){} }',
-        '} })',
-      ].join('\n'),
-      content: { values: {} },
-      assets: {},
-    }
-
-    const report = collectExportPreflight(project, 'single-html', emptyResources)
-
-    expect(report.items).not.toContainEqual(expect.objectContaining({
-      code: 'runtime-external-network',
-    }))
-    expect(report.summary.canExport).toBe(true)
-  })
-
   it('explains static-format behavior without blocking a valid project', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.scenes[0]!.interactions.push({
+    const project = createBlankCourseProject({
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    slideSurface(project).scenes[0]!.interactions.push({
       id: 'enter',
-      name: '进入',
       enabled: true,
       trigger: { type: 'scene.enter' },
       conditions: [],
@@ -252,7 +208,13 @@ describe('export preflight', () => {
       }],
     })
 
-    const report = collectExportPreflight(project, 'pptx', emptyResources)
+    const report = collectCourseProjectExportPreflight(
+      project,
+      'pptx',
+      emptyResources,
+      new Date(),
+      { playerBundle },
+    )
 
     expect(report.items).toContainEqual(expect.objectContaining({
       severity: 'info',
@@ -267,16 +229,22 @@ describe('export preflight', () => {
     } as unknown as CanvasRenderingContext2D
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
       .mockReturnValue(context)
-    const project = createProject()
-    const scene = project.scenes[0]!
-    const controller = project.globalLayer[0]!.node
-    if (controller.type !== 'teacher-controller') throw new Error('fixture')
+    const project = createBlankCourseProject()
+    const controller = project.globalLayerItems[0]?.item
+    if (
+      !controller
+      || controller.kind !== 'native'
+      || controller.content.nativeType !== 'teacher-controller'
+    ) {
+      throw new Error('expected default teacher controller')
+    }
+    const frame = controller.frame
     const lowContrast = createTextNode({
       id: 'low-contrast',
-      x: controller.x,
-      y: controller.y,
-      width: controller.width,
-      height: controller.height,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
       text: '点击继续',
       style: { color: '#ffffff', fontSize: 30 },
     })
@@ -289,18 +257,17 @@ describe('export preflight', () => {
       width: 0.8,
       height: 0.8,
     }]
-    scene.nodes.push(
-      lowContrast,
-      image,
-      ...Array.from({ length: 28 }, (_, index) => createTextNode({
-        id: `dense-${index}`,
-        x: (index % 7) * 170,
-        y: Math.floor(index / 7) * 145,
-        width: 240,
-        height: 180,
-        text: '密集信息'.repeat(12),
-      })),
-    )
+    const scene = slideSurface(project).scenes[0]!
+    addTextLayer(project, lowContrast, 1)
+    scene.layerItems.push(sceneNodeToCourseLayerItem(image, 2))
+    Array.from({ length: 28 }, (_, index) => createTextNode({
+      id: `dense-${index}`,
+      x: (index % 7) * 170,
+      y: Math.floor(index / 7) * 145,
+      width: 240,
+      height: 180,
+      text: '密集信息'.repeat(12),
+    })).forEach((node, index) => addTextLayer(project, node, index + 3))
     scene.interactions.push({
       id: 'click-target',
       enabled: true,
@@ -322,10 +289,10 @@ describe('export preflight', () => {
       byteLength: 4,
     }
 
-    const report = collectExportPreflight(project, 'single-html', {
+    const report = collectCourseProjectExportPreflight(project, 'single-html', {
       assetFiles: { hero: new Uint8Array([1, 2, 3, 4]) },
       components: {},
-    })
+    }, new Date(), { playerBundle })
     expect(report.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'text-low-contrast', severity: 'warning' }),
       expect.objectContaining({ code: 'image-safe-area-review', severity: 'info' }),

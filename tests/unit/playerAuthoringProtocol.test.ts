@@ -9,7 +9,7 @@ import {
   parsePlayerAuthoringReadyMessage,
   playerAuthoringSnapshotBarrierForCommand,
 } from '../../src/shared/playerAuthoringProtocol'
-import { createRectangleNode } from '../../src/renderer/project/createProject'
+import { createRectangleNode } from '../../src/renderer/project/nativeNodeFactories'
 
 function command(value: unknown = createRectangleNode({ id: 'node-a' })) {
   return {

@@ -22,7 +22,7 @@ import type {
   ScopedLayerItem,
 } from '../src/shared/courseProjectTypes'
 import type { InteractionRule } from '../src/shared/contracts/interaction-v1/types'
-import type { AssetMeta } from '../src/shared/projectTypes'
+import type { AssetMeta } from '../src/shared/contracts/media-v1/types'
 import {
   createCourseProjectArchive,
   type CourseProjectArchiveData,
@@ -1266,6 +1266,14 @@ const definitions: ReadonlyArray<
       'image-audio-component-canvas-runtime',
       'teacher-controller-and-scene-interaction',
       'published-v2-static-export-inputs',
+      'PM-03',
+      'PM-07',
+      'PM-08',
+      'PM-09',
+      'PM-14',
+      'PM-15',
+      'PM-18',
+      'PM-22',
     ],
     build: slideHeavyArchive,
   },
@@ -1279,6 +1287,9 @@ const definitions: ReadonlyArray<
       'formula-table-code-section-media',
       'flow-component-block-with-fallback',
       'flow-print-and-docx-inputs',
+      'PM-04',
+      'PM-14',
+      'PM-24',
     ],
     build: flowHeavyArchive,
   },
@@ -1292,6 +1303,12 @@ const definitions: ReadonlyArray<
       'spatial-camera-path-relation-semantic-zoom',
       'spatial-component-and-surface-runtime',
       'published-v2-mixed-navigation-inputs',
+      'PM-05',
+      'PM-06',
+      'PM-14',
+      'PM-15',
+      'PM-18',
+      'PM-23',
     ],
     build: mixedSpatialArchive,
   },

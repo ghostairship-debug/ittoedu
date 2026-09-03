@@ -17,8 +17,8 @@ import {
   FONT_FAMILY_OPTIONS,
   FONT_FAMILY_SOURCE_TAGS,
   fontFamilySource,
-  PropertiesTab,
-} from '@/renderer/ui/PropertiesTab'
+} from '@/renderer/ui/properties/PropertyControls'
+import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 
 /** A system family every option list carries, used as the `system` control. */
 const SYSTEM_FAMILY = 'Microsoft YaHei'

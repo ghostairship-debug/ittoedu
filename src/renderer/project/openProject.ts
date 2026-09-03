@@ -1,11 +1,10 @@
 export {
-  assertOpenableAsV8ProjectArchive,
-  courseProjectV9UnsupportedError,
-  isCourseProjectV9Document,
-  openProjectArchive,
-  openProjectArchive as openProject,
-  peekProjectDocumentFromArchive,
-  unpackProjectArchive,
-  type ProjectArchiveData,
-} from './projectArchive'
-
+  openDefaultCourseProject,
+  openDefaultCourseProjectAsync,
+  openDefaultCourseProject as openProject,
+} from './courseProjectIo'
+export {
+  openCourseProjectArchive,
+  openCourseProjectArchiveAsync,
+  type CourseProjectArchiveData,
+} from './courseProjectArchive'

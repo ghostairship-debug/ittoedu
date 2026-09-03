@@ -1,16 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createShapeNode, createTextNode } from '@/renderer/project/createProject'
+import { createShapeNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
 import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
-import {
-  detectFontAvailability,
-  PropertiesTab,
-} from '@/renderer/ui/PropertiesTab'
+import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { detectFontAvailability } from '@/renderer/ui/properties/PropertyControls'
 import { buildInitialRichTextHtml, TextEditOverlay } from '@/renderer/ui/TextEditOverlay'
 
 afterEach(() => {
@@ -61,7 +59,7 @@ describe('shape editing UI', () => {
     const shape = selectActiveScene(useEditorStore.getState()).nodes[0]!
     expect(shape.type).toBe('shape')
     if (shape.type !== 'shape') throw new Error('Expected a shape node')
-    expect(shape.style.fillOpacity).toBe(0.65)
+    expect(shape.style?.fillOpacity).toBe(0.65)
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
   })
 })
@@ -92,7 +90,7 @@ describe('basic text property semantics', () => {
     expect(node.type).toBe('text')
     if (node.type !== 'text') throw new Error('Expected a text node')
     expect(node.opacity).toBe(0)
-    expect(node.style.backgroundOpacity).toBe(1)
+    expect(node.style?.backgroundOpacity).toBe(1)
   })
 
   it('offers both vertical directions and keeps vertical height editable', () => {
@@ -436,6 +434,7 @@ describe('rich text editing UI', () => {
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const textarea = screen.getByDisplayValue('ABCDE')
+    fireEvent.focus(textarea)
     fireEvent.change(textarea, { target: { value: 'BCDE' } })
     fireEvent.blur(textarea)
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { decodePublishedCode } from '@/player/publishedLesson'
+import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { makeLayerItemAuthoringAddress } from '@/renderer/authoring/courseAuthoringScope'
 import type { CourseAuthoringTarget } from '@/renderer/authoring/courseAuthoringSession'
 import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
@@ -11,7 +11,7 @@ import {
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import {
   COURSE_RUNTIME_SOURCE_AUTHORING_FIELD,
   selectRuntimeSourceAuthoringView,
@@ -20,6 +20,8 @@ import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
   useEditorStore,
+  selectCandidateGlobalLayerItems,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -27,6 +29,21 @@ import type {
   CourseProjectDocument,
   RuntimeLayerItem,
 } from '@/shared/courseProjectTypes'
+
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
+    ...entry,
+    layer: entry.plane ?? 'overlay',
+    visibility: {
+      mode: entry.visibility.mode,
+      sceneIds: entry.visibility.locationIds,
+    },
+    node: courseLayerItemToEditorCanvasNode(entry.item)!,
+  }))
+}
+
 
 const CREATED_AT = '2026-08-24T00:00:00.000Z'
 const ARCHIVE_TIME = '2026-08-24T12:00:00.000Z'
@@ -319,10 +336,10 @@ function activeTransactionResourceChanges() {
 function compatibilitySnapshotDepths() {
   const state = useEditorStore.getState()
   return {
-    sidecarPast: state.slideCandidateSidecarPast.length,
-    sidecarFuture: state.slideCandidateSidecarFuture.length,
-    componentPast: state.slideCandidateComponentPackagesPast.length,
-    componentFuture: state.slideCandidateComponentPackagesFuture.length,
+    sidecarPast: state.courseAssetSidecarPast.length,
+    sidecarFuture: state.courseAssetSidecarFuture.length,
+    componentPast: state.courseComponentPackagesPast.length,
+    componentFuture: state.courseComponentPackagesFuture.length,
   }
 }
 
@@ -338,15 +355,15 @@ function authoritativeWriteSnapshot() {
   const state = useEditorStore.getState()
   return {
     project: structuredClone(activeProject()),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
     storeHistory: structuredClone(state.history),
     mediaFiles: byteMap(selectMediaAssetFiles(state)),
     componentPackages: structuredClone(state.componentPackages),
-    sidecarPast: structuredClone(state.slideCandidateSidecarPast),
-    sidecarFuture: structuredClone(state.slideCandidateSidecarFuture),
-    componentPast: structuredClone(state.slideCandidateComponentPackagesPast),
-    componentFuture: structuredClone(state.slideCandidateComponentPackagesFuture),
+    sidecarPast: structuredClone(state.courseAssetSidecarPast),
+    sidecarFuture: structuredClone(state.courseAssetSidecarFuture),
+    componentPast: structuredClone(state.courseComponentPackagesPast),
+    componentFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     dirty: state.dirty,
   }

@@ -1,3 +1,4 @@
+import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { ZodError } from 'zod'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
@@ -11,7 +12,7 @@ import type {
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { AssetMeta } from '@/shared/projectTypes'
-import { createProject } from '@/renderer/project/createProject'
+import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   buildPublishedCourseV2Payload,
@@ -21,7 +22,21 @@ import {
   type CoursePublishSources,
   type PublishedCourseSourceIssueCode,
 } from '@/renderer/export/course/buildPublishedCourse'
-import { collectCoursePackageExportPreflight } from '@/renderer/export/course/buildCoursePackages'
+import { collectCoursePackageExportPreflight } from '@/renderer/export/course/coursePackagePreflight'
+import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import {
+  detectCourseProjectArchiveFormat,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
+import {
+  ARCHITECTURE_BASELINE_FIXTURE_IDS,
+  buildArchitectureBaselineFixtureOutputs,
+} from '../../scripts/build-architecture-baseline-fixtures'
+import {
+  COURSE_PROJECT_REJECTION_INPUTS,
+  COURSE_PROJECT_V9_FIXTURE_IDS,
+  readCourseProjectV9FixtureArchive,
+} from '../fixtures/course-project-v9'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 const ASSET_BYTES = new Uint8Array([1, 2, 3])
@@ -524,6 +539,160 @@ describe('Published Course V2 producer', () => {
     })
   })
 
+  it('directly rejects malformed Published identity, references, carriers and print plans', () => {
+    const published = buildPublishedCourseV2Payload(mixedSources())
+    type Payload = typeof published
+    const scenarios: Array<{
+      name: string
+      expectedPath: string
+      mutate(payload: Payload): void
+    }> = [
+      {
+        name: 'duplicate course-state key',
+        expectedPath: 'courseState',
+        mutate(payload) {
+          payload.courseState.push(structuredClone(payload.courseState[0]!))
+        },
+      },
+      {
+        name: 'duplicate location id',
+        expectedPath: 'locations',
+        mutate(payload) {
+          payload.locations.push(structuredClone(payload.locations[0]!))
+        },
+      },
+      {
+        name: 'missing start location',
+        expectedPath: 'startLocationId',
+        mutate(payload) {
+          payload.startLocationId = 'missing-location'
+        },
+      },
+      {
+        name: 'duplicate surface id',
+        expectedPath: 'surfaces',
+        mutate(payload) {
+          payload.surfaces[1]!.id = payload.surfaces[0]!.id
+        },
+      },
+      {
+        name: 'dangling visibility location',
+        expectedPath: 'globalLayerItems.0.visibility.locationIds',
+        mutate(payload) {
+          payload.globalLayerItems[0]!.visibility = { mode: 'include', locationIds: ['missing-location'] }
+        },
+      },
+      {
+        name: 'effective layer identity collision',
+        expectedPath: 'surfaces.0.scenes.0.effectiveLayerItems.2.layerItemId',
+        mutate(payload) {
+          const slide = payload.surfaces[0]
+          if (slide?.type !== 'slide') throw new Error('expected slide')
+          slide.scenes[0]!.layerItems[0]!.layerItemId = payload.globalLayerItems[0]!.item.layerItemId
+        },
+      },
+      {
+        name: 'dangling Flow media asset',
+        expectedPath: 'surfaces.1.blocks.flow-media.assetId',
+        mutate(payload) {
+          delete payload.assets['flow-image']
+        },
+      },
+      {
+        name: 'dangling Runtime fallback asset',
+        expectedPath: 'surfaces.0.scenes.0.layerItems.3.runtime.staticFallback.assetId',
+        mutate(payload) {
+          delete payload.assets['runtime-fallback']
+        },
+      },
+      {
+        name: 'missing component registry entry',
+        expectedPath: 'surfaces.0.scenes.0.layerItems.2.component',
+        mutate(payload) {
+          delete payload.components['component.quiz@4.0.0']
+        },
+      },
+      {
+        name: 'duplicate component package identity',
+        expectedPath: 'components.alias',
+        mutate(payload) {
+          payload.components.alias = {
+            ...structuredClone(payload.components['component.quiz@4.0.0']!),
+            version: '5.0.0',
+          }
+        },
+      },
+      {
+        name: 'dangling interaction layer item',
+        expectedPath: 'globalInteractions.0.trigger.nodeId',
+        mutate(payload) {
+          payload.globalInteractions = [{
+            id: 'dangling-node',
+            enabled: true,
+            trigger: { type: 'node.click', nodeId: 'missing-layer' },
+            conditions: [],
+            actions: [{
+              id: 'set-ready',
+              start: 'after-previous',
+              delayMs: 0,
+              action: { type: 'course-state.set', key: 'ready', value: true },
+            }],
+          }]
+        },
+      },
+      {
+        name: 'dangling navigation guard location',
+        expectedPath: 'navigationGuards.0',
+        mutate(payload) {
+          payload.navigationGuards[0]!.toLocationIds = ['missing-location']
+        },
+      },
+      {
+        name: 'missing mixed print plan',
+        expectedPath: 'mixedPrintPlan',
+        mutate(payload) {
+          delete payload.mixedPrintPlan
+        },
+      },
+      {
+        name: 'print plan omits Spatial surface',
+        expectedPath: 'mixedPrintPlan.entries',
+        mutate(payload) {
+          payload.mixedPrintPlan!.entries.pop()
+        },
+      },
+      {
+        name: 'Runtime metadata references a missing value',
+        expectedPath: 'surfaces.0.scenes.0.layerItems.3.runtime.content.metadata.missing',
+        mutate(payload) {
+          const slide = payload.surfaces[0]
+          if (slide?.type !== 'slide') throw new Error('expected slide')
+          const runtime = slide.scenes[0]!.layerItems[3]
+          if (runtime?.kind !== 'runtime') throw new Error('expected runtime')
+          runtime.runtime.content.metadata = { missing: { label: 'Missing' } }
+        },
+      },
+    ]
+
+    scenarios.forEach((scenario) => {
+      const candidate = structuredClone(published)
+      scenario.mutate(candidate)
+      const result = publishedCourseV2Schema.safeParse(candidate)
+      expect(result.success, scenario.name).toBe(false)
+      if (!result.success) {
+        expect(
+          result.error.issues.map((issue) => issue.path.join('.')),
+          scenario.name,
+        ).toContain(scenario.expectedPath)
+      }
+    })
+
+    const arbitraryComponentRecordKey = structuredClone(published)
+    arbitraryComponentRecordKey.components.alias = arbitraryComponentRecordKey.components['component.quiz@4.0.0']!
+    delete arbitraryComponentRecordKey.components['component.quiz@4.0.0']
+    expect(publishedCourseV2Schema.safeParse(arbitraryComponentRecordKey).success).toBe(true)
+  })
+
   it('materializes legacy global planes without mutating the V9 source', () => {
     let idSequence = 0
     const project = createBlankCourseProject({
@@ -633,6 +802,55 @@ describe('Published Course V2 producer', () => {
     expect(runtimeItem.runtime.code.data.length).toBeGreaterThan(0)
     expect(published).not.toHaveProperty('played')
     expect(published).not.toHaveProperty('playbackResult')
+  })
+
+  it('preserves every Unicode code unit in published Runtime source', () => {
+    const loneHighSurrogate = String.fromCharCode(0xd800)
+    const source =
+      'CoursewareRuntime.define({runtimeApiVersion:2,' +
+      `create(){const exact="中文🎓${loneHighSurrogate}";void exact;return{destroy(){}}}})`
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    slide.scenes[0]!.layerItems.push({
+      layerItemId: 'unicode-runtime',
+      label: 'unicode-runtime',
+      frame: { mode: 'absolute', x: 40, y: 40, width: 320, height: 180 },
+      order: 10,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      kind: 'runtime',
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: true,
+        renderMode: 'dom',
+        source,
+        content: { values: {} },
+        assets: {},
+      },
+    })
+    courseProjectDocumentSchema.parse(project)
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const publishedSlide = published.surfaces.find((surface) => surface.type === 'slide')
+    const runtime = publishedSlide?.type === 'slide'
+      ? publishedSlide.scenes[0]?.layerItems.find((item) => item.kind === 'runtime')
+      : undefined
+    if (!runtime || runtime.kind !== 'runtime') throw new Error('expected published runtime')
+    expect(runtime.runtime.code.encoding).toBe('base64-utf16le')
+    expect(decodePublishedCode(runtime.runtime.code)).toBe(source)
   })
 
   it('uses the same source facts as package preflight before producing V2', () => {
@@ -888,12 +1106,11 @@ describe('Published Course V2 producer', () => {
       })
     }
 
-    const v8 = createProject({
+    const v8 = {
+      schemaVersion: 8,
       id: 'v8-raw',
       title: 'V8 工程',
-      includeDefaultController: false,
-      controls: 'none',
-    })
+    }
     expect(() => buildPublishedCourseV2Payload({
       project: v8 as unknown as CourseProjectDocument,
       assetFiles: {},
@@ -906,5 +1123,71 @@ describe('Published Course V2 producer', () => {
       ...sources,
       assetFiles: rest,
     })).toThrow(/slide-image/)
+  })
+
+  it.each([...COURSE_PROJECT_V9_FIXTURE_IDS])(
+    'builds Published V2 from committed V9 fixture %s',
+    (fixtureId) => {
+      const bytes = readCourseProjectV9FixtureArchive(fixtureId)
+      expect(detectCourseProjectArchiveFormat(bytes)).toMatchObject({
+        kind: 'v9',
+        identity: { schemaVersion: 9 },
+      })
+      const opened = openCourseProjectArchive(bytes)
+      const components = Object.fromEntries(
+        Object.values(opened.componentFiles).map((files) => {
+          const pkg = parseComponentPackageFiles(files)
+          return [pkg.manifest.id, pkg]
+        }),
+      )
+      const published = buildPublishedCourseV2Payload({
+        project: opened.project,
+        assetFiles: opened.assetFiles,
+        components,
+      })
+      expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+      expect(published.sourceSchemaVersion).toBe(9)
+      expect(published.courseId).toBe(opened.project.id)
+    },
+  )
+
+  it.each([...ARCHITECTURE_BASELINE_FIXTURE_IDS])(
+    'builds Published V2 from architecture baseline %s',
+    (fixtureId) => {
+      const filename = `${fixtureId}.h5lesson`
+      const bytes = buildArchitectureBaselineFixtureOutputs().outputs[filename]
+      if (!bytes) throw new Error(`Missing generated fixture ${filename}`)
+      const opened = openCourseProjectArchive(bytes)
+      const components = Object.fromEntries(
+        Object.values(opened.componentFiles).map((files) => {
+          const pkg = parseComponentPackageFiles(files)
+          return [pkg.manifest.id, pkg]
+        }),
+      )
+      const published = buildPublishedCourseV2Payload({
+        project: opened.project,
+        assetFiles: opened.assetFiles,
+        components,
+      })
+      expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+      expect(published.courseId).toBe(opened.project.id)
+    },
+  )
+
+  it('rejects raw V8 schemaVersion bytes without treating them as V9', () => {
+    const bytes = COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
+    expect(detectCourseProjectArchiveFormat(bytes)).toMatchObject({
+      kind: 'unsupported',
+      identity: { schemaVersion: 8 },
+    })
+    expect(() => openCourseProjectArchive(bytes)).toThrow(/格式版本为 8|版本不支持/)
+
+    const files = unzipSync(bytes)
+    const raw = JSON.parse(new TextDecoder().decode(files['project.json'])) as unknown
+    expect(() => buildPublishedCourseV2Payload({
+      project: raw as CourseProjectDocument,
+      assetFiles: {},
+      components: {},
+    })).toThrow(ZodError)
   })
 })

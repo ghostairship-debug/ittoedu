@@ -272,9 +272,11 @@ function openSession(project = v9SpatialFixture()): SpatialAuthoringSession {
 
 describe('Spatial world vs viewport coordinate contract', () => {
   it('tags world/surface as world space and global HUD plus controller as viewport', () => {
+    const session = openSession()
     const view = buildSpatialEditorView({
-      project: v9SpatialFixture(),
+      project: session.history.present,
       locationId: LOCATION_ID,
+      sessionCamera: session.sessionCamera,
     })
     const world = view.layers.find((layer) => layer.selectionId === 'world-text')
     const surface = view.layers.find((layer) => layer.selectionId === 'surface-shared')

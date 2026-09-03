@@ -33,9 +33,10 @@ import type {
   ComponentLifecyclePhase,
 } from '../shared/componentLifecycleGuard'
 import type {
-  ExternalComponentNode,
-  SceneNode,
-} from '../shared/projectTypes'
+  NativeNodeType,
+  NativeRenderInput,
+  NativeRenderableBase,
+} from '../shared/contracts/native-v1/types'
 import type { VideoInteractionAction } from '../shared/interactionTypes'
 import type { RuntimeExecutionMode } from '../shared/runtimeTypes'
 import type { AudioManager } from './AudioManager'
@@ -46,6 +47,7 @@ import type { ComponentRegistry } from './ComponentRegistry'
 import {
   ComponentAuthoringTargetRegistry,
   type ComponentAuthoringTargetsChangedHandler,
+  type ComponentHostNode,
 } from './ComponentAuthoringTargetRegistry'
 import { renderShapeGraphics } from '../shared/phaserShapeRenderer'
 import { renderImageNodeCanvas } from '../shared/imageEffects'
@@ -157,9 +159,28 @@ function scopedComponentEvents(base: CourseEventBus | undefined): {
   }
 }
 
+export interface PlayerComponentHostNode extends ComponentHostNode {
+  type: 'external-component'
+  name: string
+  opacity: number
+  locked: boolean
+  playbackInitialVisibility: 'inherit' | 'hidden'
+  component: {
+    packageId: string
+    version: string
+  }
+}
+
+export type PlayerRenderNode = NativeRenderInput | PlayerComponentHostNode
+
+type RenderFrame = Pick<
+  NativeRenderableBase,
+  'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity' | 'visible'
+>
+
 export interface RenderedNodeHandle {
   readonly id: string
-  readonly type: SceneNode['type']
+  readonly type: NativeNodeType | 'external-component'
   /** Authored/presentation frame. Interaction hit areas remain attached here. */
   readonly root: Phaser.GameObjects.Container
   /** Relative playback-motion layer, isolated from presentation transitions. */
@@ -173,7 +194,7 @@ export interface RenderedNodeHandle {
   suspend?(): void
   resume?(): void
   prepareCapture?(snapshotSurfaces?: CaptureSurfaceSnapshotter): Promise<void>
-  update(node: SceneNode, transition?: RuntimePresentationTransition): void
+  update(node: PlayerRenderNode, transition?: RuntimePresentationTransition): void
   destroy(): void
 }
 
@@ -220,7 +241,7 @@ function attachToParent(
 
 function applyNodeFrame(
   scene: Phaser.Scene,
-  node: SceneNode,
+  node: RenderFrame,
   root: Phaser.GameObjects.Container,
   visualHeight = node.height,
   transition?: RuntimePresentationTransition,
@@ -262,7 +283,7 @@ function applyNodeFrame(
 
 function objectHandle(
   scene: Phaser.Scene,
-  initialNode: SceneNode,
+  initialNode: PlayerRenderNode,
   object: Phaser.GameObjects.Container,
 ): RenderedNodeHandle {
   return {
@@ -283,7 +304,7 @@ function objectHandle(
 
 function renderErrorPlaceholder(
   scene: Phaser.Scene,
-  node: SceneNode,
+  node: PlayerRenderNode,
   depth: number,
   title: string,
   error: unknown,
@@ -340,7 +361,7 @@ function renderErrorPlaceholder(
 
 function resolveComponentPackage(
   payload: ExportPayload,
-  node: ExternalComponentNode,
+  node: PlayerComponentHostNode,
 ): ExportPayload['components'][string] | undefined {
   return (
     payload.components[`${node.component.packageId}@${node.component.version}`] ??
@@ -355,7 +376,7 @@ function resolveComponentPackage(
 
 function renderExternalComponent(
   scene: Phaser.Scene,
-  node: ExternalComponentNode,
+  node: PlayerComponentHostNode,
   depth: number,
   context: RenderNodeContext,
 ): RenderedNodeHandle {
@@ -862,7 +883,7 @@ function renderExternalComponent(
 
 function renderNodeContent(
   scene: Phaser.Scene,
-  node: SceneNode,
+  node: PlayerRenderNode,
   depth: number,
   context: RenderNodeContext,
 ): RenderedNodeHandle {
@@ -1102,7 +1123,7 @@ function renderNodeContent(
  */
 export function renderNode(
   scene: Phaser.Scene,
-  node: SceneNode,
+  node: PlayerRenderNode,
   depth: number,
   context: RenderNodeContext,
 ): RenderedNodeHandle {

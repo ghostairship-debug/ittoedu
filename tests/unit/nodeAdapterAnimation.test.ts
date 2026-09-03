@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type * as Phaser from 'phaser'
-import type { ShapeNode } from '../../src/shared/projectTypes'
-import { createShapeNode } from '../../src/renderer/project/createProject'
+import { createShapeNode } from '../../src/renderer/project/nativeNodeFactories'
 
 vi.mock('phaser', () => ({
   Geom: {
@@ -90,7 +89,7 @@ function gameObject(x: number, y: number): FakeGameObject {
   return object
 }
 
-class TestNodeAdapter extends BaseNodeAdapter<ShapeNode> {
+class TestNodeAdapter extends BaseNodeAdapter {
   getRoot(): FakeGameObject {
     return this.root as unknown as FakeGameObject
   }

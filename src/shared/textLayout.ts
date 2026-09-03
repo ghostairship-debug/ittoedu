@@ -1,4 +1,4 @@
-import type { TextNode, TextRunStyle, WritingMode } from './projectTypes'
+import type { TextNode, TextRunStyle, WritingMode } from './contracts/native-v1/types'
 import {
   resolveLayoutMeasureContext,
   type LayoutMeasureContext,

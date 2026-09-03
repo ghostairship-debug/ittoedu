@@ -18,7 +18,28 @@ import {
   selectSlideAuthoringBackend,
   selectSlideAuthoringDocument,
   useEditorStore,
+  selectCandidateGlobalLayerItems,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
+
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).flatMap((entry) => {
+    const node = courseLayerItemToEditorCanvasNode(entry.item)
+    if (!node) return []
+    return [{
+      ...entry,
+      layer: entry.plane ?? 'overlay',
+      visibility: {
+        mode: entry.visibility.mode,
+        sceneIds: entry.visibility.locationIds,
+      },
+      node,
+    }]
+  })
+}
+
 
 function componentPackage(
   id: string,
@@ -189,9 +210,9 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.click(
       screen.getByTestId(`component-${globalPackage.manifest.id}`),
     )
-    expect(useEditorStore.getState().project.globalLayer).toHaveLength(3)
+    expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(3)
     expect(
-      useEditorStore.getState().project.globalLayer.map((item) => item.node.type),
+      projectedGlobalLayer(useEditorStore.getState()).map((item) => item.node.type),
     ).toEqual(['teacher-controller', 'text', 'external-component'])
   })
 
@@ -200,13 +221,13 @@ describe('Project V8 global-layer editor UI', () => {
     const store = useEditorStore.getState()
     store.importComponentPackage(globalPackage)
     store.addScene()
-    const [firstScene, secondScene] = useEditorStore.getState().project.scenes
+    const [firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
     const sceneRuntime = runtime('场景运行时标题', '场景原文')
     const globalRuntime = runtime('全局运行时标题', '全局原文')
     installRuntimeDefinitions(firstScene!.id, sceneRuntime, globalRuntime)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(globalPackage.manifest.id)
-    const globalNode = useEditorStore.getState().project.globalLayer.find(
+    const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component',
     )!.node
     const locationId = selectActiveCourseLocationId(useEditorStore.getState())
@@ -233,7 +254,7 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.change(screen.getByLabelText('场景可见范围'), {
       target: { value: 'include' },
     })
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === globalNode.id,
     )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
     expect(screen.getByText('选择至少一个场景后，可见范围才会生效。'))
@@ -249,7 +270,7 @@ describe('Project V8 global-layer editor UI', () => {
       target: { value: '重新讲解' },
     })
 
-    const placement = useEditorStore.getState().project.globalLayer.find(
+    const placement = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === globalNode.id,
     )!
     expect(placement).toMatchObject({
@@ -308,13 +329,14 @@ describe('Project V8 global-layer editor UI', () => {
       target: { value: '统一开始' },
     })
     fireEvent.blur(screen.getByLabelText('全局运行时标题操作'))
-    expect(useEditorStore.getState().project.globalRuntime?.content.values).toEqual({
+    const updatedGlobalRuntime = selectActiveCourseProjectDocument(useEditorStore.getState())
+      ?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    if (updatedGlobalRuntime?.kind !== 'runtime') throw new Error('缺少全局 Runtime')
+    expect(updatedGlobalRuntime.runtime.content.values).toEqual({
       title: '全局新标题',
       action: '统一开始',
     })
-    expect(useEditorStore.getState().project.globalRuntime?.source).toBe(
-      globalRuntime.source,
-    )
+    expect(updatedGlobalRuntime.runtime.source).toBe(globalRuntime.source)
 
     const projectAfterGlobalEdit = selectActiveCourseProjectDocument(
       useEditorStore.getState(),
@@ -337,14 +359,20 @@ describe('Project V8 global-layer editor UI', () => {
       target: { value: '进入互动' },
     })
     fireEvent.blur(screen.getByLabelText('场景运行时标题操作'))
-    const updatedSceneRuntime = useEditorStore
-      .getState()
-      .project.scenes.find((scene) => scene.id === firstScene!.id)!.runtime!
-    expect(updatedSceneRuntime.content.values).toEqual({
+    const updatedSceneRuntime = selectActiveCourseProjectDocument(
+      useEditorStore.getState(),
+    )?.surfaces.flatMap((surface) => (
+      surface.type === 'slide' ? surface.scenes : []
+    )).find((scene) => scene.id === firstScene!.id)
+      ?.layerItems.find((item) => item.kind === 'runtime')
+    if (!updatedSceneRuntime || updatedSceneRuntime.kind !== 'runtime') {
+      throw new Error('缺少场景 Runtime')
+    }
+    expect(updatedSceneRuntime.runtime.content.values).toEqual({
       title: '场景新标题',
       action: '进入互动',
     })
-    expect(updatedSceneRuntime.source).toBe(sceneRuntime.source)
+    expect(updatedSceneRuntime.runtime.source).toBe(sceneRuntime.source)
   })
 
   it('keeps an API 3 global Runtime exact and reachable from a Flow location', () => {
@@ -500,7 +528,7 @@ describe('Project V8 global-layer editor UI', () => {
     store.addPresentationState('反馈')
     const targetStateId = useEditorStore.getState().activePresentationStateId!
     store.setEditingScope('global')
-    const controller = useEditorStore.getState().project.globalLayer.find(
+    const controller = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',
     )!.node
     store.selectNode(controller.id)
@@ -533,7 +561,7 @@ describe('Project V8 global-layer editor UI', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /添加按钮/ }))
 
-    const updated = useEditorStore.getState().project.globalLayer.find(
+    const updated = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
     )!.node
     if (updated.type !== 'teacher-controller') throw new Error('缺少教师控制器')
@@ -541,16 +569,16 @@ describe('Project V8 global-layer editor UI', () => {
       collapsible: true,
       defaultCollapsed: false,
     })
-    expect(updated.buttons[0]?.action).toEqual({
+    expect(updated.buttons?.[0]?.action).toEqual({
       type: 'scene.go',
       sceneId: targetSceneId,
       targetStateId,
     })
-    expect(updated.buttons.at(-1)?.action).toEqual({
+    expect(updated.buttons?.at(-1)?.action).toEqual({
       type: 'scene.open-picker',
     })
     expect(updated.buttons).toHaveLength(8)
-    expect(new Set(updated.buttons.map((button) => button.id)).size).toBe(8)
+    expect(new Set((updated.buttons ?? []).map((button) => button.id)).size).toBe(8)
   })
 
   it('writes 图层位置 as one undoable global plane without changing authored order', () => {

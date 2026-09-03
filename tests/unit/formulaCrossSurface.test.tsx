@@ -13,8 +13,11 @@ vi.mock('phaser', () => ({
 import { renderNode, type RenderNodeContext } from '../../src/player/renderNode'
 import { addPptxFormulaNode } from '../../src/renderer/export/pptxTextAndShape'
 import { renderSceneCanvas } from '../../src/renderer/export/renderSceneImages'
-import { createFormulaNode, createProject } from '../../src/renderer/project/createProject'
+import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createFormulaNode } from '../../src/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
+import type { SlideSurfaceDocument } from '../../src/shared/courseProjectTypes'
 import { SceneThumbnail } from '../../src/renderer/ui/SceneThumbnail'
 import {
   analyzeFormulaNodeLayout,
@@ -39,6 +42,7 @@ function canvasContext() {
     moveTo: vi.fn(),
     quadraticCurveTo: vi.fn(),
     rect: vi.fn(),
+    roundRect: vi.fn(),
     restore: vi.fn(),
     rotate: vi.fn(),
     save: vi.fn(),
@@ -196,13 +200,13 @@ describe('FormulaNode shared renderer surfaces', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context2d)
     const formula = createFormulaNode({ id: 'formula-player' })
     const harness = playerSceneHarness()
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const renderContext = {
       payload: { project, assets: {}, components: {} },
       registry: {},
       actions: {},
       scope: 'scene',
-      sceneId: project.scenes[0]!.id,
+      sceneId: project.startLocationId,
       textureKey: (assetId: string) => assetId,
     } as unknown as RenderNodeContext
 
@@ -225,16 +229,42 @@ describe('FormulaNode shared renderer surfaces', () => {
   it('renders FormulaNode in static HTML/PDF capture and scene thumbnails', async () => {
     const context2d = canvasContext()
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context2d)
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const formula = createFormulaNode({ id: 'formula-static' })
-    project.scenes[0]!.nodes.push(formula)
-    useEditorStore.getState().loadProject(project, null, {}, {})
+    const v8Scene = {
+      id: 'scene',
+      name: '场景 1',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      nodes: [formula],
+      presentation: {
+        initialStateId: 'state_initial',
+        states: [{ id: 'state_initial', name: '初始', nodeOverrides: {} }],
+      },
+      interactions: [],
+    }
+    const v9 = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const slide = v9.surfaces.find((surface): surface is SlideSurfaceDocument => (
+      surface.type === 'slide'
+    ))
+    if (!slide) throw new Error('expected Slide surface')
+    slide.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(formula, 1))
+    useEditorStore.getState().loadCourseProject(v9, null)
 
-    await renderSceneCanvas(project, project.scenes[0]!, {}, 1)
+    await renderSceneCanvas(
+      {
+        canvas: { width: 1280, height: 720 },
+        assets: {},
+        globalLayer: [],
+        scenes: [v8Scene],
+      } as never,
+      v8Scene as never,
+      {},
+      1,
+    )
     expect(context2d.drawImage).toHaveBeenCalled()
 
     const callsBeforeThumbnail = context2d.drawImage.mock.calls.length
-    render(<SceneThumbnail scene={project.scenes[0]!} />)
+    render(<SceneThumbnail />)
     await waitFor(() => {
       expect(context2d.drawImage.mock.calls.length).toBeGreaterThan(
         callsBeforeThumbnail,

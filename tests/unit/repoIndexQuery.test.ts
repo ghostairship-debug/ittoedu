@@ -88,7 +88,7 @@ describe('repo-index query and Context Pack', () => {
         confidence: 'high',
         bootstrapRequired: false,
         matchedFeature: { id: 'feature:components' },
-        freshness: { status: 'fresh', safeForS2: true },
+        freshness: { status: 'fresh', safeForImplementation: true },
       })
     }
     const normalComponents = engine.query({
@@ -238,7 +238,7 @@ describe('repo-index query and Context Pack', () => {
       bootstrapRequired: true,
       freshness: {
         status: 'stale',
-        safeForS2: false,
+        safeForImplementation: false,
         relevantDirtyInputs: dirty,
       },
     })
@@ -363,7 +363,7 @@ describe('repo-index query and Context Pack', () => {
     const raw = { manifest, storedInventory, currentInventory, dirtyInputs: [] }
     expect(assessFreshness(raw, ['src/renderer/App.tsx'])).toMatchObject({
       status: 'fresh',
-      safeForS2: true,
+      safeForImplementation: true,
     })
 
     const unrelated: InputInventoryResult = {
@@ -379,7 +379,7 @@ describe('repo-index query and Context Pack', () => {
       ],
     }
     expect(assessFreshness({ ...raw, currentInventory: unrelated }, ['src/renderer/App.tsx']))
-      .toMatchObject({ status: 'partially-stale', safeForS2: false })
+      .toMatchObject({ status: 'partially-stale', safeForImplementation: false })
 
     const relevant: InputInventoryResult = {
       hashes: { ...currentInventory.hashes, source: 'sha256:relevant' },
@@ -390,11 +390,11 @@ describe('repo-index query and Context Pack', () => {
       ),
     }
     expect(assessFreshness({ ...raw, currentInventory: relevant }, ['src/renderer/App.tsx']))
-      .toMatchObject({ status: 'stale', safeForS2: false })
+      .toMatchObject({ status: 'stale', safeForImplementation: false })
     expect(assessFreshness(
       { ...raw, dirtyInputs: [{ path: 'src/renderer/App.tsx', status: ' M' }] },
       ['src/renderer/App.tsx'],
-    )).toMatchObject({ status: 'stale', safeForS2: false })
+    )).toMatchObject({ status: 'stale', safeForImplementation: false })
   })
 
   it('uses git argument arrays and preserves unusual dirty filenames', () => {

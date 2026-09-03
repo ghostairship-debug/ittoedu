@@ -14,7 +14,7 @@ import type {
   TextRun,
   TextRunStyle,
   WritingMode,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/native-v1'
 import { SLIDE_BACKEND_NOT_CANDIDATE } from '../store/slideBackendPort'
 import {
   SLIDE_REJECT_LOCKED,

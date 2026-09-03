@@ -369,7 +369,7 @@ describe('AI capability manifest generation', () => {
         undeclaredStaticOrigin: 'blocking-error',
         unresolvedOrigin: 'warning',
         limitations: 'no-wrapper-alias-or-general-javascript-data-flow-analysis',
-        source: 'src/renderer/export/course/buildCoursePackages.ts',
+        source: 'src/renderer/export/course/coursePackagePreflight.ts',
       },
       sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
       contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',
@@ -1241,7 +1241,7 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).toContain('src/shared/contracts/course-state/schema.ts')
     expect(tracedSources).toContain('src/shared/contracts/course-state/types.ts')
     expect(tracedSources).toContain('src/shared/contracts/published-course-v2/schema.ts')
-    expect(tracedSources).toContain('src/shared/projectSchema.ts')
+    expect(tracedSources).not.toContain('src/shared/projectSchema.ts')
     expect(tracedSources).toContain('src/shared/projectTypes.ts')
     expect(tracedSources).toContain('src/renderer/project/archivePath.ts')
 
@@ -1265,7 +1265,7 @@ describe('AI capability manifest generation', () => {
       'src/renderer/project/createCourseProject.ts',
       'src/renderer/project/courseProjectArchive.ts',
       'src/renderer/ui/coursePlayerTryRun.ts',
-      'src/renderer/project/createProject.ts',
+      'src/renderer/project/nativeNodeFactories.ts',
       'src/renderer/project/projectArchive.ts',
       'src/renderer/project/validateProjectArchive.ts',
     ]) {

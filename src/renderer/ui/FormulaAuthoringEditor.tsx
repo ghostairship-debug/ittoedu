@@ -19,11 +19,25 @@ import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import { formulaAstSchema } from '../../shared/projectSchema'
 import type { FormulaAstNode, FormulaNode } from '../../shared/projectTypes'
 
+export interface FormulaAuthoringDraftChange {
+  readonly source: string
+  readonly ast: FormulaAstNode | null
+  readonly accessibleText: string
+  readonly error: string | null
+  readonly hasSlots: boolean
+  readonly committable: boolean
+}
+
 interface FormulaAuthoringEditorProps {
   node: FormulaNode
   onCommit(ast: FormulaAstNode, accessibleText: string): void
   autoFocus?: boolean
   onCancel?: () => void
+  /** When provided, the formula source is controlled by the owning authoring session. */
+  draftSource?: string
+  onDraftChange?: (draft: FormulaAuthoringDraftChange) => void
+  onCompositionChange?: (composing: boolean) => void
+  onBeginEdit?: () => void
 }
 
 interface ParsedDraft {
@@ -192,9 +206,14 @@ export function FormulaAuthoringEditor({
   onCommit,
   autoFocus = false,
   onCancel,
+  draftSource: controlledDraftSource,
+  onDraftChange,
+  onCompositionChange,
+  onBeginEdit,
 }: FormulaAuthoringEditorProps) {
   const canonicalSource = useMemo(() => serializeFormulaAst(node.ast), [node.ast])
-  const [draftSource, setDraftSource] = useState(canonicalSource)
+  const [localDraftSource, setLocalDraftSource] = useState(canonicalSource)
+  const draftSource = controlledDraftSource ?? localDraftSource
   const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const pendingSelectionRef = useRef<[number, number] | null>(null)
@@ -204,8 +223,8 @@ export function FormulaAuthoringEditor({
   const dirty = !sameAst(parsed.ast, node.ast)
 
   useEffect(() => {
-    setDraftSource(canonicalSource)
-  }, [canonicalSource, node.id])
+    if (controlledDraftSource === undefined) setLocalDraftSource(canonicalSource)
+  }, [canonicalSource, controlledDraftSource, node.id])
 
   useEffect(() => {
     setNotice(null)
@@ -225,8 +244,21 @@ export function FormulaAuthoringEditor({
     inputRef.current?.setSelectionRange(selection[0], selection[1])
   }, [draftSource])
 
+  const publishDraftSource = (source: string) => {
+    if (controlledDraftSource === undefined) setLocalDraftSource(source)
+    const next = parseDraft(source)
+    onDraftChange?.({
+      source,
+      ast: next.ast,
+      accessibleText: accessibilityAutomatic ? next.accessibleText : node.accessibleText,
+      error: next.error,
+      hasSlots: next.hasSlots,
+      committable: Boolean(next.ast && !next.error && !next.hasSlots),
+    })
+  }
+
   const resetDraft = () => {
-    setDraftSource(canonicalSource)
+    if (controlledDraftSource === undefined) setLocalDraftSource(canonicalSource)
     if (onCancel) {
       onCancel()
       return
@@ -245,7 +277,7 @@ export function FormulaAuthoringEditor({
       return
     }
     if (!dirty) {
-      setDraftSource(canonicalSource)
+      if (controlledDraftSource === undefined) setLocalDraftSource(canonicalSource)
       setNotice('公式内容没有变化')
       return
     }
@@ -273,7 +305,7 @@ export function FormulaAuthoringEditor({
       insertion.selectionStart,
       insertion.selectionEnd,
     ]
-    setDraftSource(insertion.value)
+    publishDraftSource(insertion.value)
     setNotice(null)
   }
 
@@ -321,12 +353,19 @@ export function FormulaAuthoringEditor({
           autoComplete="off"
           spellCheck={false}
           value={draftSource}
+          onFocus={onBeginEdit}
           onChange={(event) => {
-            setDraftSource(event.currentTarget.value)
+            publishDraftSource(event.currentTarget.value)
             setNotice(null)
           }}
-          onCompositionStart={() => { composingRef.current = true }}
-          onCompositionEnd={() => { composingRef.current = false }}
+          onCompositionStart={() => {
+            composingRef.current = true
+            onCompositionChange?.(true)
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false
+            onCompositionChange?.(false)
+          }}
           onKeyDown={handleKeyDown}
         />
         <span className="property-hint">

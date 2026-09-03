@@ -1,33 +1,66 @@
-import { createDefaultScenePresentation } from '../../shared/presentation'
+import { createDefaultSlidePresentation } from '../../shared/contracts/course-project-v9/presentation'
 import type {
   CourseProjectDocument,
+  LayerItem,
   SlidePresentation,
 } from '../../shared/courseProjectTypes'
-import type {
-  SceneDocument,
-  SceneNode,
-  ScenePresentation,
-  SoundDefinition,
-  VideoNode,
-} from '../../shared/projectTypes'
+import type { SoundDefinition } from '../../shared/contracts/media-v1'
 import type { InteractionRule } from '../../shared/interactionTypes'
 
 /**
- * V8-shaped scene summaries consumed by store-agnostic interaction editors.
- * V9 presentations are projected into the V8 ScenePresentation shape; node
- * overrides are never round-tripped here.
+ * V9-shaped scene summaries consumed by store-agnostic interaction editors.
+ * Named-state overrides are never round-tripped here.
  */
+export interface V9InteractionPresentationSummary {
+  readonly initialStateId: string
+  readonly thumbnailStateId?: string
+  readonly states: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+  }>
+}
+
 export interface V9InteractionSceneSummary {
   readonly id: string
   readonly name: string
-  readonly presentation: ScenePresentation
+  readonly presentation: V9InteractionPresentationSummary
 }
 
-function v9PresentationToScenePresentation(
+export interface InteractionLayerTarget {
+  readonly id: string
+  readonly name: string
+  readonly type: string
+  readonly visible: boolean
+  readonly locked: boolean
+  readonly playbackInitialVisibility?: 'inherit' | 'hidden'
+  readonly clickToToggle?: boolean
+  readonly showControls?: boolean
+  readonly loop?: boolean
+}
+
+export interface V9InteractionSceneView {
+  readonly id: string
+  readonly name: string
+  readonly nodes: readonly InteractionLayerTarget[]
+  readonly interactions: readonly InteractionRule[]
+  readonly presentation?: V9InteractionPresentationSummary
+}
+
+function v9PresentationSummary(
   presentation: SlidePresentation | undefined,
-): ScenePresentation {
+): V9InteractionPresentationSummary {
   if (!presentation || presentation.states.length === 0) {
-    return createDefaultScenePresentation()
+    const fallback = createDefaultSlidePresentation()
+    return {
+      initialStateId: fallback.initialStateId,
+      ...(fallback.thumbnailStateId === undefined
+        ? {}
+        : { thumbnailStateId: fallback.thumbnailStateId }),
+      states: fallback.states.map((state) => ({
+        id: state.id,
+        name: state.name,
+      })),
+    }
   }
   return {
     initialStateId: presentation.initialStateId,
@@ -37,7 +70,6 @@ function v9PresentationToScenePresentation(
     states: presentation.states.map((state) => ({
       id: state.id,
       name: state.name,
-      nodeOverrides: {},
     })),
   }
 }
@@ -52,25 +84,50 @@ export function v9SlideScenes(
       scenes.push({
         id: scene.id,
         name: scene.name,
-        presentation: v9PresentationToScenePresentation(scene.presentation),
+        presentation: v9PresentationSummary(scene.presentation),
       })
     }
   }
   return scenes
 }
 
-/** Builds the read-only V8-shaped scene document the interaction editors need. */
+function nativeTypeOf(item: LayerItem): string {
+  if (item.kind === 'component') return 'external-component'
+  if (item.kind === 'runtime') return 'runtime'
+  return item.content.nativeType
+}
+
+export function interactionLayerTargetFromItem(item: LayerItem): InteractionLayerTarget {
+  const target: InteractionLayerTarget = {
+    id: item.layerItemId,
+    name: item.label,
+    type: nativeTypeOf(item),
+    visible: item.visible,
+    locked: item.locked,
+    playbackInitialVisibility: item.playbackInitialVisibility,
+  }
+  if (item.kind === 'native' && item.content.nativeType === 'video') {
+    return {
+      ...target,
+      clickToToggle: item.content.data.clickToToggle,
+      showControls: item.content.data.showControls,
+      loop: item.content.data.loop,
+    }
+  }
+  return target
+}
+
+/** Builds the read-only V9 scene view the interaction editors need. */
 export function v9InteractionSceneDocument(
   sceneId: string,
   sceneName: string,
-  nodes: readonly SceneNode[],
+  nodes: readonly InteractionLayerTarget[],
   interactions: readonly InteractionRule[],
   presentation: V9InteractionSceneSummary['presentation'] | undefined,
-): SceneDocument {
+): V9InteractionSceneView {
   return {
     id: sceneId,
     name: sceneName,
-    backgroundColor: '#ffffff',
     nodes: [...nodes],
     interactions: [...interactions],
     ...(presentation === undefined ? {} : { presentation }),
@@ -125,37 +182,40 @@ interface VideoHint {
   readonly showControls: boolean
 }
 
+function visitVideoItem(
+  hints: Map<string, VideoHint>,
+  item: LayerItem,
+): void {
+  if (item.kind !== 'native' || item.content.nativeType !== 'video') return
+  hints.set(item.layerItemId, {
+    name: item.label,
+    loop: item.content.data.loop,
+    clickToToggle: item.content.data.clickToToggle,
+    showControls: item.content.data.showControls,
+  })
+}
+
 function videoHints(
   project: CourseProjectDocument,
-  nodes: readonly SceneNode[],
+  nodes: readonly InteractionLayerTarget[] = [],
 ): Map<string, VideoHint> {
   const hints = new Map<string, VideoHint>()
-  const visit = (item: CourseProjectDocument['globalLayerItems'][number]['item']): void => {
-    if (item.kind !== 'native' || item.content.nativeType !== 'video') return
-    hints.set(item.layerItemId, {
-      name: item.label,
-      loop: item.content.data.loop,
-      clickToToggle: item.content.data.clickToToggle,
-      showControls: item.content.data.showControls,
-    })
-  }
-  for (const entry of project.globalLayerItems) visit(entry.item)
+  for (const entry of project.globalLayerItems) visitVideoItem(hints, entry.item)
   for (const surface of project.surfaces) {
-    for (const entry of surface.surfaceLayerItems) visit(entry.item)
+    for (const entry of surface.surfaceLayerItems) visitVideoItem(hints, entry.item)
     if (surface.type === 'slide') {
-      for (const scene of surface.scenes) scene.layerItems.forEach(visit)
+      for (const scene of surface.scenes) scene.layerItems.forEach((item) => visitVideoItem(hints, item))
     } else if (surface.type === 'spatial-2d') {
-      surface.world.layerItems.forEach(visit)
+      surface.world.layerItems.forEach((item) => visitVideoItem(hints, item))
     }
   }
   for (const node of nodes) {
     if (node.type !== 'video') continue
-    const video = node as VideoNode
-    hints.set(video.id, {
-      name: video.name,
-      loop: video.loop,
-      clickToToggle: video.clickToToggle,
-      showControls: video.showControls,
+    hints.set(node.id, {
+      name: node.name,
+      loop: node.loop ?? false,
+      clickToToggle: node.clickToToggle ?? false,
+      showControls: node.showControls ?? false,
     })
   }
   return hints
@@ -179,7 +239,7 @@ function pushWarning(
 export function collectV9InteractionRuleWarnings(
   project: CourseProjectDocument,
   rules: readonly InteractionRule[],
-  nodes: readonly SceneNode[] = [],
+  nodes: readonly InteractionLayerTarget[] = [],
 ): Record<string, string[]> {
   const warnings: Record<string, string[]> = {}
   const layerIds = knownLayerItemIds(project)

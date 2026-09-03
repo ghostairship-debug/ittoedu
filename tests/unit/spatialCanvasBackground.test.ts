@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { resolveCourseSurfaceBackgroundColor } from '@/shared/courseProjectModel'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { useEditorStore,
+  selectActiveCourseProjectDocument,
+} from '@/renderer/store/editorStore'
 import { updateSpatialSurfaceBackgroundColor } from '@/renderer/course/spatialEditorCommands'
 import { updateFlowSurfaceBackgroundColor } from '@/renderer/course/flowEditorCommands'
 import type { FlowSurfaceDocument, SpatialSurfaceDocument } from '@/shared/courseProjectTypes'
@@ -39,7 +41,7 @@ describe('Canvas background persistence & default', () => {
     expect(state.spatialSession).not.toBeNull()
     const loadedSpatialSurface = state.spatialSession?.history.present.surfaces.find((s): s is SpatialSurfaceDocument => s.type === 'spatial-2d')
     expect(loadedSpatialSurface?.backgroundColor).toBeUndefined()
-    expect(state.project.scenes[0]!.backgroundColor).toBe('#ffffff')
+    expect(resolveCourseSurfaceBackgroundColor(loadedSpatialSurface?.backgroundColor)).toBe('#ffffff')
 
     const flowDoc = createBlankFlowCourseProject({ now: '2026-08-18T14:00:00.000Z' })
     const flowDocWithoutBg = {
@@ -76,8 +78,10 @@ describe('Canvas background persistence & default', () => {
     expect(resolveCourseSurfaceBackgroundColor(updatedSurface?.backgroundColor)).toBe('#223344')
 
     useEditorStore.getState().applySpatialAuthoringSession(result.nextSession!, { historyEntry: true })
-    const state = useEditorStore.getState()
-    expect(state.project.scenes[0]!.backgroundColor).toBe('#223344')
+    const persisted = useEditorStore.getState().spatialSession?.history.present.surfaces.find(
+      (s): s is SpatialSurfaceDocument => s.type === 'spatial-2d',
+    )
+    expect(persisted?.backgroundColor).toBe('#223344')
 
     // Invalid color should be rejected and not write #111318
     const invalidResult = updateSpatialSurfaceBackgroundColor(result.nextSession!, 'not-a-color')
@@ -104,12 +108,18 @@ describe('Canvas background persistence & default', () => {
   it('derivedV8ProjectFromSpatial scenes[0].backgroundColor equals the resolved value', () => {
     const doc = createBlankSpatialCourseProject({ now: '2026-08-18T14:00:00.000Z' })
     useEditorStore.getState().loadCourseProject(doc, null)
-    expect(useEditorStore.getState().project.scenes[0]!.backgroundColor).toBe('#ffffff')
+    expect(resolveCourseSurfaceBackgroundColor(
+      useEditorStore.getState().spatialSession?.history.present.surfaces.find(
+        (s): s is SpatialSurfaceDocument => s.type === 'spatial-2d',
+      )?.backgroundColor,
+    )).toBe('#ffffff')
 
     const session = useEditorStore.getState().spatialSession!
     const result = updateSpatialSurfaceBackgroundColor(session, '#336699')
     expect(result.ok).toBe(true)
     useEditorStore.getState().applySpatialAuthoringSession(result.nextSession!, { historyEntry: true })
-    expect(useEditorStore.getState().project.scenes[0]!.backgroundColor).toBe('#336699')
+    expect(useEditorStore.getState().spatialSession?.history.present.surfaces.find(
+      (s): s is SpatialSurfaceDocument => s.type === 'spatial-2d',
+    )?.backgroundColor).toBe('#336699')
   })
 })

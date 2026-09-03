@@ -4,7 +4,7 @@ import {
   type FormulaNode,
   type ShapeNode,
   type TextNode,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/native-v1/types'
 import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import {
   renderTextNodeCanvas,
@@ -179,7 +179,7 @@ export function addPptxTextNode(
 }
 
 /**
- * PPTX has no dependable editable mapping for the recursive V8 formula AST.
+ * PPTX has no dependable editable mapping for the recursive Native formula AST.
  * Export one transparent PNG so its authored geometry remains deterministic;
  * Formula ID and accessible text remain available as object metadata.
  */

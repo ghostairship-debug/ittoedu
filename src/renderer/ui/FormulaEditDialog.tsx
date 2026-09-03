@@ -1,11 +1,17 @@
 import { X } from 'lucide-react'
 import type { FormulaAstNode, FormulaNode } from '../../shared/projectTypes'
-import { FormulaAuthoringEditor } from './FormulaAuthoringEditor'
+import {
+  FormulaAuthoringEditor,
+  type FormulaAuthoringDraftChange,
+} from './FormulaAuthoringEditor'
 
 interface FormulaEditDialogProps {
   node: FormulaNode
   onCommit(ast: FormulaAstNode, accessibleText: string): void
   onCancel(): void
+  draftSource?: string
+  onDraftChange?: (draft: FormulaAuthoringDraftChange) => void
+  onCompositionChange?: (composing: boolean) => void
 }
 
 /** Focused canvas-authoring surface opened by a FormulaNode double click. */
@@ -13,6 +19,9 @@ export function FormulaEditDialog({
   node,
   onCommit,
   onCancel,
+  draftSource,
+  onDraftChange,
+  onCompositionChange,
 }: FormulaEditDialogProps) {
   return (
     <div
@@ -54,6 +63,9 @@ export function FormulaEditDialog({
             autoFocus
             onCancel={onCancel}
             onCommit={onCommit}
+            draftSource={draftSource}
+            onDraftChange={onDraftChange}
+            onCompositionChange={onCompositionChange}
           />
         </div>
       </section>

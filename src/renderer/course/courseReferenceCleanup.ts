@@ -8,7 +8,7 @@ import type {
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
 import type { InteractionRule } from '../../shared/interactionTypes'
-import type { TeacherControllerButton } from '../../shared/projectTypes'
+import type { TeacherControllerButton } from '../../shared/contracts/native-v1'
 
 export interface RemovedCourseReferences {
   /** Course-location ids only. These never stand in for scene, block, or layer ids. */

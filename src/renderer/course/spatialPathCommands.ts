@@ -384,7 +384,9 @@ export function updateSpatialPath(
   nextPath.id = current.id
   nextPath.name = validatePathName(nextPath.name)
   nextPath.layerItemIds = validateSpatialPathLayerItemIds(surface, nextPath.layerItemIds)
-  nextPath.style = validateSpatialPathStyle(nextPath.style)
+  const normalizedStyle = validateSpatialPathStyle(nextPath.style)
+  if (normalizedStyle === undefined) delete nextPath.style
+  else nextPath.style = normalizedStyle
   if (spatialGraphValuesEqual(current, nextPath)) return history
 
   const next = commitSpatialProjectMutation(project, (draft) => {

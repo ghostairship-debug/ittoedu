@@ -1,14 +1,14 @@
 import type { LayerItem, ScopedLayerItem } from '../../shared/courseProjectTypes'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
+import type { EditorCanvasNode } from '../phaser/editorCanvasNode'
 import type {
   AssetMeta,
   GlobalLayerItem,
-  SceneNode,
 } from '../../shared/projectTypes'
 
 export interface SlidePreviewNodeIdentity {
   readonly id: string
-  readonly type: SceneNode['type']
+  readonly type: EditorCanvasNode['type']
   readonly componentId?: string
   readonly componentVersion?: string
 }
@@ -22,7 +22,7 @@ export interface SlidePreviewRebuildScene {
   readonly runtime?: unknown
 }
 
-export type SlidePreviewIdentityNode = Pick<SceneNode, 'id' | 'type'> & {
+export type SlidePreviewIdentityNode = Pick<EditorCanvasNode, 'id' | 'type'> & {
   readonly component?: {
     readonly packageId: string
     readonly version: string

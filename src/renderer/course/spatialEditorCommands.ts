@@ -17,7 +17,7 @@ import {
   createShapeNode,
   createTextNode,
   createVideoNode,
-} from '../project/createProject'
+} from '../project/nativeNodeFactories'
 import {
   bumpSpatialGeneration,
   catchSpatialCommand,
@@ -160,6 +160,9 @@ export function selectSpatialEditorLayers(
   const view = buildSpatialEditorView({
     project: input.project,
     locationId: input.locationId,
+    sessionCamera: spatialSessionCameraFromPose(
+      resolveSpatialSurface(input.project, input.locationId).frame,
+    ),
   })
   const selectionIds = [...input.selectionIds]
   if (new Set(selectionIds).size !== selectionIds.length) {
@@ -211,6 +214,7 @@ export function buildSpatialAuthoringSnapshot(
   const view = buildSpatialEditorView({
     project: session.history.present,
     locationId: session.selection.locationId,
+    sessionCamera: session.sessionCamera,
   })
   return Object.freeze({
     sessionId: session.sessionId,
@@ -234,6 +238,7 @@ export function makeSpatialAuthoringTarget(
   const view = buildSpatialEditorView({
     project: session.history.present,
     locationId: session.selection.locationId,
+    sessionCamera: session.sessionCamera,
   })
   const layer = view.layers.find((candidate) => candidate.selectionId === layerItemId)
   if (!layer) throw new Error('所选元素已失效，请重新选择')
@@ -254,6 +259,7 @@ function selectableLayers(
   const view = buildSpatialEditorView({
     project: session.history.present,
     locationId: session.selection.locationId,
+    sessionCamera: session.sessionCamera,
   })
   return new Map(view.layers.flatMap((layer) => {
     if (layer.source !== session.scope) return []
@@ -850,6 +856,9 @@ export function transformSpatialWorldLayers(
   const view = buildSpatialEditorView({
     project: history.present,
     locationId: selection.locationId,
+    sessionCamera: spatialSessionCameraFromPose(
+      resolveSpatialSurface(history.present, selection.locationId).frame,
+    ),
   })
   if (view.surfaceId !== selection.surfaceId) {
     throw new Error('所选空间表面已失效，请重新选择')
@@ -945,6 +954,9 @@ export function transformSpatialViewportLayers(
   const view = buildSpatialEditorView({
     project: history.present,
     locationId: selection.locationId,
+    sessionCamera: spatialSessionCameraFromPose(
+      resolveSpatialSurface(history.present, selection.locationId).frame,
+    ),
   })
   if (view.surfaceId !== selection.surfaceId) {
     throw new Error('所选空间表面已失效，请重新选择')
@@ -1018,6 +1030,9 @@ function requireWorldSelection(
   const view = buildSpatialEditorView({
     project: history.present,
     locationId: selection.locationId,
+    sessionCamera: spatialSessionCameraFromPose(
+      resolveSpatialSurface(history.present, selection.locationId).frame,
+    ),
   })
   if (view.surfaceId !== selection.surfaceId) {
     throw new Error('所选空间表面已失效，请重新选择')

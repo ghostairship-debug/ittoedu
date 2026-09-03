@@ -8,9 +8,9 @@ import {
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { NodeMotionAction } from '../../shared/interactionTypes'
 import type {
-  SceneDocument,
-  SceneNode,
-} from '../../shared/projectTypes'
+  EditorCanvasDocument,
+  EditorCanvasNode,
+} from './editorCanvasNode'
 import type { EditorPhaserBridge } from './EditorPhaserBridge'
 import { resizeWorldFrameFromHandle } from '../authoring/stageViewportTransform'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
@@ -86,7 +86,7 @@ export class EditorScene extends Phaser.Scene {
   private guideGraphics!: Phaser.GameObjects.Graphics
   private selectedNodeIds: string[] = []
   private editingTextNodeId: string | null = null
-  private document: SceneDocument | null = null
+  private document: EditorCanvasDocument | null = null
   private components: Record<string, ComponentPackageData> = {}
   private lastClick = { nodeId: '', time: 0 }
   private marqueeStart: (Point & { additive: boolean }) | null = null
@@ -124,7 +124,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   loadDocument(
-    document: SceneDocument,
+    document: EditorCanvasDocument,
     components: Record<string, ComponentPackageData>,
   ): void {
     this.clearAdapters()
@@ -136,7 +136,7 @@ export class EditorScene extends Phaser.Scene {
     this.selectNodes([])
   }
 
-  addNode(node: SceneNode): void {
+  addNode(node: EditorCanvasNode): void {
     if (this.adapters.has(node.id)) return
     this.mountAdapter(node)
     if (this.document) this.document.nodes.push(structuredClone(node))
@@ -144,7 +144,7 @@ export class EditorScene extends Phaser.Scene {
     this.reorderNodes([...ids.filter((id) => id !== node.id), node.id])
   }
 
-  applyNode(node: SceneNode): void {
+  applyNode(node: EditorCanvasNode): void {
     if (this.document) {
       const index = this.document.nodes.findIndex((item) => item.id === node.id)
       if (index >= 0) this.document.nodes[index] = structuredClone(node)
@@ -268,7 +268,7 @@ export class EditorScene extends Phaser.Scene {
     return { left, right, top, bottom, width: right - left, height: bottom - top }
   }
 
-  private mountAdapter(node: SceneNode): void {
+  private mountAdapter(node: EditorCanvasNode): void {
     const adapter = new ProxyNodeAdapter(this, node)
     this.adapters.set(node.id, adapter)
     this.configureAdapterInput(adapter)
@@ -539,7 +539,7 @@ export class EditorScene extends Phaser.Scene {
     if (!adapter) return
     const start = item.bounds
     const node = adapter.getNode()
-    const component = node.type === 'external-component'
+    const component = node.type === 'external-component' && node.component
       ? this.components[node.component.packageId]
       : undefined
     const minimumWidth = component?.manifest.minSize.width ?? MIN_NODE_SIZE

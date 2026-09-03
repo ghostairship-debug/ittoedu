@@ -12,6 +12,7 @@ test-results/
 tmp/
 logs/
 .playwright-cli/
+.codex-remote-attachments/
 coverage/
 repo-index/generated/
 __pycache__/

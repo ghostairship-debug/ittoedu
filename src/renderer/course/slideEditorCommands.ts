@@ -5,6 +5,9 @@ import type {
 } from '../../shared/courseProjectTypes'
 import type { EditorTransactionStep } from '../authoring/editorTransaction'
 import {
+  commitAuthoringDocumentTransaction,
+} from '../authoring/resourceAwareAuthoringHistory'
+import {
   cloneHistoryResourceChanges,
   type HistoryResourceChanges,
   type HistoryResourceDirection,
@@ -198,6 +201,38 @@ export function commitSlideEditorTransactionHistory(
     limit,
     step.resourceChanges,
   )
+}
+
+export function commitSlideActionTransaction(
+  history: SlideAuthoringHistory,
+  next: CourseProjectDocument,
+  resourceChanges: HistoryResourceChanges = {},
+  limit = SLIDE_AUTHORING_HISTORY_LIMIT,
+): {
+  readonly history: SlideAuthoringHistory
+  readonly resourceTransition: SlideAuthoringResourceTransition
+} | null {
+  try {
+    const committed = commitAuthoringDocumentTransaction(
+      history,
+      next,
+      resourceChanges,
+      limit,
+    )
+    if (!committed) return null
+    return {
+      history: committed.history,
+      resourceTransition: committed.resourceTransition,
+    }
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes('revision')) {
+      throw new SlideCommandError(
+        SLIDE_REJECT_STALE_REVISION,
+        '编辑事务与当前 Slide 文档不一致',
+      )
+    }
+    throw error
+  }
 }
 
 export function slideAuthoringUndoResourceTransition(

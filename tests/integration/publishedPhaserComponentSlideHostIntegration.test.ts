@@ -152,6 +152,7 @@ import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchem
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
   type PlayerAuthoringHostMessage,
 } from '../../src/shared/playerAuthoringProtocol'
 import type { ExternalComponentNode } from '../../src/shared/projectTypes'
@@ -722,6 +723,183 @@ describe('Published Slide Phaser Component API 4 host', () => {
       })
     } finally {
       await session.destroy()
+      await flushTeardown()
+    }
+  })
+
+  it('rejects a delayed component authoring remount after its Slide generation is replaced', async () => {
+    const fixture = createPublishedPhaserComponentV2Fixture()
+    const location = fixture.project.locations.find((candidate) => (
+      candidate.id === fixture.slideLocationIds[0] && candidate.kind === 'slide-scene'
+    ))
+    if (!location || location.kind !== 'slide-scene') {
+      throw new Error('expected first Slide fixture location')
+    }
+    const container = document.createElement('div')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 1280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.appendChild(container)
+    const messages: PlayerAuthoringHostMessage[] = []
+    const session = await mountPublishedCourseAuthoring({
+      container,
+      project: fixture.project,
+      assetFiles: fixture.assetFiles,
+      components: fixture.components,
+      locationId: location.id,
+      sessionId: 'phaser-component-generation-race',
+      scope: 'scene',
+      stateId: null,
+      onMessage: (message) => messages.push(message),
+    })
+    let pendingPatch: ReturnType<typeof session.applyAuthoringCommand> | null = null
+
+    try {
+      await vi.waitFor(() => {
+        expect(messages.some((message) => (
+          message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets
+          && message.update.nodeId === PUBLISHED_PHASER_COMPONENT_ITEM_ID
+          && message.update.targets.length > 0
+        ))).toBe(true)
+      })
+      const initialGame = globalThis.__fakePublishedPhaserGames?.find((game) => (
+        game.canvas.isConnected
+        && game.canvas.dataset.publishedPhaserComponent === PUBLISHED_PHASER_COMPONENT_ITEM_ID
+      ))
+      if (!initialGame) throw new Error('expected current authoring Phaser game')
+      const ready = messages.find((message) => (
+        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready
+      ))
+      if (!ready || ready.type !== PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
+        throw new Error('expected Published authoring ready message')
+      }
+      const initialGameCount = globalThis.__fakePublishedPhaserGames!.length
+      const staleNode: ExternalComponentNode = {
+        id: PUBLISHED_PHASER_COMPONENT_ITEM_ID,
+        name: 'stale delayed authoring remount',
+        type: 'external-component',
+        x: 480,
+        y: 87,
+        width: 360,
+        height: 210,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        playbackInitialVisibility: 'inherit',
+        locked: false,
+        component: {
+          packageId: PUBLISHED_PHASER_COMPONENT_ID,
+          version: '4.0.0',
+        },
+        props: { label: '过期文字', projectAssetId: 'fixture-project-asset' },
+      }
+
+      globalThis.__deferPublishedPhaserBoot = true
+      pendingPatch = session.applyAuthoringCommand({
+        type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+        protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+        sessionId: 'phaser-component-generation-race',
+        requestId: 'delayed-component-remount',
+        revision: 1,
+        context: ready.context,
+        patch: {
+          kind: 'native-node',
+          target: {
+            kind: 'native-node',
+            scope: 'scene',
+            nodeId: PUBLISHED_PHASER_COMPONENT_ITEM_ID,
+          },
+          node: staleNode,
+        },
+      })
+
+      let earlyResponse: Awaited<typeof pendingPatch> | null = null
+      void pendingPatch.then((response) => {
+        earlyResponse = response
+      })
+
+      await vi.waitFor(() => {
+        expect(
+          globalThis.__fakePublishedPhaserGames?.length === initialGameCount + 1
+          || earlyResponse !== null,
+        ).toBe(true)
+      })
+      if (earlyResponse) throw new Error(`component patch settled before remount: ${JSON.stringify(earlyResponse)}`)
+      expect(globalThis.__deferredPublishedPhaserBoots).toHaveLength(1)
+      const staleGame = globalThis.__fakePublishedPhaserGames!.at(-1)!
+      const staleBoot = globalThis.__deferredPublishedPhaserBoots!.shift()!
+      expect(staleGame.destroyed).toBe(false)
+
+      // Repaint the same location while the component patch is awaiting its
+      // deferred Phaser create(). This is a new Slide render generation even
+      // though scene/state identity did not change.
+      globalThis.__deferPublishedPhaserBoot = false
+      await expect(session.player.setSurfaceLocation(
+        fixture.slideSurfaceId,
+        location.id,
+      )).resolves.toEqual({ ok: true })
+      await flushTeardown()
+      await vi.waitFor(() => expect(globalThis.__fakePublishedPhaserGames)
+        .toHaveLength(initialGameCount + 2))
+
+      const response = await pendingPatch
+      expect(response).toMatchObject({
+        type: PLAYER_AUTHORING_MESSAGE_TYPES.error,
+        requestId: 'delayed-component-remount',
+        revision: 1,
+        code: 'stale-revision',
+      })
+      expect(messages.some((message) => (
+        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack
+        && message.requestId === 'delayed-component-remount'
+      ))).toBe(false)
+
+      const currentWrap = container.querySelector<HTMLElement>(
+        `[data-slide-layer-item="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+      )
+      const currentGame = globalThis.__fakePublishedPhaserGames!.at(-1)!
+      expect(currentWrap?.style.left).toBe('123px')
+      expect(window.__publishedPhaserComponentV4Probe?.props).toEqual({
+        label: '真实导入',
+        projectAssetId: 'fixture-project-asset',
+      })
+      expect(currentGame.canvas.isConnected).toBe(true)
+      expect(staleGame.destroyed).toBe(true)
+      expect(staleGame.canvas.isConnected).toBe(false)
+      expect(staleGame.events.listenerCount()).toBe(0)
+      expect(initialGame.destroyed).toBe(true)
+
+      const createsBeforeLateBoot = Number(
+        window.__publishedPhaserComponentV4Probe?.creates ?? 0,
+      )
+      staleBoot()
+      await flushTeardown()
+      expect(Number(window.__publishedPhaserComponentV4Probe?.creates ?? 0))
+        .toBe(createsBeforeLateBoot)
+      expect(staleGame.canvas.isConnected).toBe(false)
+      expect(container.querySelectorAll(
+        `canvas[data-published-phaser-component="${PUBLISHED_PHASER_COMPONENT_ITEM_ID}"]`,
+      )).toHaveLength(1)
+      const targetUpdates = messages.flatMap((message) => (
+        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets
+          ? [message.update]
+          : []
+      ))
+      expect(targetUpdates.at(-1)).toMatchObject({
+        nodeId: PUBLISHED_PHASER_COMPONENT_ITEM_ID,
+        targets: [{ bounds: { x: 143 } }],
+      })
+      expect(targetUpdates.flatMap((update) => update.targets)
+        .some((target) => target.bounds.x === 500)).toBe(false)
+    } finally {
+      globalThis.__deferPublishedPhaserBoot = false
+      const destroying = session.destroy()
+      for (const boot of globalThis.__deferredPublishedPhaserBoots?.splice(0) ?? []) boot()
+      await Promise.allSettled([
+        destroying,
+        ...(pendingPatch ? [pendingPatch] : []),
+      ])
       await flushTeardown()
     }
   })

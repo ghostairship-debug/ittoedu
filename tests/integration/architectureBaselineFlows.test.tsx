@@ -36,9 +36,14 @@ import {
   type MixedCoursePlayerPort,
 } from '../../src/player/surfaces/mixed/MixedCourseNavigator'
 import { mountFlowLocationTryRun } from '../../src/renderer/ui/flowLocationTryRun'
-import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
+import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
 import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'
 import type { FlowBlock } from '../../src/shared/courseProjectTypes'
+import {
+  PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,
+  startPlayer,
+} from '../../src/player/index'
+import { CoursePlayer } from '../../src/player/surfaces/CoursePlayer'
 
 const FIXTURE_ROOT = join(process.cwd(), 'tests', 'fixtures', 'architecture-baseline')
 const FIXED_TIME = '2026-08-24T00:00:00.000Z'
@@ -295,5 +300,43 @@ describe('ARCH-0 representative functional baseline', () => {
       .not.toBeNull()
     await host.destroy()
     expect(container.childElementCount).toBe(0)
+  })
+
+  it('starts Mixed Published V2 through the Player entry and fail-louds Legacy payload', async () => {
+    const source = readFileSync(join(process.cwd(), 'src/player/index.ts'), 'utf8')
+    expect(source).not.toContain('new PlayerApp')
+    expect(source).not.toContain('decodeExportPayload')
+    expect(source).toContain('publishedCourseV2Schema')
+    expect(source).toContain('createPublishedCourseSession')
+
+    expect(() => startPlayer({
+      project: { schemaVersion: 8, scenes: [] },
+      assets: {},
+      components: {},
+    })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+
+    const archive = fixture('mixed-spatial').archive
+    const components = componentPackagesFromArchive(
+      archive.project,
+      archive.componentFiles,
+    )
+    const published = buildPublishedCourseV2Payload({
+      project: archive.project,
+      assetFiles: archive.assetFiles,
+      components,
+    })
+    const root = document.createElement('div')
+    root.id = 'course-root'
+    Object.defineProperties(root, {
+      clientWidth: { configurable: true, value: 1_280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.append(root)
+    const session = startPlayer(published, root)
+    expect(session.player).toBeInstanceOf(CoursePlayer)
+    expect(session.listCatalog()).toHaveLength(published.locations.length)
+    window.__H5_LESSON_PLAYER__?.destroy()
+    await session.destroy()
+    root.remove()
   })
 })

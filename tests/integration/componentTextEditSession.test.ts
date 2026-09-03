@@ -8,6 +8,7 @@ import {
   selectActiveScene,
   selectEditingNodes,
   useEditorStore,
+  selectActiveCourseProjectDocument,
 } from '@/renderer/store/editorStore'
 import type {
   ComponentAuthoringTextTarget,
@@ -15,6 +16,13 @@ import type {
 } from '@/shared/componentTypes'
 import { getComponentPropValue, mergeComponentProps } from '@/shared/componentProps'
 import { materializeScene } from '@/shared/presentation'
+
+function materialized(
+  scene: ReturnType<typeof selectActiveScene>,
+  stateId?: string | null,
+) {
+  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
+}
 
 const packageId = 'com.example.canvas-copy-session'
 
@@ -80,7 +88,7 @@ function currentContext(
 ): ComponentTextEditContext {
   const store = useEditorStore.getState()
   return {
-    projectId: store.project.id,
+    projectId: selectActiveCourseProjectDocument(store)!.id,
     scope: store.editingScope,
     sceneId: store.activeSceneId,
     stateId: store.activePresentationStateId,
@@ -93,7 +101,7 @@ function currentContext(
 function titleAtState(stateId: string | null, nodeId: string): unknown {
   const store = useEditorStore.getState()
   const scene = selectActiveScene(store)
-  const node = materializeScene(scene, stateId).nodes.find(
+  const node = materialized(scene, stateId).nodes.find(
     (candidate) => candidate.id === nodeId,
   )
   if (!node || node.type !== 'external-component') return undefined

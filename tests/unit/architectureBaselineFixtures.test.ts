@@ -15,9 +15,24 @@ import {
   type ArchitectureBaselineFixtureId,
 } from '../../scripts/build-architecture-baseline-fixtures'
 import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
+import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course'
+import {
+  createCourseProjectArchive,
+  detectCourseProjectArchiveFormat,
+  openCourseProjectArchive,
+} from '../../src/renderer/project/courseProjectArchive'
 import type { CourseProjectDocument, FlowBlock } from '../../src/shared/courseProjectTypes'
+import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
 import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'
+import {
+  COURSE_PROJECT_REJECTION_INPUTS,
+  COURSE_PROJECT_REJECTION_KIND,
+  COURSE_PROJECT_V9_FIXTURE_IDS,
+  COURSE_PROJECT_V9_FIXTURE_MTIME,
+  listCourseProjectV9Fixtures,
+  readCourseProjectV9FixtureArchive,
+} from '../fixtures/course-project-v9'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const FIXTURE_MODULE_URL = pathToFileURL(
@@ -371,5 +386,123 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     expect(Object.keys(archive.componentFiles)).toEqual([
       'com.ittoedu.baseline.evidence-panel@4.0.0',
     ])
+  })
+})
+
+function publishFromArchiveBytes(bytes: Uint8Array) {
+  const opened = openCourseProjectArchive(bytes)
+  const components = Object.fromEntries(
+    Object.values(opened.componentFiles).map((files) => {
+      const pkg = parseComponentPackageFiles(files)
+      return [pkg.manifest.id, pkg]
+    }),
+  )
+  const published = buildPublishedCourseV2Payload({
+    project: opened.project,
+    assetFiles: opened.assetFiles,
+    components,
+  })
+  expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+  expect(published.format).toBe('h5course-published')
+  expect(published.formatVersion).toBe(2)
+  expect(published.sourceSchemaVersion).toBe(9)
+  expect(published.courseId).toBe(opened.project.id)
+  return { opened, published }
+}
+
+describe('r11-050 fixed Course Project V9 IDs', () => {
+  it('binds PM-02–PM-28 onto the fixed fixture IDs without inventing new ones', () => {
+    expect(listCourseProjectV9Fixtures().map((fixture) => fixture.id)).toEqual([
+      ...COURSE_PROJECT_V9_FIXTURE_IDS,
+    ])
+    const covered = new Set<string>()
+    for (const fixture of listCourseProjectV9Fixtures()) {
+      for (const cover of fixture.covers) {
+        if (cover.startsWith('PM-')) covered.add(cover)
+      }
+    }
+    for (const spec of ARCHITECTURE_BASELINE_FIXTURE_SPECS) {
+      for (const capability of spec.capabilities) {
+        if (capability.startsWith('PM-')) covered.add(capability)
+      }
+    }
+    const expected = Array.from({ length: 27 }, (_, index) => (
+      `PM-${String(index + 2).padStart(2, '0')}`
+    ))
+    expect([...covered].sort()).toEqual(expected)
+  })
+
+  it.each([...COURSE_PROJECT_V9_FIXTURE_IDS])(
+    're-archives sidecar/component bytes and publishes V9 fixture %s',
+    (fixtureId) => {
+      const bytes = readCourseProjectV9FixtureArchive(fixtureId)
+      expect(detectCourseProjectArchiveFormat(bytes)).toMatchObject({
+        kind: 'v9',
+        identity: { schemaVersion: 9 },
+      })
+      const { opened } = publishFromArchiveBytes(bytes)
+      const rebuilt = createCourseProjectArchive(opened, { mtime: COURSE_PROJECT_V9_FIXTURE_MTIME })
+      const reopened = openCourseProjectArchive(rebuilt)
+      expect(reopened.project).toEqual(opened.project)
+      expect(Object.keys(reopened.assetFiles).sort()).toEqual(Object.keys(opened.assetFiles).sort())
+      for (const [assetId, assetBytes] of Object.entries(opened.assetFiles)) {
+        expect([...reopened.assetFiles[assetId]!]).toEqual([...assetBytes])
+      }
+      expect(Object.keys(reopened.componentFiles).sort()).toEqual(
+        Object.keys(opened.componentFiles).sort(),
+      )
+    },
+  )
+
+  it.each([...ARCHITECTURE_BASELINE_FIXTURE_IDS])(
+    'publishes architecture baseline %s from document and component bytes',
+    (fixtureId) => {
+      publishFromArchiveBytes(bytesFor(fixtureId))
+    },
+  )
+
+  it.each([...COURSE_PROJECT_REJECTION_KIND])(
+    'treats rejection input %s as unsupported or corrupted, never as V9',
+    (kind) => {
+      const bytes = COURSE_PROJECT_REJECTION_INPUTS[kind]
+      const probe = detectCourseProjectArchiveFormat(bytes)
+      expect(probe.kind).not.toBe('v9')
+      if (kind === 'v8-unsupported' || kind === 'future-unsupported') {
+        expect(probe.kind).toBe('unsupported')
+        expect(probe.identity.schemaVersion).toBe(kind === 'v8-unsupported' ? 8 : 10)
+      } else {
+        expect(probe.kind).toBe('corrupted')
+      }
+      expect(() => openCourseProjectArchive(bytes)).toThrow()
+    },
+  )
+
+  it('keeps render-host-benchmark as real V9 / Published V2 with host protocol and static fallback', () => {
+    const exampleRoot = join(REPO_ROOT, 'examples', 'render-host-benchmark')
+    const project = JSON.parse(
+      readFileSync(join(exampleRoot, 'project-v9.json'), 'utf8'),
+    ) as CourseProjectDocument
+    const published = JSON.parse(
+      readFileSync(join(exampleRoot, 'published-v2.json'), 'utf8'),
+    ) as { format: string; formatVersion: number; sourceSchemaVersion: number }
+    const html = readFileSync(join(exampleRoot, 'render-host-benchmark-v2.html'), 'utf8')
+    const lesson = new Uint8Array(readFileSync(join(exampleRoot, 'render-host-benchmark-v9.h5lesson')))
+
+    expect(project.schemaVersion).toBe(9)
+    expect(detectCourseProjectArchiveFormat(lesson)).toMatchObject({
+      kind: 'v9',
+      identity: { schemaVersion: 9, projectId: project.id },
+    })
+    expect(published).toMatchObject({
+      format: 'h5course-published',
+      formatVersion: 2,
+      sourceSchemaVersion: 9,
+    })
+    expect(html).toContain('h5course-published')
+    expect(html).toContain('CoursewareRuntime.define')
+    expect(html).toContain('staticFallback')
+    expect(JSON.stringify(project)).toContain('CoursewareRuntime.define')
+    expect(JSON.stringify(project)).toContain('staticFallback')
+    expect(JSON.stringify(published)).toContain('staticFallback')
   })
 })

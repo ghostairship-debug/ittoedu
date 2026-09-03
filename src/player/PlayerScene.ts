@@ -6,7 +6,6 @@ import type {
 import type {
   GlobalLayerItem,
   SceneDocument,
-  SceneNode,
 } from '../shared/projectTypes'
 import type {
   PlayerAuthoringContext,
@@ -45,14 +44,19 @@ import type {
 } from './RuntimeHost'
 import {
   globalLayerNativeAssetIds,
+  nativeRenderInputsOf,
+  nativeTextureAssetIds,
   sceneNativeAssetIds,
+  type NativeSceneTexturePlan,
 } from './sceneAssets'
 import {
   renderNode,
+  type PlayerRenderNode,
   type RenderedNodeHandle,
   type RenderNodeContext,
   valuesEqual,
 } from './renderNode'
+import { isNativeRenderInput } from '../shared/contracts/native-v1/types'
 
 export type SceneChangedHandler = (sceneIndex: number) => void
 
@@ -85,6 +89,39 @@ export function resolvePlayerSceneEntryStateId(
   return authoringMode && requestedStateId === null
     ? null
     : resolveSceneEntryStateId(scene, requestedStateId)
+}
+
+/** Slide paint path: Native render input or component mount descriptor only. */
+export function asSlidePlayerRenderNode(
+  node: { readonly type: string },
+): PlayerRenderNode {
+  if (isNativeRenderInput(node)) return node
+  if (
+    node.type === 'external-component'
+    && 'id' in node
+    && 'component' in node
+    && 'props' in node
+  ) {
+    return node as PlayerRenderNode
+  }
+  throw new Error(
+    `PlayerScene Slide path 只消费 Native render input 或组件 mount descriptor，收到“${node.type}”。`,
+  )
+}
+
+function nativeSceneTexturePlan(scene: SceneDocument): NativeSceneTexturePlan {
+  const presentation = ensureScenePresentation(scene)
+  return {
+    backgroundAssetId: scene.backgroundAssetId,
+    nodes: nativeRenderInputsOf(scene.nodes),
+    namedStates: presentation.states.map((state) => {
+      const materialized = materializeScene(scene, state.id)
+      return {
+        backgroundAssetId: materialized.backgroundAssetId,
+        nodes: nativeRenderInputsOf(materialized.nodes),
+      }
+    }),
+  }
 }
 
 export type PlayerSceneAuthoringPatchResult =
@@ -150,8 +187,10 @@ export class PlayerScene extends Phaser.Scene {
       this.payload.project.scenes[0]
     if (!initialScene) return
     this.queueNativeAssets([
-      ...globalLayerNativeAssetIds(this.payload.project),
-      ...sceneNativeAssetIds(initialScene),
+      ...globalLayerNativeAssetIds(nativeRenderInputsOf(
+        this.payload.project.globalLayer.map((item) => item.node),
+      )),
+      ...sceneNativeAssetIds(nativeSceneTexturePlan(initialScene)),
     ])
   }
 
@@ -279,14 +318,15 @@ export class PlayerScene extends Phaser.Scene {
       materialized.nodes.forEach((node, depth) => {
         const handle = handlesById.get(node.id)
         if (!handle) return
+        const renderNodeInput = asSlidePlayerRenderNode(node)
         if (!valuesEqual(previousNodesById.get(node.id), node)) {
           this.sceneMotionDirector?.prepareStableUpdate(node.id)
           try {
-            handle.update(node)
+            handle.update(renderNodeInput)
           } catch (error) {
             console.error(`基础画面更新节点“${node.name}”失败`, error)
           }
-          this.sceneMotionDirector?.update(handle, node, node.visible)
+          this.sceneMotionDirector?.update(handle, renderNodeInput, renderNodeInput.visible)
         }
         handle.root.setDepth(depth)
         this.sceneNodesRoot.moveTo(handle.root, depth)
@@ -365,15 +405,16 @@ export class PlayerScene extends Phaser.Scene {
       materialized.nodes.forEach((node, depth) => {
         const handle = handlesById.get(node.id)
         if (!handle) return
+        const renderNodeInput = asSlidePlayerRenderNode(node)
         const affected = !valuesEqual(previousNodesById.get(node.id), node)
         if (affected) {
           motionDirector?.prepareStableUpdate(node.id)
           try {
-            handle.update(node, normalizedTransition)
+            handle.update(renderNodeInput, normalizedTransition)
           } catch (error) {
             console.error(`状态切换更新节点“${node.name}”失败`, error)
           }
-          motionDirector?.update(handle, node, node.visible, {
+          motionDirector?.update(handle, renderNodeInput, renderNodeInput.visible, {
             preserveRenderedFrame: (normalizedTransition?.duration ?? 0) > 0,
           })
         }
@@ -539,22 +580,33 @@ export class PlayerScene extends Phaser.Scene {
         `当前 Player 中不存在节点“${patch.node.id}”。`,
       )
     }
+    let canonicalRenderNode: PlayerRenderNode
+    let nextRenderNode: PlayerRenderNode
+    try {
+      canonicalRenderNode = asSlidePlayerRenderNode(located.canonical)
+      nextRenderNode = asSlidePlayerRenderNode(patch.node)
+    } catch {
+      return this.authoringFailure(
+        'target-mismatch',
+        'PlayerScene Slide path 只接受 Native render input 或组件 mount descriptor。',
+      )
+    }
     const identityFailure = this.validateAuthoringNodeIdentity(
-      located.canonical,
-      patch.node,
+      canonicalRenderNode,
+      nextRenderNode,
     )
     if (identityFailure) return identityFailure
-    const assetFailure = this.validateAuthoringNodeAssets(patch.node)
+    const assetFailure = this.validateAuthoringNodeAssets(nextRenderNode)
     if (assetFailure) return assetFailure
     const textureFailure = await this.ensureAuthoringTextures(
-      this.authoringTextureAssetIds(patch.node),
+      this.authoringTextureAssetIds(nextRenderNode),
     )
     if (textureFailure) return textureFailure
     const refreshedContextFailure = this.validateAuthoringContext(context)
     if (refreshedContextFailure) return refreshedContextFailure
 
     try {
-      const nextNode = structuredClone(patch.node)
+      const nextNode = asSlidePlayerRenderNode(structuredClone(patch.node))
       if (patch.target.scope === 'scene') {
         this.sceneMotionDirector?.prepareStableUpdate(nextNode.id)
         located.handle.update(nextNode)
@@ -635,7 +687,7 @@ export class PlayerScene extends Phaser.Scene {
       this.pendingNavigation = null
       return
     }
-    const missingAssetIds = sceneNativeAssetIds(sceneDocument).filter(
+    const missingAssetIds = sceneNativeAssetIds(nativeSceneTexturePlan(sceneDocument)).filter(
       (assetId) =>
         !this.textures.exists(this.textureKey(assetId)) &&
         !this.attemptedAssetIds.has(assetId),
@@ -725,7 +777,7 @@ export class PlayerScene extends Phaser.Scene {
       this.buildingSceneNodes = true
       try {
         this.renderedNodes = renderedScene.nodes.map((node, depth) => {
-          const handle = renderNode(this, node, depth, renderContext)
+          const handle = renderNode(this, asSlidePlayerRenderNode(node), depth, renderContext)
           this.applyStoredLifecycleState(handle)
           return handle
         })
@@ -734,7 +786,13 @@ export class PlayerScene extends Phaser.Scene {
       }
       renderedScene.nodes.forEach((node, nodeIndex) => {
         const handle = this.renderedNodes[nodeIndex]
-        if (handle) this.sceneMotionDirector?.register(handle, node, node.visible)
+        if (handle) {
+          this.sceneMotionDirector?.register(
+            handle,
+            asSlidePlayerRenderNode(node),
+            node.visible,
+          )
+        }
       })
 
       if (this.interactionsEnabled) {
@@ -875,8 +933,8 @@ export class PlayerScene extends Phaser.Scene {
   }
 
   private validateAuthoringNodeIdentity(
-    canonical: SceneNode,
-    node: SceneNode,
+    canonical: PlayerRenderNode,
+    node: PlayerRenderNode,
   ): PlayerSceneAuthoringPatchResult | null {
     if (canonical.id !== node.id || canonical.type !== node.type) {
       return this.authoringFailure(
@@ -922,8 +980,9 @@ export class PlayerScene extends Phaser.Scene {
   }
 
   private validateAuthoringNodeAssets(
-    node: SceneNode,
+    node: PlayerRenderNode,
   ): PlayerSceneAuthoringPatchResult | null {
+    if (!isNativeRenderInput(node)) return null
     if (node.type === 'image') {
       return this.validateAuthoringAsset(node.assetId, 'image', `节点“${node.name}”`)
     }
@@ -945,16 +1004,9 @@ export class PlayerScene extends Phaser.Scene {
     return null
   }
 
-  private authoringTextureAssetIds(node: SceneNode): string[] {
-    if (node.type === 'image') return [node.assetId]
-    if (
-      node.type === 'video' &&
-      node.poster.mode === 'image' &&
-      node.poster.assetId
-    ) {
-      return [node.poster.assetId]
-    }
-    return []
+  private authoringTextureAssetIds(node: PlayerRenderNode): string[] {
+    if (!isNativeRenderInput(node)) return []
+    return nativeTextureAssetIds([node])
   }
 
   private async ensureAuthoringTextures(
@@ -1034,8 +1086,10 @@ export class PlayerScene extends Phaser.Scene {
 
   private releaseUnusedNativeTextures(scene: SceneDocument): void {
     const retained = new Set([
-      ...globalLayerNativeAssetIds(this.payload.project),
-      ...sceneNativeAssetIds(scene),
+      ...globalLayerNativeAssetIds(nativeRenderInputsOf(
+        this.payload.project.globalLayer.map((item) => item.node),
+      )),
+      ...sceneNativeAssetIds(nativeSceneTexturePlan(scene)),
     ])
     for (const assetId of Object.keys(this.payload.assets)) {
       if (retained.has(assetId)) continue
@@ -1272,7 +1326,7 @@ export class PlayerScene extends Phaser.Scene {
         const parentRoot = item.layer === 'underlay'
           ? this.globalUnderlayRoot
           : this.globalOverlayRoot
-        const handle = renderNode(this, item.node, depth, {
+        const handle = renderNode(this, asSlidePlayerRenderNode(item.node), depth, {
           payload: this.payload,
           registry: this.componentRegistry,
           actions: this.hostActions,
@@ -1303,7 +1357,7 @@ export class PlayerScene extends Phaser.Scene {
     for (const { item, handle } of this.renderedGlobalItems) {
       // The active scene is resolved immediately after the persistent layer is
       // built. Register inactive first so visibility ranges can activate once.
-      this.globalMotionDirector.register(handle, item.node, false)
+      this.globalMotionDirector.register(handle, asSlidePlayerRenderNode(item.node), false)
     }
     if (this.interactionsEnabled) {
       this.globalInteractionEngine = new InteractionEngine({
@@ -1367,7 +1421,7 @@ export class PlayerScene extends Phaser.Scene {
       const visible = this.globalItemVisible(item, sceneId)
       const previousVisible = this.globalVisibilityByNodeId.get(item.node.id)
       handle.setHostVisible?.(visible)
-      this.globalMotionDirector?.update(handle, item.node, visible, {
+      this.globalMotionDirector?.update(handle, asSlidePlayerRenderNode(item.node), visible, {
         preserveTransient: previousVisible === true && visible,
         activationSceneId: sceneId,
       })
@@ -1380,7 +1434,7 @@ export class PlayerScene extends Phaser.Scene {
   private globalItemVisible(
     item: GlobalLayerItem,
     sceneId: string,
-    node: SceneNode = item.node,
+    node: Pick<PlayerRenderNode, 'visible'> = asSlidePlayerRenderNode(item.node),
   ): boolean {
     return node.visible && (
       this.authoringMode && this.authoringScope === 'global' ||

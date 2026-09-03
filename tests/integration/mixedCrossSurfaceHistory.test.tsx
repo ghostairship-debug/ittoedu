@@ -131,7 +131,7 @@ describe('Mixed cross-surface history continuity', () => {
     const spatialAfterImport = useEditorStore.getState().spatialSession
     if (!spatialAfterImport) throw new Error('Expected Spatial session after component import')
     expect(spatialAfterImport.history.past).toHaveLength(2)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(2)
+    expect(useEditorStore.getState().courseComponentPackagesPast).toHaveLength(2)
     expectComponentPackagePresent(spatialPackage)
 
     useEditorStore.getState().setEditingScope('global')
@@ -142,13 +142,13 @@ describe('Mixed cross-surface history continuity', () => {
 
     const staleSpatialSession = spatialBeforeCamera
     const historyBeforeCamera = spatialBeforeCamera.history
-    const sidecarPastBeforeCamera = useEditorStore.getState().slideCandidateSidecarPast
-    const sidecarFutureBeforeCamera = useEditorStore.getState().slideCandidateSidecarFuture
+    const sidecarPastBeforeCamera = useEditorStore.getState().courseAssetSidecarPast
+    const sidecarFutureBeforeCamera = useEditorStore.getState().courseAssetSidecarFuture
     const componentPackagesPastBeforeCamera = (
-      useEditorStore.getState().slideCandidateComponentPackagesPast
+      useEditorStore.getState().courseComponentPackagesPast
     )
     const componentPackagesFutureBeforeCamera = (
-      useEditorStore.getState().slideCandidateComponentPackagesFuture
+      useEditorStore.getState().courseComponentPackagesFuture
     )
     const savedBeforeCamera = openCourseProjectArchive(
       useEditorStore.getState().exportV9SlideCandidateArchive()!,
@@ -166,11 +166,11 @@ describe('Mixed cross-surface history continuity', () => {
     expect(afterCamera.history.present.revision).toBe(spatialBeforeCamera.history.present.revision)
     expect(afterCamera.history.past).toBe(historyBeforeCamera.past)
     expect(afterCamera.history.future).toBe(historyBeforeCamera.future)
-    expect(useEditorStore.getState().slideCandidateSidecarPast).toBe(sidecarPastBeforeCamera)
-    expect(useEditorStore.getState().slideCandidateSidecarFuture).toBe(sidecarFutureBeforeCamera)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast)
+    expect(useEditorStore.getState().courseAssetSidecarPast).toBe(sidecarPastBeforeCamera)
+    expect(useEditorStore.getState().courseAssetSidecarFuture).toBe(sidecarFutureBeforeCamera)
+    expect(useEditorStore.getState().courseComponentPackagesPast)
       .toBe(componentPackagesPastBeforeCamera)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture)
+    expect(useEditorStore.getState().courseComponentPackagesFuture)
       .toBe(componentPackagesFutureBeforeCamera)
     expect(openCourseProjectArchive(
       useEditorStore.getState().exportV9SlideCandidateArchive()!,
@@ -184,11 +184,11 @@ describe('Mixed cross-surface history continuity', () => {
     expect(freshSlide.generation).toBe(0)
     expect(freshSlide.selection.locationId).toBe(SLIDE_LOCATION_ID)
     expect(freshSlide.selection.selectionIds).toEqual([])
-    expect(useEditorStore.getState().slideCandidateSidecarPast).toBe(sidecarPastBeforeCamera)
-    expect(useEditorStore.getState().slideCandidateSidecarFuture).toBe(sidecarFutureBeforeCamera)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast)
+    expect(useEditorStore.getState().courseAssetSidecarPast).toBe(sidecarPastBeforeCamera)
+    expect(useEditorStore.getState().courseAssetSidecarFuture).toBe(sidecarFutureBeforeCamera)
+    expect(useEditorStore.getState().courseComponentPackagesPast)
       .toBe(componentPackagesPastBeforeCamera)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture)
+    expect(useEditorStore.getState().courseComponentPackagesFuture)
       .toBe(componentPackagesFutureBeforeCamera)
 
     useEditorStore.getState().undo()
@@ -196,16 +196,16 @@ describe('Mixed cross-surface history continuity', () => {
     expectComponentPackageAbsent(SPATIAL_PACKAGE_ID)
     expect(selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.past)
       .toHaveLength(1)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(1)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(1)
+    expect(useEditorStore.getState().courseComponentPackagesPast).toHaveLength(1)
+    expect(useEditorStore.getState().courseComponentPackagesFuture).toHaveLength(1)
 
     useEditorStore.getState().redo()
     expectComponentPackagePresent(spatialPackage)
     expect(useEditorStore.getState().componentPackages[SPATIAL_PACKAGE_ID]).toBe(spatialPackage)
     expect(selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.past)
       .toHaveLength(2)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(2)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(0)
+    expect(useEditorStore.getState().courseComponentPackagesPast).toHaveLength(2)
+    expect(useEditorStore.getState().courseComponentPackagesFuture).toHaveLength(0)
 
     useEditorStore.getState().selectNode(SLIDE_ITEM_ID)
     useEditorStore.getState().updateNode(SLIDE_ITEM_ID, { name: SLIDE_EDITED_LABEL })
@@ -215,13 +215,13 @@ describe('Mixed cross-surface history continuity', () => {
     expect(layerLabel(slideAfterEdit.history.present, SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(slideAfterEdit.history.present, SLIDE_ITEM_ID)).toBe(SLIDE_EDITED_LABEL)
     const canonicalHistory = slideAfterEdit.history
-    const sidecarPastAfterBothEdits = useEditorStore.getState().slideCandidateSidecarPast
-    const sidecarFutureAfterBothEdits = useEditorStore.getState().slideCandidateSidecarFuture
+    const sidecarPastAfterBothEdits = useEditorStore.getState().courseAssetSidecarPast
+    const sidecarFutureAfterBothEdits = useEditorStore.getState().courseAssetSidecarFuture
     const componentPackagesPastAfterBothEdits = (
-      useEditorStore.getState().slideCandidateComponentPackagesPast
+      useEditorStore.getState().courseComponentPackagesPast
     )
     const componentPackagesFutureAfterBothEdits = (
-      useEditorStore.getState().slideCandidateComponentPackagesFuture
+      useEditorStore.getState().courseComponentPackagesFuture
     )
 
     useEditorStore.getState().activateCourseLocation(SPATIAL_LOCATION_ID)
@@ -234,11 +234,11 @@ describe('Mixed cross-surface history continuity', () => {
     expect(returnedSpatial.selection.locationId).toBe(SPATIAL_LOCATION_ID)
     expect(returnedSpatial.selection.selectionIds).toEqual([])
     expect(returnedSpatial.sessionCamera).toEqual({ x: 0, y: 0, zoom: 1 })
-    expect(useEditorStore.getState().slideCandidateSidecarPast).toBe(sidecarPastAfterBothEdits)
-    expect(useEditorStore.getState().slideCandidateSidecarFuture).toBe(sidecarFutureAfterBothEdits)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast)
+    expect(useEditorStore.getState().courseAssetSidecarPast).toBe(sidecarPastAfterBothEdits)
+    expect(useEditorStore.getState().courseAssetSidecarFuture).toBe(sidecarFutureAfterBothEdits)
+    expect(useEditorStore.getState().courseComponentPackagesPast)
       .toBe(componentPackagesPastAfterBothEdits)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture)
+    expect(useEditorStore.getState().courseComponentPackagesFuture)
       .toBe(componentPackagesFutureAfterBothEdits)
 
     const beforeStaleDocument = returnedSpatial.history.present
@@ -305,10 +305,10 @@ describe('Mixed cross-surface history continuity', () => {
     expect(layerLabel(reopenedSlide.history.present, SPATIAL_ITEM_ID)).toBe(SPATIAL_EDITED_LABEL)
     expect(layerLabel(reopenedSlide.history.present, SLIDE_ITEM_ID)).toBe(SLIDE_EDITED_LABEL)
     expectComponentPackagePresent(spatialPackage)
-    expect(useEditorStore.getState().slideCandidateSidecarPast).toEqual([])
-    expect(useEditorStore.getState().slideCandidateSidecarFuture).toEqual([])
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toEqual([])
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toEqual([])
+    expect(useEditorStore.getState().courseAssetSidecarPast).toEqual([])
+    expect(useEditorStore.getState().courseAssetSidecarFuture).toEqual([])
+    expect(useEditorStore.getState().courseComponentPackagesPast).toEqual([])
+    expect(useEditorStore.getState().courseComponentPackagesFuture).toEqual([])
   })
 
   it('moves Flow legacy component payloads with metadata and preserves no-op stack identity', () => {
@@ -319,35 +319,35 @@ describe('Mixed cross-surface history continuity', () => {
     const flowAfterImport = useEditorStore.getState().flowSession
     if (!flowAfterImport) throw new Error('Expected Flow session after component import')
     expect(flowAfterImport.history.past).toHaveLength(1)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(1)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(0)
+    expect(useEditorStore.getState().courseComponentPackagesPast).toHaveLength(1)
+    expect(useEditorStore.getState().courseComponentPackagesFuture).toHaveLength(0)
     expectComponentPackagePresent(flowPackage)
 
     const packagePastBeforeSelection = (
-      useEditorStore.getState().slideCandidateComponentPackagesPast
+      useEditorStore.getState().courseComponentPackagesPast
     )
     const packageFutureBeforeSelection = (
-      useEditorStore.getState().slideCandidateComponentPackagesFuture
+      useEditorStore.getState().courseComponentPackagesFuture
     )
     useEditorStore.getState().applyFlowSelection(flowAfterImport.selection)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast)
+    expect(useEditorStore.getState().courseComponentPackagesPast)
       .toBe(packagePastBeforeSelection)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture)
+    expect(useEditorStore.getState().courseComponentPackagesFuture)
       .toBe(packageFutureBeforeSelection)
 
     useEditorStore.getState().undo()
     expectComponentPackageAbsent(FLOW_PACKAGE_ID)
     expect(useEditorStore.getState().flowSession?.history.past).toHaveLength(0)
     expect(useEditorStore.getState().flowSession?.history.future).toHaveLength(1)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(0)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(1)
+    expect(useEditorStore.getState().courseComponentPackagesPast).toHaveLength(0)
+    expect(useEditorStore.getState().courseComponentPackagesFuture).toHaveLength(1)
 
     useEditorStore.getState().redo()
     expectComponentPackagePresent(flowPackage)
     expect(useEditorStore.getState().componentPackages[FLOW_PACKAGE_ID]).toBe(flowPackage)
     expect(useEditorStore.getState().flowSession?.history.past).toHaveLength(1)
     expect(useEditorStore.getState().flowSession?.history.future).toHaveLength(0)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesPast).toHaveLength(1)
-    expect(useEditorStore.getState().slideCandidateComponentPackagesFuture).toHaveLength(0)
+    expect(useEditorStore.getState().courseComponentPackagesPast).toHaveLength(1)
+    expect(useEditorStore.getState().courseComponentPackagesFuture).toHaveLength(0)
   })
 })

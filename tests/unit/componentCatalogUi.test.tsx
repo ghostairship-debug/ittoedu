@@ -6,7 +6,10 @@ import type {
 } from '@/shared/componentCatalog'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { useEditorStore,
+  selectActiveCourseProjectDocument,
+  selectSlideSceneList,
+} from '@/renderer/store/editorStore'
 
 const entry: AvailableComponentCatalogPackage = {
   packageId: 'com.example.catalog-card',
@@ -122,7 +125,7 @@ describe('组件目录 UI', () => {
     const projectCard = screen.getByTestId(`component-${entry.packageId}`)
     for (let index = 0; index < 10; index += 1) fireEvent.click(projectCard)
 
-    expect(useEditorStore.getState().project.scenes[0]!.nodes).toHaveLength(10)
+    expect(selectSlideSceneList(useEditorStore.getState())[0]!.nodes).toHaveLength(10)
     expect(onAddCatalogComponents).not.toHaveBeenCalled()
     expect(useEditorStore.getState().activeTab).toBe('components')
   })

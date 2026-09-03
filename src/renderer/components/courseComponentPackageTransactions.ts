@@ -12,7 +12,7 @@ import type {
   LayerItem,
 } from '@/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4/types'
 import { z } from 'zod'
 import {
   parseComponentPackageFiles,
@@ -694,10 +694,12 @@ export function planCourseComponentPackageDeletion(
 
   const references = collectCourseComponentPackageReferences(input.project, packageId)
   if (references.length > 0) {
+    const globalInstanceCount = references.filter((reference) => reference.scope === 'global').length
+    const sceneInstanceCount = references.length - globalInstanceCount
     return Object.freeze({
       ok: false as const,
       code: 'package-referenced' as const,
-      reason: `组件包“${packageId}”仍被 ${references.length} 个实例引用。`,
+      reason: `组件包“${packageId}”仍被 ${sceneInstanceCount} 个场景实例和 ${globalInstanceCount} 个全局实例引用。`,
       references,
     })
   }

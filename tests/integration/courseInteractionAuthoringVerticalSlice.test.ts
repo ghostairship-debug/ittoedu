@@ -94,10 +94,10 @@ function activeHistory() {
 function resourceSnapshotDepths() {
   const state = useEditorStore.getState()
   return {
-    sidecarPast: state.slideCandidateSidecarPast.length,
-    sidecarFuture: state.slideCandidateSidecarFuture.length,
-    componentPast: state.slideCandidateComponentPackagesPast.length,
-    componentFuture: state.slideCandidateComponentPackagesFuture.length,
+    sidecarPast: state.courseAssetSidecarPast.length,
+    sidecarFuture: state.courseAssetSidecarFuture.length,
+    componentPast: state.courseComponentPackagesPast.length,
+    componentFuture: state.courseComponentPackagesFuture.length,
   }
 }
 
@@ -126,15 +126,15 @@ function authoritativeWriteSnapshot() {
   const state = useEditorStore.getState()
   return {
     project: structuredClone(activeProject()),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
     storeHistory: structuredClone(state.history),
     mediaFiles: byteFileSnapshot(selectMediaAssetFiles(state)),
     componentPackages: structuredClone(state.componentPackages),
-    sidecarPast: structuredClone(state.slideCandidateSidecarPast),
-    sidecarFuture: structuredClone(state.slideCandidateSidecarFuture),
-    componentPast: structuredClone(state.slideCandidateComponentPackagesPast),
-    componentFuture: structuredClone(state.slideCandidateComponentPackagesFuture),
+    sidecarPast: structuredClone(state.courseAssetSidecarPast),
+    sidecarFuture: structuredClone(state.courseAssetSidecarFuture),
+    componentPast: structuredClone(state.courseComponentPackagesPast),
+    componentFuture: structuredClone(state.courseComponentPackagesFuture),
     sessions: authoringSessionSnapshot(),
     dirty: state.dirty,
   }

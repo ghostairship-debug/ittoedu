@@ -17,7 +17,7 @@ import {
   createImageNode,
   createTextNode,
   createVideoNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import {
@@ -28,7 +28,7 @@ import {
   flowBlockTargetFromSelection,
   selectFlowEditorBlock,
 } from '@/renderer/course/flowEditorSlice'
-import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
 
 /**
  * Proves Flow EDIT mode paper and overlay image/video rendering from sidecar bytes.

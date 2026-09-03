@@ -7,6 +7,9 @@ import type {
   SpatialPathDocument,
   SpatialSemanticZoomRule,
 } from '../../shared/courseProjectTypes'
+import { BufferedInput, PropertyDraftBoundary } from './properties/PropertyControls'
+
+const EMPTY_DRAFT_BINDINGS: ReadonlyMap<string, string> = new Map()
 
 export interface SpatialCameraPanelProps {
   readonly surfaceTitle: string
@@ -22,6 +25,10 @@ export interface SpatialCameraPanelProps {
   readonly disabled?: boolean
   readonly sessionCameraLabel?: string
   readonly disabledReason?: string
+  readonly draftBindingKey?: string
+  readonly frameDraftBindings?: ReadonlyMap<string, string>
+  readonly semanticRuleDraftBindings?: ReadonlyMap<string, string>
+  readonly onDraftStale?: () => void
   readonly onShowCameraFramesChange: (show: boolean) => void
   readonly onAddFrame: () => void
   readonly onRenameFrame: (frameId: string, name: string) => void
@@ -45,91 +52,6 @@ export interface SpatialCameraPanelProps {
   readonly onDeleteSemanticZoomRule: (ruleId: string) => void
 }
 
-function BufferedTextInput({
-  value,
-  ariaLabel,
-  disabled,
-  onCommit,
-}: {
-  value: string
-  ariaLabel: string
-  disabled?: boolean
-  onCommit: (value: string) => void
-}) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => setDraft(value), [value])
-
-  const commit = () => {
-    const next = draft.trim()
-    if (!next || next === value) {
-      setDraft(value)
-      return
-    }
-    onCommit(next)
-  }
-
-  return (
-    <input
-      className="form-input"
-      aria-label={ariaLabel}
-      disabled={disabled}
-      value={draft}
-      onChange={(event) => setDraft(event.currentTarget.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur()
-        if (event.key === 'Escape') {
-          setDraft(value)
-          event.currentTarget.blur()
-        }
-      }}
-    />
-  )
-}
-
-function BufferedNumberInput({
-  value,
-  ariaLabel,
-  disabled,
-  onCommit,
-}: {
-  value: number
-  ariaLabel: string
-  disabled?: boolean
-  onCommit: (value: number) => void
-}) {
-  const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
-
-  const commit = () => {
-    const next = Number(draft)
-    if (!Number.isFinite(next) || next === value) {
-      setDraft(String(value))
-      return
-    }
-    onCommit(next)
-  }
-
-  return (
-    <input
-      className="form-input"
-      type="number"
-      aria-label={ariaLabel}
-      disabled={disabled}
-      value={draft}
-      onChange={(event) => setDraft(event.currentTarget.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur()
-        if (event.key === 'Escape') {
-          setDraft(String(value))
-          event.currentTarget.blur()
-        }
-      }}
-    />
-  )
-}
-
 /**
  * Lightweight camera / semantic-zoom section. R5-Z must mount this *inside*
  * Properties as a page-level segment. Do not import into App / RightSidebar
@@ -149,6 +71,10 @@ export function SpatialCameraPanel({
   disabled = false,
   sessionCameraLabel,
   disabledReason,
+  draftBindingKey = 'spatial-camera-unbound',
+  frameDraftBindings = EMPTY_DRAFT_BINDINGS,
+  semanticRuleDraftBindings = EMPTY_DRAFT_BINDINGS,
+  onDraftStale = () => undefined,
   onShowCameraFramesChange,
   onAddFrame,
   onRenameFrame,
@@ -169,6 +95,13 @@ export function SpatialCameraPanel({
   const [ruleMaxZoom, setRuleMaxZoom] = useState('1')
   const [ruleVisible, setRuleVisible] = useState(true)
 
+  useEffect(() => {
+    setRuleLayerItemIds([])
+    setRuleMinZoom('0')
+    setRuleMaxZoom('1')
+    setRuleVisible(true)
+  }, [draftBindingKey])
+
   const layerLabel = (layerItemId: string): string => (
     worldLayerItems.find((candidate) => candidate.layerItemId === layerItemId)?.label || layerItemId
   )
@@ -181,6 +114,16 @@ export function SpatialCameraPanel({
     && parsedRuleMinZoom >= 0
     && parsedRuleMaxZoom > 0
     && parsedRuleMinZoom < parsedRuleMaxZoom
+
+  const moveFrameToward = (frameId: string, direction: -1 | 1) => {
+    const orderedIds = frames.map((frame) => frame.id)
+    const fromIndex = orderedIds.indexOf(frameId)
+    const neighborId = fromIndex >= 0 ? orderedIds[fromIndex + direction] : undefined
+    if (fromIndex < 0 || !neighborId) return
+    const toIndex = orderedIds.indexOf(neighborId)
+    if (toIndex < 0) return
+    onReorderFrame(frameId, toIndex)
+  }
 
   return (
     <section className="property-section" aria-label="镜头调度">
@@ -252,18 +195,23 @@ export function SpatialCameraPanel({
         </button>
       )}
 
-      {frames.map((frame, index) => (
-        <div className="form-field" key={frame.id}>
+      {frames.map((frame) => (
+        <div className="form-field" key={frame.id} data-frame-id={frame.id}>
           {editingFrameId === frame.id ? (
-            <BufferedTextInput
-              ariaLabel={`重命名镜头 ${frame.name}`}
-              disabled={disabled}
-              value={frame.name}
-              onCommit={(name) => {
-                onRenameFrame(frame.id, name)
-                setEditingFrameId(null)
-              }}
-            />
+            <PropertyDraftBoundary
+              bindingKey={frameDraftBindings.get(frame.id) ?? draftBindingKey}
+              onStale={onDraftStale}
+            >
+              <BufferedInput
+                label={`重命名镜头 ${frame.name}`}
+                disabled={disabled}
+                value={frame.name}
+                onCommit={(name) => {
+                  onRenameFrame(frame.id, name)
+                  setEditingFrameId(null)
+                }}
+              />
+            </PropertyDraftBoundary>
           ) : (
             <button
               type="button"
@@ -289,18 +237,18 @@ export function SpatialCameraPanel({
           <button
             type="button"
             className="secondary-button"
-            disabled={disabled || index === 0}
+            disabled={disabled || frame.id === frames[0]?.id}
             aria-label={`上移镜头 ${frame.name}`}
-            onClick={() => onReorderFrame(frame.id, index - 1)}
+            onClick={() => moveFrameToward(frame.id, -1)}
           >
             上移
           </button>
           <button
             type="button"
             className="secondary-button"
-            disabled={disabled || index === frames.length - 1}
+            disabled={disabled || frame.id === frames[frames.length - 1]?.id}
             aria-label={`下移镜头 ${frame.name}`}
-            onClick={() => onReorderFrame(frame.id, index + 1)}
+            onClick={() => moveFrameToward(frame.id, 1)}
           >
             下移
           </button>
@@ -336,7 +284,7 @@ export function SpatialCameraPanel({
         {worldLayerItems.length === 0 ? (
           <p className="property-hint">当前空间表面还没有可参与语义缩放的世界图层。</p>
         ) : worldLayerItems.map((item) => (
-          <label className="property-hint" key={item.layerItemId}>
+          <label className="property-hint" key={item.layerItemId} data-layer-item-id={item.layerItemId}>
             <input
               type="checkbox"
               disabled={disabled}
@@ -400,22 +348,31 @@ export function SpatialCameraPanel({
           <Plus size={14} />添加语义缩放规则
         </button>
         {semanticZoomRules.map((rule) => (
-          <div className="form-field" key={rule.id}>
+          <div className="form-field" key={rule.id} data-semantic-zoom-rule-id={rule.id}>
             <p className="property-hint">
               {rule.layerItemIds.map((layerItemId) => layerLabel(layerItemId)).join('、') || '未选择图层'}
             </p>
-            <BufferedNumberInput
-              ariaLabel={`规则最小缩放 ${rule.id}`}
-              disabled={disabled}
-              value={rule.minZoom}
-              onCommit={(minZoom) => onUpdateSemanticZoomRule(rule.id, { minZoom })}
-            />
-            <BufferedNumberInput
-              ariaLabel={`规则最大缩放 ${rule.id}`}
-              disabled={disabled}
-              value={rule.maxZoom}
-              onCommit={(maxZoom) => onUpdateSemanticZoomRule(rule.id, { maxZoom })}
-            />
+            <PropertyDraftBoundary
+              bindingKey={semanticRuleDraftBindings.get(rule.id) ?? draftBindingKey}
+              onStale={onDraftStale}
+            >
+              <BufferedInput
+                label={`规则最小缩放 ${rule.id}`}
+                type="number"
+                min={0}
+                disabled={disabled}
+                value={rule.minZoom}
+                onCommit={(minZoom) => onUpdateSemanticZoomRule(rule.id, { minZoom: Number(minZoom) })}
+              />
+              <BufferedInput
+                label={`规则最大缩放 ${rule.id}`}
+                type="number"
+                min={0.01}
+                disabled={disabled}
+                value={rule.maxZoom}
+                onCommit={(maxZoom) => onUpdateSemanticZoomRule(rule.id, { maxZoom: Number(maxZoom) })}
+              />
+            </PropertyDraftBoundary>
             <label className="property-hint">
               <input
                 type="checkbox"

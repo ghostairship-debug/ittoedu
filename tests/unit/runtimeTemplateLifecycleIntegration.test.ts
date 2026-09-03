@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { selectRuntimeSourceAuthoringView } from '@/renderer/runtime/runtimeSourceAuthoringView'
 import {
   selectActiveCourseLocationId,
@@ -129,7 +129,7 @@ function expectUnrelatedStatePreserved(): void {
     })
   expect(scene.presentation?.states[0]?.layerItemOverrides[UNRELATED_LAYER_ID])
     .toEqual({ opacity: 0.75 })
-  expect(state.slideCandidateSidecar?.files[UNRELATED_ASSET_ID])
+  expect(state.courseAssetSidecar?.files[UNRELATED_ASSET_ID])
     .toEqual(UNRELATED_ASSET_BYTES)
   expect(state.componentPackages).toEqual({})
 }

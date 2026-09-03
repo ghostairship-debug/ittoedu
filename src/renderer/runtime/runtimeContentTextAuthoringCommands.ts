@@ -519,6 +519,9 @@ export function planRuntimeContentTextUpdate(
   }
   // Runtime content is shared by all named states. A -> B alone does not stale
   // the target, while resolution still validates state A and its effective lock.
+  if (!resolution.ok && resolution.code === 'item-missing') {
+    return fail('item-missing', resolution.reason)
+  }
   const validation = validateCourseAuthoringTarget({
     target: { ...input.target.courseTarget, stateId: null },
     current: { ...input.currentIdentity, stateId: null },

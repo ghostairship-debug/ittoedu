@@ -1,16 +1,23 @@
 # 架构合同：什么不能坏
 
-> 本文是“必须守住的现状能力 + 已裁决但尚待修复的目标不变量”的唯一落点，供 S1/S2 任务按需补读。目标态条目会明确标出当前缺口，不能伪称已经满足。协议细节以 `src/shared/contracts/**`、Zod Schema 与源码为准；本文与源码冲突时修正本文。
+> 本文是“必须守住的现状能力 + 已裁决但尚待修复的目标不变量”的唯一落点。只有改动命中相关架构边界时才补读对应条目，不要求普通任务通读全文。目标态条目会明确标出当前缺口，不能伪称已经满足。协议细节以 `src/shared/contracts/**`、Zod Schema 与源码为准；本文与源码冲突时修正本文。
 
 ## 1. 协议与版本边界
 
 - Course Project V9 是唯一受支持的作者工程格式；不导入 V8 `.h5lesson`；不借重构创建 V10。
-- V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。
-- Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。
+- V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table/Chart 是 2026-09-02 Owner 明确批准的两个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
+- Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table/Chart 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
 - 项目 `id` 与单调 `revision` 语义保留；`globalLayerItems`、`surfaceLayerItems` 和三 Surface 保留；不新增 persisted `projectMode`。
-- 当前编辑器内没有可见 AI、聊天、Provider 或网络调用；internal/reserved 接口不得宣称为可用工作流。
+- AI 路线为 1.6–1.9 默认隐藏、2.0 在内部生产构建中正式开放；对应版本门完成前，当前编辑器仍不得宣称 AI、聊天、Provider 或 internal/reserved 接口为可用工作流。隐藏能力也必须走正式 CLI harness、受管暂存、自动准入与宿主 canonical command 边界；1.8 起的 live authoring 还必须走 MCP，不能从旧接口名称直接接线。
+- 1.1 在保持 V9 wire、Published V2 wire 和全部受支持行为不变的前提下，清零可执行代码、测试、脚本、示例、fixture、artifacts 与正式生成制品中的 V8 模型、Schema、旧 Player/Export payload 和旧测试工具链；历史 Markdown 与 Git 历史可保留旧名称。该清理不恢复 V8 导入，也不触发 V10。
+
+### 1.1 内部生产信任模型
+
+本产品运行于受控团队和受信代码环境。工程内 Runtime/Component、课件模块和批准后的自动生成代码视为可信生产扩展；网络声明、iframe、staging 和自动准入主要服务交付一致性、生命周期、资源闭包、诊断与错误隔离，不用于推导外部恶意插件模型。没有 Owner 新决定时，不新增多租户、公开插件市场、零信任审批或逐能力人工授权平台。长期 Provider Secret、原始 Electron Main、任意 OS 命令、远程脚本和未经合同批准的新宿主 API 仍不属于可信扩展授权。
 
 ## 2. Must Preserve / Must Achieve（25 组）
+
+**零功能降级总则**：架构迁移只能替换实现和 owner，不能通过删除入口、测试、Surface、导出格式、动态 carrier、开发工作台或把真实内容静态化来完成清理。必须先交付并验证等价 V9/Published consumer，再删除旧 consumer；任一中间提交都必须可运行、可保存、可重开、可撤销、可预览并保持适用导出。当前支持能力缺失、结果错误或失败路径变得不诚实时，迁移必须停止并回滚。
 
 ### 产品能力
 
@@ -57,7 +64,7 @@
 24. 自动化最多证明 engineering candidate；未经明确教师验收不得宣称 accepted/发布。
 25. 用户未提交修改不得被自动回退或覆盖。
 
-## 3. 状态七分类与唯一工程真相
+## 3. 状态分类与唯一工程真相
 
 | 类别 | 示例 | 持久化 | 进 Undo |
 |---|---|---:|---:|
@@ -67,9 +74,12 @@
 | Surface selection | block/layer/path/camera selection | 否 | 通常否 |
 | Draft/IME/drag | 文本、代码、表单、临时 frame | 否 | 提交后才进入 |
 | Runtime/preview session | mount、会话相机、播放状态 | 否 | 否 |
+| AI/CLI session and trace | CLI session mapping、消息、tool trace、usage、状态 | 应用本地版本化目录；不进工程 | 否 |
+| AI staging workspace | 待准入 Component/Runtime 源码、manifest、诊断与候选资源 | 应用管理的本地暂存；准入前不进工程 | 否 |
 | App UI | tab、dialog、path、status | 部分本地偏好 | 否 |
 
-- 禁止把七类塞回一个无边界大接口；不新增第二套 Store、Session、History 或持久化模式。
+- 禁止把这些状态塞回一个无边界大接口；不新增第二套作者 Store、CourseAuthoringSession、History 或工程持久化模式。AI/CLI conversation session 是本地编排记录，不是第二作者会话、第二工程真相或第二历史。
+- 内部实现可以用类型交集组合唯一 Store，但任何 Feature/Surface 不得接收或导出完整 `EditorState`、raw `get/set` 或 root Store hook；状态与 actions 必须由对应 Owner slice 持有。组合类型不是公共边界。
 - 正常生命周期恰好一个活动 V9 Surface session（Slide/Flow/Spatial 互斥）；一次用户操作 = 一次逻辑提交 = 一条历史（文档 + 资源字节同事务）。
 - 任何异步/延迟提交必须带创建时 target（projectId / sessionGeneration / location / surface / owner / item / revision），失败返回可识别 stale 结果，不写当前页面。
 - 用户操作边界：pointer up 一次提交；IME composing 不提交；批量导入可为一条批量历史；自动恢复写盘与模式/Tab 切换不进 Undo。
@@ -79,8 +89,8 @@
 | 模块 | Owns | 不 Own |
 |---|---|---|
 | Shared Contracts/Domain | V9/Published/Component/Runtime/Interaction 类型与纯规则 | Renderer 状态、UI、文件系统 |
-| Editor Core | canonical port、authoring identity、transaction/history、typed selectors | 具体 Surface selection、Feature UI |
-| App Composition | 项目生命周期、跨 Feature use case、路由、错误反馈 | Surface 内部模型、格式实现 |
+| Editor Core | canonical port、authoring identity、resource delta/apply、authoring transaction/history、typed selectors | Zustand composition root、具体 Surface session/selection、Feature UI |
+| App Composition | 唯一 Store 实例化、slice 接线、项目生命周期、exactly-one Surface router、跨 Feature use case 编排、错误反馈 | Feature planner、Surface writer 实现、Surface 内部模型、格式实现 |
 | Slide | Scene/Layer placement、Phaser 编辑生命周期、Slide selection | Catalog、通用包生命周期 |
 | Flow | FlowBlock、稿纸布局、正文合成边界、overlay placement、Flow selection | 把普通 block 变成通用图层或逐 paragraph z-order |
 | Spatial | World item、camera/path/relation、Spatial selection | Player 会话相机写回工程 |
@@ -94,9 +104,11 @@
 | Export | Published/static plan 到具体格式 | 修改作者 Store |
 | Diagnostics | structural/authoring/export report | 每次键入全量分析 |
 | Main/Preload | 文件、窗口、IPC、安全边界 | 作者业务模型 |
+| Authoring Tools / MCP | 版本化 read/write tools、canonical target、receipt、stale 与事务适配 | 模型规划循环、直接写 Store、绕过产品命令 |
+| AI / CLI Harness | CLI 探测/启动/恢复/取消、标准事件、本地 session 映射、暂存协调 | authoritative project、Provider 凭据、重复实现 CLI 的 Agent loop |
 | Repo Knowledge | 开发索引与 Context Pack | 产品运行时依赖 |
 
-跨域操作不通过模块深层 import 完成，由用例层组合：`validate → Surface placement command → Core transaction → App feedback`；document + 资源字节同时变更必须是一条原子逻辑历史。方向性约束：Core 不 import 具体 Surface/Feature；Player 不依赖 renderer Store；authoring V9 → Published 单向。
+跨域操作不通过模块深层 import 完成，由用例层组合：`validate → Surface placement command → Core transaction → App feedback`；document + 资源字节同时变更必须是一条原子逻辑历史。方向性约束：Core 不 import 具体 Surface/Feature；Player 不依赖 renderer Store；authoring V9 → Published 单向。Composition root 可以 import 各 slice factory；slice、planner 和 Feature use case 不得反向 import composition root、`useEditorStore` 或完整 Store 类型。Feature use case 只接收所需的 target/read/commit/feedback 窄 port。
 
 ## 5. Surface carrier 矩阵
 
@@ -118,32 +130,65 @@
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
 - **全局层**：有效图层管线为 visibility filter → global Underlay（平面内排序）→ 当前本地合成（Flow 为 surface Underlay → 语义正文 → surface Overlay；Slide / Spatial 保留各自本地 carrier）→ global Overlay（平面内排序）→ rows/canvas/player；跨 owner `order` 不得泄漏成可编辑交错层级。
 - **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。
+- **Table/Chart**：两者是 V9 Native 和 Published V2 的匹配 strict 分支；不得进入 legacy `SceneNode`，不得改变既有 Native 或 presentation override 的合并语义。旧 V9 必须继续读取；旧编辑器或旧 Player 遇到新分支必须 fail loud，不能静默丢弃、替换成截图后覆盖作者工程或伪装成 Shape。
 - **Diagnostics**：不预建 structural/contextual/authoring/export 框架矩阵，只处理已复现的债务。网络 finding 判断“声明与使用是否一致”，不得把合法外链本身定义为错误。
 - **Secrets**：长期 API/AI Provider 密钥不属于 Course Project、Published payload、component package 或导出文件；只允许服务端代理、运行时用户输入或短期限域 Token。
-- **UI**：只有已准入迁移的首个真实 consumer 需要时才抽最窄 seam；能局部修复就不造 seam，不一次拆大文件。
+- **模块与 UI**：局部问题仍优先抽首个真实 consumer 所需的最窄 seam；但命中巨石触发条件或 Owner 明确要求时，必须按正式 Owner 主动拆分，无需等待用户故障。不得以“不一次拆大文件”为由长期保留跨 Owner 状态和 writer，也不得借拆分创建设计系统、万能服务或无真实 consumer 的抽象。
 - **EditorMode**：只有 simple/professional 两种；不建第三 `code` 模式、新 Code Workspace 入口或结构化 Diff。
 
-## 7. 迁移期棘轮与例外
+### 6.1 主动模块化与巨石门
 
-- `state.project`（V8 投影）不新增 writer；V8 projection 只读且不新增 consumer；raw `useEditorStore` 旧 UI 允许存续、新 public API 禁止导出；deep imports 在现有基线上只允许下降。
+出现以下任一证据即进入主动模块化，而不是继续做局部代理：
+
+- 一个实现单元持有三个及以上正式 Owner 的 state/writer；
+- 出现依赖环、Core → Feature/Surface 反向依赖；
+- 出现 wrong-owner 状态、跨 Surface 镜像或以某 Surface 命名却被其他 Surface 共写的资源状态；
+- 完整 Store/State/raw hook 成为跨域公共 API；
+- 同一热点阻断两个已批准开发 lane，或频繁造成独占写锁冲突；
+- Owner 明确指定拆分。
+
+“真拆分”必须同时满足：状态、actions、planner、transaction/use case 迁到真实 Owner；import graph/结构测试证明方向；root 只实例化和接线；旧 writer、双写、完整 Store Facade、第二 Store/Session/History 为零；直接 consumer 改用窄 selector/command port；当前保存重开、Undo/Redo、三 Surface、Preview/Player 与适用导出不降级。行数下降、文件新增、re-export 或测试只查文件名均不能单独证明完成。
+
+1.1 已明确把 `editorStore.ts`、`App.tsx`、`Workspace.tsx`、`PropertiesTab.tsx`、`FlowWorkspace.tsx`、Slide Published adapter 和 Course package builder 作为主动治理热点；具体拆分边界以 1.1 独立规格为准。`buildPublishedCourse.ts`、V9 Schema/health、动态宿主和 Main/Preload 不做无 consumer 的机械拆分，后续出现真实第二 owner/consumer 时再进入同一门。
+
+## 7. CLI Agent、MCP、暂存与会话边界
+
+- **内核分工**：用户自行安装并认证 Codex、Claude、OpenCode；CLI 保留各自的模型规划、Skills、子任务与工具循环。应用只实现版本化 `LocalAgentCliAdapterV1`、session harness、MCP Authoring Tools、暂存区、回执/时间线与自动准入，不复制模型规划循环或另建 Agent Runner。
+- **进程边界**：CLI adapter 以解析后的明确可执行文件和参数数组提供 probe/start/resume/cancel；Windows 不拼接 shell 命令字符串。CLI 自行登录并保存凭据，应用不读取或保存其 API Key。
+- **唯一写路径与版本分界**：CLI candidate 默认可通过结构化 stdout / artifact channel 返回；只有 adapter 确实启用通用文件工具时，文件工具才限定到应用管理的当前 session staging，并执行对应 conformance。无文件工具的 adapter 不因缺少文件系统沙箱而失败。文件工具始终不得直接写 `.h5lesson`、其他 session 或权威工程；staging 主要保证候选事务、恢复、清理和防止意外跨工程/半写入，不承担对受信 CLI 的通用 OS 沙箱证明。1.7 是 batch candidate pipeline：应用只提供不可变最小 context snapshot 或已确认 Markdown，CLI 不获得 Store 或 live project API，只输出 strict/versioned typed authoring intent envelope 或 dynamic package manifest；宿主重校验 target/revision，Native/Recipe/Existing Component 候选直接映射 1.4 canonical commands，只有 Generated Component/Runtime 额外进入动态准入，并以单一 document + resource transaction 提交，禁止 generic V9 patch/import。1.8 起，任何 CLI 发起的 live/interactive Course Project 读取与权威修改只能经过版本化产品 MCP 工具。update target 必须逐字段无损携带 canonical `CourseAuthoringTarget`；create target 使用独立 create-scope。CLI candidate receipt 与 host commit receipt 分离；stale、拒绝、坏候选、适用的准入失败和取消均零工程写入。
+- **暂存和自动准入**：生成 Component/Runtime 源码、manifest、资源与诊断先进入暂存区。动态载体自动准入至少验证编译、协议、依赖、素材闭包、精确 origin、生命周期、资源上限、静态后备和真实宿主 smoke；未通过不得注册或写工程。Native、Recipe 与 Existing Component 候选不等待动态宿主门。内部稳定版默认不提供绕过准入的人工覆盖。
+- **自动可信能力**：通过自动准入的 Component/Runtime 自动成为当前可信扩展，可使用当前正式提供给可信扩展的父页面、本地、桌面、网络和其他宿主接口，无需人工代码审核。该授权不包含 Provider Secret、原始 Electron Main 对象、任意 OS 命令、未开放远程脚本或未经合同批准的新宿主接口。
+- **本地会话身份**：AI 会话、材料与 tool trace 保存于应用 `userData` 下的版本化目录，以工程 ID 与规范化文件位置共同标识。Save As 创建新的 workspace identity，不复制旧会话；可清除单个会话、当前工程或全部应用记录。它们不进入 Course Project、Published、Component、Runtime 或导出物；应用只能承诺删除自己的记录，CLI 自身历史由适配器能力另行说明。
+- **版本可见性**：1.6–1.9 的 CLI/生成/Agent/Chat 能力默认隐藏，2.0 才在内部生产构建中正式显示；这不改变产品的内部生产分发边界。CLI 未安装、未认证、不可用或异常退出时，全部人工编辑能力必须正常工作。
+
+## 8. 1.1 V8 清零棘轮与例外
+
+- 1.1 执行期间，`state.project`（V8 投影）不新增 writer，V8 projection 不新增 consumer，raw `useEditorStore` 不新增 public API，旧模块 deep import 只允许下降；这些是迁移期约束，不是允许 V8 路径长期保留的例外。
+- 1.1 完成时，`editorStore.ts` 是单一 Zustand composition root；Core resource/history、App lifecycle/UI、Slide/Flow/Spatial 与 Runtime/Media/Component/Interaction/Global-Teacher use case 已按 Owner 分离。`slideCandidateSidecar*` 等跨 Surface wrong-owner 状态、根级 selection/navigation/history 镜像和 Feature → root Store 反向依赖为零。
+- 1.1 完成时，`src/**`、`tests/**`、`scripts/**`、`examples/**`、`artifacts/**`、fixture 与正式生成制品中不得再导入、导出或使用旧 projectTypes/projectSchema、schemaVersion 8 作者工程/archive、旧 Player/Export payload、旧测试工厂或独立 `ProjectDocument` / `SceneDocument` / `SceneNode` / `ExportPayload` token。Markdown 历史、最终评估材料、Git 历史、依赖和构建缓存不在机器清零范围内。
+- 每个旧 consumer 必须先有行为等价的 V9/Published producer、consumer 和最近层检查，才可删除；不得靠删功能、删测试、删导出、静态化动态内容、修改断言或 silent fallback 达成零命中。
 - 例外必须登记六要素：位置、原因、首个真实 consumer、替代目标、退出条件、Owner。
-- Legacy 台账唯一真相是 `inventories/legacy-consumers.json`；任务卡只引用记录 ID，不复制 consumer 清单。
+- Legacy 台账唯一真相是 `inventories/legacy-consumers.json`；检查器验证并收紧该台账，不建立第二份 allowlist。它只对 `reconciledProductCommit`、`reconciledScope` 与排除 inventory 自身的 product tree digest 标识的候选声明当前精确，避免提交身份自引用；后续迁移只能减少实际 consumer，台账在下一次 reconciliation 前是禁止删除用的安全上界。迁移 lane 不并行修改该 JSON；只有持有 `legacy-inventory` 专用写锁的单一 Owner 可原子刷新或更新删除状态。任务卡只引用记录 ID，不复制 consumer 清单；1.1 最终门要求无 unknown、confirmed consumer 为零并在复核后删除旧模块。
+- 1.1 收敛 LEG-002 时，作者画布、当前位置试运行、整课 Player 与 capture 使用同一共享渲染语义，不把当前宿主偶然差异当成可选架构：文本 `auto-height` / `fixed` / `shrink` 以 `src/shared/textLayout.ts` 的既有规则为准；工程声明且已解析的字体在顶层文档和预览 iframe 安装同一字体 bytes；工程资产 ID 始终解析为 Course Project / Published asset closure 中的同一 bytes，只有明确 remote source 且未被工程 bytes 接管时才按声明 origin 获取，失败必须可见。该收敛是修复已知不一致，不授权改变文字、字体、素材或网络功能。
 
-## 8. 已知架构陷阱（风险登记摘要）
+## 9. 已知架构陷阱（风险登记摘要）
 
-Flow carrier 被统一层抹平；Core 循环依赖；第二套导航/状态真相并存；stale async 写错目标；history 双写；sidecar 快照内存膨胀；V2 主路径被 fallback 回退；raw Store Facade（把整个 Store re-export 当边界）；Facade 空壳（只搬文件不迁职责）；repo-index 自过期 / 非确定生成 / dirty 输入漏报。
+Flow carrier 被统一层抹平；Core 循环依赖；第二套导航/状态真相并存；stale async 写错目标；history 双写；sidecar 快照内存膨胀；V2 主路径被 fallback 回退；raw Store Facade（把整个 Store re-export 当边界）；Facade 空壳（只搬文件不迁职责）；slice factory 接收完整 `EditorState/get()`；root re-export 全部 actions；多个 slice 各自维护 active document/dirty/history；为结构测试保留无效字符串；repo-index 自过期 / 非确定生成 / dirty 输入漏报。
 
-## 9. 开发基础设施不变量
+## 10. 开发基础设施不变量
 
 - `artifacts/ai-capabilities/`（回答"课件生成能做什么"）与 `repo-index/`（回答"开发修改该读什么"）不得合并为一份真相；两者都不进产品运行时。
 - repo-index 是显式按需生成、可缺省且不 tracked 的本地导航缓存，不是默认 CI 门；生成时仍禁止写入 HEAD、时间戳、用户名或绝对路径，其缓存新鲜度只由 source/semantic/config/tool 四域 hash + schemaVersion + generatorVersion 判定，相同输入连续生成必须逐字节一致。
 - 不引入第二套 TypeScript 编译器或 ts-morph；索引只维持 TS7 `unstable/sync` 薄适配层。
-- 热点文件清单（Editor Store/History、App 保存恢复、Workspace/Properties、Published producer、contracts/Schema、main/preload、generated repo-index）是热点锁的锁对象；文件大小只是风险信号，不是机械拆分门禁。
+- 热点文件清单（Editor Store/History、App 保存恢复、Workspace/Properties、Published producer、contracts/Schema、main/preload、generated repo-index）是热点锁的锁对象。文件大小仍不是单独 CI 失败条件，但与跨 Owner writer、依赖环、wrong-owner state、raw Store 扩散或已批准 lane 冲突之一同时出现时，构成主动拆分证据；`editorStore.ts` 已由 Owner 指定为 1.1 必拆热点。
+- 持续架构治理只保留三类证据：本合同的 Owner/方向、针对真实边界的 dependency ratchet、受影响行为的最近层测试。边界变化时更新现有 `FEATURE_CONSUMER_OWNER_LEDGER` 与直接 ratchet；不建立周期性架构评审会、评分卡、全仓依赖平台或第二份模块台账。
 
-## 10. 术语要点
+## 11. 术语要点
 
 - `LayerItem`：Slide 场景 / Flow 浮层 / Spatial 世界的统一图层项，不含 Flow 普通正文。
 - `FlowBlock` / `FlowComponentBlock`：Flow 稿纸正文与稿纸组件的 carrier。
 - `ScopedLayerItem`：global/surface 共享层载体，含 location 可见性。
 - `authoringAddress`：跨保存稳定的作者身份地址；`hitId` 是会话临时命中标识。
 - `CourseAuthoringSession`：唯一活动编辑会话，演化不重建；`AuthoringTarget` 是异步提交的过期防护快照。
+- `AI/CLI session`：应用本地保存的外部 CLI 会话映射和工具轨迹；不属于 Course Project，也不是第二个 `CourseAuthoringSession`。
+- `AI staging workspace`：自动准入前的应用本地候选目录；其中内容不是 authoritative project，只有通过门禁并经产品事务提交后才成为工程事实。

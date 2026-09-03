@@ -11,7 +11,7 @@ import {
   type NativeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   commandTargetFromRow,
   courseAuthoringScopeFromLocation,
@@ -316,7 +316,14 @@ describe('effective layer projection', () => {
       ownerKey: 'scene:scene-1',
       selected: true,
       impact: { kind: 'scene', mode: 'owner' },
+      hitPolicy: 'auto',
+      contentSummary: { kind: 'native', nativeType: 'text' },
     })
+    expect(byId['slide-title']?.frame).toEqual(byId['slide-title']?.item.frame)
+    expect(byId['teacher-controller']).toMatchObject({
+      contentSummary: { kind: 'native', nativeType: 'teacher-controller' },
+    })
+    expect('schemaVersion' in byId['slide-title']!).toBe(false)
     expect(byId['teacher-controller']).toMatchObject({
       source: 'global',
       owner: 'global',

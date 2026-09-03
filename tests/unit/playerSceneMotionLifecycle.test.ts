@@ -11,11 +11,52 @@ vi.mock('phaser', () => ({
 import { PlayerScene } from '../../src/player/PlayerScene'
 import { CourseEventBus } from '../../src/player/CourseEventBus'
 import {
-  createProject,
   createRectangleNode,
-} from '../../src/renderer/project/createProject'
+} from '../../src/renderer/project/nativeNodeFactories'
 import type { ExportPayload } from '../../src/shared/componentTypes'
-import type { GlobalLayerItem } from '../../src/shared/projectTypes'
+import type { GlobalLayerItem, ProjectDocument } from '../../src/shared/projectTypes'
+
+function legacyPlayerDocument(): ProjectDocument {
+  return {
+    schemaVersion: 8,
+    id: 'player-project',
+    title: '未命名课件',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    canvas: { width: 1280, height: 720 },
+    scenes: [{
+      id: 'scene_1',
+      name: '场景 1',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      nodes: [],
+      presentation: {
+        initialStateId: 'state_initial',
+        states: [{ id: 'state_initial', name: '初始', nodeOverrides: {} }],
+      },
+      interactions: [],
+    }],
+    assets: {},
+    componentPackages: {},
+    globalLayer: [],
+    globalInteractions: [],
+    designTokens: { fonts: [], colors: [] },
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+      },
+    },
+    playback: {
+      controls: 'none',
+      keyboardNavigation: true,
+      presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+    },
+  }
+}
 
 type PrivateMethod<Args extends unknown[], Result> = (
   this: PlayerScene,
@@ -33,7 +74,7 @@ function privateMethod<Args extends unknown[], Result>(
 }
 
 function createPresentationHarness() {
-  const project = createProject({ includeDefaultController: false, controls: 'none' })
+  const project = legacyPlayerDocument()
   const sceneDocument = project.scenes[0]!
   const node = createRectangleNode({
     id: 'feedback',

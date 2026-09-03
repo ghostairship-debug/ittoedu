@@ -1,4 +1,7 @@
-import type { CourseSurfaceType } from '../../shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  CourseSurfaceType,
+} from '../../shared/courseProjectTypes'
 import type { CourseAuthoringOwner } from './courseAuthoringScope'
 
 export type CourseAuthoringSurfaceType = Extract<
@@ -199,6 +202,23 @@ export function guardCourseAuthoringTargetCallback<T>(
   return run()
 }
 
+export function surfaceTypeForLocation(
+  project: CourseProjectDocument,
+  locationId: string,
+): CourseAuthoringSurfaceType {
+  const location = project.locations.find((candidate) => candidate.id === locationId)
+  if (!location) throw new Error(`找不到课程位置：${locationId}`)
+  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (!surface || (
+    surface.type !== 'slide' &&
+    surface.type !== 'flow' &&
+    surface.type !== 'spatial-2d'
+  )) {
+    throw new Error(`找不到可编辑表面：${location.surfaceId}`)
+  }
+  return surface.type
+}
+
 export function createCourseAuthoringSession(input: {
   readonly locationId: string
   readonly surfaceType: CourseAuthoringSurfaceType
@@ -208,6 +228,19 @@ export function createCourseAuthoringSession(input: {
   return freezeSession({
     token: createSessionToken(input, 0),
     itemIds: input.itemIds ?? [],
+  })
+}
+
+export function buildCourseAuthoringSessionForProject(
+  project: CourseProjectDocument,
+  locationId: string,
+  itemIds: readonly string[] = [],
+): CourseAuthoringSession {
+  return createCourseAuthoringSession({
+    locationId,
+    surfaceType: surfaceTypeForLocation(project, locationId),
+    revision: project.revision,
+    itemIds,
   })
 }
 

@@ -12,10 +12,11 @@ import {
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,
   SlideCommandError,
-  commitSlideAuthoringHistory,
+  commitSlideActionTransaction,
   commitSlideProjectMutation,
   selectSlideEditorLayers,
   type SlideAuthoringHistory,
+  type SlideAuthoringResourceTransition,
   type SlideAuthoringSelection,
   type SlideAuthoringSessionRef,
   type SlideCommandOptions,
@@ -47,6 +48,7 @@ import { repairRemovedCourseReferences } from './courseReferenceCleanup'
 export type {
   V9SlideClipboardItem,
   V9SlideClipboardPayload,
+  V9SlideClipboardResourceReferences,
   V9SlideClipboardScope,
   V9SlideGlobalClipboardItem,
   V9SlideGlobalClipboardPayload,
@@ -296,6 +298,7 @@ function freezeSession(session: SlideAuthoringSessionRef): SlideAuthoringSession
 function succeed(
   next: SlideAuthoringSessionRef,
   historyEntry: boolean,
+  resourceTransition?: SlideAuthoringResourceTransition,
 ): SlideCommandResult {
   const session = freezeSession(next)
   return {
@@ -303,6 +306,7 @@ function succeed(
     nextSession: session,
     historyEntry,
     selection: session.selection,
+    ...(resourceTransition ? { resourceTransition } : {}),
   }
 }
 
@@ -354,14 +358,24 @@ function commitDocument(
   session: SlideAuthoringSessionRef,
   project: CourseProjectDocument,
   selection: SlideAuthoringSelection = session.selection,
-): SlideAuthoringSessionRef {
-  return {
+): SlideCommandResult {
+  const committed = commitSlideActionTransaction(session.history, project)
+  if (!committed) {
+    return succeed({
+      sessionId: session.sessionId,
+      history: session.history,
+      selection,
+      scope: session.scope,
+      generation: session.generation,
+    }, false)
+  }
+  return succeed({
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, project),
+    history: committed.history,
     selection,
     scope: session.scope,
     generation: session.generation,
-  }
+  }, true, committed.resourceTransition)
 }
 
 function selectionAfter(
@@ -550,7 +564,7 @@ export function reorderSlideSceneLayers(
       })
       sortSlideSceneLayerItems(scene)
     }, options.now)
-    return succeed(commitDocument(session, project), true)
+    return commitDocument(session, project)
   } catch (error) {
     return catchCommand(session, error)
   }
@@ -657,7 +671,7 @@ export function patchSlideSceneLayers(
         if (patch.locked !== undefined) item.locked = patch.locked
       }
     }, options.now)
-    return succeed(commitDocument(session, project), true)
+    return commitDocument(session, project)
   } catch (error) {
     return catchCommand(session, error)
   }
@@ -718,9 +732,10 @@ export function deleteSlideSceneLayers(
       }
       if (structural.size > 0) structurallyDeleteSceneLayers(draft, scene, structural)
     }, options.now)
-    return succeed(
-      commitDocument(session, project, selectionAfter(session, project, remainingSelection)),
-      true,
+    return commitDocument(
+      session,
+      project,
+      selectionAfter(session, project, remainingSelection),
     )
   } catch (error) {
     return catchCommand(session, error)
@@ -751,10 +766,7 @@ export function pasteSlideSceneLayers(
         clipboard,
       })
     }, options.now)
-    return succeed(
-      commitDocument(session, project, selectionAfter(session, project, pastedIds)),
-      true,
-    )
+    return commitDocument(session, project, selectionAfter(session, project, pastedIds))
   } catch (error) {
     return catchCommand(session, error)
   }
@@ -783,10 +795,7 @@ export function pasteSlideGlobalLayers(
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       pastedIds = mutatePasteSlideGlobalClipboard(draft, clipboard)
     }, options.now)
-    return succeed(
-      commitDocument(session, project, selectionAfter(session, project, pastedIds)),
-      true,
-    )
+    return commitDocument(session, project, selectionAfter(session, project, pastedIds))
   } catch (error) {
     return catchCommand(session, error)
   }
@@ -810,6 +819,37 @@ export function duplicateSlideSceneLayers(
     }
     const clipboard = copySlideSceneClipboard(session, layerItemIds)
     return pasteSlideSceneLayers(session, clipboard, options)
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+export function duplicateSlideGlobalLayers(
+  session: SlideAuthoringSessionRef,
+  layerItemIds: readonly string[],
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  const wrong = requireGlobalScope(session)
+  if (wrong) return wrong
+  try {
+    const uniqueIds = [...new Set(layerItemIds)]
+    if (uniqueIds.length === 0) throw new Error('没有可重复的选择')
+    const byId = new Map(
+      session.history.present.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item]),
+    )
+    for (const layerItemId of uniqueIds) {
+      const item = byId.get(layerItemId)
+      if (!item) {
+        throw new SlideCommandError('invalid-selection', '所选全局元素已失效，请重新选择')
+      }
+      if (item.locked) {
+        throw new SlideCommandError(SLIDE_REJECT_LOCKED, '当前元素已锁定')
+      }
+    }
+    const clipboard = copySlideGlobalClipboard(session, uniqueIds)
+    return pasteSlideGlobalLayers(session, clipboard, options)
   } catch (error) {
     return catchCommand(session, error)
   }

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
-import { createFormulaNode } from '@/renderer/project/createProject'
+import { createFormulaNode } from '@/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
@@ -65,7 +65,18 @@ describe('FlowFormulaBlockProperties', () => {
     expect(screen.getByTestId('formula-authoring-editor')).toBeDefined()
 
     const input = screen.getByRole('textbox', { name: '公式内容（线性输入）' })
+    fireEvent.focus(input)
+    expect(useEditorStore.getState().flowTextEdit).toMatchObject({
+      kind: 'formula',
+      blockId: formulaBlock.id,
+    })
+    const revisionBeforeDraft = useEditorStore.getState().flowSession?.history.present.revision
     fireEvent.change(input, { target: { value: 'a+b' } })
+    expect(useEditorStore.getState().flowTextEdit?.draft).toMatchObject({
+      source: 'a+b',
+      valid: true,
+    })
+    expect(useEditorStore.getState().flowSession?.history.present.revision).toBe(revisionBeforeDraft)
 
     const applyButton = screen.getByRole('button', { name: '应用公式' })
     fireEvent.click(applyButton)
@@ -81,6 +92,7 @@ describe('FlowFormulaBlockProperties', () => {
       expect(updatedBlock.accessibleText).toContain('a')
       expect(updatedBlock.accessibleText).toContain('b')
     }
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
 
     expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
   })

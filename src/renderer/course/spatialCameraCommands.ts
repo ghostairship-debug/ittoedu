@@ -344,6 +344,7 @@ export function updateActiveSpatialCameraFrameFromSession(
     const view = buildSpatialEditorView({
       project: session.history.present,
       locationId: session.selection.locationId,
+      sessionCamera: session.sessionCamera,
     })
     const history = updateSpatialCameraFramePose(
       session.history,
@@ -497,6 +498,7 @@ export function spatialSessionCameraFittingWorldContent(
   const view = buildSpatialEditorView({
     project: session.history.present,
     locationId: session.selection.locationId,
+    sessionCamera: session.sessionCamera,
   })
   const worldItems = view.layers.filter((layer) =>
     layer.coordinateSpace === 'world' && layer.effectiveVisible,

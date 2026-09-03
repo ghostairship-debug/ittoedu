@@ -39,7 +39,8 @@ import {
 } from '../../../shared/publishedCourseTypes'
 import { publishedCourseV2Schema } from '../../../shared/publishedCourseSchema'
 import { resolveEffectiveGlobalLayerPlanes } from '../../../shared/courseLayerComposition'
-import type { AssetMeta, EmbeddedComponentPackageMeta } from '../../../shared/projectTypes'
+import type { AssetMeta } from '../../../shared/contracts/media-v1/types'
+import type { EmbeddedComponentPackageMeta } from '../../../shared/contracts/component-v4/types'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import { bytesToBase64, bytesToDataUrl } from '../base64'
 

@@ -3,7 +3,7 @@ import type {
   ArrowHead,
   ShapeLineStyle,
   ShapeNode,
-} from './projectTypes'
+} from './contracts/native-v1/types'
 
 export interface ShapeRenderSize {
   width: number

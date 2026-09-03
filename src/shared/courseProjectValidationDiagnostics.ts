@@ -96,6 +96,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'Course Project V9 Schema rejects asset references without matching metadata.',
   },
   {
+    code: 'asset-reference-analysis-incomplete',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'A schema-valid component instance can lack opened package files, so image-prop analysis conservatively degrades.',
+  },
+  {
     code: 'asset-reference-missing',
     status: 'active',
     sections: ['projectHealth'],
@@ -144,6 +150,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'The original selected-package sha256 is optional provenance distinct from required embedded contentSha256.',
   },
   {
+    code: 'component-package-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'Course Project V9 Schema rejects component instances whose packageId is absent from componentPackages.',
+  },
+  {
     code: 'component-package-source-missing',
     status: 'active',
     sections: ['projectHealth'],
@@ -166,6 +178,18 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     status: 'active',
     sections: ['projectHealth'],
     note: 'Component thumbnailPath remains optional in V9 metadata.',
+  },
+  {
+    code: 'component-version-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'Course Project V9 Schema rejects component instances whose version does not match package metadata.',
+  },
+  {
+    code: 'controller-button-id-duplicate',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'Native teacher-controller Schema rejects duplicate button ids before semantic reports run.',
   },
   {
     code: 'controller-required-for-canvas',
@@ -204,6 +228,18 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'A global presentation.set target can exist in only some possible Slide scenes.',
   },
   {
+    code: 'global-node-id-duplicate',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Schema enforces layerItemId uniqueness inside each owner list; cross-owner collisions use duplicate-stable-id.',
+  },
+  {
+    code: 'global-visibility-scene-reference-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 visibility uses location ids, which the Schema cross-checks; V8 scene-id visibility has no remaining writer.',
+  },
+  {
     code: 'information-release-hidden-self-trigger',
     status: 'active',
     sections: ['projectHealth'],
@@ -214,6 +250,18 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     status: 'active',
     sections: ['projectHealth'],
     note: 'A schema-valid Slide item can begin hidden without a reachable declarative reveal path.',
+  },
+  {
+    code: 'initial-state-reference-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Slide presentation Schema requires initialStateId to exist in the same scene.',
+  },
+  {
+    code: 'interaction-action-id-duplicate',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'Interaction V1 Schema rejects duplicate action ids in the same rule and scope.',
   },
   {
     code: 'interaction-action-reference-missing',
@@ -234,16 +282,40 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'A valid node.enter target can already be visible before its reveal action.',
   },
   {
+    code: 'interaction-navigation-not-terminal',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'Interaction V1 Schema requires scene navigation, replay and restart actions to be the last independent group.',
+  },
+  {
+    code: 'interaction-node-reference-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Schema verifies interaction nodeId targets against the project layer-item universe.',
+  },
+  {
     code: 'interaction-node-type-mismatch',
     status: 'active',
     sections: ['projectHealth'],
     note: 'V9 Schema verifies layer existence but not Component/Video trigger and action target type.',
   },
   {
+    code: 'interaction-rule-id-duplicate',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'Interaction V1 Schema rejects duplicate rule ids in the same scope.',
+  },
+  {
     code: 'interaction-scene-reference-missing',
     status: 'active',
     sections: ['projectHealth'],
     note: 'Interaction scene.go targets are not cross-checked by the V9 Schema.',
+  },
+  {
+    code: 'interaction-sound-reference-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Schema rejects audio trigger and action soundId values that are absent from media.audio.sounds.',
   },
   {
     code: 'interaction-state-reference-missing',
@@ -262,6 +334,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     status: 'schema-shadowed',
     sections: ['projectHealth', 'migrationMarkers'],
     note: 'Legacy frame and runtime discriminators are rejected by the V9 Schema first.',
+  },
+  {
+    code: 'node-id-duplicate',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Schema enforces layerItemId uniqueness inside each owner list.',
   },
   {
     code: 'online-connect-origin-undeclared',
@@ -372,10 +450,28 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'V9 Schema enforces scene ids per Slide surface, so cross-surface collisions remain possible.',
   },
   {
+    code: 'scene-required',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Schema requires at least one Surface and each Slide surface to contain at least one scene.',
+  },
+  {
     code: 'sound-id-mismatch',
     status: 'active',
     sections: ['projectHealth'],
     note: 'V9 Schema does not require a sound record key to equal SoundDefinition.id.',
+  },
+  {
+    code: 'state-id-duplicate',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Slide presentation Schema requires state ids to be unique inside a scene.',
+  },
+  {
+    code: 'state-node-reference-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Schema rejects state overrides and order entries whose layerItemId is absent from the scene.',
   },
   {
     code: 'static-export-info',
@@ -400,6 +496,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     status: 'archive-shadowed',
     sections: ['exportPreflight'],
     note: 'The invoked asset warning is preceded by archive byte validation and Published source gates.',
+  },
+  {
+    code: 'thumbnail-state-reference-missing',
+    status: 'schema-shadowed',
+    sections: ['projectHealth'],
+    note: 'V9 Slide presentation Schema requires thumbnailStateId to exist in the same scene.',
   },
   {
     code: 'v8-field',

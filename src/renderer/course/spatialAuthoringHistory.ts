@@ -182,6 +182,17 @@ export function freezeSpatialHistory(
 export function freezeSpatialSession(
   session: SpatialAuthoringSession,
 ): SpatialAuthoringSession {
+  if (
+    Object.isFrozen(session)
+    && Object.isFrozen(session.history)
+    && Object.isFrozen(session.history.past)
+    && Object.isFrozen(session.history.future)
+    && Object.isFrozen(session.selection)
+    && Object.isFrozen(session.selection.selectionIds)
+    && Object.isFrozen(session.sessionCamera)
+  ) {
+    return session
+  }
   return Object.freeze({
     sessionId: session.sessionId,
     history: freezeSpatialHistory(session.history),

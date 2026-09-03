@@ -1,0 +1,444 @@
+{
+  "schemaVersion": 1,
+  "release": "1.1",
+  "fixtures": [
+    {
+      "id": "slide-heavy",
+      "path": "tests/fixtures/architecture-baseline/slide-heavy.h5lesson",
+      "identity": {
+        "kind": "course-project-v9-archive",
+        "projectId": "arch-0-slide-heavy"
+      },
+      "generateCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts",
+      "checkCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts --check"
+    },
+    {
+      "id": "flow-heavy",
+      "path": "tests/fixtures/architecture-baseline/flow-heavy.h5lesson",
+      "identity": {
+        "kind": "course-project-v9-archive",
+        "projectId": "arch-0-flow-heavy"
+      },
+      "generateCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts",
+      "checkCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts --check"
+    },
+    {
+      "id": "mixed-spatial",
+      "path": "tests/fixtures/architecture-baseline/mixed-spatial.h5lesson",
+      "identity": {
+        "kind": "course-project-v9-archive",
+        "projectId": "arch-0-mixed-spatial"
+      },
+      "generateCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts",
+      "checkCommand": "npx tsx scripts/build-architecture-baseline-fixtures.ts --check"
+    },
+    {
+      "id": "render-host-benchmark-v9",
+      "path": "examples/render-host-benchmark/render-host-benchmark-v9.h5lesson",
+      "identity": {
+        "kind": "course-project-v9-archive",
+        "projectId": "render-host-benchmark"
+      },
+      "generateCommand": "npm run refresh:render-benchmark:fixture",
+      "checkCommand": "npm run check:render-benchmark:fixture"
+    },
+    {
+      "id": "render-host-benchmark-v2",
+      "path": "examples/render-host-benchmark/render-host-benchmark-v2.html",
+      "identity": {
+        "kind": "published-course-v2-offline-html",
+        "sourceArchive": "examples/render-host-benchmark/render-host-benchmark-v9.h5lesson"
+      },
+      "generateCommand": "npm run refresh:render-benchmark:fixture",
+      "checkCommand": "npm run check:render-benchmark:fixture"
+    }
+  ],
+  "rows": [
+    {
+      "id": "PM-01",
+      "type": "owner-observation",
+      "observer": "Owner confirms desktop core UI entries remain visible and operable on the 1.1 fixture suite, including new/open/recent, element browser, properties, simple/professional mode, and the professional developer workbench.",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/App.tsx",
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/ui/PropertiesTab.tsx",
+        "tests/unit/simpleEditorMode.test.tsx",
+        "tests/unit/developerMode.test.tsx",
+        "tests/unit/editorActionRouting.test.ts"
+      ],
+      "invalidation": "Desktop shell, Workspace, Properties, simple/professional mode, or developer workbench entry files or their focused tests change."
+    },
+    {
+      "id": "PM-02",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/courseProjectCoreContract.test.ts tests/unit/courseProjectArchive.test.ts tests/unit/projectFormatIsolation.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/shared/contracts/course-project-v9",
+        "src/renderer/project/courseProjectArchive.ts",
+        "tests/unit/courseProjectCoreContract.test.ts",
+        "tests/unit/courseProjectArchive.test.ts",
+        "tests/unit/projectFormatIsolation.test.ts"
+      ],
+      "invalidation": "V9 schema, archive reader/writer, or format isolation tests change."
+    },
+    {
+      "id": "PM-03",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/v9SlideProductIntegration.test.tsx tests/unit/v9SlideActionCommands.test.ts tests/unit/v9SlideViewportAdapter.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "src/renderer/course",
+        "src/renderer/phaser",
+        "tests/unit/v9SlideProductIntegration.test.tsx",
+        "tests/unit/v9SlideActionCommands.test.ts",
+        "tests/unit/v9SlideViewportAdapter.test.ts"
+      ],
+      "invalidation": "Slide authoring commands, hit/viewport adapters, or Slide product integration tests change."
+    },
+    {
+      "id": "PM-04",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/flowProductIntegration.test.tsx tests/unit/flowEditorCommands.test.ts tests/unit/flowUnifiedLayers.test.tsx",
+      "fixtureIds": ["flow-heavy"],
+      "inputClosure": [
+        "src/renderer/course/flowEditorCommands.ts",
+        "src/renderer/ui/FlowWorkspace.tsx",
+        "tests/unit/flowProductIntegration.test.tsx",
+        "tests/unit/flowEditorCommands.test.ts",
+        "tests/unit/flowUnifiedLayers.test.tsx"
+      ],
+      "invalidation": "Flow commands, workspace, unified-layer composition, or Flow product tests change."
+    },
+    {
+      "id": "PM-05",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/spatialProductIntegration.test.tsx tests/unit/spatialCameraCommands.test.ts tests/unit/spatialPathPipeline.test.ts",
+      "fixtureIds": ["mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/course/spatialEditorCommands.ts",
+        "tests/unit/spatialProductIntegration.test.tsx",
+        "tests/unit/spatialCameraCommands.test.ts",
+        "tests/unit/spatialPathPipeline.test.ts"
+      ],
+      "invalidation": "Spatial world/camera/path commands or Spatial product tests change."
+    },
+    {
+      "id": "PM-06",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/integration/mixedCrossSurfaceHistory.test.tsx tests/unit/mixedCourseNavigatorBeforeNavigate.test.ts tests/unit/courseProjectRoundTrip.test.ts",
+      "fixtureIds": ["mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/store/editorStore.ts",
+        "tests/integration/mixedCrossSurfaceHistory.test.tsx",
+        "tests/unit/mixedCourseNavigatorBeforeNavigate.test.ts",
+        "tests/unit/courseProjectRoundTrip.test.ts"
+      ],
+      "invalidation": "Mixed navigation, cross-surface history, or V9 round-trip tests change."
+    },
+    {
+      "id": "PM-07",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/v9SlideContentCommands.test.ts tests/unit/formulaCrossSurface.test.tsx tests/unit/renderVideoNode.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "src/renderer/course/v9SlideContentCommands.ts",
+        "src/shared/formulaRenderer.ts",
+        "src/player/renderVideoNode.ts",
+        "tests/unit/v9SlideContentCommands.test.ts",
+        "tests/unit/formulaCrossSurface.test.tsx",
+        "tests/unit/renderVideoNode.test.ts"
+      ],
+      "invalidation": "Native text/formula/image/video/shape authoring or render tests change."
+    },
+    {
+      "id": "PM-08",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/courseLayerComposition.test.ts tests/unit/globalLayerUi.test.tsx tests/unit/sceneStateUi.test.tsx",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/course/effectiveLayerProjection.ts",
+        "tests/unit/courseLayerComposition.test.ts",
+        "tests/unit/globalLayerUi.test.tsx",
+        "tests/unit/sceneStateUi.test.tsx"
+      ],
+      "invalidation": "Global/surface/scene layer composition, plane, or named-state UI tests change."
+    },
+    {
+      "id": "PM-09",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/interactionAuthoringCommands.test.ts tests/unit/courseStateStore.test.ts tests/integration/teacherControllerMixedSession.test.ts tests/unit/mixedCourseNavigatorBeforeNavigate.test.ts",
+      "fixtureIds": ["slide-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/interactions",
+        "src/shared/teacherControllerConsistency.ts",
+        "tests/unit/interactionAuthoringCommands.test.ts",
+        "tests/unit/courseStateStore.test.ts",
+        "tests/integration/teacherControllerMixedSession.test.ts"
+      ],
+      "invalidation": "Interaction authoring, course-state, teacher controller, or navigation-guard tests change."
+    },
+    {
+      "id": "PM-10",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/courseDraftPersistence.test.ts tests/integration/draftSaveTransaction.test.tsx tests/unit/courseProjectIo.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/project/courseProjectIo.ts",
+        "tests/unit/courseDraftPersistence.test.ts",
+        "tests/integration/draftSaveTransaction.test.tsx",
+        "tests/unit/courseProjectIo.test.ts"
+      ],
+      "invalidation": "Save, draft commit, dirty, or project I/O tests change."
+    },
+    {
+      "id": "PM-11",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/recoveryWriteCoordinator.test.ts tests/unit/projectFormatIsolation.test.ts tests/unit/productArchiveTimezone.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "src/renderer/project/recoveryWriteCoordinator.ts",
+        "tests/unit/recoveryWriteCoordinator.test.ts",
+        "tests/unit/projectFormatIsolation.test.ts",
+        "tests/unit/productArchiveTimezone.test.ts"
+      ],
+      "invalidation": "Recovery coordinator, V9-only recovery isolation, or archive timezone tests change."
+    },
+    {
+      "id": "PM-12",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/historyResourceChanges.test.ts tests/unit/crossSurfaceResourceHistory.test.ts tests/integration/mixedCrossSurfaceHistory.test.tsx",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/store/history.ts",
+        "src/renderer/authoring/editorTransaction.ts",
+        "tests/unit/historyResourceChanges.test.ts",
+        "tests/unit/crossSurfaceResourceHistory.test.ts",
+        "tests/integration/mixedCrossSurfaceHistory.test.tsx"
+      ],
+      "invalidation": "History resource delta, transaction, or mixed-surface undo/redo tests change."
+    },
+    {
+      "id": "PM-13",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/integration/courseMediaLibraryImportVerticalSlice.test.ts tests/integration/imageReplacementVerticalSlice.test.ts tests/unit/assetReferences.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "src/renderer/media",
+        "src/renderer/project/v9AssetAdapter.ts",
+        "tests/integration/courseMediaLibraryImportVerticalSlice.test.ts",
+        "tests/integration/imageReplacementVerticalSlice.test.ts",
+        "tests/unit/assetReferences.test.ts"
+      ],
+      "invalidation": "Media import, image replacement, or asset-reference tests change."
+    },
+    {
+      "id": "PM-14",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/componentProtocolV4.test.ts tests/unit/componentPackageLifecycle.test.ts tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts",
+      "fixtureIds": ["slide-heavy", "render-host-benchmark-v9"],
+      "inputClosure": [
+        "src/renderer/components",
+        "src/shared/contracts/component-v4",
+        "tests/unit/componentProtocolV4.test.ts",
+        "tests/unit/componentPackageLifecycle.test.ts",
+        "tests/integration/courseComponentPackageReplacementVerticalSlice.test.ts"
+      ],
+      "invalidation": "Component API 4, package lifecycle, or replacement transaction tests change."
+    },
+    {
+      "id": "PM-15",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/runtimeTemplateLifecycleIntegration.test.ts tests/unit/runtimeHostV2.test.ts tests/unit/publishedRuntimeAuthoringMounts.test.ts tests/unit/publishedGlobalCanvasRuntimeOwnerLifecycleIsolation.test.ts tests/integration/publishedRuntimeSlideHostIntegration.test.ts tests/integration/courseRuntimeAssetReplacementVerticalSlice.test.ts tests/integration/runtimePropertyAuthoringVerticalSlice.test.tsx tests/integration/runtimeContentTextAuthoringVerticalSlice.test.tsx tests/integration/courseRuntimeSourceAuthoringVerticalSlice.test.tsx",
+      "fixtureIds": ["render-host-benchmark-v9"],
+      "inputClosure": [
+        "src/renderer/runtime",
+        "src/player/surfaces/runtime",
+        "tests/unit/runtimeTemplateLifecycleIntegration.test.ts",
+        "tests/unit/runtimeHostV2.test.ts",
+        "tests/unit/publishedRuntimeAuthoringMounts.test.ts",
+        "tests/unit/publishedGlobalCanvasRuntimeOwnerLifecycleIsolation.test.ts",
+        "tests/integration/publishedRuntimeSlideHostIntegration.test.ts",
+        "tests/integration/courseRuntimeAssetReplacementVerticalSlice.test.ts",
+        "tests/integration/runtimePropertyAuthoringVerticalSlice.test.tsx",
+        "tests/integration/runtimeContentTextAuthoringVerticalSlice.test.tsx",
+        "tests/integration/courseRuntimeSourceAuthoringVerticalSlice.test.tsx"
+      ],
+      "invalidation": "Runtime authoring, kernel lifecycle, or runtime asset replacement tests change."
+    },
+    {
+      "id": "PM-16",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/previewNetworkPolicy.test.ts tests/unit/courseProjectCoreContract.test.ts tests/unit/coursePackageExport.test.ts",
+      "fixtureIds": ["slide-heavy", "render-host-benchmark-v2"],
+      "inputClosure": [
+        "src/main",
+        "tests/unit/previewNetworkPolicy.test.ts",
+        "tests/unit/courseProjectCoreContract.test.ts",
+        "tests/unit/coursePackageExport.test.ts"
+      ],
+      "invalidation": "Network declaration, preview origin policy, or package CSP tests change."
+    },
+    {
+      "id": "PM-17",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePlayerTryRunFit.test.ts tests/unit/tryRunLocationMode.test.ts tests/unit/spatialLocationTryRun.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/ui/coursePlayerTryRun.ts",
+        "tests/unit/coursePlayerTryRunFit.test.ts",
+        "tests/unit/tryRunLocationMode.test.ts",
+        "tests/unit/spatialLocationTryRun.test.ts"
+      ],
+      "invalidation": "Current-location try-run mount, fit, or location-mode tests change."
+    },
+    {
+      "id": "PM-18",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/publishedCourseProtocol.test.ts tests/unit/publishedCourseNavigation.test.ts tests/integration/publishedRuntimeSlideHostIntegration.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial", "render-host-benchmark-v2"],
+      "inputClosure": [
+        "src/shared/contracts/published-course-v2",
+        "src/player",
+        "tests/unit/publishedCourseProtocol.test.ts",
+        "tests/unit/publishedCourseNavigation.test.ts",
+        "tests/integration/publishedRuntimeSlideHostIntegration.test.ts"
+      ],
+      "invalidation": "Published V2 protocol, Player navigation, or Published host integration tests change."
+    },
+    {
+      "id": "PM-19",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePackageExport.test.ts tests/unit/offlineRemoteUrlAssertion.test.ts",
+      "fixtureIds": ["render-host-benchmark-v9", "render-host-benchmark-v2"],
+      "inputClosure": [
+        "src/renderer/export/course",
+        "examples/render-host-benchmark/render-host-benchmark-v2.html",
+        "tests/unit/coursePackageExport.test.ts",
+        "tests/unit/offlineRemoteUrlAssertion.test.ts"
+      ],
+      "invalidation": "Offline HTML package producer, remote-URL assertion, or render-host benchmark HTML change."
+    },
+    {
+      "id": "PM-20",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePackageExport.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "src/renderer/export/course",
+        "tests/unit/coursePackageExport.test.ts",
+        "tests/e2e/publishedOnlineSingleHtml.spec.ts"
+      ],
+      "invalidation": "Online-light HTML producer, CSP, or published online HTML tests change."
+    },
+    {
+      "id": "PM-21",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePackageExport.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/export/course/buildCoursePackages.ts",
+        "src/renderer/export/course/coursePackageScriptAnalysis.ts",
+        "src/renderer/export/course/coursePackagePreflight.ts",
+        "tests/unit/coursePackageExport.test.ts"
+      ],
+      "invalidation": "Web Package ZIP producer or path-closure tests change."
+    },
+    {
+      "id": "PM-22",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePptxExport.test.ts tests/unit/renderPptxComponentSnapshots.test.ts tests/unit/renderPptxRuntimeSnapshots.test.ts",
+      "fixtureIds": ["slide-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/export/course/buildCoursePptx.ts",
+        "tests/unit/coursePptxExport.test.ts",
+        "tests/unit/renderPptxComponentSnapshots.test.ts",
+        "tests/unit/renderPptxRuntimeSnapshots.test.ts"
+      ],
+      "invalidation": "PPTX Published-V2 producer or snapshot tests change."
+    },
+    {
+      "id": "PM-23",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePrintArtifacts.test.ts tests/integration/coursePdfExportApp.test.tsx tests/unit/playerCapture.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+        "tests/unit/coursePrintArtifacts.test.ts",
+        "tests/integration/coursePdfExportApp.test.tsx",
+        "tests/unit/playerCapture.test.ts"
+      ],
+      "invalidation": "PDF/print artifacts, capture, or PDF export App tests change."
+    },
+    {
+      "id": "PM-24",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursePrintArtifacts.test.ts tests/unit/flowRuntimeToc.test.ts tests/unit/batchFileDialogs.test.ts",
+      "fixtureIds": ["flow-heavy"],
+      "inputClosure": [
+        "src/renderer/export/course",
+        "tests/unit/coursePrintArtifacts.test.ts",
+        "tests/unit/flowRuntimeToc.test.ts",
+        "tests/unit/batchFileDialogs.test.ts"
+      ],
+      "invalidation": "Flow DOCX/print producer or Flow TOC tests change."
+    },
+    {
+      "id": "PM-25",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/courseProjectValidationDiagnostics.test.ts tests/unit/exportPreflightUi.test.tsx tests/unit/validateProject.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/shared/projectHealth.ts",
+        "src/renderer/export/exportPreflight.ts",
+        "scripts/validate-project.ts",
+        "tests/unit/courseProjectValidationDiagnostics.test.ts",
+        "tests/unit/exportPreflightUi.test.tsx",
+        "tests/unit/validateProject.test.ts"
+      ],
+      "invalidation": "Project health, export preflight, or CLI validate-project tests change."
+    },
+    {
+      "id": "PM-26",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/courseProjectArchive.test.ts tests/unit/courseProjectRoundTrip.test.ts tests/unit/validateProject.test.ts",
+      "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
+      "inputClosure": [
+        "src/renderer/project/courseProjectArchive.ts",
+        "tests/unit/courseProjectArchive.test.ts",
+        "tests/unit/courseProjectRoundTrip.test.ts",
+        "tests/unit/validateProject.test.ts"
+      ],
+      "invalidation": "V9 archive round-trip or headless validate-project tests change."
+    },
+    {
+      "id": "PM-27",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/coursewareCaseBuilder.test.ts tests/unit/coursewareAuthoringRunner.test.ts tests/unit/coursewareSkillsContract.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "scripts/build-courseware-case.ts",
+        "scripts/run-courseware-authoring.ts",
+        ".agents/skills",
+        "tests/unit/coursewareCaseBuilder.test.ts",
+        "tests/unit/coursewareAuthoringRunner.test.ts",
+        "tests/unit/coursewareSkillsContract.test.ts"
+      ],
+      "invalidation": "Courseware builder facade, authoring runner, or Skill contract tests change."
+    },
+    {
+      "id": "PM-28",
+      "type": "automated",
+      "evidenceCommand": "npx vitest run tests/unit/aiCapabilities.test.ts tests/unit/exampleGenerationBoundary.test.ts",
+      "fixtureIds": ["slide-heavy"],
+      "inputClosure": [
+        "scripts/generate-ai-capabilities.ts",
+        "artifacts/ai-capabilities",
+        "tests/unit/aiCapabilities.test.ts",
+        "tests/unit/exampleGenerationBoundary.test.ts"
+      ],
+      "invalidation": "Capability index generator, generated artifacts, or example-generation boundary tests change."
+    }
+  ]
+}

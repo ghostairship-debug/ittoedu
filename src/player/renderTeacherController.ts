@@ -1,9 +1,8 @@
 import * as Phaser from 'phaser'
 import type {
-  SceneNode,
   TeacherControllerAction,
   TeacherControllerNode,
-} from '../shared/projectTypes'
+} from '../shared/contracts/native-v1/types'
 import type { RuntimeEventDisposer } from '../shared/runtimeTypes'
 import {
   createTeacherControllerLayout,
@@ -868,7 +867,7 @@ export function renderTeacherController(
       redraw()
       root.setVisible(controllerVisible())
     },
-    update(nextNode: SceneNode, transition): void {
+    update(nextNode, transition): void {
       if (
         destroyed ||
         nextNode.type !== 'teacher-controller' ||

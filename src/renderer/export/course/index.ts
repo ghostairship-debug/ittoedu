@@ -12,8 +12,8 @@ export {
   buildCoursePackages,
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageAsync,
-  collectCoursePackageExportPreflight,
 } from './buildCoursePackages'
+export { collectCoursePackageExportPreflight } from './coursePackagePreflight'
 export { buildCoursePptx } from './buildCoursePptx'
 export { buildCoursePrintArtifacts } from './buildCoursePrintArtifacts'
 export { buildFlowDocx, uniqueFlowDocxFilename } from './flowDocx'

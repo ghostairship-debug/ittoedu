@@ -20,10 +20,7 @@ import {
   resolveBundledFontDescriptors,
 } from '@/shared/fonts/bundledFontSources'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import type { ExportPayload } from '@/shared/componentTypes'
 import type { CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
-import { buildStandaloneHtml } from '@/renderer/export/buildStandaloneHtml'
-import { buildWebPackageFiles } from '@/renderer/export/buildWebPackage'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageFiles,
@@ -38,11 +35,10 @@ import {
 import { resolveEmbeddableBundledFonts } from '@/renderer/export/bundledFontEmbedSourceNode'
 import { installFetchBundledFontEmbedSource } from '@/renderer/export/bundledFontEmbedSourceFetch'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import {
-  createFormulaNode,
-  createProject,
-  createTextNode,
-} from '@/renderer/project/createProject'
+import { createFormulaNode } from '@/renderer/project/nativeNodeFactories'
+import { nativeRenderInputFromV9Item } from '@/player/surfaces/slide/publishedNativeRendering'
+import { buildPublishedCourseTryRunPayload } from '@/renderer/ui/coursePlayerTryRun'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 const NOW = '2026-08-26T00:00:00.000Z'
 const PLAYER_BUNDLE = 'window.__PLAYER_PLACEHOLDER__=true;'
@@ -64,16 +60,10 @@ function stableIds(): () => string {
   }
 }
 
-function lessonPayload(fontFamily?: string): ExportPayload {
-  const project = createProject({ now: NOW, idFactory: stableIds() })
-  const node = createTextNode({ x: 10, y: 10, idFactory: stableIds() })
-  node.text = '课件正文 abc'
-  if (fontFamily !== undefined) node.style.fontFamily = fontFamily
-  project.scenes[0]!.nodes.push(node)
-  return { project, assets: {}, components: {} }
-}
-
-function courseTextItem(fontFamily: string): NativeLayerItem {
+function courseTextItem(
+  fontFamily: string,
+  runs: Array<{ start: number; end: number; style: { fontFamily: string } }> = [],
+): NativeLayerItem {
   return {
     layerItemId: 'item-text',
     label: '标题',
@@ -90,7 +80,7 @@ function courseTextItem(fontFamily: string): NativeLayerItem {
       nativeType: 'text',
       data: {
         text: '标题文字',
-        runs: [],
+        runs,
         style: {
           fontFamily,
           fontSize: 32,
@@ -119,6 +109,7 @@ function courseTextItem(fontFamily: string): NativeLayerItem {
 
 function courseProject(options: {
   nodeFontFamily?: string
+  runFontFamily?: string
   tokenFontFamily?: string
   formula?: boolean
 } = {}): CourseProjectDocument {
@@ -131,11 +122,20 @@ function courseProject(options: {
   if (options.tokenFontFamily !== undefined) {
     project.designTokens.fonts[0]!.fontFamily = options.tokenFontFamily
   }
-  if (options.nodeFontFamily !== undefined || options.formula === true) {
+  if (
+    options.nodeFontFamily !== undefined
+    || options.runFontFamily !== undefined
+    || options.formula === true
+  ) {
     const slide = project.surfaces.find((surface) => surface.type === 'slide')
     if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
-    if (options.nodeFontFamily !== undefined) {
-      slide.scenes[0]!.layerItems.push(courseTextItem(options.nodeFontFamily))
+    if (options.nodeFontFamily !== undefined || options.runFontFamily !== undefined) {
+      slide.scenes[0]!.layerItems.push(courseTextItem(
+        options.nodeFontFamily ?? '"Microsoft YaHei", sans-serif',
+        options.runFontFamily === undefined
+          ? []
+          : [{ start: 0, end: 2, style: { fontFamily: options.runFontFamily } }],
+      ))
     }
     if (options.formula === true) {
       slide.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(
@@ -146,14 +146,6 @@ function courseProject(options: {
   }
   courseProjectDocumentSchema.parse(project)
   return project
-}
-
-function formulaLessonPayload(): ExportPayload {
-  const payload = lessonPayload()
-  payload.project.scenes[0]!.nodes.push(
-    createFormulaNode({ x: 20, y: 20, idFactory: stableIds() }),
-  )
-  return payload
 }
 
 function courseSources(project: CourseProjectDocument): CoursePublishSources {
@@ -203,7 +195,7 @@ describe('bundled font declaration scanning', () => {
   })
 
   it('ignores font stacks that name no bundled family', () => {
-    expect(collectBundledFontFamiliesInUse(lessonPayload().project)).toEqual([])
+    expect(collectBundledFontFamiliesInUse(courseProject())).toEqual([])
     expect(collectBundledFontFamiliesInUse({
       style: { fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif' },
     })).toEqual([])
@@ -213,11 +205,9 @@ describe('bundled font declaration scanning', () => {
     })).toEqual([])
   })
 
-  it('claims the math family from a formula node on either project shape', () => {
+  it('claims the math family from a formula node', () => {
     // The formula chain is a module constant, never a document property, so the
     // node's presence has to stand in for a declaration.
-    expect(collectBundledFontFamiliesInUse(formulaLessonPayload().project))
-      .toEqual([BUNDLED_MATH_FONT_FAMILY])
     expect(collectBundledFontFamiliesInUse(courseProject({ formula: true })))
       .toEqual([BUNDLED_MATH_FONT_FAMILY])
     // Both families when the same project also declares the text one.
@@ -238,44 +228,61 @@ describe('bundled font declaration scanning', () => {
       text: 'formula',
     })).toEqual([])
   })
+
+  it('claims the same bundled families from V9 NativeRenderInput and try-run Published', () => {
+    const fixture = listCourseProjectV9Fixtures().find((entry) => entry.id === 'slide-native')
+    if (!fixture) throw new Error('missing slide-native fixture')
+    const project = structuredClone(fixture.data.project)
+    const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
+    const title = surface?.type === 'slide'
+      ? surface.scenes[0]?.layerItems.find((item) => item.layerItemId === 'slide-title')
+      : undefined
+    if (!title || title.kind !== 'native' || title.content.nativeType !== 'text') {
+      throw new Error('expected slide-title text')
+    }
+    title.content.data.style.fontFamily = NOTO_STACK
+    const input = nativeRenderInputFromV9Item(title)
+    const published = buildPublishedCourseTryRunPayload({
+      project,
+      assetFiles: fixture.data.assetFiles,
+      components: {},
+    })
+    expect(collectBundledFontFamiliesInUse(input)).toEqual([BUNDLED_TEXT_FONT_FAMILY])
+    expect(collectBundledFontFamiliesInUse(published)).toEqual([
+      BUNDLED_TEXT_FONT_FAMILY,
+      BUNDLED_MATH_FONT_FAMILY,
+    ])
+    expect(input.type).toBe('text')
+    if (input.type === 'text') {
+      expect(input.style.fontFamily).toBe(NOTO_STACK)
+    }
+  })
 })
 
 describe('font-free exports stay byte-identical', () => {
   it('produces the same bytes with and without a registered byte source', () => {
-    const payload = lessonPayload()
     const course = courseSources(courseProject())
 
     const withSource = {
-      lessonHtml: buildStandaloneHtml(payload, PLAYER_BUNDLE),
-      lessonFiles: buildWebPackageFiles(payload, PLAYER_BUNDLE),
       courseHtml: buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE),
       courseFiles: buildPublishedCourseWebPackageFiles(course, PLAYER_BUNDLE),
     }
     registerBundledFontEmbedSource(null)
     const withoutSource = {
-      lessonHtml: buildStandaloneHtml(payload, PLAYER_BUNDLE),
-      lessonFiles: buildWebPackageFiles(payload, PLAYER_BUNDLE),
       courseHtml: buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE),
       courseFiles: buildPublishedCourseWebPackageFiles(course, PLAYER_BUNDLE),
     }
 
-    expect(withSource.lessonHtml).toBe(withoutSource.lessonHtml)
     expect(withSource.courseHtml).toBe(withoutSource.courseHtml)
-    expect(withSource.lessonFiles).toEqual(withoutSource.lessonFiles)
     expect(withSource.courseFiles).toEqual(withoutSource.courseFiles)
-    expect(Object.keys(withSource.lessonFiles)).toEqual(
-      Object.keys(withoutSource.lessonFiles),
-    )
     expect(Object.keys(withSource.courseFiles)).toEqual(
       Object.keys(withoutSource.courseFiles),
     )
   })
 
   it('adds neither a face, a file nor a notice to a default project', () => {
-    const payload = lessonPayload()
     const course = courseSources(courseProject())
     const artifacts = [
-      buildStandaloneHtml(payload, PLAYER_BUNDLE),
       buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE),
       buildPublishedCourseStandaloneHtml(course, {
         playerBundle: PLAYER_BUNDLE,
@@ -287,14 +294,10 @@ describe('font-free exports stay byte-identical', () => {
       expect(html).not.toContain('data:font/woff2')
       expect(html).not.toContain('SIL Open Font License')
     }
-    for (const files of [
-      buildWebPackageFiles(payload, PLAYER_BUNDLE),
-      buildPublishedCourseWebPackageFiles(course, PLAYER_BUNDLE),
-    ]) {
-      expect(woff2Paths(files)).toEqual([])
-      expect(Object.keys(files)).not.toContain('THIRD_PARTY_NOTICES.md')
-      expect(strFromU8(files['player/player.css']!)).not.toContain('@font-face')
-    }
+    const files = buildPublishedCourseWebPackageFiles(course, PLAYER_BUNDLE)
+    expect(woff2Paths(files)).toEqual([])
+    expect(Object.keys(files)).not.toContain('THIRD_PARTY_NOTICES.md')
+    expect(strFromU8(files['player/player.css']!)).not.toContain('@font-face')
   })
 })
 
@@ -324,12 +327,11 @@ describe('offline single HTML embeds the declared family', () => {
       .toBeLessThan(SINGLE_HTML_WARNING_BYTES)
   })
 
-  it('embeds the same family for a V8 lesson run-level override', () => {
-    const payload = lessonPayload()
-    const node = payload.project.scenes[0]!.nodes.at(-1)!
-    if (node.type !== 'text') throw new Error('expected text node')
-    node.runs = [{ start: 0, end: 2, style: { fontFamily: NOTO_STACK } }]
-    const html = buildStandaloneHtml(payload, PLAYER_BUNDLE)
+  it('embeds the same family for a V9 text run-level override', () => {
+    const html = buildPublishedCourseStandaloneHtml(
+      courseSources(courseProject({ runFontFamily: NOTO_STACK })),
+      PLAYER_BUNDLE,
+    )
 
     expect(faceBlocks(html)).toHaveLength(101)
     expect(html).toContain('data:font/woff2;base64,')
@@ -395,18 +397,6 @@ describe('web package links the declared family as sibling files', () => {
     expect(notices).toContain('`player/fonts/`')
     expect(notices).toContain(notice.trimEnd())
   })
-
-  it('writes the same layout for a V8 lesson web package', () => {
-    const payload = lessonPayload(NOTO_STACK)
-    const files = buildWebPackageFiles(payload, PLAYER_BUNDLE)
-
-    expect(woff2Paths(files)).toHaveLength(101)
-    expect(strFromU8(files['player/player.css']!))
-      .toMatch(/src: url\(\.\/fonts\/[A-Za-z0-9._-]+\.woff2\)/)
-    expect(strFromU8(files['index.html']!)).toContain("font-src 'self' data:")
-    expect(strFromU8(files['THIRD_PARTY_NOTICES.md']!))
-      .toContain('SIL Open Font License, Version 1.1')
-  })
 })
 
 describe('a formula carries the math face and nothing more', () => {
@@ -416,51 +406,41 @@ describe('a formula carries the math face and nothing more', () => {
   ).trimEnd()
 
   it('adds exactly one face to a single HTML, plus its OFL notice', () => {
-    for (const html of [
-      buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE),
-      buildPublishedCourseStandaloneHtml(
-        courseSources(courseProject({ formula: true })),
-        PLAYER_BUNDLE,
-      ),
-    ]) {
-      const blocks = faceBlocks(html)
-      expect(blocks).toHaveLength(1)
-      expect(blocks[0]).toContain(`font-family: '${BUNDLED_MATH_FONT_FAMILY}'`)
-      expect(blocks[0]).toContain('src: url(data:font/woff2;base64,')
-      expect(blocks[0]).toContain('font-weight: 400;')
-      // The math face answers for every code point it has a glyph for.
-      expect(blocks[0]).not.toContain('unicode-range')
-      // The default body chain is untouched, so no text slice may ride along.
-      expect(html).not.toContain(`font-family: '${BUNDLED_TEXT_FONT_FAMILY}'`)
-      expect(html).not.toContain('noto-sans-sc')
-      expect(html).toContain('@fontsource/stix-two-math')
-      expect(html).toContain(stixNotice())
-    }
+    const html = buildPublishedCourseStandaloneHtml(
+      courseSources(courseProject({ formula: true })),
+      PLAYER_BUNDLE,
+    )
+    const blocks = faceBlocks(html)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toContain(`font-family: '${BUNDLED_MATH_FONT_FAMILY}'`)
+    expect(blocks[0]).toContain('src: url(data:font/woff2;base64,')
+    expect(blocks[0]).toContain('font-weight: 400;')
+    expect(blocks[0]).not.toContain('unicode-range')
+    expect(html).not.toContain(`font-family: '${BUNDLED_TEXT_FONT_FAMILY}'`)
+    expect(html).not.toContain('noto-sans-sc')
+    expect(html).toContain('@fontsource/stix-two-math')
+    expect(html).toContain(stixNotice())
   })
 
   it('adds exactly one woff2 to a web package, plus its OFL notice', () => {
-    for (const files of [
-      buildWebPackageFiles(formulaLessonPayload(), PLAYER_BUNDLE),
-      buildPublishedCourseWebPackageFiles(
-        courseSources(courseProject({ formula: true })),
-        PLAYER_BUNDLE,
-      ),
-    ]) {
-      const fontPaths = woff2Paths(files)
-      expect(fontPaths).toHaveLength(1)
-      expect(fontPaths[0]).toBe('player/fonts/stix-two-math-latin-400-normal.woff2')
-      expect(files[fontPaths[0]!]!.byteLength).toBeGreaterThan(0)
+    const files = buildPublishedCourseWebPackageFiles(
+      courseSources(courseProject({ formula: true })),
+      PLAYER_BUNDLE,
+    )
+    const fontPaths = woff2Paths(files)
+    expect(fontPaths).toHaveLength(1)
+    expect(fontPaths[0]).toBe('player/fonts/stix-two-math-latin-400-normal.woff2')
+    expect(files[fontPaths[0]!]!.byteLength).toBeGreaterThan(0)
 
-      const css = strFromU8(files['player/player.css']!)
-      expect(faceBlocks(css)).toHaveLength(1)
-      expect(css).toContain('./fonts/stix-two-math-latin-400-normal.woff2')
+    const css = strFromU8(files['player/player.css']!)
+    expect(faceBlocks(css)).toHaveLength(1)
+    expect(css).toContain('./fonts/stix-two-math-latin-400-normal.woff2')
 
-      const notices = strFromU8(files['THIRD_PARTY_NOTICES.md']!)
-      expect(notices).toContain(`## ${BUNDLED_MATH_FONT_FAMILY}`)
-      expect(notices).toContain('- Package: @fontsource/stix-two-math')
-      expect(notices).toContain(stixNotice())
-      expect(notices).not.toContain(`## ${BUNDLED_TEXT_FONT_FAMILY}`)
-    }
+    const notices = strFromU8(files['THIRD_PARTY_NOTICES.md']!)
+    expect(notices).toContain(`## ${BUNDLED_MATH_FONT_FAMILY}`)
+    expect(notices).toContain('- Package: @fontsource/stix-two-math')
+    expect(notices).toContain(stixNotice())
+    expect(notices).not.toContain(`## ${BUNDLED_TEXT_FONT_FAMILY}`)
   })
 
   it('is what the formula renderer actually asks for first', () => {
@@ -544,7 +524,10 @@ describe('the editor renderer reads its own font bytes', () => {
     await prepareBundledFontEmbedding()
     expect(urls).toHaveLength(102)
 
-    const html = buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE)
+    const html = buildPublishedCourseStandaloneHtml(
+      courseSources(courseProject({ formula: true })),
+      PLAYER_BUNDLE,
+    )
     expect(faceBlocks(html)).toHaveLength(1)
     expect(html).toContain('data:font/woff2;base64,')
   })
@@ -563,14 +546,18 @@ describe('the editor renderer reads its own font bytes', () => {
 
     await prepareBundledFontEmbedding()
     // A failed read degrades typography; it never fails the export.
-    expect(buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE))
-      .not.toContain('@font-face')
+    expect(buildPublishedCourseStandaloneHtml(
+      courseSources(courseProject({ formula: true })),
+      PLAYER_BUNDLE,
+    )).not.toContain('@font-face')
     expect(warn).toHaveBeenCalled()
 
     failing = false
     await prepareBundledFontEmbedding()
-    expect(faceBlocks(buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE)))
-      .toHaveLength(1)
+    expect(faceBlocks(buildPublishedCourseStandaloneHtml(
+      courseSources(courseProject({ formula: true })),
+      PLAYER_BUNDLE,
+    ))).toHaveLength(1)
     warn.mockRestore()
   })
 
@@ -583,8 +570,10 @@ describe('the editor renderer reads its own font bytes', () => {
       licenseTexts: {},
     })
     await prepareBundledFontEmbedding()
-    expect(buildStandaloneHtml(formulaLessonPayload(), PLAYER_BUNDLE))
-      .not.toContain('@font-face')
+    expect(buildPublishedCourseStandaloneHtml(
+      courseSources(courseProject({ formula: true })),
+      PLAYER_BUNDLE,
+    )).not.toContain('@font-face')
     warn.mockRestore()
   })
 
@@ -596,12 +585,15 @@ describe('the editor renderer reads its own font bytes', () => {
     expect(main).toContain('installFetchBundledFontEmbedSource({ manifest: BUNDLED_FONT_MANIFEST })')
 
     // And the export commands are what await the lazy read.
-    const app = readFileSync(join(repoRoot, 'src/renderer/App.tsx'), 'utf8')
-    const html = app.indexOf('const handleExportHtml')
-    const web = app.indexOf('const handleExportWebPackage')
-    const pptx = app.indexOf('const handleExportPptx')
-    expect(app.indexOf('await prepareBundledFontEmbedding()', html)).toBeLessThan(web)
-    expect(app.indexOf('await prepareBundledFontEmbedding()', web)).toBeLessThan(pptx)
+    const delivery = readFileSync(join(repoRoot, 'src/renderer/app/useCourseDelivery.ts'), 'utf8')
+    const html = delivery.indexOf('const emitHtml')
+    const web = delivery.indexOf('const emitWebPackage')
+    const pptx = delivery.indexOf('const emitPptx')
+    expect(html).toBeGreaterThan(-1)
+    expect(web).toBeGreaterThan(-1)
+    expect(pptx).toBeGreaterThan(-1)
+    expect(delivery.indexOf('await prepareBundledFontEmbedding()', html)).toBeLessThan(web)
+    expect(delivery.indexOf('await prepareBundledFontEmbedding()', web)).toBeLessThan(pptx)
   })
 })
 

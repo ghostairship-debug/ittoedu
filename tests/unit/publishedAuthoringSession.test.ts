@@ -4,7 +4,7 @@ import {
   type PublishedAuthoringPatchResult,
   type PublishedAuthoringPatchSurface,
 } from '../../src/player/surfaces/publishedAuthoringSession'
-import { createRectangleNode } from '../../src/renderer/project/createProject'
+import { createRectangleNode } from '../../src/renderer/project/nativeNodeFactories'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,
@@ -40,8 +40,10 @@ function createHarness(
   ): PublishedAuthoringPatchResult => ({ ok: true, target: patch.target }),
 ) {
   const context = { sceneId: 'scene-a', stateId: 'state-a' as string | null }
+  let generation = 0
   const surface: PublishedAuthoringPatchSurface = {
     getAuthoringContext: vi.fn(() => ({ ...context })),
+    getAuthoringGeneration: vi.fn(() => generation),
     applyAuthoringPatch: vi.fn(apply),
   }
   const messages: PlayerAuthoringHostMessage[] = []
@@ -50,7 +52,13 @@ function createHarness(
     surface,
     onMessage: (message) => messages.push(message),
   })
-  return { context, surface, messages, coordinator }
+  return {
+    context,
+    surface,
+    messages,
+    coordinator,
+    setGeneration: (value: number) => { generation = value },
+  }
 }
 
 describe('PublishedAuthoringSessionCoordinator', () => {
@@ -97,6 +105,40 @@ describe('PublishedAuthoringSessionCoordinator', () => {
       revision: 2,
     })
     expect(surface.applyAuthoringPatch).toHaveBeenCalledTimes(1)
+    expect(surface.applyAuthoringPatch).toHaveBeenCalledWith(
+      command(2).context,
+      command(2).patch,
+      { revision: 2, generation: 0 },
+    )
+  })
+
+  it('rejects a successful patch when the surface generation changes before ACK', async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const harness = createHarness(async (_context, patch) => {
+      await gate
+      return { ok: true, target: patch.target }
+    })
+    harness.coordinator.markReady()
+    const pending = harness.coordinator.apply(command(1))
+    await Promise.resolve()
+    harness.setGeneration(1)
+    release?.()
+
+    await expect(pending).resolves.toMatchObject({
+      code: 'stale-revision',
+      revision: 1,
+    })
+    expect(harness.messages.some((message) => (
+      message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack
+    ))).toBe(false)
+    await expect(harness.coordinator.apply(command(1, {
+      requestId: 'request-generation-retry',
+    }))).resolves.toMatchObject({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.ack,
+      requestId: 'request-generation-retry',
+      revision: 1,
+    })
   })
 
   it('在协调器边界分别拒绝场景和呈现状态漂移', async () => {

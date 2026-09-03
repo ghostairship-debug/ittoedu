@@ -1,100 +1,101 @@
+import { composeCourseProjectLocation } from '../../shared/courseLayerComposition'
 import type {
-  GlobalLayerItem,
-  SceneDocument,
-  SceneNode,
-} from '../../shared/projectTypes'
-import type {
-  RuntimeDocument,
-  RuntimeScope,
-  RuntimeStaticFallback,
-} from '../../shared/runtimeTypes'
+  CourseProjectDocument,
+  LayerItem,
+  RuntimeLayerItem,
+} from '../../shared/courseProjectTypes'
+
+export type SceneThumbnailCompositionSource = 'global' | 'surface' | 'scene' | 'world'
+
+export type SceneThumbnailFallbackCoverage = NonNullable<
+  RuntimeLayerItem['runtime']['staticFallback']
+>['coverage']
 
 export type SceneThumbnailCompositionEntry =
   | {
-      kind: 'node'
-      scope: RuntimeScope
-      node: SceneNode
+      kind: 'layer'
+      source: SceneThumbnailCompositionSource
+      item: LayerItem
     }
   | {
       kind: 'runtime-fallback'
-      scope: RuntimeScope
-      fallback: RuntimeStaticFallback
+      source: SceneThumbnailCompositionSource
+      item: RuntimeLayerItem
+      fallback: {
+        assetId: string
+        coverage: SceneThumbnailFallbackCoverage
+      }
     }
 
-function isVisibleForScene(item: GlobalLayerItem, sceneId: string): boolean {
-  if (item.visibility.mode === 'all') return true
-  const listed = item.visibility.sceneIds.includes(sceneId)
-  return item.visibility.mode === 'include' ? listed : !listed
+export interface BuildSceneThumbnailCompositionInput {
+  readonly project: CourseProjectDocument
+  readonly locationId: string
+  readonly stateId: string | null
 }
 
-function fallbackEntry(
-  scope: RuntimeScope,
-  runtime: RuntimeDocument | undefined,
-  layer: RuntimeStaticFallback['layer'],
-): SceneThumbnailCompositionEntry[] {
-  if (!runtime?.enabled || runtime.staticFallback?.layer !== layer) return []
-  return [{
-    kind: 'runtime-fallback',
-    scope,
-    fallback: runtime.staticFallback,
-  }]
+function isMountedRuntime(
+  item: LayerItem,
+): item is RuntimeLayerItem {
+  return item.kind === 'runtime'
 }
 
 /**
  * Mirrors the Player's visual root order without executing author JavaScript:
- * background -> global underlay -> scene underlay -> scene nodes -> scene
- * overlay -> global overlay. Global runtime roots mount after authored global
- * nodes inside their respective global roots.
+ * background is painted by the caller, then global underlay → surface/scene
+ * content → global overlay. V9 Runtime is a `kind:'runtime'` LayerItem; its
+ * staticFallback is drawn at the item's composed slot.
  */
 export function buildSceneThumbnailComposition(
-  scene: SceneDocument,
-  globalLayer: readonly GlobalLayerItem[],
-  globalRuntime: RuntimeDocument | undefined,
+  input: BuildSceneThumbnailCompositionInput,
 ): SceneThumbnailCompositionEntry[] {
-  const visibleGlobal = globalLayer.filter(
-    (item) => item.node.visible && isVisibleForScene(item, scene.id),
-  )
-  return [
-    ...visibleGlobal
-      .filter((item) => item.layer === 'underlay')
-      .map((item) => ({
-        kind: 'node' as const,
-        scope: 'global' as const,
-        node: item.node,
-      })),
-    ...fallbackEntry('global', globalRuntime, 'underlay'),
-    ...fallbackEntry('scene', scene.runtime, 'underlay'),
-    ...scene.nodes
-      .filter((node) => node.visible)
-      .map((node) => ({
-        kind: 'node' as const,
-        scope: 'scene' as const,
-        node,
-      })),
-    ...fallbackEntry('scene', scene.runtime, 'overlay'),
-    ...visibleGlobal
-      .filter((item) => item.layer === 'overlay')
-      .map((item) => ({
-        kind: 'node' as const,
-        scope: 'global' as const,
-        node: item.node,
-      })),
-    ...fallbackEntry('global', globalRuntime, 'overlay'),
-  ]
+  const composition = composeCourseProjectLocation(input)
+  const entries: SceneThumbnailCompositionEntry[] = []
+  for (const entry of composition.entries) {
+    if (!entry.mounted) continue
+    if (isMountedRuntime(entry.item)) {
+      const fallback = entry.item.runtime.enabled
+        ? entry.item.runtime.staticFallback
+        : undefined
+      if (!fallback) continue
+      entries.push({
+        kind: 'runtime-fallback',
+        source: entry.source,
+        item: entry.item,
+        fallback: {
+          assetId: fallback.assetId,
+          coverage: fallback.coverage,
+        },
+      })
+      continue
+    }
+    entries.push({
+      kind: 'layer',
+      source: entry.source,
+      item: entry.item,
+    })
+  }
+  return entries
 }
 
 export function hasUnrepresentedRuntime(
-  scene: Pick<SceneDocument, 'runtime'>,
-  globalRuntime: RuntimeDocument | undefined,
+  input: BuildSceneThumbnailCompositionInput,
 ): boolean {
-  return [globalRuntime, scene.runtime].some(
-    (runtime) => runtime?.enabled === true && !runtime.staticFallback,
-  )
+  const composition = composeCourseProjectLocation(input)
+  return composition.entries.some((entry) => (
+    entry.mounted &&
+    entry.item.kind === 'runtime' &&
+    entry.item.runtime.enabled &&
+    !entry.item.runtime.staticFallback
+  ))
 }
 
 export function hasEnabledRuntime(
-  scene: Pick<SceneDocument, 'runtime'>,
-  globalRuntime: RuntimeDocument | undefined,
+  input: BuildSceneThumbnailCompositionInput,
 ): boolean {
-  return globalRuntime?.enabled === true || scene.runtime?.enabled === true
+  const composition = composeCourseProjectLocation(input)
+  return composition.entries.some((entry) => (
+    entry.mounted &&
+    entry.item.kind === 'runtime' &&
+    entry.item.runtime.enabled
+  ))
 }

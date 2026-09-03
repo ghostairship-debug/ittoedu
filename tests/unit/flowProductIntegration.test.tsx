@@ -2,23 +2,35 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
-import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
+import {
+  locateCourseLayer,
+  makeEffectiveLayerAuthoringAddress,
+  patchEffectiveLayerPropertiesAtTargets,
+} from '@/renderer/course/effectiveLayerCommands'
 import { readFlowSharedOwnership } from '@/renderer/course/flowSharedAuthoringAdapters'
-import { listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
-import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
-import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
+import {
+  buildFlowEditorView,
+  captureFlowEditorAuthoringTarget,
+  listFlowCourseTreePages,
+} from '@/renderer/course/flowEditorView'
+import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import {
   buildFlowRichTextHtml,
   formatFlowAuthoringTextStyle,
+  markFlowTextComposing,
+  updateFlowTextDraft,
 } from '@/renderer/authoring/flowTextEdit'
 import {
   selectActiveCourseProjectDocument,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { MediaTab } from '@/renderer/ui/MediaTab'
 import { NodesTab } from '@/renderer/ui/NodesTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { usePropertiesContext } from '@/renderer/ui/properties/PropertiesContextAdapter'
+import type { MultiSelectionPropertiesContext } from '@/renderer/ui/properties/MultiSelectionPropertiesPanel'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
@@ -38,6 +50,40 @@ function flowSurface() {
   return surface
 }
 
+function beginDirtyFlowParagraphEdit(suffix = '—草稿') {
+  const session = useEditorStore.getState().flowSession
+  const authoring = useEditorStore.getState().courseAuthoringSession
+  if (!session || !authoring) throw new Error('expected Flow authoring session')
+  const paragraph = flowSurfaceIn(
+    session.history.present,
+    session.selection.surfaceId,
+  ).blocks.find((block) => block.type === 'paragraph')
+  if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected Flow paragraph')
+  const target = captureFlowEditorAuthoringTarget({
+    view: buildFlowEditorView({
+      project: session.history.present,
+      locationId: session.selection.locationId,
+    }),
+    sessionToken: authoring.token,
+    target: { kind: 'block', blockId: paragraph.id },
+  })
+  const begun = useEditorStore.getState().runFlowAuthoringIntent(target, {
+    kind: 'begin-text-edit',
+    gesture: 'click-text',
+    offset: paragraph.text.length,
+  })
+  if (!begun.ok || !begun.edit) throw new Error('expected Flow text edit')
+  const editedText = `${paragraph.text}${suffix}`
+  const drafted = updateFlowTextDraft(begun.edit, { text: editedText, runs: paragraph.runs ?? [] })
+  const updated = useEditorStore.getState().runFlowAuthoringIntent(target, {
+    kind: 'update-text-edit',
+    expectedEdit: begun.edit,
+    edit: drafted,
+  })
+  if (!updated.ok) throw new Error(updated.reason ?? 'expected Flow draft update')
+  return { paragraph, target, begun: begun.edit, drafted, editedText }
+}
+
 function imageAsset(): AssetMeta {
   return {
     id: 'asset-flow-image',
@@ -53,7 +99,9 @@ function imageAsset(): AssetMeta {
 
 function FlowWorkspacePropertiesHarness() {
   const session = useEditorStore((state) => state.flowSession)
-  if (!session) return null
+  const authoringSession = useEditorStore((state) => state.courseAuthoringSession)
+  const textEdit = useEditorStore((state) => state.flowTextEdit)
+  if (!session || !authoringSession) return null
   const view = buildFlowEditorView({
     project: session.history.present,
     locationId: session.selection.locationId,
@@ -62,19 +110,32 @@ function FlowWorkspacePropertiesHarness() {
     <div>
       <div style={{ width: 900, height: 640 }}>
         <FlowWorkspace
-          project={session.history.present}
           view={view}
+          sessionToken={authoringSession.token}
+          assets={session.history.present.assets}
           selection={session.selection}
-          onProjectChange={(result) => useEditorStore.getState().applyFlowCommand(result)}
-          onDeleteRequest={(request) => useEditorStore.getState().deleteFlowSelection(request)}
-          onSelectionChange={(selection) => useEditorStore.getState().applyFlowSelection(selection)}
-          onTextEditChange={(edit) => useEditorStore.getState().setFlowTextEdit(edit)}
+          textEdit={textEdit}
+          commands={{
+            run: (target, intent) => (
+              useEditorStore.getState().runFlowAuthoringIntent(target, intent)
+            ),
+          }}
         />
       </div>
       <PropertiesTab onReplaceImage={() => undefined} />
       <button type="button" data-testid="outside-flow-authoring">离开 Flow 编辑</button>
     </div>
   )
+}
+
+function FlowMultiPropertiesCapture({
+  capture,
+}: {
+  capture(context: MultiSelectionPropertiesContext): void
+}) {
+  const context = usePropertiesContext({ onReplaceImage: () => undefined })
+  if (context.kind === 'multi-selection') capture(context)
+  return null
 }
 
 beforeEach(() => {
@@ -89,6 +150,111 @@ afterEach(() => {
 })
 
 describe('Flow product shell wiring', () => {
+  it('routes Flow overlay multi-selection through one exact canonical transaction', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().addRectangleNode(80, 70)
+    useEditorStore.getState().addRectangleNode(360, 210)
+    const inserted = useEditorStore.getState().flowSession
+    if (!inserted) throw new Error('expected Flow session')
+    const overlayIds = flowSurfaceIn(
+      inserted.history.present,
+      inserted.selection.surfaceId,
+    ).surfaceLayerItems.map((entry) => entry.item.layerItemId).slice(-2)
+    expect(overlayIds).toHaveLength(2)
+    const positionedResult = patchEffectiveLayerPropertiesAtTargets(
+      inserted.history.present,
+      overlayIds.map((id, index) => {
+        const located = locateCourseLayer(inserted.history.present, id)
+        if (!located) throw new Error('expected Flow overlay')
+        return {
+          target: {
+            authoringAddress: makeEffectiveLayerAuthoringAddress(
+              inserted.history.present.id,
+              located,
+            ),
+            locationId: inserted.selection.locationId,
+          },
+          patch: { frame: index === 0 ? { x: 80, y: 70 } : { x: 360, y: 210 } },
+        }
+      }),
+      { expectedRevision: inserted.history.present.revision },
+    )
+    useEditorStore.getState().applyFlowCommand(positionedResult)
+    const positioned = useEditorStore.getState().flowSession!
+    expect(overlayIds.map((id) => locateCourseLayer(
+      positioned.history.present,
+      id,
+    )?.item.frame.x)).toEqual([80, 360])
+    act(() => useEditorStore.getState().applyFlowSelection(selectFlowOverlay(
+      positioned.history.present,
+      positioned.selection.locationId,
+      overlayIds,
+      'page',
+    )))
+
+    let captured: MultiSelectionPropertiesContext | null = null
+    render(
+      <>
+        <PropertiesTab onReplaceImage={() => undefined} />
+        <FlowMultiPropertiesCapture capture={(context) => { captured = context }} />
+      </>,
+    )
+    expect(screen.getByTestId('multi-selection-properties')).toHaveTextContent('2')
+    expect(screen.getByRole('button', { name: '复制所选' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '删除所选' })).toBeEnabled()
+
+    const beforeAlign = useEditorStore.getState().flowSession!
+    fireEvent.click(screen.getByRole('button', { name: '左对齐' }))
+    const aligned = useEditorStore.getState().flowSession!
+    expect(aligned.history.present.revision).toBe(beforeAlign.history.present.revision + 1)
+    expect(aligned.history.past).toHaveLength(beforeAlign.history.past.length + 1)
+    expect(aligned.selection.selectedOverlayIds).toEqual(overlayIds)
+    const alignedFrames = overlayIds.map((id) => locateCourseLayer(
+      aligned.history.present,
+      id,
+    )?.item.frame)
+    expect(alignedFrames[0]?.x).toBe(alignedFrames[1]?.x)
+
+    const capturedContext = captured as MultiSelectionPropertiesContext | null
+    if (!capturedContext) throw new Error('expected captured Flow multi Properties context')
+    const staleCommands = capturedContext.commands
+    act(() => useEditorStore.getState().applyFlowSelection(selectFlowOverlay(
+      aligned.history.present,
+      aligned.selection.locationId,
+      [overlayIds[0]!],
+      'page',
+    )))
+    const beforeStale = useEditorStore.getState().flowSession!
+    act(() => staleCommands.setVisible(false))
+    const afterStale = useEditorStore.getState().flowSession!
+    expect(afterStale.history.present).toBe(beforeStale.history.present)
+    expect(afterStale.history).toBe(beforeStale.history)
+    expect(afterStale.selection).toBe(beforeStale.selection)
+
+    act(() => useEditorStore.getState().applyFlowSelection(selectFlowOverlay(
+      afterStale.history.present,
+      afterStale.selection.locationId,
+      overlayIds,
+      'page',
+    )))
+    const beforeHide = useEditorStore.getState().flowSession!
+    fireEvent.click(screen.getByRole('button', { name: '全部隐藏' }))
+    const hidden = useEditorStore.getState().flowSession!
+    expect(hidden.history.present.revision).toBe(beforeHide.history.present.revision + 1)
+    expect(hidden.history.past).toHaveLength(beforeHide.history.past.length + 1)
+    for (const id of overlayIds) {
+      expect(locateCourseLayer(hidden.history.present, id)?.item.visible).toBe(false)
+    }
+
+    const beforeDelete = hidden
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    const deleted = useEditorStore.getState().flowSession!
+    expect(deleted.history.present.revision).toBe(beforeDelete.history.present.revision + 1)
+    expect(deleted.history.past).toHaveLength(beforeDelete.history.past.length + 1)
+    expect(deleted.selection.selectedOverlayIds).toEqual([])
+    for (const id of overlayIds) expect(locateCourseLayer(deleted.history.present, id)).toBeNull()
+  })
+
   it('rejects Delete from stale rendered Flow props without overwriting newer store content', () => {
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
@@ -111,17 +277,19 @@ describe('Flow product shell wiring', () => {
       project: staleProject,
       locationId: staleSelection.locationId,
     })
-    const onProjectChange = vi.fn()
-    const onDeleteRequest = vi.fn((request) => (
-      useEditorStore.getState().deleteFlowSelection(request)
+    const staleToken = useEditorStore.getState().courseAuthoringSession?.token
+    if (!staleToken) throw new Error('expected Flow authoring token')
+    const run = vi.fn((target, intent) => (
+      useEditorStore.getState().runFlowAuthoringIntent(target, intent)
     ))
     render(
       <FlowWorkspace
-        project={staleProject}
         view={staleView}
+        sessionToken={staleToken}
+        assets={staleProject.assets}
         selection={staleSelection}
-        onProjectChange={onProjectChange}
-        onDeleteRequest={onDeleteRequest}
+        textEdit={null}
+        commands={{ run }}
       />,
     )
     const inserted = insertFlowEditorBlock(flowDocument(), {
@@ -137,8 +305,8 @@ describe('Flow product shell wiring', () => {
 
     fireEvent.keyDown(screen.getByTestId(`flow-block-${paragraph.id}`), { key: 'Delete' })
 
-    expect(onDeleteRequest).toHaveBeenCalledOnce()
-    expect(onProjectChange).not.toHaveBeenCalled()
+    expect(run).toHaveBeenCalledOnce()
+    expect(run.mock.results[0]?.value).toMatchObject({ ok: false, historyEntry: false })
     expect(flowDocument()).toBe(beforeDocument)
     expect(useEditorStore.getState().flowSession!.history.past).toBe(beforeHistory)
     expect(useEditorStore.getState().flowSession!.selection).toBe(beforeSelection)
@@ -146,6 +314,363 @@ describe('Flow product shell wiring', () => {
     expect(flowSurface().blocks.some((block) => (
       block.type === 'paragraph' && block.text === '新版本内容'
     ))).toBe(true)
+  })
+
+  it('rejects a stale media callback without touching document, history, edit, or resources', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().importAsset(imageAsset(), PNG)
+    const inserted = useEditorStore.getState().insertFlowLibraryMedia(
+      imageAsset().id,
+      { menuAction: 'insert-document' },
+    )
+    expect(inserted.ok).toBe(true)
+
+    const insertedSession = useEditorStore.getState().flowSession
+    const insertedAuthoring = useEditorStore.getState().courseAuthoringSession
+    if (!insertedSession || !insertedAuthoring) throw new Error('expected Flow authoring session')
+    const media = flowSurfaceIn(
+      insertedSession.history.present,
+      insertedSession.selection.surfaceId,
+    ).blocks.find((block) => block.type === 'media' && block.assetId === imageAsset().id)
+    if (!media || media.type !== 'media') throw new Error('expected inserted Flow media')
+    const staleTarget = captureFlowEditorAuthoringTarget({
+      view: buildFlowEditorView({
+        project: insertedSession.history.present,
+        locationId: insertedSession.selection.locationId,
+      }),
+      sessionToken: insertedAuthoring.token,
+      target: { kind: 'block', blockId: media.id },
+    })
+
+    const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(
+      flowDocument(),
+      {
+        surfaceId: insertedSession.selection.surfaceId,
+        blockId: paragraph.id,
+        parentId: null,
+      },
+      { text: '中间版本内容' },
+      { expectedRevision: flowDocument().revision },
+    ))
+
+    const before = useEditorStore.getState()
+    const beforeSession = before.flowSession!
+    const receipt = before.runFlowAuthoringIntent(staleTarget, {
+      kind: 'import-replacement-media',
+      name: 'replacement.png',
+      mimeType: 'image/png',
+      bytes: Uint8Array.from([1, 2, 3, 4]),
+    })
+    const after = useEditorStore.getState()
+
+    expect(receipt).toMatchObject({ ok: false, historyEntry: false })
+    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
+    expect(after.flowSession?.history.present.revision).toBe(beforeSession.history.present.revision)
+    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
+    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
+    expect(after.flowSession?.selection).toBe(beforeSession.selection)
+    expect(after.flowTextEdit).toBe(before.flowTextEdit)
+    expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
+    expect(after.courseAssetSidecarPast).toBe(before.courseAssetSidecarPast)
+    expect(after.courseAssetSidecarFuture).toBe(before.courseAssetSidecarFuture)
+    expect(after.assetFiles).toBe(before.assetFiles)
+    expect(after.componentPackages).toBe(before.componentPackages)
+    expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
+    expect(after.dirty).toBe(before.dirty)
+  })
+
+  it('rejects delayed callbacks from an older edit object at the same revision', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const session = useEditorStore.getState().flowSession
+    const authoring = useEditorStore.getState().courseAuthoringSession
+    if (!session || !authoring) throw new Error('expected Flow authoring session')
+    const paragraph = flowSurfaceIn(
+      session.history.present,
+      session.selection.surfaceId,
+    ).blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph) throw new Error('expected paragraph')
+    const target = captureFlowEditorAuthoringTarget({
+      view: buildFlowEditorView({
+        project: session.history.present,
+        locationId: session.selection.locationId,
+      }),
+      sessionToken: authoring.token,
+      target: { kind: 'block', blockId: paragraph.id },
+    })
+
+    const begunA = useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'begin-text-edit',
+      gesture: 'click-text',
+      offset: 0,
+    })
+    if (!begunA.ok || !begunA.edit) throw new Error('expected first edit')
+    expect(useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'cancel-text-edit',
+      edit: begunA.edit,
+    }).ok).toBe(true)
+    const begunB = useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'begin-text-edit',
+      gesture: 'click-text',
+      offset: 0,
+    })
+    if (!begunB.ok || !begunB.edit) throw new Error('expected second edit')
+    expect(begunB.edit).not.toBe(begunA.edit)
+    expect(begunB.edit.revision).toBe(begunA.edit.revision)
+
+    const before = useEditorStore.getState()
+    const beforeSession = before.flowSession!
+    const staleReceipts = [
+      before.runFlowAuthoringIntent(target, {
+        kind: 'update-text-edit',
+        expectedEdit: begunA.edit,
+        edit: begunA.edit,
+      }),
+      before.runFlowAuthoringIntent(target, {
+        kind: 'format-text-style',
+        expectedEdit: begunA.edit,
+        style: { bold: true },
+      }),
+      before.runFlowAuthoringIntent(target, {
+        kind: 'cancel-text-edit',
+        edit: begunA.edit,
+      }),
+      before.runFlowAuthoringIntent(target, {
+        kind: 'commit-text-edit',
+        edit: begunA.edit,
+      }),
+    ]
+    const after = useEditorStore.getState()
+
+    for (const receipt of staleReceipts) {
+      expect(receipt).toMatchObject({ ok: false, historyEntry: false })
+    }
+    expect(after.flowTextEdit).toBe(begunB.edit)
+    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
+    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
+    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
+    expect(after.flowSession?.selection).toBe(beforeSession.selection)
+    expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
+    expect(after.courseAssetSidecarPast).toBe(before.courseAssetSidecarPast)
+    expect(after.courseAssetSidecarFuture).toBe(before.courseAssetSidecarFuture)
+    expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
+  })
+
+  it('commits the Store-owned draft before a legacy tree selection changes blocks', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const { paragraph, editedText } = beginDirtyFlowParagraphEdit('—切换前提交')
+    const before = useEditorStore.getState().flowSession!
+    const nextBlock = flowSurfaceIn(
+      before.history.present,
+      before.selection.surfaceId,
+    ).blocks.find((block) => block.id !== paragraph.id)
+    if (!nextBlock) throw new Error('expected another Flow block')
+    const nextSelection = selectFlowEditorBlocks(
+      before.history.present,
+      before.selection.locationId,
+      [nextBlock.id],
+    )
+
+    useEditorStore.getState().applyFlowSelection(nextSelection)
+
+    const after = useEditorStore.getState().flowSession!
+    const committed = findFlowBlockRecursive(
+      flowSurfaceIn(after.history.present, after.selection.surfaceId).blocks,
+      paragraph.id,
+    )?.block
+    expect(committed).toMatchObject({ type: 'paragraph', text: editedText })
+    expect(after.selection.selectedBlockId).toBe(nextBlock.id)
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+  })
+
+  it('keeps a composing draft and selection unchanged when a tree transition cannot commit', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const { paragraph, target, drafted } = beginDirtyFlowParagraphEdit('—输入法合成中')
+    const composing = markFlowTextComposing(drafted, true)
+    expect(useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'update-text-edit',
+      expectedEdit: drafted,
+      edit: composing,
+    }).ok).toBe(true)
+    const before = useEditorStore.getState()
+    const beforeSession = before.flowSession!
+    const nextBlock = flowSurfaceIn(
+      beforeSession.history.present,
+      beforeSession.selection.surfaceId,
+    ).blocks.find((block) => block.id !== paragraph.id)
+    if (!nextBlock) throw new Error('expected another Flow block')
+
+    before.applyFlowSelection(selectFlowEditorBlocks(
+      beforeSession.history.present,
+      beforeSession.selection.locationId,
+      [nextBlock.id],
+    ))
+
+    const after = useEditorStore.getState()
+    expect(after.flowTextEdit).toBe(composing)
+    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
+    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
+    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
+    expect(after.flowSession?.selection).toBe(beforeSession.selection)
+    expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
+    expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
+  })
+
+  it('does not consume redo history or discard a dirty Store-owned edit', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const initial = useEditorStore.getState().flowSession!
+    const paragraph = flowSurfaceIn(
+      initial.history.present,
+      initial.selection.surfaceId,
+    ).blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    expect(useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(
+      initial.history.present,
+      { surfaceId: initial.selection.surfaceId, blockId: paragraph.id, parentId: null },
+      { text: `${paragraph.text}—可重做` },
+      { expectedRevision: initial.history.present.revision },
+    )).ok).toBe(true)
+    useEditorStore.getState().undo()
+    beginDirtyFlowParagraphEdit('—未提交')
+    const before = useEditorStore.getState()
+    const beforeSession = before.flowSession!
+    expect(beforeSession.history.future.length).toBeGreaterThan(0)
+
+    before.redo()
+
+    const after = useEditorStore.getState()
+    expect(after.flowTextEdit).toBe(before.flowTextEdit)
+    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
+    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
+    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
+    expect(after.flowSession?.selection).toBe(beforeSession.selection)
+    expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
+    expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
+  })
+
+  it('commits a Flow draft before opening a location on another Surface', () => {
+    useEditorStore.getState().createNewProject()
+    useEditorStore.getState().addCourseContent('flow-page')
+    const slideLocation = flowDocument().locations.find((location) => location.kind === 'slide-scene')
+    if (!slideLocation) throw new Error('expected Slide location')
+    const { paragraph, editedText } = beginDirtyFlowParagraphEdit('—跨 Surface 提交')
+    const beforePastLength = useEditorStore.getState().flowSession!.history.past.length
+
+    useEditorStore.getState().activateCourseLocation(slideLocation.id)
+
+    const afterDocument = flowDocument()
+    const flow = afterDocument.surfaces.find((surface) => surface.type === 'flow')
+    if (!flow || flow.type !== 'flow') throw new Error('expected Flow surface')
+    expect(findFlowBlockRecursive(flow.blocks, paragraph.id)?.block).toMatchObject({
+      type: 'paragraph',
+      text: editedText,
+    })
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    expect(useEditorStore.getState().flowSession).toBeNull()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).not.toBeNull()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.past)
+      .toHaveLength(beforePastLength + 1)
+  })
+
+  it('preserves the draft and the first legacy panel mutation for media, elements, and layers', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().importAsset(imageAsset(), PNG)
+
+    const mediaEdit = beginDirtyFlowParagraphEdit('—媒体点击')
+    const mediaResult = useEditorStore.getState().insertFlowLibraryMedia(
+      imageAsset().id,
+      { menuAction: 'insert-document' },
+    )
+    expect(mediaResult.ok).toBe(true)
+    expect(findFlowBlockRecursive(flowSurface().blocks, mediaEdit.paragraph.id)?.block)
+      .toMatchObject({ type: 'paragraph', text: mediaEdit.editedText })
+    expect(flowSurface().blocks).toContainEqual(expect.objectContaining({
+      type: 'media',
+      assetId: imageAsset().id,
+    }))
+
+    const elementEdit = beginDirtyFlowParagraphEdit('—元素点击')
+    const blockCountBefore = flowSurface().blocks.length
+    useEditorStore.getState().addTextNode()
+    expect(findFlowBlockRecursive(flowSurface().blocks, elementEdit.paragraph.id)?.block)
+      .toMatchObject({ type: 'paragraph', text: elementEdit.editedText })
+    expect(flowSurface().blocks).toHaveLength(blockCountBefore + 1)
+
+    const shapeEdit = beginDirtyFlowParagraphEdit('—图形点击')
+    useEditorStore.getState().addRectangleNode()
+    expect(findFlowBlockRecursive(flowSurface().blocks, shapeEdit.paragraph.id)?.block)
+      .toMatchObject({ type: 'paragraph', text: shapeEdit.editedText })
+    const overlayId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
+    if (!overlayId) throw new Error('expected inserted Flow overlay')
+
+    const layerEdit = beginDirtyFlowParagraphEdit('—图层点击')
+    useEditorStore.getState().updateNode(overlayId, { visible: false })
+    expect(findFlowBlockRecursive(flowSurface().blocks, layerEdit.paragraph.id)?.block)
+      .toMatchObject({ type: 'paragraph', text: layerEdit.editedText })
+    expect(locateCourseLayer(flowDocument(), overlayId)?.item.visible).toBe(false)
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+  })
+
+  it('commits an open text draft and a follow-up block command as one undo step', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const session = useEditorStore.getState().flowSession
+    const authoring = useEditorStore.getState().courseAuthoringSession
+    if (!session || !authoring) throw new Error('expected Flow authoring session')
+    const paragraph = flowSurfaceIn(
+      session.history.present,
+      session.selection.surfaceId,
+    ).blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
+    const originalText = paragraph.text
+    const target = captureFlowEditorAuthoringTarget({
+      view: buildFlowEditorView({
+        project: session.history.present,
+        locationId: session.selection.locationId,
+      }),
+      sessionToken: authoring.token,
+      target: { kind: 'block', blockId: paragraph.id },
+    })
+    const begun = useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'begin-text-edit',
+      gesture: 'click-text',
+      offset: 0,
+    })
+    if (!begun.ok || !begun.edit) throw new Error('expected Flow text edit')
+    const editedText = `${originalText}—已修改`
+    const drafted = updateFlowTextDraft(begun.edit, { text: editedText, runs: [] })
+    const updated = useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'update-text-edit',
+      expectedEdit: begun.edit,
+      edit: drafted,
+    })
+    expect(updated.ok).toBe(true)
+    expect(updated.historyEntry).toBe(false)
+
+    const before = useEditorStore.getState().flowSession!
+    const receipt = useEditorStore.getState().runFlowAuthoringIntent(target, {
+      kind: 'format-block',
+      spec: { kind: 'convert-quote' },
+      expectedEdit: drafted,
+    })
+    const after = useEditorStore.getState().flowSession!
+    const committed = flowSurfaceIn(
+      after.history.present,
+      after.selection.surfaceId,
+    ).blocks.find((block) => block.id === paragraph.id)
+
+    expect(receipt).toMatchObject({ ok: true, historyEntry: true })
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(committed).toMatchObject({ type: 'quote', text: editedText })
+
+    useEditorStore.getState().undo()
+    const undone = flowSurfaceIn(
+      useEditorStore.getState().flowSession!.history.present,
+      after.selection.surfaceId,
+    ).blocks.find((block) => block.id === paragraph.id)
+    expect(undone).toMatchObject({ type: 'paragraph', text: originalText })
   })
 
   it('keeps default new project on Slide and adds a visible blank Flow entry without removing Spatial', () => {
@@ -631,12 +1156,23 @@ describe('Flow product shell wiring', () => {
       { start: 0, end: Array.from(formattedHeading.text).length, style: { color: '#dc2626' } },
       { start: 0, end: 1, style: { bold: true, fontFamily: 'KaiTi', fontSize: 24 } },
     ]
+    const rangeEnd = Math.max(1, Array.from(formattedHeading.text).length - 1)
+    const currentFlow = useEditorStore.getState().flowSession!
+    useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
+      currentFlow.history.present,
+      currentFlow.selection.locationId,
+      [formattedHeading.id],
+      {
+        focus: 'text',
+        textRange: { blockId: formattedHeading.id, start: 0, end: rangeEnd },
+      },
+    ))
     useEditorStore.setState({
       flowTextEdit: {
         kind: 'rich-text',
         source: 'properties',
         blockId: formattedHeading.id,
-        surfaceId: flow.selection.surfaceId,
+        surfaceId: currentFlow.selection.surfaceId,
         parentId: null,
         field: 'text',
         composing: false,
@@ -644,7 +1180,7 @@ describe('Flow product shell wiring', () => {
         revision: flowDocument().revision,
         original: { text: formattedHeading.text, runs: mixedRuns },
         draft: { text: formattedHeading.text, runs: mixedRuns },
-        range: { start: 0, end: Math.max(1, Array.from(formattedHeading.text).length - 1) },
+        range: { start: 0, end: rangeEnd },
       },
     })
 
@@ -661,7 +1197,6 @@ describe('Flow product shell wiring', () => {
 
     const revisionBeforeRangeFormat = flowDocument().revision
     fireEvent.click(screen.getByTestId('flow-format-italic'))
-    const rangeEnd = Math.max(1, Array.from(formattedHeading.text).length - 1)
     const editedRuns = (useEditorStore.getState().flowTextEdit?.draft as {
       runs?: Array<{ start: number; end: number; style: { italic?: boolean } }>
     }).runs ?? []

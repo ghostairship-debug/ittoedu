@@ -3,8 +3,10 @@ import { componentPackagesToArchiveFiles } from '@/renderer/components/component
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
+  beginFlowFormulaEdit,
   beginFlowTextEdit,
   updateFlowTextDraft,
+  type FlowFormulaDraft,
 } from '@/renderer/authoring/flowTextEdit'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import {
@@ -16,6 +18,8 @@ import {
   selectHasUnsavedCourseChanges,
   useEditorStore,
   type CourseProjectPersistenceSnapshot,
+  selectSlideSceneList,
+  selectEditingNodes,
 } from '@/renderer/store/editorStore'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 
@@ -74,14 +78,14 @@ function createSlideFixture(): DraftFixture {
     begin,
     update(text) {
       const state = useEditorStore.getState()
-      const node = state.project.scenes.flatMap((scene) => scene.nodes)
+      const node = selectSlideSceneList(state).flatMap((scene) => scene.nodes)
         .find((candidate) => candidate.id === targetId)
       if (!node || node.type !== 'text') throw new Error('expected Slide text projection')
       begin()
       useEditorStore.getState().updateTextEditDraft(
         targetId,
         text,
-        node.runs,
+        node.runs ?? [],
         node.height,
         node.width,
       )
@@ -112,14 +116,13 @@ function createSpatialFixture(): DraftFixture {
     begin,
     update(text) {
       const state = useEditorStore.getState()
-      const node = state.project.scenes.flatMap((scene) => scene.nodes)
-        .find((candidate) => candidate.id === targetId)
+      const node = selectEditingNodes(state).find((candidate) => candidate.id === targetId)
       if (!node || node.type !== 'text') throw new Error('expected Spatial text projection')
       begin()
       useEditorStore.getState().updateTextEditDraft(
         targetId,
         text,
-        node.runs,
+        node.runs ?? [],
         node.height,
         node.width,
       )
@@ -304,8 +307,7 @@ describe('active Course Project text draft persistence', () => {
       if (kind === 'slide') {
         useEditorStore.getState().renameProject('slide clean draft revision')
       } else if (kind === 'spatial') {
-        const node = useEditorStore.getState().project.scenes
-          .flatMap((scene) => scene.nodes)
+        const node = selectEditingNodes(useEditorStore.getState())
           .find((candidate) => candidate.id === fixture.targetId)
         if (!node) throw new Error('expected projected Spatial text')
         useEditorStore.getState().updateNode(fixture.targetId, { x: node.x + 1 })
@@ -374,7 +376,7 @@ describe('active Course Project text draft persistence', () => {
     store.createNewProject()
     store.addTextNode()
     store.addRectangleNode()
-    const [text] = useEditorStore.getState().project.scenes[0]?.nodes ?? []
+    const [text] = selectSlideSceneList(useEditorStore.getState())[0]?.nodes ?? []
     if (!text) throw new Error('expected Slide nodes')
     acknowledgeBaseline('selection-baseline.h5lesson')
 
@@ -414,5 +416,107 @@ describe('active Course Project text draft persistence', () => {
     if (!recovery.ok) throw new Error(recovery.reason)
     expect(fixture.read(recovery.snapshot.project)).toBe('输入法组合中的文字')
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+  })
+
+  it('materializes the Store-owned Flow formula draft for recovery and saves it once', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().addFormulaNode()
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected Flow session')
+    const surface = flowSurfaceIn(flow.history.present, flow.selection.surfaceId)
+    const formula = surface.blocks.find((block) => block.type === 'formula')
+    if (!formula || formula.type !== 'formula') throw new Error('expected Flow formula')
+    const selection = selectFlowEditorBlocks(
+      flow.history.present,
+      flow.selection.locationId,
+      [formula.id],
+    )
+    const begun = beginFlowFormulaEdit({
+      project: flow.history.present,
+      selection,
+      blockId: formula.id,
+    })
+    if (!begun.ok) throw new Error(begun.reason)
+    useEditorStore.getState().applyFlowSelection(begun.selection)
+    const ast = {
+      type: 'row' as const,
+      children: [
+        { type: 'token' as const, value: 'a' },
+        { type: 'operator' as const, value: '+' },
+        { type: 'token' as const, value: 'b' },
+      ],
+    }
+    const drafted = updateFlowTextDraft(begun.edit, {
+      ast,
+      accessibleText: 'a加b',
+      source: 'a+b',
+      valid: true,
+      hasSlots: false,
+    })
+    useEditorStore.getState().setFlowTextEdit(drafted)
+    const historyBefore = useEditorStore.getState().history.past.length
+
+    const recovery = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
+    expect(recovery.ok).toBe(true)
+    if (!recovery.ok) throw new Error(recovery.reason)
+    const recovered = flowSurfaceIn(recovery.snapshot.project, surface.id)
+      .blocks.find((block) => block.id === formula.id)
+    expect(recovered).toMatchObject({ type: 'formula', ast, accessibleText: 'a加b' })
+    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
+
+    const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
+    expect(preparation.ok).toBe(true)
+    if (!preparation.ok) throw new Error(preparation.reason)
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    const saved = flowSurfaceIn(preparation.snapshot.project, surface.id)
+      .blocks.find((block) => block.id === formula.id)
+    expect(saved).toMatchObject({ type: 'formula', ast, accessibleText: 'a加b' })
+  })
+
+  it('keeps an invalid Flow formula source in the Store and refuses save or recovery', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().addFormulaNode()
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected Flow session')
+    const surface = flowSurfaceIn(flow.history.present, flow.selection.surfaceId)
+    const formula = surface.blocks.find((block) => block.type === 'formula')
+    if (!formula || formula.type !== 'formula') throw new Error('expected Flow formula')
+    const selection = selectFlowEditorBlocks(
+      flow.history.present,
+      flow.selection.locationId,
+      [formula.id],
+    )
+    const begun = beginFlowFormulaEdit({
+      project: flow.history.present,
+      selection,
+      blockId: formula.id,
+    })
+    if (!begun.ok) throw new Error(begun.reason)
+    useEditorStore.getState().applyFlowSelection(begun.selection)
+    const original = begun.edit.draft as FlowFormulaDraft
+    const invalid = updateFlowTextDraft(begun.edit, {
+      ...original,
+      source: '\\frac{x}',
+      valid: false,
+    })
+    useEditorStore.getState().setFlowTextEdit(invalid)
+    const before = useEditorStore.getState()
+    const beforeSession = before.flowSession!
+
+    expect(selectHasUnsavedCourseChanges(before)).toBe(true)
+    expect(before.captureCourseProjectRecoverySnapshot()).toMatchObject({ ok: false })
+    expect(useEditorStore.getState().prepareCourseProjectPersistence()).toMatchObject({ ok: false })
+    const after = useEditorStore.getState()
+    expect(after.flowTextEdit).toBe(invalid)
+    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
+    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
+    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
+    expect(after.flowSession?.selection).toBe(beforeSession.selection)
+    expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
+    expect(after.courseAssetSidecarPast).toBe(before.courseAssetSidecarPast)
+    expect(after.courseAssetSidecarFuture).toBe(before.courseAssetSidecarFuture)
+    expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
+    expect(after.dirty).toBe(before.dirty)
   })
 })

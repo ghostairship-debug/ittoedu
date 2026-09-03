@@ -67,10 +67,10 @@ describe('ProjectHealthPanel on-demand analysis', () => {
     expect(analyzeVisualDensity).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog', { name: '工程检查' })).not.toBeInTheDocument()
 
-    const staleProject = useEditorStore.getState().project
+    const staleProject = selectActiveCourseProjectDocument(useEditorStore.getState())!
     useEditorStore.getState().addTextNode()
     const latestState = useEditorStore.getState()
-    expect(latestState.project).not.toBe(staleProject)
+    expect(selectActiveCourseProjectDocument(latestState)).not.toBe(staleProject)
 
     rerender(<ProjectHealthPanel open onClose={onClose} />)
 

@@ -1,7 +1,7 @@
 import type {
   TeacherControllerButton,
   TeacherControllerNode,
-} from './projectTypes'
+} from './contracts/native-v1/types'
 import { MIN_VISIBLE_NODE_EDGE } from './constants'
 
 export interface TeacherControllerRect {

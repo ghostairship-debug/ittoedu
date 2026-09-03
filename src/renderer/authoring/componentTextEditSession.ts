@@ -9,17 +9,14 @@ import type {
   ComponentPackageData,
   ComponentScope,
 } from '../../shared/componentTypes'
-import type {
-  ExternalComponentNode,
-  SceneNode,
-} from '../../shared/projectTypes'
+import type { EditorCanvasNode } from '../phaser/editorCanvasNode'
 
 export interface ComponentTextEditContext {
   readonly projectId: string
   readonly scope: ComponentScope
   readonly sceneId: string
   readonly stateId: string | null
-  readonly nodes: ReadonlyArray<Readonly<SceneNode>>
+  readonly nodes: ReadonlyArray<Readonly<EditorCanvasNode>>
   readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
   readonly targets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
 }
@@ -72,8 +69,20 @@ export type ResolveComponentTextEditResult = {
   readonly reason: ComponentTextEditFailureReason
 }
 
+type EditorComponentCanvasNode = EditorCanvasNode & {
+  type: 'external-component'
+  component: { packageId: string; version: string }
+  props: Record<string, unknown>
+}
+
+function isEditorComponentCanvasNode(
+  node: Readonly<EditorCanvasNode>,
+): node is Readonly<EditorComponentCanvasNode> {
+  return node.type === 'external-component' && Boolean(node.component)
+}
+
 function componentPackageForNode(
-  node: Readonly<ExternalComponentNode>,
+  node: Readonly<EditorComponentCanvasNode>,
   componentPackages: Readonly<Record<string, ComponentPackageData>>,
 ): ComponentPackageData | undefined {
   const { packageId, version } = node.component
@@ -93,11 +102,11 @@ function componentNodeForTarget(
   componentId: string,
   componentVersion: string | undefined,
   context: ComponentTextEditContext,
-): Readonly<ExternalComponentNode> | undefined {
+): Readonly<EditorComponentCanvasNode> | undefined {
   return context.nodes.find(
-    (node): node is Readonly<ExternalComponentNode> => (
+    (node): node is Readonly<EditorComponentCanvasNode> => (
+      isEditorComponentCanvasNode(node) &&
       node.id === nodeId &&
-      node.type === 'external-component' &&
       node.visible &&
       !node.locked &&
       node.component.packageId === componentId &&
@@ -108,7 +117,7 @@ function componentNodeForTarget(
 }
 
 function resolveCurrentStringValue(
-  node: Readonly<ExternalComponentNode>,
+  node: Readonly<EditorComponentCanvasNode>,
   key: string,
   context: ComponentTextEditContext,
 ): string | undefined {

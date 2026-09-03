@@ -132,7 +132,7 @@ function authoritativeSnapshot() {
     : null
   return {
     project: structuredClone(project),
-    derivedProject: structuredClone(state.project),
+    derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     assetFiles: byteMap(selectMediaAssetFiles(state)),
     history: structuredClone(state.history),
     backendHistory: backendHistory
@@ -142,11 +142,11 @@ function authoritativeSnapshot() {
           future: structuredClone(backendHistory.future),
         }
       : null,
-    sidecarPast: sidecarStack(state.slideCandidateSidecarPast),
-    sidecarFuture: sidecarStack(state.slideCandidateSidecarFuture),
+    sidecarPast: sidecarStack(state.courseAssetSidecarPast),
+    sidecarFuture: sidecarStack(state.courseAssetSidecarFuture),
     componentPackages: structuredClone(state.componentPackages),
-    componentPackagesPast: structuredClone(state.slideCandidateComponentPackagesPast),
-    componentPackagesFuture: structuredClone(state.slideCandidateComponentPackagesFuture),
+    componentPackagesPast: structuredClone(state.courseComponentPackagesPast),
+    componentPackagesFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     activeSceneId: state.activeSceneId,
     activePresentationStateId: state.activePresentationStateId,
@@ -162,8 +162,8 @@ function authoritativeSnapshot() {
 function sidecarDepths() {
   const state = useEditorStore.getState()
   return {
-    past: state.slideCandidateSidecarPast.length,
-    future: state.slideCandidateSidecarFuture.length,
+    past: state.courseAssetSidecarPast.length,
+    future: state.courseAssetSidecarFuture.length,
   }
 }
 
@@ -185,8 +185,8 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     const beforeHistoryDepth = stateAtCapture.history.past.length
     const beforeSidecarDepths = sidecarDepths()
     const beforeComponentDepths = {
-      past: stateAtCapture.slideCandidateComponentPackagesPast.length,
-      future: stateAtCapture.slideCandidateComponentPackagesFuture.length,
+      past: stateAtCapture.courseComponentPackagesPast.length,
+      future: stateAtCapture.courseComponentPackagesFuture.length,
     }
     expect(selectMediaAssetFiles(stateAtCapture)[REPLACEMENT_ASSET_ID]).toBeUndefined()
 
@@ -221,8 +221,8 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(after.history.past).toHaveLength(beforeHistoryDepth + 1)
     expect(sidecarDepths()).toEqual(beforeSidecarDepths)
     expect({
-      past: after.slideCandidateComponentPackagesPast.length,
-      future: after.slideCandidateComponentPackagesFuture.length,
+      past: after.courseComponentPackagesPast.length,
+      future: after.courseComponentPackagesFuture.length,
     }).toEqual(beforeComponentDepths)
     expect(after.dirty).toBe(true)
     const afterBackend = after.slideBackend
@@ -409,7 +409,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(selectMediaAssetFiles(branched)[branchAsset.id]).toEqual(branchBytes)
     expect(branched.history.future).toHaveLength(0)
     expect(sidecarDepths()).toEqual({ past: 1, future: 0 })
-    expect(branched.slideCandidateComponentPackagesFuture).toHaveLength(0)
+    expect(branched.courseComponentPackagesFuture).toHaveLength(0)
     expect(activeProject().title).not.toBe(originalTitle)
   })
 

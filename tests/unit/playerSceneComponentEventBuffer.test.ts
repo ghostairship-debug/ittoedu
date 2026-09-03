@@ -130,10 +130,52 @@ import { PlayerScene } from '../../src/player/PlayerScene'
 import { CourseEventBus } from '../../src/player/CourseEventBus'
 import {
   createExternalComponentNode,
-  createProject,
-} from '../../src/renderer/project/createProject'
+} from '../../src/renderer/project/nativeNodeFactories'
 import type { ExportPayload } from '../../src/shared/componentTypes'
 import type { InteractionRule } from '../../src/shared/interactionTypes'
+import type { ProjectDocument } from '../../src/shared/projectTypes'
+
+function legacyPlayerDocument(): ProjectDocument {
+  return {
+    schemaVersion: 8,
+    id: 'player-project',
+    title: '未命名课件',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    canvas: { width: 1280, height: 720 },
+    scenes: [{
+      id: 'scene_1',
+      name: '场景 1',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      nodes: [],
+      presentation: {
+        initialStateId: 'state_initial',
+        states: [{ id: 'state_initial', name: '初始', nodeOverrides: {} }],
+      },
+      interactions: [],
+    }],
+    assets: {},
+    componentPackages: {},
+    globalLayer: [],
+    globalInteractions: [],
+    designTokens: { fonts: [], colors: [] },
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+      },
+    },
+    playback: {
+      controls: 'none',
+      keyboardNavigation: true,
+      presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+    },
+  }
+}
 
 type PrivateMethod<Args extends unknown[], Result> = (
   this: PlayerScene,
@@ -179,7 +221,7 @@ function componentNode(id: string) {
   })
 }
 
-function createHarness(project = createProject({ includeDefaultController: false, controls: 'none' })) {
+function createHarness(project = legacyPlayerDocument()) {
   const playerScene = Object.create(PlayerScene.prototype) as PlayerScene
   const events = new CourseEventBus()
   const domLayers = {
@@ -247,7 +289,7 @@ describe('PlayerScene component mount event buffering', () => {
   })
 
   it('replays scene component events only after the scene engine binds, in mount order', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = legacyPlayerDocument()
     const scene = project.scenes[0]!
     scene.nodes = [componentNode('scene-a'), componentNode('scene-b')]
     scene.interactions = [componentRule('scene-a'), componentRule('scene-b')]
@@ -267,7 +309,7 @@ describe('PlayerScene component mount event buffering', () => {
   })
 
   it('keeps global mount ordering and ignores an emitter retained by a destroyed mount', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = legacyPlayerDocument()
     project.globalLayer = [
       {
         node: componentNode('global-a'),
@@ -313,7 +355,7 @@ describe('PlayerScene component mount event buffering', () => {
   })
 
   it('隐藏且暂停期间新建的场景与全局组件继承宿主生命周期状态', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+    const project = legacyPlayerDocument()
     const scene = project.scenes[0]!
     scene.nodes = [componentNode('scene-hidden')]
     project.globalLayer = [{

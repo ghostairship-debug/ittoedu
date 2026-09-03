@@ -11,6 +11,7 @@ import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
   useEditorStore,
+  selectSlideSceneList,
 } from '../../src/renderer/store/editorStore'
 
 const originalUpdateRuntimeSourceAtTarget =
@@ -484,6 +485,35 @@ describe('专业开发模式', () => {
     expect(screen.getByText('未选择互动组件')).toBeInTheDocument()
   })
 
+  it('对象 JSON 草稿在 IME 期间禁用提交，并在目标切换后保持但零写入', () => {
+    useEditorStore.getState().createNewProject()
+    act(() => useEditorStore.getState().addTextNode())
+    const firstNode = selectActiveScene(useEditorStore.getState()).nodes[0]!
+    render(<DeveloperTab />)
+    fireEvent.click(screen.getByRole('tab', { name: /对象 JSON/ }))
+
+    const editor = screen.getByRole('textbox', { name: /所选对象/ })
+    const draft = JSON.parse((editor as HTMLTextAreaElement).value)
+    draft.label = '不得迟到写入的对象'
+    fireEvent.compositionStart(editor)
+    fireEvent.change(editor, { target: { value: JSON.stringify(draft, null, 2) } })
+    expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
+    fireEvent.compositionEnd(editor)
+    expect(screen.getByRole('button', { name: '校验并应用' })).toBeEnabled()
+
+    act(() => useEditorStore.getState().addTextNode())
+    expect(useEditorStore.getState().selectedNodeId).not.toBe(firstNode.id)
+    expect(screen.getByTestId('code-document-stale')).toHaveTextContent('草稿未写入工程')
+    expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
+    expect((editor as HTMLTextAreaElement).value).toContain('不得迟到写入的对象')
+    expect(selectActiveScene(useEditorStore.getState()).nodes.map((node) => node.name))
+      .not.toContain('不得迟到写入的对象')
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃草稿' }))
+    expect(screen.queryByTestId('code-document-stale')).not.toBeInTheDocument()
+    expect((editor as HTMLTextAreaElement).value).not.toContain('不得迟到写入的对象')
+  })
+
   it('Slide 既有模板入口创建后刷新为可编辑的 canonical Runtime', () => {
     useEditorStore.getState().createNewProject()
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
@@ -587,7 +617,7 @@ describe('专业开发模式', () => {
     const copiedPackage = useEditorStore.getState().componentPackages[copyId!]
     expect(copiedPackage?.manifest.id).toBe(copyId)
     expect(copiedPackage?.runtimeSource).toContain(copyId)
-    expect(useEditorStore.getState().project.componentPackages[copyId!])
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.componentPackages[copyId!])
       .toMatchObject({
         editableCopy: true,
         sourcePackageId: source.manifest.id,

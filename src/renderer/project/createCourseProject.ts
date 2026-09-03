@@ -7,11 +7,31 @@ import {
   type GlobalLayerEntry,
 } from '@/shared/courseProjectTypes'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
+import type { ProjectPlaybackSettings } from '@/shared/contracts/playback-v1/types'
 import {
   createTeacherControllerNode,
-  type CreateProjectOptions,
   type IdFactory,
-} from './createProject'
+} from './nativeNodeFactories'
+
+interface BlankCourseProjectBaseOptions {
+  id?: string
+  title?: string
+  now?: string | Date
+  idFactory?: IdFactory
+}
+
+export type CreateProjectOptions = BlankCourseProjectBaseOptions & (
+  | {
+      /** User-facing editor projects include an editable in-canvas controller by default. */
+      includeDefaultController?: true
+      controls?: ProjectPlaybackSettings['controls']
+    }
+  | {
+      /** Omitting the controller requires an explicit non-canvas delivery mode. */
+      includeDefaultController: false
+      controls: 'none'
+    }
+)
 
 const DEFAULT_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
 

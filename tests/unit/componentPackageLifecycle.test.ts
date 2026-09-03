@@ -6,12 +6,13 @@ import {
   planComponentPackageReplacement,
   rollbackComponentPackageReplacement,
 } from '../../src/shared/componentPackageLifecycle'
-import type { EmbeddedComponentPackageMeta } from '../../src/shared/projectTypes'
-import {
-  createExternalComponentNode,
-  createProject,
-  createScene,
-} from '../../src/renderer/project/createProject'
+import type {
+  EmbeddedComponentPackageMeta,
+  ProjectDocument,
+  SceneDocument,
+} from '../../src/shared/projectTypes'
+import { createDefaultScenePresentation } from '../../src/shared/presentation'
+import { createExternalComponentNode } from '../../src/renderer/project/nativeNodeFactories'
 
 const PACKAGE_ID = 'com.example.lesson-widget'
 
@@ -31,42 +32,59 @@ function packageMeta(
 }
 
 function fixture() {
-  const project = createProject({
-    id: 'project-components',
-    now: '2026-01-01T00:00:00.000Z',
-    includeDefaultController: false,
-    controls: 'none',
-  })
-  project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
-  project.componentPackages[`${PACKAGE_ID}@1.0.0`] = packageMeta('1.0.0')
-
   const sceneNode = createExternalComponentNode({
     id: 'scene-component',
     name: '场景组件',
     component: { packageId: PACKAGE_ID, version: '1.0.0' },
     props: { content: { title: '保留文案' }, answer: 2 },
   })
-  project.scenes[0]!.nodes.push(sceneNode)
-  project.scenes[0]!.presentation!.states.push({
-    id: 'state-hidden',
-    name: '隐藏状态',
-    nodeOverrides: {
-      [sceneNode.id]: { visible: false },
+  const scene1: SceneDocument = {
+    id: 'scene_1',
+    name: '场景 1',
+    backgroundColor: '#ffffff',
+    backgroundAssetId: null,
+    nodes: [sceneNode],
+    presentation: {
+      initialStateId: 'state_initial',
+      states: [
+        { id: 'state_initial', name: '初始', nodeOverrides: {} },
+        {
+          id: 'state-hidden',
+          name: '隐藏状态',
+          nodeOverrides: {
+            [sceneNode.id]: { visible: false },
+          },
+        },
+      ],
     },
-  })
-
+    interactions: [],
+  }
+  const scene2: SceneDocument = {
+    id: 'scene-2',
+    name: '场景 2',
+    backgroundColor: '#ffffff',
+    backgroundAssetId: null,
+    nodes: [],
+    presentation: createDefaultScenePresentation(),
+    interactions: [],
+  }
   const globalNode = createExternalComponentNode({
     id: 'global-component',
     name: '全局组件',
     component: { packageId: PACKAGE_ID, version: '1.0.0' },
     props: { theme: 'dark' },
   })
-  project.globalLayer.push({
-    node: globalNode,
-    layer: 'overlay',
-    visibility: { mode: 'include', sceneIds: ['scene-2'] },
-  })
-  return project
+  return {
+    scenes: [scene1, scene2],
+    globalLayer: [{
+      node: globalNode,
+      layer: 'overlay' as const,
+      visibility: { mode: 'include' as const, sceneIds: ['scene-2'] },
+    }],
+    componentPackages: {
+      [`${PACKAGE_ID}@1.0.0`]: packageMeta('1.0.0'),
+    },
+  } as unknown as ProjectDocument
 }
 
 describe('组件包使用与生命周期规划', () => {

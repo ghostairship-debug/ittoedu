@@ -1,4 +1,4 @@
-import type { ImageNode } from './projectTypes'
+import type { ImageNode } from './contracts/native-v1/types'
 
 function roundedRectAlpha(
   x: number,

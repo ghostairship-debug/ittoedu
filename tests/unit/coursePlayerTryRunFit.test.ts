@@ -18,6 +18,21 @@ vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({
 }))
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
+import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
+import {
+  nativeRenderInputFromLayerItem,
+  nativeRenderInputFromPublishedItem,
+  nativeRenderInputFromV9Item,
+} from '@/player/surfaces/slide/publishedNativeRendering'
+import {
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+  parsePlayerAuthoringPatchCommand,
+} from '@/shared/playerAuthoringProtocol'
+import type { NativeLayerItem } from '@/shared/courseProjectTypes'
+import type { PublishedLayerItem } from '@/shared/publishedCourseTypes'
+import { analyzeTextNodeLayout } from '@/shared/textLayout'
 import {
   buildPublishedCourseTryRunPayload,
   fitPublishedCourseHostForMode,
@@ -144,7 +159,7 @@ describe('buildPublishedCourseTryRunPayload', () => {
 })
 
 describe('mountPublishedCourseTryRun', () => {
-  it('shares local asset URLs while leasing only explicit playback origins', async () => {
+  it('shares local asset URLs and exact-origin leases across playback and authoring', async () => {
     publishedSessionProbe.calls.length = 0
     publishedSessionProbe.sessions.length = 0
     const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'multi-asset')!
@@ -205,7 +220,13 @@ describe('mountPublishedCourseTryRun', () => {
         scope: 'scene',
         stateId: null,
       })
-      expect(setPreviewNetworkPolicy).toHaveBeenCalledTimes(1)
+      expect(setPreviewNetworkPolicy).toHaveBeenCalledTimes(2)
+      expect(setPreviewNetworkPolicy).toHaveBeenLastCalledWith(expect.objectContaining({
+        connectOrigins: ['https://api.example.com'],
+        remoteAssetUrls: [],
+      }))
+      const authoringLeaseId = setPreviewNetworkPolicy.mock.calls[1]![0].leaseId
+      expect(authoringLeaseId).not.toBe(leaseId)
       const authoringPhotoUrl = (publishedSessionProbe.calls[1]!.payload as {
         assets: Record<string, { url: string }>
       }).assets.photo?.url
@@ -215,7 +236,10 @@ describe('mountPublishedCourseTryRun', () => {
         .not.toHaveProperty('initialPresentationStateId')
 
       await authoring.destroy()
-      expect(releasePreviewNetworkPolicy).toHaveBeenCalledTimes(1)
+      expect(releasePreviewNetworkPolicy).toHaveBeenCalledTimes(2)
+      expect(releasePreviewNetworkPolicy).toHaveBeenLastCalledWith({
+        leaseId: authoringLeaseId,
+      })
       expect(publishedSessionProbe.sessions).toEqual([
         { mounts: 1, destroys: 1 },
         { mounts: 1, destroys: 1 },
@@ -227,5 +251,148 @@ describe('mountPublishedCourseTryRun', () => {
         Reflect.deleteProperty(window, 'desktopAPI')
       }
     }
+  })
+})
+
+function fixtureById(id: string) {
+  const fixture = listCourseProjectV9Fixtures().find((entry) => entry.id === id)
+  if (!fixture) throw new Error(`missing V9 fixture ${id}`)
+  return fixture
+}
+
+function slideLocationId(project: ReturnType<typeof fixtureById>['data']['project']) {
+  const location = project.locations.find((candidate) => candidate.kind === 'slide-scene')
+  if (!location || location.kind !== 'slide-scene') {
+    throw new Error('expected a Slide location')
+  }
+  return location
+}
+
+function publishedItemById(
+  published: ReturnType<typeof buildPublishedCourseTryRunPayload>,
+  layerItemId: string,
+): PublishedLayerItem | undefined {
+  for (const surface of published.surfaces) {
+    if (surface.type !== 'slide') continue
+    for (const scene of surface.scenes) {
+      const item = scene.layerItems.find((candidate) => candidate.layerItemId === layerItemId)
+      if (item) return item
+    }
+    for (const entry of surface.surfaceLayerItems) {
+      if (entry.item.layerItemId === layerItemId) return entry.item
+    }
+  }
+  return published.globalLayerItems.find((entry) => entry.item.layerItemId === layerItemId)?.item
+}
+
+describe('Published authoring complete snapshot from V9', () => {
+  it('builds NativeRenderInput patches that the existing protocol accepts', () => {
+    for (const id of [
+      'slide-native',
+      'slide-presentation-state',
+      'global-layer-teacher-controller',
+      'component',
+      'canvas-runtime',
+      'multi-asset',
+    ] as const) {
+      const { data } = fixtureById(id)
+      const location = slideLocationId(data.project)
+      const view = buildSlideEditorView({
+        project: data.project,
+        locationId: location.id,
+        stateId: location.stateId ?? null,
+      })
+      expect(view.sceneId).toBe(location.sceneId)
+      for (const layer of view.layers) {
+        if (layer.item.kind === 'runtime') continue
+        const node = layer.item.kind === 'native'
+          ? nativeRenderInputFromV9Item(layer.item as NativeLayerItem)
+          : {
+              id: layer.item.layerItemId,
+              name: layer.item.label,
+              type: 'external-component' as const,
+              x: layer.item.frame.x,
+              y: layer.item.frame.y,
+              width: layer.item.frame.width,
+              height: layer.item.frame.height,
+              rotation: layer.item.rotation,
+              opacity: layer.item.opacity,
+              visible: layer.item.visible,
+              locked: layer.item.locked,
+              playbackInitialVisibility: layer.item.playbackInitialVisibility,
+              component: structuredClone(layer.item.component),
+              props: structuredClone(layer.item.props),
+            }
+        if (layer.item.kind === 'native') {
+          expect(nativeRenderInputFromLayerItem(layer.item as NativeLayerItem)).toEqual(node)
+        }
+        const parsed = parsePlayerAuthoringPatchCommand({
+          type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+          protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+          sessionId: 'authoring-session',
+          requestId: `request-${layer.item.layerItemId}`,
+          revision: 1,
+          context: {
+            sceneId: view.sceneId,
+            stateId: view.presentation?.activeStateId ?? null,
+          },
+          patch: {
+            kind: 'native-node',
+            target: {
+              kind: 'native-node',
+              scope: layer.source === 'global' ? 'global' : 'scene',
+              nodeId: node.id,
+            },
+            node,
+          },
+        })
+        expect(parsed.ok, `${id}:${layer.item.layerItemId}`).toBe(true)
+      }
+    }
+  })
+
+  it('keeps authoring NativeRenderInput aligned with try-run Published paint input', () => {
+    const { data } = fixtureById('slide-native')
+    const project = structuredClone(data.project)
+    const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
+    const title = surface?.type === 'slide'
+      ? surface.scenes[0]?.layerItems.find((item) => item.layerItemId === 'slide-title')
+      : undefined
+    if (!title || title.kind !== 'native' || title.content.nativeType !== 'text') {
+      throw new Error('expected slide-title text')
+    }
+    title.content.data.style.overflow = 'shrink'
+    title.content.data.style.fontSize = 48
+    title.content.data.text = '判别式可以把根的情况一次看清楚'.repeat(4)
+    title.frame.width = 180
+    title.frame.height = 56
+
+    const location = slideLocationId(project)
+    const sources = {
+      project,
+      assetFiles: data.assetFiles,
+      components: {},
+    }
+    const published = buildPublishedCourseTryRunPayload(sources)
+    expect(published).toEqual(buildPublishedCourseV2Payload(sources))
+
+    const fromV9 = nativeRenderInputFromV9Item(title)
+    const publishedItem = publishedItemById(published, 'slide-title')
+    if (!publishedItem || publishedItem.kind !== 'native') {
+      throw new Error('expected published slide-title')
+    }
+    const fromPublished = nativeRenderInputFromPublishedItem(publishedItem)
+    expect(fromV9.type).toBe('text')
+    expect(fromPublished.type).toBe('text')
+    if (fromV9.type !== 'text' || fromPublished.type !== 'text') return
+    expect(fromPublished.style.overflow).toBe('shrink')
+    expect(fromPublished.style.fontFamily).toBe(fromV9.style.fontFamily)
+    expect(fromPublished.text).toBe(fromV9.text)
+    expect(analyzeTextNodeLayout(fromPublished).fontSize).toBe(
+      analyzeTextNodeLayout(fromV9).fontSize,
+    )
+    expect(analyzeTextNodeLayout(fromV9).fontSize).toBeLessThan(48)
+    expect(published.assets.badge?.url).toMatch(/^data:image\/png;base64,/)
+    expect(location.sceneId).toBe('scene-1')
   })
 })

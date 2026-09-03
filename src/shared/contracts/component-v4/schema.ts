@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   COMPONENT_RENDER_MODES,
   COMPONENT_SCOPES,
+  type EmbeddedComponentPackageMeta,
 } from './types'
 
 const componentIdSchema = z
@@ -320,3 +321,63 @@ export const componentManifestV4Schema = configurableManifestSchema.extend({
 })
 
 export const componentManifestSchema = componentManifestV4Schema
+
+export const embeddedComponentPackageMetaSchema = z.object({
+  packageId: z.string().min(1),
+  version: z.string().min(1),
+  name: z.string().min(1),
+  manifestPath: z.string().min(1),
+  runtimePath: z.string().min(1),
+  thumbnailPath: z.string().min(1).optional(),
+  contentSha256: z.string().regex(
+    /^[0-9a-f]{64}$/,
+    '组件内容哈希必须是小写 SHA-256',
+  ),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/, '组件包哈希必须是小写 SHA-256').optional(),
+  importedAt: z.string().datetime().optional(),
+  sourceLabel: z.string().min(1).max(200).optional(),
+  editableCopy: z.boolean().optional(),
+  sourcePackageId: z.string().min(1).optional(),
+}).strict().superRefine((metadata, context) => {
+  const provenanceValues = [metadata.sha256, metadata.importedAt, metadata.sourceLabel]
+  const presentCount = provenanceValues.filter((value) => value !== undefined).length
+  if (presentCount > 0 && presentCount < provenanceValues.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sha256'],
+      message: '组件来源元数据必须同时包含 sha256、importedAt 和 sourceLabel',
+    })
+  }
+})
+
+const courseProjectStableIdSchema = z.string().trim().min(1).max(240)
+const courseProjectPortablePathSchema = z.string().min(1).refine(
+  (value) => !/^(?:[a-zA-Z]:[\\/]|[\\/]{2}|\/)/.test(value),
+  'Path must be project-relative',
+)
+
+/** Exact Course Project V9 embedded component metadata profile. */
+export const courseProjectEmbeddedComponentPackageMetaSchema: z.ZodType<EmbeddedComponentPackageMeta> = z.object({
+  packageId: courseProjectStableIdSchema,
+  version: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(500),
+  manifestPath: courseProjectPortablePathSchema,
+  runtimePath: courseProjectPortablePathSchema,
+  thumbnailPath: courseProjectPortablePathSchema.optional(),
+  contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  importedAt: z.string().datetime().optional(),
+  sourceLabel: z.string().trim().min(1).max(200).optional(),
+  editableCopy: z.boolean().optional(),
+  sourcePackageId: courseProjectStableIdSchema.optional(),
+}).strict().superRefine((metadata, context) => {
+  const provenance = [metadata.sha256, metadata.importedAt, metadata.sourceLabel]
+  const present = provenance.filter((value) => value !== undefined).length
+  if (present > 0 && present < provenance.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sha256'],
+      message: 'Component provenance must include sha256, importedAt and sourceLabel together',
+    })
+  }
+})

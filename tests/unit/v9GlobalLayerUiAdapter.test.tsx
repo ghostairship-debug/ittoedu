@@ -10,7 +10,7 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createFormulaNode, createTeacherControllerNode } from '@/renderer/project/createProject'
+import { createFormulaNode, createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
@@ -269,6 +269,16 @@ function v9ThreeLocationFixture(): CourseProjectDocument {
   })
 }
 
+function storeAuthoringPorts() {
+  return {
+    getBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
+    commandPort: {
+      run: (run: Parameters<ReturnType<typeof useEditorStore.getState>['runSlideCandidateCommand']>[0]) =>
+        useEditorStore.getState().runSlideCandidateCommand(run),
+    },
+  }
+}
+
 function injectCandidate(project = v9ThreeLocationFixture()) {
   const backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
@@ -456,7 +466,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const selectedBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
     expect(selectedBackend.getSession().scope).toBe('surface')
     expect(selectedBackend.getSession().selection.selectionIds).toEqual([surfaceItemId])
-    const canvasSelection = createSlideWorkspaceAuthoringController()
+    const canvasSelection = createSlideWorkspaceAuthoringController(storeAuthoringPorts())
       .selectFromLayerIds([surfaceItemId], VIEW)
     if (canvasSelection.kind !== 'slide-authoring') throw new Error('expected V9 canvas')
     expect(canvasSelection.targets?.[0]?.authoringAddress).toBe(address)
@@ -518,7 +528,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const selectedBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
     expect(selectedBackend.getSession().scope).toBe('surface')
     expect(selectedBackend.getSession().selection.stateId).toBe('state-explain')
-    const canvasSelection = createSlideWorkspaceAuthoringController()
+    const canvasSelection = createSlideWorkspaceAuthoringController(storeAuthoringPorts())
       .selectFromLayerIds([surfaceItemId], VIEW)
     if (canvasSelection.kind !== 'slide-authoring') throw new Error('expected V9 canvas')
     expect(canvasSelection.targets?.[0]?.authoringAddress).toBe(address)
@@ -988,7 +998,6 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
 
     const copiedState = useEditorStore.getState()
     expect(selectSlideAuthoringBackend(copiedState)!.getSession()).toBe(beforeCopy)
-    expect(copiedState.clipboardGlobalItems).toEqual([])
     const clipboard = copiedState.slideCandidateClipboard
     expect(clipboard?.sourceScope).toBe('global')
     if (!clipboard || clipboard.sourceScope !== 'global') {

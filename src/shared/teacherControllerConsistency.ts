@@ -5,13 +5,35 @@ import type {
   ScopedLayerItem,
 } from './courseProjectTypes'
 import type {
-  GlobalLayerItem,
-  GlobalLayerVisibility,
-  ProjectDocument,
   TeacherControllerAction,
-} from './projectTypes'
+  TeacherControllerNode,
+  NativeRenderableNode,
+} from './contracts/native-v1/types'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from './constants'
 import { rotatedRectangleAabb } from './geometry'
+
+type LegacyGlobalLayerVisibility = {
+  mode: 'all' | 'include' | 'exclude'
+  sceneIds: string[]
+}
+
+type LegacyGlobalLayerNode =
+  | NativeRenderableNode
+  | {
+      type: 'external-component'
+      id: string
+      x: number
+      y: number
+      width: number
+      height: number
+      rotation: number
+    }
+
+type LegacyGlobalLayerItem = {
+  layer: 'underlay' | 'overlay'
+  visibility: LegacyGlobalLayerVisibility
+  node: LegacyGlobalLayerNode
+}
 
 const NAVIGATION_ACTIONS = new Set([
   'scene.previous',
@@ -28,7 +50,13 @@ export function isTeacherControllerNavigationAction(
   return NAVIGATION_ACTIONS.has(action.type)
 }
 
-function intersectsCanvas(item: GlobalLayerItem): boolean {
+function isTeacherControllerLayer(
+  item: LegacyGlobalLayerItem,
+): item is LegacyGlobalLayerItem & { node: TeacherControllerNode } {
+  return item.node.type === 'teacher-controller'
+}
+
+function intersectsCanvas(item: LegacyGlobalLayerItem): boolean {
   const bounds = rotatedRectangleAabb(item.node)
   return bounds.right > 0 &&
     bounds.bottom > 0 &&
@@ -37,7 +65,7 @@ function intersectsCanvas(item: GlobalLayerItem): boolean {
 }
 
 function visibilityIncludesAnyScene(
-  visibility: GlobalLayerVisibility,
+  visibility: LegacyGlobalLayerVisibility,
   sceneIds: readonly string[],
 ): boolean {
   if (visibility.mode === 'all') return sceneIds.length > 0
@@ -52,10 +80,10 @@ function visibilityIncludesAnyScene(
  * rendered in at least one authored scene when playback starts.
  */
 export function isDeliveryVisibleTeacherController(
-  item: GlobalLayerItem,
+  item: LegacyGlobalLayerItem,
   sceneIds: readonly string[],
 ): boolean {
-  if (item.node.type !== 'teacher-controller') return false
+  if (!isTeacherControllerLayer(item)) return false
   const hasVisibleNavigationAction = item.node.buttons.some((button) =>
     button.visible && isTeacherControllerNavigationAction(button.action),
   )
@@ -70,9 +98,9 @@ export function isDeliveryVisibleTeacherController(
 
 /** Repairs one existing controller only after the user explicitly requests it. */
 export function restoreTeacherControllerForDelivery(
-  item: GlobalLayerItem,
+  item: LegacyGlobalLayerItem,
 ): boolean {
-  if (item.node.type !== 'teacher-controller') return false
+  if (!isTeacherControllerLayer(item)) return false
   item.layer = 'overlay'
   item.visibility = { mode: 'all', sceneIds: [] }
   item.node.visible = true
@@ -104,7 +132,10 @@ export function restoreTeacherControllerForDelivery(
 }
 
 export function hasDeliveryVisibleTeacherController(
-  project: Pick<ProjectDocument, 'globalLayer' | 'scenes'>,
+  project: {
+    globalLayer: LegacyGlobalLayerItem[]
+    scenes: Array<{ id: string }>
+  },
 ): boolean {
   const sceneIds = project.scenes.map((scene) => scene.id)
   return project.globalLayer.some((item) =>
@@ -114,7 +145,11 @@ export function hasDeliveryVisibleTeacherController(
 
 /** Keeps editor mutations on the same invariant enforced at the schema edge. */
 export function synchronizeTeacherControllerControls(
-  project: Pick<ProjectDocument, 'globalLayer' | 'scenes' | 'playback'>,
+  project: {
+    globalLayer: LegacyGlobalLayerItem[]
+    scenes: Array<{ id: string }>
+    playback: { controls: 'canvas' | 'none' }
+  },
 ): void {
   project.playback.controls = hasDeliveryVisibleTeacherController(project)
     ? 'canvas'

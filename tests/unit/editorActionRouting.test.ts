@@ -18,8 +18,11 @@ import {
 import {
   resolveEditorAdapterKind,
   resolveFlowDeleteRoute,
+  resolveKeyboardDeleteDisposition,
   routeEditorAction,
   shouldRefuseLayerDeleteForTextFocus,
+  isEditorInteractiveControlTarget,
+  isEditorTextInputTarget,
 } from '@/renderer/course/editorActionRouting'
 
 function baseSnapshot(
@@ -269,5 +272,103 @@ describe('editorActionRouting', () => {
     expect(result.ok).toBe(false)
     expect(result.reason).toMatch(/锁定/)
     expect(slide.execute).not.toHaveBeenCalled()
+  })
+
+  it('ignores IME/text targets and routes Delete by captured session snapshot', () => {
+    expect(isEditorTextInputTarget(document.createElement('textarea'))).toBe(true)
+    expect(isEditorTextInputTarget(document.createElement('div'))).toBe(false)
+    const button = document.createElement('button')
+    expect(isEditorInteractiveControlTarget(button)).toBe(true)
+
+    const courseSnapshot = baseSnapshot({ focus: 'layer', itemIds: ['layer-a'] })
+    expect(resolveKeyboardDeleteDisposition({
+      hasCourseProject: true,
+      selection: courseSnapshot,
+      contentEditable: false,
+      hasFlowSession: false,
+      flowComposing: false,
+      flowTextFocus: false,
+      flowHasSelection: false,
+      hasSlideBackend: false,
+      slideTextEdit: false,
+      slideFormulaEdit: false,
+      selectedNodeCount: 1,
+      editingText: false,
+    })).toEqual({ action: 'route', snapshot: courseSnapshot })
+
+    expect(resolveKeyboardDeleteDisposition({
+      hasCourseProject: true,
+      selection: baseSnapshot({ focus: 'text' }),
+      contentEditable: true,
+      hasFlowSession: false,
+      flowComposing: false,
+      flowTextFocus: false,
+      flowHasSelection: false,
+      hasSlideBackend: false,
+      slideTextEdit: false,
+      slideFormulaEdit: false,
+      selectedNodeCount: 1,
+      editingText: false,
+    }).action).toBe('ignore')
+
+    expect(resolveKeyboardDeleteDisposition({
+      hasCourseProject: false,
+      selection: null,
+      contentEditable: false,
+      hasFlowSession: true,
+      flowComposing: false,
+      flowTextFocus: false,
+      flowHasSelection: true,
+      hasSlideBackend: false,
+      slideTextEdit: false,
+      slideFormulaEdit: false,
+      selectedNodeCount: 0,
+      editingText: false,
+    }).action).toBe('legacy-delete')
+
+    expect(resolveKeyboardDeleteDisposition({
+      hasCourseProject: false,
+      selection: null,
+      contentEditable: false,
+      hasFlowSession: true,
+      flowComposing: true,
+      flowTextFocus: false,
+      flowHasSelection: true,
+      hasSlideBackend: false,
+      slideTextEdit: false,
+      slideFormulaEdit: false,
+      selectedNodeCount: 1,
+      editingText: false,
+    }).action).toBe('ignore')
+
+    expect(resolveKeyboardDeleteDisposition({
+      hasCourseProject: false,
+      selection: null,
+      contentEditable: false,
+      hasFlowSession: false,
+      flowComposing: false,
+      flowTextFocus: false,
+      flowHasSelection: false,
+      hasSlideBackend: true,
+      slideTextEdit: true,
+      slideFormulaEdit: false,
+      selectedNodeCount: 1,
+      editingText: true,
+    }).action).toBe('ignore')
+
+    expect(resolveKeyboardDeleteDisposition({
+      hasCourseProject: false,
+      selection: null,
+      contentEditable: false,
+      hasFlowSession: false,
+      flowComposing: false,
+      flowTextFocus: false,
+      flowHasSelection: false,
+      hasSlideBackend: false,
+      slideTextEdit: false,
+      slideFormulaEdit: false,
+      selectedNodeCount: 2,
+      editingText: false,
+    }).action).toBe('legacy-delete')
   })
 })

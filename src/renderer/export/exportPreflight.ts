@@ -1,6 +1,10 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { collectCourseProjectHealth } from '../../shared/courseProjectHealth'
 import type {
+  CourseProjectHealthCode,
+  CourseProjectHealthSeverity,
+} from '../../shared/courseProjectHealth'
+import type {
   CourseProjectDocument,
   FlowBlock,
 } from '../../shared/courseProjectTypes'
@@ -8,29 +12,23 @@ import {
   resolveSchemaValidCourseProjectDiagnosticTarget,
   type DiagnosticTargetV1,
 } from '../../shared/courseProjectValidationDiagnostics'
-import type { ProjectDocument } from '../../shared/projectTypes'
-import {
-  collectProjectHealth,
-  type ProjectHealthSeverity,
-} from '../../shared/projectHealth'
 import type { ExportPreflightCode } from '../../shared/diagnosticCodes'
-import { collectUnusedProjectAssetIds } from '../../shared/assetReferences'
-import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { compareStableStrings } from '../../shared/stableOrder'
 import { buildPublishedCourseV2Payload } from './course/buildPublishedCourse'
+import { collectPublishedPptxSpatialNotices } from './course/buildCoursePptx'
 import {
   collectCoursePackageExportPreflight,
   type CoursePackagePreflightItem,
   type SingleHtmlExportMode,
-} from './course/buildCoursePackages'
+} from './course/coursePackagePreflight'
 import {
   auditCourseExportAssets,
   buildCourseExportPageList,
+  collectPublishedPdfProducerNotices,
   type CourseExportReportItem,
 } from './course/buildCoursePrintArtifacts'
 import { componentPackagesToArchiveFiles } from '../components/componentPackageStore'
 import { collectCourseProjectSlideVisualPreflightItems } from './slideVisualPreflight'
-import { collectProjectDocumentSlideVisualPreflightItems } from './slideVisualPreflight'
 
 export type ExportPreflightTarget =
   | 'single-html'
@@ -44,9 +42,10 @@ export interface ExportPreflightResources {
 }
 
 export interface ExportPreflightItem {
-  severity: ProjectHealthSeverity
+  severity: CourseProjectHealthSeverity
   code:
     | ExportPreflightCode
+    | `project-health:${CourseProjectHealthCode}`
     | CoursePackagePreflightItem['code']
     | 'static-export-preflight'
     | 'static-export-warning'
@@ -60,10 +59,10 @@ export interface ExportPreflightItem {
   path?: ReadonlyArray<string | number>
 }
 
-export interface ExportPreflightReport {
+export interface CourseProjectExportPreflightReportV1 {
   reportVersion: 1
   projectId: string
-  schemaVersion: 8 | 9
+  schemaVersion: 9
   target: ExportPreflightTarget
   generatedAt: string
   items: ExportPreflightItem[]
@@ -74,46 +73,6 @@ export interface ExportPreflightReport {
     total: number
     canExport: boolean
   }
-}
-
-function componentKey(packageId: string, version: string): string {
-  return `${packageId}@${version}`
-}
-
-type SourceNetworkFinding = 'network-use' | 'url-reference' | null
-
-function inspectSourceNetworkUse(source: string): SourceNetworkFinding {
-  const withoutComments = source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|\s)\/\/.*$/gm, '$1')
-  // XML/SVG namespace identifiers use an http-looking URI but do not trigger
-  // a request. Treating every `//` token as a URL also blocks legitimate
-  // authored strings such as the reading component's pause markup.
-  const inertNamespaceUris = new Set([
-    'http://www.w3.org/2000/svg',
-    'http://www.w3.org/1999/xlink',
-    'http://www.w3.org/XML/1998/namespace',
-  ])
-  const absoluteUrls = withoutComments.match(/\bhttps?:\/\/[^\s'"`<>)]+/gi) ?? []
-  const hasExternalUrl = absoluteUrls.some(
-    (url) => !inertNamespaceUris.has(url.replace(/[;,]+$/, '')),
-  )
-  const protocolRelativeHost = /(?<!:)\/\/(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:[/?#]|(?=['"`]))/i
-  const hasProtocolRelativeUrl = protocolRelativeHost.test(withoutComments)
-  const usesNetworkApi = /\bfetch\s*\(/.test(withoutComments) ||
-    /\bXMLHttpRequest\b/.test(withoutComments) ||
-    /\b(?:WebSocket|EventSource)\s*\(/.test(withoutComments) ||
-    /\bnavigator\s*\.\s*sendBeacon\s*\(/.test(withoutComments)
-  const usesExternalResourceSyntax =
-    /@import\s+(?:url\()?\s*['"]?(?:https?:)?\/\//i.test(withoutComments) ||
-    /\burl\(\s*['"]?(?:https?:)?\/\//i.test(withoutComments) ||
-    /\bimport\s*(?:\(|[^;\n]*?\bfrom\s*)['"](?:https?:)?\/\//i.test(withoutComments) ||
-    /<(?:img|script|link|iframe|video|audio|source)\b[^>]*\b(?:src|href|poster)\s*=\s*['"](?:https?:)?\/\//i.test(withoutComments) ||
-    /\.\s*(?:src|href|poster)\s*=\s*['"](?:https?:)?\/\//i.test(withoutComments) ||
-    /setAttribute\s*\(\s*['"](?:src|href|poster)['"]\s*,\s*['"](?:https?:)?\/\//i.test(withoutComments)
-
-  if (usesNetworkApi || usesExternalResourceSyntax) return 'network-use'
-  return hasExternalUrl || hasProtocolRelativeUrl ? 'url-reference' : null
 }
 
 function stableItemKey(item: ExportPreflightItem): string {
@@ -129,7 +88,9 @@ function stableItemKey(item: ExportPreflightItem): string {
   ].join('\0')
 }
 
-function summarize(items: readonly ExportPreflightItem[]): ExportPreflightReport['summary'] {
+function summarize(
+  items: readonly ExportPreflightItem[],
+): CourseProjectExportPreflightReportV1['summary'] {
   const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: true }
   items.forEach(({ severity }) => { summary[severity] += 1 })
   summary.canExport = summary.error === 0
@@ -188,10 +149,307 @@ function mapCourseExportAuditItem(item: CourseExportReportItem): {
   }
 }
 
+export type CourseExportFormatFinding = Omit<ExportPreflightItem, 'target'>
+
 /**
- * Current Course Project V9 GUI preflight. It consumes the same V9 document,
- * source bytes, semantic health collector and Published producer gates as the
- * headless validator; no Project V8 projection participates in this report.
+ * r11-043 contract. HTML/Web producer facts only; health rules stay in the
+ * V9 catalog. Producer findings come from coursePackagePreflight; this adapter
+ * only attaches diagnostic targets for the shared catalog.
+ */
+export function adaptCourseHtmlWebProducerFindings(
+  project: CourseProjectDocument,
+  target: ExportPreflightTarget,
+  resources: ExportPreflightResources,
+  now: Date,
+  options: CourseProjectExportPreflightOptions = {},
+): CourseExportFormatFinding[] {
+  const delivery = target === 'web-package' ? 'web-package' : 'standalone-html'
+  return collectCoursePackageExportPreflight(
+    project,
+    delivery,
+    resources,
+    options.playerBundle ?? '',
+    now,
+    target === 'single-html' && options.singleHtmlMode
+      ? { singleHtmlMode: options.singleHtmlMode }
+      : {},
+  ).items.map((item) => ({
+    severity: item.severity,
+    code: item.code,
+    message: item.message,
+    ...(item.path ? { path: item.path } : {}),
+    diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+      ...(item.path ? { path: item.path } : {}),
+    }),
+  }))
+}
+
+function adaptCourseStaticFormatProducerFindings(
+  project: CourseProjectDocument,
+  target: Extract<ExportPreflightTarget, 'pdf' | 'pptx'>,
+  resources: ExportPreflightResources,
+  htmlWebItems: readonly CourseExportFormatFinding[],
+): CourseExportFormatFinding[] {
+  const items: CourseExportFormatFinding[] = []
+  const projectDiagnosticTarget = resolveSchemaValidCourseProjectDiagnosticTarget(project, {})
+  const sourceBlocked = htmlWebItems.some((item) => (
+    item.severity === 'error' && item.code !== 'player-bundle-empty'
+  ))
+  if (!sourceBlocked) {
+    try {
+      const published = buildPublishedCourseV2Payload({ project, ...resources })
+      const auditItems: CourseExportReportItem[] = []
+      auditCourseExportAssets(published, auditItems, (assetId) => {
+        const metadata = project.assets[assetId]
+        const bytes = resources.assetFiles[assetId]
+        return metadata && bytes
+          ? { filename: metadata.filename, mimeType: metadata.mimeType, bytes }
+          : undefined
+      })
+      auditItems.forEach((item) => {
+        const mapped = mapCourseExportAuditItem(item)
+        items.push({
+          ...mapped,
+          diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+            ...(mapped.path ? { path: mapped.path } : {}),
+          }),
+        })
+      })
+      if (buildCourseExportPageList(published).length === 0) {
+        items.push({
+          severity: 'error',
+          code: 'static-export-preflight',
+          message: '当前 Course Project V9 没有可导出的 PDF/PPTX 页面。',
+          diagnosticTarget: projectDiagnosticTarget,
+        })
+      }
+    } catch (error) {
+      items.push({
+        severity: 'error',
+        code: 'static-export-preflight',
+        message: error instanceof Error ? error.message : 'Published Course V2 预检失败。',
+        diagnosticTarget: projectDiagnosticTarget,
+      })
+    }
+  }
+
+  const interactionCount = project.globalInteractions.length
+    + project.surfaces.reduce((count, surface) => (
+      count + (surface.type === 'slide'
+        ? surface.scenes.reduce((sceneCount, scene) => sceneCount + scene.interactions.length, 0)
+        : 0)
+    ), 0)
+  if (interactionCount > 0) {
+    items.push({
+      severity: 'info',
+      code: 'static-export-interactions-omitted',
+      message: `${target.toUpperCase()} 为静态格式，${interactionCount} 条声明式交互不会保留。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+
+  const layerItems = [
+    ...project.globalLayerItems.map(({ item }) => item),
+    ...project.surfaces.flatMap((surface) => [
+      ...surface.surfaceLayerItems.map(({ item }) => item),
+      ...(surface.type === 'slide'
+        ? surface.scenes.flatMap((scene) => scene.layerItems)
+        : surface.type === 'spatial-2d'
+          ? surface.world.layerItems
+          : []),
+    ]),
+  ]
+  const videoCount = layerItems.filter((item) => (
+    item.kind === 'native' && item.content.nativeType === 'video'
+  )).length
+  const omittedControllerCount = layerItems.filter((item) => (
+    item.kind === 'native'
+    && item.content.nativeType === 'teacher-controller'
+    && !item.content.data.includeInStaticExports
+  )).length
+  const flowMediaKinds: Array<'audio' | 'video'> = []
+  const visitFlowBlocks = (blocks: readonly FlowBlock[]): void => {
+    blocks.forEach((block) => {
+      if (block.type === 'section') visitFlowBlocks(block.blocks)
+      else if (block.type === 'media' && block.mediaKind !== 'image') {
+        flowMediaKinds.push(block.mediaKind)
+      }
+    })
+  }
+  project.surfaces.forEach((surface) => {
+    if (surface.type === 'flow') visitFlowBlocks(surface.blocks)
+  })
+  const staticVideoCount = videoCount
+    + flowMediaKinds.filter((kind) => kind === 'video').length
+  const staticAudioCount = Object.keys(project.media.audio.sounds).length
+    + flowMediaKinds.filter((kind) => kind === 'audio').length
+  if (staticAudioCount > 0) {
+    items.push({
+      severity: 'info',
+      code: 'static-export-audio-omitted',
+      message: `${target.toUpperCase()} 为静态格式，声音不会播放。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+  if (staticVideoCount > 0) {
+    items.push({
+      severity: 'info',
+      code: 'static-export-video-poster',
+      message: `${target.toUpperCase()} 中的 ${staticVideoCount} 个视频只保留封面或静态占位。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+  if (omittedControllerCount > 0) {
+    items.push({
+      severity: 'info',
+      code: 'static-export-controller-omitted',
+      message: `${omittedControllerCount} 个教师控制器按作者设置从静态导出中省略。`,
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+  return items
+}
+
+/** r11-041 contract. PPTX producer facts only; do not copy health rules. */
+export function adaptCoursePptxProducerFindings(
+  project: CourseProjectDocument,
+  resources: ExportPreflightResources,
+  htmlWebItems: readonly CourseExportFormatFinding[],
+): CourseExportFormatFinding[] {
+  const items = adaptCourseStaticFormatProducerFindings(
+    project,
+    'pptx',
+    resources,
+    htmlWebItems,
+  )
+  const projectDiagnosticTarget = resolveSchemaValidCourseProjectDiagnosticTarget(project, {})
+  const pureSlide = project.locations.every((location) => location.kind === 'slide-scene')
+    && project.surfaces.every((surface) => surface.type === 'slide')
+  if (project.globalLayerItems.length > 0 && !pureSlide) {
+    items.push({
+      severity: 'info',
+      code: 'static-export-info',
+      message: '全局图层与教师控制器默认不写入 PPTX 文件。',
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+  for (const surface of project.surfaces) {
+    if (surface.type !== 'flow') continue
+    items.push({
+      severity: 'info',
+      code: 'static-export-info',
+      message: `Flow 表面“${surface.title}”没有 PPTX 映射，已按页列表跳过。`,
+      diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+        path: ['surfaces', project.surfaces.indexOf(surface)],
+      }),
+    })
+  }
+  try {
+    const published = buildPublishedCourseV2Payload({ project, ...resources })
+    project.surfaces.forEach((surface, surfaceIndex) => {
+      if (surface.type !== 'spatial-2d') return
+      const publishedSurface = published.surfaces.find((candidate) => (
+        candidate.id === surface.id && candidate.type === 'spatial-2d'
+      ))
+      if (!publishedSurface || publishedSurface.type !== 'spatial-2d') return
+      const locationIds = project.locations
+        .filter((location) => (
+          location.kind === 'spatial-camera' && location.surfaceId === surface.id
+        ))
+        .map((location) => location.id)
+      const noticeMap = new Map<string, ReturnType<typeof collectPublishedPptxSpatialNotices>[number]>()
+      const inputs: Array<string | undefined> = locationIds.length > 0
+        ? locationIds
+        : [undefined]
+      inputs.forEach((locationId) => {
+        collectPublishedPptxSpatialNotices(
+          publishedSurface,
+          (assetId) => published.assets[assetId]?.url,
+          locationId,
+        ).forEach((notice) => {
+          noticeMap.set(
+            `${notice.source}:${notice.itemIndex}:${notice.message}`,
+            notice,
+          )
+        })
+      })
+      noticeMap.forEach((notice) => {
+        const path: ReadonlyArray<string | number> = notice.source === 'world'
+          ? ['surfaces', surfaceIndex, 'world', 'layerItems', notice.itemIndex]
+          : ['surfaces', surfaceIndex, 'surfaceLayerItems', notice.itemIndex, 'item']
+        items.push({
+          severity: notice.severity,
+          code: notice.severity === 'warning'
+            ? 'static-export-warning'
+            : 'static-export-info',
+          message: notice.message,
+          path,
+          diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+            path,
+            layerItemId: notice.layerItemId,
+          }),
+        })
+      })
+    })
+  } catch {
+    // Common static preflight already owns build/asset failures. Do not emit a
+    // second, differently worded producer error from this PPTX-only adapter.
+  }
+  const hasPptxPage = project.locations.some((location) => (
+    location.kind === 'slide-scene' || location.kind === 'spatial-camera'
+  ))
+  if (!hasPptxPage) {
+    items.push({
+      severity: 'error',
+      code: 'static-export-preflight',
+      message: '当前课程没有可映射到 PPTX 的 Slide 场景或 Spatial 镜头。',
+      diagnosticTarget: projectDiagnosticTarget,
+    })
+  }
+  return items
+}
+
+/** r11-042 contract. PDF producer facts only; do not copy health rules. */
+export function adaptCoursePdfProducerFindings(
+  project: CourseProjectDocument,
+  resources: ExportPreflightResources,
+  htmlWebItems: readonly CourseExportFormatFinding[],
+): CourseExportFormatFinding[] {
+  const items = adaptCourseStaticFormatProducerFindings(
+    project,
+    'pdf',
+    resources,
+    htmlWebItems,
+  )
+  try {
+    const published = buildPublishedCourseV2Payload({ project, ...resources })
+    collectPublishedPdfProducerNotices(published).forEach((notice) => {
+      const path = notice.path ?? (notice.assetId ? ['assets', notice.assetId] : undefined)
+      items.push({
+        severity: notice.severity,
+        code: notice.severity === 'error'
+          ? 'static-export-preflight'
+          : notice.severity === 'warning'
+            ? 'static-export-warning'
+            : 'static-export-info',
+        message: notice.message,
+        ...(path ? { path } : {}),
+        diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+          ...(path ? { path } : {}),
+          ...(notice.layerItemId ? { layerItemId: notice.layerItemId } : {}),
+        }),
+      })
+    })
+  } catch {
+    // Common static preflight already owns build/asset failures. Keep the PDF
+    // adapter limited to producer facts so it cannot create a second truth.
+  }
+  return items
+}
+
+/**
+ * Current Course Project V9 GUI/saved-report preflight. Common items come from
+ * the V9 finding catalog; format producers attach through the 041–043 adapters.
  */
 export function collectCourseProjectExportPreflight(
   project: CourseProjectDocument,
@@ -199,13 +457,12 @@ export function collectCourseProjectExportPreflight(
   resources: ExportPreflightResources,
   now = new Date(),
   options: CourseProjectExportPreflightOptions = {},
-): ExportPreflightReport {
+): CourseProjectExportPreflightReportV1 {
   const itemMap = new Map<string, ExportPreflightItem>()
   const add = (item: Omit<ExportPreflightItem, 'target'>): void => {
     const complete = { ...item, target }
     itemMap.set(stableItemKey(complete), complete)
   }
-  const projectDiagnosticTarget = resolveSchemaValidCourseProjectDiagnosticTarget(project, {})
   const health = collectCourseProjectHealth(project, {
     assetFiles: resources.assetFiles,
     componentFiles: componentPackagesToArchiveFiles(resources.components),
@@ -218,26 +475,14 @@ export function collectCourseProjectExportPreflight(
     diagnosticTarget: finding.target,
   }))
 
-  const delivery = target === 'web-package' ? 'web-package' : 'standalone-html'
-  const packageReport = collectCoursePackageExportPreflight(
+  const htmlWebItems = adaptCourseHtmlWebProducerFindings(
     project,
-    delivery,
+    target,
     resources,
-    options.playerBundle ?? '',
     now,
-    target === 'single-html' && options.singleHtmlMode
-      ? { singleHtmlMode: options.singleHtmlMode }
-      : {},
+    options,
   )
-  packageReport.items.forEach((item) => add({
-    severity: item.severity,
-    code: item.code,
-    message: item.message,
-    ...(item.path ? { path: item.path } : {}),
-    diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
-      ...(item.path ? { path: item.path } : {}),
-    }),
-  }))
+  htmlWebItems.forEach(add)
 
   collectCourseProjectSlideVisualPreflightItems(project, target).forEach((item) => add({
     severity: item.severity,
@@ -254,116 +499,10 @@ export function collectCourseProjectExportPreflight(
     }),
   }))
 
-  if (target === 'pdf' || target === 'pptx') {
-    const sourceBlocked = packageReport.items.some((item) => (
-      item.severity === 'error' && item.code !== 'player-bundle-empty'
-    ))
-    if (!sourceBlocked) {
-      try {
-        const published = buildPublishedCourseV2Payload({ project, ...resources })
-        const auditItems: CourseExportReportItem[] = []
-        auditCourseExportAssets(published, auditItems, (assetId) => {
-          const metadata = project.assets[assetId]
-          const bytes = resources.assetFiles[assetId]
-          return metadata && bytes
-            ? { filename: metadata.filename, mimeType: metadata.mimeType, bytes }
-            : undefined
-        })
-        auditItems.forEach((item) => {
-          const mapped = mapCourseExportAuditItem(item)
-          add({
-            ...mapped,
-            diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
-              ...(mapped.path ? { path: mapped.path } : {}),
-            }),
-          })
-        })
-        if (buildCourseExportPageList(published).length === 0) {
-          add({
-            severity: 'error',
-            code: 'static-export-preflight',
-            message: '当前 Course Project V9 没有可导出的 PDF/PPTX 页面。',
-            diagnosticTarget: projectDiagnosticTarget,
-          })
-        }
-      } catch (error) {
-        add({
-          severity: 'error',
-          code: 'static-export-preflight',
-          message: error instanceof Error ? error.message : 'Published Course V2 预检失败。',
-          diagnosticTarget: projectDiagnosticTarget,
-        })
-      }
-    }
-
-    const interactionCount = project.globalInteractions.length
-      + project.surfaces.reduce((count, surface) => (
-        count + (surface.type === 'slide'
-          ? surface.scenes.reduce((sceneCount, scene) => sceneCount + scene.interactions.length, 0)
-          : 0)
-      ), 0)
-    if (interactionCount > 0) {
-      add({
-        severity: 'info',
-        code: 'static-export-interactions-omitted',
-        message: `${target.toUpperCase()} 为静态格式，${interactionCount} 条声明式交互不会保留。`,
-        diagnosticTarget: projectDiagnosticTarget,
-      })
-    }
-
-    const layerItems = [
-      ...project.globalLayerItems.map(({ item }) => item),
-      ...project.surfaces.flatMap((surface) => [
-        ...surface.surfaceLayerItems.map(({ item }) => item),
-        ...(surface.type === 'slide'
-          ? surface.scenes.flatMap((scene) => scene.layerItems)
-          : surface.type === 'spatial-2d'
-            ? surface.world.layerItems
-            : []),
-      ]),
-    ]
-    const videoCount = layerItems.filter((item) => (
-      item.kind === 'native' && item.content.nativeType === 'video'
-    )).length
-    const omittedControllerCount = layerItems.filter((item) => (
-      item.kind === 'native'
-      && item.content.nativeType === 'teacher-controller'
-      && !item.content.data.includeInStaticExports
-    )).length
-    const flowMediaKinds: Array<'audio' | 'video'> = []
-    const visitFlowBlocks = (blocks: readonly FlowBlock[]): void => {
-      blocks.forEach((block) => {
-        if (block.type === 'section') visitFlowBlocks(block.blocks)
-        else if (block.type === 'media' && block.mediaKind !== 'image') {
-          flowMediaKinds.push(block.mediaKind)
-        }
-      })
-    }
-    project.surfaces.forEach((surface) => {
-      if (surface.type === 'flow') visitFlowBlocks(surface.blocks)
-    })
-    const staticVideoCount = videoCount
-      + flowMediaKinds.filter((kind) => kind === 'video').length
-    const staticAudioCount = Object.keys(project.media.audio.sounds).length
-      + flowMediaKinds.filter((kind) => kind === 'audio').length
-    if (staticAudioCount > 0) add({
-      severity: 'info',
-      code: 'static-export-audio-omitted',
-      message: `${target.toUpperCase()} 为静态格式，声音不会播放。`,
-      diagnosticTarget: projectDiagnosticTarget,
-    })
-    if (staticVideoCount > 0) add({
-      severity: 'info',
-      code: 'static-export-video-poster',
-      message: `${target.toUpperCase()} 中的 ${staticVideoCount} 个视频只保留封面或静态占位。`,
-      diagnosticTarget: projectDiagnosticTarget,
-    })
-    if (omittedControllerCount > 0) add({
-      severity: 'info',
-      code: 'static-export-controller-omitted',
-      message: `${omittedControllerCount} 个教师控制器按作者设置从静态导出中省略。`,
-      diagnosticTarget: projectDiagnosticTarget,
-    })
+  if (target === 'pptx') {
+    adaptCoursePptxProducerFindings(project, resources, htmlWebItems).forEach(add)
+  } else if (target === 'pdf') {
+    adaptCoursePdfProducerFindings(project, resources, htmlWebItems).forEach(add)
   }
 
   const items = [...itemMap.values()].sort((left, right) => {
@@ -376,199 +515,7 @@ export function collectCourseProjectExportPreflight(
   return {
     reportVersion: 1,
     projectId: project.id,
-    schemaVersion: project.schemaVersion,
-    target,
-    generatedAt: now.toISOString(),
-    items,
-    summary: summarize(items),
-  }
-}
-
-export function collectExportPreflight(
-  project: ProjectDocument,
-  target: ExportPreflightTarget,
-  resources: ExportPreflightResources,
-  now = new Date(),
-): ExportPreflightReport {
-  const itemMap = new Map<string, ExportPreflightItem>()
-  const add = (item: Omit<ExportPreflightItem, 'target'>): void => {
-    const complete = { ...item, target }
-    itemMap.set(stableItemKey(complete), complete)
-  }
-
-  collectProjectHealth(project, resources.components)
-    .filter((diagnostic) => diagnostic.code !== 'asset-unused')
-    .forEach((diagnostic) => add({
-    severity: diagnostic.severity,
-    code: `project-health:${diagnostic.code}` as const,
-    message: diagnostic.message,
-    path: diagnostic.path,
-    ...(diagnostic.sceneId ? { sceneId: diagnostic.sceneId } : {}),
-    ...(diagnostic.stateId ? { stateId: diagnostic.stateId } : {}),
-    ...(diagnostic.nodeId ? { nodeId: diagnostic.nodeId } : {}),
-    }))
-
-  const unusedAssetIds = collectUnusedProjectAssetIds(project, {
-    componentPackages: resources.components,
-  })
-  if (unusedAssetIds.size > 0) {
-    const byteLength = Object.values(project.assets)
-      .filter((asset) => unusedAssetIds.has(asset.id))
-      .reduce((total, asset) => total + asset.byteLength, 0)
-    add({
-      severity: 'info',
-      code: 'asset-unused-summary',
-      message: `工程含 ${unusedAssetIds.size} 个未引用素材，共 ${byteLength} 字节；发布裁剪保持现有语义，工程归档不会被静默改写。`,
-      path: ['assets'],
-    })
-  }
-
-  for (const [assetKey, asset] of Object.entries(project.assets)) {
-    if (!resources.assetFiles[assetKey] && !resources.assetFiles[asset.id]) {
-      add({
-        severity: 'error',
-        code: 'asset-bytes-missing',
-        message: `素材“${asset.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
-        path: ['assets', assetKey],
-      })
-    }
-  }
-
-  for (const [packageKey, embedded] of Object.entries(project.componentPackages)) {
-    const component = Object.values(resources.components).find(
-      ({ manifest }) => manifest.id === embedded.packageId &&
-        manifest.version === embedded.version,
-    )
-    if (!component) {
-      add({
-        severity: 'error',
-        code: 'component-bytes-missing',
-        message: `组件包“${componentKey(embedded.packageId, embedded.version)}”没有可嵌入导出物的执行内容。`,
-        path: ['componentPackages', packageKey],
-      })
-      continue
-    }
-    const actualContentSha256 = component.contentSha256 ??
-      componentContentSha256(component.files)
-    if (embedded.contentSha256 !== actualContentSha256) {
-      add({
-        severity: 'error',
-        code: 'component-hash-mismatch',
-        message: `组件包“${componentKey(embedded.packageId, embedded.version)}”的工程锁定内容哈希与当前执行内容不一致。`,
-        path: ['componentPackages', packageKey, 'contentSha256'],
-      })
-    }
-    const networkFinding = inspectSourceNetworkUse(component.runtimeSource)
-    if (networkFinding === 'network-use') {
-      add({
-        severity: 'error',
-        code: 'component-external-network',
-        message: `组件包“${componentKey(embedded.packageId, embedded.version)}”包含网络请求 API 或外部资源引用，违反离线交付要求。`,
-        path: ['componentPackages', packageKey],
-      })
-    } else if (networkFinding === 'url-reference') {
-      add({
-        severity: 'warning',
-        code: 'component-external-url-reference',
-        message: `组件包“${componentKey(embedded.packageId, embedded.version)}”含有外部 URL 文本，但预检未识别到网络请求或资源加载；请确认它只用于展示或归属说明。`,
-        path: ['componentPackages', packageKey],
-      })
-    }
-  }
-
-  const runtimeEntries: Array<{
-    source: string
-    label: string
-    path: Array<string | number>
-    sceneId?: string
-  }> = []
-  if (project.globalRuntime?.enabled) {
-    runtimeEntries.push({
-      source: project.globalRuntime.source,
-      label: '全局自由运行时',
-      path: ['globalRuntime', 'source'],
-    })
-  }
-  project.scenes.forEach((scene, sceneIndex) => {
-    if (scene.runtime?.enabled) runtimeEntries.push({
-      source: scene.runtime.source,
-      label: `场景“${scene.name}”自由运行时`,
-      path: ['scenes', sceneIndex, 'runtime', 'source'],
-      sceneId: scene.id,
-    })
-  })
-  runtimeEntries.forEach((runtime) => {
-    const networkFinding = inspectSourceNetworkUse(runtime.source)
-    if (networkFinding === 'network-use') {
-      add({
-        severity: 'error',
-        code: 'runtime-external-network',
-        message: `${runtime.label}包含网络请求 API 或外部资源引用，违反离线交付要求。`,
-        path: runtime.path,
-        ...(runtime.sceneId ? { sceneId: runtime.sceneId } : {}),
-      })
-    } else if (networkFinding === 'url-reference') {
-      add({
-        severity: 'warning',
-        code: 'runtime-external-url-reference',
-        message: `${runtime.label}含有外部 URL 文本，但预检未识别到网络请求或资源加载；请确认它只用于展示或归属说明。`,
-        path: runtime.path,
-        ...(runtime.sceneId ? { sceneId: runtime.sceneId } : {}),
-      })
-    }
-  })
-
-  collectProjectDocumentSlideVisualPreflightItems(project, target)
-    .forEach(({ target: _target, ...item }) => add(item))
-
-  if (target === 'pdf' || target === 'pptx') {
-    const interactionCount = project.globalInteractions.length +
-      project.scenes.reduce((count, scene) => count + scene.interactions.length, 0)
-    const videoCount = project.globalLayer.filter(({ node }) => node.type === 'video').length +
-      project.scenes.reduce(
-        (count, scene) => count + scene.nodes.filter(({ type }) => type === 'video').length,
-        0,
-      )
-    const omittedControllerCount = project.globalLayer.filter(
-      ({ node }) => node.type === 'teacher-controller' && !node.includeInStaticExports,
-    ).length + project.scenes.reduce(
-      (count, scene) => count + scene.nodes.filter(
-        (node) => node.type === 'teacher-controller' && !node.includeInStaticExports,
-      ).length,
-      0,
-    )
-    if (interactionCount > 0) add({
-      severity: 'info',
-      code: 'static-export-interactions-omitted',
-      message: `${target.toUpperCase()} 为静态格式，${interactionCount} 条声明式交互不会保留。`,
-    })
-    if (Object.keys(project.media.audio.sounds).length > 0) add({
-      severity: 'info',
-      code: 'static-export-audio-omitted',
-      message: `${target.toUpperCase()} 为静态格式，声音不会播放。`,
-    })
-    if (videoCount > 0) add({
-      severity: 'info',
-      code: 'static-export-video-poster',
-      message: `${target.toUpperCase()} 中的 ${videoCount} 个视频只保留封面或静态占位。`,
-    })
-    if (omittedControllerCount > 0) add({
-      severity: 'info',
-      code: 'static-export-controller-omitted',
-      message: `${omittedControllerCount} 个教师控制器按作者设置从静态导出中省略。`,
-    })
-  }
-
-  const items = [...itemMap.values()].sort((left, right) => {
-    const severityOrder = { error: 0, warning: 1, info: 2 }
-    return severityOrder[left.severity] - severityOrder[right.severity] ||
-      compareStableStrings(left.code, right.code) ||
-      compareStableStrings(left.sceneId ?? '', right.sceneId ?? '')
-  })
-  return {
-    reportVersion: 1,
-    projectId: project.id,
-    schemaVersion: project.schemaVersion,
+    schemaVersion: 9,
     target,
     generatedAt: now.toISOString(),
     items,

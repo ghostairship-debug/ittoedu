@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { collectExportPreflight } from '@/renderer/export/exportPreflight'
+import {
+  adaptCoursePptxProducerFindings,
+  collectCourseProjectExportPreflight,
+} from '@/renderer/export/exportPreflight'
 import {
   collectCourseProjectSlideVisualPreflight,
   collectCourseProjectSlideVisualPreflightItems,
@@ -7,48 +10,20 @@ import {
   SLIDE_VISUAL_PREFLIGHT_CODES,
 } from '@/renderer/export/slideVisualPreflight'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createProject, createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { composeCourseProjectLocation } from '@/shared/courseLayerComposition'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
-  LayerItem,
   NativeLayerItem,
   SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
-import type { ProjectDocument, TextNode } from '@/shared/projectTypes'
 
 const NOW = new Date('2026-08-26T00:00:00.000Z')
 const TARGET = 'pptx' as const
 const emptyResources = { assetFiles: {}, components: {} }
 const visualCodes = new Set<string>(SLIDE_VISUAL_PREFLIGHT_CODES)
-
-function legacyProject(nodes: TextNode[]): ProjectDocument {
-  const project = createProject({
-    id: 'slide-preflight-parity',
-    now: NOW,
-    includeDefaultController: false,
-    controls: 'none',
-    idFactory: () => 'legacy-id',
-  })
-  const scene = project.scenes[0]!
-  scene.id = 'scene-parity'
-  scene.name = '对等场景'
-  scene.nodes = nodes
-  scene.backgroundColor = '#ffffff'
-  scene.presentation = {
-    initialStateId: 'state-initial',
-    states: [{
-      id: 'state-initial',
-      name: '初始状态',
-      backgroundColor: '#000000',
-      nodeOverrides: {},
-      nodeOrder: ['outside-b', 'outside-a', 'contrast'],
-    }],
-  }
-  return project
-}
 
 function blankV9Project(): CourseProjectDocument {
   const project = createBlankCourseProject({
@@ -118,35 +93,34 @@ function textItem(input: {
   return sceneNodeToCourseLayerItem(node, input.order ?? 1) as NativeLayerItem
 }
 
-function parityPair(): { legacy: ProjectDocument; course: CourseProjectDocument } {
-  const outsideA = createTextNode({
-    id: 'outside-a', name: 'outside-a', x: 1400, y: 40, width: 200, height: 80,
-    text: '画布外 A', style: {
-      fontSize: 32, color: '#111111', backgroundColor: '#ffffff', backgroundOpacity: 1,
-    },
-  })
-  const outsideB = createTextNode({
-    id: 'outside-b', name: 'outside-b', x: 1500, y: 140, width: 200, height: 80,
-    text: '画布外 B', style: {
-      fontSize: 32, color: '#111111', backgroundColor: '#ffffff', backgroundOpacity: 1,
-    },
-  })
-  const contrast = createTextNode({
-    id: 'contrast', name: 'contrast', x: 40, y: 240, width: 240, height: 80,
-    text: '背景对比', style: {
-      fontSize: 32,
-      color: '#ffffff',
-      backgroundColor: '#ffffff',
-      backgroundOpacity: 0,
-    },
-  })
-  const legacy = legacyProject([outsideA, outsideB, contrast])
+function visualFixture(): CourseProjectDocument {
   const course = blankV9Project()
   const scene = slideSurface(course).scenes[0]!
-  scene.layerItems = [outsideA, outsideB, contrast]
-    .map((node, index) => sceneNodeToCourseLayerItem(node, index + 1))
+  scene.layerItems = [
+    createTextNode({
+      id: 'outside-a', name: 'outside-a', x: 1400, y: 40, width: 200, height: 80,
+      text: '画布外 A', style: {
+        fontSize: 32, color: '#111111', backgroundColor: '#ffffff', backgroundOpacity: 1,
+      },
+    }),
+    createTextNode({
+      id: 'outside-b', name: 'outside-b', x: 1500, y: 140, width: 200, height: 80,
+      text: '画布外 B', style: {
+        fontSize: 32, color: '#111111', backgroundColor: '#ffffff', backgroundOpacity: 1,
+      },
+    }),
+    createTextNode({
+      id: 'contrast', name: 'contrast', x: 40, y: 240, width: 240, height: 80,
+      text: '背景对比', style: {
+        fontSize: 32,
+        color: '#ffffff',
+        backgroundColor: '#ffffff',
+        backgroundOpacity: 0,
+      },
+    }),
+  ].map((node, index) => sceneNodeToCourseLayerItem(node, index + 1))
   scene.presentation!.states[0]!.layerItemOrder = ['outside-b', 'outside-a', 'contrast']
-  return { legacy, course: courseProjectDocumentSchema.parse(course) }
+  return courseProjectDocumentSchema.parse(course)
 }
 
 function countCode(
@@ -156,15 +130,14 @@ function countCode(
   return items.filter((item) => item.code === code).length
 }
 
-describe('Slide export-preflight parity', () => {
-  it('keeps the public V8 report item-for-item stable at fixed now', () => {
-    const { legacy } = parityPair()
-    const report = collectExportPreflight(legacy, TARGET, emptyResources, NOW)
+describe('Slide export-preflight V9 behavior', () => {
+  it('keeps the public V9 visual report item-for-item stable at fixed now', () => {
+    const report = collectCourseProjectSlideVisualPreflight(visualFixture(), TARGET, NOW)
 
     expect(report).toEqual({
       reportVersion: 1,
       projectId: 'slide-preflight-parity',
-      schemaVersion: 8,
+      schemaVersion: 9,
       target: 'pptx',
       generatedAt: NOW.toISOString(),
       items: [
@@ -215,24 +188,7 @@ describe('Slide export-preflight parity', () => {
     })
   })
 
-  it('has zero item and summary differences in the representable one-location local Slide subdomain', () => {
-    const { legacy, course } = parityPair()
-    const legacyReport = collectExportPreflight(legacy, TARGET, emptyResources, NOW)
-    const legacyVisualItems = legacyReport.items.filter(({ code }) => visualCodes.has(code))
-    const courseReport = collectCourseProjectSlideVisualPreflight(course, TARGET, NOW)
-
-    expect(courseReport).toMatchObject({
-      reportVersion: 1,
-      projectId: legacyReport.projectId,
-      schemaVersion: 9,
-      target: legacyReport.target,
-      generatedAt: legacyReport.generatedAt,
-    })
-    expect(courseReport.items).toEqual(legacyVisualItems)
-    expect(courseReport.summary).toEqual(legacyReport.summary)
-  })
-
-  it('quantifies the +2 surface-shared outside-canvas findings that V8 cannot represent', () => {
+  it('reports two outside-canvas findings for a surface-shared item', () => {
     const project = blankV9Project()
     slideSurface(project).surfaceLayerItems = [{
       item: textItem({ id: 'surface-outside', x: 1400 }),
@@ -240,14 +196,8 @@ describe('Slide export-preflight parity', () => {
     }]
     const parsed = courseProjectDocumentSchema.parse(project)
     const v9Items = collectCourseProjectSlideVisualPreflightItems(parsed, TARGET)
-    const legacyItems = collectExportPreflight(
-      legacyProject([]), TARGET, emptyResources, NOW,
-    ).items
-    const v9Count = countCode(v9Items, 'node-fully-outside-canvas')
-    const legacyCount = countCode(legacyItems, 'node-fully-outside-canvas')
 
-    expect({ v9Count, legacyCount, delta: v9Count - legacyCount })
-      .toEqual({ v9Count: 2, legacyCount: 0, delta: 2 })
+    expect(countCode(v9Items, 'node-fully-outside-canvas')).toBe(2)
   })
 
   it('keeps a location-scoped global item in A only when two locations point at one scene', () => {
@@ -369,5 +319,25 @@ describe('Slide export-preflight parity', () => {
       'state-initial:outside-b',
     ])
     expect(contrastFindings).toEqual([null])
+  })
+
+  it('keeps the saved V9 report on catalog health plus the PPTX adapter contract', () => {
+    const course = visualFixture()
+    const report = collectCourseProjectExportPreflight(course, TARGET, emptyResources, NOW)
+    expect(report).toMatchObject({
+      reportVersion: 1,
+      schemaVersion: 9,
+      target: TARGET,
+    })
+    expect(report.items.filter(({ code }) => visualCodes.has(code)).length).toBeGreaterThan(0)
+    expect(adaptCoursePptxProducerFindings(course, emptyResources, []).every((item) => (
+      item.code === 'static-export-preflight'
+      || item.code === 'static-export-warning'
+      || item.code === 'static-export-info'
+      || item.code === 'static-export-interactions-omitted'
+      || item.code === 'static-export-audio-omitted'
+      || item.code === 'static-export-video-poster'
+      || item.code === 'static-export-controller-omitted'
+    ))).toBe(true)
   })
 })

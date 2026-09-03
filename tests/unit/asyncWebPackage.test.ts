@@ -1,19 +1,22 @@
 import { strFromU8, unzipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createVideoNode } from '@/renderer/project/nativeNodeFactories'
 import {
-  createProject,
-  createVideoNode,
-} from '@/renderer/project/createProject'
-import {
-  buildWebPackageFilesFromProject,
-  buildWebPackageFromProjectAsync,
-} from '@/renderer/export/buildWebPackage'
-import type { PublishedLessonPayload } from '@/shared/publishedLessonTypes'
+  buildPublishedCourseWebPackageAsync,
+  buildPublishedCourseWebPackageFiles,
+} from '@/renderer/export/course/buildCoursePackages'
 
 afterEach(() => vi.restoreAllMocks())
 
 function makeSources(byteLength: number) {
-  const project = createProject({ includeDefaultController: false, controls: 'none' })
+  const project = createBlankCourseProject({
+    includeDefaultController: false,
+    controls: 'none',
+  })
   const video = new Uint8Array(byteLength)
   video[0] = 17
   video[video.length - 1] = 29
@@ -26,10 +29,12 @@ function makeSources(byteLength: number) {
     byteLength,
     duration: 20,
   }
-  project.scenes[0]!.nodes.push(createVideoNode({
+  const slide = project.surfaces.find((surface) => surface.type === 'slide')
+  if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+  slide.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createVideoNode({
     id: 'lesson-video',
     assetId: 'video',
-  }))
+  }), 20))
   project.assets.unused = {
     id: 'unused',
     filename: '作者素材-未使用.png',
@@ -38,6 +43,7 @@ function makeSources(byteLength: number) {
     path: 'assets/unused.png',
     byteLength: 64,
   }
+  courseProjectDocumentSchema.parse(project)
   return {
     project,
     assetFiles: { video },
@@ -45,18 +51,18 @@ function makeSources(byteLength: number) {
   }
 }
 
-function decodeCourseData(bytes: Uint8Array): PublishedLessonPayload {
+function decodeCourseData(bytes: Uint8Array): PublishedCourseV2Payload {
   const source = strFromU8(bytes)
-  const match = source.match(/^window\.__H5_LESSON_PAYLOAD__=(.*);\s*$/s)
-  if (!match?.[1]) throw new Error('course-data.js 格式无效')
-  return JSON.parse(match[1]) as PublishedLessonPayload
+  const assignment = 'window.__H5_COURSE_PAYLOAD__='
+  if (!source.startsWith(assignment)) throw new Error('course-data.js 格式无效')
+  return JSON.parse(source.slice(assignment.length).replace(/;\s*$/, '')) as PublishedCourseV2Payload
 }
 
 describe('asynchronous web package', () => {
   it('直接打包原始素材，不做 Base64 往返', () => {
     const sources = makeSources(1024)
     const atobSpy = vi.spyOn(globalThis, 'atob')
-    const files = buildWebPackageFilesFromProject(
+    const files = buildPublishedCourseWebPackageFiles(
       sources,
       'window.__PLAYER__=true;',
     )
@@ -74,7 +80,7 @@ describe('asynchronous web package', () => {
   it('大素材 ZIP 压缩在后台运行', async () => {
     const sources = makeSources(8 * 1024 * 1024)
     const events: string[] = []
-    const archive = buildWebPackageFromProjectAsync(
+    const archive = buildPublishedCourseWebPackageAsync(
       sources,
       'window.__PLAYER__=true;',
     ).then((bytes) => {

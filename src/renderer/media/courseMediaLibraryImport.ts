@@ -9,8 +9,11 @@ import {
   type HistoryResourceChanges,
 } from '@/renderer/store/history'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import type { AssetMeta } from '@/shared/projectTypes'
+import type {
+  CourseAssetMeta,
+  CourseProjectDocument,
+} from '@/shared/courseProjectTypes'
+import type { AssetMeta } from '@/shared/contracts/media-v1/types'
 
 export interface PlanCourseMediaLibraryImportInput {
   readonly project: CourseProjectDocument
@@ -120,6 +123,13 @@ function cloneAssetMeta(meta: AssetMeta): AssetMeta {
   }
 }
 
+function cloneCourseAssetMeta(meta: CourseAssetMeta): CourseAssetMeta {
+  return {
+    ...cloneAssetMeta(meta),
+    ...(meta.remote ? { remote: { url: meta.remote.url } } : {}),
+  }
+}
+
 function isUint8Array(value: unknown): value is Uint8Array {
   return ArrayBuffer.isView(value)
     && Object.prototype.toString.call(value) === '[object Uint8Array]'
@@ -174,14 +184,14 @@ function freezeIds(ids: string[]): readonly string[] {
 }
 
 function cloneOwnAssetRecord(
-  assets: Readonly<Record<string, AssetMeta>>,
-): Record<string, AssetMeta> {
-  const clone: Record<string, AssetMeta> = {}
+  assets: Readonly<Record<string, CourseAssetMeta>>,
+): Record<string, CourseAssetMeta> {
+  const clone: Record<string, CourseAssetMeta> = {}
   for (const [assetId, meta] of Object.entries(assets)) {
     // defineProperty keeps "__proto__" an own record key instead of invoking
     // Object.prototype's legacy setter.
     Object.defineProperty(clone, assetId, {
-      value: cloneAssetMeta(meta),
+      value: cloneCourseAssetMeta(meta),
       enumerable: true,
       configurable: true,
       writable: true,

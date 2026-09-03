@@ -32,10 +32,14 @@ import {
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,
   createSlideAuthoringBackend,
+  makeSlideAuthoringTarget,
   openSlideAuthoringSession,
   setSlideEditingScope,
   type SlideAuthoringSession,
 } from '@/renderer/course/slideAuthoringBackend'
+import {
+  commitSlideMultiLayerIntentAtTargets,
+} from '@/renderer/course/v9SlideContentCommands'
 import {
   selectEditingNodes,
   selectSelectedNode,
@@ -573,5 +577,129 @@ describe('V9 Slide text/formula transactions', () => {
     expect(selected?.type).toBe('text')
     const projected = selectEditingNodes(after).find((node) => node.id === 'slide-title')
     expect(projected?.type).toBe('text')
+  })
+
+  it('commits exact Slide multi-property gestures once and rejects stale targets', () => {
+    const document = v9SlideFixture()
+    const surface = document.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    const vertical = surface.scenes[0]?.layerItems.find(
+      (item) => item.layerItemId === 'slide-vertical',
+    )
+    if (!vertical) throw new Error('expected vertical text')
+    vertical.frame.x = 520
+    let backend = createSlideAuthoringBackend(openSlideAuthoringSession(document))
+    const selected = backend.selectLayers(['slide-title', 'slide-vertical'], false, {
+      expectedRevision: backend.getSnapshot().revision,
+    })
+    const session = requireSession(selected)
+    const targets = session.selection.selectionIds.map((id) => (
+      makeSlideAuthoringTarget(session, id, 'item')
+    ))
+
+    const aligned = commitSlideMultiLayerIntentAtTargets(session, {
+      targets,
+      intent: { kind: 'align', mode: 'left' },
+    }, { expectedRevision: session.history.present.revision, now: NOW })
+    const alignedSession = requireSession(aligned)
+    expect(aligned.historyEntry).toBe(true)
+    expect(alignedSession.history.past).toHaveLength(session.history.past.length + 1)
+    expect(alignedSession.selection.selectionIds).toEqual(['slide-title', 'slide-vertical'])
+    expect(nativeTextData(alignedSession, 'slide-vertical').frame.x).toBe(120)
+
+    backend = createSlideAuthoringBackend(alignedSession)
+    const changedSelection = requireSession(backend.selectLayers(
+      ['slide-title', 'slide-formula'],
+      false,
+      { expectedRevision: alignedSession.history.present.revision },
+    ))
+    const stale = commitSlideMultiLayerIntentAtTargets(changedSelection, {
+      targets,
+      intent: { kind: 'delete' },
+    }, { expectedRevision: targets[0]!.revision, now: NOW })
+    expect(stale.ok).toBe(false)
+    expect(stale.reason).toBe(SLIDE_REJECT_STALE_REVISION)
+    expect(stale.nextSession).toEqual(changedSelection)
+    expect(stale.historyEntry).toBe(false)
+    expect(changedSelection.history.present.surfaces).toEqual(
+      alignedSession.history.present.surfaces,
+    )
+  })
+
+  it('duplicates and deletes exact scene multi-selections with one history entry', () => {
+    const project = v9SlideFixture()
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    surface.scenes[0]!.interactions.push({
+      id: 'rule-multi-copy',
+      name: '复制引用关系',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: 'slide-title' },
+      conditions: [],
+      actions: [{
+        id: 'action-multi-copy',
+        start: 'after-previous',
+        delayMs: 0,
+        action: {
+          type: 'node.enter',
+          nodeId: 'slide-vertical',
+          effect: 'fade',
+          durationMs: 200,
+          easing: 'ease-out',
+        },
+      }],
+    })
+    let backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
+    const selected = requireSession(backend.selectLayers(
+      ['slide-title', 'slide-vertical'],
+      false,
+      { expectedRevision: backend.getSnapshot().revision },
+    ))
+    const targets = selected.selection.selectionIds.map((id) => (
+      makeSlideAuthoringTarget(selected, id, 'item')
+    ))
+    const duplicated = requireSession(commitSlideMultiLayerIntentAtTargets(selected, {
+      targets,
+      intent: { kind: 'duplicate' },
+    }, { expectedRevision: selected.history.present.revision, now: NOW }))
+    expect(duplicated.history.past).toHaveLength(selected.history.past.length + 1)
+    expect(duplicated.selection.selectionIds).toHaveLength(2)
+    expect(duplicated.selection.selectionIds).not.toEqual(selected.selection.selectionIds)
+    const duplicatedSurface = duplicated.history.present.surfaces[0]
+    if (!duplicatedSurface || duplicatedSurface.type !== 'slide') {
+      throw new Error('expected duplicated slide')
+    }
+    expect(duplicatedSurface.scenes[0]?.interactions).toContainEqual(expect.objectContaining({
+      id: expect.not.stringMatching(/^rule-multi-copy$/),
+      trigger: {
+        type: 'node.click',
+        nodeId: duplicated.selection.selectionIds[0],
+      },
+      actions: [expect.objectContaining({
+        id: expect.not.stringMatching(/^action-multi-copy$/),
+        action: expect.objectContaining({
+          type: 'node.enter',
+          nodeId: duplicated.selection.selectionIds[1],
+        }),
+      })],
+    }))
+
+    backend = createSlideAuthoringBackend(duplicated)
+    const deleteTargets = duplicated.selection.selectionIds.map((id) => (
+      makeSlideAuthoringTarget(duplicated, id, 'item')
+    ))
+    const deleted = requireSession(commitSlideMultiLayerIntentAtTargets(duplicated, {
+      targets: deleteTargets,
+      intent: { kind: 'delete' },
+    }, { expectedRevision: backend.getSnapshot().revision, now: NOW }))
+    expect(deleted.history.past).toHaveLength(duplicated.history.past.length + 1)
+    expect(deleted.selection.selectionIds).toEqual([])
+    for (const id of deleteTargets.map((target) => target.layerItemId)) {
+      expect(deleted.history.present.surfaces[0]?.type === 'slide'
+        ? deleted.history.present.surfaces[0].scenes[0]?.layerItems.some(
+            (item) => item.layerItemId === id,
+          )
+        : true).toBe(false)
+    }
   })
 })

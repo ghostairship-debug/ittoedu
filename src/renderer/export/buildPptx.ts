@@ -513,17 +513,3 @@ export async function buildPptx(
     releasePptxImageCache(imageCache)
   }
 }
-
-export function buildPdfPrintHtml(projectTitle: string, images: string[]): string {
-  const escapedTitle = projectTitle.replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  })[character]!)
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapedTitle}</title><style>
-  @page { size: 13.333in 7.5in; margin: 0; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; }
-  .page { width: 13.333in; height: 7.5in; break-after: page; page-break-after: always; overflow: hidden; }
-  .page:last-child { break-after: auto; page-break-after: auto; }
-  img { display: block; width: 100%; height: 100%; object-fit: fill; }
-  </style></head><body>${images.map((image, index) => `<section class="page"><img src="${image}" alt="第 ${index + 1} 页"></section>`).join('')}</body></html>`
-}

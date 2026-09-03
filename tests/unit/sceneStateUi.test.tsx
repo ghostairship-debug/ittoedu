@@ -1,40 +1,70 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { selectActiveScene, selectSlideAuthoringBackend, useEditorStore } from '@/renderer/store/editorStore'
+import {
+  selectSlideAuthoringDocument,
+  selectSlideAuthoringSnapshot,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { AutomationTab } from '@/renderer/ui/AutomationTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { SceneStateStrip } from '@/renderer/ui/SceneStateStrip'
-import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import type { VideoNode } from '@/shared/projectTypes'
+import type {
+  NativeLayerItem,
+  SlideSceneDocument,
+} from '@/shared/courseProjectTypes'
 
-function videoNode(id: string, name: string): VideoNode {
+function activeV9Scene(): SlideSceneDocument {
+  const state = useEditorStore.getState()
+  const document = selectSlideAuthoringDocument(state)
+  const snapshot = selectSlideAuthoringSnapshot(state)
+  if (!document || !snapshot) throw new Error('Expected an active Slide authoring session')
+  const surface = document.surfaces.find((candidate) => candidate.id === snapshot.surfaceId)
+  if (!surface || surface.type !== 'slide') throw new Error('Expected an active Slide surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === snapshot.sceneId)
+  if (!scene) throw new Error('Expected an active V9 Slide scene')
+  return scene
+}
+
+function v9SlideScenes(): SlideSceneDocument[] {
+  const document = selectSlideAuthoringDocument(useEditorStore.getState())
+  if (!document) throw new Error('Expected a Slide authoring document')
+  return document.surfaces.flatMap((surface) => (
+    surface.type === 'slide' ? surface.scenes : []
+  ))
+}
+
+function videoLayerItem(id: string, name: string): NativeLayerItem {
   return {
-    id,
-    name,
-    type: 'video',
-    x: 120,
-    y: 100,
-    width: 640,
-    height: 360,
+    layerItemId: id,
+    label: name,
+    frame: { mode: 'absolute', x: 120, y: 100, width: 640, height: 360 },
+    order: 0,
+    visible: true,
+    locked: false,
     rotation: 0,
     opacity: 1,
-    visible: true,
+    hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    locked: false,
-    assetId: 'asset_video',
-    fit: 'contain',
-    autoplay: false,
-    loop: false,
-    muted: false,
-    volume: 1,
-    playbackRate: 1,
-    showControls: true,
-    clickToToggle: true,
-    startTime: 0,
-    endTime: null,
-    poster: { mode: 'video-frame', time: 0 },
-    backgroundAudioMode: 'none',
+    kind: 'native',
+    content: {
+      nativeType: 'video',
+      data: {
+        assetId: 'asset_video',
+        fit: 'contain',
+        autoplay: false,
+        loop: false,
+        muted: false,
+        volume: 1,
+        playbackRate: 1,
+        showControls: true,
+        clickToToggle: true,
+        startTime: 0,
+        endTime: null,
+        poster: { mode: 'video-frame', time: 0 },
+        backgroundAudioMode: 'none',
+      },
+    },
   }
 }
 
@@ -58,7 +88,7 @@ describe('scene presentation state UI', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '添加规则' }))
 
-    const scene = selectActiveScene(useEditorStore.getState())
+    const scene = activeV9Scene()
     expect(scene.interactions).toHaveLength(1)
     expect(scene.interactions[0]).toMatchObject({
       trigger: { type: 'scene.enter' },
@@ -106,10 +136,13 @@ describe('scene presentation state UI', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
-    const [text, shape] = selectActiveScene(useEditorStore.getState()).nodes
+    const [text, shape] = activeV9Scene().layerItems.slice(-2)
+    if (!text || !shape || text.frame.mode !== 'absolute') {
+      throw new Error('Expected two absolute V9 Slide layer items')
+    }
     store.setActivePresentationState('state_initial')
-    store.updateNode(text!.id, { x: text!.x + 20 })
-    store.selectNodes([text!.id, shape!.id])
+    store.updateNode(text.layerItemId, { x: text.frame.x + 20 })
+    store.selectNodes([text.layerItemId, shape.layerItemId])
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
 
@@ -122,7 +155,7 @@ describe('scene presentation state UI', () => {
   it('edits playback initial visibility without changing stable canvas visibility', () => {
     const store = useEditorStore.getState()
     store.addRectangleNode()
-    const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
+    const nodeId = activeV9Scene().layerItems.at(-1)!.layerItemId
     store.selectNode(nodeId)
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -132,7 +165,7 @@ describe('scene presentation state UI', () => {
     expect(playbackVisibility).toHaveValue('inherit')
     fireEvent.change(playbackVisibility, { target: { value: 'hidden' } })
 
-    const updated = selectActiveScene(useEditorStore.getState()).nodes[0]!
+    const updated = activeV9Scene().layerItems.find((item) => item.layerItemId === nodeId)!
     expect(updated.playbackInitialVisibility).toBe('hidden')
     expect(updated.visible).toBe(true)
   })
@@ -140,16 +173,15 @@ describe('scene presentation state UI', () => {
   it('keeps video diagnostics scoped to the selected scene when legacy ids repeat', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    const [firstScene, secondScene] = useEditorStore.getState().project.scenes
+    const [firstScene, secondScene] = v9SlideScenes()
     const sharedVideoId = 'legacy_shared_video'
-    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
-    const document = backend?.getSession().history.present
+    const document = selectSlideAuthoringDocument(useEditorStore.getState())
     if (document) {
       for (const surface of document.surfaces) {
         if (surface.type !== 'slide') continue
         for (const scene of surface.scenes) {
           if (scene.id === firstScene!.id) {
-            scene.layerItems = [sceneNodeToCourseLayerItem(videoNode(sharedVideoId, '第一场景视频'))]
+            scene.layerItems = [videoLayerItem(sharedVideoId, '第一场景视频')]
             scene.interactions = [{
               id: 'legacy_click',
               name: '旧视频点击规则',
@@ -165,7 +197,7 @@ describe('scene presentation state UI', () => {
             }]
           }
           if (scene.id === secondScene!.id) {
-            scene.layerItems = [sceneNodeToCourseLayerItem(videoNode(sharedVideoId, '第二场景视频'))]
+            scene.layerItems = [videoLayerItem(sharedVideoId, '第二场景视频')]
             scene.interactions = []
           }
         }
@@ -178,20 +210,20 @@ describe('scene presentation state UI', () => {
     })
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
-    expect(screen.queryByText(/会覆盖该视频/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/会覆盖这条单击规则/)).not.toBeInTheDocument()
 
     act(() => {
       useEditorStore.getState().setActiveScene(firstScene!.id)
       useEditorStore.getState().selectNode(sharedVideoId)
     })
-    expect(screen.getByText(/会覆盖该视频/)).toBeInTheDocument()
+    expect(screen.getByText(/会覆盖这条单击规则/)).toBeInTheDocument()
   })
 
   it('labels which authored state is used by each scene thumbnail', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       null as never,
     )
-    const scene = selectActiveScene(useEditorStore.getState())
+    const scene = activeV9Scene()
 
     render(<ScenePanel />)
 

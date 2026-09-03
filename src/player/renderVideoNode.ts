@@ -1,9 +1,6 @@
 import * as Phaser from 'phaser'
 import type { VideoInteractionAction } from '../shared/interactionTypes'
-import type {
-  SceneNode,
-  VideoNode,
-} from '../shared/projectTypes'
+import type { VideoNode } from '../shared/contracts/native-v1/types'
 import type {
   RuntimeEventDisposer,
   RuntimePresentationTransition,
@@ -707,7 +704,7 @@ export function renderVideoNode(
       root.setVisible(visible && effectiveVisible())
       syncInput()
     },
-    update(nextNode: SceneNode, transition): void {
+    update(nextNode, transition): void {
       if (
         destroyed ||
         nextNode.type !== 'video' ||

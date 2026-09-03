@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { InteractionCondition } from '../../shared/interactionTypes'
-import { collectProjectDiagnostics } from '../../shared/projectDiagnostics'
+import { collectCourseProjectHealth } from '../../shared/courseProjectHealth'
 import {
   selectGlobalInteractionAuthoringView,
   selectLocalInteractionAuthoringView,
@@ -70,7 +70,6 @@ export function AutomationTab() {
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const activeLocationId = useEditorStore(selectActiveCourseLocationId)
   const slideAuthoringSnapshot = useEditorStore(selectSlideAuthoringSnapshot)
-  const projectedProject = useEditorStore((state) => state.project)
   const addInteractionRule = useEditorStore((state) => state.addInteractionRule)
   const deleteInteractionRule = useEditorStore((state) => state.deleteInteractionRule)
   const duplicateInteractionRule = useEditorStore(
@@ -125,20 +124,25 @@ export function AutomationTab() {
   }, [activeLocationId, activeSlideStateId, courseProject, editingScope])
 
   const diagnostics = useMemo(
-    () => collectProjectDiagnostics(projectedProject).filter(
-      (diagnostic) => diagnostic.sceneId === scene.id,
-    ),
-    [projectedProject, scene.id],
+    () => courseProject
+      ? collectCourseProjectHealth(courseProject, { assetFiles: {}, componentFiles: {} })
+      : [],
+    [courseProject],
   )
   const ruleWarnings = useMemo(() => {
     const warnings: Record<string, string[]> = {}
-    for (const diagnostic of diagnostics) {
-      for (const ruleId of diagnostic.ruleIds) {
-        warnings[ruleId] = [...(warnings[ruleId] ?? []), diagnostic.message]
+    if (!authoringView || authoringView.availability !== 'available') return warnings
+    for (const finding of diagnostics) {
+      if (finding.severity !== 'warning' || !finding.layerItemId) continue
+      for (const rule of authoringView.rules) {
+        const trigger = rule.trigger
+        if ('nodeId' in trigger && trigger.nodeId === finding.layerItemId) {
+          warnings[rule.id] = [...(warnings[rule.id] ?? []), finding.message]
+        }
       }
     }
     return warnings
-  }, [diagnostics])
+  }, [authoringView, diagnostics])
 
   if (!courseProject || !authoringView) {
     return (
@@ -285,7 +289,7 @@ export function AutomationTab() {
           </h3>
           {diagnostics.map((diagnostic) => (
             <p
-              key={`${diagnostic.code}:${diagnostic.nodeId}`}
+              key={`${diagnostic.code}:${diagnostic.layerItemId ?? diagnostic.path.join('.')}`}
               className="property-hint"
               role="alert"
             >

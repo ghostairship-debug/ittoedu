@@ -20,10 +20,20 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { COURSE_LAST_LOCATION_REASON } from '../course/courseLocationCommands'
 import { deriveCourseEditorLayout, type CourseEditorLayoutResult } from '../course/courseEditorLayout'
 import {
-  addSpatialCameraFrameFromSession,
-  deleteSpatialCameraFrameInSession,
-  reorderSpatialCameraFramesInSession,
-} from '../course/spatialCameraCommands'
+  buildSpatialEditorView,
+  captureSpatialEditorAuthoringTarget,
+  type SpatialEditorAuthoringTargetInput,
+} from '../course/spatialEditorView'
+import {
+  COURSE_AUTHORING_STALE_SESSION_REASON,
+  type CourseAuthoringSessionToken,
+  type CourseAuthoringTarget,
+} from '../authoring/courseAuthoringSession'
+import type { SpatialWorldContentEditSession } from '../authoring/spatialWorldAuthoring'
+import type {
+  SpatialAuthoringIntent,
+  SpatialAuthoringIntentInput,
+} from '../authoring/spatialAuthoringIntents'
 import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import {
   buildCourseTreeView,
@@ -49,6 +59,31 @@ export type CourseTreeReorderPlan =
   | { readonly kind: 'scenes'; readonly sceneIds: string[] }
   | { readonly kind: 'migrate-scene'; readonly locationId: string; readonly targetSurfaceId: string; readonly toIndex: number }
   | { readonly kind: 'cameras'; readonly surfaceId: string; readonly frameId: string; readonly toIndex: number }
+
+interface PendingSpatialCameraDelete {
+  readonly projectId: string
+  readonly revision: number
+  readonly locationId: string
+  readonly surfaceId: string
+  readonly frameId: string
+  readonly label: string
+  readonly authoringToken: CourseAuthoringSessionToken
+  readonly target: CourseAuthoringTarget | null
+  readonly contentEdit: SpatialWorldContentEditSession | null
+}
+
+function sameCourseAuthoringToken(
+  left: CourseAuthoringSessionToken | null | undefined,
+  right: CourseAuthoringSessionToken,
+): boolean {
+  return Boolean(
+    left
+    && left.locationId === right.locationId
+    && left.surfaceType === right.surfaceType
+    && left.revision === right.revision
+    && left.generation === right.generation,
+  )
+}
 
 type CourseTreeSortableKind = 'page' | 'slide-scene' | 'spatial-camera'
 
@@ -556,13 +591,11 @@ export function ScenePanel() {
   const deleteCourseSurface = useEditorStore((state) => state.deleteCourseSurface)
   const moveCourseSlideScene = useEditorStore((state) => state.moveCourseSlideScene)
   const reorderScenes = useEditorStore((state) => state.reorderScenes)
-  const runSpatialCommand = useEditorStore((state) => state.runSpatialCommand)
   const applyFlowSelection = useEditorStore((state) => state.applyFlowSelection)
   const renameFlowHeading = useEditorStore((state) => state.renameFlowHeading)
   const renameFlowPage = useEditorStore((state) => state.renameFlowPage)
   const flowSession = useEditorStore((state) => state.flowSession)
-  const spatialSession = useEditorStore((state) => state.spatialSession)
-  const [pendingDeleteCameraId, setPendingDeleteCameraId] = useState<string | null>(null)
+  const [pendingDeleteCamera, setPendingDeleteCamera] = useState<PendingSpatialCameraDelete | null>(null)
   const [pendingDeleteSceneId, setPendingDeleteSceneId] = useState<string | null>(null)
   const [pendingDeleteSurfaceId, setPendingDeleteSurfaceId] = useState<string | null>(null)
   const sensors = useSensors(
@@ -578,16 +611,6 @@ export function ScenePanel() {
     () => (project ? panelLayoutForActiveLocation(project, activeLocationId) : null),
     [project, activeLocationId],
   )
-
-  const pendingCameraName = useMemo(() => {
-    if (!project || !pendingDeleteCameraId) return null
-    for (const surface of project.surfaces) {
-      if (surface.type !== 'spatial-2d') continue
-      const frame = surface.camera.frames.find((candidate) => candidate.id === pendingDeleteCameraId)
-      if (frame) return frame.name
-    }
-    return pendingDeleteCameraId
-  }, [project, pendingDeleteCameraId])
 
   const pendingSceneName = useMemo(() => {
     if (!project || !pendingDeleteSceneId) return null
@@ -623,6 +646,63 @@ export function ScenePanel() {
     activateCourseLocation(locationId)
   }
 
+  const captureLiveSpatialTarget = (
+    locationId: string,
+    targetInput: SpatialEditorAuthoringTargetInput,
+  ): {
+    readonly target: CourseAuthoringTarget
+    readonly contentEdit: SpatialWorldContentEditSession | null
+    readonly camera: { readonly x: number; readonly y: number; readonly zoom: number }
+  } | null => {
+    const requested = project.locations.find((location) => location.id === locationId)
+    if (requested?.kind !== 'spatial-camera') return null
+    const before = useEditorStore.getState().spatialSession
+    if (
+      !before
+      || before.selection.surfaceId !== requested.surfaceId
+    ) {
+      activateCourseLocation(requested.id)
+    }
+    const store = useEditorStore.getState()
+    const session = store.spatialSession
+    const token = store.courseAuthoringSession?.token
+    if (
+      !session
+      || !token
+      || token.surfaceType !== 'spatial-2d'
+      || session.selection.surfaceId !== requested.surfaceId
+      || token.locationId !== session.selection.locationId
+      || token.revision !== session.history.present.revision
+    ) return null
+    const view = buildSpatialEditorView({
+      project: session.history.present,
+      locationId: session.selection.locationId,
+      sessionCamera: session.sessionCamera,
+    })
+    try {
+      return {
+        target: captureSpatialEditorAuthoringTarget({ view, sessionToken: token, target: targetInput }),
+        contentEdit: store.spatialContentEdit,
+        camera: view.sessionCamera,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  const runLiveSpatialIntent = (
+    locationId: string,
+    targetInput: SpatialEditorAuthoringTargetInput,
+    buildIntent: (captured: ReturnType<typeof captureLiveSpatialTarget> & {}) => SpatialAuthoringIntentInput,
+  ) => {
+    const captured = captureLiveSpatialTarget(locationId, targetInput)
+    if (!captured) return
+    useEditorStore.getState().runSpatialAuthoringIntent(captured.target, {
+      ...buildIntent(captured),
+      expectedContentEdit: captured.contentEdit,
+    } as SpatialAuthoringIntent)
+  }
+
   const handlePrimaryAdd = () => {
     if (layout.primary.action === 'scene' && layout.primary.surfaceId) {
       addCourseContent('scene', { surfaceId: layout.primary.surfaceId })
@@ -645,7 +725,7 @@ export function ScenePanel() {
       return
     }
     if (plan.kind === 'scenes') {
-      if (flowSession || spatialSession) {
+      if (flowSession || useEditorStore.getState().spatialSession) {
         const dragged = project.locations.find((location) => location.id === String(active.id))
         if (dragged) activateCourseLocation(dragged.id)
       }
@@ -656,16 +736,24 @@ export function ScenePanel() {
       moveCourseSlideScene(plan.locationId, plan.targetSurfaceId, plan.toIndex)
       return
     }
-    if (spatialSession?.selection.surfaceId !== plan.surfaceId) {
-      const target = project.locations.find((location) =>
-        location.kind === 'spatial-camera'
-        && location.surfaceId === plan.surfaceId
-        && location.cameraFrameId === plan.frameId,
-      )
-      if (target) activateCourseLocation(target.id)
-    }
-    runSpatialCommand((current) =>
-      reorderSpatialCameraFramesInSession(current, plan.frameId, plan.toIndex),
+    const location = project.locations.find((candidate) =>
+      candidate.kind === 'spatial-camera'
+      && candidate.surfaceId === plan.surfaceId
+      && candidate.cameraFrameId === plan.frameId,
+    )
+    if (!location) return
+    const expectedFrameIds = project.surfaces.find((surface) => surface.id === plan.surfaceId)
+    const expectedCameraFrameIds = expectedFrameIds?.type === 'spatial-2d'
+      ? expectedFrameIds.camera.frames.map((frame) => frame.id)
+      : []
+    runLiveSpatialIntent(
+      location.id,
+      { kind: 'camera-frame', frameId: plan.frameId, field: 'camera.frames.order' },
+      () => ({
+        kind: 'reorder-camera-frame',
+        toIndex: plan.toIndex,
+        expectedFrameIds: expectedCameraFrameIds,
+      }),
     )
   }
 
@@ -728,34 +816,66 @@ export function ScenePanel() {
                   onRenameFlowPage={renameFlowPage}
                   onRenameFlowHeading={renameFlowHeading}
                   onAddSpatialCamera={(surfaceId) => {
-                    if (spatialSession?.selection.surfaceId !== surfaceId) {
-                      const target = project.locations.find((location) =>
-                        location.surfaceId === surfaceId && location.kind === 'spatial-camera',
-                      )
-                      if (target) activateCourseLocation(target.id)
-                    }
-                    runSpatialCommand((current) => addSpatialCameraFrameFromSession(current), {
-                      statusMessage: '已添加镜头',
-                    })
+                    const location = project.locations.find((candidate) =>
+                      candidate.surfaceId === surfaceId && candidate.kind === 'spatial-camera',
+                    )
+                    if (!location) return
+                    runLiveSpatialIntent(
+                      location.id,
+                      { kind: 'world', field: 'camera.frames' },
+                      (captured) => ({
+                        kind: 'add-camera-frame',
+                        expectedCamera: captured.camera,
+                      }),
+                    )
                   }}
                   onDeleteSpatialCamera={(locationId) => {
                     const spatialLocation = project.locations.find((location) => location.id === locationId)
                     if (spatialLocation?.kind === 'spatial-camera') {
+                      const store = useEditorStore.getState()
+                      const authoringToken = store.courseAuthoringSession?.token
+                      if (!authoringToken) {
+                        store.setError(COURSE_AUTHORING_STALE_SESSION_REASON)
+                        return
+                      }
+                      const surface = project.surfaces.find(
+                        (candidate) => candidate.id === spatialLocation.surfaceId,
+                      )
+                      const frame = surface?.type === 'spatial-2d'
+                        ? surface.camera.frames.find((candidate) => candidate.id === spatialLocation.cameraFrameId)
+                        : null
+                      const captured = store.spatialSession?.selection.surfaceId === spatialLocation.surfaceId
+                        ? captureLiveSpatialTarget(locationId, {
+                            kind: 'camera-frame',
+                            frameId: spatialLocation.cameraFrameId,
+                            field: 'camera.frames',
+                          })
+                        : null
                       setPendingDeleteSceneId(null)
                       setPendingDeleteSurfaceId(null)
-                      setPendingDeleteCameraId(spatialLocation.cameraFrameId)
+                      setPendingDeleteCamera({
+                        projectId: project.id,
+                        revision: project.revision,
+                        locationId,
+                        surfaceId: spatialLocation.surfaceId,
+                        frameId: spatialLocation.cameraFrameId,
+                        label: frame?.name ?? spatialLocation.cameraFrameId,
+                        authoringToken: { ...authoringToken },
+                        target: captured?.target ?? null,
+                        contentEdit: captured?.contentEdit ?? store.spatialContentEdit,
+                      })
                     }
                   }}
                   onDeleteSlideScene={(locationId) => {
                     const sceneId = slideSceneIdFromLocation(project, locationId)
                     if (sceneId) {
-                      setPendingDeleteCameraId(null)
+                      setPendingDeleteCamera(null)
                       setPendingDeleteSurfaceId(null)
                       setPendingDeleteSceneId(sceneId)
                     }
                   }}
                   onDeleteSurface={(surfaceId) => {
-                    setPendingDeleteCameraId(null)
+                    setPendingDeleteCamera(null)
                     setPendingDeleteSceneId(null)
                     setPendingDeleteSurfaceId(surfaceId)
                   }}
@@ -766,19 +886,51 @@ export function ScenePanel() {
         </DndContext>
       </div>
       <ConfirmDialog
-        open={Boolean(pendingDeleteCameraId)}
+        open={Boolean(pendingDeleteCamera)}
         title="删除镜头？"
-        message={pendingCameraName ? `“${pendingCameraName}”将被删除。此操作可以撤销。` : ''}
+        message={pendingDeleteCamera ? `“${pendingDeleteCamera.label}”将被删除。此操作可以撤销。` : ''}
         confirmLabel="删除镜头"
         danger
-        onCancel={() => setPendingDeleteCameraId(null)}
+        onCancel={() => setPendingDeleteCamera(null)}
         onConfirm={() => {
-          if (pendingDeleteCameraId) {
-            runSpatialCommand((current) =>
-              deleteSpatialCameraFrameInSession(current, pendingDeleteCameraId),
-            )
+          if (pendingDeleteCamera) {
+            const store = useEditorStore.getState()
+            const liveProject = selectActiveCourseProjectDocument(store)
+            if (
+              !liveProject
+              || liveProject.id !== pendingDeleteCamera.projectId
+              || liveProject.revision !== pendingDeleteCamera.revision
+              || !sameCourseAuthoringToken(
+                store.courseAuthoringSession?.token,
+                pendingDeleteCamera.authoringToken,
+              )
+              || !Object.is(store.spatialContentEdit, pendingDeleteCamera.contentEdit)
+            ) {
+              store.setError(COURSE_AUTHORING_STALE_SESSION_REASON)
+            } else if (!pendingDeleteCamera.target && pendingDeleteCamera.contentEdit) {
+              store.setError('请先完成当前文字编辑')
+            } else {
+              const captured = pendingDeleteCamera.target
+                ? {
+                    target: pendingDeleteCamera.target,
+                    contentEdit: pendingDeleteCamera.contentEdit,
+                  }
+                : captureLiveSpatialTarget(pendingDeleteCamera.locationId, {
+                    kind: 'camera-frame',
+                    frameId: pendingDeleteCamera.frameId,
+                    field: 'camera.frames',
+                  })
+              if (captured && Object.is(captured.contentEdit, pendingDeleteCamera.contentEdit)) {
+                useEditorStore.getState().runSpatialAuthoringIntent(captured.target, {
+                  kind: 'delete-camera-frame',
+                  expectedContentEdit: pendingDeleteCamera.contentEdit,
+                })
+              } else if (captured) {
+                useEditorStore.getState().setError(COURSE_AUTHORING_STALE_SESSION_REASON)
+              }
+            }
           }
-          setPendingDeleteCameraId(null)
+          setPendingDeleteCamera(null)
         }}
       />
       <ConfirmDialog

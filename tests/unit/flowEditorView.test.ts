@@ -8,11 +8,18 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { isFlowDocumentBlockId } from '@/renderer/course/effectiveLayerProjection'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { isFlowZOrderLayerBlock } from '@/renderer/course/flowEditorSlice'
-import { buildFlowEditorView, listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
+import {
+  assertActiveFlowEditorView,
+  buildFlowEditorView,
+  captureFlowEditorAuthoringTarget,
+  FLOW_SESSIONLESS_ERROR,
+  flowSurfaceAuthoringAddress,
+  listFlowCourseTreePages,
+} from '@/renderer/course/flowEditorView'
 
 const NOW = '2026-08-17T09:10:00.000Z'
 
@@ -93,6 +100,20 @@ function flowBlocksFixture(): FlowBlock[] {
       layout: 'content-width',
     },
     {
+      id: 'block-formula',
+      type: 'formula',
+      formulaId: 'formula-1',
+      accessibleText: 'a + b',
+      ast: {
+        type: 'row',
+        children: [
+          { type: 'token', value: 'a' },
+          { type: 'operator', value: '+' },
+          { type: 'token', value: 'b' },
+        ],
+      },
+    },
+    {
       id: 'block-section',
       type: 'section',
       title: '章节 A',
@@ -120,6 +141,7 @@ function flowFixture(): {
     name: '表面隐藏层',
     text: '隐藏',
     visible: false,
+    locked: true,
   }), 30)
   const globalVisible = sceneNodeToCourseLayerItem(createTextNode({
     id: 'global-banner',
@@ -203,6 +225,7 @@ describe('Flow editor read projection', () => {
     })
     expect(view.blocks[0]).toMatchObject({
       blockId: 'block-h1',
+      locationId: 'block-h1',
       parentId: null,
       navigable: true,
       layerKind: 'document-block',
@@ -216,8 +239,13 @@ describe('Flow editor read projection', () => {
       }),
     })
     expect(view.blocks.find((block) => block.blockId === 'block-paragraph')).toMatchObject({
+      locationId: null,
       navigable: false,
       layerKind: 'document-block',
+    })
+    expect(view.blocks.find((block) => block.blockId === 'block-formula')?.block).toMatchObject({
+      type: 'formula',
+      formulaId: 'formula-1',
     })
     expect(view.blocks.map((block) => ({
       blockId: block.blockId,
@@ -230,12 +258,29 @@ describe('Flow editor read projection', () => {
       { blockId: 'block-list', parentId: null, depth: 0, index: 2 },
       { blockId: 'block-quote', parentId: null, depth: 0, index: 3 },
       { blockId: 'block-media', parentId: null, depth: 0, index: 4 },
-      { blockId: 'block-section', parentId: null, depth: 0, index: 5 },
+      { blockId: 'block-formula', parentId: null, depth: 0, index: 5 },
+      { blockId: 'block-section', parentId: null, depth: 0, index: 6 },
       { blockId: 'block-h2', parentId: 'block-section', depth: 1, index: 0 },
       { blockId: 'block-section-p', parentId: 'block-section', depth: 1, index: 1 },
     ])
+    expect(view.activeLocation).toEqual({
+      locationId: fixture.locationId,
+      surfaceId: 'flow-surface',
+      blockId: 'block-h1',
+      label: '第一章 开始',
+    })
+    expect(view.navigationLocations.map((entry) => entry.locationId)).toEqual(
+      fixture.project.locations.map((location) => location.id),
+    )
     expect(fixture.project).toEqual(before)
     expect(Object.isFrozen(view)).toBe(true)
+    expect(Object.isFrozen(view.blocks[0])).toBe(true)
+    expect(Object.isFrozen(view.overlayLayers[0])).toBe(true)
+    expect('history' in view).toBe(false)
+    expect(Object.values(view).every((value) => typeof value !== 'function')).toBe(true)
+    expect(() => {
+      (view as { locationId: string }).locationId = 'mutated'
+    }).toThrow()
     expect(view.blocks[0]?.authoringAddress).not.toContain('hitId')
   })
 
@@ -287,6 +332,30 @@ describe('Flow editor read projection', () => {
     expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-paragraph')).toBe(false)
     expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-h1')).toBe(false)
     expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-media')).toBe(false)
+    expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-formula')).toBe(false)
+    expect(view.overlayLayers.find((layer) => layer.selectionId === 'global-banner')).toMatchObject({
+      owner: 'global',
+      ownerKey: 'global',
+      source: 'global',
+      locked: false,
+      scopedVisible: true,
+      effectiveVisible: true,
+    })
+    expect(view.overlayLayers.find((layer) => layer.selectionId === 'surface-shared')).toMatchObject({
+      owner: 'surface',
+      ownerKey: 'surface:flow-surface',
+      locked: false,
+      scopedVisible: true,
+      effectiveVisible: true,
+    })
+    expect(view.overlayLayers.find((layer) => layer.selectionId === 'surface-hidden')).toMatchObject({
+      owner: 'surface',
+      ownerKey: 'surface:flow-surface',
+      locked: true,
+      scopedVisible: true,
+      effectiveVisible: false,
+    })
+    expect(view.blocks.every((block) => block.layerKind === 'document-block')).toBe(true)
     expect(view.blocks.every((block) => isFlowZOrderLayerBlock(block.block as FlowBlock) === false)).toBe(true)
     expect(isFlowDocumentBlockId(fixture.project, 'block-paragraph')).toBe(true)
     expect(getEffectiveCourseLayerOrder({
@@ -311,11 +380,143 @@ describe('Flow editor read projection', () => {
     )
   })
 
+  it('captures exact surface, block, and overlay targets from one immutable session view', () => {
+    const fixture = flowFixture()
+    const view = buildFlowEditorView({
+      project: fixture.project,
+      locationId: fixture.locationId,
+    })
+    const sessionToken = {
+      locationId: fixture.locationId,
+      surfaceType: 'flow' as const,
+      revision: fixture.project.revision,
+      generation: 7,
+    }
+    const surface = captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken,
+      target: { kind: 'surface' },
+    })
+    const block = captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken,
+      target: { kind: 'block', blockId: 'block-paragraph' },
+    })
+    const globalOverlay = captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken,
+      target: { kind: 'overlay', layerItemId: 'global-banner' },
+    })
+    const surfaceOverlay = captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken,
+      target: { kind: 'overlay', layerItemId: 'surface-shared' },
+    })
+
+    expect(surface).toMatchObject({
+      projectId: fixture.project.id,
+      documentRevision: fixture.project.revision,
+      sessionGeneration: 7,
+      surfaceType: 'flow',
+      surfaceId: fixture.surfaceId,
+      locationId: fixture.locationId,
+      owner: 'surface',
+      ownerKey: `surface:${fixture.surfaceId}`,
+      itemId: fixture.surfaceId,
+      authoringAddress: flowSurfaceAuthoringAddress(view),
+    })
+    expect(block).toMatchObject({
+      owner: 'surface',
+      ownerKey: `surface:${fixture.surfaceId}`,
+      itemId: 'block-paragraph',
+      authoringAddress: view.blocks.find((entry) => entry.blockId === 'block-paragraph')?.authoringAddress,
+    })
+    expect(globalOverlay).toMatchObject({
+      owner: 'global',
+      ownerKey: 'global',
+      itemId: 'global-banner',
+      authoringAddress: view.overlayLayers.find((entry) => entry.selectionId === 'global-banner')?.authoringAddress,
+    })
+    expect(surfaceOverlay).toMatchObject({
+      owner: 'surface',
+      ownerKey: `surface:${fixture.surfaceId}`,
+      itemId: 'surface-shared',
+      authoringAddress: view.overlayLayers.find((entry) => entry.selectionId === 'surface-shared')?.authoringAddress,
+    })
+    expect(() => captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken: { ...sessionToken, revision: sessionToken.revision + 1 },
+      target: { kind: 'block', blockId: 'block-paragraph' },
+    })).toThrow(FLOW_SESSIONLESS_ERROR)
+    expect(() => captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken: { ...sessionToken, locationId: 'another-location' },
+      target: { kind: 'surface' },
+    })).toThrow(FLOW_SESSIONLESS_ERROR)
+  })
+
+  it('keeps component blocks on the document outline instead of converting them to LayerItem', () => {
+    const fixture = flowFixture()
+    const surface = fixture.project.surfaces[0]
+    if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
+    surface.blocks = [
+      ...surface.blocks,
+      {
+        id: 'block-component',
+        type: 'component',
+        component: { packageId: 'test-comp', version: '1.0.0' },
+        props: {},
+        staticFallbackAssetId: 'asset-image',
+      },
+    ]
+    const view = buildFlowEditorView({
+      project: fixture.project,
+      locationId: fixture.locationId,
+    })
+    expect(view.blocks.find((block) => block.blockId === 'block-component')).toMatchObject({
+      blockId: 'block-component',
+      locationId: null,
+      navigable: false,
+      layerKind: 'document-block',
+    })
+    expect(view.overlayLayers.some((layer) => layer.selectionId === 'block-component')).toBe(false)
+  })
+
   it('rejects unknown locations and non-Flow locations', () => {
     const fixture = flowFixture()
     expect(() => buildFlowEditorView({
       project: fixture.project,
       locationId: 'missing-location',
     })).toThrow('找不到课程位置：missing-location')
+    expect(() => buildFlowEditorView({
+      project: {
+        ...fixture.project,
+        locations: [
+          ...fixture.project.locations,
+          {
+            id: 'slide-loc',
+            label: '演示页',
+            kind: 'slide-scene',
+            surfaceId: fixture.surfaceId,
+            sceneId: 'scene-1',
+          },
+        ],
+      },
+      locationId: 'slide-loc',
+    })).toThrow('FlowEditorView 只接受 Flow 块位置：slide-loc')
+    expect(() => assertActiveFlowEditorView({
+      ...buildFlowEditorView({
+        project: fixture.project,
+        locationId: fixture.locationId,
+      }),
+      locationId: '',
+      activeBlockId: '',
+      activeLocation: {
+        locationId: '',
+        surfaceId: '',
+        blockId: '',
+        label: '',
+      },
+    })).toThrow(FLOW_SESSIONLESS_ERROR)
   })
 })

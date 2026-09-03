@@ -329,7 +329,7 @@ describe('bundled font asset boundary', () => {
     expect(player).toContain('await ensureBundledFonts()')
     // The exported bootstrap must stay synchronous; the wait lives in the
     // DOMContentLoaded path around it.
-    expect(player).toContain('export function bootstrapPlayer(): PlayerApp | null')
+    expect(player).toContain('export function bootstrapPlayer(): PublishedCourseSession | null')
     expect(player).toContain('bootstrapPlayerAfterFonts')
 
     const renderer = readFileSync(join(repoRoot, 'src/renderer/main.tsx'), 'utf8')

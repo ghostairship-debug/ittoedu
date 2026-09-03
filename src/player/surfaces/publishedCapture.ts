@@ -861,7 +861,7 @@ async function captureElementContent(
   return canvas
 }
 
-export interface PublishedSlideCaptureLayer {
+export interface PublishedSurfaceCaptureLayer {
   readonly element: HTMLElement
   readonly x: number
   readonly y: number
@@ -871,15 +871,21 @@ export interface PublishedSlideCaptureLayer {
   readonly opacity: number
 }
 
-export interface CapturePublishedSlideOptions {
+/** Backward-compatible name retained for Slide callers. */
+export type PublishedSlideCaptureLayer = PublishedSurfaceCaptureLayer
+
+export interface CapturePublishedSurfaceOptions {
   readonly root: HTMLElement
   readonly width: number
   readonly height: number
-  readonly layers: readonly PublishedSlideCaptureLayer[]
+  readonly layers: readonly PublishedSurfaceCaptureLayer[]
   /** Item capture stays transparent and omits the authored page background. */
   readonly transparentBackground?: boolean
   readonly timeoutMs?: number
 }
+
+/** Backward-compatible name retained for Slide callers. */
+export type CapturePublishedSlideOptions = CapturePublishedSurfaceOptions
 
 function exposeCaptureRootForLayout(root: HTMLElement): () => void {
   const visibility = computedStyle(root).visibility
@@ -920,8 +926,8 @@ function exposeCaptureRootForLayout(root: HTMLElement): () => void {
  * Top-level authored transforms are applied once here so item capture can be
  * embedded by PPTX without double rotation or opacity.
  */
-export async function capturePublishedSlidePng(
-  options: CapturePublishedSlideOptions,
+export async function capturePublishedSurfacePng(
+  options: CapturePublishedSurfaceOptions,
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS
   const deadline = new PublishedCaptureDeadline(timeoutMs)
@@ -1010,4 +1016,11 @@ export async function capturePublishedSlidePng(
   } finally {
     restoreCaptureRoot()
   }
+}
+
+/** Slide compatibility wrapper over the generic Published Surface compositor. */
+export function capturePublishedSlidePng(
+  options: CapturePublishedSlideOptions,
+): Promise<string> {
+  return capturePublishedSurfacePng(options)
 }

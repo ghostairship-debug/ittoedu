@@ -3,9 +3,9 @@ import type { CourseProjectDocument, NativeLayerItem, ScopedLayerItem } from '@/
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { addCourseFlowPage, addCourseScene, addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createFormulaNode } from '@/renderer/project/createProject'
+import { createFormulaNode } from '@/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { courseLayerItemToSceneNode } from '@/renderer/store/slideEditorProjection'
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,
@@ -16,6 +16,7 @@ import {
   createPublishedCourseSession,
   type PublishedCourseSession,
 } from '@/player/surfaces/publishedDynamicHosts'
+import { attachPublishedCoursePresenter } from '@/player/publishedCoursePresenter'
 
 const NOW = '2026-08-17T21:00:00.000Z'
 
@@ -171,6 +172,26 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
+  it('rejects an unknown location instead of inventing a destination', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    await expect(session.goToLocation('missing')).rejects.toThrow(
+      /Unknown mixed-course location/,
+    )
+    expect(session.navigator.current?.locationId).toBe(payload.startLocationId)
+    container.remove()
+  })
+
   it('shows global overlay only on the included active location', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({
@@ -239,6 +260,8 @@ describe('published course Mixed navigation', () => {
     const slideRoot = container.querySelector<HTMLElement>('.slide-published-adapter')
     expect(slideRoot?.querySelector('.slide-native-teacher-controller')).not.toBeNull()
     expect(slideRoot?.querySelector(`[data-native-type="teacher-controller"]`)).not.toBeNull()
+    expect(container.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
+    expect(container.querySelector('.lesson-footer')).toBeNull()
     const controller = slideRoot?.querySelector<HTMLElement>(
       `[data-global-layer-item="${controllerId}"]`,
     )
@@ -505,7 +528,7 @@ describe('published course Mixed navigation', () => {
     ))).toBe(true)
 
     const global = project.globalLayerItems.find((entry) => entry.item.layerItemId === 'global-note')
-    const node = global ? courseLayerItemToSceneNode(global.item) : null
+    const node = global ? courseLayerItemToEditorCanvasNode(global.item) : null
     if (!node) throw new Error('expected projected global note')
     const hiddenWrap = container.querySelector<HTMLElement>('[data-global-layer-item="global-note"]')
     expect(hiddenWrap).not.toBeNull()
@@ -527,6 +550,29 @@ describe('published course Mixed navigation', () => {
     expect(response.type).toBe(PLAYER_AUTHORING_MESSAGE_TYPES.ack)
     expect(hiddenWrap?.style.left).toBe('123px')
     expect(hiddenWrap?.style.visibility).toBe('hidden')
+    expect(slot?.inert).toBe(true)
+    expect(container.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
+    expect(container.querySelector('.lesson-footer')).toBeNull()
+    expect(container.querySelector('.lesson-authoring-input-shield')).toBeNull()
+
+    const stale = await session.applyAuthoringCommand({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: 'published-authoring-session',
+      requestId: 'request-stale',
+      revision: 1,
+      context: { sceneId: targetLocation.sceneId, stateId: null },
+      patch: {
+        kind: 'native-node',
+        target: { kind: 'native-node', scope: 'global', nodeId: node.id },
+        node: { ...node, x: 480 },
+      },
+    })
+    expect(stale).toMatchObject({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.error,
+      code: 'stale-revision',
+    })
+    expect(hiddenWrap?.style.left).toBe('123px')
     container.remove()
   })
 
@@ -562,6 +608,36 @@ describe('published course Mixed navigation', () => {
       expect(slot.style.pointerEvents).toBe(active ? 'auto' : 'none')
     }
 
+    container.remove()
+  })
+
+  it('exposes a V2 session presenter, not PlayerApp', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    const presenter = attachPublishedCoursePresenter(container, session, payload)
+    expect(presenter.session).toBe(session)
+    expect(window.__H5_LESSON_PLAYER__).toBe(presenter)
+    expect(presenter).not.toHaveProperty('game')
+    expect(presenter.getCurrentSceneIndex()).toBe(0)
+
+    expect(presenter.goToScene(2)).toBe(true)
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.kind).toBe('flow')
+      expect(presenter.getCurrentSceneIndex()).toBe(2)
+    })
+
+    presenter.destroy()
+    expect(window.__H5_LESSON_PLAYER__).toBeUndefined()
     container.remove()
   })
 })

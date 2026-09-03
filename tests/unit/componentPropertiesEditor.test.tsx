@@ -1,10 +1,16 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentManifestV4 } from '@/shared/componentTypes'
 import type { AssetMeta, ExternalComponentNode } from '@/shared/projectTypes'
 import { ComponentPropertiesEditor } from '@/renderer/ui/ComponentPropertiesEditor'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
+import {
+  FontFamilyPicker,
+  PropertyDraftBoundary,
+  RangeField,
+  TextContentTextarea,
+} from '@/renderer/ui/properties/PropertyControls'
 import {
   selectActiveScene,
   useEditorStore,
@@ -298,5 +304,299 @@ describe('ComponentsTab component presets', () => {
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
+  })
+})
+
+describe('target-bound property drafts', () => {
+  it('rejects same-value stale range pointer and blur terminals without retargeting callbacks', () => {
+    const changeA = vi.fn()
+    const changeB = vi.fn()
+    const staleA = vi.fn()
+    const staleB = vi.fn()
+    const renderRange = (bindingKey: string) => (
+      <PropertyDraftBoundary
+        bindingKey={bindingKey}
+        onStale={bindingKey === 'A' ? staleA : staleB}
+      >
+        <RangeField
+          label="同值范围目标"
+          value={50}
+          min={0}
+          max={100}
+          onChange={bindingKey === 'A' ? changeA : changeB}
+        />
+      </PropertyDraftBoundary>
+    )
+    const view = render(renderRange('A'))
+    const input = screen.getByRole('slider', { name: '同值范围目标' })
+
+    fireEvent.pointerDown(input)
+    fireEvent.change(input, { target: { value: '75' } })
+    view.rerender(renderRange('B'))
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    fireEvent.pointerUp(input)
+    expect(staleB).toHaveBeenCalledTimes(1)
+    expect(input).not.toHaveAttribute('aria-invalid')
+    expect(changeA).not.toHaveBeenCalled()
+    expect(changeB).not.toHaveBeenCalled()
+
+    fireEvent.pointerDown(input)
+    fireEvent.change(input, { target: { value: '80' } })
+    view.rerender(renderRange('A'))
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    fireEvent.blur(input)
+    expect(staleA).toHaveBeenCalledTimes(1)
+    expect(input).not.toHaveAttribute('aria-invalid')
+    expect(changeA).not.toHaveBeenCalled()
+    expect(changeB).not.toHaveBeenCalled()
+  })
+
+  it('rejects clean and dirty stale text terminals without retargeting callbacks', () => {
+    const onBeginA = vi.fn()
+    const onChangeA = vi.fn()
+    const onCommitA = vi.fn()
+    const onCancelA = vi.fn()
+    const onStaleA = vi.fn()
+    const onBeginB = vi.fn()
+    const onChangeB = vi.fn()
+    const onCommitB = vi.fn()
+    const onCancelB = vi.fn()
+    const onStaleB = vi.fn()
+    const renderText = (bindingKey: string, value: string) => (
+      <PropertyDraftBoundary
+        bindingKey={bindingKey}
+        onStale={bindingKey === 'A' ? onStaleA : onStaleB}
+      >
+        <TextContentTextarea
+          label="文字草稿"
+          value={value}
+          onBegin={bindingKey === 'A' ? onBeginA : onBeginB}
+          onChange={bindingKey === 'A' ? onChangeA : onChangeB}
+          onCommit={bindingKey === 'A' ? onCommitA : onCommitB}
+          onCancel={bindingKey === 'A' ? onCancelA : onCancelB}
+        />
+      </PropertyDraftBoundary>
+    )
+    const view = render(renderText('A', 'alpha'))
+    const input = screen.getByLabelText('文字草稿')
+
+    fireEvent.focus(input)
+    expect(onBeginA).toHaveBeenCalledTimes(1)
+    view.rerender(renderText('B', 'bravo'))
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onStaleB).toHaveBeenCalledTimes(1)
+    expect(onCommitA).not.toHaveBeenCalled()
+    expect(onCancelA).not.toHaveBeenCalled()
+    expect(onCommitB).not.toHaveBeenCalled()
+    expect(onCancelB).not.toHaveBeenCalled()
+    expect(input).toHaveValue('bravo')
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'bravo draft' } })
+    expect(onChangeB).toHaveBeenLastCalledWith('bravo draft')
+    view.rerender(renderText('A', 'alpha'))
+    fireEvent.change(input, { target: { value: 'bravo' } })
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+    expect(onStaleA).toHaveBeenCalledTimes(1)
+    expect(onCommitB).not.toHaveBeenCalled()
+    expect(onCommitA).not.toHaveBeenCalled()
+    expect(input).toHaveValue('alpha')
+  })
+
+  it('buffers text IME input and commits the final value once after a composing blur', async () => {
+    const onBegin = vi.fn()
+    const onChange = vi.fn()
+    const onCommit = vi.fn()
+    const onCancel = vi.fn()
+    const onCompositionChange = vi.fn()
+    render(
+      <PropertyDraftBoundary bindingKey="A" onStale={vi.fn()}>
+        <TextContentTextarea
+          label="IME 文字"
+          value=""
+          onBegin={onBegin}
+          onChange={onChange}
+          onCommit={onCommit}
+          onCancel={onCancel}
+          onCompositionChange={onCompositionChange}
+        />
+      </PropertyDraftBoundary>,
+    )
+    const input = screen.getByLabelText('IME 文字')
+    fireEvent.focus(input)
+    fireEvent.compositionStart(input)
+    fireEvent.change(input, { target: { value: '中' } })
+    fireEvent.change(input, { target: { value: '中文' } })
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true, isComposing: true })
+    fireEvent.blur(input)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onCommit).not.toHaveBeenCalled()
+
+    fireEvent.compositionEnd(input, { data: '文' })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenLastCalledWith('中文')
+    expect(onCompositionChange.mock.calls).toEqual([[true], [false]])
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it('commits a text IME draft once when composition ends immediately before blur', async () => {
+    const onChange = vi.fn()
+    const onCommit = vi.fn()
+    const onCompositionChange = vi.fn()
+    render(
+      <PropertyDraftBoundary bindingKey="A" onStale={vi.fn()}>
+        <TextContentTextarea
+          label="IME 结束后失焦"
+          value=""
+          onBegin={vi.fn()}
+          onChange={onChange}
+          onCommit={onCommit}
+          onCancel={vi.fn()}
+          onCompositionChange={onCompositionChange}
+        />
+      </PropertyDraftBoundary>,
+    )
+    const input = screen.getByLabelText('IME 结束后失焦')
+    fireEvent.focus(input)
+    fireEvent.compositionStart(input)
+    fireEvent.change(input, { target: { value: '中文' } })
+    fireEvent.compositionEnd(input, { data: '文' })
+    fireEvent.blur(input)
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenLastCalledWith('中文')
+    expect(onCompositionChange.mock.calls).toEqual([[true], [false]])
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears a same-value stale text session before the next target begins editing', () => {
+    const beginA = vi.fn()
+    const beginB = vi.fn()
+    const staleB = vi.fn()
+    const renderText = (bindingKey: string) => (
+      <PropertyDraftBoundary
+        bindingKey={bindingKey}
+        onStale={bindingKey === 'B' ? staleB : vi.fn()}
+      >
+        <TextContentTextarea
+          label="同值文字目标"
+          value="same"
+          onBegin={bindingKey === 'A' ? beginA : beginB}
+          onChange={vi.fn()}
+          onCommit={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </PropertyDraftBoundary>
+    )
+    const view = render(renderText('A'))
+    const input = screen.getByLabelText('同值文字目标')
+    fireEvent.focus(input)
+    view.rerender(renderText('B'))
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+
+    fireEvent.blur(input)
+    expect(staleB).toHaveBeenCalledTimes(1)
+    expect(input).not.toHaveAttribute('aria-invalid')
+    fireEvent.focus(input)
+    expect(beginA).toHaveBeenCalledTimes(1)
+    expect(beginB).toHaveBeenCalledTimes(1)
+  })
+
+  it('terminates live text edits exactly once on Escape and Ctrl+Enter', () => {
+    const onCommit = vi.fn()
+    const onCancel = vi.fn()
+    render(
+      <PropertyDraftBoundary bindingKey="A" onStale={vi.fn()}>
+        <TextContentTextarea
+          label="文字终止键"
+          value="alpha"
+          onBegin={vi.fn()}
+          onChange={vi.fn()}
+          onCommit={onCommit}
+          onCancel={onCancel}
+        />
+      </PropertyDraftBoundary>,
+    )
+    const input = screen.getByLabelText('文字终止键')
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'cancel me' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    fireEvent.blur(input)
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onCommit).not.toHaveBeenCalled()
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'commit me' } })
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+    fireEvent.blur(input)
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not auto-commit a typed common font and rejects a stale font blur', () => {
+    const commitA = vi.fn()
+    const commitB = vi.fn()
+    const staleA = vi.fn()
+    const staleB = vi.fn()
+    const renderFont = (bindingKey: string, value: string) => (
+      <PropertyDraftBoundary
+        bindingKey={bindingKey}
+        onStale={bindingKey === 'A' ? staleA : staleB}
+      >
+        <FontFamilyPicker
+          value={value}
+          onCommit={bindingKey === 'A' ? commitA : commitB}
+        />
+      </PropertyDraftBoundary>
+    )
+    const view = render(renderFont('A', 'Arial'))
+    const input = screen.getByRole('combobox', { name: '字体' })
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'Verdana' } })
+    expect(commitA).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(commitA).not.toHaveBeenCalled()
+    expect(input).toHaveValue('Arial')
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'Custom A' } })
+    view.rerender(renderFont('B', 'SimSun'))
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    fireEvent.blur(input)
+    expect(staleB).toHaveBeenCalledTimes(1)
+    expect(commitA).not.toHaveBeenCalled()
+    expect(commitB).not.toHaveBeenCalled()
+    expect(input).toHaveValue('SimSun')
+
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'KaiTi' } })
+    fireEvent.blur(input)
+    expect(commitB).toHaveBeenCalledTimes(1)
+    expect(commitB).toHaveBeenLastCalledWith('KaiTi')
+  })
+
+  it('commits only the final font IME value after composition ends', () => {
+    const onCommit = vi.fn()
+    render(
+      <PropertyDraftBoundary bindingKey="A" onStale={vi.fn()}>
+        <FontFamilyPicker value="Arial" onCommit={onCommit} />
+      </PropertyDraftBoundary>,
+    )
+    const input = screen.getByRole('combobox', { name: '字体' })
+    fireEvent.focus(input)
+    fireEvent.compositionStart(input)
+    fireEvent.change(input, { target: { value: '思' } })
+    fireEvent.change(input, { target: { value: '思源黑体' } })
+    fireEvent.blur(input)
+    expect(onCommit).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(input, { data: '体' })
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenLastCalledWith('思源黑体')
   })
 })

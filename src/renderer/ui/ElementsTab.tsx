@@ -13,8 +13,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ShapeType } from '../../shared/projectTypes'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
-import { createShapeNode } from '../project/createProject'
-import { useEditorStore } from '../store/editorStore'
+import { createShapeNode } from '../project/nativeNodeFactories'
+import { useEditorStore, selectMediaAssets, selectAudioSettings } from '../store/editorStore'
 import { MediaTab } from './MediaTab'
 
 interface ElementsTabProps {
@@ -200,7 +200,8 @@ export function ElementsTab({
   const addTextNode = useEditorStore((state) => state.addTextNode)
   const addFormulaNode = useEditorStore((state) => state.addFormulaNode)
   const addShapeNode = useEditorStore((state) => state.addShapeNode)
-  const project = useEditorStore((state) => state.project)
+  const mediaAssets = useEditorStore(selectMediaAssets)
+  const audioSettings = useEditorStore(selectAudioSettings)
   const editorMode = useEditorStore((state) => state.editorMode)
   const editingScope = useEditorStore((state) => state.editingScope)
   const spatialInsertionScope = useEditorStore<SpatialInsertionScope | null>((state) => (
@@ -267,10 +268,10 @@ export function ElementsTab({
     : activeCategory === 'common'
   const shapeGroups = visibleShapeGroups
   const assetSearchMatches = searching && (
-    Object.values(project.assets).some((asset) =>
+    Object.values(mediaAssets).some((asset) =>
       matchesSearch(`${asset.filename} ${asset.mimeType} ${asset.kind}`),
     ) ||
-    Object.values(project.media.audio.sounds).some((sound) =>
+    Object.values(audioSettings.sounds).some((sound) =>
       matchesSearch(`${sound.name} 音频 声音`),
     )
   )

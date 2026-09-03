@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { createProject } from '@/renderer/project/createProject'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
-  createProjectArchiveAsync,
-  openProjectArchiveAsync,
-  type ProjectArchiveData,
-} from '@/renderer/project/projectArchive'
-import { saveProjectAsync } from '@/renderer/project/saveProject'
+  createCourseProjectArchiveAsync,
+  openCourseProjectArchiveAsync,
+  type CourseProjectArchiveData,
+} from '@/renderer/project/courseProjectArchive'
 
-function makeLargeArchiveData(byteLength = 12 * 1024 * 1024): ProjectArchiveData {
-  const project = createProject({ includeDefaultController: false, controls: 'none' })
+function makeLargeArchiveData(byteLength = 12 * 1024 * 1024): CourseProjectArchiveData {
+  const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
   const bytes = new Uint8Array(byteLength)
   project.assets.largeVideo = {
     id: 'largeVideo',
@@ -43,36 +42,25 @@ async function recordTimerBefore<T>(operation: Promise<T>): Promise<T> {
   return result
 }
 
-describe('asynchronous project archive', () => {
+describe('asynchronous Course Project V9 archive', () => {
   it('压缩和解压大素材时保持事件循环可响应', async () => {
     const source = makeLargeArchiveData()
-    const bytes = await recordTimerBefore(createProjectArchiveAsync(source, {
+    const bytes = await recordTimerBefore(createCourseProjectArchiveAsync(source, {
       mtime: '2026-07-22T00:00:00.000Z',
     }))
-    const restored = await recordTimerBefore(openProjectArchiveAsync(bytes))
+    const restored = await recordTimerBefore(openCourseProjectArchiveAsync(bytes))
 
     expect(restored.project.id).toBe(source.project.id)
+    expect(restored.project.schemaVersion).toBe(9)
     expect(restored.assetFiles.largeVideo?.byteLength).toBe(12 * 1024 * 1024)
   }, 30_000)
 
   it('可取消过期的后台压缩', async () => {
     const controller = new AbortController()
-    const operation = createProjectArchiveAsync(makeLargeArchiveData(), {
+    const operation = createCourseProjectArchiveAsync(makeLargeArchiveData(), {
       signal: controller.signal,
     })
     controller.abort()
     await expect(operation).rejects.toMatchObject({ name: 'AbortError' })
-  })
-
-  it('异步保存更新时间戳但不修改输入工程', async () => {
-    const source = makeLargeArchiveData(1024)
-    const originalUpdatedAt = source.project.updatedAt
-    const saved = await saveProjectAsync(source, '2026-07-22T01:02:03.000Z')
-
-    expect(source.project.updatedAt).toBe(originalUpdatedAt)
-    expect(saved.project.updatedAt).toBe('2026-07-22T01:02:03.000Z')
-    expect((await openProjectArchiveAsync(saved.bytes)).project.updatedAt).toBe(
-      '2026-07-22T01:02:03.000Z',
-    )
   })
 })

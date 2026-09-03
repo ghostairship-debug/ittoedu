@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
@@ -10,6 +10,15 @@ import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import {
+  PLAYER_V2_ENTRY_CORRUPT_ERROR,
+  PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,
+  bootstrapPlayer,
+  parsePublishedCourseV2Entry,
+  startPlayer,
+} from '@/player/index'
+import { CoursePlayer } from '@/player/surfaces/CoursePlayer'
+import { PUBLISHED_LESSON_FORMAT, PUBLISHED_LESSON_VERSION } from '@/shared/publishedLessonTypes'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 
@@ -194,6 +203,141 @@ describe('Published Course V2 protocol', () => {
     expect(published).not.toHaveProperty('createdAt')
     expect(published).not.toHaveProperty('updatedAt')
     expect(published).not.toHaveProperty('componentPackages')
+  })
+
+  it('owns the historical Published asset-key and layer-item ID boundaries directly', () => {
+    const published = publish(flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ]))
+    const assetIdAtLimit = 'a'.repeat(240)
+    published.assets[assetIdAtLimit] = { mimeType: 'image/png', url: './asset.png' }
+    expect(publishedCourseV2Schema.safeParse(published).success).toBe(true)
+
+    const whitespaceAssetId = structuredClone(published)
+    whitespaceAssetId.assets[' bad-id '] = { mimeType: 'image/png', url: './bad.png' }
+    expect(publishedCourseV2Schema.safeParse(whitespaceAssetId).success).toBe(false)
+
+    const longAssetId = structuredClone(published)
+    longAssetId.assets['a'.repeat(241)] = { mimeType: 'image/png', url: './bad.png' }
+    expect(publishedCourseV2Schema.safeParse(longAssetId).success).toBe(false)
+
+    const layerIdAtLimit = 'l'.repeat(200)
+    const layerProject = flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ])
+    layerProject.globalLayerItems = [{
+      item: nativeText(layerIdAtLimit, 10, '全局层'),
+      visibility: { mode: 'all', locationIds: [] },
+    }]
+    const layerPayload = publish(layerProject)
+    expect(publishedCourseV2Schema.safeParse(layerPayload).success).toBe(true)
+    layerPayload.globalLayerItems[0]!.item.layerItemId = 'l'.repeat(201)
+    expect(publishedCourseV2Schema.safeParse(layerPayload).success).toBe(false)
+  })
+
+  it('validates Slide presentation semantics without reconstructing an authoring scene', () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('expected slide surface')
+    const scene = surface.scenes[0]!
+    scene.layerItems = [nativeText('scene-item', 1, '正文')]
+    scene.presentation = {
+      initialStateId: 'state-1',
+      states: [{ id: 'state-1', name: '状态 1', layerItemOverrides: {} }],
+    }
+    const published = publish(project)
+
+    const missingOverrideTarget = structuredClone(published)
+    const missingScene = missingOverrideTarget.surfaces[0]
+    if (missingScene?.type !== 'slide') throw new Error('expected slide surface')
+    missingScene.scenes[0]!.presentation!.states[0]!.layerItemOverrides.missing = { visible: false }
+    expect(publishedCourseV2Schema.safeParse(missingOverrideTarget).success).toBe(false)
+
+    const invalidOrder = structuredClone(published)
+    const orderScene = invalidOrder.surfaces[0]
+    if (orderScene?.type !== 'slide') throw new Error('expected slide surface')
+    orderScene.scenes[0]!.presentation!.states[0]!.layerItemOrder = ['scene-item', 'scene-item']
+    expect(publishedCourseV2Schema.safeParse(invalidOrder).success).toBe(false)
+
+    const shadowedLayerField = structuredClone(published)
+    const shadowScene = shadowedLayerField.surfaces[0]
+    if (shadowScene?.type !== 'slide') throw new Error('expected slide surface')
+    shadowScene.scenes[0]!.presentation!.states[0]!.layerItemOverrides['scene-item'] = {
+      nativeData: { x: 10 },
+    }
+    expect(publishedCourseV2Schema.safeParse(shadowedLayerField).success).toBe(false)
+
+    const duplicateScene = structuredClone(published)
+    const duplicateSurface = duplicateScene.surfaces[0]
+    if (duplicateSurface?.type !== 'slide') throw new Error('expected slide surface')
+    duplicateSurface.scenes.push(structuredClone(duplicateSurface.scenes[0]!))
+    expect(publishedCourseV2Schema.safeParse(duplicateScene).success).toBe(false)
+  })
+
+  it('validates Flow and Spatial local invariants directly on Published surfaces', () => {
+    const flow = publish(flowProject([{
+      id: 'section',
+      type: 'section',
+      title: '章节',
+      collapsedByDefault: false,
+      blocks: [{ id: 'paragraph', type: 'paragraph', text: '正文' }],
+    }]))
+    const duplicateBlock = structuredClone(flow)
+    const duplicateFlow = duplicateBlock.surfaces[0]
+    if (duplicateFlow?.type !== 'flow') throw new Error('expected flow surface')
+    const section = duplicateFlow.blocks[0]
+    if (section?.type !== 'section') throw new Error('expected section')
+    section.blocks[0]!.id = 'section'
+    expect(publishedCourseV2Schema.safeParse(duplicateBlock).success).toBe(false)
+
+    const invalidLayout = structuredClone(flow)
+    const layoutFlow = invalidLayout.surfaces[0]
+    if (layoutFlow?.type !== 'flow') throw new Error('expected flow surface')
+    layoutFlow.layout.wideContentWidth = layoutFlow.layout.readingWidth - 1
+    expect(publishedCourseV2Schema.safeParse(invalidLayout).success).toBe(false)
+
+    const spatial = publish(spatialProject([nativeText('world-item', 1, '空间项')]))
+    const duplicateFrame = structuredClone(spatial)
+    const frameSurface = duplicateFrame.surfaces[0]
+    if (frameSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    frameSurface.camera.frames.push(structuredClone(frameSurface.camera.frames[0]!))
+    expect(publishedCourseV2Schema.safeParse(duplicateFrame).success).toBe(false)
+
+    const danglingZoom = structuredClone(spatial)
+    const zoomSurface = danglingZoom.surfaces[0]
+    if (zoomSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    zoomSurface.semanticZoom = [{
+      id: 'zoom-1',
+      layerItemIds: ['missing-item'],
+      minZoom: 0.5,
+      maxZoom: 1,
+      visible: true,
+    }]
+    expect(publishedCourseV2Schema.safeParse(danglingZoom).success).toBe(false)
+  })
+
+  it('round-trips Unicode titles and package-relative asset URLs through the V2 entry parser', () => {
+    const published = publish(flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '中文课件 🎓' },
+    ]))
+    const packaged = {
+      ...published,
+      title: '中文课件 🎓',
+      assets: {
+        ...published.assets,
+        cover: {
+          mimeType: 'image/png',
+          url: './assets/000-cover.png',
+        },
+      },
+    }
+    expect(parsePublishedCourseV2Entry(JSON.stringify(packaged))).toEqual(
+      publishedCourseV2Schema.parse(packaged),
+    )
   })
 
   it('accepts an optional plane only on global entries and rejects an Underlay controller', () => {
@@ -382,5 +526,106 @@ describe('Published Course V2 protocol', () => {
     if (parsedSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
     expect(parsedSurface.world.paths).toEqual([])
     expect(parsedSurface.world.relations).toEqual([])
+  })
+})
+
+describe('Player bundle entry is Published V2 only', () => {
+  afterEach(async () => {
+    delete window.__H5_COURSE_PAYLOAD__
+    delete window.__H5_LESSON_PAYLOAD__
+    delete window.__H5_LESSON_PAYLOAD_FALLBACK__
+    delete window.__H5_LESSON_PAYLOAD_URL__
+    window.__H5_LESSON_PLAYER__?.destroy()
+    await bootstrapPlayer()?.destroy()
+    document.getElementById('course-root')?.remove()
+    document.getElementById('lesson-root')?.remove()
+  })
+
+  it('strict-parses Published V2 and mounts CoursePlayer', async () => {
+    const published = publish(flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ]))
+    const root = document.createElement('div')
+    root.id = 'course-root'
+    Object.defineProperties(root, {
+      clientWidth: { configurable: true, value: 1_280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.append(root)
+
+    const session = startPlayer(published, root)
+    expect(session.player).toBeInstanceOf(CoursePlayer)
+    expect(parsePublishedCourseV2Entry(JSON.stringify(published)).courseId).toBe(published.courseId)
+
+    await vi.waitFor(() => {
+      expect(window.__H5_LESSON_PLAYER__?.session).toBe(session)
+    })
+    expect(window.__H5_LESSON_PLAYER__).not.toHaveProperty('game')
+    expect(session.listCatalog().map((entry) => entry.kind)).toEqual(['flow'])
+  })
+
+  it('fail-louds Legacy ExportPayload, PublishedLesson, encoded payload, and corrupt V2', () => {
+    expect(() => parsePublishedCourseV2Entry({
+      project: { schemaVersion: 8, scenes: [] },
+      assets: {},
+      components: {},
+    })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+
+    expect(() => parsePublishedCourseV2Entry({
+      format: PUBLISHED_LESSON_FORMAT,
+      formatVersion: PUBLISHED_LESSON_VERSION,
+    })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+
+    expect(() => parsePublishedCourseV2Entry('AAAA')).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+    expect(() => startPlayer({
+      project: { schemaVersion: 8, scenes: [{ id: 'scene-1' }] },
+      assets: {},
+      components: {},
+    })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+
+    const published = publish(flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ]))
+    expect(() => parsePublishedCourseV2Entry({
+      ...published,
+      locations: [],
+    })).toThrow(PLAYER_V2_ENTRY_CORRUPT_ERROR)
+    expect(() => parsePublishedCourseV2Entry('{')).toThrow(PLAYER_V2_ENTRY_CORRUPT_ERROR)
+  })
+
+  it('shows an actionable error for leftover __H5_LESSON_PAYLOAD__ and does not mount a player', () => {
+    const root = document.createElement('div')
+    root.id = 'lesson-root'
+    document.body.append(root)
+    window.__H5_LESSON_PAYLOAD__ = {
+      project: { schemaVersion: 8, scenes: [] },
+      assets: {},
+      components: {},
+    }
+
+    expect(bootstrapPlayer()).toBeNull()
+    expect(root.textContent).toContain(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
+    expect(window.__H5_LESSON_PLAYER__).toBeUndefined()
+    expect(root.querySelector('.lesson-player-error')).not.toBeNull()
+  })
+
+  it('bootstraps __H5_COURSE_PAYLOAD__ onto #course-root', async () => {
+    const published = publish(flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ]))
+    const root = document.createElement('div')
+    root.id = 'course-root'
+    Object.defineProperties(root, {
+      clientWidth: { configurable: true, value: 1_280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.append(root)
+    window.__H5_COURSE_PAYLOAD__ = published
+
+    const session = bootstrapPlayer()
+    expect(session?.player).toBeInstanceOf(CoursePlayer)
+    await vi.waitFor(() => {
+      expect(window.__H5_LESSON_PLAYER__?.session).toBe(session)
+    })
   })
 })

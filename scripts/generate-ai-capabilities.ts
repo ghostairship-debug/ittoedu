@@ -1289,7 +1289,7 @@ export async function generateAiCapabilityArtifacts(
         undeclaredStaticOrigin: 'blocking-error',
         unresolvedOrigin: 'warning',
         limitations: 'no-wrapper-alias-or-general-javascript-data-flow-analysis',
-        source: 'src/renderer/export/course/buildCoursePackages.ts',
+        source: 'src/renderer/export/course/coursePackagePreflight.ts',
       },
       sourceOfTruth: 'src/shared/courseProjectValidationDiagnostics.ts',
       contract: 'docs/contracts/COURSE_PROJECT_VALIDATION_REPORT_V1.md',

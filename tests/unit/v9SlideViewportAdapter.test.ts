@@ -164,6 +164,53 @@ function nativeVideo(layerItemId: string, order: number, assetId: string): Nativ
   }
 }
 
+function nativeFormula(layerItemId: string): NativeLayerItem {
+  return {
+    ...layerBase(layerItemId, 7, {
+      mode: 'absolute', x: 830, y: 80, width: 180, height: 80,
+    }),
+    kind: 'native',
+    content: {
+      nativeType: 'formula',
+      data: {
+        formulaId: 'formula-hit',
+        accessibleText: 'x',
+        ast: { type: 'token', value: 'x' },
+        style: { fontSize: 32, color: '#172033', align: 'center' },
+      },
+    },
+  }
+}
+
+function thinRotatedLine(layerItemId: string): NativeLayerItem {
+  return {
+    ...layerBase(
+      layerItemId,
+      8,
+      { mode: 'absolute', x: 830, y: 250, width: 200, height: 1 },
+      { rotation: 27 },
+    ),
+    kind: 'native',
+    content: {
+      nativeType: 'shape',
+      data: {
+        shapeType: 'line',
+        style: {
+          fillColor: '#000000',
+          fillOpacity: 0,
+          borderColor: '#172033',
+          borderOpacity: 1,
+          borderWidth: 1,
+          lineStyle: 'solid',
+          cornerRadius: 0,
+          startArrow: 'none',
+          endArrow: 'none',
+        },
+      },
+    },
+  }
+}
+
 function componentItem(): ComponentLayerItem {
   return {
     ...layerBase('slide-component', 5, { mode: 'absolute', x: 80, y: 400, width: 200, height: 160 }),
@@ -332,6 +379,20 @@ function v9ViewportFixture(): CourseProjectDocument {
   })
 }
 
+function storeAuthoringPorts() {
+  return {
+    getBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
+    commandPort: {
+      run: (run: Parameters<ReturnType<typeof useEditorStore.getState>['runSlideCandidateCommand']>[0]) =>
+        useEditorStore.getState().runSlideCandidateCommand(run),
+    },
+  }
+}
+
+function createController() {
+  return createSlideWorkspaceAuthoringController(storeAuthoringPorts())
+}
+
 function injectCandidate() {
   const backend = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
@@ -357,37 +418,55 @@ afterEach(() => {
 })
 
 describe('V9 Slide viewport adapter', () => {
+  it('keeps explicitly injected controllers isolated', () => {
+    const first = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
+    const second = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
+    const makeController = (backend: typeof first) => createSlideWorkspaceAuthoringController({
+      getBackend: () => backend,
+      commandPort: { run: (command) => command(backend) },
+    })
+    const firstController = makeController(first)
+    const secondController = makeController(second)
+
+    firstController.selectFromLayerIds(['slide-title'], VIEW)
+
+    expect(first.getSession().selection.selectionIds).toEqual(['slide-title'])
+    expect(second.getSession().selection.selectionIds).toEqual([])
+    expect(secondController.currentTargets()).toEqual([])
+  })
+
   it('defaults the Workspace authoring path to the V9 slide candidate', () => {
-    const controller = createSlideWorkspaceAuthoringController()
-    expect(resolveSlideWorkspaceAuthoringKind()).toBe('slide-authoring')
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
+    const controller = createController()
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
+    expect(resolveSlideWorkspaceAuthoringKind(backend)).toBe('slide-authoring')
+    expect(backend?.kind).toBe('slide-authoring')
     const down = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const move = controller.pointerMove({ x: 220, y: 160 }, VIEW)
     const up = controller.pointerUp({ x: 220, y: 160 }, VIEW)
     expect(down.kind).toBe('slide-authoring')
     expect(move.kind).toBe('slide-authoring')
     expect(up.kind).toBe('slide-authoring')
-    expect(down).not.toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
+    expect(down).not.toEqual({ kind: 'unavailable', reason: SLIDE_BACKEND_NOT_CANDIDATE })
   })
 
-  it('returns the V8 Workspace path when no slide backend is available', () => {
+  it('returns unavailable when no slide backend is injected', () => {
     useEditorStore.setState({ slideBackend: undefined as any })
-    const controller = createSlideWorkspaceAuthoringController()
-    expect(resolveSlideWorkspaceAuthoringKind()).toBe('v8')
+    const controller = createController()
+    expect(resolveSlideWorkspaceAuthoringKind(null)).toBe('unavailable')
     expect(selectSlideAuthoringBackend(useEditorStore.getState())).toBeNull()
     const down = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const move = controller.pointerMove({ x: 220, y: 160 }, VIEW)
     const up = controller.pointerUp({ x: 220, y: 160 }, VIEW)
-    expect(down).toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
-    expect(move).toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
-    expect(up).toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
+    expect(down).toEqual({ kind: 'unavailable', reason: SLIDE_BACKEND_NOT_CANDIDATE })
+    expect(move).toEqual({ kind: 'unavailable', reason: SLIDE_BACKEND_NOT_CANDIDATE })
+    expect(up).toEqual({ kind: 'unavailable', reason: SLIDE_BACKEND_NOT_CANDIDATE })
     expect(down).not.toMatchObject({ kind: 'slide-authoring' })
     expect('command' in down ? down.command?.ok : false).toBe(false)
   })
 
   it('maps single, additive, marquee and layer selection to the same SlideAuthoringTarget', () => {
     injectCandidate()
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
     const canvas = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     if (canvas.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(canvas.command?.ok).toBe(true)
@@ -435,7 +514,7 @@ describe('V9 Slide viewport adapter', () => {
 
   it('keeps object, selection box, rotate handle and eight handles on one viewport transform', () => {
     injectCandidate()
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
     controller.selectFromLayerIds(['slide-title'], VIEW)
     const overlay = controller.overlayGeometry(VIEW)
     const westWorld = stageResizeHandleWorldPoint(
@@ -465,7 +544,7 @@ describe('V9 Slide viewport adapter', () => {
 
   it('previews west/north resize on pointermove and commits transformSlideNativeLayers once on pointerup', () => {
     injectCandidate()
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
     controller.selectFromLayerIds(['slide-title'], VIEW)
     const west = stageResizeHandleWorldPoint(
       { x: 120, y: 120, width: 400, height: 80 },
@@ -567,7 +646,7 @@ describe('V9 Slide viewport adapter', () => {
     expect(hitTestV9SlideLayerItems(adapted, { x: 120, y: 460 })?.layerItemId).toBe('slide-component')
     expect(hitTestV9SlideLayerItems(adapted, { x: 1000, y: 480 })?.layerItemId).toBe('slide-runtime')
 
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
     expect(controller.pointerDown({ x: 640, y: 140 }, VIEW)).toMatchObject({
       kind: 'slide-authoring',
       hit: { layerItemId: 'slide-image', nativeType: 'image' },
@@ -593,9 +672,31 @@ describe('V9 Slide viewport adapter', () => {
     expect(editorPhaserPointerToWorld({ worldX: 12.5, worldY: -3 })).toEqual({ x: 12.5, y: -3 })
   })
 
+  it('keeps formula, rotated thin Shape, and surface-owner hits in the V9 geometry adapter', () => {
+    const backend = injectCandidate()
+    const document = backend.getSession().history.present
+    const surface = document.surfaces.find((candidate) => candidate.type === 'slide')
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    const surfaceItem = surface.surfaceLayerItems[0]!.item
+    const formula = adaptV9SlideLayerItemHit(nativeFormula('formula-hit'), true, 'scene')
+    const line = adaptV9SlideLayerItemHit(thinRotatedLine('thin-line-hit'), true, 'scene')
+    const shared = adaptV9SlideLayerItemHit(surfaceItem, true, 'surface')
+
+    expect(formula).toMatchObject({ nativeType: 'formula', hittable: true })
+    expect(line).toMatchObject({ nativeType: 'shape', hittable: true })
+    expect(line.bounds).toMatchObject({ height: 1, rotation: 27 })
+    expect(shared).toMatchObject({ layerItemId: 'surface-shared', hittable: true })
+    expect(hitTestV9SlideLayerItems([formula], { x: 920, y: 120 })?.layerItemId)
+      .toBe('formula-hit')
+    expect(hitTestV9SlideLayerItems([line], { x: 930, y: 250.5 })?.layerItemId)
+      .toBe('thin-line-hit')
+    expect(hitTestV9SlideLayerItems([shared], { x: 170, y: 230 })?.layerItemId)
+      .toBe('surface-shared')
+  })
+
   it('lets locked items be selected but rejects transform writes', () => {
     injectCandidate()
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
     const selected = controller.pointerDown({ x: 200, y: 250 }, VIEW)
     if (selected.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(selected.command?.ok).toBe(true)
@@ -621,7 +722,7 @@ describe('V9 Slide viewport adapter', () => {
 
   it('paints pointermove preview onto SceneNodes without committing the native frame', () => {
     injectCandidate()
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
     controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const moved = controller.pointerMove({ x: 260, y: 190 }, VIEW)
     if (moved.kind !== 'slide-authoring') throw new Error('expected V9')
@@ -640,7 +741,7 @@ describe('V9 Slide viewport adapter', () => {
 
   it('transforms global Native layers on global scope without touching scene layerItems and refuses teacher-controller', () => {
     const backend = injectCandidate()
-    const controller = createSlideWorkspaceAuthoringController()
+    const controller = createController()
 
     // Switch to global scope
     const scopeResult = backend.setScope('global')

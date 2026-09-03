@@ -1,6 +1,7 @@
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
 import type { MixedPrintEntry, MixedPrintPlan } from '../../../shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
+import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import {
   flowTableCellText,
   walkFlowBlocks,
@@ -71,6 +72,7 @@ export type FlowPrintNode =
 export interface FlowPrintPlan {
   readonly surfaceId: string
   readonly title: string
+  readonly backgroundColor: string
   readonly pageSize: FlowPrintPageSize
   readonly orientation: FlowPrintOrientation
   readonly nodes: readonly FlowPrintNode[]
@@ -97,6 +99,7 @@ export function buildFlowPrintPlan(
   return {
     surfaceId: surface.id,
     title: surface.title,
+    backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
     pageSize: options.pageSize ?? 'A4',
     orientation: options.orientation ?? 'portrait',
     nodes,
@@ -137,13 +140,18 @@ export function renderFlowPrintBodyHtml(plan: FlowPrintPlan): string {
 
 export function renderFlowPrintHtml(plan: FlowPrintPlan): string {
   const body = renderFlowPrintBodyHtml(plan)
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(plan.title)}</title></head><body class="flow-print-document" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${body}</body></html>`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(plan.title)}</title><style>html,body{min-height:100%;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body class="flow-print-document" style="background:${escapeHtml(plan.backgroundColor)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${body}</body></html>`
 }
 
 export function flowPrintPlanHasRuntimeToc(plan: FlowPrintPlan): boolean {
   const includesRuntimeToc: boolean = plan.includesRuntimeToc
   return includesRuntimeToc
     || plan.nodes.some((node) => 'text' in node && typeof node.text === 'string' && node.text.includes('flow-runtime-toc'))
+}
+
+export function flowPrintOmittedOverlayMessage(plan: FlowPrintPlan): string | undefined {
+  if (plan.omittedFloatingLayerCount <= 0) return undefined
+  return `Flow 表面“${plan.title}”的 ${plan.omittedFloatingLayerCount} 个浮层不进入语义分页。`
 }
 
 function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {

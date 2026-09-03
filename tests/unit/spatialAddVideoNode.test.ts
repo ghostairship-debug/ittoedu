@@ -48,8 +48,8 @@ describe('Spatial addVideoNode with real session and asset', () => {
     expect(videoLayers).toHaveLength(1)
     expect(videoLayers[0]!.kind === 'native' && videoLayers[0]!.content.nativeType === 'video' && videoLayers[0]!.content.data.assetId).toBe('asset-q6-video')
 
-    expect(state.slideCandidateSidecar).toBeDefined()
-    expect([...(state.slideCandidateSidecar!.files['asset-q6-video'] ?? [])]).toEqual([0, 0, 0, 1])
+    expect(state.courseAssetSidecar).toBeDefined()
+    expect([...(state.courseAssetSidecar!.files['asset-q6-video'] ?? [])]).toEqual([0, 0, 0, 1])
 
     expect(present.revision).toBe(beforeRevision + 1)
   })
@@ -104,8 +104,8 @@ describe('Spatial addVideoNode with real session and asset', () => {
     expect(present.assets['asset-q6-video-1']).toBeDefined()
     expect(present.assets['asset-q6-video-2']).toBeDefined()
 
-    expect([...(state.slideCandidateSidecar!.files['asset-q6-video-1'] ?? [])]).toEqual([1, 1, 1, 1])
-    expect([...(state.slideCandidateSidecar!.files['asset-q6-video-2'] ?? [])]).toEqual([2, 2, 2, 2])
+    expect([...(state.courseAssetSidecar!.files['asset-q6-video-1'] ?? [])]).toEqual([1, 1, 1, 1])
+    expect([...(state.courseAssetSidecar!.files['asset-q6-video-2'] ?? [])]).toEqual([2, 2, 2, 2])
 
     expect(present.revision).toBe(revisionAfterFirst + 1)
   })

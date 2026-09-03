@@ -5,8 +5,21 @@ import {
   addCourseSlidePage,
 } from '@/renderer/course/courseLocationCommands'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { mountPublishedCourseTryRun } from '@/renderer/ui/coursePlayerTryRun'
+import {
+  mountPublishedCourseAuthoring,
+  mountPublishedCourseTryRun,
+} from '@/renderer/ui/coursePlayerTryRun'
+import {
+  nativeRenderInputFromV9Item,
+} from '@/player/surfaces/slide/publishedNativeRendering'
+import { SlidePublishedAdapter } from '@/player/surfaces/slide/SlidePublishedAdapter'
+import {
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+} from '@/shared/playerAuthoringProtocol'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import {
   createPublishedCourseSession,
   type PublishedCourseSession,
@@ -884,5 +897,214 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
     expect(diagnostics.join('\n')).toContain('create失败')
     expect(diagnostics.join('\n')).toContain('lifecycle失败')
     frame.remove()
+  })
+})
+
+describe('Published authoring complete snapshot from V9 NativeRenderInput', () => {
+  it('ACKs native-node, background and order patches from the slide-native fixture', async () => {
+    const fixture = listCourseProjectV9Fixtures().find((entry) => entry.id === 'slide-native')
+    if (!fixture) throw new Error('missing slide-native fixture')
+    const location = fixture.data.project.locations.find((candidate) => (
+      candidate.kind === 'slide-scene'
+    ))
+    if (!location || location.kind !== 'slide-scene') {
+      throw new Error('expected Slide location')
+    }
+    const { frame, container } = mountDocument()
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 1280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    const session = await mountPublishedCourseAuthoring({
+      container,
+      project: fixture.data.project,
+      assetFiles: fixture.data.assetFiles,
+      components: {},
+      locationId: location.id,
+      sessionId: 'v9-complete-snapshot',
+      scope: 'scene',
+      stateId: null,
+    })
+    sessions.push(session)
+
+    const view = buildSlideEditorView({
+      project: fixture.data.project,
+      locationId: location.id,
+      stateId: null,
+    })
+    expect(view.sceneId).toBe(location.sceneId)
+    const localNodes = view.layers.flatMap((layer) => {
+      if (layer.source === 'global' || layer.item.kind === 'runtime') return []
+      if (layer.item.kind !== 'native') return []
+      return [nativeRenderInputFromV9Item(layer.item as NativeLayerItem)]
+    })
+    let revision = 0
+    for (const node of localNodes) {
+      revision += 1
+      await expect(session.applyAuthoringCommand({
+        type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+        protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+        sessionId: 'v9-complete-snapshot',
+        requestId: `native-${node.id}`,
+        revision,
+        context: { sceneId: view.sceneId, stateId: null },
+        patch: {
+          kind: 'native-node',
+          target: { kind: 'native-node', scope: 'scene', nodeId: node.id },
+          node,
+        },
+      })).resolves.toMatchObject({
+        type: PLAYER_AUTHORING_MESSAGE_TYPES.ack,
+        revision,
+      })
+    }
+    revision += 1
+    await expect(session.applyAuthoringCommand({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: 'v9-complete-snapshot',
+      requestId: 'background',
+      revision,
+      context: { sceneId: view.sceneId, stateId: null },
+      patch: {
+        kind: 'scene-background',
+        target: { kind: 'scene-background', scope: 'scene' },
+        backgroundColor: view.backgroundColor,
+        backgroundAssetId: view.backgroundAssetId ?? null,
+      },
+    })).resolves.toMatchObject({ type: PLAYER_AUTHORING_MESSAGE_TYPES.ack })
+    revision += 1
+    await expect(session.applyAuthoringCommand({
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: 'v9-complete-snapshot',
+      requestId: 'order',
+      revision,
+      context: { sceneId: view.sceneId, stateId: null },
+      patch: {
+        kind: 'scene-order',
+        target: { kind: 'scene-order', scope: 'scene' },
+        nodeIds: localNodes.map((node) => node.id),
+      },
+    })).resolves.toMatchObject({ type: PLAYER_AUTHORING_MESSAGE_TYPES.ack })
+    frame.remove()
+  })
+
+  it('keeps explicit authoring base and named state across navigator location assignment', async () => {
+    const draft = structuredClone(createBlankCourseProject({ now: NOW }))
+    const draftSlide = draft.surfaces.find((surface) => surface.type === 'slide')
+    const draftScene = draftSlide?.type === 'slide' ? draftSlide.scenes[0] : undefined
+    if (!draftSlide || draftSlide.type !== 'slide' || !draftScene?.presentation) {
+      throw new Error('expected a Slide scene with presentation states')
+    }
+    const namedStateId = 'state_authoring_preview'
+    draftScene.presentation.states.push({
+      id: namedStateId,
+      name: 'Authoring preview',
+      layerItemOverrides: {},
+    })
+    const project = courseProjectDocumentSchema.parse(draft)
+    const slide = project.surfaces.find((surface) => surface.id === draftSlide.id)
+    const location = project.locations.find((candidate) => candidate.kind === 'slide-scene')
+    if (!slide || slide.type !== 'slide' || !location || location.kind !== 'slide-scene') {
+      throw new Error('expected a Published Slide location')
+    }
+    const scene = slide.scenes.find((candidate) => candidate.id === location.sceneId)
+    if (!scene?.presentation) throw new Error('expected Published presentation states')
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+
+    const base = new SlidePublishedAdapter(payload, slide.id, {
+      locationId: location.id,
+      authoring: { stateId: null, scope: 'scene' },
+    })
+    await base.setLocationId(location.id)
+    expect(base.getAuthoringContext()).toEqual({ sceneId: scene.id, stateId: null })
+
+    const named = new SlidePublishedAdapter(payload, slide.id, {
+      locationId: location.id,
+      authoring: { stateId: namedStateId, scope: 'scene' },
+    })
+    await named.setLocationId(location.id)
+    expect(named.getAuthoringContext()).toEqual({ sceneId: scene.id, stateId: namedStateId })
+
+    const playback = new SlidePublishedAdapter(payload, slide.id, { locationId: location.id })
+    await playback.setLocationId(location.id)
+    expect(playback.getPublishedSlideRenderPlan().stateId).toBe(
+      scene.presentation.initialStateId,
+    )
+
+    await Promise.all([base.destroy(), named.destroy(), playback.destroy()])
+  })
+
+  it('rejects an old scene command after the authoring render generation moves', async () => {
+    let project = createBlankCourseProject({ now: NOW })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected Slide surface')
+    const added = addCourseScene(project, {
+      surfaceId: slide.id,
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    if (!added.ok) throw new Error(added.reason)
+    project = added.project
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const locations = payload.locations.filter((location) => (
+      location.kind === 'slide-scene' && location.surfaceId === slide.id
+    ))
+    const first = locations[0]
+    const second = locations[1]
+    if (
+      !first
+      || first.kind !== 'slide-scene'
+      || !second
+      || second.kind !== 'slide-scene'
+    ) throw new Error('expected two Slide locations')
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const host = new SlidePublishedAdapter(payload, slide.id, {
+      locationId: first.id,
+      authoring: { stateId: null, scope: 'scene' },
+    })
+    const abort = new AbortController()
+    await host.mount({
+      surfaceId: slide.id,
+      container,
+      signal: abort.signal,
+      services: {
+        navigate: vi.fn(),
+        getCourseState: vi.fn(),
+        setCourseState: vi.fn(),
+        resolveAsset: vi.fn(),
+      },
+    })
+    expect(host.getAuthoringContext()).toEqual({ sceneId: first.sceneId, stateId: null })
+    const firstGeneration = host.getAuthoringGeneration()
+    await host.setLocationId(second.id)
+    expect(host.getAuthoringContext()).toMatchObject({ sceneId: second.sceneId })
+    const root = container.querySelector<HTMLElement>('.slide-published-adapter')
+    const backgroundBefore = root?.style.backgroundColor
+
+    await expect(host.applyAuthoringPatch(
+      { sceneId: first.sceneId, stateId: null },
+      {
+        kind: 'scene-background',
+        target: { kind: 'scene-background', scope: 'scene' },
+        backgroundColor: '#ff00ff',
+        backgroundAssetId: null,
+      },
+      { revision: 1, generation: firstGeneration },
+    )).resolves.toMatchObject({ ok: false, code: 'scene-mismatch' })
+    expect(root?.style.backgroundColor).toBe(backgroundBefore)
+    abort.abort()
+    await host.destroy()
   })
 })

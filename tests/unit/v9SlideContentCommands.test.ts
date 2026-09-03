@@ -7,7 +7,7 @@ import {
   type CourseProjectDocument,
 } from '@/shared/courseProjectTypes'
 import type { ComponentManifestV4 } from '@/shared/componentTypes'
-import { createImageNode, createTextNode, createVideoNode } from '@/renderer/project/createProject'
+import { createImageNode, createTextNode, createVideoNode } from '@/renderer/project/nativeNodeFactories'
 import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,

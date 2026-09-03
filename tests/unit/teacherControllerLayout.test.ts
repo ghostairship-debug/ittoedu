@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TeacherControllerNode } from '../../src/shared/projectTypes'
-import { createTeacherControllerNode } from '../../src/renderer/project/createProject'
+import { createTeacherControllerNode } from '../../src/renderer/project/nativeNodeFactories'
 import {
   createTeacherControllerLayout,
   formatTeacherControllerProgress,

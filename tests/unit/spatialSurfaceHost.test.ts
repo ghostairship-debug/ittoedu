@@ -10,6 +10,7 @@ import {
   SpatialSurfaceHost,
   type SpatialSurfaceHostOptions,
 } from '@/player/surfaces/spatial/SpatialSurfaceHost'
+import * as publishedCapture from '@/player/surfaces/publishedCapture'
 
 const VIEWPORT = { width: 400, height: 240 }
 
@@ -289,6 +290,95 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
     expect(host.publishedRelations().map((relation) => relation.id)).toEqual(['relation-1'])
     expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1, viewportWidth: 400, viewportHeight: 240 })
 
+    await host.destroy()
+  })
+
+  it('captures the actual static Spatial root at export dimensions and restores the session camera', async () => {
+    const course = publishedCourse()
+    const spatial = course.surfaces[0]
+    if (spatial?.type !== 'spatial-2d') throw new Error('expected spatial')
+    spatial.backgroundColor = '#dbeafe'
+    const capturePublishedSurfacePng = vi.spyOn(
+      publishedCapture,
+      'capturePublishedSurfacePng',
+    ).mockImplementation(async (options) => {
+      expect(options.width).toBe(1120)
+      expect(options.height).toBe(760)
+      expect(options.transparentBackground).toBe(false)
+      expect(options.root.dataset.hostMode).toBe('capture')
+      expect(options.root.style.backgroundColor).toBe('rgb(219, 234, 254)')
+      expect(options.root.style.width).toBe('1120px')
+      expect(options.root.style.height).toBe('760px')
+      expect(options.root.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1120 760')
+      const decorationLayer = options.layers[0]
+      expect(decorationLayer?.element.querySelector('[data-spatial-path-id="path-1"]')).not.toBeNull()
+      expect(decorationLayer?.element.querySelector('[data-spatial-relation-id="relation-1"]')).not.toBeNull()
+      expect(decorationLayer).toEqual(expect.objectContaining({
+        x: 0,
+        y: 0,
+        width: 1120,
+        height: 760,
+        rotation: 0,
+        opacity: 1,
+      }))
+      expect(options.layers.slice(1).map((layer) => layer.element.dataset.layerItemId)).toEqual([
+        'world-a',
+        'world-b',
+        'surface-note',
+        'global-hud',
+      ])
+      expect(options.layers.find((layer) => layer.element.dataset.layerItemId === 'world-a')).toEqual(
+        expect.objectContaining({ x: 480, y: 340, width: 120, height: 36 }),
+      )
+      expect(options.layers.find((layer) => layer.element.dataset.layerItemId === 'surface-note')).toEqual(
+        expect.objectContaining({ x: 576, y: 580, width: 80, height: 24 }),
+      )
+      expect(options.layers.find((layer) => layer.element.dataset.layerItemId === 'global-hud')).toEqual(
+        expect.objectContaining({ x: 8, y: 8, width: 120, height: 28 }),
+      )
+      return 'data:image/png;base64,U1BBVElBTA=='
+    })
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT, {
+      staticCapture: true,
+      includeGlobalLayerItemsForStaticCapture: true,
+    })
+    await host.mount(container)
+    await host.activate()
+    const cameraBefore = host.camera
+
+    await expect(host.capture({
+      purpose: 'export',
+      frameId: 'frame-home',
+      width: 1120,
+      height: 760,
+    })).resolves.toEqual({
+      format: 'data-url',
+      content: 'data:image/png;base64,U1BBVElBTA==',
+      width: 1120,
+      height: 760,
+    })
+    expect(capturePublishedSurfacePng).toHaveBeenCalledTimes(1)
+    expect(host.camera).toEqual(cameraBefore)
+    expect(host.rootElement?.style.width).toBe('400px')
+    expect(host.rootElement?.style.height).toBe('240px')
+    expect(host.rootElement?.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 400 240')
+    expect(host.rootElement?.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+
+    capturePublishedSurfacePng.mockRejectedValueOnce(new Error('capture failed'))
+    await expect(host.capture({
+      purpose: 'export',
+      frameId: 'frame-home',
+      width: 1120,
+      height: 760,
+    })).rejects.toThrow('capture failed')
+    expect(capturePublishedSurfacePng).toHaveBeenCalledTimes(2)
+    expect(host.camera).toEqual(cameraBefore)
+    expect(host.rootElement?.style.width).toBe('400px')
+    expect(host.rootElement?.style.height).toBe('240px')
+    expect(host.rootElement?.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+
+    capturePublishedSurfacePng.mockRestore()
     await host.destroy()
   })
 

@@ -1,4 +1,7 @@
 import { webcrypto } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
@@ -6,17 +9,11 @@ import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 
-const legacyPreflight = vi.hoisted(() => ({
-  called: vi.fn<(...args: unknown[]) => void>(),
-}))
-
 const sizeProbe = vi.hoisted(() => ({ forceWarning: false }))
 
 const publishSourceProbe = vi.hoisted(() => ({ forceUnavailable: false }))
 
 const deliveryProbe = vi.hoisted(() => ({
-  legacyStandalone: vi.fn(),
-  legacyWebPackage: vi.fn(),
   publishedStandalone: vi.fn(),
   publishedWebPackage: vi.fn(),
 }))
@@ -39,30 +36,6 @@ vi.mock('../../src/renderer/store/editorStore', async (importOriginal) => {
   }
 })
 
-vi.mock('../../src/renderer/export/buildStandaloneHtml', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/renderer/export/buildStandaloneHtml')>()
-  return {
-    ...actual,
-    buildStandaloneHtml: (...args: Parameters<typeof actual.buildStandaloneHtml>) => {
-      deliveryProbe.legacyStandalone(...args)
-      return actual.buildStandaloneHtml(...args)
-    },
-  }
-})
-
-vi.mock('../../src/renderer/export/buildWebPackage', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/renderer/export/buildWebPackage')>()
-  return {
-    ...actual,
-    buildWebPackageFromProjectAsync: (
-      ...args: Parameters<typeof actual.buildWebPackageFromProjectAsync>
-    ) => {
-      deliveryProbe.legacyWebPackage(...args)
-      return actual.buildWebPackageFromProjectAsync(...args)
-    },
-  }
-})
-
 vi.mock('../../src/renderer/export/course/buildCoursePackages', async (importOriginal) => {
   const actual = await importOriginal<
     typeof import('../../src/renderer/export/course/buildCoursePackages')
@@ -80,17 +53,6 @@ vi.mock('../../src/renderer/export/course/buildCoursePackages', async (importOri
     ) => {
       deliveryProbe.publishedWebPackage(...args)
       return actual.buildPublishedCourseWebPackageAsync(...args)
-    },
-  }
-})
-
-vi.mock('../../src/renderer/export/exportPreflight', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/renderer/export/exportPreflight')>()
-  return {
-    ...actual,
-    collectExportPreflight: (...args: Parameters<typeof actual.collectExportPreflight>) => {
-      legacyPreflight.called(...args)
-      return actual.collectExportPreflight(...args)
     },
   }
 })
@@ -350,11 +312,8 @@ beforeEach(() => {
     observe() {}
     disconnect() {}
   })
-  legacyPreflight.called.mockClear()
   sizeProbe.forceWarning = false
   publishSourceProbe.forceUnavailable = false
-  deliveryProbe.legacyStandalone.mockClear()
-  deliveryProbe.legacyWebPackage.mockClear()
   deliveryProbe.publishedStandalone.mockClear()
   deliveryProbe.publishedWebPackage.mockClear()
   publishedPreviewProbe.mount.mockClear()
@@ -372,6 +331,17 @@ afterEach(() => {
 })
 
 describe('ARCH-4 V9 HTML/Web export preflight', () => {
+  it('App and delivery modules do not import leftover V8 HTML/Web producers', () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
+    const app = readFileSync(join(root, 'src/renderer/App.tsx'), 'utf8')
+    const delivery = readFileSync(join(root, 'src/renderer/app/useCourseDelivery.ts'), 'utf8')
+    for (const source of [app, delivery]) {
+      expect(source).not.toMatch(/buildStandaloneHtml/)
+      expect(source).not.toMatch(/from ['"][^'"]*\/buildWebPackage['"]/)
+      expect(source).not.toMatch(/\bcollectExportPreflight\b/)
+    }
+  })
+
   it('opens full preview through the renderer Published V2 session', async () => {
     const project = loadBlankCourse()
     const api = appApi()
@@ -388,7 +358,6 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
         schemaVersion: 9,
       },
     })
-    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -413,9 +382,6 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     expect(screen.queryByTestId('course-preview-overlay')).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(publishedPreviewProbe.mount).not.toHaveBeenCalled()
-    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
-    expect(deliveryProbe.legacyWebPackage).not.toHaveBeenCalled()
-    expect(legacyPreflight.called).not.toHaveBeenCalled()
     expect(api.exportHtml).not.toHaveBeenCalled()
     expect(api.exportWebPackage).not.toHaveBeenCalled()
   })
@@ -442,7 +408,6 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     expect(screen.getByText(/hero\.png/)).toBeVisible()
     expect(screen.queryByRole('button', { name: '继续导出' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '去修复' })).toBeVisible()
-    expect(legacyPreflight.called).not.toHaveBeenCalled()
     expect(api.exportHtml).not.toHaveBeenCalled()
     expect(api.exportWebPackage).not.toHaveBeenCalled()
 
@@ -483,8 +448,6 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent(title)
-    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
-    expect(deliveryProbe.legacyWebPackage).not.toHaveBeenCalled()
     expect(api.exportHtml).not.toHaveBeenCalled()
     expect(api.exportWebPackage).not.toHaveBeenCalled()
   })
@@ -514,7 +477,6 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
 
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
     expect(deliveryProbe.publishedStandalone).toHaveBeenCalledOnce()
-    expect(deliveryProbe.legacyStandalone).not.toHaveBeenCalled()
     const html = api.exportHtml.mock.calls[0]?.[0]?.html as string | undefined
     expect(html).toContain('img-src data: blob: https://cdn.example.com')
     expect(html).toContain('connect-src data: blob: https://api.example.com')
@@ -537,7 +499,6 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
 
     await waitFor(() => expect(api.exportWebPackage).toHaveBeenCalledOnce())
     expect(deliveryProbe.publishedWebPackage).toHaveBeenCalledOnce()
-    expect(deliveryProbe.legacyWebPackage).not.toHaveBeenCalled()
   })
 
   it('blocks a wildcard online remote URL before exportHtml is called', async () => {

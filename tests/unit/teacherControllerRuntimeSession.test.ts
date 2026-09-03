@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   constrainTeacherControllerOffset,
   logicalDragDelta,

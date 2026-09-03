@@ -16,6 +16,8 @@ import {
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import {
+  COURSE_PROJECT_REJECTION_INPUTS,
+  COURSE_PROJECT_REJECTION_KIND,
   COURSE_PROJECT_V9_FIXTURE_IDS,
   COURSE_PROJECT_V9_FIXTURE_MTIME,
   readCourseProjectV9FixtureArchive,
@@ -490,4 +492,21 @@ describe('Course Project V9 protocol round-trip', () => {
     if (surface?.type !== 'flow') throw new Error('expected flow surface')
     expect(surface.backgroundColor).toBe('#fffbeb')
   })
+
+  it.each([...COURSE_PROJECT_REJECTION_KIND])(
+    'rejects %s bytes as unsupported or corrupted and never round-trips them as V9',
+    (kind) => {
+      const bytes = COURSE_PROJECT_REJECTION_INPUTS[kind]
+      const probe = detectCourseProjectArchiveFormat(bytes)
+      expect(probe.kind).not.toBe('v9')
+      if (kind === 'v8-unsupported') {
+        expect(probe).toMatchObject({ kind: 'unsupported', identity: { schemaVersion: 8 } })
+      } else if (kind === 'future-unsupported') {
+        expect(probe).toMatchObject({ kind: 'unsupported', identity: { schemaVersion: 10 } })
+      } else {
+        expect(probe.kind).toBe('corrupted')
+      }
+      expect(() => openCourseProjectArchive(bytes)).toThrow()
+    },
+  )
 })

@@ -36,10 +36,6 @@ import {
   SLIDE_BACKEND_NOT_CANDIDATE,
 } from '../store/slideBackendPort'
 import {
-  selectSlideAuthoringBackend,
-  useEditorStore,
-} from '../store/editorStore'
-import {
   commitSlideAuthoringHistory,
   commitSlideProjectMutation,
   SlideCommandError,
@@ -51,7 +47,8 @@ import {
   type SlideCommandOptions,
   type SlideCommandResult,
 } from '../course/slideEditorCommands'
-import type { SlideAuthoringSession } from '../course/slideAuthoringBackend'
+import type { SlideAuthoringBackend, SlideAuthoringSession } from '../course/slideAuthoringBackend'
+import type { EffectiveLayerPropertiesPatchAtTarget } from '../course/effectiveLayerCommands'
 
 const HANDLE_HIT_RADIUS = 10
 
@@ -100,12 +97,27 @@ interface ResizeGesture {
 
 type ControllerGesture = MoveGesture | ResizeGesture
 
+export type TeacherControllerAuthoringPorts = {
+  readBackend(): SlideAuthoringBackend | null
+  commit(run: (session: SlideAuthoringSession) => SlideCommandResult): SlideCommandResult
+}
+
+let boundTeacherControllerAuthoringPorts: TeacherControllerAuthoringPorts | null = null
+
+export function bindTeacherControllerAuthoringPorts(
+  ports: TeacherControllerAuthoringPorts | null,
+): void {
+  boundTeacherControllerAuthoringPorts = ports
+}
+
 function v8Fallback(): TeacherControllerAuthoringResult {
   return { kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE }
 }
 
-function readCandidate() {
-  return selectSlideAuthoringBackend(useEditorStore.getState())
+function resolveTeacherControllerAuthoringPorts(
+  ports?: TeacherControllerAuthoringPorts,
+): TeacherControllerAuthoringPorts | null {
+  return ports ?? boundTeacherControllerAuthoringPorts
 }
 
 function viewportTransform(
@@ -329,6 +341,106 @@ export function commitTeacherControllerAuthoringFrame(
   }
 }
 
+/**
+ * Exact Properties transaction for the global Teacher Controller. Unlike the
+ * generic Native property command, this path preserves the controller's
+ * constrained frame and validates the captured Slide authoring identity.
+ */
+export function commitTeacherControllerPropertiesAtTarget(
+  session: SlideAuthoringSessionRef,
+  target: SlideAuthoringTarget,
+  patch: EffectiveLayerPropertiesPatchAtTarget,
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const expectedRevision = options.expectedRevision ?? target.revision
+  if (
+    session.history.present.revision !== expectedRevision
+    || target.revision !== expectedRevision
+    || target.sessionId !== session.sessionId
+    || target.generation !== session.generation
+    || target.scope !== 'global'
+    || session.scope !== 'global'
+    || session.selection.selectionIds.length !== 1
+    || session.selection.selectionIds[0] !== target.layerItemId
+  ) return failCommand(session, SLIDE_REJECT_STALE_REVISION)
+  const current = findGlobalTeacherController(session.history.present, target.layerItemId)
+  if (!current) return failCommand(session, SLIDE_REJECT_WRONG_OWNER)
+  const expectedAddress = makeAuthoringAddress({
+    projectId: session.history.present.id,
+    scope: 'global',
+    carrier: 'native',
+    layerItemId: target.layerItemId,
+    field: 'item',
+  })
+  if (target.authoringAddress !== expectedAddress || patch.componentProps) {
+    return failCommand(session, SLIDE_REJECT_WRONG_OWNER)
+  }
+  try {
+    const project = commitSlideProjectMutation(session.history.present, (draft) => {
+      const entry = draft.globalLayerItems.find(
+        (candidate) => candidate.item.layerItemId === target.layerItemId,
+      )
+      if (!entry || !isCourseTeacherControllerLayerItem(entry.item)) {
+        throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器必须是 global owner')
+      }
+      const item = entry.item
+      const nativeData = patch.nativeData ?? {}
+      const stylePatch = typeof nativeData.style === 'object' && nativeData.style !== null
+        ? nativeData.style as Record<string, unknown>
+        : null
+      const nextData = {
+        ...item.content.data,
+        ...nativeData,
+        ...(stylePatch ? { style: { ...item.content.data.style, ...stylePatch } } : {}),
+      }
+      const requestedFrame = {
+        x: patch.frame?.x ?? item.frame.x,
+        y: patch.frame?.y ?? item.frame.y,
+        width: patch.frame?.width ?? item.frame.width,
+        height: patch.frame?.height ?? item.frame.height,
+      }
+      const rotation = patch.rotation ?? item.rotation
+      const constrainedFrame = constrainTeacherControllerAuthoringFrame(
+        nextData,
+        requestedFrame,
+        rotation,
+        { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      )
+      if (patch.label !== undefined) item.label = patch.label
+      item.frame = { mode: 'absolute', ...constrainedFrame }
+      item.rotation = rotation
+      if (patch.opacity !== undefined) item.opacity = patch.opacity
+      if (patch.visible !== undefined) item.visible = patch.visible
+      if (patch.locked !== undefined) item.locked = patch.locked
+      if (patch.playbackInitialVisibility !== undefined) {
+        item.playbackInitialVisibility = patch.playbackInitialVisibility
+      }
+      item.content.data = nextData
+    }, options.now)
+    if (project === session.history.present) {
+      return {
+        ok: true,
+        nextSession: session,
+        historyEntry: false,
+        selection: session.selection,
+      }
+    }
+    const nextSession: SlideAuthoringSessionRef = {
+      ...session,
+      history: commitSlideAuthoringHistory(session.history, project),
+    }
+    return {
+      ok: true,
+      nextSession,
+      historyEntry: true,
+      selection: nextSession.selection,
+    }
+  } catch (error) {
+    if (error instanceof SlideCommandError) return failCommand(session, error.reason)
+    return failCommand(session, error instanceof Error ? error.message : '命令失败')
+  }
+}
+
 function hitResizeHandle(
   frame: StageRect,
   rotation: number,
@@ -378,21 +490,33 @@ function makeControllerTarget(
 }
 
 function applyCandidate(
+  ports: TeacherControllerAuthoringPorts | null,
   run: (session: SlideAuthoringSession) => SlideCommandResult,
 ): SlideCommandResult {
-  return useEditorStore.getState().applySlideCandidateCommand(run)
+  if (!ports) {
+    return {
+      ok: false,
+      reason: SLIDE_BACKEND_NOT_CANDIDATE,
+      historyEntry: false,
+    }
+  }
+  return ports.commit(run)
 }
 
 /**
  * Authoring kernel for the global teacher controller. Default V8
- * (`selectSlideAuthoringBackend === null`) returns `{ kind: 'v8' }` and never
+ * (`readBackend() === null`) returns `{ kind: 'v8' }` and never
  * reports a successful command. Candidate pointermove only previews; pointerup
- * writes one history entry through `applySlideCandidateCommand`.
+ * writes one history entry through the injected commit port.
  */
-export function createV9TeacherControllerAuthoringController() {
+export function createV9TeacherControllerAuthoringController(
+  ports?: TeacherControllerAuthoringPorts,
+) {
   let gesture: ControllerGesture | null = null
   let preview: StageRect | null = null
 
+  const activePorts = () => resolveTeacherControllerAuthoringPorts(ports)
+  const readCandidate = () => activePorts()?.readBackend() ?? null
   const resolveKind = (): TeacherControllerAuthoringKind =>
     readCandidate() ? 'v9-controller-candidate' : 'v8'
 
@@ -582,7 +706,7 @@ export function createV9TeacherControllerAuthoringController() {
       ? safeAuthoringFrame(liveItem, rawFrame, active.rotation)
       : rawFrame
     const snapshot = backend.getSnapshot()
-    const command = applyCandidate((session) =>
+    const command = applyCandidate(activePorts(), (session) =>
       commitTeacherControllerAuthoringFrame(session, {
         layerItemId: active.layerItemId,
         frame,
@@ -627,8 +751,12 @@ export function createV9TeacherControllerAuthoringController() {
   }
 }
 
-export function resolveTeacherControllerAuthoringKind(): TeacherControllerAuthoringKind {
-  return readCandidate() ? 'v9-controller-candidate' : 'v8'
+export function resolveTeacherControllerAuthoringKind(
+  ports?: TeacherControllerAuthoringPorts,
+): TeacherControllerAuthoringKind {
+  return resolveTeacherControllerAuthoringPorts(ports)?.readBackend()
+    ? 'v9-controller-candidate'
+    : 'v8'
 }
 
 export function clientDeltaToControllerWorld(

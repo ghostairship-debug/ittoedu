@@ -11,7 +11,6 @@ import {
   Workflow,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import { ensureScenePresentation } from '../../shared/presentation'
 import {
   isNodeMotionAction,
   isTerminalNavigationAction,
@@ -27,14 +26,38 @@ import {
   type MotionEffect,
 } from '../../shared/interactionTypes'
 import type { CourseStateDeclaration } from '../../shared/courseProjectTypes'
-import type {
-  ExternalComponentNode,
-  SceneDocument,
-  SceneNode,
-  SoundDefinition,
-  VideoNode,
-} from '../../shared/projectTypes'
+import type { SoundDefinition } from '../../shared/contracts/media-v1'
+import type { InteractionLayerTarget } from '../course/slideInteractionView'
 import { requestNodeMotionPreview } from '../phaser/elementAnimationPreviewBus'
+
+export interface InteractionSceneListItem {
+  readonly id: string
+  readonly name: string
+  readonly presentation?: {
+    readonly initialStateId?: string
+    readonly states?: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+    }>
+  }
+}
+
+export interface InteractionSceneView {
+  readonly id: string
+  readonly name: string
+  readonly nodes?: readonly InteractionLayerTarget[]
+  readonly interactions?: readonly InteractionRule[]
+  readonly presentation?: InteractionSceneListItem['presentation']
+}
+
+function presentationStates(
+  scene: Pick<InteractionSceneView, 'presentation'>,
+): Array<{ id: string; name: string }> {
+  return (scene.presentation?.states ?? []).map((state) => ({
+    id: state.id,
+    name: state.name,
+  }))
+}
 
 const ALL_STATES = '__all_states__'
 const MULTIPLE_STATES = '__multiple_states__'
@@ -150,16 +173,14 @@ function isTerminalActionStep(step: InteractionActionStep): boolean {
 }
 
 export interface InteractionEditorProps {
-  scene: SceneDocument
-  selectedNode: SceneNode
+  scene: InteractionSceneView
+  selectedNode: InteractionLayerTarget
   sourceScope?: 'scene' | 'global'
-  sourceNodes?: readonly SceneNode[]
+  sourceNodes?: readonly InteractionLayerTarget[]
   sourceRules?: readonly InteractionRule[]
   selectedNodeId?: string | null
   activeStateId: string | null
-  scenes: ReadonlyArray<
-    Pick<SceneDocument, 'id' | 'name' | 'presentation'>
-  >
+  scenes: ReadonlyArray<InteractionSceneListItem>
   sounds: Readonly<Record<string, SoundDefinition>>
   courseState?: readonly CourseStateDeclaration[]
   ruleWarnings?: Readonly<Record<string, readonly string[]>>
@@ -388,7 +409,7 @@ type RuleTemplateId =
 interface RuleDescriptionContext {
   nodes: ReadonlyMap<string, string>
   states: ReadonlyMap<string, string>
-  scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
+  scenes: ReadonlyArray<InteractionSceneListItem>
   sounds: ReadonlyMap<string, string>
   animationSteps: ReadonlyMap<string, string>
   courseState: ReadonlyMap<string, CourseStateDeclaration>
@@ -556,7 +577,7 @@ function describeAction(
     case 'scene.go': {
       const targetScene = context.scenes.find((scene) => scene.id === action.sceneId)
       const targetState = action.targetStateId
-        ? targetScene?.presentation?.states.find((state) => state.id === action.targetStateId)
+        ? targetScene?.presentation?.states?.find((state) => state.id === action.targetStateId)
         : undefined
       return `跳转到场景“${targetScene?.name ?? `缺失场景（${action.sceneId}）`}”${
         action.targetStateId
@@ -758,11 +779,11 @@ function AutomationTriggerEditor({
   onChange,
 }: {
   rule: AutomationRule
-  states: Array<{ id: string; name: string }>
+  states: ReadonlyArray<{ id: string; name: string }>
   sounds: SoundDefinition[]
-  videos: VideoNode[]
-  components: ExternalComponentNode[]
-  nodes: ReadonlyArray<SceneNode>
+  videos: InteractionLayerTarget[]
+  components: InteractionLayerTarget[]
+  nodes: ReadonlyArray<InteractionLayerTarget>
   animationSteps: AnimationStepOption[]
   onChange(trigger: AutomationTrigger): void
 }) {
@@ -1304,13 +1325,11 @@ function ActionEditor({
   rule: InteractionRule
   step: InteractionActionStep
   actionIndex: number
-  states: Array<{ id: string; name: string }>
-  scenes: ReadonlyArray<
-    Pick<SceneDocument, 'id' | 'name' | 'presentation'>
-  >
+  states: ReadonlyArray<{ id: string; name: string }>
+  scenes: ReadonlyArray<InteractionSceneListItem>
   sounds: SoundDefinition[]
-  videos: VideoNode[]
-  nodes: ReadonlyArray<SceneNode>
+  videos: InteractionLayerTarget[]
+  nodes: ReadonlyArray<InteractionLayerTarget>
   courseState: readonly CourseStateDeclaration[]
   referencedByCompletion: boolean
   onChange(step: InteractionActionStep): void
@@ -1784,19 +1803,19 @@ export function InteractionEditor({
   onUpdateRule,
   onDeleteRule,
 }: InteractionEditorProps) {
-  const availableNodes = sourceNodes ?? scene.nodes
-  const allRules = sourceRules ?? scene.interactions
+  const availableNodes = sourceNodes ?? scene.nodes ?? []
+  const allRules = sourceRules ?? scene.interactions ?? []
   const completionActionIds = useMemo(() => new Set(
     allRules.flatMap((rule) => rule.trigger.type === 'animation.completed'
       ? [rule.trigger.actionId]
       : []),
   ), [allRules])
   const states = useMemo(
-    () => ensureScenePresentation(scene).states.map(({ id, name }) => ({ id, name })),
+    () => presentationStates(scene),
     [scene],
   )
   const videoNodes = useMemo(
-    () => availableNodes.filter((node): node is VideoNode => node.type === 'video'),
+    () => availableNodes.filter((node) => node.type === 'video'),
     [availableNodes],
   )
   const soundList = useMemo(
@@ -2090,26 +2109,23 @@ export function SceneAutomationEditor({
   onDuplicateRule,
   onMoveRule,
 }: SceneAutomationEditorProps) {
-  const availableNodes = sourceNodes ?? scene.nodes
-  const allRules = sourceRules ?? scene.interactions
+  const availableNodes = sourceNodes ?? scene.nodes ?? []
+  const allRules = sourceRules ?? scene.interactions ?? []
   const completionActionIds = useMemo(() => new Set(
     allRules.flatMap((rule) => rule.trigger.type === 'animation.completed'
       ? [rule.trigger.actionId]
       : []),
   ), [allRules])
   const states = useMemo(
-    () => (authoringStates ?? ensureScenePresentation(scene).states)
-      .map(({ id, name }) => ({ id, name })),
+    () => (authoringStates ?? presentationStates(scene)),
     [authoringStates, scene],
   )
   const videoNodes = useMemo(
-    () => availableNodes.filter((node): node is VideoNode => node.type === 'video'),
+    () => availableNodes.filter((node) => node.type === 'video'),
     [availableNodes],
   )
   const componentNodes = useMemo(
-    () => availableNodes.filter(
-      (node): node is ExternalComponentNode => node.type === 'external-component',
-    ),
+    () => availableNodes.filter((node) => node.type === 'external-component'),
     [availableNodes],
   )
   const animationSteps = useMemo<AnimationStepOption[]>(() => {

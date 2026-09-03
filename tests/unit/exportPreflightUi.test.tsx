@@ -1,16 +1,18 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ExportPreflightReport } from '../../src/renderer/export/exportPreflight'
+import type {
+  CourseProjectExportPreflightReportV1,
+} from '../../src/renderer/export/exportPreflight'
 import { ExportPreflightDialog } from '../../src/renderer/ui/ExportPreflightDialog'
 
 afterEach(cleanup)
 
-function report(canExport: boolean): ExportPreflightReport {
+function report(canExport: boolean): CourseProjectExportPreflightReportV1 {
   const severity = canExport ? 'warning' : 'error'
   return {
     reportVersion: 1,
     projectId: 'project',
-    schemaVersion: 8,
+    schemaVersion: 9,
     target: 'pptx',
     generatedAt: '2026-08-11T00:00:00.000Z',
     items: [{
@@ -18,6 +20,15 @@ function report(canExport: boolean): ExportPreflightReport {
       code: 'asset-bytes-missing',
       message: '节点需要处理',
       target: 'pptx',
+      diagnosticTarget: {
+        version: 1,
+        kind: 'layer-item',
+        owner: 'scene',
+        projectId: 'project',
+        surfaceId: 'surface',
+        sceneId: 'scene',
+        layerItemId: 'node',
+      },
       sceneId: 'scene',
       nodeId: 'node',
     }],
@@ -49,7 +60,13 @@ describe('export preflight dialog', () => {
 
     expect(screen.queryByRole('button', { name: '继续导出' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '定位' }))
-    expect(onLocate).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'node' }))
+    expect(onLocate).toHaveBeenCalledWith(expect.objectContaining({
+      nodeId: 'node',
+      diagnosticTarget: expect.objectContaining({
+        kind: 'layer-item',
+        layerItemId: 'node',
+      }),
+    }))
     fireEvent.click(screen.getByRole('button', { name: /保存报告/ }))
     expect(onSaveReport).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '去修复' }))

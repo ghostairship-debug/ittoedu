@@ -22,10 +22,9 @@ const sceneRenderers = vi.hoisted(() => ({
   legacy: vi.fn(),
 }))
 
-const publishedCapture = vi.hoisted(() => ({
+const v2PrintCapture = vi.hoisted(() => ({
   create: vi.fn(),
-  captureScene: vi.fn(),
-  captureLayer: vi.fn(),
+  capturePage: vi.fn(),
   destroy: vi.fn(),
 }))
 
@@ -105,9 +104,13 @@ vi.mock('../../src/renderer/export/renderSceneImages', () => ({
   renderProjectSceneImages: sceneRenderers.legacy,
 }))
 
-vi.mock('../../src/renderer/export/course/publishedSlideCapture', () => ({
-  createPublishedSlideCaptureSession: publishedCapture.create,
-}))
+vi.mock('../../src/renderer/export/playerCapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/export/playerCapture')>()
+  return {
+    ...actual,
+    createPublishedCourseV2PrintCaptureSession: v2PrintCapture.create,
+  }
+})
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
@@ -120,6 +123,7 @@ import App from '../../src/renderer/App'
 
 const NOW = '2026-08-24T00:00:00.000Z'
 const TEST_IMAGE = 'data:image/png;base64,AA=='
+const SPATIAL_TEST_IMAGE = 'data:image/png;base64,AQ=='
 const EXPECTED_COMPLETENESS_ERROR =
   'PDF 导出不完整：Published Course V2 未生成覆盖当前课程全部表面的 PDF 打印内容。\n' +
   '请检查导出预检与混合打印计划后重试；本次不会回退到旧版 V8 Slide 快照。'
@@ -129,6 +133,25 @@ const EXPECTED_UNAVAILABLE_ERROR =
 
 type AppDesktopApi = DesktopAPI & {
   exportPdf: ReturnType<typeof vi.fn>
+}
+
+function surfaceCapture(content: string, width: number, height: number) {
+  return {
+    format: 'data-url' as const,
+    content,
+    width,
+    height,
+    warnings: [],
+  }
+}
+
+function captureForRequest(request: { width?: number; height?: number }) {
+  const isSpatial = request.width === 1120 && request.height === 760
+  return surfaceCapture(
+    isSpatial ? SPATIAL_TEST_IMAGE : TEST_IMAGE,
+    request.width ?? 1280,
+    request.height ?? 720,
+  )
 }
 
 function appApi(): AppDesktopApi {
@@ -218,13 +241,11 @@ beforeEach(() => {
   printArtifacts.omitPdfHtml = false
   publishSourceProbe.forceUnavailable = false
   sceneRenderers.legacy.mockReset().mockResolvedValue([TEST_IMAGE])
-  publishedCapture.captureScene.mockReset().mockResolvedValue(TEST_IMAGE)
-  publishedCapture.captureLayer.mockReset().mockResolvedValue(TEST_IMAGE)
-  publishedCapture.destroy.mockReset().mockResolvedValue(undefined)
-  publishedCapture.create.mockReset().mockResolvedValue({
-    captureScene: publishedCapture.captureScene,
-    captureLayer: publishedCapture.captureLayer,
-    destroy: publishedCapture.destroy,
+  v2PrintCapture.capturePage.mockReset().mockImplementation(captureForRequest)
+  v2PrintCapture.destroy.mockReset().mockResolvedValue(undefined)
+  v2PrintCapture.create.mockReset().mockResolvedValue({
+    capturePage: v2PrintCapture.capturePage,
+    destroy: v2PrintCapture.destroy,
   })
 })
 
@@ -247,24 +268,47 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     await continuePdfExport()
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
-    const published = printArtifacts.calls.mock.calls[0]?.[0] as {
-      courseId: string
-      sourceSchemaVersion: number
-      surfaces: Array<{ type: string }>
+    const sources = printArtifacts.calls.mock.calls[0]?.[0] as {
+      project: { id: string; schemaVersion: number; surfaces: Array<{ type: string }> }
+      assetFiles: unknown
+      components: unknown
     }
-    expect(published).toMatchObject({
-      courseId: project.id,
-      sourceSchemaVersion: 9,
+    expect(sources.project).toMatchObject({
+      id: project.id,
+      schemaVersion: 9,
     })
-    expect(published.surfaces.map((surface) => surface.type)).toEqual([
+    expect(sources.project.surfaces.map((surface) => surface.type)).toEqual([
       'slide',
       'flow',
       'spatial-2d',
     ])
+    expect(printArtifacts.calls.mock.calls[0]?.[1]).toBeUndefined()
+    expect(v2PrintCapture.create).toHaveBeenCalledOnce()
+    expect(v2PrintCapture.create).toHaveBeenCalledWith(expect.objectContaining({
+      includeGlobalLayerItems: false,
+    }))
+    expect(v2PrintCapture.capturePage).toHaveBeenCalledTimes(2)
+    expect(v2PrintCapture.capturePage.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({ width: 1280, height: 720 }),
+      expect.objectContaining({ width: 1120, height: 760 }),
+    ])
     const html = api.exportPdf.mock.calls[0]?.[0].html as string
     expect(html).toContain('course-slide-print-page')
+    expect(html).toContain('data-published-v2-capture="true"')
+    expect(html).toContain(TEST_IMAGE)
+    expect(html).toContain(SPATIAL_TEST_IMAGE)
+    expect(html).toContain('data-capture-width="1280" data-capture-height="720"')
+    expect(html).toContain('data-capture-width="1120" data-capture-height="760"')
+    expect(html).toContain('object-fit:contain')
     expect(html).toContain('flow-print-document')
     expect(html).toContain('course-spatial-print-page')
+    expect([
+      ...html.matchAll(/<section class="page ([^"]+)"/g),
+    ].map((match) => match[1])).toEqual([
+      'course-visual-print-page course-slide-print-page',
+      'flow-print-document',
+      'course-visual-print-page course-spatial-print-page',
+    ])
     expect(sceneRenderers.legacy).not.toHaveBeenCalled()
   })
 
@@ -332,10 +376,64 @@ describe('ARCH-4 V9 PDF export completeness', () => {
     await continuePdfExport()
 
     await waitFor(() => expect(api.exportPdf).toHaveBeenCalledOnce())
-    expect(publishedCapture.create).toHaveBeenCalledOnce()
-    expect(publishedCapture.captureScene).toHaveBeenCalledOnce()
-    expect(publishedCapture.destroy).toHaveBeenCalledOnce()
+    expect(printArtifacts.calls.mock.calls[0]?.[1]).toBeUndefined()
+    expect(v2PrintCapture.create).toHaveBeenCalledOnce()
+    expect(v2PrintCapture.capturePage).toHaveBeenCalledOnce()
+    expect(v2PrintCapture.destroy).toHaveBeenCalledOnce()
     expect(sceneRenderers.legacy).not.toHaveBeenCalled()
     expect(api.exportPdf.mock.calls[0]?.[0].html).toContain(TEST_IMAGE)
+  })
+
+  it('shows a Spatial Published capture cause and writes no partial PDF', async () => {
+    const project = mixedCourseProject()
+    loadCourse(project)
+    v2PrintCapture.capturePage.mockImplementation((request: {
+      width?: number
+      height?: number
+    }) => {
+      if (request.width === 1120 && request.height === 760) {
+        throw new Error('spatial snapshot decoder failed')
+      }
+      return captureForRequest(request)
+    })
+    const api = appApi()
+    window.desktopAPI = api
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(<App />)
+
+    await continuePdfExport()
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().errorMessage).toContain('spatial snapshot decoder failed')
+    })
+    expect(v2PrintCapture.capturePage).toHaveBeenCalledTimes(2)
+    expect(api.exportPdf).not.toHaveBeenCalled()
+    expect(v2PrintCapture.destroy).toHaveBeenCalledOnce()
+    expect(sceneRenderers.legacy).not.toHaveBeenCalled()
+  })
+
+  it('fails closed for sessionless PDF without V8 Project preflight', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    loadCourse(project)
+    publishSourceProbe.forceUnavailable = true
+    const api = appApi()
+    window.desktopAPI = api
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-pdf'))
+
+    await waitFor(() => {
+      expect(useEditorStore.getState().errorMessage).toBe(EXPECTED_UNAVAILABLE_ERROR)
+    })
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(printArtifacts.calls).not.toHaveBeenCalled()
+    expect(v2PrintCapture.create).not.toHaveBeenCalled()
+    expect(sceneRenderers.legacy).not.toHaveBeenCalled()
+    expect(api.exportPdf).not.toHaveBeenCalled()
   })
 })

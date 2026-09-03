@@ -4,17 +4,13 @@ import {
 } from '../../../shared/courseLayerComposition'
 import type {
   CourseLocation,
-  NativeElementContent,
 } from '../../../shared/courseProjectTypes'
-import type {
-  ExternalComponentNode,
-  ImageNode,
-  SceneNode,
-  ShapeNode,
-  TeacherControllerAction,
-} from '../../../shared/projectTypes'
-import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
-import { renderImageNodeCanvas } from '../../../shared/imageEffects'
+import {
+  isNativeRenderInput,
+  type ReadonlyNativeRenderInput,
+  type TeacherControllerAction,
+  type TeacherControllerNode,
+} from '../../../shared/contracts/native-v1/types'
 import type {
   PlayerAuthoringContext,
   PlayerAuthoringErrorCode,
@@ -33,6 +29,7 @@ import type {
   RuntimePresentationApi,
 } from '../../../shared/runtimeTypes'
 import type {
+  PublishedComponentLayerItem,
   PublishedCourseV2Payload,
   PublishedLayerItem,
   PublishedNativeLayerItem,
@@ -64,8 +61,12 @@ import {
   type PublishedComponentMountHandle,
 } from '../publishedComponentMount'
 import { mountPublishedSlidePhaserComponent } from './publishedSlidePhaserComponentMount'
-import { paintPublishedNativeText } from '../publishedNativeText'
-import { paintPublishedFormula } from '../publishedFormula'
+import {
+  nativeMediaAssetIds,
+  readonlyNativeRenderInputFromPublishedItem,
+  paintPublishedNativeRenderInput,
+  type PublishedTeacherControllerInput,
+} from './publishedNativeRendering'
 import {
   createPublishedSurfaceRuntimeSession,
   mountPublishedSurfaceRuntime,
@@ -89,16 +90,23 @@ import {
   type PublishedInteractionNodeState,
 } from '../../interactions/PublishedDomInteractionSurfacePort'
 import type { PublishedInteractionSurfacePort } from '../../interactions/PublishedInteractionSurfacePort'
-import type { PublishedAuthoringPatchSurface } from '../publishedAuthoringSession'
+import type {
+  PublishedAuthoringPatchIdentity,
+  PublishedAuthoringPatchSurface,
+} from '../publishedAuthoringSession'
 import {
-  mapRuntimeAuthoringTargetsToLayer,
-  mergePublishedAuthoringNode,
+  applyPublishedSlideAuthoringItemPatch,
   publishedComponentAuthoringNode,
+  publishedSlideAuthoringFrameOf,
+  mapRuntimeAuthoringTargetsToLayer,
+  validatePublishedSlideAuthoringIdentity,
+  type PublishedSlideAuthoringIdentity,
+  type PublishedSlideAuthoringOwner,
   type PublishedSlideAuthoringPatchResult,
+  type PublishedSlideComponentAuthoringNode,
 } from './publishedSlideAuthoringPatch'
 import {
   capturePublishedSlidePng,
-  registerPublishedCaptureResource,
   type PublishedSlideCaptureLayer,
 } from '../publishedCapture'
 import type { CourseStateStore } from '../../CourseStateStore'
@@ -185,6 +193,107 @@ export function composePublishedSlideLocation(input: {
   })
 }
 
+export type PublishedSlideLayerSource = 'scene' | 'surface' | 'global'
+
+export interface PublishedSlideNativeRenderLayer {
+  readonly kind: 'native'
+  readonly source: PublishedSlideLayerSource
+  readonly layerItemId: string
+  readonly stackOrder: number
+  readonly applicable: boolean
+  readonly mounted: boolean
+  readonly item: PublishedNativeLayerItem
+  readonly renderInput: ReadonlyNativeRenderInput
+}
+
+export interface PublishedSlideComponentMountDescriptor {
+  readonly kind: 'component'
+  readonly source: PublishedSlideLayerSource
+  readonly layerItemId: string
+  readonly stackOrder: number
+  readonly applicable: boolean
+  readonly mounted: boolean
+  readonly item: PublishedComponentLayerItem
+  readonly hostNode: PublishedSlideComponentAuthoringNode
+}
+
+export interface PublishedSlideRuntimeMountDescriptor {
+  readonly kind: 'runtime'
+  readonly source: PublishedSlideLayerSource
+  readonly layerItemId: string
+  readonly stackOrder: number
+  readonly applicable: boolean
+  readonly mounted: boolean
+  readonly item: PublishedRuntimeLayerItem
+}
+
+export type PublishedSlidePaintLayer =
+  | PublishedSlideNativeRenderLayer
+  | PublishedSlideComponentMountDescriptor
+  | PublishedSlideRuntimeMountDescriptor
+
+export interface PublishedSlideRenderPlan {
+  readonly locationId: string
+  readonly surfaceId: string
+  readonly sceneId: string | null
+  readonly stateId: string | null
+  readonly background: CourseLayerComposition<PublishedLayerItem>['background']
+  readonly layers: readonly PublishedSlidePaintLayer[]
+}
+
+function publishedSlideLayerSource(
+  source: CourseLayerComposition<PublishedLayerItem>['entries'][number]['source'],
+): PublishedSlideLayerSource {
+  if (source === 'world') {
+    throw new Error('Slide Published 合成不能包含 world 图层')
+  }
+  return source
+}
+
+/** Readonly Published Slide paint plan: Native render input + dynamic mount descriptors. */
+export function publishedSlideRenderPlanFromComposition(
+  composition: CourseLayerComposition<PublishedLayerItem>,
+): PublishedSlideRenderPlan {
+  return {
+    locationId: composition.locationId,
+    surfaceId: composition.surfaceId,
+    sceneId: composition.sceneId,
+    stateId: composition.stateId,
+    background: composition.background,
+    layers: composition.entries.map((entry): PublishedSlidePaintLayer => {
+      const source = publishedSlideLayerSource(entry.source)
+      const base = {
+        source,
+        layerItemId: entry.item.layerItemId,
+        stackOrder: entry.stackOrder,
+        applicable: entry.applicable,
+        mounted: entry.mounted,
+      }
+      if (entry.item.kind === 'native') {
+        return {
+          ...base,
+          kind: 'native',
+          item: entry.item,
+          renderInput: readonlyNativeRenderInputFromPublishedItem(entry.item),
+        }
+      }
+      if (entry.item.kind === 'component') {
+        return {
+          ...base,
+          kind: 'component',
+          item: entry.item,
+          hostNode: publishedComponentAuthoringNode(entry.item),
+        }
+      }
+      return {
+        ...base,
+        kind: 'runtime',
+        item: entry.item,
+      }
+    }),
+  }
+}
+
 function firstKeyedString(value: unknown, keys: readonly string[]): string | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
@@ -226,14 +335,6 @@ function appendFallbackImage(wrap: HTMLElement, url: string, alt: string): void 
   image.style.height = '100%'
   image.style.objectFit = 'contain'
   wrap.appendChild(image)
-}
-
-function applyNativeTextStyle(
-  wrap: HTMLElement,
-  data: Extract<NativeElementContent, { nativeType: 'text' }>['data'],
-  frame: PublishedLayerItem['frame'],
-): void {
-  paintPublishedNativeText(wrap, data, frame)
 }
 
 function appendVisibleTextFallback(
@@ -314,248 +415,13 @@ function canBindPublishedNativeClick(item: PublishedLayerItem): boolean {
     || item.content.nativeType === 'shape'
 }
 
-function paintPublishedNativeLayerItem(
-  wrap: HTMLElement,
-  item: PublishedNativeLayerItem,
-  resolveAsset: (assetId: string) => string | undefined,
-  mountTeacherController?: (wrap: HTMLElement, item: PublishedNativeLayerItem) => void,
-  staticCapture = false,
-): void {
-  wrap.dataset.nativeType = item.content.nativeType
-  if (isPublishedTeacherController(item)) {
-    mountTeacherController?.(wrap, item)
-    return
-  }
-  if (item.content.nativeType === 'text') {
-    applyNativeTextStyle(wrap, item.content.data, item.frame)
-    return
-  }
-  if (item.content.nativeType === 'video') {
-    if (staticCapture) {
-      Object.assign(wrap.style, {
-        overflow: 'hidden',
-        background: '#0b1120',
-      })
-      const posterId = item.content.data.poster.mode === 'image'
-        ? item.content.data.poster.assetId
-        : undefined
-      const posterUrl = posterId ? resolveAsset(posterId) : undefined
-      if (posterUrl) {
-        const poster = wrap.ownerDocument.createElement('img')
-        poster.src = posterUrl
-        poster.alt = ''
-        Object.assign(poster.style, {
-          width: '100%',
-          height: '100%',
-          objectFit: item.content.data.fit,
-        })
-        wrap.appendChild(poster)
-      } else {
-        const url = resolveAsset(item.content.data.assetId)
-        if (url) {
-          const video = wrap.ownerDocument.createElement('video')
-          video.src = url
-          video.muted = true
-          video.preload = 'auto'
-          Object.assign(video.style, {
-            width: '100%',
-            height: '100%',
-            objectFit: item.content.data.fit,
-          })
-          const targetTime = item.content.data.poster.mode === 'video-frame'
-            ? item.content.data.poster.time
-            : item.content.data.startTime
-          const ready = new Promise<void>((resolve, reject) => {
-            let settled = false
-            const finish = (action: () => void) => {
-              if (settled) return
-              settled = true
-              video.removeEventListener('loadedmetadata', seek)
-              video.removeEventListener('loadeddata', complete)
-              video.removeEventListener('seeked', complete)
-              video.removeEventListener('error', fail)
-              action()
-            }
-            const complete = () => finish(() => {
-              video.pause()
-              resolve()
-            })
-            const fail = () => finish(() => reject(new Error(
-              `视频“${item.layerItemId}”的静态封面无法解码`,
-            )))
-            const seek = () => {
-              try {
-                video.currentTime = Math.max(0, targetTime)
-                if (
-                  video.readyState >= 2
-                  && Math.abs(video.currentTime - Math.max(0, targetTime)) < 0.001
-                ) {
-                  complete()
-                }
-              } catch (cause) {
-                finish(() => reject(cause))
-              }
-            }
-            video.addEventListener('loadedmetadata', seek)
-            video.addEventListener('loadeddata', complete)
-            video.addEventListener('seeked', complete)
-            video.addEventListener('error', fail)
-            if (video.readyState >= 1) seek()
-          })
-          registerPublishedCaptureResource(wrap, {
-            waitForCaptureReady: () => ready,
-          })
-          wrap.appendChild(video)
-        }
-      }
-      const play = wrap.ownerDocument.createElement('span')
-      play.textContent = '▶'
-      Object.assign(play.style, {
-        position: 'absolute',
-        left: '50%',
-        top: '50%',
-        transform: 'translate(-50%, -50%)',
-        color: '#f8fafc',
-        font: '48px/1 sans-serif',
-      })
-      wrap.appendChild(play)
-      return
-    }
-    const url = resolveAsset(item.content.data.assetId)
-    if (!url) return
-    const video = wrap.ownerDocument.createElement('video')
-    video.controls = true
-    video.src = url
-    video.style.width = '100%'
-    video.style.height = '100%'
-    video.style.objectFit = 'contain'
-    video.style.pointerEvents = 'auto'
-    wrap.appendChild(video)
-    return
-  }
-  if (item.content.nativeType === 'formula') {
-    wrap.style.boxSizing = 'border-box'
-    wrap.style.overflow = 'hidden'
-    paintPublishedFormula(wrap, {
-      formulaId: item.content.data.formulaId,
-      accessibleText: item.content.data.accessibleText,
-      ast: item.content.data.ast,
-      style: item.content.data.style,
-      width: Math.max(1, item.frame.width),
-      height: Math.max(1, item.frame.height),
-    })
-    return
-  }
-  if (item.content.nativeType === 'shape') {
-    const canvas = wrap.ownerDocument.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(item.frame.width))
-    canvas.height = Math.max(1, Math.round(item.frame.height))
-    Object.assign(canvas.style, {
-      display: 'block',
-      width: '100%',
-      height: '100%',
-    })
-    const context = canvas.getContext('2d')
-    if (context) {
-      const node = {
-        ...structuredClone(item.content.data),
-        id: item.layerItemId,
-        name: item.layerItemId,
-        type: 'shape',
-        x: 0,
-        y: 0,
-        width: item.frame.width,
-        height: item.frame.height,
-        rotation: 0,
-        opacity: 1,
-        visible: true,
-        locked: false,
-        playbackInitialVisibility: item.playbackInitialVisibility,
-      } satisfies ShapeNode
-      renderShapeCanvas(context, node, canvas.width, canvas.height)
-    }
-    wrap.appendChild(canvas)
-    return
-  }
-  if (item.content.nativeType === 'image') {
-    const url = resolveAsset(item.content.data.assetId)
-    if (!url) return
-    const image = wrap.ownerDocument.createElement('img')
-    image.alt = ''
-    image.hidden = true
-    const pending = wrap.ownerDocument.createElement('canvas')
-    pending.width = Math.max(1, Math.round(item.frame.width))
-    pending.height = Math.max(1, Math.round(item.frame.height))
-    Object.assign(pending.style, {
-      display: 'block',
-      width: '100%',
-      height: '100%',
-    })
-    wrap.append(image, pending)
-
-    const node: ImageNode = {
-      id: item.layerItemId,
-      name: item.layerItemId,
-      type: 'image',
-      x: 0,
-      y: 0,
-      width: item.frame.width,
-      height: item.frame.height,
-      rotation: 0,
-      opacity: 1,
-      visible: true,
-      locked: false,
-      playbackInitialVisibility: item.playbackInitialVisibility,
-      ...structuredClone(item.content.data),
-    }
-    const showImageFallback = (): void => {
-      if (pending.parentElement !== wrap || image.parentElement !== wrap) return
-      pending.remove()
-      image.hidden = false
-      Object.assign(image.style, {
-        display: 'block',
-        width: '100%',
-        height: '100%',
-        objectFit: node.fit,
-      })
-    }
-    const render = (): void => {
-      if (pending.parentElement !== wrap || image.parentElement !== wrap) return
-      try {
-        const rendered = renderImageNodeCanvas(
-          image,
-          image.naturalWidth,
-          image.naturalHeight,
-          node,
-          item.frame.width,
-          item.frame.height,
-          Math.min(2, wrap.ownerDocument.defaultView?.devicePixelRatio || 1),
-        )
-        Object.assign(rendered.style, {
-          display: 'block',
-          width: '100%',
-          height: '100%',
-        })
-        rendered.setAttribute('aria-hidden', 'true')
-        pending.replaceWith(rendered)
-      } catch {
-        showImageFallback()
-      }
-    }
-    image.addEventListener('load', render, { once: true })
-    image.addEventListener('error', showImageFallback, { once: true })
-    image.src = url
-    if (image.complete && image.naturalWidth > 0) render()
-  }
-}
-
 function appendLayerNode(
   dom: Document,
   parent: HTMLElement,
   item: PublishedLayerItem,
   source: 'scene' | 'surface' | 'global',
   resolveAsset: (assetId: string) => string | undefined,
-  mountTeacherController?: (wrap: HTMLElement, item: PublishedNativeLayerItem) => void,
+  mountTeacherController?: (wrap: HTMLElement, input: PublishedTeacherControllerInput) => void,
   options?: {
     components?: Readonly<Record<string, PublishedComponentPackageSource>>
     interactive?: boolean
@@ -578,6 +444,7 @@ function appendLayerNode(
       item: Extract<PublishedLayerItem, { kind: 'component' }>,
     ) => void
     mountRuntime?: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => void
+    renderInput?: ReadonlyNativeRenderInput
   },
 ): HTMLElement | null {
   if (!item.visible && !options?.includeInvisible) return null
@@ -621,12 +488,16 @@ function appendLayerNode(
     wrap.setAttribute('aria-hidden', 'true')
   }
   if (item.kind === 'native') {
-    paintPublishedNativeLayerItem(
+    paintPublishedNativeRenderInput(
       wrap,
-      item,
-      resolveAsset,
-      mountTeacherController,
-      options?.staticCapture === true,
+      options?.renderInput ?? readonlyNativeRenderInputFromPublishedItem(item),
+      {
+        resolveAsset,
+        ...(mountTeacherController
+          ? { mountTeacherController }
+          : {}),
+      },
+      { staticCapture: options?.staticCapture === true },
     )
   } else if (item.kind === 'component') {
     wrap.dataset.slideFallbackKind = 'component'
@@ -807,7 +678,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   readonly #authoring: SlidePublishedAuthoringOptions | null
   readonly #staticCapture: boolean
   readonly #includeGlobalLayerItemsForStaticCapture: boolean
-  readonly #authoringContext: PlayerAuthoringContext | null
+  #authoringGeneration = 0
   #locationId: string
   #presentationStateId: string | undefined
   #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
@@ -898,9 +769,6 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
     this.#includeGlobalLayerItemsForStaticCapture =
       options.includeGlobalLayerItemsForStaticCapture === true
-    this.#authoringContext = this.#authoring
-      ? { sceneId: scene.id, stateId: this.#authoring.stateId }
-      : null
     this.#presentationStateId = this.#authoring
       ? this.#authoring.stateId === null
         ? undefined
@@ -912,24 +780,46 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     return this.#locationId
   }
 
+  /** Current Published Slide paint plan. Does not construct Scene/Project. */
+  getPublishedSlideRenderPlan(): PublishedSlideRenderPlan {
+    return publishedSlideRenderPlanFromComposition(composePublishedSlideLocation({
+      payload: this.#payload,
+      locationId: this.#locationId,
+      stateId: this.#presentationStateId ?? null,
+    }))
+  }
+
   getAuthoringContext(): PlayerAuthoringContext {
-    if (!this.#authoringContext) {
+    if (!this.#authoring) {
       throw new Error('当前 Slide Published 宿主不是作者模式。')
     }
-    return { ...this.#authoringContext }
+    const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
+    const scene = sceneOf(findSlideSurface(this.#payload, this.id), location)
+    return {
+      sceneId: scene.id,
+      stateId: this.#presentationStateId ?? null,
+    }
+  }
+
+  getAuthoringGeneration(): number {
+    if (!this.#authoring) {
+      throw new Error('当前 Slide Published 宿主不是作者模式。')
+    }
+    return this.#authoringGeneration
   }
 
   async applyAuthoringPatch(
     context: PlayerAuthoringContext,
     patch: PlayerAuthoringPatch,
+    commandIdentity: PublishedAuthoringPatchIdentity,
   ): Promise<PublishedSlideAuthoringPatchResult> {
-    const expected = this.#authoringContext
-    if (!expected) {
+    if (!this.#authoring) {
       return this.#authoringFailure(
         'unsupported-host-mode',
         '当前 Slide Published 宿主不是统一画布编辑宿主。',
       )
     }
+    const expected = this.getAuthoringContext()
     if (context.sceneId !== expected.sceneId) {
       return this.#authoringFailure('scene-mismatch', '编辑命令不属于当前 Slide 场景。')
     }
@@ -996,6 +886,13 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
 
     if (patch.kind === 'runtime-content') {
       const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      const captured = this.#captureAuthoringIdentity(
+        patch.target,
+        commandIdentity,
+        patch.target.nodeId,
+      )
+      const identity = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!identity.ok) return identity
       if (!record || record.item.kind !== 'runtime') {
         return this.#authoringFailure(
           'target-not-found',
@@ -1032,26 +929,61 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       }
       // Runtime content is snapshotted into ctx.content during create(). ACK
       // only after this one carrier has rebuilt and completed its async boot.
-      await record.remountRuntime(item)
+      try {
+        await record.remountRuntime(item)
+      } catch (error) {
+        const current = this.#validateCapturedAuthoringRecord(captured, record)
+        if (!current.ok) return current
+        throw error
+      }
+      const current = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!current.ok) return current
       record.item = item
       return { ok: true, target: patch.target }
     }
 
-    if (patch.target.nodeId !== patch.node.id) {
+    const frame = publishedSlideAuthoringFrameOf(patch.node)
+    if (!frame) {
+      return this.#authoringFailure(
+        'target-mismatch',
+        'Published Slide 画面命令只接受 Native render input 或组件 mount descriptor。',
+      )
+    }
+    if (patch.target.nodeId !== frame.id) {
       return this.#authoringFailure('target-mismatch', '编辑目标 ID 与完整节点 ID 不一致。')
     }
     const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+    const captured = this.#captureAuthoringIdentity(
+      patch.target,
+      commandIdentity,
+      patch.target.nodeId,
+    )
+    const merged = applyPublishedSlideAuthoringItemPatch({
+      current: record?.item ?? null,
+      next: frame,
+      captured,
+      currentIdentity: {
+        revision: commandIdentity.revision,
+        generation: this.#authoringGeneration,
+        owner: record
+          ? this.#recordAuthoringOwner(record)
+          : this.#authoringOwner(patch.target.scope),
+        itemId: record?.item.layerItemId ?? '',
+      },
+    })
+    if (!merged.ok) return merged
     if (!record) {
       return this.#authoringFailure(
         'target-not-found',
-        `当前 Published 宿主中不存在节点“${patch.node.id}”。`,
+        `当前 Published 宿主中不存在节点“${frame.id}”。`,
       )
     }
-    const merged = mergePublishedAuthoringNode(record.item, patch.node)
-    if (!merged.ok) return merged
-    const assetFailure = this.#validateAuthoringNodeAssets(patch.node)
-    if (assetFailure) return assetFailure
-    await this.#updateAuthoringRecord(record, merged.item)
+    if (isNativeRenderInput(frame)) {
+      const assetFailure = this.#validateAuthoringNodeAssets(frame)
+      if (assetFailure) return assetFailure
+    }
+    const updated = await this.#updateAuthoringRecord(record, merged.item, captured)
+    if (!updated.ok) return updated
     return { ok: true, target: patch.target }
   }
 
@@ -1273,9 +1205,13 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const completedResetLocationId = this.#completedActiveResetLocationId
     this.#completedActiveResetLocationId = null
     this.#preparedRuntimeActivation = null
-    const presentationStateId = this.#preparedPresentationState?.locationId === locationId
-      ? this.#preparedPresentationState.stateId
-      : presentationStateIdForLocation(scene, location)
+    const presentationStateId = this.#authoring
+      ? this.#authoring.stateId === null
+        ? undefined
+        : exactPresentationStateId(scene, this.#authoring.stateId)
+      : this.#preparedPresentationState?.locationId === locationId
+        ? this.#preparedPresentationState.stateId
+        : presentationStateIdForLocation(scene, location)
     this.#preparedPresentationState = null
     const sameLocation = locationId === this.#locationId
       && presentationStateId === this.#presentationStateId
@@ -1312,6 +1248,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   }
 
   async destroy(): Promise<void> {
+    if (this.#authoring) this.#authoringGeneration += 1
     this.#cancelAllAuthoringMotions()
     this.#invalidateInteractions()
     this.#carrierSideEffects.destroy()
@@ -1363,21 +1300,67 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     return this.#authoring?.scope === 'surface' ? 'surface' : 'scene'
   }
 
-  #validateAuthoringNodeAssets(
-    node: SceneNode,
-  ): Extract<PublishedSlideAuthoringPatchResult, { ok: false }> | null {
-    const assetIds: string[] = []
-    if (node.type === 'image') assetIds.push(node.assetId)
-    if (node.type === 'video') {
-      assetIds.push(node.assetId)
-      if (node.poster.assetId) assetIds.push(node.poster.assetId)
+  #authoringOwner(scope: 'scene' | 'global'): PublishedSlideAuthoringOwner {
+    return scope === 'global' ? 'global' : this.#localAuthoringSource()
+  }
+
+  #recordAuthoringOwner(record: SlideRenderedLayerRecord): PublishedSlideAuthoringOwner {
+    return record.source === 'global' ? 'global' : this.#localAuthoringSource()
+  }
+
+  #captureAuthoringIdentity(
+    target: PublishedSlideAuthoringIdentity['target'],
+    commandIdentity: PublishedAuthoringPatchIdentity,
+    itemId: string,
+  ): PublishedSlideAuthoringIdentity {
+    return {
+      target,
+      revision: commandIdentity.revision,
+      generation: commandIdentity.generation,
+      owner: this.#authoringOwner(target.scope),
+      itemId,
     }
-    const missing = assetIds.find((assetId) => !this.#resolveAsset(assetId))
+  }
+
+  #validateCapturedAuthoringRecord(
+    captured: PublishedSlideAuthoringIdentity,
+    expectedRecord: SlideRenderedLayerRecord | null,
+  ): PublishedSlideAuthoringPatchResult {
+    const currentRecord = this.#authoringRecord(captured.target.scope, captured.itemId)
+    const validated = validatePublishedSlideAuthoringIdentity({
+      captured,
+      current: {
+        // Command monotonicity is owned by PublishedAuthoringSessionCoordinator;
+        // this value is its validated lease, while generation/owner/item are
+        // re-read from the live Slide render before mutation and again before ACK.
+        revision: captured.revision,
+        generation: this.#authoringGeneration,
+        owner: currentRecord
+          ? this.#recordAuthoringOwner(currentRecord)
+          : this.#authoringOwner(captured.target.scope),
+        itemId: currentRecord?.item.layerItemId ?? '',
+      },
+      item: currentRecord?.item ?? null,
+    })
+    if (!validated.ok) return validated
+    if (currentRecord !== expectedRecord) {
+      return this.#authoringFailure(
+        'stale-revision',
+        `编辑目标“${captured.itemId}”所属的 Published 渲染世代已被替换。`,
+      )
+    }
+    return validated
+  }
+
+  #validateAuthoringNodeAssets(
+    input: ReadonlyNativeRenderInput,
+  ): Extract<PublishedSlideAuthoringPatchResult, { ok: false }> | null {
+    const missing = nativeMediaAssetIds(input).find((assetId) => !this.#resolveAsset(assetId))
     return missing
       ? {
           ok: false,
           code: 'asset-missing',
-          message: `节点“${node.name}”的素材“${missing}”无法解析。`,
+          message: `节点“${input.name}”的素材“${missing}”无法解析。`,
         }
       : null
   }
@@ -1422,13 +1405,24 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   async #updateAuthoringRecord(
     record: SlideRenderedLayerRecord,
     item: PublishedLayerItem,
-  ): Promise<void> {
+    captured: PublishedSlideAuthoringIdentity,
+  ): Promise<PublishedSlideAuthoringPatchResult> {
+    const before = this.#validateCapturedAuthoringRecord(captured, record)
+    if (!before.ok) return before
     this.#cancelAuthoringMotion(item.layerItemId)
     if (item.kind === 'component') {
       if (!record.remountComponent) {
         throw new Error(`Component“${item.layerItemId}”没有可重建的作者实例。`)
       }
-      await record.remountComponent(item)
+      try {
+        await record.remountComponent(item)
+      } catch (error) {
+        const current = this.#validateCapturedAuthoringRecord(captured, record)
+        if (!current.ok) return current
+        throw error
+      }
+      const current = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!current.ok) return current
       record.item = item
       this.#applyRecordFrame(record)
     } else if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
@@ -1439,12 +1433,17 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       record.item = item
       this.#applyRecordFrame(record)
       record.wrap.replaceChildren()
-      paintPublishedNativeLayerItem(record.wrap, item, this.#resolveAsset)
+      paintPublishedNativeRenderInput(
+        record.wrap,
+        readonlyNativeRenderInputFromPublishedItem(item),
+        { resolveAsset: this.#resolveAsset },
+      )
     } else {
       record.item = item
       this.#applyRecordFrame(record)
     }
     this.#refreshInteractionNodesFromRecords()
+    return { ok: true, target: captured.target }
   }
 
   #remountAuthoringControllers(): void {
@@ -1452,7 +1451,10 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     for (const record of this.#renderedLayers.values()) {
       if (!isPublishedTeacherController(record.item)) continue
       record.wrap.replaceChildren()
-      this.#mountTeacherController(record.wrap, record.item)
+      this.#mountTeacherController(
+        record.wrap,
+        readonlyNativeRenderInputFromPublishedItem(record.item),
+      )
     }
   }
 
@@ -1596,25 +1598,33 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#controllers = []
   }
 
-  #controllerSessionFor(item: PublishedLayerItem): TeacherControllerDomSession {
-    const collapsed = isPublishedTeacherController(item)
-      ? item.content.data.collapsible && item.content.data.defaultCollapsed
-      : false
+  #controllerSessionFor(input: PublishedTeacherControllerInput): TeacherControllerDomSession {
     return this.#teacherControllerSession.get({
-      controllerId: item.layerItemId,
+      controllerId: input.id,
       surfaceSessionId: this.id,
-      defaultCollapsed: collapsed,
+      defaultCollapsed: input.collapsible && input.defaultCollapsed,
     })
   }
 
-  #mountTeacherController(wrap: HTMLElement, item: PublishedNativeLayerItem): void {
-    if (!isPublishedTeacherController(item) || this.#payload.playback.controls === 'none') return
+  #mountTeacherController(wrap: HTMLElement, input: ReadonlyNativeRenderInput): void {
+    if (input.type !== 'teacher-controller' || this.#payload.playback.controls === 'none') return
     const root = this.#root
     if (!root) return
-    const session = this.#controllerSessionFor(item)
-    wrap.style.left = `${item.frame.x + session.offset.dx}px`
-    wrap.style.top = `${item.frame.y + session.offset.dy}px`
-    const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
+    const session = this.#controllerSessionFor(input)
+    wrap.style.left = `${input.x + session.offset.dx}px`
+    wrap.style.top = `${input.y + session.offset.dy}px`
+    const node = teacherControllerDomNode(
+      { x: input.x, y: input.y, width: input.width, height: input.height },
+      input.rotation,
+      {
+        title: input.title,
+        compact: input.compact,
+        showSceneProgress: input.showSceneProgress,
+        collapsible: input.collapsible,
+        buttons: structuredClone(input.buttons) as TeacherControllerNode['buttons'],
+        style: structuredClone(input.style),
+      },
+    )
     const controller = new TeacherControllerDom({
       node,
       container: wrap,
@@ -1631,16 +1641,15 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         muted: this.#muted,
         fullscreen: Boolean(root.ownerDocument.fullscreenElement),
       }),
-      getSession: () => this.#controllerSessionFor(item),
+      getSession: () => this.#controllerSessionFor(input),
       onSessionChange: (next) => {
         this.#teacherControllerSession.set({
-          controllerId: item.layerItemId,
+          controllerId: input.id,
           surfaceSessionId: this.id,
-          defaultCollapsed: item.content.data.collapsible
-            && item.content.data.defaultCollapsed,
+          defaultCollapsed: input.collapsible && input.defaultCollapsed,
         }, next)
-        wrap.style.left = `${item.frame.x + next.offset.dx}px`
-        wrap.style.top = `${item.frame.y + next.offset.dy}px`
+        wrap.style.left = `${input.x + next.offset.dx}px`
+        wrap.style.top = `${input.y + next.offset.dy}px`
       },
       onAction: (action) => {
         void this.#handleControllerAction(action).catch((cause) => {
@@ -1797,6 +1806,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #render(): void {
     const root = this.#root
     if (!root) return
+    if (this.#authoring) this.#authoringGeneration += 1
     this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
     const carrierEffects = this.#carrierEffects
     const authoringRuntimeGeneration = ++this.#authoringRuntimeGeneration
@@ -1817,8 +1827,9 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       locationId: location.id,
       stateId: this.#presentationStateId ?? null,
     })
-    const backgroundColor = composition.background!.color
-    const backgroundAssetId = composition.background!.assetId
+    const plan = publishedSlideRenderPlanFromComposition(composition)
+    const backgroundColor = plan.background!.color
+    const backgroundAssetId = plan.background!.assetId
     const backgroundAssetUrl = backgroundAssetId
       ? this.#resolveAsset(backgroundAssetId)
       : undefined
@@ -1839,12 +1850,12 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     stage.style.position = 'absolute'
     stage.style.inset = '0'
     root.appendChild(stage)
-    const mountController = (wrap: HTMLElement, item: PublishedNativeLayerItem) => {
-      this.#mountTeacherController(wrap, item)
+    const mountController = (wrap: HTMLElement, input: PublishedTeacherControllerInput) => {
+      this.#mountTeacherController(wrap, input)
     }
     if (this.#authoring) this.#publishAuthoringRuntimeTargets(scene.id)
-    for (const entry of composition.entries) {
-      const source = entry.source as 'scene' | 'surface' | 'global'
+    for (const entry of plan.layers) {
+      const source = entry.source
       const authoringSnapshotNode = this.#authoring !== null
         && (source === this.#localAuthoringSource() || source === 'global')
         && (entry.item.kind === 'native' || entry.item.kind === 'component')
@@ -1926,6 +1937,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
           ...(this.#authoring
             ? { authoring: this.#authoring, sceneId: scene.id }
             : {}),
+          ...(entry.kind === 'native' ? { renderInput: entry.renderInput } : {}),
           mountComponent: (handle) => rememberComponentHandle(handle),
           registerComponentRemount: (mount) => {
             registeredComponentMount = mount

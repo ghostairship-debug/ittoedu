@@ -5,17 +5,20 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
   createCourseProjectArchive,
   type CourseProjectArchiveData,
 } from '@/renderer/project/courseProjectArchive'
 import {
   createImageNode,
-  createProject,
   createRectangleNode,
-} from '@/renderer/project/createProject'
-import { createProjectArchive } from '@/renderer/project/projectArchive'
+} from '@/renderer/project/nativeNodeFactories'
+import {
+  COURSE_PROJECT_REJECTION_INPUTS,
+} from '../fixtures/course-project-v9'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type {
   CourseProjectDocument,
@@ -442,12 +445,73 @@ describe('headless Course Project V9 validation', () => {
     }
   })
 
-  it('returns exit 2 for Project V8 without calling it the current format', () => {
-    const bytes = createProjectArchive({
-      project: createProject({ includeDefaultController: false, controls: 'none' }),
-      assetFiles: {},
-      componentFiles: {},
+  it('uses the same PDF producer facts in GUI and headless validation', () => {
+    const project = createBlankSpatialCourseProject({
+      includeDefaultController: false,
+      controls: 'none',
     })
+    const surface = project.surfaces.find((candidate) => candidate.type === 'spatial-2d')
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const runtime: RuntimeLayerItem = {
+      layerItemId: 'spatial-runtime-without-fallback',
+      label: '无静态后备 Runtime',
+      frame: { mode: 'absolute', x: 0, y: 0, width: 320, height: 180 },
+      order: 0,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'surface',
+      playbackInitialVisibility: 'inherit',
+      kind: 'runtime',
+      runtime: {
+        protocol: 'canvas-runtime',
+        runtimeApiVersion: 2,
+        enabled: true,
+        renderMode: 'dom',
+        source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
+        content: { values: {} },
+        assets: {},
+      },
+    }
+    surface.world.layerItems.push(runtime)
+    const resources = { assetFiles: {}, components: {} }
+    const gui = collectCourseProjectExportPreflight(
+      project,
+      'pdf',
+      resources,
+      new Date(project.updatedAt),
+    )
+    const headless = validateCourseProjectArchiveBytes(
+      createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }),
+      'spatial-runtime.h5lesson',
+    )
+    const expectedMessage = gui.items.find((item) => (
+      item.code === 'static-export-warning'
+      && item.message.includes(runtime.layerItemId)
+      && item.message.includes('Spatial PDF')
+    ))?.message
+
+    expect(expectedMessage).toBeTruthy()
+    expect(headless.exportPreflight?.pdf.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'static-export-warning',
+        message: expectedMessage,
+        target: {
+          version: 1,
+          kind: 'layer-item',
+          projectId: project.id,
+          surfaceId: surface.id,
+          owner: 'world',
+          layerItemId: runtime.layerItemId,
+        },
+      }),
+    ]))
+  })
+
+  it('returns exit 2 for Project V8 without calling it the current format', () => {
+    const bytes = COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
     const report = validateCourseProjectArchiveBytes(bytes, 'legacy-v8.h5lesson')
     expect(report).toMatchObject({
       status: 'unreadable',
@@ -457,6 +521,37 @@ describe('headless Course Project V9 validation', () => {
     expect(courseProjectValidationExitCode(report)).toBe(2)
     expect(JSON.stringify(report)).not.toContain('只接受 Project V8')
     expect(report.fatal?.message).toContain('不是当前 Course Project V9')
+  })
+
+  it('separates r11-050 unsupported versions from corrupt archives', () => {
+    for (const kind of ['v8-unsupported', 'future-unsupported'] as const) {
+      const report = validateCourseProjectArchiveBytes(
+        COURSE_PROJECT_REJECTION_INPUTS[kind],
+        `${kind}.h5lesson`,
+      )
+      expect(report).toMatchObject({
+        status: 'unreadable',
+        fatal: { code: 'unsupported-project-version' },
+      })
+      expect(courseProjectValidationExitCode(report)).toBe(2)
+    }
+    for (const kind of [
+      'corrupted-empty',
+      'corrupted-not-zip',
+      'corrupted-invalid-json',
+      'corrupted-missing-json',
+    ] as const) {
+      const report = validateCourseProjectArchiveBytes(
+        COURSE_PROJECT_REJECTION_INPUTS[kind],
+        `${kind}.h5lesson`,
+      )
+      expect(report).toMatchObject({
+        status: 'unreadable',
+        fatal: { code: 'archive-invalid' },
+      })
+      expect(report.fatal?.code).not.toBe('unsupported-project-version')
+      expect(courseProjectValidationExitCode(report)).toBe(2)
+    }
   })
 
   it('returns exit 2 for an old schema and for missing declared bytes', () => {
@@ -695,11 +790,7 @@ describe('headless Course Project V9 validation', () => {
         fatal: { code: 'unsupported-project-version' },
       })
 
-      const v8Bytes = createProjectArchive({
-        project: createProject({ includeDefaultController: false, controls: 'none' }),
-        assetFiles: {},
-        componentFiles: {},
-      })
+      const v8Bytes = COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
       await writeFile(v8Path, v8Bytes)
       const v8Result = await publicValidatorCommand(v8Path)
       expect(v8Result.exitCode).toBe(2)

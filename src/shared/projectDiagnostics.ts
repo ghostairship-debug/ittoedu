@@ -1,3 +1,7 @@
+/**
+ * V8-shaped video authoring diagnostics retained until r11-054.
+ * Product truth for these codes is collectCourseProjectControllerMediaHealth.
+ */
 import {
   ensureScenePresentation,
   materializeScene,

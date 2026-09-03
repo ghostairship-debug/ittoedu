@@ -13,7 +13,24 @@ import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
   useEditorStore,
+  selectCandidateGlobalLayerItems,
+  selectSlideSceneList,
 } from '@/renderer/store/editorStore'
+
+import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+
+function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
+  return (selectCandidateGlobalLayerItems(state) ?? []).map((entry) => ({
+    ...entry,
+    layer: entry.plane ?? 'overlay',
+    visibility: {
+      mode: entry.visibility.mode,
+      sceneIds: entry.visibility.locationIds,
+    },
+    node: courseLayerItemToEditorCanvasNode(entry.item)!,
+  }))
+}
+
 
 function componentPackage(
   id: string,
@@ -181,36 +198,36 @@ describe('Project V8 global-layer editor store', () => {
   it('在隐藏、关闭与恢复教师控制器时始终维持双向一致', () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
-    const controller = useEditorStore.getState().project.globalLayer.find(
+    const controller = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',
     )!.node
 
     store.updateNode(controller.id, { visible: false })
-    expect(useEditorStore.getState().project.playback.controls).toBe('none')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('none')
 
     useEditorStore.getState().ensureTeacherController()
-    let project = useEditorStore.getState().project
+    let project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(project.playback.controls).toBe('canvas')
-    expect(project.globalLayer.find((item) => item.node.id === controller.id)?.node)
+    expect(projectedGlobalLayer(useEditorStore.getState()).find((item) => item.node.id === controller.id)?.node)
       .toMatchObject({ visible: true, playbackInitialVisibility: 'inherit' })
 
     useEditorStore.getState().updatePlayback({ controls: 'none' })
-    project = useEditorStore.getState().project
+    project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(project.playback.controls).toBe('none')
-    expect(project.globalLayer.find((item) => item.node.id === controller.id)?.node)
+    expect(projectedGlobalLayer(useEditorStore.getState()).find((item) => item.node.id === controller.id)?.node)
       .toMatchObject({ playbackInitialVisibility: 'hidden' })
 
     useEditorStore.getState().ensureTeacherController()
-    expect(useEditorStore.getState().project.playback.controls).toBe('canvas')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('canvas')
 
-    const currentController = useEditorStore.getState().project.globalLayer.find(
+    const currentController = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
     )!.node
     if (currentController.type !== 'teacher-controller') throw new Error('缺少教师控制器')
     useEditorStore.getState().updateNode(controller.id, {
       x: 2000,
       opacity: 0,
-      buttons: currentController.buttons.map((button) => ({
+      buttons: (currentController.buttons ?? []).map((button) => ({
         ...button,
         visible: false,
       })),
@@ -218,11 +235,11 @@ describe('Project V8 global-layer editor store', () => {
     useEditorStore.getState().updateGlobalLayerSettings(controller.id, {
       layer: 'underlay',
     })
-    expect(useEditorStore.getState().project.playback.controls).toBe('none')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('none')
 
     useEditorStore.getState().ensureTeacherController()
-    project = useEditorStore.getState().project
-    const repaired = project.globalLayer.find(
+    project = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const repaired = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
     )!
     expect(project.playback.controls).toBe('canvas')
@@ -233,7 +250,7 @@ describe('Project V8 global-layer editor store', () => {
     })
     if (repaired.node.type !== 'teacher-controller') throw new Error('缺少教师控制器')
     expect(repaired.node.x).toBeLessThan(1280)
-    expect(repaired.node.buttons.some((button) => button.visible)).toBe(true)
+    expect(repaired.node.buttons?.some((button) => button.visible)).toBe(true)
   })
 
   it('accepts only global-capable V4 packages and creates an undoable placement', () => {
@@ -243,17 +260,17 @@ describe('Project V8 global-layer editor store', () => {
     store.importComponentPackage(global)
     store.importComponentPackage(sceneOnly)
     store.setEditingScope('global')
-    const initialGlobalCount = useEditorStore.getState().project.globalLayer.length
+    const initialGlobalCount = projectedGlobalLayer(useEditorStore.getState()).length
 
     store.addExternalComponentNode(sceneOnly.manifest.id)
-    expect(useEditorStore.getState().project.globalLayer).toHaveLength(
+    expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(
       initialGlobalCount,
     )
     expect(useEditorStore.getState().errorMessage).toContain('未声明支持全局层')
 
     store.addExternalComponentNode(global.manifest.id, 240, 90)
     const state = useEditorStore.getState()
-    const placement = state.project.globalLayer.find(
+    const placement = projectedGlobalLayer(state).find(
       (item) => item.node.type === 'external-component',
     )!
     expect(placement).toMatchObject({
@@ -269,12 +286,12 @@ describe('Project V8 global-layer editor store', () => {
     expect(state.selectedNodeId).toBe(placement.node.id)
 
     store.undo()
-    expect(useEditorStore.getState().project.globalLayer).toHaveLength(
+    expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(
       initialGlobalCount,
     )
     store.redo()
     expect(
-      useEditorStore.getState().project.globalLayer.some(
+      projectedGlobalLayer(useEditorStore.getState()).some(
         (item) => item.node.id === placement.node.id,
       ),
     ).toBe(true)
@@ -285,10 +302,10 @@ describe('Project V8 global-layer editor store', () => {
     const global = componentPackage('com.example.global', ['global'])
     store.importComponentPackage(global)
     store.addScene()
-    const sceneIds = useEditorStore.getState().project.scenes.map((scene) => scene.id)
+    const sceneIds = selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)
     store.setEditingScope('global')
     store.addExternalComponentNode(global.manifest.id)
-    const nodeId = useEditorStore.getState().project.globalLayer.find(
+    const nodeId = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component',
     )!.node.id
 
@@ -312,10 +329,10 @@ describe('Project V8 global-layer editor store', () => {
       },
     })
 
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
-      layer: 'overlay',
+      layer: 'underlay',
       visibility: { mode: 'include', sceneIds: [sceneIds[1]] },
       node: {
         x: 80,
@@ -332,17 +349,17 @@ describe('Project V8 global-layer editor store', () => {
     })
 
     store.undo()
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
-      layer: 'overlay',
+      layer: 'underlay',
       visibility: { mode: 'all', sceneIds: [] },
     })
     store.redo()
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
-      layer: 'overlay',
+      layer: 'underlay',
       visibility: { mode: 'include', sceneIds: [sceneIds[1]] },
     })
   })
@@ -350,24 +367,24 @@ describe('Project V8 global-layer editor store', () => {
   it('keeps filtered global visibility schema-valid while the UI changes mode', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    const firstSceneId = useEditorStore.getState().project.scenes[0]!.id
+    const firstSceneId = selectSlideSceneList(useEditorStore.getState())[0]!.id
     store.setEditingScope('global')
     store.addTextNode()
-    const nodeId = useEditorStore.getState().project.globalLayer[0]!.node.id
+    const nodeId = projectedGlobalLayer(useEditorStore.getState())[0]!.node.id
 
     store.updateGlobalLayerSettings(nodeId, {
       visibility: { mode: 'include', sceneIds: [] },
     })
 
-    expect(useEditorStore.getState().project.globalLayer[0]!.visibility)
+    expect(projectedGlobalLayer(useEditorStore.getState())[0]!.visibility)
       .toEqual({ mode: 'include', sceneIds: [firstSceneId] })
   })
 
   it('canonicalizes include/exclude visibility when its last referenced scene is deleted', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    let [firstScene, secondScene] = useEditorStore.getState().project.scenes
-    const controllerId = useEditorStore.getState().project.globalLayer.find(
+    let [firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
+    const controllerId = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',
     )!.node.id
 
@@ -375,17 +392,17 @@ describe('Project V8 global-layer editor store', () => {
       visibility: { mode: 'include', sceneIds: [secondScene!.id] },
     })
     expect(store.deleteScene(secondScene!.id)).toBe(true)
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controllerId,
     )?.visibility).toEqual({ mode: 'include', sceneIds: [firstScene!.id] })
 
     useEditorStore.getState().addScene()
-    ;[firstScene, secondScene] = useEditorStore.getState().project.scenes
+    ;[firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
     useEditorStore.getState().updateGlobalLayerSettings(controllerId, {
       visibility: { mode: 'exclude', sceneIds: [secondScene!.id] },
     })
     expect(useEditorStore.getState().deleteScene(secondScene!.id)).toBe(true)
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controllerId,
     )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
   })
@@ -393,7 +410,7 @@ describe('Project V8 global-layer editor store', () => {
   it('authors native text, image, and shape nodes in the persistent global layer', () => {
     const store = useEditorStore.getState()
     store.addScene()
-    const secondSceneId = useEditorStore.getState().project.scenes[1]!.id
+    const secondSceneId = selectSlideSceneList(useEditorStore.getState())[1]!.id
     store.setEditingScope('global')
 
     store.addTextNode(80, 40)
@@ -409,7 +426,7 @@ describe('Project V8 global-layer editor store', () => {
       height: 80,
     }, new Uint8Array([1, 2, 3, 4]), 1080, 30)
 
-    let layer = useEditorStore.getState().project.globalLayer
+    let layer = projectedGlobalLayer(useEditorStore.getState())
     expect(layer.map((item) => item.node.type)).toEqual([
       'teacher-controller',
       'text',
@@ -428,9 +445,9 @@ describe('Project V8 global-layer editor store', () => {
       visibility: { mode: 'exclude', sceneIds: [secondSceneId] },
     })
 
-    layer = useEditorStore.getState().project.globalLayer
+    layer = projectedGlobalLayer(useEditorStore.getState())
     expect(layer.find((item) => item.node.id === text.id)).toMatchObject({
-      layer: 'overlay',
+      layer: 'underlay',
       visibility: { mode: 'exclude', sceneIds: [secondSceneId] },
       node: { type: 'text', text: '跨场景课程标题', height: 64 },
     })
@@ -439,16 +456,16 @@ describe('Project V8 global-layer editor store', () => {
     )
 
     store.undo()
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === text.id,
-    )!.layer).toBe('overlay')
+    )!.layer).toBe('underlay')
   })
 
   it('edits scene and global runtime content without changing source and supports undo', () => {
     const sceneRuntime = runtime('场景标题')
     const globalRuntime = runtime('全局标题')
     const store = useEditorStore.getState()
-    const sceneId = store.project.scenes[0]!.id
+    const sceneId = selectSlideSceneList(store)[0]!.id
     installRuntimeDefinitions(sceneId, sceneRuntime, globalRuntime)
     const locationId = selectActiveCourseLocationId(useEditorStore.getState())
     if (!locationId) throw new Error('缺少活动课程位置')
@@ -466,46 +483,57 @@ describe('Project V8 global-layer editor store', () => {
     )
     expect(globalResult).toMatchObject({ ok: true, status: 'updated' })
 
-    let project = useEditorStore.getState().project
-    expect(project.scenes[0]!.runtime?.source).toBe(sceneRuntime.source)
-    expect(project.globalRuntime?.source).toBe(globalRuntime.source)
-    expect(project.scenes[0]!.runtime?.content.values).toEqual({
+    let project = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const slideRuntime = project.surfaces.flatMap((surface) => (
+      surface.type === 'slide' ? surface.scenes : []
+    ))[0]?.layerItems.find((item) => item.kind === 'runtime')
+    const globalRuntimeItem = project.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    if (!slideRuntime || slideRuntime.kind !== 'runtime' || globalRuntimeItem?.kind !== 'runtime') {
+      throw new Error('expected scene and global runtime layers')
+    }
+    expect(slideRuntime.runtime.source).toBe(sceneRuntime.source)
+    expect(globalRuntimeItem.runtime.source).toBe(globalRuntime.source)
+    expect(slideRuntime.runtime.content.values).toEqual({
       title: '修改后的场景标题',
       'feedback.success': '回答正确',
     })
-    expect(project.globalRuntime?.content.values.title).toBe('修改后的全局标题')
+    expect(globalRuntimeItem.runtime.content.values.title).toBe('修改后的全局标题')
 
     store.undo()
-    project = useEditorStore.getState().project
-    expect(project.globalRuntime?.content.values.title).toBe('全局标题')
-    expect(project.globalRuntime?.source).toBe(globalRuntime.source)
+    project = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const undoneGlobal = project.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
+    if (undoneGlobal?.kind !== 'runtime') throw new Error('expected global runtime')
+    expect(undoneGlobal.runtime.content.values.title).toBe('全局标题')
+    expect(undoneGlobal.runtime.source).toBe(globalRuntime.source)
     store.undo()
-    expect(
-      useEditorStore.getState().project.scenes[0]!.runtime?.content.values.title,
-    ).toBe('场景标题')
+    const undoneScene = selectActiveCourseProjectDocument(useEditorStore.getState())
+      ?.surfaces.flatMap((surface) => (surface.type === 'slide' ? surface.scenes : []))[0]
+      ?.layerItems.find((item) => item.kind === 'runtime')
+    if (!undoneScene || undoneScene.kind !== 'runtime') throw new Error('expected scene runtime')
+    expect(undoneScene.runtime.content.values.title).toBe('场景标题')
   })
 
   it('keeps scene editing isolated when switching to and from the global layer', () => {
     const store = useEditorStore.getState()
     store.addTextNode(50, 60)
-    const sceneNode = useEditorStore.getState().project.scenes[0]!.nodes[0]!
+    const sceneNode = selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0]!
     const global = componentPackage('com.example.global', ['scene', 'global'])
     store.importComponentPackage(global)
 
     store.setEditingScope('global')
     expect(useEditorStore.getState().selectedNodeIds).toEqual([])
     store.addExternalComponentNode(global.manifest.id)
-    const globalNode = useEditorStore.getState().project.globalLayer.find(
+    const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component',
     )!.node
     store.updateNode(globalNode.id, { x: 900 })
 
     store.setActiveScene(useEditorStore.getState().activeSceneId)
     expect(useEditorStore.getState().editingScope).toBe('scene')
-    expect(useEditorStore.getState().project.scenes[0]!.nodes[0]).toEqual(sceneNode)
+    expect(selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0]).toEqual(sceneNode)
     store.selectNode(sceneNode.id)
     store.updateNode(sceneNode.id, { x: 120 })
-    expect(useEditorStore.getState().project.globalLayer.find(
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === globalNode.id,
     )!.node.x).toBe(900)
   })
@@ -514,7 +542,7 @@ describe('Project V8 global-layer editor store', () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     store.addTextNode(120, 80)
-    const original = useEditorStore.getState().project.globalLayer.find(
+    const original = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'text',
     )!.node
     store.addGlobalInteractionRule({
@@ -533,18 +561,18 @@ describe('Project V8 global-layer editor store', () => {
 
     store.duplicateNode(original.id)
     let state = useEditorStore.getState()
-    expect(state.project.globalInteractions).toHaveLength(2)
-    const duplicate = state.project.globalLayer.find(
+    expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(2)
+    const duplicate = projectedGlobalLayer(state).find(
       (item) => item.node.id === state.selectedNodeId,
     )!.node
-    expect(state.project.globalInteractions.some((rule) => (
+    expect(selectActiveCourseProjectDocument(state)!.globalInteractions.some((rule) => (
       rule.trigger.type === 'node.click' && rule.trigger.nodeId === duplicate.id
     ))).toBe(true)
 
     store.deleteNode(duplicate.id)
     state = useEditorStore.getState()
-    expect(state.project.globalInteractions).toHaveLength(1)
-    expect(state.project.globalInteractions[0]!.trigger).toEqual({
+    expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(1)
+    expect(selectActiveCourseProjectDocument(state)!.globalInteractions[0]!.trigger).toEqual({
       type: 'node.click',
       nodeId: original.id,
     })
@@ -554,8 +582,8 @@ describe('Project V8 global-layer editor store', () => {
     store.pasteNodes()
     state = useEditorStore.getState()
     const pastedId = state.selectedNodeId!
-    expect(state.project.globalInteractions).toHaveLength(2)
-    expect(state.project.globalInteractions.some((rule) => (
+    expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(2)
+    expect(selectActiveCourseProjectDocument(state)!.globalInteractions.some((rule) => (
       rule.trigger.type === 'node.click' && rule.trigger.nodeId === pastedId
     ))).toBe(true)
   })
@@ -566,13 +594,13 @@ describe('Project V8 global-layer editor store', () => {
     const targetSceneId = useEditorStore.getState().activeSceneId
     store.addPresentationState('目标状态')
     const targetStateId = useEditorStore.getState().activePresentationStateId!
-    const controller = useEditorStore.getState().project.globalLayer.find(
+    const controller = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',
     )!.node
     if (controller.type !== 'teacher-controller') throw new Error('缺少教师控制器')
     store.setEditingScope('global')
     store.updateNode(controller.id, {
-      buttons: controller.buttons.map((button, index) => index === 0
+      buttons: (controller.buttons ?? []).map((button, index) => index === 0
         ? {
             ...button,
             action: {
@@ -598,19 +626,19 @@ describe('Project V8 global-layer editor store', () => {
 
     store.duplicateScene(targetSceneId)
     const copiedSceneId = useEditorStore.getState().activeSceneId
-    expect(useEditorStore.getState().project.globalInteractions[0]?.conditions)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.globalInteractions[0]?.conditions)
       .toEqual([{ type: 'scene.in', sceneIds: [targetSceneId, copiedSceneId] }])
 
     expect(store.deleteScene(targetSceneId)).toBe(true)
-    const project = useEditorStore.getState().project
+    const project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(project.globalInteractions[0]?.conditions).toEqual([
       { type: 'scene.in', sceneIds: [copiedSceneId] },
     ])
-    const nextController = project.globalLayer.find(
+    const nextController = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'teacher-controller',
     )!.node
     if (nextController.type !== 'teacher-controller') throw new Error('缺少教师控制器')
-    expect(nextController.buttons.some((button) => (
+    expect((nextController.buttons ?? []).some((button) => (
       button.action.type === 'scene.go' && button.action.sceneId === targetSceneId
     ))).toBe(false)
   })

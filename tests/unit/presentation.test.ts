@@ -9,17 +9,28 @@ import {
   rewritePresentationNodeIds,
   stateReferencesAsset,
 } from '@/shared/presentation'
-import { projectDocumentSchema } from '@/shared/projectSchema'
+import type { SceneDocument } from '@/shared/projectTypes'
 import {
   createExternalComponentNode,
-  createProject,
   createRectangleNode,
   createTextNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
+
+function blankScene(): SceneDocument {
+  return {
+    id: 'scene_1',
+    name: '场景 1',
+    backgroundColor: '#ffffff',
+    backgroundAssetId: null,
+    nodes: [],
+    presentation: createDefaultScenePresentation(),
+    interactions: [],
+  }
+}
 
 describe('scene presentation materialization', () => {
   it('resolves valid entry states and safely falls back without materializing base', () => {
-    const scene = createProject().scenes[0]!
+    const scene = blankScene()
     scene.presentation = {
       initialStateId: 'question',
       states: [
@@ -80,21 +91,17 @@ describe('scene presentation materialization', () => {
     })
     expect(deriveSceneNodeOverride(base, effective)).toEqual({ visible: true })
 
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const scene = project.scenes[0]!
+    const scene = blankScene()
     scene.nodes = [base]
     scene.presentation!.states[0]!.nodeOverrides[base.id] = { visible: true }
     expect(materializeScene(scene).nodes[0]).toMatchObject({
       visible: true,
       playbackInitialVisibility: 'hidden',
     })
-    expect(projectDocumentSchema.parse(project).scenes[0]!.nodes[0])
-      .toMatchObject({ playbackInitialVisibility: 'hidden' })
   })
 
   it('materializes initial and explicit states without mutating the base scene', () => {
-    const project = createProject({ idFactory: () => 'fixed' })
-    const scene = project.scenes[0]!
+    const scene = blankScene()
     const node = createTextNode({ id: 'title', text: '基础', x: 20 })
     scene.nodes.push(node)
     scene.presentation = {
@@ -124,7 +131,7 @@ describe('scene presentation materialization', () => {
   })
 
   it('uses the initial state when the optional thumbnail state is absent or invalid', () => {
-    const scene = createProject().scenes[0]!
+    const scene = blankScene()
     scene.presentation = {
       initialStateId: 'correct',
       states: [
@@ -180,7 +187,7 @@ describe('scene presentation materialization', () => {
   })
 
   it('applies partial node order deterministically and rewrites it with override ids', () => {
-    const scene = createProject().scenes[0]!
+    const scene = blankScene()
     scene.nodes = [
       createTextNode({ id: 'a' }),
       createRectangleNode({ id: 'b' }),
@@ -225,96 +232,5 @@ describe('scene presentation materialization', () => {
       name: '结果',
       nodeOverrides: { image: { assetId: 'answer-image' } },
     }, 'answer-image')).toBe(true)
-  })
-})
-
-describe('presentation schema compatibility', () => {
-  it('keeps legacy V4 payloads valid without rewriting them at parse time', () => {
-    const project = createProject()
-    delete project.scenes[0]!.presentation
-    const parsed = projectDocumentSchema.parse(project)
-    expect(parsed.scenes[0]!.presentation).toBeUndefined()
-    expect(materializeScene(parsed.scenes[0]!)).toMatchObject({ nodes: [] })
-  })
-
-  it('rejects dangling node overrides and protected identity fields', () => {
-    const project = createProject()
-    const scene = project.scenes[0]!
-    scene.nodes.push(createTextNode({ id: 'title' }))
-    scene.presentation = createDefaultScenePresentation()
-    scene.presentation.states[0]!.nodeOverrides = {
-      missing: { x: 100 },
-      title: { id: 'replacement' } as never,
-    }
-
-    const result = projectDocumentSchema.safeParse(project)
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.message).join('\n')).toContain(
-        '状态覆盖',
-      )
-    }
-  })
-
-  it('rejects duplicate node ids and fields belonging to another node type', () => {
-    const project = createProject()
-    const scene = project.scenes[0]!
-    scene.nodes = [
-      createTextNode({ id: 'duplicate' }),
-      createRectangleNode({ id: 'duplicate' }),
-    ]
-    scene.presentation = createDefaultScenePresentation()
-    scene.presentation.states[0]!.nodeOverrides = {
-      duplicate: { assetId: 'wrong-node-field' } as never,
-    }
-
-    const result = projectDocumentSchema.safeParse(project)
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message).join('\n')
-      expect(messages).toContain('节点 ID 不能重复')
-      expect(messages).toContain('不适用于该节点的字段')
-    }
-  })
-
-  it('rejects initial and thumbnail references outside the scene state list', () => {
-    const project = createProject()
-    project.scenes[0]!.presentation = {
-      initialStateId: 'missing-initial',
-      thumbnailStateId: 'missing-thumbnail',
-      states: [{ id: 'only-state', name: '唯一状态', nodeOverrides: {} }],
-    }
-
-    const result = projectDocumentSchema.safeParse(project)
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message).join('\n')
-      expect(messages).toContain('初始状态必须引用')
-      expect(messages).toContain('缩略图状态必须引用')
-    }
-  })
-
-  it('rejects unknown fields nested inside replacement arrays', () => {
-    const project = createProject()
-    const scene = project.scenes[0]!
-    scene.nodes = [createTextNode({ id: 'title', text: '文字' })]
-    scene.presentation = createDefaultScenePresentation()
-    scene.presentation.states[0]!.nodeOverrides = {
-      title: {
-        runs: [{
-          start: 0,
-          end: 1,
-          style: { bold: true },
-          unknownField: true,
-        }],
-      } as never,
-    }
-
-    const result = projectDocumentSchema.safeParse(project)
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.message).join('\n'))
-        .toContain('未知字段')
-    }
   })
 })

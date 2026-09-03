@@ -33,7 +33,7 @@ export interface ChangedInput {
 
 export interface FreshnessAssessment {
   status: FreshnessStatus
-  safeForS2: boolean
+  safeForImplementation: boolean
   domainMatches: Record<'source' | 'semantic' | 'config' | 'tool', boolean>
   changedInputs: readonly ChangedInput[]
   dirtyInputs: readonly DirtyInput[]
@@ -409,7 +409,7 @@ export function assessFreshness(
   }
   return {
     status,
-    safeForS2: status === 'fresh' && relevantDirtyInputs.length === 0,
+    safeForImplementation: status === 'fresh' && relevantDirtyInputs.length === 0,
     domainMatches,
     changedInputs,
     dirtyInputs: raw.dirtyInputs,
@@ -952,8 +952,8 @@ function finalizeResult(
       `Index is ${freshness.status}; verify changed/relevant paths with manual Bootstrap before modification.`,
     )
   }
-  if (!freshness.safeForS2) {
-    unknowns.push('This Context Pack is not safe to treat as fresh for an S2 migration.')
+  if (!freshness.safeForImplementation) {
+    unknowns.push('This Context Pack is not fresh enough to rely on for implementation; verify relevant paths directly.')
   }
   return {
     request,

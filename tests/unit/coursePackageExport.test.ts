@@ -10,13 +10,20 @@ import {
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import type { CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
+import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import {
   buildCoursePackages,
   buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseWebPackage,
+  buildPublishedCourseWebPackageAsync,
   buildPublishedCourseWebPackageFiles,
-  collectCoursePackageExportPreflight,
-  OnlineSingleHtmlDeliveryError,
 } from '@/renderer/export/course/buildCoursePackages'
+import {
+  collectCoursePackageExportPreflight,
+  CoursePackagePreflightError,
+  OnlineSingleHtmlDeliveryError,
+} from '@/renderer/export/course/coursePackagePreflight'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 const NOW = '2026-08-17T12:00:00.000Z'
@@ -111,6 +118,24 @@ function onlineSources(): CoursePublishSources {
     project,
     assetFiles: { hero, narration, unused },
     components: {},
+  }
+}
+
+function countedOnlineSources(): {
+  sources: CoursePublishSources
+  readCount(): number
+} {
+  const sources = onlineSources()
+  let reads = 0
+  const assetFiles = new Proxy(sources.assetFiles, {
+    get(target, property, receiver) {
+      if (property === 'hero' || property === 'narration') reads += 1
+      return Reflect.get(target, property, receiver) as unknown
+    },
+  })
+  return {
+    sources: { ...sources, assetFiles },
+    readCount: () => reads,
   }
 }
 
@@ -229,6 +254,17 @@ describe('course package export', () => {
       expect(path.includes(':')).toBe(false)
       expect(path.startsWith('/')).toBe(false)
     }
+  })
+
+  it('does not rebuild the Published V2 payload inside the unified standalone facade', () => {
+    const direct = countedOnlineSources()
+    buildPublishedCourseStandaloneHtml(direct.sources, PLAYER_BUNDLE)
+
+    const unified = countedOnlineSources()
+    buildCoursePackages(unified.sources, 'standalone-html', PLAYER_BUNDLE)
+
+    expect(direct.readCount()).toBeGreaterThan(0)
+    expect(unified.readCount()).toBe(direct.readCount())
   })
 
   it('distinguishes offline-portable and online-lightweight standalone HTML without changing web packages', () => {
@@ -374,6 +410,34 @@ describe('course package export', () => {
         }),
       ]))
     expect(report.summary.canExport).toBe(false)
+  })
+
+  it('fails closed with the same code and path in direct and unified online producers', () => {
+    const sources = runtimeSources(`fetch('https://undeclared.example.com/data')`)
+    const options = {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'online-lightweight' as const,
+    }
+
+    for (const produce of [
+      () => buildPublishedCourseStandaloneHtml(sources, options),
+      () => buildCoursePackages(sources, 'standalone-html', options),
+    ]) {
+      let thrown: unknown
+      try {
+        produce()
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBeInstanceOf(CoursePackagePreflightError)
+      expect(thrown).toMatchObject({
+        code: 'online-connect-origin-undeclared',
+        path: expect.arrayContaining(['runtime', 'source']),
+        report: expect.objectContaining({
+          summary: expect.objectContaining({ canExport: false }),
+        }),
+      })
+    }
   })
 
   it('warns for unresolved calls without treating comments, text, regex, or object methods as dependencies', () => {
@@ -800,5 +864,195 @@ describe('course package export', () => {
       code: 'asset-metadata-missing',
       path: ['assets', 'hero'],
     }))
+  })
+
+  it('embeds a Published V2 payload and matching CoursePlayer bundle in the web package', () => {
+    const sources = mixedSources()
+    const files = buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE)
+    const courseData = strFromU8(files['course-data.js']!)
+    const assignment = 'window.__H5_COURSE_PAYLOAD__='
+    expect(courseData.startsWith(assignment)).toBe(true)
+    const payload = publishedCourseV2Schema.parse(JSON.parse(
+      courseData.slice(assignment.length).replace(/;\s*$/, ''),
+    ))
+    expect(payload.format).toBe('h5course-published')
+    expect(payload.formatVersion).toBe(2)
+    expect(payload.sourceSchemaVersion).toBe(9)
+    expect(courseData).not.toContain('__H5_LESSON_PAYLOAD__')
+    expect(courseData).not.toContain('"schemaVersion":8')
+    expect(strFromU8(files['player/player.iife.js']!)).toBe(PLAYER_BUNDLE)
+    expect(strFromU8(files['index.html']!)).toContain('id="course-root"')
+    expect(strFromU8(files['index.html']!)).not.toContain('lesson-root')
+  })
+
+  it('fails loud when the matching CoursePlayer bundle is empty', () => {
+    const sources = mixedSources()
+    const emptyBundle = '   '
+    expect(() => buildPublishedCourseStandaloneHtml(sources, '')).toThrow('Player Runtime 为空')
+    expect(() => buildPublishedCourseStandaloneHtml(sources, emptyBundle)).toThrow('Player Runtime 为空')
+    expect(() => buildPublishedCourseWebPackageFiles(sources, '')).toThrow('Player Runtime 为空')
+    expect(() => buildCoursePackages(sources, 'web-package', emptyBundle)).toThrow('Player Runtime 为空')
+    expect(() => buildCoursePackages(sources, 'standalone-html', {
+      playerBundle: '',
+      singleHtmlMode: 'online-lightweight',
+    })).toThrow('Player Runtime 为空')
+
+    const report = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: {}, components: {} },
+      '',
+      new Date('2026-08-17T00:00:00.000Z'),
+    )
+    expect(report.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'player-bundle-empty',
+    }))
+    expect(report.summary.canExport).toBe(false)
+  })
+
+  it('escapes title HTML, script terminators, and remote URLs in standalone HTML', () => {
+    const sources = mixedSources()
+    sources.project.title = '离线课件 </title><script>bad()</script>'
+    const html = buildPublishedCourseStandaloneHtml(
+      sources,
+      "window.__PLAYER_STARTED__=true;const marker='</script>';const info='https://example.invalid';",
+    )
+
+    expect(html.startsWith('<!doctype html>')).toBe(true)
+    expect(html).toContain('id="course-root"')
+    expect(html).not.toContain('<script src=')
+    expect(html).not.toContain('<link rel="stylesheet"')
+    expect(html).not.toMatch(/https?:\/\//i)
+    expect(html).not.toContain('<title>离线课件 </title>')
+    expect(html).toContain('&lt;/title&gt;&lt;script&gt;bad()&lt;/script&gt;')
+    expect(html).toContain('<\\/script>')
+    expect(html).toContain('connect-src data: blob:')
+    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*|'self')/i)
+    expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
+    expect(html).toContain('"format":"h5course-published"')
+    expect(html).toContain('"formatVersion":2')
+  })
+
+  it('fails closed before every public standalone and web package emitter', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    project.assets.hero = {
+      id: 'hero',
+      filename: 'hero.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/hero.png',
+      byteLength: 4,
+    }
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    slide.scenes[0]!.backgroundAssetId = 'hero'
+    courseProjectDocumentSchema.parse(project)
+
+    const sources = { project, assetFiles: {}, components: {} }
+    const producers: ReadonlyArray<readonly [string, () => unknown]> = [
+      ['standalone direct', () => buildPublishedCourseStandaloneHtml(sources, PLAYER_BUNDLE)],
+      ['standalone unified', () => buildCoursePackages(
+        sources,
+        'standalone-html',
+        PLAYER_BUNDLE,
+      )],
+      ['web files', () => buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE)],
+      ['web sync zip', () => buildPublishedCourseWebPackage(sources, PLAYER_BUNDLE)],
+      ['web async zip', () => buildPublishedCourseWebPackageAsync(sources, PLAYER_BUNDLE)],
+      ['web unified', () => buildCoursePackages(sources, 'web-package', PLAYER_BUNDLE)],
+    ]
+
+    for (const [label, produce] of producers) {
+      await expect(Promise.resolve().then(produce), label).rejects.toMatchObject({
+        name: 'CoursePackagePreflightError',
+        code: 'asset-bytes-missing',
+        path: ['assets', 'hero'],
+        report: expect.objectContaining({
+          summary: expect.objectContaining({ canExport: false }),
+        }),
+      })
+    }
+  })
+
+  it('keeps web-package ZIP paths and asset URLs inside the package root', () => {
+    const sources = mixedSources()
+    const zipBytes = buildPublishedCourseWebPackage(sources, PLAYER_BUNDLE)
+    expect([...zipBytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04])
+
+    const files = buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE)
+    const html = strFromU8(files['index.html']!)
+    expect(html).toContain('src="./course-data.js"')
+    expect(html).toContain('src="./player/player.iife.js"')
+    expect(html).toContain('href="./player/player.css"')
+    expect(html).not.toMatch(/https?:\/\//i)
+    expect(html).toContain("connect-src 'self'")
+    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*)/i)
+
+    for (const archivePath of Object.keys(files)) {
+      expect(archivePath).not.toMatch(/^(?:[A-Za-z]:|\/|\\)/)
+      expect(archivePath).not.toContain('\\')
+      expect(archivePath.split('/')).not.toContain('..')
+      expect(archivePath.split('/')).not.toContain('.')
+    }
+    const assignment = 'window.__H5_COURSE_PAYLOAD__='
+    const courseText = strFromU8(files['course-data.js']!)
+    const payload = publishedCourseV2Schema.parse(JSON.parse(
+      courseText.slice(assignment.length).replace(/;\s*$/, ''),
+    ))
+    const urls = Object.values(payload.assets).map((asset) => asset.url)
+    for (const url of urls) {
+      expect(url).toMatch(/^\.\/[A-Za-z0-9._/-]+$/)
+      expect(url.split('/')).not.toContain('..')
+    }
+  })
+
+  it('embeds Canvas Runtime source as UTF-16LE and refuses a missing runtime asset', () => {
+    const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'canvas-runtime')
+    if (!fixture) throw new Error('missing canvas-runtime fixture')
+    const sources = {
+      project: structuredClone(fixture.data.project),
+      assetFiles: { ...fixture.data.assetFiles },
+      components: {},
+    }
+    const runtimeSource = (() => {
+      const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')
+      const item = slide?.type === 'slide'
+        ? slide.scenes[0]?.layerItems.find((candidate) => candidate.kind === 'runtime')
+        : undefined
+      if (!item || item.kind !== 'runtime') throw new Error('expected canvas runtime')
+      return item.runtime.source
+    })()
+
+    const published = buildPublishedCourseV2Payload(sources)
+    const publishedSlide = published.surfaces.find((surface) => surface.type === 'slide')
+    const runtime = publishedSlide?.type === 'slide'
+      ? publishedSlide.scenes[0]?.layerItems.find((item) => item.kind === 'runtime')
+      : undefined
+    if (!runtime || runtime.kind !== 'runtime') throw new Error('expected published runtime')
+    expect(runtime.runtime).not.toHaveProperty('source')
+    expect(decodePublishedCode(runtime.runtime.code)).toBe(runtimeSource)
+
+    const html = buildPublishedCourseStandaloneHtml(sources, PLAYER_BUNDLE)
+    expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
+    expect(html).not.toContain(runtimeSource)
+
+    const files = buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE)
+    const assignment = 'window.__H5_COURSE_PAYLOAD__='
+    const packaged = publishedCourseV2Schema.parse(JSON.parse(
+      strFromU8(files['course-data.js']!).slice(assignment.length).replace(/;\s*$/, ''),
+    ))
+    for (const asset of Object.values(packaged.assets)) {
+      expect(asset.url).toMatch(/^\.\/assets\//)
+      expect(asset.url).not.toContain('data:')
+    }
+
+    delete sources.assetFiles['runtime-sprite']
+    expect(() => buildPublishedCourseStandaloneHtml(sources, PLAYER_BUNDLE))
+      .toThrow(/没有可嵌入导出物的本地字节/)
   })
 })

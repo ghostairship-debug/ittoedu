@@ -1,7 +1,7 @@
 import { UserFacingError } from '@/shared/errors'
 import type { ComponentPackageData } from '@/shared/componentTypes'
-import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
-import type { ProjectDocument } from '@/shared/projectTypes'
+import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4/types'
+import type { AssetKind, AssetMeta, RuntimeAssetMap } from '@/shared/contracts/media-v1/types'
 import type { BlobUrlRegistry } from '@/renderer/project/blobUrlRegistry'
 import { componentPackageKey } from '@/renderer/project/archivePath'
 import {
@@ -147,7 +147,7 @@ export class ComponentPackageStore {
 }
 
 export function componentPackagesFromArchive(
-  project: Pick<ProjectDocument, 'componentPackages'>,
+  project: { componentPackages: Record<string, EmbeddedComponentPackageMeta> },
   componentFiles: Readonly<
     Record<string, Readonly<Record<string, Uint8Array>>>
   >,

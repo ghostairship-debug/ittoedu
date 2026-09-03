@@ -1,4 +1,4 @@
-import type { SceneNode } from '../../../shared/projectTypes'
+import type { EditorCanvasNode } from '../editorCanvasNode'
 import { BaseNodeAdapter } from './NodeAdapter'
 
 /**
@@ -6,7 +6,7 @@ import { BaseNodeAdapter } from './NodeAdapter'
  * Player is the visual source of truth; this proxy owns only hit testing and
  * transform handles and therefore never loads assets or executes components.
  */
-export class ProxyNodeAdapter extends BaseNodeAdapter<SceneNode> {
+export class ProxyNodeAdapter extends BaseNodeAdapter<EditorCanvasNode> {
   protected override redraw(): void {
     this.resizeInteractionTarget()
   }

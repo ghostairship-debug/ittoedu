@@ -8,6 +8,8 @@ import type {
   FlowBlock,
   FlowBodyLayerPlane,
   GlobalLayerPlane,
+  LayerFrame,
+  LayerHitPolicy,
   LayerItem,
   LocationVisibility,
   NativeLayerItem,
@@ -114,6 +116,10 @@ export interface EffectiveLayerProjectionRow {
   readonly flowBodyPlane: FlowBodyLayerPlane | null
   /** Canonical dense back-to-front slot from the shared composition. */
   readonly stackOrder: number
+  readonly frame: LayerFrame
+  readonly rotation: number
+  readonly hitPolicy: LayerHitPolicy
+  readonly contentSummary: EffectiveLayerContentSummary
   readonly item: LayerItem
 }
 
@@ -151,6 +157,29 @@ export interface ProjectEffectiveLayersInput {
    * row should pass `owner: 'global'` after `scopeTokenForSelectingRow`.
    */
   readonly owner?: CourseAuthoringOwner
+}
+
+export type EffectiveLayerContentSummary =
+  | { readonly kind: 'native'; readonly nativeType: NativeLayerItem['content']['nativeType'] }
+  | { readonly kind: 'component'; readonly packageId: string; readonly version: string }
+  | { readonly kind: 'runtime'; readonly protocol: string; readonly enabled: boolean }
+
+export function layerContentSummary(item: LayerItem): EffectiveLayerContentSummary {
+  if (item.kind === 'native') {
+    return { kind: 'native', nativeType: item.content.nativeType }
+  }
+  if (item.kind === 'component') {
+    return {
+      kind: 'component',
+      packageId: item.component.packageId,
+      version: item.component.version,
+    }
+  }
+  return {
+    kind: 'runtime',
+    protocol: item.runtime.protocol,
+    enabled: item.runtime.enabled,
+  }
 }
 
 export function isTeacherControllerLayerItem(
@@ -523,6 +552,10 @@ function toRow(input: {
     globalPlane: input.globalPlane,
     flowBodyPlane: input.flowBodyPlane,
     stackOrder: input.stackOrder,
+    frame: item.frame,
+    rotation: item.rotation,
+    hitPolicy: item.hitPolicy,
+    contentSummary: layerContentSummary(item),
     item,
   })
 }

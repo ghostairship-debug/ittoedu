@@ -11,69 +11,45 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
-import type { FormulaAstNode } from '../../shared/projectTypes'
-import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../shared/courseProjectTypes'
-import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
+import type { FormulaAstNode, TextRun } from '../../shared/contracts/native-v1'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
+import type { FlowBlock } from '../../shared/courseProjectTypes'
 import {
   FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
   FLOW_MEDIA_INLINE_SIZE_REFERENCE,
   FLOW_MEDIA_QUERY_CONTAINER_TYPE,
   resolveFlowMediaLayoutProjection,
 } from '../../shared/flowMediaLayout'
-import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
-import type { FlowCommandResult, FlowDeleteRequest } from '../course/flowEditorCommands'
 import {
-  executeFlowDelete,
-  executeFlowEditorCommand,
-} from '../course/flowEditorCommands'
-import type { FlowBlockView, FlowEditorLayerView, FlowEditorView } from '../course/flowEditorView'
+  assertActiveFlowEditorView,
+  captureFlowEditorAuthoringTarget,
+  type FlowBlockView,
+  type FlowEditorView,
+} from '../course/flowEditorView'
+import type { FlowEditorSelection } from '../course/flowEditorSlice'
+import type {
+  CourseAuthoringSessionToken,
+  CourseAuthoringTarget,
+} from '../authoring/courseAuthoringSession'
+import { STAGE_VIEWPORT_HEIGHT, STAGE_VIEWPORT_WIDTH } from '../authoring/stageViewportTransform'
 import {
-  selectFlowEditorBlocks,
-  selectFlowOverlay,
-  type FlowEditorSelection,
-} from '../course/flowEditorSlice'
-import { transformFlowOverlayFrame, type FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAdapters'
-import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
-import { selectMediaAssetFiles, useEditorStore } from '../store/editorStore'
-import {
-  createStageViewportTransform,
-  resizeWorldFrameFromHandle,
-  STAGE_RESIZE_HANDLE_DIRECTIONS,
-  STAGE_VIEWPORT_HEIGHT,
-  STAGE_VIEWPORT_WIDTH,
-  type StageRect,
-  type StageResizeHandleDirection,
-} from '../authoring/stageViewportTransform'
-import {
-  applyFlowTextEditGesture,
-  beginFlowFormulaEdit,
-  beginFlowTextEdit,
   buildFlowRichTextHtml,
-  cancelFlowTextEdit,
   cellToRichText,
   clearFlowTextEditRangeStyle,
-  commitFlowFormulaAst,
-  commitFlowTextEdit,
-  deferFlowTextAction,
   deriveFlowSelectionFormat,
   extractFlowRichTextFromEditor,
   finishFlowTextComposition,
   FLOW_PAPER_TEXT_COLOR,
-  FLOW_TEXT_REJECT_FORMULA_RUNS,
   flowFormulaBlockToAuthoringNode,
-  formatFlowAuthoringBlock,
-  formatFlowAuthoringTextStyle,
   logicalFlowSelectionOffsets,
   markFlowTextComposing,
-  resolveFlowTextBlur,
-  resolveFlowTextHistoryAction,
   resolveFlowTextKeyDown,
   restoreFlowLogicalSelection,
   toggleFlowTextEditEmphasis,
   toggleFlowTextEditRunStyle,
   updateFlowTextDraft,
   updateFlowTextRange,
+  type FlowFormulaDraft,
   type FlowTextEditSession,
 } from '../authoring/flowTextEdit'
 import { FormulaEditDialog } from './FormulaEditDialog'
@@ -83,42 +59,28 @@ import {
   FlowBlockContextToolbar,
   type FlowBlockContextCommand,
 } from './FlowBlockContextToolbar'
-import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
 import {
   findComponentPackageSource,
   mountPublishedComponent,
 } from '../../player/surfaces/publishedComponentMount'
 import type { ComponentPackageData } from '../../shared/componentTypes'
-
-const FLOW_OVERLAY_HANDLE_RADIUS = 10
+import {
+  isFlowSelectionPreservingFocusTarget,
+  useFlowTextAuthoringController,
+  type FlowCurrentSessionCommandPort,
+} from './flow/useFlowTextAuthoringController'
+import { FlowOverlayAuthoringLayer } from './flow/FlowOverlayAuthoringLayer'
 
 export interface FlowWorkspaceProps {
-  readonly project: CourseProjectDocument
   readonly view: FlowEditorView
+  readonly sessionToken: CourseAuthoringSessionToken
+  readonly assets: Readonly<Record<string, AssetMeta>>
   readonly selection: FlowEditorSelection | null
-  readonly onProjectChange?: (result: FlowCommandResult | FlowSharedAuthoringResult) => void
-  readonly onDeleteRequest?: (request: FlowDeleteRequest) => FlowCommandResult
-  readonly onSelectionChange?: (selection: FlowEditorSelection | null) => void
-  readonly onTextEditChange?: (edit: FlowTextEditSession | null) => void
+  readonly textEdit: FlowTextEditSession | null
+  readonly commands: FlowCurrentSessionCommandPort
   readonly readOnly?: boolean
-  /** Sidecar bytes for edit-mode previews. Production falls back to the editor store. */
   readonly assetFiles?: Record<string, Uint8Array>
   readonly componentPackages?: Record<string, ComponentPackageData>
-}
-
-const FLOW_SELECTION_PRESERVING_SELECTOR = [
-  '.flow-block-context-toolbar',
-  '[data-flow-selection-preserving-target="true"]',
-].join(',')
-
-function isFlowSelectionPreservingFocusTarget(
-  target: EventTarget | null,
-  workspace?: HTMLElement | null,
-): target is HTMLElement {
-  return target instanceof HTMLElement && (
-    workspace?.contains(target) === true ||
-    target.closest(FLOW_SELECTION_PRESERVING_SELECTOR) !== null
-  )
 }
 
 export function FlowInlineRichTextEditor({
@@ -139,13 +101,13 @@ export function FlowInlineRichTextEditor({
   readonly blockId: string
   readonly label: string
   readonly text: string
-  readonly runs: import('../../shared/projectTypes').TextRun[]
+  readonly runs: readonly TextRun[]
   readonly restyleToken: number
   readonly range: { start: number; end: number }
   readonly composing: boolean
   readonly onDraftChange: (
     text: string,
-    runs: import('../../shared/projectTypes').TextRun[],
+    runs: TextRun[],
     offsets: { start: number; end: number } | null,
   ) => void
   readonly onRangeChange: (offsets: { start: number; end: number }) => void
@@ -164,9 +126,9 @@ export function FlowInlineRichTextEditor({
   composingRef.current = composing
   onRangeChangeRef.current = onRangeChange
 
-  const read = () => editorRef.current
+  const read = (): { text: string; runs: TextRun[] } => editorRef.current
     ? extractFlowRichTextFromEditor(editorRef.current)
-    : { text, runs }
+    : { text, runs: [...runs] }
 
   useLayoutEffect(() => {
     const editor = editorRef.current
@@ -333,42 +295,8 @@ function FlowPlainStringEditor({
   return <input {...shared} />
 }
 
-function overlayCardStyle(
-  layer: FlowEditorLayerView,
-  preview?: StageRect | null,
-  paperScrollTop = 0,
-): CSSProperties {
-  const frame = preview ?? layer.item.frame
-  const isController = isTeacherControllerLayerItem(layer.item)
-  const isPaper = !isController && layer.item.paperSpace === 'paper'
-  const top = isPaper ? frame.y - paperScrollTop : frame.y
-  return {
-    position: 'absolute',
-    left: frame.x,
-    top,
-    width: frame.width,
-    height: frame.height,
-    boxSizing: 'border-box',
-    pointerEvents: 'auto',
-    zIndex: layer.stackOrder,
-  }
-}
-
-function constrainFlowControllerOverlayFrame(
-  layer: FlowEditorLayerView | undefined,
-  frame: StageRect,
-): StageRect {
-  if (!layer || !isTeacherControllerLayerItem(layer.item)) return frame
-  return constrainTeacherControllerAuthoringFrame(
-    layer.item.content.data,
-    frame,
-    layer.item.rotation,
-    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-  )
-}
-
 function createFlowAssetObjectUrls(
-  assets: CourseProjectDocument['assets'],
+  assets: Readonly<Record<string, AssetMeta>>,
   files: Record<string, Uint8Array>,
 ): Record<string, string> {
   const urls: Record<string, string> = {}
@@ -380,36 +308,6 @@ function createFlowAssetObjectUrls(
     )
   }
   return urls
-}
-
-function nativeOverlayMedia(item: LayerItem): {
-  readonly kind: 'image' | 'video'
-  readonly assetId: string
-  readonly posterAssetId?: string
-} | null {
-  if (item.kind !== 'native') return null
-  if (item.content.nativeType === 'image') {
-    return { kind: 'image', assetId: item.content.data.assetId }
-  }
-  if (item.content.nativeType === 'video') {
-    const posterAssetId = item.content.data.poster.assetId
-    return {
-      kind: 'video',
-      assetId: item.content.data.assetId,
-      ...(posterAssetId ? { posterAssetId } : {}),
-    }
-  }
-  return null
-}
-
-function overlayMediaFillStyle(): CSSProperties {
-  return {
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain',
-    display: 'block',
-    pointerEvents: 'none',
-  }
 }
 
 function renderFlowPaperMedia(
@@ -450,140 +348,6 @@ function renderFlowPaperMedia(
   )
 }
 
-function FlowOverlayComponentContent({
-  layer,
-  componentPackages,
-  assetUrls,
-}: {
-  layer: FlowEditorLayerView
-  componentPackages?: Record<string, ComponentPackageData>
-  assetUrls: Record<string, string>
-}) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const item = layer.item as LayerItem
-  if (item.kind !== 'component') return null
-  const pkg = findComponentPackageSource(componentPackages, item.component.packageId, item.component.version)
-  const fallbackUrl = item.staticFallbackAssetId ? assetUrls[item.staticFallbackAssetId] : undefined
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el || !pkg) return
-    const handle = mountPublishedComponent(el, {
-      container: el,
-      componentId: item.component.packageId,
-      version: item.component.version,
-      instanceId: layer.selectionId,
-      width: item.frame.width,
-      height: item.frame.height,
-      props: item.props,
-      staticFallbackAssetId: item.staticFallbackAssetId,
-      components: componentPackages,
-      resolveAsset: (id) => assetUrls[id],
-      mode: 'edit',
-      interactive: false,
-    })
-    return () => handle.destroy()
-  }, [item.component.packageId, item.component.version, layer.selectionId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg])
-
-  if (!pkg) {
-    if (fallbackUrl) {
-      return (
-        <img
-          src={fallbackUrl}
-          data-flow-overlay-media="image"
-          data-flow-asset-id={item.staticFallbackAssetId}
-          alt={`${item.component.packageId} 后备`}
-          style={overlayMediaFillStyle()}
-        />
-      )
-    }
-    return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'rgba(23, 32, 51, 0.88)',
-          color: '#f8fafc',
-          padding: 8,
-          textAlign: 'center',
-          fontSize: 12,
-        }}
-      >
-        <strong>{item.component.packageId}</strong>
-        <span style={{ fontSize: 10, color: '#94a3b8' }}>v{item.component.version}</span>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
-    />
-  )
-}
-
-function renderFlowOverlayCardContent(
-  layer: FlowEditorLayerView,
-  assetUrls: Record<string, string>,
-  componentPackages?: Record<string, ComponentPackageData>,
-): ReactNode {
-  if (layer.item.kind === 'component') {
-    return (
-      <FlowOverlayComponentContent
-        layer={layer}
-        componentPackages={componentPackages}
-        assetUrls={assetUrls}
-      />
-    )
-  }
-  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'formula') {
-    const data = layer.item.content.data
-    const frame = layer.item.frame
-    return (
-      <PublishedFormulaPaint
-        formulaId={data.formulaId}
-        accessibleText={data.accessibleText}
-        ast={data.ast as FormulaAstNode}
-        style={data.style}
-        width={Math.max(1, frame.width)}
-        height={Math.max(1, frame.height)}
-        lockHeight
-      />
-    )
-  }
-  const media = nativeOverlayMedia(layer.item as LayerItem)
-  if (!media) return layer.item.label || '浮层'
-  const url = assetUrls[media.assetId]
-  if (media.kind === 'image') {
-    return (
-      <img
-        data-flow-overlay-media="image"
-        data-flow-asset-id={media.assetId}
-        alt=""
-        {...(url ? { src: url } : {})}
-        style={overlayMediaFillStyle()}
-      />
-    )
-  }
-  const posterUrl = media.posterAssetId ? assetUrls[media.posterAssetId] : undefined
-  return (
-    <video
-      data-flow-overlay-media="video"
-      data-flow-asset-id={media.assetId}
-      {...(url ? { src: url } : {})}
-      {...(posterUrl ? { poster: posterUrl } : {})}
-      muted
-      playsInline
-      preload="metadata"
-      style={overlayMediaFillStyle()}
-    />
-  )
-}
 
 function FlowComponentBlockView({
   block,
@@ -650,60 +414,6 @@ function FlowComponentBlockView({
   )
 }
 
-function overlayLocalPoint(
-  overlay: HTMLElement,
-  clientX: number,
-  clientY: number,
-): { x: number; y: number } {
-  const bounds = overlay.getBoundingClientRect()
-  const width = Math.max(1, bounds.width)
-  const height = Math.max(1, bounds.height)
-  return {
-    x: (clientX - bounds.left) * (CANVAS_WIDTH / width),
-    y: (clientY - bounds.top) * (CANVAS_HEIGHT / height),
-  }
-}
-
-function hitFlowOverlayResizeHandle(
-  frame: StageRect,
-  local: { x: number; y: number },
-): StageResizeHandleDirection | null {
-  for (const direction of STAGE_RESIZE_HANDLE_DIRECTIONS) {
-    const point = overlayHandlePoint(frame, direction)
-    if (Math.hypot(local.x - point.x, local.y - point.y) <= FLOW_OVERLAY_HANDLE_RADIUS) {
-      return direction
-    }
-  }
-  return null
-}
-
-function overlayHandlePoint(
-  frame: StageRect,
-  direction: StageResizeHandleDirection,
-): { x: number; y: number } {
-  const left = frame.x
-  const top = frame.y
-  const right = frame.x + frame.width
-  const bottom = frame.y + frame.height
-  const midX = frame.x + frame.width / 2
-  const midY = frame.y + frame.height / 2
-  if (direction === 'nw') return { x: left, y: top }
-  if (direction === 'n') return { x: midX, y: top }
-  if (direction === 'ne') return { x: right, y: top }
-  if (direction === 'e') return { x: right, y: midY }
-  if (direction === 'se') return { x: right, y: bottom }
-  if (direction === 's') return { x: midX, y: bottom }
-  if (direction === 'sw') return { x: left, y: bottom }
-  return { x: left, y: midY }
-}
-
-interface FlowOverlayGesture {
-  readonly type: 'move' | 'resize'
-  readonly layerItemId: string
-  readonly direction?: StageResizeHandleDirection
-  readonly startLocal: { x: number; y: number }
-  readonly startFrame: StageRect
-}
 
 function isTextTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -744,43 +454,63 @@ function blockLabel(block: FlowBlock): string {
 }
 
 export function FlowWorkspace({
-  project,
   view,
+  sessionToken,
+  assets,
   selection,
-  onProjectChange,
-  onDeleteRequest,
-  onSelectionChange,
-  onTextEditChange,
+  textEdit,
+  commands,
   readOnly = false,
-  assetFiles,
-  componentPackages: propComponentPackages,
+  assetFiles = {},
+  componentPackages = {},
 }: FlowWorkspaceProps) {
+  assertActiveFlowEditorView(view)
   const paperRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const workspaceMeasureRef = useRef<HTMLDivElement>(null)
-  const editRef = useRef<FlowTextEditSession | null>(null)
-  const [edit, setEdit] = useState<FlowTextEditSession | null>(null)
-  const [restyleToken, setRestyleToken] = useState(0)
+  const blockDragTargetRef = useRef<{
+    readonly target: CourseAuthoringTarget
+    readonly expectedEdit: FlowTextEditSession | null
+  } | null>(null)
   const [toolbarPlacement, setToolbarPlacement] = useState<'top' | 'below'>('below')
-  const [formulaBlockId, setFormulaBlockId] = useState<string | null>(null)
   const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
-  const overlayRef = useRef<HTMLDivElement>(null)
-  const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
-  const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
   const [paperScrollTop, setPaperScrollTop] = useState(0)
   const [overlayViewportSize, setOverlayViewportSize] = useState({
     width: STAGE_VIEWPORT_WIDTH,
     height: STAGE_VIEWPORT_HEIGHT,
   })
-  const storeAssetFiles = useEditorStore(selectMediaAssetFiles)
-  const storeComponentPackages = useEditorStore((state) => state.componentPackages)
-  const storeEdit = useEditorStore((state) => state.flowTextEdit)
-  const componentPackages = propComponentPackages ?? storeComponentPackages
-  const sidecarFiles = assetFiles ?? storeAssetFiles
+  const locationId = selection?.locationId ?? view.locationId
+  const sidecarFiles = assetFiles
   const assetUrls = useMemo(
-    () => createFlowAssetObjectUrls(project.assets, sidecarFiles),
-    [project.assets, sidecarFiles],
+    () => createFlowAssetObjectUrls(assets, sidecarFiles),
+    [assets, sidecarFiles],
   )
+
+  const {
+    edit,
+    editRef,
+    restyleToken,
+    formulaBlockId,
+    setFormulaBlockId,
+    bumpRestyle,
+    setEditState,
+    commitCurrent,
+    cancelCurrent,
+    enterText,
+    openFormula,
+    updateFormulaDraft,
+    setFormulaComposing,
+    commitFormula,
+    handleHistoryKey,
+  } = useFlowTextAuthoringController({
+    view,
+    sessionToken,
+    selection,
+    readOnly,
+    textEdit,
+    workspaceRef: workspaceMeasureRef,
+    commands,
+  })
 
   useEffect(() => () => {
     if (typeof URL.revokeObjectURL !== 'function') return
@@ -801,106 +531,6 @@ export function FlowWorkspace({
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
-
-  const overlayTransform = useMemo(() => createStageViewportTransform({
-    viewport: {
-      x: 0,
-      y: 0,
-      width: Math.max(1, overlayViewportSize.width),
-      height: Math.max(1, overlayViewportSize.height),
-    },
-    zoom: 1,
-  }), [overlayViewportSize.height, overlayViewportSize.width])
-
-  const setEditState = (next: FlowTextEditSession | null) => {
-    editRef.current = next
-    setEdit(next)
-    onTextEditChange?.(next)
-  }
-
-  const adoptStoreEdit = (next: FlowTextEditSession | null) => {
-    const previous = editRef.current
-    editRef.current = next
-    setEdit(next)
-    if (!next && previous?.kind === 'formula') setFormulaBlockId(null)
-    setRestyleToken((value) => value + 1)
-  }
-
-  useLayoutEffect(() => {
-    const local = editRef.current
-    if (!storeEdit) {
-      if (local) adoptStoreEdit(null)
-      return
-    }
-    if (!local) {
-      adoptStoreEdit(storeEdit)
-      return
-    }
-    if (
-      storeEdit.blockId !== local.blockId
-      || storeEdit.surfaceId !== local.surfaceId
-      || storeEdit.revision !== local.revision
-    ) {
-      adoptStoreEdit(storeEdit)
-      return
-    }
-    if (local.composing || storeEdit.composing) return
-
-    const rangeEqual =
-      local.range.start === storeEdit.range.start &&
-      local.range.end === storeEdit.range.end
-
-    const draftEqual = (() => {
-      const ld = local.draft as any
-      const sd = storeEdit.draft as any
-      if (local.kind !== storeEdit.kind) return false
-      if (local.kind === 'rich-text') {
-        if (ld?.text !== sd?.text) return false
-        const lRuns = ld?.runs ?? []
-        const sRuns = sd?.runs ?? []
-        if (lRuns.length !== sRuns.length) return false
-        return JSON.stringify(lRuns) === JSON.stringify(sRuns)
-      }
-      if (local.kind === 'plain-string') {
-        return ld?.text === sd?.text
-      }
-      if (local.kind === 'formula') {
-        return (
-          ld?.accessibleText === sd?.accessibleText &&
-          JSON.stringify(ld?.ast) === JSON.stringify(sd?.ast)
-        )
-      }
-      return false
-    })()
-
-    if (rangeEqual && draftEqual) return
-
-    adoptStoreEdit(storeEdit)
-  }, [storeEdit])
-
-  useEffect(() => {
-    if (readOnly) return
-    if (selection?.focus === 'text' && selection.selectedBlockId) {
-      if (editRef.current?.blockId === selection.selectedBlockId) return
-      const begun = beginFlowTextEdit({
-        project,
-        selection,
-        blockId: selection.selectedBlockId,
-        range: selection.textRange ?? {
-          blockId: selection.selectedBlockId,
-          start: 0,
-          end: 0,
-        },
-      })
-      if (!begun.ok) return
-      setEditState(begun.edit)
-      setRestyleToken((token) => token + 1)
-    }
-  }, [
-    project,
-    readOnly,
-    selection,
-  ])
 
   useEffect(() => {
     if (!edit || !scrollRef.current) return
@@ -934,176 +564,21 @@ export function FlowWorkspace({
     block.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [selection?.selectedBlockId])
 
-  const emitProject = (result: FlowCommandResult | FlowSharedAuthoringResult) => {
-    onProjectChange?.(result)
-  }
-
-  const requestDelete = (request: FlowDeleteRequest): FlowCommandResult => {
-    if (onDeleteRequest) return onDeleteRequest(request)
-    const deleteSelection = request.deleteSelectedBlocks
-      ? selectFlowEditorBlocks(project, request.selection.locationId, request.selection.selectedBlockIds)
-      : request.selection
-    const result = executeFlowDelete(project, deleteSelection, {
-      expectedRevision: request.expectedRevision,
-      direction: request.direction,
+  const targetForBlock = (blockId: string): CourseAuthoringTarget => (
+    captureFlowEditorAuthoringTarget({
+      view,
+      sessionToken,
+      target: { kind: 'block', blockId },
     })
-    emitProject(result)
-    return result
-  }
-
-  const emitSelection = (next: FlowEditorSelection | null) => {
-    onSelectionChange?.(next)
-  }
-
-  const locationId = selection?.locationId ?? view.locationId
-
-  const commitCurrent = (keepSelected = true) => {
-    const current = editRef.current
-    if (!current || !selection) {
-      setEditState(null)
-      return
-    }
-    const liveStoreEdit = useEditorStore.getState().flowTextEdit
-    if (storeEdit && liveStoreEdit !== current) {
-      adoptStoreEdit(liveStoreEdit)
-      return
-    }
-    const action = resolveFlowTextBlur({ composing: current.composing, blurReady: true })
-    if (action === 'defer') {
-      setEditState(deferFlowTextAction(current, 'commit'))
-      return
-    }
-    const result = commitFlowTextEdit(project, selection, current, {
-      expectedRevision: project.revision,
-    })
-    setEditState(null)
-    emitProject(result)
-    if (keepSelected && selection.selectedBlockId) {
-      emitSelection(selectFlowEditorBlocks(result.nextDocument ?? project, locationId, [current.blockId]))
-    } else if (!keepSelected) {
-      emitSelection(null)
-    }
-  }
-
-  const flushOpenTextEdit = () => {
-    const current = editRef.current
-    if (!current) return
-    if (current.composing) {
-      setEditState(deferFlowTextAction(current, 'commit'))
-      return
-    }
-    const result = commitFlowTextEdit(
-      project,
-      selection ?? selectFlowEditorBlocks(project, locationId, [current.blockId]),
-      current,
-      { expectedRevision: project.revision },
-    )
-    setEditState(null)
-    emitProject(result)
-  }
-
-  useEffect(() => {
-    if (readOnly) return
-    const workspace = workspaceMeasureRef.current
-    const ownerDocument = workspace?.ownerDocument
-    if (!workspace || !ownerDocument) return
-    let pendingCommit: number | null = null
-    const ownerWindow = ownerDocument.defaultView ?? window
-    const onFocusOut = (event: FocusEvent) => {
-      if (!editRef.current || isFlowSelectionPreservingFocusTarget(event.relatedTarget, workspace)) {
-        return
-      }
-      const scheduledStoreEdit = useEditorStore.getState().flowTextEdit
-      if (pendingCommit !== null) ownerWindow.clearTimeout(pendingCommit)
-      pendingCommit = ownerWindow.setTimeout(() => {
-        pendingCommit = null
-        if (!editRef.current) return
-        if (
-          scheduledStoreEdit
-          && useEditorStore.getState().flowTextEdit !== scheduledStoreEdit
-        ) return
-        if (isFlowSelectionPreservingFocusTarget(ownerDocument.activeElement, workspace)) return
-        commitCurrent(true)
-      }, 0)
-    }
-    ownerDocument.addEventListener('focusout', onFocusOut)
-    return () => {
-      ownerDocument.removeEventListener('focusout', onFocusOut)
-      if (pendingCommit !== null) ownerWindow.clearTimeout(pendingCommit)
-    }
-  }, [project, readOnly, selection])
-
-  useEffect(() => {
-    if (readOnly) return
-    if (editRef.current && selection?.focus !== 'text') {
-      flushOpenTextEdit()
-    }
-  }, [project, readOnly, selection])
-
-  const cancelCurrent = () => {
-    const current = editRef.current
-    if (!current || !selection) {
-      setEditState(null)
-      return
-    }
-    cancelFlowTextEdit(project, selection, current)
-    setEditState(null)
-    emitSelection(selectFlowEditorBlocks(project, locationId, [current.blockId]))
-  }
-
-  const enterText = (
-    blockId: string,
-    gesture: 'double-click' | 'enter' | 'click-text',
-    extra?: { offset?: number; listItemId?: string; tableRowId?: string; tableColumnId?: string },
-  ) => {
-    if (readOnly || selection?.authoringScope === 'global') return
-    const currentSelection = selection ?? selectFlowEditorBlocks(project, locationId, [blockId])
-    const begun = applyFlowTextEditGesture({
-      project,
-      selection: currentSelection,
-      blockId,
-      gesture,
-      locationId,
-      offset: extra?.offset,
-      listItemId: extra?.listItemId,
-      tableRowId: extra?.tableRowId,
-      tableColumnId: extra?.tableColumnId,
-    })
-    if (!begun.ok) {
-      if (begun.reason === FLOW_TEXT_REJECT_FORMULA_RUNS) {
-        openFormula(blockId)
-      }
-      return
-    }
-    emitSelection(begun.selection)
-    setEditState(begun.edit)
-    setRestyleToken((token) => token + 1)
-  }
-
-  const openFormula = (blockId: string) => {
-    if (readOnly || selection?.authoringScope === 'global') return
-    if (editRef.current?.kind === 'formula' && editRef.current.blockId === blockId) {
-      setFormulaBlockId(blockId)
-      return
-    }
-    const currentSelection = selection ?? selectFlowEditorBlocks(project, locationId, [blockId])
-    const begun = beginFlowFormulaEdit({
-      project,
-      selection: currentSelection,
-      blockId,
-    })
-    if (!begun.ok) return
-    emitSelection(begun.selection)
-    setEditState(begun.edit)
-    setFormulaBlockId(blockId)
-  }
+  )
 
   const selectBlock = (blockId: string, event: ReactMouseEvent<HTMLElement>) => {
     if (readOnly) return
     event.stopPropagation()
     if (selection?.authoringScope === 'global') return
     if (editRef.current && editRef.current.blockId !== blockId) {
-      commitCurrent(false)
+      commitCurrent(false, blockId)
+      return
     }
     if (
       !event.ctrlKey &&
@@ -1141,17 +616,13 @@ export function FlowWorkspace({
       }
       return [blockId]
     })()
-    if (ids.length === 0) {
-      emitSelection(null)
-      return
-    }
-    emitSelection(selectFlowEditorBlocks(project, locationId, ids))
+    if (ids.length === 0) return
+    commands.run(targetForBlock(blockId), { kind: 'select-blocks', blockIds: ids })
   }
 
   const handlePaperClick = (event: ReactMouseEvent<HTMLElement>) => {
     if (event.target !== event.currentTarget) return
     if (editRef.current) commitCurrent(false)
-    else emitSelection(null)
   }
 
   const handleBlockKeyDown = (blockId: string, event: ReactKeyboardEvent<HTMLElement>) => {
@@ -1164,16 +635,15 @@ export function FlowWorkspace({
     }
     if (event.key === 'Escape') {
       event.preventDefault()
-      emitSelection(null)
       return
     }
     if (event.key === 'Delete' || event.key === 'Backspace') {
       if (!selection) return
       event.preventDefault()
       event.stopPropagation()
-      requestDelete({
-        selection,
-        expectedRevision: project.revision,
+      commands.run(targetForBlock(blockId), {
+        kind: 'delete-blocks',
+        blockIds: selection.selectedBlockIds,
         direction: event.key === 'Backspace' ? 'backward' : 'forward',
       })
       return
@@ -1184,37 +654,16 @@ export function FlowWorkspace({
       const index = order.indexOf(blockId)
       const nextIndex = event.key === 'ArrowUp' ? index - 1 : index + 1
       const nextId = order[nextIndex]
-      if (nextId) emitSelection(selectFlowEditorBlocks(project, locationId, [nextId]))
-    }
-  }
-
-  const handleHistoryKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const current = editRef.current
-    if (!current) return
-    if (!(event.ctrlKey || event.metaKey)) return
-    if (event.key.toLowerCase() !== 'z' && event.key.toLowerCase() !== 'y') return
-    const action = event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey)
-      ? 'redo' as const
-      : 'undo' as const
-    const resolved = resolveFlowTextHistoryAction({
-      composing: current.composing,
-      draftDirty: JSON.stringify(current.original) !== JSON.stringify(current.draft),
-      action,
-    })
-    if (resolved === 'ignore' && current.composing) {
-      event.preventDefault()
-      event.stopPropagation()
-      return
-    }
-    if (resolved === 'cancel') {
-      event.preventDefault()
-      event.stopPropagation()
-      cancelCurrent()
+      if (nextId) {
+        commands.run(targetForBlock(nextId), { kind: 'select-blocks', blockIds: [nextId] })
+      }
     }
   }
 
   const applyToolbarCommand = (command: FlowBlockContextCommand) => {
-    if (!selection) return
+    const blockId = selection?.selectedBlockId
+    if (!selection || !blockId) return
+    const target = targetForBlock(blockId)
     const current = editRef.current
     const captured = toolbarSelectionRef.current
     toolbarSelectionRef.current = null
@@ -1234,7 +683,7 @@ export function FlowWorkspace({
                 : null
         if (key) {
           setEditState(toggleFlowTextEditRunStyle(live, key, live.range))
-          setRestyleToken((token) => token + 1)
+          bumpRestyle()
           return
         }
       }
@@ -1243,69 +692,79 @@ export function FlowWorkspace({
         : command.type === 'range-color'
           ? { color: command.color }
           : { highlightColor: command.color }
-      const result = formatFlowAuthoringTextStyle({
-        document: project,
-        selection,
+      const receipt = commands.run(target, {
+        kind: 'format-text-style',
         style,
-        edit: live,
-        range: live?.range,
-        expectedRevision: project.revision,
+        expectedEdit: live,
       })
-      if (result.nextEdit) {
-        setEditState(result.nextEdit)
-        setRestyleToken((token) => token + 1)
-      }
-      emitProject(result)
+      if (receipt.ok && receipt.edit) bumpRestyle()
       return
     }
     if (command.type === 'range-emphasis' && live) {
       setEditState(toggleFlowTextEditEmphasis(live, live.range))
-      setRestyleToken((token) => token + 1)
+      bumpRestyle()
       return
     }
     if (command.type === 'range-clear' && live) {
       setEditState(clearFlowTextEditRangeStyle(live, live.range))
-      setRestyleToken((token) => token + 1)
+      bumpRestyle()
       return
     }
     if (command.type === 'heading-level') {
-      emitProject(formatFlowAuthoringBlock(project, selection, { kind: 'heading-level', level: command.level }))
+      commands.run(target, {
+        kind: 'format-block',
+        spec: { kind: 'heading-level', level: command.level },
+        expectedEdit: live,
+      })
       return
     }
     if (command.type === 'convert-heading') {
-      emitProject(formatFlowAuthoringBlock(project, selection, { kind: 'convert-heading', level: command.level }))
+      commands.run(target, {
+        kind: 'format-block',
+        spec: { kind: 'convert-heading', level: command.level },
+        expectedEdit: live,
+      })
       return
     }
     if (command.type === 'convert-paragraph') {
-      emitProject(formatFlowAuthoringBlock(project, selection, { kind: 'convert-paragraph' }))
+      commands.run(target, {
+        kind: 'format-block',
+        spec: { kind: 'convert-paragraph' },
+        expectedEdit: live,
+      })
       return
     }
     if (command.type === 'list-ordered') {
-      emitProject(formatFlowAuthoringBlock(project, selection, { kind: 'list-ordered', ordered: command.ordered }))
+      commands.run(target, {
+        kind: 'format-block',
+        spec: { kind: 'list-ordered', ordered: command.ordered },
+        expectedEdit: live,
+      })
       return
     }
     if (command.type === 'indent' || command.type === 'outdent') {
-      emitProject(executeFlowEditorCommand(project, selection, { name: command.type }))
+      commands.run(target, {
+        kind: 'execute-editor-command',
+        blockIds: selection.selectedBlockIds,
+        command: { name: command.type },
+        expectedEdit: live,
+      })
       return
     }
     if (command.type === 'move') {
-      const blockView = view.blocks.find((entry) => entry.blockId === selection.selectedBlockId)
-      if (!blockView) return
-      const nextIndex = command.direction === 'up' ? blockView.index - 1 : blockView.index + 1
-      if (nextIndex < 0) return
-      emitProject(executeFlowEditorCommand(project, selection, {
-        name: 'move',
-        destination: { parentId: blockView.parentId, index: nextIndex },
-      }))
+      commands.run(target, {
+        kind: 'move-block',
+        direction: command.direction,
+        expectedEdit: live,
+      })
       return
     }
     if (command.type === 'delete') {
-      const result = requestDelete({
-        selection,
-        expectedRevision: project.revision,
-        deleteSelectedBlocks: selection.focus === 'text',
+      commands.run(target, {
+        kind: 'delete-blocks',
+        blockIds: selection.selectedBlockIds,
+        expectedEdit: live,
       })
-      if (result.ok) setEditState(null)
     }
   }
 
@@ -1320,6 +779,9 @@ export function FlowWorkspace({
         ast: formulaBlock.ast as FormulaAstNode,
       })
     : null
+  const formulaDraft = edit?.kind === 'formula' && edit.blockId === formulaBlockId
+    ? edit.draft as FlowFormulaDraft
+    : null
 
   const childrenByParent = new Map<string | null, FlowBlockView[]>()
   for (const blockView of view.blocks) {
@@ -1327,12 +789,9 @@ export function FlowWorkspace({
     if (siblings) siblings.push(blockView)
     else childrenByParent.set(blockView.parentId, [blockView])
   }
-  const activeFlowSurface = project.surfaces.find((entry) => entry.id === view.surfaceId)
   const flowMediaWidths = {
     readingWidth: view.layout.readingWidth,
-    wideContentWidth: activeFlowSurface?.type === 'flow'
-      ? activeFlowSurface.layout.wideContentWidth
-      : view.layout.readingWidth,
+    wideContentWidth: view.layout.wideContentWidth,
   }
 
   const renderBlock = (blockView: FlowBlockView): ReactNode => {
@@ -1342,7 +801,7 @@ export function FlowWorkspace({
     const showToolbar = selected && !readOnly
     const formulaEditingAvailable = !readOnly && selection?.authoringScope !== 'global'
     const richDraft = edit?.kind === 'rich-text' && editingThis
-      ? edit.draft as { text: string; runs: import('../../shared/projectTypes').TextRun[] }
+      ? edit.draft as { text: string; runs: TextRun[] }
       : null
     const selectionFormat = deriveFlowSelectionFormat({
       block,
@@ -1388,6 +847,7 @@ export function FlowWorkspace({
     const frameProps = {
       'data-testid': `flow-block-${blockView.blockId}`,
       'data-flow-block-id': blockView.blockId,
+      'data-flow-location-id': blockView.locationId ?? '',
       'data-flow-parent-id': blockView.parentId ?? '',
       'data-flow-block-index': blockView.index,
       'data-flow-block-parent': blockView.parentId ?? '',
@@ -1431,15 +891,40 @@ export function FlowWorkspace({
         event.preventDefault()
         const sourceId = event.dataTransfer.getData('text/flow-block-id')
         if (!sourceId || sourceId === blockView.blockId) return
-        emitProject(executeFlowEditorCommand(project, selectFlowEditorBlocks(project, locationId, [sourceId]), {
-          name: 'move',
-          destination: { parentId: blockView.parentId, index: blockView.index, surfaceId: view.surfaceId },
-        }))
+        const drag = blockDragTargetRef.current
+        blockDragTargetRef.current = null
+        if (!drag || drag.target.itemId !== sourceId) return
+        commands.run(drag.target, {
+          kind: 'execute-editor-command',
+          blockIds: [sourceId],
+          expectedEdit: drag.expectedEdit,
+          command: {
+            name: 'move',
+            destination: {
+              parentId: blockView.parentId,
+              index: blockView.index,
+              surfaceId: view.surfaceId,
+            },
+          },
+        })
       },
       style: frameStyle,
     }
 
-    const richEditor = (label: string, text: string, runs: import('../../shared/projectTypes').TextRun[]) => (
+    const handleComposingChange = (composing: boolean) => {
+      const current = editRef.current
+      if (!current) return
+      if (composing) {
+        setEditState(markFlowTextComposing(current, true))
+        return
+      }
+      const finished = finishFlowTextComposition(current)
+      setEditState(finished.edit)
+      if (finished.action === 'commit') commitCurrent(true)
+      else if (finished.action === 'cancel') cancelCurrent()
+    }
+
+    const richEditor = (label: string, text: string, runs: readonly TextRun[]) => (
       <FlowInlineRichTextEditor
           blockId={blockView.blockId}
           label={label}
@@ -1461,18 +946,7 @@ export function FlowWorkspace({
             if (current.range.start === offsets.start && current.range.end === offsets.end) return
             setEditState(updateFlowTextRange(current, offsets))
           }}
-          onComposingChange={(composing) => {
-            const current = editRef.current
-            if (!current) return
-            if (composing) {
-              setEditState(markFlowTextComposing(current, true))
-              return
-            }
-            const finished = finishFlowTextComposition(current)
-            setEditState(finished.edit)
-            if (finished.action === 'commit') commitCurrent(true)
-            else if (finished.action === 'cancel') cancelCurrent()
-          }}
+          onComposingChange={handleComposingChange}
           onCommit={() => commitCurrent(true)}
           onCancel={cancelCurrent}
           onKeyAction={(event) => {
@@ -1490,7 +964,7 @@ export function FlowWorkspace({
         />
     )
 
-    const idleRichText = (text: string, runs: readonly import('../../shared/projectTypes').TextRun[] = []) => (
+    const idleRichText = (text: string, runs: readonly TextRun[] = []) => (
       <span
         data-flow-idle-rich-text="true"
         dangerouslySetInnerHTML={{ __html: buildFlowRichTextHtml(text, runs) }}
@@ -1702,11 +1176,7 @@ export function FlowWorkspace({
                       if (!current) return
                       setEditState(updateFlowTextDraft(current, { text: value }))
                     }}
-                    onComposingChange={(composing) => {
-                      const current = editRef.current
-                      if (!current) return
-                      setEditState(markFlowTextComposing(current, composing))
-                    }}
+                    onComposingChange={handleComposingChange}
                     onCommit={() => commitCurrent(true)}
                     onCancel={cancelCurrent}
                   />
@@ -1731,11 +1201,7 @@ export function FlowWorkspace({
                       if (!current) return
                       setEditState(updateFlowTextDraft(current, { text: value }))
                     }}
-                    onComposingChange={(composing) => {
-                      const current = editRef.current
-                      if (!current) return
-                      setEditState(markFlowTextComposing(current, composing))
-                    }}
+                    onComposingChange={handleComposingChange}
                     onCommit={() => commitCurrent(true)}
                     onCancel={cancelCurrent}
                   />
@@ -1760,11 +1226,7 @@ export function FlowWorkspace({
                         if (!current) return
                         setEditState(updateFlowTextDraft(current, { text: value }))
                       }}
-                      onComposingChange={(composing) => {
-                        const current = editRef.current
-                        if (!current) return
-                        setEditState(markFlowTextComposing(current, composing))
-                      }}
+                      onComposingChange={handleComposingChange}
                       onCommit={() => commitCurrent(true)}
                       onCancel={cancelCurrent}
                     />
@@ -1794,7 +1256,7 @@ export function FlowWorkspace({
 
     return (
       <div key={blockView.blockId} {...frameProps}>
-        {!readOnly && !editingThis ? (
+        {!readOnly && !edit ? (
           <button
             type="button"
             className="flow-block-drag-handle"
@@ -1816,6 +1278,10 @@ export function FlowWorkspace({
             onDragStart={(event) => {
               event.dataTransfer.setData('text/flow-block-id', blockView.blockId)
               event.dataTransfer.effectAllowed = 'move'
+              blockDragTargetRef.current = {
+                target: targetForBlock(blockView.blockId),
+                expectedEdit: editRef.current,
+              }
             }}
           />
         ) : null}
@@ -1839,284 +1305,7 @@ export function FlowWorkspace({
   }
 
   const rootBlocks = childrenByParent.get(null) ?? []
-  const overlayLayers = view.overlayLayers.filter((layer) => layer.effectiveVisible)
-  const globalUnderlayLayers = overlayLayers.filter((layer) => (
-    layer.source === 'global' && layer.globalPlane === 'underlay'
-  ))
-  const surfaceUnderlayLayers = overlayLayers.filter((layer) => (
-    layer.source === 'surface' && layer.flowBodyPlane === 'underlay'
-  ))
-  const surfaceOverlayLayers = overlayLayers.filter((layer) => (
-    layer.source === 'surface' && layer.flowBodyPlane !== 'underlay'
-  ))
-  const globalOverlayLayers = overlayLayers.filter((layer) => (
-    layer.source === 'global' && layer.globalPlane !== 'underlay'
-  ))
-  const flowSurface = project.surfaces.find((candidate) => candidate.id === view.surfaceId)
-  const surfaceBackground = resolveCourseSurfaceBackgroundColor(
-    flowSurface?.type === 'flow' ? flowSurface.backgroundColor : undefined,
-  )
-  const overlayScenes = project.locations.map((entry) => ({
-    id: entry.id,
-    name: entry.label,
-  }))
-
-  const overlayFrameOf = (layer: FlowEditorLayerView): StageRect => {
-    if (overlayPreview?.id === layer.selectionId) return overlayPreview.frame
-    return {
-      x: layer.item.frame.x,
-      y: layer.item.frame.y,
-      width: layer.item.frame.width,
-      height: layer.item.frame.height,
-    }
-  }
-
-  const beginOverlayGesture = (
-    event: ReactPointerEvent<HTMLElement>,
-    layer: FlowEditorLayerView,
-  ) => {
-    if (readOnly || event.button !== 0 || layer.item.locked) {
-      if (!readOnly) {
-        if (editRef.current) commitCurrent(false)
-        emitSelection(selectFlowOverlay(
-          project,
-          locationId,
-          [layer.selectionId],
-          layer.source === 'global' ? 'global' : 'page',
-        ))
-      }
-      return
-    }
-    const overlay = overlayRef.current
-    if (!overlay) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (editRef.current) commitCurrent(false)
-    emitSelection(selectFlowOverlay(
-      project,
-      locationId,
-      [layer.selectionId],
-      layer.source === 'global' ? 'global' : 'page',
-    ))
-    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
-    const startFrame = overlayFrameOf(layer)
-    const handleEl = event.target instanceof HTMLElement
-      ? event.target.closest('[data-handle]')
-      : null
-    const handleAttr = handleEl?.getAttribute('data-handle')
-    const direction = (STAGE_RESIZE_HANDLE_DIRECTIONS as readonly string[]).includes(handleAttr ?? '')
-      ? handleAttr as StageResizeHandleDirection
-      : hitFlowOverlayResizeHandle(startFrame, local)
-    overlayGestureRef.current = {
-      type: direction ? 'resize' : 'move',
-      layerItemId: layer.selectionId,
-      ...(direction ? { direction } : {}),
-      startLocal: local,
-      startFrame,
-    }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  const moveOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
-    const gesture = overlayGestureRef.current
-    const overlay = overlayRef.current
-    if (!gesture || !overlay) return
-    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
-    const rawNext = gesture.type === 'resize' && gesture.direction
-      ? resizeWorldFrameFromHandle(
-          gesture.startFrame,
-          gesture.direction,
-          local,
-          MIN_NODE_SIZE,
-        )
-      : {
-          x: gesture.startFrame.x + (local.x - gesture.startLocal.x),
-          y: gesture.startFrame.y + (local.y - gesture.startLocal.y),
-          width: gesture.startFrame.width,
-          height: gesture.startFrame.height,
-        }
-    const next = constrainFlowControllerOverlayFrame(
-      view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId),
-      rawNext,
-    )
-    setOverlayPreview({ id: gesture.layerItemId, frame: next })
-  }
-
-  const endOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
-    const gesture = overlayGestureRef.current
-    const overlay = overlayRef.current
-    overlayGestureRef.current = null
-    if (!gesture || !overlay) return
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
-    const rawNext = gesture.type === 'resize' && gesture.direction
-      ? resizeWorldFrameFromHandle(
-          gesture.startFrame,
-          gesture.direction,
-          local,
-          MIN_NODE_SIZE,
-        )
-      : {
-          x: gesture.startFrame.x + (local.x - gesture.startLocal.x),
-          y: gesture.startFrame.y + (local.y - gesture.startLocal.y),
-          width: gesture.startFrame.width,
-          height: gesture.startFrame.height,
-        }
-    const next = constrainFlowControllerOverlayFrame(
-      view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId),
-      rawNext,
-    )
-    setOverlayPreview(null)
-    const selected = selectFlowOverlay(
-      project,
-      locationId,
-      [gesture.layerItemId],
-      view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId)?.source === 'global'
-        ? 'global'
-        : 'page',
-    )
-    emitProject(transformFlowOverlayFrame(project, selected, next, {
-      expectedRevision: project.revision,
-    }))
-  }
-
-  const cancelOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
-    const gesture = overlayGestureRef.current
-    overlayGestureRef.current = null
-    setOverlayPreview(null)
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    if (!gesture) return
-    event.preventDefault()
-    event.stopPropagation()
-  }
-
-  const overlayPlaneStyle = (zIndex: number): CSSProperties => ({
-    position: 'absolute',
-    left: overlayTransform.stageRect.x,
-    top: overlayTransform.stageRect.y,
-    width: STAGE_VIEWPORT_WIDTH,
-    height: STAGE_VIEWPORT_HEIGHT,
-    transform: `scale(${overlayTransform.scale})`,
-    transformOrigin: '0 0',
-    zIndex,
-    pointerEvents: 'none',
-    overflow: 'hidden',
-  })
-
-  const renderOverlayVisual = (layer: FlowEditorLayerView) => {
-    const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
-    const controller = isTeacherControllerLayerItem(layer.item)
-    const controllerGlobalAuthoring = controller && selection?.authoringScope === 'global'
-    const controllerPagePreview = controller && !controllerGlobalAuthoring
-    const selected = !controllerPagePreview
-      && selection?.selectedOverlayIds.includes(layer.selectionId) === true
-    const underlayVisual = layer.source === 'global' && layer.globalPlane === 'underlay'
-    const passThroughVisual = layer.item.hitPolicy === 'pass-through'
-    const inertVisual = underlayVisual || passThroughVisual
-    const interactive = !readOnly && !selected && !controllerPagePreview && !inertVisual
-    return (
-      <div
-        key={layer.selectionId}
-        role={interactive ? 'button' : undefined}
-        tabIndex={interactive ? 0 : undefined}
-        className={`flow-layer-card${controller ? ' flow-layer-card--controller' : ''}`}
-        data-layer-item-id={layer.selectionId}
-        data-testid={`flow-layer-card-${layer.selectionId}`}
-        data-controller-page-preview={controllerPagePreview || undefined}
-        data-flow-global-plane={layer.globalPlane ?? undefined}
-        data-flow-body-plane={layer.flowBodyPlane ?? undefined}
-        aria-hidden={controllerPagePreview || inertVisual || undefined}
-        aria-label={interactive ? layer.item.label || '浮层' : undefined}
-        {...(inertVisual ? { inert: true } : {})}
-        style={{
-          ...overlayCardStyle(layer, preview, paperScrollTop),
-          pointerEvents: interactive ? 'auto' : 'none',
-        }}
-        onPointerDown={interactive ? (event) => beginOverlayGesture(event, layer) : undefined}
-        onPointerMove={interactive ? moveOverlayGesture : undefined}
-        onPointerUp={interactive ? endOverlayGesture : undefined}
-        onPointerCancel={interactive ? cancelOverlayGesture : undefined}
-      >
-        {controller ? (
-          <TeacherControllerAuthoringChrome
-            item={layer.item as LayerItem}
-            frame={overlayFrameOf(layer)}
-            rotation={layer.item.rotation}
-            canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
-            getRenderedStageBounds={() => {
-              const bounds = overlayRef.current?.getBoundingClientRect()
-              return {
-                width: Math.max(1, bounds?.width || CANVAS_WIDTH),
-                height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
-              }
-            }}
-            scenes={overlayScenes}
-            currentSceneId={locationId}
-          />
-        ) : (
-          renderFlowOverlayCardContent(layer, assetUrls, componentPackages)
-        )}
-      </div>
-    )
-  }
-
-  const renderSelectionChrome = (layer: FlowEditorLayerView) => {
-    const controller = isTeacherControllerLayerItem(layer.item)
-    const controllerPagePreview = controller && selection?.authoringScope !== 'global'
-    const selected = !controllerPagePreview
-      && selection?.selectedOverlayIds.includes(layer.selectionId) === true
-    if (!selected) return null
-    const editable = !readOnly && !layer.item.locked
-    return (
-      <div
-        key={layer.selectionId}
-        role={readOnly ? undefined : 'button'}
-        tabIndex={readOnly ? undefined : 0}
-        className="flow-layer-selection-chrome flow-layer-card--selected"
-        data-layer-item-id={layer.selectionId}
-        data-testid={`flow-layer-selection-${layer.selectionId}`}
-        aria-label={readOnly ? undefined : `${layer.item.label || '浮层'}选择框`}
-        style={{
-          ...overlayCardStyle(
-            layer,
-            overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null,
-            paperScrollTop,
-          ),
-          pointerEvents: readOnly ? 'none' : 'auto',
-          background: 'transparent',
-        }}
-        onPointerDown={readOnly ? undefined : (event) => beginOverlayGesture(event, layer)}
-        onPointerMove={readOnly ? undefined : moveOverlayGesture}
-        onPointerUp={readOnly ? undefined : endOverlayGesture}
-        onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
-      >
-        {editable ? STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
-          const point = overlayHandlePoint(overlayFrameOf(layer), direction)
-          const frame = overlayFrameOf(layer)
-          return (
-            <div
-              key={direction}
-              className="flow-layer-card__handle"
-              data-handle={direction}
-              data-testid={`flow-overlay-handle-${layer.selectionId}-${direction}`}
-              style={{
-                position: 'absolute',
-                left: point.x - frame.x - 4,
-                top: point.y - frame.y - 4,
-                width: 8,
-                height: 8,
-                pointerEvents: 'auto',
-              }}
-            />
-          )
-        }) : null}
-      </div>
-    )
-  }
+  const surfaceBackground = view.backgroundColor
 
   return (
     <div
@@ -2124,6 +1313,10 @@ export function FlowWorkspace({
       className="flow-workspace"
       data-testid="flow-workspace"
       data-flow-not-slide-stage="true"
+      data-flow-project-id={view.projectId}
+      data-flow-location-id={view.locationId}
+      data-flow-surface-id={view.surfaceId}
+      data-flow-active-block-id={view.activeBlockId}
       onKeyDown={handleHistoryKey}
       style={{
         position: 'relative',
@@ -2136,102 +1329,76 @@ export function FlowWorkspace({
         background: surfaceBackground,
       }}
     >
-      <div
-        className="flow-authoring-layer-plane flow-authoring-layer-plane--global-underlay"
-        data-flow-layer-plane="global-underlay"
-        data-testid="flow-authoring-global-underlay"
-        style={overlayPlaneStyle(0)}
-      >
-        {globalUnderlayLayers.map(renderOverlayVisual)}
-      </div>
-      <div
-        className="flow-authoring-layer-plane flow-authoring-layer-plane--surface-underlay"
-        data-flow-layer-plane="surface-underlay"
-        data-testid="flow-authoring-surface-underlay"
-        style={overlayPlaneStyle(1)}
-      >
-        {surfaceUnderlayLayers.map(renderOverlayVisual)}
-      </div>
-      <div
-        ref={scrollRef}
-        className="flow-workspace__scroll flow-media-query-root"
-        data-testid="flow-workspace-scroll"
-        data-flow-media-query-root="true"
-        onScroll={(e) => {
-          setPaperScrollTop(e.currentTarget.scrollTop)
+      <FlowOverlayAuthoringLayer
+        view={view}
+        sessionToken={sessionToken}
+        selection={selection}
+        locationId={locationId}
+        readOnly={readOnly}
+        assetUrls={assetUrls}
+        componentPackages={componentPackages}
+        paperScrollTop={paperScrollTop}
+        overlayViewportSize={overlayViewportSize}
+        onBeforeGesture={() => {
+          if (!editRef.current) return true
+          commitCurrent(false)
+          return false
         }}
-        style={{
-          flex: 1,
-          position: 'relative',
-          zIndex: 2,
-          overflow: 'auto',
-          height: '100%',
-          padding: '24px 16px 48px',
-          containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
-          containerName: 'flow-media-root',
-        }}
+        commands={commands}
       >
-        <article
-          ref={paperRef}
-          className="flow-paper"
-          data-testid="flow-paper"
-          data-flow-reading-width={view.layout.readingWidth}
-          onClick={handlePaperClick}
+        <div
+          ref={scrollRef}
+          className="flow-workspace__scroll flow-media-query-root"
+          data-testid="flow-workspace-scroll"
+          data-flow-media-query-root="true"
+          onScroll={(e) => {
+            setPaperScrollTop(e.currentTarget.scrollTop)
+          }}
           style={{
-            width: '100%',
-            maxWidth: view.layout.readingWidth,
-            minHeight: '100%',
-            margin: '0 auto',
-            padding: '28px 36px 64px',
-            background: 'transparent',
-            color: FLOW_PAPER_TEXT_COLOR,
-            boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
+            flex: 1,
+            position: 'relative',
+            zIndex: 2,
+            overflow: 'auto',
+            height: '100%',
+            padding: '24px 16px 48px',
+            containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
+            containerName: 'flow-media-root',
           }}
         >
-          {rootBlocks.map((blockView) => renderBlock(blockView))}
-          <div style={{ clear: 'both' }} aria-hidden="true" />
-        </article>
-      </div>
-      <div
-        className="flow-authoring-layer-plane flow-authoring-layer-plane--surface-overlay"
-        data-flow-layer-plane="surface-overlay"
-        data-testid="flow-authoring-surface-overlay"
-        style={overlayPlaneStyle(3)}
-      >
-        {surfaceOverlayLayers.map(renderOverlayVisual)}
-      </div>
-      <div
-        ref={overlayRef}
-        className="flow-authoring-layer-plane flow-authoring-layer-plane--global-overlay flow-authoring-layer-overlay"
-        data-flow-layer-plane="global-overlay"
-        data-testid="flow-authoring-layer-overlay"
-        style={overlayPlaneStyle(4)}
-      >
-        {globalOverlayLayers.map(renderOverlayVisual)}
-      </div>
-      <div
-        className="flow-authoring-selection-plane"
-        data-testid="flow-authoring-selection-plane"
-        style={overlayPlaneStyle(5)}
-      >
-        {overlayLayers.map(renderSelectionChrome)}
-      </div>
-      {formulaNode ? (
+          <article
+            ref={paperRef}
+            className="flow-paper"
+            data-testid="flow-paper"
+            data-flow-reading-width={view.layout.readingWidth}
+            onClick={handlePaperClick}
+            style={{
+              width: '100%',
+              maxWidth: view.layout.readingWidth,
+              minHeight: '100%',
+              margin: '0 auto',
+              padding: '28px 36px 64px',
+              background: 'transparent',
+              color: FLOW_PAPER_TEXT_COLOR,
+              boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
+            }}
+          >
+            {rootBlocks.map((blockView) => renderBlock(blockView))}
+            <div style={{ clear: 'both' }} aria-hidden="true" />
+          </article>
+        </div>
+      </FlowOverlayAuthoringLayer>
+      {formulaNode && formulaDraft ? (
         <FormulaEditDialog
           node={formulaNode}
+          draftSource={formulaDraft.source}
+          onDraftChange={updateFormulaDraft}
+          onCompositionChange={setFormulaComposing}
           onCancel={() => {
             setFormulaBlockId(null)
             cancelCurrent()
           }}
           onCommit={(ast, accessibleText) => {
-            if (!selection) return
-            const result = commitFlowFormulaAst(project, selection, ast, accessibleText, {
-              expectedRevision: project.revision,
-            })
-            setFormulaBlockId(null)
-            setEditState(null)
-            emitProject(result)
-            emitSelection(selectFlowEditorBlocks(result.nextDocument ?? project, locationId, [formulaNode.id]))
+            commitFormula(ast, accessibleText)
           }}
         />
       ) : null}

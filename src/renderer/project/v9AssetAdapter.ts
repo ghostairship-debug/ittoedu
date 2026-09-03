@@ -8,9 +8,14 @@ import {
 import {
   collectCourseProjectReferences,
   type CourseProjectReference,
-} from '@/shared/courseProjectModel'
+} from '@/shared/contracts/course-project-v9/references'
+import {
+  analyzeCourseAssetReferences,
+  type CourseAssetReference,
+  type CourseAssetReferenceOptions,
+} from '@/shared/contracts/course-project-v9/assetReferences'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import type { AssetKind, AssetMeta } from '@/shared/projectTypes'
+import type { AssetKind, AssetMeta } from '@/shared/contracts/media-v1/types'
 
 /**
  * V9 asset sidecar: binary files keyed by stable AssetMeta.id, kept beside
@@ -161,13 +166,64 @@ export async function dedupeCourseMediaImports(
   return { placements, additions, duplicateCount }
 }
 
+export interface PreparedHashedMediaBatch {
+  readonly placements: CourseImportedAsset[]
+  readonly additions: CourseImportedAsset[]
+  readonly duplicateCount: number
+  readonly decodeFailures: ReadonlyArray<{ name: string; message: string }>
+}
+
+/**
+ * Selection-side hash reuse before decode. Uses the existing content-hash
+ * index; callers supply the captured asset snapshot and a decode factory.
+ */
+export async function prepareHashedMediaBatch<T extends {
+  name: string
+  bytes: Uint8Array
+  sha256: string
+}>(
+  files: readonly T[],
+  kind: AssetKind,
+  assets: Readonly<Record<string, AssetMeta>>,
+  assetFiles: Readonly<Record<string, Uint8Array>>,
+  decode: (file: T) => Promise<CourseImportedAsset>,
+  describeDecodeError: (error: unknown, file: T) => string,
+): Promise<PreparedHashedMediaBatch> {
+  const hashes = await buildAssetContentHashIndex(kind, assets, assetFiles)
+  const placements: CourseImportedAsset[] = []
+  const additions: CourseImportedAsset[] = []
+  const decodeFailures: Array<{ name: string; message: string }> = []
+  let duplicateCount = 0
+
+  for (const file of files) {
+    const existing = hashes.get(file.sha256)
+    if (existing) {
+      duplicateCount += 1
+      placements.push({ meta: existing.meta, bytes: existing.bytes })
+      continue
+    }
+    try {
+      const imported = await decode(file)
+      hashes.set(file.sha256, { meta: imported.meta, bytes: imported.bytes })
+      additions.push(imported)
+      placements.push(imported)
+    } catch (error) {
+      decodeFailures.push({
+        name: file.name,
+        message: describeDecodeError(error, file),
+      })
+    }
+  }
+
+  return { placements, additions, duplicateCount, decodeFailures }
+}
+
 export function listCourseAssetReferences(
   project: CourseProjectDocument,
   assetId: string,
-): CourseProjectReference[] {
-  return collectCourseProjectReferences(project).filter(
-    (reference) => reference.kind === 'asset' && reference.id === assetId,
-  )
+  options: CourseAssetReferenceOptions = {},
+): readonly CourseAssetReference[] {
+  return analyzeCourseAssetReferences(project, options).graph.get(assetId) ?? []
 }
 
 export function listCourseSoundReferences(
@@ -180,7 +236,7 @@ export function listCourseSoundReferences(
 }
 
 export function describeCourseAssetReference(
-  reference: CourseProjectReference,
+  reference: CourseAssetReference | CourseProjectReference,
 ): string {
   const label = reference.kind === 'sound' ? '声音' : '素材'
   return `工程在 ${reference.path.join('.')} 引用该${label}`

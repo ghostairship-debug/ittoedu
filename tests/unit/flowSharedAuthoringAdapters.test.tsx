@@ -12,7 +12,7 @@ import type { ComponentManifest } from '@/shared/componentTypes'
 import {
   createTeacherControllerNode,
   createTextNode,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import {
   enterFlowTextEditing,

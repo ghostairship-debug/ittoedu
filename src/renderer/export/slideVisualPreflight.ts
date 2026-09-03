@@ -1,20 +1,15 @@
 import type { ExportPreflightCode } from '../../shared/diagnosticCodes'
 import { analyzeFormulaNodeLayout } from '../../shared/formulaRenderer'
 import { rotatedRectangleAabb } from '../../shared/geometry'
-import {
-  ensureScenePresentation,
-  materializeScene,
-} from '../../shared/presentation'
-import type {
-  ProjectDocument,
-  SceneNode,
-  TextNode,
-} from '../../shared/projectTypes'
-import type { ProjectHealthSeverity } from '../../shared/projectHealth'
+import type { CourseProjectHealthSeverity } from '../../shared/courseProjectHealth'
 import {
   composeCourseProjectLocation,
   type CourseLayerComposition,
 } from '../../shared/courseLayerComposition'
+import type {
+  TextNode,
+  NativeRenderableNode,
+} from '../../shared/contracts/native-v1/types'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -27,11 +22,9 @@ import {
   textNodeHasEmphasis,
 } from '../../shared/textLayout'
 import {
-  analyzeVisualDensity,
   analyzeVisualDensityState,
   type VisualDensityStateReport,
 } from '../../shared/visualDensity'
-import { visibleGlobalLayerItemsForScene } from './exportPayloadSupport'
 
 export type SlideVisualPreflightTarget =
   | 'single-html'
@@ -40,7 +33,7 @@ export type SlideVisualPreflightTarget =
   | 'pptx'
 
 export interface SlideVisualPreflightItem {
-  severity: ProjectHealthSeverity
+  severity: CourseProjectHealthSeverity
   code: ExportPreflightCode
   message: string
   target: SlideVisualPreflightTarget
@@ -73,6 +66,25 @@ interface SlideVisualStateContext {
   stateName: string
   backgroundColor: string
 }
+
+interface ComponentVisualNode {
+  id: string
+  name: string
+  type: 'external-component'
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  opacity: number
+  visible: boolean
+  locked: boolean
+  playbackInitialVisibility: 'inherit' | 'hidden'
+  component: { packageId: string; version: string }
+  props: Record<string, unknown>
+}
+
+type VisualInspectNode = NativeRenderableNode | ComponentVisualNode
 
 type AddItem = (item: Omit<SlideVisualPreflightItem, 'target'>) => void
 
@@ -162,7 +174,7 @@ function textFontAvailable(node: TextNode): boolean | null {
   }
 }
 
-function nodeLocationLabel(context: SlideVisualStateContext, node: SceneNode): string {
+function nodeLocationLabel(context: SlideVisualStateContext, node: VisualInspectNode): string {
   return `场景“${context.sceneName}”${context.stateId ? `的状态“${context.stateName}”` : '的基础画面'}中，节点“${node.name}”`
 }
 
@@ -170,7 +182,7 @@ function nodeLocationLabel(context: SlideVisualStateContext, node: SceneNode): s
 function collectNodeItems(input: {
   canvas: { width: number; height: number }
   target: SlideVisualPreflightTarget
-  node: SceneNode
+  node: VisualInspectNode
   context: SlideVisualStateContext
   add: AddItem
 }): void {
@@ -390,7 +402,7 @@ function collectNodeItems(input: {
 
 function collectControllerObstructionItems(input: {
   context: SlideVisualStateContext
-  nodes: readonly SceneNode[]
+  nodes: readonly VisualInspectNode[]
   interactiveNodeIds: ReadonlySet<string>
   add: AddItem
 }): void {
@@ -476,83 +488,7 @@ function itemCollector(target: SlideVisualPreflightTarget): {
   }
 }
 
-/** Existing Project V8 container adapter. The rule layer above does not read it. */
-export function collectProjectDocumentSlideVisualPreflightItems(
-  project: ProjectDocument,
-  target: SlideVisualPreflightTarget,
-): SlideVisualPreflightItem[] {
-  const { items, add } = itemCollector(target)
-  for (const scene of project.scenes) {
-    const presentation = ensureScenePresentation(scene)
-    const states: Array<{ id: string | null; name: string }> = [
-      { id: null, name: '基础画面' },
-      ...presentation.states.map(({ id, name }) => ({ id, name })),
-    ]
-    states.forEach((state) => {
-      const rendered = materializeScene(scene, state.id)
-      const context: SlideVisualStateContext = {
-        sceneId: scene.id,
-        sceneName: scene.name,
-        ...(state.id ? { stateId: state.id } : {}),
-        stateName: state.name,
-        backgroundColor: rendered.backgroundColor,
-      }
-      rendered.nodes.forEach((node) => collectNodeItems({
-        canvas: project.canvas,
-        target,
-        node,
-        context,
-        add,
-      }))
-      const globalNodes = visibleGlobalLayerItemsForScene(project, scene.id)
-        .map(({ node }) => node)
-      collectControllerObstructionItems({
-        context,
-        nodes: [...rendered.nodes, ...globalNodes],
-        interactiveNodeIds: interactiveNodeIds([
-          ...scene.interactions,
-          ...project.globalInteractions,
-        ]),
-        add,
-      })
-    })
-
-    const globalContext: SlideVisualStateContext = {
-      sceneId: scene.id,
-      sceneName: scene.name,
-      stateName: '全局层',
-      backgroundColor: scene.backgroundColor,
-    }
-    visibleGlobalLayerItemsForScene(project, scene.id).forEach(({ node }) => {
-      collectNodeItems({
-        canvas: project.canvas,
-        target,
-        node,
-        context: globalContext,
-        add,
-      })
-    })
-
-    const visibleContent = materializeScene(scene).nodes.some(
-      (node) => node.visible && node.type !== 'teacher-controller',
-    ) || visibleGlobalLayerItemsForScene(project, scene.id).some(
-      ({ node }) => node.type !== 'teacher-controller',
-    ) || scene.runtime?.enabled || project.globalRuntime?.enabled
-    if (!visibleContent && !scene.backgroundAssetId) {
-      add({
-        severity: 'warning',
-        code: 'scene-appears-blank',
-        message: `场景“${scene.name}”没有可见内容、背景图片或运行时，导出结果可能是空白页。`,
-        sceneId: scene.id,
-      })
-    }
-  }
-
-  analyzeVisualDensity(project).states.forEach((state) => collectDensityItems(state, add))
-  return items
-}
-
-function layerItemToSceneNode(item: LayerItem): SceneNode | null {
+function layerItemToVisualNode(item: LayerItem): VisualInspectNode | null {
   const base = {
     id: item.layerItemId,
     name: item.label,
@@ -580,7 +516,7 @@ function layerItemToSceneNode(item: LayerItem): SceneNode | null {
     ...base,
     type: native.content.nativeType,
     ...structuredClone(native.content.data),
-  } as SceneNode
+  } as VisualInspectNode
 }
 
 function slideLocation(project: CourseProjectDocument, locationId: string): {
@@ -600,10 +536,10 @@ function slideLocation(project: CourseProjectDocument, locationId: string): {
   return { surface, scene }
 }
 
-function mountedNodes(composition: CourseLayerComposition<LayerItem>): SceneNode[] {
+function mountedNodes(composition: CourseLayerComposition<LayerItem>): VisualInspectNode[] {
   return composition.entries.flatMap((entry) => {
     if (!entry.mounted) return []
-    const node = layerItemToSceneNode(entry.item)
+    const node = layerItemToVisualNode(entry.item)
     return node ? [node] : []
   })
 }

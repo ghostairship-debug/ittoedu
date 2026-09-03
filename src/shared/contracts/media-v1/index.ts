@@ -1,6 +1,16 @@
 export type {
+  AssetKind,
   AudioChannel,
   SoundDefinition,
   ProjectAudioSettings,
   ProjectMediaSettings,
-} from '../../projectTypes'
+  AssetMeta,
+  RuntimeAsset,
+  RuntimeAssetMap,
+} from './types'
+export {
+  assetMetaSchema,
+  courseProjectAssetMetaSchema,
+  courseProjectMediaSettingsSchema,
+  projectMediaSettingsSchema,
+} from './schema'

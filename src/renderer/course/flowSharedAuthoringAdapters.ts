@@ -27,7 +27,7 @@ import {
   createImageNode,
   createShapeNode,
   createVideoNode,
-} from '../project/createProject'
+} from '../project/nativeNodeFactories'
 import {
   locateCourseLayer,
   makeEffectiveLayerAuthoringAddress,

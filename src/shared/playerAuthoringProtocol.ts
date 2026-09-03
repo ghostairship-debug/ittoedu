@@ -1,10 +1,33 @@
 import { z } from 'zod'
 import type { ComponentAuthoringTargetUpdate } from './componentTypes'
+import {
+  nativeRenderableBaseSchema,
+  nativeRenderableNodeSchema,
+} from './contracts/native-v1'
 import { nodeMotionActionSchema } from './interactionSchema'
 import type { NodeMotionAction } from './interactionTypes'
-import { sceneNodeSchema } from './projectSchema'
-import type { SceneNode } from './projectTypes'
 import type { RuntimeAuthoringTargetUpdate } from './runtimeTypes'
+
+export interface PlayerAuthoringNativeNode {
+  id: string
+  name: string
+  type: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  opacity: number
+  visible: boolean
+  locked: boolean
+  playbackInitialVisibility: 'inherit' | 'hidden'
+  component?: {
+    packageId: string
+    version: string
+  }
+  props?: Record<string, unknown>
+  style?: Record<string, unknown>
+}
 
 export const PLAYER_AUTHORING_PROTOCOL_VERSION = 1 as const
 
@@ -51,8 +74,8 @@ export type PlayerAuthoringPatch =
   | {
       kind: 'native-node'
       target: Extract<PlayerAuthoringTarget, { kind: 'native-node' }>
-      /** Complete, materialized Project V8 node. The Player never merges partials. */
-      node: SceneNode
+      /** Complete, materialized Native V1 or Component V4 node. The host never merges partials. */
+      node: PlayerAuthoringNativeNode
     }
   | {
       kind: 'scene-background'
@@ -252,11 +275,27 @@ const ackSchema = z.object({
   token: identifier.optional(),
 }).strict()
 
+const authoringComponentNodeSchema = nativeRenderableBaseSchema.extend({
+  type: z.literal('external-component'),
+  component: z.object({
+    packageId: z.string().min(1),
+    version: z.string().min(1),
+  }),
+  props: z.record(z.string(), z.unknown()),
+}).and(z.object({
+  playbackInitialVisibility: z.enum(['inherit', 'hidden']),
+}))
+
+const authoringNativeNodeSchema = z.union([
+  nativeRenderableNodeSchema,
+  authoringComponentNodeSchema,
+])
+
 const patchSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('native-node'),
     target: nativeTargetSchema,
-    node: sceneNodeSchema,
+    node: authoringNativeNodeSchema,
   }).strict(),
   z.object({
     kind: z.literal('scene-background'),

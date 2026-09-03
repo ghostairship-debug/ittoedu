@@ -1,4 +1,4 @@
-import type { FormulaAstNode, FormulaNode } from './projectTypes'
+import type { FormulaAstNode, FormulaNode } from './contracts/native-v1/types'
 import { BUNDLED_MATH_FONT_FAMILY } from './fonts/bundledFontFamilies'
 import {
   resolveLayoutMeasureContext,

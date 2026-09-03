@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES } from '../../shared/constants'
+import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
   applyComponentVariant,
   getComponentPropValue,
@@ -29,7 +30,15 @@ import {
   type MotionEffect,
   type NodeMotionAction,
 } from '../../shared/interactionTypes'
-import type { ShapeType } from '../../shared/projectTypes'
+import type { ShapeType } from '../../shared/contracts/native-v1'
+import {
+  patchEffectiveLayerPropertiesAtTarget,
+  patchEffectiveLayerPropertiesAtTargets,
+  patchEffectiveLayerItems,
+  deleteEffectiveLayerItems,
+  type EffectiveLayerPropertiesPatchAtTarget,
+  type EffectiveLayerPropertyUpdate,
+} from './effectiveLayerCommands'
 import {
   createExternalComponentNode,
   createFormulaNode,
@@ -37,7 +46,7 @@ import {
   createShapeNode,
   createTextNode,
   createVideoNode,
-} from '../project/createProject'
+} from '../project/nativeNodeFactories'
 import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
@@ -55,8 +64,18 @@ import { buildSlideEditorView, type SlideEditorLayerView } from './slideEditorVi
 import {
   makeSlideAuthoringTarget,
   type SlideAuthoringSession,
+  type SlideAuthoringTarget,
 } from './slideAuthoringBackend'
-import { allocateCourseLayerOrder } from './globalLayerCommands'
+import {
+  allocateCourseLayerOrder,
+  sortScopedLayerList,
+  type LayerCommandResult,
+} from './globalLayerCommands'
+import {
+  deleteSlideSceneLayers,
+  duplicateSlideGlobalLayers,
+  duplicateSlideSceneLayers,
+} from './v9SlideActionCommands'
 
 /**
  * V8 `offsetDefaultInsertion` contract from editorStore.
@@ -274,6 +293,37 @@ function requireSceneScope(session: SlideAuthoringSessionRef): void {
   if (session.scope !== 'scene') {
     throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '请先切换到场景层')
   }
+}
+
+function appendGlobalLayer(
+  project: CourseProjectDocument,
+  item: LayerItem,
+): void {
+  if (project.globalLayerItems.some((entry) => entry.item.layerItemId === item.layerItemId)) {
+    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
+  }
+  const preferred = Math.max(-1, ...project.globalLayerItems.map((entry) => entry.item.order)) + 1
+  item.order = allocateCourseLayerOrder(project, Math.max(0, preferred))
+  project.globalLayerItems.push({
+    item,
+    plane: 'overlay',
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  sortScopedLayerList(project.globalLayerItems)
+}
+
+function appendOwnedLayer(
+  project: CourseProjectDocument,
+  session: SlideAuthoringSessionRef,
+  item: LayerItem,
+): void {
+  if (session.scope === 'global') {
+    appendGlobalLayer(project, item)
+    return
+  }
+  requireSceneScope(session)
+  const { scene } = slideSceneContext(project, session)
+  appendSceneLayer(project, scene, structuredClone(item), session.selection.stateId)
 }
 
 function sortSceneLayers(scene: SlideSceneDocument): void {
@@ -593,8 +643,9 @@ export function addSlideTextLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
-    const { scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'global'
+      ? session.history.present.globalLayerItems.length
+      : slideSceneContext(session.history.present, session).scene.layerItems.length
     const node = offsetDefaultSlideInsertion(
       createTextNode({
         id: stableId('text', input.id),
@@ -603,13 +654,12 @@ export function addSlideTextLayer(
         x: input.x,
         y: input.y,
       }),
-      scene.layerItems.length,
+      existingCount,
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
+      appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -625,8 +675,9 @@ export function addSlideFormulaLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
-    const { scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'global'
+      ? session.history.present.globalLayerItems.length
+      : slideSceneContext(session.history.present, session).scene.layerItems.length
     const node = offsetDefaultSlideInsertion(
       createFormulaNode({
         id: stableId('formula', input.id),
@@ -634,13 +685,12 @@ export function addSlideFormulaLayer(
         x: input.x,
         y: input.y,
       }),
-      scene.layerItems.length,
+      existingCount,
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
+      appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -656,8 +706,9 @@ export function addSlideShapeLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
-    const { scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'global'
+      ? session.history.present.globalLayerItems.length
+      : slideSceneContext(session.history.present, session).scene.layerItems.length
     const node = offsetDefaultSlideInsertion(
       createShapeNode(input.shapeType, {
         id: stableId('shape', input.id),
@@ -665,13 +716,12 @@ export function addSlideShapeLayer(
         x: input.x,
         y: input.y,
       }),
-      scene.layerItems.length,
+      existingCount,
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
+      appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -689,7 +739,9 @@ export function addSlideImageLayer(
   try {
     requireSceneScope(session)
     requireAsset(session.history.present, input.assetId, 'image')
-    const { scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'global'
+      ? session.history.present.globalLayerItems.length
+      : slideSceneContext(session.history.present, session).scene.layerItems.length
     const asset = session.history.present.assets[input.assetId]!
     const sized = createImageNode(input.assetId, asset.width, asset.height, input.x, input.y)
     const node = offsetDefaultSlideInsertion(
@@ -702,13 +754,12 @@ export function addSlideImageLayer(
         x: input.x,
         y: input.y,
       }),
-      scene.layerItems.length,
+      existingCount,
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
+      appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -724,9 +775,10 @@ export function addSlideVideoLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     requireAsset(session.history.present, input.assetId, 'video')
-    const { scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'global'
+      ? session.history.present.globalLayerItems.length
+      : slideSceneContext(session.history.present, session).scene.layerItems.length
     const asset = session.history.present.assets[input.assetId]!
     const node = offsetDefaultSlideInsertion(
       createVideoNode({
@@ -738,13 +790,12 @@ export function addSlideVideoLayer(
         x: input.x,
         y: input.y,
       }),
-      scene.layerItems.length,
+      existingCount,
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
+      appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -760,15 +811,15 @@ export function addSlideComponentLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
+    const ownedScope = session.scope === 'global' ? 'global' : 'scene'
     const embedded = session.history.present.componentPackages[input.packageId]
     if (!embedded) throw new Error(`组件包未嵌入工程：${input.packageId}`)
     const manifest = input.manifest
     if (manifest && manifest.id !== input.packageId) {
       throw new Error('组件清单 ID 与工程嵌入包不一致')
     }
-    if (manifest && !componentSupportsScope(manifest, 'scene')) {
-      throw new Error('该组件不支持场景层')
+    if (manifest && !componentSupportsScope(manifest, ownedScope)) {
+      throw new Error(ownedScope === 'global' ? '未声明支持全局层' : '该组件不支持场景层')
     }
     const preset = input.presetId
       ? manifest?.presets?.find((candidate) => candidate.id === input.presetId)
@@ -777,11 +828,17 @@ export function addSlideComponentLayer(
     const props = preset && manifest
       ? resolveComponentPresetProps(manifest, preset)
       : structuredClone(input.props ?? manifest?.defaultProps ?? {})
-    const { scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'global'
+      ? session.history.present.globalLayerItems.length
+      : slideSceneContext(session.history.present, session).scene.layerItems.length
     const node = offsetDefaultSlideInsertion(
       createExternalComponentNode({
         id: stableId('component', input.id),
-        name: input.label ?? preset?.label ?? manifest?.name ?? embedded.name,
+        name: input.label
+          ?? (preset && manifest ? `${manifest.name} · ${preset.label}` : undefined)
+          ?? preset?.label
+          ?? manifest?.name
+          ?? embedded.name,
         component: {
           packageId: embedded.packageId,
           version: embedded.version,
@@ -792,13 +849,12 @@ export function addSlideComponentLayer(
         x: input.x,
         y: input.y,
       }),
-      scene.layerItems.length,
+      existingCount,
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const next = slideSceneContext(draft, session)
-      appendSceneLayer(draft, next.scene, structuredClone(item), session.selection.stateId)
+      appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
   } catch (error) {
@@ -1165,7 +1221,7 @@ function simpleEntranceRuleMatchesState(
     presentationConditions[0]!.stateIds[0] === stateId
 }
 
-function findSimpleEntranceRule(
+export function findSimpleEntranceAnimationRule(
   rules: readonly InteractionRule[],
   nodeId: string,
   stateId: string | null,
@@ -1173,7 +1229,15 @@ function findSimpleEntranceRule(
   return rules.find((rule) => simpleEntranceRuleMatchesState(rule, nodeId, stateId))
 }
 
-function hasAdvancedEntranceAnimation(
+function findSimpleEntranceRule(
+  rules: readonly InteractionRule[],
+  nodeId: string,
+  stateId: string | null,
+): InteractionRule | undefined {
+  return findSimpleEntranceAnimationRule(rules, nodeId, stateId)
+}
+
+export function hasAdvancedEntranceAnimation(
   rules: readonly InteractionRule[],
   nodeId: string,
   stateId: string | null,
@@ -1485,6 +1549,379 @@ export function readSlideRuntimeLayer(
   const layer = sceneLayerView(session, layerItemId)
   if (layer.item.kind !== 'runtime') throw new Error('找不到当前动态内容层')
   return structuredClone(layer.item) as RuntimeLayerItem
+}
+
+function slideResultFromLayerCommand(
+  session: SlideAuthoringSession,
+  result: LayerCommandResult,
+  nextSelectionIds?: readonly string[],
+): SlideCommandResult {
+  if (!result.ok || !result.nextDocument) {
+    return {
+      ok: false,
+      reason: result.reason,
+      historyEntry: false,
+      nextSession: session,
+      selection: session.selection,
+    }
+  }
+  const nextHistory = result.historyEntry
+    ? commitSlideAuthoringHistory(session.history, result.nextDocument)
+    : {
+        present: result.nextDocument,
+        past: session.history.past,
+        future: session.history.future,
+      }
+  const nextSelection = nextSelectionIds
+    ? selectSlideEditorLayers({
+        project: result.nextDocument,
+        locationId: session.selection.locationId,
+        stateId: session.selection.stateId,
+        selectionIds: [...nextSelectionIds],
+      })
+    : session.selection
+  return {
+    ok: true,
+    reason: result.reason,
+    historyEntry: Boolean(result.historyEntry),
+    nextSession: {
+      ...session,
+      history: nextHistory,
+      selection: nextSelection,
+    },
+    selection: nextSelection,
+  }
+}
+
+/**
+ * Applies one or more effective-layer property patches and folds them into the
+ * current Slide session. Callers that also write native content should run this
+ * inside `coalesceSlideAuthoringCommands` so one gesture is one history entry.
+ */
+export function patchSlideEffectiveLayerProperties(
+  session: SlideAuthoringSession,
+  updates: readonly EffectiveLayerPropertyUpdate[],
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  return slideResultFromLayerCommand(
+    session,
+    patchEffectiveLayerItems(session.history.present, updates, {
+      expectedRevision: options.expectedRevision ?? session.history.present.revision,
+      now: options.now,
+    }),
+  )
+}
+
+/**
+ * Applies one complete Properties submit to the exact Slide target captured
+ * when that editor was rendered. This deliberately does not reuse the batch
+ * command: named-state property editing needs one sparse override transaction,
+ * while a stale focused control must never be rebound to the current selection.
+ */
+export function patchSlideLayerPropertiesAtTarget(
+  session: SlideAuthoringSession,
+  target: SlideAuthoringTarget,
+  patch: EffectiveLayerPropertiesPatchAtTarget,
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(
+    session,
+    options.expectedRevision ?? target.revision,
+  )
+  if (stale) return stale
+  if (
+    target.sessionId !== session.sessionId
+    || target.generation !== session.generation
+    || target.scope !== session.scope
+    || session.selection.selectionIds.length !== 1
+    || session.selection.selectionIds[0] !== target.layerItemId
+  ) {
+    return reject(session, SLIDE_REJECT_STALE_REVISION)
+  }
+  try {
+    const currentTarget = makeSlideAuthoringTarget(
+      session,
+      target.layerItemId,
+      'item',
+    )
+    if (
+      currentTarget.authoringAddress !== target.authoringAddress
+      || currentTarget.scope !== target.scope
+      || currentTarget.layerItemId !== target.layerItemId
+    ) {
+      return reject(session, SLIDE_REJECT_WRONG_OWNER)
+    }
+    return slideResultFromLayerCommand(
+      session,
+      patchEffectiveLayerPropertiesAtTarget(
+        session.history.present,
+        {
+          authoringAddress: target.authoringAddress,
+          locationId: session.selection.locationId,
+          stateId: session.selection.stateId,
+        },
+        patch,
+        {
+          expectedRevision: target.revision,
+          now: options.now,
+        },
+      ),
+    )
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+export type SlideMultiLayerPropertiesIntent =
+  | { readonly kind: 'set-visible'; readonly visible: boolean }
+  | { readonly kind: 'set-locked'; readonly locked: boolean }
+  | {
+      readonly kind: 'align'
+      readonly mode: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
+    }
+  | { readonly kind: 'distribute'; readonly axis: 'horizontal' | 'vertical' }
+  | { readonly kind: 'duplicate' }
+  | { readonly kind: 'delete' }
+
+function exactSlideMultiLayers(
+  session: SlideAuthoringSession,
+  targets: readonly SlideAuthoringTarget[],
+):
+  | { readonly kind: 'layers'; readonly layers: readonly SlideEditorLayerView[] }
+  | { readonly kind: 'error'; readonly result: SlideCommandResult } {
+  const selectedIds = session.selection.selectionIds
+  if (
+    targets.length < 2
+    || targets.length !== selectedIds.length
+    || new Set(targets.map((target) => target.layerItemId)).size !== targets.length
+    || targets.some((target, index) => (
+      target.layerItemId !== selectedIds[index]
+      || target.sessionId !== session.sessionId
+      || target.revision !== session.history.present.revision
+      || target.generation !== session.generation
+      || target.scope !== session.scope
+    ))
+  ) {
+    return { kind: 'error', result: reject(session, SLIDE_REJECT_STALE_REVISION) }
+  }
+  const view = buildSlideEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: session.selection.stateId,
+  })
+  const layersById = new Map(view.layers.map((layer) => [layer.selectionId, layer]))
+  const layers: SlideEditorLayerView[] = []
+  for (const target of targets) {
+    const current = makeSlideAuthoringTarget(session, target.layerItemId, 'item')
+    const layer = layersById.get(target.layerItemId)
+    if (
+      !layer
+      || current.authoringAddress !== target.authoringAddress
+      || current.scope !== target.scope
+    ) {
+      return { kind: 'error', result: reject(session, SLIDE_REJECT_WRONG_OWNER) }
+    }
+    layers.push(layer)
+  }
+  return { kind: 'layers', layers }
+}
+
+function slideMultiFramePatches(
+  layers: readonly SlideEditorLayerView[],
+  intent: Extract<SlideMultiLayerPropertiesIntent, { kind: 'align' | 'distribute' }>,
+): Map<string, { readonly x: number; readonly y: number }> {
+  const unlocked = layers.filter((layer) => !layer.item.locked)
+  const minimum = intent.kind === 'distribute' ? 3 : 2
+  if (unlocked.length < minimum) return new Map()
+  const boundsById = new Map(unlocked.map((layer) => [
+    layer.selectionId,
+    rotatedRectangleAabb({
+      x: layer.item.frame.x,
+      y: layer.item.frame.y,
+      width: layer.item.frame.width,
+      height: layer.item.frame.height,
+      rotation: layer.item.rotation,
+    }),
+  ]))
+  if (intent.kind === 'distribute') {
+    const horizontal = intent.axis === 'horizontal'
+    const sorted = [...unlocked].sort((left, right) => {
+      const leftBounds = boundsById.get(left.selectionId)!
+      const rightBounds = boundsById.get(right.selectionId)!
+      return horizontal
+        ? leftBounds.left - rightBounds.left
+        : leftBounds.top - rightBounds.top
+    })
+    const first = boundsById.get(sorted[0]!.selectionId)!
+    const last = boundsById.get(sorted.at(-1)!.selectionId)!
+    const span = horizontal ? last.right - first.left : last.bottom - first.top
+    const totalSize = sorted.reduce((sum, layer) => {
+      const bounds = boundsById.get(layer.selectionId)!
+      return sum + (horizontal ? bounds.width : bounds.height)
+    }, 0)
+    const gap = (span - totalSize) / (sorted.length - 1)
+    let cursor = horizontal ? first.left : first.top
+    const translations = new Map<string, number>()
+    for (const layer of sorted) {
+      const bounds = boundsById.get(layer.selectionId)!
+      const current = horizontal ? bounds.left : bounds.top
+      translations.set(layer.selectionId, cursor - current)
+      cursor += (horizontal ? bounds.width : bounds.height) + gap
+    }
+    return new Map(unlocked.map((layer) => {
+      const delta = translations.get(layer.selectionId) ?? 0
+      return [layer.selectionId, {
+        x: layer.item.frame.x + (horizontal ? delta : 0),
+        y: layer.item.frame.y + (horizontal ? 0 : delta),
+      }]
+    }))
+  }
+  const bounds = [...boundsById.values()]
+  const left = Math.min(...bounds.map((item) => item.left))
+  const right = Math.max(...bounds.map((item) => item.right))
+  const top = Math.min(...bounds.map((item) => item.top))
+  const bottom = Math.max(...bounds.map((item) => item.bottom))
+  return new Map(unlocked.map((layer) => {
+    const visual = boundsById.get(layer.selectionId)!
+    let dx = 0
+    let dy = 0
+    if (intent.mode === 'left') dx = left - visual.left
+    else if (intent.mode === 'center') dx = (left + right) / 2 - visual.centerX
+    else if (intent.mode === 'right') dx = right - visual.right
+    else if (intent.mode === 'top') dy = top - visual.top
+    else if (intent.mode === 'middle') dy = (top + bottom) / 2 - visual.centerY
+    else dy = bottom - visual.bottom
+    return [layer.selectionId, {
+      x: layer.item.frame.x + dx,
+      y: layer.item.frame.y + dy,
+    }]
+  }))
+}
+
+/**
+ * Executes one Properties multi-selection gesture against the exact captured
+ * Slide selection. Validation happens before planning, and every property
+ * patch is committed by one Course document transaction.
+ */
+export function commitSlideMultiLayerIntentAtTargets(
+  session: SlideAuthoringSession,
+  input: {
+    readonly targets: readonly SlideAuthoringTarget[]
+    readonly intent: SlideMultiLayerPropertiesIntent
+  },
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(
+    session,
+    options.expectedRevision ?? input.targets[0]?.revision,
+  )
+  if (stale) return stale
+  try {
+    const exact = exactSlideMultiLayers(session, input.targets)
+    if (exact.kind === 'error') return exact.result
+    const ids = input.targets.map((target) => target.layerItemId)
+    if (input.intent.kind === 'duplicate') {
+      if (session.scope === 'scene') {
+        return duplicateSlideSceneLayers(session, ids, options)
+      }
+      if (session.scope === 'global') {
+        return duplicateSlideGlobalLayers(session, ids, options)
+      }
+      return reject(session, '当前表面多选复制尚未形成完整引用事务。')
+    }
+    if (input.intent.kind === 'delete') {
+      if (session.scope === 'scene') return deleteSlideSceneLayers(session, ids, options)
+      return slideResultFromLayerCommand(
+        session,
+        deleteEffectiveLayerItems(
+          session.history.present,
+          input.targets.map((target) => ({
+            authoringAddress: target.authoringAddress,
+            locationId: session.selection.locationId,
+            stateId: session.selection.stateId,
+          })),
+          {
+            expectedRevision: session.history.present.revision,
+            now: options.now,
+          },
+        ),
+        [],
+      )
+    }
+    const framePatches = input.intent.kind === 'align' || input.intent.kind === 'distribute'
+      ? slideMultiFramePatches(exact.layers, input.intent)
+      : null
+    const updates = exact.layers.flatMap((layer, index) => {
+      let patch: EffectiveLayerPropertiesPatchAtTarget | null = null
+      if (input.intent.kind === 'set-visible') {
+        if (!layer.item.locked) patch = { visible: input.intent.visible }
+      } else if (input.intent.kind === 'set-locked') {
+        if (!layer.item.locked || input.intent.locked === false) {
+          patch = { locked: input.intent.locked }
+        }
+      } else {
+        const frame = framePatches?.get(layer.selectionId)
+        if (frame) patch = { frame }
+      }
+      if (!patch) return []
+      const target = input.targets[index]!
+      return [{
+        target: {
+          authoringAddress: target.authoringAddress,
+          locationId: session.selection.locationId,
+          stateId: session.selection.stateId,
+        },
+        patch,
+      }]
+    })
+    return slideResultFromLayerCommand(
+      session,
+      patchEffectiveLayerPropertiesAtTargets(
+        session.history.present,
+        updates,
+        {
+          expectedRevision: session.history.present.revision,
+          now: options.now,
+        },
+      ),
+    )
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+/**
+ * Runs sequential Slide session commands and keeps a single document history
+ * frame against the original session, so one user submit cannot split undo.
+ */
+export function coalesceSlideAuthoringCommands(
+  session: SlideAuthoringSession,
+  run: (current: SlideAuthoringSession) => SlideCommandResult,
+): SlideCommandResult {
+  const result = run(session)
+  if (!result.ok) return result
+  const next = result.nextSession ?? session
+  if (next.history.present === session.history.present) {
+    return {
+      ok: true,
+      reason: result.reason,
+      historyEntry: false,
+      nextSession: next,
+      selection: next.selection,
+    }
+  }
+  return {
+    ok: true,
+    reason: result.reason,
+    historyEntry: true,
+    nextSession: {
+      ...next,
+      history: commitSlideAuthoringHistory(session.history, next.history.present),
+    },
+    selection: next.selection,
+  }
 }
 
 export { makeSlideAuthoringTarget }

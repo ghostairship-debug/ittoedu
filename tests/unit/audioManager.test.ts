@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AudioManager } from '@/player/AudioManager'
 import { CourseEventBus } from '@/player/CourseEventBus'
-import { createProject } from '@/renderer/project/createProject'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 
 class FakeAudioElement extends EventTarget {
   preload = ''
@@ -41,7 +41,11 @@ class FakeAudioElement extends EventTarget {
 }
 
 function testProject() {
-  const project = createProject({ id: 'audio-project', idFactory: () => 'fixed' })
+  const project = createBlankCourseProject({
+    id: 'audio-project',
+    includeDefaultController: false,
+    controls: 'none',
+  })
   Object.assign(project, {
     media: {
       audio: {

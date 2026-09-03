@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { projectDocumentSchema } from '@/shared/projectSchema'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { useEditorStore,
+  selectActiveCourseProjectDocument,
+} from '@/renderer/store/editorStore'
 
 const PACKAGE_ID = 'com.example.catalog-card'
 
@@ -48,7 +50,7 @@ describe('组件目录版本锁定', () => {
   it('拒绝同一 ID 与版本对应不同哈希的替换，且保持工程不变', () => {
     const original = catalogPackage('a'.repeat(64))
     useEditorStore.getState().importComponentPackage(original)
-    const projectBefore = structuredClone(useEditorStore.getState().project)
+    const projectBefore = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     const historyBefore = useEditorStore.getState().history.past.length
 
     expect(() => useEditorStore.getState().replaceComponentPackage(
@@ -57,17 +59,17 @@ describe('组件目录版本锁定', () => {
     )).toThrow('同版本哈希不一致')
 
     const state = useEditorStore.getState()
-    expect(state.project).toEqual(projectBefore)
+    expect(selectActiveCourseProjectDocument(state)!).toEqual(projectBefore)
     expect(state.componentPackages[PACKAGE_ID]).toBe(original)
     expect(state.history.past).toHaveLength(historyBefore)
   })
 
   it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', () => {
     useEditorStore.getState().importComponentPackage(catalogPackage('a'.repeat(64)))
-    const project = structuredClone(useEditorStore.getState().project)
-    expect(projectDocumentSchema.safeParse(project).success).toBe(true)
+    const project = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
 
     delete project.componentPackages[PACKAGE_ID]!.importedAt
-    expect(projectDocumentSchema.safeParse(project).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(false)
   })
 })

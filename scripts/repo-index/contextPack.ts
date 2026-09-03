@@ -312,7 +312,7 @@ export function buildContextPack(
     '',
     bullets([
       `status: ${freshness.status}`,
-      `safe-for-S2: ${freshness.safeForS2 ? 'yes' : 'no'}`,
+      `safe-for-implementation: ${freshness.safeForImplementation ? 'yes' : 'no'}`,
       ...domainLines,
       ...changed.map((line) => `strict input ${line}`),
       ...dirty.map((line) => `dirty ${line}`),

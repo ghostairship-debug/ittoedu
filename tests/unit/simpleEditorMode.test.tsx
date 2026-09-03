@@ -2,11 +2,20 @@ import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
-import { collectProjectHealth } from '@/shared/projectHealth'
+import { collectCourseProjectHealth } from '@/shared/courseProjectHealth'
 import { materializeScene } from '@/shared/presentation'
-import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
+import { selectActiveScene, useEditorStore,
+  selectActiveCourseProjectDocument,
+} from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { RightSidebar } from '@/renderer/ui/RightSidebar'
+
+function materialized(
+  scene: object,
+  stateId?: string | null,
+) {
+  return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
+}
 
 const TEST_COMPONENT_ID = 'com.example.mode-test'
 
@@ -61,7 +70,7 @@ describe('simple and professional editor modes', () => {
       onReplaceComponent: vi.fn(),
     }
     useEditorStore.getState().importComponentPackage(createTestComponentPackage())
-    const projectBeforeSwitch = useEditorStore.getState().project
+    const projectBeforeSwitch = selectActiveCourseProjectDocument(useEditorStore.getState())!
 
     render(<RightSidebar {...props} />)
 
@@ -117,7 +126,7 @@ describe('simple and professional editor modes', () => {
     expect(screen.getByTestId('components-tab')).toHaveTextContent(
       '模式测试组件',
     )
-    expect(useEditorStore.getState().project).toBe(projectBeforeSwitch)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBeforeSwitch)
     expect(localStorage.getItem('courseware-editor:mode')).toBe('professional')
 
     act(() => {
@@ -125,7 +134,7 @@ describe('simple and professional editor modes', () => {
       useEditorStore.getState().setEditorMode('simple')
     })
     expect(useEditorStore.getState().activeTab).toBe('properties')
-    expect(useEditorStore.getState().project).toBe(projectBeforeSwitch)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBeforeSwitch)
   })
 
   it('filters element contents without exposing professional-only component results', () => {
@@ -190,7 +199,10 @@ describe('simple and professional editor modes', () => {
       }],
     })
     expect(state.history.past).toHaveLength(historyBefore + 1)
-    expect(collectProjectHealth(state.project).some(
+    expect(collectCourseProjectHealth(selectActiveCourseProjectDocument(state)!, {
+      assetFiles: state.courseAssetSidecar?.files ?? {},
+      componentFiles: {},
+    }).some(
       (diagnostic) => diagnostic.code === 'interaction-enter-target-initially-visible',
     )).toBe(false)
 
@@ -346,11 +358,11 @@ describe('simple and professional editor modes', () => {
     let scene = selectActiveScene(useEditorStore.getState())
     expect(scene.interactions).toHaveLength(2)
     expect(
-      materializeScene(scene, stateA).nodes.find((node) => node.id === nodeId)
+      materialized(scene, stateA).nodes.find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('hidden')
     expect(
-      materializeScene(scene, stateB).nodes.find((node) => node.id === nodeId)
+      materialized(scene, stateB).nodes.find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('hidden')
 
@@ -364,11 +376,11 @@ describe('simple and professional editor modes', () => {
       stateIds: [stateB],
     }])
     expect(
-      materializeScene(scene, stateA).nodes.find((node) => node.id === nodeId)
+      materialized(scene, stateA).nodes.find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('inherit')
     expect(
-      materializeScene(scene, stateB).nodes.find((node) => node.id === nodeId)
+      materialized(scene, stateB).nodes.find((node) => node.id === nodeId)
         ?.playbackInitialVisibility,
     ).toBe('hidden')
   })

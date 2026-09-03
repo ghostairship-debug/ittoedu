@@ -1,5 +1,8 @@
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import type { EditorTransactionStep } from './editorTransaction'
+import {
+  createEditorTransactionStep,
+  type EditorTransactionStep,
+} from './editorTransaction'
 import {
   cloneHistoryResourceChanges,
   type HistoryResourceChanges,
@@ -104,6 +107,35 @@ export function commitEditorTransactionToAuthoringHistory(
     limit,
     step.resourceChanges,
   )
+}
+
+/**
+ * One document+resource commit. Empty resource deltas still produce a
+ * transaction frame so sidecar stacks are not used as a second history.
+ */
+export function commitAuthoringDocumentTransaction(
+  history: ResourceAwareAuthoringHistory,
+  next: CourseProjectDocument,
+  resourceChanges: HistoryResourceChanges = {},
+  limit = RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT,
+): {
+  readonly history: ResourceAwareAuthoringHistory
+  readonly resourceTransition: AuthoringHistoryResourceTransition
+} | null {
+  const step = createEditorTransactionStep(history.present, {
+    projectId: history.present.id,
+    baseRevision: history.present.revision,
+    nextDocument: next,
+    resourceChanges,
+  })
+  if (!step) return null
+  return {
+    history: commitEditorTransactionToAuthoringHistory(history, step, limit),
+    resourceTransition: Object.freeze({
+      resourceChanges: step.resourceChanges,
+      resourceDirection: 'forward' as const,
+    }),
+  }
 }
 
 export function authoringHistoryUndoResourceTransition(

@@ -19,12 +19,15 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
-import type { ProjectHealthSummary } from '../../shared/projectHealth'
+import type { CourseProjectHealthSummary } from '../../shared/courseProjectHealth'
 import { APP_NAME } from '../../shared/constants'
-import type { SingleHtmlExportMode } from '../export/course/buildCoursePackages'
+import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import {
   selectActiveCourseProjectDocument,
+  selectCanRedoActiveSurface,
+  selectCanUndoActiveSurface,
   selectHasUnsavedCourseChanges,
+  selectSlideSceneList,
   useEditorStore,
 } from '../store/editorStore'
 
@@ -37,7 +40,7 @@ interface TopToolbarProps {
   recentProjects: RecentProjectEntry[]
   onOpenRecent(path: string): void
   onSave(saveAs?: boolean): void
-  healthSummary: ProjectHealthSummary
+  healthSummary: CourseProjectHealthSummary
   onOpenHealth(): void
   onPreview(): void
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
@@ -91,9 +94,9 @@ export function TopToolbar({
   onPreview,
   onExport,
 }: TopToolbarProps) {
-  const project = useEditorStore((state) => state.project)
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
-  const history = useEditorStore((state) => state.history)
+  const canUndo = useEditorStore(selectCanUndoActiveSurface)
+  const canRedo = useEditorStore(selectCanRedoActiveSurface)
   const activeSceneId = useEditorStore((state) => state.activeSceneId)
   const editorMode = useEditorStore((state) => state.editorMode)
   const undo = useEditorStore((state) => state.undo)
@@ -101,17 +104,19 @@ export function TopToolbar({
   const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const renameProject = useEditorStore((state) => state.renameProject)
   const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
+  const slideScenes = useEditorStore(selectSlideSceneList)
+  const projectTitle = courseDocument?.title ?? ''
   const hasFlowSurface = Boolean(courseDocument?.surfaces.some((surface) => surface.type === 'flow'))
   const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState(project.title)
-  useEffect(() => setTitleDraft(project.title), [project.title])
+  const [titleDraft, setTitleDraft] = useState(projectTitle)
+  useEffect(() => setTitleDraft(projectTitle), [projectTitle])
   const commitTitle = () => {
     const normalized = titleDraft.trim()
     if (normalized) renameProject(normalized)
-    else setTitleDraft(project.title)
+    else setTitleDraft(projectTitle)
     setEditingTitle(false)
   }
-  const sceneIndex = project.scenes.findIndex(
+  const sceneIndex = slideScenes.findIndex(
     (scene) => scene.id === activeSceneId,
   )
 
@@ -229,7 +234,7 @@ export function TopToolbar({
         <ToolButton
           label="撤销"
           title="撤销（Ctrl+Z）"
-          disabled={busy || history.past.length === 0}
+          disabled={busy || !canUndo}
           onClick={undo}
         >
           <Undo2 size={18} />
@@ -237,7 +242,7 @@ export function TopToolbar({
         <ToolButton
           label="重做"
           title="重做（Ctrl+Y / Ctrl+Shift+Z）"
-          disabled={busy || history.future.length === 0}
+          disabled={busy || !canRedo}
           onClick={redo}
         >
           <Redo2 size={18} />
@@ -323,7 +328,7 @@ export function TopToolbar({
             onKeyDown={(event) => {
               if (event.key === 'Enter') event.currentTarget.blur()
               if (event.key === 'Escape') {
-                setTitleDraft(project.title)
+                setTitleDraft(projectTitle)
                 setEditingTitle(false)
               }
             }}
@@ -336,12 +341,12 @@ export function TopToolbar({
             aria-label="重命名课件"
             onClick={() => setEditingTitle(true)}
           >
-            <span>{project.title}{dirty ? ' *' : ''}</span>
+            <span>{projectTitle}{dirty ? ' *' : ''}</span>
             <Pencil size={11} aria-hidden="true" />
           </button>
         )}
         <span className="toolbar__scene-index">
-          场景 {sceneIndex + 1} / {project.scenes.length}
+          场景 {sceneIndex + 1} / {slideScenes.length}
         </span>
       </div>
 

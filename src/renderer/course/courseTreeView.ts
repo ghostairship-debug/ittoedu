@@ -4,7 +4,7 @@ import type {
   SlideSurfaceDocument,
   SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import { listFlowCourseTreePages } from './flowEditorView'
+import { listFlowCourseTreePages, type FlowCourseTreeSource } from './flowEditorView'
 
 export const SHARED_CONTENT_SECTION_ID = 'shared-content' as const
 export const GLOBAL_LAYER_ENTRY_ID = 'global-layer' as const
@@ -47,6 +47,8 @@ export interface CourseTreeNode {
   readonly isLocation: boolean
   readonly writesHistory: boolean
   readonly children: readonly CourseTreeNode[]
+  /** Stable Spatial camera frame identity; only set on spatial-camera nodes. */
+  readonly cameraFrameId?: string
 }
 
 export interface CourseTreeViewModel {
@@ -71,7 +73,7 @@ const FIXED_SHARED_CONTENT: CourseTreeSharedContent = Object.freeze({
   entries: Object.freeze([FIXED_GLOBAL_LAYER_ENTRY]) as readonly [CourseTreeGlobalLayerEntry],
 })
 
-type TreeProject = Pick<CourseProjectDocument, 'locations' | 'surfaces'>
+type TreeProject = FlowCourseTreeSource
 
 function surfacesById(project: TreeProject): Map<string, CourseProjectDocument['surfaces'][number]> {
   const map = new Map<string, CourseProjectDocument['surfaces'][number]>()
@@ -146,7 +148,7 @@ function flowPageChildren(
   project: TreeProject,
   surfaceId: string,
 ): CourseTreeNode[] {
-  const flowPage = listFlowCourseTreePages(project as CourseProjectDocument)
+  const flowPage = listFlowCourseTreePages(project)
     .find((page) => page.surfaceId === surfaceId)
   if (!flowPage) return []
   return flowPage.headings.map((heading) => ({
@@ -183,6 +185,7 @@ function spatialCameraNodes(
       surfaceType: 'spatial-2d' as const,
       label: frame.name,
       locationId: location.id,
+      cameraFrameId: frame.id,
       isLocation: true,
       writesHistory: true,
       children: [],
@@ -215,7 +218,7 @@ function buildSurfacePageNode(
 
   if (surface.type === 'flow') {
     const children = flowPageChildren(project, surfaceId)
-    const flowPages = listFlowCourseTreePages(project as CourseProjectDocument)
+    const flowPages = listFlowCourseTreePages(project)
     const flowPage = flowPages.find((page) => page.surfaceId === surfaceId)
     return {
       id: surfaceId,

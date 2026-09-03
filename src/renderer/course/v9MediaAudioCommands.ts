@@ -28,7 +28,7 @@ import { makeLayerItemAuthoringAddress } from '../authoring/courseAuthoringScope
 import {
   createImageNode,
   createVideoNode,
-} from '../project/createProject'
+} from '../project/nativeNodeFactories'
 import {
   MEDIA_BATCH_CANVAS_LIMIT,
   layoutMediaBatchFrames,
@@ -75,6 +75,7 @@ import {
   type SlideAuthoringSession,
 } from './slideAuthoringBackend'
 import { planAssetFileHistoryChange } from '../store/history'
+import { allocateCourseLayerOrder, sortScopedLayerList } from './globalLayerCommands'
 
 /**
  * V9 MediaTab / sound-library commands. Not wired to the real MediaTab;
@@ -822,9 +823,6 @@ function placeMediaItems(
   y: number | undefined,
   now?: string,
 ): CourseMediaCommandResult {
-  if (media.session.scope !== 'scene') {
-    return reject(media, SLIDE_REJECT_WRONG_OWNER)
-  }
   const sidecarFiles = mutableCourseAssetSidecar(media.sidecar)
   let importedAssetIds: string[] = []
   let reusedAssetIds: string[] = []
@@ -833,8 +831,11 @@ function placeMediaItems(
     const applied = applyCourseAssetImports(draft.assets, sidecarFiles, items)
     importedAssetIds = applied.importedAssetIds
     reusedAssetIds = applied.reusedAssetIds
-    const { surface, scene } = slideSceneContext(draft, media.session)
-    if (scene.layerItems.length + items.length > MAX_SCENE_NODES) {
+    const global = media.session.scope === 'global'
+    const existingCount = global
+      ? draft.globalLayerItems.length
+      : slideSceneContext(draft, media.session).scene.layerItems.length
+    if (!global && existingCount + items.length > MAX_SCENE_NODES) {
       throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
     }
     const single = items.length === 1
@@ -847,7 +848,7 @@ function placeMediaItems(
           single ? x : undefined,
           single ? y : undefined,
         ),
-        scene.layerItems.length + index,
+        existingCount + index,
         explicit,
       )
       return node
@@ -860,7 +861,19 @@ function placeMediaItems(
       : nodes
     for (const node of laidOut) {
       const item = sceneNodeToCourseLayerItem(node)
-      appendSceneLayer(draft, surface, scene, structuredClone(item), media.session.selection.stateId)
+      if (global) {
+        const preferred = Math.max(-1, ...draft.globalLayerItems.map((entry) => entry.item.order)) + 1
+        item.order = allocateCourseLayerOrder(draft, Math.max(0, preferred))
+        draft.globalLayerItems.push({
+          item: structuredClone(item),
+          plane: 'overlay',
+          visibility: { mode: 'all', locationIds: [] },
+        })
+        sortScopedLayerList(draft.globalLayerItems)
+      } else {
+        const { surface, scene } = slideSceneContext(draft, media.session)
+        appendSceneLayer(draft, surface, scene, structuredClone(item), media.session.selection.stateId)
+      }
       placedLayerItemIds.push(node.id)
     }
   }, now)
@@ -917,14 +930,16 @@ export function importAndPlaceCourseMedia(
         ...(plan.overflowToLibrary ? { libraryFallback: 'batch-size' as const } : {}),
       }
     }
-    const { scene } = slideSceneContext(media.session.history.present, media.session)
-    if (scene.layerItems.length + input.items.length > MAX_SCENE_NODES) {
-      const imported = importCourseMediaAssets(media, input.items, options)
-      return {
-        ...imported,
-        destination: 'library',
-        placedLayerItemIds: [],
-        libraryFallback: 'scene-capacity',
+    if (media.session.scope !== 'global') {
+      const { scene } = slideSceneContext(media.session.history.present, media.session)
+      if (scene.layerItems.length + input.items.length > MAX_SCENE_NODES) {
+        const imported = importCourseMediaAssets(media, input.items, options)
+        return {
+          ...imported,
+          destination: 'library',
+          placedLayerItemIds: [],
+          libraryFallback: 'scene-capacity',
+        }
       }
     }
     return placeMediaItems(
@@ -1175,13 +1190,18 @@ export function updateCourseMediaFitCrop(
 export function deleteCourseAsset(
   media: CourseMediaSession,
   assetId: string,
-  options: SlideCommandOptions = {},
+  options: SlideCommandOptions & {
+    componentPackages?: Readonly<Record<string, import('../../shared/componentTypes').ComponentPackageData>>
+  } = {},
 ): CourseMediaCommandResult {
   const stale = rejectIfStale(media, options.expectedRevision)
   if (stale) return stale
   const project = media.session.history.present
   if (!project.assets[assetId]) return reject(media, `找不到素材：${assetId}`)
-  const references = listCourseAssetReferences(project, assetId)
+  const references = listCourseAssetReferences(project, assetId, {
+    componentPackages: options.componentPackages,
+    includeDisabledRuntimes: true,
+  })
   if (references.length > 0) {
     const locations = references
       .slice(0, 3)

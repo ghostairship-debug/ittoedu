@@ -187,10 +187,10 @@ function createPublishedSurfaceHostInternal(
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
-      ...(options.authoring ? { authoring: options.authoring } : {}),
       staticCapture: options.staticCapture,
       includeGlobalLayerItemsForStaticCapture:
         options.includeGlobalLayerItemsForStaticCapture,
+      ...(options.authoring ? { authoring: options.authoring } : {}),
     })
   }
   if (kind === 'flow') {
@@ -229,6 +229,9 @@ function createPublishedSurfaceHostInternal(
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      staticCapture: options.staticCapture,
+      includeGlobalLayerItemsForStaticCapture:
+        options.includeGlobalLayerItemsForStaticCapture,
     },
   )
 }
@@ -1225,9 +1228,10 @@ function createPublishedAuthoringCourseSession(
   })
   const authoringSurface: PublishedAuthoringPatchSurface = {
     getAuthoringContext: () => host.getAuthoringContext(),
-    applyAuthoringPatch: async (context, patch) => {
+    getAuthoringGeneration: () => host.getAuthoringGeneration(),
+    applyAuthoringPatch: async (context, patch, identity) => {
       if (patch.kind !== 'runtime-content' || patch.target.scope !== 'global') {
-        return host.applyAuthoringPatch(context, patch)
+        return host.applyAuthoringPatch(context, patch, identity)
       }
       if (await globalRuntimeOwner.applyAuthoringContentValue(
         patch.target.nodeId,
@@ -1655,6 +1659,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
       courseState?: CourseStateStore
       runtimeActions?: Readonly<RuntimeHostActions>
       componentActions?: Readonly<ComponentHostActions>
+      staticCapture?: boolean
+      includeGlobalLayerItemsForStaticCapture?: boolean
     },
   ) {
     this.id = surfaceId
@@ -1677,6 +1683,9 @@ class SpatialPublishedAdapter implements SurfaceHost {
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
+      staticCapture: options.staticCapture,
+      includeGlobalLayerItemsForStaticCapture:
+        options.includeGlobalLayerItemsForStaticCapture,
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({
           id: location.id,
@@ -1735,14 +1744,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
     await this.#host.setLocationId(this.#startLocationId)
   }
 
-  async capture(_request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
-    return {
-      format: 'json',
-      content: JSON.stringify({
-        surfaceId: this.id,
-        locationId: this.#host.locationId,
-      }),
-    }
+  async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    return this.#host.capture(request)
   }
 
   async setLocationId(locationId: string): Promise<void> {

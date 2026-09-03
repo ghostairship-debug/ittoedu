@@ -2,14 +2,23 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/projectTypes'
-import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  NativeLayerItem,
+  RuntimeLayerItem,
+  SlideSurfaceDocument,
+} from '@/shared/courseProjectTypes'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createExternalComponentNode,
   createImageNode,
-  createProject,
-} from '@/renderer/project/createProject'
+} from '@/renderer/project/nativeNodeFactories'
+import { assetBytesSha256 } from '@/renderer/project/assetManager'
 import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { prepareHashedMediaBatch } from '@/renderer/project/v9AssetAdapter'
+import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
@@ -37,6 +46,57 @@ function meta(
     path: `assets/${filename}`,
     byteLength: 3,
     ...(kind === 'image' ? { width: 320, height: 180 } : {}),
+  }
+}
+
+function firstSlideScene(project: CourseProjectDocument) {
+  const surface = project.surfaces.find((candidate): candidate is SlideSurfaceDocument => (
+    candidate.type === 'slide'
+  ))
+  const scene = surface?.scenes[0]
+  if (!scene) throw new Error('expected Slide scene')
+  return scene
+}
+
+function appendSceneLayer(
+  project: CourseProjectDocument,
+  node: Parameters<typeof sceneNodeToCourseLayerItem>[0],
+) {
+  const scene = firstSlideScene(project)
+  scene.layerItems.push(sceneNodeToCourseLayerItem(
+    node,
+    allocateCourseLayerOrder(project, scene.layerItems.length + 1),
+  ))
+}
+
+function runtimeLayer(
+  layerItemId: string,
+  order: number,
+  assets: Record<string, { assetId: string }>,
+  fallbackId: string,
+): RuntimeLayerItem {
+  return {
+    layerItemId,
+    label: 'Runtime',
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    kind: 'runtime',
+    runtime: {
+      protocol: 'canvas-runtime',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'dom',
+      source: "CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})",
+      content: { values: {} },
+      assets,
+      staticFallback: { assetId: fallbackId, coverage: 'scene' },
+    },
   }
 }
 
@@ -73,23 +133,71 @@ function introHeroAssetId(project = activeCourseProject()): string {
   return item.content.data.assetId
 }
 
+function nativeLayerItems(project: CourseProjectDocument): NativeLayerItem[] {
+  return [
+    ...project.globalLayerItems.map((entry) => entry.item),
+    ...project.surfaces.flatMap((surface) => (
+      surface.type === 'slide'
+        ? [
+            ...surface.surfaceLayerItems.map((entry) => entry.item),
+            ...surface.scenes.flatMap((scene) => scene.layerItems),
+          ]
+        : []
+    )),
+  ].filter((item): item is NativeLayerItem => item.kind === 'native')
+}
+
+function nativeVideoLayer(project = activeCourseProject()): NativeLayerItem | undefined {
+  return nativeLayerItems(project).find((item) => item.content.nativeType === 'video')
+}
+
 beforeEach(() => useEditorStore.getState().createNewProject())
+
+describe('hashed media batch preparation', () => {
+  it('reuses existing content by captured hash and does not decode duplicates', async () => {
+    const bytes = new Uint8Array([9, 8, 7])
+    const hash = await assetBytesSha256(bytes)
+    const existing = meta('hero', 'image', 'hero.png')
+    let decoded = 0
+    const prepared = await prepareHashedMediaBatch(
+      [{ name: 'dup.png', bytes, sha256: hash }],
+      'image',
+      { hero: existing },
+      { hero: bytes },
+      async () => {
+        decoded += 1
+        throw new Error('duplicate should not decode')
+      },
+      () => 'decode failed',
+    )
+    expect(decoded).toBe(0)
+    expect(prepared.duplicateCount).toBe(1)
+    expect(prepared.additions).toEqual([])
+    expect(prepared.placements).toEqual([{ meta: existing, bytes }])
+    expect(prepared.decodeFailures).toEqual([])
+  })
+})
 
 describe('single asset history transactions', () => {
   it('undoes and redoes video import, metadata, bytes, and node together', () => {
     const video = meta('video', 'video', 'video.mp4')
     useEditorStore.getState().addVideoNode(video, new Uint8Array([1, 2, 3]))
-    expect(useEditorStore.getState().project.scenes[0]!.nodes[0]).toMatchObject({
-      type: 'video', assetId: 'video',
+    expect(nativeVideoLayer()?.content).toMatchObject({
+      nativeType: 'video', data: { assetId: 'video' },
     })
+    expect(activeCourseProject().assets.video).toEqual(video)
+    expect([...selectMediaAssetFiles(useEditorStore.getState()).video!]).toEqual([1, 2, 3])
 
     useEditorStore.getState().undo()
-    expect(useEditorStore.getState().project.scenes[0]!.nodes).toHaveLength(0)
-    expect(useEditorStore.getState().project.assets.video).toBeUndefined()
-    expect(useEditorStore.getState().assetFiles.video).toBeUndefined()
+    expect(nativeVideoLayer()).toBeUndefined()
+    expect(activeCourseProject().assets.video).toBeUndefined()
+    expect(selectMediaAssetFiles(useEditorStore.getState()).video).toBeUndefined()
     useEditorStore.getState().redo()
-    expect(useEditorStore.getState().project.assets.video).toEqual(video)
-    expect([...useEditorStore.getState().assetFiles.video!]).toEqual([1, 2, 3])
+    expect(nativeVideoLayer()?.content).toMatchObject({
+      nativeType: 'video', data: { assetId: 'video' },
+    })
+    expect(activeCourseProject().assets.video).toEqual(video)
+    expect([...selectMediaAssetFiles(useEditorStore.getState()).video!]).toEqual([1, 2, 3])
   })
 
   it('undoes and redoes target-based image replacement using a conflict-free asset ID', () => {
@@ -143,58 +251,66 @@ describe('single asset history transactions', () => {
       audio,
       new Uint8Array([7, 8, 9]),
     )
-    expect(useEditorStore.getState().project.media.audio.sounds[soundId]).toBeDefined()
+    expect(activeCourseProject().media.audio.sounds[soundId]).toBeDefined()
+    expect(activeCourseProject().assets.audio).toEqual(audio)
+    expect([...selectMediaAssetFiles(useEditorStore.getState()).audio!]).toEqual([7, 8, 9])
     useEditorStore.getState().undo()
-    expect(useEditorStore.getState().project.media.audio.sounds[soundId]).toBeUndefined()
-    expect(useEditorStore.getState().project.assets.audio).toBeUndefined()
-    expect(useEditorStore.getState().assetFiles.audio).toBeUndefined()
+    expect(activeCourseProject().media.audio.sounds[soundId]).toBeUndefined()
+    expect(activeCourseProject().assets.audio).toBeUndefined()
+    expect(selectMediaAssetFiles(useEditorStore.getState()).audio).toBeUndefined()
     useEditorStore.getState().redo()
-    expect(useEditorStore.getState().project.media.audio.sounds[soundId]).toBeDefined()
-    expect([...useEditorStore.getState().assetFiles.audio!]).toEqual([7, 8, 9])
+    expect(activeCourseProject().media.audio.sounds[soundId]).toBeDefined()
+    expect(activeCourseProject().assets.audio).toEqual(audio)
+    expect([...selectMediaAssetFiles(useEditorStore.getState()).audio!]).toEqual([7, 8, 9])
   })
 })
 
 describe('asset deletion safety', () => {
-  it('blocks named-state background and node override references with locations', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    const state = project.scenes[0]!.presentation!.states[0]!
+  it('blocks named-state background and node image references with locations', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const scene = firstSlideScene(project)
+    const state = scene.presentation!.states[0]!
     const background = meta('state-bg')
     const override = meta('state-node')
     project.assets[background.id] = background
     project.assets[override.id] = override
     state.backgroundAssetId = background.id
-    const node = createImageNode('base')
-    project.assets.base = meta('base')
-    project.scenes[0]!.nodes.push(node)
-    state.nodeOverrides[node.id] = { assetId: override.id }
-    useEditorStore.getState().loadProject(project, null, {
+    const node = createImageNode('state-node')
+    appendSceneLayer(project, node)
+
+    useEditorStore.getState().loadCourseProject(project, null, {
       'state-bg': new Uint8Array([1]),
       'state-node': new Uint8Array([2]),
-      base: new Uint8Array([3]),
     })
 
     expect(useEditorStore.getState().deleteAsset('state-bg')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain(`状态 ${state.id}`)
+    expect(useEditorStore.getState().errorMessage).toContain('backgroundAssetId')
     expect(useEditorStore.getState().deleteAsset('state-node')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain(`节点 ${node.id}`)
+    expect(useEditorStore.getState().errorMessage).toContain('assetId')
   })
 
-  it('blocks runtime fallback/source and nested component prop references', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+  it('blocks runtime fallback/source and declared component fallback references', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     ;['fallback', 'source', 'component'].forEach((id) => {
       project.assets[id] = meta(id)
     })
-    project.scenes[0]!.runtime = {
-      runtimeApiVersion: 2, enabled: true, renderMode: 'dom', assets: {},
-      content: { values: {} },
-      staticFallback: { assetId: 'fallback', coverage: 'runtime-layer', layer: 'overlay' },
-      source: `ctx.projectAssetUrl('source')`,
-    }
+    const scene = firstSlideScene(project)
+    scene.layerItems.push(runtimeLayer(
+      'runtime-asset-refs',
+      allocateCourseLayerOrder(project, 1),
+      { source: { assetId: 'source' } },
+      'fallback',
+    ))
     const componentNode = createExternalComponentNode({
       component: { packageId: 'com.test.asset', version: '4.0.0' },
       props: { nested: { image: 'component' } },
     })
-    project.scenes[0]!.nodes.push(componentNode)
+    appendSceneLayer(project, componentNode)
+    const componentItem = scene.layerItems.find((item) => item.kind === 'component')
+    if (!componentItem || componentItem.kind !== 'component') {
+      throw new Error('expected component layer')
+    }
+    componentItem.staticFallbackAssetId = 'component'
     project.componentPackages['com.test.asset'] = {
       packageId: 'com.test.asset', version: '4.0.0', name: 'Asset component',
       manifestPath: 'components/manifest.json', runtimePath: 'components/runtime.js',
@@ -211,7 +327,7 @@ describe('asset deletion safety', () => {
       },
       runtimeSource: '', files: {},
     }
-    useEditorStore.getState().loadProject(project, null, {
+    useEditorStore.getState().loadCourseProject(project, null, {
       fallback: new Uint8Array([1]), source: new Uint8Array([2]), component: new Uint8Array([3]),
     }, { 'com.test.asset': packageData })
 
@@ -220,15 +336,21 @@ describe('asset deletion safety', () => {
     expect(useEditorStore.getState().deleteAsset('source')).toBe(false)
     expect(useEditorStore.getState().errorMessage).toContain('source')
     expect(useEditorStore.getState().deleteAsset('component')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain(`组件 com.test.asset`)
+    expect(useEditorStore.getState().errorMessage).toContain('staticFallbackAssetId')
   })
 
-  it('conservatively blocks deletion when component executable context is absent', () => {
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
+  it('blocks deletion when a component declares a fallback without executable files', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     project.assets.possible = meta('possible')
-    project.scenes[0]!.nodes.push(createExternalComponentNode({
+    const componentNode = createExternalComponentNode({
       component: { packageId: 'com.test.missing', version: '4.0.0' },
-    }))
+    })
+    appendSceneLayer(project, componentNode)
+    const componentItem = firstSlideScene(project).layerItems.find((item) => item.kind === 'component')
+    if (!componentItem || componentItem.kind !== 'component') {
+      throw new Error('expected component layer')
+    }
+    componentItem.staticFallbackAssetId = 'possible'
     project.componentPackages['com.test.missing'] = {
       packageId: 'com.test.missing',
       version: '4.0.0',
@@ -237,11 +359,11 @@ describe('asset deletion safety', () => {
       runtimePath: 'components/runtime.js',
       contentSha256: '0'.repeat(64),
     }
-    useEditorStore.getState().loadProject(project, null, {
+    useEditorStore.getState().loadCourseProject(project, null, {
       possible: new Uint8Array([1]),
     })
 
     expect(useEditorStore.getState().deleteAsset('possible')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain('组件 com.test.missing')
+    expect(useEditorStore.getState().errorMessage).toContain('staticFallbackAssetId')
   })
 })

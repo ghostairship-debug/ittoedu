@@ -13,7 +13,7 @@ import {
   type NativeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   CONTROLLER_MOVE_REASON,
   CROSS_OWNER_REORDER_REASON,

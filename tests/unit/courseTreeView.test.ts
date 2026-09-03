@@ -6,7 +6,7 @@ import {
   type SlideSceneDocument,
   type SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { createBlankFlowSurface, syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import {
   buildCourseTreeView,
   collectCourseTreeNodeIds,
@@ -185,6 +185,17 @@ describe('buildCourseTreeView', () => {
     expect(flowPage?.children.map((child) => [child.id, child.kind, child.label])).toEqual([
       ['block-h1', 'flow-heading', '第一章'],
     ])
+    expect(flowPage?.children.every((child) => (
+      child.locationId === child.id
+      && child.isLocation
+      && child.surfaceId === surfaceId
+      && !/^\d+$/.test(child.id)
+    ))).toBe(true)
+    expect(project.locations.some((location) => (
+      location.kind === 'flow-block'
+      && location.id === 'block-h1'
+      && location.blockId === 'block-h1'
+    ))).toBe(true)
     expect(flowPage?.children.some((child) => child.label.includes('正文'))).toBe(false)
   })
 
@@ -233,6 +244,52 @@ describe('buildCourseTreeView', () => {
     expect(view.pages.filter((page) => page.surfaceType === 'slide').map((page) => page.id))
       .toEqual(slideSurfaceIds)
     expect(view.pages.filter((page) => page.kind === 'slide-page')).toHaveLength(2)
+  })
+
+  it('navigates Mixed Slide+Flow pages by stable surface and location identity', () => {
+    const slide = createBlankCourseProject({ now: NOW, idFactory: fixtureIdFactory('mixed-nav') })
+    const slideSurfaceId = slideSurface(slide).id
+    const slideSceneIds = slideSurface(slide).scenes.map((scene) => scene.id)
+    const flow = createBlankFlowSurface({
+      id: 'surface-flow-mixed',
+      title: '流式讲义',
+      headingId: 'flow-heading-mixed',
+    })
+    const project = courseProjectDocumentSchema.parse(commitSlideProjectMutation(slide, (draft) => {
+      draft.surfaces.push(flow.surface)
+      draft.locations.push(flow.location)
+      draft.mixedPrintPlan = {
+        pageSize: 'A4',
+        orientation: 'auto',
+        entries: [
+          { id: 'print-slide', kind: 'slide-scenes', surfaceId: slideSurfaceId, sceneIds: slideSceneIds },
+          { id: 'print-flow', kind: 'flow-document', surfaceId: flow.surface.id },
+        ],
+      }
+    }))
+    const view = buildCourseTreeView(project)
+    const flowPage = view.pages.find((page) => page.kind === 'flow-page')
+    const heading = flowPage?.children[0]
+    const headingLocation = project.locations.find((location) => location.id === heading?.id)
+
+    expect(view.pages.map((page) => [page.kind, page.id])).toEqual([
+      ['slide-page', slideSurfaceId],
+      ['flow-page', flow.surface.id],
+    ])
+    expect(heading).toMatchObject({
+      id: 'flow-heading-mixed',
+      kind: 'flow-heading',
+      locationId: 'flow-heading-mixed',
+      surfaceId: flow.surface.id,
+      isLocation: true,
+    })
+    expect(headingLocation).toMatchObject({
+      kind: 'flow-block',
+      blockId: 'flow-heading-mixed',
+      surfaceId: flow.surface.id,
+    })
+    expect(heading?.id).not.toBe('0')
+    expect(flowPage?.id).toBe(flow.surface.id)
   })
 
   it('keeps stable unique ids across 20+ locations in one mixed fixture', () => {

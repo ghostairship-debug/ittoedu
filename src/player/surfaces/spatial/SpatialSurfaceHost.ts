@@ -58,7 +58,10 @@ import {
   type PublishedComponentMountHandle,
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
-import { paintPublishedFormula } from '../publishedFormula'
+import {
+  paintPublishedNativeRenderInput,
+  readonlyNativeRenderInputFromPublishedItem,
+} from '../slide/publishedNativeRendering'
 import {
   PublishedDomInteractionSurfacePort,
   PublishedInteractionVisibilityState,
@@ -75,6 +78,11 @@ import {
   PublishedCarrierSideEffectGate,
   type PublishedCarrierSideEffects,
 } from '../publishedCourseState'
+import {
+  capturePublishedSurfacePng,
+  type PublishedSurfaceCaptureLayer,
+} from '../publishedCapture'
+import type { SurfaceCapture, SurfaceCaptureRequest } from '../SurfaceHost'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -128,6 +136,10 @@ export interface SpatialSurfaceHostOptions {
   /** Published-session generation hook fired after an active interaction record set is ready. */
   onInteractionReady?: () => void
   reportActionError?: (action: TeacherControllerAction, error: Error) => void
+  /** Deterministic export host: no authored interaction side effects. */
+  staticCapture?: boolean
+  /** Pure-Slide compatibility policy; Spatial print normally omits global HUD. */
+  includeGlobalLayerItemsForStaticCapture?: boolean
 }
 
 type TeacherControllerNativeItem = PublishedNativeLayerItem & {
@@ -162,6 +174,18 @@ function nativeLabel(item: PublishedLayerItem): string {
   return item.kind
 }
 
+function publishedDynamicFallbackAssetId(item: PublishedLayerItem): string | undefined {
+  if (item.kind === 'component') return item.staticFallbackAssetId
+  if (item.kind === 'runtime') return item.runtime.staticFallback?.assetId
+  return undefined
+}
+
+function omittedFromSpatialStaticCapture(item: PublishedLayerItem): boolean {
+  return item.kind === 'native'
+    && item.content.nativeType === 'teacher-controller'
+    && !item.content.data.includeInStaticExports
+}
+
 function pathDashArray(dash: SpatialPathDash | undefined): string | undefined {
   if (dash === 'dashed') return '8 6'
   if (dash === 'dotted') return '2 5'
@@ -186,43 +210,12 @@ function createWorldItem(
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
     deferComponentMount?: (mount: () => void) => void
+    staticCapture?: boolean
   },
 ): SVGGElement {
   const group = dom.createElementNS(SVG_NS, 'g')
   const { frame } = item
-  if (item.kind === 'native' && item.content.nativeType === 'image') {
-    const url = resolveAsset(item.content.data.assetId)
-    if (url) {
-      const image = dom.createElementNS(SVG_NS, 'image')
-      image.setAttribute('href', url)
-      image.setAttribute('x', String(frame.x))
-      image.setAttribute('y', String(frame.y))
-      image.setAttribute('width', String(frame.width))
-      image.setAttribute('height', String(frame.height))
-      image.setAttribute('preserveAspectRatio', 'xMidYMid meet')
-      group.appendChild(image)
-    }
-  } else if (item.kind === 'native' && item.content.nativeType === 'video') {
-    // World video is an HTML layer beside the SVG, not a transformed foreignObject.
-  } else if (item.kind === 'native' && item.content.nativeType === 'text') {
-    const text = dom.createElementNS(SVG_NS, 'text')
-    text.textContent = item.content.data.text
-    text.setAttribute('x', String(frame.x + Math.max(0, item.content.data.style.padding)))
-    text.setAttribute('y', String(frame.y + Math.max(item.content.data.style.fontSize, 16)))
-    text.setAttribute('fill', safeColor(item.content.data.style.color, '#172033'))
-    text.setAttribute('font-size', String(item.content.data.style.fontSize))
-    text.setAttribute('font-family', item.content.data.style.fontFamily)
-    group.appendChild(text)
-  } else if (item.kind === 'native' && item.content.nativeType === 'shape') {
-    const rect = dom.createElementNS(SVG_NS, 'rect')
-    rect.setAttribute('x', String(frame.x))
-    rect.setAttribute('y', String(frame.y))
-    rect.setAttribute('width', String(frame.width))
-    rect.setAttribute('height', String(frame.height))
-    rect.setAttribute('fill', safeColor(item.content.data.style.fillColor, '#e2e8f0'))
-    rect.setAttribute('stroke', safeColor(item.content.data.style.borderColor, '#64748b'))
-    group.appendChild(rect)
-  } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
+  if (item.kind === 'native') {
     const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
     foreign.setAttribute('x', String(frame.x))
     foreign.setAttribute('y', String(frame.y))
@@ -233,14 +226,13 @@ function createWorldItem(
     holder.style.width = '100%'
     holder.style.height = '100%'
     holder.style.overflow = 'hidden'
-    paintPublishedFormula(holder, {
-      formulaId: item.content.data.formulaId,
-      accessibleText: item.content.data.accessibleText,
-      ast: item.content.data.ast,
-      style: item.content.data.style,
-      width: Math.max(1, frame.width),
-      height: Math.max(1, frame.height),
-    })
+    holder.style.position = 'relative'
+    paintPublishedNativeRenderInput(
+      holder,
+      readonlyNativeRenderInputFromPublishedItem(item),
+      { resolveAsset },
+      { staticCapture: options?.staticCapture === true },
+    )
     foreign.appendChild(holder)
     group.appendChild(foreign)
   } else if (item.kind === 'component') {
@@ -277,6 +269,7 @@ function createWorldItem(
         components: options?.components,
         resolveAsset,
         interactive: options?.interactive ?? true,
+        ...(options?.staticCapture ? { mode: 'capture' as const } : {}),
         ...(options?.courseState ? { courseState: options.courseState } : {}),
         ...(options?.componentActions ? { actions: options.componentActions } : {}),
       })
@@ -288,6 +281,20 @@ function createWorldItem(
     if (item.kind === 'runtime') {
       group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'runtime')
     }
+    const fallbackId = options?.staticCapture
+      ? publishedDynamicFallbackAssetId(item)
+      : undefined
+    const fallbackUrl = fallbackId ? resolveAsset(fallbackId) : undefined
+    if (fallbackUrl) {
+      const image = dom.createElementNS(SVG_NS, 'image')
+      image.setAttribute('href', fallbackUrl)
+      image.setAttribute('x', String(frame.x))
+      image.setAttribute('y', String(frame.y))
+      image.setAttribute('width', String(frame.width))
+      image.setAttribute('height', String(frame.height))
+      image.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+      group.appendChild(image)
+    } else {
     const rect = dom.createElementNS(SVG_NS, 'rect')
     rect.setAttribute('x', String(frame.x))
     rect.setAttribute('y', String(frame.y))
@@ -304,6 +311,7 @@ function createWorldItem(
     text.setAttribute('dominant-baseline', 'middle')
     text.setAttribute('fill', '#172033')
     group.appendChild(text)
+    }
   }
   group.setAttribute('opacity', String(item.opacity))
   group.style.pointerEvents = item.hitPolicy === 'pass-through' ? 'none' : 'auto'
@@ -363,6 +371,72 @@ function createWorldVideoHtml(
   return wrapper
 }
 
+function paintSpatialStaticDynamicFallback(
+  root: HTMLElement,
+  item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' }>,
+  resolveAsset: (assetId: string) => string | undefined,
+): void {
+  const fallbackId = publishedDynamicFallbackAssetId(item)
+  const fallbackUrl = fallbackId ? resolveAsset(fallbackId) : undefined
+  if (fallbackUrl) {
+    const image = root.ownerDocument.createElement('img')
+    image.src = fallbackUrl
+    image.alt = ''
+    Object.assign(image.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+      objectFit: 'contain',
+    })
+    root.appendChild(image)
+    return
+  }
+  Object.assign(root.style, {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '8px',
+    color: '#1d4ed8',
+    background: '#eff6ff',
+    border: '1px dashed #2563eb',
+    font: '12px/1.4 "Microsoft YaHei", sans-serif',
+    textAlign: 'center',
+  })
+  root.textContent = item.kind === 'component' ? '组件静态后备缺失' : '运行时静态后备缺失'
+}
+
+function createWorldStaticHtmlItem(
+  dom: Document,
+  item: PublishedLayerItem,
+  resolveAsset: (assetId: string) => string | undefined,
+): HTMLElement {
+  const wrapper = dom.createElement('div')
+  wrapper.className = 'spatial-world-html-item spatial-static-capture-item'
+  wrapper.dataset.spatialLayerRecord = 'true'
+  wrapper.dataset.layerItemId = item.layerItemId
+  wrapper.dataset.layerKind = item.kind
+  wrapper.dataset.layerSource = 'world'
+  wrapper.dataset.coordinateSpace = 'world'
+  Object.assign(wrapper.style, {
+    position: 'absolute',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    transformOrigin: 'center center',
+  })
+  if (item.kind === 'native') {
+    paintPublishedNativeRenderInput(
+      wrapper,
+      readonlyNativeRenderInputFromPublishedItem(item),
+      { resolveAsset },
+      { staticCapture: true },
+    )
+  } else {
+    paintSpatialStaticDynamicFallback(wrapper, item, resolveAsset)
+  }
+  return wrapper
+}
+
 function isHtmlWorldWrapper(wrapper: HTMLElement | SVGGElement): wrapper is HTMLElement {
   return !(wrapper instanceof SVGElement)
 }
@@ -402,6 +476,7 @@ function createViewportHud(
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
     deferComponentMount?: (mount: () => void) => void
+    staticCapture?: boolean
   },
 ): HTMLElement {
   const root = dom.createElement('div')
@@ -414,6 +489,23 @@ function createViewportHud(
     position: 'relative',
     pointerEvents: item.hitPolicy === 'pass-through' ? 'none' : 'auto',
   })
+  if (item.kind === 'native') {
+    paintPublishedNativeRenderInput(
+      root,
+      readonlyNativeRenderInputFromPublishedItem(item),
+      { resolveAsset: options?.resolveAsset ?? (() => undefined) },
+      { staticCapture: options?.staticCapture === true },
+    )
+    return root
+  }
+  if (item.kind === 'component' && options?.staticCapture) {
+    paintSpatialStaticDynamicFallback(
+      root,
+      item,
+      options.resolveAsset ?? (() => undefined),
+    )
+    return root
+  }
   if (item.kind === 'component') {
     const mountInstance = () => {
       const handle = mountPublishedComponent(root, {
@@ -428,6 +520,7 @@ function createViewportHud(
         components: options?.components,
         resolveAsset: options?.resolveAsset,
         interactive: options?.interactive ?? true,
+        ...(options?.staticCapture ? { mode: 'capture' as const } : {}),
         ...(options?.courseState ? { courseState: options.courseState } : {}),
         ...(options?.componentActions ? { actions: options.componentActions } : {}),
       })
@@ -438,30 +531,21 @@ function createViewportHud(
     root.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
     return root
   }
-  if (item.kind === 'native' && item.content.nativeType === 'formula') {
-    Object.assign(root.style, {
-      background: 'transparent',
-      border: '0',
-      padding: '0',
-      overflow: 'hidden',
-    })
-    paintPublishedFormula(root, {
-      formulaId: item.content.data.formulaId,
-      accessibleText: item.content.data.accessibleText,
-      ast: item.content.data.ast,
-      style: item.content.data.style,
-      width: Math.max(1, item.frame.width),
-      height: Math.max(1, item.frame.height),
-    })
-    return root
-  }
   Object.assign(root.style, {
     color: '#172033',
     background: '#ffffff',
     border: '1px solid #cbd5e1',
     padding: '8px',
   })
-  root.textContent = nativeLabel(item)
+  if (item.kind === 'runtime' && options?.staticCapture) {
+    paintSpatialStaticDynamicFallback(
+      root,
+      item,
+      options.resolveAsset ?? (() => undefined),
+    )
+  } else {
+    root.textContent = nativeLabel(item)
+  }
   return root
 }
 
@@ -653,6 +737,11 @@ export class SpatialSurfaceHost {
       touchAction: 'none',
       overscrollBehavior: 'contain',
     })
+    if (this.#options.staticCapture) {
+      root.inert = true
+      root.style.pointerEvents = 'none'
+      root.dataset.hostMode = 'capture'
+    }
     const svg = dom.createElementNS(SVG_NS, 'svg')
     svg.setAttribute('width', String(camera.viewportWidth))
     svg.setAttribute('height', String(camera.viewportHeight))
@@ -865,6 +954,148 @@ export class SpatialSurfaceHost {
     this.#reconcileWorldVisibility()
   }
 
+  async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    const root = this.#root
+    const svg = this.#svg
+    if (!root) throw new Error('Spatial Published 宿主尚未挂载')
+    if (!svg) throw new Error('Spatial Published 世界画布尚未挂载')
+    if (request.layerItemId) {
+      throw new Error('Spatial Published 当前只支持整页 Surface 捕获')
+    }
+    const originalSession = this.#session
+    const currentCamera = { ...this.#requireCamera() }
+    const width = Math.max(1, Math.round(request.width ?? currentCamera.viewportWidth))
+    const height = Math.max(1, Math.round(request.height ?? currentCamera.viewportHeight))
+    const resized = width !== currentCamera.viewportWidth || height !== currentCamera.viewportHeight
+    if (resized) {
+      this.#session = {
+        ...this.#session,
+        viewport: { width, height },
+        camera: {
+          ...currentCamera,
+          viewportWidth: width,
+          viewportHeight: height,
+        },
+      }
+      this.#updateWorldTransform()
+      this.#reconcileWorldVisibility()
+    }
+    const captureCamera = this.#requireCamera()
+    const dom = root.ownerDocument
+    const staging = dom.createElement('div')
+    staging.dataset.spatialCaptureStaging = 'true'
+    Object.assign(staging.style, {
+      position: 'fixed',
+      left: '-100000px',
+      top: '0',
+      width: `${width}px`,
+      height: `${height}px`,
+      visibility: 'visible',
+      pointerEvents: 'none',
+      overflow: 'visible',
+    })
+    dom.body.appendChild(staging)
+    const decorations = dom.createElement('div')
+    Object.assign(decorations.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: `${width}px`,
+      height: `${height}px`,
+      overflow: 'hidden',
+    })
+    const decorationSvg = svg.cloneNode(true) as SVGSVGElement
+    decorationSvg.setAttribute('width', String(width))
+    decorationSvg.setAttribute('height', String(height))
+    decorationSvg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+    decorations.appendChild(decorationSvg)
+    staging.appendChild(decorations)
+    const restoreRecords: Array<{
+      wrapper: HTMLElement
+      parent: Node
+      nextSibling: ChildNode | null
+      style: string
+    }> = []
+    const layers: PublishedSurfaceCaptureLayer[] = [{
+      element: decorations,
+      x: 0,
+      y: 0,
+      width,
+      height,
+      rotation: 0,
+      opacity: 1,
+    }]
+    try {
+      const records = [...this.#records.values()]
+        .filter((record) => record.wrapper.style.display !== 'none')
+        .sort((left, right) => (
+          left.entry.stackOrder - right.entry.stackOrder
+          || left.entry.item.layerItemId.localeCompare(right.entry.item.layerItemId)
+        ))
+      for (const record of records) {
+        if (!isHtmlWorldWrapper(record.wrapper)) {
+          throw new Error(`Spatial 静态捕获图层“${record.entry.item.layerItemId}”没有 HTML 捕获载体`)
+        }
+        const wrapper = record.wrapper
+        const parent = wrapper.parentNode
+        if (!parent) throw new Error(`Spatial 静态捕获图层“${record.entry.item.layerItemId}”未挂载`)
+        restoreRecords.push({
+          wrapper,
+          parent,
+          nextSibling: wrapper.nextSibling,
+          style: wrapper.getAttribute('style') ?? '',
+        })
+        staging.appendChild(wrapper)
+        const { item, coordinateSpace } = record.entry
+        Object.assign(wrapper.style, {
+          position: 'absolute',
+          left: '0',
+          top: '0',
+          width: `${item.frame.width}px`,
+          height: `${item.frame.height}px`,
+          display: '',
+          opacity: '1',
+          transform: 'none',
+          pointerEvents: 'none',
+        })
+        const world = coordinateSpace === 'world'
+        const scale = world ? captureCamera.zoom : 1
+        layers.push({
+          element: wrapper,
+          x: world
+            ? (item.frame.x - captureCamera.x) * captureCamera.zoom + width / 2
+            : item.frame.x,
+          y: world
+            ? (item.frame.y - captureCamera.y) * captureCamera.zoom + height / 2
+            : item.frame.y,
+          width: item.frame.width * scale,
+          height: item.frame.height * scale,
+          rotation: item.rotation,
+          opacity: item.opacity,
+        })
+      }
+      const content = await capturePublishedSurfacePng({
+        root,
+        width,
+        height,
+        layers,
+        transparentBackground: false,
+      })
+      return { format: 'data-url', content, width, height }
+    } finally {
+      for (const record of restoreRecords.reverse()) {
+        record.wrapper.setAttribute('style', record.style)
+        record.parent.insertBefore(record.wrapper, record.nextSibling)
+      }
+      staging.remove()
+      if (resized) {
+        this.#session = originalSession
+        this.#updateWorldTransform()
+        this.#reconcileWorldVisibility()
+      }
+    }
+  }
+
   #invalidateInteractions(): void {
     this.#options.onInteractionInvalidated?.()
     this.#interactionPort?.setActive(false)
@@ -998,6 +1229,16 @@ export class SpatialSurfaceHost {
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
     const entries = collectSpatialPlaybackEntries(this.#session.input, this.#session.locationId)
+      .filter((entry) => (
+        !this.#options.staticCapture
+        || (
+          !omittedFromSpatialStaticCapture(entry.item)
+          && (
+            this.#options.includeGlobalLayerItemsForStaticCapture
+            || entry.source !== 'global'
+          )
+        )
+      ))
     const nextIds = new Set(entries.map((entry) => entry.item.layerItemId))
     for (const [id, record] of [...this.#records.entries()]) {
       if (nextIds.has(id)) continue
@@ -1200,11 +1441,12 @@ export class SpatialSurfaceHost {
         wrapper.appendChild(createViewportHud(dom, entry.item, {
           components: this.#components,
           resolveAsset: this.#resolveAsset,
-          interactive: true,
+          interactive: !this.#options.staticCapture,
+          staticCapture: this.#options.staticCapture,
           ...(componentEffects?.courseState
             ? { courseState: componentEffects.courseState }
             : {}),
-          ...(componentEffects?.componentActions
+          ...(!this.#options.staticCapture && componentEffects?.componentActions
             ? { componentActions: componentEffects.componentActions }
             : {}),
           onMountComponent,
@@ -1213,7 +1455,14 @@ export class SpatialSurfaceHost {
       }
       return finish(wrapper, controllerDom)
     }
-    if (entry.item.kind === 'native' && entry.item.content.nativeType === 'video') {
+    if (this.#options.staticCapture) {
+      return finish(createWorldStaticHtmlItem(dom, entry.item, this.#resolveAsset), null)
+    }
+    if (
+      !this.#options.staticCapture
+      && entry.item.kind === 'native'
+      && entry.item.content.nativeType === 'video'
+    ) {
       const url = this.#resolveAsset(entry.item.content.data.assetId)
       const wrapper = createWorldVideoHtml(dom, entry.item, url)
       wrapper.dataset.layerSource = entry.source
@@ -1225,11 +1474,12 @@ export class SpatialSurfaceHost {
     }
     const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
       components: this.#components,
-      interactive: true,
+      interactive: !this.#options.staticCapture,
+      staticCapture: this.#options.staticCapture,
       ...(componentEffects?.courseState
         ? { courseState: componentEffects.courseState }
         : {}),
-      ...(componentEffects?.componentActions
+      ...(!this.#options.staticCapture && componentEffects?.componentActions
         ? { componentActions: componentEffects.componentActions }
         : {}),
       onMountComponent,

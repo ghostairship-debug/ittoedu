@@ -1,19 +1,19 @@
 import { AlertCircle, AlertTriangle, CheckCircle2, FileJson } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type {
+  CourseProjectExportPreflightReportV1,
   ExportPreflightItem,
-  ExportPreflightReport,
 } from '../export/exportPreflight'
 
 interface ExportPreflightDialogProps {
-  report: ExportPreflightReport | null
+  report: CourseProjectExportPreflightReportV1 | null
   onCancel(): void
   onContinue(): void
   onLocate(item: ExportPreflightItem): void
   onSaveReport(): void
 }
 
-const targetLabels: Record<ExportPreflightReport['target'], string> = {
+const targetLabels: Record<CourseProjectExportPreflightReportV1['target'], string> = {
   'single-html': '单 HTML',
   'web-package': '网页包',
   pdf: 'PDF',

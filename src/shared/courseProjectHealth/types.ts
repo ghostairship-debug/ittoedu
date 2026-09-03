@@ -1,16 +1,11 @@
 import type { ComponentManifest } from '../componentTypes'
 import type { CourseProjectDocument } from '../courseProjectTypes'
-import type {
-  CourseProjectValidationFindingCode,
-  DiagnosticTargetV1,
-} from '../courseProjectValidationDiagnostics'
-import type { ProjectHealthCode } from '../diagnosticCodes'
+import type { DiagnosticTargetV1 } from '../courseProjectValidationDiagnostics'
+import type { CourseProjectHealthCatalogCode } from './catalog'
 
 export type CourseProjectHealthSeverity = 'error' | 'warning' | 'info'
-export type CourseProjectHealthCode = Extract<
-  CourseProjectValidationFindingCode,
-  ProjectHealthCode
->
+/** Codes listed in the V9 health catalog, including schema/archive-shadowed entries. */
+export type CourseProjectHealthCode = CourseProjectHealthCatalogCode
 
 export interface CourseProjectHealthArchiveFiles {
   /** Already-opened archive bytes, keyed by AssetMeta.id. */

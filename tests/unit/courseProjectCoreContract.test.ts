@@ -6,7 +6,6 @@ import {
   flowPlainTextFallback,
   flowRunsFallback,
   getEffectiveCourseLayerOrder,
-  migrateProjectV8ToCourseProjectV9,
   normalizeFlowRichText,
   resolveCourseSurfaceBackgroundColor,
   sceneNodeToCourseLayerItem,
@@ -30,7 +29,7 @@ import {
   type CourseRuntimeDefinition,
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
-import { createProject, createRectangleNode } from '@/renderer/project/createProject'
+import { createRectangleNode } from '@/renderer/project/nativeNodeFactories'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 
@@ -118,6 +117,59 @@ function minimalSlideProject(): CourseProjectDocument {
   }
 }
 
+function domainProfileProject(): CourseProjectDocument {
+  const project = minimalSlideProject()
+  project.assets = {
+    'asset-audio': {
+      id: 'asset-audio',
+      filename: 'narration.mp3',
+      mimeType: 'audio/mpeg',
+      kind: 'audio',
+      path: 'assets/narration.mp3',
+      byteLength: 1_024,
+      duration: 2.5,
+      remote: { url: 'https://media.example.com/narration.mp3' },
+    },
+  }
+  project.componentPackages = {
+    'component.quiz': {
+      packageId: 'component.quiz',
+      version: '1.0.0',
+      name: 'Quiz',
+      manifestPath: 'components/component.quiz/manifest.json',
+      runtimePath: 'components/component.quiz/runtime.js',
+      contentSha256: 'ab'.repeat(32),
+    },
+  }
+  project.media.audio.sounds = {
+    'sound-1': {
+      id: 'sound-1',
+      name: 'Narration',
+      assetId: 'asset-audio',
+      channel: 'narration',
+      defaultVolume: 1,
+      defaultLoop: false,
+    },
+  }
+  project.playback.presenter.additionalBindings = [{
+    id: 'binding-1',
+    command: 'next',
+    key: 'F5',
+    altKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    metaKey: false,
+  }]
+  return project
+}
+
+function asMutableRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('expected mutable record fixture')
+  }
+  return value as Record<string, unknown>
+}
+
 function spatialProject(backgroundColor?: string): CourseProjectDocument {
   return {
     ...courseShell(),
@@ -202,6 +254,218 @@ describe('Course Project V9 core contract', () => {
       text: 'x',
       level: 2,
     }).success).toBe(false)
+  })
+
+  it('keeps all extracted domain fields required without injecting defaults', () => {
+    for (const field of ['assets', 'componentPackages', 'designTokens', 'media', 'playback']) {
+      const candidate = asMutableRecord(structuredClone(minimalSlideProject()))
+      delete candidate[field]
+      expect(courseProjectDocumentSchema.safeParse(candidate).success, field).toBe(false)
+    }
+  })
+
+  it('rejects unknown fields at every extracted domain object layer', () => {
+    const targets: Array<readonly [string, (project: CourseProjectDocument) => unknown]> = [
+      ['asset', (project) => project.assets['asset-audio']],
+      ['asset remote', (project) => project.assets['asset-audio']?.remote],
+      ['component metadata', (project) => project.componentPackages['component.quiz']],
+      ['design root', (project) => project.designTokens],
+      ['design token', (project) => project.designTokens.fonts[0]],
+      ['media root', (project) => project.media],
+      ['audio settings', (project) => project.media.audio],
+      ['channel volumes', (project) => project.media.audio.channelVolumes],
+      ['sound definition', (project) => project.media.audio.sounds['sound-1']],
+      ['narration ducking', (project) => project.media.audio.narrationDucking],
+      ['playback root', (project) => project.playback],
+      ['presenter settings', (project) => project.playback.presenter],
+      ['presenter binding', (project) => project.playback.presenter.additionalBindings[0]],
+    ]
+
+    targets.forEach(([label, select]) => {
+      const candidate = domainProfileProject()
+      asMutableRecord(select(candidate)).unexpected = true
+      expect(courseProjectDocumentSchema.safeParse(candidate).success, label).toBe(false)
+    })
+  })
+
+  it('preserves Course Project V9 domain limits and parse-time policy', () => {
+    const designAtLimit = domainProfileProject()
+    designAtLimit.designTokens.fonts = Array.from({ length: 64 }, (_, index) => ({
+      id: `font${index}`,
+      label: `Font ${index}`,
+      fontFamily: `Font ${index}`,
+    }))
+    designAtLimit.designTokens.colors = Array.from({ length: 256 }, (_, index) => ({
+      id: `color${index}`,
+      label: `Color ${index}`,
+      color: '#123456',
+    }))
+    expect(courseProjectDocumentSchema.safeParse(designAtLimit).success).toBe(true)
+    designAtLimit.designTokens.fonts.push({ id: 'overflow', label: 'Overflow', fontFamily: 'sans-serif' })
+    expect(courseProjectDocumentSchema.safeParse(designAtLimit).success).toBe(false)
+
+    const colorsOverLimit = domainProfileProject()
+    colorsOverLimit.designTokens.colors = Array.from({ length: 257 }, (_, index) => ({
+      id: `color${index}`,
+      label: `Color ${index}`,
+      color: '#123456',
+    }))
+    expect(courseProjectDocumentSchema.safeParse(colorsOverLimit).success).toBe(false)
+
+    const duplicateDesignToken = domainProfileProject()
+    duplicateDesignToken.designTokens.fonts = [
+      { id: 'body', label: 'Body A', fontFamily: 'sans-serif' },
+      { id: 'body', label: 'Body B', fontFamily: 'serif' },
+    ]
+    expect(courseProjectDocumentSchema.safeParse(duplicateDesignToken).success).toBe(true)
+    duplicateDesignToken.designTokens.fonts[0]!.id = ' body '
+    expect(courseProjectDocumentSchema.safeParse(duplicateDesignToken).success).toBe(false)
+
+    const mediaAtLimit = domainProfileProject()
+    mediaAtLimit.media.audio.sounds['sound-1']!.name = 'n'.repeat(200)
+    mediaAtLimit.media.audio.sounds['sound-1']!.id = 's'.repeat(240)
+    expect(courseProjectDocumentSchema.safeParse(mediaAtLimit).success).toBe(true)
+    mediaAtLimit.media.audio.sounds['sound-1']!.name = 'n'.repeat(201)
+    expect(courseProjectDocumentSchema.safeParse(mediaAtLimit).success).toBe(false)
+    mediaAtLimit.media.audio.sounds['sound-1']!.name = 'Narration'
+    mediaAtLimit.media.audio.sounds['sound-1']!.id = 's'.repeat(241)
+    expect(courseProjectDocumentSchema.safeParse(mediaAtLimit).success).toBe(false)
+
+    const playbackAtLimit = domainProfileProject()
+    playbackAtLimit.playback.presenter.additionalBindings[0]!.id = 'b'.repeat(240)
+    expect(courseProjectDocumentSchema.safeParse(playbackAtLimit).success).toBe(true)
+    playbackAtLimit.playback.presenter.additionalBindings[0]!.id = 'b'.repeat(241)
+    expect(courseProjectDocumentSchema.safeParse(playbackAtLimit).success).toBe(false)
+
+    const thirtyTwoBindings = domainProfileProject()
+    const repeatedBinding = {
+      id: 'repeated',
+      command: 'next' as const,
+      key: 'PageDown',
+      altKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      metaKey: false,
+    }
+    thirtyTwoBindings.playback.presenter.additionalBindings = Array.from(
+      { length: 32 },
+      () => ({ ...repeatedBinding }),
+    )
+    expect(courseProjectDocumentSchema.safeParse(thirtyTwoBindings).success).toBe(true)
+    thirtyTwoBindings.playback.presenter.additionalBindings.push({ ...repeatedBinding })
+    expect(courseProjectDocumentSchema.safeParse(thirtyTwoBindings).success).toBe(false)
+  })
+
+  it('preserves component provenance, portable paths and string normalization', () => {
+    const withoutProvenance = domainProfileProject()
+    expect(courseProjectDocumentSchema.safeParse(withoutProvenance).success).toBe(true)
+
+    const withProvenance = domainProfileProject()
+    Object.assign(withProvenance.componentPackages['component.quiz']!, {
+      sha256: 'cd'.repeat(32),
+      importedAt: NOW,
+      sourceLabel: 'Catalog',
+    })
+    expect(courseProjectDocumentSchema.safeParse(withProvenance).success).toBe(true)
+
+    const partialProvenance = domainProfileProject()
+    partialProvenance.componentPackages['component.quiz']!.sha256 = 'cd'.repeat(32)
+    expect(courseProjectDocumentSchema.safeParse(partialProvenance).success).toBe(false)
+
+    const absoluteComponentPath = domainProfileProject()
+    absoluteComponentPath.componentPackages['component.quiz']!.manifestPath = 'C:\\component\\manifest.json'
+    expect(courseProjectDocumentSchema.safeParse(absoluteComponentPath).success).toBe(false)
+
+    const normalized = domainProfileProject()
+    normalized.assets['asset-audio']!.id = ' asset-audio '
+    normalized.assets['asset-audio']!.filename = ' narration.mp3 '
+    normalized.assets['asset-audio']!.mimeType = ' audio/mpeg '
+    normalized.componentPackages['component.quiz']!.packageId = ' component.quiz '
+    normalized.componentPackages['component.quiz']!.name = ' Quiz '
+    const parsed = courseProjectDocumentSchema.parse(normalized)
+    expect(parsed.assets['asset-audio']).toMatchObject({
+      id: 'asset-audio',
+      filename: 'narration.mp3',
+      mimeType: 'audio/mpeg',
+    })
+    expect(parsed.componentPackages['component.quiz']).toMatchObject({
+      packageId: 'component.quiz',
+      name: 'Quiz',
+    })
+  })
+
+  it('rejects unknown native content fields and cross-discriminator nativeData overrides', () => {
+    const project = minimalSlideProject()
+    const slideSurface = project.surfaces[0]
+    if (slideSurface?.type !== 'slide') throw new Error('expected slide surface')
+    const item = sceneNodeToCourseLayerItem(createRectangleNode({
+      id: 'shape-item',
+      name: '矩形',
+    }), 0)
+    if (item.kind !== 'native' || item.content.nativeType !== 'shape') {
+      throw new Error('expected shape native item')
+    }
+    slideSurface.scenes[0]!.layerItems = [item]
+    slideSurface.scenes[0]!.presentation = {
+      initialStateId: 'state_initial',
+      states: [{
+        id: 'state_initial',
+        name: '初始',
+        layerItemOverrides: {},
+      }],
+    }
+
+    const parsed = courseProjectDocumentSchema.parse(project)
+    expect(courseProjectDocumentSchema.parse(
+      JSON.parse(JSON.stringify(parsed)) as unknown,
+    )).toEqual(parsed)
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{
+        ...slideSurface,
+        scenes: [{
+          ...slideSurface.scenes[0]!,
+          layerItems: [{
+            ...item,
+            content: {
+              nativeType: 'shape',
+              data: {
+                ...item.content.data,
+                extraField: true,
+              },
+            },
+          }],
+        }],
+      }],
+    }).success).toBe(false)
+
+    slideSurface.scenes[0]!.presentation = {
+      initialStateId: 'state_initial',
+      states: [{
+        id: 'state_initial',
+        name: '初始',
+        layerItemOverrides: {
+          'shape-item': { nativeData: { text: 'not-a-shape' } },
+        },
+      }],
+    }
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(false)
+
+    slideSurface.scenes[0]!.presentation = {
+      initialStateId: 'state_initial',
+      states: [{
+        id: 'state_initial',
+        name: '初始',
+        layerItemOverrides: {
+          'shape-item': { nativeData: { style: { fillColor: '#ff0000' } } },
+        },
+      }],
+    }
+    const withOverride = courseProjectDocumentSchema.parse(project)
+    expect(courseProjectDocumentSchema.parse(
+      JSON.parse(JSON.stringify(withOverride)) as unknown,
+    )).toEqual(withOverride)
   })
 
   it('keeps global and Flow body planes strict on their own entry contracts', () => {
@@ -459,50 +723,6 @@ describe('Course Project V9 core contract', () => {
       text: '短',
       runs: [{ start: 0, end: 8, style: { bold: true } }],
     }).success).toBe(false)
-  })
-
-  it('migrates a minimal V8 document through the V9 model and round-trips schema', () => {
-    const source = createProject({
-      id: 'course-migrate',
-      title: '迁移合同',
-      now: NOW,
-      includeDefaultController: false,
-      controls: 'none',
-    })
-    const before = structuredClone(source)
-    const migrated = migrateProjectV8ToCourseProjectV9(source)
-
-    expect(source).toEqual(before)
-    expect(migrated.schemaVersion).toBe(9)
-    expect(courseProjectDocumentSchema.parse(structuredClone(migrated))).toEqual(migrated)
-    expect(migrated.locations).toEqual([expect.objectContaining({
-      id: source.scenes[0]!.id,
-      kind: 'slide-scene',
-      surfaceId: `slide:${source.id}`,
-      sceneId: source.scenes[0]!.id,
-    })])
-    expect(migrated.surfaces).toEqual([expect.objectContaining({
-      type: 'slide',
-      scenes: [expect.objectContaining({ id: source.scenes[0]!.id })],
-    })])
-
-    const ordered = getEffectiveCourseLayerOrder({
-      project: migrated,
-      surfaceId: migrated.surfaces[0]!.id,
-      locationId: migrated.startLocationId,
-    })
-    expect(ordered).toEqual([])
-
-    const visited = { surfaces: 0, scenes: 0, locations: 0 }
-    visitCourseProject(migrated, {
-      surface: () => { visited.surfaces += 1 },
-      scene: () => { visited.scenes += 1 },
-      location: () => { visited.locations += 1 },
-    })
-    expect(visited).toEqual({ surfaces: 1, scenes: 1, locations: 1 })
-    expect(collectCourseProjectReferences(migrated).some((entry) => (
-      entry.kind === 'surface' && entry.id === migrated.surfaces[0]!.id
-    ))).toBe(true)
   })
 
   it('treats omitted Spatial and Flow backgroundColor as white without injecting the field', () => {

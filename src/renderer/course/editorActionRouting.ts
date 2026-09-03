@@ -1,3 +1,4 @@
+import { shouldIgnoreSlideLayerDeleteForFocus } from './v9SlideActionCommands'
 import {
   EDITOR_LOCKED_WRITE_REASON,
   EDITOR_TEXT_FOCUS_LAYER_DELETE_REASON,
@@ -59,6 +60,88 @@ export function resolveFlowDeleteRoute(
   if (snapshot.focus === 'text' || snapshot.focus === 'block') return 'document'
   if (snapshot.focus === 'overlay') return 'overlay'
   return 'refuse'
+}
+
+export function isEditorTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    Boolean(target.isContentEditable)
+  )
+}
+
+export function isEditorInteractiveControlTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(
+    target.closest('button, [role="button"], [role="menuitem"], [role="option"]'),
+  )
+}
+
+export type KeyboardDeleteDisposition =
+  | { readonly action: 'ignore' }
+  | { readonly action: 'route'; readonly snapshot: EditorSelectionSnapshot }
+  | { readonly action: 'legacy-delete' }
+
+export interface KeyboardDeleteSessionSnapshot {
+  readonly hasCourseProject: boolean
+  readonly selection: EditorSelectionSnapshot | null
+  readonly contentEditable: boolean
+  readonly hasFlowSession: boolean
+  readonly flowComposing: boolean
+  readonly flowTextFocus: boolean
+  readonly flowHasSelection: boolean
+  readonly hasSlideBackend: boolean
+  readonly slideTextEdit: boolean
+  readonly slideFormulaEdit: boolean
+  readonly slideTagName?: string
+  readonly selectedNodeCount: number
+  readonly editingText: boolean
+}
+
+/**
+ * Delete routing for the App keyboard router. Surface forks live here so
+ * App.tsx only supplies a captured session snapshot.
+ */
+export function resolveKeyboardDeleteDisposition(
+  snapshot: KeyboardDeleteSessionSnapshot,
+): KeyboardDeleteDisposition {
+  if (snapshot.hasCourseProject) {
+    if (!snapshot.selection) return { action: 'ignore' }
+    if (snapshot.selection.focus === 'text' && snapshot.contentEditable) {
+      return { action: 'ignore' }
+    }
+    return { action: 'route', snapshot: snapshot.selection }
+  }
+  if (snapshot.hasFlowSession) {
+    if (
+      snapshot.flowComposing
+      || snapshot.flowTextFocus
+      || snapshot.contentEditable
+    ) {
+      return { action: 'ignore' }
+    }
+    return snapshot.flowHasSelection
+      ? { action: 'legacy-delete' }
+      : { action: 'ignore' }
+  }
+  if (snapshot.hasSlideBackend) {
+    if (shouldIgnoreSlideLayerDeleteForFocus({
+      textEditSession: snapshot.slideTextEdit,
+      formulaEditSession: snapshot.slideFormulaEdit,
+      tagName: snapshot.slideTagName,
+      isContentEditable: snapshot.contentEditable,
+    })) {
+      return { action: 'ignore' }
+    }
+    return snapshot.selectedNodeCount > 0
+      ? { action: 'legacy-delete' }
+      : { action: 'ignore' }
+  }
+  if (snapshot.selectedNodeCount > 0 && !snapshot.editingText) {
+    return { action: 'legacy-delete' }
+  }
+  return { action: 'ignore' }
 }
 
 export function shouldRefuseLayerDeleteForTextFocus(

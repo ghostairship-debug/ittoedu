@@ -4,7 +4,7 @@ import type { RecentProjectEntry } from '@/shared/ipcTypes'
 import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
 import { utf8ByteLength } from '@/renderer/export/exportSize'
 import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
-import type { SingleHtmlExportMode } from '@/renderer/export/course/buildCoursePackages'
+import type { SingleHtmlExportMode } from '@/renderer/export/course/coursePackagePreflight'
 import { ExportSizeWarningDialog } from '@/renderer/ui/ExportSizeWarningDialog'
 import { TopToolbar, type ExportFormat } from '@/renderer/ui/TopToolbar'
 
@@ -49,10 +49,10 @@ describe('unified export menu', () => {
     const title = screen.getByRole('textbox', { name: '课件名称' })
     fireEvent.change(title, { target: { value: '雨中的苏轼' } })
     fireEvent.blur(title)
-    expect(useEditorStore.getState().project.title).toBe('雨中的苏轼')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('雨中的苏轼')
     expect(useEditorStore.getState().dirty).toBe(true)
     useEditorStore.getState().undo()
-    expect(useEditorStore.getState().project.title).toBe('未命名课件')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('未命名课件')
   })
 
   it('moves Save As, project health, and recent projects into More in simple mode', () => {
@@ -106,16 +106,16 @@ describe('unified export menu', () => {
   })
 
   it('changes editor density without replacing or mutating the Project document', () => {
-    const projectBefore = useEditorStore.getState().project
+    const projectBefore = selectActiveCourseProjectDocument(useEditorStore.getState())!
     renderToolbar(vi.fn())
 
     fireEvent.click(screen.getByRole('button', { name: '专业' }))
     expect(useEditorStore.getState().editorMode).toBe('professional')
-    expect(useEditorStore.getState().project).toBe(projectBefore)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBefore)
 
     fireEvent.click(screen.getByRole('button', { name: '简洁' }))
     expect(useEditorStore.getState().editorMode).toBe('simple')
-    expect(useEditorStore.getState().project).toBe(projectBefore)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBefore)
   })
 
   it('offers both explicit single HTML modes, web package, PPTX, PDF, and DOCX', () => {

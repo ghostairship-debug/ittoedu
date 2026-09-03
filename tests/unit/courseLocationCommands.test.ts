@@ -17,7 +17,7 @@ import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createTextNode } from '@/renderer/project/createProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 
 const NOW = '2026-08-17T12:00:00.000Z'
 
