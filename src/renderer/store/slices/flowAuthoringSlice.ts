@@ -35,6 +35,7 @@ import {
   findGlobalTeacherController,
   patchEffectiveLayerItem,
   restoreDefaultTeacherController,
+  type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
 import { commandTargetForRow } from '../v9LayerMutations'
@@ -614,6 +615,10 @@ export function createFlowAuthoringSlice(
   deleteSelectedNodes(): void
   duplicateSelectedNodes(): void
   duplicateNode(nodeId: string): void
+  persistLayerCommand(
+    result: LayerCommandResult,
+    extra?: { statusMessage?: string | null },
+  ): FlowCommandResult | FlowSharedAuthoringResult | { readonly ok: false; readonly reason: string; readonly historyEntry: false }
 } {
   const missingSession = (): FlowCommandResult => ({
     ok: false,
@@ -1605,7 +1610,47 @@ export function createFlowAuthoringSlice(
     },
     duplicateSelectedNodes() {},
     duplicateNode() {},
+    persistLayerCommand(result: LayerCommandResult, extra?: { statusMessage?: string | null }) {
+      return persistFlowLayerCommand(flow, result, extra)
+    },
   }
+}
+
+export function persistFlowLayerCommand(
+  flow: FlowAuthoringPorts,
+  result: LayerCommandResult,
+  extra?: { statusMessage?: string | null },
+): FlowCommandResult | FlowSharedAuthoringResult | { readonly ok: false; readonly reason: string; readonly historyEntry: false } {
+  const session = flow.read().flowSession
+  if (!session) {
+    return { ok: false, reason: 'not-flow-session', historyEntry: false }
+  }
+  if (!result.ok || !result.nextDocument) {
+    return { ok: false, reason: result.reason ?? 'layer-command-failed', historyEntry: false }
+  }
+  const overlayId = result.createdLayerItemId ?? session.selection.selectedOverlayIds[0]
+  let selection = session.selection
+  if (overlayId) {
+    try {
+      selection = selectFlowOverlay(
+        result.nextDocument,
+        session.selection.locationId,
+        session.selection.selectedOverlayIds.includes(overlayId)
+          ? [...session.selection.selectedOverlayIds]
+          : [overlayId],
+        session.selection.authoringScope,
+      )
+    } catch {
+      selection = session.selection
+    }
+  }
+  return flow.persist({
+    ok: true,
+    reason: result.reason,
+    nextDocument: result.nextDocument,
+    historyEntry: Boolean(result.historyEntry),
+    selection,
+  }, extra)
 }
 
 export function flowPersistSnapshotFrom(

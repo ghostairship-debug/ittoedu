@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037j-flow-persist-owner](tasks/1.1/r11-037j-flow-persist-owner.md) | queued | — | none | 把 applyFlowBackend、persistFlowResult、persistFlowLayerCommand 迁入 flowAuthoringSlice，root 仅接返回成员。 |
+| [r11-037k-spatial-persist-owner](tasks/1.1/r11-037k-spatial-persist-owner.md) | queued | — | none | 把 applySpatialBackend、persistSpatialResult、persistSpatialLayerCommand 迁入 spatialAuthoringSlice，并保留资源 Undo/Redo generation 行为。 |

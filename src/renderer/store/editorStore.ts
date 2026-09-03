@@ -84,6 +84,7 @@ import {
 import {
   applyFlowBackendState,
   createFlowAuthoringSlice,
+  persistFlowLayerCommand,
   persistFlowResult as persistFlowResultFromSlice,
   flowPersistSnapshotFrom,
   type FlowAuthoringIntent,
@@ -1346,42 +1347,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const componentAuthoringActions = createComponentAuthoringActions(featurePorts)
   const interactionAuthoringActions = createInteractionAuthoringActions(featurePorts)
 
-  const persistFlowLayerCommand = (
-    result: LayerCommandResult,
-    extra?: { statusMessage?: string | null },
-  ) => {
-    const session = get().flowSession
-    if (!session) {
-      return { ok: false, reason: 'not-flow-session', historyEntry: false } as const
-    }
-    if (!result.ok || !result.nextDocument) {
-      if (result.reason) set({ errorMessage: result.reason, statusMessage: null })
-      return { ok: false, reason: result.reason ?? 'layer-command-failed', historyEntry: false } as const
-    }
-    const overlayId = result.createdLayerItemId ?? session.selection.selectedOverlayIds[0]
-    let selection = session.selection
-    if (overlayId) {
-      try {
-        selection = selectFlowOverlay(
-          result.nextDocument,
-          session.selection.locationId,
-          session.selection.selectedOverlayIds.includes(overlayId)
-            ? [...session.selection.selectedOverlayIds]
-            : [overlayId],
-          session.selection.authoringScope,
-        )
-      } catch {
-        selection = session.selection
-      }
-    }
-    return persistFlowResult({
-      ok: true,
-      reason: result.reason,
-      nextDocument: result.nextDocument,
-      historyEntry: Boolean(result.historyEntry),
-      selection,
-    }, extra)
-  }
 
   const applyFlowBackend = (
     session: FlowAuthoringSession,
@@ -1591,7 +1556,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     persistLayer: {
       slide: (result, extra) => slideAuthoringSlice.persistLayerCommand(result, extra),
       spatial: persistSpatialLayerCommand,
-      flow: persistFlowLayerCommand,
+      flow: (result, extra) => flowAuthoringSlice.persistLayerCommand(result, extra),
     },
   })
 
