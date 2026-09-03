@@ -1271,7 +1271,75 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
   })
   const mediaAuthoringActions = createMediaAuthoringActions(featurePorts)
-  const componentAuthoringActions = createComponentAuthoringActions(featurePorts)
+  const componentAuthoringActions = createComponentAuthoringActions({
+    read: () => {
+      const state = get()
+      return {
+        document: selectActiveCourseProjectDocument(state),
+        sidecar: state.courseAssetSidecar,
+        componentPackages: state.componentPackages,
+        authoringSession: state.courseAuthoringSession,
+        editingScope: state.editingScope,
+        interactionStateId: state.activePresentationStateId,
+        hasSpatialSession: Boolean(state.spatialSession),
+        hasFlowSession: Boolean(state.flowSession),
+      }
+    },
+    readSpatialSession: () => get().spatialSession,
+    readFlowSession: () => get().flowSession,
+    setFeedback: (feedback) => set(feedback),
+    setActiveTab: (tab) => {
+      const simpleHidden = new Set<string>(['components', 'automation', 'developer'])
+      const activeTab = get().editorMode === 'simple' && simpleHidden.has(tab)
+        ? 'elements'
+        : tab
+      set({ activeTab, errorMessage: null })
+    },
+    persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
+    persistProject: (project, extra) => {
+      const state = get()
+      if (state.spatialSession) {
+        persistSpatialResult(succeedSpatialCommand({
+          ...state.spatialSession,
+          history: commitSpatialAuthoringHistory(state.spatialSession.history, project),
+        }, true), extra)
+        return
+      }
+      if (state.flowSession) {
+        persistFlowResult({
+          ok: true,
+          nextDocument: project,
+          historyEntry: true,
+          selection: state.flowSession.selection,
+        }, extra)
+        return
+      }
+      const backend = selectSlideAuthoringBackend(state)
+      if (!backend) return
+      persistCandidateResult({
+        ok: true,
+        nextSession: {
+          ...backend.getSession(),
+          history: commitSlideAuthoringHistory(backend.getSession().history, project),
+        },
+        historyEntry: true,
+        selection: backend.getSession().selection,
+      }, extra)
+    },
+    persistSpatial: (result, extra) => {
+      persistSpatialResult(result, extra)
+    },
+    persistFlow: (result, extra) => {
+      persistFlowResult(result, extra)
+    },
+    persistSlideCommand: (run, extra) => {
+      const backend = selectSlideAuthoringBackend(get())
+      if (!backend) {
+        return { ok: false, reason: 'not-slide-authoring-backend', historyEntry: false }
+      }
+      return persistCandidateResult(run(backend.getSession()), extra)
+    },
+  })
   const interactionAuthoringActions = createInteractionAuthoringActions({
     read: () => {
       const state = get()

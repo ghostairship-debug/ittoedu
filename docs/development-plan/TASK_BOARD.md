@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037n-component-ports](tasks/1.1/r11-037n-component-ports.md) | queued | — | none | 组件 Authoring 使用自己的窄 ports，不再依赖 FeatureAuthoringPorts 泛型聚合。 |
+| [r11-037o-media-ports-and-facade-removal](tasks/1.1/r11-037o-media-ports-and-facade-removal.md) | queued | — | none | 媒体 Authoring 使用独立窄 ports；彻底删除 featureAuthoringPorts.ts、root 的 featurePorts 汇总对象与冗余旧实现。 |

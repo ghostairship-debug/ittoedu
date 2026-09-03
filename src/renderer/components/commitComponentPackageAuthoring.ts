@@ -3,8 +3,16 @@ import type { AssetMeta } from '../../shared/projectTypes'
 import type { ComponentManifest, ComponentPackageData } from '../../shared/componentTypes'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { UserFacingError } from '../../shared/errors'
-import { createEditorTransactionStep } from '../authoring/editorTransaction'
-import type { FeatureAuthoringPorts } from '../authoring/featureAuthoringPorts'
+import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
+import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type { CourseAssetSidecar } from '../project/v9AssetAdapter'
+import type { CourseAuthoringSession } from '../authoring/courseAuthoringSession'
+import type { SlideAuthoringSession, SlideCommandResult } from '../course/slideAuthoringBackend'
+import type { SlidePersistExtra } from '../store/slices/slideAuthoringSlice'
+import type { SpatialAuthoringSession, SpatialCommandResult } from '../course/spatialEditorCommands'
+import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
+import type { FlowCommandResult } from '../course/flowEditorCommands'
+import type { FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAdapters'
 import {
   planCourseComponentPackageDeletion,
   planCourseComponentPackageReplacement,
@@ -48,8 +56,38 @@ export type ComponentPackageReplacementCommitResult =
       readonly reason: string
     }
 
+export type ComponentAuthoringState = {
+  readonly document: CourseProjectDocument | null
+  readonly sidecar: CourseAssetSidecar | null
+  readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
+  readonly authoringSession: CourseAuthoringSession | null
+  readonly editingScope: 'scene' | 'global'
+  readonly interactionStateId: string | null
+  readonly hasSpatialSession: boolean
+  readonly hasFlowSession: boolean
+}
+
+export type ComponentAuthoringPorts = {
+  read(): ComponentAuthoringState
+  readSpatialSession(): SpatialAuthoringSession | null
+  readFlowSession(): FlowAuthoringSession | null
+  setFeedback(feedback: { errorMessage?: string | null; statusMessage?: string | null }): void
+  setActiveTab(tab: 'components' | 'elements' | 'developer'): void
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistProject(document: CourseProjectDocument, extra?: {
+    statusMessage?: string | null
+    componentPackages?: Record<string, ComponentPackageData>
+  }): void
+  persistSpatial(result: SpatialCommandResult, extra?: { statusMessage?: string | null }): void
+  persistFlow(result: FlowCommandResult | FlowSharedAuthoringResult, extra?: { statusMessage?: string | null }): void
+  persistSlideCommand(
+    run: (session: SlideAuthoringSession) => SlideCommandResult,
+    extra?: SlidePersistExtra,
+  ): SlideCommandResult
+}
+
 export function captureComponentPackageReplacementTarget(
-  ports: FeatureAuthoringPorts,
+  ports: ComponentAuthoringPorts,
   packageId: string,
 ): ComponentPackageReplacementTarget | null {
   const state = ports.read()
@@ -69,7 +107,7 @@ export function captureComponentPackageReplacementTarget(
 }
 
 export function commitComponentReplacementAtTarget(
-  ports: FeatureAuthoringPorts,
+  ports: ComponentAuthoringPorts,
   target: ComponentPackageReplacementTarget,
   packageData: ComponentPackageData,
 ): ComponentPackageReplacementCommitResult {
@@ -131,7 +169,7 @@ export function commitComponentReplacementAtTarget(
 
 export { componentPackageMeta, editableComponentPackageId } from './editableComponentPackage'
 
-export function createComponentAuthoringActions(ports: FeatureAuthoringPorts) {
+export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) {
   return {
     captureComponentPackageReplacementTarget: (packageId: string) => (
       captureComponentPackageReplacementTarget(ports, packageId)
