@@ -58,6 +58,7 @@ export interface CourseProjectLifecycleIdentity {
   readonly projectId: string
   readonly revision: number
   readonly sessionGeneration: number
+  readonly epoch: number
 }
 
 export interface CourseProjectOpenedLoad {
@@ -70,7 +71,7 @@ export interface CourseProjectOpenedLoad {
 }
 
 export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
-  captureIdentity(): CourseProjectLifecycleIdentity
+  captureIdentity(): Omit<CourseProjectLifecycleIdentity, 'epoch'>
   prepareDraft(): CourseProjectDraftPreparation<TDraftToken>
   acknowledgeSaved(path: string, token: TDraftToken): boolean
   captureRecoverySnapshot(): CourseProjectRecoveryCapture
@@ -158,7 +159,7 @@ function sameProjectIdentity(
   expected: CourseProjectLifecycleIdentity,
   current: CourseProjectLifecycleIdentity,
 ): boolean {
-  return expected.projectId === current.projectId
+  return expected.projectId === current.projectId && expected.epoch === current.epoch
 }
 
 function courseArchiveDataFromSnapshot(
@@ -173,6 +174,7 @@ function courseArchiveDataFromSnapshot(
 
 function createRecoveryWriteCoordinator(
   portsRef: { current: CourseProjectLifecyclePorts<unknown> },
+  captureIdentity: () => CourseProjectLifecycleIdentity,
 ): RecoveryWriteCoordinator<RecoverySnapshot, Uint8Array> {
   return new RecoveryWriteCoordinator({
     delayMs: 1800,
@@ -188,7 +190,7 @@ function createRecoveryWriteCoordinator(
     async write(bytes, snapshot) {
       const ports = portsRef.current
       if (!ports.desktopAvailable()) throw new Error('桌面恢复服务不可用。')
-      if (!sameProjectIdentity(snapshot.identity, ports.captureIdentity())) {
+      if (!sameProjectIdentity(snapshot.identity, captureIdentity())) {
         throw new DOMException('已取消', 'AbortError')
       }
       await ports.writeRecoveryProject({
@@ -219,6 +221,10 @@ export function useCourseProjectLifecycle<TDraftToken>(
   const [recoveryDecisionComplete, setRecoveryDecisionComplete] = useState(false)
   const saveInFlightRef = useRef(false)
   const loadEpochRef = useRef(0)
+  const captureIdentity = (): CourseProjectLifecycleIdentity => ({
+    ...portsRef.current.captureIdentity(),
+    epoch: loadEpochRef.current,
+  })
   const recoveryRevisionRef = useRef(0)
   const recoveryOfferRef = useRef<RecoveryProjectResult | null>(null)
   recoveryOfferRef.current = recoveryOffer
@@ -229,6 +235,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
   if (recoveryCoordinatorRef.current === null && ports.desktopAvailable()) {
     recoveryCoordinatorRef.current = createRecoveryWriteCoordinator(
       portsRef as { current: CourseProjectLifecyclePorts<unknown> },
+      captureIdentity,
     )
   }
 
@@ -257,7 +264,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
     epoch?: number,
   ): boolean => {
     if (epoch !== undefined && !isCurrentMutation(epoch)) return false
-    const current = portsRef.current.captureIdentity()
+    const current = captureIdentity()
     if (started && !sameProjectIdentity(started, current)) return false
     const packages = componentPackagesFromArchive(
       archive.project,
@@ -280,7 +287,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
     extra?: { dirty?: boolean; statusMessage?: string },
     epoch?: number,
   ): Promise<boolean> => {
-    const started = portsRef.current.captureIdentity()
+    const started = captureIdentity()
     const archive = await openDefaultCourseProjectAsync(bytes)
     return applyCourseArchive(archive, path, extra, started, epoch)
   }, [applyCourseArchive])
@@ -377,11 +384,11 @@ export function useCourseProjectLifecycle<TDraftToken>(
               '请结束输入法组合或重新选择有效文字后再保存。',
             )
           }
-          const identity = portsRef.current.captureIdentity()
+          const identity = captureIdentity()
           const currentPath = saveAs ? undefined : (portsRef.current.projectPath() ?? undefined)
           const archive = courseArchiveDataFromSnapshot(preparation.snapshot)
           const bytes = await saveCourseProjectDocumentAsync(archive)
-          if (!sameProjectIdentity(identity, portsRef.current.captureIdentity())) {
+          if (!sameProjectIdentity(identity, captureIdentity())) {
             return
           }
           const result = await portsRef.current.saveProjectFile({
@@ -390,7 +397,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
             bytes,
           })
           if (result) {
-            if (!sameProjectIdentity(identity, portsRef.current.captureIdentity())) {
+            if (!sameProjectIdentity(identity, captureIdentity())) {
               return
             }
             const allChangesSaved = portsRef.current.acknowledgeSaved(
@@ -516,7 +523,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
     const snapshot = capture.snapshot
     recoveryRevisionRef.current += 1
     coordinator.schedule(recoveryRevisionRef.current, {
-      identity: portsRef.current.captureIdentity(),
+      identity: captureIdentity(),
       project: snapshot.project,
       assetFiles: snapshot.assetFiles,
       componentPackages: snapshot.componentPackages,

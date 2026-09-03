@@ -67,10 +67,10 @@
 
 ## Focused validation
 
-- `npx vitest run tests/integration/draftSaveTransaction.test.tsx tests/unit/courseDraftPersistence.test.ts tests/unit/recoveryWriteCoordinator.test.ts tests/unit/courseProjectIo.test.ts tests/unit/readModelBoundary.test.ts`
+- `npx vitest run tests/integration/draftSaveTransaction.test.tsx tests/unit/courseDraftPersistence.test.ts tests/unit/recoveryWriteCoordinator.test.ts tests/unit/courseProjectIo.test.ts tests/unit/readModelBoundary.test.ts tests/unit/useCourseProjectLifecycle.test.tsx`
 - `npm run typecheck`
 
-新增测试文件随本节点提交后，把它追加到上面第一条命令末尾。
+2026-09-03：本节点已按上述执行版完成并提交（`tests/unit/useCourseProjectLifecycle.test.tsx` 两条红→绿），测试文件已追加到第一条命令。
 
 ## Rollback / handoff
 
