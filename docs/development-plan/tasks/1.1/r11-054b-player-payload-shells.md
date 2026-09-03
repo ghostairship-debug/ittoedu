@@ -1,6 +1,6 @@
 # r11-054b-player-payload-shells Player / payload 空壳删除
 
-- Status / Owner: blocked / Integrator
+- Status / Owner: queued / unassigned
 - Outcome / Evidence: 精确删除五个零消费者的旧 Player/payload 空壳；Published Course V2、CoursePlayer 与 RuntimeHost 保持唯一播放路径，旧工程与旧发布数据继续 fail-loud。
 - Write scope: `src/player/{CourseRuntimeKernel,PlayerApp,PlayerScene,payload,publishedLesson}.ts`、`docs/development-plan/inventories/legacy-consumers.json`、本卡、后继卡与任务板。
 - Write locks: legacy-inventory

@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "649e8e7a3469c77d328fb51bfdb44220af59c378",
-    "reconciledScope": "legacy-consumers-v3 对当前 1.1 产品树的唯一正式重算；所有 confirmed observation、unknown、target reference 与 schema 8 archive 均为零，17 个 file-absent target 仅保留无副作用空模块，等待精确删除。",
-    "reconciledProductTreeDigest": "a2740664b8c0c242faf3ce9dfba46a3670857e61eeff6b8d43106e4af99405a4"
+    "reconciledProductCommit": "588afaec5ab42fb6d1f7ccfb181fab47de9d7d3a",
+    "reconciledScope": "054a 删除 shared contract 空壳后的当前产品树；confirmed observation、unknown 与 target reference 保持为零。",
+    "reconciledProductTreeDigest": "bff7a2fccfc5a94874438d08ae015cd752b025dcc24c2d326244466d6d9d9826"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
@@ -1332,8 +1332,8 @@
         }
       ],
       "owner": "Integrator",
-      "status": "dead-candidate",
-      "currentFact": "正式重算确认 consumer=0、unknown=0、target reference=0；现存 file-absent target 是无副作用空模块，只等待 054 精确删除。",
+      "status": "removed",
+      "currentFact": "V8 shared type/schema/factory targets 与混合模型符号均已删除；Course Project V9 strict contract 是唯一 Owner。",
       "evidence": [
         {
           "path": "scripts/check-legacy-consumers.ts",
@@ -1429,8 +1429,8 @@
   "reconciledCounts": {
     "recordCount": 11,
     "byStatus": {
-      "dead-candidate": 6,
-      "removed": 5
+      "dead-candidate": 5,
+      "removed": 6
     },
     "confirmedConsumerRelationsByCategory": {
       "staticImportsOrReferences": 0,
@@ -1458,7 +1458,8 @@
       "replacementTests": [
         "tests/unit/courseProjectCoreContract.test.ts",
         "tests/unit/courseProjectTopLevelFields.test.ts"
-      ]
+      ],
+      "status": "removed"
     },
     {
       "id": "r11-054b-player-payload-shells",
@@ -1476,7 +1477,8 @@
         "tests/unit/runtimeHostV2.test.ts",
         "tests/unit/publishedCourseProtocol.test.ts",
         "tests/integration/player-payload.test.ts"
-      ]
+      ],
+      "status": "pending"
     },
     {
       "id": "r11-054c-export-diagnostics-shells",
@@ -1498,7 +1500,8 @@
         "tests/unit/coursePptxExport.test.ts",
         "tests/integration/coursePdfExportApp.test.tsx",
         "tests/unit/courseProjectHealth.test.ts"
-      ]
+      ],
+      "status": "pending"
     },
     {
       "id": "r11-054d-archive-shell",
@@ -1510,7 +1513,8 @@
       ],
       "replacementTests": [
         "tests/unit/courseProjectArchive.test.ts"
-      ]
+      ],
+      "status": "pending"
     }
   ]
 }
