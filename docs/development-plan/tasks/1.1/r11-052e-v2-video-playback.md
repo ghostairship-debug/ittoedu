@@ -1,6 +1,6 @@
 # r11-052e-v2-video-playback V2 Slide 视频播放与 Interaction 事件闭环
 
-- Status / Owner: blocked / Integrator（解除条件：r11-052c 完成并由协调者改为 queued）
+- Status / Owner: queued /
 - Outcome / Evidence: 当前 `src/player/surfaces/slide/publishedNativeRendering.ts#paintPublishedNativeVideo` 的播放态只创建裸 `<video controls>`；`PublishedInteractionController` 仍把 `video.*` 触发器与动作判为 unsupported。052c 完成后，在 Published V2 Slide scene-local Native 宿主建立单一视频生命周期句柄，消费正式 Video 字段并承接 Interaction V1 的六类动作与四类事件；若起始事实已变化，停止并报告现有实现/测试，不叠加第二路径。
 - Write scope: `src/player/surfaces/slide/publishedNativeRendering.ts`；允许新增 `src/player/surfaces/slide/publishedNativeVideoMount.ts` 与 `src/player/surfaces/slide/publishedSlideInteractionSurfacePort.ts`；`src/player/surfaces/slide/SlidePublishedAdapter.ts`；`src/player/interactions/PublishedInteractionSurfacePort.ts`；`src/player/interactions/PublishedInteractionController.ts`；`tests/unit/publishedInteractionController.test.ts`；`tests/integration/publishedInteractionSlideHostIntegration.test.ts`。禁止修改 V9/Published V2 Schema、Flow/Spatial carrier、通用 `PublishedDomInteractionSurfacePort.ts`、`PlayerApp.ts`、`renderVideoNode.ts` 或旧测试；需要其他产品文件时停止。
 - Write locks: published-producer

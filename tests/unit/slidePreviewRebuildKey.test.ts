@@ -4,10 +4,10 @@ import type {
   RuntimeLayerItem,
   ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import type { ExternalComponentNode, SceneNode } from '@/shared/projectTypes'
 import {
   buildSlidePreviewRebuildKey,
   slidePreviewComponentPackageFingerprint,
+  type SlidePreviewIdentityNode,
   type SlidePreviewRebuildKeyInput,
   type SlidePreviewRebuildScene,
 } from '@/renderer/ui/workspaceSlidePreviewRebuild'
@@ -34,7 +34,7 @@ function scene(
     id,
     nodes: nodeIds.map((nodeId) => ({
       id: nodeId,
-      type: 'text' satisfies SceneNode['type'],
+      type: 'text' satisfies SlidePreviewIdentityNode['type'],
     })),
     presentation: { states: [{ id: `${id}-state` }] },
     runtime: { runtimeApiVersion: 2 as const, source: 'runtime-a' },
@@ -96,7 +96,7 @@ function input(
     scene: current,
     scenes: [current, scene('scene-2', ['n2'])],
     globalLayer: [{
-      node: { id: 'g1', type: 'teacher-controller' satisfies SceneNode['type'] },
+      node: { id: 'g1', type: 'teacher-controller' satisfies SlidePreviewIdentityNode['type'] },
       layer: 'overlay',
       visibility: { mode: 'all', sceneIds: [] },
     }],
@@ -355,7 +355,7 @@ describe('buildSlidePreviewRebuildKey', () => {
   })
 
   it('ignores patchable local node order but keeps component carrier and package code identity', () => {
-    const first: ExternalComponentNode = {
+    const first = {
       id: 'component-a',
       name: '组件',
       type: 'external-component',
@@ -375,7 +375,7 @@ describe('buildSlidePreviewRebuildKey', () => {
       id: 'text-b',
       type: 'text' as const,
     }
-    const changedComponent: ExternalComponentNode = {
+    const changedComponent = {
       ...first,
       x: 260,
       width: 620,

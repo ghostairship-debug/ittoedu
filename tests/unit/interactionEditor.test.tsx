@@ -6,18 +6,13 @@ import type {
   InteractionRule,
   InteractionTrigger,
 } from '@/shared/interactionTypes'
-import type {
-  ExternalComponentNode,
-  SceneDocument,
-  SceneNode,
-  ShapeNode,
-  SoundDefinition,
-  VideoNode,
-} from '@/shared/projectTypes'
 import type { CourseStateDeclaration } from '@/shared/courseProjectTypes'
+import type { SoundDefinition } from '@/shared/contracts/media-v1'
+import type { InteractionLayerTarget } from '@/renderer/course/slideInteractionView'
 import {
   InteractionEditor,
   SceneAutomationEditor,
+  type InteractionSceneView,
 } from '@/renderer/ui/InteractionEditor'
 
 const previewMotion = vi.hoisted(() => vi.fn())
@@ -31,7 +26,7 @@ afterEach(() => {
   previewMotion.mockReset()
 })
 
-const button: ShapeNode = {
+const button = {
   id: 'button',
   name: '确认按钮',
   type: 'shape',
@@ -42,7 +37,7 @@ const button: ShapeNode = {
   rotation: 0,
   opacity: 1,
   visible: true,
-  playbackInitialVisibility: 'inherit',
+  playbackInitialVisibility: 'inherit' as const,
   locked: false,
   shapeType: 'rounded-rectangle',
   style: {
@@ -58,7 +53,7 @@ const button: ShapeNode = {
   },
 }
 
-const video: VideoNode = {
+const video = {
   id: 'video_demo',
   name: '讲解视频',
   type: 'video',
@@ -69,7 +64,7 @@ const video: VideoNode = {
   rotation: 0,
   opacity: 1,
   visible: true,
-  playbackInitialVisibility: 'inherit',
+  playbackInitialVisibility: 'inherit' as const,
   locked: false,
   assetId: 'asset_video',
   fit: 'contain',
@@ -86,7 +81,7 @@ const video: VideoNode = {
   backgroundAudioMode: 'none',
 }
 
-const component: ExternalComponentNode = {
+const component = {
   id: 'quiz_component',
   name: '答题组件',
   type: 'external-component',
@@ -97,7 +92,7 @@ const component: ExternalComponentNode = {
   rotation: 0,
   opacity: 1,
   visible: true,
-  playbackInitialVisibility: 'inherit',
+  playbackInitialVisibility: 'inherit' as const,
   locked: false,
   component: { packageId: 'com.example.quiz', version: '1.0.0' },
   props: {},
@@ -173,19 +168,16 @@ function automationRule(
   }
 }
 
-function makeScene(interactions: InteractionRule[]): SceneDocument {
+function makeScene(interactions: InteractionRule[]): InteractionSceneView {
   return {
     id: 'scene_one',
     name: '答题页',
-    backgroundColor: '#ffffff',
-    backgroundAssetId: null,
     nodes: [button, video, component],
     presentation: {
       initialStateId: 'question',
-      thumbnailStateId: 'question',
       states: [
-        { id: 'question', name: '题目', nodeOverrides: {} },
-        { id: 'feedback', name: '答对反馈', nodeOverrides: {} },
+        { id: 'question', name: '题目' },
+        { id: 'feedback', name: '答对反馈' },
       ],
     },
     interactions,
@@ -221,7 +213,7 @@ const projectScenes = [
 
 function renderEditor({
   scene = makeScene([]),
-  selectedNode = button as SceneNode,
+  selectedNode = button as InteractionLayerTarget,
   activeStateId = 'question' as string | null,
   courseState = courseStateDeclarations as readonly CourseStateDeclaration[],
   onAddRule = vi.fn(),
