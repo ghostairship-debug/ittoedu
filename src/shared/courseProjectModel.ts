@@ -1,32 +1,22 @@
-import { projectDocumentSchema } from './projectSchema'
 import type {
-  EmbeddedComponentPackageMeta,
-  GlobalLayerVisibility,
-  ProjectDocument,
-  SceneNode,
-  SceneNodeOverride,
+  NativeRenderableBase,
+  NativeRenderableNode,
   TextRun,
-} from './projectTypes'
+} from './contracts/native-v1'
 import { compareStableStrings } from './stableOrder'
 import { makeAuthoringAddress } from './authoringAddress'
 import {
   compareCourseLayerItems,
   composeCourseProjectLocation,
 } from './courseLayerComposition'
-import { courseProjectDocumentSchema } from './courseProjectSchema'
 import {
-  COURSE_PROJECT_SCHEMA_VERSION,
-  type CourseLocation,
   type CourseProjectDocument,
   type FlowBlock,
   type FlowTableCell,
   type LayerItem,
   type LayerItemBase,
-  type LayerItemOverride,
   type NativeElementContent,
   type ScopedLayerItem,
-  type SlidePresentation,
-  type SlideSceneDocument,
 } from './courseProjectTypes'
 
 export {
@@ -149,7 +139,7 @@ export function reindexLayerItems<T extends LayerItem>(items: ReadonlyArray<T>):
 
 /**
  * Same-version Flow rich-text fallback.
- * V8 `TextRun` is a style range over `text`, not a glyph carrier, so missing
+ * `TextRun` is a style range over `text`, not a glyph carrier, so missing
  * `text` cannot be recovered from runs and becomes `''`. Missing `runs` become
  * one empty-style span covering the whole plain string (or `[]` if empty).
  */
@@ -203,7 +193,18 @@ const baseNodeKeys = new Set([
   'playbackInitialVisibility',
 ])
 
-function nodeBase(node: SceneNode, order: number): LayerItemBase {
+export interface ComponentLayerSourceNode extends Omit<NativeRenderableBase, 'type'> {
+  type: 'external-component'
+  component: {
+    packageId: string
+    version: string
+  }
+  props: Record<string, unknown>
+}
+
+export type CourseLayerSourceNode = NativeRenderableNode | ComponentLayerSourceNode
+
+function nodeBase(node: CourseLayerSourceNode, order: number): LayerItemBase {
   return {
     layerItemId: node.id,
     label: node.name,
@@ -224,7 +225,7 @@ function nodeBase(node: SceneNode, order: number): LayerItemBase {
   }
 }
 
-function nodeData(node: Exclude<SceneNode, { type: 'external-component' }>): NativeElementContent {
+function nodeData(node: NativeRenderableNode): NativeElementContent {
   const data = Object.fromEntries(
     Object.entries(node).filter(([key]) => !baseNodeKeys.has(key)),
   )
@@ -240,7 +241,7 @@ function nodeData(node: Exclude<SceneNode, { type: 'external-component' }>): Nat
  * construct a legacy project merely to create a V9 layer item.
  */
 export function sceneNodeToCourseLayerItem(
-  node: SceneNode,
+  node: CourseLayerSourceNode,
   order = 0,
 ): LayerItem {
   const base = nodeBase(node, order)
@@ -257,98 +258,6 @@ export function sceneNodeToCourseLayerItem(
     kind: 'native',
     content: nodeData(node),
   }
-}
-
-const migrateNode = sceneNodeToCourseLayerItem
-
-function migrateRuntime(
-  runtime: NonNullable<ProjectDocument['globalRuntime']>,
-  layerItemId: string,
-  label: string,
-  order: number,
-): LayerItem {
-  return {
-    layerItemId,
-    label,
-    kind: 'runtime',
-    frame: {
-      mode: 'absolute',
-      x: 0,
-      y: 0,
-      width: 1280,
-      height: 720,
-    },
-    order,
-    visible: runtime.enabled,
-    locked: false,
-    rotation: 0,
-    opacity: 1,
-    hitPolicy: 'surface',
-    playbackInitialVisibility: 'inherit',
-    runtime: {
-      protocol: 'canvas-runtime',
-      runtimeApiVersion: 2,
-      enabled: runtime.enabled,
-      renderMode: runtime.renderMode,
-      source: runtime.source,
-      content: structuredClone(runtime.content),
-      assets: structuredClone(runtime.assets),
-      nodeBindings: runtime.nodeBindings ? structuredClone(runtime.nodeBindings) : undefined,
-      staticFallback: runtime.staticFallback
-        ? {
-            assetId: runtime.staticFallback.assetId,
-            coverage: runtime.staticFallback.coverage === 'full-scene' ? 'scene' : 'surface',
-          }
-        : undefined,
-    },
-  }
-}
-
-function uniqueGeneratedId(preferred: string, reserved: ReadonlySet<string>): string {
-  if (!reserved.has(preferred)) return preferred
-  let suffix = 2
-  while (reserved.has(`${preferred}:${suffix}`)) suffix += 1
-  return `${preferred}:${suffix}`
-}
-
-function migrateOverride(
-  override: SceneNodeOverride,
-  node: SceneNode,
-): LayerItemOverride {
-  const source = structuredClone(override) as Record<string, unknown>
-  const migrated: LayerItemOverride = {}
-  if (typeof source.name === 'string') migrated.label = source.name
-  delete source.name
-
-  const frame: LayerItemOverride['frame'] = {}
-  ;(['x', 'y', 'width', 'height'] as const).forEach((key) => {
-    if (typeof source[key] === 'number') frame[key] = source[key] as never
-    delete source[key]
-  })
-  if (Object.keys(frame).length > 0) migrated.frame = frame
-
-  if (typeof source.visible === 'boolean') migrated.visible = source.visible
-  if (typeof source.locked === 'boolean') migrated.locked = source.locked
-  if (typeof source.rotation === 'number') migrated.rotation = source.rotation
-  if (typeof source.opacity === 'number') migrated.opacity = source.opacity
-  if (source.playbackInitialVisibility === 'inherit' || source.playbackInitialVisibility === 'hidden') {
-    migrated.playbackInitialVisibility = source.playbackInitialVisibility
-  }
-  delete source.visible
-  delete source.rotation
-  delete source.opacity
-  delete source.locked
-  delete source.playbackInitialVisibility
-  delete source.id
-  delete source.type
-  delete source.component
-
-  if (node.type === 'external-component') {
-    if (isRecord(source.props)) migrated.componentProps = source.props
-    delete source.props
-  }
-  if (Object.keys(source).length > 0) migrated.nativeData = source
-  return migrated
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -662,271 +571,4 @@ export function deriveCourseProjectAuthoringInventorySnapshot(
     revision: project.revision,
     entries: deriveCourseProjectAuthoringInventory(project),
   })
-}
-
-function migratePresentation(
-  scene: ProjectDocument['scenes'][number],
-): SlidePresentation | undefined {
-  if (!scene.presentation) return undefined
-  const nodesById = new Map(scene.nodes.map((node) => [node.id, node]))
-  return {
-    initialStateId: scene.presentation.initialStateId,
-    thumbnailStateId: scene.presentation.thumbnailStateId,
-    states: scene.presentation.states.map((state) => ({
-      id: state.id,
-      name: state.name,
-      description: state.description,
-      backgroundColor: state.backgroundColor,
-      backgroundAssetId: state.backgroundAssetId,
-      layerItemOverrides: Object.fromEntries(
-        Object.entries(state.nodeOverrides).map(([nodeId, override]) => [
-          nodeId,
-          migrateOverride(override, nodesById.get(nodeId)!),
-        ]),
-      ),
-      layerItemOrder: state.nodeOrder ? [...state.nodeOrder] : undefined,
-    })),
-  }
-}
-
-export class ProjectV8MigrationCompatibilityError extends Error {
-  readonly scope: 'scene' | 'global'
-  readonly runtimeId: string
-
-  constructor(scope: 'scene' | 'global', runtimeId: string) {
-    super(
-      `旧版工程中的${scope === 'global' ? '全局' : '场景'}动态内容同时位于其他内容的下方和上方；` +
-      '当前编辑器无法在不改变显示层级的情况下自动迁移。' +
-      '请先在原编辑器中将该动态内容统一到一个层级，再重新导入。',
-    )
-    this.name = 'ProjectV8MigrationCompatibilityError'
-    this.scope = scope
-    this.runtimeId = runtimeId
-  }
-}
-
-export class LegacyComponentPackageMigrationConflictError extends Error {
-  readonly packageId: string
-  readonly versions: readonly string[]
-
-  constructor(
-    packageId: string,
-    versions: readonly string[],
-    reason: 'multiple-versions' | 'conflicting-metadata' = 'multiple-versions',
-  ) {
-    const sortedVersions = [...versions].sort(compareStableStrings)
-    const detail = reason === 'multiple-versions'
-      ? `同时包含多个版本（${sortedVersions.join('、')}）`
-      : `包含多份内容不一致的 ${sortedVersions[0] ?? '未知'} 版本记录`
-    super(
-      `旧工程中的同一个组件${detail}，无法确定应保留哪一份。` +
-      '请先在原编辑器中只保留一份组件，再重新导入。',
-    )
-    this.name = 'LegacyComponentPackageMigrationConflictError'
-    this.packageId = packageId
-    this.versions = sortedVersions
-  }
-}
-
-function migrateComponentPackages(
-  packages: Readonly<Record<string, EmbeddedComponentPackageMeta>>,
-): CourseProjectDocument['componentPackages'] {
-  const grouped = new Map<string, EmbeddedComponentPackageMeta[]>()
-  for (const metadata of Object.values(packages)) {
-    const entries = grouped.get(metadata.packageId) ?? []
-    entries.push(metadata)
-    grouped.set(metadata.packageId, entries)
-  }
-
-  return Object.fromEntries(
-    [...grouped.entries()]
-      .sort(([left], [right]) => compareStableStrings(left, right))
-      .map(([packageId, entries]) => {
-        const versions = [...new Set(entries.map((entry) => entry.version))]
-          .sort(compareStableStrings)
-        if (versions.length > 1) {
-          throw new LegacyComponentPackageMigrationConflictError(packageId, versions)
-        }
-        const [first, ...duplicates] = entries
-        if (!first) throw new Error('Unexpected empty component package group')
-        const canonicalMetadata = JSON.stringify(first)
-        if (duplicates.some((entry) => JSON.stringify(entry) !== canonicalMetadata)) {
-          throw new LegacyComponentPackageMigrationConflictError(
-            packageId,
-            versions,
-            'conflicting-metadata',
-          )
-        }
-        return [packageId, structuredClone(first)]
-      }),
-  )
-}
-
-function legacyRuntimePlane(
-  runtime: ProjectDocument['globalRuntime'],
-  scope: 'scene' | 'global',
-  runtimeId: string,
-): 'underlay' | 'overlay' {
-  if (!runtime) return 'overlay'
-  // Runtime API 2 did not declare plane usage. A conservative source audit is
-  // therefore the only safe migration boundary: ambiguous dual-plane code is
-  // rejected instead of being silently collapsed into one V9 item.
-  const usesUnderlay = /\bunderlay\b/u.test(runtime.source)
-  // Runtime API 2 defines every default root alias as the overlay plane.
-  // Prefer executable source evidence over a potentially stale static-fallback
-  // label; the latter is only used when the source does not name any root.
-  const usesOverlay = /\boverlay\b|\bdomRoot\b|\b(?:dom|phaser)\s*(?:\?\.|\.)\s*root\b/u.test(runtime.source)
-  if (usesUnderlay && usesOverlay) {
-    throw new ProjectV8MigrationCompatibilityError(scope, runtimeId)
-  }
-  if (usesUnderlay) return 'underlay'
-  if (usesOverlay) return 'overlay'
-  return runtime.staticFallback?.layer ?? 'overlay'
-}
-
-function migrateScene(
-  scene: ProjectDocument['scenes'][number],
-  orderOffset = 0,
-): SlideSceneDocument {
-  const reserved = new Set(scene.nodes.map((node) => node.id))
-  const runtimeId = uniqueGeneratedId(`${scene.id}:legacy-runtime`, reserved)
-  const layerItems: LayerItem[] = []
-  const runtimeIsUnderlay = scene.runtime
-    ? legacyRuntimePlane(scene.runtime, 'scene', runtimeId) === 'underlay'
-    : false
-  if (scene.runtime && runtimeIsUnderlay) {
-    layerItems.push(migrateRuntime(
-      scene.runtime,
-      runtimeId,
-      `${scene.name} runtime`,
-      orderOffset,
-    ))
-  }
-  scene.nodes.forEach((node) => layerItems.push(migrateNode(
-    node,
-    orderOffset + layerItems.length,
-  )))
-  if (scene.runtime && !runtimeIsUnderlay) {
-    layerItems.push(migrateRuntime(
-      scene.runtime,
-      runtimeId,
-      `${scene.name} runtime`,
-      orderOffset + layerItems.length,
-    ))
-  }
-  return {
-    id: scene.id,
-    name: scene.name,
-    backgroundColor: scene.backgroundColor,
-    backgroundAssetId: scene.backgroundAssetId,
-    layerItems,
-    presentation: migratePresentation(scene),
-    interactions: structuredClone(scene.interactions),
-  }
-}
-
-function migrateVisibility(visibility: GlobalLayerVisibility): ScopedLayerItem['visibility'] {
-  return {
-    mode: visibility.mode,
-    locationIds: [...visibility.sceneIds],
-  }
-}
-
-/**
- * Pure, explicit Project V8 -> Course Project V9 migration.
- * Existing project/scene/node/state ids are retained. Only the new surface and
- * formerly anonymous runtime items receive deterministic generated ids.
- */
-export function migrateProjectV8ToCourseProjectV9(
-  input: ProjectDocument,
-): CourseProjectDocument {
-  const project = projectDocumentSchema.parse(structuredClone(input))
-  const slideSurfaceId = `slide:${project.id}`
-  const globalReserved = new Set(project.globalLayer.map((entry) => entry.node.id))
-  const globalRuntimeId = uniqueGeneratedId(`${project.id}:legacy-global-runtime`, globalReserved)
-  const globalRuntimePlane = project.globalRuntime
-    ? legacyRuntimePlane(project.globalRuntime, 'global', globalRuntimeId)
-    : undefined
-  const globalLayerItems: ScopedLayerItem[] = []
-  const underlayEntries = project.globalLayer.filter((entry) => entry.layer === 'underlay')
-  const overlayEntries = project.globalLayer.filter((entry) => entry.layer === 'overlay')
-
-  const migrateGlobalEntry = (
-    entry: ProjectDocument['globalLayer'][number],
-    order: number,
-  ): void => {
-    globalLayerItems.push({
-      item: migrateNode(entry.node, order),
-      visibility: migrateVisibility(entry.visibility),
-    })
-  }
-  underlayEntries.forEach((entry, index) => migrateGlobalEntry(entry, index))
-  const sceneOrderOffset = underlayEntries.length + (globalRuntimePlane === 'underlay' ? 1 : 0)
-  if (project.globalRuntime && globalRuntimePlane === 'underlay') {
-    globalLayerItems.push({
-      item: migrateRuntime(
-        project.globalRuntime,
-        globalRuntimeId,
-        'Global runtime',
-        underlayEntries.length,
-      ),
-      visibility: { mode: 'all', locationIds: [] },
-    })
-  }
-  const migratedScenes = project.scenes.map((scene) => migrateScene(scene, sceneOrderOffset))
-  const maximumSceneItems = Math.max(0, ...migratedScenes.map((scene) => scene.layerItems.length))
-  const overlayOrderOffset = sceneOrderOffset + maximumSceneItems + 1
-  overlayEntries.forEach((entry, index) => migrateGlobalEntry(
-    entry,
-    overlayOrderOffset + index,
-  ))
-  if (project.globalRuntime && globalRuntimePlane === 'overlay') {
-    globalLayerItems.push({
-      item: migrateRuntime(
-        project.globalRuntime,
-        globalRuntimeId,
-        'Global runtime',
-        overlayOrderOffset + overlayEntries.length,
-      ),
-      visibility: { mode: 'all', locationIds: [] },
-    })
-  }
-
-  const locations: CourseLocation[] = project.scenes.map((scene) => ({
-    id: scene.id,
-    label: scene.name,
-    kind: 'slide-scene',
-    surfaceId: slideSurfaceId,
-    sceneId: scene.id,
-  }))
-
-  const migrated: CourseProjectDocument = {
-    schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
-    id: project.id,
-    revision: 0,
-    title: project.title,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-    assets: structuredClone(project.assets),
-    componentPackages: migrateComponentPackages(project.componentPackages),
-    designTokens: structuredClone(project.designTokens),
-    media: structuredClone(project.media),
-    playback: structuredClone(project.playback),
-    courseState: [],
-    navigationGuards: [],
-    locations,
-    startLocationId: locations[0]!.id,
-    globalLayerItems,
-    globalInteractions: structuredClone(project.globalInteractions),
-    surfaces: [{
-      id: slideSurfaceId,
-      title: project.title,
-      type: 'slide',
-      canvas: { width: 1280, height: 720 },
-      surfaceLayerItems: [],
-      scenes: migratedScenes,
-    }],
-  }
-
-  return courseProjectDocumentSchema.parse(migrated)
 }

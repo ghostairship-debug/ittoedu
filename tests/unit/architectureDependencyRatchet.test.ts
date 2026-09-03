@@ -626,7 +626,7 @@ describe('r11-055 architecture modularity gate', () => {
     expect(emitter).not.toMatch(/\buseEditorStore\b/)
   })
 
-  it('keeps one Zustand store, V9 history depth, and fail-loud V8 load without a second writer', () => {
+  it('keeps one Zustand store, V9 history depth, and fail-loud V8 load without migration code', () => {
     const zustandFiles = filesUnder('src').filter((path) => (
       /from ['"]zustand['"]/.test(source(path))
     ))
@@ -634,9 +634,8 @@ describe('r11-055 architecture modularity gate', () => {
 
     const srcFiles = filesUnder('src')
     expect(srcFiles.filter((path) => source(path).includes('v9HistoryToStoreHistory'))).toEqual([])
-    expect(srcFiles.filter((path) => source(path).includes('migrateProjectV8ToCourseProjectV9'))).toEqual([
-      'src/shared/courseProjectModel.ts',
-    ])
+    const removedV8MigrationSymbol = ['migrateProjectV8', 'ToCourseProjectV9'].join('')
+    expect(srcFiles.filter((path) => source(path).includes(removedV8MigrationSymbol))).toEqual([])
     expect(existsSync(join(root, 'tests/helpers/projectV8.ts'))).toBe(false)
 
     const kernel = source('src/renderer/store/editorStoreKernel.ts')

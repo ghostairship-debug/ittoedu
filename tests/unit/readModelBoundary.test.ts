@@ -537,7 +537,7 @@ describe('Read model boundary checks', () => {
     expect(panel).not.toMatch(/\bcollectProjectHealth\b/)
   })
 
-  it('product loadProject is fail-loud and V8 migration remains only on the shared model helper', () => {
+  it('product loadProject is fail-loud and the shared model has no V8 migration helper', () => {
     const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
     const lifecycle = readFileSync(
       join(root, 'src/renderer/store/slices/courseLifecycleSlice.ts'),
@@ -546,6 +546,6 @@ describe('Read model boundary checks', () => {
     expect(lifecycle).toMatch(/V8 工程不能打开或导入/)
     expect(lifecycle).not.toMatch(/migrateProjectV8ToCourseProjectV9/)
     const model = readFileSync(join(root, 'src/shared/courseProjectModel.ts'), 'utf8')
-    expect(model).toMatch(/export function migrateProjectV8ToCourseProjectV9/)
+    expect(model).not.toMatch(/migrateProjectV8ToCourseProjectV9/)
   })
 })
