@@ -38,9 +38,6 @@ import App from '@/renderer/App'
 vi.mock('@/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => 'window.__coursePlayerTestBundle = true',
 }))
-vi.mock('@/renderer/export/renderSceneImages', () => ({
-  renderProjectSceneImages: vi.fn(async () => []),
-}))
 vi.mock('@/renderer/ui/Workspace', () => ({
   Workspace: () => null,
 }))

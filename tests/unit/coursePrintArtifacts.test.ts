@@ -654,7 +654,7 @@ describe('r11-042 V9 fixture print facts', () => {
     expect(createPublishedCourseV2PrintCaptureSession).toHaveBeenCalled()
   })
 
-  it('rejects Legacy ExportPayload instead of restoring renderProjectSceneImages', async () => {
+  it('rejects a V8 source instead of restoring the retired raster path', async () => {
     await expect(buildCoursePrintArtifacts({
       project: { schemaVersion: 8, scenes: [] },
       assets: {},

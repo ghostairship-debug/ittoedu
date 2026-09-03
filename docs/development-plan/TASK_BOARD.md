@@ -6,5 +6,5 @@ Tasks: 2 · queued: 1 · blocked: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037aa-slide-workspace-connector-port](tasks/1.1/r11-037aa-slide-workspace-connector-port.md) | queued | Codex | editor-store-history, workspace-properties | `readModelBoundary.test.ts` 在当前基线证实 `SlideWorkspaceConnector.tsx` 仍 import 完整 `EditorState` 并直接从 root Store 组装跨 Owner 状态/动作；将其改为消费命名 selector 与窄 Workspace ports，不改 Slide 编辑、Preview/Try-run 或历史行为。 |
+| [r11-052j-project-health-test-owner-return](tasks/1.1/r11-052j-project-health-test-owner-return.md) | queued | unassigned | none | 将仍直接消费 V8 `projectHealth.ts` 的界面测试迁回正式 Course Project V9 健康诊断 Owner；保持问题摘要、定位与面板展示行为，不再以待删除兼容模块作为测试入口。 |
 | [r11-053-legacy-list](tasks/1.1/r11-053-legacy-list.md) | blocked | Integrator | legacy-inventory | 在 037z 与 052d 完成后的当前树上只运行一次 Legacy inventory 扫描，按 structured output 原子更新唯一台账的明细、计数、当前提交和 schema 强制的 product digest；在台账中形成 `LEG ID / 精确路径 / 当前 consumer=0 / replacement 测试` 删除表，不删除产品文件、不生成第二报告或文件 Hash。 |

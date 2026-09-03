@@ -150,10 +150,6 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => '/* ARCH-4 V9 preflight player bundle */',
 }))
 
-vi.mock('../../src/renderer/export/renderSceneImages', () => ({
-  renderProjectSceneImages: vi.fn(async () => []),
-}))
-
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
   mountPublishedCourseTryRun: publishedPreviewProbe.mount,

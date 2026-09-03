@@ -100,10 +100,6 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => '/* ARCH-4 PDF integration player bundle */',
 }))
 
-vi.mock('../../src/renderer/export/renderSceneImages', () => ({
-  renderProjectSceneImages: sceneRenderers.legacy,
-}))
-
 vi.mock('../../src/renderer/export/playerCapture', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/export/playerCapture')>()
   return {

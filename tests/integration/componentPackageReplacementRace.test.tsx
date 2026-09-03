@@ -76,10 +76,6 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => '/* component replacement race test player bundle */',
 }))
 
-vi.mock('../../src/renderer/export/renderSceneImages', () => ({
-  renderProjectSceneImages: vi.fn(async () => []),
-}))
-
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
   mountPublishedCourseTryRun: vi.fn(async () => ({

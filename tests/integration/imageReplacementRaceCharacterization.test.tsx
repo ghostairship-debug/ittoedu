@@ -80,10 +80,6 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
   loadPlayerBundle: () => '/* VS-01 test player bundle */',
 }))
 
-vi.mock('../../src/renderer/export/renderSceneImages', () => ({
-  renderProjectSceneImages: vi.fn(async () => []),
-}))
-
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
   mountPublishedCourseTryRun: vi.fn(async () => ({
