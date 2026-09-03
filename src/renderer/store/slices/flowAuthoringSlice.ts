@@ -448,7 +448,6 @@ export function applyFlowBackendState(
     selectedNodeIds: [...session.selection.selectedOverlayIds],
     selectedNodeId: session.selection.selectedOverlayIds.at(-1) ?? null,
     editingTextNodeId: null,
-    textEditSession: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
     history: storeHistoryFromSessionLengths(session.history),

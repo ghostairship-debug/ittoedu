@@ -430,7 +430,6 @@ export function applySpatialBackendState(
     selectedNodeIds: [...session.selection.selectionIds],
     selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
     editingTextNodeId: null,
-    textEditSession: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
     history: storeHistoryFromSessionLengths(session.history),

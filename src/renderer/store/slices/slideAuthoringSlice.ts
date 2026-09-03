@@ -256,7 +256,6 @@ export function applyV9BackendState(
     selectedNodeIds: [...snapshot.selection.selectionIds],
     selectedNodeId: snapshot.selection.selectionIds.at(-1) ?? null,
     editingTextNodeId: null,
-    textEditSession: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
     history: storeHistoryFromSessionLengths(backend.getSession().history),

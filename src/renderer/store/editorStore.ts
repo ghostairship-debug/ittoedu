@@ -653,22 +653,6 @@ function loadEditorMode(): EditorMode {
   }
 }
 
-interface TextEditSnapshot {
-  text: string
-  runs: TextRun[]
-  width: number
-  height: number
-}
-
-export interface TextEditSession {
-  scope: EditingScope
-  sceneId: string
-  presentationStateId: string | null
-  nodeId: string
-  source: TextEditSource
-  original: TextEditSnapshot
-  dirtyBefore: boolean
-}
 
 export interface ProjectAudioSettingsPatch {
   defaultMuted?: boolean
@@ -848,7 +832,6 @@ export interface EditorState {
   editorMode: EditorMode
   activeTab: SidebarTab
   editingTextNodeId: string | null
-  textEditSession: TextEditSession | null
   statusMessage: string | null
   errorMessage: string | null
   /** Product Slide authoring backend. Null while Flow or Spatial session is active. */
@@ -1179,20 +1162,11 @@ export function selectHasDirtyCourseContentDraft(state: EditorState): boolean {
   }
   if (state.flowTextEdit && isFlowTextDraftDirty(state.flowTextEdit)) return true
   if (state.v9ContentEdit && isV9SlideContentDraftDirty(state.v9ContentEdit)) return true
-  return Boolean(state.textEditSession)
+  return false
 }
 
 export function selectHasUnsavedCourseChanges(state: EditorState): boolean {
   return state.dirty || selectHasDirtyCourseContentDraft(state)
-}
-
-function commitTextEditSessionState(state: EditorState): EditorState {
-  if (!state.textEditSession) return state
-  return {
-    ...state,
-    editingTextNodeId: null,
-    textEditSession: null,
-  }
 }
 
 export { editableComponentPackageId } from '../components/editableComponentPackage'
@@ -1729,7 +1703,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     },
     patch: (patch) => set(patch),
-    commitOpenTextEdits: () => set(commitTextEditSessionState(get())),
   })
   bindTeacherControllerAuthoringPorts({
     readBackend: () => selectSlideAuthoringBackend(get()),
@@ -1839,7 +1812,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     editorMode: loadEditorMode(),
     activeTab: 'elements',
     editingTextNodeId: null,
-    textEditSession: null,
     statusMessage: '已创建新课件',
     errorMessage: null,
     slideBackend: initialBackend,

@@ -20,7 +20,6 @@ export type EditorShellOwnedState = {
 export type EditorShellPorts = {
   read(): EditorShellOwnedState
   patch(patch: Partial<EditorShellOwnedState>): void
-  commitOpenTextEdits(): void
 }
 
 const EDITOR_MODE_STORAGE_KEY = 'courseware-editor:mode'
@@ -45,7 +44,6 @@ export function createEditorShellSlice(
   return {
     setEditorMode(mode) {
       persistEditorMode(mode)
-      shell.commitOpenTextEdits()
       const current = shell.read()
       const activeTab = mode === 'simple'
         && (
@@ -62,7 +60,6 @@ export function createEditorShellSlice(
       })
     },
     setActiveTab(tab) {
-      shell.commitOpenTextEdits()
       const mode = shell.read().editorMode
       const activeTab = mode === 'simple'
         && (tab === 'components' || tab === 'automation' || tab === 'developer')

@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037a-dead-text-edit-mirror](tasks/1.1/r11-037a-dead-text-edit-mirror.md) | queued | — | editor-store-history | 根级 `textEditSession` 镜像从不保存非 null 值，且三 Surface 已各有其文字草稿机制；删除根镜像及多余兜底。 |
+| [r11-037b-asset-mirror-and-root-forwards](tasks/1.1/r11-037b-asset-mirror-and-root-forwards.md) | queued | — | editor-store-history | 根级 `assetFiles` 镜像是冗余字段，素材真实来源是 sidecar；删除根级 `assetFiles` 镜像、无用局部函数和 root re-export，不碰历史事务中的 `HistoryResourceState.assetFiles`。 |

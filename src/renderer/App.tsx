@@ -91,7 +91,6 @@ export default function App() {
   const v9ContentEdit = useEditorStore((state) => state.v9ContentEdit)
   const spatialContentEdit = useEditorStore((state) => state.spatialContentEdit)
   const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
-  const textEditSession = useEditorStore((state) => state.textEditSession)
   const selectedNode = useEditorStore(selectSelectedNode)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -233,7 +232,7 @@ export default function App() {
     slideDraftTrigger: v9ContentEdit,
     spatialDraftTrigger: spatialContentEdit,
     flowDraftTrigger: flowTextEdit,
-    textEditTrigger: textEditSession,
+    textEditTrigger: undefined,
   })
 
   const courseDelivery = useCourseDelivery({

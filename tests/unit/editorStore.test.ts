@@ -1522,7 +1522,6 @@ describe('node operations', () => {
     })
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().dirty).toBe(false)
-    expect(useEditorStore.getState().textEditSession).toBeNull()
   })
 
   it('deterministically commits text before switching nodes or scenes', () => {
@@ -1543,7 +1542,6 @@ describe('node operations', () => {
       historyBeforeNodeSwitch + 1,
     )
     expect(activeScene().nodes[0]).toMatchObject({ text: '切换后仍保留' })
-    expect(useEditorStore.getState().textEditSession).toBeNull()
 
     store.addScene()
     const secondSceneId = useEditorStore.getState().activeSceneId
@@ -1556,7 +1554,6 @@ describe('node operations', () => {
     expect(
       selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0],
     ).toMatchObject({ text: '切场景前提交' })
-    expect(useEditorStore.getState().textEditSession).toBeNull()
   })
 
   it('commits the current text draft before save acknowledgement', () => {
@@ -1577,7 +1574,6 @@ describe('node operations', () => {
 
     expect(activeScene().nodes[0]).toMatchObject({ text: '保存时的当前文字' })
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
-    expect(useEditorStore.getState().textEditSession).toBeNull()
     expect(useEditorStore.getState().v9ContentEdit).toBeNull()
     expect(useEditorStore.getState().dirty).toBe(true)
 
