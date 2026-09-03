@@ -5,58 +5,76 @@
 - Inventory access: `read`
 - Preservation: PM-01, PM-03–PM-15, PM-17
 
+## 2026-09-03 执行版（基于 HEAD bb1f848）
+
+通用规则、术语与交接模板见 [执行者指南](EXECUTION_GUIDE.md)。原规格的模块迁移步骤已经完成，不再执行；下面只保留剩余缺陷。
+
 ## Outcome / current evidence
 
-`App.tsx` 的媒体导入/替换、Component 包导入/替换和全局键盘 action 分别进入 `useMediaImport`、`useComponentLibrary`、`useEditorKeyboardRouter`。每个模块捕获 canonical target/revision 并调用现有 document+resource transaction 或统一 action snapshot，不暴露 raw Store/module bag。
+已完成：`src/renderer/app/useMediaImport.ts`（562 行）、`src/renderer/app/useComponentLibrary.ts`（488 行）、`src/renderer/app/useEditorKeyboardRouter.ts`（109 行）已从 `App.tsx` 分出并接线。`useComponentLibrary` 在文件读取与校验之后、提交之前都有 `assertFreshIdentity`（:213、:266、:385），本节点只核对不修改。
+
+剩余缺陷全部在 `useMediaImport.ts`：
+
+1. **解码之后没有再核对。** 三条导入路径都在文件对话框返回后核对了 identity（图片 :344、声音 :430、视频 :482），随后 `await prepareSelection(...)` 解码（:345、:431、:483），解码结束直接提交：`tryInjectCandidateMedia` → `commitCandidateMedia`（:374、:441、:512）、`commitMediaBatchImport` → `placeImageNodes`/`placeVideoNodes`（:391、:529）、`importSounds`（:455）。这些提交函数不携带目标修订，解码期间的文档变化会被写进新文档。`replace` 路径在 `readImageDimensions`（:316）之后也没有再核对，只是 `replaceImageAtTarget` 的 target 自带修订号才没有写错。
+2. **identity 缺少位置维度。** `MediaImportIdentity`（:32–35）只有 `projectId` 与 `revision`；`App.tsx:68–72` 的 `captureCourseIdentity` 也只返回这两项。用户在导入进行中切换到另一页时修订号不变，`add` 模式会把素材放到新页面。
 
 ## Read first
 
-- `src/renderer/App.tsx`
-- `src/renderer/media/`
-- `src/renderer/components/`
-- `src/renderer/authoring/editorTransaction.ts`
-- `src/renderer/store/editorStore.ts`
-- `tests/unit/editorActionRouting.test.ts`
+- `src/renderer/app/useMediaImport.ts`（全文）
+- `src/renderer/App.tsx:60–75`（`captureCourseIdentity`）与 `:285–300`（`useMediaImport` 的 ports 实现）
+- `src/renderer/store/editorStore.ts:2123–2128`（`selectActiveCourseLocationId`）
+- `src/renderer/app/useComponentLibrary.ts:110–140`（只读，作为已闭合的对照）
 
 ## Exact targets
 
-| New module | Owns | Does not own |
-|---|---|---|
-| `src/renderer/app/useMediaImport.ts` | choose/read/import/replace request 与 canonical transaction 编排 | asset hash/dedupe 规则副本、Surface placement |
-| `src/renderer/app/useComponentLibrary.ts` | package import/validate/register/replace request 编排 | Catalog/Package 领域实现、Surface carrier |
-| `src/renderer/app/useEditorKeyboardRouter.ts` | Delete/Copy/Paste/Duplicate/Nudge/Undo/Redo action snapshot 与焦点守卫 | Surface command 实现、IME draft、raw key side effect |
-| `App.tsx` | 只把 UI 事件交给三个 hook | 媒体/组件/键盘 Surface 分支 |
+| 位置 | 改动 |
+|---|---|
+| `useMediaImport.ts:32–35` `MediaImportIdentity` | 新增 `readonly locationId: string | null` |
+| `:168–174` `sameIdentity` | 同时比较 `projectId`、`revision`、`locationId` |
+| `selectAndImportImage` `replace` 分支 | 在 `readImageDimensions`（:316）之后、`replaceImageAtTarget`（:318）之前插入 `assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换图片')` |
+| `selectAndImportImage` 批量分支 | 在 `prepareSelection`（:345–354）之后立刻插入 `assertFreshIdentity(started, portsRef.current.captureIdentity(), '图片批量入库已取消')`，位于 `importIntoCapturedLibrary`（:362）、`tryInjectCandidateMedia`（:374）与 `commitMediaBatchImport`（:391）之前 |
+| `selectAndImportAudio` | 在 `prepareSelection`（:431–440）之后立刻插入 `assertFreshIdentity(started, portsRef.current.captureIdentity(), '声音批量入库已取消')` |
+| `selectAndImportVideo` | 在 `prepareSelection`（:483–492）之后立刻插入 `assertFreshIdentity(started, portsRef.current.captureIdentity(), '视频批量入库已取消')` |
+| `src/renderer/App.tsx:68–72` `captureCourseIdentity` | 返回值增加 `locationId: selectActiveCourseLocationId(state)`；该函数同时被 `useComponentLibrary` 的 ports 使用，多出的字段与 `ComponentLibraryIdentity` 兼容，不改组件库 |
+
+允许新建：执行卡指定的 hook 级测试文件（放在 `tests/unit/` 下，文件名以执行卡为准）（红→绿测试）。不允许新建其他文件、类型、函数。
 
 ## Write scope
 
-只允许修改 `src/renderer/App.tsx`、现有 media/component/action routing adapters，并新增三个 Exact target；只允许更新 `tests/unit/assetTransactions.test.ts`、`tests/unit/editorActionRouting.test.ts`、`tests/integration/mixedCrossSurfaceHistory.test.tsx`、`tests/unit/readModelBoundary.test.ts`。禁止修改 Schema、Catalog/asset identity 语义、Surface command、Main file IPC、共享 inventory 或建立通用 app service container。
+只允许修改 `src/renderer/app/useMediaImport.ts`、`src/renderer/App.tsx`（仅 `captureCourseIdentity` 与其 import），新建 执行卡指定的 hook 级测试文件（放在 `tests/unit/` 下，文件名以执行卡为准）。禁止修改 Store、`assetManager.ts`、`mediaBatch.ts`、`v9AssetAdapter.ts`、`useComponentLibrary.ts`、`useEditorKeyboardRouter.ts`、共享 inventory。
 
 ## Execution
 
-1. 固定素材导入/替换/孤立清理、Component 包导入/替换/回滚，以及 Delete/Copy/Paste/Duplicate/Nudge/Undo/Redo 的焦点、IME、Mixed 与 History 行为。
-2. 为每个 hook 定义最小 ports：dialog/read bytes、canonical target snapshot、domain validate/plan、transaction commit、feedback；不传完整 Store/Preload API。
-3. 先迁 media，再迁 component；捕获操作开始时 target/revision，读取/校验完成后重验，document+resource 同成同败。
-4. 迁 keyboard router；它只做事件规范化、焦点/IME guard 与 action snapshot，真正 Surface command 仍由正式 owner 执行。
-5. 每迁一组，在同一提交删除 App 中对应 imports/state/effects/handlers/switch；收紧 boundary test。
+1. 先写红测试 执行卡指定的 hook 级测试文件（放在 `tests/unit/` 下，文件名以执行卡为准），用 `renderHook` 与全部为 `vi.fn` 的假 ports；`vi.mock('../../src/renderer/project/assetManager', ...)` 用 `importOriginal` 保留其余导出，只把 `readImageDimensions` 替换为返回一个手动 deferred 的函数。共用 arrange：`identity` 为可变对象，初值 `{ projectId: 'p1', revision: 1, locationId: 'L1' }`，`captureIdentity` 返回它的拷贝；`captureLibraryTarget` 返回 `{ projectId: 'p1', documentRevision: 1 }`；`readMediaLibrarySnapshot` 返回 `{ assets: {}, files: {} }`；`readCandidateMediaContext` 返回 `{ assets: {}, sidecar: emptyCourseAssetSidecar() }`；`selectImages` 返回 `{ accepted: [{ name: 'a.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), sha256: 'h1' }], rejected: [] }`；`runBusy` 为 `async (op) => { try { return await op() } catch (error) { errors.push(error); return undefined } }`；`commitCandidateMedia`、`placeImageNodes`、`importAssetsAtTarget` 为 `vi.fn`。
+   - `describe('useMediaImport stale results')`
+   - `it('does not commit an image batch when the document changes during decoding')`。act：调用 `selectAndImportImage('add', { x: 10, y: 10 })` 不 await；等待 `readImageDimensions` 被调用；把 `identity.revision` 改为 2；resolve deferred 为 `{ width: 10, height: 10 }`；await 调用结果。assert：`commitCandidateMedia`、`placeImageNodes`、`importAssetsAtTarget` 调用次数均为 0；`errors[0]` 的 message 或 title 含 `工程已发生变化`。
+   - `it('does not commit when the active location changes during decoding')`。同上，但只把 `identity.locationId` 改为 `'L2'`，其余不变；assert 相同。
+   运行 `npx vitest run <执行卡指定的测试文件>`，两条必须失败，失败点均是 `commitCandidateMedia` 被调用 1 次。粘贴输出。
+2. 按 Exact targets 修改 `useMediaImport.ts` 与 `App.tsx`。
+3. 再运行第 1 步命令，两条通过；粘贴。
+4. `npm run typecheck`。
+5. 运行 Focused validation 第一条。
+6. 结构事实：`grep -c "assertFreshIdentity(" src/renderer/app/useMediaImport.ts` 为 8（1 处定义 + 7 处调用）；`grep -cE "left\.locationId === right\.locationId" src/renderer/app/useMediaImport.ts` 为 1；`grep -c "locationId: selectActiveCourseLocationId" src/renderer/App.tsx` 为 1；`grep -cE "useEditorStore|from '\.\./store/" src/renderer/app/useMediaImport.ts` 为 0；`grep -c "assertFreshIdentity(" src/renderer/app/useComponentLibrary.ts` 仍为 4（只读核对，值变化即停止）。
 
 ## Stop conditions
 
-- 需要改变 asset/component identity、Surface carrier、键盘可见行为或 IPC wire。
-- hook 只能直接调用 `useEditorStore.getState/setState` 或复制领域 planner。
-- App 与 hook 同时保留相同导入/键盘分支。
+- 第 1 步的两条测试有任一在修改前就通过。
+- 修复需要改 Store 动作签名、`assetManager.ts`、`mediaBatch.ts` 或组件库 hook。
+- 现有 `assetTransactions.test.ts`、`courseMediaLibraryImportVerticalSlice.test.ts`、`imageReplacementVerticalSlice.test.ts` 任一变红。
 
 ## Acceptance
 
-- 三个 hook 不 import root Store、不返回通用 module bag；`App.tsx` 不保留媒体/组件 planner 或按 Surface 分叉的键盘业务规则。
-- 媒体与组件捕获 canonical target/revision，通过唯一 document+resource transaction 提交；stale/cancel/failure 零部分写入，一次 Undo 精确恢复。
-- 键盘焦点/IME、Slide/Flow/Spatial/Mixed 的 Delete/Copy/Paste/Duplicate/Nudge/Undo/Redo 行为不变。
-- 原 App 迁出职责真实删除，无 facade/re-export/双 handler。
+- 两条新测试有完整的红→绿证据。
+- 三条导入路径与替换路径在每个 `await` 之后、每次提交之前都核对包含位置的 identity；不一致时零写入并报可操作错误。
+- PM-13 的 focused 测试通过；组件库与键盘路由文件无改动（`git show --stat` 证明）。
 
 ## Focused validation
 
-- `npx vitest run tests/unit/assetTransactions.test.ts tests/unit/editorActionRouting.test.ts tests/integration/mixedCrossSurfaceHistory.test.tsx tests/unit/readModelBoundary.test.ts`
+- `npx vitest run tests/unit/assetTransactions.test.ts tests/unit/editorActionRouting.test.ts tests/integration/mixedCrossSurfaceHistory.test.tsx tests/unit/readModelBoundary.test.ts tests/integration/courseMediaLibraryImportVerticalSlice.test.ts tests/integration/imageReplacementVerticalSlice.test.ts`
 - `npm run typecheck`
+
+新增测试文件随本节点提交后，把它追加到上面第一条命令末尾。
 
 ## Rollback / handoff
 
-按 media、component 或 keyboard 的完整纵切回滚；不得保留新旧两条提交路径。交接列出缺少的窄 domain/desktop port 与失败断言。
+单一提交，整体回滚。交接按指南第 6 节格式。

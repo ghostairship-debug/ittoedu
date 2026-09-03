@@ -24,3 +24,4 @@
 - 给较弱模型或跨会话交接时，必须写出当前证据、允许路径、越界停止条件、确定结果和精确检查；不增加风险等级、预算、Reviewer、Ready checklist 或 Evidence 表单。
 - 文件放在 `docs/development-plan/tasks/<wave>/<task-id>.md`，task-id 使用小写稳定 ID。
 - 任务板由 `npm run generate:task-board` 生成，只在任务集合实质变化时更新。
+- 1.1 执行卡的字段内容规范（红→绿证据、结构事实查法、交接模板与术语表）见 [1.1 执行者指南](roadmap/1.1/EXECUTION_GUIDE.md)。

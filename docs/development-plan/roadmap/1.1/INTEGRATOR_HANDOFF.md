@@ -14,20 +14,24 @@
 - `r11-029` 已通过 10 个聚焦测试文件共 127 项测试、`typecheck`、scoped diff check 与精确负边界查询。根 `Workspace.tsx` 只消费 exactly-one discriminated route；Flow/Spatial connector 使用命名 selector 与 typed port；Slide leaf 只接收同一时点 projected snapshot 和分组 ports；module-global bind、live Store facade 与 Store→UI 反向依赖均为零。
 - r11-029 任务卡已按协议删除，任务板重新生成后为 0 项；本次文档收口后的 `check:development-roadmap` 与文档 scoped diff check 通过。
 - **1.1 未完成。** 按用户要求，当前检查点立即暂停；不创建下一任务卡，不 commit，不 tag，不 release。
+- 2026-09-03 重基核实：检查点提交 `bb1f848` 上 `check:development-roadmap` 通过，但 `check:preservation` 因 PM-08 的 `globalLayerUi.test.tsx` 夹具失败，`check:legacy-inventory` 报 7 项未登记观察；三道门中两道为红。剩余节点已按 [执行者指南](EXECUTION_GUIDE.md) 改写为执行版，并在 `docs/development-plan/tasks/1.1/` 建首批卡。
 
 本轮可复用的直接证据：`r11-042` 为 8 个文件 / 94 项测试并通过 `typecheck`，覆盖真实 Spatial host capture、Flow semantic print 与共享 producer facts；`r11-043` 为 6 个文件 / 104 项测试并通过 `typecheck`、capability check 与真实在线 E2E，完成 producer Owner 迁移；`r11-033` 为 8 个文件 / 81 项测试并通过 `typecheck`，闭合 Surface owner remount、精确 origin network lease 与 Slide authoring base/named-state 保留。证据只在相关实现、依赖、fixture 与验证定义未变化时复用。
 
 恢复后的剩余 failure-owner 边界如下：
 
-| Failure owner | 必须先闭合的真实阻断 |
+| Failure owner | 2026-09-03 重基后的状态 |
 |---|---|
-| `r11-025` / `r11-037` | 裁定 history 归属冲突：025 只清理其规格内的 Surface 残留，不抢先建立、复制或双写 037 的 Core history owner。 |
-| `r11-032` | Player V2-only 入口收口前，Flow-only aggregate/Builder 无效输入必须 fail loud，并补齐与该输入对应的 mount/destroy 等生命周期门；不保留 Legacy 入口兜底。 |
-| `r11-034` | App project lifecycle 的异步 load/save/recovery 需完整携带并核对 session generation，迟到结果不能写入新会话。 |
-| `r11-035` | preflight 到 emit 必须使用同一 canonical snapshot/identity，stale finding 不导航当前新文档；单 HTML 大文件改为 Web Package 时必须按新 target 重做 preflight。 |
-| `r11-036` | media import/replace 的异步结果仍有 stale-target 可写错工程/页面的缺口，因此重开；失败、取消与迟到结果必须零工程写入。 |
+| `r11-029` 返工卡 | 修复 PM-08 夹具（`globalLayerUi.test.tsx` retained-spatial-path）与两处新增 LEG-011 import（`spatialAuthoringIntents.ts`、`SlideWorkspaceConnector.tsx`）。 |
+| `r11-025` | 以证据闭合；history 镜像残留归 `r11-037` W1。 |
+| `r11-032` | 只剩 `playerCapture.ts` 的 PlayerApp 旧捕获函数与类型引用；Flow-only 项待 Integrator 给出失败测试，否则作废。 |
+| `r11-034` | `sameProjectIdentity` 改为比较 `projectId` 与 hook 自有的 `epoch`；两条红→绿测试。 |
+| `r11-035` | 四个 emit 使用预检时的 `pending.snapshot`；过期 finding 不导航；大文件改网页包走 `exportCourse('web-package')`；三条红→绿测试。 |
+| `r11-036` | 解码后再核对 identity 且 identity 加入 `locationId`；两条红→绿测试。 |
+| `r11-037` | 拆为 W1–W9，W1–W7 符号表已钉死。 |
+| `r11-052` | 按当前测试树重算为 A–E；旧渲染器簇六个模块需由 `r11-053` 先登记为 targets。 |
 
-暂停后恢复的唯一顺序是：`r11-025 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037 → r11-052 → r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`。`r11-055` 的第一次执行是 pre-delete 结构门，第二次是 054 删除后在未改弱的同一门上复验；053/054 仍只能消费届时固定候选的新 reconciliation。
+暂停后恢复的唯一顺序是：`r11-029 返工卡 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037（W1–W9）→ r11-052（A–E）→ r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`。`r11-055` 的第一次执行是 pre-delete 结构门，第二次是 054 删除后在未改弱的同一门上复验；053/054 仍只能消费届时固定候选的新 reconciliation。
 
 ---
 

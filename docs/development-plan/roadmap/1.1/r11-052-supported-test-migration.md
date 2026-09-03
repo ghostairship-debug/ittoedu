@@ -5,110 +5,72 @@
 - Inventory access: read
 - Preservation: PM-02–PM-28
 
+## 2026-09-03 执行版（基于 HEAD bb1f848）
+
+通用规则、术语与交接模板见 [执行者指南](EXECUTION_GUIDE.md)。原规格表中的多数文件已在此前提交删除（`tests/helpers/projectV8.ts`、`courseProjectMigration.test.ts`、单元级 `player-payload.test.ts`、`courseRuntimeKernel*.test.ts`、`runtimeExport.test.ts`、`publishedLesson.test.ts`、`webPackageExport.test.ts`、`playerAppLayerOrder.test.ts`、`playerAuthoringHost.test.ts`），它们是历史处置，不恢复、不作为 Read first。下面的表按当前 `tests/**` 重算。
+
+仍只允许三类分类：`supported-behavior-migrate`、`v8-success-delete`、`v8-rejection-retain`。执行者只判断一个断言属于哪一类和对应哪个 V2 替代用例，不得重新决定 V8 是受支持格式，也不得删除仍受支持的行为。
+
 ## Outcome / current evidence
 
-旧 Player/Export/Runtime/Archive tests 中仍代表受支持行为的断言改用 r11-050 的 V9/V2 fixture；只刻画 V8 成功路径的 tests/helper 被删除。V8 fail-loud 拒绝仍有独立最小测试。
-
-## Integrator audit / reopened（2026-09-03）
-
-r11-051 的 V9 save wrapper 复核仍成立，已删除的 `tests/helpers/projectV8.ts` 和大批 Legacy success suites 不得恢复；现有 replacement tests 与 `npm run test:product` 全绿也是可保留证据。但本节点尚未闭合：
-
-- `playerSceneMotionLifecycle.test.ts` 与 `playerSceneComponentEventBuffer.test.ts` 仍直接构造 `schemaVersion: 8` 的 `ProjectDocument` 和旧 `ExportPayload`，验证 Legacy `PlayerScene` 成功路径。
-- `playerSceneAnimationMode.test.ts` 仍直接验证拟删除 `PlayerScene` 的成功实现；即使不命中当前 token，也必须判断其行为是否已由 CoursePlayer/Published V2 replacement 覆盖。
-- PM-15 仍引用已删除的 `courseRuntimeKernel*.test.ts`，PM-21 仍引用已删除的 `webPackageExport.test.ts`；`check:preservation` 因此为 `malformed-map`。
-- 当前 scanner 自身不完备，Exact targets 不能再被视为封闭全集。执行时必须用修正后的 r11-002 scanner 与直接 import/dependency closure 补齐全部旧 PlayerScene/CourseRuntimeKernel/PlayerApp/V8 type success tests。
-
-仍只允许三类：`supported-behavior-migrate`、`v8-success-delete`、`v8-rejection-retain`。已删除旧 test 是历史处置记录，不是 Read first 路径；若 replacement 证据不等价，返回对应产品 owner，不恢复旧成功路径。r11-001 已在 r11-002 前建立当前有效 map/matrix；本节点只要改变测试路径、命令或 input closure，就必须在同一变更把逐 case `old test → classification → V9/V2 replacement → PM ID` 映射写回 preservation map/matrix，并保持两道 checker 为绿。正常 evidence 迁移不再返回 r11-001；只有 preservation checker/schema 本身需要改变时才停止并返回该 Owner。
+- `check:preservation` 的 map/matrix 结构已有效（当前只因 PM-08 的一条行为测试失败，由 r11-029 返工卡处理），Wave E 只需保持两道门为绿。
+- 旧渲染器簇 `src/player/renderNode.ts`、`renderVideoNode.ts`、`renderTeacherController.ts`、`ComponentEventMountBuffer.ts`、`NodeMotionDirector.ts`、`sceneAssets.ts` 在 src 中只被 `PlayerScene.ts` 链路引用（对每个文件运行 `grep -rlE "/NAME'" src --include="*.ts"` 排除自身后只剩簇内文件与 `PlayerScene.ts`）；V2 Slide 绘制在 `src/player/surfaces/slide/publishedNativeRendering.ts`，不 import 它们。因此这些模块是随 `PlayerScene` 一起死亡的旧渲染器，但它们**不在**台账 LEG-002 的 targets 中；r11-053 必须先把它们登记为 `file-absent` targets，r11-054 才能删除。本节点只处理它们的测试。
+- `tests/unit/playerCapture.test.ts` 的 PlayerApp stub 成功用例由 r11-032 执行卡处理；本节点只核对 `grep -c "PlayerApp" tests/unit/playerCapture.test.ts` 为 0。
 
 ## Read first
 
-- `scripts/check-legacy-consumers.ts`
-- `docs/development-plan/inventories/legacy-consumers.json`
-- `tests/unit/playerSceneMotionLifecycle.test.ts`
-- `tests/unit/playerSceneComponentEventBuffer.test.ts`
-- `tests/unit/playerSceneAnimationMode.test.ts`
-- `tests/unit/playerCapture.test.ts`
-- `tests/unit/publishedCourseProtocol.test.ts`
-- `tests/unit/publishedCourseState.test.ts`
-- `tests/unit/publishedCourseNavigation.test.ts`
-- `tests/unit/coursePackageExport.test.ts`
-- `docs/development-plan/baselines/v1.1-preservation-map.json`
+- `tests/unit/publishedCourseState.test.ts`、`tests/unit/publishedCourseNavigation.test.ts`、`tests/integration/publishedRuntimeSlideHostIntegration.test.ts`、`tests/unit/slidePublishedNativeText.test.ts`（V2 替代用例的现有覆盖）
+- 该波表中列出的旧测试文件
+- `docs/development-plan/baselines/v1.1-preservation-map.json` 与 `docs/development-plan/roadmap/PRESERVATION_MATRIX.md`（只在 Wave E 读 PM-07 相关行）
 
 ## Exact targets
 
-| Legacy consumer | Fixed classification | Replacement / retained assertion |
+| 文件 | 当前事实 | 固定处理 |
 |---|---|---|
-| `tests/helpers/projectV8.ts` | delete after every import below is zero | 不建立 V9 同名万能 helper；使用 r11-050 fixed sources |
-| `projectArchive.test.ts`, `asyncArchive.test.ts` 中 r11-051 未处理的剩余 case | r11-051 已迁走两条 `saveProject` / `saveProjectAsync` wrapper 断言；本任务迁移其余 generic zip/security/async assertions，再删除 V8 success suites | `courseProjectArchive.test.ts`；不得重新 import `saveProject.ts` |
-| `componentContentIntegrity.test.ts` | migrate input, retain assertions | V9 archive + component bytes |
-| `courseProjectArchive.test.ts`, `editorStore.test.ts`, `projectFormatIsolation.test.ts`, `validateProject.test.ts` | retain only fail-loud V8 rejection via minimal raw bytes | unsupported 与 corrupted 分类不变 |
-| `courseProjectMigration.test.ts` | delete V8 success/migration cases；若含现行 rejection，迁到 format-isolation target | 产品不导入 V8 |
-| `formulaNode.test.ts`, `textEmphasis.test.ts` | migrate supported round-trip assertions to V9 archive, delete V8 archive setup | 文字/公式语义不减 |
-| `player-payload.test.ts` | delete Legacy payload success；保留最小旧 payload rejection | `publishedCourseProtocol.test.ts` / V2 success |
-| `courseRuntimeKernel.test.ts`, `courseRuntimeKernelLifecycle.test.ts` | migrate supported state/navigation/lifecycle assertions, then delete old-kernel-only cases | `publishedCourseState.test.ts`, `publishedCourseNavigation.test.ts` |
-| `export.test.ts`, `runtimeExport.test.ts` | split-migrate supported HTML/PPTX/PDF/dynamic assertions | `coursePackageExport.test.ts`, `coursePptxExport.test.ts`, `coursePrintArtifacts.test.ts` |
-| `publishedLesson.test.ts` | migrate asset closure/Unicode/published behavior, delete Legacy PublishedLesson success | `buildPublishedCourseV2.test.ts`, `publishedCourseProtocol.test.ts` |
-| `webPackageExport.test.ts` | migrate supported package assertions, delete Legacy payload cases | `coursePackageExport.test.ts` |
-| `playerAppLayerOrder.test.ts`, `playerAuthoringHost.test.ts` | migrate still-supported plane/host/lifecycle assertions onto CoursePlayer / V2 session; delete `new PlayerApp` + `createProject` success | `publishedCourseProtocol.test.ts` / `publishedCourseNavigation.test.ts` / 现有 CoursePlayer tests；不得为迁测试复活 `PlayerApp.ts` |
-| `playerCapture.test.ts` | keep fail-loud old-payload rejection via minimal raw bytes，不在 import/type/assertion 文案保留旧 identifier；migrate remaining capture timing/size assertions off legacy type stub | 现行 `buildPublishedCourseV2Payload` 路径；删除只证明旧 Player stub 的 success |
-| `bundledFontExportEmbedding.test.ts`, `nodeExportHostFontWiring.test.ts`, `asyncWebPackage.test.ts` | migrate supported HTML/Web/font assertions onto `buildPublishedCourseStandaloneHtml` / `buildPublishedCourseWebPackageAsync`；delete `buildStandaloneHtml` / `buildWebPackageFromProject*` / `PublishedLessonPayload` success | `coursePackageExport.test.ts` |
-| `playerSceneMotionLifecycle.test.ts`, `playerSceneComponentEventBuffer.test.ts`, `playerSceneAnimationMode.test.ts` | migrate still-supported motion/event-buffer/transition semantics to CoursePlayer/Published V2 host；delete Legacy `PlayerScene` success setup | `publishedCourseState.test.ts`, `publishedCourseNavigation.test.ts` 与现有 V2 runtime/host tests；若缺等价行为退回 Player owner |
-| `componentEventMountBuffer.test.ts`, `formulaCrossSurface.test.tsx`, `nodeMotionDirector.test.ts`, `playerComponentV4Render.test.ts`, `playerSceneAssets.test.ts`, `renderVideoNode.test.ts`, `teacherControllerActions.test.ts` | 对 scanner/dependency closure 发现的旧 renderer success 按行为逐 case 迁移或删除 | 对应 Published V2 Native/Runtime/Component/teacher-controller 最近层测试；不得继续直接 import 旧 renderer |
-| e2e 中旧 Player bridge 类型/调用 | supported behavior 迁到 Published V2/CoursePlayer fixture；旧 bridge-only setup 删除 | 现有 Published course e2e；不得为类型方便保留 Legacy module |
-| 修正后的 r11-002 scanner 或直接 dependency closure 新发现的 test | 按同一三分类逐 case 处理，不因“表外”跳过 | 最近的 V9/V2 product owner + 同层 replacement test |
-
-表中 classification 已固定。执行者只判断一个断言属于表中哪条 replacement，不得重新决定 V8 是受支持格式或删除仍受支持行为。
+| `tests/unit/playerSceneMotionLifecycle.test.ts`（5 个 `it`）、`tests/unit/playerSceneComponentEventBuffer.test.ts`（3 个 `it`）、`tests/unit/playerSceneAnimationMode.test.ts`（2 个 `it`） | 直接 `new PlayerScene`，构造 `schemaVersion: 8` 的 `ProjectDocument` 与 `ExportPayload` 成功路径 | 逐 `it`：行为已被 V2 host 测试覆盖 → `v8-success-delete`，交接写明覆盖它的 V2 `it` 名；未覆盖但仍受支持 → `supported-behavior-migrate` 到上面四个 V2 文件之一；无法判断 → 停止 |
+| `tests/unit/componentEventMountBuffer.test.ts`、`tests/unit/formulaCrossSurface.test.tsx`、`tests/unit/nodeMotionDirector.test.ts`、`tests/unit/playerComponentV4Render.test.ts`、`tests/unit/renderVideoNode.test.ts`、`tests/unit/teacherControllerActions.test.ts`、`tests/unit/playerSceneAssets.test.ts` | import 旧渲染器簇 | 逐 `it` 三分类。`renderVideoNode.test.ts` 与 `formulaCrossSurface.test.tsx` 是 PM-07 的证据文件，Wave E 必须把 PM-07 改绑到 V2 替代测试（公式画布用 `publishedCourseNavigation.test.ts` 的 "paints slide formulas as math canvases" 用例；视频与文字用 `slidePublishedNativeText.test.ts` 或迁入的新用例）；不得删掉 PM-07 行为 |
+| `tests/unit/componentPackageLifecycle.test.ts`（`ProjectDocument` ×2）、`tests/unit/informationRelease.test.ts`（×3）、`tests/unit/projectDiagnostics.test.ts`（×2）、`tests/unit/projectHealth.test.ts`（×1）、`tests/unit/coursePrintArtifacts.test.ts`（`ExportPayload` ×1）、`tests/unit/playerComponentV4Render.test.ts`（`ExportPayload` ×3） | 旧类型 token 命中，成功路径还是拒绝断言未核实 | 逐处判定：拒绝断言 → `v8-rejection-retain`，只保留 fail-loud 所需的最小字节或对象，不保留旧类型 import；成功路径 → 迁移或删除 |
+| `schemaVersion: 8` 命中：`tests/fixtures/course-project-v9/rejection.ts`、`tests/integration/architectureBaselineFlows.test.tsx`、`tests/unit/buildPublishedCourseV2.test.ts`、`tests/unit/coursePptxExport.test.ts`、`tests/unit/coursePrintArtifacts.test.ts`、`tests/unit/courseProjectArchive.test.ts`、`tests/unit/courseProjectRoundTrip.test.ts`、`tests/unit/courseProjectTopLevelFields.test.ts`、`tests/unit/legacyInventoryChecker.test.ts`、`tests/unit/projectFormatIsolation.test.ts`、`tests/unit/publishedCourseProtocol.test.ts`、`tests/unit/renderPptxComponentSnapshots.test.ts`、`tests/unit/renderPptxRuntimeSnapshots.test.ts`、`tests/unit/validateProject.test.ts` | 多数是拒绝夹具 | 逐处确认为 `v8-rejection-retain`；任何用它构造成功路径的 → 迁移或删除 |
+| `tests/e2e/window.d.ts` 中 `__H5_LESSON_PLAYER__` 的 `getCurrentSceneIndex`、`goToScene`、`replayScene`、`waitForCaptureReady` | 类型声明 | 以 `src/player/publishedCoursePresenter.ts` 是否仍暴露这些方法为准：仍暴露 → 保留；不再暴露 → 删除并同步使用它们的 e2e spec |
+| `tests/unit/nodeExportHostFontWiring.test.ts:38`、`tests/integration/courseExportPreflightApp.test.tsx:339` 中的 `buildStandaloneHtml` 字样 | 禁止性正则 | 保留；属于 r11-002 扫描器表示法问题，交 Integrator，不在本节点处理 |
 
 ## Execution waves
 
-每波同一变更内完成 migrate+delete 旧 success，跑该波 focused tests 后再开下一波。已删除的旧文件不得恢复，只复核其 replacement 与证据闭包。
+每波一张执行卡；同一波内先完成 migrate 再删除旧成功用例，跑该波命令后才交接。
 
-| Wave | Files | Focused validation |
+| Wave | 内容 | Focused validation |
 |---|---|---|
-| A Residual Player/Runtime | 三个 `playerScene*`、`componentEventMountBuffer`、`formulaCrossSurface`、`nodeMotionDirector`、`playerComponentV4Render`、`playerSceneAssets`、`renderVideoNode`、`teacherControllerActions` 及 scanner/dependency closure 新发现的 Legacy Player/Runtime/e2e tests | `npx vitest run tests/unit/publishedCourseProtocol.test.ts tests/unit/publishedCourseState.test.ts tests/unit/publishedCourseNavigation.test.ts` + 对应现有 V2 Native/Runtime/Component/host test |
-| B Archive/Export replacement audit | 复核已删除 Archive/Runtime/HTML tests 的受支持断言已在现存 replacement 中同层覆盖；只修真实缺口，不恢复旧测试 | `npx vitest run tests/unit/courseProjectArchive.test.ts tests/unit/coursePackageExport.test.ts tests/unit/coursePptxExport.test.ts tests/unit/coursePrintArtifacts.test.ts tests/unit/playerCapture.test.ts` |
-| C Scanner closure | `tests/**` 中旧成功 import/type/constructor 为零；V8 只剩最小非法 bytes rejection；逐 case 交接表完整 | `npx vitest run tests/unit/legacyInventoryChecker.test.ts tests/unit/editor10ForbiddenTokens.test.ts tests/unit/readModelBoundary.test.ts` |
-| D Behavior close | 所有 replacement 与产品行为在同一工作树通过 | `npm run test:product` |
-| E Evidence close | 在同一变更更新受影响 PM 的 old path、classification、replacement command、input closure 与矩阵引用；不得留下 stale 引用 | `npm run check:development-roadmap` 与 `npm run check:preservation` |
-
-若 V9/V2 路径无法保持同一受支持行为，**停止**并退回最近产品 owner；不要改产品来迎合旧测试，也不要只删断言。
+| A | 上表前两行的 10 个文件逐 `it` 处理；A 可按文件拆成两张卡 | `npx vitest run tests/unit/publishedCourseProtocol.test.ts tests/unit/publishedCourseState.test.ts tests/unit/publishedCourseNavigation.test.ts tests/integration/publishedRuntimeSlideHostIntegration.test.ts tests/unit/slidePublishedNativeText.test.ts` |
+| B | 上表第三、四行的 token 命中逐处分类 | `npx vitest run tests/unit/courseProjectArchive.test.ts tests/unit/projectFormatIsolation.test.ts tests/unit/validateProject.test.ts tests/unit/coursePackageExport.test.ts tests/unit/coursePptxExport.test.ts tests/unit/coursePrintArtifacts.test.ts tests/unit/componentPackageLifecycle.test.ts tests/unit/informationRelease.test.ts tests/unit/projectDiagnostics.test.ts tests/unit/projectHealth.test.ts` |
+| C | 扫描闭合：`grep -rlE "from '.*player/(PlayerScene|PlayerApp|renderNode|sceneAssets|NodeMotionDirector|ComponentEventMountBuffer|renderVideoNode|renderTeacherController|CourseRuntimeKernel|payload|publishedLesson)'" tests` 为 0；`grep -rlE "\bProjectDocument\b" tests` 与 `grep -rlE "\bExportPayload\b" tests` 只剩交接中逐个列出的拒绝用例与门测试 | `npx vitest run tests/unit/legacyInventoryChecker.test.ts tests/unit/editor10ForbiddenTokens.test.ts tests/unit/readModelBoundary.test.ts` |
+| D | 全量行为 | `npm run test:product` |
+| E | 在同一变更更新 `v1.1-preservation-map.json` 与 `PRESERVATION_MATRIX.md` 中受影响 PM（至少 PM-07）的证据命令与输入闭包；不改 PM 语义 | `npm run check:development-roadmap` 与 `npm run check:preservation` |
 
 ## Write scope
 
-只允许修改/删除 Exact targets 表中 legacy tests/helper，修改表中明确列出的 replacement tests，并读取 r11-050 fixture；允许在同一变更更新 `docs/development-plan/baselines/v1.1-preservation-map.json` 与 `docs/development-plan/roadmap/PRESERVATION_MATRIX.md` 中受本任务影响的 evidence command/input closure，不改变 PM 语义；`tests/unit/readModelBoundary.test.ts` 只允许删除已失效 legacy test consumer 的直接声明，不得改变结构边。`tests/unit/courseProjectIo.test.ts` 只允许清理当前 EOF 空行噪声，必须是机械、零语义 diff。禁止改其他 `tests/**`、产品代码、共享 inventory、fixture contract，禁止弱化/删除受支持行为断言、改变 timeout/retry 掩盖失败或把 V8 success test 更名后保留。
-
-## Execution
-
-1. 先核对 r11-051 handoff仍成立；随后按 **Execution waves A→B→C→D→E** 处理。把每个 case 标为 `supported-behavior-migrate`、`v8-success-delete` 或 `v8-rejection-retain`，不得新增第四类。在交接按 LEG ID 与 PM ID 列出旧 path#symbol、分类、replacement 与精确查询，不修改共享 inventory。
-2. supported case 使用 V9 source/Published producer，保持原断言关注的行为，不直接手写第二份 Published payload。
-3. V8 rejection 使用最小非法 archive/payload bytes，只断言 fail-loud，不调用 `createProjectV8Fields`。
-4. 只有 replacement 测试在同一候选通过后，才删除只验证 V8 成功解析、迁移、Player 或导出的 case；不以覆盖率数字代替行为审查。
-5. 不要改 `architectureDependencyRatchet.test.ts`（037/055）；`readModelBoundary.test.ts` 只允许删除已失效旧 test consumer 的直接声明，不得放宽结构边。新/留 tests 不得再 import 旧模块；若现有 ratchet 变红，停止交 Integrator，不要放宽正则。
-6. 对每个删除/改名测试记录受影响的 PM evidence command 与 input closure，并在同一变更更新 preservation map/matrix；任何 map/route 引用仍指向已删路径，或 `check:preservation` / `check:development-roadmap` 未通过时，本节点不得向 r11-055 交接。
+只允许修改或删除 Exact targets 表中的测试文件，修改表中列出的 V2 替代测试文件（只增用例），并在 Wave E 更新两份 preservation 文件中受影响 PM 的证据命令。`tests/unit/readModelBoundary.test.ts` 只允许删除已失效旧测试 consumer 的直接声明，不得改变结构边；`tests/unit/architectureDependencyRatchet.test.ts` 不改。禁止改产品代码、共享 inventory、fixture contract，禁止弱化或删除受支持行为断言、改 timeout/retry 掩盖失败，或把 V8 成功用例改名后保留。
 
 ## Stop conditions
 
 - 不能判断旧断言是否仍代表受支持行为。
-- V9/V2 路径无法实现同一行为，表明前置产品 lane 未完成。
+- V9/V2 路径无法实现同一行为，说明前置产品 lane 未完成，退回最近产品 owner。
 - 需要修改产品代码或降低断言强度才能迁移。
+- 任一门测试变红。
 
 ## Acceptance
 
-- `tests/helpers/projectV8.ts` 及其 unit/integration imports 为零。
-- unit/integration 不再 `new PlayerApp` / `buildStandaloneHtml` / `createProjectV8Fields`（fail-loud 字节例外）。
-- `projectArchive.test.ts` / `asyncArchive.test.ts` 未重新 import `saveProject.ts`，r11-051 已迁移的 V9 wrapper 断言仍在 `courseProjectIo.test.ts` 通过。
-- 所有保留的功能断言使用 V9/V2；V8 只有明确拒绝测试。
-- Exact targets 每一行都有逐 case 处置记录；PM-02–PM-28 的受支持行为断言数量/层级不因删旧 tests 下降。
-- 修正后的 scanner 与直接 dependency closure 不再发现 Legacy PlayerScene/CourseRuntimeKernel/PlayerApp/V8 type 成功测试；三个 `playerScene*` 残留均有明确迁移或删除记录。
-- 所有受影响 PM 的 replacement command/input closure 已在同一变更写入 map/matrix；`check:preservation` 与 `check:development-roadmap` 均通过后，r11-055 才可开始。
-- `tests/unit/courseProjectIo.test.ts` 的既有 EOF 噪声已机械清理，且无断言或运行语义变化。
+- Wave C 的三条 grep 结果与交接列表一致。
+- 所有保留的功能断言使用 V9/V2；V8 只剩明确拒绝用例。
+- 每个被删或被迁的 `it` 都有 `旧文件#it → 分类 → V2 替代 it 或"拒绝保留" → PM ID` 一行记录。
+- PM-02 到 PM-28 的受支持行为断言数量与层级不因删旧测试下降；PM-07 已改绑到 V2 替代测试。
+- `check:preservation` 与 `check:development-roadmap` 通过后，r11-055 才可开始。
 
 ## Focused validation
 
-- Waves A–C：该波表格中的命令（不要每波跑 `test:product`）
+- Wave A–C：该波表格中的命令
 - Wave D：`npm run test:product`
-- Wave E：同任务更新 evidence 后运行 `npm run check:development-roadmap` 与 `npm run check:preservation`
+- Wave E：`npm run check:development-roadmap` 与 `npm run check:preservation`
 
 ## Rollback / handoff
 
-按 test case 分类回滚；不得恢复已删除 V8 success 产品路径。交接列出无法迁移的 case、它保护的 PM ID 和前置缺口。
+按测试用例分类回滚；不得恢复已删除的 V8 成功产品路径。交接除指南第 6 节格式外，附逐 `it` 处置表，并列出 r11-053 需登记的旧渲染器簇六个路径。

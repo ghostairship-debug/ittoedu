@@ -5,6 +5,8 @@
 - Inventory access: read
 - Preservation: PM-01–PM-28
 
+> 执行者分工（2026-09-03）：本节点由 Integrator 执行并判读；通用规则见 [执行者指南](EXECUTION_GUIDE.md)。
+
 ## Outcome / current evidence
 
 机器可重现地证明 `src/**`、`tests/**`、`scripts/**`、`examples/**`、`artifacts/**`、fixture 与正式生成制品没有旧模块、独立旧 token、Schema 8 作者样本或 V8 Player/Export/archive 工具链；Markdown 历史、最终评估、Git 历史、node_modules 与 cache 明确排除。

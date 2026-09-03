@@ -5,6 +5,8 @@
 - Inventory access: `read`
 - Preservation: PM-01–PM-28
 
+> 执行者分工（2026-09-03）：本节点编写 AST/import 结构门与违规 fixture，只由 Integrator（Codex / Claude）执行，不派通用执行者；通用规则见 [执行者指南](EXECUTION_GUIDE.md)。
+
 ## Outcome / current evidence
 
 在当前固定 product tree 上以 dependency/read-model ratchet 和代表性行为证明 1.1 是真实模块化，而非搬文件：组合根只接线、owner 方向正确、旧 writer/Facade/运行时环消失、raw Store consumer 收紧，且用户行为没有降级。本节点不修改产品实现；失败返回对应 owner 节点。它先作为 r11-053 前的 pre-delete gate 执行；r11-054 改变源码、测试或 generator closure 后，必须在最终 post-delete closure 原样重跑完整 gate，新的通过结果才可交给 r11-060。

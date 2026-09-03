@@ -5,6 +5,8 @@
 - Inventory access: read
 - Preservation: PM-01–PM-28
 
+> 执行者分工（2026-09-03）：本节点由 Integrator 执行并判读；通用规则见 [执行者指南](EXECUTION_GUIDE.md)。
+
 ## Outcome / current evidence
 
 在一个固定 product candidate 上，零遗留、不可降级、现有源码验证与固定离线 HTML 检查全部通过，并形成 `artifacts/release-evidence/v1.1/<candidate>/candidate.json`；不调用要求 Portable/win-unpacked/app.asar 的 installer release verifier。同一候选同一命令不重复执行。

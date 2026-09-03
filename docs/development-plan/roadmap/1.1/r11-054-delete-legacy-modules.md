@@ -5,6 +5,8 @@
 - Inventory access: write
 - Preservation: PM-01–PM-28
 
+> 执行者分工（2026-09-03）：r11-053 交付精确 deletion list 后，本节点可派通用执行者按组机械删除；通用规则见 [执行者指南](EXECUTION_GUIDE.md)。
+
 ## Outcome / current evidence
 
 只删除 r11-053 在同一候选明确列出的零 consumer 旧模块，并清理由这些删除直接造成的 import/barrel/build 引用；所有产品删除、generator 更新和验证完成后，才在最终 inventory-only 阶段把对应 status 更新为已定义的 `removed`，不创建 re-export 桩或双轨 fallback。

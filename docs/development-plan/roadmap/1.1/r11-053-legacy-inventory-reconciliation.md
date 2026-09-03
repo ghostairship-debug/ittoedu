@@ -5,6 +5,8 @@
 - Inventory access: write
 - Preservation: PM-01–PM-28
 
+> 执行者分工（2026-09-03）：本节点由 Integrator（Codex / Claude）执行，不派通用执行者；通用规则见 [执行者指南](EXECUTION_GUIDE.md)。r11-052 交接会列出旧渲染器簇六个路径（`renderNode.ts`、`renderVideoNode.ts`、`renderTeacherController.ts`、`ComponentEventMountBuffer.ts`、`NodeMotionDirector.ts`、`sceneAssets.ts`），本节点须把它们登记为 LEG-002 `file-absent` targets，否则 r11-054 不能删除。
+
 ## Outcome / current evidence
 
 在所有迁移 lane 已集成且工作树不再变化的同一 product candidate 上，逐条重扫七类 consumer，并一次性刷新唯一 `legacy-consumers.json`。完成后 `reconciledProductCommit`、scope 与排除 inventory 自身的 product tree digest 一致，所有待删除目标均无 unknown，confirmed consumer 为零；本任务不删除任何产品或测试文件。

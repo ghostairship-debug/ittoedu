@@ -95,11 +95,15 @@
 | [061 candidate](r11-061-no-regression-candidate.md) | 依赖尚未重新成立 | 未解锁；不得写 candidate evidence 或宣称 1.1 candidate |
 | [062 Owner release](r11-062-owner-release.md) | 只接受同一固定 engineering candidate 的 Owner 实测签署 | Owner only，不自动执行 |
 
-当前恢复顺序是：r11-000 → 001 → 002 已闭合；接着 010 → 复核 011 → 012 → 013 → 复核 014，并复核 050/051。基础闭合后，Editor lane 复核 020–024，再按 027 → 028 → 026；Player lane 修正规格并复核 030 → 031；diagnostics/export lane执行 040 → 041 并复核 042/043；033 修正真实 caller 后复核。029 仅在 022/027/028/033 全部有效后拥有 route connector，随后复核 025，再闭合 032/034–036 → 037 → 052（同任务同步 preservation evidence）→ 055 pre-delete → 053 → 054 → 055 post-delete → 060 → 061。scanner 对 SceneStateStrip、PPTX shared、Course Project model、旧 Player/render test 等命中必须排到上述既有 Owner并清零，不能让 037/052 越过 026/029/025 或塞进匿名“053 前清债”。030/031 不现代化死 `PlayerScene`；027/028 拥有各自 leaf read/command，029 只接 route。r11-054 的 post-delete gate 语义必须原样；若需改变 assertion/helper/fixture、ledger 边、baseline 或产品/测试，须返回 055，并从 053 重新固定 identity。r11-062 仍只由 Owner验收。共享写锁节点继续串行，055/053/060/061 保持原子门。
+当前恢复顺序是：`r11-029 返工卡 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037（W1–W9）→ r11-052（A–E）→ r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`。r11-000/001/002 与 010–043 中已闭合的节点不重开；scanner 对旧渲染器簇的命中交 r11-053 登记，对负向正则 token 的命中交 r11-002 表示法修正，不塞进匿名阶段。r11-054 的 post-delete gate 语义必须原样；若需改变 assertion/helper/fixture、ledger 边、baseline 或产品/测试，须返回 055，并从 053 重新固定 identity。r11-062 仍只由 Owner 验收。共享写锁节点继续串行，055/053/060/061 保持原子门。
 
 **不要新增 `r11-*` ID。** 返工返回上表已有 failure owner，在同一规格内按 owner/case 分波；不创建匿名“053 前清债”阶段，也不把旧 handoff 的候选删除路径当作 054 授权。跨会话真正开始执行时按工作协议实例化当下首个节点并生成任务板；本路线文件不记录 queued/active/blocked。
 
 跨会话接手先读已审计改写的 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md)。
+
+## 2026-09-03 执行版重基
+
+Codex 检查点（HEAD `bb1f848`）之后，剩余节点按 [执行者指南](EXECUTION_GUIDE.md) 的规则改写为可直接执行的“2026-09-03 执行版”：每张卡钉死 file:line 的符号表、允许新建清单、结构事实命令与红→绿证据要求，执行者不做架构判断；上表 037/052 行的“当前裁决”由对应规格的执行版替代。裁决：`r11-025` 以证据闭合，其 history 镜像残留归 `r11-037` W1；检查点上 `check:preservation`（PM-08 夹具）与 `check:legacy-inventory`（7 项未登记观察）为红，由 `r11-029` 返工卡先修；`r11-032` 只剩 `playerCapture.ts` 的 PlayerApp 引用，Flow-only 项待 Integrator 给出失败测试否则作废；`r11-034`、`r11-035`、`r11-036` 各为一处已钉死的缺陷修复；`r11-037` 拆为 W1–W9；`r11-052` 重算为 A–E。`r11-055`、`r11-053`、`r11-060`、`r11-061` 的判读与结构门编写只由 Integrator 执行，不派通用执行者；`r11-054` 在 053 给出精确清单后可派。首批执行卡位于 `docs/development-plan/tasks/1.1/`。
 
 ## 交接格式
 

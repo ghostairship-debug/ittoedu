@@ -101,7 +101,7 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 2026-09-03 Codex 执行检查点以当前源码、直接 consumer 和聚焦门为准：`r11-026`、`r11-030`、`r11-031`、`r11-040`、`r11-041`、`r11-042`、`r11-043`、`r11-033` 与 `r11-029` 已闭合。`r11-029` 已通过 10 个聚焦测试文件共 127 项测试、`typecheck`、scoped diff check 与负边界查询；根 Workspace 现在只做 exactly-one Surface 路由，Slide leaf 不再接收完整 document/live Store，module-global bind 与 Store→UI 反向依赖已清零。**1.1 尚未完成**；按用户当前要求，当前检查点即暂停，不创建下一任务卡，不 commit、tag 或 release。
 
-暂停后仍待解决的 failure-owner 链为：先裁定 `r11-025` 与 `r11-037` 对 history 的归属冲突，使 025 只清理其规格内的 Surface 残留且不抢先建立 037 的 Core history owner；`r11-032` 在入口收口前修正 Flow-only aggregate/Builder 无效输入与对应生命周期门；`r11-034` 补齐 lifecycle generation 身份；`r11-035` 修正 preflight 到 emit 的 stale snapshot/identity 与单 HTML 改网页包时重做目标 preflight；`r11-036` 因 media async stale-target 重开。恢复执行时按 `r11-025 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037 → r11-052 → r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062` 前推；旧 053 identity、deletion list 和“已完成”自述仍不授权删除。
+暂停后的剩余路线已于 2026-09-03 重基为执行版规格（见 `docs/development-plan/roadmap/1.1/EXECUTION_GUIDE.md` 与各规格的“2026-09-03 执行版”段）：`r11-025` 以证据闭合，其 history 镜像残留归 `r11-037` W1；检查点提交上 `check:preservation`（PM-08 夹具）与 `check:legacy-inventory`（7 项未登记观察）为红，由 `r11-029` 返工卡先修；`r11-032` 只剩 `playerCapture.ts` 的 PlayerApp 引用，Flow-only 项待 Integrator 给出失败测试否则作废；`r11-034`、`r11-035`、`r11-036` 各收窄为一处已钉死 file:line 的缺陷修复并要求红→绿证据；`r11-037` 拆为 W1–W9 九波；`r11-052` 按当前测试树重算为 A–E 五波。恢复执行顺序为 `r11-029 返工卡 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037（W1–W9）→ r11-052（A–E）→ r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`；执行者一次一张卡，复查由 Integrator 完成；旧 053 identity、deletion list 和“已完成”自述仍不授权删除。
 
 硬约束：
 
