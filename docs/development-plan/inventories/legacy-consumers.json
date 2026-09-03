@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "d2d7d96d265cc2a55edce73bae2c52c479ee899e",
-    "reconciledScope": "054c 删除旧 Export/diagnostics 空壳后的当前产品树；V9/V2 package producer 与 Course Project Health 是唯一当前 Owner。",
-    "reconciledProductTreeDigest": "7326fde4c23049c846cbb15828c2576046cd490dd0dcf4904310b412815a0ed0"
+    "reconciledProductCommit": "f1fbf3a741c1e504cc6c191dc095fe432c41d997",
+    "reconciledScope": "054d 最终删除后的 1.1 产品树；confirmed、unknown、target definition、target reference、legacy module 与 schema 8 archive 全部为零。",
+    "reconciledProductTreeDigest": "6149cfe6a32152f3ad86f68a97e3e0f4b74da7feb3e34e74a55522aea3770e16"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
@@ -994,8 +994,8 @@
         }
       ],
       "owner": "Tooling / Release",
-      "status": "dead-candidate",
-      "currentFact": "正式重算确认 consumer=0、unknown=0、target reference=0；现存 file-absent target 是无副作用空模块，只等待 054 精确删除。",
+      "status": "removed",
+      "currentFact": "旧 V8 archive target 已删除；Course Project V9 archive codec 是唯一可打开工程路径，旧格式保持 fail-loud。",
       "evidence": [
         {
           "path": "src/renderer/project/openProject.ts",
@@ -1429,8 +1429,7 @@
   "reconciledCounts": {
     "recordCount": 11,
     "byStatus": {
-      "dead-candidate": 1,
-      "removed": 10
+      "removed": 11
     },
     "confirmedConsumerRelationsByCategory": {
       "staticImportsOrReferences": 0,
@@ -1514,7 +1513,7 @@
       "replacementTests": [
         "tests/unit/courseProjectArchive.test.ts"
       ],
-      "status": "pending"
+      "status": "removed"
     }
   ]
 }

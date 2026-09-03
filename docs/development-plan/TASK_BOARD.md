@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-054d-archive-shell](tasks/1.1/r11-054d-archive-shell.md) | queued | unassigned | legacy-inventory | 精确删除最后一个零消费者的 V8 archive 空壳；Course Project V9 archive codec 保持唯一可打开工程路径，旧版本继续 fail-loud。 |
+| [r11-055-final-architecture-review](tasks/1.1/r11-055-final-architecture-review.md) | queued | unassigned | none | 审查 1.1 实际 diff 与 import graph，证明 `editorStore.ts` 仅作 Zustand composition root，Owner 边界无宽 Facade、镜像状态、service locator 或反向 Store 依赖；两份结构门与当前合同一致。 |
