@@ -45,6 +45,7 @@ import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
   selectCandidateGlobalLayerItems,
+  selectEditingScope,
   useEditorStore,
 } from '../store/editorStore'
 import { AddCourseContentMenu } from './AddCourseContentMenu'
@@ -347,7 +348,7 @@ function CourseTreeNodeRow({
   onDeleteSlideScene?(locationId: string): void
   onDeleteSurface?(surfaceId: string): void
 }) {
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const project = useEditorStore(selectActiveCourseProjectDocument)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -582,7 +583,7 @@ function CourseTreeNodeRow({
 export function ScenePanel() {
   const project = useEditorStore(selectActiveCourseProjectDocument)
   const activeLocationId = useEditorStore(selectActiveCourseLocationId)
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const globalLayerCount = useEditorStore(selectCandidateGlobalLayerItems)?.length ?? 0
   const setEditingScope = useEditorStore((state) => state.setEditingScope)
   const activateCourseLocation = useEditorStore((state) => state.activateCourseLocation)

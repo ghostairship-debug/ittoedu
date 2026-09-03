@@ -4,7 +4,11 @@ import type { CourseAuthoringSession } from '../../authoring/courseAuthoringSess
 import type { FlowTextEditSession } from '../../authoring/flowTextEdit'
 import { buildFlowEditorView, FLOW_SESSIONLESS_ERROR } from '../../course/flowEditorView'
 import type { FlowAuthoringSession } from '../../project/createFlowCourseProject'
-import { selectMediaAssetFiles, useEditorStore } from '../../store/editorStore'
+import {
+  selectEditingScope,
+  selectMediaAssetFiles,
+  useEditorStore,
+} from '../../store/editorStore'
 import { mountFlowLocationTryRun } from '../flowLocationTryRun'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
 import { FlowLocationWorkspace } from './FlowLocationWorkspace'
@@ -23,7 +27,6 @@ type FlowWorkspaceStore = {
 function selectFlowSession(state: FlowWorkspaceStore) { return state.flowSession }
 function selectCourseAuthoringSession(state: FlowWorkspaceStore) { return state.courseAuthoringSession }
 function selectCanvasMode(state: FlowWorkspaceStore) { return state.canvasMode }
-function selectEditingScope(state: FlowWorkspaceStore) { return state.editingScope }
 function selectComponentPackages(state: FlowWorkspaceStore) { return state.componentPackages }
 function selectFlowTextEdit(state: FlowWorkspaceStore) { return state.flowTextEdit }
 function selectRunFlowAuthoringIntent(state: FlowWorkspaceStore) { return state.runFlowAuthoringIntent }

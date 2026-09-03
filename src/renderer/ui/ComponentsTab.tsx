@@ -33,6 +33,7 @@ import {
 } from '../components/componentLibraryModel'
 import {
   selectActiveCourseProjectDocument,
+  selectEditingScope,
   useEditorStore,
 } from '../store/editorStore'
 
@@ -470,7 +471,7 @@ export function ComponentsTab({
   const [detailsPackageId, setDetailsPackageId] = useState<string | null>(null)
   const components = useEditorStore((state) => state.componentPackages)
   const project = useEditorStore(selectActiveCourseProjectDocument)
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
   const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)

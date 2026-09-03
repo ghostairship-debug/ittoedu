@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ShapeType } from '../../shared/projectTypes'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { createShapeNode } from '../project/nativeNodeFactories'
-import { useEditorStore, selectMediaAssets, selectAudioSettings } from '../store/editorStore'
+import { useEditorStore, selectMediaAssets, selectAudioSettings, selectEditingScope } from '../store/editorStore'
 import type { EditingScope } from '../store/slices/editorShellSlice'
 import { MediaTab } from './MediaTab'
 
@@ -204,7 +204,7 @@ export function ElementsTab({
   const mediaAssets = useEditorStore(selectMediaAssets)
   const audioSettings = useEditorStore(selectAudioSettings)
   const editorMode = useEditorStore((state) => state.editorMode)
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const spatialInsertionScope = useEditorStore<SpatialInsertionScope | null>((state) => (
     state.spatialSession?.scope ?? null
   ))

@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037y-root-selection-ui-consumers](tasks/1.1/r11-037y-root-selection-ui-consumers.md) | queued | — | none | 迁移 `ui/**`、Phaser bridge 和三个 Workspace connector 对五个根镜像字段的读取，改用命名 selector 或单一 Owner view。 |
+| [r11-037z-root-selection-tests-and-removal](tasks/1.1/r11-037z-root-selection-tests-and-removal.md) | queued | — | none | 迁移测试对五个根镜像字段（`activeSceneId`、`activePresentationStateId`、`selectedNodeId`、`selectedNodeIds`、`editingScope`）的读取，然后删除五个根字段及 `kernel.readSelection/syncSelection` 镜像写入；不删除各 Surface 自有 selection。 |

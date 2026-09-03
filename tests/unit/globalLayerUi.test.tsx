@@ -12,6 +12,7 @@ import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { selectRuntimeInspectorAuthoringView } from '@/renderer/runtime/runtimeInspectorAuthoringView'
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
+import { clearFlowEditorSelection } from '@/renderer/course/flowEditorSlice'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
@@ -419,11 +420,16 @@ describe('Project V8 global-layer editor UI', () => {
     useEditorStore.getState().activateCourseLocation(api3Project.startLocationId)
     useEditorStore.getState().selectNode(null)
     useEditorStore.getState().setEditingScope('global')
-    useEditorStore.setState({
-      editorMode: 'professional',
-      selectedNodeId: null,
-      selectedNodeIds: [],
-    })
+    useEditorStore.setState({ editorMode: 'professional' })
+    const flowSession = useEditorStore.getState().flowSession
+    if (!flowSession) throw new Error('缺少 Flow session')
+    useEditorStore.getState().applyFlowSelection(
+      clearFlowEditorSelection(
+        flowSession.history.present,
+        flowSession.selection.locationId,
+        'global',
+      ),
+    )
     expect(useEditorStore.getState().flowSession?.selection.authoringScope)
       .toBe('global')
 
@@ -516,11 +522,8 @@ describe('Project V8 global-layer editor UI', () => {
       kind: 'path',
       id: 'retained-spatial-path',
     })
-    useEditorStore.setState({
-      editorMode: 'professional',
-      selectedNodeId: null,
-      selectedNodeIds: [],
-    })
+    useEditorStore.setState({ editorMode: 'professional' })
+    useEditorStore.getState().selectNode(null)
     expect(useEditorStore.getState()).toMatchObject({
       editingScope: 'global',
       spatialGraphSelection: {

@@ -7,7 +7,14 @@ import { buildSlideEditorView } from '../../course/slideEditorView'
 import { isSlideAuthoringBackend, type SlideBackend } from '../../store/slideBackendPort'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import type { EditorCanvasNodePatch } from '../../phaser/editorCanvasNode'
-import { useEditorStore } from '../../store/editorStore'
+import {
+  selectActivePresentationStateId,
+  selectEditingScope,
+  selectSelectedNodeId,
+  selectSelectedNodeIds,
+  useEditorStore,
+  type EditorState,
+} from '../../store/editorStore'
 import { projectV9EditingNodesWithDraft } from '../../store/slideEditorProjection'
 import {
   attachPublishedCourseStageFit,
@@ -134,43 +141,7 @@ function makePreviewRebuildKey(input: {
   })
 }
 
-interface SlideWorkspaceSourceStore {
-  readonly slideBackend: SlideBackend
-  readonly slideCandidateSnapshot: { readonly locationId: string } | null
-  readonly canvasMode: 'edit' | 'run'
-  readonly editingScope: 'scene' | 'global'
-  readonly selectedNodeIds: string[]
-  readonly selectedNodeId: string | null
-  readonly editingTextNodeId: string | null
-  readonly activePresentationStateId: string | null
-  readonly courseAssetSidecar: { readonly files: Record<string, Uint8Array> } | null
-  readonly componentPackages: Record<string, ComponentPackageData>
-  readonly v9ContentEdit: SlideWorkspaceSnapshot['contentEdit']
-  readonly setCanvasMode: SlideWorkspaceCanvasPort['setCanvasMode']
-  readonly selectNodes: (ids: string[]) => void
-  readonly selectNode: (id: string | null, additive?: boolean) => void
-  readonly beginTextEdit: SlideWorkspaceContentPort['beginTextEdit']
-  readonly commitTextEdit: SlideWorkspaceContentPort['commitTextEdit']
-  readonly cancelTextEdit: SlideWorkspaceContentPort['cancelTextEdit']
-  readonly updateTextEditDraft: SlideWorkspaceContentPort['updateTextEditDraft']
-  readonly setStatus: (message: string | null) => void
-  readonly updateNode: (nodeId: string, patch: EditorCanvasNodePatch) => void
-  readonly updateNodes: (nodes: Array<{ nodeId: string; patch: EditorCanvasNodePatch }>) => void
-  readonly addTextNode: (x?: number, y?: number) => void
-  readonly addFormulaNode: (x?: number, y?: number) => void
-  readonly addRectangleNode: (x?: number, y?: number) => void
-  readonly addShapeNode: (shapeType: ShapeType, x?: number, y?: number) => void
-  readonly addExternalComponentNode: SlideWorkspaceContentPort['addExternalComponentNode']
-  readonly captureRuntimeContentTextTarget: SlideWorkspaceRuntimePort['captureRuntimeContentTextTarget']
-  readonly updateRuntimeContentTextAtTarget: SlideWorkspaceRuntimePort['updateRuntimeContentTextAtTarget']
-  readonly captureRuntimeAssetReplacementTarget: SlideWorkspaceRuntimePort['captureRuntimeAssetReplacementTarget']
-  readonly replaceRuntimeAssetAtTarget: SlideWorkspaceRuntimePort['replaceRuntimeAssetAtTarget']
-  readonly runSlideCandidateCommand: SlideWorkspaceAuthoringPort['run']
-  readonly applySlideCandidateCommand: SlideWorkspaceAuthoringPort['applySlideCommand']
-  readonly setActiveTab: (tab: 'properties') => void
-}
-
-function selectSlideWorkspaceSource(state: SlideWorkspaceSourceStore) {
+function selectSlideWorkspaceSource(state: EditorState) {
   const backend = isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
   const project = backend?.getSession().history.present ?? null
   return [
@@ -178,11 +149,11 @@ function selectSlideWorkspaceSource(state: SlideWorkspaceSourceStore) {
     project,
     state.slideCandidateSnapshot?.locationId ?? null,
     state.canvasMode,
-    state.editingScope,
-    state.selectedNodeIds,
-    state.selectedNodeId,
+    selectEditingScope(state),
+    selectSelectedNodeIds(state),
+    selectSelectedNodeId(state),
     state.editingTextNodeId,
-    state.activePresentationStateId,
+    selectActivePresentationStateId(state),
     state.courseAssetSidecar?.files ?? EMPTY_ASSET_FILES,
     state.componentPackages,
     state.courseAssetSidecar,

@@ -11,6 +11,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { ensureSlidePresentation } from '../../shared/contracts/course-project-v9/presentation'
 import type { SlidePresentationState } from '../../shared/courseProjectTypes'
 import {
+  selectActivePresentationStateId,
+  selectEditingScope,
   selectSlideAuthoringDocument,
   selectSlideAuthoringSnapshot,
   useEditorStore,
@@ -36,12 +38,10 @@ export function SceneStateStrip() {
     if (!surface || surface.type !== 'slide') return null
     return surface.scenes.find((candidate) => candidate.id === snapshot.sceneId) ?? null
   }, [document, snapshot])
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
   const setEditorMode = useEditorStore((state) => state.setEditorMode)
-  const activeStateId = useEditorStore(
-    (state) => state.activePresentationStateId,
-  )
+  const activeStateId = useEditorStore(selectActivePresentationStateId)
   const setActiveState = useEditorStore(
     (state) => state.setActivePresentationState,
   )

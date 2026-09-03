@@ -55,7 +55,9 @@ import { selectFlowOverlay } from '../course/flowEditorSlice'
 import {
   selectActiveScene,
   selectEditingNodes,
+  selectEditingScope,
   selectEffectiveLayerProjection,
+  selectSelectedNodeIds,
   selectSlideBackendKind,
   useEditorStore,
 } from '../store/editorStore'
@@ -448,7 +450,7 @@ export function NodesTab() {
   const backendKind = useEditorStore(selectSlideBackendKind)
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const candidate = (backendKind === 'slide-authoring' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
   const unifiedRows = candidate ? projection.unifiedRows : null
   const visualRows = unifiedRows ? visualFrontToBackRows(unifiedRows) : null
@@ -467,7 +469,7 @@ export function NodesTab() {
   const nodes = displayedLayerGroups
     ? displayedLayerGroups.flatMap((group) => group.rows.map(rowAsNode))
     : [...v8Nodes].reverse()
-  const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
+  const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
   const selectNode = useEditorStore((state) => state.selectNode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const deleteNode = useEditorStore((state) => state.deleteNode)

@@ -32,7 +32,10 @@ import {
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
+  selectEditingScope,
   selectEffectiveLayerProjection,
+  selectSelectedNodeId,
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '../store/editorStore'
@@ -644,16 +647,14 @@ export function DeveloperTab() {
     (state) => state.courseAuthoringSession,
   )
   const projection = useEditorStore(selectEffectiveLayerProjection)
-  const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
+  const selectedNodeId = useEditorStore(selectSelectedNodeId)
   const selectedRow = (projection?.unifiedRows ?? []).find((row) => row.id === selectedNodeId)
     ?? null
   const selectedItem = selectedRow?.item ?? null
   const componentTarget = selectedItem ? componentItemOf(selectedItem) : null
   const componentPackages = useEditorStore((state) => state.componentPackages)
-  const editingScope = useEditorStore((state) => state.editingScope)
-  const activePresentationStateId = useEditorStore(
-    (state) => state.activePresentationStateId,
-  )
+  const editingScope = useEditorStore(selectEditingScope)
+  const activePresentationStateId = useEditorStore(selectActivePresentationStateId)
   const applySlideCandidateCommand = useEditorStore(
     (state) => state.applySlideCandidateCommand,
   )

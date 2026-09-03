@@ -24,6 +24,7 @@ import { APP_NAME } from '../../shared/constants'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import {
   selectActiveCourseProjectDocument,
+  selectActiveSceneId,
   selectCanRedoActiveSurface,
   selectCanUndoActiveSurface,
   selectHasUnsavedCourseChanges,
@@ -97,7 +98,7 @@ export function TopToolbar({
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const canUndo = useEditorStore(selectCanUndoActiveSurface)
   const canRedo = useEditorStore(selectCanRedoActiveSurface)
-  const activeSceneId = useEditorStore((state) => state.activeSceneId)
+  const activeSceneId = useEditorStore(selectActiveSceneId)
   const editorMode = useEditorStore((state) => state.editorMode)
   const undo = useEditorStore((state) => state.undo)
   const redo = useEditorStore((state) => state.redo)

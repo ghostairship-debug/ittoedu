@@ -15,6 +15,8 @@ import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
   selectEditingNodes,
+  selectEditingScope,
+  selectSelectedNodeId,
   selectSlideAuthoringSnapshot,
 } from '../store/editorStore'
 import {
@@ -64,9 +66,9 @@ function templateConditionsFromView(
 export function AutomationTab() {
   const scene = useEditorStore(selectActiveScene)
   const editingNodes = useEditorStore(selectEditingNodes)
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
-  const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
+  const selectedNodeId = useEditorStore(selectSelectedNodeId)
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const activeLocationId = useEditorStore(selectActiveCourseLocationId)
   const slideAuthoringSnapshot = useEditorStore(selectSlideAuthoringSnapshot)

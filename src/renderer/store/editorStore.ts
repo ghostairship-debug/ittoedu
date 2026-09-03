@@ -1252,11 +1252,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 })
 
+let selectedNodeIdsCache: {
+  readonly source: readonly string[]
+  readonly result: string[]
+} | null = null
+
 export const selectSelectedNodeIds = (state: EditorState): string[] => {
-  if (state.spatialSession) return [...state.spatialSession.selection.selectionIds]
-  if (state.flowSession) return [...state.flowSession.selection.selectedOverlayIds]
-  if (state.slideCandidateSnapshot) return [...state.slideCandidateSnapshot.selection.selectionIds]
-  return state.selectedNodeIds
+  const source: readonly string[] = state.spatialSession
+    ? state.spatialSession.selection.selectionIds
+    : state.flowSession
+      ? state.flowSession.selection.selectedOverlayIds
+      : state.slideCandidateSnapshot
+        ? state.slideCandidateSnapshot.selection.selectionIds
+        : state.selectedNodeIds
+  if (selectedNodeIdsCache?.source === source) return selectedNodeIdsCache.result
+  const result = [...source]
+  selectedNodeIdsCache = { source, result }
+  return result
 }
 
 export const selectSelectedNodeId = (state: EditorState): string | null =>
@@ -1264,6 +1276,7 @@ export const selectSelectedNodeId = (state: EditorState): string | null =>
 
 export const selectEditingScope = (state: EditorState): EditingScope => {
   if (state.spatialSession) return state.spatialSession.scope === 'global' ? 'global' : 'scene'
+  if (state.flowSession) return state.flowSession.selection.authoringScope === 'global' ? 'global' : 'scene'
   if (state.slideCandidateSnapshot) return state.slideCandidateSnapshot.scope === 'global' ? 'global' : 'scene'
   return state.editingScope
 }
