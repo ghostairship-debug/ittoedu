@@ -4,7 +4,8 @@ import { PropertiesTab } from './PropertiesTab'
 import { AutomationTab } from './AutomationTab'
 import { DeveloperTab } from './DeveloperTab'
 import { ComponentsTab } from './ComponentsTab'
-import { useEditorStore, type SidebarTab } from '../store/editorStore'
+import { useEditorStore } from '../store/editorStore'
+import type { SidebarTab } from '../store/slices/editorShellSlice'
 import type {
   AvailableComponentCatalogPackage,
   ComponentCatalogSnapshot,

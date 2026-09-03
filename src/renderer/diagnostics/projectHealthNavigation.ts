@@ -1,7 +1,7 @@
 import type { CourseProjectHealthFinding } from '../../shared/courseProjectHealth'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { DiagnosticTargetV1 } from '../../shared/courseProjectValidationDiagnostics'
-import type { EditingScope, SidebarTab } from '../store/editorStore'
+import type { EditingScope, SidebarTab } from '../store/slices/editorShellSlice'
 
 export interface ProjectHealthRoute {
   scope: EditingScope

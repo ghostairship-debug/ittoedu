@@ -1,17 +1,22 @@
 import type { EditorStoreKernel } from '../editorStoreKernel'
 
-export type EditorShellTab =
+export type SidebarTab =
   | 'elements'
   | 'components'
   | 'layers'
   | 'properties'
   | 'automation'
   | 'developer'
+export type EditorShellTab = SidebarTab
+export type EditorMode = 'simple' | 'professional'
+export type EditingScope = 'scene' | 'global'
+export type CanvasMode = 'edit' | 'run'
+export type TextEditSource = 'canvas' | 'properties'
 
 export type EditorShellOwnedState = {
-  editorMode: 'simple' | 'professional'
+  editorMode: EditorMode
   activeTab: EditorShellTab
-  canvasMode: 'edit' | 'run'
+  canvasMode: CanvasMode
   statusMessage: string | null
   errorMessage: string | null
   editingTextNodeId: string | null
@@ -24,7 +29,7 @@ export type EditorShellPorts = {
 
 const EDITOR_MODE_STORAGE_KEY = 'courseware-editor:mode'
 
-function persistEditorMode(mode: 'simple' | 'professional'): void {
+function persistEditorMode(mode: EditorMode): void {
   try {
     globalThis.localStorage?.setItem(EDITOR_MODE_STORAGE_KEY, mode)
   } catch {
@@ -36,7 +41,7 @@ export function createEditorShellSlice(
   kernel: EditorStoreKernel,
   shell: EditorShellPorts,
 ): {
-  setEditorMode(mode: 'simple' | 'professional'): void
+  setEditorMode(mode: EditorMode): void
   setActiveTab(tab: EditorShellTab): void
   setStatus(message: string | null): void
   setError(message: string | null): void

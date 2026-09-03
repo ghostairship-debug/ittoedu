@@ -599,25 +599,31 @@ function flowEditingNodes(session: FlowAuthoringSession): EditorCanvasNode[] {
   })
 }
 
-export type SidebarTab =
-  | 'elements'
-  | 'components'
-  | 'layers'
-  | 'properties'
-  | 'automation'
-  | 'developer'
-export type EditorMode = 'simple' | 'professional'
-export type EditingScope = 'scene' | 'global'
-export type CanvasMode = 'edit' | 'run'
-export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
-export type TextEditSource = 'canvas' | 'properties'
+export type {
+  SidebarTab,
+  EditorMode,
+  EditingScope,
+  CanvasMode,
+  TextEditSource,
+} from './slices/editorShellSlice'
+export type { AlignmentMode } from './slices/slideOwnedCommands'
+export type { SimpleEntranceAnimationConfig } from '../course/v9SlideContentCommands'
 
-export interface SimpleEntranceAnimationConfig {
-  effect: Exclude<MotionEffect, 'none'>
-  direction?: MotionDirection
-  durationMs: number
-  delayMs: number
-}
+import type {
+  SidebarTab,
+  EditorMode,
+  EditingScope,
+  CanvasMode,
+  TextEditSource,
+} from './slices/editorShellSlice'
+import type { AlignmentMode } from './slices/slideOwnedCommands'
+import type { SimpleEntranceAnimationConfig } from '../course/v9SlideContentCommands'
+import type {
+  CourseProjectPersistenceSnapshot,
+  CourseProjectPersistenceToken,
+  PrepareCourseProjectPersistenceResult,
+  CaptureCourseProjectRecoveryResult,
+} from './slices/courseLifecycleSlice'
 
 const EDITOR_MODE_STORAGE_KEY = 'courseware-editor:mode'
 
@@ -761,38 +767,12 @@ export type InteractionAuthoringCommitResult =
       readonly reason: string
     }
 
-export interface CourseProjectPersistenceSnapshot {
-  readonly project: CourseProjectDocument
-  readonly assetFiles: Record<string, Uint8Array>
-  readonly componentPackages: Record<string, ComponentPackageData>
-}
-
-export interface CourseProjectPersistenceToken {
-  readonly document: CourseProjectDocument
-  readonly sidecar: CourseAssetSidecar | null
-  readonly componentPackages: Record<string, ComponentPackageData>
-}
-
-export type PrepareCourseProjectPersistenceResult =
-  | {
-      readonly ok: true
-      readonly snapshot: CourseProjectPersistenceSnapshot
-      readonly token: CourseProjectPersistenceToken
-    }
-  | {
-      readonly ok: false
-      readonly reason: string
-    }
-
-export type CaptureCourseProjectRecoveryResult =
-  | {
-      readonly ok: true
-      readonly snapshot: CourseProjectPersistenceSnapshot
-    }
-  | {
-      readonly ok: false
-      readonly reason: string
-    }
+export type {
+  CourseProjectPersistenceSnapshot,
+  CourseProjectPersistenceToken,
+  PrepareCourseProjectPersistenceResult,
+  CaptureCourseProjectRecoveryResult,
+} from './slices/courseLifecycleSlice'
 
 export interface EditorState {
   activeSceneId: string

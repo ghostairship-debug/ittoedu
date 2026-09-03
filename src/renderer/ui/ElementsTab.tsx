@@ -15,6 +15,7 @@ import type { ShapeType } from '../../shared/projectTypes'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { createShapeNode } from '../project/nativeNodeFactories'
 import { useEditorStore, selectMediaAssets, selectAudioSettings } from '../store/editorStore'
+import type { EditingScope } from '../store/slices/editorShellSlice'
 import { MediaTab } from './MediaTab'
 
 interface ElementsTabProps {
@@ -31,7 +32,7 @@ type AddCategory =
   | 'controls'
 
 type AuthoringSurface = 'slide' | 'flow' | 'spatial'
-type AuthoringScope = 'scene' | 'global'
+type AuthoringScope = EditingScope
 type SpatialInsertionScope = 'world' | 'surface' | 'global'
 type InsertableElementKind = 'text' | 'formula' | 'image' | 'video' | 'shape'
 type InsertionCarrier =

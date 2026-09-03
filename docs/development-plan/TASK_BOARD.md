@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037g-shell-slide-lifecycle-types](tasks/1.1/r11-037g-shell-slide-lifecycle-types.md) | queued | — | none | 把 shell、Slide 与 lifecycle 类型从 root 移到已有 Owner，只有一个定义。 |
+| [r11-037h-feature-result-types](tasks/1.1/r11-037h-feature-result-types.md) | queued | — | none | 把媒体、组件、Runtime、Interaction 结果类型从 root 移到各 Feature 文件，只有一个定义。 |

@@ -111,6 +111,7 @@ export interface SlideSimpleEntranceAnimationConfig {
   durationMs: number
   delayMs: number
 }
+export type SimpleEntranceAnimationConfig = SlideSimpleEntranceAnimationConfig
 
 export interface SlideNativeContentPatch {
   readonly nativeData?: Record<string, unknown>

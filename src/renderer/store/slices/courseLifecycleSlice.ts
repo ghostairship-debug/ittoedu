@@ -9,7 +9,11 @@ import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
 } from '../../components/componentPackageStore'
-import { emptyCourseAssetSidecar, freezeCourseAssetSidecar } from '../../project/v9AssetAdapter'
+import {
+  emptyCourseAssetSidecar,
+  freezeCourseAssetSidecar,
+  type CourseAssetSidecar,
+} from '../../project/v9AssetAdapter'
 import { createBlankCourseProject } from '../../project/createCourseProject'
 import {
   courseProjectStartsAsFlow,
@@ -19,6 +23,39 @@ import {
   courseProjectStartsAsSpatial,
   createBlankSpatialCourseProject,
 } from '../../project/createSpatialCourseProject'
+
+export interface CourseProjectPersistenceSnapshot {
+  readonly project: CourseProjectDocument
+  readonly assetFiles: Record<string, Uint8Array>
+  readonly componentPackages: Record<string, ComponentPackageData>
+}
+
+export interface CourseProjectPersistenceToken {
+  readonly document: CourseProjectDocument
+  readonly sidecar: CourseAssetSidecar | null
+  readonly componentPackages: Record<string, ComponentPackageData>
+}
+
+export type PrepareCourseProjectPersistenceResult =
+  | {
+      readonly ok: true
+      readonly snapshot: CourseProjectPersistenceSnapshot
+      readonly token: CourseProjectPersistenceToken
+    }
+  | {
+      readonly ok: false
+      readonly reason: string
+    }
+
+export type CaptureCourseProjectRecoveryResult =
+  | {
+      readonly ok: true
+      readonly snapshot: CourseProjectPersistenceSnapshot
+    }
+  | {
+      readonly ok: false
+      readonly reason: string
+    }
 
 export type CourseLifecycleOwnedState = {
   projectPath: string | null
