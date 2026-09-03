@@ -6,4 +6,4 @@ Tasks: 1 · active: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-061-final-regression](tasks/1.1/r11-061-final-regression.md) | active | Codex | editor-store-history | 在最终产品代码与 Legacy inventory 冻结后，依次完成类型、全量产品行为与保全门，形成 1.1 engineering candidate 的最终自动化证据。 |
+| [r11-061-final-regression](tasks/1.1/r11-061-final-regression.md) | active | Codex | editor-store-history, legacy-inventory | 在最终产品代码与 Legacy inventory 冻结后，依次完成类型、全量产品行为与保全门，形成 1.1 engineering candidate 的最终自动化证据。 |

@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "ae4082cdd709efb322c9bfb0d15922652365744b",
-    "reconciledScope": "055 最终架构审查并收紧旧 PlayerScene 结构白名单后的 1.1 产品树；confirmed、unknown、target definition、target reference、legacy module 与 schema 8 archive 全部为零。",
-    "reconciledProductTreeDigest": "0a9624681bacc49d21162440e7775bee946e184dbc3c30d56c06be1353e15563"
+    "reconciledProductCommit": "6191d25f34e9faf818409a8bde6aeb4d63d9d201",
+    "reconciledScope": "061 最终回归修复跨 Surface project command 的 history-entry 端口语义后的 1.1 产品树；confirmed、unknown、target definition、target reference、legacy module 与 schema 8 archive 全部为零。",
+    "reconciledProductTreeDigest": "ec3571f6eddb193928845b623292058f41bfbcf6b1825170f3a30f5b3ffbbda4"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
