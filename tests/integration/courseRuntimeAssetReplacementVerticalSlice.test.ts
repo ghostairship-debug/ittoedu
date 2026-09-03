@@ -498,7 +498,6 @@ function authoritativeWriteSnapshot() {
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     files: byteMap(selectMediaAssetFiles(state)),
     activeHistory: structuredClone(active.history),
-    storeHistory: structuredClone(state.history),
     sidecarPast: state.courseAssetSidecarPast.map(
       (sidecar) => byteMap(sidecar.files),
     ),
@@ -540,7 +539,6 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     const beforeProject = structuredClone(activeProject())
     const beforeFiles = byteMap(selectMediaAssetFiles(useEditorStore.getState()))
     const beforeHistoryDepth = activeHistory().history.past.length
-    const beforeStoreHistoryDepth = useEditorStore.getState().history.past.length
     const beforeSnapshotDepths = resourceSnapshotDepths()
     const beforeSelection = selectionSnapshot()
 
@@ -572,9 +570,6 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     expect(committedProject.assets[OLD_ASSET_ID]).toEqual(beforeProject.assets[OLD_ASSET_ID])
     expect(committedFiles[OLD_ASSET_ID]).toEqual(source.assetFiles[OLD_ASSET_ID])
     expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(useEditorStore.getState().history.past).toHaveLength(
-      beforeStoreHistoryDepth + 1,
-    )
     expect(activeTransactionAssetIds()).toEqual([replacement.meta.id])
     expect(resourceSnapshotDepths()).toEqual(beforeSnapshotDepths)
     expect(selectionSnapshot()).toEqual(beforeSelection)

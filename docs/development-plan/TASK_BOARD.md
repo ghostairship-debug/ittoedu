@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037e-history-e2e-consumers](tasks/1.1/r11-037e-history-e2e-consumers.md) | queued | — | editor-store-history | 迁移 integration 测试中的根级 history 读取，使其直接改读活动 Surface 会话的 history，产品代码不动。 |
+| [r11-037f-remove-history-and-can-flags](tasks/1.1/r11-037f-remove-history-and-can-flags.md) | queued | — | editor-store-history | 从 EditorState 和 editorStoreKernel 中彻底删除 history、canUndo、canRedo、canUndoRef、canRedoRef，所有 UI 消费端改用活动 Surface 会话派生状态。 |

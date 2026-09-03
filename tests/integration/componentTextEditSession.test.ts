@@ -24,6 +24,13 @@ function materialized(
   return materializeScene(scene as Parameters<typeof materializeScene>[0], stateId)
 }
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 const packageId = 'com.example.canvas-copy-session'
 
 function componentPackage(): ComponentPackageData {
@@ -133,7 +140,7 @@ describe('component canvas text session with editor store', () => {
       currentContext([liveTarget]),
     )
     if (!started.ok) throw new Error('会话未启动')
-    const historyBefore = useEditorStore.getState().history.past.length
+    const historyBefore = activeHistory().past.length
 
     const resolved = resolveComponentTextEdit(
       started.session,
@@ -150,7 +157,7 @@ describe('component canvas text session with editor store', () => {
       ?.nodeOverrides[nodeId]).toMatchObject({
         props: { content: { title: '反馈状态标题' } },
       })
-    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
     useEditorStore.getState().undo()
     expect(titleAtState(stateId, nodeId)).toBe('基础标题')

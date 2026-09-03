@@ -548,7 +548,6 @@ function authoritativeSnapshot() {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
-    storeHistory: structuredClone(state.history),
     files: byteMap(selectMediaAssetFiles(state)),
     compatibility: compatibilityDepths(),
     packages: structuredClone(state.componentPackages),
@@ -672,7 +671,6 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
       const beforeProject = structuredClone(activeProject())
       const beforeRuntime = structuredClone(runtimeItem(beforeProject, source.itemId))
       const beforeHistoryDepth = activeHistory().history.past.length
-      const beforeStoreDepth = useEditorStore.getState().history.past.length
       const beforeCompatibility = compatibilityDepths()
 
       expect(activeHistory().kind).toBe(expectedHistoryKind)
@@ -697,7 +695,6 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
       expect(runtimeItem(committed, source.itemId)).toEqual(expectedRuntime)
       expect(committed.revision).toBe(beforeProject.revision + 1)
       expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-      expect(useEditorStore.getState().history.past).toHaveLength(beforeStoreDepth + 1)
       expect(newestTransactionResourceChanges()).toEqual({})
       expect(compatibilityDepths()).toEqual(beforeCompatibility)
 

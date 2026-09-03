@@ -134,7 +134,6 @@ function authoritativeSnapshot() {
     project: structuredClone(project),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     assetFiles: byteMap(selectMediaAssetFiles(state)),
-    history: structuredClone(state.history),
     backendHistory: backendHistory
       ? {
           present: structuredClone(backendHistory.present),

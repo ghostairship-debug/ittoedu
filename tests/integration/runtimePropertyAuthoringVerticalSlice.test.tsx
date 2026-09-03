@@ -329,7 +329,6 @@ function authoritativeSnapshot() {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
-    storeHistory: structuredClone(state.history),
     mediaFiles: byteMap(selectMediaAssetFiles(state)),
     componentPackages: structuredClone(state.componentPackages),
     sidecarPast: structuredClone(state.courseAssetSidecarPast),
@@ -368,7 +367,6 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
       const beforeProject = structuredClone(activeProject())
       const beforeItem = structuredClone(runtimeItem(beforeProject, source.itemId))
       const beforeHistoryDepth = activeHistory().history.past.length
-      const beforeStoreDepth = useEditorStore.getState().history.past.length
 
       expect(activeHistory().kind).toBe(historyKind)
       expect(useEditorStore.getState().updateRuntimePropertyAtTarget(target, update))
@@ -394,7 +392,6 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
         playbackInitialVisibility: beforeItem.playbackInitialVisibility,
       })
       expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-      expect(useEditorStore.getState().history.past).toHaveLength(beforeStoreDepth + 1)
       expect(transactionResourceChanges()).toEqual({})
 
       useEditorStore.getState().undo()

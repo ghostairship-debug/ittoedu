@@ -397,7 +397,6 @@ function authoritativeWriteSnapshot() {
     assetFiles: byteMap(selectMediaAssetFiles(state)),
     componentPackages: componentResourceSnapshot(),
     activeHistory: structuredClone(active.history),
-    storeHistory: structuredClone(state.history),
     sidecarPast: state.courseAssetSidecarPast.map((sidecar) => byteMap(sidecar.files)),
     sidecarFuture: state.courseAssetSidecarFuture.map((sidecar) => byteMap(sidecar.files)),
     componentPast: structuredClone(state.courseComponentPackagesPast),
@@ -474,7 +473,6 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     const beforeSessionShape = sessionStableShape()
     const beforeCourseSession = expectFrozenCourseSession()
     const beforeHistoryDepth = activeHistory().history.past.length
-    const beforeStoreHistoryDepth = useEditorStore.getState().history.past.length
     const beforeResourceDepths = resourceSnapshotDepths()
     const replacement = replacementPackage(
       useEditorStore.getState().componentPackages[PACKAGE_ID]!,
@@ -520,7 +518,6 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     expect(packageSnapshot(useEditorStore.getState().componentPackages[PACKAGE_ID]))
       .toEqual(packageSnapshot(replacement))
     expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(useEditorStore.getState().history.past).toHaveLength(beforeStoreHistoryDepth + 1)
     const change = lastComponentTransactionChange()
     expect(change.packageId).toBe(PACKAGE_ID)
     expect(packageSnapshot(change.before)).toEqual(beforePackage)

@@ -115,7 +115,6 @@ interface PersistentSnapshot {
   readonly project: CourseProjectDocument
   readonly assetFiles: Readonly<Record<string, readonly number[]>>
   readonly activeHistoryDepth: number
-  readonly storeHistoryDepth: number
   readonly sidecarPastDepth: number
   readonly sidecarFutureDepth: number
 }
@@ -210,7 +209,6 @@ function persistentSnapshot(): PersistentSnapshot {
       ]),
     ),
     activeHistoryDepth: state.slideBackend.getSession().history.past.length,
-    storeHistoryDepth: state.history.past.length,
     sidecarPastDepth: state.courseAssetSidecarPast.length,
     sidecarFutureDepth: state.courseAssetSidecarFuture.length,
   })
@@ -429,7 +427,6 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     )
     expect(after.project.revision).toBe(before.project.revision + 1)
     expect(after.activeHistoryDepth).toBe(before.activeHistoryDepth + 1)
-    expect(after.storeHistoryDepth).toBe(before.storeHistoryDepth + 1)
     expect(after.sidecarPastDepth).toBe(before.sidecarPastDepth)
     expect(after.sidecarFutureDepth).toBe(before.sidecarFutureDepth)
     expect(after.project.assets[REPLACEMENT_ASSET_ID]).toEqual(REPLACEMENT.meta)

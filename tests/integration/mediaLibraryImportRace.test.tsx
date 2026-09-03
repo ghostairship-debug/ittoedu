@@ -118,7 +118,6 @@ interface ResourceSnapshot {
   readonly project: CourseProjectDocument
   readonly files: Readonly<Record<string, readonly number[]>>
   readonly activeHistoryDepth: number
-  readonly storeHistoryDepth: number
   readonly sidecarPastDepth: number
   readonly sidecarFutureDepth: number
   readonly componentPastDepth: number
@@ -209,7 +208,6 @@ function resourceSnapshot(): ResourceSnapshot {
     project: structuredClone(activeProject()),
     files: byteMap(selectMediaAssetFiles(state)),
     activeHistoryDepth: state.slideBackend.getSession().history.past.length,
-    storeHistoryDepth: state.history.past.length,
     sidecarPastDepth: state.courseAssetSidecarPast.length,
     sidecarFutureDepth: state.courseAssetSidecarFuture.length,
     componentPastDepth: state.courseComponentPackagesPast.length,
@@ -310,7 +308,6 @@ describe('ARCH-2 App media-library import race', () => {
     const after = resourceSnapshot()
     expect(after.project.revision).toBe(before.project.revision + 1)
     expect(after.activeHistoryDepth).toBe(before.activeHistoryDepth + 1)
-    expect(after.storeHistoryDepth).toBe(before.storeHistoryDepth + 1)
     expect(after.sidecarPastDepth).toBe(before.sidecarPastDepth)
     expect(after.sidecarFutureDepth).toBe(before.sidecarFutureDepth)
     expect(after.componentPastDepth).toBe(before.componentPastDepth)

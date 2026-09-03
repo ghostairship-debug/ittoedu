@@ -257,7 +257,7 @@ function snapshot(): ReplacementSnapshot {
     imageBAssetId: imageAssetId(project, IMAGE_B),
     assetIds: Object.keys(project.assets).sort(),
     fileIds: Object.keys(selectMediaAssetFiles(state)).sort(),
-    historyDepth: state.history.past.length,
+    historyDepth: state.slideBackend?.getSession().history.past.length ?? 0,
     sidecarPastDepth: state.courseAssetSidecarPast.length,
     errorMessage: state.errorMessage,
   }

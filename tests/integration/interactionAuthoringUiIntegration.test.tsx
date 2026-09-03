@@ -125,7 +125,6 @@ describe('interaction authoring UI integration', () => {
     render(<AutomationTab />)
     const beforeTemplateRevision = activeProject().revision
     const beforeTemplateHistory = activeHistory().past.length
-    const beforeTemplateStoreHistory = useEditorStore.getState().history.past.length
 
     fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
 
@@ -134,8 +133,6 @@ describe('interaction authoring UI integration', () => {
     if (!templatedRule) throw new Error('Expected the UI to create a local rule')
     expect(templatedProject.revision).toBe(beforeTemplateRevision + 1)
     expect(activeHistory().past).toHaveLength(beforeTemplateHistory + 1)
-    expect(useEditorStore.getState().history.past)
-      .toHaveLength(beforeTemplateStoreHistory + 1)
     expect(activeHistory().past.at(-1)).toMatchObject({
       kind: 'editor-transaction',
       resourceChanges: {},
@@ -158,7 +155,6 @@ describe('interaction authoring UI integration', () => {
     const stableRuleId = templatedRule.id
     const beforeRenameRevision = templatedProject.revision
     const beforeRenameHistory = activeHistory().past.length
-    const beforeRenameStoreHistory = useEditorStore.getState().history.past.length
     fireEvent.change(screen.getByLabelText('规则名称'), {
       target: { value: '专业字段改名后的规则' },
     })
@@ -166,8 +162,6 @@ describe('interaction authoring UI integration', () => {
     const renamedProject = activeProject()
     expect(renamedProject.revision).toBe(beforeRenameRevision + 1)
     expect(activeHistory().past).toHaveLength(beforeRenameHistory + 1)
-    expect(useEditorStore.getState().history.past)
-      .toHaveLength(beforeRenameStoreHistory + 1)
     expect(slideScene(renamedProject).interactions).toEqual([
       expect.objectContaining({
         id: stableRuleId,

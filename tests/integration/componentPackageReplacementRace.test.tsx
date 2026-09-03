@@ -181,7 +181,6 @@ interface ReplacementWriteSnapshot {
   readonly project: CourseProjectDocument
   readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
   readonly activeHistory: unknown
-  readonly storeHistory: unknown
   readonly sidecarPast: unknown
   readonly sidecarFuture: unknown
   readonly componentPast: unknown
@@ -316,7 +315,6 @@ function writeSnapshot(): ReplacementWriteSnapshot {
     project: activeProject(),
     componentPackages: state.componentPackages,
     activeHistory: state.slideBackend.getSession().history,
-    storeHistory: state.history,
     sidecarPast: state.courseAssetSidecarPast,
     sidecarFuture: state.courseAssetSidecarFuture,
     componentPast: state.courseComponentPackagesPast,

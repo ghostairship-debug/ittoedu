@@ -150,7 +150,6 @@ function authoritativeWriteSnapshot() {
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     files: byteMap(selectMediaAssetFiles(state)),
     activeHistory: structuredClone(active.history),
-    storeHistory: structuredClone(state.history),
     sidecarPast: state.courseAssetSidecarPast.map((sidecar) => byteMap(sidecar.files)),
     sidecarFuture: state.courseAssetSidecarFuture.map((sidecar) => byteMap(sidecar.files)),
     componentPackages: structuredClone(state.componentPackages),
@@ -206,7 +205,6 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     const beforeProject = structuredClone(activeProject())
     const beforeFiles = byteMap(selectMediaAssetFiles(useEditorStore.getState()))
     const beforeHistoryDepth = activeHistory().history.past.length
-    const beforeStoreHistoryDepth = useEditorStore.getState().history.past.length
     const beforeResourceDepths = resourceSnapshotDepths()
     const beforeSelection = selectionSnapshot()
     const beforeSession = structuredClone(useEditorStore.getState().courseAuthoringSession)
@@ -226,7 +224,6 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     const afterProject = structuredClone(activeProject())
     expect(afterProject.revision).toBe(beforeProject.revision + 1)
     expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(useEditorStore.getState().history.past).toHaveLength(beforeStoreHistoryDepth + 1)
     expect(transactionAssetIds()).toEqual(items.map((item) => item.meta.id))
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
     expect(selectionSnapshot()).toEqual(beforeSelection)

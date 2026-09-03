@@ -128,7 +128,6 @@ function authoritativeWriteSnapshot() {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
     activeHistory: structuredClone(activeHistory().history),
-    storeHistory: structuredClone(state.history),
     mediaFiles: byteFileSnapshot(selectMediaAssetFiles(state)),
     componentPackages: structuredClone(state.componentPackages),
     sidecarPast: structuredClone(state.courseAssetSidecarPast),
@@ -218,7 +217,6 @@ describe('Course interaction authoring Store vertical slice', () => {
   it('commits Slide template visibility and rule in one revision and one undoable history frame', () => {
     const beforeProject = structuredClone(activeProject())
     const beforeActiveHistoryDepth = activeHistory().history.past.length
-    const beforeStoreHistoryDepth = useEditorStore.getState().history.past.length
     const beforeResourceSnapshotDepths = resourceSnapshotDepths()
 
     const result = useEditorStore.getState().applyInteractionTemplateAtTarget(
@@ -241,8 +239,6 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(committedProject.revision).toBe(beforeProject.revision + 1)
     expect(activeHistory().kind).toBe('slide')
     expect(activeHistory().history.past).toHaveLength(beforeActiveHistoryDepth + 1)
-    expect(useEditorStore.getState().history.past)
-      .toHaveLength(beforeStoreHistoryDepth + 1)
     expect(activeHistory().history.past.at(-1)).toMatchObject({
       kind: 'editor-transaction',
       resourceChanges: {},
@@ -333,7 +329,6 @@ describe('Course interaction authoring Store vertical slice', () => {
 
     const beforeNoOpProject = structuredClone(activeProject())
     const beforeNoOpHistory = structuredClone(activeHistory().history)
-    const beforeNoOpStoreHistory = structuredClone(useEditorStore.getState().history)
     const unchanged = useEditorStore.getState().updateInteractionRuleAtTarget(
       localTarget(activeProject()),
       LOCAL_RULE_ID,
@@ -351,7 +346,6 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(activeProject()).toEqual(beforeNoOpProject)
     expect(activeHistory().history).toEqual(beforeNoOpHistory)
-    expect(useEditorStore.getState().history).toEqual(beforeNoOpStoreHistory)
   })
 
   it.each([
@@ -362,7 +356,6 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(activeHistory().kind).toBe(expectedKind)
     const beforeProject = structuredClone(activeProject())
     const beforeActiveHistoryDepth = activeHistory().history.past.length
-    const beforeStoreHistoryDepth = useEditorStore.getState().history.past.length
     const beforeResourceSnapshotDepths = resourceSnapshotDepths()
     expect(beforeResourceSnapshotDepths).toEqual({
       sidecarPast: 0,
@@ -390,8 +383,6 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(activeHistory().kind).toBe(expectedKind)
     expect(activeProject().revision).toBe(beforeProject.revision + 1)
     expect(activeHistory().history.past).toHaveLength(beforeActiveHistoryDepth + 1)
-    expect(useEditorStore.getState().history.past)
-      .toHaveLength(beforeStoreHistoryDepth + 1)
     expect(activeHistory().history.past.at(-1)).toMatchObject({
       kind: 'editor-transaction',
       resourceChanges: {},
@@ -502,7 +493,6 @@ describe('Course interaction authoring Store vertical slice', () => {
     const target = localTarget(activeProject(), locationId)
     const beforeTemplateProject = structuredClone(activeProject())
     const beforeTemplateHistory = structuredClone(activeHistory().history)
-    const beforeTemplateStoreHistory = structuredClone(useEditorStore.getState().history)
     const beforeTemplateDirty = useEditorStore.getState().dirty
     const templateResult = useEditorStore.getState().applyInteractionTemplateAtTarget(
       target,
@@ -515,12 +505,10 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(activeProject()).toEqual(beforeTemplateProject)
     expect(activeHistory().history).toEqual(beforeTemplateHistory)
-    expect(useEditorStore.getState().history).toEqual(beforeTemplateStoreHistory)
     expect(useEditorStore.getState().dirty).toBe(beforeTemplateDirty)
 
     const beforeUpdateProject = structuredClone(activeProject())
     const beforeUpdateHistory = structuredClone(activeHistory().history)
-    const beforeUpdateStoreHistory = structuredClone(useEditorStore.getState().history)
     const beforeUpdateDirty = useEditorStore.getState().dirty
     const updateResult = useEditorStore.getState().updateInteractionRuleAtTarget(
       target,
@@ -534,7 +522,6 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(activeProject()).toEqual(beforeUpdateProject)
     expect(activeHistory().history).toEqual(beforeUpdateHistory)
-    expect(useEditorStore.getState().history).toEqual(beforeUpdateStoreHistory)
     expect(useEditorStore.getState().dirty).toBe(beforeUpdateDirty)
   })
 
