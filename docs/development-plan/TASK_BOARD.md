@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037m-kernel-resource-dispatch](tasks/1.1/r11-037m-kernel-resource-dispatch.md) | queued | — | editor-store-history | 把 courseResourceCommands 的包装移入 kernel，root 不直接操作资源历史。 |
+| [r11-037n-component-ports](tasks/1.1/r11-037n-component-ports.md) | queued | — | none | 组件 Authoring 使用自己的窄 ports，不再依赖 FeatureAuthoringPorts 泛型聚合。 |

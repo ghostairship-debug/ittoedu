@@ -1,5 +1,9 @@
-import { createEditorTransactionStep } from '../authoring/editorTransaction'
-import type { FeatureAuthoringPorts } from '../authoring/featureAuthoringPorts'
+import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
+import type { CourseAssetSidecar } from '../project/v9AssetAdapter'
+import type { ComponentPackageData } from '../../shared/componentTypes'
+import type { CourseAuthoringSession } from '../authoring/courseAuthoringSession'
+import type { SlideAuthoringSession, SlideCommandResult } from '../course/slideAuthoringBackend'
+import type { SlidePersistExtra } from '../store/slices/slideAuthoringSlice'
 import {
   planApplyInteractionTemplate,
   planUpdateInteractionRule,
@@ -86,7 +90,28 @@ function findSlideSceneInteractions(
   return null
 }
 
-export function createInteractionAuthoringActions(ports: FeatureAuthoringPorts) {
+export type InteractionAuthoringState = {
+  readonly document: CourseProjectDocument | null
+  readonly sidecar: CourseAssetSidecar | null
+  readonly componentPackages: Record<string, ComponentPackageData>
+  readonly authoringSession: CourseAuthoringSession | null
+  readonly editingScope: 'scene' | 'global'
+  readonly interactionLocationId?: string | null
+  readonly interactionStateId?: string | null
+}
+
+export type InteractionAuthoringPorts = {
+  read(): InteractionAuthoringState
+  setFeedback(feedback: { errorMessage?: string | null; statusMessage?: string | null }): void
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistProject(document: CourseProjectDocument, options?: { statusMessage?: string | null }): void
+  persistSlideCommand(
+    run: (session: SlideAuthoringSession) => SlideCommandResult,
+    extra?: SlidePersistExtra,
+  ): SlideCommandResult
+}
+
+export function createInteractionAuthoringActions(ports: InteractionAuthoringPorts) {
   const rejectInteractionAuthoring = (
     code: InteractionAuthoringPlanFailureCode,
     reason: string,

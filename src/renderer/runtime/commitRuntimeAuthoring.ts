@@ -7,8 +7,15 @@ import {
   updateCourseAuthoringSessionRevision,
   type CourseAuthoringTarget,
 } from '../authoring/courseAuthoringSession'
-import type { FeatureAuthoringPorts } from '../authoring/featureAuthoringPorts'
+import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type { ComponentPackageData } from '../../shared/componentTypes'
+import type { CourseAssetSidecar } from '../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
+import type { CourseAuthoringSession } from '../authoring/courseAuthoringSession'
+import type { EditorTransactionStep } from '../authoring/editorTransaction'
+import type { EffectiveLayerProjection } from '../course/effectiveLayerProjection'
+import type { SlideAuthoringSession, SlideCommandResult } from '../course/slideAuthoringBackend'
+import type { SlidePersistExtra } from '../store/slices/slideAuthoringSlice'
 import type { RuntimeTargetEditSession } from '../authoring/runtimeTargetEditSession'
 import {
   captureCourseRuntimeAssetReplacementTarget,
@@ -107,7 +114,29 @@ export type RuntimeTemplateCreationCommitResult =
       readonly reason: string
     }
 
-export function createRuntimeAuthoringActions(ports: FeatureAuthoringPorts) {
+export type RuntimeAuthoringState = {
+  readonly document: CourseProjectDocument | null
+  readonly sidecar: CourseAssetSidecar | null
+  readonly componentPackages: Record<string, ComponentPackageData>
+  readonly authoringSession: CourseAuthoringSession | null
+  readonly editingScope: 'scene' | 'global'
+  readonly activeSceneId?: string
+  readonly projection?: EffectiveLayerProjection | null
+  readonly hasSlideSession?: boolean
+}
+
+export type RuntimeAuthoringPorts = {
+  read(): RuntimeAuthoringState
+  setFeedback(feedback: { errorMessage?: string | null; statusMessage?: string | null }): void
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistSlideCommand(
+    run: (session: SlideAuthoringSession) => SlideCommandResult,
+    extra?: SlidePersistExtra,
+  ): SlideCommandResult
+  persistProject(document: CourseProjectDocument, options?: { statusMessage?: string | null }): void
+}
+
+export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
   const rejectRuntimeSourceAuthoring = (
     code: RuntimeSourceAuthoringPlanFailureCode,
     reason: string,

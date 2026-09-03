@@ -1243,10 +1243,65 @@ export const useEditorStore = create<EditorState>((set, get) => {
       persistFlowResult(result, extra)
     },
   }
-  const runtimeAuthoringActions = createRuntimeAuthoringActions(featurePorts)
+  const runtimeAuthoringActions = createRuntimeAuthoringActions({
+    read: () => {
+      const state = get()
+      return {
+        document: selectActiveCourseProjectDocument(state),
+        sidecar: state.courseAssetSidecar,
+        componentPackages: state.componentPackages,
+        authoringSession: state.courseAuthoringSession,
+        editingScope: state.editingScope,
+        activeSceneId: state.activeSceneId,
+        projection: buildCandidateEffectiveLayers(state),
+        hasSlideSession: Boolean(state.slideBackend),
+      }
+    },
+    setFeedback: (feedback) => set(feedback),
+    persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
+    persistSlideCommand: (run, extra) => {
+      const backend = selectSlideAuthoringBackend(get())
+      if (!backend) {
+        return { ok: false, reason: 'not-slide-authoring-backend', historyEntry: false }
+      }
+      return persistCandidateResult(run(backend.getSession()), extra)
+    },
+    persistProject: (document, options) => {
+      kernel.persistDocument(document, options)
+    },
+  })
   const mediaAuthoringActions = createMediaAuthoringActions(featurePorts)
   const componentAuthoringActions = createComponentAuthoringActions(featurePorts)
-  const interactionAuthoringActions = createInteractionAuthoringActions(featurePorts)
+  const interactionAuthoringActions = createInteractionAuthoringActions({
+    read: () => {
+      const state = get()
+      return {
+        document: selectActiveCourseProjectDocument(state),
+        sidecar: state.courseAssetSidecar,
+        componentPackages: state.componentPackages,
+        authoringSession: state.courseAuthoringSession,
+        editingScope: state.editingScope,
+        interactionLocationId:
+          state.spatialSession?.selection.locationId
+          ?? state.flowSession?.selection.locationId
+          ?? state.slideCandidateSnapshot?.locationId
+          ?? null,
+        interactionStateId: state.activePresentationStateId,
+      }
+    },
+    setFeedback: (feedback) => set(feedback),
+    persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
+    persistSlideCommand: (run, extra) => {
+      const backend = selectSlideAuthoringBackend(get())
+      if (!backend) {
+        return { ok: false, reason: 'not-slide-authoring-backend', historyEntry: false }
+      }
+      return persistCandidateResult(run(backend.getSession()), extra)
+    },
+    persistProject: (document, options) => {
+      kernel.persistDocument(document, options)
+    },
+  })
 
 
   const applyFlowBackend = (
