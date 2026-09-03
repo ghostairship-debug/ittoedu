@@ -393,7 +393,8 @@
       "evidenceCommand": "npx vitest run tests/unit/courseProjectValidationDiagnostics.test.ts tests/unit/exportPreflightUi.test.tsx tests/unit/validateProject.test.ts",
       "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
       "inputClosure": [
-        "src/shared/projectHealth.ts",
+        "src/shared/courseProjectHealth.ts",
+        "src/shared/courseProjectHealth",
         "src/renderer/export/exportPreflight.ts",
         "scripts/validate-project.ts",
         "tests/unit/courseProjectValidationDiagnostics.test.ts",
