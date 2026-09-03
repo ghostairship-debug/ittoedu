@@ -441,9 +441,7 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     const legacyEngineConsumers = filesUnder('src/player').filter((path) => (
       source(path).includes('new InteractionEngine(')
     ))
-    expect(legacyEngineConsumers).toEqual([
-      ['src/player/Player', 'Scene.ts'].join(''),
-    ])
+    expect(legacyEngineConsumers).toEqual([])
   })
 
   it('keeps global playback actions on canonical V9 Surface histories', () => {

@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-055-final-architecture-review](tasks/1.1/r11-055-final-architecture-review.md) | queued | unassigned | none | 审查 1.1 实际 diff 与 import graph，证明 `editorStore.ts` 仅作 Zustand composition root，Owner 边界无宽 Facade、镜像状态、service locator 或反向 Store 依赖；两份结构门与当前合同一致。 |
+| [r11-060-final-legacy-zero](tasks/1.1/r11-060-final-legacy-zero.md) | queued | unassigned | none | 在 1.1 架构与删除范围冻结后，只运行一次正式 Legacy Zero 扫描，证明最终候选与已对账 inventory 一致且 V8、旧模块、旧引用与新增未归档命中全部为零。 |
