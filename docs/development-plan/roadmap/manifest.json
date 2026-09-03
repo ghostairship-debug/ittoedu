@@ -468,27 +468,26 @@
     {
       "id": "r11-055-architecture-modularity-gate",
       "release": "1.1",
-      "title": "证明 Owner 模块化与依赖方向收口",
+      "title": "最终审查 Owner 与依赖方向",
       "dependencies": [
-        "r11-037-editor-store-owner-modularization",
-        "r11-052-supported-test-migration"
+        "r11-054-delete-legacy-modules"
       ],
       "optional": false,
       "writeLocks": [
-        "generated-index"
+        "editor-store-history",
+        "workspace-properties"
       ],
       "spec": "1.1/r11-055-architecture-modularity-gate.md"
     },
     {
       "id": "r11-053-legacy-inventory-reconciliation",
       "release": "1.1",
-      "title": "在集成 HEAD 原子复核 Legacy 台账",
+      "title": "重算 Legacy 台账并给出删除清单",
       "dependencies": [
-        "r11-055-architecture-modularity-gate"
+        "r11-052-supported-test-migration"
       ],
       "optional": false,
       "writeLocks": [
-        "contracts-schema",
         "legacy-inventory"
       ],
       "spec": "1.1/r11-053-legacy-inventory-reconciliation.md"
@@ -496,51 +495,48 @@
     {
       "id": "r11-054-delete-legacy-modules",
       "release": "1.1",
-      "title": "按复核清单删除零 consumer 旧模块",
+      "title": "按精确清单分组删除旧模块",
       "dependencies": [
         "r11-053-legacy-inventory-reconciliation"
       ],
       "optional": false,
       "writeLocks": [
-        "app-save-recovery",
-        "contracts-schema",
         "legacy-inventory",
         "editor-store-history",
-        "published-producer",
-        "generated-index"
+        "published-producer"
       ],
       "spec": "1.1/r11-054-delete-legacy-modules.md"
     },
     {
       "id": "r11-060-zero-gate",
       "release": "1.1",
-      "title": "证明可执行作用域零遗留",
+      "title": "最终运行一次 Legacy 零检查",
       "dependencies": [
-        "r11-054-delete-legacy-modules"
+        "r11-055-architecture-modularity-gate"
       ],
       "optional": false,
       "writeLocks": [
-        "generated-index"
+        "none"
       ],
       "spec": "1.1/r11-060-zero-gate.md"
     },
     {
       "id": "r11-061-no-regression-candidate",
       "release": "1.1",
-      "title": "固定 1.1 无回归候选",
+      "title": "最终一次无回归检查",
       "dependencies": [
         "r11-060-zero-gate"
       ],
       "optional": false,
       "writeLocks": [
-        "generated-index"
+        "none"
       ],
       "spec": "1.1/r11-061-no-regression-candidate.md"
     },
     {
       "id": "r11-062-owner-release",
       "release": "1.1",
-      "title": "Owner 验收并发布 1.1",
+      "title": "Owner 验收并决定是否发布 1.1",
       "dependencies": [
         "r11-061-no-regression-candidate"
       ],

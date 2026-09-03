@@ -99,9 +99,9 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 执行顺序为：正式合同与行为基线 → 以 `inventories/legacy-consumers.json` 建立只减不增的保守上界与扫描门 → 抽取仍有效的 Native/Design/Media 等领域合同 → 使 V9 Native 与 Published V2 Schema 独立 → 按写锁迁移 Editor、Published/Preview/Export/Diagnostics 与 Archive/Test lane → 清零 V8 镜像与双轨 writer → 抽取 Core resource/history → 依次迁移 Slide、Flow、Spatial state/action → 迁移 App router/lifecycle 与 Feature use case → 拆分 UI 与交付热点 → 以依赖棘轮证明组合根只接线 → 单一 writer 在集成候选原子复核 inventory → 按精确零 consumer 清单删除旧模块 → 固定候选执行零遗留、模块化、不可降级和发布门 → Owner 签署。
 
-2026-09-03 Codex 执行检查点以当前源码、直接 consumer 和聚焦门为准：`r11-026`、`r11-030`、`r11-031`、`r11-040`、`r11-041`、`r11-042`、`r11-043`、`r11-033` 与 `r11-029` 已闭合。`r11-029` 已通过 10 个聚焦测试文件共 127 项测试、`typecheck`、scoped diff check 与负边界查询；根 Workspace 现在只做 exactly-one Surface 路由，Slide leaf 不再接收完整 document/live Store，module-global bind 与 Store→UI 反向依赖已清零。**1.1 尚未完成**；按用户当前要求，当前检查点即暂停，不创建下一任务卡，不 commit、tag 或 release。
+2026-09-03 当前实现已完成 `r11-029`、`r11-032`、`r11-034`、`r11-035` 与 `r11-036` 的主体工作；复查发现 036 在媒体解码后的哈希去重 `await` 与最终提交之间仍缺一次 identity 核对，因此先执行 `r11-036b-media-dedupe-race`，再进入 Store 拆分。纯 Flow 课程的兼容格式是 DOCX，PPTX 只适用于含 Slide 场景或 Spatial 镜头的课程；当前 HEAD 已恢复该边界。
 
-暂停后的剩余路线已于 2026-09-03 重基为执行版规格（见 `docs/development-plan/roadmap/1.1/EXECUTION_GUIDE.md` 与各规格的“2026-09-03 执行版”段）：`r11-025` 以证据闭合，其 history 镜像残留归 `r11-037` W1；检查点提交上 `check:preservation`（PM-08 夹具）与 `check:legacy-inventory`（7 项未登记观察）为红，由 `r11-029` 返工卡先修；`r11-032` 只剩 `playerCapture.ts` 的 PlayerApp 引用，Flow-only 项待 Integrator 给出失败测试否则作废；`r11-034`、`r11-035`、`r11-036` 各收窄为一处已钉死 file:line 的缺陷修复并要求红→绿证据；`r11-037` 拆为 W1–W9 九波；`r11-052` 按当前测试树重算为 A–E 五波。恢复执行顺序为 `r11-029 返工卡 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037（W1–W9）→ r11-052（A–E）→ r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`；执行者一次一张卡，复查由 Integrator 完成；旧 053 identity、deletion list 和“已完成”自述仍不授权删除。
+剩余实施统一遵循 `docs/development-plan/roadmap/1.1/EXECUTION_GUIDE.md` 与 `GEMINI_EXECUTION_PLAN.md`：`r11-036b → r11-037a–037z → r11-052a–052d → r11-053 → r11-054a–054d`。每次只实例化一张可立即执行的卡，每卡只跑一条最近层测试命令，并在产品 TypeScript 变化时跑 `typecheck`；实施阶段不运行全量产品测试、保全门、Legacy zero、verify、候选 Hash 或字节比较。全部实施完成后由 Codex 一次执行 `r11-055 → r11-060 → r11-061` 的最终结构审查、Legacy 零检查、全量产品测试与保全检查，再交 Owner 执行 `r11-062`。旧 W1–W9、052 A–E、053/054 candidate digest 与旧 deletion list 均不再授权执行。
 
 硬约束：
 

@@ -1,5 +1,15 @@
 # 1.1 Integrator handoff（接手审计修订：2026-09-03）
 
+## 当前执行覆盖（2026-09-03，Gemini 最小验证版）
+
+本节覆盖下文所有旧恢复顺序、W1–W9、052 A–E、candidate digest、Hash 报告和旧 deletion list；下文仅作历史审计依据。
+
+- 当前 HEAD 主体完成到 036，但复查发现 `useMediaImport.ts#tryInjectCandidateMedia` 在异步去重后仍可迟到写入，先执行任务板上的 `r11-036b-media-dedupe-race`。
+- 后续按 [GEMINI_EXECUTION_PLAN.md](GEMINI_EXECUTION_PLAN.md) 顺序执行 037a–037z、052a–052d、053 与 054 分组卡；一次只有一张 queued 卡。
+- Gemini 每卡只运行一条最近层测试命令，产品 TypeScript 变化时再运行 `typecheck`。不提前运行 `test:product`、`verify`、`check:preservation`、`check:legacy-zero` 或 Hash/字节比较。
+- 全部实施完成后才由 Codex 执行 055 结构审查、060 一次 Legacy zero、061 一次 typecheck/full product/preservation；再交 Owner 062。
+- 当前纯 Flow→DOCX、Slide/Spatial→PPTX 的产品边界保持不变。
+
 本文件取代 2026-09-02 的 Grok handoff。旧 handoff 中“不要重开 r11-000–055”“剩余链只有 053 → 054 → 060 → 061”以及基于旧 scanner 得出的 deletion list 均已被源码和可复现检查推翻，不能作为继续开发或删除文件的授权。
 
 当前裁决是：**保留已有实现成果，先修裁判与 Owner 边界，再重新进入 Legacy reconciliation；不整体回滚，也不直接继续 053/054。**

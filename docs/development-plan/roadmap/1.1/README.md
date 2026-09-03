@@ -10,13 +10,13 @@
 
 ## 执行规则
 
-1. 一次只执行一个规格；完成后停止，不自动领取后继节点。
-2. 开始前读取当前总纲、任务板、规格的 Read first、直接 producer/consumer 和目标测试；不要按旧 SHA、历史行号或旧 ZIP 强行修改。
-3. 先证明替代 consumer 的保存、重开、Player 或导出行为等价，再删除旧 consumer。Legacy 唯一机器台账是 `../../inventories/legacy-consumers.json`，不得创建第二份 allowlist。台账只对其 `reconciledProductCommit`、`reconciledScope` 与排除 inventory 自身的 product tree digest 声明精确；后续 lane 迁移不得并行修改共享 JSON，只允许实际 consumer 减少，因此旧 confirmed 集合是安全上界。发现漏记或新增旧 consumer 时立即停止并退回 r11-002；r11-053 在集成 HEAD 原子复核后，r11-054 才能删除模块。
-4. 只写规格允许的路径。需要越界、需要改变 V9/Published wire、需要降级功能、consumer 未清零或基线事实已变时，停止并交回 Integrator 重裁。
+1. 一次只执行任务板上的一张卡；完成后按 [Gemini 拆卡蓝图](GEMINI_EXECUTION_PLAN.md) 实例化唯一下一卡，不并行领取同一写锁。
+2. 开始前只读当前卡的目标函数、直接 consumer 和目标测试；不要按旧 SHA、历史行号或旧 ZIP 强行修改。
+3. 先证明替代 consumer 的最近层行为，再删除旧 consumer。Legacy 唯一机器台账是 `../../inventories/legacy-consumers.json`；r11-053 只重算一次当前明细并给出精确删除清单，不维护候选 Hash 或第二报告。
+4. 只写当前卡允许的路径。需要越界、改变 V9/Published wire、降级功能或 consumer 未清零时立即停止。
 5. 不使用 `any`、`.passthrough()`、silent strip、silent fallback、no-op、隐藏入口、静态占位或弱化断言实现绿灯。
 6. 每个中间提交都必须可运行；不得以“最终任务会恢复”为理由暂时删除 UI、导出、Runtime/Component 或历史能力。
-7. Focused validation 只列当前仓库真实存在的命令和测试文件。若命令失效，停止更新规格；不得自行换成未声明的大门掩盖漂移。
+7. 实施卡只运行一条最近层测试命令，产品 TypeScript 变化时再运行 `typecheck`；全量产品测试、保全门与 Legacy zero 全部留到最终复查。
 8. 自动化最多形成 `engineering candidate`；Owner 对固定课例与固定候选签署 `accepted`。
 9. 模块迁移一次只迁一个 Owner 闭环：新模块接管 state/action/use case 的同一提交必须删除原 writer/实现；不得以完整 Store Facade、root re-export、raw `get()` 注入、同文件代理或“先双写后清理”作为中间方案。
 
@@ -57,16 +57,16 @@
 | r11-050-v9-fixture-foundation | 建立 V9/Published 测试基础 | r11-011-v9-native-schema-independence,r11-012-published-v2-schema-independence | generated-index | [spec](r11-050-v9-fixture-foundation.md) |
 | r11-051-v9-archive-only | 保存、打开与校验只支持 V9 archive | r11-050-v9-fixture-foundation | app-save-recovery | [spec](r11-051-v9-archive-only.md) |
 | r11-052-supported-test-migration | 测试只证明受支持 V9/V2 行为 | r11-037-editor-store-owner-modularization | generated-index | [spec](r11-052-supported-test-migration.md) |
-| r11-055-architecture-modularity-gate | 证明 Owner 模块化与依赖方向收口 | r11-037-editor-store-owner-modularization,r11-052-supported-test-migration | generated-index | [spec](r11-055-architecture-modularity-gate.md) |
-| r11-053-legacy-inventory-reconciliation | 在集成 HEAD 原子复核 Legacy 台账 | r11-055-architecture-modularity-gate | contracts-schema,legacy-inventory | [spec](r11-053-legacy-inventory-reconciliation.md) |
-| r11-054-delete-legacy-modules | 按复核清单删除零 consumer 旧模块 | r11-053-legacy-inventory-reconciliation | app-save-recovery,contracts-schema,legacy-inventory,editor-store-history,published-producer,generated-index | [spec](r11-054-delete-legacy-modules.md) |
-| r11-060-zero-gate | 证明可执行作用域零遗留 | r11-054-delete-legacy-modules | generated-index | [spec](r11-060-zero-gate.md) |
-| r11-061-no-regression-candidate | 固定 1.1 无回归候选 | r11-060-zero-gate | generated-index | [spec](r11-061-no-regression-candidate.md) |
-| r11-062-owner-release | Owner 验收并发布 1.1 | r11-061-no-regression-candidate | none | [spec](r11-062-owner-release.md) |
+| r11-053-legacy-inventory-reconciliation | 重算 Legacy 台账并给出删除清单 | r11-052-supported-test-migration | legacy-inventory | [spec](r11-053-legacy-inventory-reconciliation.md) |
+| r11-054-delete-legacy-modules | 按精确清单分组删除旧模块 | r11-053-legacy-inventory-reconciliation | legacy-inventory,editor-store-history,published-producer | [spec](r11-054-delete-legacy-modules.md) |
+| r11-055-architecture-modularity-gate | 最终审查 Owner 与依赖方向 | r11-054-delete-legacy-modules | editor-store-history,workspace-properties | [spec](r11-055-architecture-modularity-gate.md) |
+| r11-060-zero-gate | 最终运行一次 Legacy 零检查 | r11-055-architecture-modularity-gate | none | [spec](r11-060-zero-gate.md) |
+| r11-061-no-regression-candidate | 最终一次无回归检查 | r11-060-zero-gate | none | [spec](r11-061-no-regression-candidate.md) |
+| r11-062-owner-release | Owner 验收并决定是否发布 1.1 | r11-061-no-regression-candidate | none | [spec](r11-062-owner-release.md) |
 
-合同拆分后，Editor、Archive/Test 与 Published lane 可按无冲突写锁并行；Player、作者预览、Export 与 package producer 因共享 `published-producer` 必须在该 lane 内串行领取。Editor 先完成 Properties/Flow/Spatial/Slide 四个 UI owner 纵切，再由 r11-025 清除 Surface 旧镜像；App 生命周期、Delivery、导入/输入三支随后可按锁推进，r11-037 才最终拆 Store composition root 并删除最后旧工程真相。任何一步都不保留双写。所有 lane 只交接预期减少的 LEG endpoint，不并行写共享 inventory。r11-055 在集成树证明真拆分后，r11-053 才原子复核 inventory；r11-054 只按精确零 consumer 清单删除。发布顺序不等于人为串行实现。
+当前剩余工作不并行：先完成 036b 与 037/052 小卡，再由 053 给出精确删除清单，054 分组删除。全部实施完成后才由 Codex 顺序执行 055、060、061；任何一步都不保留双写或兼容桩。
 
-## 2026-09-03 接手审计裁决
+## 2026-09-03 接手审计裁决（历史记录）
 
 本节记录当前路线的 failure return，不是任务板状态，也不改变上表的稳定 DAG。上一份 handoff 中“r11-000–055 已完成、直接继续 053 → 054”的判断已经失效；现有实现有大量可复用成果，但下列节点必须按原规格重新满足退出条件：
 
@@ -101,11 +101,15 @@
 
 跨会话接手先读已审计改写的 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md)。
 
-## 2026-09-03 执行版重基
+## 2026-09-03 旧执行版重基（已取代）
 
-Codex 检查点（HEAD `bb1f848`）之后，剩余节点按 [执行者指南](EXECUTION_GUIDE.md) 的规则改写为可直接执行的“2026-09-03 执行版”：每张卡钉死 file:line 的符号表、允许新建清单、结构事实命令与红→绿证据要求，执行者不做架构判断；上表 037/052 行的“当前裁决”由对应规格的执行版替代。裁决：`r11-025` 以证据闭合，其 history 镜像残留归 `r11-037` W1；检查点上 `check:preservation`（PM-08 夹具）与 `check:legacy-inventory`（7 项未登记观察）为红，由 `r11-029` 返工卡先修；`r11-032` 只剩 `playerCapture.ts` 的 PlayerApp 引用，Flow-only 项待 Integrator 给出失败测试否则作废；`r11-034`、`r11-035`、`r11-036` 各为一处已钉死的缺陷修复；`r11-037` 拆为 W1–W9；`r11-052` 重算为 A–E。`r11-055`、`r11-053`、`r11-060`、`r11-061` 的判读与结构门编写只由 Integrator 执行，不派通用执行者；`r11-054` 在 053 给出精确清单后可派。首批执行卡位于 `docs/development-plan/tasks/1.1/`。
+该版本基于 `bb1f848` 的 W1–W9、052 A–E、candidate digest 和旧 deletion list 均已作废，只保留为审计历史；不得据此执行。
 
 检查点上 `test:product` 的 7 文件 / 10 项失败已于 2026-09-03 定责并修复（① 校验器整体状态不再计入不适用格式的错误，纯 Flow 课程的 PPTX 预检项本身保留 error；②③⑤ 为测试侧缺陷；④ ratchet 白名单为预期红，待 037/055 收口），逐组结论与证据见 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md) §0；修后仅剩 ④ 一项预期红。
+
+## 2026-09-03 Gemini 最小验证执行版（当前）
+
+当前唯一顺序是 `r11-036b → r11-037a–037z → r11-052a–052d → r11-053 → r11-054a–054d → Codex r11-055 → r11-060 → r11-061 → Owner r11-062`，细节以 [拆卡蓝图](GEMINI_EXECUTION_PLAN.md) 为准。实施阶段每卡只跑最近层测试与必要的 `typecheck`，不运行全量、保全、Legacy zero、verify 或 Hash；全部实施完成后由 Codex 集中复查一次。
 
 ## 交接格式
 

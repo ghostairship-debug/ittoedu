@@ -257,6 +257,8 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
   }, [])
 
   const tryInjectCandidateMedia = useCallback(async (input: {
+    started: MediaImportIdentity | null
+    title: string
     kind: AssetKind
     items: readonly CourseImportedAsset[]
     nativeType?: 'image' | 'video' | 'audio'
@@ -271,6 +273,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
       context.sidecar,
       input.items,
     )
+    assertFreshIdentity(input.started, portsRef.current.captureIdentity(), input.title)
     const items = input.mode === 'add' ? deduped.placements : deduped.additions
     portsRef.current.commitCandidateMedia({
       items: asCommitItems(items),
@@ -377,6 +380,8 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
           return
         }
         if (await tryInjectCandidateMedia({
+          started,
+          title: '图片批量入库已取消',
           kind: 'image',
           items: mode === 'library' ? prepared.additions : prepared.placements,
           nativeType: 'image',
@@ -445,6 +450,8 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
       )
       assertFreshIdentity(started, portsRef.current.captureIdentity(), '声音批量入库已取消')
       if (await tryInjectCandidateMedia({
+        started,
+        title: '声音批量入库已取消',
         kind: 'audio',
         items: prepared.additions,
         nativeType: 'audio',
@@ -517,6 +524,8 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
         return
       }
       if (await tryInjectCandidateMedia({
+        started,
+        title: '视频批量入库已取消',
         kind: 'video',
         items: mode === 'library' ? prepared.additions : prepared.placements,
         nativeType: 'video',

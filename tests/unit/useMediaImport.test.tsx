@@ -8,6 +8,12 @@ const dimensionProbe = vi.hoisted(() => ({
   resolve: null as ((value: { width: number; height: number }) => void) | null,
 }))
 
+const dedupeProbe = vi.hoisted(() => ({
+  calls: 0,
+  deferred: false,
+  release: null as (() => void) | null,
+}))
+
 vi.mock('../../src/renderer/project/assetManager', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/project/assetManager')>()
   return {
@@ -16,6 +22,32 @@ vi.mock('../../src/renderer/project/assetManager', async (importOriginal) => {
       dimensionProbe.calls += 1
       dimensionProbe.resolve = resolve
     }),
+  }
+})
+
+vi.mock('../../src/renderer/project/v9AssetAdapter', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/project/v9AssetAdapter')>()
+  return {
+    ...actual,
+    dedupeCourseMediaImports: async (
+      kind: unknown,
+      assets: unknown,
+      sidecar: unknown,
+      items: unknown,
+    ) => {
+      dedupeProbe.calls += 1
+      if (dedupeProbe.deferred) {
+        await new Promise<void>((resolve) => {
+          dedupeProbe.release = resolve
+        })
+      }
+      return actual.dedupeCourseMediaImports(
+        kind as any,
+        assets as any,
+        sidecar as any,
+        items as any,
+      )
+    },
   }
 })
 
@@ -94,6 +126,9 @@ async function importWhileDecoding(
 afterEach(() => {
   dimensionProbe.calls = 0
   dimensionProbe.resolve = null
+  dedupeProbe.calls = 0
+  dedupeProbe.deferred = false
+  dedupeProbe.release = null
   vi.restoreAllMocks()
 })
 
@@ -115,6 +150,24 @@ describe('useMediaImport stale results', () => {
     await importWhileDecoding(harness, () => {
       harness.identity.locationId = 'L2'
     })
+
+    expect(harness.ports.commitCandidateMedia).toHaveBeenCalledTimes(0)
+    expect(harness.ports.placeImageNodes).toHaveBeenCalledTimes(0)
+    expect(harness.ports.importAssetsAtTarget).toHaveBeenCalledTimes(0)
+    expect(errorText(harness.errors[0])).toContain('工程已发生变化')
+  })
+
+  it('does not commit when the document changes during deduplication', async () => {
+    const harness = createHarness()
+    dedupeProbe.deferred = true
+    const { result } = renderHook(() => useMediaImport(harness.ports))
+    const pending = result.current.selectAndImportImage('add', { x: 10, y: 10 })
+    await vi.waitFor(() => expect(dimensionProbe.calls).toBe(1))
+    dimensionProbe.resolve?.({ width: 10, height: 10 })
+    await vi.waitFor(() => expect(dedupeProbe.calls).toBe(1))
+    harness.identity.revision = 2
+    dedupeProbe.release?.()
+    await pending
 
     expect(harness.ports.commitCandidateMedia).toHaveBeenCalledTimes(0)
     expect(harness.ports.placeImageNodes).toHaveBeenCalledTimes(0)
