@@ -177,6 +177,7 @@ export type SpatialAuthoringPorts = {
     extra?: SpatialPersistExtra,
   ): SpatialCommandResult
   applyBackend(session: SpatialAuthoringSession, extra?: SpatialApplyBackendExtra): void
+  openPropertiesTab?(): void
 }
 
 function spatialFailureMessage(rawReason: string): string {
@@ -653,6 +654,8 @@ export function createSpatialAuthoringSlice(
   ): SpatialCommandResult
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
+  activateCameraFrame(frameId: string): boolean
+  setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
 } {
   const commitDraft = (): SpatialAuthoringSession | null => {
     const owned = spatial.read()
@@ -1671,6 +1674,65 @@ export function createSpatialAuthoringSlice(
     },
     persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean {
       return persistSpatialDocument(spatial, document, options)
+    },
+    activateCameraFrame(frameId: string): boolean {
+      const before = spatial.read()
+      if (before.spatialContentEdit && !commitDraft()) return false
+      const current = spatial.read()
+      const session = current.spatialSession
+      const authoringSession = spatial.readAuthoringSession()
+      if (!session || !authoringSession) return false
+      try {
+        const view = buildSpatialEditorView({
+          project: session.history.present,
+          locationId: session.selection.locationId,
+          sessionCamera: session.sessionCamera,
+        })
+        const target = captureSpatialEditorAuthoringTarget({
+          view,
+          sessionToken: authoringSession.token,
+          target: { kind: 'camera-frame', frameId, field: 'session.activeCameraFrameId' },
+        })
+        return runSpatialAuthoringIntent(target, {
+          kind: 'activate-camera-frame',
+          expectedContentEdit: null,
+        }).ok
+      } catch (error) {
+        kernel.setFeedback({
+          errorMessage: error instanceof Error ? error.message : '无法切换 Spatial 镜头',
+          statusMessage: null,
+        })
+        return false
+      }
+    },
+    setSpatialGraphSelection(selection: SpatialGraphSelection | null): void {
+      const current = spatial.read()
+      const authoringSession = spatial.readAuthoringSession()
+      const token = authoringSession?.token
+      if (!current.spatialSession || !token) return kernel.failSessionless()
+      const view = buildSpatialEditorView({
+        project: current.spatialSession.history.present,
+        locationId: current.spatialSession.selection.locationId,
+        sessionCamera: current.spatialSession.sessionCamera,
+      })
+      const target = captureSpatialEditorAuthoringTarget({
+        view,
+        sessionToken: token,
+        target: selection?.kind === 'path'
+          ? { kind: 'path', pathId: selection.id, field: 'session.graphSelection' }
+          : selection?.kind === 'relation'
+            ? { kind: 'relation', relationId: selection.id, field: 'session.graphSelection' }
+            : { kind: 'world', field: 'session.graphSelection' },
+      })
+      const receipt = runSpatialAuthoringIntent(target, {
+        kind: 'set-graph-selection',
+        selection,
+        expectedSelection: current.spatialGraphSelection,
+        expectedContentEdit: current.spatialContentEdit,
+      })
+      if (receipt.ok && selection) {
+        spatial.openPropertiesTab?.()
+      }
     },
   }
 }

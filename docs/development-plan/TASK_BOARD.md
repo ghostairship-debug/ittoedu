@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037r-surface-navigation-owner](tasks/1.1/r11-037r-surface-navigation-owner.md) | queued | — | none | 把 setSpatialGraphSelection、Flow block 激活和 Surface 特有导航分支迁回对应 slice；crossSurfaceCommands 仅保留通用路由。 |
+| [r11-037s-layer-command-owners](tasks/1.1/r11-037s-layer-command-owners.md) | queued | — | none | 把全局图层设置、重排、owner 移动和位置可见性的 Flow/Spatial 实现迁到对应 slice；cross-surface 只分派。 |

@@ -626,6 +626,7 @@ export function createFlowAuthoringSlice(
   ): FlowCommandResult | FlowSharedAuthoringResult | { readonly ok: false; readonly reason: string; readonly historyEntry: false }
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
+  activateBlock(locationId: string): boolean
 } {
   const missingSession = (): FlowCommandResult => ({
     ok: false,
@@ -1659,6 +1660,21 @@ export function createFlowAuthoringSlice(
     },
     persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean {
       return persistFlowDocument(flow, document, options)
+    },
+    activateBlock(locationId: string): boolean {
+      if (!commitDraft()) return false
+      const session = flow.read().flowSession
+      if (!session) return false
+      const document = session.history.present
+      const location = document.locations.find((candidate) => candidate.id === locationId)
+      if (!location || location.kind !== 'flow-block') return false
+      const result = flow.persist({
+        ok: true,
+        nextDocument: document,
+        historyEntry: false,
+        selection: selectFlowEditorBlock(document, location.id, location.blockId),
+      }, { clearTextEdit: true })
+      return result.ok
     },
   }
 }

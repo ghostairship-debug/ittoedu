@@ -42,10 +42,6 @@ import {
   type CourseEditorDropdownAction,
   type CourseEditorPrimaryAction,
 } from '../course/courseEditorLayout'
-import {
-  buildSpatialEditorView,
-  captureSpatialEditorAuthoringTarget,
-} from '../course/spatialEditorView'
 import type {
   CaptureCourseProjectRecoveryResult,
   CourseProjectPersistenceSnapshot,
@@ -165,6 +161,7 @@ export type CrossSurfaceFlowPorts = {
   selectNode(nodeId: string | null, additive?: boolean): void
   ensureTeacherController(): void
   patch(patch: { flowTextEdit?: null }): void
+  activateBlock(locationId: string): boolean
 } & SurfaceNodeCommands
 
 export type CrossSurfaceSpatialPorts = {
@@ -207,6 +204,9 @@ export type CrossSurfaceSpatialPorts = {
     spatialGraphSelection: SpatialGraphSelection | null
     spatialPlaybackPathId: string | null
   }>): void
+  activateCameraFrame(frameId: string): boolean
+  setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
+  setScope(scope: 'global' | 'world'): void
 } & SurfaceNodeCommands
 
 export type CrossSurfaceCommandPorts = {
@@ -286,37 +286,6 @@ function sameEditorSelectionSnapshot(
 }
 
 export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
-  const activateSpatialCameraTarget = (frameId: string): boolean => {
-    const before = ports.spatial.read()
-    if (before.spatialContentEdit && !ports.spatial.commitDraft()) return false
-    const current = ports.spatial.read()
-    const session = current.spatialSession
-    const authoringSession = ports.kernel.readAuthoringSession()
-    if (!session || !authoringSession) return false
-    try {
-      const view = buildSpatialEditorView({
-        project: session.history.present,
-        locationId: session.selection.locationId,
-        sessionCamera: session.sessionCamera,
-      })
-      const target = captureSpatialEditorAuthoringTarget({
-        view,
-        sessionToken: authoringSession.token,
-        target: { kind: 'camera-frame', frameId, field: 'session.activeCameraFrameId' },
-      })
-      return ports.spatial.runAuthoringIntent(target, {
-        kind: 'activate-camera-frame',
-        expectedContentEdit: null,
-      }).ok
-    } catch (error) {
-      ports.kernel.setFeedback({
-        errorMessage: error instanceof Error ? error.message : '无法切换 Spatial 镜头',
-        statusMessage: null,
-      })
-      return false
-    }
-  }
-
   const commands = {
     setCanvasMode(canvasMode: 'edit' | 'run') {
       dispatchActiveSurface(ports.detect(), {
@@ -393,26 +362,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
 
     setEditingScope(editingScope: 'scene' | 'global') {
       dispatchActiveSurface(ports.detect(), {
-        spatial: () => {
-          const current = ports.spatial.read()
-          const token = current.courseAuthoringSession?.token
-          if (!current.spatialSession || !token) return ports.kernel.failSessionless()
-          const view = buildSpatialEditorView({
-            project: current.spatialSession.history.present,
-            locationId: current.spatialSession.selection.locationId,
-            sessionCamera: current.spatialSession.sessionCamera,
-          })
-          const target = captureSpatialEditorAuthoringTarget({
-            view,
-            sessionToken: token,
-            target: { kind: 'world', field: 'authoring.scope' },
-          })
-          ports.spatial.runAuthoringIntent(target, {
-            kind: 'set-scope',
-            scope: editingScope === 'global' ? 'global' : 'world',
-            expectedContentEdit: current.spatialContentEdit,
-          })
-        },
+        spatial: () => ports.spatial.setScope(editingScope === 'global' ? 'global' : 'world'),
         flow: () => ports.flow.setScope(editingScope === 'global' ? 'global' : 'scene'),
         slide: () => ports.slide.setScope(editingScope === 'global' ? 'global' : 'scene'),
         sessionless: () => ports.kernel.failSessionless(),
@@ -420,30 +370,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
 
     setSpatialGraphSelection(selection: SpatialGraphSelection | null) {
-      const current = ports.spatial.read()
-      const token = current.courseAuthoringSession?.token
-      if (!current.spatialSession || !token) return ports.kernel.failSessionless()
-      const view = buildSpatialEditorView({
-        project: current.spatialSession.history.present,
-        locationId: current.spatialSession.selection.locationId,
-        sessionCamera: current.spatialSession.sessionCamera,
-      })
-      const target = captureSpatialEditorAuthoringTarget({
-        view,
-        sessionToken: token,
-        target: selection?.kind === 'path'
-          ? { kind: 'path', pathId: selection.id, field: 'session.graphSelection' }
-          : selection?.kind === 'relation'
-            ? { kind: 'relation', relationId: selection.id, field: 'session.graphSelection' }
-            : { kind: 'world', field: 'session.graphSelection' },
-      })
-      const receipt = ports.spatial.runAuthoringIntent(target, {
-        kind: 'set-graph-selection',
-        selection,
-        expectedSelection: current.spatialGraphSelection,
-        expectedContentEdit: current.spatialContentEdit,
-      })
-      if (receipt.ok && selection) ports.shell.patch({ activeTab: 'properties' })
+      ports.spatial.setSpatialGraphSelection(selection)
     },
 
     activateCourseLocation(locationId: string) {
@@ -469,7 +396,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         && spatial.spatialSession.scope !== 'global'
         && !shell.editingTextNodeId
       ) {
-        activateSpatialCameraTarget(requestedLocation.cameraFrameId)
+        ports.spatial.activateCameraFrame(requestedLocation.cameraFrameId)
         return
       }
       const plan = planActivateCourseLocation({
@@ -612,21 +539,8 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
 
     setActiveScene(activeSceneId: string) {
       dispatchActiveSurface(ports.detect(), {
-        spatial: () => activateSpatialCameraTarget(activeSceneId),
-        flow: () => {
-          if (!ports.flow.commitDraft()) return
-          const session = ports.flow.read().flowSession
-          if (!session) return
-          const document = session.history.present
-          const location = document.locations.find((candidate) => candidate.id === activeSceneId)
-          if (!location || location.kind !== 'flow-block') return
-          ports.flow.persist({
-            ok: true,
-            nextDocument: document,
-            historyEntry: false,
-            selection: selectFlowEditorBlock(document, location.id, location.blockId),
-          }, { clearTextEdit: true })
-        },
+        spatial: () => ports.spatial.activateCameraFrame(activeSceneId),
+        flow: () => ports.flow.activateBlock(activeSceneId),
         slide: () => {
           ports.slide.commitDraft()
           ports.slide.activateScene(activeSceneId)

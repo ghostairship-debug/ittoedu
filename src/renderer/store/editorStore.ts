@@ -1437,6 +1437,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     patch: (patch) => set(patch),
     persist: persistSpatialResult,
     applyBackend: applySpatialBackend,
+    openPropertiesTab: () => set({ activeTab: 'properties' }),
   })
   const detectSurface = () => detectActiveSurface({
     spatialLocationId: get().spatialSession?.selection.locationId ?? null,
