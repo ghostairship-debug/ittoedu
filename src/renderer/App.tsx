@@ -24,9 +24,11 @@ import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
   selectEditingNodes,
+  selectEditingScope,
   selectMediaAssetFiles,
   selectMediaAssets,
   selectSelectedNode,
+  selectSelectedNodeIds,
   selectSlideAuthoringBackend,
   selectHasUnsavedCourseChanges,
   useEditorStore,
@@ -92,8 +94,8 @@ export default function App() {
   const spatialContentEdit = useEditorStore((state) => state.spatialContentEdit)
   const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
   const selectedNode = useEditorStore(selectSelectedNode)
-  const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
+  const editingScope = useEditorStore(selectEditingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
   const activeTab = useEditorStore((state) => state.activeTab)
   const editingNodes = useEditorStore(selectEditingNodes)
@@ -384,7 +386,7 @@ export default function App() {
         flowTextFocus: flow?.selection.focus === 'text',
         flowHasSelection: Boolean(
           flow && (
-            state.selectedNodeIds.length > 0
+            selectSelectedNodeIds(state).length > 0
             || flow.selection.selectedBlockIds.length > 0
             || flow.selection.selectedOverlayIds.length > 0
           ),
@@ -395,7 +397,7 @@ export default function App() {
         ),
         slideFormulaEdit: state.v9ContentEdit?.kind === 'formula',
         ...(target instanceof HTMLElement ? { slideTagName: target.tagName } : {}),
-        selectedNodeCount: state.selectedNodeIds.length,
+        selectedNodeCount: selectSelectedNodeIds(state).length,
         editingText: Boolean(state.editingTextNodeId),
       }
     },
@@ -414,7 +416,7 @@ export default function App() {
       state.selectNodes(selectEditingNodes(state).map((node) => node.id))
     },
     clearSelection: () => useEditorStore.getState().selectNodes([]),
-    selectedCount: () => useEditorStore.getState().selectedNodeIds.length,
+    selectedCount: () => selectSelectedNodeIds(useEditorStore.getState()).length,
     saveProject: (saveAs) => {
       void courseProjectLifecycle.saveProject(saveAs)
     },

@@ -767,8 +767,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         sidecar: state.courseAssetSidecar,
         componentPackages: state.componentPackages,
         authoringSession: state.courseAuthoringSession,
-        editingScope: state.editingScope,
-        activeSceneId: state.activeSceneId,
+        editingScope: selectEditingScope(state),
+        activeSceneId: selectActiveSceneId(state),
         projection: buildCandidateEffectiveLayers(state),
         hasSlideSession: Boolean(state.slideBackend),
       }
@@ -795,8 +795,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         sidecar: state.courseAssetSidecar,
         componentPackages: state.componentPackages,
         authoringSession: state.courseAuthoringSession,
-        editingScope: state.editingScope,
-        activeSceneId: state.activeSceneId,
+        editingScope: selectEditingScope(state),
+        activeSceneId: selectActiveSceneId(state),
         projection: buildCandidateEffectiveLayers(state),
         hasSlideSession: Boolean(selectSlideAuthoringBackend(state)),
         hasFlowSession: Boolean(state.flowSession),
@@ -827,8 +827,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         sidecar: state.courseAssetSidecar,
         componentPackages: state.componentPackages,
         authoringSession: state.courseAuthoringSession,
-        editingScope: state.editingScope,
-        interactionStateId: state.activePresentationStateId,
+        editingScope: selectEditingScope(state),
+        interactionStateId: selectActivePresentationStateId(state),
         hasSpatialSession: Boolean(state.spatialSession),
         hasFlowSession: Boolean(state.flowSession),
       }
@@ -896,13 +896,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         sidecar: state.courseAssetSidecar,
         componentPackages: state.componentPackages,
         authoringSession: state.courseAuthoringSession,
-        editingScope: state.editingScope,
+        editingScope: selectEditingScope(state),
         interactionLocationId:
           state.spatialSession?.selection.locationId
           ?? state.flowSession?.selection.locationId
           ?? state.slideCandidateSnapshot?.locationId
           ?? null,
-        interactionStateId: state.activePresentationStateId,
+        interactionStateId: selectActivePresentationStateId(state),
       }
     },
     setFeedback: (feedback) => set(feedback),
@@ -953,11 +953,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readSelection: () => {
       const current = get()
       return {
-        selectedNodeIds: current.selectedNodeIds,
-        selectedNodeId: current.selectedNodeId,
-        editingScope: current.editingScope,
-        activeSceneId: current.activeSceneId,
-        activePresentationStateId: current.activePresentationStateId,
+        selectedNodeIds: selectSelectedNodeIds(current),
+        selectedNodeId: selectSelectedNodeId(current),
+        editingScope: selectEditingScope(current),
+        activeSceneId: selectActiveSceneId(current),
+        activePresentationStateId: selectActivePresentationStateId(current),
       }
     },
     syncSelection: (selection) => set(selection),
@@ -1252,19 +1252,44 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 })
 
+export const selectSelectedNodeIds = (state: EditorState): string[] => {
+  if (state.spatialSession) return [...state.spatialSession.selection.selectionIds]
+  if (state.flowSession) return [...state.flowSession.selection.selectedOverlayIds]
+  if (state.slideCandidateSnapshot) return [...state.slideCandidateSnapshot.selection.selectionIds]
+  return state.selectedNodeIds
+}
+
+export const selectSelectedNodeId = (state: EditorState): string | null =>
+  selectSelectedNodeIds(state).at(-1) ?? null
+
+export const selectEditingScope = (state: EditorState): EditingScope => {
+  if (state.spatialSession) return state.spatialSession.scope === 'global' ? 'global' : 'scene'
+  if (state.slideCandidateSnapshot) return state.slideCandidateSnapshot.scope === 'global' ? 'global' : 'scene'
+  return state.editingScope
+}
+
+export const selectActivePresentationStateId = (state: EditorState): string | null =>
+  state.slideCandidateSnapshot?.selection.stateId ?? state.activePresentationStateId ?? null
+
+export const selectActiveSceneId = (state: EditorState): string =>
+  state.slideCandidateSnapshot?.sceneId
+  ?? state.flowSession?.selection.locationId
+  ?? state.spatialSession?.selection.locationId
+  ?? state.activeSceneId
+
 export const selectActiveScene = (state: EditorState): EditorCanvasSceneView => projectActiveScene(state)
 
 export const selectSlideSceneList = (state: EditorState): EditorCanvasSceneView[] => projectSlideSceneList(state)
 
 export const selectEditingNodes = (state: EditorState): EditorCanvasNode[] => projectEditingNodes(state)
 
-export const selectSelectedNode = (state: EditorState) =>
-  selectEditingNodes(state).find(
-    (node) => node.id === state.selectedNodeId,
-  ) ?? null
+export const selectSelectedNode = (state: EditorState) => {
+  const id = selectSelectedNodeId(state)
+  return selectEditingNodes(state).find((node) => node.id === id) ?? null
+}
 
 export const selectSelectedNodes = (state: EditorState) => {
-  const selected = new Set(state.selectedNodeIds)
+  const selected = new Set(selectSelectedNodeIds(state))
   return selectEditingNodes(state).filter((node) => selected.has(node.id))
 }
 

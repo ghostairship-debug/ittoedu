@@ -389,7 +389,9 @@ export function createSlideOwnedCommands(
     },
 
     deleteSelectedNodes() {
-      const ids = [...kernel.readSelection().selectedNodeIds]
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
+      const ids = [...backend.getSession().selection.selectionIds]
       for (const nodeId of ids) api.deleteNode(nodeId)
     },
 
@@ -420,7 +422,7 @@ export function createSlideOwnedCommands(
         runCandidateAction('copy')
         return
       }
-      const ids = kernel.readSelection().selectedNodeIds
+      const ids = backend.getSession().selection.selectionIds
       if (ids.length === 0) return
       try {
         const clipboard = copySlideGlobalClipboard(backend.getSession(), ids)
@@ -672,7 +674,7 @@ export function createSlideOwnedCommands(
       const backend = slide.read().slideBackend
       if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
       const nodes = projectV9EditingNodes(backend).filter(
-        (node) => kernel.readSelection().selectedNodeIds.includes(node.id) && !node.locked,
+        (node) => backend.getSession().selection.selectionIds.includes(node.id) && !node.locked,
       )
       api.updateNodes(nodes.map((node) => ({
         nodeId: node.id,
@@ -684,7 +686,7 @@ export function createSlideOwnedCommands(
       const backend = slide.read().slideBackend
       if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
       const nodes = projectV9EditingNodes(backend).filter(
-        (node) => kernel.readSelection().selectedNodeIds.includes(node.id) && !node.locked,
+        (node) => backend.getSession().selection.selectionIds.includes(node.id) && !node.locked,
       )
       if (nodes.length < 2) return
       const boundsById = new Map(nodes.map((node) => [node.id, rotatedRectangleAabb(node)]))
@@ -712,7 +714,7 @@ export function createSlideOwnedCommands(
       const backend = slide.read().slideBackend
       if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
       const nodes = projectV9EditingNodes(backend).filter(
-        (node) => kernel.readSelection().selectedNodeIds.includes(node.id) && !node.locked,
+        (node) => backend.getSession().selection.selectionIds.includes(node.id) && !node.locked,
       )
       if (nodes.length < 3) return
       const boundsById = new Map(nodes.map((node) => [node.id, rotatedRectangleAabb(node)]))

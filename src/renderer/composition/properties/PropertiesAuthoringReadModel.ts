@@ -27,8 +27,11 @@ import { selectRuntimeInspectorAuthoringView } from '../../runtime/runtimeInspec
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
   selectCandidateGlobalLayerItems,
+  selectEditingScope,
   selectEffectiveLayerProjection,
+  selectSelectedNodeIds,
   selectSlideAuthoringSnapshot,
   type EditorState,
 } from '../../store/editorStore'
@@ -208,18 +211,18 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
   const spatialSession = state.spatialSession
   const propertiesOwner = !flowSession && !spatialSession && snapshot?.scope
     ? snapshot.scope
-    : state.editingScope
+    : selectEditingScope(state)
   const selectedRows = (projection?.unifiedRows ?? []).filter((row) => (
-    state.selectedNodeIds.includes(row.id)
+    selectSelectedNodeIds(state).includes(row.id)
   ))
   const selectedRow = selectedRows.length === 1 ? selectedRows[0]! : null
   const selectedViews = selectedRows.map((row) => propertiesViewFromLayerItem(row.item))
   const selectedView = selectedRow ? propertiesViewFromLayerItem(selectedRow.item) : null
   const scene = activeSlideScene(project, locationId, snapshot?.sceneId ?? null)
-  const activeState = state.activePresentationStateId === null
+  const activeState = selectActivePresentationStateId(state) === null
     ? null
     : scene?.presentation?.states.find(
-        (candidate) => candidate.id === state.activePresentationStateId,
+        (candidate) => candidate.id === selectActivePresentationStateId(state),
       ) ?? null
   const candidateGlobalItems = selectCandidateGlobalLayerItems(state)
   const globalEntries = candidateGlobalItems ?? project?.globalLayerItems ?? []
@@ -234,9 +237,9 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
     ? selectRuntimeInspectorAuthoringView({
         project,
         locationId,
-        editingScope: state.editingScope,
+        editingScope: selectEditingScope(state),
         activeStateId: activeLocation?.kind === 'slide-scene'
-          ? state.activePresentationStateId
+          ? selectActivePresentationStateId(state)
           : null,
         sessionToken: runtimeAuthoringSession.token,
       })
@@ -288,15 +291,15 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
         : state.courseAuthoringSession?.token.generation ?? 0,
       locationId,
       owner: propertiesOwner,
-      stateId: state.activePresentationStateId,
+      stateId: selectActivePresentationStateId(state),
     },
     authoringToken: state.courseAuthoringSession?.token ?? null,
     flow,
     spatial,
     editorMode: state.editorMode,
-    editingScope: state.editingScope,
+    editingScope: selectEditingScope(state),
     propertiesOwner,
-    selectedNodeIds: state.selectedNodeIds,
+    selectedNodeIds: selectSelectedNodeIds(state),
     selectedRows,
     selectedViews,
     selectedRow,
