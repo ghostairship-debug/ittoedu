@@ -1347,6 +1347,48 @@ export const selectMediaAssetFiles = (state: EditorState): Record<string, Uint8A
   return EMPTY_CANDIDATE_ASSET_FILES
 }
 
+/** Pure composition selector for the Slide Workspace connector. */
+export const selectSlideWorkspaceSource = (state: EditorState) => {
+  const backend = selectSlideAuthoringBackend(state)
+  return [
+    backend,
+    backend?.getSession().history.present ?? null,
+    state.slideCandidateSnapshot?.locationId ?? null,
+    state.canvasMode,
+    selectEditingScope(state),
+    selectSelectedNodeIds(state),
+    selectSelectedNodeId(state),
+    state.editingTextNodeId,
+    selectActivePresentationStateId(state),
+    selectMediaAssetFiles(state),
+    state.componentPackages,
+    state.courseAssetSidecar,
+    state.v9ContentEdit,
+    state.setCanvasMode,
+    state.selectNodes,
+    state.selectNode,
+    state.beginTextEdit,
+    state.commitTextEdit,
+    state.cancelTextEdit,
+    state.updateTextEditDraft,
+    state.setStatus,
+    state.updateNode,
+    state.updateNodes,
+    state.addTextNode,
+    state.addFormulaNode,
+    state.addRectangleNode,
+    state.addShapeNode,
+    state.addExternalComponentNode,
+    state.captureRuntimeContentTextTarget,
+    state.updateRuntimeContentTextAtTarget,
+    state.captureRuntimeAssetReplacementTarget,
+    state.replaceRuntimeAssetAtTarget,
+    state.runSlideCandidateCommand,
+    state.applySlideCandidateCommand,
+    state.setActiveTab,
+  ] as const
+}
+
 export const selectAudioSettings = (state: EditorState) => {
   const document = selectActiveCourseProjectDocument(state)
   if (!document) throw new Error(SESSIONLESS_COURSE_REASON)

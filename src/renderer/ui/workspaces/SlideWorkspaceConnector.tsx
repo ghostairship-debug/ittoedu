@@ -4,16 +4,11 @@ import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, LayerItem } from '../../../shared/courseProjectTypes'
 import type { ShapeType } from '../../../shared/contracts/native-v1/types'
 import { buildSlideEditorView } from '../../course/slideEditorView'
-import { isSlideAuthoringBackend, type SlideBackend } from '../../store/slideBackendPort'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import type { EditorCanvasNodePatch } from '../../phaser/editorCanvasNode'
 import {
-  selectActivePresentationStateId,
-  selectEditingScope,
-  selectSelectedNodeId,
-  selectSelectedNodeIds,
+  selectSlideWorkspaceSource,
   useEditorStore,
-  type EditorState,
 } from '../../store/editorStore'
 import { projectV9EditingNodesWithDraft } from '../../store/slideEditorProjection'
 import {
@@ -43,8 +38,6 @@ interface SlideWorkspaceConnectorProps {
   readonly onAddVideo: (x?: number, y?: number) => void
   readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
 }
-
-const EMPTY_ASSET_FILES: Record<string, Uint8Array> = Object.freeze({})
 
 function slidePreviewIdentityFromLayer(item: LayerItem): SlidePreviewIdentityNode | null {
   if (item.kind === 'runtime') return null
@@ -139,48 +132,6 @@ function makePreviewRebuildKey(input: {
     sidecarFileIds: input.sidecarFileIds,
     componentPackages: input.componentPackages,
   })
-}
-
-function selectSlideWorkspaceSource(state: EditorState) {
-  const backend = isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
-  const project = backend?.getSession().history.present ?? null
-  return [
-    backend,
-    project,
-    state.slideCandidateSnapshot?.locationId ?? null,
-    state.canvasMode,
-    selectEditingScope(state),
-    selectSelectedNodeIds(state),
-    selectSelectedNodeId(state),
-    state.editingTextNodeId,
-    selectActivePresentationStateId(state),
-    state.courseAssetSidecar?.files ?? EMPTY_ASSET_FILES,
-    state.componentPackages,
-    state.courseAssetSidecar,
-    state.v9ContentEdit,
-    state.setCanvasMode,
-    state.selectNodes,
-    state.selectNode,
-    state.beginTextEdit,
-    state.commitTextEdit,
-    state.cancelTextEdit,
-    state.updateTextEditDraft,
-    state.setStatus,
-    state.updateNode,
-    state.updateNodes,
-    state.addTextNode,
-    state.addFormulaNode,
-    state.addRectangleNode,
-    state.addShapeNode,
-    state.addExternalComponentNode,
-    state.captureRuntimeContentTextTarget,
-    state.updateRuntimeContentTextAtTarget,
-    state.captureRuntimeAssetReplacementTarget,
-    state.replaceRuntimeAssetAtTarget,
-    state.runSlideCandidateCommand,
-    state.applySlideCandidateCommand,
-    state.setActiveTab,
-  ] as const
 }
 
 export function SlideWorkspaceConnector({
