@@ -1,6 +1,6 @@
 import { Bold, Eraser, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { TextNode, TextRun, TextRunStyle } from '../../shared/projectTypes'
+import type { TextNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import {
   applyTextRunStyle,
   toggleTextRunBoolean,

@@ -1,7 +1,7 @@
 import type {
   TeacherControllerAction,
   TeacherControllerButton,
-} from '../shared/projectTypes'
+} from '../shared/contracts/native-v1'
 import {
   createTeacherControllerLayout,
   formatTeacherControllerProgress,

@@ -1,5 +1,5 @@
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
-import type { TeacherControllerAction } from '../../shared/projectTypes'
+import type { TeacherControllerAction } from '../../shared/contracts/native-v1'
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type {

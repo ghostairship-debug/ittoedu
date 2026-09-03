@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import type { FormulaAstNode, FormulaNode } from '../../shared/projectTypes'
+import type { FormulaAstNode, FormulaNode } from '../../shared/contracts/native-v1'
 import {
   FormulaAuthoringEditor,
   type FormulaAuthoringDraftChange,

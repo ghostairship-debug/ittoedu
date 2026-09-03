@@ -9,7 +9,8 @@ import type {
   RuntimeLayerItem,
   SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import type { AssetMeta, ShapeType } from '../../shared/projectTypes'
+import type { AssetMeta } from '../../shared/projectTypes'
+import type { ShapeType } from '../../shared/contracts/native-v1'
 import {
   createExternalComponentNode,
   createFormulaNode,

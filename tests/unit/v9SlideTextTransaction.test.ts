@@ -7,7 +7,7 @@ import {
   type NativeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import type { FormulaAstNode, TextNode } from '@/shared/projectTypes'
+import type { FormulaAstNode, TextNode } from '@/shared/contracts/native-v1'
 import {
   V9_SLIDE_CONTENT_REJECT_COMPOSING,
   V9_SLIDE_CONTENT_REJECT_NOT_CANDIDATE,

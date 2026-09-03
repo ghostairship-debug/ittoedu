@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TextRun } from '@/shared/projectTypes'
+import type { TextRun } from '@/shared/contracts/native-v1'
 import { applyTextRunStyle, remapTextRuns, toggleTextRunBoolean, toggleTextRunEmphasis } from '@/shared/textRuns'
 
 describe('remapTextRuns', () => {

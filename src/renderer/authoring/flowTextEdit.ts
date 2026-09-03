@@ -1,6 +1,6 @@
 import { applyTextRunStyle, remapTextRuns, toggleTextRunEmphasis } from '../../shared/textRuns'
 import { formulaAstToAccessibleText, serializeFormulaAst } from '../../shared/formulaLinear'
-import type { FormulaAstNode, FormulaNode, TextRun, TextRunStyle } from '../../shared/projectTypes'
+import type { FormulaAstNode, FormulaNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import type {
   CourseProjectDocument,
   FlowBlock,

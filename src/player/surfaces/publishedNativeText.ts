@@ -2,7 +2,7 @@ import type {
   LayerFrame,
   NativeElementContent,
 } from '../../shared/courseProjectTypes'
-import type { TextNode } from '../../shared/projectTypes'
+import type { TextNode } from '../../shared/contracts/native-v1'
 import { analyzeTextNodeLayout } from '../../shared/textLayout'
 import { flowRichTextSegments } from './flow/flowModel'
 

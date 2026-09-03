@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
-import type { TeacherControllerAction } from '@/shared/projectTypes'
+import type { TeacherControllerAction } from '@/shared/contracts/native-v1'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import type { PublishedFlowSurface, PublishedNativeLayerItem } from '@/shared/publishedCourseTypes'
 import {

@@ -82,7 +82,8 @@ import {
 } from '../../course/effectiveLayerCommands'
 import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
-import type { GlobalLayerItem, ShapeType, TextRun } from '../../../shared/projectTypes'
+import type { GlobalLayerItem } from '../../../shared/projectTypes'
+import type { ShapeType, TextRun } from '../../../shared/contracts/native-v1'
 import {
   copySpatialClipboard,
   duplicateSpatialLayers,
@@ -641,7 +642,7 @@ export function createSpatialAuthoringSlice(
     layerItemId: string
     selectionStart: number
     selectionEnd: number
-    patch: import('../../../shared/projectTypes').TextRunStyle
+    patch: import('../../../shared/contracts/native-v1').TextRunStyle
     source?: 'canvas' | 'properties'
   }): SpatialCommandResult
   persistLayerCommand(

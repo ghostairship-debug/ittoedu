@@ -1,5 +1,6 @@
 import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
-import type { AssetMeta, TextRunStyle } from '../../shared/projectTypes'
+import type { AssetMeta } from '../../shared/projectTypes'
+import type { TextRunStyle } from '../../shared/contracts/native-v1'
 import type {
   CourseProjectDocument,
   FlowBlock,

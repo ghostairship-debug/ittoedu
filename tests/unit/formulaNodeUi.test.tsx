@@ -10,7 +10,7 @@ import {
 } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { FormulaEditDialog } from '@/renderer/ui/FormulaEditDialog'
-import type { FormulaNode } from '@/shared/projectTypes'
+import type { FormulaNode } from '@/shared/contracts/native-v1'
 
 function formulaNode(): FormulaNode {
   const node = selectActiveScene(useEditorStore.getState()).nodes[0]

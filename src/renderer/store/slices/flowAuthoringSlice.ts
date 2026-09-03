@@ -1,7 +1,7 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
-import type { TextRun, TextRunStyle } from '../../../shared/projectTypes'
+import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar, freezeCourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { createImageAssetImport, createMediaAssetImport } from '../../project/assetManager'
@@ -1589,7 +1589,7 @@ export function createFlowAuthoringSlice(
       const result = insertFlowSharedShape(
         session.history.present,
         session.selection,
-        { shapeType: shapeType as import('../../../shared/projectTypes').ShapeType },
+            { shapeType: shapeType as import('../../../shared/contracts/native-v1').ShapeType },
         { expectedRevision: session.history.present.revision },
       )
       flow.persist(result, { statusMessage: result.reason ?? '已作为页面浮层添加图形' })

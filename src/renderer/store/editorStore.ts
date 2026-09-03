@@ -13,11 +13,9 @@ import type {
   GlobalLayerVisibility,
   ProjectDesignTokens,
   ProjectAudioSettings,
-  ShapeType,
   SoundDefinition,
-  TextRun,
-  TextRunStyle,
 } from '../../shared/projectTypes'
+import type { ShapeType, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1/types'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import { UserFacingError } from '../../shared/errors'

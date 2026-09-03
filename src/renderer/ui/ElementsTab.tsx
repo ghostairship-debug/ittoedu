@@ -11,7 +11,7 @@ import {
   Sigma,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ShapeType } from '../../shared/projectTypes'
+import type { ShapeType } from '../../shared/contracts/native-v1'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { createShapeNode } from '../project/nativeNodeFactories'
 import { useEditorStore, selectMediaAssets, selectAudioSettings, selectEditingScope } from '../store/editorStore'

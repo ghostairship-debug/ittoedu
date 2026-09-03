@@ -11,7 +11,7 @@ import type {
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type { InteractionRule } from '../../shared/interactionTypes'
-import type { TeacherControllerButton } from '../../shared/projectTypes'
+import type { TeacherControllerButton } from '../../shared/contracts/native-v1'
 import {
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,

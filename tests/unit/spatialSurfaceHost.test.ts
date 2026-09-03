@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { TeacherControllerAction } from '@/shared/projectTypes'
+import type { TeacherControllerAction } from '@/shared/contracts/native-v1'
 import {
   PUBLISHED_COURSE_FORMAT,
   PUBLISHED_COURSE_VERSION,

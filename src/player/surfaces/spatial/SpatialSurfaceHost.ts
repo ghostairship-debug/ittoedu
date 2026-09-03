@@ -1,6 +1,6 @@
 import type { SpatialPathDash } from '../../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
-import type { TeacherControllerAction } from '../../../shared/projectTypes'
+import type { TeacherControllerAction } from '../../../shared/contracts/native-v1'
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,

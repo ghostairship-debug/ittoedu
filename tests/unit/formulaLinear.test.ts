@@ -9,7 +9,7 @@ import {
   serializeFormulaAst,
 } from '@/shared/formulaLinear'
 import { formulaAstSchema } from '@/shared/projectSchema'
-import type { FormulaAstNode } from '@/shared/projectTypes'
+import type { FormulaAstNode } from '@/shared/contracts/native-v1'
 
 const completeAst: FormulaAstNode = {
   type: 'row',

@@ -22,7 +22,7 @@ import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
 import { formulaAstSchema } from '@/shared/contracts/native-v1/schema'
-import type { FormulaAstNode } from '@/shared/projectTypes'
+import type { FormulaAstNode } from '@/shared/contracts/native-v1'
 
 function activeHistory() {
   const state = useEditorStore.getState()

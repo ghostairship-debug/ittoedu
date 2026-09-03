@@ -12,7 +12,7 @@ import type {
   TextRun,
   TextRunStyle,
   WritingMode,
-} from '../../shared/projectTypes'
+} from '../../shared/contracts/native-v1'
 import {
   clientToWorld,
   resizeWorldFrameFromHandle,

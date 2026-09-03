@@ -10,7 +10,7 @@ import {
   FLOW_MEDIA_QUERY_CONTAINER_TYPE,
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
-import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
+import type { TeacherControllerAction, TextRun } from '../../../shared/contracts/native-v1'
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,

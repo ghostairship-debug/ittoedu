@@ -37,10 +37,10 @@ import {
   type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
 import type { CourseMediaCommandResult } from '../../course/v9MediaAudioCommands'
-import type { ShapeType } from '../../../shared/projectTypes'
+import type { ShapeType } from '../../../shared/contracts/native-v1'
 import { createFormulaNode, createShapeNode, createTextNode } from '../../project/nativeNodeFactories'
 import { normalizeNewNodeGeometry, sessionFromLayerResult } from '../v9LayerMutations'
-import type { TextRun } from '../../../shared/projectTypes'
+import type { TextRun } from '../../../shared/contracts/native-v1'
 import type { V9SlideClipboardPayload } from '../../course/v9SlideClipboard'
 import {
   isV9SlideContentDraftDirty,

@@ -2,7 +2,7 @@ import {
   analyzeFormulaNodeLayout,
   renderFormulaNodeCanvas,
 } from '../../shared/formulaRenderer'
-import type { FormulaAstNode, FormulaNode, TextAlign } from '../../shared/projectTypes'
+import type { FormulaAstNode, FormulaNode, TextAlign } from '../../shared/contracts/native-v1'
 
 export interface PublishedFormulaPaintInput {
   formulaId: string

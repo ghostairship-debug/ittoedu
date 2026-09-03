@@ -50,7 +50,8 @@ import type {
   PrepareCourseProjectPersistenceResult,
 } from '../store/editorStore'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
-import type { GlobalLayerItem, TextRun, TextRunStyle } from '../../shared/projectTypes'
+import type { GlobalLayerItem } from '../../shared/projectTypes'
+import type { TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import { findCourseSlideScene } from '../store/v9LayerMutations'
 import {
   findGlobalTeacherController,

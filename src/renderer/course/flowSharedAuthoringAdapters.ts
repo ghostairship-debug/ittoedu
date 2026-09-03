@@ -8,7 +8,7 @@ import {
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { ComponentManifest } from '../../shared/componentTypes'
-import type { FormulaAstNode, ShapeType } from '../../shared/projectTypes'
+import type { FormulaAstNode, ShapeType } from '../../shared/contracts/native-v1'
 import type {
   ComponentLayerItem,
   CourseProjectDocument,

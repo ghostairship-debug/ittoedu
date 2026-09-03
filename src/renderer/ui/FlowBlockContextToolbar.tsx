@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { FlowBlock } from '../../shared/courseProjectTypes'
-import type { TextRunStyle } from '../../shared/projectTypes'
+import type { TextRunStyle } from '../../shared/contracts/native-v1'
 import {
   FLOW_DEFAULT_HIGHLIGHT,
   FLOW_PAPER_TEXT_COLOR,

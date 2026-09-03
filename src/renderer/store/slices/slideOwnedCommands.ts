@@ -54,7 +54,7 @@ import {
 } from '../v9LayerMutations'
 import type { SlideAuthoringPorts, SlidePersistExtra } from './slideAuthoringSlice'
 import type { SlideAuthoringBackend, SlideAuthoringSession, SlideCommandResult } from '../../course/slideAuthoringBackend'
-import type { TextRunStyle } from '../../../shared/projectTypes'
+import type { TextRunStyle } from '../../../shared/contracts/native-v1'
 
 
 export function createSlideOwnedCommands(

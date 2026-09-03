@@ -1,5 +1,5 @@
 import type { CourseLocation, FlowBlock, FlowTableCell } from '../../../shared/courseProjectTypes'
-import type { TextRun, TextRunStyle } from '../../../shared/projectTypes'
+import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type {
   PublishedCourseAsset,
   PublishedCourseSurface,

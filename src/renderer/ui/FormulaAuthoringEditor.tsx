@@ -17,7 +17,7 @@ import {
 } from '../../shared/formulaLinear'
 import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import { formulaAstSchema } from '../../shared/projectSchema'
-import type { FormulaAstNode, FormulaNode } from '../../shared/projectTypes'
+import type { FormulaAstNode, FormulaNode } from '../../shared/contracts/native-v1'
 
 export interface FormulaAuthoringDraftChange {
   readonly source: string

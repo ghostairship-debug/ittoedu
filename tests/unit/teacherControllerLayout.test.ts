@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TeacherControllerNode } from '../../src/shared/projectTypes'
+import type { TeacherControllerNode } from '../../src/shared/contracts/native-v1'
 import { createTeacherControllerNode } from '../../src/renderer/project/nativeNodeFactories'
 import {
   createTeacherControllerLayout,

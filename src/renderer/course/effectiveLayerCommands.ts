@@ -16,7 +16,7 @@ import type {
   SlidePresentationState,
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
-import type { TextNode } from '../../shared/projectTypes'
+import type { TextNode } from '../../shared/contracts/native-v1'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import { synchronizeCourseTeacherControllerControls } from '../../shared/teacherControllerConsistency'
 import {
