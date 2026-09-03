@@ -38,6 +38,7 @@ function applyStyles(
  * semantics regardless of canvas scale.
  */
 export class ScenePickerOverlay {
+  private readonly document: Document
   private readonly layer: HTMLDivElement
   private readonly closeButton: HTMLButtonElement
   private readonly sceneButtons: HTMLButtonElement[] = []
@@ -53,6 +54,7 @@ export class ScenePickerOverlay {
   private destroyed = false
 
   constructor(options: ScenePickerOverlayOptions) {
+    this.document = options.stage.ownerDocument
     this.onSelect = options.onSelect
     this.onClose = options.onClose
 
@@ -60,7 +62,7 @@ export class ScenePickerOverlay {
     const titleId = `lesson-scene-picker-title-${instanceId}`
     const descriptionId = `lesson-scene-picker-description-${instanceId}`
 
-    const layer = document.createElement('div')
+    const layer = this.document.createElement('div')
     layer.className = 'lesson-scene-picker-layer'
     layer.hidden = true
     applyStyles(layer, {
@@ -75,7 +77,7 @@ export class ScenePickerOverlay {
       pointerEvents: 'auto',
     })
 
-    const dialog = document.createElement('section')
+    const dialog = this.document.createElement('section')
     dialog.className = 'lesson-scene-picker'
     dialog.dataset.scenePicker = 'true'
     dialog.setAttribute('role', 'dialog')
@@ -97,7 +99,7 @@ export class ScenePickerOverlay {
       fontFamily: 'Inter, "Microsoft YaHei", "PingFang SC", sans-serif',
     })
 
-    const header = document.createElement('header')
+    const header = this.document.createElement('header')
     applyStyles(header, {
       display: 'grid',
       gridTemplateColumns: '1fr auto',
@@ -107,8 +109,8 @@ export class ScenePickerOverlay {
       borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
     })
 
-    const headingGroup = document.createElement('div')
-    const title = document.createElement('h2')
+    const headingGroup = this.document.createElement('div')
+    const title = this.document.createElement('h2')
     title.id = titleId
     title.textContent = '场景目录'
     applyStyles(title, {
@@ -117,7 +119,7 @@ export class ScenePickerOverlay {
       fontSize: 'clamp(18px, 2.4vw, 24px)',
       lineHeight: '1.25',
     })
-    const description = document.createElement('p')
+    const description = this.document.createElement('p')
     description.id = descriptionId
     description.textContent = `选择要跳转的场景，共 ${options.scenes.length} 个`
     applyStyles(description, {
@@ -128,7 +130,7 @@ export class ScenePickerOverlay {
     })
     headingGroup.append(title, description)
 
-    const closeButton = document.createElement('button')
+    const closeButton = this.document.createElement('button')
     closeButton.type = 'button'
     closeButton.className = 'lesson-scene-picker__close'
     closeButton.setAttribute('aria-label', '关闭场景目录')
@@ -146,7 +148,7 @@ export class ScenePickerOverlay {
     })
     header.append(headingGroup, closeButton)
 
-    const list = document.createElement('div')
+    const list = this.document.createElement('div')
     list.className = 'lesson-scene-picker__list'
     list.setAttribute('role', 'group')
     list.setAttribute('aria-label', '全部场景')
@@ -162,7 +164,7 @@ export class ScenePickerOverlay {
     })
 
     options.scenes.forEach((scene, index) => {
-      const button = document.createElement('button')
+      const button = this.document.createElement('button')
       button.type = 'button'
       button.className = 'lesson-scene-picker__item'
       button.dataset.sceneId = scene.id
@@ -183,7 +185,7 @@ export class ScenePickerOverlay {
         cursor: 'pointer',
       })
 
-      const number = document.createElement('span')
+      const number = this.document.createElement('span')
       number.setAttribute('aria-hidden', 'true')
       number.textContent = String(index + 1).padStart(2, '0')
       applyStyles(number, {
@@ -192,7 +194,7 @@ export class ScenePickerOverlay {
         fontVariantNumeric: 'tabular-nums',
         letterSpacing: '0.08em',
       })
-      const name = document.createElement('span')
+      const name = this.document.createElement('span')
       name.textContent = scene.name
       applyStyles(name, {
         minWidth: '0',
@@ -237,9 +239,9 @@ export class ScenePickerOverlay {
     if (this.destroyed) return
     this.bypassNavigationGuards = options.bypassNavigationGuards ?? false
     if (!this.openValue) {
-      this.restoreFocusTo = document.activeElement instanceof HTMLElement &&
-        document.activeElement !== document.body
-        ? document.activeElement
+      this.restoreFocusTo = this.document.activeElement instanceof HTMLElement &&
+        this.document.activeElement !== this.document.body
+        ? this.document.activeElement
         : null
     }
     this.openValue = true
@@ -319,7 +321,7 @@ export class ScenePickerOverlay {
     }
 
     const focusables = [this.closeButton, ...this.sceneButtons]
-    const activeIndex = focusables.indexOf(document.activeElement as HTMLButtonElement)
+    const activeIndex = focusables.indexOf(this.document.activeElement as HTMLButtonElement)
     if (event.key === 'Tab') {
       if (event.shiftKey && activeIndex <= 0) {
         event.preventDefault()
@@ -333,7 +335,7 @@ export class ScenePickerOverlay {
 
     let target: HTMLButtonElement | undefined
     const sceneIndex = this.sceneButtons.indexOf(
-      document.activeElement as HTMLButtonElement,
+      this.document.activeElement as HTMLButtonElement,
     )
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
       target = this.sceneButtons[(Math.max(-1, sceneIndex) + 1) % this.sceneButtons.length]

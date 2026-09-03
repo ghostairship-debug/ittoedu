@@ -313,6 +313,94 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
+  it('opens one session-owned picker from every Surface and force-navigates its location order', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const flowLocation = payload.locations.find((location) => location.kind === 'flow-block')!
+    const spatialLocation = payload.locations.find((location) => location.kind === 'spatial-camera')!
+    payload.courseState = [{ key: 'unlocked', valueType: 'boolean', defaultValue: false }]
+    payload.navigationGuards = [{
+      id: 'guard-flow',
+      effect: 'block',
+      toLocationIds: [flowLocation.id],
+      match: 'all',
+      conditions: [{ type: 'compare', key: 'unlocked', operator: 'eq', value: false }],
+      message: 'Flow 尚未解锁',
+    }]
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    const pickerLayer = container.querySelector<HTMLElement>('.lesson-scene-picker-layer')!
+    expect(pickerLayer).not.toBeNull()
+    expect(container.querySelectorAll('.lesson-scene-picker-layer')).toHaveLength(1)
+    expect(await session.goToLocation(flowLocation.id).then(() => true, () => false)).toBe(false)
+
+    const openPickerFromActiveSurface = () => {
+      const activeSlot = [...container.querySelectorAll<HTMLElement>('[data-course-surface-slot]')]
+        .find((slot) => slot.style.visibility !== 'hidden')!
+      let button = [...activeSlot.querySelectorAll<HTMLButtonElement>('button')]
+        .find((candidate) => candidate.textContent?.includes('场景目录'))
+      if (!button) {
+        activeSlot.querySelector<HTMLButtonElement>(
+          '[data-teacher-controller-collapse="true"]',
+        )?.click()
+        button = [...activeSlot.querySelectorAll<HTMLButtonElement>('button')]
+          .find((candidate) => candidate.textContent?.includes('场景目录'))
+      }
+      expect(button).toBeDefined()
+      button!.click()
+    }
+    const choose = (locationId: string) => {
+      container.querySelector<HTMLButtonElement>(
+        `.lesson-scene-picker__item[data-scene-id="${locationId}"]`,
+      )!.click()
+    }
+
+    openPickerFromActiveSurface()
+    await Promise.resolve()
+    expect(pickerLayer).toBeVisible()
+    expect(pickerLayer.querySelector('[aria-current="page"]'))
+      .toHaveAttribute('data-scene-id', payload.startLocationId)
+    choose(flowLocation.id)
+    await vi.waitFor(() => expect(session.navigator.current?.locationId).toBe(flowLocation.id))
+    expect(pickerLayer).not.toBeVisible()
+
+    openPickerFromActiveSurface()
+    choose(spatialLocation.id)
+    await vi.waitFor(() => expect(session.navigator.current?.locationId).toBe(spatialLocation.id))
+    expect(container.querySelectorAll('.lesson-scene-picker-layer')).toHaveLength(1)
+
+    openPickerFromActiveSurface()
+    choose(payload.startLocationId)
+    await vi.waitFor(() => expect(session.navigator.current?.locationId).toBe(payload.startLocationId))
+
+    await session.destroy()
+    expect(container.querySelector('.lesson-scene-picker-layer')).toBeNull()
+    container.remove()
+  })
+
+  it('does not mount a scene picker for static capture', async () => {
+    const payload = buildPublishedCourseV2Payload({
+      project: mixedProject(),
+      assetFiles: {},
+      components: {},
+    })
+    const session = createPublishedCourseSession(payload, { staticCapture: true })
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+    expect(container.querySelector('.lesson-scene-picker-layer')).toBeNull()
+    container.remove()
+  })
+
   it('shows include-scoped global component fallback only on the selected location', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({
@@ -553,6 +641,7 @@ describe('published course Mixed navigation', () => {
     expect(slot?.inert).toBe(true)
     expect(container.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
     expect(container.querySelector('.lesson-footer')).toBeNull()
+    expect(container.querySelector('.lesson-scene-picker-layer')).toBeNull()
     expect(container.querySelector('.lesson-authoring-input-shield')).toBeNull()
 
     const stale = await session.applyAuthoringCommand({

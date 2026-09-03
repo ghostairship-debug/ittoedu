@@ -18,6 +18,7 @@ import {
 import { CourseStateStore } from '../CourseStateStore'
 import { AudioManager, type AudioPlaybackEvent } from '../AudioManager'
 import { CourseEventBus } from '../CourseEventBus'
+import { ScenePickerOverlay } from '../ScenePickerOverlay'
 import { createPlayerComponentHostActions } from '../componentHostActions'
 import { TeacherControllerRuntimeSessionStore } from '../teacherControllerRuntimeSession'
 import { PublishedInteractionController } from '../interactions/PublishedInteractionController'
@@ -661,6 +662,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   readonly #interactionSessionPort: PublishedInteractionSessionPort
   #globalInteractionController: PublishedInteractionController | null = null
   #localInteractionController: PublishedInteractionController | null = null
+  #scenePicker: ScenePickerOverlay | null = null
   #terminalNavigationClaimed = false
   #terminalNavigationInvalidated = false
   #interactionDestroyStarted = false
@@ -711,6 +713,30 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       replayScene: (signal) => this.#replayScene(signal),
       restartCourse: (signal) => this.#restartCourse(signal),
     }
+  }
+
+  override async mount(container: HTMLElement): Promise<void> {
+    await super.mount(container)
+    if (this.#staticCapture || this.#interactionDestroyStarted || this.#scenePicker) return
+    this.#scenePicker = new ScenePickerOverlay({
+      stage: container,
+      scenes: this.navigator.listCatalog().map((location) => ({
+        id: location.id,
+        name: location.label,
+      })),
+      onSelect: (locationId) => {
+        const target = this.#payload.locations.find((location) => location.id === locationId)
+        if (!target || !this.#canAcceptHostAction()) return
+        this.#launchHostAction(
+          'scenePicker',
+          this.#navigateFromTeacherController(
+            target,
+            undefined,
+            new AbortController().signal,
+          ),
+        )
+      },
+    })
   }
 
   assertNavigationAllowed(transition: MixedNavigationTransition): void {
@@ -787,6 +813,13 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       this.#audio.toggleMuted()
       return true
     }
+    if (action.type === 'scene.open-picker') {
+      if (!this.#canAcceptHostAction() || !this.#scenePicker) return false
+      this.#scenePicker.open(this.navigator.current?.locationId ?? null, {
+        bypassNavigationGuards: true,
+      })
+      return true
+    }
     if (action.type === 'course.restart') {
       return this.#restartCourse(new AbortController().signal)
     }
@@ -822,6 +855,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   /** Navigator callback: every real/forced navigation invalidates the old generation. */
   handleBeforeNavigation(transition?: MixedNavigationTransition): void {
+    this.#scenePicker?.close(false)
     if (transition) {
       this.#audioEvents.emit('scene:leave', { sceneId: transition.current?.locationId })
       locationPreparedHost(this.#hostsById.get(transition.next.surfaceId))
@@ -881,6 +915,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       this.#destroyInteractionControllers()
       this.#globalInteractionVisibilityState.reset()
     }
+    this.#scenePicker?.destroy()
+    this.#scenePicker = null
     try {
       await super.destroy()
     } finally {

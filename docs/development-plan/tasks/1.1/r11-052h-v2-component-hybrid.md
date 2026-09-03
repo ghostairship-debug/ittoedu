@@ -1,6 +1,6 @@
 # r11-052h-v2-component-hybrid V2 Slide scene-local Component hybrid 宿主
 
-- Status / Owner: blocked / Integrator（解除条件：r11-052g 完成并由协调者改为 queued）
+- Status / Owner: queued /
 - Outcome / Evidence: Component API 4 与 Published V2 正式声明 `hybrid`；当前通用 DOM mount 把 create context 硬编码为 `renderMode: 'dom'`，Slide 只把纯 `phaser` 送入 Phaser owner，导致 hybrid 静默退化。052g 完成后只补 Published V2 Slide scene-local hybrid，不宣称 Flow、Spatial 或 global hybrid。
 - Write scope: `src/player/surfaces/publishedComponentMount.ts`；`src/player/surfaces/slide/publishedSlidePhaserComponentMount.ts`；`src/player/surfaces/slide/SlidePublishedAdapter.ts`；`tests/unit/publishedComponentMount.test.ts`；`tests/integration/publishedPhaserComponentSlideHostIntegration.test.ts`。禁止修改 Component API 4、Published V2 Schema、Flow/Spatial host 或能力索引；需要双实例同步时停止。
 - Write locks: published-producer
