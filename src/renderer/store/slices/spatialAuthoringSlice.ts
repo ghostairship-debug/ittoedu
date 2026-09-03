@@ -114,6 +114,7 @@ import type { EditorTransactionStep } from '../../authoring/editorTransaction'
 import { exclusiveInactiveSurfaces } from '../../composition/surfaceRouter'
 import {
   commitSurfaceResourcePersist,
+  courseSessionAfterSurfaceHistory,
   storeHistoryFromSessionLengths,
   type EditorStoreKernel,
 } from '../editorStoreKernel'
@@ -346,7 +347,18 @@ export function persistSpatialResult(
     : snapshot.resources
   const snapshotView = buildSpatialAuthoringSnapshot(session)
   const graphSelection = snapshot.spatialGraphSelection
-  const nextCourseAuthoringSession = spatialCourseAuthoringSessionAfterResult(
+  // A resource-bearing undo/redo keeps the same location, so the location-switch
+  // helper would retain the generation and let a stale target pass the freshness
+  // guard. Slide and Flow bump it on the same move; Spatial has to as well.
+  const nextCourseAuthoringSession = courseSessionAfterSurfaceHistory(
+    snapshot.authoringSession,
+    session.history.present,
+    session.selection.locationId,
+    {
+      resourceTransition: extra.resourceTransition,
+      sidecarDirection: extra.sidecarDirection,
+    },
+  ) ?? spatialCourseAuthoringSessionAfterResult(
     snapshot.authoringSession,
     session,
   )
