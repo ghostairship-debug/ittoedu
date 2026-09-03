@@ -13,6 +13,7 @@ import {
 import {
   adaptCoursePdfProducerFindings,
   adaptCoursePptxProducerFindings,
+  coursePptxTargetApplicable,
   type CourseExportFormatFinding,
 } from '../src/renderer/export/exportPreflight'
 import {
@@ -532,6 +533,7 @@ function collectExportReports(
 function combinedSummary(
   health: ReturnType<typeof summarizeFindings>,
   reports: Record<CourseProjectExportTarget, CourseProjectExportPreflightReport>,
+  applicableTargets: readonly CourseProjectExportTarget[],
 ): CourseProjectValidationReport['summary'] {
   const summary = {
     error: health.error,
@@ -540,8 +542,11 @@ function combinedSummary(
     total: health.total,
     canExport: true,
   }
-  for (const report of Object.values(reports)) {
-    for (const item of report.items) {
+  // A format that does not apply to this course (PPTX for a Flow-only course,
+  // which exports as DOCX) keeps its own blocking report but must not make
+  // the course itself invalid.
+  for (const target of applicableTargets) {
+    for (const item of reports[target].items) {
       summary[item.severity] += 1
       summary.total += 1
     }
@@ -644,7 +649,13 @@ export function validateCourseProjectArchiveBytes(
   ]
   const healthSummary = summarizeFindings(healthItems)
   const exportPreflight = collectExportReports(archive)
-  const summary = combinedSummary(healthSummary, exportPreflight)
+  const applicableTargets: CourseProjectExportTarget[] = [
+    'single-html',
+    'web-package',
+    'pdf',
+    ...(coursePptxTargetApplicable(archive.project) ? ['pptx' as const] : []),
+  ]
+  const summary = combinedSummary(healthSummary, exportPreflight, applicableTargets)
 
   return {
     reportVersion: COURSE_PROJECT_VALIDATION_REPORT_VERSION,

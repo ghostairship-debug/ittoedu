@@ -167,9 +167,13 @@ function expectLegalExportableV9(id: ArchitectureBaselineFixtureId): CourseProje
   expect(report.migrationMarkers).toMatchObject({ present: false, items: [] })
   expect(report.summary.error).toBe(0)
   expect(report.summary.canExport).toBe(true)
-  for (const target of ['single-html', 'web-package', 'pdf', 'pptx'] as const) {
+  for (const target of ['single-html', 'web-package', 'pdf'] as const) {
     expect(report.exportPreflight?.[target].summary.canExport).toBe(true)
   }
+  // PPTX maps Slide scenes and Spatial cameras only; Flow-only courses export
+  // DOCX instead, so their PPTX target stays blocked without invalidating the
+  // course.
+  expect(report.exportPreflight?.pptx.summary.canExport).toBe(id !== 'flow-heavy')
 
   const files = unzipSync(bytes)
   const rawProject = JSON.parse(new TextDecoder().decode(files['project.json'])) as Record<

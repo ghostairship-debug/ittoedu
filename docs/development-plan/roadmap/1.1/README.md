@@ -105,7 +105,7 @@
 
 Codex 检查点（HEAD `bb1f848`）之后，剩余节点按 [执行者指南](EXECUTION_GUIDE.md) 的规则改写为可直接执行的“2026-09-03 执行版”：每张卡钉死 file:line 的符号表、允许新建清单、结构事实命令与红→绿证据要求，执行者不做架构判断；上表 037/052 行的“当前裁决”由对应规格的执行版替代。裁决：`r11-025` 以证据闭合，其 history 镜像残留归 `r11-037` W1；检查点上 `check:preservation`（PM-08 夹具）与 `check:legacy-inventory`（7 项未登记观察）为红，由 `r11-029` 返工卡先修；`r11-032` 只剩 `playerCapture.ts` 的 PlayerApp 引用，Flow-only 项待 Integrator 给出失败测试否则作废；`r11-034`、`r11-035`、`r11-036` 各为一处已钉死的缺陷修复；`r11-037` 拆为 W1–W9；`r11-052` 重算为 A–E。`r11-055`、`r11-053`、`r11-060`、`r11-061` 的判读与结构门编写只由 Integrator 执行，不派通用执行者；`r11-054` 在 053 给出精确清单后可派。首批执行卡位于 `docs/development-plan/tasks/1.1/`。
 
-检查点上 `test:product` 的 7 文件 / 10 项失败已于 2026-09-03 定责并修复（① PPTX 无页项降为 info；②③⑤ 为测试侧缺陷；④ ratchet 白名单为预期红，待 037/055 收口），逐组结论与证据见 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md) §0；修后仅剩 ④ 一项预期红。
+检查点上 `test:product` 的 7 文件 / 10 项失败已于 2026-09-03 定责并修复（① 校验器整体状态不再计入不适用格式的错误，纯 Flow 课程的 PPTX 预检项本身保留 error；②③⑤ 为测试侧缺陷；④ ratchet 白名单为预期红，待 037/055 收口），逐组结论与证据见 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md) §0；修后仅剩 ④ 一项预期红。
 
 ## 交接格式
 

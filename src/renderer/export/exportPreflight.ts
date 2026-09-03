@@ -311,6 +311,16 @@ function adaptCourseStaticFormatProducerFindings(
 }
 
 /** r11-041 contract. PPTX producer facts only; do not copy health rules. */
+/**
+ * PPTX maps Slide scenes and Spatial cameras only. Flow content exports as
+ * DOCX, so a Flow-only course has no PPTX target at all.
+ */
+export function coursePptxTargetApplicable(project: CourseProjectDocument): boolean {
+  return project.locations.some((location) => (
+    location.kind === 'slide-scene' || location.kind === 'spatial-camera'
+  ))
+}
+
 export function adaptCoursePptxProducerFindings(
   project: CourseProjectDocument,
   resources: ExportPreflightResources,
@@ -395,12 +405,9 @@ export function adaptCoursePptxProducerFindings(
     // Common static preflight already owns build/asset failures. Do not emit a
     // second, differently worded producer error from this PPTX-only adapter.
   }
-  const hasPptxPage = project.locations.some((location) => (
-    location.kind === 'slide-scene' || location.kind === 'spatial-camera'
-  ))
-  if (!hasPptxPage) {
+  if (!coursePptxTargetApplicable(project)) {
     items.push({
-      severity: 'info',
+      severity: 'error',
       code: 'static-export-preflight',
       message: '当前课程没有可映射到 PPTX 的 Slide 场景或 Spatial 镜头。',
       diagnosticTarget: projectDiagnosticTarget,
