@@ -16,7 +16,7 @@ import {
   serializeFormulaAst,
 } from '../../shared/formulaLinear'
 import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
-import { formulaAstSchema } from '../../shared/projectSchema'
+import { formulaAstSchema } from '../../shared/contracts/native-v1'
 import type { FormulaAstNode, FormulaNode } from '../../shared/contracts/native-v1'
 
 export interface FormulaAuthoringDraftChange {

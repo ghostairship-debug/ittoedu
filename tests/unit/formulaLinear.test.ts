@@ -8,7 +8,7 @@ import {
   parseFormulaLinear,
   serializeFormulaAst,
 } from '@/shared/formulaLinear'
-import { formulaAstSchema } from '@/shared/projectSchema'
+import { formulaAstSchema } from '@/shared/contracts/native-v1'
 import type { FormulaAstNode } from '@/shared/contracts/native-v1'
 
 const completeAst: FormulaAstNode = {

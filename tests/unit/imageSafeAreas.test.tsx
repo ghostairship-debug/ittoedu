@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import { sceneNodeSchema } from '../../src/shared/projectSchema'
+import { imageNodeSchema } from '../../src/shared/contracts/native-v1'
 import { createImageNode } from '../../src/renderer/project/nativeNodeFactories'
 import { selectActiveScene, useEditorStore,
   selectActiveCourseProjectDocument,
@@ -33,11 +33,11 @@ function addImage(): string {
 }
 
 describe('image safe-area metadata', () => {
-  it('defaults old V8 image input to an empty safe-area list and rejects overflow', () => {
+  it('defaults native image input to an empty safe-area list and rejects overflow', () => {
     const image = createImageNode({ assetId: 'image' })
     const legacy = structuredClone(image) as unknown as Record<string, unknown>
     delete legacy.safeAreas
-    expect(sceneNodeSchema.parse(legacy)).toMatchObject({ safeAreas: [] })
+    expect(imageNodeSchema.parse(legacy)).toMatchObject({ safeAreas: [] })
 
     image.safeAreas = [{
       id: 'subject',
@@ -47,7 +47,7 @@ describe('image safe-area metadata', () => {
       width: 0.5,
       height: 0.8,
     }]
-    expect(sceneNodeSchema.safeParse(image)).toMatchObject({ success: false })
+    expect(imageNodeSchema.safeParse(image)).toMatchObject({ success: false })
   })
 
   it('adds, edits, removes, and undoes a stable safe area from image properties', () => {

@@ -6,5 +6,5 @@ Tasks: 2 · queued: 1 · blocked: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-011-v8-schema-owner-return](tasks/1.1/r11-011-v8-schema-owner-return.md) | queued | Codex | contracts-schema | 消除 r11-053 扫描证实的 live Native/Playback 测试与 UI consumer 对 `shared/projectSchema.ts` 的依赖，改用 Native V1 / Playback V1 的窄 Schema；V8-only archive/player/model 仍保持待删事实，不改造为双模型 helper。 |
+| [r11-010-v8-model-owner-return](tasks/1.1/r11-010-v8-model-owner-return.md) | queued | Codex | contracts-schema | 从 `courseProjectModel.ts` 删除已无产品入口的 V8→V9 migration 与 V8 Project/Scene type 依赖，将仍在使用的 Native/Component node→V9 LayerItem 转换收窄为非持久化 adapter input；不恢复 V8 导入。 |
 | [r11-053-legacy-list](tasks/1.1/r11-053-legacy-list.md) | blocked | Integrator | legacy-inventory | 在 037z 与 052d 完成后的当前树上只运行一次 Legacy inventory 扫描，按 structured output 原子更新唯一台账的明细、计数、当前提交和 schema 强制的 product digest；在台账中形成 `LEG ID / 精确路径 / 当前 consumer=0 / replacement 测试` 删除表，不删除产品文件、不生成第二报告或文件 Hash。 |

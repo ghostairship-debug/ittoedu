@@ -6,7 +6,6 @@ import { useEditorStore,
 } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { projectDocumentSchema } from '@/shared/projectSchema'
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
