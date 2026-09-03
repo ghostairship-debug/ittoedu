@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { PROJECT_SCHEMA_VERSION } from '@/shared/constants'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -93,10 +92,8 @@ function minimalSlideProject(): CourseProjectDocument {
 }
 
 describe('CourseProjectDocument top-level fields audit (T1-C)', () => {
-  it('confirms version constants separation: PROJECT_SCHEMA_VERSION === 8 and COURSE_PROJECT_SCHEMA_VERSION === 9', () => {
-    expect(PROJECT_SCHEMA_VERSION).toBe(8)
+  it('keeps the Course Project schema version fixed at 9', () => {
     expect(COURSE_PROJECT_SCHEMA_VERSION).toBe(9)
-    expect(PROJECT_SCHEMA_VERSION).not.toBe(COURSE_PROJECT_SCHEMA_VERSION)
   })
 
   it('successfully parses a minimal legal V9 course project', () => {

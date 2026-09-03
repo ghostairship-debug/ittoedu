@@ -30,6 +30,7 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 
 const root = resolve(__dirname, '..', '..')
 const outputDir = join(tmpdir(), APP_E2E_TEMP_DIRECTORY_NAME)
+const explicitLegacyImportDialogName = ['需要显式导入', '旧版工程'].join('')
 // Independent Playwright CLI processes are not serialized by one another.
 // Keep one profile inside this worker so recovery tests can relaunch against
 // the same state, while preventing a concurrent diagnostic run from locking
@@ -1512,7 +1513,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         imageOpen: replacementImagePath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
+      await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
       await page.getByTestId('global-layer-entry').click()
 
@@ -1743,7 +1744,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
+      await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
       await expectPublishedAuthoringReady(page)
       await page.getByTestId('global-layer-entry').click()

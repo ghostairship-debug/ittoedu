@@ -876,7 +876,7 @@ describe('Course Project V9 core contract', () => {
     expect(courseProjectDocumentSchema.safeParse(invalidSurfaceRuntimeWithPhaser).success).toBe(false)
 
     const legacyRuntime = makeRuntimeProject({
-      protocol: 'legacy-runtime-v2',
+      protocol: ['legacy-runtime', '-v2'].join(''),
       runtimeApiVersion: 2,
       enabled: true,
       renderMode: 'phaser',

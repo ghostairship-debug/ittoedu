@@ -248,7 +248,9 @@ describe('deterministic repo-index generator', () => {
           expect(fact.evidence).toEqual(expect.any(Array))
         }
       }
-      const shared = files.find((record) => record.path === 'src/shared/projectTypes.ts')
+      const shared = files.find((record) => (
+        record.path === 'src/shared/contracts/course-project-v9/types.ts'
+      ))
       expect(shared?.projects).toEqual([
         'tsconfig.e2e.json',
         'tsconfig.electron.json',
@@ -265,15 +267,15 @@ describe('deterministic repo-index generator', () => {
         resolve(repoRoot, 'src/renderer/ui/Workspace.tsx'),
         'utf8',
       )
-      const spatialImportLine = workspaceSource
+      const spatialConnectorImportLine = workspaceSource
         .split(/\r?\n/u)
-        .findIndex((text) => text.includes("from '../course/spatialEditorCommands'")) + 1
-      expect(spatialImportLine).toBeGreaterThan(0)
+        .findIndex((text) => text.includes("from './workspaces/SpatialWorkspaceConnector'")) + 1
+      expect(spatialConnectorImportLine).toBeGreaterThan(0)
       expect(edges).toContainEqual(expect.objectContaining({
-        kind: 'imports_type',
+        kind: 'imports',
         from: 'file:src/renderer/ui/Workspace.tsx',
-        specifier: '../course/spatialEditorCommands',
-        line: spatialImportLine,
+        specifier: './workspaces/SpatialWorkspaceConnector',
+        line: spatialConnectorImportLine,
       }))
       expect(edges).toContainEqual(expect.objectContaining({
         kind: 'imports',

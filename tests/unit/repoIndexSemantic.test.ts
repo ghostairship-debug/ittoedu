@@ -350,7 +350,7 @@ describe('repo-index stable semantic coverage', () => {
     )
 
     expect(feature('feature:developer-tab').highSignalFiles).toContain(
-      'src/shared/projectSchema.ts',
+      'src/shared/contracts/course-project-v9/schema.ts',
     )
 
     expect(feature('feature:desktop-ipc').highSignalFiles).toEqual(expect.arrayContaining([

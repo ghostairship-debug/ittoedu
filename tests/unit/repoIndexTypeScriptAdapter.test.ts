@@ -49,7 +49,7 @@ describe('TypeScript 7 repo-index adapter', () => {
       'src/barrel.ts',
       'src/dynamic.ts',
       'src/index.ts',
-      'src/shared/projectTypes.ts',
+      'src/shared/contracts/course-project-v9/types.ts',
       'src/types.ts',
       'tests/index.test.ts',
     ])
@@ -63,7 +63,7 @@ describe('TypeScript 7 repo-index adapter', () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'static',
-          moduleSpecifier: '@/shared/projectTypes',
+          moduleSpecifier: '@/shared/contracts/course-project-v9/types',
           isTypeOnly: true,
         }),
         expect.objectContaining({
@@ -170,7 +170,7 @@ describe('TypeScript 7 repo-index adapter', () => {
       }
 
       const sharedMembership = first.files.find(
-        (file) => file.path === 'src/shared/projectTypes.ts',
+        (file) => file.path === 'src/shared/contracts/course-project-v9/types.ts',
       )
       expect(sharedMembership?.projects).toEqual([
         'tsconfig.e2e.json',

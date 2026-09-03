@@ -429,7 +429,7 @@
         "docs/development-plan/inventories/FEATURE_CONSUMER_OWNER_LEDGER.md"
       ],
       "highSignalTests": [
-        "tests/unit/playerComponentV4Render.test.ts",
+        "tests/unit/componentProtocolV4.test.ts",
         "tests/integration/componentCatalogV8Matrix.test.ts",
         "tests/unit/componentContentIntegrity.test.ts",
         "tests/unit/publishedComponentMount.test.ts",
@@ -770,7 +770,7 @@
       ],
       "highSignalTests": [
         "tests/unit/buildPublishedCourseV2.test.ts",
-        "tests/unit/webPackageExport.test.ts"
+        "tests/unit/coursePackageExport.test.ts"
       ],
       "canonicalFiles": [
         "src/renderer/export/course/buildCoursePackages.ts",
@@ -784,8 +784,7 @@
         "src/renderer/App.tsx"
       ],
       "tests": [
-        "tests/unit/coursePackageExport.test.ts",
-        "tests/unit/webPackageExport.test.ts"
+        "tests/unit/coursePackageExport.test.ts"
       ],
       "evidence": [
         "docs/development-plan/ARCHITECTURE_CONTRACT.md"
@@ -963,7 +962,7 @@
         "src/shared/contracts/interaction-v1/schema.ts",
         "src/renderer/components/importComponentPackage.ts",
         "src/renderer/authoring/runtimeTargetEditSession.ts",
-        "src/shared/projectSchema.ts"
+        "src/shared/contracts/course-project-v9/schema.ts"
       ],
       "highSignalTests": [
         "tests/unit/componentPackage.test.ts"
@@ -1062,7 +1061,6 @@
       "highSignalFiles": [
         "src/renderer/project/projectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
-        "tests/helpers/projectV8.ts",
         "scripts/verify-release.ts",
         "scripts/build-render-host-benchmark.ts",
         "docs/contracts/V9_COMPATIBILITY_POLICY.md"
@@ -1077,7 +1075,6 @@
       "canonicalFiles": [
         "src/renderer/project/projectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
-        "tests/helpers/projectV8.ts",
         "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "entrypoints": [

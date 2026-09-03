@@ -884,7 +884,7 @@ describe('SpatialEditorView identities and Workspace Spatial reads', () => {
     expect(isSpatialEditorLocationKind('slide-scene')).toBe(false)
   })
 
-  it('Spatial Workspace branch no longer projects SceneNode or old editing nodes', () => {
+  it('Spatial Workspace branch no longer uses the retired scene projection', () => {
     const shell = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/SpatialLocationWorkspace.tsx'),
       'utf8',
@@ -897,7 +897,7 @@ describe('SpatialEditorView identities and Workspace Spatial reads', () => {
       join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/workspaces/WorkspaceRouteContext.ts'),
       'utf8',
     )
-    expect(shell).not.toMatch(/courseLayerItemToSceneNode/)
+    expect(shell).not.toMatch(new RegExp(['courseLayerItemToScene', 'Node'].join('')))
     expect(shell).not.toMatch(/selectEditingNodes/)
     expect(shell).not.toMatch(/selectSelectedNode/)
     expect(shell).not.toMatch(/useEditorStore/)

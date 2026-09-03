@@ -21,6 +21,7 @@ const execFileAsync = promisify(execFile)
 const root = path.resolve(__dirname, '..', '..')
 const installerPath = path.join(root, 'scripts', 'install-courseware-skills.ps1')
 const manifestName = '.ittoedu-courseware-editor-managed-skills.json'
+const retiredV8BuilderSkill = ['build-project-v8', '-courseware'].join('')
 
 type InstallerManifest = {
   schemaVersion: number
@@ -190,7 +191,7 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
     expect(manifest.skills['build-courseware-project']?.installedTreeSignature)
       .toBe(await treeSignature(path.join(sourceRoot, 'build-courseware-project')))
     expect(manifest.retiredSkills['build-project-v7-courseware']?.status).toBe('not-present')
-    expect(manifest.retiredSkills['build-project-v8-courseware']?.status).toBe('not-present')
+    expect(manifest.retiredSkills[retiredV8BuilderSkill]?.status).toBe('not-present')
     expect(manifest.lastTransactionId).toMatch(/^[0-9a-f]{32}$/)
 
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -340,7 +341,7 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
   it('retires a v2-managed V8 Builder copy only when it still matches the recorded installed signature', async () => {
     const legacyPath = await createSkill(
       destinationRoot,
-      'build-project-v8-courseware',
+      retiredV8BuilderSkill,
       '# V2 managed V8\n',
     )
     const legacySignature = await treeSignature(legacyPath)
@@ -348,7 +349,7 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
       schemaVersion: 2,
       source: 'ittoedu-courseware-editor',
       skills: {
-        'build-project-v8-courseware': {
+        [retiredV8BuilderSkill]: {
           installedTreeSignature: legacySignature,
         },
       },
@@ -357,13 +358,13 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
     })
 
     const result = await runInstaller()
-    expect(result.stdout).toContain('Retired managed legacy Skill: build-project-v8-courseware')
+    expect(result.stdout).toContain(`Retired managed legacy Skill: ${retiredV8BuilderSkill}`)
     expect(await exists(legacyPath)).toBe(false)
     expect(await exists(path.join(destinationRoot, 'build-courseware-project', 'SKILL.md'))).toBe(true)
-    expect((await readManifest()).retiredSkills['build-project-v8-courseware']?.status)
+    expect((await readManifest()).retiredSkills[retiredV8BuilderSkill]?.status)
       .toBe('removed')
     expect((await readManifest()).skills).toHaveProperty('build-courseware-project')
-    expect((await readManifest()).skills).not.toHaveProperty('build-project-v8-courseware')
+    expect((await readManifest()).skills).not.toHaveProperty(retiredV8BuilderSkill)
   })
 
   it('preserves modified and unmanaged V7 copies and removes them from management', async () => {

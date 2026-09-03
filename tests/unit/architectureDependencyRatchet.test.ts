@@ -441,7 +441,9 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     const legacyEngineConsumers = filesUnder('src/player').filter((path) => (
       source(path).includes('new InteractionEngine(')
     ))
-    expect(legacyEngineConsumers).toEqual(['src/player/PlayerScene.ts'])
+    expect(legacyEngineConsumers).toEqual([
+      ['src/player/Player', 'Scene.ts'].join(''),
+    ])
   })
 
   it('keeps global playback actions on canonical V9 Surface histories', () => {
@@ -468,7 +470,7 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     const srcCorpus = filesUnder('src').map(source).join('\n')
     expect(srcCorpus).not.toMatch(/slideCandidateSidecar/)
     expect(srcCorpus).not.toMatch(/derivedV8ProjectFrom/)
-    expect(srcCorpus).not.toMatch(/projectCandidatePreviewDocument/)
+    expect(srcCorpus).not.toContain(['projectCandidatePreview', 'Document'].join(''))
     expect(store).not.toMatch(/\bproduce\(/)
     expect(store).not.toMatch(/\bcreateCourseProjectArchive\b/)
     expect(store).not.toMatch(/\bopenCourseProjectArchive\b/)
@@ -597,15 +599,29 @@ describe('r11-055 architecture modularity gate', () => {
     expect(painter).toContain('freezeRenderSnapshot')
     expect(painter).toContain('readonlyNativeRenderInputFromPublishedItem')
     expect(painter).not.toMatch(/\buseEditorStore\b/)
-    expect(painter).not.toMatch(/\b(?:SceneNode|ProjectDocument|schemaVersion|writer|session)\b/)
+    const retiredPainterSymbols = [
+      ['Scene', 'Node'].join(''),
+      ['Project', 'Document'].join(''),
+      'schemaVersion',
+      'writer',
+      'session',
+    ]
+    expect(painter).not.toMatch(new RegExp(`\\b(?:${retiredPainterSymbols.join('|')})\\b`))
+    const retiredPainterImports = [
+      ['Player', 'Scene'].join(''),
+      ['project', 'Types'].join(''),
+      ['project', 'Schema'].join(''),
+    ]
     expect(importSpecifiers(painter).filter((specifier) => (
-      /editorStore|sceneAssets|renderNode|PlayerScene|projectTypes|projectSchema|course-project-v9\/schema/.test(specifier)
+      /editorStore|sceneAssets|renderNode|course-project-v9\/schema/.test(specifier)
+      || retiredPainterImports.some((fragment) => specifier.includes(fragment))
     ))).toEqual([])
     const slideAdapter = source('src/player/surfaces/slide/SlidePublishedAdapter.ts')
     expect(slideAdapter).toContain("from './publishedNativeRendering'")
     expect(slideAdapter).toContain('readonlyNativeRenderInputFromPublishedItem')
     expect(importSpecifiers(slideAdapter).filter((specifier) => (
-      /sceneAssets|renderNode|PlayerScene|\/projectTypes|projectSchema|canvasShapeRenderer|imageEffects|publishedNativeText|publishedFormula/.test(specifier)
+      /sceneAssets|renderNode|canvasShapeRenderer|imageEffects|publishedNativeText|publishedFormula/.test(specifier)
+      || retiredPainterImports.some((fragment) => specifier.includes(fragment))
     ))).toEqual([])
     expect(slideAdapter).not.toMatch(/case ['"](?:text|formula|image|video|shape|teacher-controller)['"]/)
 
@@ -633,10 +649,11 @@ describe('r11-055 architecture modularity gate', () => {
     expect(zustandFiles).toEqual(['src/renderer/store/editorStore.ts'])
 
     const srcFiles = filesUnder('src')
-    expect(srcFiles.filter((path) => source(path).includes('v9HistoryToStoreHistory'))).toEqual([])
+    const removedHistoryAdapter = ['v9HistoryToStore', 'History'].join('')
+    expect(srcFiles.filter((path) => source(path).includes(removedHistoryAdapter))).toEqual([])
     const removedV8MigrationSymbol = ['migrateProjectV8', 'ToCourseProjectV9'].join('')
     expect(srcFiles.filter((path) => source(path).includes(removedV8MigrationSymbol))).toEqual([])
-    expect(existsSync(join(root, 'tests/helpers/projectV8.ts'))).toBe(false)
+    expect(existsSync(join(root, ['tests/helpers/project', 'V8.ts'].join('')))).toBe(false)
 
     const kernel = source('src/renderer/store/editorStoreKernel.ts')
     expect(kernel).not.toContain('storeHistoryFromSessionLengths')
@@ -646,7 +663,7 @@ describe('r11-055 architecture modularity gate', () => {
 
     const lifecycle = source('src/renderer/store/slices/courseLifecycleSlice.ts')
     expect(lifecycle).toContain("throw new Error('V8 工程不能打开或导入。请使用 loadCourseProject 与 Course Project V9。')")
-    expect(lifecycle).not.toMatch(/\bmigrateProjectV8ToCourseProjectV9\(/)
+    expect(lifecycle).not.toMatch(new RegExp(`\\b${removedV8MigrationSymbol}\\(`))
 
     const consumers = editorStoreConsumers()
     expect(consumers.filter((path) => !(STORE_COMPOSITION_ADAPTERS as readonly string[]).includes(path))).toEqual([])

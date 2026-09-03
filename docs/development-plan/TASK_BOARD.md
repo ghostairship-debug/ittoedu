@@ -6,5 +6,5 @@ Tasks: 2 · queued: 1 · blocked: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-052l-legacy-negative-fixture-closure](tasks/1.1/r11-052l-legacy-negative-fixture-closure.md) | queued | unassigned | none | 清理不再代表产品依赖的旧符号字面量与 repo-index 旧 Owner 夹具，同时保留 V8 拒绝、架构禁止项、旧工具不安装等负向保障；静态扫描不再把这些保护性断言误计为产品 consumer。 |
+| [r11-052m-player-export-test-token-closure](tasks/1.1/r11-052m-player-export-test-token-closure.md) | queued | unassigned | none | 现有 Published V2、PPTX、预检、authoring 与 host-action 测试已不执行旧 Player/Export 实现，但描述与源码守卫仍连续写出退役符号；保留相同负向断言，移除 scanner consumer 假象。 |
 | [r11-053-legacy-list](tasks/1.1/r11-053-legacy-list.md) | blocked | Integrator | legacy-inventory | 在 037z 与 052d 完成后的当前树上只运行一次 Legacy inventory 扫描，按 structured output 原子更新唯一台账的明细、计数、当前提交和 schema 强制的 product digest；在台账中形成 `LEG ID / 精确路径 / 当前 consumer=0 / replacement 测试` 删除表，不删除产品文件、不生成第二报告或文件 Hash。 |

@@ -1,4 +1,4 @@
-import type {} from '@/shared/projectTypes'
+import type {} from '@/shared/contracts/course-project-v9/types'
 import { fixtureValue, type FixtureIdentifier } from './barrel'
 import { type FixtureShape } from './types'
 

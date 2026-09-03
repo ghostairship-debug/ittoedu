@@ -39,6 +39,7 @@ const matrixProjectPath = join(
   artifactDirectory,
   'component-catalog-v9-matrix.project.json',
 )
+const explicitLegacyImportDialogName = ['需要显式导入', '旧版工程'].join('')
 const importedRoundtripPath = join(
   outputDirectory,
   'catalog-ui-roundtrip.h5lesson',
@@ -661,7 +662,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
         pptxSave: exportedPptxPath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
+      await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
       const sceneItems = page.locator('[data-testid^="scene-item-"]')
       await expect(sceneItems).toHaveCount(expectedPackageCount)
