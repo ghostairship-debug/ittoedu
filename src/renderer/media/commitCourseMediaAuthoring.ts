@@ -1,5 +1,5 @@
 import type { AssetMeta, SoundDefinition } from '../../shared/contracts/media-v1/types'
-import { emptyCourseAssetSidecar, freezeCourseAssetSidecar } from '../project/v9AssetAdapter'
+import { emptyCourseAssetSidecar, freezeCourseAssetSidecar, type CourseAssetSidecar } from '../project/v9AssetAdapter'
 import {
   addCourseLibraryMediaToCanvas,
   bindCourseMediaSession,
@@ -18,12 +18,18 @@ import {
   captureCourseAuthoringTarget,
   updateCourseAuthoringSessionItems,
   updateCourseAuthoringSessionRevision,
+  type CourseAuthoringSession,
   type CourseAuthoringTarget,
   type CurrentCourseAuthoringTargetIdentity,
 } from '../authoring/courseAuthoringSession'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
-import type { CourseAuthoringSession } from '../authoring/courseAuthoringSession'
-import type { FeatureAuthoringPorts } from '../authoring/featureAuthoringPorts'
+import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type { ComponentPackageData } from '../../shared/componentTypes'
+import type { EffectiveLayerProjection } from '../course/effectiveLayerProjection'
+import type { SpatialAuthoringSession, SpatialCommandResult } from '../course/spatialEditorCommands'
+import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
+import type { FlowCommandResult } from '../course/flowEditorCommands'
+import type { FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAdapters'
 import type { SlideAuthoringSession } from '../course/slideAuthoringBackend'
 import { commitSlideEditorTransactionHistory } from '../course/slideEditorCommands'
 import {
@@ -79,10 +85,26 @@ export type MediaLibraryImportCommitResult =
       readonly reason: string
     }
 
-export type ImageAuthoringPorts = FeatureAuthoringPorts & {
+export type MediaAuthoringState = {
+  readonly document: CourseProjectDocument | null
+  readonly sidecar: CourseAssetSidecar | null
+  readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
+  readonly authoringSession: CourseAuthoringSession | null
+  readonly editingScope: 'scene' | 'global'
+  readonly activeSceneId: string
+  readonly projection: EffectiveLayerProjection | null
+  readonly hasSlideSession: boolean
+  readonly hasFlowSession: boolean
+  readonly hasSpatialSession: boolean
+}
+
+export type MediaAuthoringPorts = {
+  read(): MediaAuthoringState
   readSlideSession(): SlideAuthoringSession | null
-  readSpatialSession(): import('../course/spatialEditorCommands').SpatialAuthoringSession | null
-  readFlowSession(): import('../project/createFlowCourseProject').FlowAuthoringSession | null
+  readSpatialSession(): SpatialAuthoringSession | null
+  readFlowSession(): FlowAuthoringSession | null
+  setFeedback(feedback: { errorMessage?: string | null; statusMessage?: string | null }): void
+  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   persistCandidateResult(
     result: {
       readonly ok: true
@@ -100,10 +122,15 @@ export type ImageAuthoringPorts = FeatureAuthoringPorts & {
       readonly courseAuthoringSession: CourseAuthoringSession
     },
   ): void
+  persistMedia(result: CourseMediaCommandResult): CourseMediaCommandResult
+  persistSpatial(result: SpatialCommandResult, extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar }): void
+  persistFlow(result: FlowCommandResult | FlowSharedAuthoringResult, extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar }): void
 }
 
+export type ImageAuthoringPorts = MediaAuthoringPorts
+
 export function captureCourseProjectRevisionTarget(
-  ports: FeatureAuthoringPorts,
+  ports: ImageAuthoringPorts,
 ): CourseProjectRevisionTarget | null {
   const document = ports.read().document
   return document
@@ -115,7 +142,7 @@ export function captureCourseProjectRevisionTarget(
 }
 
 export function commitMediaLibraryImportAtTarget(
-  ports: FeatureAuthoringPorts,
+  ports: ImageAuthoringPorts,
   target: CourseProjectRevisionTarget,
   items: ImportedAssetBatchItem[],
 ): MediaLibraryImportCommitResult {

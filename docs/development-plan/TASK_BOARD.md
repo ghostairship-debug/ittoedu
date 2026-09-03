@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037o-media-ports-and-facade-removal](tasks/1.1/r11-037o-media-ports-and-facade-removal.md) | queued | — | none | 媒体 Authoring 使用独立窄 ports；彻底删除 featureAuthoringPorts.ts、root 的 featurePorts 汇总对象与冗余旧实现。 |
+| [r11-037p-root-action-delegation](tasks/1.1/r11-037p-root-action-delegation.md) | queued | — | none | 将 root store 中四类 Feature actions（Runtime、Media、Component、Interaction）全部从 inline 闭包简化为纯粹的 slice/action 委托；消除重复顶层实现。 |

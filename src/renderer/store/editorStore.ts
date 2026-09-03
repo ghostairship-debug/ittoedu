@@ -151,7 +151,6 @@ import { createComponentAuthoringActions } from '../components/commitComponentPa
 import {
   commitMediaLibraryImportAtTarget,
   createMediaAuthoringActions,
-  type ImageAuthoringPorts,
 } from '../media/commitCourseMediaAuthoring'
 import {
   deleteEffectiveLayerItem,
@@ -1149,100 +1148,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     )
   }
 
-  const featurePorts: ImageAuthoringPorts = {
-    read() {
-      const state = get()
-      return {
-        document: selectActiveCourseProjectDocument(state),
-        sidecar: state.courseAssetSidecar,
-        componentPackages: state.componentPackages,
-        authoringSession: state.courseAuthoringSession,
-        editingScope: state.editingScope,
-        activeSceneId: state.activeSceneId,
-        projection: buildCandidateEffectiveLayers(state),
-        interactionLocationId: state.spatialSession?.selection.locationId
-          ?? state.flowSession?.selection.locationId
-          ?? state.slideCandidateSnapshot?.locationId
-          ?? null,
-        interactionStateId: state.slideCandidateSnapshot?.stateId ?? null,
-        hasSlideSession: Boolean(selectSlideAuthoringBackend(state)),
-        hasFlowSession: Boolean(state.flowSession),
-        hasSpatialSession: Boolean(state.spatialSession),
-      }
-    },
-    persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
-    persistCandidateResult: (result, extra) => {
-      persistCandidateResult(result, extra)
-    },
-    setFeedback(feedback) {
-      set(feedback)
-    },
-    setActiveTab(tab) {
-      const simpleHidden = new Set<string>(['components', 'automation', 'developer'])
-      const activeTab = get().editorMode === 'simple' && simpleHidden.has(tab)
-        ? 'elements'
-        : tab
-      set({ activeTab, errorMessage: null })
-    },
-    readSlideSession() {
-      return selectSlideAuthoringBackend(get())?.getSession() ?? null
-    },
-    readSpatialSession() {
-      return get().spatialSession
-    },
-    readFlowSession() {
-      return get().flowSession
-    },
-    persistProject(project, extra) {
-      const state = get()
-      if (state.spatialSession) {
-        persistSpatialResult(succeedSpatialCommand({
-          ...state.spatialSession,
-          history: commitSpatialAuthoringHistory(state.spatialSession.history, project),
-        }, true), extra)
-        return
-      }
-      if (state.flowSession) {
-        persistFlowResult({
-          ok: true,
-          nextDocument: project,
-          historyEntry: true,
-          selection: state.flowSession.selection,
-        }, extra)
-        return
-      }
-      const backend = selectSlideAuthoringBackend(state)
-      if (!backend) return
-      const session = backend.getSession()
-      persistCandidateResult({
-        ok: true,
-        nextSession: {
-          ...session,
-          history: commitSlideAuthoringHistory(session.history, project),
-        },
-        historyEntry: true,
-      }, extra)
-    },
-    persistSlideCommand(run, extra) {
-      const backend = selectSlideAuthoringBackend(get())
-      if (!backend) {
-        return { ok: false, reason: 'not-slide-authoring-backend', historyEntry: false }
-      }
-      return persistCandidateResult(run(backend.getSession()), extra)
-    },
-    persistMedia(result) {
-      return slideAuthoringSlice.persistMediaResult(result, get().errorMessage)
-    },
-    persistLayer(result, extra) {
-      slideAuthoringSlice.persistLayerCommand(result, extra)
-    },
-    persistSpatial(result, extra) {
-      persistSpatialResult(result, extra)
-    },
-    persistFlow(result, extra) {
-      persistFlowResult(result, extra)
-    },
-  }
   const runtimeAuthoringActions = createRuntimeAuthoringActions({
     read: () => {
       const state = get()
@@ -1270,7 +1175,39 @@ export const useEditorStore = create<EditorState>((set, get) => {
       kernel.persistDocument(document, options)
     },
   })
-  const mediaAuthoringActions = createMediaAuthoringActions(featurePorts)
+
+  const mediaAuthoringActions = createMediaAuthoringActions({
+    read: () => {
+      const state = get()
+      return {
+        document: selectActiveCourseProjectDocument(state),
+        sidecar: state.courseAssetSidecar,
+        componentPackages: state.componentPackages,
+        authoringSession: state.courseAuthoringSession,
+        editingScope: state.editingScope,
+        activeSceneId: state.activeSceneId,
+        projection: buildCandidateEffectiveLayers(state),
+        hasSlideSession: Boolean(selectSlideAuthoringBackend(state)),
+        hasFlowSession: Boolean(state.flowSession),
+        hasSpatialSession: Boolean(state.spatialSession),
+      }
+    },
+    readSlideSession: () => selectSlideAuthoringBackend(get())?.getSession() ?? null,
+    readSpatialSession: () => get().spatialSession,
+    readFlowSession: () => get().flowSession,
+    setFeedback: (feedback) => set(feedback),
+    persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
+    persistCandidateResult: (result, extra) => {
+      persistCandidateResult(result, extra)
+    },
+    persistMedia: (result) => slideAuthoringSlice.persistMediaResult(result, get().errorMessage),
+    persistSpatial: (result, extra) => {
+      persistSpatialResult(result, extra)
+    },
+    persistFlow: (result, extra) => {
+      persistFlowResult(result, extra)
+    },
+  })
   const componentAuthoringActions = createComponentAuthoringActions({
     read: () => {
       const state = get()
