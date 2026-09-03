@@ -796,9 +796,12 @@ export function createSlideOwnedCommands(
       runCandidateAction('reorder', { orderedLayerItemIds: nodeIds })
     },
 
-    moveGlobalLayerOwner(fromId: string, toId: string) {
+    moveGlobalLayerOwner(fromId: string, toId: string): void {
       const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) return kernel.failSessionless()
+      if (!isSlideAuthoringBackend(backend)) {
+        kernel.failSessionless()
+        return
+      }
       const from = slideRow(fromId)
       const to = slideRow(toId)
       if (!from || !to) return
@@ -818,9 +821,12 @@ export function createSlideOwnedCommands(
     setCandidateGlobalLayerLocationVisibility(
       nodeId: string,
       visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
-    ) {
+    ): void {
       const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) return kernel.failSessionless()
+      if (!isSlideAuthoringBackend(backend)) {
+        kernel.failSessionless()
+        return
+      }
       const row = slideRow(nodeId)
       if (!row || row.owner !== 'global') return
       persistLayer(setGlobalLayerLocationVisibility(
@@ -831,9 +837,12 @@ export function createSlideOwnedCommands(
       ))
     },
 
-    setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean) {
+    setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void {
       const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) return kernel.failSessionless()
+      if (!isSlideAuthoringBackend(backend)) {
+        kernel.failSessionless()
+        return
+      }
       const row = slideRow(nodeId)
       if (!row || row.owner !== 'global') return
       persistLayer(setGlobalLayerVisibleAtLocation(

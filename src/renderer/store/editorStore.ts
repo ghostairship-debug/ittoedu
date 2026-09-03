@@ -556,330 +556,65 @@ export type {
   CaptureCourseProjectRecoveryResult,
 } from './slices/courseLifecycleSlice'
 
-export interface EditorState {
+import type { EditorShellOwnedState } from './slices/editorShellSlice'
+import type { SlideOwnedState } from './slices/slideAuthoringSlice'
+import type { FlowOwnedState } from './slices/flowAuthoringSlice'
+import type { SpatialOwnedState } from './slices/spatialAuthoringSlice'
+import type { CourseLifecycleOwnedState } from './slices/courseLifecycleSlice'
+
+export interface EditorRootOwnedState {
   activeSceneId: string
   /** `null` edits the canonical base scene. */
   activePresentationStateId: string | null
   editingScope: EditingScope
-  canvasMode: CanvasMode
   selectedNodeId: string | null
   selectedNodeIds: string[]
-  projectPath: string | null
-  dirty: boolean
-  readonly assetFiles: Record<string, Uint8Array>
-  componentPackages: Record<string, ComponentPackageData>
-  editorMode: EditorMode
-  activeTab: SidebarTab
-  editingTextNodeId: string | null
-  statusMessage: string | null
-  errorMessage: string | null
-  /** Product Slide authoring backend. Null while Flow or Spatial session is active. */
-  slideBackend: SlideBackend
-  /** Cached after successful candidate commands so Zustand subscribers refresh. */
-  slideCandidateSnapshot: SlideAuthoringSnapshot | null
-  slideCandidateClipboard: V9SlideClipboardPayload | null
-  v9ContentEdit: V9SlideContentEditSession | null
-  /** Candidate asset bytes. Not V8 `assetFiles`. Undo/redo restores this with session history. */
-  courseAssetSidecar: CourseAssetSidecar | null
-  courseAssetSidecarPast: CourseAssetSidecar[]
-  courseAssetSidecarFuture: CourseAssetSidecar[]
-  /** Executable component payloads. Undo/redo restores this with session history. */
-  courseComponentPackagesPast: Record<string, ComponentPackageData>[]
-  courseComponentPackagesFuture: Record<string, ComponentPackageData>[]
-  /** Pure Spatial authoring session. Null on the default Slide product path. */
-  spatialSession: SpatialAuthoringSession | null
-  /** Session-only canonical Spatial clipboard; never mirrored into legacy clipboard fields. */
-  spatialClipboard: SpatialClipboardPayload | null
-  spatialContentEdit: SpatialWorldContentEditSession | null
-  spatialGraphSelection: SpatialGraphSelection | null
-  spatialPlaybackPathId: string | null
-  /** Pure Flow authoring session. Null on the default Slide product path. */
-  flowSession: FlowAuthoringSession | null
-  flowTextEdit: FlowTextEditSession | null
   courseAuthoringSession: CourseAuthoringSession | null
-
-  createNewProject(): void
-  createNewSpatialProject(): void
-  createNewFlowProject(): void
-  loadProject(
-    project: unknown,
-    path: string | null,
-    assetFiles?: Record<string, Uint8Array>,
-    componentPackages?: Record<string, ComponentPackageData>,
-  ): void
-  loadCourseProject(
-    project: CourseProjectDocument,
-    path: string | null,
-    assetFiles?: Record<string, Uint8Array>,
-    componentPackages?: Record<string, ComponentPackageData>,
-  ): void
-  prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult
-  captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
-  acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
-  setEditingScope(scope: EditingScope): void
-  setCanvasMode(mode: CanvasMode): void
-  setEditorMode(mode: EditorMode): void
-  setActiveTab(tab: SidebarTab): void
-  setStatus(message: string | null): void
-  setError(message: string | null): void
-  renameProject(title: string): void
-  setEditingTextNode(nodeId: string | null): void
-  beginTextEdit(nodeId: string, source?: TextEditSource): void
-  updateTextEditDraft(
-    nodeId: string,
-    text: string,
-    runs: TextRun[],
-    height?: number,
-    width?: number,
-  ): void
-  commitTextEdit(): void
-  cancelTextEdit(): void
-
-  addScene(): void
-  addCourseContent(
-    action: CourseEditorPrimaryAction | CourseEditorDropdownAction,
-    options?: { surfaceId?: string },
-  ): void
-  reorderCourseSurfaces(surfaceIds: string[]): void
-  deleteCourseSurface(surfaceId: string): void
-  moveCourseSlideScene(locationId: string, targetSurfaceId: string, toIndex?: number): void
-  activateCourseLocation(locationId: string): void
-  createLiveEditorSelectionSnapshot(
-    focus?: EditorFocusKind | EventTarget | null,
-  ): EditorSelectionSnapshot | null
-  routeEditorAction(
-    actionId: EditorActionId,
-    snapshot?: EditorSelectionSnapshot,
-  ): EditorActionResult
-  duplicateScene(sceneId: string): void
-  deleteScene(sceneId: string): boolean
-  reorderScenes(sceneIds: string[]): void
-  updateScene(
-    sceneId: string,
-    patch: Partial<Pick<EditorCanvasDocument, 'name' | 'backgroundColor' | 'backgroundAssetId'>>,
-  ): void
-  createRuntimeTemplateAtTarget(
-    target: CourseRuntimeTemplateCreationTarget,
-  ): RuntimeTemplateCreationCommitResult
-  updateRuntimeSourceAtTarget(
-    target: CourseAuthoringTarget,
-    source: string,
-  ): RuntimeSourceAuthoringCommitResult
-  captureRuntimeContentTextTarget(
-    session: Readonly<RuntimeTargetEditSession>,
-  ): CourseRuntimeContentTextTarget | null
-  updateRuntimeContentTextAtTarget(
-    target: CourseRuntimeContentTextTarget,
-    value: string,
-  ): RuntimeContentTextAuthoringCommitResult
-  updateRuntimePropertyAtTarget(
-    target: CourseRuntimePropertyTarget,
-    update: CourseRuntimePropertyUpdate,
-  ): RuntimePropertyAuthoringCommitResult
-  captureRuntimeAssetReplacementTarget(
-    session: Readonly<RuntimeTargetEditSession>,
-  ): CourseRuntimeAssetReplacementTarget | null
-  replaceRuntimeAssetAtTarget(
-    target: CourseRuntimeAssetReplacementTarget,
-    asset: AssetMeta,
-    bytes: Uint8Array,
-  ): RuntimeAssetReplacementCommitResult
-  setActiveScene(sceneId: string): void
-  setActivePresentationState(stateId: string | null): void
-  addPresentationState(name?: string): void
-  duplicatePresentationState(stateId: string): void
-  renamePresentationState(stateId: string, name: string): void
-  deletePresentationState(stateId: string): boolean
-  setInitialPresentationState(stateId: string): void
-  setThumbnailPresentationState(stateId: string): void
-  updatePresentationState(
-    stateId: string,
-    patch: Partial<Pick<SlidePresentationState, 'name' | 'description' | 'backgroundColor' | 'backgroundAssetId'>>,
-  ): void
-  clearNodePresentationOverride(nodeId: string): void
-  clearPresentationStateOverrides(stateId: string): void
-
-  addTextNode(x?: number, y?: number): void
-  addFormulaNode(x?: number, y?: number): void
-  addRectangleNode(x?: number, y?: number): void
-  addShapeNode(shapeType: ShapeType, x?: number, y?: number): void
-  addImageNode(asset: AssetMeta, bytes: Uint8Array, x?: number, y?: number): void
-  addVideoNode(asset: AssetMeta, bytes: Uint8Array, x?: number, y?: number): void
-  addImageNodes(
-    items: ImportedAssetBatchItem[],
-    position?: { x?: number; y?: number },
-  ): string[]
-  addVideoNodes(
-    items: ImportedAssetBatchItem[],
-    position?: { x?: number; y?: number },
-  ): string[]
-  importAsset(asset: AssetMeta, bytes: Uint8Array): void
-  importAssets(items: ImportedAssetBatchItem[]): void
-  captureMediaLibraryImportTarget(): CourseProjectRevisionTarget | null
-  importAssetsAtTarget(
-    target: CourseProjectRevisionTarget,
-    items: ImportedAssetBatchItem[],
-  ): MediaLibraryImportCommitResult
-  captureImageReplacementTarget(): CourseAuthoringTarget | null
-  replaceImageAssetAtTarget(
-    target: CourseAuthoringTarget,
-    asset: AssetMeta,
-    bytes: Uint8Array,
-  ): ImageReplacementCommitResult
-  importSound(asset: AssetMeta, bytes: Uint8Array, sound?: Partial<SoundDefinition>): string
-  importSounds(items: ImportedAssetBatchItem[]): string[]
-  updateAudioSettings(patch: ProjectAudioSettingsPatch): void
-  updateSound(soundId: string, patch: Partial<Omit<SoundDefinition, 'id'>>): void
-  deleteSound(soundId: string): boolean
-  deleteAsset(assetId: string): boolean
-  applyInteractionTemplateAtTarget(
-    target: InteractionAuthoringTarget,
-    template: InteractionTemplateRequest,
-  ): InteractionAuthoringCommitResult
-  updateInteractionRuleAtTarget(
-    target: InteractionAuthoringTarget,
-    ruleId: string,
-    patch: Partial<Omit<InteractionRule, 'id'>>,
-  ): InteractionAuthoringCommitResult
-  applyCourseLogicAuthoringCommand(
-    command: CourseLogicAuthoringCommand,
-  ): CourseLogicAuthoringResult
-  addInteractionRule(sceneId: string, rule: InteractionRule): void
-  updateInteractionRule(sceneId: string, ruleId: string, rule: InteractionRule): void
-  deleteInteractionRule(sceneId: string, ruleId: string): void
-  duplicateInteractionRule(sceneId: string, ruleId: string): string | null
-  moveInteractionRule(
-    sceneId: string,
-    ruleId: string,
-    direction: -1 | 1,
-  ): void
-  addGlobalInteractionRule(rule: InteractionRule): void
-  updateGlobalInteractionRule(ruleId: string, rule: InteractionRule): void
-  deleteGlobalInteractionRule(ruleId: string): void
-  duplicateGlobalInteractionRule(ruleId: string): string | null
-  moveGlobalInteractionRule(ruleId: string, direction: -1 | 1): void
-  setSimpleEntranceAnimation(
-    nodeId: string,
-    config: SimpleEntranceAnimationConfig | null,
-  ): void
-  updatePlayback(patch: Partial<ProjectPlaybackSettings>): void
-  updateDesignTokens(tokens: ProjectDesignTokens): void
-  ensureTeacherController(): void
-  addExternalComponentNode(packageId: string, x?: number, y?: number, presetId?: string): void
-  importComponentPackage(packageData: ComponentPackageData): void
-  importComponentPackages(packageData: ComponentPackageData[]): void
-  deleteComponentPackage(packageId: string): boolean
-  replaceComponentPackage(packageId: string, packageData: ComponentPackageData): void
-  captureComponentPackageReplacementTarget(
-    packageId: string,
-  ): ComponentPackageReplacementTarget | null
-  replaceComponentPackageAtTarget(
-    target: ComponentPackageReplacementTarget,
-    packageData: ComponentPackageData,
-  ): ComponentPackageReplacementCommitResult
-  createEditableComponentCopy(packageId: string, nodeId?: string): string | null
-  updateEditableComponentPackage(
-    packageId: string,
-    patch: Partial<Pick<ComponentPackageData, 'manifest' | 'runtimeSource'>>,
-  ): void
-  deleteNode(nodeId: string): void
-  deleteSelectedNodes(): void
-  duplicateNode(nodeId: string): void
-  duplicateSelectedNodes(): void
-  copySelectedNodes(): void
-  pasteNodes(): void
-  nudgeSelection(dx: number, dy: number): void
-  alignSelection(mode: AlignmentMode): void
-  distributeSelection(axis: 'horizontal' | 'vertical'): void
-  updateNodes(patches: Array<{ nodeId: string; patch: EditorCanvasNodePatch }>): void
-  updateNode(nodeId: string, patch: EditorCanvasNodePatch): void
-  updateGlobalLayerSettings(
-    nodeId: string,
-    patch: Partial<Pick<GlobalLayerItem, 'layer' | 'visibility'>>,
-  ): void
-  reorderNodes(nodeIds: string[]): void
-  selectNode(nodeId: string | null, additive?: boolean): void
-  selectNodes(nodeIds: string[]): void
-
-  undo(): void
-  redo(): void
-
-  /** Test/dev only. Do not bind to App, menus, or URL query. */
-  injectV9SlideCandidateBackend(backend: SlideAuthoringBackend): void
-  /** Test/dev only. Discards the in-memory candidate and returns the session to V8. */
-  clearV9SlideCandidateBackend(): void
-  runSlideCandidateCommand(
-    run: (backend: SlideAuthoringBackend) => SlideCommandResult,
-  ): SlideCommandResult
-  applySlideCandidateSession(session: SlideAuthoringSession): void
-  applySlideCandidateCommand(
-    run: (session: SlideAuthoringSession) => SlideCommandResult,
-    extra?: {
-      clipboard?: V9SlideClipboardPayload | null
-      statusMessage?: string | null
-      clearContentEdit?: boolean
-      sidecar?: CourseAssetSidecar
-      sidecarDirection?: 'undo' | 'redo'
-    },
-  ): SlideCommandResult
-  importV9CandidateMedia(input: {
-    items: ImportedAssetBatchItem[]
-    nativeType?: 'image' | 'video' | 'audio'
-    mode?: 'add' | 'library'
-    x?: number
-    y?: number
-  }): CourseMediaCommandResult
-  /** Test helper. Reloads a V9 zip into the default V9 session. */
-  exportV9SlideCandidateArchive(): Uint8Array | null
-  /** Reopens a V9 zip as the current session. Does not call V8 loadProject. */
-  reopenV9SlideCandidateArchive(bytes: Uint8Array): boolean
-  runSpatialCommand(
-    run: (session: SpatialAuthoringSession) => SpatialCommandResult,
-    extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar; clearContentEdit?: boolean },
-  ): SpatialCommandResult
-  applySpatialAuthoringSession(
-    session: SpatialAuthoringSession,
-    extra?: { historyEntry?: boolean; statusMessage?: string | null },
-  ): SpatialCommandResult
-  runSpatialAuthoringIntent(
-    target: CourseAuthoringTarget,
-    intent: SpatialAuthoringIntent,
-  ): SpatialAuthoringReceipt
-  applyFlowCommand(
-    result: FlowCommandResult | FlowSharedAuthoringResult,
-    extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar },
-  ): FlowCommandResult | FlowSharedAuthoringResult
-  runFlowAuthoringIntent(
-    target: CourseAuthoringTarget,
-    intent: FlowAuthoringIntent,
-  ): FlowAuthoringReceipt
-  deleteFlowSelection(request: FlowDeleteRequest): FlowCommandResult
-  applyFlowSelection(selection: FlowEditorSelection | null): void
-  setFlowTextEdit(edit: FlowTextEditSession | null): void
-  insertFlowLibraryMedia(
-    assetId: string,
-    request?: { altKey?: boolean; menuAction?: 'insert-document' | 'insert-overlay' },
-  ): FlowSharedAuthoringResult
-  formatFlowTextStyle(style: TextRunStyle): FlowCommandResult
-  formatFlowBlock(spec: Parameters<typeof formatFlowAuthoringBlock>[2]): FlowCommandResult
-  renameFlowHeading(locationId: string, title: string): void
-  renameFlowPage(surfaceId: string, title: string): void
-  setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
-  setSpatialPlaybackPathId(pathId: string | null): void
-  moveCandidateLayerOwner(fromId: string, toId: string): void
-  setCandidateGlobalLayerLocationVisibility(
-    nodeId: string,
-    visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
-  ): void
-  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
-  commitSlideCandidateTextRunStyle(input: {
-    layerItemId: string
-    selectionStart: number
-    selectionEnd: number
-    patch: TextRunStyle
-    source?: TextEditSource
-  }): SlideCommandResult | SpatialCommandResult
+  readonly assetFiles: Record<string, Uint8Array>
 }
+
+export type EditorOwnedState =
+  & EditorRootOwnedState
+  & EditorShellOwnedState
+  & SlideOwnedState
+  & FlowOwnedState
+  & SpatialOwnedState
+  & CourseLifecycleOwnedState
+  & CourseResourceState
+
+type SliceInternalPorts =
+  | 'commitDraft'
+  | 'commitDraftForPersistence'
+  | 'materializeDraft'
+  | 'persistLayerCommand'
+  | 'deriveFocus'
+  | 'executeAction'
+  | 'executeGlobalAction'
+  | 'commitSlideCandidateTextRunStyle'
+  | 'setScope'
+
+export type EditorState =
+  & EditorOwnedState
+  & ReturnType<typeof createCourseLifecycleSlice>
+  & ReturnType<typeof createEditorShellSlice>
+  & Omit<ReturnType<typeof createCourseStructureSlice>, 'addCourseContent' | 'addScene' | 'reorderCourseSurfaces' | 'deleteCourseSurface' | 'moveCourseSlideScene'>
+  & Omit<ReturnType<typeof createSlideAuthoringSlice>, SliceInternalPorts>
+  & Omit<ReturnType<typeof createFlowAuthoringSlice>, SliceInternalPorts>
+  & Omit<ReturnType<typeof createSpatialAuthoringSlice>, SliceInternalPorts>
+  & ReturnType<typeof createRuntimeAuthoringActions>
+  & ReturnType<typeof createMediaAuthoringActions>
+  & ReturnType<typeof createComponentAuthoringActions>
+  & ReturnType<typeof createInteractionAuthoringActions>
+  & ReturnType<typeof createCrossSurfaceCommands>
+  & {
+      commitSlideCandidateTextRunStyle(input: {
+        layerItemId: string
+        selectionStart: number
+        selectionEnd: number
+        patch: TextRunStyle
+        source?: TextEditSource
+      }): SlideCommandResult | SpatialCommandResult
+    }
 
 
 

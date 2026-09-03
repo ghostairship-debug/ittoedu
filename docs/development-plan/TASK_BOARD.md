@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037w-editor-state-composition](tasks/1.1/r11-037w-editor-state-composition.md) | queued | — | none | EditorState 改为 owner state 与各工厂返回类型的交叉类型；root 工厂只剩 kernel host、slice/Feature 工厂调用、分派接线、初始值和展开返回。 |
+| [r11-037x-root-selection-core-consumers](tasks/1.1/r11-037x-root-selection-core-consumers.md) | queued | — | none | 迁移 Core 命令、快捷键与 Feature ports，改走活动 Surface session 的 selection / scope；保留 Store 上的字段与回写供下一卡使用，但不新增第二写入。 |
