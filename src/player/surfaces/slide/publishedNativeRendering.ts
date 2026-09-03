@@ -306,11 +306,30 @@ function paintPublishedNativeVideo(
   const url = resolveAsset(input.assetId)
   if (!url) return
   const video = wrap.ownerDocument.createElement('video')
-  video.controls = true
   video.src = url
+  video.controls = input.showControls
+  video.loop = input.loop
+  video.muted = input.muted
+  try {
+    video.volume = Number.isFinite(input.volume)
+      ? Math.max(0, Math.min(1, input.volume))
+      : 1
+  } catch {
+    // A synthetic element may reject volume assignment; playback still mounts.
+  }
+  try {
+    video.playbackRate = Number.isFinite(input.playbackRate)
+      ? Math.max(0.25, Math.min(4, input.playbackRate))
+      : 1
+  } catch {
+    // Keep the default rate when the element rejects the authored value.
+  }
+  video.playsInline = true
+  video.preload = 'auto'
+  video.dataset.videoNodeId = input.id
   video.style.width = '100%'
   video.style.height = '100%'
-  video.style.objectFit = 'contain'
+  video.style.objectFit = input.fit === 'stretch' ? 'fill' : input.fit
   video.style.pointerEvents = 'auto'
   wrap.appendChild(video)
 }

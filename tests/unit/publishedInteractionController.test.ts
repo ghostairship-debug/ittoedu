@@ -61,13 +61,20 @@ function clickRule(
 function surfaceHarness(overrides: {
   bindNodeClick?: PublishedInteractionSurfacePort['bindNodeClick']
   executeNodeMotion?: PublishedInteractionSurfacePort['executeNodeMotion']
+  bindVideoEvent?: PublishedInteractionSurfacePort['bindVideoEvent']
+  executeVideoAction?: PublishedInteractionSurfacePort['executeVideoAction']
 } = {}) {
   const listeners = new Map<string, () => void>()
+  const videoListeners = new Map<string, Set<(seconds?: number) => void>>()
+  const videoDisposed: string[] = []
   const disposed: string[] = []
   const executeNodeMotion = vi.fn((
     _action: NodeMotionAction,
     _context: PublishedNodeMotionContext,
   ) => true)
+  const executeVideoAction = vi.fn((
+    action: Extract<InteractionActionPayload, { type: `video.${string}` }>,
+  ) => action.nodeId === 'video-a')
   const surface: PublishedInteractionSurfacePort = {
     bindNodeClick: overrides.bindNodeClick ?? ((nodeId, listener) => {
       listeners.set(nodeId, listener)
@@ -77,8 +84,35 @@ function surfaceHarness(overrides: {
       }
     }),
     executeNodeMotion: overrides.executeNodeMotion ?? executeNodeMotion,
+    bindVideoEvent: overrides.bindVideoEvent ?? ((nodeId, kind, listener) => {
+      const key = `${nodeId}::${kind}`
+      let registrations = videoListeners.get(key)
+      if (!registrations) {
+        registrations = new Set()
+        videoListeners.set(key, registrations)
+      }
+      registrations.add(listener)
+      return () => {
+        videoDisposed.push(key)
+        videoListeners.get(key)?.delete(listener)
+      }
+    }),
+    executeVideoAction: overrides.executeVideoAction ?? executeVideoAction,
   }
-  return { surface, listeners, disposed, executeNodeMotion }
+  return {
+    surface,
+    listeners,
+    disposed,
+    executeNodeMotion,
+    videoListeners,
+    videoDisposed,
+    executeVideoAction,
+    emitVideo(nodeId: string, kind: string, seconds?: number) {
+      for (const listener of [...(videoListeners.get(`${nodeId}::${kind}`) ?? [])]) {
+        listener(seconds)
+      }
+    },
+  }
 }
 
 function sessionHarness(initialSceneId = 'scene_one') {
@@ -514,5 +548,186 @@ describe('PublishedInteractionController', () => {
 
     expect(() => controller.destroy()).not.toThrow()
     expect(diagnostics.map((item) => item.code)).toContain('dispose-failed')
+  })
+
+  it('routes video actions only to the addressed node and diagnoses misses', async () => {
+    const host = surfaceHarness()
+    const navigation = sessionHarness()
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      rules: [clickRule('video_route', 'button', [
+        actionStep('play_supported', { type: 'video.play', nodeId: 'video-a' }),
+        actionStep('pause_missing', { type: 'video.pause', nodeId: 'video-b' }),
+        actionStep('never_reached', motion('node.enter', 'answer')),
+      ])],
+      surface: host.surface,
+      session: navigation.session,
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+
+    host.listeners.get('button')?.()
+    await vi.waitFor(() => expect(host.executeVideoAction).toHaveBeenCalledTimes(2))
+    expect(host.executeVideoAction.mock.calls.map(([action]) => action)).toEqual([
+      { type: 'video.play', nodeId: 'video-a' },
+      { type: 'video.pause', nodeId: 'video-b' },
+    ])
+    expect(host.executeNodeMotion).not.toHaveBeenCalled()
+    expect(diagnostics.map((item) => item.code)).toEqual(['video-failed'])
+    expect(diagnostics[0]).toMatchObject({
+      ruleId: 'video_route',
+      stepId: 'pause_missing',
+      nodeId: 'video-b',
+      interactionType: 'video.pause',
+    })
+    controller.destroy()
+  })
+
+  it('fires video started/paused/ended triggers only in the current scene', async () => {
+    const host = surfaceHarness()
+    const navigation = sessionHarness('scene_one')
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      rules: [
+        clickRule('unused_click', 'button', []),
+        {
+          id: 'on_started',
+          enabled: true,
+          trigger: { type: 'video.started', nodeId: 'video-a' },
+          conditions: [{ type: 'scene.in', sceneIds: ['scene_one'] }],
+          actions: [actionStep('show_started', motion('node.enter', 'started_target'))],
+        },
+        {
+          id: 'on_paused',
+          enabled: true,
+          trigger: { type: 'video.paused', nodeId: 'video-a' },
+          conditions: [],
+          actions: [actionStep('show_paused', motion('node.enter', 'paused_target'))],
+        },
+        {
+          id: 'on_ended_elsewhere',
+          enabled: true,
+          trigger: { type: 'video.ended', nodeId: 'video-a' },
+          conditions: [{ type: 'scene.in', sceneIds: ['scene_two'] }],
+          actions: [actionStep('show_ended', motion('node.enter', 'ended_target'))],
+        },
+      ],
+      surface: host.surface,
+      session: navigation.session,
+    })
+
+    host.emitVideo('video-a', 'started')
+    host.emitVideo('video-a', 'paused')
+    host.emitVideo('video-a', 'ended')
+
+    await vi.waitFor(() => expect(host.executeNodeMotion).toHaveBeenCalledTimes(2))
+    expect(host.executeNodeMotion.mock.calls.map(([action]) => action.nodeId).sort()).toEqual(
+      ['paused_target', 'started_target'],
+    )
+    controller.destroy()
+  })
+
+  it('treats video.time as a crossing threshold and rearms after rewind', async () => {
+    const host = surfaceHarness()
+    const navigation = sessionHarness()
+    const timeRule = (id: string, seconds: number): InteractionRule => ({
+      id,
+      enabled: true,
+      trigger: { type: 'video.time', nodeId: 'video-a', seconds },
+      conditions: [],
+      actions: [actionStep(`${id}_step`, motion('node.enter', `${id}_target`))],
+    })
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      rules: [timeRule('five', 5), timeRule('ten', 10)],
+      surface: host.surface,
+      session: navigation.session,
+    })
+
+    host.emitVideo('video-a', 'time', 3)
+    await Promise.resolve()
+    expect(host.executeNodeMotion).not.toHaveBeenCalled()
+
+    host.emitVideo('video-a', 'time', 6)
+    await vi.waitFor(() => expect(host.executeNodeMotion).toHaveBeenCalledTimes(1))
+    expect(host.executeNodeMotion.mock.calls[0]?.[0]).toMatchObject({ nodeId: 'five_target' })
+
+    host.emitVideo('video-a', 'time', 7)
+    await Promise.resolve()
+    expect(host.executeNodeMotion).toHaveBeenCalledTimes(1)
+
+    host.emitVideo('video-a', 'time', 11)
+    await vi.waitFor(() => expect(host.executeNodeMotion).toHaveBeenCalledTimes(2))
+    expect(host.executeNodeMotion.mock.calls[1]?.[0]).toMatchObject({ nodeId: 'ten_target' })
+
+    host.emitVideo('video-a', 'time', 2)
+    await Promise.resolve()
+    expect(host.executeNodeMotion).toHaveBeenCalledTimes(2)
+
+    host.emitVideo('video-a', 'time', 6)
+    await vi.waitFor(() => expect(host.executeNodeMotion).toHaveBeenCalledTimes(3))
+    expect(host.executeNodeMotion.mock.calls[2]?.[0]).toMatchObject({ nodeId: 'five_target' })
+    controller.destroy()
+  })
+
+  it('ignores video events after destroy and cancels delayed video work on scene change', async () => {
+    vi.useFakeTimers()
+    const host = surfaceHarness()
+    const navigation = sessionHarness('scene_one')
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      rules: [{
+        id: 'video_delayed',
+        enabled: true,
+        trigger: { type: 'video.started', nodeId: 'video-a' },
+        conditions: [{ type: 'scene.in', sceneIds: ['scene_one'] }],
+        actions: [actionStep('delayed', motion('node.enter', 'answer'), { delayMs: 50 })],
+      }],
+      surface: host.surface,
+      session: navigation.session,
+    })
+
+    host.emitVideo('video-a', 'started')
+    navigation.setSceneId('scene_two')
+    await vi.advanceTimersByTimeAsync(60)
+    expect(host.executeNodeMotion).not.toHaveBeenCalled()
+
+    navigation.setSceneId('scene_one')
+    host.emitVideo('video-a', 'started')
+    controller.destroy()
+    await vi.advanceTimersByTimeAsync(60)
+    expect(host.executeNodeMotion).not.toHaveBeenCalled()
+    expect(host.videoDisposed.length).toBeGreaterThan(0)
+  })
+
+  it('diagnoses video triggers as unavailable when the surface has no video port', async () => {
+    const listeners = new Map<string, () => void>()
+    const executeNodeMotion = vi.fn(() => true)
+    const surface: PublishedInteractionSurfacePort = {
+      bindNodeClick: (nodeId, listener) => {
+        listeners.set(nodeId, listener)
+        return () => listeners.delete(nodeId)
+      },
+      executeNodeMotion,
+    }
+    const navigation = sessionHarness()
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const controller = new PublishedInteractionController({
+      surfaceId: 'flow_surface',
+      rules: [{
+        id: 'video_elsewhere',
+        enabled: true,
+        trigger: { type: 'video.started', nodeId: 'video-a' },
+        conditions: [],
+        actions: [actionStep('video_elsewhere_step', motion('node.enter', 'answer'))],
+      }],
+      surface,
+      session: navigation.session,
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+
+    expect(diagnostics.map((item) => item.code)).toEqual(['bind-unavailable'])
+    expect(diagnostics[0]).toMatchObject({ nodeId: 'video-a' })
+    controller.destroy()
   })
 })

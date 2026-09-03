@@ -1417,4 +1417,162 @@ describe('Published Interaction Slide host integration', () => {
     }))
     expect(payload).toEqual(before)
   })
+
+  it('applies formal video fields and routes video actions to video events', async () => {
+    vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(
+      function play(this: HTMLMediaElement) {
+        return Promise.resolve()
+      },
+    )
+    vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(
+      function pause(this: HTMLMediaElement) {},
+    )
+    const target = textItem('video-motion-target', 30, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const timeTarget = textItem('video-time-target', 40, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [
+        textItem('video-play-trigger', 10),
+        videoItem('video-a', 20),
+        target,
+        timeTarget,
+      ],
+      sceneAInteractions: [
+        clickRule('play-video-a', 'video-play-trigger', [
+          step('play-video-a-step', { type: 'video.play', nodeId: 'video-a' }),
+        ]),
+        {
+          id: 'on-video-started',
+          enabled: true,
+          trigger: { type: 'video.started', nodeId: 'video-a' },
+          conditions: [],
+          actions: [step('reveal-on-started', motion('node.enter', target.layerItemId))],
+        },
+        {
+          id: 'on-video-time',
+          enabled: true,
+          trigger: { type: 'video.time', nodeId: 'video-a', seconds: 5 },
+          conditions: [],
+          actions: [step('reveal-on-time', motion('node.enter', timeTarget.layerItemId))],
+        },
+      ],
+    })
+    const before = structuredClone(payload)
+    const { container } = await mount(payload)
+
+    const video = renderedItem(container, 'video-a').querySelector('video')
+    expect(video).not.toBeNull()
+    expect(video!.controls).toBe(true)
+    expect(video!.loop).toBe(false)
+    expect(video!.muted).toBe(true)
+    expect(video!.volume).toBe(1)
+    expect(video!.playbackRate).toBe(1)
+    expect(video!.style.objectFit).toBe('contain')
+
+    renderedItem(container, 'video-play-trigger').click()
+    await settle()
+    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
+
+    video!.dispatchEvent(new Event('playing'))
+    await settle()
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), true)
+    expect(animationTargets).toContain(target.layerItemId)
+
+    try {
+      video!.currentTime = 2
+    } catch {
+      // Synthetic media without metadata keeps a 0 playhead; the threshold simply holds.
+    }
+    video!.dispatchEvent(new Event('timeupdate'))
+    await settle(24)
+    expectInteractionVisibility(renderedItem(container, timeTarget.layerItemId), false)
+
+    try {
+      video!.currentTime = 6
+    } catch {
+      // Fall through to the dispatched threshold below.
+    }
+    video!.dispatchEvent(new Event('timeupdate'))
+    await settle()
+    expectInteractionVisibility(renderedItem(container, timeTarget.layerItemId), true)
+    expect(payload).toEqual(before)
+  })
+
+  it('keeps video playback inert during static capture', async () => {
+    const target = textItem('capture-video-target', 30)
+    const payload = publishedFixture({
+      sceneAItems: [textItem('capture-video-trigger', 10), videoItem('video-a', 20), target],
+      sceneAInteractions: [
+        clickRule('capture-play', 'capture-video-trigger', [
+          step('capture-play-step', { type: 'video.play', nodeId: 'video-a' }),
+        ]),
+        {
+          id: 'capture-on-started',
+          enabled: true,
+          trigger: { type: 'video.started', nodeId: 'video-a' },
+          conditions: [],
+          actions: [step('capture-reveal', motion('node.exit', target.layerItemId))],
+        },
+      ],
+    })
+    const before = structuredClone(payload)
+    const { container } = await mount(payload, [], { staticCapture: true })
+
+    renderedItem(container, 'capture-video-trigger').click()
+    await settle(24)
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), true)
+    expect(animationTargets).not.toContain(target.layerItemId)
+
+    const cover = renderedItem(container, 'video-a').querySelector('video')
+    cover?.dispatchEvent(new Event('playing'))
+    await settle(24)
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), true)
+    expect(animationTargets).not.toContain(target.layerItemId)
+    expect(payload).toEqual(before)
+  })
+
+  it('drops stale video events across suspend and navigation', async () => {
+    const target = textItem('stale-video-target', 30, {
+      playbackInitialVisibility: 'hidden',
+    })
+    const payload = publishedFixture({
+      sceneAItems: [textItem('stale-video-trigger', 10), videoItem('video-a', 20), target],
+      sceneAInteractions: [{
+        id: 'stale-on-started',
+        enabled: true,
+        trigger: { type: 'video.started', nodeId: 'video-a' },
+        conditions: [],
+        actions: [step('stale-reveal', motion('node.enter', target.layerItemId))],
+      }],
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload)
+    const oldVideo = renderedItem(container, 'video-a').querySelector('video')
+    expect(oldVideo).not.toBeNull()
+
+    expect(await session.player.suspendSurface(SLIDE_SURFACE_ID)).toEqual({ ok: true })
+    oldVideo!.dispatchEvent(new Event('playing'))
+    await settle()
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), false)
+    expect(animationTargets).not.toContain(target.layerItemId)
+
+    expect(await session.player.resumeSurface(SLIDE_SURFACE_ID)).toEqual({ ok: true })
+    await session.goToLocation(LOCATION_B_ID)
+    oldVideo!.dispatchEvent(new Event('playing'))
+    await settle()
+    await session.goToLocation(LOCATION_A_ID)
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), false)
+    expect(animationTargets).not.toContain(target.layerItemId)
+
+    const freshVideo = renderedItem(container, 'video-a').querySelector('video')
+    expect(freshVideo).not.toBe(oldVideo)
+    freshVideo!.dispatchEvent(new Event('playing'))
+    await settle()
+    expectInteractionVisibility(renderedItem(container, target.layerItemId), true)
+    expect(animationTargets).toContain(target.layerItemId)
+    expect(payload).toEqual(before)
+  })
 })

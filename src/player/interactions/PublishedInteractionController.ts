@@ -1,15 +1,18 @@
 import {
   isNodeMotionAction,
   isTerminalNavigationAction,
+  isVideoInteractionAction,
   type InteractionActionPayload,
   type InteractionActionStep,
   type InteractionRule,
+  type InteractionTrigger,
 } from '../../shared/contracts/interaction-v1/types'
 import type {
   PublishedInteractionDiagnostic,
   PublishedInteractionDiagnosticCode,
   PublishedInteractionSessionPort,
   PublishedInteractionSurfacePort,
+  PublishedVideoEventKind,
 } from './PublishedInteractionSurfacePort'
 import { matchesPublishedCourseStateCondition } from '../surfaces/publishedCourseState'
 
@@ -43,7 +46,42 @@ const SUPPORTED_ACTION_TYPES = new Set<InteractionActionPayload['type']>([
   'scene.replay',
   'course.restart',
   'course-state.set',
+  'video.play',
+  'video.pause',
+  'video.restart',
+  'video.stop',
+  'video.toggle',
+  'video.seek',
 ])
+
+const SUPPORTED_VIDEO_TRIGGER_TYPES = new Set<InteractionTrigger['type']>([
+  'video.started',
+  'video.paused',
+  'video.ended',
+  'video.time',
+])
+
+function videoEventKindOf(trigger: InteractionTrigger): PublishedVideoEventKind | null {
+  switch (trigger.type) {
+    case 'video.started': return 'started'
+    case 'video.paused': return 'paused'
+    case 'video.ended': return 'ended'
+    case 'video.time': return 'time'
+    default: return null
+  }
+}
+
+function videoTriggerNodeId(trigger: InteractionTrigger): string | null {
+  switch (trigger.type) {
+    case 'video.started':
+    case 'video.paused':
+    case 'video.ended':
+    case 'video.time':
+      return trigger.nodeId
+    default:
+      return null
+  }
+}
 
 function boundedDelay(delayMs: number): number {
   if (!Number.isFinite(delayMs)) return 0
@@ -64,6 +102,8 @@ export class PublishedInteractionController {
     diagnostic: PublishedInteractionDiagnostic,
   ) => void
   readonly #clickRules = new Map<string, InteractionRule[]>()
+  readonly #videoRules = new Map<string, InteractionRule[]>()
+  readonly #videoTimes = new Map<string, number>()
   readonly #disposers: Array<() => void> = []
   readonly #activeRuns = new Map<string, ActiveRuleRun>()
   #destroyed = false
@@ -95,12 +135,14 @@ export class PublishedInteractionController {
       }
     }
     this.#clickRules.clear()
+    this.#videoRules.clear()
+    this.#videoTimes.clear()
   }
 
   #inspectAndBindRules(): void {
     for (const rule of this.#rules) {
       if (!rule.enabled) continue
-      if (rule.trigger.type !== 'node.click') {
+      if (rule.trigger.type !== 'node.click' && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)) {
         this.#diagnose({
           code: 'unsupported-trigger',
           severity: 'warning',
@@ -111,6 +153,8 @@ export class PublishedInteractionController {
         continue
       }
 
+      const triggerNodeId = videoTriggerNodeId(rule.trigger)
+        ?? (rule.trigger.type === 'node.click' ? rule.trigger.nodeId : undefined)
       let conditionsSupported = true
       for (const condition of rule.conditions) {
         if (
@@ -124,7 +168,7 @@ export class PublishedInteractionController {
           severity: 'warning',
           message: `Published 交互尚不支持条件 ${condition.type}，已跳过规则`,
           ruleId: rule.id,
-          nodeId: rule.trigger.nodeId,
+          ...(triggerNodeId === undefined ? {} : { nodeId: triggerNodeId }),
           interactionType: condition.type,
         })
       }
@@ -136,15 +180,25 @@ export class PublishedInteractionController {
           message: `Published 交互尚不支持动作 ${step.action.type}，执行时将跳过该步`,
           ruleId: rule.id,
           stepId: step.id,
-          nodeId: rule.trigger.nodeId,
+          ...(triggerNodeId === undefined ? {} : { nodeId: triggerNodeId }),
           interactionType: step.action.type,
         })
       }
       if (!conditionsSupported) continue
 
-      const rules = this.#clickRules.get(rule.trigger.nodeId) ?? []
+      if (rule.trigger.type === 'node.click') {
+        const rules = this.#clickRules.get(rule.trigger.nodeId) ?? []
+        rules.push(rule)
+        this.#clickRules.set(rule.trigger.nodeId, rules)
+        continue
+      }
+      const kind = videoEventKindOf(rule.trigger)
+      const videoNodeId = videoTriggerNodeId(rule.trigger)
+      if (kind === null || videoNodeId === null) continue
+      const key = `${videoNodeId}::${kind}`
+      const rules = this.#videoRules.get(key) ?? []
       rules.push(rule)
-      this.#clickRules.set(rule.trigger.nodeId, rules)
+      this.#videoRules.set(key, rules)
     }
 
     for (const nodeId of this.#clickRules.keys()) {
@@ -171,6 +225,109 @@ export class PublishedInteractionController {
           cause,
         })
       }
+    }
+
+    for (const key of this.#videoRules.keys()) {
+      const separator = key.lastIndexOf('::')
+      const nodeId = key.slice(0, separator)
+      const kind = key.slice(separator + 2) as PublishedVideoEventKind
+      try {
+        const bind = this.#surface.bindVideoEvent
+        const dispose = typeof bind === 'function'
+          ? bind.call(this.#surface, nodeId, kind, (seconds) => {
+            this.#handleVideoEvent(nodeId, kind, seconds)
+          })
+          : null
+        if (typeof dispose === 'function') {
+          this.#disposers.push(dispose)
+        } else {
+          this.#diagnose({
+            code: 'bind-unavailable',
+            severity: 'warning',
+            message: `Published 交互视频 ${nodeId} 当前不可绑定 ${kind} 事件`,
+            nodeId,
+            interactionType: `video.${kind === 'time' ? 'time' : kind}`,
+          })
+        }
+      } catch (cause) {
+        this.#diagnose({
+          code: 'bind-failed',
+          severity: 'error',
+          message: `Published 交互视频 ${nodeId} 事件绑定失败`,
+          nodeId,
+          cause,
+        })
+      }
+    }
+  }
+
+  #handleVideoEvent(nodeId: string, kind: PublishedVideoEventKind, seconds?: number): void {
+    if (this.#destroyed) return
+    if (kind === 'time') {
+      this.#handleVideoTimeEvent(nodeId, seconds)
+      return
+    }
+    const rules = this.#videoRules.get(`${nodeId}::${kind}`) ?? []
+    let currentScene: CurrentSceneResult | undefined
+    for (const rule of rules) {
+      const sceneConditions = rule.conditions.filter(
+        (condition) => condition.type === 'scene.in',
+      )
+      if (sceneConditions.length > 0) {
+        currentScene ??= this.#readCurrentScene(rule, undefined, nodeId)
+        if (!currentScene.ok) continue
+        if (!sceneConditions.every((condition) => (
+          currentScene!.sceneId !== null
+          && condition.sceneIds.includes(currentScene!.sceneId)
+        ))) continue
+      }
+      if (!this.#matchesCourseStateConditions(rule, nodeId)) continue
+      this.#startRule(rule)
+    }
+  }
+
+  /**
+   * Browser timeupdate events are neither exact nor frame-aligned. Treat an
+   * authored video.time value as a threshold: emit it once when playback or
+   * a forward seek crosses that threshold, and re-arm after rewinding.
+   */
+  #handleVideoTimeEvent(nodeId: string, seconds: number | undefined): void {
+    if (this.#destroyed || seconds === undefined || !Number.isFinite(seconds)) return
+    const current = Math.max(0, seconds)
+    const previous = this.#videoTimes.get(nodeId)
+    this.#videoTimes.set(nodeId, current)
+    if (previous !== undefined && current < previous) return
+    const lowerBound = previous ?? Number.NEGATIVE_INFINITY
+    const keyPrefix = `${nodeId}::time`
+    const rules = this.#videoRules.get(keyPrefix) ?? []
+    if (rules.length === 0) return
+    const crossed = new Set<number>()
+    for (const rule of rules) {
+      if (rule.trigger.type !== 'video.time' || rule.trigger.nodeId !== nodeId) continue
+      const threshold = rule.trigger.seconds
+      if (threshold > lowerBound && threshold <= current) crossed.add(threshold)
+    }
+    if (crossed.size === 0) return
+    const ordered = [...crossed].sort((left, right) => left - right)
+    let currentScene: CurrentSceneResult | undefined
+    for (const threshold of ordered) {
+      for (const rule of rules) {
+        if (rule.trigger.type !== 'video.time' || rule.trigger.seconds !== threshold) continue
+        const sceneConditions = rule.conditions.filter(
+          (condition) => condition.type === 'scene.in',
+        )
+        if (sceneConditions.length > 0) {
+          currentScene ??= this.#readCurrentScene(rule, undefined, nodeId)
+          if (!currentScene.ok) break
+          if (!sceneConditions.every((condition) => (
+            currentScene!.sceneId !== null
+            && condition.sceneIds.includes(currentScene!.sceneId)
+          ))) continue
+        }
+        if (!this.#matchesCourseStateConditions(rule, nodeId)) continue
+        this.#startRule(rule)
+      }
+      if (currentScene !== undefined && !currentScene.ok) return
     }
   }
 
@@ -326,6 +483,26 @@ export class PublishedInteractionController {
 
     try {
       let result: boolean | void
+      if (isVideoInteractionAction(action)) {
+        const execute = this.#surface.executeVideoAction
+        if (typeof execute !== 'function') return 'completed'
+        result = await execute.call(this.#surface, action, {
+          ruleId: rule.id,
+          stepId: step.id,
+          signal,
+        })
+        if (this.#destroyed || signal.aborted) return 'cancelled'
+        if (result === false) {
+          this.#reportActionFailure(
+            'video-failed',
+            rule,
+            step,
+            `Published 交互动作 ${action.type} 未执行`,
+          )
+          return 'cancelled'
+        }
+        return 'completed'
+      }
       if (isNodeMotionAction(action)) {
         result = await this.#surface.executeNodeMotion(action, {
           ruleId: rule.id,
@@ -388,12 +565,15 @@ export class PublishedInteractionController {
       if (this.#destroyed || signal.aborted) return 'cancelled'
       const motion = isNodeMotionAction(action)
       const courseState = action.type === 'course-state.set'
+      const video = isVideoInteractionAction(action)
       this.#reportActionFailure(
         motion
           ? 'motion-failed'
           : courseState
             ? 'course-state-failed'
-            : 'navigation-failed',
+            : video
+              ? 'video-failed'
+              : 'navigation-failed',
         rule,
         step,
         `Published 交互动作 ${action.type} 执行失败`,
@@ -406,7 +586,7 @@ export class PublishedInteractionController {
   #reportActionFailure(
     code: Extract<
       PublishedInteractionDiagnosticCode,
-      'motion-failed' | 'navigation-failed' | 'course-state-failed'
+      'motion-failed' | 'navigation-failed' | 'course-state-failed' | 'video-failed'
     >,
     rule: InteractionRule,
     step: InteractionActionStep,

@@ -1,6 +1,6 @@
 # r11-052f-v2-video-background-audio V2 视频与背景音乐会话闭环
 
-- Status / Owner: blocked / Integrator（解除条件：r11-052e 完成并由协调者改为 queued）
+- Status / Owner: queued /
 - Outcome / Evidence: `AudioManager` 已有视频注册和 `beginBackgroundAudioInterruption` 的正确单体语义，但当前 Published V2 整课会话不持有它，V2 视频也未接入，因此 `backgroundAudioMode` 在真实 V2 Player 中无效。052e 完成后建立整课唯一音频会话，并把 Interaction V1 audio 动作/`audio.ended`、教师控制器静音与视频 interruption 接到同一真相。
 - Write scope: `src/player/AudioManager.ts`；`src/player/surfaces/publishedDynamicHosts.ts`；`src/player/surfaces/slide/SlidePublishedAdapter.ts`；`src/player/surfaces/slide/publishedNativeRendering.ts`；`src/player/surfaces/slide/publishedNativeVideoMount.ts`（若 052e 创建）；`src/player/interactions/PublishedInteractionSurfacePort.ts`；`src/player/interactions/PublishedInteractionController.ts`；`tests/unit/audioManager.test.ts`；`tests/unit/publishedInteractionController.test.ts`；`tests/integration/publishedInteractionSlideHostIntegration.test.ts`。禁止新增 Store/持久字段、修改 legacy Player 或复制 AudioManager；需要其他 Surface 产品文件时停止。
 - Write locks: published-producer

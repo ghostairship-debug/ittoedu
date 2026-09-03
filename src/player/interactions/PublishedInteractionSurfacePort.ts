@@ -1,5 +1,6 @@
 import type {
   NodeMotionAction,
+  VideoInteractionAction,
 } from '../../shared/contracts/interaction-v1/types'
 import type { SurfaceDiagnostic } from '../surfaces/SurfaceHost'
 import type { CourseStateStore } from '../../shared/runtimeTypes'
@@ -23,12 +24,45 @@ export interface PublishedNodeMotionContext {
  * camera/location visibility and the concrete motion implementation. The
  * controller never queries or mutates arbitrary DOM nodes.
  */
+export type PublishedVideoEventKind = 'started' | 'paused' | 'ended' | 'time'
+
+export interface PublishedVideoActionContext {
+  readonly ruleId: string
+  readonly stepId: string
+  readonly signal: AbortSignal
+}
+
+/**
+ * Scene-local video extension. Only the Slide Published host implements it;
+ * Flow/Spatial ports omit these members and video rules stay unsupported there.
+ */
+export interface PublishedInteractionVideoPort {
+  executeVideoAction(
+    action: VideoInteractionAction,
+    context: PublishedVideoActionContext,
+  ): PublishedInteractionPortResult
+  bindVideoEvent(
+    nodeId: string,
+    kind: PublishedVideoEventKind,
+    listener: (seconds?: number) => void,
+  ): (() => void) | null
+}
+
 export interface PublishedInteractionSurfacePort {
   bindNodeClick(nodeId: string, listener: () => void): (() => void) | null
   executeNodeMotion(
     action: NodeMotionAction,
     context: PublishedNodeMotionContext,
   ): PublishedInteractionPortResult
+  executeVideoAction?(
+    action: VideoInteractionAction,
+    context: PublishedVideoActionContext,
+  ): PublishedInteractionPortResult
+  bindVideoEvent?(
+    nodeId: string,
+    kind: PublishedVideoEventKind,
+    listener: (seconds?: number) => void,
+  ): (() => void) | null
 }
 
 /** Published navigation boundary supplied by the whole-course session. */
@@ -56,6 +90,7 @@ export type PublishedInteractionDiagnosticCode =
   | 'motion-failed'
   | 'navigation-failed'
   | 'course-state-failed'
+  | 'video-failed'
   | 'execution-failed'
   | 'dispose-failed'
 

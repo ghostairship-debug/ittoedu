@@ -68,6 +68,14 @@ import {
   type PublishedTeacherControllerInput,
 } from './publishedNativeRendering'
 import {
+  mountPublishedNativeVideo,
+  type PublishedNativeVideoHandle,
+  type PublishedVideoInput,
+} from './publishedNativeVideoMount'
+import {
+  PublishedSlideInteractionSurfacePort,
+} from './publishedSlideInteractionSurfacePort'
+import {
   createPublishedSurfaceRuntimeSession,
   mountPublishedSurfaceRuntime,
   type PublishedSurfaceRuntimeSession,
@@ -702,6 +710,9 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   readonly #componentActions?: Readonly<ComponentHostActions>
   #muted = false
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
+  #slideInteractionPort: PublishedSlideInteractionSurfacePort | null = null
+  /** Scene-local video registry: one lifecycle handle per mounted video node. */
+  readonly #videoHandles = new Map<string, PublishedNativeVideoHandle>()
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #renderedLayers = new Map<string, SlideRenderedLayerRecord>()
@@ -995,7 +1006,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   }
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
-    return this.#interactionPort
+    return this.#slideInteractionPort
   }
 
   getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
@@ -1070,6 +1081,11 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#root = root
     this.#services = context.services
     this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
+    this.#slideInteractionPort = new PublishedSlideInteractionSurfacePort(
+      this.#interactionPort,
+      this.#videoHandles,
+      { capture: this.#authoring !== null || this.#staticCapture },
+    )
     this.#render()
     this.#restoreInteractionsIfActive()
   }
@@ -1101,11 +1117,13 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     }
     if (this.#pendingRuntimeActivation !== null) return
     this.#restoreInteractionsIfActive()
+    this.#autoplayPublishedVideos()
   }
 
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    this.#pausePublishedVideos()
     this.#carrierSideEffects.suspend()
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
@@ -1252,6 +1270,9 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#cancelAllAuthoringMotions()
     this.#invalidateInteractions()
     this.#carrierSideEffects.destroy()
+    this.#destroyPublishedVideos()
+    this.#slideInteractionPort?.clearVideoListeners()
+    this.#slideInteractionPort = null
     this.#interactionPort?.destroy()
     this.#interactionPort = null
     this.#interactionNodes.clear()
@@ -1598,6 +1619,76 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#controllers = []
   }
 
+  #destroyPublishedVideos(): void {
+    for (const handle of this.#videoHandles.values()) {
+      try {
+        handle.destroy()
+      } catch (error) {
+        console.error('Slide video destroy failed', error)
+      }
+    }
+    this.#videoHandles.clear()
+  }
+
+  #pausePublishedVideos(): void {
+    for (const handle of this.#videoHandles.values()) {
+      try {
+        handle.pause()
+      } catch (error) {
+        console.error('Slide video pause failed', error)
+      }
+    }
+  }
+
+  #isPublishedVideoWrapVisible(nodeId: string): boolean {
+    for (const record of this.#renderedLayers.values()) {
+      if (record.item.layerItemId !== nodeId) continue
+      if (!record.item.visible) return false
+      try {
+        if (!this.#root?.contains(record.wrap)) return false
+      } catch {
+        return false
+      }
+      return record.wrap.style.visibility !== 'hidden'
+    }
+    return false
+  }
+
+  #autoplayPublishedVideos(): void {
+    if (this.#authoring || this.#staticCapture) return
+    for (const handle of this.#videoHandles.values()) {
+      if (!handle.autoplay) continue
+      if (!this.#isPublishedVideoWrapVisible(handle.nodeId)) continue
+      try {
+        handle.execute({ type: 'video.play', nodeId: handle.nodeId })
+      } catch (error) {
+        console.error('Slide video autoplay failed', error)
+      }
+    }
+  }
+
+  #mountPublishedVideoHandle(wrap: HTMLElement, nodeId: string, input: PublishedVideoInput): void {
+    if (this.#authoring || this.#staticCapture) return
+    if (this.#videoHandles.has(nodeId)) return
+    const video = wrap.querySelector('video')
+    if (!video) return
+    const handle = mountPublishedNativeVideo(video, input)
+    if (!handle) return
+    this.#videoHandles.set(nodeId, handle)
+    handle.subscribe('started', () => {
+      this.#slideInteractionPort?.dispatchVideoEvent(nodeId, 'started')
+    })
+    handle.subscribe('paused', () => {
+      this.#slideInteractionPort?.dispatchVideoEvent(nodeId, 'paused')
+    })
+    handle.subscribe('ended', () => {
+      this.#slideInteractionPort?.dispatchVideoEvent(nodeId, 'ended')
+    })
+    handle.subscribe('time', (seconds) => {
+      this.#slideInteractionPort?.dispatchVideoEvent(nodeId, 'time', seconds)
+    })
+  }
+
   #controllerSessionFor(input: PublishedTeacherControllerInput): TeacherControllerDomSession {
     return this.#teacherControllerSession.get({
       controllerId: input.id,
@@ -1783,6 +1874,13 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       ),
       applyInteractionState: (state: PublishedInteractionNodeState) => {
         const visible = state.visible
+        if (!visible && item.kind === 'native' && item.content.nativeType === 'video') {
+          try {
+            this.#videoHandles.get(item.layerItemId)?.pause()
+          } catch {
+            // Visibility propagation must never break playback teardown.
+          }
+        }
         wrap.dataset.interactionVisibility = visible ? 'visible' : 'hidden'
         wrap.style.visibility = visible ? 'visible' : 'hidden'
         if (source === 'global' && isPublishedGlobalCanvasRuntimePointerItem(item)) {
@@ -1816,6 +1914,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
     this.#renderedLayers.clear()
+    this.#destroyPublishedVideos()
     this.#destroyRuntimes()
     this.#destroyComponents()
     this.#destroyControllers()
@@ -2171,8 +2270,12 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         ...(remountRuntime ? { remountRuntime } : {}),
       }
       this.#renderedLayers.set(renderedLayerKey(source, entry.item.layerItemId), record)
+      if (entry.kind === 'native' && entry.renderInput.type === 'video') {
+        this.#mountPublishedVideoHandle(wrap, entry.item.layerItemId, entry.renderInput)
+      }
     }
     this.#refreshInteractionNodesFromRecords()
+    if (this.#active) this.#autoplayPublishedVideos()
   }
 }
 

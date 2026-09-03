@@ -1,8 +1,0 @@
-# r11-052e-v2-video-playback V2 Slide 视频播放与 Interaction 事件闭环
-
-- Status / Owner: queued /
-- Outcome / Evidence: 当前 `src/player/surfaces/slide/publishedNativeRendering.ts#paintPublishedNativeVideo` 的播放态只创建裸 `<video controls>`；`PublishedInteractionController` 仍把 `video.*` 触发器与动作判为 unsupported。052c 完成后，在 Published V2 Slide scene-local Native 宿主建立单一视频生命周期句柄，消费正式 Video 字段并承接 Interaction V1 的六类动作与四类事件；若起始事实已变化，停止并报告现有实现/测试，不叠加第二路径。
-- Write scope: `src/player/surfaces/slide/publishedNativeRendering.ts`；允许新增 `src/player/surfaces/slide/publishedNativeVideoMount.ts` 与 `src/player/surfaces/slide/publishedSlideInteractionSurfacePort.ts`；`src/player/surfaces/slide/SlidePublishedAdapter.ts`；`src/player/interactions/PublishedInteractionSurfacePort.ts`；`src/player/interactions/PublishedInteractionController.ts`；`tests/unit/publishedInteractionController.test.ts`；`tests/integration/publishedInteractionSlideHostIntegration.test.ts`。禁止修改 V9/Published V2 Schema、Flow/Spatial carrier、通用 `PublishedDomInteractionSurfacePort.ts`、`PlayerApp.ts`、`renderVideoNode.ts` 或旧测试；需要其他产品文件时停止。
-- Write locks: published-producer
-- Acceptance: 播放态应用 `autoplay/loop/muted/volume/playbackRate/startTime/endTime/showControls/clickToToggle/fit`；`video.play/pause/restart/stop/toggle/seek` 只命中当前 node；`video.started/paused/ended/time` 可触发当前 V2 规则且迟到旧 generation 事件被忽略；隐藏、重挂载、导航、suspend、destroy 清理监听并停止播放。capture 仍只准备封面，拒绝所有播放动作且不发 started。视频注册表属于 Slide host，不用 DOM id、第二 controller 或第二 event bus 查找节点。完成时删除本卡，只把 `r11-052f-v2-video-background-audio` 改为 queued 并重新生成任务板。
-- Validation: `npx vitest run tests/unit/publishedInteractionController.test.ts tests/integration/publishedInteractionSlideHostIntegration.test.ts`；`npm run typecheck`。
