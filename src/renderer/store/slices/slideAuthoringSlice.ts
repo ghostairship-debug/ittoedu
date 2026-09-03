@@ -53,7 +53,6 @@ import { executeSlideAuthoringCommand, isSlideAuthoringBackend, type SlideBacken
 import {
   SESSIONLESS_COURSE_REASON,
   commitSurfaceResourcePersist,
-  storeHistoryFromSessionLengths,
   type EditorStoreKernel,
 } from '../editorStoreKernel'
 import {
@@ -199,7 +198,6 @@ export function persistSlideCandidateResult(
     activeSceneId: nextSnapshot.sceneId,
     activePresentationStateId: nextSnapshot.stateId,
     ...committed,
-    history: storeHistoryFromSessionLengths(nextHistory),
     dirty: resourceAware || extra.sidecarDirection || result.historyEntry
       ? true
       : snapshot.dirty,
@@ -257,7 +255,6 @@ export function applyV9BackendState(
     editingTextNodeId: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
-    history: storeHistoryFromSessionLengths(backend.getSession().history),
     dirty: extra.dirty ?? false,
     projectPath: extra.path === undefined ? null : extra.path,
     statusMessage: extra.statusMessage ?? `已打开“${courseProject.title}”`,

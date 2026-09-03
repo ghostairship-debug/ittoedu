@@ -13,7 +13,7 @@ import {
   type CourseAuthoringOwner,
 } from '@/renderer/authoring/courseAuthoringScope'
 import type { CourseAssetSidecar } from '@/renderer/project/v9AssetAdapter'
-import { planAssetFileHistoryChange } from '@/renderer/store/history'
+import { planAssetFileHistoryChange } from '@/renderer/store/courseResourceState'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,

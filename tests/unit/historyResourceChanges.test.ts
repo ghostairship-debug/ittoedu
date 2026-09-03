@@ -1,18 +1,13 @@
-import type { Patch } from 'immer'
 import { describe, expect, it } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
-import { MAX_HISTORY_STEPS } from '@/shared/constants'
 import {
   applyAssetFileHistoryChanges,
   applyComponentPackageHistoryChanges,
   applyHistoryResourceChanges,
   cloneHistoryResourceChanges,
-  emptyHistory,
   historyResourceChangesAreEmpty,
   planAssetFileHistoryChange,
-  pushHistory,
-  type HistoryEntry,
-} from '@/renderer/store/history'
+} from '@/renderer/store/courseResourceState'
 
 function componentPackage(
   id: string,
@@ -181,50 +176,5 @@ describe('History resource changes', () => {
     expect([...inverse.componentPackages[before.manifest.id]!.files['index.js']!])
       .toEqual([1, 2])
     expect([...inverse.assetFiles.image!]).toEqual([5])
-  })
-
-  it('keeps one resource-only step, clears future, drops no-ops, and honors the cap', () => {
-    const futureEntry: HistoryEntry = { patches: [], inversePatches: [] }
-    const sourceBytes = new Uint8Array([10, 20])
-    const initial = {
-      ...emptyHistory(),
-      future: [futureEntry],
-    }
-    const resourceOnly = pushHistory(initial, [], [], {
-      assetFileChanges: [{ assetId: 'image', after: sourceBytes }],
-    })
-    expect(resourceOnly.past).toHaveLength(1)
-    expect(resourceOnly.future).toEqual([])
-    sourceBytes[0] = 99
-    expect([...resourceOnly.past[0]!.assetFileChanges![0]!.after!])
-      .toEqual([10, 20])
-
-    const noOp = pushHistory(resourceOnly, [], [], {
-      assetFileChanges: [{
-        assetId: 'image',
-        before: new Uint8Array([10, 20]),
-        after: new Uint8Array([10, 20]),
-      }],
-    })
-    expect(noOp).toBe(resourceOnly)
-    expect(historyResourceChangesAreEmpty(cloneHistoryResourceChanges({
-      assetFileChanges: [{
-        assetId: 'image',
-        before: new Uint8Array([1]),
-        after: new Uint8Array([1]),
-      }],
-    }))).toBe(true)
-
-    let capped = resourceOnly
-    for (let index = 0; index < MAX_HISTORY_STEPS + 5; index += 1) {
-      const patch: Patch = {
-        op: 'replace',
-        path: ['revision'],
-        value: index,
-      }
-      capped = pushHistory(capped, [patch], [])
-    }
-    expect(capped.past).toHaveLength(MAX_HISTORY_STEPS)
-    expect(capped.future).toEqual([])
   })
 })

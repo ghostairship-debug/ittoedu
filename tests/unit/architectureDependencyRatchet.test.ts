@@ -70,6 +70,10 @@ const STORE_COMPOSITION_ADAPTERS = [
   'src/renderer/ui/SimpleEntranceAnimationEditor.tsx',
   'src/renderer/ui/TopToolbar.tsx',
   'src/renderer/ui/Workspace.tsx',
+  'src/renderer/ui/workspaces/FlowWorkspaceConnector.tsx',
+  'src/renderer/ui/workspaces/SlideWorkspaceConnector.tsx',
+  'src/renderer/ui/workspaces/SpatialWorkspaceConnector.tsx',
+  'src/renderer/ui/workspaces/WorkspaceRouteContext.ts',
 ] as const
 
 function compositionRootFactory(text: string): string {
@@ -636,10 +640,10 @@ describe('r11-055 architecture modularity gate', () => {
     expect(existsSync(join(root, 'tests/helpers/projectV8.ts'))).toBe(false)
 
     const kernel = source('src/renderer/store/editorStoreKernel.ts')
-    expect(kernel).toContain('export function storeHistoryFromSessionLengths(')
-    expect(source('src/renderer/store/slices/slideAuthoringSlice.ts')).toContain('storeHistoryFromSessionLengths(')
-    expect(source('src/renderer/store/slices/flowAuthoringSlice.ts')).toContain('storeHistoryFromSessionLengths(')
-    expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).toContain('storeHistoryFromSessionLengths(')
+    expect(kernel).not.toContain('storeHistoryFromSessionLengths')
+    expect(source('src/renderer/store/slices/slideAuthoringSlice.ts')).not.toContain('storeHistoryFromSessionLengths')
+    expect(source('src/renderer/store/slices/flowAuthoringSlice.ts')).not.toContain('storeHistoryFromSessionLengths')
+    expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).not.toContain('storeHistoryFromSessionLengths')
 
     const lifecycle = source('src/renderer/store/slices/courseLifecycleSlice.ts')
     expect(lifecycle).toContain("throw new Error('V8 工程不能打开或导入。请使用 loadCourseProject 与 Course Project V9。')")

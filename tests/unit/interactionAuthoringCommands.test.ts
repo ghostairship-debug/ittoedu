@@ -8,7 +8,7 @@ import {
   SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID,
   type SceneEnterRevealSequenceTemplateRequest,
 } from '@/renderer/interactions/interactionTemplates'
-import { historyResourceChangesAreEmpty } from '@/renderer/store/history'
+import { historyResourceChangesAreEmpty } from '@/renderer/store/courseResourceState'
 import type {
   CourseProjectDocument,
   LayerItem,

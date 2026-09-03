@@ -33,20 +33,8 @@ import {
   MIN_VISIBLE_NODE_EDGE,
 } from '../../shared/constants'
 import {
-  applyHistoryResourceChanges,
-  emptyHistory,
-  pushHistory,
-  type AssetFileHistoryChange,
-  type ComponentPackageHistoryChange,
-  type HistoryEntry,
-  type HistoryResourceChanges,
-  type HistoryResourceDirection,
-  type HistoryState,
-} from './history'
-import {
   SESSIONLESS_COURSE_REASON,
   createEditorStoreKernel,
-  storeHistoryFromSessionLengths,
   courseSessionAfterSurfaceHistory,
   commitSurfaceResourcePersist,
 } from './editorStoreKernel'
@@ -257,7 +245,6 @@ import {
   commitSlideEditorTransactionHistory,
   commitSlideProjectMutation,
   selectSlideEditorLayers,
-  slideAuthoringLegacyHistoryEntryCount,
   type SlideAuthoringHistory,
 } from '../course/slideEditorCommands'
 import {
@@ -282,7 +269,6 @@ import {
   commitFlowEditorTransactionHistory,
   commitFlowEditorHistory,
   createFlowEditorHistory,
-  flowEditorLegacyHistoryEntryCount,
   flowEditorRedoResourceTransition,
   flowEditorUndoResourceTransition,
   redoFlowEditorHistory,
@@ -818,7 +804,6 @@ export interface EditorState {
   selectedNodeIds: string[]
   projectPath: string | null
   dirty: boolean
-  history: HistoryState
   readonly assetFiles: Record<string, Uint8Array>
   componentPackages: Record<string, ComponentPackageData>
   editorMode: EditorMode
@@ -1593,7 +1578,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readResources: () => readCourseResourceState(get()),
     commit: (patch) => set(patch),
     readDirty: () => get().dirty,
-    writeHistoryMirror: (history) => set({ history }),
     readSelection: () => {
       const current = get()
       return {
@@ -1785,7 +1769,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selectedNodeIds: [],
     projectPath: null,
     dirty: false,
-    history: emptyHistory(),
     get assetFiles() {
       return selectMediaAssetFiles(get())
     },

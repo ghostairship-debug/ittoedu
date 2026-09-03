@@ -44,7 +44,7 @@ import {
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { applyHistoryResourceChanges } from '@/renderer/store/history'
+import { applyHistoryResourceChanges } from '@/renderer/store/courseResourceState'
 
 const NOW = '2026-08-24T12:00:00.000Z'
 

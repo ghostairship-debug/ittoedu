@@ -20,7 +20,6 @@ import {
   updateCourseAuthoringSessionRevision,
   type CourseAuthoringSession,
 } from '../authoring/courseAuthoringSession'
-import type { HistoryState, HistoryEntry } from './history'
 
 export const SESSIONLESS_COURSE_REASON = '当前会话没有课程工程'
 
@@ -64,7 +63,6 @@ export type EditorStoreKernel = {
   setFeedback(feedback: EditorFeedback): void
   markDirty(dirty?: boolean): void
   readDirty(): boolean
-  writeHistoryMirror(history: HistoryState): void
   readSelection(): EditorUiSelection
   syncSelection(selection: EditorUiSelection): void
   failSessionless(reason?: string): never
@@ -77,7 +75,6 @@ export type EditorStoreKernelHost = {
   readResources(): CourseResourceState
   commit(patch: Record<string, unknown>): void
   readDirty(): boolean
-  writeHistoryMirror(history: HistoryState): void
   readSelection(): EditorUiSelection
   syncSelection(selection: EditorUiSelection): void
 }
@@ -104,23 +101,11 @@ export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStor
       host.commit({ dirty })
     },
     readDirty: host.readDirty,
-    writeHistoryMirror: host.writeHistoryMirror,
     readSelection: host.readSelection,
     syncSelection: host.syncSelection,
     failSessionless(reason = SESSIONLESS_COURSE_REASON): never {
       throw new Error(reason)
     },
-  }
-}
-
-export function storeHistoryFromSessionLengths(history: {
-  readonly past: readonly unknown[]
-  readonly future: readonly unknown[]
-}): HistoryState {
-  const entry = (): HistoryEntry => ({ patches: [], inversePatches: [] })
-  return {
-    past: history.past.map(entry),
-    future: history.future.map(entry),
   }
 }
 

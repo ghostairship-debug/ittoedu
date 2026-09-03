@@ -571,7 +571,6 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(selectSlideAuthoringBackend(afterLate)).toBe(selectSlideAuthoringBackend(beforeLate))
     expect(selectSlideAuthoringBackend(afterLate)!.getSession())
       .toBe(selectSlideAuthoringBackend(beforeLate)!.getSession())
-    expect(afterLate.history).toBe(beforeLate.history)
     expect(afterLate.assetFiles).toBe(beforeLate.assetFiles)
     expect(afterLate.componentPackages).toBe(beforeLate.componentPackages)
     expect(afterLate.courseAuthoringSession).toBe(beforeLate.courseAuthoringSession)

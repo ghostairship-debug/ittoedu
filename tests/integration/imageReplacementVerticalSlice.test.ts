@@ -21,6 +21,13 @@ import type {
 } from '@/shared/courseProjectTypes'
 import type { AssetMeta } from '@/shared/projectTypes'
 
+function activeHistory() {
+  const state = useEditorStore.getState()
+  const backend = state.slideBackend
+  if (!backend) throw new Error('expected active slideBackend')
+  return backend.getSession().history
+}
+
 const FIXTURE_PATH = join(
   process.cwd(),
   'tests',
@@ -181,7 +188,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     const beforeProject = structuredClone(activeProject())
     const beforeImageAssetId = imageAssetId(beforeProject)
     const beforeSelectionB = structuredClone(sceneItem(beforeProject, SELECTION_B))
-    const beforeHistoryDepth = stateAtCapture.history.past.length
+    const beforeHistoryDepth = activeHistory().past.length
     const beforeSidecarDepths = sidecarDepths()
     const beforeComponentDepths = {
       past: stateAtCapture.courseComponentPackagesPast.length,
@@ -217,7 +224,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(sceneItem(afterProject, SELECTION_B)).toEqual(beforeSelectionB)
     expect(afterProject.assets[REPLACEMENT_ASSET_ID]).toEqual(replacementMeta())
     expect(selectMediaAssetFiles(after)[REPLACEMENT_ASSET_ID]).toEqual(REPLACEMENT_BYTES)
-    expect(after.history.past).toHaveLength(beforeHistoryDepth + 1)
+    expect(activeHistory().past).toHaveLength(beforeHistoryDepth + 1)
     expect(sidecarDepths()).toEqual(beforeSidecarDepths)
     expect({
       past: after.courseComponentPackagesPast.length,
@@ -406,7 +413,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     const branched = useEditorStore.getState()
     expect(imageAssetId(activeProject())).toBe(branchAsset.id)
     expect(selectMediaAssetFiles(branched)[branchAsset.id]).toEqual(branchBytes)
-    expect(branched.history.future).toHaveLength(0)
+    expect(activeHistory().future).toHaveLength(0)
     expect(sidecarDepths()).toEqual({ past: 1, future: 0 })
     expect(branched.courseComponentPackagesFuture).toHaveLength(0)
     expect(activeProject().title).not.toBe(originalTitle)

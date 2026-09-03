@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037f-remove-history-and-can-flags](tasks/1.1/r11-037f-remove-history-and-can-flags.md) | queued | — | editor-store-history | 从 EditorState 和 editorStoreKernel 中彻底删除 history、canUndo、canRedo、canUndoRef、canRedoRef，所有 UI 消费端改用活动 Surface 会话派生状态。 |
+| [r11-037g-shell-slide-lifecycle-types](tasks/1.1/r11-037g-shell-slide-lifecycle-types.md) | queued | — | none | 把 shell、Slide 与 lifecycle 类型从 root 移到已有 Owner，只有一个定义。 |

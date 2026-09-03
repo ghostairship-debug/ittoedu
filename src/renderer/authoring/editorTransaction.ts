@@ -6,7 +6,7 @@ import {
   type HistoryResourceChanges,
   type HistoryResourceDirection,
   type HistoryResourceState,
-} from '../store/history'
+} from '../store/courseResourceState'
 
 export interface EditorTransactionPlan<
   TSelectionHint = unknown,

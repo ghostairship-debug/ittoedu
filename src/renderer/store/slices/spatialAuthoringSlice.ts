@@ -115,7 +115,6 @@ import { exclusiveInactiveSurfaces } from '../../composition/surfaceRouter'
 import {
   commitSurfaceResourcePersist,
   courseSessionAfterSurfaceHistory,
-  storeHistoryFromSessionLengths,
   type EditorStoreKernel,
 } from '../editorStoreKernel'
 import {
@@ -371,7 +370,6 @@ export function persistSpatialResult(
         : snapshot.spatialContentEdit,
     slideCandidateSnapshot: null,
     ...committed,
-    ...(surfaceHistoryChanged ? { history: storeHistoryFromSessionLengths(session.history) } : {}),
     dirty: extra.transactionStep || extra.resourceTransition || extra.sidecarDirection || result.historyEntry
       ? true
       : snapshot.dirty,
@@ -431,7 +429,6 @@ export function applySpatialBackendState(
     editingTextNodeId: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
-    history: storeHistoryFromSessionLengths(session.history),
     dirty: extra.dirty ?? false,
     projectPath: extra.path === undefined ? null : extra.path,
     statusMessage: extra.statusMessage ?? `已打开“${session.history.present.title}”`,

@@ -84,7 +84,6 @@ import { exclusiveInactiveSurfaces } from '../../composition/surfaceRouter'
 import {
   commitSurfaceResourcePersist,
   courseSessionAfterSurfaceHistory,
-  storeHistoryFromSessionLengths,
   type EditorStoreKernel,
 } from '../editorStoreKernel'
 import {
@@ -404,7 +403,6 @@ export function persistFlowResult(
     spatialSession: null,
     slideCandidateSnapshot: null,
     ...committed,
-    history: storeHistoryFromSessionLengths(history),
     dirty: extra.transactionStep || extra.resourceTransition || extra.sidecarDirection || result.historyEntry
       ? true
       : snapshot.dirty,
@@ -449,7 +447,6 @@ export function applyFlowBackendState(
     editingTextNodeId: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
-    history: storeHistoryFromSessionLengths(session.history),
     dirty: extra.dirty ?? false,
     projectPath: extra.path === undefined ? null : extra.path,
     statusMessage: extra.statusMessage ?? `已打开“${session.history.present.title}”`,

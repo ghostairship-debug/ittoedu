@@ -7,7 +7,7 @@ import {
   cloneHistoryResourceChanges,
   type HistoryResourceChanges,
   type HistoryResourceDirection,
-} from '../store/history'
+} from '../store/courseResourceState'
 
 export const RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT = 100
 

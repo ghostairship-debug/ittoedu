@@ -1,6 +1,6 @@
 import type { EditorTransactionPlan } from '@/renderer/authoring/editorTransaction'
 import { componentArchiveRoot } from '@/renderer/project/archivePath'
-import type { ComponentPackageHistoryChange } from '@/renderer/store/history'
+import type { ComponentPackageHistoryChange } from '@/renderer/store/courseResourceState'
 import { componentManifestSchema } from '@/shared/componentSchema'
 import type {
   ComponentPackageData,

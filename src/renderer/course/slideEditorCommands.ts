@@ -11,7 +11,7 @@ import {
   cloneHistoryResourceChanges,
   type HistoryResourceChanges,
   type HistoryResourceDirection,
-} from '../store/history'
+} from '../store/courseResourceState'
 import { commitCourseProjectMutation as commitSlideProjectMutation } from './courseProjectMutation'
 import { buildSlideEditorView, type SlideEditorLayerScope } from './slideEditorView'
 

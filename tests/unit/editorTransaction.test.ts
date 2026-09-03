@@ -8,7 +8,7 @@ import {
   createEditorTransactionStep,
   type EditorTransactionState,
 } from '@/renderer/authoring/editorTransaction'
-import { planAssetFileHistoryChange } from '@/renderer/store/history'
+import { planAssetFileHistoryChange } from '@/renderer/store/courseResourceState'
 
 const FIXTURE_PATH = join(
   process.cwd(),

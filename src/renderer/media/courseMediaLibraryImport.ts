@@ -7,7 +7,7 @@ import {
   planAssetFileHistoryChange,
   type AssetFileHistoryChange,
   type HistoryResourceChanges,
-} from '@/renderer/store/history'
+} from '@/renderer/store/courseResourceState'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseAssetMeta,

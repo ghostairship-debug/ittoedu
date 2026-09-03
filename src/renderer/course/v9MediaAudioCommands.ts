@@ -74,7 +74,7 @@ import {
   openSlideAuthoringSession,
   type SlideAuthoringSession,
 } from './slideAuthoringBackend'
-import { planAssetFileHistoryChange } from '../store/history'
+import { planAssetFileHistoryChange } from '../store/courseResourceState'
 import { allocateCourseLayerOrder, sortScopedLayerList } from './globalLayerCommands'
 
 /**

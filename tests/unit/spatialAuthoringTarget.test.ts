@@ -37,7 +37,6 @@ function captureSpatialTarget(input: SpatialEditorAuthoringTargetInput) {
 function expectPersistentStateUnchanged(before: ReturnType<typeof useEditorStore.getState>) {
   const after = useEditorStore.getState()
   expect(after.spatialSession).toBe(before.spatialSession)
-  expect(after.history).toBe(before.history)
   expect(after.assetFiles).toBe(before.assetFiles)
   expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
   expect(after.courseAssetSidecarPast).toBe(before.courseAssetSidecarPast)
@@ -144,7 +143,6 @@ describe('Spatial canonical authoring targets', () => {
       generation: tokenBefore.generation + 1,
     })
     expect(after.spatialSession?.history).toBe(session.history)
-    expect(after.history).toBe(initial.history)
     expect(after.assetFiles).toBe(initial.assetFiles)
     expect(after.spatialSession?.sessionCamera).toEqual({
       x: frame.x,
@@ -446,7 +444,6 @@ describe('Spatial canonical authoring targets', () => {
     expect(after.selectedNodeId).toBeNull()
     expect(after.spatialSession?.history.past).toHaveLength(beforeSession.history.past.length + 1)
     expect(after.spatialSession?.history.past.at(-1)).toBe(beforeSession.history.present)
-    expect(after.history.past).toHaveLength(before.history.past.length + 1)
     expect(after.courseAssetSidecarPast).toHaveLength(before.courseAssetSidecarPast.length + 1)
     expect(after.courseComponentPackagesPast).toHaveLength(before.courseComponentPackagesPast.length + 1)
     expect(locateCourseLayer(after.spatialSession!.history.present, firstId)).toMatchObject({
