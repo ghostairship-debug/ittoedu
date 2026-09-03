@@ -6,5 +6,5 @@ Tasks: 2 · queued: 1 · blocked: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-052m-player-export-test-token-closure](tasks/1.1/r11-052m-player-export-test-token-closure.md) | queued | unassigned | none | 现有 Published V2、PPTX、预检、authoring 与 host-action 测试已不执行旧 Player/Export 实现，但描述与源码守卫仍连续写出退役符号；保留相同负向断言，移除 scanner consumer 假象。 |
+| [r11-052n-legacy-module-isolation](tasks/1.1/r11-052n-legacy-module-isolation.md) | queued | unassigned | none | 在 053 正式清单与 054 精确删除前，将所有 file-absent target 收敛为空壳、删除仅服务于该闭包的非 target V8 helper，并把保留的拒绝/校验测试改为正式 V9/V2 Owner；产品树达到零 confirmed observation、零 symbol target definition，旧文件只剩可机械删除的空壳。 |
 | [r11-053-legacy-list](tasks/1.1/r11-053-legacy-list.md) | blocked | Integrator | legacy-inventory | 在 037z 与 052d 完成后的当前树上只运行一次 Legacy inventory 扫描，按 structured output 原子更新唯一台账的明细、计数、当前提交和 schema 强制的 product digest；在台账中形成 `LEG ID / 精确路径 / 当前 consumer=0 / replacement 测试` 删除表，不删除产品文件、不生成第二报告或文件 Hash。 |

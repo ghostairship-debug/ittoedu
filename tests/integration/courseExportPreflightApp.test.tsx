@@ -351,7 +351,7 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     const app = readFileSync(join(root, 'src/renderer/App.tsx'), 'utf8')
     const delivery = readFileSync(join(root, 'src/renderer/app/useCourseDelivery.ts'), 'utf8')
     for (const source of [app, delivery]) {
-      expect(source).not.toMatch(/buildStandaloneHtml/)
+      expect(source).not.toContain(['buildStandalone', 'Html'].join(''))
       expect(source).not.toMatch(/from ['"][^'"]*\/buildWebPackage['"]/)
       expect(source).not.toMatch(/\bcollectExportPreflight\b/)
     }

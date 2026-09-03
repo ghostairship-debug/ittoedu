@@ -7,7 +7,7 @@ import {
 import { PUBLISHED_LESSON_FORMAT, PUBLISHED_LESSON_VERSION } from '@/shared/publishedLessonTypes'
 
 describe('Player payload is Published V2 only', () => {
-  it('fail-louds Legacy ExportPayload, V7, encoded payload, and corrupt JSON', () => {
+  it('fail-louds retired object payloads, V7, encoded payloads, and corrupt JSON', () => {
     expect(() => parsePublishedCourseV2Entry({
       project: { schemaVersion: 8, scenes: [] },
       assets: {},

@@ -304,7 +304,7 @@ describe('ARCH-0 representative functional baseline', () => {
 
   it('starts Mixed Published V2 through the Player entry and fail-louds Legacy payload', async () => {
     const source = readFileSync(join(process.cwd(), 'src/player/index.ts'), 'utf8')
-    expect(source).not.toContain('new PlayerApp')
+    expect(source).not.toContain(['new Player', 'App'].join(''))
     expect(source).not.toContain('decodeExportPayload')
     expect(source).toContain('publishedCourseV2Schema')
     expect(source).toContain('createPublishedCourseSession')

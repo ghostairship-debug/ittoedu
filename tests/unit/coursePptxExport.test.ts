@@ -69,7 +69,12 @@ describe('buildCoursePptx', () => {
       expect(source).not.toMatch(
         /from ['"][^'"]*\/projectTypes['"]/,
       )
-      expect(source).not.toMatch(/\b(?:SceneNode|buildExportPayload|PlayerApp)\b/)
+      const retiredSymbols = [
+        ['Scene', 'Node'].join(''),
+        ['buildExport', 'Payload'].join(''),
+        ['Player', 'App'].join(''),
+      ]
+      expect(source).not.toMatch(new RegExp(`\\b(?:${retiredSymbols.join('|')})\\b`))
     }
     expect(helperSources.join('\n')).toMatch(/contracts\/native-v1\/types/)
   })

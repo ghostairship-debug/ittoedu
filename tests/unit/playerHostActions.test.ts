@@ -13,7 +13,7 @@ import type {
 import { createPlayerComponentHostActions } from '@/player/componentHostActions'
 
 describe('component host actions', () => {
-  it('forwards the stable action contract without exposing PlayerScene', () => {
+  it('forwards the stable action contract without exposing a renderer scene', () => {
     const target = {
       goToSceneById: vi.fn(() => true),
       nextScene: vi.fn(() => true),

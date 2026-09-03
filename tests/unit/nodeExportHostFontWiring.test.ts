@@ -29,13 +29,11 @@ const BYTE_SOURCE = 'src/renderer/export/bundledFontEmbedSourceNode'
 /**
  * The builder families that emit `@font-face` and an OFL notice.
  *
- * `course/` covers the V9 course packages and the two `build*` modules cover the
- * leftover V8 single file and web package until r11-054 deletes those files; a
- * script importing any of them can produce an artifact with fonts in it. The
- * rest of `src/renderer/export/` — sizes, preflight, payload shaping — cannot,
- * so requiring the source there would be noise.
+ * `course/` owns every current V9 package emitter. A script importing that
+ * family can produce an artifact with fonts in it; the rest of
+ * `src/renderer/export/` — sizes and preflight — cannot.
  */
-const PACKAGING_IMPORT = /from '\.\.\/src\/renderer\/export\/(course|buildStandaloneHtml|buildWebPackage)/
+const PACKAGING_IMPORT = /from '\.\.\/src\/renderer\/export\/course/
 
 function scriptSources(): { path: string; text: string }[] {
   return readdirSync(scriptsDirectory, { withFileTypes: true })

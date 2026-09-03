@@ -700,7 +700,7 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
-  it('exposes a V2 session presenter, not PlayerApp', async () => {
+  it('exposes a V2 session presenter instead of a retired player object', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({
       project,

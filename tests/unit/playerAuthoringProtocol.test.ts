@@ -184,7 +184,7 @@ describe('Player authoring protocol', () => {
     }).ok).toBe(false)
   })
 
-  it('requires a complete, duplicate-free order at the PlayerScene boundary', () => {
+  it('requires a complete, duplicate-free order at the published scene boundary', () => {
     const result = parsePlayerAuthoringPatchCommand({
       ...command(),
       patch: {

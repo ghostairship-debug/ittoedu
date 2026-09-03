@@ -97,7 +97,7 @@ beforeEach(() => {
 })
 
 describe('PPTX component snapshot capture semantics', () => {
-  it('rejects a retired V8-era export package without probing PlayerApp', async () => {
+  it('rejects a retired V8-era export package before probing a player host', async () => {
     await expect(renderPptxComponentSnapshots({
       project: { schemaVersion: 8, scenes: [] },
       assets: {},

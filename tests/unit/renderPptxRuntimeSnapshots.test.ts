@@ -75,7 +75,7 @@ beforeEach(() => {
 })
 
 describe('PPTX runtime snapshot isolation', () => {
-  it('rejects a retired V8-era export package without probing PlayerApp', async () => {
+  it('rejects a retired V8-era export package before probing a player host', async () => {
     await expect(renderPptxRuntimeSnapshots({
       project: { schemaVersion: 8, scenes: [] },
       assets: {},
