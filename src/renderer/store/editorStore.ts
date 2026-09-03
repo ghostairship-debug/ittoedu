@@ -93,6 +93,7 @@ import {
 import {
   applySpatialBackendState,
   createSpatialAuthoringSlice,
+  persistSpatialLayerCommand,
   persistSpatialResult as persistSpatialResultFromSlice,
   spatialPersistSnapshotFrom,
   type SpatialAuthoringIntent,
@@ -1104,40 +1105,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     )
   }
 
-  const persistSpatialLayerCommand = (
-    result: LayerCommandResult,
-    extra?: { statusMessage?: string | null; selectionIds?: readonly string[] },
-  ): SpatialCommandResult => {
-    const session = get().spatialSession
-    if (!session) {
-      return {
-        ok: false,
-        reason: 'not-spatial-session',
-        historyEntry: false,
-        nextSession: session as unknown as SpatialAuthoringSession,
-        selection: { locationId: '', surfaceId: '', selectionIds: [] },
-      }
-    }
-    if (!result.ok || !result.nextDocument) {
-      return persistSpatialResult(
-        rejectSpatialCommand(session, result.reason ?? 'layer-command-failed'),
-      )
-    }
-    const history = result.historyEntry
-      ? commitSpatialAuthoringHistory(session.history, result.nextDocument)
-      : { ...session.history, present: result.nextDocument }
-    const selection = extra?.selectionIds === undefined
-      ? session.selection
-      : selectSpatialEditorLayers({
-          project: result.nextDocument,
-          locationId: session.selection.locationId,
-          selectionIds: extra.selectionIds,
-        })
-    return persistSpatialResult(
-      succeedSpatialCommand({ ...session, history, selection }, Boolean(result.historyEntry)),
-      extra,
-    )
-  }
 
   const applySpatialBackend = (
     session: SpatialAuthoringSession,
@@ -1555,7 +1522,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readProjection: () => buildCandidateEffectiveLayers(get()),
     persistLayer: {
       slide: (result, extra) => slideAuthoringSlice.persistLayerCommand(result, extra),
-      spatial: persistSpatialLayerCommand,
+      spatial: (result, extra) => spatialAuthoringSlice.persistLayerCommand(result, extra),
       flow: (result, extra) => flowAuthoringSlice.persistLayerCommand(result, extra),
     },
   })

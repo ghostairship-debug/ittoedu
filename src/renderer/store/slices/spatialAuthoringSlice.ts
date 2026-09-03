@@ -36,6 +36,7 @@ import {
   buildSpatialAuthoringSnapshot,
   panSpatialSessionCamera,
   redoSpatialAuthoring,
+  selectSpatialEditorLayers,
   selectSpatialLayers,
   setSpatialEditingScope,
   transformSpatialViewportLayersInSession,
@@ -69,6 +70,7 @@ import {
   findGlobalTeacherController,
   patchEffectiveLayerItems,
   restoreDefaultTeacherController,
+  type LayerCommandResult,
 } from '../../course/effectiveLayerCommands'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
 import type { ShapeType, TextRun } from '../../../shared/projectTypes'
@@ -638,6 +640,10 @@ export function createSpatialAuthoringSlice(
     patch: import('../../../shared/projectTypes').TextRunStyle
     source?: 'canvas' | 'properties'
   }): SpatialCommandResult
+  persistLayerCommand(
+    result: LayerCommandResult,
+    extra?: { statusMessage?: string | null; selectionIds?: readonly string[] },
+  ): SpatialCommandResult
 } {
   const commitDraft = (): SpatialAuthoringSession | null => {
     const owned = spatial.read()
@@ -1608,7 +1614,49 @@ export function createSpatialAuthoringSlice(
         source: input.source ?? 'properties',
       }), { clearContentEdit: true })
     },
+    persistLayerCommand(
+      result: LayerCommandResult,
+      extra?: { statusMessage?: string | null; selectionIds?: readonly string[] },
+    ) {
+      return persistSpatialLayerCommand(spatial, result, extra)
+    },
   }
+}
+
+export function persistSpatialLayerCommand(
+  spatial: SpatialAuthoringPorts,
+  result: LayerCommandResult,
+  extra?: { statusMessage?: string | null; selectionIds?: readonly string[] },
+): SpatialCommandResult {
+  const session = spatial.read().spatialSession
+  if (!session) {
+    return {
+      ok: false,
+      reason: 'not-spatial-session',
+      historyEntry: false,
+      nextSession: session as unknown as SpatialAuthoringSession,
+      selection: { locationId: '', surfaceId: '', selectionIds: [] },
+    }
+  }
+  if (!result.ok || !result.nextDocument) {
+    return spatial.persist(
+      rejectSpatialCommand(session, result.reason ?? 'layer-command-failed'),
+    )
+  }
+  const history = result.historyEntry
+    ? commitSpatialAuthoringHistory(session.history, result.nextDocument)
+    : { ...session.history, present: result.nextDocument }
+  const selection = extra?.selectionIds === undefined
+    ? session.selection
+    : selectSpatialEditorLayers({
+        project: result.nextDocument,
+        locationId: session.selection.locationId,
+        selectionIds: extra.selectionIds,
+      })
+  return spatial.persist(
+    succeedSpatialCommand({ ...session, history, selection }, Boolean(result.historyEntry)),
+    extra,
+  )
 }
 
 export function spatialPersistSnapshotFrom(

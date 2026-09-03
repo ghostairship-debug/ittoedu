@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r11-037k-spatial-persist-owner](tasks/1.1/r11-037k-spatial-persist-owner.md) | queued | — | none | 把 applySpatialBackend、persistSpatialResult、persistSpatialLayerCommand 迁入 spatialAuthoringSlice，并保留资源 Undo/Redo generation 行为。 |
+| [r11-037l-kernel-persistence-dispatch](tasks/1.1/r11-037l-kernel-persistence-dispatch.md) | queued | — | editor-store-history | 在 kernel 建立 persistDocument、persistTransaction 窄入口，三大 Surface slice 各实现分支，root 仅通过 dispatchActiveSurface 分发。 |
