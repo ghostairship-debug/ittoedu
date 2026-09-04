@@ -9,6 +9,7 @@ import {
 } from '../../src/renderer/export/course/buildCoursePackages'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
+import { composeCourseProjectLocation } from '../../src/shared/courseLayerComposition'
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 
 const root = resolve(__dirname, '..', '..')
@@ -18,6 +19,7 @@ const onlineStandalonePath = join(runRoot, 'online-standalone.html')
 const webRoot = join(runRoot, 'web')
 let controllerItemId = ''
 let restartButtonId = ''
+let initialSlideGlobalHybridStackOrder = -1
 
 const globalHybridSource = `
   CoursewareRuntime.define({
@@ -213,6 +215,23 @@ function writeFixture(): void {
     assetFiles: {},
     components: {},
   }
+  const initialLocation = sources.project.locations.find(
+    (location) => location.surfaceId === fixture.slideSurfaceId,
+  )
+  if (!initialLocation || initialLocation.kind !== 'slide-scene') {
+    throw new Error('expected initial Slide location')
+  }
+  const initialScene = slide.scenes.find((scene) => scene.id === initialLocation.sceneId)
+  const composition = composeCourseProjectLocation({
+    project: sources.project,
+    locationId: initialLocation.id,
+    stateId: initialScene?.presentation?.initialStateId ?? null,
+  })
+  const globalHybridEntry = composition.entries.find(
+    (entry) => entry.item.layerItemId === item.layerItemId,
+  )
+  if (!globalHybridEntry) throw new Error('expected composed global API2 hybrid')
+  initialSlideGlobalHybridStackOrder = globalHybridEntry.stackOrder
   const playerBundle = readFileSync(join(root, 'dist-player', 'player.iife.js'), 'utf8')
   writeFileSync(standalonePath, buildPublishedCourseStandaloneHtml(sources, playerBundle), 'utf8')
   writeFileSync(onlineStandalonePath, buildPublishedCourseStandaloneHtml(sources, {
@@ -255,7 +274,7 @@ for (const delivery of [
     await expect(hostileMarker).toBeVisible()
     await expect(button).toHaveText('GLOBAL API2:0')
     await expect(page.locator('[data-global-layer-item="published-global-api2-hybrid"]'))
-      .toHaveCSS('z-index', '415')
+      .toHaveCSS('z-index', String(initialSlideGlobalHybridStackOrder))
     await expect(page.locator('[data-global-layer-item="published-global-api2-hybrid"]'))
       .toHaveCSS('pointer-events', 'auto')
     const hostileCreateSlideWrapper = page.locator(

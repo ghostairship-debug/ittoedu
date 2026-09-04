@@ -12,7 +12,7 @@
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| `r14-000-target-wire` | `AuthoringToolTargetWireV1` 无损表达 update target，并为 create 提供独立 scope | `r11-062-owner-release` | 否 | `contracts-schema` | 现有 `CourseAuthoringTarget` 的全部字段逐字段 serialize/parse/serialize 后不变；update 缺任一 canonical 字段即拒绝；create-scope 不含伪造 `itemId`/`authoringAddress`；错误定位到字段且零写入；基础 target wire 不等待 Table/Chart/Recipe 完整版本 |
+| `r14-000-target-wire` | `AuthoringToolTargetWireV1` 无损表达 update target，并为 create 提供独立 scope | `r11-064-patch-release` | 否 | `contracts-schema` | 现有 `CourseAuthoringTarget` 的全部字段逐字段 serialize/parse/serialize 后不变；update 缺任一 canonical 字段即拒绝；create-scope 不含伪造 `itemId`/`authoringAddress`；错误定位到字段且零写入；基础 target wire 不等待 Table/Chart/Recipe 完整版本 |
 | `r14-001-tool-receipt` | 统一工具回执、revision / stale、history 与 resource transaction | `r14-000-target-wire` | 否 | `contracts-schema`, `editor-store-history` | 成功回执包含 tool、canonical target、before / after revision、创建 / 修改身份、diagnostics；预期 revision 不匹配返回 stale 且零写入；一个工具调用只产生一个可 Undo 事务；资源与文档提交同成同败 |
 | `r14-010-component-registry-identity` | 硬门 1：Component Registry 区分工程、package、version、source 与 content identity | `r14-000-target-wire` | 否 | `contracts-schema` | 同 package 不同工程 / version / source / content 同时注册时互不覆盖；更新只失效精确旧身份；保存重开与 Published 构建解析到同一身份；碰撞被拒绝并产生定位诊断 |
 | `r14-011-dynamic-asset-closure` | 硬门 2：Runtime / Component 的 direct project asset 引用进入 Published asset closure | `r14-000-target-wire` | 否 | `published-producer` | Component 与 Runtime 各自直接引用工程图片、字体和媒体后，Published manifest / 单 HTML 均包含且能离线读取；缺失资产使 preflight 失败并列出 origin；未引用资产不被误带入 |

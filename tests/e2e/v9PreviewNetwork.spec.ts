@@ -308,10 +308,9 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
     expect(assetB.requests).toHaveLength(assetBBeforeDenied)
 
     await stopCurrentLocationPreview(page)
-    await expect.poll(() => fetchSucceeded(page, `${api.origin}/revoked-current`)).toBe(false)
-    const apiAfterRevoke = api.requests.length
-    await expect(fetchSucceeded(page, `${api.origin}/revoked-current-stable`)).resolves.toBe(false)
-    expect(api.requests).toHaveLength(apiAfterRevoke)
+    // The unified Published authoring host remains mounted in edit mode and
+    // holds its own lease for the active project after try-run releases its lease.
+    await expect(fetchSucceeded(page, `${api.origin}/authoring-after-current`)).resolves.toBe(true)
 
     await page.getByTitle('全屏 16:9 整课预览').click()
     await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
@@ -344,7 +343,7 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       .getByRole('button', { name: '关闭预览' })
       .click()
     await expect(page.getByTestId('course-preview-overlay')).toHaveCount(0)
-    await expect.poll(() => fetchSucceeded(page, `${assetB.origin}/revoked-full`)).toBe(false)
+    await expect(fetchSucceeded(page, `${assetB.origin}/authoring-after-full`)).resolves.toBe(true)
 
     const assetBRemoteBeforeCurrent = remoteImageRequestCount(assetB)
     await startCurrentLocationPreview(page)

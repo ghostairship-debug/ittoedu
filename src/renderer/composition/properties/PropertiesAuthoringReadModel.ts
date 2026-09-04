@@ -42,7 +42,11 @@ import type {
   SlideSceneDocument,
 } from '../../../shared/courseProjectTypes'
 import type { ProjectPlaybackSettings } from '../../../shared/contracts/playback-v1'
-import type { V9SlideContentEditSession } from '../../authoring/v9SlideContentEdit'
+import type {
+  V9SlideContentEditSession,
+  V9SlideFormulaContentDraft,
+  V9SlideTextContentDraft,
+} from '../../authoring/v9SlideContentEdit'
 import type { RuntimeInspectorAuthoringView } from '../../runtime/runtimeInspectorAuthoringView'
 import { slideAuthoringGeneration } from '../../course/slideAuthoringBackend'
 import type { CourseGlobalLayerView } from '../../ui/properties/CourseGlobalPropertiesPanel'
@@ -200,6 +204,39 @@ function buildGlobalLayerView(
  */
 const propertiesReadModelCache = new WeakMap<EditorState, PropertiesOwnerReadModel>()
 
+function propertiesViewWithSlideContentDraft(
+  row: EffectiveLayerProjectionRow,
+  edit: V9SlideContentEditSession | null,
+): PropertiesItemView {
+  const view = propertiesViewFromLayerItem(row.item)
+  if (
+    !edit
+    || edit.target.layerItemId !== row.id
+    || edit.target.scope !== row.owner
+  ) return view
+  if (edit.kind === 'text' && view.type === 'text') {
+    const draft = edit.draft as V9SlideTextContentDraft
+    return {
+      ...view,
+      text: draft.text,
+      runs: structuredClone(draft.runs),
+      ...(typeof draft.width === 'number' ? { width: draft.width } : {}),
+      ...(typeof draft.height === 'number' ? { height: draft.height } : {}),
+    }
+  }
+  if (edit.kind === 'formula' && view.type === 'formula') {
+    const draft = edit.draft as V9SlideFormulaContentDraft
+    return {
+      ...view,
+      ast: structuredClone(draft.ast),
+      ...(draft.accessibleText === undefined
+        ? {}
+        : { accessibleText: draft.accessibleText }),
+    }
+  }
+  return view
+}
+
 export function selectPropertiesAuthoringReadModel(state: EditorState): PropertiesOwnerReadModel {
   const cached = propertiesReadModelCache.get(state)
   if (cached) return cached
@@ -216,8 +253,12 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
     selectSelectedNodeIds(state).includes(row.id)
   ))
   const selectedRow = selectedRows.length === 1 ? selectedRows[0]! : null
-  const selectedViews = selectedRows.map((row) => propertiesViewFromLayerItem(row.item))
-  const selectedView = selectedRow ? propertiesViewFromLayerItem(selectedRow.item) : null
+  const selectedViews = selectedRows.map((row) => (
+    propertiesViewWithSlideContentDraft(row, state.v9ContentEdit)
+  ))
+  const selectedView = selectedRow
+    ? propertiesViewWithSlideContentDraft(selectedRow, state.v9ContentEdit)
+    : null
   const scene = activeSlideScene(project, locationId, snapshot?.sceneId ?? null)
   const activeState = selectActivePresentationStateId(state) === null
     ? null

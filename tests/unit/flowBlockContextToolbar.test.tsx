@@ -35,6 +35,7 @@ describe('FlowBlockContextToolbar', () => {
       field: 'text',
       composing: false,
       pendingAction: null,
+      pendingStyle: {},
       revision: 1,
       original: { text: baseBlock.text, runs: structuredClone(baseBlock.runs ?? []) },
       draft: { text: baseBlock.text, runs: structuredClone(baseBlock.runs ?? []) },
@@ -113,7 +114,7 @@ describe('FlowBlockContextToolbar', () => {
         ? '局部加粗'
         : state.mode === 'whole-block'
           ? '整块加粗'
-          : '选择文字后加粗'
+          : '插入点加粗'
       expect(screen.getByRole('button', { name: boldName })).toBeTruthy()
       if (state.mode === 'whole-block') {
         expect(screen.queryByRole('button', { name: '局部加粗' })).toBeNull()
@@ -146,8 +147,14 @@ describe('FlowBlockContextToolbar', () => {
   it('writes range font controls and preserves the captured native selection', () => {
     const { onCommand, onPreserveSelection } = renderToolbar()
 
-    fireEvent.pointerDown(screen.getByTestId('flow-toolbar-font-family'))
-    fireEvent.change(screen.getByTestId('flow-toolbar-font-family'), {
+    const fontFamily = screen.getByTestId('flow-toolbar-font-family')
+    fireEvent.pointerDown(fontFamily)
+    const familyMouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    fontFamily.dispatchEvent(familyMouseDown)
+    expect(familyMouseDown.defaultPrevented).toBe(false)
+    fontFamily.focus()
+    expect(document.activeElement).toBe(fontFamily)
+    fireEvent.change(fontFamily, {
       target: { value: 'SimSun' },
     })
     expect(onPreserveSelection).toHaveBeenCalled()
@@ -158,30 +165,50 @@ describe('FlowBlockContextToolbar', () => {
 
     onCommand.mockClear()
     const fontSizeInput = screen.getByTestId('flow-toolbar-font-size')
+    const sizeMouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    fontSizeInput.dispatchEvent(sizeMouseDown)
+    expect(sizeMouseDown.defaultPrevented).toBe(false)
+    fontSizeInput.focus()
+    expect(document.activeElement).toBe(fontSizeInput)
     fireEvent.change(fontSizeInput, { target: { value: '28' } })
-    fireEvent.keyDown(fontSizeInput, { key: 'Enter' })
+    expect(fireEvent.keyDown(fontSizeInput, { key: 'Enter' })).toBe(false)
     expect(onCommand).toHaveBeenCalledWith({
       type: 'range-style',
       style: { fontSize: 28 },
     })
+    fireEvent.blur(fontSizeInput)
+    expect(onCommand).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps caret formatting display-only and explains how to enable writes', () => {
+  it('keeps caret formatting session-only until the next inserted text', () => {
     const caretEdit = richEdit({ start: 5, end: 5 })
     const { onCommand } = renderToolbar({ edit: caretEdit })
 
-    expect(screen.getByTestId('flow-toolbar-format-scope')).toHaveTextContent(
-      '选择文字后应用',
-    )
+    expect(screen.getByTestId('flow-toolbar-format-scope')).toHaveTextContent('插入点')
     expect(screen.getByTestId('flow-toolbar-font-family')).toHaveValue('KaiTi')
-    expect(screen.getByTestId('flow-toolbar-font-family')).toBeDisabled()
+    expect(screen.getByTestId('flow-toolbar-font-family')).toBeEnabled()
     expect(screen.getByTestId('flow-toolbar-font-size')).toHaveValue(24)
-    expect(screen.getByRole('button', { name: '选择文字后加粗' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: '选择文字后加粗' }))
-    expect(onCommand).not.toHaveBeenCalled()
-    expect((applyFlowTextEditRunStyle(caretEdit, { italic: true }).draft as {
+    const bold = screen.getByRole('button', { name: '插入点加粗' })
+    expect(bold).toBeEnabled()
+    fireEvent.click(bold)
+    expect(onCommand).toHaveBeenCalledWith({
+      type: 'range-style',
+      style: { bold: false },
+    })
+    const pending = applyFlowTextEditRunStyle(caretEdit, { italic: true })
+    expect((pending.draft as {
       runs: unknown[]
     }).runs).toEqual((caretEdit.draft as { runs: unknown[] }).runs)
+    expect(pending.pendingStyle).toEqual({ italic: true })
+
+    cleanup()
+    const pendingToolbar = renderToolbar({ edit: pending })
+    expect(screen.getByTestId('flow-toolbar-format-scope')).toHaveTextContent('插入点 · 待输入样式')
+    fireEvent.click(screen.getByTestId('flow-toolbar-more'))
+    const clearPending = screen.getByRole('button', { name: '清除待输入格式' })
+    expect(clearPending).toBeEnabled()
+    fireEvent.click(clearPending)
+    expect(pendingToolbar.onCommand).toHaveBeenCalledWith({ type: 'range-clear' })
   })
 
   it('puts low-frequency formatting and block commands in an absolute discoverable panel', () => {

@@ -142,6 +142,38 @@ function mixedPublishedFixture() {
 }
 
 describe('buildCoursePrintArtifacts', () => {
+  it('preserves Flow rich-text font family and size in semantic HTML and DOCX', () => {
+    const project = createBlankFlowCourseProject({ now: NOW })
+    const surface = project.surfaces.find((candidate) => candidate.type === 'flow')
+    if (surface?.type !== 'flow') throw new Error('expected flow surface')
+    const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
+    if (paragraph?.type !== 'paragraph') throw new Error('expected flow paragraph')
+    paragraph.text = '甲乙丙丁'
+    paragraph.runs = [{
+      start: 2,
+      end: 4,
+      style: { fontFamily: 'SimSun', fontSize: 30, bold: true },
+    }]
+
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const flowSurface = published.surfaces.find((candidate) => candidate.type === 'flow')
+    if (flowSurface?.type !== 'flow') throw new Error('expected published flow surface')
+
+    const html = renderFlowPrintBodyHtml(buildFlowPrintPlan(flowSurface))
+    expect(html).toContain('<span style="font-family:SimSun;font-size:30px;font-weight:700">丙丁</span>')
+
+    const docx = buildFlowDocx(flowSurface)
+    const documentXml = strFromU8(unzipSync(docx.bytes)['word/document.xml']!)
+    expect(documentXml).toContain('<w:rFonts w:ascii="SimSun" w:eastAsia="SimSun" w:hAnsi="SimSun"/>')
+    expect(documentXml).toContain('<w:sz w:val="60"/><w:szCs w:val="60"/>')
+    expect(documentXml).toContain('<w:b/>')
+    expect(documentXml).toContain('<w:t>丙丁</w:t>')
+  })
+
   it('builds mixed print/DOCX file list and keeps HUD plus runtime TOC out of files', async () => {
     const { project, published } = mixedPublishedFixture()
     const flowSurface = published.surfaces.find((surface) => surface.type === 'flow')

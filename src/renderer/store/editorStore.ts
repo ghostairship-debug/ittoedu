@@ -1362,7 +1362,9 @@ export const selectSlideWorkspaceSource = (state: EditorState) => {
     selectEditingScope(state),
     selectSelectedNodeIds(state),
     selectSelectedNodeId(state),
-    state.editingTextNodeId,
+    state.v9ContentEdit?.kind === 'text' && state.v9ContentEdit.source === 'canvas'
+      ? state.v9ContentEdit.target.layerItemId
+      : null,
     selectActivePresentationStateId(state),
     selectMediaAssetFiles(state),
     state.componentPackages,

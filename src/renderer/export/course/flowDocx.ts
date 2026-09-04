@@ -1,6 +1,8 @@
 import { strToU8, zipSync } from 'fflate'
 import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
+import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
+import { flowRichTextSegments } from '../../../player/surfaces/flow/flowModel'
 import {
   buildFlowPrintPlan,
   type BuildFlowPrintPlanOptions,
@@ -56,12 +58,48 @@ function xml(value: string): string {
     .replace(/'/g, '&apos;')
 }
 
-function run(text: string, options: { bold?: boolean; italic?: boolean } = {}): string {
+function wordFontFamily(value: string): string {
+  return value.split(',')[0]!.trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2')
+}
+
+function wordColor(value: string): string | null {
+  const normalized = value.trim().replace(/^#/, '').toUpperCase()
+  return /^[0-9A-F]{6}$/.test(normalized) ? normalized : null
+}
+
+function run(text: string, options: TextRunStyle = {}): string {
   const preserve = /^\s|\s$|\s{2}/.test(text) ? ' xml:space="preserve"' : ''
-  const properties = options.bold || options.italic
-    ? `<w:rPr>${options.bold ? '<w:b/>' : ''}${options.italic ? '<w:i/>' : ''}</w:rPr>`
-    : ''
+  const fontFamily = options.fontFamily ? wordFontFamily(options.fontFamily) : ''
+  const fontSize = options.fontSize !== undefined ? Math.round(options.fontSize * 2) : 0
+  const color = options.color ? wordColor(options.color) : null
+  const highlight = typeof options.highlightColor === 'string'
+    ? wordColor(options.highlightColor)
+    : null
+  const declarations = [
+    fontFamily
+      ? `<w:rFonts w:ascii="${xml(fontFamily)}" w:eastAsia="${xml(fontFamily)}" w:hAnsi="${xml(fontFamily)}"/>`
+      : '',
+    fontSize > 0 ? `<w:sz w:val="${fontSize}"/><w:szCs w:val="${fontSize}"/>` : '',
+    color ? `<w:color w:val="${color}"/>` : '',
+    options.bold !== undefined ? `<w:b${options.bold ? '/' : ' w:val="0"/'}>` : '',
+    options.italic !== undefined ? `<w:i${options.italic ? '/' : ' w:val="0"/'}>` : '',
+    options.underline !== undefined ? `<w:u w:val="${options.underline ? 'single' : 'none'}"/>` : '',
+    options.strike !== undefined ? `<w:strike${options.strike ? '/' : ' w:val="0"/'}>` : '',
+    options.emphasis !== undefined ? `<w:em w:val="${options.emphasis ? 'dot' : 'none'}"/>` : '',
+    highlight ? `<w:shd w:val="clear" w:color="auto" w:fill="${highlight}"/>` : '',
+  ].filter(Boolean).join('')
+  const properties = declarations ? `<w:rPr>${declarations}</w:rPr>` : ''
   return `<w:r>${properties}<w:t${preserve}>${xml(text)}</w:t></w:r>`
+}
+
+function richRuns(
+  text: string,
+  runs: readonly TextRun[] = [],
+  baseStyle: TextRunStyle = {},
+): string {
+  return flowRichTextSegments(text, runs).map((segment) => (
+    run(segment.text, { ...baseStyle, ...segment.style })
+  )).join('')
 }
 
 function paragraph(
@@ -70,6 +108,7 @@ function paragraph(
     style?: string
     bold?: boolean
     italic?: boolean
+    runs?: readonly TextRun[]
     keepNext?: boolean
     numbering?: { id: number; level?: number }
   } = {},
@@ -81,25 +120,38 @@ function paragraph(
       ? `<w:numPr><w:ilvl w:val="${options.numbering.level ?? 0}"/><w:numId w:val="${options.numbering.id}"/></w:numPr>`
       : '',
   ].join('')
-  return `<w:p>${properties ? `<w:pPr>${properties}</w:pPr>` : ''}${run(text, options)}</w:p>`
+  return `<w:p>${properties ? `<w:pPr>${properties}</w:pPr>` : ''}${richRuns(
+    text,
+    options.runs,
+    { bold: options.bold, italic: options.italic },
+  )}</w:p>`
 }
 
 function formulaParagraph(expression: string): string {
   return `<m:oMathPara><m:oMath><m:r><m:t>${xml(expression)}</m:t></m:r></m:oMath></m:oMathPara>`
 }
 
-function tableCell(text: string, header: boolean): string {
-  return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/><w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar></w:tcPr><w:p>${run(text, { bold: header })}</w:p></w:tc>`
+function tableCell(
+  cell: { readonly text: string; readonly runs: readonly TextRun[] },
+  header: boolean,
+): string {
+  return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/><w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar></w:tcPr><w:p>${richRuns(cell.text, cell.runs, { bold: header })}</w:p></w:tc>`
 }
 
-function tableXml(rows: readonly string[][], headerRows: number): string {
+function tableXml(
+  rows: ReadonlyArray<ReadonlyArray<{ readonly text: string; readonly runs: readonly TextRun[] }>>,
+  headerRows: number,
+): string {
   const width = Math.max(1, ...rows.map((row) => row.length))
   const grid = Array.from({ length: width }, () => '<w:gridCol w:w="2400"/>').join('')
   return `<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid>${grid}</w:tblGrid>${
     rows.map((row, rowIndex) => `<w:tr>${
       rowIndex < headerRows ? '<w:trPr><w:tblHeader/></w:trPr>' : ''
     }${
-      Array.from({ length: width }, (_, cellIndex) => tableCell(row[cellIndex] ?? '', rowIndex < headerRows)).join('')
+      Array.from({ length: width }, (_, cellIndex) => tableCell(
+        row[cellIndex] ?? { text: '', runs: [] },
+        rowIndex < headerRows,
+      )).join('')
     }</w:tr>`).join('')
   }</w:tbl>`
 }
@@ -126,13 +178,13 @@ function renderPrintNode(node: FlowPrintNode, context: BuildContext): string {
       return paragraph(node.text, { style: 'Title', keepNext: true })
     case 'heading':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: `Heading ${node.level}` })
-      return paragraph(node.text, { style: `Heading${node.level}`, keepNext: true })
+      return paragraph(node.text, { style: `Heading${node.level}`, keepNext: true, runs: node.runs })
     case 'paragraph':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native paragraph' })
-      return paragraph(node.text)
+      return paragraph(node.text, { runs: node.runs })
     case 'quote':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native quote paragraphs' })
-      return `${paragraph(node.text, { style: 'Quote', italic: true })}${
+      return `${paragraph(node.text, { style: 'Quote', italic: true, runs: node.runs })}${
         node.citation ? paragraph(`— ${node.citation}`, { style: 'Quote' }) : ''
       }`
     case 'list':
@@ -143,11 +195,15 @@ function renderPrintNode(node: FlowPrintNode, context: BuildContext): string {
       })
       return node.items.map((item) => paragraph(item.text, {
         numbering: { id: node.ordered ? 2 : 1 },
+        runs: item.runs,
       })).join('')
     case 'table':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native Word table' })
       return `${node.caption ? paragraph(node.caption, { style: 'Caption', keepNext: true }) : ''}${
-        tableXml([node.headers, ...node.rows], 1)
+        tableXml([
+          node.headers.map((text) => ({ text, runs: [] })),
+          ...node.rows,
+        ], 1)
       }`
     case 'formula':
       context.warnings.push(`${node.blockId}: semantic formula exported as an explained OMML text fallback`)

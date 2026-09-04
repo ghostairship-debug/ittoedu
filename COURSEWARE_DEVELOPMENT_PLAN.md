@@ -56,9 +56,9 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 - 首发 Agent 集成只支持用户自行安装并自行认证的 Codex、Claude 与 OpenCode。CLI 保持自身规划循环；编辑器只提供本地 session harness、受管暂存区、自动准入、宿主 canonical command 提交边界和 1.8 起的版本化 MCP Authoring Tools，不复制一套模型 Agent 内核。
 - AI 会话与工具轨迹保存在应用本地，按工程 ID 与规范化文件位置隔离；Save As 不复制会话。会话、材料与工具轨迹不进入 `.h5lesson`、Published、组件包或导出物；产品只承诺删除自身记录，不代替外部 CLI 删除其历史。
 - 单 HTML 明确区分离线便携与在线轻量；这是导出选择，不新增持久化 `projectMode`。
-- `v1.1.0` 是当前 V9-only、主动模块化、零遗留与零降级的已签署基线；发布制品是该源码标签和固定的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不含安装包。既有证据只在相关实现、依赖、测试、fixture 和验证定义未变化时复用；后续版本的发布身份仍由对应路线节点重新固定。
+- `v1.1.0` 是不可改写的 V9-only、主动模块化、零遗留与零降级已签署基线；`v1.1.1` 已闭合 Flow 选区字体/字号控件失焦和折叠光标待输入样式，并固定为新的维护版源码标签，不重打或移动 `v1.1.0`。1.1 的发布制品仍是对应源码标签和固定的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不含安装包。既有证据只在相关实现、依赖、测试、fixture 和验证定义未变化时复用；后续版本的发布身份仍由对应路线节点重新固定。
 - 自动化最多证明 `engineering candidate`；真实课程的视觉、互动和教师复核决定 `art candidate` / `accepted`。
-- 发布列车固定为：1.1 发布源码标签与固定课例离线 HTML；1.2–1.9 只发布内部源码标签；2.0 发布内部生产源码标签与固定课例离线 HTML。当前路线不承诺安装包。每个版本由 Owner 对固定候选与固定课例签署 `accepted`，该签署不表示对外发行。
+- 发布列车固定为：1.1（含 1.1.1 维护版）发布源码标签与固定课例离线 HTML；1.2–1.9 只发布内部源码标签；2.0 发布内部生产源码标签与固定课例离线 HTML。当前路线不承诺安装包。每个版本由 Owner 对固定候选与固定课例签署 `accepted`，该签署不表示对外发行。
 
 ## 3. 产品级不变量
 
@@ -93,15 +93,15 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和弱模型规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 当前起点：1.1 已签署基线
+### 5.1 当前起点：1.2 Native 编辑闭环
 
-后续开发以 `v1.1.0` 为依赖基线：作者工程仅为 Course Project V9，发布仅为 Published Course V2，`editorStore.ts` 仅作为唯一 Zustand 组合根，Legacy inventory 的正式 consumer 与生成制品命中保持为零。固定课例离线 HTML 与源码标签共同构成 1.1 发布身份；任何后续改动都不得恢复 V8、第二 Store/Session/History、双轨 writer，或削弱 PM-01–PM-28 已签署行为。
+`r11-063-flow-text-format-hotfix` 与 `r11-064-patch-release` 已完成并签署 `accepted`。真实 Electron 指针/键盘路径证明：Flow 非空选区可直接选择字体和字号，折叠光标可设置只在后续输入时物化的会话待输入样式；同一持久化 runs 经 Undo/Redo、保存重开、当前位置试运行、整课 Player、单 HTML、语义打印与 DOCX 保持一致。新行为已晋升为 PM-29，V9 / Published V2 wire 未改变，也未新增零长度 run、持久化 pending-style、第二 History 或 writer。
 
-当前任务板没有 1.1 剩余工作。下一批可按依赖与写锁实例化的路线从 1.2 开始；路线节点本身不自动创建任务卡。
+1.2 的直接依赖门现已解除；按 [`docs/development-plan/roadmap/1.2/README.md`](docs/development-plan/roadmap/1.2/README.md) 的并行 frontier，从 `r12-000-native-contract`、`r12-005-flow-native-authoring-parity`、`r12-030-line-authoring`、`r12-040-background-authoring` 中按写锁实例化下一节点。路线节点本身不自动创建任务卡。
 
 ### 5.2 1.2–1.5：人工创作与外部 Builder 生产力
 
-- **1.2 Native 编辑闭环**：Table、Chart 是 V9 Native 的显式 strict 新分支，并在 Published V2 中成对窄扩展；Line 与 Background 分别形成可保存、可撤销、可运行、可导出的纵切。
+- **1.2 Native 编辑闭环**：在保留 Flow 正文文档流语义的前提下，先补齐 Flow 原生文字/图片浮层的直接作者能力；正文文字继续使用富文本与块级排版，正文图片继续使用布局/环绕，并提供明确的“转为浮层”路径。Flow 浮层复用共享 Native 属性 owner，补齐文字内容/样式以及图片替换、适配、裁剪、翻转、圆角/羽化和通用几何/可见性控制，不复制一套 Slide 规则。Table、Chart 是 V9 Native 的显式 strict 新分支，并在 Published V2 中成对窄扩展；Line 与 Background 分别形成可保存、可撤销、可运行、可导出的纵切。
 - **1.3 Recipe 与设计生产力**：Recipe 立即展开为普通 V9 内容，不形成第二 DSL；交付参考页骨架、批量替换、Design Token 与快速诊断。
 - **1.4 Authoring Tools 与 Builder v2**：update target 无损承载 canonical target；create 使用独立 scope；覆盖 Slide、Flow 正文和 Spatial world/camera/path/relation。代码工具开放前必须闭合 Component Registry 身份、direct project asset closure 与生命周期可见回退三项动态 carrier 门。
 - **1.5 材料、PPTX 与内容 QA**：应用本地材料缓存、可见引用、受限 PPTX 原子导入、Style remix 与内容一致性检查。OpenMAIC 只是可选旁支，不得阻塞发布核心路径。
@@ -120,7 +120,7 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 ### 5.4 发布顺序、并行与证据
 
-版本发布门按 1.1 → 2.0 顺序通过；版本内与前置能力之间按真实依赖和写锁形成 DAG，不再把所有任务串成一条单链。OpenMAIC 等 optional 节点不得出现在核心依赖闭包。
+版本发布门按 1.1.1 → 1.2 → … → 2.0 顺序通过；版本内与前置能力之间按真实依赖和写锁形成 DAG，不再把所有任务串成一条单链。OpenMAIC 等 optional 节点不得出现在核心依赖闭包。
 
 每个新增能力必须同时证明人工 UI、产品命令或 Authoring Tool、保存重开、Player、适用导出、诊断和能力索引；进入版本候选时把本版已完成行为晋升到不可降级矩阵，并证明没有新增 raw Store consumer、跨 Owner deep import / 运行时依赖环、第二 Store/History/Session/writer 或重复 registry/catalog。验证仍遵循最小充分原则，不建设架构评分平台。自动化只形成 candidate，Owner 对固定课例的真实结果拥有各版本唯一 `accepted` 签署权。
 

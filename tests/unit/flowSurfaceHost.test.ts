@@ -936,6 +936,29 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     await host.destroy()
   })
 
+  it('keeps adjacent rich-text segments separate when only font family or size differs', async () => {
+    const course = publishedCourse()
+    const surf = course.surfaces[0] as PublishedFlowSurface
+    surf.blocks = [{
+      id: 'p-font-segments',
+      type: 'paragraph',
+      text: '甲乙丙',
+      runs: [
+        { start: 1, end: 2, style: { fontFamily: 'SimSun' } },
+        { start: 2, end: 3, style: { fontSize: 32 } },
+      ],
+    }]
+
+    const { host, container } = await mountHost(course)
+    const spans = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-flow-block-id="p-font-segments"] span'),
+    )
+    expect(spans.map((span) => span.textContent)).toEqual(['甲', '乙', '丙'])
+    expect(spans[1]?.style.fontFamily).toBe('SimSun')
+    expect(spans[2]?.style.fontSize).toBe('32px')
+    await host.destroy()
+  })
+
   it('renders media block with wrap left/right styling', async () => {
     const course = publishedCourse()
     const surf = course.surfaces[0] as PublishedFlowSurface

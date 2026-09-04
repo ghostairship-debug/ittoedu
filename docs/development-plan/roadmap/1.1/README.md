@@ -1,16 +1,16 @@
-# 1.1｜V9-only、主动模块化与零降级稳定底座
+# 1.1 / 1.1.1｜V9-only 稳定底座与 Flow 文字格式维护版
 
 > 本目录是规划规格，不是任务状态。任何节点只有在前置结果仍成立、届时 HEAD 事实与规格一致、写锁无冲突时，才可按工作协议实例化；当前协调状态只看任务板。
 
 ## 交付结果
 
-在不削弱 PM-01 至 PM-28 任一受支持行为的前提下，使 `src/**`、`tests/**`、`scripts/**`、`examples/**`、`artifacts/**`、fixture 与正式生成制品不再依赖 V8 工程模型、V8 Schema、旧 Player/Export payload 或 V8 测试工具链；同时把当前 `editorStore.ts`、App/Workspace/Properties/Flow UI、Slide Published adapter 与 Course package builder 按正式 Owner 拆分。1.1 不改变 V9 / Published V2 wire，不导入 V8，不创建 V10，不新增第二 Store/Session/History。
+原 1.1 在不削弱 PM-01 至 PM-28 任一受支持行为的前提下，使 `src/**`、`tests/**`、`scripts/**`、`examples/**`、`artifacts/**`、fixture 与正式生成制品不再依赖 V8 工程模型、V8 Schema、旧 Player/Export payload 或 V8 测试工具链；同时把 `editorStore.ts`、App/Workspace/Properties/Flow UI、Slide Published adapter 与 Course package builder 按正式 Owner 拆分。1.1.1 在这份不可变基线上只闭合 Flow 已交付文字格式入口：非空选区的字体下拉/字号输入可真实操作，折叠光标可设置待输入样式。两版都不改变 V9 / Published V2 wire，不导入 V8，不创建 V10，不新增第二 Store/Session/History。
 
-发布制品是 `v1.1.0` 源码标签和固定课例离线便携 HTML；不做安装包。
+`v1.1.0` 源码标签保持不可变。1.1.1 已经 Owner 验收并创建新的 `v1.1.1` 源码标签，重新固定课例离线便携 HTML；不做安装包。
 
 ## 执行规则
 
-1. 一次只执行任务板上的一张卡；完成后按 [Gemini 拆卡蓝图](GEMINI_EXECUTION_PLAN.md) 实例化唯一下一卡，不并行领取同一写锁。
+1. 一次只执行任务板上的一张卡；完成后按下表依赖实例化唯一下一卡，不并行领取同一写锁。原 1.1 的细分执行记录仅用于历史追溯，不覆盖 1.1.1 规格。
 2. 开始前只读当前卡的目标函数、直接 consumer 和目标测试；不要按旧 SHA、历史行号或旧 ZIP 强行修改。
 3. 先证明替代 consumer 的最近层行为，再删除旧 consumer。Legacy 唯一机器台账是 `../../inventories/legacy-consumers.json`；r11-053 只重算一次当前明细并给出精确删除清单，不维护候选 Hash 或第二报告。
 4. 只写当前卡允许的路径。需要越界、改变 V9/Published wire、降级功能或 consumer 未清零时立即停止。
@@ -63,12 +63,14 @@
 | r11-060-zero-gate | 最终运行一次 Legacy 零检查 | r11-055-architecture-modularity-gate | none | [spec](r11-060-zero-gate.md) |
 | r11-061-no-regression-candidate | 最终一次无回归检查 | r11-060-zero-gate | none | [spec](r11-061-no-regression-candidate.md) |
 | r11-062-owner-release | Owner 验收并决定是否发布 1.1 | r11-061-no-regression-candidate | none | [spec](r11-062-owner-release.md) |
+| r11-063-flow-text-format-hotfix | 修复 Flow 选区字体/字号操作与折叠光标待输入样式 | r11-062-owner-release | editor-store-history,workspace-properties | [spec](r11-063-flow-text-format-hotfix.md) |
+| r11-064-patch-release | Owner 验收并发布 1.1.1 Flow 文字格式维护版 | r11-063-flow-text-format-hotfix | none | [spec](r11-064-patch-release.md) |
 
-当前剩余工作不并行：先完成 036b 与 037/052 小卡，再由 053 给出精确删除清单，054 分组删除。全部实施完成后才由 Codex 顺序执行 055、060、061；任何一步都不保留双写或兼容桩。
+`r11-063 → r11-064` 已完成并签署 `accepted`，PM-29 与固定离线 HTML 身份见各自规格。1.1 / 1.1.1 路线没有剩余开发节点；当前生产入口转到 1.2。
 
-## 2026-09-03 接手审计裁决（历史记录）
+## 2026-09-03 接手审计裁决（已完成历史记录）
 
-本节记录当前路线的 failure return，不是任务板状态，也不改变上表的稳定 DAG。上一份 handoff 中“r11-000–055 已完成、直接继续 053 → 054”的判断已经失效；现有实现有大量可复用成果，但下列节点必须按原规格重新满足退出条件：
+本节只记录 `v1.1.0` 发布前曾使用的 failure return，不是当前路线或任务板状态，也不覆盖已经完成的 `r11-063 → r11-064`。
 
 | 返回规格 | 审计事实 | 当前裁决 |
 |---|---|---|
@@ -95,11 +97,11 @@
 | [061 candidate](r11-061-no-regression-candidate.md) | 依赖尚未重新成立 | 未解锁；不得写 candidate evidence 或宣称 1.1 candidate |
 | [062 Owner release](r11-062-owner-release.md) | 只接受同一固定 engineering candidate 的 Owner 实测签署 | Owner only，不自动执行 |
 
-当前恢复顺序是：`r11-029 返工卡 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037（W1–W9）→ r11-052（A–E）→ r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`。r11-000/001/002 与 010–043 中已闭合的节点不重开；scanner 对旧渲染器簇的命中交 r11-053 登记，对负向正则 token 的命中交 r11-002 表示法修正，不塞进匿名阶段。r11-054 的 post-delete gate 语义必须原样；若需改变 assertion/helper/fixture、ledger 边、baseline 或产品/测试，须返回 055，并从 053 重新固定 identity。r11-062 仍只由 Owner 验收。共享写锁节点继续串行，055/053/060/061 保持原子门。
+当时采用的恢复顺序是：`r11-029 返工卡 → r11-032 → r11-034 → r11-035 → r11-036 → r11-037（W1–W9）→ r11-052（A–E）→ r11-055 → r11-053 → r11-054 → post-delete r11-055 → r11-060 → r11-061 → Owner r11-062`。该序列已经完成，只能用于追溯 `v1.1.0`，不得重新实例化或阻断当前维护版。
 
-**不要新增 `r11-*` ID。** 返工返回上表已有 failure owner，在同一规格内按 owner/case 分波；不创建匿名“053 前清债”阶段，也不把旧 handoff 的候选删除路径当作 054 授权。跨会话真正开始执行时按工作协议实例化当下首个节点并生成任务板；本路线文件不记录 queued/active/blocked。
+当时“不要新增 `r11-*` ID”的限制只约束 `v1.1.0` 重基阶段，已随 r11-062 完成而失效。新复现的已发布用户缺陷使用独立的 r11-063/r11-064 表达维护版，避免篡改已签署节点的含义。
 
-跨会话接手先读已审计改写的 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md)。
+原 `v1.1.0` 跨会话记录见 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md)，只作历史追溯；1.1.1 的最终事实读取 r11-063/r11-064 独立规格。
 
 ## 2026-09-03 旧执行版重基（已取代）
 
@@ -107,9 +109,9 @@
 
 检查点上 `test:product` 的 7 文件 / 10 项失败已于 2026-09-03 定责并修复（① 校验器整体状态不再计入不适用格式的错误，纯 Flow 课程的 PPTX 预检项本身保留 error；②③⑤ 为测试侧缺陷；④ ratchet 白名单为预期红，待 037/055 收口），逐组结论与证据见 [INTEGRATOR_HANDOFF.md](INTEGRATOR_HANDOFF.md) §0；修后仅剩 ④ 一项预期红。
 
-## 2026-09-03 Gemini 最小验证执行版（当前）
+## 2026-09-03 Gemini 最小验证执行版（已完成历史记录）
 
-当前唯一顺序是 `r11-036b → r11-037a–037z → r11-052a–052d → r11-053 → r11-054a–054d → Codex r11-055 → r11-060 → r11-061 → Owner r11-062`，细节以 [拆卡蓝图](GEMINI_EXECUTION_PLAN.md) 为准。实施阶段每卡只跑最近层测试与必要的 `typecheck`，不运行全量、保全、Legacy zero、verify 或 Hash；全部实施完成后由 Codex 集中复查一次。
+该阶段的唯一顺序曾为 `r11-036b → r11-037a–037z → r11-052a–052d → r11-053 → r11-054a–054d → Codex r11-055 → r11-060 → r11-061 → Owner r11-062`，细节见 [拆卡蓝图](GEMINI_EXECUTION_PLAN.md)。它不适用于 1.1.1。
 
 ## 交接格式
 

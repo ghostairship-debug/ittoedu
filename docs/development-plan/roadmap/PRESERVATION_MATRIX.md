@@ -42,6 +42,7 @@
 | PM-26 | V9 `.h5lesson` archive 对 Schema、素材字节和 Component 文件原样 round-trip；无界面校验只读输入并输出机器可读报告。 | `npm run test -- tests/unit/courseProjectArchive.test.ts tests/unit/courseProjectRoundTrip.test.ts tests/unit/validateProject.test.ts`。 | 不得改变 wire、丢 sidecar、写回被校验文件，或借迁移任务重新接受 V8 作者工程。 |
 | PM-27 | 外部 Builder 可在非 Git 普通课例目录经产品 Facade 调用真实 V9 工厂/命令，生成 `.h5lesson` 与离线 HTML；Builder Skill 不要求静态导入编辑器内部路径。 | `npm run test -- tests/unit/coursewareCaseBuilder.test.ts tests/unit/coursewareAuthoringRunner.test.ts tests/unit/coursewareSkillsContract.test.ts`。 | 不得恢复不存在的 `agent-kit` CLI、把内部 module bag 扩散给课例、要求教师切到产品仓库，或只生成不可编辑 HTML。 |
 | PM-28 | Capability Index、合同与生成示例和当前协议/源码一致，生成/check 字节确定；stale、缺失和额外文件均非成功。 | `npm run check:ai-capabilities` 与 `npm run test -- tests/unit/aiCapabilities.test.ts tests/unit/exampleGenerationBoundary.test.ts`。 | 不得手改生成制品、忽略 stale provenance、删掉真实能力条目来通过体积门，或把 internal/reserved 接口宣称为可用工作流。 |
+| PM-29 | Flow 文字就地编辑中，非空真实选区可通过能取得焦点的原生控件设置字体、字号和局部格式；折叠插入点可设置仅属当前会话的待输入样式，只在随后输入时物化为非空 run。结果在 Undo/Redo、保存重开、当前位置试运行、整课 Player、单 HTML、Flow 语义打印与 DOCX 中读取同一持久化 runs。 | `npm run test:product -- tests/unit/flowBlockContextToolbar.test.tsx tests/unit/flowInlineTextEditor.test.tsx tests/unit/flowEditorCommands.test.ts tests/unit/coursePrintArtifacts.test.ts`；`npm run test:e2e -- tests/e2e/stabilizationFlowAuthoring.spec.ts`；发布候选执行 `npm run verify`。 | 不得阻止原生字体/字号控件取得焦点、在 caret 处禁用格式、持久化 pending style、生成零长度 run、让选区漂移或被过期草稿覆盖，也不得在 contenteditable 提取或 delivery 投影中丢弃字体/字号 runs。 |
 
 ## 1.1 删除准入补充
 

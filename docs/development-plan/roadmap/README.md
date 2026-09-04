@@ -25,6 +25,7 @@ Course Project V9、Published Course V2、Runtime API 2/3、Component API 4 继�
 ```mermaid
 flowchart LR
     R11["1.1 V9-only + 主动模块化\nr11-062-owner-release"]
+    R111["1.1.1 Flow 文字格式维护\nr11-064-patch-release"]
     R12["1.2 Native 表达力"]
     R13["1.3 高频工作流"]
     R14["1.4 Authoring Tool / Builder V2"]
@@ -36,9 +37,10 @@ flowchart LR
     R20["2.0 内部生产 AI 作者工作流"]
     O["OpenMAIC 可选旁支"]
 
-    R11 --> R12
-    R11 --> R13
-    R11 --> R16
+    R11 --> R111
+    R111 --> R12
+    R111 --> R13
+    R111 --> R16
     R12 --> R14
     R13 --> R14
     R14 --> R15
@@ -50,14 +52,14 @@ flowchart LR
     R14 -. optional .-> O
 ```
 
-实现可在依赖和写锁允许时并行；版本发布门按 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6 → 1.7 → 1.8 → 1.9 → 2.0 串行。1.6 的实现从 1.1 基线即可开始，但它的版本发布节点等待 1.5 发布完成。
+实现可在依赖和写锁允许时并行；版本发布门按 1.1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6 → 1.7 → 1.8 → 1.9 → 2.0 串行。1.1.1 只修复 Flow 已交付文字格式入口，不改变 V9 / Published V2 wire；1.6 的实现从 1.1.1 基线即可开始，但它的版本发布节点等待 1.5 发布完成。
 
 ## 版本规格与制品
 
 | 版本 | 规格 | 用户结果 | AI 可见性 | 发布制品 |
 | --- | --- | --- | --- | --- |
-| 1.1 | [README](1.1/README.md) | V9-only、Owner 模块化稳定底座与既有人工能力保持 | 无 AI | 源码 tag + 固定课例离线 HTML |
-| 1.2 | [README](1.2/README.md) | Table / Chart Native 节点、线条与背景直接可编辑 | 无 AI | 源码 tag |
+| 1.1 / 1.1.1 | [README](1.1/README.md) | V9-only、Owner 模块化稳定底座；维护版闭合 Flow 选区字体/字号和折叠光标待输入样式 | 无 AI | 源码 tag + 固定课例离线 HTML |
+| 1.2 | [README](1.2/README.md) | Flow 原生文字/图片浮层作者能力、Table / Chart Native 节点、线条与背景直接可编辑 | 无 AI | 源码 tag |
 | 1.3 | [README](1.3/README.md) | 高频页面 / 互动配方、克隆、批量替换、Token 与快速诊断 | 无 AI | 源码 tag |
 | 1.4 | [README](1.4/README.md) | 三 Surface 与动态载体统一进入可验证 Authoring Tool / Builder V2 | 无 AI | 源码 tag |
 | 1.5 | [README](1.5/README.md) | 素材、PPTX 导入、风格 Remix 与内容 QA | 无 AI | 源码 tag |
@@ -67,7 +69,7 @@ flowchart LR
 | 1.9 | [README](1.9/README.md) | 内部聊天工作台、工具轨迹、Stop / Undo / stale 防护 | 默认隐藏 | 源码 tag |
 | 2.0 | [README](2.0/README.md) | 三种 CLI 的内部生产 AI 作者工作流和数据边界 | 内部正式开放 | 源码 tag + 固定课例离线 HTML |
 
-v1.1.0 的既定制品为源码 tag 与固定课例离线 HTML。1.2–1.9 不发布离线 HTML，2.0 恢复固定课例离线 HTML；本路线不发布安装器。
+`v1.1.0` 标签保持不可变；`v1.1.1` 已经 Flow 文字格式维护闭环与 Owner 验收创建新源码标签，并重新固定同一课例的离线 HTML。1.2–1.9 不发布离线 HTML，2.0 恢复固定课例离线 HTML；本路线不发布安装器。
 
 ## 跨版本接口与数据合同
 

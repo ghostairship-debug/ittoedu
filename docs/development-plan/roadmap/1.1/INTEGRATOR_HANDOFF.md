@@ -1,4 +1,6 @@
-# 1.1 Integrator handoff（当前检查点：2026-09-03）
+# 1.1 Integrator handoff（v1.1.0 历史记录）
+
+> 本文件的检查点与任务状态已经失效，只用于追溯 `v1.1.0`。1.1.1 的最终事实请读取 [README](README.md)、[r11-063](r11-063-flow-text-format-hotfix.md) 与 [r11-064](r11-064-patch-release.md)。
 
 ## 当前检查点（HEAD `ee1f87e`，本节优先于全文件旧节）
 

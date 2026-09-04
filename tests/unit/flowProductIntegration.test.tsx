@@ -1145,6 +1145,7 @@ describe('Flow product shell wiring', () => {
         field: 'text',
         composing: true,
         pendingAction: null,
+        pendingStyle: {},
         revision: afterInsert,
         original: { text: '无标题', runs: [] },
         draft: { text: '无标题', runs: [] },
@@ -1236,6 +1237,7 @@ describe('Flow product shell wiring', () => {
         field: 'text',
         composing: false,
         pendingAction: null,
+        pendingStyle: {},
         revision: flowDocument().revision,
         original: { text: formattedHeading.text, runs: mixedRuns },
         draft: { text: formattedHeading.text, runs: mixedRuns },
@@ -1274,9 +1276,15 @@ describe('Flow product shell wiring', () => {
     cleanup()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.getByTestId('flow-selection-format-title')).toHaveTextContent('插入点格式')
-    expect(screen.getByTestId('flow-selection-format-hint')).toHaveTextContent('选择文字后应用')
+    expect(screen.getByTestId('flow-selection-format-hint')).toHaveTextContent('待输入格式')
     expect(screen.getByRole('combobox', { name: '字体' })).toHaveValue('KaiTi')
-    expect(screen.getByTestId('flow-format-bold')).toBeDisabled()
+    const caretBoldButton = screen.getByTestId('flow-format-bold')
+    const inheritedBold = caretBoldButton.getAttribute('aria-pressed') === 'true'
+    expect(caretBoldButton).toBeEnabled()
+    const revisionBeforePendingFormat = flowDocument().revision
+    fireEvent.click(caretBoldButton)
+    expect(useEditorStore.getState().flowTextEdit?.pendingStyle.bold).toBe(!inheritedBold)
+    expect(flowDocument().revision).toBe(revisionBeforePendingFormat)
   })
 
   it('converts paragraph to quote block via block type dropdown in properties tab', () => {

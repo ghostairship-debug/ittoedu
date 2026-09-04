@@ -69,9 +69,11 @@ export interface FlowTextAuthoringController {
   readonly edit: FlowTextEditSession | null
   readonly editRef: RefObject<FlowTextEditSession | null>
   readonly restyleToken: number
+  readonly restyleRange: { readonly start: number; readonly end: number } | null
   readonly formulaBlockId: string | null
   readonly setFormulaBlockId: (blockId: string | null) => void
-  readonly bumpRestyle: () => void
+  readonly bumpRestyle: (range?: { readonly start: number; readonly end: number }) => void
+  readonly adoptEditReceipt: (edit: FlowTextEditSession) => void
   readonly setEditState: (next: FlowTextEditSession | null) => void
   readonly commitCurrent: (keepSelected?: boolean, nextBlockId?: string) => void
   readonly cancelCurrent: () => void
@@ -113,7 +115,11 @@ export function useFlowTextAuthoringController(
   const editRef = useRef<FlowTextEditSession | null>(textEdit)
   const editTargetRef = useRef<CourseAuthoringTarget | null>(null)
   const publishedEditRef = useRef<FlowTextEditSession | null>(null)
-  const [restyleToken, setRestyleToken] = useState(0)
+  const [restyleRequest, setRestyleRequest] = useState<{
+    readonly token: number
+    readonly range: { readonly start: number; readonly end: number } | null
+  }>({ token: 0, range: null })
+  const restyleToken = restyleRequest.token
   const [formulaBlockId, setFormulaBlockId] = useState<string | null>(null)
 
   const targetForBlock = useCallback((blockId: string) => (
@@ -130,7 +136,10 @@ export function useFlowTextAuthoringController(
     if (Object.is(publishedEditRef.current, textEdit)) {
       publishedEditRef.current = null
     } else if (!Object.is(previousEdit, textEdit)) {
-      setRestyleToken((token) => token + 1)
+      setRestyleRequest((request) => ({
+        token: request.token + 1,
+        range: textEdit ? { ...textEdit.range } : null,
+      }))
     }
     if (!textEdit) {
       editTargetRef.current = null
@@ -155,8 +164,19 @@ export function useFlowTextAuthoringController(
     }
   }, [targetForBlock, textEdit, view.revision])
 
-  const bumpRestyle = useCallback(() => {
-    setRestyleToken((token) => token + 1)
+  const bumpRestyle = useCallback((range?: { readonly start: number; readonly end: number }) => {
+    setRestyleRequest((request) => ({
+      token: request.token + 1,
+      range: range ? { ...range } : null,
+    }))
+  }, [])
+
+  const adoptEditReceipt = useCallback((next: FlowTextEditSession) => {
+    // A command-port receipt is already the Store-owned canonical edit. Adopt
+    // it synchronously and mark it as published so the prop mirror effect does
+    // not schedule a second, late restyle/focus cycle.
+    publishedEditRef.current = next
+    editRef.current = next
   }, [])
 
   const setEditState = useCallback((next: FlowTextEditSession | null) => {
@@ -202,7 +222,7 @@ export function useFlowTextAuthoringController(
     editTargetRef.current = target
     publishedEditRef.current = receipt.edit
     editRef.current = receipt.edit
-    bumpRestyle()
+    bumpRestyle(receipt.edit.range)
   }, [bumpRestyle, commands, readOnly, selection, targetForBlock])
 
   const commitCurrent = useCallback((keepSelected = true, nextBlockId?: string) => {
@@ -351,7 +371,7 @@ export function useFlowTextAuthoringController(
     editTargetRef.current = target
     publishedEditRef.current = receipt.edit
     editRef.current = receipt.edit
-    bumpRestyle()
+    bumpRestyle(receipt.edit.range)
   }, [bumpRestyle, commands, openFormula, readOnly, selection?.authoringScope, targetForBlock])
 
   const commitFormula = useCallback((ast: FormulaAstNode, accessibleText: string) => {
@@ -406,9 +426,11 @@ export function useFlowTextAuthoringController(
     edit: textEdit,
     editRef,
     restyleToken,
+    restyleRange: restyleRequest.range,
     formulaBlockId,
     setFormulaBlockId,
     bumpRestyle,
+    adoptEditReceipt,
     setEditState,
     commitCurrent,
     cancelCurrent,

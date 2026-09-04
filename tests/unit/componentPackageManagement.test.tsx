@@ -506,6 +506,7 @@ describe('ComponentsTab locate component usage', () => {
       field: 'text' as const,
       composing: true,
       pendingAction: null,
+      pendingStyle: {},
       revision: activeCourseProject().revision,
       original: { text: '输入中的段落', runs: [] },
       draft: { text: '尚未提交的拼音草稿', runs: [] },

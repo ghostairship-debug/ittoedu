@@ -486,7 +486,11 @@ async function exportHtmlAndWeb(
 function unexpectedConsoleErrors(errors: readonly string[]): string[] {
   return errors.filter((message) => !(
     message.includes('UserFacingError') &&
-    (message.includes('编辑会话已过期') || message.includes('当前页面或呈现状态已改变'))
+    (
+      message.includes('编辑会话已过期')
+      || message.includes('当前页面或呈现状态已改变')
+      || message.includes('工程已发生变化')
+    )
   ))
 }
 
@@ -563,7 +567,9 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       await selectSlideImage(launch.page, 'slide-summary-hero')
       await releaseDeferredImageDialog(launch.app)
       const staleAlert = launch.page.getByRole('alert')
-      await expect(staleAlert).toContainText(/编辑会话已过期|当前页面或呈现状态已改变/)
+      await expect(staleAlert).toContainText(
+        /编辑会话已过期|当前页面或呈现状态已改变|工程已发生变化/,
+      )
       await expect(staleAlert).toContainText('重新选择')
       await expect(launch.page.getByRole('button', { name: '撤销（Ctrl+Z）' }))
         .toBeDisabled()

@@ -31,6 +31,7 @@ import {
   selectSelectedNodeId,
   selectSelectedNodeIds,
   selectSlideBackendKind,
+  selectSlideWorkspaceSource,
   selectSlideAuthoringDocument,
   selectSlideSceneList,
   selectActiveCourseProjectDocument,
@@ -1449,6 +1450,7 @@ describe('node operations', () => {
     const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
+    expect(selectSlideWorkspaceSource(useEditorStore.getState())[7]).toBe(nodeId)
     store.updateTextEditDraft(nodeId, '画布编辑中的草稿', [], 80)
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
     expect(activeHistory().past).toHaveLength(historyBefore)
@@ -1463,6 +1465,7 @@ describe('node operations', () => {
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('properties')
     expect(useEditorStore.getState().editingTextNodeId).toBeNull()
+    expect(selectSlideWorkspaceSource(useEditorStore.getState())[7]).toBeNull()
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
 
     store.updateTextEditDraft(nodeId, '属性栏最终文字', [], 80)

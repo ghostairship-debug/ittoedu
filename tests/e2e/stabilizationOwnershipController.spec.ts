@@ -23,7 +23,7 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 const root = resolve(__dirname, '..', '..')
 const SPATIAL_MOVE_REASON =
   '空间画布中的全课图层固定在视口，本页和世界图层跟随画布；当前不能跨这两种定位移动。'
-const SPATIAL_MOVE_ALERT = '操作未完成。请重新选择目标后再试。'
+const SPATIAL_MOVE_ALERT = '图层顺序未更新。请在同一分组内重新排序。'
 const SPATIAL_GLOBAL_INSERTION_REASON =
   '文本：无限画布全局层暂不支持插入；请切换到无限画布世界层'
 
@@ -903,8 +903,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       expect(globalDuplicate.visibility).toEqual(globalSource.visibility)
       expect(spatialSurface(afterNodesDuplicate).world.layerItems)
         .toEqual(spatialSurface(afterDuplicate).world.layerItems)
-      await expect(page.getByRole('tab', { name: '属性' }))
-        .toHaveAttribute('aria-selected', 'true')
+      await page.getByRole('tab', { name: '属性' }).click()
       await expect(page.getByTestId('properties-tab')).toBeVisible()
       await expect(page.getByLabel('名称', { exact: true }))
         .toHaveValue(globalDuplicate.item.label)

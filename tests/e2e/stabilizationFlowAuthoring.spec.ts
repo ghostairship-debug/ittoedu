@@ -359,6 +359,8 @@ async function selectRealTextRange(
   text: string
   collapsed: boolean
   inside: boolean
+  start: number
+  end: number
 }> {
   const start = await flowTextPoint(editor, startOffset, 'start')
   const end = await flowTextPoint(editor, endCharacterOffset, 'end')
@@ -370,6 +372,17 @@ async function selectRealTextRange(
   await page.mouse.down()
   await page.mouse.move(end.x, end.y, { steps: 12 })
   await page.mouse.up()
+  return readRealTextSelection(page)
+}
+
+async function readRealTextSelection(page: Page): Promise<{
+  editorConnected: boolean
+  text: string
+  collapsed: boolean
+  inside: boolean
+  start: number
+  end: number
+}> {
   return page.evaluate(() => {
     const element = document.querySelector<HTMLElement>('[data-testid="flow-inline-editor"]')
     const selection = document.getSelection()
@@ -377,11 +390,20 @@ async function selectRealTextRange(
     const inside = (node: Node | null) => Boolean(
       element && node && (node === element || element.contains(node)),
     )
+    const logicalOffset = (container: Node | undefined, offset: number | undefined) => {
+      if (!element || !container || offset === undefined) return -1
+      const prefix = document.createRange()
+      prefix.selectNodeContents(element)
+      prefix.setEnd(container, offset)
+      return Array.from(prefix.toString()).length
+    }
     return {
       editorConnected: element?.isConnected === true,
       text: selection?.toString() ?? '',
       collapsed: range?.collapsed ?? true,
       inside: inside(range?.startContainer ?? null) && inside(range?.endContainer ?? null),
+      start: logicalOffset(range?.startContainer, range?.startOffset),
+      end: logicalOffset(range?.endContainer, range?.endOffset),
     }
   })
 }
@@ -494,23 +516,90 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
         text: '丙丁',
         collapsed: false,
         inside: true,
+        start: 2,
+        end: 4,
       })
       await expect(page.getByTestId('flow-toolbar-format-scope'))
         .toHaveAttribute('data-flow-format-mode', 'range')
+      const fontFamily = page.getByTestId('flow-toolbar-font-family')
+      await fontFamily.click()
+      await expect(fontFamily).toBeFocused()
+      await fontFamily.selectOption('SimSun')
+      await expect(editor).toBeFocused()
+      await expect(editor.locator('span[style*="SimSun"]')).toHaveText(['丙', '丁'])
+      expect(await readRealTextSelection(page)).toEqual({
+        editorConnected: true,
+        text: '丙丁',
+        collapsed: false,
+        inside: true,
+        start: 2,
+        end: 4,
+      })
+      const fontSize = page.getByTestId('flow-toolbar-font-size')
+      await fontSize.click()
+      await expect(fontSize).toBeFocused()
+      await fontSize.fill('30')
+      await expect(fontSize).toHaveValue('30')
+      await fontSize.press('Enter')
+      await expect(editor).toBeFocused()
+      await expect(editor.locator('span[style*="font-size:30px"]')).toHaveText(['丙', '丁'])
+      expect(await readRealTextSelection(page)).toEqual({
+        editorConnected: true,
+        text: '丙丁',
+        collapsed: false,
+        inside: true,
+        start: 2,
+        end: 4,
+      })
       const bold = page.getByRole('button', { name: '局部加粗' })
       await expect(bold).toHaveAttribute('aria-pressed', 'false')
       await bold.click()
       await expect(bold).toHaveAttribute('aria-pressed', 'true')
+      await expect(editor.locator(
+        'span[style*="SimSun"][style*="font-size:30px"][style*="font-weight:700"]',
+      )).toHaveText(['丙', '丁'])
 
       expect(await selectRealTextRange(page, editor, 0, 3)).toEqual({
         editorConnected: true,
         text: '甲乙丙丁',
         collapsed: false,
         inside: true,
+        start: 0,
+        end: 4,
       })
       await expect(page.getByTestId('flow-toolbar-format-scope')).toHaveText('选区 · 混合格式')
       await expect(page.getByRole('button', { name: '局部加粗' }))
         .toHaveAttribute('aria-pressed', 'mixed')
+
+      const caretPoint = await flowTextPoint(editor, FORMAT_TEXT.length - 1, 'end')
+      await page.mouse.click(caretPoint.x, caretPoint.y)
+      await expect(page.getByTestId('flow-toolbar-format-scope'))
+        .toHaveAttribute('data-flow-format-mode', 'caret')
+      expect(await editor.evaluate((element) => {
+        const selection = element.ownerDocument.getSelection()
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null
+        if (!range || !range.collapsed || !element.contains(range.endContainer)) return -1
+        const prefix = element.ownerDocument.createRange()
+        prefix.selectNodeContents(element)
+        prefix.setEnd(range.endContainer, range.endOffset)
+        return Array.from(prefix.toString()).length
+      })).toBe(FORMAT_TEXT.length)
+
+      await fontFamily.click()
+      await expect(fontFamily).toBeFocused()
+      await fontFamily.selectOption('KaiTi')
+      await expect(editor).toBeFocused()
+      await fontSize.click()
+      await expect(fontSize).toBeFocused()
+      await fontSize.fill('32')
+      await fontSize.press('Enter')
+      await expect(editor).toBeFocused()
+      await expect(page.getByTestId('flow-toolbar-format-scope')).toHaveText('插入点 · 待输入样式')
+      await editor.pressSequentially('新')
+      await expect(editor).toHaveText(`${FORMAT_TEXT}新`)
+      const pendingRun = editor.locator('span').filter({ hasText: '新' }).last()
+      await expect(pendingRun).toHaveAttribute('style', /font-family:\s*KaiTi/i)
+      await expect(pendingRun).toHaveAttribute('style', /font-size:\s*32px/i)
 
       await expect(editor).toBeFocused()
       await editor.evaluate((element) => {
@@ -536,6 +625,14 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
         isComposing: false,
       })
       await expect(editor).toHaveCount(0)
+
+      const undo = page.getByRole('button', { name: '撤销（Ctrl+Z）' })
+      const redo = page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）' })
+      const paragraphText = paragraph.locator('[data-flow-idle-rich-text="true"]')
+      await undo.click()
+      await expect(paragraphText).toHaveText(FORMAT_TEXT)
+      await redo.click()
+      await expect(paragraphText).toHaveText(`${FORMAT_TEXT}新`)
 
       await page.getByRole('tab', { name: '图层' }).click()
       const overlayRegion = page.getByTestId('flow-overlay-layers')
@@ -570,11 +667,51 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       const saved = await saveCurrent(page, projectPath)
       const savedParagraph = requireBlock(requireFlowSurface(saved), 'flow-paragraph', 'paragraph')
       expect(requireFlowSurface(saved).surfaceLayerItems[0]?.bodyPlane).toBe('underlay')
-      expect(saved.revision).toBe(formatBaseline.revision + 2)
-      expect(savedParagraph.text).toBe(FORMAT_TEXT)
+      expect(saved.revision).toBeGreaterThan(formatBaseline.revision)
+      expect(savedParagraph.text).toBe(`${FORMAT_TEXT}新`)
       expect(savedParagraph.runs).toEqual([
-        { start: 2, end: 4, style: { bold: true } },
+        { start: 2, end: 4, style: { bold: true, fontFamily: 'SimSun', fontSize: 30 } },
+        { start: 8, end: 9, style: { fontFamily: 'KaiTi', fontSize: 32 } },
       ])
+
+      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await expect(page.getByTestId('flow-workspace')).toHaveCount(0)
+      await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await expect(page.getByTestId('flow-workspace')).toBeVisible({ timeout: 15_000 })
+      const reopenedParagraph = page.getByTestId('flow-block-flow-paragraph')
+      await expect(reopenedParagraph.locator('[data-flow-idle-rich-text="true"]'))
+        .toHaveText(`${FORMAT_TEXT}新`)
+      await expect(reopenedParagraph.locator('span[style*="SimSun"]')).toHaveText(['丙', '丁'])
+      await expect(reopenedParagraph.locator('span[style*="KaiTi"]')).toHaveText('新')
+
+      const canvasMode = page.getByRole('group', { name: '画布模式' })
+      const tryRunButton = canvasMode.getByRole('button', { name: '当前位置试运行', exact: true })
+      await tryRunButton.click()
+      await expect(tryRunButton).toHaveAttribute('aria-pressed', 'true')
+      const tryRunArticle = page.getByRole('main').getByTestId('flow-runtime-article')
+      await expect(tryRunArticle).toBeVisible({ timeout: 15_000 })
+      const tryRunStyles = await tryRunArticle.locator(
+        '[data-flow-block-id="flow-paragraph"] span',
+      ).evaluateAll((spans) => spans.map((span) => ({
+        text: span.textContent,
+        fontFamily: (span as HTMLElement).style.fontFamily,
+        fontSize: (span as HTMLElement).style.fontSize,
+        fontWeight: (span as HTMLElement).style.fontWeight,
+      })))
+      expect(tryRunStyles).toContainEqual({
+        text: '丙丁',
+        fontFamily: 'SimSun',
+        fontSize: '30px',
+        fontWeight: '700',
+      })
+      expect(tryRunStyles).toContainEqual({
+        text: '新',
+        fontFamily: 'KaiTi',
+        fontSize: '32px',
+        fontWeight: '',
+      })
+      await canvasMode.getByRole('button', { name: '编辑状态', exact: true }).click()
+      await expect(tryRunArticle).toBeHidden()
     })
 
     await test.step('current media fields persist and all three actual rect tiers match Editor and Player', async () => {
@@ -635,6 +772,26 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(preview).toBeVisible()
       const playerArticle = previewHost.getByTestId('flow-runtime-article')
       await expect(playerArticle).toBeVisible({ timeout: 15_000 })
+      const playerStyles = await previewHost.locator(
+        '[data-flow-block-id="flow-paragraph"] span',
+      ).evaluateAll((spans) => spans.map((span) => ({
+        text: span.textContent,
+        fontFamily: (span as HTMLElement).style.fontFamily,
+        fontSize: (span as HTMLElement).style.fontSize,
+        fontWeight: (span as HTMLElement).style.fontWeight,
+      })))
+      expect(playerStyles).toContainEqual({
+        text: '丙丁',
+        fontFamily: 'SimSun',
+        fontSize: '30px',
+        fontWeight: '700',
+      })
+      expect(playerStyles).toContainEqual({
+        text: '新',
+        fontFamily: 'KaiTi',
+        fontSize: '32px',
+        fontWeight: '',
+      })
       await expect(previewHost.getByTestId('flow-runtime-surface-underlay')
         .locator('[data-flow-overlay-item="wave-c-overlay"]'))
         .toHaveAttribute('data-flow-body-plane', 'underlay')

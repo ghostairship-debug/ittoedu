@@ -143,6 +143,18 @@ function sameSlideTarget(
     && current.layerItemId === target.layerItemId)
 }
 
+function sameSlideTargetIdentity(
+  read: PropertiesOwnerReadModel,
+  target: SlideAuthoringTarget,
+): boolean {
+  const current = makeSlideTarget(read)
+  return Boolean(current
+    && current.sessionId === target.sessionId
+    && current.generation === target.generation
+    && current.scope === target.scope
+    && current.layerItemId === target.layerItemId)
+}
+
 function sameSlideContentTarget(
   read: PropertiesOwnerReadModel,
   itemTarget: SlideAuthoringTarget,
@@ -661,12 +673,19 @@ export function usePropertiesAuthoringBinding({
     }
     return {
       beginEdit: (source) => {
-        if (!sameSlideTarget(readLive(), slideTarget)) {
+        if (!sameSlideTargetIdentity(readLive(), slideTarget)) {
           reportError(STALE_PROPERTY_TARGET)
-          return
+          return false
         }
-        if (readBoundEdit()) return
+        if (readBoundEdit()?.source === source) return false
         beginTextEdit(textNode.id, source)
+        const live = readLive()
+        return Boolean(
+          live.textEdit?.kind === 'text'
+          && live.textEdit.source === source
+          && live.textEdit.target.layerItemId === textNode.id
+          && sameSlideTargetIdentity(live, slideTarget),
+        )
       },
       commitEdit: () => {
         if (readBoundEdit()) commitTextEdit()

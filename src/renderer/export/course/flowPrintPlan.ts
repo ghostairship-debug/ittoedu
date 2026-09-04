@@ -2,8 +2,10 @@ import { serializeFormulaAst } from '../../../shared/formulaLinear'
 import type { MixedPrintEntry, MixedPrintPlan } from '../../../shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
+import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import {
   flowTableCellText,
+  flowRichTextSegments,
   walkFlowBlocks,
   type FlowBlock,
 } from '../../../player/surfaces/flow/flowModel'
@@ -21,21 +23,22 @@ export type FlowPrintNode =
       blockId: string
       level: 1 | 2 | 3 | 4 | 5 | 6
       text: string
+      runs: readonly TextRun[]
     }
-  | { type: 'paragraph'; blockId: string; text: string }
-  | { type: 'quote'; blockId: string; text: string; citation?: string }
+  | { type: 'paragraph'; blockId: string; text: string; runs: readonly TextRun[] }
+  | { type: 'quote'; blockId: string; text: string; runs: readonly TextRun[]; citation?: string }
   | {
       type: 'list'
       blockId: string
       ordered: boolean
-      items: Array<{ id: string; text: string }>
+      items: Array<{ id: string; text: string; runs: readonly TextRun[] }>
     }
   | {
       type: 'table'
       blockId: string
       caption?: string
       headers: string[]
-      rows: string[][]
+      rows: Array<Array<{ text: string; runs: readonly TextRun[] }>>
     }
   | {
       type: 'formula'
@@ -167,14 +170,26 @@ export function flowPrintOmittedOverlayMessage(plan: FlowPrintPlan): string | un
 function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
   switch (block.type) {
     case 'heading':
-      return [{ type: 'heading', blockId: block.id, level: block.level, text: block.text }]
+      return [{
+        type: 'heading',
+        blockId: block.id,
+        level: block.level,
+        text: block.text,
+        runs: block.runs ?? [],
+      }]
     case 'paragraph':
-      return [{ type: 'paragraph', blockId: block.id, text: block.text }]
+      return [{
+        type: 'paragraph',
+        blockId: block.id,
+        text: block.text,
+        runs: block.runs ?? [],
+      }]
     case 'quote':
       return [{
         type: 'quote',
         blockId: block.id,
         text: block.text,
+        runs: block.runs ?? [],
         ...(block.citation ? { citation: block.citation } : {}),
       }]
     case 'list':
@@ -182,7 +197,11 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         type: 'list',
         blockId: block.id,
         ordered: block.ordered,
-        items: block.items.map((item) => ({ id: item.id, text: item.text })),
+        items: block.items.map((item) => ({
+          id: item.id,
+          text: item.text,
+          runs: item.runs ?? [],
+        })),
       }]
     case 'table':
       return [{
@@ -190,7 +209,13 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         blockId: block.id,
         ...(block.caption ? { caption: block.caption } : {}),
         headers: block.columns.map((column) => column.header),
-        rows: block.rows.map((row) => block.columns.map((column) => flowTableCellText(row.cells[column.id]))),
+        rows: block.rows.map((row) => block.columns.map((column) => {
+          const cell = row.cells[column.id]
+          return {
+            text: flowTableCellText(cell),
+            runs: typeof cell === 'object' && cell ? cell.runs ?? [] : [],
+          }
+        })),
       }]
     case 'formula':
       return [{
@@ -246,22 +271,22 @@ function printNodeToHtml(
     case 'document-title':
       return `<h1 data-flow-print-node="title">${escapeHtml(node.text)}</h1>`
     case 'heading':
-      return `<h${node.level} data-flow-print-block="${escapeHtml(node.blockId)}">${escapeHtml(node.text)}</h${node.level}>`
+      return `<h${node.level} data-flow-print-block="${escapeHtml(node.blockId)}">${richTextToHtml(node.text, node.runs)}</h${node.level}>`
     case 'paragraph':
-      return `<p data-flow-print-block="${escapeHtml(node.blockId)}">${escapeHtml(node.text)}</p>`
+      return `<p data-flow-print-block="${escapeHtml(node.blockId)}">${richTextToHtml(node.text, node.runs)}</p>`
     case 'quote':
-      return `<blockquote data-flow-print-block="${escapeHtml(node.blockId)}"><p>${escapeHtml(node.text)}</p>${
+      return `<blockquote data-flow-print-block="${escapeHtml(node.blockId)}"><p>${richTextToHtml(node.text, node.runs)}</p>${
         node.citation ? `<cite>${escapeHtml(node.citation)}</cite>` : ''
       }</blockquote>`
     case 'list': {
       const tag = node.ordered ? 'ol' : 'ul'
       return `<${tag} data-flow-print-block="${escapeHtml(node.blockId)}">${
-        node.items.map((item) => `<li>${escapeHtml(item.text)}</li>`).join('')
+        node.items.map((item) => `<li>${richTextToHtml(item.text, item.runs)}</li>`).join('')
       }</${tag}>`
     }
     case 'table': {
       const head = `<tr>${node.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`
-      const body = node.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')
+      const body = node.rows.map((row) => `<tr>${row.map((cell) => `<td>${richTextToHtml(cell.text, cell.runs)}</td>`).join('')}</tr>`).join('')
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}">${
         node.caption ? `<figcaption>${escapeHtml(node.caption)}</figcaption>` : ''
       }<table>${head}${body}</table></figure>`
@@ -293,6 +318,33 @@ function printNodeToHtml(
     case 'component':
       return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="component-fallback">[组件后备：${escapeHtml(node.fallbackLabel)}]</p>`
   }
+}
+
+function richTextStyleToCss(style: TextRunStyle): string {
+  const decorations = [
+    style.underline ? 'underline' : '',
+    style.strike ? 'line-through' : '',
+  ].filter(Boolean).join(' ')
+  return [
+    style.fontFamily ? `font-family:${style.fontFamily}` : '',
+    style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
+    style.color ? `color:${style.color}` : '',
+    style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
+    style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
+    decorations ? `text-decoration-line:${decorations}` : '',
+    style.highlightColor ? `background-color:${style.highlightColor}` : '',
+    style.emphasis !== undefined
+      ? `text-emphasis-style:${style.emphasis ? 'filled circle' : 'none'}`
+      : '',
+  ].filter(Boolean).join(';')
+}
+
+function richTextToHtml(text: string, runs: readonly TextRun[]): string {
+  return flowRichTextSegments(text, runs).map((segment) => {
+    const content = escapeHtml(segment.text).replace(/\n/g, '<br/>')
+    const css = richTextStyleToCss(segment.style)
+    return css ? `<span style="${escapeHtml(css)}">${content}</span>` : content
+  }).join('')
 }
 
 function escapeHtml(value: string): string {

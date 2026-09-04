@@ -571,18 +571,12 @@ async function capturePlayerCanvasEvidence(
   label: string,
 ): Promise<Buffer> {
   await expectCanvasPlayerScene(page, 0)
-  await expect.poll(() => page.evaluate(() => {
-    const player = window.__H5_LESSON_PLAYER__
-    const renderedNodes = player?.playerScene?.renderedNodes ?? []
-    return {
-      sceneCount: player?.payload?.project?.scenes?.length ?? 0,
-      textCount: renderedNodes.filter((node) => node.type === 'text').length,
-      formulaCount: renderedNodes.filter((node) => node.type === 'formula').length,
-    }
-  })).toEqual({ sceneCount: 1, textCount: 3, formulaCount: 1 })
   await page.evaluate(async () => {
     await window.__H5_LESSON_PLAYER__?.waitForCaptureReady()
   })
+  await expect(page.locator('.slide-published-adapter')).toHaveCount(1)
+  await expect(page.locator('[data-native-type="text"]')).toHaveCount(3)
+  await expect(page.locator('[data-native-type="formula"]')).toHaveCount(1)
   const png = await page.locator('.slide-published-adapter').screenshot({
     path: screenshotPath,
   })
@@ -1148,19 +1142,24 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       ).toHaveAttribute('aria-current', 'page')
       const authoringHost = await expectPublishedAuthoringReady(page)
       const authoringAdapter = authoringHost.locator('.slide-published-adapter')
+      await page.getByRole('button', { name: /初始，命名状态/ }).click()
+      await expect(authoringAdapter).toHaveAttribute('data-presentation-state-id', /.+/)
       const initialStateId = await authoringAdapter
         .getAttribute('data-presentation-state-id')
       if (!initialStateId) throw new Error('统一编辑宿主未写入正式初始状态')
       await page.getByRole('button', { name: '新建场景状态' }).click()
-      await expect(page.getByRole('button', {
-        name: /状态 2，命名状态/,
-      })).toHaveAttribute('aria-pressed', 'true')
+      await expect(authoringAdapter).toHaveAttribute('data-presentation-state-id', /.+/)
+      const authoredStateId = await authoringAdapter
+        .getAttribute('data-presentation-state-id')
+      if (!authoredStateId || authoredStateId === initialStateId) {
+        throw new Error('新建场景状态后统一编辑宿主未切换正式状态')
+      }
       await clickCanvasTryRun(page)
 
       await expectCoursePlayerTryRunReady(page)
       const host = page.getByTestId('course-try-run-host')
       const adapter = host.locator('.slide-published-adapter')
-      await expect(adapter).not.toHaveAttribute('data-presentation-state-id', initialStateId)
+      await expect(adapter).toHaveAttribute('data-presentation-state-id', authoredStateId)
       const locationOnCurrent = await adapter.getAttribute('data-location-id')
       if (!locationOnCurrent) throw new Error('CoursePlayer 试运行未写入当前 location')
       await page.getByTestId('course-try-run-previous').click()
@@ -3457,7 +3456,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         }),
       ]))
       expect(formula.content.data).toMatchObject({
-        formulaId: expect.stringMatching(/^formula:formula_/),
+        formulaId: expect.stringMatching(/^formula:formula-/),
         accessibleText: '二分之一加根号下 x 加一，再加 x 的上标二下标 n',
         ast: formulaAst,
         style: { fontSize: 64 },

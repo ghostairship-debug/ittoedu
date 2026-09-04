@@ -412,6 +412,46 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(useEditorStore.getState().errorMessage).toMatch(/文字|Delete|文本/)
   })
 
+  it('projects a live canvas text draft into Properties and transfers focus as one new edit', async () => {
+    injectCandidate()
+    act(() => useEditorStore.getState().addTextNode())
+    const nodeId = selectSelectedNodeId(useEditorStore.getState())
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
+    if (!nodeId || !backend) throw new Error('expected selected Slide text')
+    const historyBefore = backend.getSession().history.past.length
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    act(() => {
+      useEditorStore.getState().beginTextEdit(nodeId, 'canvas')
+      useEditorStore.getState().updateTextEditDraft(
+        nodeId,
+        '画布编辑中的草稿',
+        [],
+        80,
+      )
+    })
+
+    const textarea = screen.getByRole('textbox', { name: '文字内容' })
+    expect(textarea).toHaveValue('画布编辑中的草稿')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())
+      ?.getSession().history.past).toHaveLength(historyBefore)
+
+    fireEvent.focus(textarea)
+    await act(async () => Promise.resolve())
+    expect(useEditorStore.getState().v9ContentEdit?.source).toBe('properties')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())
+      ?.getSession().history.past).toHaveLength(historyBefore + 1)
+
+    fireEvent.change(textarea, { target: { value: '属性栏最终文字' } })
+    fireEvent.blur(textarea)
+    expect(selectEditingNodes(useEditorStore.getState())[0]).toMatchObject({
+      id: nodeId,
+      text: '属性栏最终文字',
+    })
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())
+      ?.getSession().history.past).toHaveLength(historyBefore + 2)
+  })
+
   it('属性输入在 IME 组合期间不提交，并在目标切换后拒绝迟到草稿', () => {
     injectCandidate()
     act(() => useEditorStore.getState().addTextNode())

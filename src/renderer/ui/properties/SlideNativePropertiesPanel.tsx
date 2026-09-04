@@ -107,7 +107,8 @@ export type PropertiesPatch = DeepPartial<PropertiesItemView>
 export type EditorModeView = 'simple' | 'professional'
 
 export interface SlideNativeTextCommands {
-  readonly beginEdit: (source: 'properties' | 'canvas') => void
+  /** Returns true when the control must rebind after a canonical source transition. */
+  readonly beginEdit: (source: 'properties' | 'canvas') => boolean | void
   readonly commitEdit: () => void
   readonly cancelEdit: () => void
   readonly setComposing?: (composing: boolean) => void

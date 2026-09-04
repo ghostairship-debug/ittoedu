@@ -72,6 +72,8 @@ export interface FlowTextEditSession {
   readonly original: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft
   readonly draft: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft
   readonly range: { start: number; end: number }
+  /** Session-only style patch applied to text subsequently inserted at a caret. */
+  readonly pendingStyle: TextRunStyle
 }
 
 export type BeginFlowTextEditResult = {
@@ -100,8 +102,8 @@ export interface FlowSelectionFormat {
   readonly start: number
   readonly end: number
   readonly richText: boolean
-  /** A collapsed caret is display-only until the editor supports pending typing styles. */
   readonly canApplyInlineStyle: boolean
+  readonly hasPendingStyle: boolean
   readonly hasMixedValue: boolean
   readonly fields: {
     readonly fontFamily: FlowSelectionFormatField<string>
@@ -155,6 +157,23 @@ function flowCharacterStyles(text: string, runs: readonly TextRun[]): TextRunSty
   return styles
 }
 
+function flowCaretStyle(
+  text: string,
+  runs: readonly TextRun[],
+  caret: number,
+  pendingStyle: TextRunStyle = {},
+): TextRunStyle {
+  const characterStyles = flowCharacterStyles(text, runs)
+  const inherited = characterStyles.length === 0
+    ? {}
+    : characterStyles[caret === 0 ? 0 : Math.min(characterStyles.length - 1, caret - 1)]
+  return { ...inherited, ...pendingStyle }
+}
+
+function hasFlowTextStyle(style: TextRunStyle): boolean {
+  return Object.keys(style).length > 0
+}
+
 function deriveFlowSelectionFormatField<K extends keyof FlowSelectionFormat['fields']>(
   styles: readonly TextRunStyle[],
   key: K,
@@ -196,6 +215,7 @@ export function deriveFlowSelectionFormat(input: {
       end: 0,
       richText: false,
       canApplyInlineStyle: false,
+      hasPendingStyle: false,
       hasMixedValue: false,
       fields: unsetFlowSelectionFormatFields(),
     }
@@ -210,9 +230,12 @@ export function deriveFlowSelectionFormat(input: {
     : Math.max(start, Math.min(length, activeEdit?.range.end ?? start))
   const characterStyles = flowCharacterStyles(content.text, content.runs)
   const sampledStyles = mode === 'caret'
-    ? length === 0
-      ? []
-      : [characterStyles[start === 0 ? 0 : Math.min(length - 1, start - 1)]]
+    ? [flowCaretStyle(
+        content.text,
+        content.runs,
+        start,
+        activeEdit?.kind === 'rich-text' ? activeEdit.pendingStyle : {},
+      )]
     : characterStyles.slice(start, end)
   const fields = unsetFlowSelectionFormatFields()
   for (const key of FLOW_SELECTION_FORMAT_KEYS) {
@@ -223,7 +246,12 @@ export function deriveFlowSelectionFormat(input: {
     start,
     end,
     richText: true,
-    canApplyInlineStyle: mode !== 'caret' && end > start,
+    canApplyInlineStyle: mode === 'caret'
+      ? activeEdit?.kind === 'rich-text'
+      : end > start,
+    hasPendingStyle: activeEdit?.kind === 'rich-text'
+      ? hasFlowTextStyle(activeEdit.pendingStyle)
+      : false,
     hasMixedValue: Object.values(fields).some((field) => field.state === 'mixed'),
     fields,
   }
@@ -235,6 +263,7 @@ function freezeEdit(edit: FlowTextEditSession): FlowTextEditSession {
     original: Object.freeze(structuredClone(edit.original)),
     draft: Object.freeze(structuredClone(edit.draft)),
     range: Object.freeze({ ...edit.range }),
+    pendingStyle: Object.freeze(structuredClone(edit.pendingStyle)),
   })
 }
 
@@ -441,6 +470,7 @@ export function beginFlowTextEdit(input: {
         field: readable.field,
         composing: false,
         pendingAction: null,
+        pendingStyle: {},
         revision: input.project.revision,
         original,
         draft: structuredClone(original),
@@ -525,6 +555,7 @@ export function beginFlowFormulaEdit(input: {
       field: 'formula',
       composing: false,
       pendingAction: null,
+      pendingStyle: {},
       revision: input.project.revision,
       original,
       draft: structuredClone(original),
@@ -568,9 +599,29 @@ export function updateFlowTextDraft(
   if (!('text' in draft)) return edit
   const previous = edit.draft as FlowRichTextDraft
   const text = draft.text
-  const runs = 'runs' in draft && draft.runs
+  let runs = 'runs' in draft && draft.runs
     ? draft.runs
     : remapTextRuns(previous.text, text, previous.runs)
+  if (text !== previous.text && hasFlowTextStyle(edit.pendingStyle)) {
+    const previousLength = Array.from(previous.text).length
+    const nextLength = Array.from(text).length
+    const replacedLength = Math.max(0, edit.range.end - edit.range.start)
+    const insertedLength = nextLength - (previousLength - replacedLength)
+    if (insertedLength > 0) {
+      const insertionStart = Math.max(0, Math.min(nextLength, edit.range.start))
+      const insertionEnd = Math.max(
+        insertionStart,
+        Math.min(nextLength, insertionStart + insertedLength),
+      )
+      runs = applyTextRunStyle(
+        text,
+        runs,
+        insertionStart,
+        insertionEnd,
+        edit.pendingStyle,
+      )
+    }
+  }
   return freezeEdit({
     ...edit,
     draft: { text, runs },
@@ -581,15 +632,19 @@ export function updateFlowTextDraft(
 export function updateFlowTextRange(
   edit: FlowTextEditSession,
   range: { start: number; end: number },
+  options: { readonly preservePendingStyle?: boolean } = {},
 ): FlowTextEditSession {
   const text = 'text' in edit.draft ? edit.draft.text : ''
   const length = Array.from(text).length
+  const nextRange = {
+    start: Math.max(0, Math.min(length, range.start)),
+    end: Math.max(0, Math.min(length, range.end)),
+  }
+  const moved = nextRange.start !== edit.range.start || nextRange.end !== edit.range.end
   return freezeEdit({
     ...edit,
-    range: {
-      start: Math.max(0, Math.min(length, range.start)),
-      end: Math.max(0, Math.min(length, range.end)),
-    },
+    range: nextRange,
+    pendingStyle: moved && !options.preservePendingStyle ? {} : edit.pendingStyle,
   })
 }
 
@@ -601,6 +656,13 @@ export function applyFlowTextEditRunStyle(
   if (edit.kind !== 'rich-text') return edit
   const draft = edit.draft as FlowRichTextDraft
   const resolved = resolveFlowFormatRange(draft.text, range ?? edit.range)
+  if (resolved.end <= resolved.start) {
+    return freezeEdit({
+      ...edit,
+      pendingStyle: { ...edit.pendingStyle, ...style },
+      range: resolved,
+    })
+  }
   return freezeEdit({
     ...edit,
     draft: {
@@ -608,6 +670,7 @@ export function applyFlowTextEditRunStyle(
       runs: applyTextRunStyle(draft.text, draft.runs, resolved.start, resolved.end, style),
     },
     range: resolved,
+    pendingStyle: {},
   })
 }
 
@@ -619,7 +682,9 @@ export function toggleFlowTextEditRunStyle(
   if (edit.kind !== 'rich-text') return edit
   const draft = edit.draft as FlowRichTextDraft
   const resolved = resolveFlowFormatRange(draft.text, range ?? edit.range)
-  const enabled = rangeHasFlag(draft, resolved, key)
+  const enabled = resolved.end <= resolved.start
+    ? Boolean(flowCaretStyle(draft.text, draft.runs, resolved.start, edit.pendingStyle)[key])
+    : rangeHasFlag(draft, resolved, key)
   return applyFlowTextEditRunStyle(edit, { [key]: !enabled }, resolved)
 }
 
@@ -630,6 +695,12 @@ export function toggleFlowTextEditEmphasis(
   if (edit.kind !== 'rich-text') return edit
   const draft = edit.draft as FlowRichTextDraft
   const resolved = resolveFlowFormatRange(draft.text, range ?? edit.range)
+  if (resolved.end <= resolved.start) {
+    const emphasized = Boolean(
+      flowCaretStyle(draft.text, draft.runs, resolved.start, edit.pendingStyle).emphasis,
+    )
+    return applyFlowTextEditRunStyle(edit, { emphasis: !emphasized }, resolved)
+  }
   return freezeEdit({
     ...edit,
     draft: {
@@ -637,6 +708,7 @@ export function toggleFlowTextEditEmphasis(
       runs: toggleTextRunEmphasis(draft.text, draft.runs, resolved.start, resolved.end, false),
     },
     range: resolved,
+    pendingStyle: {},
   })
 }
 
@@ -665,6 +737,9 @@ export function clearFlowTextEditRangeStyle(
   if (edit.kind !== 'rich-text') return edit
   const draft = edit.draft as FlowRichTextDraft
   const resolved = resolveFlowFormatRange(draft.text, range ?? edit.range)
+  if (resolved.end <= resolved.start) {
+    return freezeEdit({ ...edit, range: resolved, pendingStyle: {} })
+  }
   return freezeEdit({
     ...edit,
     draft: {
@@ -672,6 +747,7 @@ export function clearFlowTextEditRangeStyle(
       runs: clearFlowTextRangeStyle(draft.text, draft.runs, resolved.start, resolved.end),
     },
     range: resolved,
+    pendingStyle: {},
   })
 }
 
@@ -1100,6 +1176,32 @@ function authoredBackgroundColor(element: HTMLElement, root: HTMLElement): strin
   return null
 }
 
+function authoredInlineStyleValue(
+  element: HTMLElement,
+  root: HTMLElement,
+  read: (candidate: HTMLElement) => string,
+): string | null {
+  let current: HTMLElement | null = element
+  while (current && current !== root) {
+    const value = read(current).trim()
+    if (value) return value
+    current = current.parentElement
+  }
+  return null
+}
+
+function normalizeAuthoredFontFamily(value: string): string {
+  const trimmed = value.trim()
+  if (
+    trimmed.length >= 2
+    && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+      || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+  ) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
 function isTransparentColor(value: string): boolean {
   if (value === 'transparent') return true
   const match = value.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/i)
@@ -1125,8 +1227,17 @@ export function extractFlowRichTextFromEditor(root: HTMLElement): FlowRichTextDr
         computed.getPropertyValue('-webkit-text-emphasis-style')
       const emphasis = emphasisStyle !== '' && emphasisStyle !== 'none'
       const rootColor = rgbToHex(getComputedStyle(root).color)
+      const authoredFontFamily = authoredInlineStyleValue(parent, root, (candidate) => (
+        candidate.style.fontFamily
+      ))
+      const authoredFontSize = authoredInlineStyleValue(parent, root, (candidate) => (
+        candidate.style.fontSize
+      ))
+      const fontSize = authoredFontSize ? Number.parseFloat(authoredFontSize) : Number.NaN
       const style: TextRunStyle = {
         ...(color && color !== (rootColor ?? FLOW_PAPER_TEXT_COLOR) ? { color } : {}),
+        ...(authoredFontFamily ? { fontFamily: normalizeAuthoredFontFamily(authoredFontFamily) } : {}),
+        ...(Number.isFinite(fontSize) && fontSize > 0 ? { fontSize } : {}),
         ...(Number.parseInt(computed.fontWeight, 10) >= 600 ? { bold: true } : {}),
         ...(computed.fontStyle === 'italic' ? { italic: true } : {}),
         ...(decoration.includes('underline') ? { underline: true } : {}),

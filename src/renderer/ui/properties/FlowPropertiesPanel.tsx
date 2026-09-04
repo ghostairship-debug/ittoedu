@@ -336,7 +336,9 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
       ? '选区格式'
       : '整块格式'
   const formatScopeHint = selectionFormat.mode === 'caret'
-    ? '当前显示插入点格式。选择文字后应用；这里不创建待输入样式。'
+    ? selectionFormat.hasPendingStyle
+      ? '当前已设置待输入格式；它只应用于随后输入的文字。'
+      : '当前显示插入点格式；修改会成为待输入格式，只应用于随后输入的文字。'
     : selectionFormat.mode === 'range'
       ? selectionFormat.hasMixedValue
         ? '选区包含混合格式；修改会统一所选文字。'

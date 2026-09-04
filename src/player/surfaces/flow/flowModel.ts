@@ -247,7 +247,9 @@ function firstFlowHeadingId(blocks: readonly FlowBlock[]): string | undefined {
 }
 
 function sameRunStyle(left: TextRunStyle, right: TextRunStyle): boolean {
-  return left.bold === right.bold
+  return left.fontFamily === right.fontFamily
+    && left.fontSize === right.fontSize
+    && left.bold === right.bold
     && left.italic === right.italic
     && left.underline === right.underline
     && left.strike === right.strike

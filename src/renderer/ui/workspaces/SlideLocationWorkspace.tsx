@@ -2147,7 +2147,7 @@ export function SlideLocationWorkspace({
         if (
           event.target instanceof Element &&
           event.target.closest(
-            '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls',
+            '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls',
           )
         ) return
         const currentSnapshot = readSnapshot()
@@ -2349,7 +2349,7 @@ export function SlideLocationWorkspace({
           !authoringCanvasInteractive ||
           (event.target instanceof Element &&
             event.target.closest(
-              '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog',
+              '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog',
             ))
         ) {
           return

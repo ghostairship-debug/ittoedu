@@ -15,10 +15,14 @@ import {
 import {
   FLOW_TEXT_REJECT_COMPOSING,
   FLOW_TEXT_REJECT_FORMULA_RUNS,
+  applyFlowTextEditRunStyle,
   applyFlowTextEditGesture,
   beginFlowFormulaEdit,
   beginFlowTextEdit,
+  buildFlowRichTextHtml,
   commitFlowTextEdit,
+  deriveFlowSelectionFormat,
+  extractFlowRichTextFromEditor,
   formatFlowAuthoringTextStyle,
   isFlowTextDraftDirty,
   markFlowTextComposing,
@@ -26,6 +30,7 @@ import {
   resolveFlowTextHistoryAction,
   resolveFlowTextKeyDown,
   updateFlowTextDraft,
+  updateFlowTextRange,
 } from '@/renderer/authoring/flowTextEdit'
 import { executeFlowEditorCommand } from '@/renderer/course/flowEditorCommands'
 
@@ -140,6 +145,29 @@ function paragraphOf(project: CourseProjectDocument) {
 }
 
 describe('Flow inline text editor bridge', () => {
+  it('round-trips authored font family and size through the contenteditable DOM', () => {
+    const root = document.createElement('span')
+    root.style.fontFamily = 'sans-serif'
+    root.style.fontSize = '16px'
+    root.innerHTML = buildFlowRichTextHtml('甲乙丙丁', [{
+      start: 2,
+      end: 4,
+      style: { fontFamily: 'SimSun', fontSize: 30, bold: true },
+    }])
+    document.body.append(root)
+
+    expect(extractFlowRichTextFromEditor(root)).toEqual({
+      text: '甲乙丙丁',
+      runs: [{
+        start: 2,
+        end: 4,
+        style: { fontFamily: 'SimSun', fontSize: 30, bold: true },
+      }],
+    })
+
+    root.remove()
+  })
+
   it('uses enterFlowTextEditing for double-click, Enter, and second text click', () => {
     const project = createFlowProject()
     const selected = selectFlowEditorBlocks(project, 'h1', ['p-runs'])
@@ -186,6 +214,93 @@ describe('Flow inline text editor bridge', () => {
     expect(formula.ok).toBe(true)
     if (!formula.ok) return
     expect(formula.edit.kind).toBe('formula')
+  })
+
+  it('materializes a caret pending style only on subsequently inserted text', () => {
+    const project = createFlowProject()
+    const selected = selectFlowEditorBlocks(project, 'h1', ['p-runs'])
+    const begun = beginFlowTextEdit({
+      project,
+      selection: selected,
+      blockId: 'p-runs',
+      range: { blockId: 'p-runs', start: 1, end: 1 },
+    })
+    expect(begun.ok).toBe(true)
+    if (!begun.ok) return
+
+    const pending = applyFlowTextEditRunStyle(begun.edit, {
+      fontFamily: 'SimSun',
+      fontSize: 28,
+      underline: true,
+    })
+    expect(pending.draft).toEqual(begun.edit.draft)
+    expect(pending.pendingStyle).toEqual({
+      fontFamily: 'SimSun',
+      fontSize: 28,
+      underline: true,
+    })
+    expect(isFlowTextDraftDirty(pending)).toBe(false)
+    expect(deriveFlowSelectionFormat({ block: paragraphOf(project), edit: pending })).toMatchObject({
+      mode: 'caret',
+      canApplyInlineStyle: true,
+      hasPendingStyle: true,
+      fields: {
+        fontFamily: { state: 'uniform', value: 'SimSun' },
+        fontSize: { state: 'uniform', value: 28 },
+        underline: { state: 'uniform', value: true },
+      },
+    })
+
+    const typed = updateFlowTextDraft(pending, { text: '春新⭐风' })
+    const afterInput = updateFlowTextRange(typed, { start: 2, end: 2 }, {
+      preservePendingStyle: true,
+    })
+    const typedDraft = afterInput.draft as { text: string; runs: Array<{
+      start: number
+      end: number
+      style: { fontFamily?: string; fontSize?: number; underline?: boolean }
+    }> }
+    expect(typedDraft.runs).toContainEqual({
+      start: 1,
+      end: 2,
+      style: { bold: true, fontFamily: 'SimSun', fontSize: 28, underline: true },
+    })
+    expect(typedDraft.runs.every((run) => run.end > run.start)).toBe(true)
+    expect(afterInput.pendingStyle).toEqual(pending.pendingStyle)
+
+    const moved = updateFlowTextRange(pending, { start: 2, end: 2 })
+    expect(moved.pendingStyle).toEqual({})
+
+    const committed = commitFlowTextEdit(project, begun.selection, afterInput, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(committed.ok).toBe(true)
+    expect(committed.historyEntry).toBe(true)
+    expect(paragraphOf(committed.nextDocument!).text).toBe('春新⭐风')
+  })
+
+  it('supports a pending font and size in an empty paragraph without a zero-length run', () => {
+    const project = createFlowProject()
+    const paragraph = paragraphOf(project)
+    paragraph.text = ''
+    delete paragraph.runs
+    const selected = selectFlowEditorBlocks(project, 'h1', ['p-runs'])
+    const begun = beginFlowTextEdit({
+      project,
+      selection: selected,
+      blockId: 'p-runs',
+      range: { blockId: 'p-runs', start: 0, end: 0 },
+    })
+    expect(begun.ok).toBe(true)
+    if (!begun.ok) return
+
+    const pending = applyFlowTextEditRunStyle(begun.edit, { fontFamily: 'KaiTi', fontSize: 32 })
+    const typed = updateFlowTextDraft(pending, { text: '新' })
+    expect(typed.draft).toEqual({
+      text: '新',
+      runs: [{ start: 0, end: 1, style: { fontFamily: 'KaiTi', fontSize: 32 } }],
+    })
   })
 
   it('keeps IME composition from committing, then writes text + runs through apply-text', () => {

@@ -466,7 +466,7 @@ export function TextContentTextarea({
 }: {
   label: string
   value: string
-  onBegin(): void
+  onBegin(): boolean | void
   onChange(value: string): void
   onCommit(): void
   onCancel(): void
@@ -503,7 +503,7 @@ export function TextContentTextarea({
     baseline: string
     draft: string
     staleNotified: boolean
-    onBegin: () => void
+    onBegin: () => boolean | void
     onChange: (value: string) => void
     onCommit: () => void
     onCancel: () => void
@@ -588,7 +588,20 @@ export function TextContentTextarea({
     session.staleNotified = false
     copyCurrentHandlers()
     setDraft(current.value)
-    session.onBegin()
+    const rebindAfterBegin = session.onBegin()
+    if (rebindAfterBegin) {
+      queueMicrotask(() => {
+        const active = sessionRef.current
+        if (active.phase !== 'editing') return
+        const current = currentRef.current
+        active.bindingKey = current.bindingKey
+        active.baseline = current.value
+        active.draft = current.value
+        active.staleNotified = false
+        copyCurrentHandlers()
+        setDraft(current.value)
+      })
+    }
   }
 
   const finishCommit = () => {

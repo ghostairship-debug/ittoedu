@@ -490,9 +490,11 @@ export function FlowWorkspace({
     edit,
     editRef,
     restyleToken,
+    restyleRange,
     formulaBlockId,
     setFormulaBlockId,
     bumpRestyle,
+    adoptEditReceipt,
     setEditState,
     commitCurrent,
     cancelCurrent,
@@ -666,7 +668,12 @@ export function FlowWorkspace({
     const target = targetForBlock(blockId)
     const current = editRef.current
     const captured = toolbarSelectionRef.current
-    toolbarSelectionRef.current = null
+    // Native controls can emit a second commit while React replaces or blurs
+    // them (the number input does this after Enter). Keep the pointer-captured
+    // editor range for the whole toolbar interaction so that follow-up event
+    // cannot silently turn a real range operation into a caret operation. The
+    // next toolbar pointer-down always replaces this value with the live DOM
+    // selection.
     if (current && captured) setEditState(updateFlowTextRange(current, captured))
     const live = editRef.current
 
@@ -682,8 +689,9 @@ export function FlowWorkspace({
                 ? 'strike' as const
                 : null
         if (key) {
-          setEditState(toggleFlowTextEditRunStyle(live, key, live.range))
-          bumpRestyle()
+          const next = toggleFlowTextEditRunStyle(live, key, live.range)
+          setEditState(next)
+          bumpRestyle(next.range)
           return
         }
       }
@@ -697,17 +705,26 @@ export function FlowWorkspace({
         style,
         expectedEdit: live,
       })
-      if (receipt.ok && receipt.edit) bumpRestyle()
+      if (receipt.ok && receipt.edit) {
+        // The command port writes the Store synchronously, but the hook's
+        // prop/effect mirror is updated after this browser event. Adopt the
+        // receipt now so a native change/blur/click sequence cannot apply its
+        // next style to the preceding draft and discard earlier formatting.
+        adoptEditReceipt(receipt.edit)
+        bumpRestyle(receipt.edit.range)
+      }
       return
     }
     if (command.type === 'range-emphasis' && live) {
-      setEditState(toggleFlowTextEditEmphasis(live, live.range))
-      bumpRestyle()
+      const next = toggleFlowTextEditEmphasis(live, live.range)
+      setEditState(next)
+      bumpRestyle(next.range)
       return
     }
     if (command.type === 'range-clear' && live) {
-      setEditState(clearFlowTextEditRangeStyle(live, live.range))
-      bumpRestyle()
+      const next = clearFlowTextEditRangeStyle(live, live.range)
+      setEditState(next)
+      bumpRestyle(next.range)
       return
     }
     if (command.type === 'heading-level') {
@@ -931,14 +948,17 @@ export function FlowWorkspace({
           text={richDraft?.text ?? text}
           runs={richDraft?.runs ?? runs}
           restyleToken={restyleToken}
-          range={edit?.range ?? { start: 0, end: 0 }}
+          range={restyleRange ?? edit?.range ?? { start: 0, end: 0 }}
           composing={edit?.composing ?? false}
           onDraftChange={(nextText, nextRuns, offsets) => {
             const current = editRef.current
             if (!current) return
             let next = updateFlowTextDraft(current, { text: nextText, runs: nextRuns })
-            if (offsets) next = updateFlowTextRange(next, offsets)
+            if (offsets) next = updateFlowTextRange(next, offsets, { preservePendingStyle: true })
             setEditState(next)
+            if (Object.keys(next.pendingStyle).length > 0 && !current.composing) {
+              bumpRestyle(next.range)
+            }
           }}
           onRangeChange={(offsets) => {
             const current = editRef.current

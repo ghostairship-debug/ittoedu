@@ -1109,6 +1109,7 @@ describe('FlowWorkspace paper', () => {
       field: 'text',
       composing: false,
       pendingAction: null,
+      pendingStyle: {},
       revision: 1,
       original: { text: '阅读任务', runs: [{ start: 0, end: 2, style: { bold: true } }] },
       draft: {

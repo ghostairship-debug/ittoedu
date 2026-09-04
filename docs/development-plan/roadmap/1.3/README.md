@@ -10,7 +10,7 @@
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| `r13-000-recipe-contract` | 定义 Recipe 输入、普通 V9 展开结果、槽位与容量策略 | `r11-062-owner-release` | 否 | `contracts-schema`, `generated-index` | 六个 recipe ID 与版本在一个正式 registry/catalog 中固定，UI、Builder、Capability 只投影它；同一输入产生可解析的普通 V9 命令结果；展开后删除 Recipe 元数据不改变行为；超容量返回“换档/拆页/Flow”建议而不是继续缩字；禁止第二 recipe registry 或运行时 DSL |
+| `r13-000-recipe-contract` | 定义 Recipe 输入、普通 V9 展开结果、槽位与容量策略 | `r11-064-patch-release` | 否 | `contracts-schema`, `generated-index` | 六个 recipe ID 与版本在一个正式 registry/catalog 中固定，UI、Builder、Capability 只投影它；同一输入产生可解析的普通 V9 命令结果；展开后删除 Recipe 元数据不改变行为；超容量返回“换档/拆页/Flow”建议而不是继续缩字；禁止第二 recipe registry 或运行时 DSL |
 | `r13-010-cover-recipe` | `cover-v1` 生成可编辑封面骨架 | `r13-000-recipe-contract` | 否 | `editor-store-history`, `generated-index` | 标题、副标题、署名和视觉槽位可单独编辑；一次应用只产生一个历史事务；保存重开后无 Recipe 专用节点；在固定长短标题输入下不遮挡主操作区 |
 | `r13-011-concept-recipe` | `concept-v1` 生成概念讲解骨架 | `r13-000-recipe-contract` | 否 | `editor-store-history`, `generated-index` | 概念、解释、例证和视觉槽位展开为普通 V9 内容；删除 / 重排任一对象不破坏其余对象；长内容触发结构化容量建议而非字体小于现有可读下限 |
 | `r13-012-worked-example-recipe` | `worked-example-v1` 生成分步例题骨架 | `r13-000-recipe-contract` | 否 | `editor-store-history`, `generated-index` | 题干、步骤、结论和提示均可直接编辑；步骤可增删重排并 Undo / Redo；新知识不只存在于答案反馈；保存重开和 Player 保持顺序 |
@@ -20,7 +20,7 @@
 | `r13-030-reference-clone` | 从参考页复制可编辑骨架而非复制隐藏状态 | `r13-000-recipe-contract` | 否 | `editor-store-history`, `workspace-properties` | 克隆后对象、资源和交互引用获得无冲突身份；修改副本不改变原页；保存重开、Player 与适用导出无悬空引用；一次克隆可整体撤销 |
 | `r13-040-batch-replace` | 在明确范围内预览并批量查找替换 | `r13-000-recipe-contract` | 否 | `editor-store-history`, `workspace-properties` | 可选择当前页 / Surface / 整课范围；预览逐项显示 old / new 与 target；确认后仅修改勾选项并产生一个事务；stale 预览拒绝提交；Undo 恢复全部原值 |
 | `r13-041-token-apply` | 将 Design Token 应用于明确对象范围 | `r13-000-recipe-contract` | 否 | `editor-store-history`, `workspace-properties` | 预览列出受影响对象与属性；确认后只写所选范围；不支持属性保持原值并报告；保存重开和 Player 使用同一 token 解析结果；整体可撤销 |
-| `r13-050-fast-diagnostics` | 提供面向教师的快速诊断入口与可定位结果 | `r11-062-owner-release` | 否 | `generated-index`, `workspace-properties` | 从可见入口启动后，结果按严重度和 Surface 分组并能跳转到对象；健康工程显示零错误；构造的悬空资源、答案不一致和容量问题分别被精确定位；诊断不改工程 |
+| `r13-050-fast-diagnostics` | 提供面向教师的快速诊断入口与可定位结果 | `r11-064-patch-release` | 否 | `generated-index`, `workspace-properties` | 从可见入口启动后，结果按严重度和 Surface 分组并能跳转到对象；健康工程显示零错误；构造的悬空资源、答案不一致和容量问题分别被精确定位；诊断不改工程 |
 | `r13-060-release` | 固定课例通过六种 Recipe 与生产力工具人工闭环并发布 1.3 源码 tag | `r13-010-cover-recipe`, `r13-011-concept-recipe`, `r13-012-worked-example-recipe`, `r13-020-step-reveal-recipe`, `r13-021-choice-feedback-recipe`, `r13-022-classify-sort-recipe`, `r13-030-reference-clone`, `r13-040-batch-replace`, `r13-041-token-apply`, `r13-050-fast-diagnostics`, `r12-060-release` | 否 | `none` | Owner 在固定课例应用六个 Recipe、修改展开内容、克隆、批量替换、Token、诊断、保存重开和 Player；把已验收 Recipe/生产力行为晋升到保全矩阵，证明 Recipe 只产 canonical commands、无第二模板状态/registry、无 UI deep import 后签署 `accepted` 并发布源码 tag |
 
 并行 frontier：六个 Recipe、参考页克隆、批量替换、Token 应用和快速诊断可在各自依赖满足且写锁可取得时并行。`r13-060-release` 等待 1.2 发布只为保持版本发布顺序；1.3 的实现节点不因此等待。

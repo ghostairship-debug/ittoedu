@@ -14,7 +14,7 @@ import {
   Type,
   Underline,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { FlowBlock } from '../../shared/courseProjectTypes'
 import type { TextRunStyle } from '../../shared/contracts/native-v1'
 import {
@@ -61,8 +61,7 @@ export const FLOW_BLOCK_CONTEXT_TOOLBAR_HEIGHT = 54
 export const FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET =
   FLOW_BLOCK_CONTEXT_TOOLBAR_HEIGHT + 6
 
-function preserveFocus(event: { preventDefault(): void; stopPropagation(): void }): void {
-  event.preventDefault()
+function stopToolbarMouseDown(event: { stopPropagation(): void }): void {
   event.stopPropagation()
 }
 
@@ -89,13 +88,12 @@ export function FlowBlockContextToolbar({
   onPreserveSelection,
 }: FlowBlockContextToolbarProps) {
   const [expanded, setExpanded] = useState(false)
+  const enterCommittedFontSizeRef = useRef<string | null>(null)
   const headingLevel = block.type === 'heading' ? block.level : 2
   const capture = () => onPreserveSelection?.()
-  const disabledReason = selectionFormat.mode === 'caret'
-    ? '选择文字后应用'
-    : !selectionFormat.richText
-      ? '当前块不支持文字格式'
-      : undefined
+  const disabledReason = !selectionFormat.richText
+    ? '当前块不支持文字格式'
+    : undefined
   const inlineDisabled = !selectionFormat.canApplyInlineStyle
   const familyField = selectionFormat.fields.fontFamily
   const familyValue = familyField.state === 'mixed'
@@ -112,8 +110,8 @@ export function FlowBlockContextToolbar({
       : '整块'
   const stateLabel = !selectionFormat.richText
     ? `${scopeLabel} · 无文字格式`
-    : selectionFormat.mode === 'caret'
-      ? `${scopeLabel} · 选择文字后应用`
+    : selectionFormat.mode === 'caret' && selectionFormat.hasPendingStyle
+      ? `${scopeLabel} · 待输入样式`
       : selectionFormat.hasMixedValue
         ? `${scopeLabel} · 混合格式`
         : scopeLabel
@@ -129,7 +127,7 @@ export function FlowBlockContextToolbar({
       ? `局部${label}`
       : selectionFormat.mode === 'whole-block'
         ? `整块${label}`
-        : `选择文字后${label}`
+      : `插入点${label}`
     return (
       <button
         type="button"
@@ -174,10 +172,7 @@ export function FlowBlockContextToolbar({
         overflow: 'visible',
       }}
       onPointerDownCapture={capture}
-      onMouseDown={(event) => {
-        capture()
-        preserveFocus(event)
-      }}
+      onMouseDown={stopToolbarMouseDown}
       onClick={(event) => event.stopPropagation()}
     >
       <div
@@ -224,7 +219,6 @@ export function FlowBlockContextToolbar({
           value={familyValue}
           disabled={inlineDisabled}
           style={{ flex: '0 0 88px', width: 88, minWidth: 0 }}
-          onMouseDown={preserveFocus}
           onChange={(event) => {
             const value = event.target.value
             if (value && value !== '__mixed__') {
@@ -270,18 +264,29 @@ export function FlowBlockContextToolbar({
           max={400}
           disabled={inlineDisabled}
           style={{ flex: '0 0 48px', width: 48 }}
-          onMouseDown={preserveFocus}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
+              // Applying the size changes this keyed input and may remove the
+              // focused DOM node during keydown. Cancel the native Enter
+              // action first; otherwise Chromium applies it to the retained
+              // contenteditable selection and replaces the selected text with
+              // a line break.
+              event.preventDefault()
+              event.stopPropagation()
               const target = event.currentTarget
               const n = Number(target.value)
               if (target.value.trim() !== '' && !Number.isNaN(n) && n > 0) {
+                enterCommittedFontSizeRef.current = target.value
                 onCommand({ type: 'range-style', style: { fontSize: n } })
               }
             }
           }}
           onBlur={(event) => {
             const target = event.currentTarget
+            if (enterCommittedFontSizeRef.current === target.value) {
+              enterCommittedFontSizeRef.current = null
+              return
+            }
             const n = Number(target.value)
             if (target.value.trim() !== '' && !Number.isNaN(n) && n > 0) {
               onCommand({ type: 'range-style', style: { fontSize: n } })
@@ -396,9 +401,14 @@ export function FlowBlockContextToolbar({
           </button>
           <button
             type="button"
-            title={selectionFormat.mode === 'range' ? '清除选区格式' : '请先选择文字再清除格式'}
-            aria-label="清除选区格式"
-            disabled={selectionFormat.mode !== 'range'}
+            title={selectionFormat.mode === 'range'
+              ? '清除选区格式'
+              : selectionFormat.mode === 'caret'
+                ? '清除待输入格式'
+                : '请先选择文字再清除格式'}
+            aria-label={selectionFormat.mode === 'caret' ? '清除待输入格式' : '清除选区格式'}
+            disabled={selectionFormat.mode === 'whole-block'
+              || (selectionFormat.mode === 'caret' && !selectionFormat.hasPendingStyle)}
             onClick={() => onCommand({ type: 'range-clear' })}
           >
             <Eraser size={14} />
@@ -419,7 +429,6 @@ export function FlowBlockContextToolbar({
               <select
                 aria-label="标题级别"
                 value={headingLevel}
-                onMouseDown={preserveFocus}
                 onChange={(event) => onCommand({
                   type: 'heading-level',
                   level: Number(event.target.value) as 1 | 2 | 3 | 4 | 5 | 6,
