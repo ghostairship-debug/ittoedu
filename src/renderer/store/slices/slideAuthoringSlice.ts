@@ -27,6 +27,7 @@ import {
   beginV9SlideContentEdit,
   cancelV9SlideContentEdit,
   commitV9SlideContentEdit,
+  markV9SlideContentComposing,
   updateV9SlideContentTextDraft,
 } from '../../authoring/v9SlideContentEdit'
 import { MAX_SCENE_NODES } from '../../../shared/constants'
@@ -301,6 +302,7 @@ export function createSlideAuthoringSlice(
   addShapeNode(shapeType: string, x?: number, y?: number): void
   beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
   updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
+  setSlideTextEditComposing(composing: boolean): void
   commitTextEdit(): void
   cancelTextEdit(): void
   selectNode(nodeId: string | null, additive?: boolean): void
@@ -330,10 +332,12 @@ export function createSlideAuthoringSlice(
     const backend = owned.slideBackend
     if (!isSlideAuthoringBackend(backend)) return null
     if (!owned.v9ContentEdit) return backend
-    slide.persist(
-      commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit),
-      { clearContentEdit: true },
-    )
+    const result = commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit)
+    if (!result.ok) {
+      slide.persist(result)
+      return null
+    }
+    slide.persist(result, { clearContentEdit: true })
     const next = slide.read().slideBackend
     return isSlideAuthoringBackend(next) ? next : null
   }
@@ -363,11 +367,12 @@ export function createSlideAuthoringSlice(
   }
 
   const selectNode = (nodeId: string | null, additive = false): void => {
-    const backend = slide.read().slideBackend
+    const owned = slide.read()
+    const backend = owned.slideBackend
     if (!isSlideAuthoringBackend(backend)) {
       kernel.failSessionless()
     }
-    commitDraft()
+    if (owned.v9ContentEdit && !commitDraft()) return
     const live = slide.read().slideBackend
     if (!isSlideAuthoringBackend(live)) return
     if (nodeId === null) {
@@ -595,9 +600,11 @@ export function createSlideAuthoringSlice(
       })
     },
     setActivePresentationState(stateId) {
-      const live = commitDraft() ?? slide.read().slideBackend
+      const owned = slide.read()
+      const live = owned.v9ContentEdit ? commitDraft() : owned.slideBackend
       if (!isSlideAuthoringBackend(live)) {
         kernel.failSessionless()
+        return
       }
       slide.persist(live.activateState(stateId, {
         expectedRevision: live.getSnapshot().revision,
@@ -681,7 +688,7 @@ export function createSlideAuthoringSlice(
       ) {
         return
       }
-      if (owned.v9ContentEdit) commitTextEdit()
+      if (owned.v9ContentEdit && !commitDraft()) return
       const next = slide.read().slideBackend
       if (!isSlideAuthoringBackend(next)) return
       const begun = beginV9SlideContentEdit({
@@ -706,6 +713,11 @@ export function createSlideAuthoringSlice(
           ...(height !== undefined ? { height } : {}),
         }),
       })
+    },
+    setSlideTextEditComposing(composing) {
+      const edit = slide.read().v9ContentEdit
+      if (!edit || edit.composing === composing) return
+      slide.patch({ v9ContentEdit: markV9SlideContentComposing(edit, composing) })
     },
     commitTextEdit,
     cancelTextEdit() {

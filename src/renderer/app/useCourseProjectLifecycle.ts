@@ -162,6 +162,15 @@ function sameProjectIdentity(
   return expected.projectId === current.projectId && expected.epoch === current.epoch
 }
 
+function sameProjectMutationTarget(
+  expected: CourseProjectLifecycleIdentity,
+  current: CourseProjectLifecycleIdentity,
+): boolean {
+  return sameProjectIdentity(expected, current)
+    && expected.revision === current.revision
+    && expected.sessionGeneration === current.sessionGeneration
+}
+
 function courseArchiveDataFromSnapshot(
   snapshot: CanonicalCourseProjectSnapshot,
 ): CourseProjectArchiveData {
@@ -246,14 +255,33 @@ export function useCourseProjectLifecycle<TDraftToken>(
 
   const isCurrentMutation = (epoch: number): boolean => loadEpochRef.current === epoch
 
-  const refreshRecentProjects = useCallback(async () => {
-    if (!portsRef.current.desktopAvailable()) return
-    setRecentProjects(await portsRef.current.listRecentProjects())
+  const refreshRecentProjects = useCallback(async (): Promise<boolean> => {
+    if (!portsRef.current.desktopAvailable()) return true
+    try {
+      setRecentProjects(await portsRef.current.listRecentProjects())
+      return true
+    } catch (error) {
+      console.error('更新最近工程列表失败', error)
+      portsRef.current.reportError('最近工程列表暂时无法更新，但不影响当前工程。')
+      return false
+    }
   }, [])
 
-  const confirmDiscardIfNeeded = useCallback(async () => {
-    if (!portsRef.current.hasUnsavedChanges()) return true
-    return (await portsRef.current.confirmDiscardChanges()) === 'discard'
+  const confirmDiscardIfNeeded = useCallback(async (): Promise<
+    CourseProjectLifecycleIdentity | null
+  > => {
+    const started = captureIdentity()
+    if (
+      portsRef.current.hasUnsavedChanges()
+      && (await portsRef.current.confirmDiscardChanges()) !== 'discard'
+    ) {
+      return null
+    }
+    if (!sameProjectMutationTarget(started, captureIdentity())) {
+      portsRef.current.commitStatus('工程已发生新的编辑，已取消此次替换操作')
+      return null
+    }
+    return started
   }, [])
 
   const applyCourseArchive = useCallback((
@@ -265,7 +293,10 @@ export function useCourseProjectLifecycle<TDraftToken>(
   ): boolean => {
     if (epoch !== undefined && !isCurrentMutation(epoch)) return false
     const current = captureIdentity()
-    if (started && !sameProjectIdentity(started, current)) return false
+    if (started && !sameProjectMutationTarget(started, current)) {
+      portsRef.current.commitStatus('工程已发生新的编辑，已取消此次替换操作')
+      return false
+    }
     const packages = componentPackagesFromArchive(
       archive.project,
       archive.componentFiles,
@@ -286,17 +317,25 @@ export function useCourseProjectLifecycle<TDraftToken>(
     path: string | null,
     extra?: { dirty?: boolean; statusMessage?: string },
     epoch?: number,
+    started?: CourseProjectLifecycleIdentity,
   ): Promise<boolean> => {
-    const started = captureIdentity()
+    const target = started ?? captureIdentity()
     const archive = await openDefaultCourseProjectAsync(bytes)
-    return applyCourseArchive(archive, path, extra, started, epoch)
+    return applyCourseArchive(archive, path, extra, target, epoch)
   }, [applyCourseArchive])
 
   const ingestOpenedProjectFile = useCallback(async (
     file: OpenProjectFileResult,
     epoch: number,
+    started: CourseProjectLifecycleIdentity,
   ): Promise<boolean> => {
-    const applied = await ingestOpenedCourseBytes(file.bytes, file.path, undefined, epoch)
+    const applied = await ingestOpenedCourseBytes(
+      file.bytes,
+      file.path,
+      undefined,
+      epoch,
+      started,
+    )
     if (!applied) return false
     await portsRef.current.confirmProjectOpen(file.confirmationId).catch((error) => {
       console.error('确认最近工程失败', error)
@@ -308,10 +347,17 @@ export function useCourseProjectLifecycle<TDraftToken>(
     void portsRef.current.runBusy(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const epoch = beginMutation()
+      const started = captureIdentity()
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      if (!isCurrentMutation(epoch)) return
+      if (
+        !isCurrentMutation(epoch)
+        || !sameProjectMutationTarget(started, captureIdentity())
+      ) {
+        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
+        return
+      }
       portsRef.current.createBlankProject()
     }, '新建课件失败，请重试。')
   }, [confirmDiscardIfNeeded])
@@ -320,10 +366,17 @@ export function useCourseProjectLifecycle<TDraftToken>(
     void portsRef.current.runBusy(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const epoch = beginMutation()
+      const started = captureIdentity()
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      if (!isCurrentMutation(epoch)) return
+      if (
+        !isCurrentMutation(epoch)
+        || !sameProjectMutationTarget(started, captureIdentity())
+      ) {
+        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
+        return
+      }
       portsRef.current.createSpatialProject()
     }, '新建无限画布课件失败，请重试。')
   }, [confirmDiscardIfNeeded])
@@ -332,21 +385,34 @@ export function useCourseProjectLifecycle<TDraftToken>(
     void portsRef.current.runBusy(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const epoch = beginMutation()
+      const started = captureIdentity()
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      if (!isCurrentMutation(epoch)) return
+      if (
+        !isCurrentMutation(epoch)
+        || !sameProjectMutationTarget(started, captureIdentity())
+      ) {
+        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
+        return
+      }
       portsRef.current.createFlowProject()
     }, '新建流式讲义课件失败，请重试。')
   }, [confirmDiscardIfNeeded])
 
   const openProject = useCallback(() => {
     void portsRef.current.runBusy(async () => {
-      if (!(await confirmDiscardIfNeeded())) return
+      const confirmed = await confirmDiscardIfNeeded()
+      if (!confirmed) return
       const file = await portsRef.current.openProjectFile()
       if (!file) return
+      if (!sameProjectMutationTarget(confirmed, captureIdentity())) {
+        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次打开操作')
+        return
+      }
       const epoch = beginMutation()
-      const applied = await ingestOpenedProjectFile(file, epoch)
+      const started = captureIdentity()
+      const applied = await ingestOpenedProjectFile(file, epoch, started)
       if (!applied) return
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
@@ -358,9 +424,10 @@ export function useCourseProjectLifecycle<TDraftToken>(
   const openRecentProject = useCallback((path: string) => {
     void portsRef.current.runBusy(async () => {
       if (!(await confirmDiscardIfNeeded())) return
-      const file = await portsRef.current.openRecentProjectFile(path)
       const epoch = beginMutation()
-      const applied = await ingestOpenedProjectFile(file, epoch)
+      const started = captureIdentity()
+      const file = await portsRef.current.openRecentProjectFile(path)
+      const applied = await ingestOpenedProjectFile(file, epoch, started)
       if (!applied) return
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
@@ -426,6 +493,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
     if (!offer) return
     void portsRef.current.runBusy(async () => {
       const epoch = beginMutation()
+      const started = captureIdentity()
       const applied = await ingestOpenedCourseBytes(
         offer.bytes,
         null,
@@ -434,6 +502,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
           statusMessage: '已恢复未保存的课件，请尽快另存为工程文件',
         },
         epoch,
+        started,
       )
       if (!applied) return
       await portsRef.current.clearRecoveryProject()
@@ -465,12 +534,9 @@ export function useCourseProjectLifecycle<TDraftToken>(
       return
     }
     let cancelled = false
-    void Promise.all([
-      portsRef.current.listRecentProjects(),
-      portsRef.current.readRecoveryProject(),
-    ]).then(async ([recent, recovery]) => {
+    void refreshRecentProjects()
+    void portsRef.current.readRecoveryProject().then(async (recovery) => {
       if (cancelled) return
-      setRecentProjects(recent)
       if (!recovery) {
         setRecoveryDecisionComplete(true)
         return
@@ -506,7 +572,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
       portsRef.current.reportError('无法读取本地恢复状态；请在编辑后及时手动保存。')
     })
     return () => { cancelled = true }
-  }, [])
+  }, [refreshRecentProjects])
 
   useEffect(() => {
     const coordinator = recoveryCoordinatorRef.current

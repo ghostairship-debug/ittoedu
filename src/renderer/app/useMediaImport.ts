@@ -33,6 +33,10 @@ export interface MediaImportIdentity {
   readonly projectId: string
   readonly revision: number
   readonly locationId: string | null
+  readonly sessionGeneration: number
+  readonly surfaceId: string | null
+  readonly owner: string | null
+  readonly ownerKey: string | null
 }
 
 export interface MediaLibraryTarget {
@@ -174,6 +178,10 @@ function sameIdentity(
   return left.projectId === right.projectId
     && left.revision === right.revision
     && left.locationId === right.locationId
+    && left.sessionGeneration === right.sessionGeneration
+    && left.surfaceId === right.surfaceId
+    && left.owner === right.owner
+    && left.ownerKey === right.ownerKey
 }
 
 function assertFreshIdentity(

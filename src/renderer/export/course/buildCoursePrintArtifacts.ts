@@ -417,11 +417,13 @@ function buildMixedPrintDocumentHtml(
             ? 'portrait'
             : undefined,
       })
-      sections.push(`<section class="page flow-print-document" style="background:${escapeHtml(plan.backgroundColor)}" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${renderFlowPrintBodyHtml(plan)}</section>`)
+      sections.push(`<section class="page flow-print-document" style="background:${escapeHtml(plan.backgroundColor)}" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${renderFlowPrintBodyHtml(plan, {
+        resolveAssetUrl: (assetId) => published.assets[assetId]?.url,
+      })}</section>`)
     }
   }
   const layout = resolveMixedPrintPageLayout(published, pages)
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(published.title)}</title><style>@page{size:${layout.pageRule};margin:0}*{box-sizing:border-box}html,body{margin:0;background:#fff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}.page{width:${layout.width};min-height:${layout.height};break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}.course-visual-print-page{position:relative;height:${layout.height};overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}.course-visual-print-canvas{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.course-visual-print-capture{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}.flow-print-document table{max-width:100%;border-collapse:collapse}.flow-print-document pre{white-space:pre-wrap}</style></head><body>${sections.join('')}</body></html>`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(published.title)}</title><style>@page{size:${layout.pageRule};margin:0}*{box-sizing:border-box}html,body{margin:0;background:#fff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}.page{width:${layout.width};min-height:${layout.height};break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}.course-visual-print-page{position:relative;height:${layout.height};overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}.course-visual-print-canvas{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.course-visual-print-capture{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}.flow-print-document table{max-width:100%;border-collapse:collapse}.flow-print-document pre{white-space:pre-wrap}.flow-print-image{display:block;max-width:100%;height:auto;object-fit:contain}</style></head><body>${sections.join('')}</body></html>`
 }
 
 export function auditCourseExportFonts(
@@ -580,13 +582,22 @@ export function collectPublishedPdfProducerNotices(
         })
       }
       for (const node of plan.nodes) {
-        if (node.type !== 'component') continue
-        add({
-          severity: 'info',
-          message: `Flow 组件块“${node.blockId}”将使用静态后备说明。`,
-          pageId: page.id,
-          path: ['surfaces', surfaceIndex, 'blocks'],
-        })
+        if (node.type === 'component') {
+          add({
+            severity: 'info',
+            message: `Flow 组件块“${node.blockId}”将使用静态后备说明。`,
+            pageId: page.id,
+            path: ['surfaces', surfaceIndex, 'blocks'],
+          })
+        } else if (node.type === 'media' && node.mediaKind !== 'image') {
+          add({
+            severity: 'info',
+            message: `Flow ${node.mediaKind === 'audio' ? '音频' : '视频'}块“${node.blockId}”将在 PDF 中使用文字后备说明。`,
+            pageId: page.id,
+            assetId: node.assetId,
+            path: ['surfaces', surfaceIndex, 'blocks'],
+          })
+        }
       }
       continue
     }
@@ -860,8 +871,10 @@ export async function buildCoursePrintArtifacts(
       })
       warnings.push(...docx.warnings)
       auditExportSize(docx.bytes, `Flow DOCX（${surface.title}）`, report)
+      const filename = uniqueFlowDocxFilename(surface.title, usedDocxNames)
+      usedDocxNames.add(filename)
       files.push({
-        filename: uniqueFlowDocxFilename(surface.title, usedDocxNames),
+        filename,
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         bytes: docx.bytes,
         kind: 'docx',

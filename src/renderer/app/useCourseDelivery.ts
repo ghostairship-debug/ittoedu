@@ -279,8 +279,20 @@ export function useCourseDelivery(
     void portsRef.current.runBusy(async () => {
       portsRef.current.commitStatus('正在生成可编辑 PPTX 对象…')
       const built = await buildCoursePptx(publishSources(snapshot))
-      if (built.bytes.byteLength === 0) {
-        throw new Error(built.report.map((item) => item.message).join('\n') || '未能生成 PPTX')
+      const producerErrors = built.report.filter((item) => item.severity === 'error')
+      if (producerErrors.length > 0 || built.bytes.byteLength === 0) {
+        const details = producerErrors
+          .slice(0, 4)
+          .map((item) => item.message)
+          .join('\n') || '未能生成 PPTX'
+        const remaining = producerErrors.length > 4
+          ? `\n另有 ${producerErrors.length - 4} 项阻断。`
+          : ''
+        throw new UserFacingError(
+          'PPTX 导出失败',
+          `${details}${remaining}`,
+          '请按提示修复内容或资源后重试；本次没有写出不完整 PPTX。',
+        )
       }
       const result = await portsRef.current.exportBinary({
         suggestedName: `${snapshot.project.title}.pptx`,
@@ -346,29 +358,43 @@ export function useCourseDelivery(
         throw new Error('DOCX 讲义仅适用于当前课程工程中的流式讲义')
       }
       const published = buildPublishedCourseV2Payload(publishSources(snapshot))
-      const flowSurface = published.surfaces.find((surface) => surface.type === 'flow')
-      if (!flowSurface) {
+      const flowSurfaces = published.surfaces.filter((surface) => surface.type === 'flow')
+      if (flowSurfaces.length === 0) {
         throw new Error('当前课程没有流式讲义，无法导出 DOCX')
       }
-      const built = buildFlowDocx(flowSurface, {
-        resolveAsset: (assetId) => {
-          const meta = snapshot.project.assets[assetId]
-          const bytes = snapshot.assetFiles[assetId]
-          return meta && bytes
-            ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
-            : undefined
-        },
-      })
-      const result = await portsRef.current.exportBinary({
-        suggestedName: uniqueFlowDocxFilename(flowSurface.title),
-        extension: 'docx',
-        bytes: built.bytes,
-      })
-      if (result) {
-        const notes = built.warnings.length > 0
-          ? `；${built.warnings.length} 项内容已按导出说明处理`
+      const usedNames = new Set<string>()
+      const exportedPaths: string[] = []
+      let warningCount = 0
+      for (const flowSurface of flowSurfaces) {
+        const built = buildFlowDocx(flowSurface, {
+          resolveAsset: (assetId) => {
+            const meta = snapshot.project.assets[assetId]
+            const bytes = snapshot.assetFiles[assetId]
+            return meta && bytes
+              ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
+              : undefined
+          },
+        })
+        warningCount += built.warnings.length
+        const suggestedName = uniqueFlowDocxFilename(flowSurface.title, usedNames)
+        usedNames.add(suggestedName)
+        const result = await portsRef.current.exportBinary({
+          suggestedName,
+          extension: 'docx',
+          bytes: built.bytes,
+        })
+        if (result) exportedPaths.push(result.path)
+      }
+      if (exportedPaths.length > 0) {
+        const notes = warningCount > 0
+          ? `；${warningCount} 项内容已按导出说明处理`
           : ''
-        portsRef.current.commitStatus(`DOCX 讲义已导出到 ${result.path}${notes}`)
+        const destination = exportedPaths.length === 1
+          ? exportedPaths[0]
+          : `${exportedPaths.length} 个文件`
+        portsRef.current.commitStatus(
+          `DOCX 讲义已导出 ${exportedPaths.length}/${flowSurfaces.length} 份到 ${destination}${notes}`,
+        )
       }
     }, 'DOCX 导出失败。请先新增流式讲义页面后重试。')
   }, [])

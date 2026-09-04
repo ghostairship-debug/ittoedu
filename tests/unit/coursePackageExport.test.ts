@@ -308,7 +308,9 @@ describe('course package export', () => {
     expect(webData).toContain('./assets/')
     expect(webData).not.toContain('z-assets.example.com')
     expect(webData).not.toContain('a-media.example.com')
-    expect(webIndex).toContain("connect-src 'self'")
+    expect(webIndex).toContain(
+      "connect-src 'self' https://api.example.com wss://z-realtime.example.com:8443",
+    )
   })
 
   it('lists only actual online remote dependencies in stable preflight order', () => {
@@ -374,6 +376,22 @@ describe('course package export', () => {
 
     expect(report.items.filter(({ code }) => code.startsWith('online-connect-'))).toEqual([])
     expect(report.summary.canExport).toBe(true)
+
+    const webReport = collectCoursePackageExportPreflight(
+      sources.project,
+      'web-package',
+      { assetFiles: {}, components: {} },
+      PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'),
+    )
+    expect(webReport.items.filter(({ code }) => code.startsWith('online-connect-'))).toEqual([])
+    expect(webReport.summary.canExport).toBe(true)
+    const webIndex = strFromU8(
+      buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE)['index.html']!,
+    )
+    expect(webIndex).toContain(
+      "connect-src 'self' https://api.example.com https://beacon.example.com https://events.example.com https://xhr.example.com wss://socket.example.com:8443",
+    )
   })
 
   it('blocks an undeclared exact origin while keeping scheme and port matching exact', () => {
@@ -422,6 +440,8 @@ describe('course package export', () => {
     for (const produce of [
       () => buildPublishedCourseStandaloneHtml(sources, options),
       () => buildCoursePackages(sources, 'standalone-html', options),
+      () => buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE),
+      () => buildCoursePackages(sources, 'web-package', PLAYER_BUNDLE),
     ]) {
       let thrown: unknown
       try {
@@ -581,7 +601,7 @@ describe('course package export', () => {
     }
   })
 
-  it('does not scan disabled Runtime or non-online package targets', () => {
+  it('skips disabled Runtime and offline standalone, but validates web-package connect origins', () => {
     const sources = runtimeSources(
       `fetch('https://undeclared.example.com/data')`,
       false,
@@ -617,7 +637,8 @@ describe('course package export', () => {
 
     expect(onlineDisabled.items.filter(({ code }) => code.startsWith('online-connect-'))).toEqual([])
     expect(offline.items.filter(({ code }) => code.startsWith('online-connect-'))).toEqual([])
-    expect(web.items.filter(({ code }) => code.startsWith('online-connect-'))).toEqual([])
+    expect(web.items.filter(({ code }) => code === 'online-connect-origin-undeclared'))
+      .toHaveLength(1)
   })
 
   it('scans only component packages that the Published payload actually references', () => {

@@ -662,25 +662,6 @@ export function createMediaAuthoringActions(ports: ImageAuthoringPorts) {
           destination: 'library',
         }
       }
-      if (
-        ports.read().editingScope === 'global'
-        && (input.mode ?? 'library') === 'add'
-        && (input.nativeType === 'image' || input.nativeType === 'video')
-      ) {
-        for (const item of items) {
-          if (input.nativeType === 'image') placeImage(item.meta, item.bytes, input.x, input.y)
-          else placeVideo(item.meta, item.bytes, input.x, input.y)
-        }
-        const session = ports.readSlideSession() ?? media.session
-        return {
-          ok: Boolean(session),
-          reason: session ? '图片已添加到全局层' : 'not-slide-authoring-backend',
-          nextSession: session,
-          sidecar: ports.read().sidecar ?? emptyCourseAssetSidecar(),
-          historyEntry: Boolean(session),
-          selection: session.selection,
-        }
-      }
       return ports.persistMedia(importAndPlaceCourseMedia(media, {
         items,
         nativeType: input.nativeType,

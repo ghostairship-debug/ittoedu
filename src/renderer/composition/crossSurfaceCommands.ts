@@ -346,7 +346,10 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
           })
         },
         slide: () => {
-          ports.slide.commitDraft()
+          if (
+            ports.slide.read().v9ContentEdit
+            && !ports.slide.commitDraft()
+          ) return
           const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
           if (backend && typeof backend.getSession === 'function') {
             const session = backend.getSession()
@@ -397,6 +400,10 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       if (
         ports.spatial.read().spatialContentEdit
         && !ports.spatial.commitDraft()
+      ) return
+      if (
+        ports.slide.read().v9ContentEdit
+        && !ports.slide.commitDraft()
       ) return
       const project = ports.kernel.tryReadDocument()
       if (!project) return
@@ -495,7 +502,6 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         return
       }
       if (plan.kind === 'activate-slide-scene' && plan.sceneId) {
-        ports.slide.commitDraft()
         ports.slide.activateScene(plan.sceneId)
         ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
         ports.slide.selectNode(null)
@@ -551,7 +557,10 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         spatial: () => ports.spatial.activateCameraFrame(activeSceneId),
         flow: () => ports.flow.activateBlock(activeSceneId),
         slide: () => {
-          ports.slide.commitDraft()
+          if (
+            ports.slide.read().v9ContentEdit
+            && !ports.slide.commitDraft()
+          ) return
           ports.slide.activateScene(activeSceneId)
         },
         sessionless: () => ports.kernel.failSessionless(),
@@ -719,6 +728,20 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
     updateNode(nodeId: string, patch: EditorCanvasNodePatch) {
       commands.updateNodes([{ nodeId, patch }])
+    },
+    nudgeSelection(dx: number, dy: number) {
+      const projection = ports.readProjection()
+      if (!projection) {
+        ports.kernel.failSessionless()
+        return
+      }
+      const patches = projection.unifiedRows
+        .filter((row) => row.selected && !row.locked)
+        .map((row) => ({
+          nodeId: row.id,
+          patch: { x: row.frame.x + dx, y: row.frame.y + dy },
+        }))
+      if (patches.length > 0) commands.updateNodes(patches)
     },
     updateGlobalLayerSettings(
       nodeId: string,

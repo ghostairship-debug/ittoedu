@@ -66,6 +66,26 @@ beforeEach(() => {
 })
 
 describe('Spatial canonical authoring targets', () => {
+  it('nudges the selected Spatial layer through the active Surface owner', () => {
+    useEditorStore.getState().addTextNode(120, 160)
+    const before = useEditorStore.getState().spatialSession!
+    const layerItemId = before.selection.selectionIds[0]
+    if (!layerItemId) throw new Error('expected selected Spatial text')
+    const original = locateCourseLayer(before.history.present, layerItemId)?.item
+    if (!original) throw new Error('expected Spatial layer')
+
+    useEditorStore.getState().nudgeSelection(4, -3)
+
+    const after = useEditorStore.getState().spatialSession!
+    const moved = locateCourseLayer(after.history.present, layerItemId)?.item
+    expect(moved?.frame).toMatchObject({
+      x: original.frame.x + 4,
+      y: original.frame.y - 3,
+    })
+    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(useEditorStore.getState().errorMessage).toBeNull()
+  })
+
   it('rejects a revision-stale property callback with zero document, History, or resource writes', () => {
     const target = captureSpatialTarget({ kind: 'surface', field: 'backgroundColor' })
     useEditorStore.getState().addTextNode()

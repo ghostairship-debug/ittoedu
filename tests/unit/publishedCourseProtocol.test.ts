@@ -567,6 +567,30 @@ describe('Player bundle entry is Published V2 only', () => {
     expect(session.listCatalog().map((entry) => entry.kind)).toEqual(['flow'])
   })
 
+  it('keeps a replacement Player mounted when the abandoned start settles late', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const published = publish(flowProject([
+      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+    ]))
+    const root = document.createElement('div')
+    root.id = 'course-root'
+    Object.defineProperties(root, {
+      clientWidth: { configurable: true, value: 1_280 },
+      clientHeight: { configurable: true, value: 720 },
+    })
+    document.body.append(root)
+
+    const abandoned = startPlayer(published, root)
+    const replacement = startPlayer(published, root)
+
+    await vi.waitFor(() => {
+      expect(window.__H5_LESSON_PLAYER__?.session).toBe(replacement)
+    })
+    expect(window.__H5_LESSON_PLAYER__?.session).not.toBe(abandoned)
+    expect(root.querySelector('.course-player-error')).toBeNull()
+    expect(root.querySelector('.flow-surface-host')).not.toBeNull()
+  })
+
   it('fail-louds retired player envelopes, encoded payload, and corrupt V2', () => {
     expect(() => parsePublishedCourseV2Entry({
       project: { schemaVersion: 8, scenes: [] },

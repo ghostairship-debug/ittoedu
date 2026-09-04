@@ -354,6 +354,30 @@ export function adaptCoursePptxProducerFindings(
       }),
     })
   }
+  project.surfaces.forEach((surface, surfaceIndex) => {
+    if (surface.type !== 'slide') return
+    surface.scenes.forEach((scene, sceneIndex) => {
+      const located = project.locations.some((location) => (
+        location.kind === 'slide-scene'
+        && location.surfaceId === surface.id
+        && location.sceneId === scene.id
+      ))
+      if (located) return
+      const path: ReadonlyArray<string | number> = [
+        'surfaces',
+        surfaceIndex,
+        'scenes',
+        sceneIndex,
+      ]
+      items.push({
+        severity: 'error',
+        code: 'static-export-preflight',
+        message: `Slide 场景“${scene.name}”没有课程位置，无法确定 PPTX 状态与图层可见性。`,
+        path,
+        diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, { path }),
+      })
+    })
+  })
   try {
     const published = buildPublishedCourseV2Payload({ project, ...resources })
     project.surfaces.forEach((surface, surfaceIndex) => {

@@ -157,6 +157,7 @@ export interface SlideWorkspaceContentPort {
     height?: number,
     width?: number,
   ) => void
+  readonly setTextEditComposing: (composing: boolean) => void
   readonly updateNode: (nodeId: string, patch: Record<string, unknown>) => void
   readonly updateNodes: (
     nodes: ReadonlyArray<{ nodeId: string; patch: Record<string, unknown> }>,
@@ -2596,6 +2597,7 @@ export function SlideLocationWorkspace({
               rendered?.width ?? editingNode.width,
             )
           }}
+          onCompositionChange={ports.content.setTextEditComposing}
           onCommit={(text, runs) => {
             const draftNode = { ...editingNode, text, runs }
             const rendered = editingNode.style.overflow === 'auto-height'

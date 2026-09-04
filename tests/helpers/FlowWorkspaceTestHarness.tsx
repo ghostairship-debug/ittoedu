@@ -149,6 +149,7 @@ export function FlowWorkspaceTestHarness(props: FlowWorkspaceTestHarnessProps) {
           selection: stateRef.current.selection,
         },
         flowTextEdit: stateRef.current.textEdit,
+        flowClipboard: null,
       }),
       readAuthoringSession: () => stateRef.current.authoringSession,
       readAssetSidecar: () => stateRef.current.sidecar,

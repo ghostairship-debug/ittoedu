@@ -738,6 +738,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         {
           flowSession: current.flowSession,
           flowTextEdit: current.flowTextEdit,
+          flowClipboard: current.flowClipboard,
         },
         current,
         current.dirty,
@@ -1003,6 +1004,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return {
         flowSession: current.flowSession,
         flowTextEdit: current.flowTextEdit,
+        flowClipboard: current.flowClipboard,
       }
     },
     readAuthoringSession: () => get().courseAuthoringSession,
@@ -1117,6 +1119,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return {
           flowSession: current.flowSession,
           flowTextEdit: current.flowTextEdit,
+          flowClipboard: current.flowClipboard,
         }
       },
       persist: persistFlowResult,
@@ -1206,6 +1209,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     spatialPlaybackPathId: null,
     flowSession: null,
     flowTextEdit: null,
+    flowClipboard: null,
     courseAuthoringSession: buildCourseAuthoringSessionForProject(
       initialCourse,
       initialSnapshot.locationId,
@@ -1371,6 +1375,7 @@ export const selectSlideWorkspaceSource = (state: EditorState) => {
     state.commitTextEdit,
     state.cancelTextEdit,
     state.updateTextEditDraft,
+    state.setSlideTextEditComposing,
     state.setStatus,
     state.updateNode,
     state.updateNodes,

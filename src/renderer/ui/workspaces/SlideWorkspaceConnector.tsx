@@ -160,6 +160,7 @@ export function SlideWorkspaceConnector({
     commitTextEdit,
     cancelTextEdit,
     updateTextEditDraft,
+    setSlideTextEditComposing,
     setStatus,
     updateNode,
     updateNodes,
@@ -273,6 +274,7 @@ export function SlideWorkspaceConnector({
       commitTextEdit,
       cancelTextEdit,
       updateTextEditDraft,
+      setTextEditComposing: setSlideTextEditComposing,
       updateNode: (nodeId, patch) => updateNode(
         nodeId,
         patch as Parameters<typeof updateNode>[1],
@@ -361,6 +363,7 @@ export function SlideWorkspaceConnector({
     updateNodes,
     updateRuntimeContentTextAtTarget,
     updateTextEditDraft,
+    setSlideTextEditComposing,
   ])
 
   return (

@@ -313,6 +313,19 @@ describe('buildCoursePrintArtifacts', () => {
     ))).toBe(false)
   })
 
+  it('renders a native Flow image into PDF HTML instead of a silent text fallback', async () => {
+    const result = await buildCoursePrintArtifacts(v9Sources('flow'))
+    const pdfHtml = new TextDecoder().decode(
+      result.files.find((file) => file.kind === 'pdf-html')!.bytes,
+    )
+
+    expect(pdfHtml).toContain('data-flow-print="image"')
+    expect(pdfHtml).toContain('class="flow-print-image"')
+    expect(pdfHtml).toMatch(/<img[^>]+src="data:image\/png;base64,/)
+    expect(pdfHtml).toContain('alt="插图"')
+    expect(pdfHtml).not.toContain('[媒体后备：插图]')
+  })
+
   it('returns Chinese reasons for missing assets without throwing', async () => {
     const { published } = mixedPublishedFixture()
     const broken = structuredClone(published)

@@ -298,10 +298,9 @@ export function collectCoursePackageExportPreflight(
     items.push({ severity: 'error', ...issue })
   }
 
-  if (
-    delivery === 'standalone-html'
+  const onlineStandalone = delivery === 'standalone-html'
     && options.singleHtmlMode === 'online-lightweight'
-  ) {
+  if (onlineStandalone) {
     const dependencies = collectOnlineRemoteAssetDependencies(project, resources.components) ?? []
     for (const dependency of dependencies) {
       if (exactHttpsOrigin(dependency.url)) continue
@@ -322,6 +321,8 @@ export function collectCoursePackageExportPreflight(
         message: `在线轻量单 HTML 将依赖远程素材：${url}`,
       })
     }
+  }
+  if (delivery === 'web-package' || onlineStandalone) {
     items.push(...collectOnlineConnectPreflightItems(project, resources.components))
   }
 

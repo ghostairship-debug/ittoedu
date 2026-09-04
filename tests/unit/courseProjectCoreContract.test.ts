@@ -723,6 +723,16 @@ describe('Course Project V9 core contract', () => {
       text: '短',
       runs: [{ start: 0, end: 8, style: { bold: true } }],
     }).success).toBe(false)
+    expect(flowBlockSchema.safeParse({
+      id: 'unknown-run-style',
+      type: 'paragraph',
+      text: '严格',
+      runs: [{
+        start: 0,
+        end: 2,
+        style: { bold: true, unexpected: 'must-reject' },
+      }],
+    }).success).toBe(false)
   })
 
   it('treats omitted Spatial and Flow backgroundColor as white without injecting the field', () => {

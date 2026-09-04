@@ -773,6 +773,16 @@ export async function buildCoursePptx(
     )) slideCount += 1
   }
 
+  if (report.some((item) => item.severity === 'error')) {
+    return {
+      bytes: new Uint8Array(),
+      slideCount: 0,
+      pages,
+      warnings,
+      report,
+    }
+  }
+
   if (slideCount === 0) {
     pushReport(report, {
       severity: 'error',

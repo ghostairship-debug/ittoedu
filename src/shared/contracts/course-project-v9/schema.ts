@@ -539,7 +539,7 @@ const flowTextRunStyleSchema = z.object({
   highlightColor: colorSchema.nullable().optional(),
   fontFamily: z.string().trim().min(1).max(300).optional(),
   fontSize: finiteNumber.min(8).max(400).optional(),
-})
+}).strict()
 
 const flowTextRunSchema = z.object({
   start: z.number().int().nonnegative(),

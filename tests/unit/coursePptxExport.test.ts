@@ -361,10 +361,47 @@ describe('buildCoursePptx', () => {
     broken.assets['missing-slide-image'] = { mimeType: 'image/png', url: '' }
 
     const result = await buildCoursePptx(broken)
-    expect(result.bytes.byteLength).toBeGreaterThan(0)
+    expect(result.bytes.byteLength).toBe(0)
+    expect(result.slideCount).toBe(0)
     expect(result.report.some((item) => (
       item.severity === 'error' && item.message.includes('缺少可离线引用')
     ))).toBe(true)
+  })
+
+  it('blocks both preflight and file emission when any Slide scene has no course location', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const sources: CoursePublishSources = { project, assetFiles: {}, components: {} }
+    const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const orphan = structuredClone(surface.scenes[0]!)
+    orphan.id = 'orphan-scene'
+    orphan.name = '未定位场景'
+    surface.scenes.push(orphan)
+
+    const preflight = collectCourseProjectExportPreflight(
+      sources.project,
+      'pptx',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      new Date(NOW),
+      { playerBundle: '/* player */' },
+    )
+    expect(preflight.summary.canExport).toBe(false)
+    expect(preflight.items).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      message: expect.stringContaining('未定位场景'),
+    }))
+
+    const result = await buildCoursePptx(sources)
+    expect(result.bytes.byteLength).toBe(0)
+    expect(result.slideCount).toBe(0)
+    expect(result.report).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      message: expect.stringContaining('未定位场景'),
+    }))
   })
 
   it('returns no PPTX bytes for Flow-only courses and names the missing mapping', async () => {

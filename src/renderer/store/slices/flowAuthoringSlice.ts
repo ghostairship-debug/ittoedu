@@ -1,5 +1,5 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
@@ -12,6 +12,7 @@ import {
   flowEditorLegacyHistoryEntryCount,
   flowEditorRedoResourceTransition,
   flowEditorUndoResourceTransition,
+  clearFlowEditorSelection,
   redoFlowEditorHistory,
   flowBlockTargetFromSelection,
   selectFlowEditorBlock,
@@ -41,6 +42,7 @@ import {
 } from '../../course/flowEditorCommands'
 import {
   findGlobalTeacherController,
+  duplicateEffectiveLayerItem,
   moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
   reorderEffectiveLayerItems,
@@ -116,6 +118,10 @@ import {
 export type FlowOwnedState = {
   flowSession: FlowAuthoringSession | null
   flowTextEdit: FlowTextEditSession | null
+  flowClipboard: {
+    readonly projectId: string
+    readonly blocks: readonly FlowBlock[]
+  } | null
 }
 
 export type FlowPersistExtra = {
@@ -576,8 +582,33 @@ function flowOverlaySelection(
   )
 }
 
+function reconcileFlowSelection(
+  project: CourseProjectDocument,
+  selection: FlowEditorSelection,
+): FlowEditorSelection {
+  const location = project.locations.find((candidate) =>
+    candidate.id === selection.locationId && candidate.kind === 'flow-block'
+  ) ?? project.locations.find((candidate) =>
+    candidate.kind === 'flow-block' && candidate.surfaceId === selection.surfaceId
+  ) ?? project.locations.find((candidate) => candidate.kind === 'flow-block')
+  if (!location) return selection
+  if (location.id !== selection.locationId || location.surfaceId !== selection.surfaceId) {
+    return clearFlowEditorSelection(project, location.id, selection.authoringScope)
+  }
+  const surface = flowSurfaceIn(project, location.surfaceId)
+  const blocksRemain = selection.selectedBlockIds.every((blockId) =>
+    Boolean(findFlowBlockRecursive(surface.blocks, blockId))
+  )
+  const overlaysRemain = selection.selectedOverlayIds.every((overlayId) =>
+    surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === overlayId)
+      || project.globalLayerItems.some((entry) => entry.item.layerItemId === overlayId)
+  )
+  if (blocksRemain && overlaysRemain) return selection
+  return clearFlowEditorSelection(project, location.id, selection.authoringScope)
+}
+
 export function createFlowAuthoringSlice(
-  _kernel: EditorStoreKernel,
+  kernel: EditorStoreKernel,
   flow: FlowAuthoringPorts,
 ): {
   runFlowAuthoringIntent(
@@ -1452,7 +1483,7 @@ export function createFlowAuthoringSlice(
         ok: true,
         nextDocument: nextHistory.present,
         historyEntry: false,
-        selection: session.selection,
+        selection: reconcileFlowSelection(nextHistory.present, session.selection),
       }, {
         replaceHistory: nextHistory,
         ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'undo' as const }),
@@ -1473,7 +1504,7 @@ export function createFlowAuthoringSlice(
         ok: true,
         nextDocument: nextHistory.present,
         historyEntry: false,
-        selection: session.selection,
+        selection: reconcileFlowSelection(nextHistory.present, session.selection),
       }, {
         replaceHistory: nextHistory,
         ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'redo' as const }),
@@ -1646,8 +1677,69 @@ export function createFlowAuthoringSlice(
     updateNode(nodeId, patch) {
       updateNodes([{ nodeId, patch }])
     },
-    copySelectedNodes() {},
-    pasteNodes() {},
+    copySelectedNodes() {
+      if (!commitDraft()) return
+      const owned = flow.read()
+      const session = owned.flowSession
+      if (!session) return
+      if (session.selection.selectedOverlayIds.length > 0) {
+        kernel.setFeedback({
+          errorMessage: 'Flow 浮层暂不支持跨位置剪贴板；请使用“创建副本”。',
+          statusMessage: null,
+        })
+        return
+      }
+      const result = executeFlowEditorCommand(
+        session.history.present,
+        session.selection,
+        { name: 'copy' },
+      )
+      flow.persist(result, { statusMessage: result.reason })
+      if (result.ok && result.clipboard) {
+        flow.patch({
+          flowClipboard: {
+            projectId: session.history.present.id,
+            blocks: result.clipboard,
+          },
+        })
+      }
+    },
+    pasteNodes() {
+      if (!commitDraft()) return
+      const owned = flow.read()
+      const session = owned.flowSession
+      if (!session) return
+      const clipboard = owned.flowClipboard
+      if (!clipboard) {
+        kernel.setFeedback({ errorMessage: 'Flow 剪贴板为空，无法粘贴。', statusMessage: null })
+        return
+      }
+      if (clipboard.projectId !== session.history.present.id) {
+        kernel.setFeedback({
+          errorMessage: 'Flow 剪贴板不属于当前课件，请重新复制。',
+          statusMessage: null,
+        })
+        return
+      }
+      const result = executeFlowEditorCommand(
+        session.history.present,
+        session.selection,
+        { name: 'paste', clipboard: clipboard.blocks },
+        { expectedRevision: session.history.present.revision },
+      )
+      flow.persist(result, {
+        statusMessage: result.reason,
+        ...(result.ok && result.nextDocument && result.createdBlockIds?.length
+          ? {
+              selection: selectFlowEditorBlocks(
+                result.nextDocument,
+                session.selection.locationId,
+                result.createdBlockIds,
+              ),
+            }
+          : {}),
+      })
+    },
     deleteNode(nodeId) {
       if (!commitDraft()) return
       const session = flow.read().flowSession
@@ -1673,8 +1765,67 @@ export function createFlowAuthoringSlice(
         { expectedRevision: session.history.present.revision },
       ))
     },
-    duplicateSelectedNodes() {},
-    duplicateNode() {},
+    duplicateSelectedNodes() {
+      if (!commitDraft()) return
+      const session = flow.read().flowSession
+      if (!session) return
+      if (session.selection.selectedBlockIds.length > 0) {
+        const result = executeFlowEditorCommand(
+          session.history.present,
+          session.selection,
+          { name: 'duplicate' },
+          { expectedRevision: session.history.present.revision },
+        )
+        flow.persist(result, {
+          statusMessage: result.reason,
+          ...(result.ok && result.nextDocument && result.createdBlockIds?.length
+            ? {
+                selection: selectFlowEditorBlocks(
+                  result.nextDocument,
+                  session.selection.locationId,
+                  result.createdBlockIds,
+                ),
+              }
+            : {}),
+        })
+        return
+      }
+      const selected = session.selection.selectedOverlayIds
+      if (selected.length !== 1) {
+        kernel.setFeedback({
+          errorMessage: selected.length > 1
+            ? 'Flow 浮层当前一次只能创建一个副本。'
+            : '没有可创建副本的 Flow 选择。',
+          statusMessage: null,
+        })
+        return
+      }
+      const row = flowRow(selected[0]!)
+      if (!row) {
+        kernel.setFeedback({ errorMessage: '所选 Flow 浮层已失效。', statusMessage: null })
+        return
+      }
+      persistFlowLayerCommand(flow, duplicateEffectiveLayerItem(
+        session.history.present,
+        commandTargetForRow(row),
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
+    duplicateNode(nodeId) {
+      if (!commitDraft()) return
+      const session = flow.read().flowSession
+      if (!session) return
+      const row = flowRow(nodeId)
+      if (!row) {
+        kernel.setFeedback({ errorMessage: '所选 Flow 浮层已失效。', statusMessage: null })
+        return
+      }
+      persistFlowLayerCommand(flow, duplicateEffectiveLayerItem(
+        session.history.present,
+        commandTargetForRow(row),
+        { expectedRevision: session.history.present.revision },
+      ))
+    },
     persistLayerCommand(result: LayerCommandResult, extra?: { statusMessage?: string | null }) {
       return persistFlowLayerCommand(flow, result, extra)
     },

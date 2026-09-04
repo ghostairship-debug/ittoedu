@@ -164,6 +164,37 @@ describe('batch media transactions', () => {
     expect([...selectMediaAssetFiles(state).asset_a!]).toEqual([1, 2, 3, 4])
   })
 
+  it('adds a global image batch as one history transaction and one undo', () => {
+    const store = useEditorStore.getState()
+    store.setEditingScope('global')
+    const items = [
+      { meta: image('global_batch_a', 800, 600), bytes: Uint8Array.from([1, 2, 3, 4]) },
+      { meta: image('global_batch_b', 640, 480), bytes: Uint8Array.from([5, 6, 7, 8]) },
+    ]
+    const historyBefore = activeHistory().past.length
+    const globalCountBefore = selectCandidateGlobalLayerItems(useEditorStore.getState())?.length ?? 0
+
+    const result = store.importV9CandidateMedia({
+      items,
+      nativeType: 'image',
+      mode: 'add',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(selectCandidateGlobalLayerItems(useEditorStore.getState()))
+      .toHaveLength(globalCountBefore + 2)
+    expect(selectSelectedNodeIds(useEditorStore.getState()))
+      .toEqual(result.placedLayerItemIds)
+
+    store.undo()
+    expect(selectCandidateGlobalLayerItems(useEditorStore.getState()))
+      .toHaveLength(globalCountBefore)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)
+      .toEqual({})
+    expect(selectMediaAssetFiles(useEditorStore.getState())).toEqual({})
+  })
+
   it('imports a media-library batch without creating nodes and undoes it once', () => {
     const store = useEditorStore.getState()
     store.importAssets([

@@ -20,6 +20,7 @@ const LESSON_ROOT_ID = 'lesson-root'
 
 let activeSession: PublishedCourseSession | null = null
 let activePresenter: PublishedCoursePresenter | null = null
+let activeEntryGeneration = 0
 
 export function parsePublishedCourseV2Entry(value: unknown): PublishedCourseV2Payload {
   const candidate = typeof value === 'string' ? parseJsonPayload(value) : value
@@ -61,9 +62,14 @@ function findBootstrapErrorHost(): { root: HTMLElement; className: string } | nu
   return null
 }
 
-function reportPlayerBootstrapFailure(error: unknown): void {
+function reportPlayerBootstrapFailure(error: unknown, root?: HTMLElement): void {
   console.error('课程播放器启动失败', error)
-  const host = findBootstrapErrorHost()
+  const host = root
+    ? {
+        root,
+        className: root.id === LESSON_ROOT_ID ? 'lesson-player-error' : 'course-player-error',
+      }
+    : findBootstrapErrorHost()
   const detail = error instanceof Error && error.message.trim()
     ? error.message
     : PLAYER_V2_ENTRY_CORRUPT_ERROR
@@ -115,13 +121,19 @@ async function mountPublishedCourseEntry(
   session: PublishedCourseSession,
   root: HTMLElement,
   payload: PublishedCourseV2Payload,
+  generation: number,
 ): Promise<void> {
   await session.mount(root)
+  if (activeEntryGeneration !== generation || activeSession !== session) {
+    await session.destroy()
+    return
+  }
   attachPublishedCourseStageFit(root)
   activePresenter = attachPublishedCoursePresenter(root, session, payload)
 }
 
 function abandonActiveEntry(): void {
+  activeEntryGeneration += 1
   const presenter = activePresenter
   const session = activeSession
   activePresenter = null
@@ -140,14 +152,14 @@ export function startPlayer(
   const payload = parsePublishedCourseV2Entry(payloadOrEncoded)
   const rootElement = resolveRoot(root)
   abandonActiveEntry()
+  const generation = activeEntryGeneration
   const session = bindActiveSession(createPublishedCourseSession(payload))
-  void mountPublishedCourseEntry(session, rootElement, payload).catch((error) => {
-    if (activeSession === session) {
-      activeSession = null
-      activePresenter = null
-      void session.destroy()
-    }
-    reportPlayerBootstrapFailure(error)
+  void mountPublishedCourseEntry(session, rootElement, payload, generation).catch((error) => {
+    if (activeEntryGeneration !== generation || activeSession !== session) return
+    activeSession = null
+    activePresenter = null
+    void session.destroy()
+    reportPlayerBootstrapFailure(error, rootElement)
   })
   return session
 }

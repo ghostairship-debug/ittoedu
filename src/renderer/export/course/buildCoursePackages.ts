@@ -240,13 +240,18 @@ function onlineStandaloneCsp(
   ].join('; ')
 }
 
-function packageIndex(payload: PublishedCourseV2Payload, lang: string): string {
+function packageIndex(
+  payload: PublishedCourseV2Payload,
+  lang: string,
+  connectOrigins: readonly string[],
+): string {
+  const connectSource = cspSources(["'self'"], new Set(connectOrigins))
   return `<!doctype html>
 <html lang="${escapeHtml(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src blob:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src ${connectSource}; worker-src blob:">
   <title>${escapeHtml(payload.title)}</title>
   <link rel="stylesheet" href="./player/player.css">
 </head>
@@ -340,6 +345,7 @@ function buildPublishedCourseWebPayload(
 function emitPublishedCourseWebPackageFiles(
   emission: PublishedCourseWebPackageEmission,
   normalized: Required<PublishedCoursePackageOptions>,
+  sources: CoursePublishSources,
 ): PublishedCourseWebPackageEmission {
   const { files, payload } = emission
   // Only the bundled families this course declares, written as sibling files
@@ -361,7 +367,15 @@ function emitPublishedCourseWebPackageFiles(
       bundledFontRelativeUrlCss(fonts, PLAYER_FONT_URL_PREFIX),
     )),
   )
-  addFile(files, 'index.html', strToU8(packageIndex(payload, normalized.lang)))
+  const connectOrigins = (sources.project.network?.connectOrigins ?? [])
+    .map(exactConnectOrigin)
+    .filter((origin): origin is string => origin !== null)
+    .sort(compareStableStrings)
+  addFile(
+    files,
+    'index.html',
+    strToU8(packageIndex(payload, normalized.lang, connectOrigins)),
+  )
   // OFL 1.1 only allows shipping the bytes together with their notices.
   const notices = bundledFontNoticeMarkdown(fonts, PLAYER_FONT_DIRECTORY)
   if (notices !== '') addFile(files, 'THIRD_PARTY_NOTICES.md', strToU8(notices))
@@ -376,6 +390,7 @@ function buildWebPackageEmission(
   return emitPublishedCourseWebPackageFiles(
     buildPublishedCourseWebPayload(sources),
     normalized,
+    sources,
   )
 }
 

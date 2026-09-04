@@ -109,7 +109,7 @@ vi.mock('../../src/renderer/ui/TopToolbar', () => ({
   TopToolbar: (props: {
     onPreview(): void
     onExport(
-      format: 'single-html' | 'web-package',
+      format: 'single-html' | 'web-package' | 'docx',
       singleHtmlMode?: 'offline-portable' | 'online-lightweight',
     ): void
   }) => (
@@ -141,6 +141,13 @@ vi.mock('../../src/renderer/ui/TopToolbar', () => ({
         onClick={() => props.onExport('web-package')}
       >
         WEB
+      </button>
+      <button
+        type="button"
+        data-testid="export-docx"
+        onClick={() => props.onExport('docx')}
+      >
+        DOCX
       </button>
     </div>
   ),
@@ -346,6 +353,27 @@ afterEach(() => {
 })
 
 describe('ARCH-4 V9 HTML/Web export preflight', () => {
+  it('exports every Flow surface as a separate DOCX from the product shell', async () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().addCourseContent('flow-page')
+    const project = selectActiveCourseProjectDocument(useEditorStore.getState())
+    expect(project?.surfaces.filter((surface) => surface.type === 'flow')).toHaveLength(2)
+    const api = appApi()
+    api.exportBinary.mockImplementation(async (input: { suggestedName: string }) => ({
+      path: `C:/exports/${input.suggestedName}`,
+    }))
+    window.desktopAPI = api
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('export-docx'))
+
+    await waitFor(() => expect(api.exportBinary).toHaveBeenCalledTimes(2))
+    const exports = api.exportBinary.mock.calls.map(([input]) => input)
+    expect(exports.every((input) => input.extension === 'docx')).toBe(true)
+    expect(new Set(exports.map((input) => input.suggestedName))).toHaveProperty('size', 2)
+    expect(exports.every((input) => input.bytes.byteLength > 0)).toBe(true)
+  })
+
   it('App and delivery modules do not import leftover V8 HTML/Web producers', () => {
     const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
     const app = readFileSync(join(root, 'src/renderer/App.tsx'), 'utf8')

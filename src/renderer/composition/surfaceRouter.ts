@@ -179,6 +179,7 @@ export type InactiveSurfaceClear = {
   readonly spatialPlaybackPathId: null
   readonly flowSession: null
   readonly flowTextEdit: null
+  readonly flowClipboard: null
   readonly slideBackend: null
   readonly slideCandidateSnapshot: null
   readonly slideCandidateClipboard: null
@@ -197,6 +198,7 @@ export function exclusiveInactiveSurfaces(
       spatialPlaybackPathId: null,
       flowSession: null,
       flowTextEdit: null,
+      flowClipboard: null,
     }
   }
   if (active === 'flow') {
@@ -215,6 +217,7 @@ export function exclusiveInactiveSurfaces(
   return {
     flowSession: null,
     flowTextEdit: null,
+    flowClipboard: null,
     slideBackend: null,
     slideCandidateSnapshot: null,
     slideCandidateClipboard: null,

@@ -25,6 +25,7 @@ import {
   selectActiveScene,
   selectEditingNodes,
   selectEditingScope,
+  selectEffectiveLayerProjection,
   selectMediaAssetFiles,
   selectMediaAssets,
   selectSelectedNode,
@@ -72,10 +73,15 @@ function captureCourseIdentity() {
   const state = useEditorStore.getState()
   const document = selectActiveCourseProjectDocument(state)
   if (!document) return null
+  const projection = selectEffectiveLayerProjection(state)
   return {
     projectId: document.id,
     revision: document.revision,
     locationId: selectActiveCourseLocationId(state),
+    sessionGeneration: state.courseAuthoringSession?.token.generation ?? 0,
+    surfaceId: projection?.surfaceId ?? null,
+    owner: projection?.scope.owner ?? null,
+    ownerKey: projection?.scope.ownerKey ?? null,
   }
 }
 

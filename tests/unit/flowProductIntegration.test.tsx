@@ -151,6 +151,64 @@ afterEach(() => {
 })
 
 describe('Flow product shell wiring', () => {
+  it('wires Flow block copy/paste/duplicate and overlay duplication to real history', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const initial = useEditorStore.getState().flowSession!
+    const surface = flowSurfaceIn(initial.history.present, initial.selection.surfaceId)
+    const blockId = surface.blocks[0]?.id
+    if (!blockId) throw new Error('expected Flow block')
+    useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
+      initial.history.present,
+      initial.selection.locationId,
+      [blockId],
+    ))
+
+    const beforeCopy = useEditorStore.getState().flowSession!
+    useEditorStore.getState().copySelectedNodes()
+    expect(useEditorStore.getState().flowClipboard?.blocks).toHaveLength(1)
+    expect(useEditorStore.getState().flowSession?.history.present).toBe(beforeCopy.history.present)
+    expect(useEditorStore.getState().flowSession?.history.past)
+      .toHaveLength(beforeCopy.history.past.length)
+
+    useEditorStore.getState().pasteNodes()
+    const afterPaste = useEditorStore.getState().flowSession!
+    expect(flowSurfaceIn(afterPaste.history.present, afterPaste.selection.surfaceId).blocks)
+      .toHaveLength(surface.blocks.length + 1)
+    expect(afterPaste.history.past).toHaveLength(beforeCopy.history.past.length + 1)
+
+    useEditorStore.getState().undo()
+    const afterUndo = useEditorStore.getState().flowSession!
+    expect(flowSurfaceIn(afterUndo.history.present, afterUndo.selection.surfaceId).blocks)
+      .toHaveLength(surface.blocks.length)
+    expect(afterUndo.selection.focus).toBe('idle')
+    useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
+      afterUndo.history.present,
+      afterUndo.selection.locationId,
+      [blockId],
+    ))
+
+    useEditorStore.getState().duplicateSelectedNodes()
+    const afterDuplicate = useEditorStore.getState().flowSession!
+    expect(flowSurfaceIn(afterDuplicate.history.present, afterDuplicate.selection.surfaceId).blocks)
+      .toHaveLength(surface.blocks.length + 1)
+    expect(afterDuplicate.history.past).toHaveLength(afterUndo.history.past.length + 1)
+
+    useEditorStore.getState().addRectangleNode()
+    const beforeOverlayDuplicate = useEditorStore.getState().flowSession!
+    const overlayCount = flowSurfaceIn(
+      beforeOverlayDuplicate.history.present,
+      beforeOverlayDuplicate.selection.surfaceId,
+    ).surfaceLayerItems.length
+    useEditorStore.getState().duplicateSelectedNodes()
+    const afterOverlayDuplicate = useEditorStore.getState().flowSession!
+    expect(flowSurfaceIn(
+      afterOverlayDuplicate.history.present,
+      afterOverlayDuplicate.selection.surfaceId,
+    ).surfaceLayerItems).toHaveLength(overlayCount + 1)
+    expect(afterOverlayDuplicate.history.past)
+      .toHaveLength(beforeOverlayDuplicate.history.past.length + 1)
+  })
+
   it('routes Flow overlay multi-selection through one exact canonical transaction', () => {
     useEditorStore.getState().createNewFlowProject()
     useEditorStore.getState().addRectangleNode(80, 70)

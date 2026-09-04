@@ -88,6 +88,10 @@ export interface BuildFlowPrintPlanOptions {
   orientation?: FlowPrintOrientation
 }
 
+export interface FlowPrintRenderOptions {
+  readonly resolveAssetUrl?: (assetId: string) => string | undefined
+}
+
 export function buildFlowPrintPlan(
   surface: PublishedFlowSurface,
   options: BuildFlowPrintPlanOptions = {},
@@ -134,12 +138,18 @@ export function buildFlowMixedPrintEntries(
   ))
 }
 
-export function renderFlowPrintBodyHtml(plan: FlowPrintPlan): string {
-  return plan.nodes.map(printNodeToHtml).join('')
+export function renderFlowPrintBodyHtml(
+  plan: FlowPrintPlan,
+  options: FlowPrintRenderOptions = {},
+): string {
+  return plan.nodes.map((node) => printNodeToHtml(node, options)).join('')
 }
 
-export function renderFlowPrintHtml(plan: FlowPrintPlan): string {
-  const body = renderFlowPrintBodyHtml(plan)
+export function renderFlowPrintHtml(
+  plan: FlowPrintPlan,
+  options: FlowPrintRenderOptions = {},
+): string {
+  const body = renderFlowPrintBodyHtml(plan, options)
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(plan.title)}</title><style>html,body{min-height:100%;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body class="flow-print-document" style="background:${escapeHtml(plan.backgroundColor)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${body}</body></html>`
 }
 
@@ -228,7 +238,10 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
   }
 }
 
-function printNodeToHtml(node: FlowPrintNode): string {
+function printNodeToHtml(
+  node: FlowPrintNode,
+  options: FlowPrintRenderOptions,
+): string {
   switch (node.type) {
     case 'document-title':
       return `<h1 data-flow-print-node="title">${escapeHtml(node.text)}</h1>`
@@ -255,8 +268,18 @@ function printNodeToHtml(node: FlowPrintNode): string {
     }
     case 'formula':
       return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="formula"><span>${escapeHtml(node.linear)}</span><span>公式说明：${escapeHtml(node.accessibleText)}</span></p>`
-    case 'media':
+    case 'media': {
+      const assetUrl = node.mediaKind === 'image'
+        ? options.resolveAssetUrl?.(node.assetId)?.trim()
+        : undefined
+      if (assetUrl) {
+        const alt = node.altText?.trim() || node.caption?.trim() || node.fallbackLabel
+        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}"/>${
+          node.caption ? `<figcaption>${escapeHtml(node.caption)}</figcaption>` : ''
+        }</figure>`
+      }
       return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="media-fallback">[媒体后备：${escapeHtml(node.fallbackLabel)}]</p>`
+    }
     case 'code':
       return `<pre data-flow-print-block="${escapeHtml(node.blockId)}"><code>${escapeHtml(node.code)}</code></pre>`
     case 'callout':

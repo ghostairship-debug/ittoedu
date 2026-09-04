@@ -1729,6 +1729,43 @@ describe('node operations', () => {
 })
 
 describe('scene presentation states', () => {
+  it('keeps a composing Slide draft in edit mode until IME composition finishes', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode(80, 90)
+    const nodeId = activeScene().nodes[0]!.id
+    const original = locateCourseLayer(
+      selectActiveCourseProjectDocument(useEditorStore.getState())!,
+      nodeId,
+    )?.item
+    if (!original || original.kind !== 'native' || original.content.nativeType !== 'text') {
+      throw new Error('expected text layer')
+    }
+
+    store.beginTextEdit(nodeId, 'canvas')
+    store.updateTextEditDraft(nodeId, '输入法草稿', [])
+    store.setSlideTextEditComposing(true)
+    store.setCanvasMode('run')
+
+    const blocked = useEditorStore.getState()
+    expect(blocked.canvasMode).toBe('edit')
+    expect(blocked.v9ContentEdit).toMatchObject({
+      composing: true,
+      draft: { text: '输入法草稿' },
+    })
+    expect((original.content.data as { text: string }).text).toBe('双击编辑文字')
+
+    blocked.setSlideTextEditComposing(false)
+    useEditorStore.getState().setCanvasMode('run')
+
+    const committed = useEditorStore.getState()
+    expect(committed.canvasMode).toBe('run')
+    expect(committed.v9ContentEdit).toBeNull()
+    const item = locateCourseLayer(selectActiveCourseProjectDocument(committed)!, nodeId)?.item
+    expect(item?.kind === 'native' && item.content.nativeType === 'text'
+      ? (item.content.data as { text: string }).text
+      : null).toBe('输入法草稿')
+  })
+
   it('normalizes legacy scenes and enters the authored initial state when run mode starts', () => {
     const presentation = activeScene().presentation
     expect(presentation).toBeDefined()

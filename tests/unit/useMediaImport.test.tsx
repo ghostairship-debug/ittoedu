@@ -54,13 +54,29 @@ vi.mock('../../src/renderer/project/v9AssetAdapter', async (importOriginal) => {
 import { useMediaImport } from '../../src/renderer/app/useMediaImport'
 
 interface Harness {
-  readonly identity: { projectId: string; revision: number; locationId: string | null }
+  readonly identity: {
+    projectId: string
+    revision: number
+    locationId: string | null
+    sessionGeneration: number
+    surfaceId: string | null
+    owner: string | null
+    ownerKey: string | null
+  }
   readonly errors: unknown[]
   readonly ports: MediaImportPorts
 }
 
 function createHarness(): Harness {
-  const identity = { projectId: 'p1', revision: 1, locationId: 'L1' }
+  const identity = {
+    projectId: 'p1',
+    revision: 1,
+    locationId: 'L1',
+    sessionGeneration: 1,
+    surfaceId: 'surface-1',
+    owner: 'scene',
+    ownerKey: 'scene:surface-1:scene-1',
+  }
   const errors: unknown[] = []
   const ports: MediaImportPorts = {
     captureIdentity: vi.fn(() => ({ ...identity }) as MediaImportIdentity),
@@ -149,6 +165,20 @@ describe('useMediaImport stale results', () => {
     const harness = createHarness()
     await importWhileDecoding(harness, () => {
       harness.identity.locationId = 'L2'
+    })
+
+    expect(harness.ports.commitCandidateMedia).toHaveBeenCalledTimes(0)
+    expect(harness.ports.placeImageNodes).toHaveBeenCalledTimes(0)
+    expect(harness.ports.importAssetsAtTarget).toHaveBeenCalledTimes(0)
+    expect(errorText(harness.errors[0])).toContain('工程已发生变化')
+  })
+
+  it('does not commit when the active owner scope changes during decoding', async () => {
+    const harness = createHarness()
+    await importWhileDecoding(harness, () => {
+      harness.identity.sessionGeneration += 1
+      harness.identity.owner = 'global'
+      harness.identity.ownerKey = 'global'
     })
 
     expect(harness.ports.commitCandidateMedia).toHaveBeenCalledTimes(0)
