@@ -133,3 +133,22 @@
 1.1 对 V8 可执行残留的清零只是删除不受支持的旧实现并迁移现有 consumer，不改变 V9 wire；Table/Chart 则由 3.3 节的明确窄例外覆盖。两者都不是创建 V10 的理由。
 
 > 注：Editor 1.0 不承诺读取未来的 V10+ 工程。
+
+
+## 1.3 Chart carrier extension
+
+Chart additionally supports Spatial `world.layerItems` and the strict Flow body branch
+`{ id, type: 'chart', chart: NativeChartContent, height }`. Height is 160–1600 CSS pixels;
+width follows the paper reading width and scales with the paper. No x/y or overlay placement
+is stored. Nested sections retain their existing order and collapsed visibility semantics.
+The Published V2 Flow contract reuses the exact same Flow block schema. Chart categories,
+series and points retain the Native chart validation and identifiers; duplicate operations
+allocate new block/layer and chart child IDs. Deletion uses the existing carrier reference cleanup.
+Edits target the containing Flow block or Spatial world item and commit one owner transaction.
+
+DOCX preserves the chart as an explicitly diagnosed static image followed by an editable data
+table. Print/PDF preserve its document position. Spatial static exports retain camera cropping;
+they do not claim editable whole-world PPTX. Slide editable PPTX remains unchanged.
+Flow overlays, Spatial shared layers and global layers still reject charts. Table and input
+remain in their prior domains. Old V9 documents remain valid; pre-1.3 readers reject the new
+Flow discriminator and Spatial chart carrier explicitly, without stripping data or migration.
