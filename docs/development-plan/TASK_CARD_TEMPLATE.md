@@ -38,13 +38,13 @@
 | `store-flow` | `src/renderer/store/slices/flowAuthoringSlice.ts` |
 | `store-spatial` | `src/renderer/store/slices/spatialAuthoringSlice.ts` |
 | `store-course` | `src/renderer/store/slices/courseLifecycleSlice.ts`、`courseStructureSlice.ts`、`editorShellSlice.ts`、`courseResourceState.ts`、`src/shared/effectiveBackground.ts` |
-| `props-shared` | `src/renderer/ui/properties/PropertyControls.tsx`、`propertiesItemView.ts`、`PropertiesPanelRouter.tsx`、`PropertiesContext*.ts(x)`、`src/renderer/composition/properties/**` |
-| `props-slide` | `SlideNativePropertiesPanel.tsx`、`MultiSelectionPropertiesPanel.tsx`、`RuntimePropertiesPanel.tsx`、`RuntimePropertiesContextBuilder.ts` |
+| `props-shared` | `src/renderer/ui/ColorInput.tsx`、`DesignTokensEditor.tsx`、`src/renderer/ui/properties/PropertyControls.tsx`、`SharedShapeProperties.tsx`、`SharedBackgroundProperties.tsx`、`propertiesItemView.ts`、`PropertiesPanelRouter.tsx`、`PropertiesContext*.ts(x)`、`src/renderer/composition/properties/**` |
+| `props-slide` | `SlideNativePropertiesPanel.tsx`、`SlideTableProperties.tsx`、`SlideChartProperties.tsx`、`MultiSelectionPropertiesPanel.tsx`、`RuntimePropertiesPanel.tsx`、`RuntimePropertiesContextBuilder.ts` |
 | `props-flow` | `FlowPropertiesPanel.tsx`、`FlowPropertiesContextBuilder.ts`、`FlowSpatialInteractionUnavailableSection.tsx` |
 | `props-spatial` | `SpatialPropertiesPanel.tsx`、`SpatialPropertiesContextBuilder.ts` |
 | `props-global` | `CourseGlobalPropertiesPanel.tsx`、`EmptyScenePropertiesPanel.tsx` |
-| `workspace-shell` | `src/renderer/ui/Workspace.tsx`、`ui/workspaces/**`、`TopToolbar.tsx`、`RightSidebar.tsx`、`src/renderer/composition/surfaceRouter.ts`、`crossSurfaceCommands.ts` |
-| `authoring-slide` | `src/renderer/course/v9SlideContentCommands.ts`、`slideAuthoringBackend.ts`、`effectiveLayerCommands.ts`、`v9MediaAudioCommands.ts`、`src/renderer/project/nativeNodeFactories.ts`、`src/shared/nativeTableLayout.ts`、`src/shared/nativeChartView.ts`、`src/shared/nativeLineGeometry.ts` |
+| `workspace-shell` | `src/renderer/ui/Workspace.tsx`、`ui/workspaces/**`、`ElementsTab.tsx`、`TopToolbar.tsx`、`RightSidebar.tsx`、`src/renderer/styles/globals.css`、`src/renderer/composition/surfaceRouter.ts`、`crossSurfaceCommands.ts` |
+| `authoring-slide` | `src/renderer/course/v9SlideContentCommands.ts`、`v9TableCommands.ts`、`v9ChartCommands.ts`、`v9SlideClipboard.ts`、`slideAuthoringBackend.ts`、`effectiveLayerCommands.ts`、`v9MediaAudioCommands.ts`、`src/renderer/project/nativeNodeFactories.ts`、`src/shared/playerAuthoringProtocol.ts`、`src/shared/nativeTableLayout.ts`、`src/shared/nativeChartView.ts`、`src/shared/nativeLineGeometry.ts` |
 | `authoring-flow` | `src/renderer/course/flowSharedAuthoringAdapters.ts`、`src/renderer/authoring/flowTextEdit.ts`、`flowOverlayAuthoring.ts` |
 | `authoring-spatial` | `src/renderer/course/spatialEditorCommands.ts`、`src/renderer/authoring/spatialWorldAuthoring.ts` |
 | `authoring-interaction` | `src/renderer/ui/InteractionEditor.tsx`、`src/renderer/interactions/**`、`src/renderer/course/courseLogicAuthoringCommands.ts` |
@@ -52,10 +52,10 @@
 | `published-slide` | `src/player/surfaces/slide/**` |
 | `published-flow` | `src/player/surfaces/flow/**` |
 | `published-spatial` | `src/player/surfaces/spatial/**` |
-| `published-interaction` | `src/player/interactions/**`、`src/player/CourseStateStore.ts`、`src/player/InteractionEngine.ts` |
+| `published-interaction` | `src/player/interactions/**`、`src/player/CourseStateStore.ts`、`src/player/InteractionEngine.ts`、`src/player/surfaces/publishedCourseState.ts` |
 | `published-dynamic` | `src/player/surfaces/publishedDynamicHosts.ts` 与 Component / Runtime registry |
 | `published-producer` | `src/renderer/export/course/buildPublishedCourse.ts`、`buildCoursePackages.ts` |
-| `export-pptx` | `src/renderer/export/course/buildCoursePptx.ts`、`renderPptx*` |
+| `export-pptx` | `src/renderer/export/course/buildCoursePptx.ts`、`pptxTableAndChart.ts`、`pptxTextAndShape.ts`、`renderPptx*` |
 | `export-docx-print` | `src/renderer/export/course/flowDocx.ts`、`flowDocxProjection.ts`、`flowPrintPlan.ts`、`buildCoursePrintArtifacts.ts` |
 | `app-save-recovery` | `src/renderer/app/useCourseDelivery.ts`、`src/renderer/project/courseProjectArchive.ts` 与保存 / 恢复路径 |
 | `diagnostics` | `src/shared/courseProjectHealth.ts`、`src/shared/courseProjectHealth/**`、`src/renderer/diagnostics/**` |

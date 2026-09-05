@@ -704,4 +704,37 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past)
       .toHaveLength(beforeLate.history.past.length + 1)
   })
+
+  it('Table 与 Chart 经 store 增量创建并在编辑视图中保留完整 Native 结构', () => {
+    injectCandidate()
+    act(() => {
+      useEditorStore.getState().addChartNode('bar')
+      useEditorStore.getState().addTableNode()
+    })
+    const state = useEditorStore.getState()
+    const backend = selectSlideAuthoringBackend(state)!
+    const session = backend.getSession()
+    const surface = session.history.present.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+    const scene = surface.scenes[0]
+    if (!scene) throw new Error('expected scene')
+    expect(scene.layerItems).toHaveLength(2)
+    const chartLayer = scene.layerItems.find(
+      (item) => item.kind === 'native' && item.content.nativeType === 'chart',
+    )
+    const tableLayer = scene.layerItems.find(
+      (item) => item.kind === 'native' && item.content.nativeType === 'table',
+    )
+    expect(chartLayer).toBeDefined()
+    expect(tableLayer).toBeDefined()
+    if (!chartLayer || chartLayer.kind !== 'native' || chartLayer.content.nativeType !== 'chart') {
+      throw new Error('expected chart')
+    }
+    expect(chartLayer.content.data.chartType).toBe('bar')
+    if (!tableLayer || tableLayer.kind !== 'native' || tableLayer.content.nativeType !== 'table') {
+      throw new Error('expected table')
+    }
+    expect(tableLayer.content.data.columns.length).toBeGreaterThan(0)
+    expect(tableLayer.content.data.rows.length).toBeGreaterThan(0)
+  })
 })

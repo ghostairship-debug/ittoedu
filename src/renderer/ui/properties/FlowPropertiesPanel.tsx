@@ -88,6 +88,7 @@ export interface FlowPropertiesCommands {
   readonly renamePage: (surfaceId: string, title: string) => void
   readonly setPaperBackground: (surfaceId: string, backgroundColor: string) => void
   readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
+  readonly previewSurfaceBackground?: (patch: { backgroundColor?: string | null }) => void
   readonly importSurfaceBackgroundAsset: (file: FlowImportedMediaBytes) => void
   readonly patchSelectedBlock: (patch: Record<string, unknown>) => void
   readonly patchOverlayProperties: (patch: Record<string, unknown>) => void
@@ -174,6 +175,7 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
           onChange: (backgroundMode) => commands.updateSurfaceBackground({ backgroundMode }),
         }}
         onColorChange={(backgroundColor) => commands.updateSurfaceBackground({ backgroundColor })}
+        onPreviewColorChange={commands.previewSurfaceBackground ? (backgroundColor) => commands.previewSurfaceBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateSurfaceBackground({ backgroundAssetId })}
         onImportAsset={(file) => commands.importSurfaceBackgroundAsset(file)}
         testId="flow-surface-background-properties"

@@ -516,4 +516,186 @@ describe('Published Slide authoring patch', () => {
       expect((inputMerged.item.content.data as any).placeholder).toBe('请输入数字')
     }
   })
+
+  it('rejects invalid incremental patch transitions, mismatched node types, and stale identity for Table, Chart, and Input', () => {
+    // 1. Cannot change native type (Chart -> Table or Table -> Chart)
+    const chartItem: PublishedNativeLayerItem = {
+      kind: 'native',
+      layerItemId: 'node-x',
+      frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 200 },
+      order: 1,
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      content: {
+        nativeType: 'chart',
+        data: {
+          chartType: 'bar',
+          title: 'T',
+          categories: [],
+          series: [],
+          style: {
+            backgroundColor: '#ffffff',
+            backgroundOpacity: 1,
+            fontFamily: 'sans-serif',
+            fontSize: 12,
+            textColor: '#000000',
+            showLegend: false,
+            legendPosition: 'top',
+            showDataLabels: false,
+            showCategoryAxis: false,
+            showValueAxis: false,
+            showGridLines: false,
+          },
+        },
+      },
+    }
+
+    const tableInput: NativeRenderInput = {
+      id: 'node-x',
+      name: 'node-x',
+      type: 'table',
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 200,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: 'inherit',
+      columns: [],
+      rows: [],
+      headerRowCount: 0,
+      style: {
+        fillColor: '#ffffff',
+        fillOpacity: 1,
+        borderColor: '#000000',
+        borderOpacity: 1,
+        borderWidth: 1,
+        lineStyle: 'solid',
+        textColor: '#000000',
+        fontFamily: 'sans-serif',
+        fontSize: 12,
+        horizontalAlign: 'left',
+        verticalAlign: 'middle',
+        cellPadding: 4,
+      },
+    }
+
+    const mismatchedType = applyPublishedSlideAuthoringItemPatch({
+      current: chartItem,
+      next: tableInput,
+      captured: identity('node-x'),
+      currentIdentity: identity('node-x'),
+    })
+    expect(mismatchedType).toMatchObject({ ok: false, code: 'target-mismatch' })
+
+    // 2. Cannot change carrier kind (Native -> Component)
+    const mismatchedKind = applyPublishedSlideAuthoringItemPatch({
+      current: chartItem,
+      next: {
+        id: 'node-x',
+        name: 'node-x',
+        type: 'external-component',
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        locked: false,
+        playbackInitialVisibility: 'inherit',
+        component: { packageId: 'test.pkg', version: '1.0.0' },
+        props: {},
+      },
+      captured: identity('node-x'),
+      currentIdentity: identity('node-x'),
+    })
+    expect(mismatchedKind).toMatchObject({ ok: false, code: 'target-mismatch' })
+
+    // 3. Rejects stale revision for Table / Chart
+    const staleTable = applyPublishedSlideAuthoringItemPatch({
+      current: chartItem,
+      next: {
+        id: 'node-x',
+        name: 'node-x',
+        type: 'chart',
+        x: 10,
+        y: 10,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        locked: false,
+        playbackInitialVisibility: 'inherit',
+        chartType: 'pie',
+        title: 'Updated',
+        categories: [],
+        series: [{ id: 's', name: 'S', color: '#f00', points: [] }],
+        style: {
+          backgroundColor: '#fff',
+          backgroundOpacity: 1,
+          fontFamily: 'sans-serif',
+          fontSize: 12,
+          textColor: '#000',
+          showLegend: true,
+          legendPosition: 'right',
+          showDataLabels: true,
+        },
+      },
+      captured: { ...identity('node-x'), revision: 2 },
+      currentIdentity: identity('node-x'),
+    })
+    expect(staleTable).toMatchObject({ ok: false, code: 'stale-revision' })
+
+    // 4. Rejects mismatched target ID
+    const mismatchedTargetId = applyPublishedSlideAuthoringItemPatch({
+      current: chartItem,
+      next: {
+        id: 'node-different',
+        name: 'node-different',
+        type: 'chart',
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        locked: false,
+        playbackInitialVisibility: 'inherit',
+        chartType: 'pie',
+        title: 'T',
+        categories: [],
+        series: [{ id: 's', name: 'S', color: '#f00', points: [] }],
+        style: {
+          backgroundColor: '#fff',
+          backgroundOpacity: 1,
+          fontFamily: 'sans-serif',
+          fontSize: 12,
+          textColor: '#000',
+          showLegend: false,
+          legendPosition: 'top',
+          showDataLabels: false,
+        },
+      },
+      captured: identity('node-x'),
+      currentIdentity: identity('node-x'),
+    })
+    expect(mismatchedTargetId).toMatchObject({ ok: false, code: 'target-mismatch' })
+
+    // 5. Rejects missing item in host
+    const missingTarget = applyPublishedSlideAuthoringItemPatch({
+      current: null,
+      next: tableInput,
+      captured: identity('node-x'),
+      currentIdentity: identity('node-x'),
+    })
+    expect(missingTarget).toMatchObject({ ok: false, code: 'target-not-found' })
+  })
 })

@@ -2093,7 +2093,10 @@ export {
   insertSlideTableColumn,
   deleteSlideTableColumn,
   reorderSlideTableColumns,
+  commitSlideTableLastCellAndAppendRow,
   type AddSlideTableLayerInput,
+  type CommitSlideTableLastCellAndAppendRowInput,
+  type CommitSlideTableLastCellAndAppendRowResult,
 } from './v9TableCommands'
 
 export {

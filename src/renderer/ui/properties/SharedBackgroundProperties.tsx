@@ -55,6 +55,7 @@ export interface SharedBackgroundProps {
   /** Present only for Named state. */
   readonly inherit?: SharedBackgroundInheritControl
   readonly onColorChange: (color: string) => void
+  readonly onPreviewColorChange?: (color: string | null) => void
   readonly onAssetChange: (assetId: string | null) => void
   /** Omit to hide the upload affordance for owners with no import pathway wired yet. */
   readonly onImportAsset?: (file: SharedBackgroundImportFile) => void
@@ -77,6 +78,7 @@ export function SharedBackgroundProperties({
   mode,
   inherit,
   onColorChange,
+  onPreviewColorChange,
   onAssetChange,
   onImportAsset,
   testId = 'shared-background-properties',
@@ -128,6 +130,7 @@ export function SharedBackgroundProperties({
           label="背景颜色"
           value={color ?? effective.color}
           onChange={onColorChange}
+          onPreviewChange={onPreviewColorChange}
         />
         {inherit && (
           <p className="property-hint" data-testid={`${testId}-color-inherit-status`}>

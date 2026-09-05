@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-所有功能纵切已由依赖节点交付。本节点只做跨功能闭合：统一 health/preflight、键盘可达与能力声明，验证 Published producer 没有遗漏，不接管上游实现或用 closure 阶段重写合同。
+本节点的启动前提是所有依赖纵切逐项通过 Acceptance；[2026-09-05 本地复审](../../reviews/1.2-local-review-2026-09-05.md) 仍存在 F1–F5、L1–L6，不能沿用“所有功能已交付”的结论。上游修复及真实 carrier 证据齐备后，本节点只做跨功能 health/preflight、键盘可达、能力声明与 Published 完整性闭合，不接管上游实现或重写合同。
 
 ## Read first
 
@@ -32,7 +32,7 @@
 3. 构建 Published fixture，断言所有合法新 Native 与背景字段进入 payload，越界/非法项阻断而非过滤；旧 V9/Published fixture 仍通过。
 4. 对每个静态导出检查“保留、明确静态后备、可见占位、明确拒绝”恰有一个结果；DOCX 报告逐 item，PPTX input/elbow 的 warning 稳定。
 5. 检查可见入口与键盘路径：Table Tab/Shift+Tab、Chart 数据表、input Tab/Enter/Esc/IME、Line handles、Background owner selector；修复只能落 diagnostics/producer 范围，UI 缺陷返回上游。
-   对本轮反例额外核对真实作者态初始/增量 ACK、统一图表选择入口、连续色板/常用色和一操作一历史证据。transport 故障返回 `r12-008-native-authoring-transport`；颜色和入口分别返回 background/chart delivery，不能因功能数据已通过 Schema 就判为完整。
+   按复审编号核对完整退出证据：L1 的真实内容/样式/历史增量；L2/L3 的 base/两个 named state/surface 隔离；F1 的真实 input 双键原子提交/规则族；L5 的末格单事务与焦点；L6 的独立填充/边框 alpha；F3–F5 的完整圆环、类型图元、裁切、轴/标签/四向图例；L4/F2 的合法 HEX 取消与真实 consumer 连续预览。对应反例须进入正式目标测试，ignored 临时测试不作交接前置。现有常用色/统一入口继续保全；发现缺口返回原责任节点。
 6. 更新能力生成器的 source evidence 覆盖 `src/shared/contracts/**`，在所有上游稳定后仅生成一次最终能力索引；结果必须确定性且与真实 UI/carrier 一致。
 
 ## Stop conditions
@@ -46,7 +46,8 @@
 - 所有 1.2 新能力有精确 health/preflight，合法 Published 不漏项，非法项不静默通过。
 - 键盘入口达到实施合同，无障碍摘要/名称可读取；旧人工编辑与导出基线不退化。
 - 能力索引由生成器产生、source evidence 完整、连续生成确定且检查通过。
-- 1.2 能力声明仍明确 Chart 仅 Slide；Flow/Spatial 的后续规划不能生成当前已支持声明。已修复 UI 和真实作者态同步证据齐全后才允许交给 release。
+- 复审 F1–F5、L1–L6 各有修复 diff 和对应行为证据，真实创建/后续编辑、保存重开、Undo/Redo、Player/HTML 与适用导出齐全后才交给 release；不把测试文件存在、70 项旧测试通过或 build 成功当作这些反例已关闭。
+- 1.2 能力声明仍明确 Chart 仅 Slide，input 仅 Slide scene；Flow/Spatial 后续规划不能生成当前支持声明。只有真实交付的能力进入索引。
 
 ## Focused validation
 

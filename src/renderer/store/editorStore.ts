@@ -1078,6 +1078,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         errorMessage: current.errorMessage,
         editingTextNodeId: current.editingTextNodeId,
         slideDrawTool: current.slideDrawTool,
+        previewBackgroundColor: current.previewBackgroundColor,
       }
     },
     patch: (patch) => set(patch),
@@ -1155,6 +1156,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           errorMessage: current.errorMessage,
           editingTextNodeId: current.editingTextNodeId,
           slideDrawTool: current.slideDrawTool,
+          previewBackgroundColor: current.previewBackgroundColor,
         }
       },
       patch: (patch) => set(patch),
@@ -1194,6 +1196,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     activeTab: 'elements',
     editingTextNodeId: null,
     slideDrawTool: null,
+    previewBackgroundColor: null,
     statusMessage: '已创建新课件',
     errorMessage: null,
     slideBackend: initialBackend,

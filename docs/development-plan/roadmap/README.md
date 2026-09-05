@@ -73,6 +73,7 @@ flowchart LR
 
 - **Native 内容**：Table、Chart 与 Slide-only input 是获批的 V9 Native strict 窄增量；Published Course V2 只做匹配读取与运行所需的窄增量。input 的提交值先原子写入已声明状态键再求规则条件，只映射 PPTX；Flow 作者浮层进入一份连续 DOCX。线条和背景沿用既有对象 / Surface 所有权，不另建旁路状态。
 - **Chart 与取色版本边界**：1.2 闭合真实 Native 作者同步、图表选择入口和共享常用色/连续调色；1.3 先独立固定 Chart 的 Flow 正文与 Spatial world 合同，再迁移共享编辑器并交付两个 Surface，两个 delivery 都必须进入 S1 依赖闭包。项目色板复用 `designTokens.colors`，通过明确范围预览/应用配色；不提前创建持久化主题绑定。1.2 当前 Chart 容器限制在后续合同落地前保持。
+- **1.2 复审修复门**：当前收尾按 [1.2 执行指南](1.2/EXECUTION_GUIDE.md) 闭合作者增量、正确 owner/state 写入、input 及表格/图表/颜色的已确认可见缺口；未通过的共享能力不能被 1.3 图表/色板 delivery 当作完成前置。1.3 无关节点仍可按自己的依赖推进，S1 不替代 1.2 基础修复及 engineering candidate 验证。
 - **Recipe 互动**：分类使用声明式“选中项目→选中目标组”；排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不扩拖放/放置触发器或顺序动作，也不要求先完成通用组件化。
 - **Authoring target**：所有写操作解析为 canonical target，至少包含工程稳定身份、Surface、容器、对象 / 内容路径与版本前提；工具回执必须报告实际落点和新版本。
 - **动态载体**：Component 注册身份固定为工程 / package / version / source / content；动态引用资产必须进入 Published 闭包；实例异常必须隔离并销毁旧实例，显示可见错误或 fallback。

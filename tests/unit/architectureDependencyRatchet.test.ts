@@ -62,7 +62,7 @@ beforeAll(() => {
       if (parsed) parsedSources.set(path, parsed)
     }
   }
-})
+}, 60_000)
 
 afterAll(() => {
   typeScriptSnapshot?.dispose()

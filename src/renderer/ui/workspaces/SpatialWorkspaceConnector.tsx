@@ -51,13 +51,20 @@ export function SpatialWorkspaceConnector() {
   const commands = useMemo<SpatialAuthoringCommandPort>(() => ({
     run: runSpatialAuthoringIntent,
   }), [runSpatialAuthoringIntent])
-  const view = useMemo(() => session
-    ? buildSpatialEditorView({
+  const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
+  const view = useMemo(() => {
+    if (!session) return null
+    const baseView = buildSpatialEditorView({
       project: session.history.present,
       locationId: session.selection.locationId,
       sessionCamera: session.sessionCamera,
     })
-    : null, [session])
+    if (!previewBackgroundColor) return baseView
+    return {
+      ...baseView,
+      backgroundColor: previewBackgroundColor,
+    }
+  }, [session, previewBackgroundColor])
   const assetMimeTypes = useMemo(() => session
     ? Object.fromEntries(
       Object.entries(session.history.present.assets).map(([id, meta]) => [id, meta.mimeType]),

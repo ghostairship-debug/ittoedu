@@ -128,6 +128,7 @@ export interface CourseGlobalPropertiesContext {
     readonly replaceImage: () => void
     readonly clearPresentationOverride: () => void
     readonly updateCourseBackground: (patch: { backgroundColor?: string; backgroundAssetId?: string | null }) => void
+    readonly previewCourseBackground?: (patch: { backgroundColor?: string | null }) => void
     readonly updatePlayback: (patch: Partial<ProjectPlaybackSettings>) => void
     readonly ensureTeacherController: () => void
     readonly updateDesignTokens: (tokens: ProjectDesignTokens) => void
@@ -524,6 +525,7 @@ function CourseGlobalEmptyPanel({
         assets={empty.background.assets}
         effective={empty.background.effective}
         onColorChange={(backgroundColor) => commands.updateCourseBackground({ backgroundColor })}
+        onPreviewColorChange={commands.previewCourseBackground ? (backgroundColor) => commands.previewCourseBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateCourseBackground({ backgroundAssetId })}
         testId="course-background-properties"
       />

@@ -97,9 +97,9 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 当前开发以已签署的 `v1.1.1` 为维护基线；1.1 阶段的执行过程和已闭合评审由 Git 历史保存，不在当前总纲维护完成记录。
 
-1.2 的直接依赖门现已解除；先读 [`1.2/EXECUTION_GUIDE.md`](docs/development-plan/roadmap/1.2/EXECUTION_GUIDE.md) 与 [`1.2/IMPLEMENTATION_CONTRACT.md`](docs/development-plan/roadmap/1.2/IMPLEMENTATION_CONTRACT.md)，再按 [`1.2/README.md`](docs/development-plan/roadmap/1.2/README.md) 的 DAG 实例化节点。五个根节点中 `r12-000-native-contract`、`r12-006-input-response-contract`、`r12-030-line-authoring`、`r12-040-background-authoring` 共享合同锁，首批安全并行只保留 `r12-000-native-contract` + `r12-005-flow-native-authoring-parity`；单执行者使用执行指南的确定顺序。路线节点本身不自动创建任务卡。
+1.2 已有 Native 合同与多项实现，当前进入本地复审驱动的修复收尾。先读 [`1.2/EXECUTION_GUIDE.md`](docs/development-plan/roadmap/1.2/EXECUTION_GUIDE.md) 与 [`1.2/IMPLEMENTATION_CONTRACT.md`](docs/development-plan/roadmap/1.2/IMPLEMENTATION_CONTRACT.md)，再按 [`1.2/README.md`](docs/development-plan/roadmap/1.2/README.md) 的依赖与写锁推进。完整版本 DAG 不表示需要重新开发已成立的根节点；路线节点本身不自动创建任务卡。
 
-当前收尾优先完成真实作者态同步、连续调色与共享常用色板、图表插入入口整理，再进入闭合与候选验收。图表/表格插入后画布失败和色板操作中断是 1.2 的交付阻断；五种图表收为统一入口、现有取色入口提供常用预设色也在 1.2 完成。具体责任节点、证据和执行顺序只在执行指南维护，不从头重做已有合同、命令和导出。Flow/Spatial 图表属于 1.3 的独立扩展，必须在 S1 前完成；1.2 不提前放开当前 strict 有效域。
+当前优先修复 Native 作者画布增量陈旧、Table/Chart 命名状态误写基础数据及合法 Slide surface owner 被拒绝，再交付 input 的完整作者与运行纵切；随后闭合表格末格 Tab 原子事务、表格透明度、图表几何与样式、颜色取消及真实连续预览。现有初始同步、常用色板和统一图表入口继续保留。具体反例、责任节点和退出证据只在执行包维护；以上缺口关闭并通过真实编辑、保存重开、历史、Player/HTML 与适用导出后，才进入 1.2 闭合及候选门。1.3 独立节点可按依赖推进，但不得继承尚未通过的图表/颜色能力，或把 1.2 缺陷延至 S1。Flow/Spatial 图表仍属于 1.3；1.2 保持当前 strict 有效域。
 
 ### 5.2 1.2–1.5：人工创作与外部 Builder 生产力
 

@@ -26,6 +26,7 @@ export type SpatialPropertiesKind = 'spatial-page' | 'spatial-graph'
 export interface SpatialPropertiesCommands {
   readonly setBackgroundColor: (backgroundColor: string) => void
   readonly updateBackground: (patch: SpatialSurfaceBackgroundFields) => void
+  readonly previewBackground?: (patch: { backgroundColor?: string | null }) => void
   readonly setShowCameraFrames: (show: boolean) => void
   readonly addCameraFrame: () => void
   readonly renameCameraFrame: (frameId: string, name: string) => void
@@ -166,6 +167,7 @@ function SpatialPageProperties({ context }: { context: SpatialPropertiesContext 
           onChange: (backgroundMode) => commands.updateBackground({ backgroundMode }),
         }}
         onColorChange={(backgroundColor) => commands.updateBackground({ backgroundColor })}
+        onPreviewColorChange={commands.previewBackground ? (backgroundColor) => commands.previewBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateBackground({ backgroundAssetId })}
         testId="spatial-surface-background-properties"
       />

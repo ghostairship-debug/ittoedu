@@ -66,6 +66,7 @@ function createCommands(input: {
     intent: SpatialAuthoringIntent,
   ) => SpatialAuthoringReceipt
   readonly reportError: (message: string) => void
+  readonly setPreviewBackgroundColor?: (color: string | null) => void
 }): SpatialPropertiesCommands {
   const capture = (target: SpatialEditorAuthoringTargetInput) => (
     captureSpatialEditorAuthoringTarget({
@@ -100,10 +101,16 @@ function createCommands(input: {
       { kind: 'surface', field: 'backgroundColor' },
       { kind: 'set-surface-background', backgroundColor },
     ),
-    updateBackground: (patch) => run(
-      { kind: 'surface', field: 'background' },
-      { kind: 'set-surface-background-patch', patch },
-    ),
+    updateBackground: (patch) => {
+      input.setPreviewBackgroundColor?.(null)
+      return run(
+        { kind: 'surface', field: 'background' },
+        { kind: 'set-surface-background-patch', patch },
+      )
+    },
+    previewBackground: (patch) => {
+      input.setPreviewBackgroundColor?.(patch.backgroundColor ?? null)
+    },
     setShowCameraFrames: (show) => world('session.showCameraFrames', {
       kind: 'set-show-camera-frames',
       show,
@@ -308,6 +315,7 @@ export function buildSpatialPropertiesOwner(input: {
   ) => SpatialAuthoringReceipt
   readonly reportError: (message: string) => void
   readonly professionalInteraction?: SpatialPropertiesContext['professionalInteraction']
+  readonly setPreviewBackgroundColor?: (color: string | null) => void
 }): SpatialPropertiesOwnerResult {
     const { view } = input
     if (!view) return { status: 'inactive' }
@@ -347,6 +355,7 @@ export function buildSpatialPropertiesOwner(input: {
       playbackPathId: input.playbackPathId,
       runIntent: input.runIntent,
       reportError: input.reportError,
+      setPreviewBackgroundColor: input.setPreviewBackgroundColor,
     })
     const pageContext = buildContext({
       kind: 'spatial-page',

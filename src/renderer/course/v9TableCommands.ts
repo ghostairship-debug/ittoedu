@@ -9,9 +9,11 @@ import type {
   NativeTableRow,
   NativeTableStyle,
 } from '../../shared/contracts/native-v1/types'
+import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
   LayerItem,
+  LayerItemOverride,
   SlideSceneDocument,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
@@ -51,6 +53,21 @@ export interface AddSlideTableLayerInput {
   readonly headerRowCount?: number
   readonly style?: Partial<NativeTableStyle>
   readonly label?: string
+}
+
+export interface CommitSlideTableLastCellAndAppendRowInput {
+  readonly layerItemId: string
+  readonly cellId: string
+  readonly text: string
+  readonly idFactory?: IdFactory
+}
+
+export interface CommitSlideTableLastCellAndAppendRowResult extends SlideCommandResult {
+  readonly focusResult?: {
+    readonly newRowId: string
+    readonly newCellId: string
+    readonly targetColumnId: string
+  }
 }
 
 function freezeSelection(selection: SlideAuthoringSelection): SlideAuthoringSelection {
@@ -118,6 +135,49 @@ function catchCommand(session: SlideAuthoringSessionRef, error: unknown): SlideC
   return reject(session, '命令失败')
 }
 
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function sparseObjectDiff(
+  base: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const diff: Record<string, unknown> = {}
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    if (sameJson(base[key], next[key])) continue
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      diff[key] = null
+    } else {
+      const baseVal = base[key]
+      const nextVal = next[key]
+      if (isPlainRecord(baseVal) && isPlainRecord(nextVal)) {
+        const nestedDiff = sparseObjectDiff(baseVal, nextVal)
+        if (Object.keys(nestedDiff).length > 0) {
+          diff[key] = nestedDiff
+        }
+      } else {
+        diff[key] = structuredClone(nextVal)
+      }
+    }
+  }
+  return diff
+}
+
+function deleteEmptyOverride(
+  overrides: Record<string, LayerItemOverride>,
+  layerItemId: string,
+): void {
+  const override = overrides[layerItemId]
+  if (override && Object.keys(override).length === 0) {
+    delete overrides[layerItemId]
+  }
+}
+
 function slideSceneContext(
   project: CourseProjectDocument,
   session: SlideAuthoringSessionRef,
@@ -137,12 +197,6 @@ function slideSceneContext(
   const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
   if (!scene) throw new Error('当前幻灯片已失效')
   return { location, surface, scene }
-}
-
-function requireSceneScope(session: SlideAuthoringSessionRef): void {
-  if (session.scope !== 'scene') {
-    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '表格只能添加到幻灯片场景内')
-  }
 }
 
 function nextSceneLayerOrder(
@@ -176,6 +230,35 @@ function appendSceneLayer(
   }
   scene.layerItems.push(item)
   scene.layerItems.sort((a, b) => a.order - b.order || a.layerItemId.localeCompare(b.layerItemId))
+}
+
+function nextSurfaceLayerOrder(
+  project: CourseProjectDocument,
+  surface: SlideSurfaceDocument,
+): number {
+  const preferred = Math.max(-1, ...surface.surfaceLayerItems.map((entry) => entry.item.order)) + 1
+  return allocateCourseLayerOrder(project, Math.max(0, preferred))
+}
+
+function appendSurfaceLayer(
+  project: CourseProjectDocument,
+  surface: SlideSurfaceDocument,
+  item: LayerItem,
+): void {
+  if (surface.surfaceLayerItems.length >= MAX_SCENE_NODES) {
+    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
+  }
+  if (surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === item.layerItemId)) {
+    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
+  }
+  item.order = nextSurfaceLayerOrder(project, surface)
+  surface.surfaceLayerItems.push({
+    item,
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  surface.surfaceLayerItems.sort((a, b) =>
+    a.item.order - b.item.order || a.item.layerItemId.localeCompare(b.item.layerItemId),
+  )
 }
 
 function selectAdded(
@@ -218,21 +301,126 @@ function commitUpdated(
   }, true)
 }
 
-function requireTableLayer(
-  scene: SlideSceneDocument,
+interface ResolvedTableTarget {
+  readonly item: LayerItem
+  readonly table: NativeTableContent
+  commit(nextTable: NativeTableContent): void
+}
+
+function resolveTableTarget(
+  project: CourseProjectDocument,
+  session: SlideAuthoringSessionRef,
   layerItemId: string,
-): { item: LayerItem; table: NativeTableContent } {
-  const item = scene.layerItems.find((candidate) => candidate.layerItemId === layerItemId)
-  if (!item) {
+): ResolvedTableTarget {
+  if (session.scope === 'global') {
+    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '表格只能在幻灯片场景或本页中使用')
+  }
+  if (session.scope !== 'scene' && session.scope !== 'surface') {
+    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '表格只能在幻灯片场景或本页中使用')
+  }
+
+  const { surface, scene } = slideSceneContext(project, session)
+
+  if (session.scope === 'surface') {
+    const scoped = surface.surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === layerItemId,
+    )
+    if (!scoped) {
+      if (scene.layerItems.some((candidate) => candidate.layerItemId === layerItemId)) {
+        throw new SlideCommandError(
+          SLIDE_REJECT_WRONG_OWNER,
+          '当前元素属于场景层，请切换到场景层编辑',
+        )
+      }
+      throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+    }
+    if (scoped.item.locked) {
+      throw new SlideCommandError(SLIDE_REJECT_LOCKED, '所选元素已锁定，无法修改')
+    }
+    const nativeScopedItem = scoped.item
+    if (nativeScopedItem.kind !== 'native' || nativeScopedItem.content.nativeType !== 'table') {
+      throw new SlideCommandError('invalid-target', '所选元素不是表格')
+    }
+    const table = structuredClone(nativeScopedItem.content.data as NativeTableContent)
+    return {
+      item: nativeScopedItem,
+      table,
+      commit(nextTable: NativeTableContent) {
+        tableNativeContentObjectSchema.parse(nextTable)
+        nativeScopedItem.content.data = structuredClone(nextTable)
+      },
+    }
+  }
+
+  // session.scope === 'scene'
+  const baseItem = scene.layerItems.find(
+    (candidate) => candidate.layerItemId === layerItemId,
+  )
+  if (!baseItem) {
+    if (surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === layerItemId)) {
+      throw new SlideCommandError(
+        SLIDE_REJECT_WRONG_OWNER,
+        '当前元素属于本页层，请切换到本页层编辑',
+      )
+    }
     throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
   }
-  if (item.locked) {
+  const stateId = session.selection.stateId
+  const state = stateId
+    ? scene.presentation?.states.find((candidate) => candidate.id === stateId)
+    : undefined
+  if (stateId && !state) {
+    throw new Error(`找不到命名状态：${stateId}`)
+  }
+  const override = state ? state.layerItemOverrides[layerItemId] : undefined
+  const isLocked = override?.locked ?? baseItem.locked
+  if (isLocked) {
     throw new SlideCommandError(SLIDE_REJECT_LOCKED, '所选元素已锁定，无法修改')
   }
-  if (item.kind !== 'native' || item.content.nativeType !== 'table') {
+  const nativeBaseItem = baseItem
+  if (nativeBaseItem.kind !== 'native' || nativeBaseItem.content.nativeType !== 'table') {
     throw new SlideCommandError('invalid-target', '所选元素不是表格')
   }
-  return { item, table: item.content.data }
+
+  if (!state) {
+    const table = structuredClone(nativeBaseItem.content.data as NativeTableContent)
+    return {
+      item: nativeBaseItem,
+      table,
+      commit(nextTable: NativeTableContent) {
+        tableNativeContentObjectSchema.parse(nextTable)
+        nativeBaseItem.content.data = structuredClone(nextTable)
+      },
+    }
+  }
+
+  const currentOverride = state.layerItemOverrides[layerItemId] ?? {}
+  const currentData = currentOverride.nativeData
+    ? (mergeCourseNativeData(
+        nativeBaseItem.content.data as unknown as Record<string, unknown>,
+        currentOverride.nativeData,
+      ) as unknown as NativeTableContent)
+    : structuredClone(nativeBaseItem.content.data as NativeTableContent)
+
+  return {
+    item: nativeBaseItem,
+    table: currentData,
+    commit(nextTable: NativeTableContent) {
+      tableNativeContentObjectSchema.parse(nextTable)
+      const nextNative = sparseObjectDiff(
+        nativeBaseItem.content.data as unknown as Record<string, unknown>,
+        nextTable as unknown as Record<string, unknown>,
+      )
+      const itemOverride = state.layerItemOverrides[layerItemId] ?? {}
+      if (Object.keys(nextNative).length === 0) {
+        delete itemOverride.nativeData
+      } else {
+        itemOverride.nativeData = nextNative
+      }
+      state.layerItemOverrides[layerItemId] = itemOverride
+      deleteEmptyOverride(state.layerItemOverrides, layerItemId)
+    },
+  }
 }
 
 export function addSlideTableLayer(
@@ -243,9 +431,13 @@ export function addSlideTableLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
-    const { scene } = slideSceneContext(session.history.present, session)
-    const existingCount = scene.layerItems.length
+    if (session.scope !== 'scene' && session.scope !== 'surface') {
+      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '表格只能在幻灯片场景或本页中使用')
+    }
+    const { surface, scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'surface'
+      ? surface.surfaceLayerItems.length
+      : scene.layerItems.length
 
     const tableNode = createTableNode({
       id: input.id,
@@ -276,8 +468,12 @@ export function addSlideTableLayer(
     const layerItem = createTableLayerItem(positioned)
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene: draftScene } = slideSceneContext(draft, session)
-      appendSceneLayer(draft, draftScene, layerItem, session.selection.stateId)
+      const { surface: draftSurface, scene: draftScene } = slideSceneContext(draft, session)
+      if (session.scope === 'surface') {
+        appendSurfaceLayer(draft, draftSurface, layerItem)
+      } else {
+        appendSceneLayer(draft, draftScene, layerItem, session.selection.stateId)
+      }
     }, options.now)
 
     return commitAdded(session, project, layerItem.layerItemId)
@@ -298,20 +494,18 @@ export function patchSlideTableCellText(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     if (typeof input.text !== 'string' || input.text.length > 20000) {
       throw new SlideCommandError('invalid-data', '单元格文本长度超出上限')
     }
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       let found = false
       for (const row of table.rows) {
         const cell = row.cells.find((c) => c.id === input.cellId)
         if (cell) {
-          if (cell.text === input.text) return // no-op
           cell.text = input.text
           found = true
           break
@@ -321,7 +515,7 @@ export function patchSlideTableCellText(
         throw new SlideCommandError('invalid-target', `找不到单元格：${input.cellId}`)
       }
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -341,21 +535,16 @@ export function patchSlideTableStyle(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
-      const candidateStyle = {
+      table.style = {
         ...table.style,
         ...input.stylePatch,
       }
-      const candidateTable = {
-        ...table,
-        style: candidateStyle,
-      }
-      tableNativeContentObjectSchema.parse(candidateTable)
-      table.style = candidateStyle
+
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -376,10 +565,9 @@ export function patchSlideTableCellStyle(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       let targetCell: NativeTableCell | undefined
       for (const row of table.rows) {
@@ -397,13 +585,12 @@ export function patchSlideTableCellStyle(
         ...(targetCell.style ?? {}),
         ...input.stylePatch,
       }
-      // Clean undefined keys
       for (const key of Object.keys(nextStyle) as (keyof NativeTableCellStyle)[]) {
         if (nextStyle[key] === undefined) delete nextStyle[key]
       }
       targetCell.style = Object.keys(nextStyle).length > 0 ? nextStyle : undefined
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -424,20 +611,19 @@ export function patchSlideTableRowHeight(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     if (!Number.isFinite(input.height) || input.height < 20 || input.height > 2000) {
       throw new SlideCommandError('invalid-data', '行高必须介于 20 到 2000 之间')
     }
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       const row = table.rows.find((r) => r.id === input.rowId)
       if (!row) throw new SlideCommandError('invalid-target', `找不到行：${input.rowId}`)
       row.height = input.height
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -458,20 +644,19 @@ export function patchSlideTableColumnWidth(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     if (!Number.isFinite(input.width) || input.width < 24 || input.width > 2000) {
       throw new SlideCommandError('invalid-data', '列宽必须介于 24 到 2000 之间')
     }
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       const col = table.columns.find((c) => c.id === input.columnId)
       if (!col) throw new SlideCommandError('invalid-target', `找不到列：${input.columnId}`)
       col.width = input.width
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -493,12 +678,11 @@ export function insertSlideTableRow(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const idFactory = input.idFactory ?? nanoid
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       if (table.rows.length >= 1000) {
         throw new SlideCommandError('invalid-data', '表格行数已达上限（1000 行）')
@@ -527,7 +711,7 @@ export function insertSlideTableRow(
 
       table.rows.splice(insertIndex, 0, newRow)
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -547,10 +731,9 @@ export function deleteSlideTableRow(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       if (table.rows.length <= 1) {
         throw new SlideCommandError('invalid-data', '表格至少需要保留一行')
@@ -566,7 +749,7 @@ export function deleteSlideTableRow(
         table.headerRowCount = table.rows.length
       }
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -586,10 +769,9 @@ export function reorderSlideTableRows(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       if (
         input.orderedRowIds.length !== table.rows.length ||
@@ -609,7 +791,7 @@ export function reorderSlideTableRows(
       }
 
       table.rows = nextRows
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -632,12 +814,11 @@ export function insertSlideTableColumn(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const idFactory = input.idFactory ?? nanoid
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       if (table.columns.length >= 100) {
         throw new SlideCommandError('invalid-data', '表格列数已达上限（100 列）')
@@ -672,7 +853,7 @@ export function insertSlideTableColumn(
         row.cells.splice(insertIndex, 0, newCell)
       }
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -692,10 +873,9 @@ export function deleteSlideTableColumn(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       if (table.columns.length <= 1) {
         throw new SlideCommandError('invalid-data', '表格至少需要保留一列')
@@ -713,7 +893,7 @@ export function deleteSlideTableColumn(
         row.cells = row.cells.filter((c) => c.columnId !== input.columnId)
       }
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -733,10 +913,9 @@ export function reorderSlideTableColumns(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { table } = requireTableLayer(scene, input.layerItemId)
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
 
       if (
         input.orderedColumnIds.length !== table.columns.length ||
@@ -767,10 +946,101 @@ export function reorderSlideTableColumns(
         })
       }
 
-      tableNativeContentObjectSchema.parse(table)
+      target.commit(table)
     }, options.now)
 
     return commitUpdated(session, project)
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+export function commitSlideTableLastCellAndAppendRow(
+  session: SlideAuthoringSession,
+  input: CommitSlideTableLastCellAndAppendRowInput,
+  options: SlideCommandOptions = {},
+): CommitSlideTableLastCellAndAppendRowResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    if (typeof input.text !== 'string' || input.text.length > 20000) {
+      throw new SlideCommandError('invalid-data', '单元格文本长度超出上限')
+    }
+
+    let focusResult: {
+      readonly newRowId: string
+      readonly newCellId: string
+      readonly targetColumnId: string
+    } | undefined
+
+    const project = commitSlideProjectMutation(session.history.present, (draft) => {
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      const table = target.table
+
+      if (table.rows.length === 0 || table.columns.length === 0) {
+        throw new SlideCommandError('invalid-target', '表格必须包含行与列')
+      }
+
+      // Find target cell
+      let targetRowIndex = -1
+      let targetCell: NativeTableCell | undefined
+      for (let r = 0; r < table.rows.length; r++) {
+        const cell = table.rows[r]!.cells.find((c) => c.id === input.cellId)
+        if (cell) {
+          targetRowIndex = r
+          targetCell = cell
+          break
+        }
+      }
+      if (!targetCell || targetRowIndex < 0) {
+        throw new SlideCommandError('invalid-target', `找不到单元格：${input.cellId}`)
+      }
+
+      // Check if it is the last cell: last row and last column
+      const lastRowIndex = table.rows.length - 1
+      const lastRow = table.rows[lastRowIndex]!
+      const lastColumn = table.columns[table.columns.length - 1]!
+      if (targetRowIndex !== lastRowIndex || targetCell.columnId !== lastColumn.id) {
+        throw new SlideCommandError('invalid-target', '所选单元格不是表格末格')
+      }
+
+      // Check row limit
+      if (table.rows.length >= 1000) {
+        throw new SlideCommandError('invalid-data', '表格行数已达上限（1000 行）')
+      }
+
+      // 1. Commit text
+      targetCell.text = input.text
+
+      // 2. Append new row
+      const idFactory = input.idFactory ?? nanoid
+      const newRowId = `row_${idFactory()}`
+      const newCells: NativeTableCell[] = table.columns.map((col) => ({
+        id: `cell_${idFactory()}`,
+        columnId: col.id,
+        text: '',
+      }))
+      const newRow: NativeTableRow = {
+        id: newRowId,
+        height: lastRow.height,
+        cells: newCells,
+      }
+      table.rows.push(newRow)
+
+      // 3. Commit mutation through target commit
+      target.commit(table)
+
+      focusResult = {
+        newRowId,
+        newCellId: newCells[0]!.id,
+        targetColumnId: table.columns[0]!.id,
+      }
+    }, options.now)
+
+    return {
+      ...commitUpdated(session, project),
+      focusResult,
+    }
   } catch (error) {
     return catchCommand(session, error)
   }

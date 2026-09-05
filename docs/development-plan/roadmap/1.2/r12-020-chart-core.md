@@ -6,31 +6,34 @@
 
 ## Outcome / current evidence
 
-`r12-000-native-contract` 已冻结 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §4 的 Chart union。本节点实现五类共用的 factory 与 canonical data/style commands，确保非法表格输入零部分改写、类型切换不静默丢数据。
+Chart factory 与命令已存在。[本地复审 L2、L3 / P1](../../reviews/1.2-local-review-2026-09-05.md) 的正式命令反例确认：命名状态标题改写 base，schema-valid Slide surface 图表被 scene-only guard 拒绝。本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.3/§4 修复 owner/state 写入并保全既有类型、数据及稳定 ID，不重做五类 factory 或接管 F3–F5 painter 修复。
 
 ## Read first
 
 - `src/renderer/project/nativeNodeFactories.ts`
 - `src/renderer/course/v9SlideContentCommands.ts`
+- `src/renderer/course/v9ChartCommands.ts`
+- `src/renderer/course/slideAuthoringBackend.ts`
 - `src/renderer/course/effectiveLayerCommands.ts`
 - `src/renderer/store/slices/slideAuthoringSlice.ts`
+- `src/renderer/store/slices/slideOwnedCommands.ts`
 - `src/renderer/store/history.ts`
 - `tests/unit/v9SlideContentCommands.test.ts`
+- `tests/unit/v9ChartCommands.test.ts`
 - `tests/unit/editorTransaction.test.ts`
 - `tests/unit/effectiveLayerCommands.test.ts`
 
 ## Write scope
 
-只写 Chart factory、typed commands、Slide slice 接线和现有 command/history tests。禁止修改 Chart schema、构建 UI/renderer/PPTX、接受 NaN/Infinity、用 chart library 的内部索引作为稳定身份，或扩到 Flow/Spatial/global。
+只写 `v9ChartCommands.ts`、`v9SlideContentCommands.ts`、`effectiveLayerCommands.ts`、`slideAuthoringBackend.ts` 的 Chart 目标/事务接线、`slideAuthoringSlice.ts`/`slideOwnedCommands.ts` 及目标测试；`nativeNodeFactories.ts` 仅在实际输入需要时调整。`history.ts` 只读，复用 Table 已交接的 owner/state seam，不建立另一套 writer。禁止修改 Schema、UI/painter/PPTX、接受 NaN/Infinity、改变身份规则或扩 Flow/Spatial/global。
 
 ## Execution
 
-1. 实现注入 ID factory 的默认 Chart factory，五类都从同一 categories/series/points builder 创建；bar 固定为纵向簇状柱形语义。
-2. 实现 title/common style/cartesian style/donut hole patch；candidate 先过完整 Chart schema 再一次提交。
-3. 实现 category/series insert/delete/reorder 与 point value patch，保持 point-category 对齐和既有 ID；最后 category/series 删除拒绝。
-4. 类型切换保留数据与 ID。多系列切到 pie/donut 必须接收教师已确认的 retainedSeriesId；没有、错 ID 或未确认均零写入。
-5. 支持一次性表格 candidate 更新：先定位每个非法 cell，全部合法才替换；不逐 cell 写 history。
-6. 为五类、负值、非有限值、长度错位、pie/donut 约束、stale/locked 和 Undo/Redo 增加 table-driven tests。
+1. 将命名状态标题误写与 schema-valid surface fixture 的命令拒绝纳入目标 tests，比较 base、两个 named state 和 surface 的真实变化。
+2. 复用 canonical target/effective read/override writer，scene named state 只写 nativeData override，surface 写实际 surface item；不能只放开 guard 或继续从 base 读旧值。Table/Chart 共用同一已有 seam，按共享写锁串行修改。
+3. 覆盖 title、common/cartesian/donut style、数据整表、category/series/point、类型切换的既有命令；candidate 整体验证后提交一次。创建/复制保持 owner、可见性与 ID 规则，普通编辑不重建子项 ID。
+4. 保留多系列切 pie/donut 的 retainedSeriesId 明确选择语义；没有、错 ID 或取消零写入。非法数值、长度错位、最后分类/系列删除仍拒绝，整表提交不拆历史。
+5. 用 base/两个 named state/surface 的数据、样式和类型变化验证 Undo/Redo 与保存往返；locked/stale/缺失 owner/state 失败时 project/revision/history/selection 不变。既有五类 factory 用例未受影响时复用。
 
 ## Stop conditions
 
@@ -42,14 +45,15 @@
 
 - 五类由同一合同工厂创建；所有数据、样式与类型 command 原子且有稳定子项 ID。
 - 非法 candidate 定位失败且 project/history/revision 不变；Undo/Redo 精确恢复。
+- 命名状态修改不污染 base 或其他状态；合法 Slide surface Chart 创建/编辑成功且不写当前 scene state。有效内容读取、candidate 校验与写入采用同一 owner/state 边界。
 - 切入单系列图表必须显式选择，任何隐式截断都有测试防回归。
 
 ## Focused validation
 
-- `npm run test:product -- tests/unit/v9SlideContentCommands.test.ts tests/unit/effectiveLayerCommands.test.ts`
+- `npm run test:product -- tests/unit/v9ChartCommands.test.ts tests/unit/effectiveLayerCommands.test.ts tests/unit/v9SlideContentCommands.test.ts`
 - `npm run test:product -- tests/unit/editorTransaction.test.ts tests/unit/courseProjectRoundTrip.test.ts`
 - `npm run typecheck`
 
 ## Rollback / handoff
 
-Factory、commands 与 tests 整体回滚；不得留下能创建却无法合法修改的 Chart。交接 `r12-021-chart-authoring-delivery` 时列出 commands、retainedSeries 决策接口、错误 path 与五类 fixture。
+commands、owner/state 接线与 tests 整体回滚，不保留直写 base 的旁路。交接 `r12-021-chart-authoring-delivery` 时列出 state/surface 行为、窄命令、retainedSeries 接口、错误 path 与往返 fixture；图表几何与样式由 delivery 修复。

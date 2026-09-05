@@ -52,6 +52,8 @@
       "writeLocks": [
         "store-slide",
         "props-slide",
+        "props-shared",
+        "workspace-shell",
         "authoring-slide",
         "authoring-interaction",
         "published-slide",
@@ -75,7 +77,8 @@
       "writeLocks": [
         "contracts-schema",
         "authoring-slide",
-        "published-slide"
+        "published-slide",
+        "workspace-shell"
       ],
       "spec": "1.2/r12-008-native-authoring-transport.md"
     },
@@ -104,6 +107,7 @@
       "optional": false,
       "writeLocks": [
         "props-slide",
+        "props-shared",
         "authoring-slide",
         "published-slide",
         "export-pptx"
@@ -135,6 +139,7 @@
       "optional": false,
       "writeLocks": [
         "props-slide",
+        "props-shared",
         "authoring-slide",
         "published-slide",
         "export-pptx",
@@ -177,6 +182,7 @@
         "props-flow",
         "props-spatial",
         "props-global",
+        "workspace-shell",
         "authoring-slide",
         "authoring-flow",
         "authoring-spatial",

@@ -382,10 +382,25 @@ function publishedAuthoringNodeFromLayerItem(item: LayerItem): AuthoringPatchNod
   return null
 }
 
-function publishedAuthoringPatchesFromSlideView(
-  view: ReturnType<typeof buildSlideEditorView>,
+interface PublishedAuthoringSnapshotState {
+  readonly localNodes: AuthoringPatchNode[]
+  readonly globalNodes: AuthoringPatchNode[]
+  readonly backgroundColor: string
+  readonly backgroundAssetId: string | null
+}
+
+function extractPublishedAuthoringState(
+  view: ReturnType<typeof buildSlideEditorView> | null,
   localSource: 'scene' | 'surface',
-): PlayerAuthoringPatch[] {
+): PublishedAuthoringSnapshotState {
+  if (!view) {
+    return {
+      localNodes: [],
+      globalNodes: [],
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+    }
+  }
   const localNodes: AuthoringPatchNode[] = []
   const globalNodes: AuthoringPatchNode[] = []
   for (const layer of view.layers) {
@@ -394,6 +409,20 @@ function publishedAuthoringPatchesFromSlideView(
     if (layer.source === 'global') globalNodes.push(node)
     else if (layer.source === localSource) localNodes.push(node)
   }
+  return {
+    localNodes,
+    globalNodes,
+    backgroundColor: view.backgroundColor,
+    backgroundAssetId: view.backgroundAssetId ?? null,
+  }
+}
+
+function publishedAuthoringPatchesFromSlideView(
+  view: ReturnType<typeof buildSlideEditorView>,
+  localSource: 'scene' | 'surface',
+): PlayerAuthoringPatch[] {
+  const { localNodes, globalNodes, backgroundColor, backgroundAssetId } =
+    extractPublishedAuthoringState(view, localSource)
   return [
     ...localNodes.map((node): PlayerAuthoringPatch => ({
       kind: 'native-node',
@@ -408,8 +437,8 @@ function publishedAuthoringPatchesFromSlideView(
     {
       kind: 'scene-background',
       target: { kind: 'scene-background', scope: 'scene' },
-      backgroundColor: view.backgroundColor,
-      backgroundAssetId: view.backgroundAssetId ?? null,
+      backgroundColor,
+      backgroundAssetId,
     },
     {
       kind: 'scene-order',
@@ -651,6 +680,7 @@ export function SlideLocationWorkspace({
     authoringScope: 'scene' | 'surface' | 'global'
   } | null>(null)
   const previousSceneRef = useRef<SlidePhaserDocument | null>(null)
+  const previousPublishedStateRef = useRef<PublishedAuthoringSnapshotState | null>(null)
   const previousComponentPackagesRef = useRef<
     Record<string, ComponentPackageData> | null
   >(null)
@@ -899,6 +929,7 @@ export function SlideLocationWorkspace({
       authoringFrameRef.current = null
     }
     pendingAuthoringNodesRef.current.clear()
+    previousPublishedStateRef.current = null
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     lastAuthoringTargetsRevisionRef.current = -1
@@ -1153,9 +1184,12 @@ export function SlideLocationWorkspace({
       authoringFrameRef.current = null
     }
     pendingAuthoringNodesRef.current.clear()
+    const localSource = localPublishedAuthoringSource(authoringScope)
+    const currentState = extractPublishedAuthoringState(view, localSource)
+    previousPublishedStateRef.current = structuredClone(currentState)
     const patches = publishedAuthoringPatchesFromSlideView(
       view,
-      localPublishedAuthoringSource(authoringScope),
+      localSource,
     )
     let lastCommand: PlayerAuthoringPatchCommand | null = null
     for (const patch of patches) {
@@ -1171,6 +1205,7 @@ export function SlideLocationWorkspace({
       authoringFrameRef.current = null
     }
     pendingAuthoringNodesRef.current.clear()
+    previousPublishedStateRef.current = null
   }, [])
 
   const handlePublishedAuthoringMessage = useCallback((
@@ -2040,6 +2075,28 @@ export function SlideLocationWorkspace({
     ) {
       const previousIds = previous.nodes.map((node) => node.id).join('|')
       const nextIds = document.nodes.map((node) => node.id).join('|')
+      const authoringScope = publishedAuthoringInitRef.current?.authoringScope
+        ?? backend?.getSnapshot().scope
+        ?? editingScope
+      const localSource = localPublishedAuthoringSource(authoringScope)
+      const currentPublished = extractPublishedAuthoringState(slideEditorView, localSource)
+      const prevPublished = previousPublishedStateRef.current
+      const publishedDirty = prevPublished ? (
+        prevPublished.backgroundColor !== currentPublished.backgroundColor
+        || prevPublished.backgroundAssetId !== currentPublished.backgroundAssetId
+        || prevPublished.localNodes.map((n) => n.id).join('|') !== currentPublished.localNodes.map((n) => n.id).join('|')
+        || prevPublished.globalNodes.map((n) => n.id).join('|') !== currentPublished.globalNodes.map((n) => n.id).join('|')
+        || currentPublished.localNodes.some((node) => {
+          if (node.id === editingId) return false
+          const before = prevPublished.localNodes.find((item) => item.id === node.id)
+          return !before || !nodesEqual(before, node)
+        })
+        || currentPublished.globalNodes.some((node) => {
+          if (node.id === editingId) return false
+          const before = prevPublished.globalNodes.find((item) => item.id === node.id)
+          return !before || !nodesEqual(before, node)
+        })
+      ) : false
       const othersDirty =
         previousIds !== nextIds
         || previous.backgroundColor !== document.backgroundColor
@@ -2049,6 +2106,7 @@ export function SlideLocationWorkspace({
           const before = previous.nodes.find((item) => item.id === node.id)
           return !before || !nodesEqual(before, node)
         })
+        || publishedDirty
       if (!othersDirty) return
     }
 
@@ -2078,37 +2136,75 @@ export function SlideLocationWorkspace({
       }
     }
     if (canvasMode === 'edit' && authoringReadyRef.current) {
-      const previousById = new Map(
-        previous?.nodes.map((node) => [node.id, node]) ?? [],
-      )
-      for (const node of document.nodes) {
-        if (node.id === editingId) continue
-        const before = previousById.get(node.id)
-        if (!before || !nodesEqual(before, node)) {
-          queueAuthoringNodePatch(editingScope, node)
+      const authoringScope = publishedAuthoringInitRef.current?.authoringScope
+        ?? backend?.getSnapshot().scope
+        ?? editingScope
+      const localSource = localPublishedAuthoringSource(authoringScope)
+      const currentPublished = extractPublishedAuthoringState(slideEditorView, localSource)
+      const previousPublished = previousPublishedStateRef.current
+
+      if (previousPublished) {
+        const previousLocalById = new Map(
+          previousPublished.localNodes.map((node) => [node.id, node]),
+        )
+        for (const node of currentPublished.localNodes) {
+          if (node.id === editingId) continue
+          const before = previousLocalById.get(node.id)
+          if (!before || !nodesEqual(before, node)) {
+            queueAuthoringNodePatch('scene', node)
+          }
+        }
+
+        const previousGlobalById = new Map(
+          previousPublished.globalNodes.map((node) => [node.id, node]),
+        )
+        for (const node of currentPublished.globalNodes) {
+          if (node.id === editingId) continue
+          const before = previousGlobalById.get(node.id)
+          if (!before || !nodesEqual(before, node)) {
+            queueAuthoringNodePatch('global', node)
+          }
+        }
+
+        if (editingScope === 'scene') {
+          if (
+            previousPublished.backgroundColor !== currentPublished.backgroundColor ||
+            previousPublished.backgroundAssetId !== currentPublished.backgroundAssetId
+          ) {
+            postAuthoringPatch({
+              kind: 'scene-background',
+              target: { kind: 'scene-background', scope: 'scene' },
+              backgroundColor: currentPublished.backgroundColor,
+              backgroundAssetId: currentPublished.backgroundAssetId,
+            })
+          }
+          const previousOrder = previousPublished.localNodes.map((node) => node.id).join('|')
+          const nextOrder = currentPublished.localNodes.map((node) => node.id).join('|')
+          if (previousOrder !== nextOrder) {
+            postAuthoringPatch({
+              kind: 'scene-order',
+              target: { kind: 'scene-order', scope: 'scene' },
+              nodeIds: currentPublished.localNodes.map((node) => node.id),
+            })
+          }
         }
       }
-      if (editingScope === 'scene') {
-        if (
-          !previous ||
-          previous.backgroundColor !== document.backgroundColor ||
-          previous.backgroundAssetId !== document.backgroundAssetId
-        ) {
-          postAuthoringPatch({
-            kind: 'scene-background',
-            target: { kind: 'scene-background', scope: 'scene' },
-            backgroundColor: document.backgroundColor,
-            backgroundAssetId: document.backgroundAssetId ?? null,
-          })
+
+      previousPublishedStateRef.current = structuredClone(currentPublished)
+      if (editingId && previousPublishedStateRef.current && previousPublished) {
+        const oldLocal = previousPublished.localNodes.find((node) => node.id === editingId)
+        if (oldLocal) {
+          const idx = previousPublishedStateRef.current.localNodes.findIndex((node) => node.id === editingId)
+          if (idx >= 0) {
+            previousPublishedStateRef.current.localNodes[idx] = structuredClone(oldLocal)
+          }
         }
-        const previousOrder = previous?.nodes.map((node) => node.id).join('|')
-        const nextOrder = document.nodes.map((node) => node.id).join('|')
-        if (previousOrder !== nextOrder) {
-          postAuthoringPatch({
-            kind: 'scene-order',
-            target: { kind: 'scene-order', scope: 'scene' },
-            nodeIds: document.nodes.map((node) => node.id),
-          })
+        const oldGlobal = previousPublished.globalNodes.find((node) => node.id === editingId)
+        if (oldGlobal) {
+          const idx = previousPublishedStateRef.current.globalNodes.findIndex((node) => node.id === editingId)
+          if (idx >= 0) {
+            previousPublishedStateRef.current.globalNodes[idx] = structuredClone(oldGlobal)
+          }
         }
       }
     }
@@ -2124,12 +2220,14 @@ export function SlideLocationWorkspace({
       }
     }
   }, [
+    backend,
     canvasMode,
     componentPackages,
     document,
     editingScope,
     postAuthoringPatch,
     queueAuthoringNodePatch,
+    slideEditorView,
   ])
 
   useEffect(() => {

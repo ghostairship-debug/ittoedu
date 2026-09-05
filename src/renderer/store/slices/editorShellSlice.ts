@@ -22,6 +22,7 @@ export type EditorShellOwnedState = {
   errorMessage: string | null
   editingTextNodeId: string | null
   slideDrawTool: SlideLineDrawTool
+  previewBackgroundColor: string | null
 }
 
 export type EditorShellPorts = {
@@ -48,6 +49,7 @@ export function createEditorShellSlice(
   setStatus(message: string | null): void
   setError(message: string | null): void
   setSlideDrawTool(tool: SlideLineDrawTool): void
+  setPreviewBackgroundColor(color: string | null): void
 } {
   return {
     setEditorMode(mode) {
@@ -92,6 +94,9 @@ export function createEditorShellSlice(
             ? { statusMessage: '在画布上拖拽绘制折线箭头；Esc 取消' }
             : {}),
       })
+    },
+    setPreviewBackgroundColor(color: string | null) {
+      shell.patch({ previewBackgroundColor: color })
     },
   }
 }

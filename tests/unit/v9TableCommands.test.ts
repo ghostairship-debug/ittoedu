@@ -5,8 +5,12 @@ import {
   type CourseProjectDocument,
 } from '@/shared/courseProjectTypes'
 import {
+  activateSlidePresentationState,
+  addSlidePresentationState,
   openSlideAuthoringSession,
+  redoSlideAuthoring,
   setSlideEditingScope,
+  undoSlideAuthoring,
   type SlideAuthoringSession,
 } from '@/renderer/course/slideAuthoringBackend'
 import {
@@ -20,6 +24,7 @@ import {
 } from '@/renderer/project/nativeNodeFactories'
 import {
   addSlideTableLayer,
+  commitSlideTableLastCellAndAppendRow,
   deleteSlideTableColumn,
   deleteSlideTableRow,
   insertSlideTableColumn,
@@ -408,4 +413,256 @@ describe('r12-010-table-core Canonical Table Commands', () => {
     expect(lockedResult.ok).toBe(false)
     expect(lockedResult.reason).toBe(SLIDE_REJECT_LOCKED)
   })
+
+  it('maintains state isolation with nativeData override and does not pollute base or sibling state', () => {
+    const session = makeSession()
+    const added = addSlideTableLayer(session)
+    const tableId = added.selection?.selectionIds[0]!
+    let cur = added.nextSession!
+    const baseTable = getTableData(cur)
+    const targetCellId = baseTable.rows[0].cells[0].id
+
+    // Add state A and state B
+    const addStateAResult = addSlidePresentationState(cur, 'State A')
+    expect(addStateAResult.ok).toBe(true)
+    cur = addStateAResult.nextSession!
+    const stateAId = cur.selection.stateId!
+    expect(stateAId).toBeDefined()
+
+    const addStateBResult = addSlidePresentationState(cur, 'State B')
+    expect(addStateBResult.ok).toBe(true)
+    cur = addStateBResult.nextSession!
+    const stateBId = cur.selection.stateId!
+    expect(stateBId).toBeDefined()
+
+    // Activate state A
+    const activateAResult = activateSlidePresentationState(cur, stateAId)
+    cur = activateAResult.nextSession!
+    expect(cur.selection.stateId).toBe(stateAId)
+
+    // Edit cell text in State A
+    const editResult = patchSlideTableCellText(cur, {
+      layerItemId: tableId,
+      cellId: targetCellId,
+      text: 'Text in State A',
+    })
+    expect(editResult.ok).toBe(true)
+    cur = editResult.nextSession!
+
+    // Verify: State A has nativeData override with the updated rows
+    const scene = getSlideScene(cur)
+    const stateA = scene.presentation?.states.find((s) => s.id === stateAId)
+    expect(stateA?.layerItemOverrides[tableId]?.nativeData?.rows).toBeDefined()
+
+    // Verify: Base scene layer item content data is UNPOLLUTED
+    const baseItem = scene.layerItems.find((l) => l.layerItemId === tableId)!
+    if (baseItem.kind !== 'native') throw new Error('expected native')
+    const baseData = baseItem.content.data as any
+    expect(baseData.rows[0].cells[0].text).toBe('标题 1')
+
+    // Switch to State B: verify it sees base data (unpolluted)
+    const activateBResult = activateSlidePresentationState(cur, stateBId)
+    cur = activateBResult.nextSession!
+    const stateB = scene.presentation?.states.find((s) => s.id === stateBId)
+    expect(stateB?.layerItemOverrides[tableId]?.nativeData).toBeUndefined()
+
+    // Switch to base state (null): verify it sees base data
+    const activateBaseResult = activateSlidePresentationState(cur, null)
+    cur = activateBaseResult.nextSession!
+    expect(getTableData(cur).rows[0].cells[0].text).toBe('标题 1')
+
+    // Switch back to State A: edit style
+    cur = activateSlidePresentationState(cur, stateAId).nextSession!
+    const styleResult = patchSlideTableStyle(cur, {
+      layerItemId: tableId,
+      stylePatch: { fillColor: '#aabbcc' },
+    })
+    expect(styleResult.ok).toBe(true)
+    cur = styleResult.nextSession!
+
+    // Base style remains unpolluted
+    const curScene = getSlideScene(cur)
+    const curBaseItem = curScene.layerItems.find((l) => l.layerItemId === tableId)!
+    if (curBaseItem.kind !== 'native') throw new Error('expected native')
+    expect((curBaseItem.content.data as any).style.fillColor).not.toBe('#aabbcc')
+
+    // Reset cell text back to base in State A
+    const resetTextResult = patchSlideTableCellText(cur, {
+      layerItemId: tableId,
+      cellId: targetCellId,
+      text: '标题 1',
+    })
+    expect(resetTextResult.ok).toBe(true)
+    cur = resetTextResult.nextSession!
+    const curStateA = getSlideScene(cur).presentation?.states.find((s) => s.id === stateAId)!
+    // rows diff is removed because it now matches base!
+    expect(curStateA.layerItemOverrides[tableId]?.nativeData?.rows).toBeUndefined()
+    // style diff remains
+    expect(curStateA.layerItemOverrides[tableId]?.nativeData?.style).toBeDefined()
+  })
+
+  it('creates and edits Table on Slide surface scope without touching scene base', () => {
+    const session = makeSession()
+    // Switch to surface scope
+    const surfaceSession = requireSession(setSlideEditingScope(session, 'surface'))
+    expect(surfaceSession.scope).toBe('surface')
+
+    // Add table to surface
+    const added = addSlideTableLayer(surfaceSession, { label: 'Surface Table' })
+    expect(added.ok).toBe(true)
+    const tableId = added.selection?.selectionIds[0]!
+    let cur = added.nextSession!
+
+    // Verify it is in surfaceLayerItems, not scene.layerItems
+    const surface = cur.history.present.surfaces[0]!
+    expect(surface.surfaceLayerItems).toHaveLength(1)
+    const surfaceItem = surface.surfaceLayerItems[0]!.item
+    expect(surfaceItem.layerItemId).toBe(tableId)
+    const scene = getSlideScene(cur)
+    expect(scene.layerItems).toHaveLength(0)
+
+    // Edit cell text in surface scope
+    if (surfaceItem.kind !== 'native') throw new Error('expected native')
+    const surfaceTable = surfaceItem.content.data as any
+    const cellId = surfaceTable.rows[0].cells[0].id
+    const patched = patchSlideTableCellText(cur, {
+      layerItemId: tableId,
+      cellId,
+      text: 'Surface Cell Content',
+    })
+    expect(patched.ok).toBe(true)
+    cur = patched.nextSession!
+    const curSurfaceItem = cur.history.present.surfaces[0]!.surfaceLayerItems[0]!.item
+    if (curSurfaceItem.kind !== 'native') throw new Error('expected native')
+    const curSurfaceTable = curSurfaceItem.content.data as any
+    expect(curSurfaceTable.rows[0].cells[0].text).toBe('Surface Cell Content')
+
+    // Editing surface table from scene scope must be rejected
+    const sceneScopeSession = requireSession(setSlideEditingScope(cur, 'scene'))
+    const rejectFromScene = patchSlideTableCellText(sceneScopeSession, {
+      layerItemId: tableId,
+      cellId,
+      text: 'Forbidden',
+    })
+    expect(rejectFromScene.ok).toBe(false)
+    expect(rejectFromScene.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+  })
+
+  it('rejects cross-scope edits with SLIDE_REJECT_WRONG_OWNER', () => {
+    const session = makeSession()
+    const added = addSlideTableLayer(session)
+    const tableId = added.selection?.selectionIds[0]!
+    const cur = added.nextSession!
+    const cellId = getTableData(cur).rows[0].cells[0].id
+
+    // Attempting to edit scene table from surface scope
+    const surfaceSession = requireSession(setSlideEditingScope(cur, 'surface'))
+    const rejectSurface = patchSlideTableCellText(surfaceSession, {
+      layerItemId: tableId,
+      cellId,
+      text: 'Should Fail',
+    })
+    expect(rejectSurface.ok).toBe(false)
+    expect(rejectSurface.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+
+    // Attempting to edit scene table from global scope
+    const globalSession = requireSession(setSlideEditingScope(cur, 'global'))
+    const rejectGlobal = patchSlideTableCellText(globalSession, {
+      layerItemId: tableId,
+      cellId,
+      text: 'Should Fail',
+    })
+    expect(rejectGlobal.ok).toBe(false)
+    expect(rejectGlobal.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+  })
+
+  it('executes commitSlideTableLastCellAndAppendRow atomically, supports Undo/Redo, and rolls back on failure', () => {
+    const session = makeSession()
+    const added = addSlideTableLayer(session)
+    const tableId = added.selection?.selectionIds[0]!
+    const initialSession = added.nextSession!
+    const initialRevision = initialSession.history.present.revision
+    const initialTable = getTableData(initialSession)
+    expect(initialTable.rows).toHaveLength(3)
+
+    const lastRow = initialTable.rows[2]!
+    const lastCell = lastRow.cells[2]!
+    const nonLastCell = initialTable.rows[0]!.cells[0]!
+
+    // 1. Failure on non-last cell: zero writes
+    const nonLastResult = commitSlideTableLastCellAndAppendRow(initialSession, {
+      layerItemId: tableId,
+      cellId: nonLastCell.id,
+      text: 'Should Fail',
+    })
+    expect(nonLastResult.ok).toBe(false)
+    expect(nonLastResult.reason).toBe('invalid-target')
+    expect(nonLastResult.nextSession).toBeDefined()
+    const nonLastFailSession = nonLastResult.nextSession!
+    expect(nonLastFailSession.history.present.revision).toBe(initialRevision)
+    expect(getTableData(nonLastFailSession).rows).toHaveLength(3)
+    expect(getTableData(nonLastFailSession).rows[0].cells[0].text).toBe('标题 1')
+
+    // 2. Failure with oversized text: zero writes
+    const tooLongResult = commitSlideTableLastCellAndAppendRow(initialSession, {
+      layerItemId: tableId,
+      cellId: lastCell.id,
+      text: 'x'.repeat(20001),
+    })
+    expect(tooLongResult.ok).toBe(false)
+    expect(tooLongResult.reason).toBe('invalid-data')
+    expect(tooLongResult.nextSession).toBeDefined()
+    expect(tooLongResult.nextSession!.history.present.revision).toBe(initialRevision)
+
+    // 3. Failure on stale revision: zero writes
+    const staleResult = commitSlideTableLastCellAndAppendRow(initialSession, {
+      layerItemId: tableId,
+      cellId: lastCell.id,
+      text: 'Valid',
+    }, { expectedRevision: 999 })
+    expect(staleResult.ok).toBe(false)
+    expect(staleResult.reason).toBe(SLIDE_REJECT_STALE_REVISION)
+
+    // 4. Successful commit on last cell
+    const successResult = commitSlideTableLastCellAndAppendRow(initialSession, {
+      layerItemId: tableId,
+      cellId: lastCell.id,
+      text: 'Completed Answer',
+    })
+    expect(successResult.ok).toBe(true)
+    expect(successResult.historyEntry).toBe(true)
+    expect(successResult.nextSession).toBeDefined()
+    const successSession = successResult.nextSession!
+    expect(successSession.history.present.revision).toBe(initialRevision + 1)
+
+    // Verify focus result
+    expect(successResult.focusResult).toBeDefined()
+    const focus = successResult.focusResult!
+    expect(focus.targetColumnId).toBe(initialTable.columns[0].id)
+
+    // Verify table structure: row 2 text updated, row 3 appended
+    const updatedTable = getTableData(successSession)
+    expect(updatedTable.rows).toHaveLength(4)
+    expect(updatedTable.rows[2].cells[2].text).toBe('Completed Answer')
+    expect(updatedTable.rows[3].id).toBe(focus.newRowId)
+    expect(updatedTable.rows[3].cells[0].id).toBe(focus.newCellId)
+    expect(updatedTable.rows[3].cells[0].text).toBe('')
+    expect(updatedTable.rows[3].cells[1].text).toBe('')
+    expect(updatedTable.rows[3].cells[2].text).toBe('')
+
+    // 5. Undo: BOTH text change and appended row are reverted in a SINGLE undo step
+    const undone = undoSlideAuthoring(successSession)
+    expect(undone.ok).toBe(true)
+    const undoneTable = getTableData(undone.nextSession!)
+    expect(undoneTable.rows).toHaveLength(3)
+    expect(undoneTable.rows[2].cells[2].text).toBe('单元格 3-3')
+
+    // 6. Redo: BOTH text change and appended row are restored in a SINGLE redo step
+    const redone = redoSlideAuthoring(undone.nextSession!)
+    expect(redone.ok).toBe(true)
+    const redoneTable = getTableData(redone.nextSession!)
+    expect(redoneTable.rows).toHaveLength(4)
+    expect(redoneTable.rows[2].cells[2].text).toBe('Completed Answer')
+  })
 })
+

@@ -327,6 +327,7 @@ export function usePropertiesAuthoringBinding({
   )
   const updatePresentationState = useEditorStore((state) => state.updatePresentationState)
   const updateCourseBackground = useEditorStore((state) => state.updateCourseBackground)
+  const setPreviewBackgroundColor = useEditorStore((state) => state.setPreviewBackgroundColor)
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
   const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
@@ -384,6 +385,7 @@ export function usePropertiesAuthoringBinding({
     course: read.course,
     runIntent: runFlowAuthoringIntent,
     reportError,
+    setPreviewBackgroundColor,
   })
   const spatialOwner = buildSpatialPropertiesOwner({
     view: read.spatial?.view ?? null,
@@ -404,6 +406,7 @@ export function usePropertiesAuthoringBinding({
           onOpenAutomation: () => setActiveTab('automation'),
         }
       : null,
+    setPreviewBackgroundColor,
   })
 
   if (flowOwner.status === 'stale') {
@@ -1194,7 +1197,11 @@ export function usePropertiesAuthoringBinding({
       replaceImage: onReplaceImage,
       clearPresentationOverride: () => undefined,
       updateCourseBackground: (patch) => {
+        setPreviewBackgroundColor(null)
         if (requireLiveOwner()) updateCourseBackground(patch)
+      },
+      previewCourseBackground: (patch) => {
+        setPreviewBackgroundColor(patch.backgroundColor ?? null)
       },
       ...projectCommands,
       openProfessionalAutomation: () => {
@@ -1268,19 +1275,31 @@ export function usePropertiesAuthoringBinding({
           if (sceneId && requireLiveOwner()) updateScene(sceneId, { name })
         },
         updateSlideSurfaceBackground: (patch) => {
+          setPreviewBackgroundColor(null)
           if (surfaceId && requireLiveOwner()) updateSlideSurfaceBackground(surfaceId, patch)
+        },
+        previewSlideSurfaceBackground: (patch) => {
+          setPreviewBackgroundColor(patch.backgroundColor ?? null)
         },
         importSlideSurfaceBackgroundAsset: (file) => {
           if (surfaceId && requireLiveOwner()) importSlideSurfaceBackgroundAsset(surfaceId, file)
         },
         updateSceneBackground: (patch) => {
+          setPreviewBackgroundColor(null)
           if (sceneId && requireLiveOwner()) updateSceneBackground(sceneId, patch)
+        },
+        previewSceneBackground: (patch) => {
+          setPreviewBackgroundColor(patch.backgroundColor ?? null)
         },
         importSceneBackgroundAsset: (file) => {
           if (sceneId && requireLiveOwner()) importSceneBackgroundAsset(sceneId, file)
         },
         updateStateBackground: (patch) => {
+          setPreviewBackgroundColor(null)
           if (stateId && requireLiveOwner()) updatePresentationState(stateId, patch)
+        },
+        previewStateBackground: (patch) => {
+          setPreviewBackgroundColor(patch.backgroundColor ?? null)
         },
         // Both only ever run in the "currently overridden" direction: the
         // shared control shows this action solely when an override exists.

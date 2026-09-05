@@ -51,6 +51,14 @@ render input 的几何来自外层 LayerItem，内容严格复用相应 Native c
 
 Table 与五类 Chart 必须从真实可见入口插入后仍可选择、改数据/样式、拖动/缩放和 Undo/Redo；input 还必须保留作者态 inert、运行态可提交。数据校验通过与作者态启动成功分别验收；parser 失败不得吞掉为成功或只提示反复重载。保留 request/target/字段路径，正确区分“工程已提交但画布同步失败”与“命令未写入”，不借此另建工程回滚或第二历史。
 
+初始快照与后续增量必须来自同一正式 V9 Native render input。旧编辑投影中的六类 `document.nodes` 不能充当 Table/Chart/input 的增量枚举源；不得通过扩 legacy SceneNode、重挂载整页或切换试运行强制刷新来掩盖漏项。ACK 证明当前目标及 revision 的内容/几何已经同步，不能仅回复成功而继续呈现旧数据。
+
+### 2.3 Table/Chart 的既有 owner/state 写入语义
+
+Table/Chart 的专用命令必须复用 canonical target、effective layer 读取与现有 presentation override 写入边界：scene base 编辑写基础内容；scene named state 编辑写该状态的 `nativeData` override；Slide surface 编辑写对应 `surfaceLayerItems`，不借当前 scene 的 state 改写 surface。candidate 从目标有效内容构造并整体验证，不能绕过 state 直接修改 base 或只放开 scope 检查而仍查 scene 列表。
+
+该要求适用于已支持的数据、样式及结构命令；创建、复制与删除继续按既有 owner、可见性和稳定身份规则执行。普通修改保留子项 ID，复制重建；失败、locked、stale、缺失状态或错误 owner 不改变工程、revision、历史与选区。沿用既有稀疏合并及 override 清理语义，不新增 wire、第二份内容状态或专用历史。共享 History 只读使用，不在本轮重写。
+
 ## 3. Table 合同
 
 ### 3.1 精确形状
@@ -122,11 +130,14 @@ interface NativeTableContent {
 - 行/列插入位置是稳定 ID 的 before/after，不用数组下标作为命令外部参数；删除最后一行或最后一列拒绝且零写入。
 - 重排命令接收完整、无重复的 ID 顺序；缺失、额外或重复 ID 拒绝。
 - 一次 cell 文本提交、一次行列操作、一次宽高拖动或一次样式提交各形成一条历史事务；键盘移动焦点不写历史。
+- 编辑末格后 Tab 的“提交文本并追加行”是一次复合 canonical command：先在同一 candidate 中完成两步并完整校验，再提交一次；失败两步都不写入。UI 不能连续调用两个持旧 revision 的独立命令，也不能关闭 stale 检查；一次 Undo 同时恢复文本与结构。
 - 复制整个 Table 复制内容与样式，但 table LayerItem 和所有 row/column/cell ID 全部重建。
 
 ### 3.3 渲染与导出
 
 作者画布与 Published renderer 共享一个纯 table layout/view model，不能各自推导列宽或 header 样式。PPTX 使用 PptxGenJS 4.0.1 的 table primitive；每个 cell 保持可编辑文字，列宽、行高、边框、填充、对齐与字体从同一 view model 投影。无法表达的 per-cell 细节进入精确 preflight warning，但表格本体不得截图或遗漏。
+
+HTML painter 分别消费 effective cell/table 的填充与边框透明度，覆盖 0、部分透明与 1；不可把 alpha 简化为是否填充，也不可对整个 cell 设置 opacity 使文字一起变透明。PPTX 已支持的填充保持映射，无法表达的边框透明度继续精确提示差异。
 
 ## 4. Chart 合同
 
@@ -202,6 +213,9 @@ type NativeChartContent =
 - 分类/系列插入、删除、重排使用稳定 ID；不得删除最后一个分类或系列。一次表格式数据提交先完整校验 candidate，再原子替换，非法单元格不造成部分写入。
 - 类型切换保留 categories、series、point ID 与数值；切入 pie/donut 时若多系列，必须在 UI 要求教师明确选择保留系列，不能静默丢弃。教师未选择则零写入。
 - 作者与 Published 共用一个纯 chart view model。Canvas/SVG 绘制必须有确定性；空白、NaN 或长度不一致是诊断，不是“渲染为空”。
+- pie/donut 的单分类或多分类中只有一个非零值时必须绘制完整圆/环，零值分类不生成伪扇区；完整圆周不能退化为起终点相同的单段 SVG arc。
+- 类型决定几何：bar 只绘制柱体，不叠画折线/点；line/area 保留各自语义。笛卡尔图的可见几何受 plot 约束；自定义轴范围不包含 0 时，柱体/面积基线投影到可见边界并裁切，数据不改写为边界值。
+- `showGridLines`、`showCategoryAxis`、`showValueAxis`、`showDataLabels`、`showLegend` 与四种 `legendPosition` 都由实际 painter 消费；数值轴包含可读刻度，图例位置参与布局。关闭开关必须移除对应绘制，不能只保存字段或只改变摘要。
 - PPTX 五类都使用原生 chart：bar→clustered column，line→line，area→area，pie→pie，donut→doughnut。若当前库无法表达已承诺的共同样式，只对该样式给 warning，不能把整张图降成图片。
 
 ## 5. Slide Native input 与提交语义
@@ -349,6 +363,7 @@ PPTX 使用页面 background color 加铺满页面的 background image；DOCX �
 
 - 打开控件首先可直接选固定常用色块，至少包含黑、白、灰阶和常用彩色；各色块有可读名称/HEX 与当前选中提示，不仅靠颜色区分。保留“自定义颜色”连续面板和合法 `#RRGGBB` 输入。常用色定义只有一个来源；1.2 不创建工程主题、自动 token 绑定或第二配色表。最近使用色不是本版交付前置条件。
 - 颜色控件的 React 身份按稳定编辑目标绑定；revision 用来判定提交是否仍有效，不得直接用作正在操作控件的 key。切换真实目标取消旧草稿并清除临时预览，迟到事件不得写入新目标。
+- 共享 preview 回调必须接通真实 owner adapter/画布，不以可选回调存在或 mock 被调用代替交付。取消先阻止后续 blur/迟到事件提交旧草稿，再恢复当前目标的展示；合法 HEX 的 focus→Esc→blur 也必须零工程/revision/历史写入。
 - 连续拖动只更新局部草稿及必要的只读临时预览；该预览不进入工程、恢复副本、Published 或历史。一次按下到释放形成一次 commit，一次色块选择形成一次 commit，合法 HEX 由 Enter/失焦提交一次；重复同值零历史，Esc 取消零工程写入。自定义面板的关闭、取消和失焦必须有确定行为，不依赖浏览器原生色板的模糊关闭时机。
 - 若某 consumer 本来具有整表“应用”草稿（如 Chart 数据系列颜色），取色结束只更新该草稿；仍由“应用数据”形成一条 canonical 事务，不能提前把系列颜色写入工程。
 - 修改工程对象只经该 owner 现有 typed command/history。连续操作的结束与取消要在真实 Renderer/Electron 中验证，单次 `fireEvent.change` 写值通过不能替代色板持续操作证据。

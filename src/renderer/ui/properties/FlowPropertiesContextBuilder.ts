@@ -115,6 +115,7 @@ function createCommands(input: {
     intent: FlowAuthoringIntent,
   ) => { readonly ok: boolean; readonly reason?: string }
   readonly reportError: (message: string) => void
+  readonly setPreviewBackgroundColor?: (color: string | null) => void
 }): FlowPropertiesCommands {
   const selectedBlockIds = [...input.selection.selectedBlockIds]
   const dispatch = (intent: FlowAuthoringIntent) => {
@@ -135,7 +136,13 @@ function createCommands(input: {
       kind: 'set-paper-background',
       backgroundColor,
     }),
-    updateSurfaceBackground: (patch) => run({ kind: 'set-surface-background', patch }),
+    updateSurfaceBackground: (patch) => {
+      input.setPreviewBackgroundColor?.(null)
+      run({ kind: 'set-surface-background', patch })
+    },
+    previewSurfaceBackground: (patch) => {
+      input.setPreviewBackgroundColor?.(patch.backgroundColor ?? null)
+    },
     importSurfaceBackgroundAsset: (imported) => run({
       kind: 'import-surface-background-asset',
       name: imported.name,
@@ -236,6 +243,7 @@ export function buildFlowPropertiesOwner(input: {
     intent: FlowAuthoringIntent,
   ) => { readonly ok: boolean; readonly reason?: string }
   readonly reportError: (message: string) => void
+  readonly setPreviewBackgroundColor?: (color: string | null) => void
 }): FlowPropertiesOwnerResult {
     const { selection, view } = input
     if (!selection || !view) return { status: 'inactive' }
@@ -287,6 +295,7 @@ export function buildFlowPropertiesOwner(input: {
           textEdit: input.textEdit,
           runIntent: input.runIntent,
           reportError: input.reportError,
+          setPreviewBackgroundColor: input.setPreviewBackgroundColor,
         }),
       },
     }

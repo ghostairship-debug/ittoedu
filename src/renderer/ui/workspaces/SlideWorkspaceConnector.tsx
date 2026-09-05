@@ -182,13 +182,20 @@ export function SlideWorkspaceConnector({
     setSlideDrawTool,
     drawSlideShapeNode,
   ] = useEditorStore(useShallow(selectSlideWorkspaceSource))
-  const view = useMemo(() => project && locationId
-    ? buildSlideEditorView({
+  const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
+  const view = useMemo(() => {
+    if (!project || !locationId) return null
+    const baseView = buildSlideEditorView({
       project,
       locationId,
       stateId: activePresentationStateId,
     })
-    : null, [activePresentationStateId, locationId, project])
+    if (!previewBackgroundColor) return baseView
+    return {
+      ...baseView,
+      backgroundColor: previewBackgroundColor,
+    }
+  }, [activePresentationStateId, locationId, project, previewBackgroundColor])
   const editingNodes = useMemo(() => backend
     ? projectV9EditingNodesWithDraft(backend, contentEdit)
     : [], [backend, contentEdit])

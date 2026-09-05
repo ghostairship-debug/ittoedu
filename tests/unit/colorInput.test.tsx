@@ -139,4 +139,53 @@ describe('ColorInput', () => {
     fireEvent.change(picker, { target: { value: '#ff8800' } })
     expect(onChange).toHaveBeenCalledTimes(1)
   })
+
+  it('does not commit when pressing Escape after typing valid hex, reverts draft and preview', () => {
+    const onChange = vi.fn()
+    const onPreviewChange = vi.fn()
+    render(
+      <ColorInput
+        id="test-color"
+        label="测试颜色"
+        value="#ffffff"
+        onChange={onChange}
+        onPreviewChange={onPreviewChange}
+      />
+    )
+
+    const input = screen.getByLabelText('测试颜色') as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '#ff0000' } })
+    expect(onPreviewChange).toHaveBeenCalledWith('#ff0000')
+
+    // Hit Escape -> should cancel and blur without calling onChange
+    fireEvent.keyDown(input, { key: 'Escape' })
+    fireEvent.blur(input)
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(input.value).toBe('#ffffff')
+    expect(onPreviewChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it('restores preview to original value on unmount if draft was dirty', () => {
+    const onChange = vi.fn()
+    const onPreviewChange = vi.fn()
+    const { unmount } = render(
+      <ColorInput
+        id="test-color"
+        label="测试颜色"
+        value="#ffffff"
+        onChange={onChange}
+        onPreviewChange={onPreviewChange}
+      />
+    )
+
+    const input = screen.getByLabelText('测试颜色') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '#00ff00' } })
+    expect(onPreviewChange).toHaveBeenCalledWith('#00ff00')
+
+    unmount()
+    expect(onPreviewChange).toHaveBeenLastCalledWith(null)
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })

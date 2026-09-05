@@ -44,12 +44,19 @@ export function FlowWorkspaceConnector() {
   const commands = useMemo<FlowCurrentSessionCommandPort>(() => ({
     run: runFlowAuthoringIntent,
   }), [runFlowAuthoringIntent])
-  const view = useMemo(() => session
-    ? buildFlowEditorView({
+  const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
+  const view = useMemo(() => {
+    if (!session) return null
+    const baseView = buildFlowEditorView({
       project: session.history.present,
       locationId: session.selection.locationId,
     })
-    : null, [session])
+    if (!previewBackgroundColor) return baseView
+    return {
+      ...baseView,
+      backgroundColor: previewBackgroundColor,
+    }
+  }, [session, previewBackgroundColor])
   const tryRunSnapshot = useMemo(() => session
     ? {
       project: session.history.present,

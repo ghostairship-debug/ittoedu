@@ -8,9 +8,11 @@ import type {
   NativeChartPoint,
   NativeChartSeries,
 } from '../../shared/contracts/native-v1/types'
+import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
   LayerItem,
+  LayerItemOverride,
   SlideSceneDocument,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
@@ -126,6 +128,49 @@ function catchCommand(session: SlideAuthoringSessionRef, error: unknown): SlideC
   return reject(session, '命令失败')
 }
 
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function sparseObjectDiff(
+  base: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const diff: Record<string, unknown> = {}
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    if (sameJson(base[key], next[key])) continue
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      diff[key] = null
+    } else {
+      const baseVal = base[key]
+      const nextVal = next[key]
+      if (isPlainRecord(baseVal) && isPlainRecord(nextVal)) {
+        const nestedDiff = sparseObjectDiff(baseVal, nextVal)
+        if (Object.keys(nestedDiff).length > 0) {
+          diff[key] = nestedDiff
+        }
+      } else {
+        diff[key] = structuredClone(nextVal)
+      }
+    }
+  }
+  return diff
+}
+
+function deleteEmptyOverride(
+  overrides: Record<string, LayerItemOverride>,
+  layerItemId: string,
+): void {
+  const override = overrides[layerItemId]
+  if (override && Object.keys(override).length === 0) {
+    delete overrides[layerItemId]
+  }
+}
+
 function slideSceneContext(
   project: CourseProjectDocument,
   session: SlideAuthoringSessionRef,
@@ -145,12 +190,6 @@ function slideSceneContext(
   const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
   if (!scene) throw new Error('当前幻灯片已失效')
   return { location, surface, scene }
-}
-
-function requireSceneScope(session: SlideAuthoringSessionRef): void {
-  if (session.scope !== 'scene') {
-    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '图表只能添加到幻灯片场景内')
-  }
 }
 
 function nextSceneLayerOrder(
@@ -184,6 +223,35 @@ function appendSceneLayer(
   }
   scene.layerItems.push(item)
   scene.layerItems.sort((a, b) => a.order - b.order || a.layerItemId.localeCompare(b.layerItemId))
+}
+
+function nextSurfaceLayerOrder(
+  project: CourseProjectDocument,
+  surface: SlideSurfaceDocument,
+): number {
+  const preferred = Math.max(-1, ...surface.surfaceLayerItems.map((entry) => entry.item.order)) + 1
+  return allocateCourseLayerOrder(project, Math.max(0, preferred))
+}
+
+function appendSurfaceLayer(
+  project: CourseProjectDocument,
+  surface: SlideSurfaceDocument,
+  item: LayerItem,
+): void {
+  if (surface.surfaceLayerItems.length >= MAX_SCENE_NODES) {
+    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
+  }
+  if (surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === item.layerItemId)) {
+    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
+  }
+  item.order = nextSurfaceLayerOrder(project, surface)
+  surface.surfaceLayerItems.push({
+    item,
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  surface.surfaceLayerItems.sort((a, b) =>
+    a.item.order - b.item.order || a.item.layerItemId.localeCompare(b.item.layerItemId),
+  )
 }
 
 function selectAdded(
@@ -226,21 +294,126 @@ function commitUpdated(
   }, true)
 }
 
-function requireChartLayer(
-  scene: SlideSceneDocument,
+interface ResolvedChartTarget {
+  readonly item: Extract<LayerItem, { kind: 'native' }>
+  readonly chart: NativeChartContent
+  commit(nextChart: NativeChartContent): void
+}
+
+function resolveChartTarget(
+  project: CourseProjectDocument,
+  session: SlideAuthoringSessionRef,
   layerItemId: string,
-): { item: Extract<LayerItem, { kind: 'native' }>; chart: NativeChartContent } {
-  const item = scene.layerItems.find((candidate) => candidate.layerItemId === layerItemId)
-  if (!item) {
+): ResolvedChartTarget {
+  if (session.scope === 'global') {
+    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '图表只能在幻灯片场景或本页中使用')
+  }
+  if (session.scope !== 'scene' && session.scope !== 'surface') {
+    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '图表只能在幻灯片场景或本页中使用')
+  }
+
+  const { surface, scene } = slideSceneContext(project, session)
+
+  if (session.scope === 'surface') {
+    const scoped = surface.surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === layerItemId,
+    )
+    if (!scoped) {
+      if (scene.layerItems.some((candidate) => candidate.layerItemId === layerItemId)) {
+        throw new SlideCommandError(
+          SLIDE_REJECT_WRONG_OWNER,
+          '当前元素属于场景层，请切换到场景层编辑',
+        )
+      }
+      throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+    }
+    if (scoped.item.locked) {
+      throw new SlideCommandError(SLIDE_REJECT_LOCKED, '所选元素已锁定，无法修改')
+    }
+    const nativeScopedItem = scoped.item
+    if (nativeScopedItem.kind !== 'native' || nativeScopedItem.content.nativeType !== 'chart') {
+      throw new SlideCommandError('invalid-target', '所选元素不是图表')
+    }
+    const chart = structuredClone(nativeScopedItem.content.data as NativeChartContent)
+    return {
+      item: nativeScopedItem as Extract<LayerItem, { kind: 'native' }>,
+      chart,
+      commit(nextChart: NativeChartContent) {
+        chartNativeContentObjectSchema.parse(nextChart)
+        nativeScopedItem.content.data = structuredClone(nextChart)
+      },
+    }
+  }
+
+  // session.scope === 'scene'
+  const baseItem = scene.layerItems.find(
+    (candidate) => candidate.layerItemId === layerItemId,
+  )
+  if (!baseItem) {
+    if (surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === layerItemId)) {
+      throw new SlideCommandError(
+        SLIDE_REJECT_WRONG_OWNER,
+        '当前元素属于本页层，请切换到本页层编辑',
+      )
+    }
     throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
   }
-  if (item.locked) {
+  const stateId = session.selection.stateId
+  const state = stateId
+    ? scene.presentation?.states.find((candidate) => candidate.id === stateId)
+    : undefined
+  if (stateId && !state) {
+    throw new Error(`找不到命名状态：${stateId}`)
+  }
+  const override = state ? state.layerItemOverrides[layerItemId] : undefined
+  const isLocked = override?.locked ?? baseItem.locked
+  if (isLocked) {
     throw new SlideCommandError(SLIDE_REJECT_LOCKED, '所选元素已锁定，无法修改')
   }
-  if (item.kind !== 'native' || item.content.nativeType !== 'chart') {
+  const nativeBaseItem = baseItem
+  if (nativeBaseItem.kind !== 'native' || nativeBaseItem.content.nativeType !== 'chart') {
     throw new SlideCommandError('invalid-target', '所选元素不是图表')
   }
-  return { item, chart: item.content.data }
+
+  if (!state) {
+    const chart = structuredClone(nativeBaseItem.content.data as NativeChartContent)
+    return {
+      item: nativeBaseItem as Extract<LayerItem, { kind: 'native' }>,
+      chart,
+      commit(nextChart: NativeChartContent) {
+        chartNativeContentObjectSchema.parse(nextChart)
+        nativeBaseItem.content.data = structuredClone(nextChart)
+      },
+    }
+  }
+
+  const currentOverride = state.layerItemOverrides[layerItemId] ?? {}
+  const currentData = currentOverride.nativeData
+    ? (mergeCourseNativeData(
+        nativeBaseItem.content.data as unknown as Record<string, unknown>,
+        currentOverride.nativeData,
+      ) as unknown as NativeChartContent)
+    : structuredClone(nativeBaseItem.content.data as NativeChartContent)
+
+  return {
+    item: nativeBaseItem as Extract<LayerItem, { kind: 'native' }>,
+    chart: currentData,
+    commit(nextChart: NativeChartContent) {
+      chartNativeContentObjectSchema.parse(nextChart)
+      const nextNative = sparseObjectDiff(
+        nativeBaseItem.content.data as unknown as Record<string, unknown>,
+        nextChart as unknown as Record<string, unknown>,
+      )
+      const itemOverride = state.layerItemOverrides[layerItemId] ?? {}
+      if (Object.keys(nextNative).length === 0) {
+        delete itemOverride.nativeData
+      } else {
+        itemOverride.nativeData = nextNative
+      }
+      state.layerItemOverrides[layerItemId] = itemOverride
+      deleteEmptyOverride(state.layerItemOverrides, layerItemId)
+    },
+  }
 }
 
 export function addSlideChartLayer(
@@ -251,9 +424,13 @@ export function addSlideChartLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
-    const { scene } = slideSceneContext(session.history.present, session)
-    const existingCount = scene.layerItems.length
+    if (session.scope !== 'scene' && session.scope !== 'surface') {
+      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '图表只能在幻灯片场景或本页中使用')
+    }
+    const { surface, scene } = slideSceneContext(session.history.present, session)
+    const existingCount = session.scope === 'surface'
+      ? surface.surfaceLayerItems.length
+      : scene.layerItems.length
 
     const chartNode = createChartNode({
       id: input.id,
@@ -286,8 +463,12 @@ export function addSlideChartLayer(
     const layerItem = createChartLayerItem(positioned as ChartFactoryNode)
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene: draftScene } = slideSceneContext(draft, session)
-      appendSceneLayer(draft, draftScene, layerItem, session.selection.stateId)
+      const { surface: draftSurface, scene: draftScene } = slideSceneContext(draft, session)
+      if (session.scope === 'surface') {
+        appendSurfaceLayer(draft, draftSurface, layerItem)
+      } else {
+        appendSceneLayer(draft, draftScene, layerItem, session.selection.stateId)
+      }
     }, options.now)
 
     return commitAdded(session, project, layerItem.layerItemId)
@@ -307,18 +488,16 @@ export function patchSlideChartTitle(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     if (typeof input.title !== 'string' || input.title.length > 1000) {
       throw new SlideCommandError('invalid-data', '图表标题长度超出上限')
     }
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
-      if (chart.title === input.title) return // no-op
       chart.title = input.title
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -338,21 +517,16 @@ export function patchSlideChartStyle(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       const candidateStyle = {
         ...chart.style,
         ...input.stylePatch,
       }
-      const candidateChart = {
-        ...chart,
-        style: candidateStyle,
-      }
-      chartNativeContentObjectSchema.parse(candidateChart)
       chart.style = candidateStyle as typeof chart.style
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -374,15 +548,14 @@ export function patchSlideChartType(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const targetType = input.newChartType ?? input.nextType
     if (!targetType) {
       throw new SlideCommandError('invalid-data', '未指定新的图表类型')
     }
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { item, chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (chart.chartType === targetType) return
 
@@ -430,7 +603,7 @@ export function patchSlideChartType(
           chartType: 'pie',
           title: chart.title,
           categories: structuredClone(chart.categories),
-          series: [nextSeries[0]!],
+          series: [nextSeries[0]!] as [NativeChartSeries],
           style: commonStyle,
         }
       } else if (targetType === 'donut') {
@@ -440,7 +613,7 @@ export function patchSlideChartType(
           chartType: 'donut',
           title: chart.title,
           categories: structuredClone(chart.categories),
-          series: [nextSeries[0]!],
+          series: [nextSeries[0]!] as [NativeChartSeries],
           style: {
             ...commonStyle,
             holeSize: existingHoleSize,
@@ -473,13 +646,7 @@ export function patchSlideChartType(
         }
       }
 
-      chartNativeContentObjectSchema.parse(candidateChart)
-
-      // Commit to draft
-      item.content = {
-        nativeType: 'chart',
-        data: candidateChart,
-      }
+      target.commit(candidateChart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -501,14 +668,13 @@ export function patchSlideChartPointValue(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     if (!Number.isFinite(input.value)) {
       throw new SlideCommandError('invalid-data', '数据点数值必须是有效数字')
     }
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       const ser = chart.series.find((s) => s.id === input.seriesId)
       if (!ser) throw new SlideCommandError('invalid-target', `找不到系列：${input.seriesId}`)
@@ -516,10 +682,8 @@ export function patchSlideChartPointValue(
       const pt = ser.points.find((p) => p.categoryId === input.categoryId)
       if (!pt) throw new SlideCommandError('invalid-target', `找不到分类对应的数据点：${input.categoryId}`)
 
-      if (pt.value === input.value) return // no-op
       pt.value = input.value
-
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -544,12 +708,11 @@ export function insertSlideChartCategory(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const idFactory = input.idFactory ?? nanoid
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (chart.categories.length >= 200) {
         throw new SlideCommandError('invalid-data', '分类数量已达上限（200 个）')
@@ -587,7 +750,7 @@ export function insertSlideChartCategory(
         ser.points.splice(insertIndex, 0, newPoint)
       }
 
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -607,10 +770,9 @@ export function deleteSlideChartCategory(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (chart.categories.length <= 1) {
         throw new SlideCommandError('invalid-data', '图表至少需要保留一个分类')
@@ -628,7 +790,7 @@ export function deleteSlideChartCategory(
         ser.points = ser.points.filter((p) => p.categoryId !== input.categoryId)
       }
 
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -648,10 +810,9 @@ export function reorderSlideChartCategories(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (
         input.orderedCategoryIds.length !== chart.categories.length ||
@@ -680,7 +841,7 @@ export function reorderSlideChartCategories(
         })
       }
 
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -706,12 +867,11 @@ export function insertSlideChartSeries(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const idFactory = input.idFactory ?? nanoid
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (chart.chartType === 'pie' || chart.chartType === 'donut') {
         throw new SlideCommandError('invalid-data', '饼图和环形图只支持单系列')
@@ -751,7 +911,7 @@ export function insertSlideChartSeries(
 
       chart.series.splice(insertIndex, 0, newSeries)
 
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -771,10 +931,9 @@ export function deleteSlideChartSeries(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (chart.series.length <= 1) {
         throw new SlideCommandError('invalid-data', '图表至少需要保留一个系列')
@@ -786,7 +945,7 @@ export function deleteSlideChartSeries(
       }
 
       chart.series.splice(index, 1)
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -806,10 +965,9 @@ export function reorderSlideChartSeries(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       if (
         input.orderedSeriesIds.length !== chart.series.length ||
@@ -827,7 +985,7 @@ export function reorderSlideChartSeries(
       }
 
       chart.series = nextSeries
-      chartNativeContentObjectSchema.parse(chart)
+      target.commit(chart)
     }, options.now)
 
     return commitUpdated(session, project)
@@ -849,12 +1007,11 @@ export function replaceSlideChartTableData(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
     const idFactory = input.idFactory ?? nanoid
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = slideSceneContext(draft, session)
-      const { chart } = requireChartLayer(scene, input.layerItemId)
+      const target = resolveChartTarget(draft, session, input.layerItemId)
+      const chart = target.chart
 
       const candidateData = input.candidateData ?? input.data
       if (!candidateData) {
@@ -922,16 +1079,19 @@ export function replaceSlideChartTableData(
         }
       })
 
-      const candidateChart = {
-        ...chart,
-        categories: nextCategories,
-        series: nextSeries,
-      }
+      const candidateChart: NativeChartContent = (chart.chartType === 'pie' || chart.chartType === 'donut')
+        ? {
+            ...chart,
+            categories: nextCategories,
+            series: [nextSeries[0]!] as [NativeChartSeries],
+          }
+        : {
+            ...chart,
+            categories: nextCategories,
+            series: nextSeries,
+          }
 
-      chartNativeContentObjectSchema.parse(candidateChart)
-
-      chart.categories = nextCategories
-      chart.series = nextSeries as typeof chart.series
+      target.commit(candidateChart)
     }, options.now)
 
     return commitUpdated(session, project)

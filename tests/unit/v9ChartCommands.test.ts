@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import {
+  courseProjectDocumentSchema,
+  mergeCourseNativeData,
+} from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
 } from '@/shared/courseProjectTypes'
 import {
+  activateSlidePresentationState,
+  addSlidePresentationState,
   openSlideAuthoringSession,
   setSlideEditingScope,
   undoSlideAuthoring,
@@ -119,6 +124,21 @@ function getNativeItem(scene: ReturnType<typeof getSlideScene>, index = 0) {
 
 function getChartData(session: SlideAuthoringSession) {
   return (getNativeItem(getSlideScene(session)).content as any).data
+}
+
+function getEffectiveChartData(session: SlideAuthoringSession) {
+  const scene = getSlideScene(session)
+  const item = getNativeItem(scene)
+  const baseData = item.content.data as any
+  const stateId = session.selection.stateId
+  if (!stateId) return baseData
+  const state = scene.presentation?.states.find((s) => s.id === stateId)
+  const override = state?.layerItemOverrides[item.layerItemId]?.nativeData
+  if (!override) return baseData
+  return mergeCourseNativeData(
+    baseData as unknown as Record<string, unknown>,
+    override,
+  ) as any
 }
 
 describe('r12-020-chart-core Chart Factory & Rebuild IDs', () => {
@@ -524,4 +544,237 @@ describe('r12-020-chart-core Canonical Chart Commands', () => {
     scene = getSlideScene(redone2.nextSession!)
     expect((getNativeItem(scene).content as any).data.title).toBe('更新后标题')
   })
+
+  it('maintains state isolation with nativeData override for title, style, and type', () => {
+    const session = makeSession()
+    const added = addSlideChartLayer(session)
+    const chartId = added.selection?.selectionIds[0]!
+    let cur = added.nextSession!
+    const baseChart = getChartData(cur)
+    expect(baseChart.title).toBe('柱状图')
+    expect(baseChart.chartType).toBe('bar')
+
+    // Add state A and state B
+    const stateAResult = addSlidePresentationState(cur, 'State A')
+    expect(stateAResult.ok).toBe(true)
+    cur = stateAResult.nextSession!
+    const stateAId = cur.selection.stateId!
+
+    const stateBResult = addSlidePresentationState(cur, 'State B')
+    expect(stateBResult.ok).toBe(true)
+    cur = stateBResult.nextSession!
+    const stateBId = cur.selection.stateId!
+
+    // Activate State A and patch title
+    cur = activateSlidePresentationState(cur, stateAId).nextSession!
+    const patchTitleResult = patchSlideChartTitle(cur, {
+      layerItemId: chartId,
+      title: 'Title in State A',
+    })
+    expect(patchTitleResult.ok).toBe(true)
+    cur = patchTitleResult.nextSession!
+
+    // Verify State A has override
+    const scene = getSlideScene(cur)
+    const stateA = scene.presentation?.states.find((s) => s.id === stateAId)
+    expect(stateA?.layerItemOverrides[chartId]?.nativeData?.title).toBe('Title in State A')
+
+    // Verify base is UNPOLLUTED
+    const baseItem = scene.layerItems.find((l) => l.layerItemId === chartId)!
+    if (baseItem.kind !== 'native') throw new Error('expected native')
+    expect((baseItem.content.data as any).title).toBe('柱状图')
+
+    // Verify State B sees base title
+    cur = activateSlidePresentationState(cur, stateBId).nextSession!
+    expect(getChartData(cur).title).toBe('柱状图')
+
+    // Verify base state sees base title
+    cur = activateSlidePresentationState(cur, null).nextSession!
+    expect(getChartData(cur).title).toBe('柱状图')
+
+    // In State A, switch type to pie with retainedSeriesId
+    cur = activateSlidePresentationState(cur, stateAId).nextSession!
+    const curChartInA = getChartData(cur)
+    const switchTypeResult = patchSlideChartType(cur, {
+      layerItemId: chartId,
+      newChartType: 'pie',
+      retainedSeriesId: curChartInA.series[0].id,
+    })
+    expect(switchTypeResult.ok).toBe(true)
+    cur = switchTypeResult.nextSession!
+
+    // State A has override chartType 'pie' with 1 series
+    const stateAAfterSwitch = getSlideScene(cur).presentation?.states.find((s) => s.id === stateAId)!
+    expect(stateAAfterSwitch.layerItemOverrides[chartId]?.nativeData?.chartType).toBe('pie')
+    const chartInA = getEffectiveChartData(cur)
+    expect(chartInA.chartType).toBe('pie')
+    expect(chartInA.series).toHaveLength(1)
+
+    // Base state still has chartType 'bar' with 1 series
+    cur = activateSlidePresentationState(cur, null).nextSession!
+    const chartInBase = getChartData(cur)
+    expect(chartInBase.chartType).toBe('bar')
+    expect(chartInBase.series).toHaveLength(1)
+
+    // State B still has chartType 'bar' with 1 series
+    cur = activateSlidePresentationState(cur, stateBId).nextSession!
+    const chartInB = getChartData(cur)
+    expect(chartInB.chartType).toBe('bar')
+    expect(chartInB.series).toHaveLength(1)
+
+    // In State A, reset title back to base '柱状图'
+    cur = activateSlidePresentationState(cur, stateAId).nextSession!
+    const resetTitleResult = patchSlideChartTitle(cur, {
+      layerItemId: chartId,
+      title: '柱状图',
+    })
+    expect(resetTitleResult.ok).toBe(true)
+    cur = resetTitleResult.nextSession!
+    const curStateA = getSlideScene(cur).presentation?.states.find((s) => s.id === stateAId)!
+    // title diff is removed
+    expect(curStateA.layerItemOverrides[chartId]?.nativeData?.title).toBeUndefined()
+    // chartType diff remains
+    expect(curStateA.layerItemOverrides[chartId]?.nativeData?.chartType).toBe('pie')
+  })
+
+  it('creates and edits Chart on Slide surface scope without touching scene base', () => {
+    const session = makeSession()
+    // Switch to surface scope
+    const surfaceSession = requireSession(setSlideEditingScope(session, 'surface'))
+    expect(surfaceSession.scope).toBe('surface')
+
+    // Add chart on surface
+    const added = addSlideChartLayer(surfaceSession, { label: 'Surface Chart' })
+    expect(added.ok).toBe(true)
+    const chartId = added.selection?.selectionIds[0]!
+    let cur = added.nextSession!
+
+    // Verify it is in surfaceLayerItems, not scene.layerItems
+    const surface = cur.history.present.surfaces[0]!
+    expect(surface.surfaceLayerItems).toHaveLength(1)
+    const surfaceItem = surface.surfaceLayerItems[0]!.item
+    expect(surfaceItem.layerItemId).toBe(chartId)
+    const scene = getSlideScene(cur)
+    expect(scene.layerItems).toHaveLength(0)
+
+    // Edit title in surface scope
+    const patched = patchSlideChartTitle(cur, {
+      layerItemId: chartId,
+      title: 'Surface Chart Title',
+    })
+    expect(patched.ok).toBe(true)
+    cur = patched.nextSession!
+    const curSurfaceItem = cur.history.present.surfaces[0]!.surfaceLayerItems[0]!.item
+    if (curSurfaceItem.kind !== 'native') throw new Error('expected native')
+    expect((curSurfaceItem.content.data as any).title).toBe('Surface Chart Title')
+
+    // Editing surface chart from scene scope must be rejected
+    const sceneScopeSession = requireSession(setSlideEditingScope(cur, 'scene'))
+    const rejectFromScene = patchSlideChartTitle(sceneScopeSession, {
+      layerItemId: chartId,
+      title: 'Forbidden',
+    })
+    expect(rejectFromScene.ok).toBe(false)
+    expect(rejectFromScene.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+  })
+
+  it('rejects cross-scope edits with SLIDE_REJECT_WRONG_OWNER', () => {
+    const session = makeSession()
+    const added = addSlideChartLayer(session)
+    const chartId = added.selection?.selectionIds[0]!
+    const cur = added.nextSession!
+
+    // Attempting to edit scene chart from surface scope
+    const surfaceSession = requireSession(setSlideEditingScope(cur, 'surface'))
+    const rejectSurface = patchSlideChartTitle(surfaceSession, {
+      layerItemId: chartId,
+      title: 'Should Fail',
+    })
+    expect(rejectSurface.ok).toBe(false)
+    expect(rejectSurface.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+
+    // Attempting to edit scene chart from global scope
+    const globalSession = requireSession(setSlideEditingScope(cur, 'global'))
+    const rejectGlobal = patchSlideChartTitle(globalSession, {
+      layerItemId: chartId,
+      title: 'Should Fail',
+    })
+    expect(rejectGlobal.ok).toBe(false)
+    expect(rejectGlobal.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+  })
+
+  it('strictly requires retainedSeriesId when converting multi-series to pie/donut with zero writes on failure', () => {
+    const session = makeSession()
+    const added = addSlideChartLayer(session)
+    const chartId = added.selection?.selectionIds[0]!
+    const cur = added.nextSession!
+
+    // Insert a second series so chart is multi-series
+    const insertSeriesResult = insertSlideChartSeries(cur, {
+      layerItemId: chartId,
+      name: '系列 2',
+    })
+    expect(insertSeriesResult.ok).toBe(true)
+    const multiSeriesSession = insertSeriesResult.nextSession!
+    const initialRevision = multiSeriesSession.history.present.revision
+    expect(getChartData(multiSeriesSession).series).toHaveLength(2)
+
+    // 1. Convert to pie without retainedSeriesId
+    const missingRetainedResult = patchSlideChartType(multiSeriesSession, {
+      layerItemId: chartId,
+      newChartType: 'pie',
+    })
+    expect(missingRetainedResult.ok).toBe(false)
+    expect(missingRetainedResult.reason).toBe('retained-series-required')
+    expect(missingRetainedResult.nextSession).toBeDefined()
+    expect(missingRetainedResult.nextSession!.history.present.revision).toBe(initialRevision)
+
+    // 2. Convert to pie with non-existent retainedSeriesId
+    const invalidRetainedResult = patchSlideChartType(multiSeriesSession, {
+      layerItemId: chartId,
+      newChartType: 'pie',
+      retainedSeriesId: 'non-existent-series-id',
+    })
+    expect(invalidRetainedResult.ok).toBe(false)
+    expect(invalidRetainedResult.reason).toBe('invalid-target')
+    expect(invalidRetainedResult.nextSession).toBeDefined()
+    expect(invalidRetainedResult.nextSession!.history.present.revision).toBe(initialRevision)
+
+    // 3. Switch to pie with valid retainedSeriesId
+    const toPieResult = patchSlideChartType(multiSeriesSession, {
+      layerItemId: chartId,
+      newChartType: 'pie',
+      retainedSeriesId: getChartData(multiSeriesSession).series[0].id,
+    })
+    expect(toPieResult.ok).toBe(true)
+    const pieSession = toPieResult.nextSession!
+    const pieRevision = pieSession.history.present.revision
+
+    // Negative values in pie data replacement
+    const negativeValueResult = replaceSlideChartTableData(pieSession, {
+      layerItemId: chartId,
+      candidateData: {
+        categories: [{ label: 'Cat 1' }],
+        series: [{ name: 'Ser 1', values: [-10] }],
+      },
+    })
+    expect(negativeValueResult.ok).toBe(false)
+    expect(negativeValueResult.reason).toBe('invalid-data')
+    expect(negativeValueResult.nextSession).toBeDefined()
+    expect(negativeValueResult.nextSession!.history.present.revision).toBe(pieRevision)
+
+    // Non-finite values
+    const nonFiniteResult = replaceSlideChartTableData(pieSession, {
+      layerItemId: chartId,
+      candidateData: {
+        categories: [{ label: 'Cat 1' }],
+        series: [{ name: 'Ser 1', values: [NaN] }],
+      },
+    })
+    expect(nonFiniteResult.ok).toBe(false)
+    expect(nonFiniteResult.reason).toBe('invalid-data')
+    expect(nonFiniteResult.nextSession).toBeDefined()
+    expect(nonFiniteResult.nextSession!.history.present.revision).toBe(pieRevision)
+  })
 })
+

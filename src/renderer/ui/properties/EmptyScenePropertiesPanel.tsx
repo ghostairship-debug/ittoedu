@@ -19,6 +19,10 @@ export interface EmptySceneBackgroundPatch {
   readonly backgroundAssetId?: string | null
 }
 
+export interface EmptySceneBackgroundPreviewPatch {
+  readonly backgroundColor?: string | null
+}
+
 export interface EmptySceneSlideSurfaceView {
   readonly id: string
   readonly backgroundMode: BackgroundMode
@@ -58,10 +62,13 @@ export interface EmptyScenePropertiesContext {
   readonly commands: {
     readonly updateName: (name: string) => void
     readonly updateSlideSurfaceBackground: (patch: EmptySceneBackgroundPatch) => void
+    readonly previewSlideSurfaceBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
     readonly importSlideSurfaceBackgroundAsset: (file: SharedBackgroundImportFile) => void
     readonly updateSceneBackground: (patch: EmptySceneBackgroundPatch) => void
+    readonly previewSceneBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
     readonly importSceneBackgroundAsset: (file: SharedBackgroundImportFile) => void
     readonly updateStateBackground: (patch: { backgroundColor?: string; backgroundAssetId?: string | null }) => void
+    readonly previewStateBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
     readonly inheritStateColor: () => void
     readonly inheritStateAsset: () => void
     readonly openAutomation: () => void
@@ -144,6 +151,7 @@ export function EmptyScenePropertiesPanel({
               onChange: (backgroundMode) => context.commands.updateSlideSurfaceBackground({ backgroundMode }),
             }}
             onColorChange={(backgroundColor) => context.commands.updateSlideSurfaceBackground({ backgroundColor })}
+            onPreviewColorChange={context.commands.previewSlideSurfaceBackground ? (backgroundColor) => context.commands.previewSlideSurfaceBackground!({ backgroundColor }) : undefined}
             onAssetChange={(backgroundAssetId) => context.commands.updateSlideSurfaceBackground({ backgroundAssetId })}
             onImportAsset={context.commands.importSlideSurfaceBackgroundAsset}
             testId="slide-surface-background-properties"
@@ -162,6 +170,7 @@ export function EmptyScenePropertiesPanel({
               onChange: (backgroundMode) => context.commands.updateSceneBackground({ backgroundMode }),
             }}
             onColorChange={(backgroundColor) => context.commands.updateSceneBackground({ backgroundColor })}
+            onPreviewColorChange={context.commands.previewSceneBackground ? (backgroundColor) => context.commands.previewSceneBackground!({ backgroundColor }) : undefined}
             onAssetChange={(backgroundAssetId) => context.commands.updateSceneBackground({ backgroundAssetId })}
             onImportAsset={context.commands.importSceneBackgroundAsset}
             testId="scene-background-properties"
@@ -186,6 +195,7 @@ export function EmptyScenePropertiesPanel({
               },
             }}
             onColorChange={(backgroundColor) => context.commands.updateStateBackground({ backgroundColor })}
+            onPreviewColorChange={context.commands.previewStateBackground ? (backgroundColor) => context.commands.previewStateBackground!({ backgroundColor }) : undefined}
             onAssetChange={(backgroundAssetId) => context.commands.updateStateBackground({ backgroundAssetId })}
             testId="state-background-properties"
           />

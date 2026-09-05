@@ -28,7 +28,7 @@ export interface ColorInputProps {
   readonly label: string
   readonly value: string
   readonly onChange: (value: string) => void
-  readonly onPreviewChange?: (value: string) => void
+  readonly onPreviewChange?: (value: string | null) => void
   readonly 'data-testid'?: string
 }
 
@@ -43,30 +43,55 @@ export function ColorInput({
   const normalizedValue = (value || '').toLowerCase()
   const [draft, setDraft] = useState(normalizedValue)
   const [pickerDraft, setPickerDraft] = useState(normalizedValue)
+  const isCancelledRef = useRef(false)
+  const isPreviewDirtyRef = useRef(false)
+  const draftRef = useRef(normalizedValue)
   const pickerRef = useRef<HTMLInputElement>(null)
   const lastCommittedRef = useRef(normalizedValue)
+  const onPreviewChangeRef = useRef(onPreviewChange)
 
   useEffect(() => {
+    onPreviewChangeRef.current = onPreviewChange
+  }, [onPreviewChange])
+
+  useEffect(() => {
+    isCancelledRef.current = false
+    draftRef.current = normalizedValue
     setDraft(normalizedValue)
     setPickerDraft(normalizedValue)
-    lastCommittedRef.current = normalizedValue
   }, [normalizedValue])
+
+  useEffect(() => {
+    return () => {
+      if (isPreviewDirtyRef.current) {
+        isPreviewDirtyRef.current = false
+        onPreviewChangeRef.current?.(null)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const el = pickerRef.current
     if (!el) return
 
     const handleNativeInput = (e: Event) => {
+      isCancelledRef.current = false
+      isPreviewDirtyRef.current = true
       const targetVal = (e.target as HTMLInputElement).value.toLowerCase()
       setPickerDraft(targetVal)
+      draftRef.current = targetVal
       setDraft(targetVal)
       onPreviewChange?.(targetVal)
     }
 
     const handleNativeChange = (e: Event) => {
+      isCancelledRef.current = false
+      isPreviewDirtyRef.current = false
       const targetVal = (e.target as HTMLInputElement).value.toLowerCase()
       setPickerDraft(targetVal)
+      draftRef.current = targetVal
       setDraft(targetVal)
+      onPreviewChange?.(null)
       if (targetVal !== normalizedValue && targetVal !== lastCommittedRef.current) {
         lastCommittedRef.current = targetVal
         onChange(targetVal)
@@ -82,30 +107,48 @@ export function ColorInput({
   }, [normalizedValue, onChange, onPreviewChange])
 
   const commit = () => {
-    const trimmed = draft.trim().toLowerCase()
+    if (isCancelledRef.current) {
+      isCancelledRef.current = false
+      isPreviewDirtyRef.current = false
+      draftRef.current = normalizedValue
+      setDraft(normalizedValue)
+      setPickerDraft(normalizedValue)
+      onPreviewChange?.(null)
+      return
+    }
+    isPreviewDirtyRef.current = false
+    onPreviewChange?.(null)
+    const trimmed = draftRef.current.trim().toLowerCase()
     if (isValidHex(trimmed)) {
       if (trimmed !== normalizedValue && trimmed !== lastCommittedRef.current) {
         lastCommittedRef.current = trimmed
+        draftRef.current = trimmed
         setDraft(trimmed)
         setPickerDraft(trimmed)
         onChange(trimmed)
       } else {
+        draftRef.current = normalizedValue
         setDraft(normalizedValue)
         setPickerDraft(normalizedValue)
       }
     } else {
+      draftRef.current = normalizedValue
       setDraft(normalizedValue)
       setPickerDraft(normalizedValue)
-      onPreviewChange?.(normalizedValue)
     }
   }
 
   const handlePresetClick = (presetColor: string) => {
+    isCancelledRef.current = false
+    isPreviewDirtyRef.current = false
+    onPreviewChange?.(null)
     const next = presetColor.toLowerCase()
     if (next !== normalizedValue && next !== lastCommittedRef.current) {
       lastCommittedRef.current = next
+      draftRef.current = next
       setDraft(next)
       setPickerDraft(next)
+      onPreviewChange?.(next)
       onChange(next)
     }
   }
@@ -149,7 +192,21 @@ export function ColorInput({
           id={`${id}-text`}
           value={draft}
           maxLength={7}
-          onChange={(event) => setDraft(event.target.value)}
+          onFocus={() => {
+            isCancelledRef.current = false
+          }}
+          onChange={(event) => {
+            isCancelledRef.current = false
+            const nextVal = event.target.value
+            draftRef.current = nextVal
+            setDraft(nextVal)
+            const trimmed = nextVal.trim().toLowerCase()
+            if (isValidHex(trimmed)) {
+              setPickerDraft(trimmed)
+              isPreviewDirtyRef.current = true
+              onPreviewChange?.(trimmed)
+            }
+          }}
           onBlur={commit}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -157,9 +214,12 @@ export function ColorInput({
               event.currentTarget.blur()
             }
             if (event.key === 'Escape') {
+              isCancelledRef.current = true
+              isPreviewDirtyRef.current = false
+              draftRef.current = normalizedValue
               setDraft(normalizedValue)
               setPickerDraft(normalizedValue)
-              onPreviewChange?.(normalizedValue)
+              onPreviewChange?.(null)
               event.currentTarget.blur()
             }
           }}
