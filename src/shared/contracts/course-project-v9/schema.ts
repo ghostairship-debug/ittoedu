@@ -6,7 +6,7 @@ import {
 } from '../course-state/schema'
 import { courseStateScalarType } from '../course-state/types'
 export { courseStateDeclarationSchema } from '../course-state/schema'
-import { formulaAstSchema, nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
+import { chartNativeContentObjectSchema, formulaAstSchema, nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
 import type { NativeRenderInput } from '../native-v1/types'
 import { courseProjectEmbeddedComponentPackageMetaSchema } from '../component-v4/schema'
 import { courseProjectDesignTokensSchema } from '../design-v1/schema'
@@ -775,6 +775,13 @@ const flowComponentBlockSchema = z.object({
   wrap: z.enum(['none', 'left', 'right']).optional(),
 }).strict()
 
+const flowChartBlockSchema = z.object({
+  ...flowBlockBaseFields,
+  type: z.literal('chart'),
+  chart: chartNativeContentObjectSchema,
+  height: finiteNumber.min(160).max(1600),
+}).strict()
+
 export const flowBlockSchema: z.ZodType<FlowBlock> = z.lazy(() =>
   z.discriminatedUnion('type', [
     flowHeadingBlockSchema,
@@ -784,6 +791,7 @@ export const flowBlockSchema: z.ZodType<FlowBlock> = z.lazy(() =>
     flowDividerBlockSchema,
     flowMediaBlockSchema,
     flowTableBlockSchema,
+    flowChartBlockSchema,
     flowFormulaBlockSchema,
     flowCodeBlockSchema,
     flowCalloutBlockSchema,
@@ -949,7 +957,7 @@ const spatialSurfaceSchema = z.object({
   surface.world.layerItems.forEach((item, index) => {
     if (
       item.kind === 'native'
-      && (item.content.nativeType === 'table' || item.content.nativeType === 'chart' || item.content.nativeType === 'input')
+      && (item.content.nativeType === 'table' || item.content.nativeType === 'input')
     ) {
       context.addIssue({
         code: 'custom',

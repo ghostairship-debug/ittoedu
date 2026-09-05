@@ -197,3 +197,13 @@ Flow carrier 被统一层抹平；Core 循环依赖；第二套导航/状态真�
 - `CourseAuthoringSession`：唯一活动编辑会话，演化不重建；`AuthoringTarget` 是异步提交的过期防护快照。
 - `AI/CLI session`：应用本地保存的外部 CLI 会话映射和工具轨迹；不属于 Course Project，也不是第二个 `CourseAuthoringSession`。
 - `AI staging workspace`：自动准入前的应用本地候选目录；其中内容不是 authoritative project，只有通过门禁并经产品事务提交后才成为工程事实。
+
+
+### 1.3 Chart domain
+
+Chart now also uses a strict Flow body block (`type: chart`, `chart`, `height`) and Spatial
+world Native LayerItem. Published V2 uses the matching domain. Flow width follows reading
+width; height is 160–1600 CSS pixels. Shared chart data and style rules have one owner;
+Surface adapters own identity, target and history. Flow DOCX uses a static chart image plus
+editable data, while Spatial exports use existing camera pages. Flow overlay, Spatial shared,
+global, Table and input domains are unchanged. See the V9 compatibility policy for details.

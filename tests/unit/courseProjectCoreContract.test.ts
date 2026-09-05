@@ -1725,7 +1725,17 @@ describe('Course Project V9 core contract', () => {
       expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: extraField as any })).success).toBe(false)
     })
 
-    it('strictly rejects Table and Chart in Flow, Global, and Spatial containers', () => {
+    it('accepts nested strict Flow charts with shared Native data constraints', () => {
+      for (const type of ['bar', 'line', 'area', 'pie', 'donut'] as const) {
+        const block = { id: 'chart-body', type: 'chart', chart: sampleChartContent(type), height: 360 }
+        expect(flowBlockSchema.safeParse(block).success).toBe(true)
+        expect(flowBlockSchema.safeParse({ ...block, x: 1 }).success).toBe(false)
+        expect(flowBlockSchema.safeParse({ ...block, height: 0 }).success).toBe(false)
+        expect(flowBlockSchema.safeParse({ id: 'section-chart', type: 'section', title: 'Charts', collapsedByDefault: true, blocks: [block] }).success).toBe(true)
+      }
+    })
+
+    it('rejects out-of-domain Table and Chart while accepting Spatial world charts', () => {
       const tableContent = sampleTableContent()
 
       // 1. Flow surfaceLayerItems
@@ -1824,7 +1834,7 @@ describe('Course Project V9 core contract', () => {
           },
         ]
       }
-      expect(courseProjectDocumentSchema.safeParse(spatialProject2).success).toBe(false)
+      expect(courseProjectDocumentSchema.safeParse(spatialProject2).success).toBe(true)
     })
   })
 
