@@ -104,7 +104,10 @@ function insertionCapability(
       carrier: scope === 'global' ? 'global-layer-item' : 'free-node',
     }
   }
-  if (kind === 'table' || kind === 'chart') {
+  if (kind === 'table') {
+    return { enabled: false, draggable: false, carrier: 'unavailable' }
+  }
+  if (kind === 'chart' && scope === 'global') {
     return { enabled: false, draggable: false, carrier: 'unavailable' }
   }
   if (surface === 'spatial') {
@@ -139,8 +142,8 @@ function insertionTitle(
     if (surface === 'slide' && (kind === 'table' || kind === 'chart')) {
       return `${label}：暂不支持添加到全局层；请切换到当前场景`
     }
-    if (kind === 'table' || kind === 'chart') {
-      return `${label}：表格和图表只能添加到演示页场景`
+    if (kind === 'table') {
+      return `${label}：表格只能添加到演示页场景`
     }
     return surface === 'spatial'
       ? spatialScope === 'surface'
@@ -163,6 +166,8 @@ function insertionTitle(
       ? '文档段落'
       : kind === 'formula'
         ? '独立公式块'
+        : kind === 'chart'
+          ? '正文图表'
         : kind === 'image'
           ? '文中图片块'
           : '文中视频块'

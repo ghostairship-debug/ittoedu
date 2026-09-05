@@ -4,11 +4,15 @@
 
 教师可以用高频页面 / 互动 Recipe 快速得到普通、可继续编辑的 V9 内容，并能复用参考页骨架、批量替换内容、应用 Design Token 和快速定位问题。Recipe 只是一组产品命令，不成为第二套 DSL，不保留隐藏运行时；容量不足时换档、拆页或切换 Flow，不默认无限缩小文字。
 
-本版还必须交付五种 Chart 的 Flow/Spatial 创作闭环，以及复用项目 `designTokens.colors` 的工程色板与范围应用；这些不是 Recipe 的隐含附带工作。1.2 已负责图表/表格作者态同步修复、不中断的连续调色、固定常用色和统一图表插入入口，本版不承接未修好的 1.2 基础可用性。下面跨 Surface 载体与导出方案是待独立合同交付的开发目标，当前 reader/能力索引仍遵循已实现的 1.2 边界。
+本版交付五种 Chart 的 Flow/Spatial 创作闭环，以及复用项目 `designTokens.colors` 的工程色板与范围应用；这些不是 Recipe 的隐含附带工作。1.2 已负责图表/表格作者态同步修复、不中断的连续调色、固定常用色和统一图表插入入口。跨 Surface Chart 的独立 strict 合同与 consumer 已落地，当前 reader/能力索引包含 Flow 正文和 Spatial world；Table/input/global 不扩域。
 
 S1 Owner 验收 1.2–1.3 后发布 `v1.3.0` accepted 源码标签，不发布 HTML 或安装器。
 
 ## 任务 DAG
+
+本轮执行先消除人工依赖，再按实际文件边界并行。Recipe 采用固定布局和明确容量阈值，不建设自动排版求解器；首个配方贯通普通 V9、事务和可见 UI 后复用实现其余配方。参考页限定为当前工程内已有 V9 Slide 页；批量替换限定为正式可编辑文本字段，不处理任意 JSON、代码、资源路径或外部 PPT/截图识别。快速诊断扩展已有 ProjectHealthPanel 与权威 health collector，不新建诊断系统。
+
+每批选择直接覆盖新行为的聚焦检查，已有且未受影响的通过证据继续有效。使用 `npx vitest run` 避免无关 Player 构建；真实操作覆盖明确路径，按依赖变化构建必需载体后直接运行 Playwright。集成时检查跨模块路径，只有证据不足或相关回归才扩大范围；不按子智能体数量重复执行。
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
@@ -23,9 +27,9 @@ S1 Owner 验收 1.2–1.3 后发布 `v1.3.0` accepted 源码标签，不发布 H
 | `r13-020-step-reveal-recipe` | `step-reveal-v1` 生成声明式逐步揭示互动 | `r13-000-recipe-contract` | 否 | `authoring-recipe`, `authoring-interaction` | 至少三步内容可编辑、重排并设置初始状态；Player 逐步操作顺序确定，返回起点可复现；键盘可触发；展开结果不依赖 Recipe 运行时 |
 | `r13-021-choice-feedback-recipe` | `choice-feedback-v1` 生成选择与反馈互动 | `r13-000-recipe-contract` | 否 | `authoring-recipe`, `authoring-interaction` | 题干、选项、正确性与反馈可编辑；选择后显示对应反馈并可重置；答案一致性诊断能定位缺答案 / 多答案配置；保存重开与 Player 一致 |
 | `r13-022-classify-sort-recipe` | `classify-sort-v1` 生成分类 / 排序互动 | `r13-000-recipe-contract` | 否 | `authoring-recipe`, `authoring-interaction`, `published-dynamic` | 分类与排序参数均可编辑；分类用“选中项目→选中目标组”的声明式点击/状态路径，排序用当前 Component 载体真实重排并公开项目、正确顺序和反馈参数，不要求本节点先建设通用组件化；指针与键盘得到同一结果，错误/正确反馈与重置确定，保存重开与 Player 一致；缺组、孤立项和重复稳定 ID 被拒绝且零部分写入；不新增拖放/放置触发器或顺序动作 |
-| `r13-030-reference-clone` | 从参考页复制可编辑骨架而非复制隐藏状态 | `r13-000-recipe-contract` | 否 | `store-slide`, `authoring-slide`, `workspace-shell` | 克隆后对象、资源和交互引用获得无冲突身份；修改副本不改变原页；保存重开、Player 与适用导出无悬空引用；一次克隆可整体撤销 |
-| `r13-040-batch-replace` | 在明确范围内预览并批量查找替换 | `r13-000-recipe-contract` | 否 | `store-kernel`, `workspace-shell` | 可选择当前页 / Surface / 整课范围；预览逐项显示 old / new 与 target；确认后仅修改勾选项并产生一个事务；stale 预览拒绝提交；Undo 恢复全部原值 |
-| `r13-041-token-apply` | 复用项目色板并将 Design Token 应用于明确对象范围 | `r13-000-recipe-contract`, `r12-040-background-authoring` | 否 | `store-kernel`, `props-shared`, `store-course` | 同一颜色控件读取既有 designTokens.colors；范围预览逐项报告 old/new/target 和属性，不支持项保留并说明；确认后只写所选范围，一次原子提交、stale 零写入、整体可撤销；保存重开和 Player 保持已应用色值与项目色板；不复制主题状态或默认为同色对象建立自动绑定 |
+| `r13-030-reference-clone` | 从当前工程已有 V9 Slide 页复制可编辑骨架 | — | 否 | `store-slide`, `authoring-slide`, `workspace-shell` | 克隆后对象、资源和交互引用获得无冲突身份；修改副本不改变原页；保存重开、Player 与适用导出无悬空引用；一次克隆可整体撤销 |
+| `r13-040-batch-replace` | 在明确范围内预览并批量查找替换正式文本字段 | — | 否 | `store-kernel`, `workspace-shell` | 可选择当前页 / Surface / 整课范围；预览逐项显示 old / new 与 target；确认后仅修改勾选项并产生一个事务；stale 预览拒绝提交；Undo 恢复全部原值 |
+| `r13-041-token-apply` | 复用项目色板并将 Design Token 应用于明确对象范围 | `r12-040-background-authoring` | 否 | `store-kernel`, `props-shared`, `store-course` | 同一颜色控件读取既有 designTokens.colors；范围预览逐项报告 old/new/target 和属性，不支持项保留并说明；确认后只写所选范围，一次原子提交、stale 零写入、整体可撤销；保存重开和 Player 保持已应用色值与项目色板；不复制主题状态或默认为同色对象建立自动绑定 |
 | `r13-050-fast-diagnostics` | 提供面向教师的快速诊断入口与可定位结果 | — | 否 | `diagnostics`, `workspace-shell` | 从可见入口启动后，结果按严重度和 Surface 分组并能跳转到对象；健康工程显示零错误；构造的悬空资源、答案不一致和容量问题分别被精确定位；诊断不改工程 |
 | `r13-055-recipe-closure` | 统一收口 Recipe、跨 Surface Chart 与设计生产力的能力及导出 | `r13-010-cover-recipe`, `r13-011-concept-recipe`, `r13-012-worked-example-recipe`, `r13-020-step-reveal-recipe`, `r13-021-choice-feedback-recipe`, `r13-022-classify-sort-recipe`, `r13-030-reference-clone`, `r13-040-batch-replace`, `r13-041-token-apply`, `r13-050-fast-diagnostics`, `r13-003-flow-chart-delivery`, `r13-004-spatial-chart-delivery` | 否 | `generated-index`, `diagnostics`, `published-producer` | 能力索引精确声明六种 Recipe、四项生产力能力与已通过的 Flow/Spatial Chart；诊断定位展开后的悬空引用、答案不一致、容量及图表容器/数据/静态后备问题；Published 与适用导出对普通 V9 展开结果无静默遗漏，不含 Recipe 专用运行时节点或第二工程真相；既有基线不退化，两个 Chart delivery 均为必选前置 |
 | `r13-060-release` | Owner 验收 S1 创作力并发布 v1.3.0 accepted 源码标签 | `r13-055-recipe-closure`, `r12-060-release` | 否 | `none` | Owner 在同一固定课例完成 S1 创作力验收：覆盖 1.2 的 Flow 正文及文字/图片/图形浮层、图形属性、连续 DOCX、Slide input 与 PPTX、Table、五种 Chart、Line、六 owner 背景，并检查作者态同步、连续调色、常用色和统一入口；覆盖 1.3 的六种 Recipe、分类、Component 排序、克隆、批量替换、项目色板/Token、快速诊断，以及 Flow 正文和 Spatial 世界五类 Chart；检查保存、重开、Undo/Redo、Player、单 HTML 与适用导出，晋升 1.2–1.3 已验收行为到保全矩阵，签署 accepted 后创建 `v1.3.0` 源码标签 |
@@ -75,7 +79,7 @@ Flow 正文图表块是新增 discriminator，必须在兼容政策中单独登�
 - 共享编辑：`npx vitest run tests/unit/v9ChartCommands.test.ts tests/unit/v9SlideProductIntegration.test.tsx tests/unit/coursePptxExport.test.ts`
 - Flow：`npx vitest run tests/unit/flowEditorCommands.test.ts tests/unit/buildPublishedCourseV2.test.ts tests/unit/flowDocxProjection.test.ts tests/unit/coursePrintArtifacts.test.ts`
 - Spatial：`npx vitest run tests/unit/spatialEditorCommands.test.ts tests/unit/spatialSurfaceHost.test.ts tests/unit/coursePrintArtifacts.test.ts`
-- 真实操作：`npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts tests/e2e/stabilizationFlowAuthoring.spec.ts tests/e2e/stabilizationOwnershipController.spec.ts`
+- 真实操作：`npx playwright test tests/e2e/stabilizationCoreUsability.spec.ts tests/e2e/stabilizationFlowAuthoring.spec.ts tests/e2e/stabilizationOwnershipController.spec.ts`
 
 各节点只选相关的 1–3 条命令；上述清单不是每次全跑。两个 delivery 全部通过后，`r13-055-recipe-closure` 才统一生成新能力索引、检查容器错误和静态后备；S1 必须用真实 Flow 正文与 Spatial 相机路径完成图表创作/重开/播放/导出。失败按首个错误回到合同、共享编辑器或对应 Surface owner，不通过隐藏入口、截图替换工程或 warning 吞错收尾。
 
@@ -100,10 +104,10 @@ Flow 正文图表块是新增 discriminator，必须在兼容政策中单独登�
 实现任务应在以下现有测试文件中增加明确用例，并按最小相关集合执行：
 
 ```text
-npm run test:product -- tests/unit/coursewareCaseBuilder.test.ts tests/unit/coursewareAuthoringRunner.test.ts tests/unit/editorTransaction.test.ts
-npm run test:product -- tests/unit/designTokens.test.tsx tests/unit/assessmentEvaluators.test.ts tests/unit/courseProjectHealth.test.ts
-npm run test:product -- tests/unit/courseProjectRoundTrip.test.ts tests/unit/v9SlideContentCommands.test.ts
-npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts
+npx vitest run tests/unit/coursewareCaseBuilder.test.ts tests/unit/coursewareAuthoringRunner.test.ts tests/unit/editorTransaction.test.ts
+npx vitest run tests/unit/designTokens.test.tsx tests/unit/assessmentEvaluators.test.ts tests/unit/courseProjectHealth.test.ts
+npx vitest run tests/unit/courseProjectRoundTrip.test.ts tests/unit/v9SlideContentCommands.test.ts
+npx playwright test tests/e2e/stabilizationCoreUsability.spec.ts
 ```
 
 版本候选再执行总路线的统一验证与发布门。视觉、容量与互动结果必须在固定课例中由 Owner 实际观察。

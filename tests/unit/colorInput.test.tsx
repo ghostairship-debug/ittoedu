@@ -1,8 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
-import { ColorInput, COMMON_COLOR_PRESETS } from '../../src/renderer/ui/ColorInput'
+import { ColorInput, COMMON_COLOR_PRESETS, ProjectColorPaletteContext } from '../../src/renderer/ui/ColorInput'
 
 describe('ColorInput', () => {
+  it('projects the current project palette into the same color control', () => {
+    const change = vi.fn()
+    const view = render(<ProjectColorPaletteContext.Provider value={[{ name: '强调', value: '#123456' }]}>
+      <ColorInput id="palette" label="填充" value="#ffffff" onChange={change} />
+    </ProjectColorPaletteContext.Provider>)
+    fireEvent.click(screen.getByRole('button', { name: '项目色 强调 #123456' }))
+    expect(change).toHaveBeenCalledExactlyOnceWith('#123456')
+    view.rerender(<ProjectColorPaletteContext.Provider value={[{ name: '强调', value: '#abcdef' }]}>
+      <ColorInput id="palette" label="填充" value="#123456" onChange={change} />
+    </ProjectColorPaletteContext.Provider>)
+    expect(screen.getByRole('button', { name: '项目色 强调 #abcdef' })).toBeInTheDocument()
+    expect(change).toHaveBeenCalledTimes(1)
+  })
   afterEach(() => {
     cleanup()
   })

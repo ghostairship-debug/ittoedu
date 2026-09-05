@@ -44,6 +44,10 @@ import { SceneStateStrip } from './ui/SceneStateStrip'
 import { TopToolbar } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
+import { ProjectColorPaletteContext } from './ui/ColorInput'
+import { RecipePanel } from './ui/recipes/RecipePanel'
+import { ProductivityDialog } from './ui/productivity/ProductivityDialog'
+import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
 
 function desktopApi() {
@@ -88,10 +92,19 @@ function captureCourseIdentity() {
 export default function App() {
   const [busy, setBusy] = useState(false)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
+  const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity'; context: ProductivityContext } | null>(null)
+  const openDesignTool = (kind: 'recipe' | 'productivity') => {
+    const context = useEditorStore.getState().prepareDesignProduction()
+    if (context) setDesignTool({ kind, context })
+  }
 
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const projectPath = useEditorStore((state) => state.projectPath)
   const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
+  const designSessionToken = useEditorStore(state => state.courseAuthoringSession?.token)
+  const projectColors = useMemo(() => activeCourseDocument?.designTokens.colors.map(
+    token => ({ name: token.label, value: token.color }),
+  ) ?? [], [activeCourseDocument?.designTokens.colors])
   const sidecarFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
@@ -447,6 +460,7 @@ export default function App() {
   }, [run])
 
   return (
+    <ProjectColorPaletteContext.Provider value={projectColors}>
     <div className="app-shell">
       <TopToolbar
         busy={busy}
@@ -459,6 +473,8 @@ export default function App() {
         onSave={(saveAs) => void courseProjectLifecycle.saveProject(saveAs)}
         healthSummary={projectHealthSummary}
         onOpenHealth={() => setProjectHealthOpen(true)}
+        onOpenRecipes={() => openDesignTool('recipe')}
+        onOpenProductivity={() => openDesignTool('productivity')}
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
       />
@@ -569,6 +585,38 @@ export default function App() {
         onClose={() => setProjectHealthOpen(false)}
         onExportDiagnostics={handleExportDiagnostics}
       />
+      {designTool?.kind === 'recipe' && <div className="modal-backdrop" role="presentation">
+        <section className="design-production-dialog" role="dialog" aria-modal="true" aria-label="新建配方页">
+          <header><h2>新建配方页</h2><button type="button" aria-label="关闭配方" onClick={() => setDesignTool(null)}><X size={18} /></button></header>
+          <RecipePanel project={activeCourseDocument ?? designTool.context.document} locationId={designSessionToken?.locationId ?? designTool.context.sessionToken.locationId}
+            sessionGeneration={designSessionToken?.generation} error={errorMessage ?? undefined}
+            onApply={input => {
+              const store = useEditorStore.getState()
+              const live = store.readDesignProductionContext()
+              if (live && store.applyCourseRecipe(input, live.sessionToken)) setDesignTool(null)
+            }} />
+        </section>
+      </div>}
+      {designTool?.kind === 'productivity' && <ProductivityDialog
+        getContext={() => {
+          const context = useEditorStore.getState().readDesignProductionContext()
+          if (!context) throw new Error('当前工程会话已关闭')
+          return context
+        }}
+        getAssetFiles={() => selectMediaAssetFiles(useEditorStore.getState())}
+        onCommit={step => {
+          const store = useEditorStore.getState()
+          const live = store.readDesignProductionContext()
+          if (!live || !store.commitDesignProduction(step, live.sessionToken)) return false
+          const hint = step.selectionHint
+          if (hint && typeof hint === 'object' && 'locationId' in hint && typeof hint.locationId === 'string') {
+            store.activateCourseLocation(hint.locationId)
+          }
+          setDesignTool(null)
+          return true
+        }}
+        onClose={() => setDesignTool(null)}
+      />}
       <CopyableSummaryDialog
         open={mediaImport.batchOperationSummary !== null}
         title={mediaImport.batchOperationSummary?.title ?? '批次结果'}
@@ -673,5 +721,6 @@ export default function App() {
         </div>
       ) : null}
     </div>
+    </ProjectColorPaletteContext.Provider>
   )
 }

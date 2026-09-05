@@ -76,11 +76,21 @@ function OpenProjectHealthPanel({
     [diagnostics],
   )
   const grouped = useMemo(
-    () => severityOrder.map((severity) => ({
-      severity,
-      items: diagnostics.filter((item) => item.severity === severity),
-    })).filter((group) => group.items.length > 0),
-    [diagnostics],
+    () => severityOrder.flatMap((severity) => {
+      const groups = new Map<string, CourseProjectHealthFinding[]>()
+      for (const item of diagnostics.filter(item => item.severity === severity)) {
+        const target = item.target
+        const surface = 'surfaceId' in target
+          ? courseProject?.surfaces.find(surface => surface.id === target.surfaceId)
+          : undefined
+        const label = surface
+          ? `${surface.type === 'slide' ? '演示页' : surface.type === 'flow' ? '流式讲义' : '无限画布'} · ${surface.title}`
+          : '整课与资源'
+        groups.set(label, [...(groups.get(label) ?? []), item])
+      }
+      return [...groups].map(([label, items]) => ({ severity, label, items }))
+    }),
+    [diagnostics, courseProject],
   )
 
   const locate = (diagnostic: CourseProjectHealthFinding) => {
@@ -90,6 +100,7 @@ function OpenProjectHealthPanel({
     if (route.locationId) store.activateCourseLocation(route.locationId)
     store.setEditingScope(route.scope)
     if (route.layerItemId) store.selectNode(route.layerItemId)
+    if (route.blockId) store.selectNode(route.blockId)
     if (route.tab === 'automation' || route.tab === 'components') {
       store.setEditorMode('professional')
     }
@@ -131,10 +142,11 @@ function OpenProjectHealthPanel({
             </div>
           ) : (
             grouped.map((group) => (
+              <section key={`${group.severity}:${group.label}`}>
+              <h3>{severityLabel[group.severity]} · {group.label}</h3>
               <ol
-                key={group.severity}
                 className="project-health-list"
-                aria-label={severityLabel[group.severity]}
+                aria-label={`${severityLabel[group.severity]} · ${group.label}`}
               >
                 {group.items.map((diagnostic, index) => (
                   <li
@@ -153,6 +165,7 @@ function OpenProjectHealthPanel({
                   </li>
                 ))}
               </ol>
+              </section>
             ))
           )}
         </div>

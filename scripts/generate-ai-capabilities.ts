@@ -92,6 +92,8 @@ import {
   RUNTIME_SCOPES,
 } from '../src/shared/runtimeTypes'
 import { ASSESSMENT_EVALUATOR_REGISTRY } from '../src/shared/assessmentEvaluators'
+import { NATIVE_NODE_TYPES } from '../src/shared/contracts/native-v1/types'
+import { RECIPE_CATALOG } from '../src/renderer/recipes/recipeCatalog'
 import {
   HOST_EVIDENCE_CONSOLE_PREFIX,
   HOST_EVIDENCE_SCHEMA_VERSION,
@@ -105,14 +107,7 @@ export const AI_CAPABILITY_INDEX_MAX_BYTES = 16_384
 export const AI_CAPABILITY_MANIFEST_VERSION = 1 as const
 export const INTERACTION_PROTOCOL_VERSION = 1 as const
 
-export const COURSE_NATIVE_TYPES = [
-  'text',
-  'formula',
-  'image',
-  'video',
-  'shape',
-  'teacher-controller',
-] as const
+export const COURSE_NATIVE_TYPES = NATIVE_NODE_TYPES
 
 type CourseNativeType = typeof COURSE_NATIVE_TYPES[number]
 
@@ -612,6 +607,18 @@ async function buildComponentCatalogSnapshot(
 }
 
 const nodeCapabilitySummary = {
+  table: {
+    label: '表格', authoringModes: ['simple', 'professional'], authoringScopes: ['slide-scene', 'slide-surface'],
+    exports: { singleHtml: 'native', webPackage: 'native', pptx: 'editable-table', pdf: 'static-capture' },
+  },
+  chart: {
+    label: '图表', authoringModes: ['simple', 'professional'], authoringScopes: ['slide-scene', 'slide-surface', 'flow-body', 'spatial-world'],
+    exports: { singleHtml: 'native', webPackage: 'native', pptx: 'slide-editable-chart;spatial-camera-static', docx: 'flow-static-chart-and-editable-data', pdf: 'static-chart' },
+  },
+  input: {
+    label: '输入框', authoringModes: ['simple', 'professional'], authoringScopes: ['slide-scene'],
+    exports: { singleHtml: 'interactive', webPackage: 'interactive', pptx: 'static-editable-answer-area', pdf: 'static-answer-area' },
+  },
   text: {
     label: '文本',
     authoringModes: ['simple', 'professional'],
@@ -1371,6 +1378,20 @@ export async function generateAiCapabilityArtifacts(
       scopes: RUNTIME_SCOPES,
     },
     assessmentEvaluators: ASSESSMENT_EVALUATOR_REGISTRY,
+    recipes: {
+      catalog: RECIPE_CATALOG.map(({ id, version, label }) => ({ id, version, label })),
+      sourceOfTruth: 'src/renderer/recipes/recipeCatalog.ts',
+      builder: 'api.recipes.planRecipe',
+      output: 'ordinary-course-project-v9-with-atomic-resource-transaction',
+      authoringScope: 'new-slide-scene',
+    },
+    designProductivity: {
+      referenceClone: 'same-project-slide-scene-with-remapped-identities',
+      batchReplace: 'selected-formal-text-fields-with-preview-and-stale-rejection',
+      projectPalette: 'designTokens.colors',
+      tokenApply: 'selected-color-properties-with-preview-and-single-undo;no-live-binding',
+      diagnostics: 'read-only-severity-and-surface-groups-with-stable-target-navigation',
+    },
     runtime: {
       versions: [RUNTIME_API_VERSION, SURFACE_RUNTIME_API_VERSION],
       schema: 'schemas/runtime-api2.json',

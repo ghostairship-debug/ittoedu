@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { usePropertyDraftBindingKey } from './properties/PropertyControls'
 
 export interface ColorPreset {
@@ -6,6 +6,9 @@ export interface ColorPreset {
   readonly value: string
   readonly contrastColor?: string
 }
+
+/** Read-only projection of the current project's designTokens.colors. */
+export const ProjectColorPaletteContext = createContext<readonly ColorPreset[]>([])
 
 export const COMMON_COLOR_PRESETS: readonly ColorPreset[] = [
   { name: '纯白', value: '#ffffff', contrastColor: '#000000' },
@@ -41,6 +44,7 @@ export function ColorInput({
   onPreviewChange,
   'data-testid': testId,
 }: ColorInputProps) {
+  const projectColors = useContext(ProjectColorPaletteContext)
   const bindingKey = `${usePropertyDraftBindingKey()}:${id}`
   const normalizedValue = (value || '').toLowerCase()
   const [draft, setDraft] = useState(normalizedValue)
@@ -200,6 +204,17 @@ export function ColorInput({
           )
         })}
       </div>
+      {projectColors.length > 0 && <div className="color-presets" role="group" aria-label={`${label}项目色板`}>
+        {projectColors.map((preset, index) => <button
+          key={`${preset.name}:${index}`}
+          type="button"
+          className={`color-preset-swatch${preset.value.toLowerCase() === normalizedValue ? ' is-selected' : ''}`}
+          aria-label={`项目色 ${preset.name} ${preset.value}`}
+          title={`${preset.name} (${preset.value})`}
+          style={{ backgroundColor: preset.value }}
+          onClick={() => handlePresetClick(preset.value)}
+        >{preset.value.toLowerCase() === normalizedValue ? '✓' : ''}</button>)}
+      </div>}
       <div className="color-control">
         <input
           ref={pickerRef}

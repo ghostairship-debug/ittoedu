@@ -97,6 +97,7 @@ import {
 } from './slices/spatialAuthoringSlice'
 import { createEditorShellSlice } from './slices/editorShellSlice'
 import { createCourseStructureSlice } from './slices/courseStructureSlice'
+import { createDesignProductionActions } from '../composition/designProductionActions'
 import {
   applyEditorTransactionStep,
   createEditorTransactionStep,
@@ -596,6 +597,7 @@ export type EditorState =
   & ReturnType<typeof createComponentAuthoringActions>
   & ReturnType<typeof createInteractionAuthoringActions>
   & ReturnType<typeof createCrossSurfaceCommands>
+  & ReturnType<typeof createDesignProductionActions>
   & {
       commitSlideCandidateTextRunStyle(input: {
         layerItemId: string
@@ -1185,6 +1187,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
   })
 
+  const designProductionActions = createDesignProductionActions({
+    readContext: () => {
+      const document = kernel.tryReadDocument()
+      const session = kernel.readAuthoringSession()
+      return document && session ? { document, sessionToken: { ...session.token } } : null
+    },
+    prepare: () => courseLifecycleSlice.prepareCourseProjectPersistence(),
+    persist: (step, message) => kernel.persistTransaction(step, message),
+    activate: locationId => crossSurfaceCommands.activateCourseLocation(locationId),
+    feedback: reason => kernel.setFeedback({ errorMessage: reason }),
+  })
+
   return {
     canvasMode: 'edit',
     projectPath: null,
@@ -1233,6 +1247,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ...interactionAuthoringActions,
     ...courseStructureSlice,
     ...crossSurfaceCommands,
+    ...designProductionActions,
 
   }
 })

@@ -93,11 +93,11 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和次旗舰执行规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 当前起点：1.2 Native 编辑闭环
+### 5.1 当前起点：1.3 Recipe 与设计生产力
 
 当前开发以已签署的 `v1.1.1` 为维护基线；1.1 阶段的执行过程和已闭合评审由 Git 历史保存，不在当前总纲维护完成记录。
 
-1.2 本地复审驱动的修复已完成工程验证，当前为已完成验证的 engineering candidate。先读 [`1.2/EXECUTION_GUIDE.md`](docs/development-plan/roadmap/1.2/EXECUTION_GUIDE.md) 与 [`1.2/IMPLEMENTATION_CONTRACT.md`](docs/development-plan/roadmap/1.2/IMPLEMENTATION_CONTRACT.md)，再按 [`1.2/README.md`](docs/development-plan/roadmap/1.2/README.md) 的依赖与写锁推进。完整版本 DAG 不表示需要重新开发已成立的根节点；路线节点本身不自动创建任务卡。
+1.2 本地复审驱动的修复已完成工程验证。1.3 的 Recipe、跨 Surface Chart 和设计生产力实现已合并，当前按[实现复核记录](docs/development-plan/reviews/1.3-implementation-2026-09-05.md)收口 engineering candidate 与 S1 教师验收；1.2 的执行指南与实现合同保留为已实现行为依据。完整版本 DAG 不表示需要重新开发已成立的根节点；路线节点本身不自动创建任务卡。
 
 input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和共享颜色连续预览（F2）已完成实现；真实调色采用应用内连续面板，保留系统色盘、常用色与 HEX。Native 传输、Table/Chart owner/state、作者可用性及本轮收尾证据由[修复复核记录](docs/development-plan/reviews/1.2-usability-fixes-2026-09-05.md)承接，不再按旧失败清单重复开发。单元/集成失败项已定向关闭，57 个桌面用例经首次运行与补跑全部通过，最终 Flow 改动另经复验；未重复运行未受影响的全量组。S1 人工验收仍按 1.3 的签署边界执行；当前尚未创建候选或 accepted 标签。Flow/Spatial 图表仍属于 1.3；1.2 保持当前 strict 有效域。
 

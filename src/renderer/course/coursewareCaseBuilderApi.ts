@@ -14,6 +14,8 @@ import * as spatialProjectFactory from '@/renderer/project/createSpatialCoursePr
 import * as courseProjectArchive from '@/renderer/project/courseProjectArchive'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import { RECIPE_CATALOG } from '@/renderer/recipes/recipeCatalog'
+import { planRecipe } from '@/renderer/recipes/applyRecipe'
 
 export const COURSEWARE_CASE_BUILDER_API_VERSION = 1 as const
 
@@ -43,6 +45,7 @@ export function createCoursewareCaseBuilderApi() {
     flowEditor: flowEditorCommands,
     flowShared: flowSharedAuthoringAdapters,
     spatialEditor: spatialEditorCommands,
+    recipes: Object.freeze({ catalog: RECIPE_CATALOG, planRecipe }),
     components: Object.freeze({
       ...componentPackages,
       ...componentPackageStore,

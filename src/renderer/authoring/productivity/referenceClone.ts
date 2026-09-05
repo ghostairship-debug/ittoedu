@@ -3,6 +3,7 @@ import type { CourseProjectDocument, SlideSceneDocument } from '../../../shared/
 import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
 import { createEditorTransactionStep } from '../editorTransaction'
 import type { ProductivityContext, ProductivityApplyResult } from './index'
+import { isSingleChoiceStateKey, SINGLE_CHOICE_STATE_KEY_PREFIX, SINGLE_CHOICE_STATE_KEY_SUFFIX } from '../../../shared/singleChoiceRuleFamily'
 
 type JsonRecord = Record<string, unknown>
 const scalarReferences = new Set(['id', 'layerItemId', 'nodeId', 'sceneId', 'stateId', 'targetStateId', 'initialStateId', 'thumbnailStateId', 'actionId', 'columnId', 'categoryId', 'assetId', 'backgroundAssetId', 'staticFallbackAssetId', 'stateKey', 'validityKey', 'key'])
@@ -48,7 +49,7 @@ export function cloneReferencePage(
       for (const key of ['stateKey', 'validityKey']) if (typeof record[key] === 'string') stateKeys.add(record[key] as string)
       if ((record.type === 'course-state.set' || record.type === 'course-state.toggle' || record.type === 'course-state.compare' || record.type === 'course-state.exists') && typeof record.key === 'string') stateKeys.add(record.key)
     })
-    stateKeys.forEach(key => ids.set(key, /^single_choice_.+_correct$/.test(key) ? `single_choice_${nanoid(12)}_correct` : `${key.slice(0, 64)}_${nanoid(12)}`))
+    stateKeys.forEach(key => ids.set(key, isSingleChoiceStateKey(key) ? `${SINGLE_CHOICE_STATE_KEY_PREFIX}${nanoid(12)}${SINGLE_CHOICE_STATE_KEY_SUFFIX}` : `${key.slice(0, 64)}_${nanoid(12)}`))
     const copiedAssets: CourseProjectDocument['assets'] = {}
     const assetFileChanges: Array<{ assetId: string; after: Uint8Array }> = []
     visit(scene, record => {

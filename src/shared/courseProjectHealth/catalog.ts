@@ -19,6 +19,12 @@ export interface CourseProjectHealthCodeSpec {
  * "meaningful". Schema/archive-shadowed codes stay listed and are not deleted.
  */
 export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
+  'interaction-single-choice-answer-inconsistent': {
+    severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'text-capacity-overflow': {
+    severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true,
+  },
   'asset-kind-mismatch': {
     severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
   },

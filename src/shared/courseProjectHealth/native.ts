@@ -13,7 +13,118 @@ import type {
   CourseProjectHealthArchiveFiles,
   CourseProjectHealthFindingDraft,
 } from './types'
-import { allLayerVisits, slideScenes } from './internal'
+import { allLayerVisits, slideScenes, visitCourseFlowBlocks } from './internal'
+import { analyzeTextNodeLayout } from '../textLayout'
+
+function chartHealth(data: NativeChartContent, path: Array<string | number>, label: string, surfaceId?: string, layerItemId?: string): CourseProjectHealthFindingDraft[] {
+  const drafts: CourseProjectHealthFindingDraft[] = []
+      const categoryIds = new Set<string>()
+      data.categories?.forEach((cat, cIdx) => {
+        if (categoryIds.has(cat.id)) {
+          drafts.push({
+            severity: 'error',
+            code: 'chart-id-duplicate',
+            message: `图表“${label}”存在重复的分类 ID：“${cat.id}”。`,
+            path: [...path, 'categories', cIdx, 'id'],
+            ...(layerItemId ? { layerItemId } : {}),
+            ...(surfaceId ? { surfaceId } : {}),
+          })
+        }
+        categoryIds.add(cat.id)
+      })
+
+      const seriesIds = new Set<string>()
+      const pointIds = new Set<string>()
+      data.series?.forEach((s, sIdx) => {
+        if (seriesIds.has(s.id)) {
+          drafts.push({
+            severity: 'error',
+            code: 'chart-id-duplicate',
+            message: `图表“${label}”存在重复的系列 ID：“${s.id}”。`,
+            path: [...path, 'series', sIdx, 'id'],
+            ...(layerItemId ? { layerItemId } : {}),
+            ...(surfaceId ? { surfaceId } : {}),
+          })
+        }
+        seriesIds.add(s.id)
+
+        if (data.categories && s.points && s.points.length !== data.categories.length) {
+          drafts.push({
+            severity: 'error',
+            code: 'chart-series-points-mismatch',
+            message: `图表“${label}”系列“${s.name || s.id}”数据点数量 (${s.points.length}) 与分类数量 (${data.categories.length}) 不一致。`,
+            path: [...path, 'series', sIdx, 'points'],
+            ...(layerItemId ? { layerItemId } : {}),
+            ...(surfaceId ? { surfaceId } : {}),
+          })
+        }
+
+        s.points?.forEach((pt, pIdx) => {
+          if (pointIds.has(pt.id)) {
+            drafts.push({
+              severity: 'error',
+              code: 'chart-id-duplicate',
+              message: `图表“${label}”存在重复的数据点 ID：“${pt.id}”。`,
+              path: [...path, 'series', sIdx, 'points', pIdx, 'id'],
+              ...(layerItemId ? { layerItemId } : {}),
+              ...(surfaceId ? { surfaceId } : {}),
+            })
+          }
+          pointIds.add(pt.id)
+
+          if (!categoryIds.has(pt.categoryId)) {
+            drafts.push({
+              severity: 'error',
+              code: 'chart-series-points-mismatch',
+              message: `图表“${label}”系列“${s.name || s.id}”数据点引用的分类 ID“${pt.categoryId}”不存在。`,
+              path: [...path, 'series', sIdx, 'points', pIdx, 'categoryId'],
+              ...(layerItemId ? { layerItemId } : {}),
+              ...(surfaceId ? { surfaceId } : {}),
+            })
+          }
+
+          if (!Number.isFinite(pt.value)) {
+            drafts.push({
+              severity: 'error',
+              code: 'chart-numeric-value-invalid',
+              message: `图表“${label}”系列“${s.name || s.id}”数据点数值无效（必须为有限数字）。`,
+              path: [...path, 'series', sIdx, 'points', pIdx, 'value'],
+              ...(layerItemId ? { layerItemId } : {}),
+              ...(surfaceId ? { surfaceId } : {}),
+            })
+          }
+        })
+      })
+
+      if (data.chartType === 'pie' || data.chartType === 'donut') {
+        if (data.series && data.series.length !== 1) {
+          drafts.push({
+            severity: 'error',
+            code: 'chart-pie-single-series',
+            message: `饼图/环形图“${label}”只能包含恰好 1 个系列。`,
+            path: [...path, 'series'],
+            ...(layerItemId ? { layerItemId } : {}),
+            ...(surfaceId ? { surfaceId } : {}),
+          })
+        }
+      }
+
+      if (data.chartType === 'donut') {
+        const style = data.style as { holeSize?: number }
+        if (style?.holeSize !== undefined && (style.holeSize < 10 || style.holeSize > 90 || !Number.isFinite(style.holeSize))) {
+          drafts.push({
+            severity: 'error',
+            code: 'chart-donut-hole-size-invalid',
+            message: `环形图“${label}”中心孔径比例无效（必须介于 10 与 90 之间）。`,
+            path: [...path, 'style', 'holeSize'],
+            ...(layerItemId ? { layerItemId } : {}),
+            ...(surfaceId ? { surfaceId } : {}),
+          })
+        }
+      }
+
+  return drafts
+}
 
 export function collectCourseProjectNativeHealth(
   project: CourseProjectDocument,
@@ -36,6 +147,20 @@ export function collectCourseProjectNativeHealth(
     if (item.kind !== 'native') continue
     const content = item.content
     const surfaceId = 'surfaceId' in owner ? owner.surfaceId : undefined
+
+    if (content.nativeType === 'text' && content.data.style.overflow !== 'auto-height') {
+      const layout = analyzeTextNodeLayout({
+        ...content.data, type: 'text', id: item.layerItemId, name: item.label,
+        ...item.frame, rotation: item.rotation, opacity: item.opacity,
+        visible: item.visible, locked: item.locked, playbackInitialVisibility: item.playbackInitialVisibility,
+      })
+      if (layout.overflowsWidth || layout.overflowsHeight) drafts.push({
+        severity: 'warning', code: 'text-capacity-overflow',
+        message: `“${item.label}”的文字${layout.measurementMode === 'deterministic-fallback' ? '可能' : ''}超出文本框；请扩大文本框、拆页或改用流式讲义。`,
+        path: [...path, 'content', 'data', 'text'], layerItemId: item.layerItemId,
+        ...(surfaceId ? { surfaceId } : {}),
+      })
+    }
 
     // 1. Native Table
     if (content.nativeType === 'table') {
@@ -130,114 +255,7 @@ export function collectCourseProjectNativeHealth(
       })
     }
 
-    // 2. Native Chart
-    if (content.nativeType === 'chart') {
-      const data = content.data as NativeChartContent
-      const categoryIds = new Set<string>()
-      data.categories?.forEach((cat, cIdx) => {
-        if (categoryIds.has(cat.id)) {
-          drafts.push({
-            severity: 'error',
-            code: 'chart-id-duplicate',
-            message: `图表“${item.layerItemId}”存在重复的分类 ID：“${cat.id}”。`,
-            path: [...path, 'content', 'data', 'categories', cIdx, 'id'],
-            layerItemId: item.layerItemId,
-            ...(surfaceId ? { surfaceId } : {}),
-          })
-        }
-        categoryIds.add(cat.id)
-      })
-
-      const seriesIds = new Set<string>()
-      const pointIds = new Set<string>()
-      data.series?.forEach((s, sIdx) => {
-        if (seriesIds.has(s.id)) {
-          drafts.push({
-            severity: 'error',
-            code: 'chart-id-duplicate',
-            message: `图表“${item.layerItemId}”存在重复的系列 ID：“${s.id}”。`,
-            path: [...path, 'content', 'data', 'series', sIdx, 'id'],
-            layerItemId: item.layerItemId,
-            ...(surfaceId ? { surfaceId } : {}),
-          })
-        }
-        seriesIds.add(s.id)
-
-        if (data.categories && s.points && s.points.length !== data.categories.length) {
-          drafts.push({
-            severity: 'error',
-            code: 'chart-series-points-mismatch',
-            message: `图表“${item.layerItemId}”系列“${s.name || s.id}”数据点数量 (${s.points.length}) 与分类数量 (${data.categories.length}) 不一致。`,
-            path: [...path, 'content', 'data', 'series', sIdx, 'points'],
-            layerItemId: item.layerItemId,
-            ...(surfaceId ? { surfaceId } : {}),
-          })
-        }
-
-        s.points?.forEach((pt, pIdx) => {
-          if (pointIds.has(pt.id)) {
-            drafts.push({
-              severity: 'error',
-              code: 'chart-id-duplicate',
-              message: `图表“${item.layerItemId}”存在重复的数据点 ID：“${pt.id}”。`,
-              path: [...path, 'content', 'data', 'series', sIdx, 'points', pIdx, 'id'],
-              layerItemId: item.layerItemId,
-              ...(surfaceId ? { surfaceId } : {}),
-            })
-          }
-          pointIds.add(pt.id)
-
-          if (!categoryIds.has(pt.categoryId)) {
-            drafts.push({
-              severity: 'error',
-              code: 'chart-series-points-mismatch',
-              message: `图表“${item.layerItemId}”系列“${s.name || s.id}”数据点引用的分类 ID“${pt.categoryId}”不存在。`,
-              path: [...path, 'content', 'data', 'series', sIdx, 'points', pIdx, 'categoryId'],
-              layerItemId: item.layerItemId,
-              ...(surfaceId ? { surfaceId } : {}),
-            })
-          }
-
-          if (!Number.isFinite(pt.value)) {
-            drafts.push({
-              severity: 'error',
-              code: 'chart-numeric-value-invalid',
-              message: `图表“${item.layerItemId}”系列“${s.name || s.id}”数据点数值无效（必须为有限数字）。`,
-              path: [...path, 'content', 'data', 'series', sIdx, 'points', pIdx, 'value'],
-              layerItemId: item.layerItemId,
-              ...(surfaceId ? { surfaceId } : {}),
-            })
-          }
-        })
-      })
-
-      if (data.chartType === 'pie' || data.chartType === 'donut') {
-        if (data.series && data.series.length !== 1) {
-          drafts.push({
-            severity: 'error',
-            code: 'chart-pie-single-series',
-            message: `饼图/环形图“${item.layerItemId}”只能包含恰好 1 个系列。`,
-            path: [...path, 'content', 'data', 'series'],
-            layerItemId: item.layerItemId,
-            ...(surfaceId ? { surfaceId } : {}),
-          })
-        }
-      }
-
-      if (data.chartType === 'donut') {
-        const style = data.style as { holeSize?: number }
-        if (style?.holeSize !== undefined && (style.holeSize < 10 || style.holeSize > 90 || !Number.isFinite(style.holeSize))) {
-          drafts.push({
-            severity: 'error',
-            code: 'chart-donut-hole-size-invalid',
-            message: `环形图“${item.layerItemId}”中心孔径比例无效（必须介于 10 与 90 之间）。`,
-            path: [...path, 'content', 'data', 'style', 'holeSize'],
-            layerItemId: item.layerItemId,
-            ...(surfaceId ? { surfaceId } : {}),
-          })
-        }
-      }
-    }
+    if (content.nativeType === 'chart') drafts.push(...chartHealth(content.data, [...path, 'content', 'data'], item.label, surfaceId, item.layerItemId))
 
     // 3. Native Input
     if (content.nativeType === 'input') {
@@ -360,6 +378,10 @@ export function collectCourseProjectNativeHealth(
       }
     }
   }
+
+  visitCourseFlowBlocks(project, ({ block, path, surfaceId }) => {
+    if (block.type === 'chart') drafts.push(...chartHealth(block.chart, [...path, 'chart'], block.chart.title || block.id, surfaceId))
+  })
 
   // 5. Background asset presence check
   const checkBackgroundAsset = (

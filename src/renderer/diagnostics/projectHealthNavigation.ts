@@ -11,6 +11,7 @@ export interface ProjectHealthRoute {
   stateId?: string | null
   nodeId?: string
   layerItemId?: string
+  blockId?: string
 }
 
 function firstLocationForSurface(
@@ -120,6 +121,7 @@ export function resolveCourseProjectDiagnosticTargetRoute(
     return {
       ...base,
       ...(locationId ? { locationId } : {}),
+      blockId: target.blockId,
     }
   }
   if (target.kind !== 'layer-item') return base

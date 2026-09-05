@@ -18,6 +18,8 @@ import { SpatialSurfaceHost } from '@/player/surfaces/spatial/SpatialSurfaceHost
 import { SlideNativeTypeFields } from '@/renderer/ui/properties/SlideNativePropertiesPanel'
 import { createChartPropertiesCommands } from '@/renderer/ui/properties/chartPropertiesCommands'
 import { EditableChartView } from '@/renderer/ui/EditableChartView'
+import { buildSpatialEditorView, captureSpatialEditorAuthoringTarget } from '@/renderer/course/spatialEditorView'
+import { chartCanvasTextPort, connectChartCanvasText } from '@/renderer/authoring/chartCanvasTextBridge'
 import type { NativeChartContent } from '@/shared/contracts/native-v1'
 
 const chartContent = (chartType: NativeChartContent['chartType']) => createChartLayerItem(createChartNode({ chartType })).content.data as NativeChartContent
@@ -25,6 +27,23 @@ const publish = (project: ReturnType<typeof createBlankFlowCourseProject>) => bu
 afterEach(cleanup)
 
 describe('1.3 chart carriers', () => {
+  it('connects Spatial frame and item targets to the same draft while rejecting stale identities', () => {
+    const session = addSpatialWorldChartLayer(openSpatialAuthoringSession(createBlankSpatialCourseProject()), { id: 'bridge-chart' }).nextSession!
+    const view = buildSpatialEditorView({ project: session.history.present, locationId: session.selection.locationId, sessionCamera: session.sessionCamera })
+    const sessionToken = { surfaceType: 'spatial-2d' as const, locationId: view.locationId, revision: view.revision, generation: 1 }
+    const capture = (field: 'frame' | 'item') => captureSpatialEditorAuthoringTarget({ view, sessionToken, target: { kind: 'layer', layerItemId: 'bridge-chart', field } })
+    const inspector = capture('item')
+    const canvas = capture('frame')
+    expect(canvas.authoringAddress).not.toBe(inspector.authoringAddress)
+    const port = { read: vi.fn(), commit: vi.fn(() => null) }
+    const disconnect = connectChartCanvasText(inspector, port)
+    try {
+      expect(chartCanvasTextPort(canvas)).toBe(port)
+      expect(chartCanvasTextPort({ ...canvas, documentRevision: canvas.documentRevision + 1 })).toBeUndefined()
+      expect(chartCanvasTextPort({ ...canvas, itemId: 'other-chart' })).toBeUndefined()
+    } finally { disconnect() }
+    expect(chartCanvasTextPort(canvas)).toBeUndefined()
+  })
   it.each(['bar', 'line', 'area', 'pie', 'donut'] as const)('keeps %s in nested Flow document order, copies identities, publishes and prints', async type => {
     const project = createBlankFlowCourseProject()
     const surface = project.surfaces.find(surface => surface.type === 'flow')!
@@ -124,6 +143,17 @@ describe('1.3 chart carriers', () => {
     fireEvent.change(screen.getByLabelText('图表文字'), { target: { value: '取消内容' } })
     fireEvent.keyDown(screen.getByLabelText('图表文字'), { key: 'Escape' })
     expect(commit).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains the SVG label across selection rerenders so a second click can edit it', () => {
+    const chart = chartContent('bar')
+    const { container, rerender } = render(<EditableChartView id="stable-chart" chart={chart} width={656} height={360} onCommit={vi.fn()} />)
+    const label = container.querySelector('[data-chart-category-id]')!
+    fireEvent.click(label)
+    rerender(<EditableChartView id="stable-chart" chart={structuredClone(chart)} width={656} height={360} onCommit={vi.fn()} />)
+    expect(container.querySelector('[data-chart-category-id]')).toBe(label)
+    fireEvent.doubleClick(label)
+    expect(screen.getByLabelText('图表文字')).toHaveValue(chart.categories[0]!.label)
   })
   it('shows Spatial chart properties and commits clean chart values', () => {
     const node = createChartNode({ chartType: 'bar' })

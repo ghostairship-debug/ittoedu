@@ -408,10 +408,8 @@
     {
       "id": "r13-030-reference-clone",
       "release": "1.3",
-      "title": "从参考页复制可编辑骨架而非复制隐藏状态",
-      "dependencies": [
-        "r13-000-recipe-contract"
-      ],
+      "title": "从当前工程已有 V9 Slide 页复制可编辑骨架",
+      "dependencies": [],
       "optional": false,
       "writeLocks": [
         "store-slide",
@@ -423,10 +421,8 @@
     {
       "id": "r13-040-batch-replace",
       "release": "1.3",
-      "title": "在明确范围内预览并批量查找替换",
-      "dependencies": [
-        "r13-000-recipe-contract"
-      ],
+      "title": "在明确范围内预览并批量查找替换正式文本字段",
+      "dependencies": [],
       "optional": false,
       "writeLocks": [
         "store-kernel",
@@ -439,7 +435,6 @@
       "release": "1.3",
       "title": "复用项目色板并将 Design Token 应用于明确对象范围",
       "dependencies": [
-        "r13-000-recipe-contract",
         "r12-040-background-authoring"
       ],
       "optional": false,

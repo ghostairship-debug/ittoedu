@@ -1,10 +1,10 @@
 import type { ChartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { NativeChartContent } from '../../shared/contracts/native-v1'
 import { buildNativeChartSvg } from '../../shared/nativeChartSvg'
 import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 
-export function EditableChartView({ id, chart, width, height, onCommit, onHeightCommit, canvasTextPort }: {
+export function EditableChartView({ id, chart, width, height, onCommit, onHeightCommit, canvasTextPort, onEditStart }: {
   id: string
   chart: NativeChartContent
   width: number
@@ -12,6 +12,7 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
   onCommit?: (chart: NativeChartContent) => string | null
   onHeightCommit?: (height: number) => void
   canvasTextPort?: () => ChartCanvasTextPort | undefined
+  onEditStart?: (event: MouseEvent<HTMLElement>) => void
 }) {
   const root = useRef<HTMLDivElement>(null)
   const [edit, setEdit] = useState<{ value: string; left: number; top: number; apply: (value: string) => string | null } | null>(null)
@@ -22,6 +23,9 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
   const [error, setError] = useState<string | null>(null)
   const [previewHeight, setPreviewHeight] = useState<number | null>(null)
   const resize = useRef<{ y: number; height: number; scale: number; commit: (height: number) => void } | null>(null)
+  const svg = buildNativeChartSvg(chart, width, previewHeight ?? height, id)
+  // Selection renders must retain the SVG text node between the two clicks.
+  const markup = useMemo(() => ({ __html: svg }), [svg])
   useEffect(() => { setEdit(null); setError(null) }, [id])
   const finish = () => {
     if (composing.current) { finishAfterComposition.current = true; return }
@@ -38,6 +42,7 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
       event.stopPropagation()
       const label = event.target.closest('[data-chart-text],[data-chart-category-id],[data-chart-series-id]')
       if (!label) return
+      onEditStart?.(event)
       const categoryId = label.getAttribute('data-chart-category-id')
       const seriesId = label.getAttribute('data-chart-series-id')
       const source = structuredClone(chart)
@@ -61,7 +66,7 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
         return result.success ? onCommit(result.data) : '图表文字无效，请输入非空文字'
       } })
     }}>
-    <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: buildNativeChartSvg(chart, width, previewHeight ?? height, id) }} />
+    <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={markup} />
     {edit ? <input autoFocus aria-label="图表文字" value={edit.value} style={{ position: 'absolute', left: edit.left, top: edit.top, minWidth: 150, maxWidth: '100%', zIndex: 10, color: '#111827', background: '#fff' }}
       onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
       onChange={event => { const next = { ...edit, value: event.target.value }; editRef.current = next; setEdit(next) }} onBlur={finish}

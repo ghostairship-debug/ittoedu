@@ -50,6 +50,7 @@ describe('resolveCourseProjectDiagnosticTargetRoute', () => {
       scope: 'scene',
       tab: 'properties',
       locationId: location.id,
+      blockId: location.blockId,
     })
     expect(resolveCourseProjectDiagnosticTargetRoute(project, {
       version: 1,

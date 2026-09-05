@@ -43,6 +43,8 @@ interface TopToolbarProps {
   onSave(saveAs?: boolean): void
   healthSummary: CourseProjectHealthSummary
   onOpenHealth(): void
+  onOpenRecipes?(): void
+  onOpenProductivity?(): void
   onPreview(): void
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
 }
@@ -92,6 +94,8 @@ export function TopToolbar({
   onSave,
   healthSummary,
   onOpenHealth,
+  onOpenRecipes,
+  onOpenProductivity,
   onPreview,
   onExport,
 }: TopToolbarProps) {
@@ -251,6 +255,18 @@ export function TopToolbar({
       </div>
 
       <div className="toolbar__separator" />
+
+      {(onOpenRecipes || onOpenProductivity) && <details className="toolbar-more-menu">
+        <summary className="tool-button" aria-label="创作工具"><FileText size={18} /><span>创作工具</span></summary>
+        <div className="toolbar-more-menu__panel" role="menu" aria-label="创作工具菜单">
+          <button type="button" role="menuitem" disabled={busy} onClick={event => {
+            event.currentTarget.closest('details')?.removeAttribute('open'); onOpenRecipes?.()
+          }}><span><strong>新建配方页</strong><small>封面、概念、例题和互动模板</small></span></button>
+          <button type="button" role="menuitem" disabled={busy} onClick={event => {
+            event.currentTarget.closest('details')?.removeAttribute('open'); onOpenProductivity?.()
+          }}><span><strong>批量编辑与参考页</strong><small>查找替换、项目配色、克隆页面</small></span></button>
+        </div>
+      </details>}
 
       {editorMode === 'simple' && (
         <details className="toolbar-more-menu">

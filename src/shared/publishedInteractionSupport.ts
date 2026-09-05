@@ -11,7 +11,7 @@ import type { LayerItem } from './courseProjectTypes'
  */
 export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   status: 'partial',
-  triggerTypes: ['node.click', 'input.submit'],
+  triggerTypes: ['node.click', 'input.submit', 'scene.enter'],
   conditionTypes: [
     'scene.in',
     'course-state.exists',

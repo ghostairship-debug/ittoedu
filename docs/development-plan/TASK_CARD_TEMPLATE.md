@@ -48,7 +48,7 @@
 | `authoring-flow` | `src/renderer/course/flowSharedAuthoringAdapters.ts`、`src/renderer/authoring/flowTextEdit.ts`、`flowOverlayAuthoring.ts` |
 | `authoring-spatial` | `src/renderer/course/spatialEditorCommands.ts`、`src/renderer/authoring/spatialWorldAuthoring.ts` |
 | `authoring-interaction` | `src/renderer/ui/InteractionEditor.tsx`、`src/renderer/interactions/**`、`src/renderer/course/courseLogicAuthoringCommands.ts` |
-| `authoring-recipe` | 1.3 配方定义 Owner；首个节点创建目录时在写入前回填精确路径 |
+| `authoring-recipe` | `src/renderer/recipes/**`、`src/renderer/ui/recipes/**`；唯一 Recipe catalog、普通 V9 展开与现有 Component 配方依赖包 |
 | `published-slide` | `src/player/surfaces/slide/**` |
 | `published-flow` | `src/player/surfaces/flow/**` |
 | `published-spatial` | `src/player/surfaces/spatial/**` |

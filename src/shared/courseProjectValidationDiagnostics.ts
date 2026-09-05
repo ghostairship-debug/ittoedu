@@ -72,6 +72,14 @@ export type CourseProjectValidationFindingCodeStatus =
 
 export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
   {
+    code: 'interaction-single-choice-answer-inconsistent', status: 'active', sections: ['projectHealth'],
+    note: 'Product single-choice boolean state families have missing, multiple or conflicting correct options; arbitrary handwritten interactions are not inferred.',
+  },
+  {
+    code: 'text-capacity-overflow', status: 'active', sections: ['projectHealth'],
+    note: 'Fixed-size Native text exceeds the shared layout capacity; headless measurement is explicitly approximate.',
+  },
+  {
     code: 'asset-byte-length-mismatch',
     status: 'archive-shadowed',
     sections: ['exportPreflight'],

@@ -3,6 +3,7 @@ import type {
   InteractionRule,
 } from '../interactionTypes'
 import { composeCourseProjectLocation } from '../courseLayerComposition'
+import { inspectSingleChoiceRuleFamilies } from '../singleChoiceRuleFamily'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -516,6 +517,25 @@ export function collectCourseProjectInteractionHealth(
 ): CourseProjectHealthFinding[] {
   const drafts: CourseProjectHealthFindingDraft[] = []
   const scenes = slideScenes(project)
+  const choiceFindings = inspectSingleChoiceRuleFamilies(project.courseState,
+    [...project.globalInteractions, ...scenes.flatMap(({ scene }) => scene.interactions)])
+  const choiceTargets = allLayerVisits(project)
+  for (const finding of choiceFindings) {
+    // Rule IDs are only unique within their interaction scope. Resolve the
+    // actual option carrier, including global/shared layers, before building
+    // its path; an interaction path would take precedence and select a scene.
+    const target = finding.nodeIds.flatMap(nodeId => {
+      const matches = choiceTargets.filter(visit => visit.item.layerItemId === nodeId)
+      return matches.length === 1 ? matches : []
+    })[0]
+    drafts.push({
+      severity: 'warning', code: 'interaction-single-choice-answer-inconsistent',
+      message: `单选答案“${finding.key}”${finding.code === 'missing-correct-answer' ? '没有正确选项' : finding.code === 'multiple-correct-answers' ? '包含多个正确选项' : '同一选项设置了矛盾的正确性'}；请检查选项交互规则。`,
+      path: target ? target.path : ['courseState', project.courseState.findIndex(state => state.key === finding.key)],
+      ...(target && 'surfaceId' in target.owner ? { surfaceId: target.owner.surfaceId } : {}),
+      ...(target ? { layerItemId: target.item.layerItemId } : {}),
+    })
+  }
   const sceneIds = new Set<string>()
   const duplicateSceneIds = new Set<string>()
   scenes.forEach(({ scene }) => {

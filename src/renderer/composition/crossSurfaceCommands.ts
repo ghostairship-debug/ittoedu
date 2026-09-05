@@ -135,6 +135,7 @@ export type CrossSurfaceSlidePorts = {
 } & SurfaceNodeCommands
 
 export type CrossSurfaceFlowPorts = {
+  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   read(): {
     flowSession: FlowAuthoringSession | null
     flowTextEdit: FlowTextEditSession | null
@@ -172,6 +173,7 @@ export type CrossSurfaceFlowPorts = {
 } & SurfaceNodeCommands
 
 export type CrossSurfaceSpatialPorts = {
+  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   read(): {
     spatialSession: SpatialAuthoringSession | null
     spatialContentEdit: SpatialWorldContentEditSession | null
@@ -699,17 +701,12 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
 
     addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number) {
-      const detected = ports.detect()
-      if (detected !== 'slide') {
-        ports.kernel.setFeedback({
-          errorMessage: detected === null
-            ? '当前 Course Project 没有可用的作者会话。'
-            : '图表只能添加到演示页场景内。',
-          statusMessage: null,
-        })
-        return
-      }
-      ports.slide.addChartNode(chartType, x, y)
+      dispatchActiveSurface(ports.detect(), {
+        spatial: () => ports.spatial.addChartNode(chartType, x, y),
+        flow: () => ports.flow.addChartNode(chartType, x, y),
+        slide: () => ports.slide.addChartNode(chartType, x, y),
+        sessionless: () => ports.kernel.failSessionless(),
+      })
     },
 
     selectNode(nodeId: string | null, additive = false) {

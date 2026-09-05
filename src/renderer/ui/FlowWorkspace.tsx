@@ -885,7 +885,11 @@ export function FlowWorkspace({
       className: `flow-block flow-block-${block.type}${selected ? ' flow-block--selected' : ''}`,
       'aria-selected': selected,
       tabIndex: selected && !editingThis ? 0 : -1,
-      onClick: readOnly ? undefined : (event: ReactMouseEvent<HTMLElement>) => selectBlock(blockView.blockId, event),
+      onClick: readOnly ? undefined : (event: ReactMouseEvent<HTMLElement>) => {
+        // Keep chart labels stationary until the double-click opens their editor.
+        if (block.type === 'chart' && event.target instanceof Element && event.target.closest('[data-chart-text],[data-chart-category-id],[data-chart-series-id]')) { event.stopPropagation(); return }
+        selectBlock(blockView.blockId, event)
+      },
       onDoubleClick: readOnly ? undefined : (event: ReactMouseEvent<HTMLElement>) => {
         event.stopPropagation()
         if (block.type === 'formula') {
@@ -1102,6 +1106,7 @@ export function FlowWorkspace({
       }
       case 'chart':
         body = <EditableChartView id={block.id} chart={structuredClone(block.chart) as import('../../shared/contracts/native-v1').NativeChartContent} width={Math.max(240, view.layout.readingWidth - 104)} height={block.height}
+          onEditStart={event => selectBlock(block.id, event)}
           canvasTextPort={() => chartCanvasTextPort(targetForBlock(block.id))}
           onCommit={readOnly ? undefined : chart => { const receipt = commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { chart }, expectedEdit: editRef.current }); return receipt.ok ? null : receipt.reason ?? '图表提交失败' }}
           onHeightCommit={readOnly ? undefined : height => { commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { height }, expectedEdit: editRef.current }) }} />
