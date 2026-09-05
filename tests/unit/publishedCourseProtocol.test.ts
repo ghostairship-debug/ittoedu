@@ -10,6 +10,8 @@ import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
+import { createTableLayerItem, createTableNode } from '@/renderer/project/nativeNodeFactories'
 import {
   PLAYER_V2_ENTRY_CORRUPT_ERROR,
   PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,
@@ -20,6 +22,21 @@ import {
 import { CoursePlayer } from '@/player/surfaces/CoursePlayer'
 
 const NOW = '2026-08-17T00:00:00.000Z'
+
+it('publishes Spatial world Table without flattening its content and rejects the shared carrier', () => {
+  const project = createBlankSpatialCourseProject()
+  const surface = project.surfaces.find(surface => surface.type === 'spatial-2d')!
+  const table = createTableLayerItem(createTableNode())
+  surface.world.layerItems.push(table)
+  const published = buildPublishedCourseV2Payload({ project, assetFiles: {}, components: {} })
+  const parsed = publishedCourseV2Schema.parse(published)
+  const spatial = parsed.surfaces.find(surface => surface.type === 'spatial-2d')!
+  const native = spatial.world.layerItems[0]!
+  expect(native.kind === 'native' && native.content).toEqual(table.content)
+  spatial.world.layerItems = []
+  spatial.surfaceLayerItems.push({ item: native, visibility: { mode: 'all', locationIds: [] } })
+  expect(publishedCourseV2Schema.safeParse(parsed).success).toBe(false)
+})
 const retiredPublishedPayload = {
   format: ['h5lesson', 'published'].join('-'),
   formatVersion: 1,

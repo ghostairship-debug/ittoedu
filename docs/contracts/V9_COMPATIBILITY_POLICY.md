@@ -80,7 +80,7 @@
 该例外必须同时满足：
 
 1. 不修改既有六种 Native 的字段、判别器、缺省或语义；所有既有合法 V9 工程继续读取且行为不变。
-2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema。Table 只允许 Slide scene/surface；Chart 另按本文 1.3 扩域合同允许 Flow 正文和 Spatial world；Flow overlay、Spatial shared 与 global 必须定位拒绝。不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
+2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema。Native Table 允许 Slide scene/surface 与 Spatial world，Flow 使用既有 FlowTableBlock；Chart 另按本文 1.3 扩域合同允许 Flow 正文和 Spatial world。Spatial Table 按下文独立合同交付 consumer；Flow overlay、Spatial shared 与 global 必须定位拒绝。不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
 3. Table/Chart 不加入 legacy `SceneNode` / `SCENE_NODE_TYPES`。V9 Native data materializer、presentation `nativeData` override 校验与生成合同必须脱离旧 Scene Schema，同时保持既有 presentation override 合并语义不变。
 4. 含新分支的工程由不了解该分支的旧编辑器明确拒绝；不得静默丢字段、跳过元素、改写为旧类型或覆盖原工程。旧编辑器前向不兼容是已披露结果，用户须使用匹配版本。
 5. Published V2 payload 与匹配 Player 成对交付；旧 V2 reader/Player 遇到新分支必须明确失败，不承诺前向兼容，也不得静默隐藏或仅以无提示静态占位冒充支持。
@@ -89,7 +89,7 @@
 
 本节只批准 Table/Chart 两个明确分支；Slide input 与 `input.submit` 的独立批准见 3.4 节。两节都不构成新增其它 Native、Interaction、Surface 或 Published discriminator 的通行授权。
 
-1.3 的 Flow/Spatial Chart 合同已独立交付，具体字段、尺寸、兼容与静态导出见本文末尾扩域条款；不得据此放开 Table、input、global 或其他未批准容器。
+1.3 的 Flow/Spatial Chart 合同已独立交付，具体字段、尺寸、兼容与静态导出见本文末尾扩域条款；不得据 Chart 合同放开 Table、input、global 或其他未批准容器。Table 按下文单独批准的范围与合同交付，不继承 Chart 的正文数据结构。
 
 ### 3.4 2026-09-04 Owner 批准的 Slide Native input 与 input.submit 窄扩展
 
@@ -149,6 +149,22 @@ Edits target the containing Flow block or Spatial world item and commit one owne
 DOCX preserves the chart as an explicitly diagnosed static image followed by an editable data
 table. Print/PDF preserve its document position. Spatial static exports retain camera cropping;
 they do not claim editable whole-world PPTX. Slide editable PPTX remains unchanged.
-Flow overlays, Spatial shared layers and global layers still reject charts. Table and input
-remain in their prior domains. Old V9 documents remain valid; pre-1.3 readers reject the new
+Flow overlays, Spatial shared layers and global layers still reject charts. This Chart change
+leaves Table and input in their prior domains; separate planned Table approval follows below.
+Old V9 documents remain valid; pre-1.3 readers reject the new
 Flow discriminator and Spatial chart carrier explicitly, without stripping data or migration.
+
+## 1.3 Table 扩域合同（2026-09-06）
+
+Owner 将 Flow 正文表格完整创作与 Spatial 世界表格纳入 1.3 必选范围。`r13-005-table-surface-contract` 的窄变更如下；Schema 接受新的世界载体不单独表示作者 UI 与能力索引已经开放：
+
+1. Flow 保持既有 FlowTableBlock 判别器、行列身份、cell key 及字符串/富文本单元格语义，不新建第二表格载体，也不强制转换为 Native Table。当前字段无法表达的样式须在同一独立合同中明确必要的 additive 可选字段、默认值与 consumer；不得静默重解释旧字段。
+2. Spatial world 复用既有 Native Table 内容和 LayerItem，精确扩展 V9 与 Published V2 的匹配容器有效域；不增加 schemaVersion，不借此扩 Flow overlay、Spatial shared、global 或 input。Slide scene/surface 的既有 Table 继续有效。
+3. 合同变更同时交付类型、strict Schema、生成合同、合法/非法 fixture、旧 V9/Flow 无损往返与旧 reader 明确拒绝新 Spatial Table 的反例。保持当前 Native/presentation override 合并语义，不进入 legacy SceneNode。
+4. Slide 的可编辑 PPTX 表格保持；Flow DOCX 使用可编辑 Word 表格，保留单元格内容与正文顺序；Spatial 的作者数据完整可编辑，静态输出使用已声明的相机页并明示静态结果。不能用截图替代作者数据或把 Flow DOCX 表格静默栅格化。
+
+本次没有新增 Flow 样式字段：Flow 表格继续使用稿纸排版、富文本单元格、独立表头和 caption；Native 表格的行高、列宽和单元格样式只用于其既有内容模型。旧 Flow 数据读取不物化新字段。V9 与 Published V2 的 Spatial world 都接受既有 strict Native Table 分支，其行列、合并单元格、样式和几何约束不变；共享层与 global 的拒绝规则保持。
+
+合同证据：`courseProjectCoreContract.test.ts`、`publishedCourseProtocol.test.ts` 与 `courseProjectRoundTrip.test.ts` 共 86 项通过；`generate:contracts` 完成，容器 refinement 不改变生成的 JSON Schema。以提交 `ff65affa49a977fa86b0d414a506474f033d87e9` 的实际 V9/Published reader 读取 Spatial Table，两者均在 `surfaces[0].world.layerItems[0].content.nativeType` 明确拒绝（`Spatial world does not support native table`）；既有字符串及富文本 Flow 表格在新旧 reader 的解析结果一致。
+
+共享编辑和两个 Surface consumer 按 `r13-006`–`r13-008` 继续完成真实插入、编辑、草稿保存/恢复、Undo/Redo、重开、Player/HTML 与适用导出后，才能声明对应能力可用。具体任务和验收见 [1.3 路线](../development-plan/roadmap/1.3/README.md)。

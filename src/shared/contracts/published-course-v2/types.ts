@@ -170,6 +170,7 @@ export interface PublishedFlowSurface extends PublishedSurfaceBase {
 }
 
 export interface PublishedSpatialSurface extends PublishedSurfaceBase {
+  /** Native Table/Chart retain their content in world; shared layers reject both. */
   type: 'spatial-2d'
   backgroundMode?: BackgroundMode
   backgroundColor?: string

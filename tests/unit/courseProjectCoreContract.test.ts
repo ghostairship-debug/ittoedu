@@ -35,9 +35,24 @@ import type {
   NativeInputContent,
   NativeTableContent,
 } from '@/shared/contracts/native-v1/types'
-import { createRectangleNode } from '@/renderer/project/nativeNodeFactories'
+import { createRectangleNode, createTableLayerItem, createTableNode } from '@/renderer/project/nativeNodeFactories'
 
 const NOW = '2026-08-17T00:00:00.000Z'
+
+it('accepts strict Native Table only in the newly approved Spatial world carrier', () => {
+  const project = createBlankSpatialCourseProject()
+  const surface = project.surfaces.find(surface => surface.type === 'spatial-2d')!
+  const table = createTableLayerItem(createTableNode())
+  surface.world.layerItems.push(table)
+  expect(courseProjectDocumentSchema.parse(project)).toEqual(project)
+  const invalid = structuredClone(project)
+  const invalidSurface = invalid.surfaces.find(surface => surface.type === 'spatial-2d')!
+  Object.assign((invalidSurface.world.layerItems[0] as NativeLayerItem).content.data, { unknownTableField: true })
+  expect(courseProjectDocumentSchema.safeParse(invalid).success).toBe(false)
+  surface.world.layerItems = []
+  surface.surfaceLayerItems.push({ item: table, visibility: { mode: 'all', locationIds: [] } })
+  expect(courseProjectDocumentSchema.safeParse(project).success).toBe(false)
+})
 
 function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocationId' | 'surfaces'> {
   return {

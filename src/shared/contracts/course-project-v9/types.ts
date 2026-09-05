@@ -457,6 +457,7 @@ export interface SpatialRelationDocument {
 }
 
 export interface SpatialSurfaceDocument extends SurfaceBase {
+  /** Native Table and Chart are valid in world only; input remains Slide-only. */
   type: 'spatial-2d'
   /** Missing mode defaults to `'own'`; Spatial has always owned its background. */
   backgroundMode?: BackgroundMode
