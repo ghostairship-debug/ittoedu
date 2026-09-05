@@ -333,6 +333,14 @@ export interface FlowTableBlock extends FlowBlockBase {
   rows: Array<{ id: string; cells: Record<string, FlowTableCell> }>
 }
 
+/** A chart in normal document flow. Width is the paper reading width. */
+export interface FlowChartBlock extends FlowBlockBase {
+  type: 'chart'
+  chart: NativeChartContent
+  /** CSS pixels; scales down with paper width, never an absolute world position. */
+  height: number
+}
+
 export interface FlowFormulaBlock extends FlowBlockBase {
   type: 'formula'
   formulaId: string
@@ -379,6 +387,7 @@ export type FlowBlock =
   | FlowDividerBlock
   | FlowMediaBlock
   | FlowTableBlock
+  | FlowChartBlock
   | FlowFormulaBlock
   | FlowCodeBlock
   | FlowCalloutBlock

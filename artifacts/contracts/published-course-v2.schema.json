@@ -6406,6 +6406,538 @@
             },
             "type": {
               "type": "string",
+              "const": "chart"
+            },
+            "chart": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "chartType": {
+                      "type": "string",
+                      "enum": [
+                        "bar",
+                        "line",
+                        "area"
+                      ]
+                    },
+                    "title": {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    "categories": {
+                      "minItems": 1,
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "series": {
+                      "minItems": 1,
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "name": {
+                            "type": "string",
+                            "maxLength": 500
+                          },
+                          "color": {
+                            "type": "string",
+                            "pattern": "^#[0-9a-fA-F]{6}$"
+                          },
+                          "points": {
+                            "minItems": 1,
+                            "maxItems": 200,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "categoryId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "value": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "categoryId",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "color",
+                          "points"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "style": {
+                      "type": "object",
+                      "properties": {
+                        "backgroundColor": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{6}$"
+                        },
+                        "backgroundOpacity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "fontFamily": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "fontSize": {
+                          "type": "number",
+                          "minimum": 6,
+                          "maximum": 144
+                        },
+                        "textColor": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{6}$"
+                        },
+                        "showLegend": {
+                          "type": "boolean"
+                        },
+                        "legendPosition": {
+                          "type": "string",
+                          "enum": [
+                            "top",
+                            "right",
+                            "bottom",
+                            "left"
+                          ]
+                        },
+                        "showDataLabels": {
+                          "type": "boolean"
+                        },
+                        "showCategoryAxis": {
+                          "type": "boolean"
+                        },
+                        "showValueAxis": {
+                          "type": "boolean"
+                        },
+                        "showGridLines": {
+                          "type": "boolean"
+                        },
+                        "valueMin": {
+                          "type": "number"
+                        },
+                        "valueMax": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "backgroundColor",
+                        "backgroundOpacity",
+                        "fontFamily",
+                        "fontSize",
+                        "textColor",
+                        "showLegend",
+                        "legendPosition",
+                        "showDataLabels",
+                        "showCategoryAxis",
+                        "showValueAxis",
+                        "showGridLines"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "chartType",
+                    "title",
+                    "categories",
+                    "series",
+                    "style"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "chartType": {
+                      "type": "string",
+                      "const": "pie"
+                    },
+                    "title": {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    "categories": {
+                      "minItems": 1,
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "series": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "name": {
+                              "type": "string",
+                              "maxLength": 500
+                            },
+                            "color": {
+                              "type": "string",
+                              "pattern": "^#[0-9a-fA-F]{6}$"
+                            },
+                            "points": {
+                              "minItems": 1,
+                              "maxItems": 200,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "categoryId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "categoryId",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "color",
+                            "points"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "style": {
+                      "type": "object",
+                      "properties": {
+                        "backgroundColor": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{6}$"
+                        },
+                        "backgroundOpacity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "fontFamily": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "fontSize": {
+                          "type": "number",
+                          "minimum": 6,
+                          "maximum": 144
+                        },
+                        "textColor": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{6}$"
+                        },
+                        "showLegend": {
+                          "type": "boolean"
+                        },
+                        "legendPosition": {
+                          "type": "string",
+                          "enum": [
+                            "top",
+                            "right",
+                            "bottom",
+                            "left"
+                          ]
+                        },
+                        "showDataLabels": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "backgroundColor",
+                        "backgroundOpacity",
+                        "fontFamily",
+                        "fontSize",
+                        "textColor",
+                        "showLegend",
+                        "legendPosition",
+                        "showDataLabels"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "chartType",
+                    "title",
+                    "categories",
+                    "series",
+                    "style"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "chartType": {
+                      "type": "string",
+                      "const": "donut"
+                    },
+                    "title": {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    "categories": {
+                      "minItems": 1,
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "series": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "name": {
+                              "type": "string",
+                              "maxLength": 500
+                            },
+                            "color": {
+                              "type": "string",
+                              "pattern": "^#[0-9a-fA-F]{6}$"
+                            },
+                            "points": {
+                              "minItems": 1,
+                              "maxItems": 200,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "categoryId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "value": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "categoryId",
+                                  "value"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "color",
+                            "points"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "style": {
+                      "type": "object",
+                      "properties": {
+                        "backgroundColor": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{6}$"
+                        },
+                        "backgroundOpacity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "fontFamily": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "fontSize": {
+                          "type": "number",
+                          "minimum": 6,
+                          "maximum": 144
+                        },
+                        "textColor": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{6}$"
+                        },
+                        "showLegend": {
+                          "type": "boolean"
+                        },
+                        "legendPosition": {
+                          "type": "string",
+                          "enum": [
+                            "top",
+                            "right",
+                            "bottom",
+                            "left"
+                          ]
+                        },
+                        "showDataLabels": {
+                          "type": "boolean"
+                        },
+                        "holeSize": {
+                          "type": "number",
+                          "minimum": 10,
+                          "maximum": 90
+                        }
+                      },
+                      "required": [
+                        "backgroundColor",
+                        "backgroundOpacity",
+                        "fontFamily",
+                        "fontSize",
+                        "textColor",
+                        "showLegend",
+                        "legendPosition",
+                        "showDataLabels",
+                        "holeSize"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "chartType",
+                    "title",
+                    "categories",
+                    "series",
+                    "style"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "height": {
+              "type": "number",
+              "minimum": 160,
+              "maximum": 1600
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "chart",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "type": {
+              "type": "string",
               "const": "formula"
             },
             "formulaId": {

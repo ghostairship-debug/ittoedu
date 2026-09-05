@@ -443,7 +443,7 @@ const publishedSpatialSurfaceSchema = z.object({
   surface.world.layerItems.forEach((item, index) => {
     if (
       item.kind === 'native'
-      && (item.content.nativeType === 'table' || item.content.nativeType === 'chart' || item.content.nativeType === 'input')
+      && (item.content.nativeType === 'table' || item.content.nativeType === 'input')
     ) {
       context.addIssue({
         code: 'custom',
