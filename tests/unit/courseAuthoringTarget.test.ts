@@ -18,6 +18,12 @@ import {
 } from '@/renderer/course/effectiveLayerProjection'
 import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import {
+  authoringToolCreateScopeV1Schema,
+  authoringToolTargetWireV1Schema,
+  parseAuthoringToolTargetV1,
+  serializeAuthoringToolTargetV1,
+} from '@/shared/authoringToolContract'
 
 const SLIDE_FIXTURE_PATH = join(
   process.cwd(),
@@ -95,6 +101,35 @@ function hasCapturedImage(
 }
 
 describe('CourseAuthoringTarget', () => {
+  it('roundtrips every canonical field and rejects each missing field at its path', () => {
+    const { target } = slideTargetContext()
+    const wire = serializeAuthoringToolTargetV1(target)
+    expect(parseAuthoringToolTargetV1(wire)).toEqual(target)
+    expect(serializeAuthoringToolTargetV1(parseAuthoringToolTargetV1(wire))).toBe(wire)
+    for (const field of Object.keys(target)) {
+      const incomplete = { ...target } as Record<string, unknown>
+      delete incomplete[field]
+      const result = authoringToolTargetWireV1Schema.safeParse(incomplete)
+      expect(result.success, field).toBe(false)
+      if (!result.success) expect(result.error.issues.some((issue) => issue.path[0] === field)).toBe(true)
+    }
+    expect(authoringToolTargetWireV1Schema.safeParse({ ...target, revisionPolicy: { kind: 'latest' } }).success).toBe(false)
+    expect(authoringToolTargetWireV1Schema.safeParse({ ...target, documentRevision: -1 }).success).toBe(false)
+    expect(authoringToolTargetWireV1Schema.safeParse({ ...target, itemId: ' ' }).success).toBe(false)
+    expect(authoringToolTargetWireV1Schema.safeParse({ ...target, extra: true }).success).toBe(false)
+  })
+
+  it('creates through a parent scope without invented update identity', () => {
+    const { target } = slideTargetContext()
+    const { itemId, authoringAddress, ...scope } = target
+    const create = { ...scope, parent: { kind: 'owner' }, insertion: { kind: 'before', siblingId: itemId } }
+    expect(authoringToolCreateScopeV1Schema.parse(create)).toEqual(create)
+    expect(authoringToolCreateScopeV1Schema.safeParse({ ...create, itemId }).success).toBe(false)
+    expect(authoringToolCreateScopeV1Schema.safeParse({ ...create, authoringAddress }).success).toBe(false)
+    expect(authoringToolCreateScopeV1Schema.safeParse({ ...create, insertion: { kind: 'before' } }).success).toBe(false)
+    expect(authoringToolCreateScopeV1Schema.safeParse({ ...create, parent: { kind: 'flow-body', parentBlockId: null } }).success).toBe(true)
+  })
+
   it('captures only frozen scalar identity from the real Slide fixture and effective row', () => {
     const { project, projection, target } = slideTargetContext()
     const row = projection.unifiedRows.find((candidate) => (

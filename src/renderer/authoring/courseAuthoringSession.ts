@@ -3,6 +3,7 @@ import type {
   CourseSurfaceType,
 } from '../../shared/courseProjectTypes'
 import type { CourseAuthoringOwner } from './courseAuthoringScope'
+import type { AuthoringToolTargetWireV1 } from '../../shared/authoringToolContract'
 
 export type CourseAuthoringSurfaceType = Extract<
   CourseSurfaceType,
@@ -38,20 +39,7 @@ export interface CourseProjectRevisionTarget {
  * retarget the operation. The target is transient editor state and is never a
  * persisted Course Project field.
  */
-export interface CourseAuthoringTarget {
-  readonly projectId: string
-  readonly documentRevision: number
-  readonly revisionPolicy: CourseAuthoringExactRevisionPolicy
-  readonly sessionGeneration: number
-  readonly surfaceType: CourseAuthoringSurfaceType
-  readonly surfaceId: string
-  readonly locationId: string
-  readonly stateId: string | null
-  readonly owner: CourseAuthoringOwner
-  readonly ownerKey: string
-  readonly itemId: string
-  readonly authoringAddress: string
-}
+export type CourseAuthoringTarget = Readonly<AuthoringToolTargetWireV1>
 
 /** Current canonical identity supplied at completion time by the consumer. */
 export interface CurrentCourseAuthoringTargetIdentity {
