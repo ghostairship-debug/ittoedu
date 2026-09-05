@@ -1,3 +1,5 @@
+import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
+import { EditableChartView } from './EditableChartView'
 import {
   useEffect,
   useLayoutEffect,
@@ -1098,6 +1100,12 @@ export function FlowWorkspace({
         )
         break
       }
+      case 'chart':
+        body = <EditableChartView id={block.id} chart={structuredClone(block.chart) as import('../../shared/contracts/native-v1').NativeChartContent} width={Math.max(240, view.layout.readingWidth - 104)} height={block.height}
+          canvasTextPort={() => chartCanvasTextPort(targetForBlock(block.id))}
+          onCommit={readOnly ? undefined : chart => { const receipt = commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { chart }, expectedEdit: editRef.current }); return receipt.ok ? null : receipt.reason ?? '图表提交失败' }}
+          onHeightCommit={readOnly ? undefined : height => { commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { height }, expectedEdit: editRef.current }) }} />
+        break
       case 'table':
         body = (
           <table>

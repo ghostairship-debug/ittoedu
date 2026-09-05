@@ -18,6 +18,7 @@ export type SpatialGraphSelection =
   | { readonly kind: 'relation'; readonly id: string }
 
 export type SpatialAuthoringIntent = (
+  | { readonly kind: 'replace-chart'; readonly chart: import('../../shared/contracts/native-v1').NativeChartContent }
   | {
       readonly kind: 'select-layers'
       readonly layerItemIds: readonly string[]

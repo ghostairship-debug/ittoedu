@@ -1,3 +1,4 @@
+import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
 import type {
   CourseAuthoringSessionToken,
   CourseAuthoringTarget,
@@ -131,6 +132,7 @@ function createCommands(input: {
     expectedEdit: input.textEdit,
   })
   return {
+    connectChartCanvasText: port => input.target ? connectChartCanvasText(input.target, port) : () => {},
     renamePage: (_surfaceId, title) => run({ kind: 'rename-page', title }),
     setPaperBackground: (_surfaceId, backgroundColor) => run({
       kind: 'set-paper-background',
@@ -149,7 +151,12 @@ function createCommands(input: {
       mimeType: imported.mimeType,
       bytes: imported.bytes,
     }),
-    patchSelectedBlock: (patch) => run({ kind: 'patch-block', patch }),
+    patchSelectedBlock: (patch) => {
+      if (!input.target) return COURSE_AUTHORING_STALE_SESSION_REASON
+      const receipt = input.runIntent(input.target, { kind: 'patch-block', patch, expectedEdit: input.textEdit })
+      if (!receipt.ok && receipt.reason) input.reportError(receipt.reason)
+      return receipt.ok ? null : receipt.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON
+    },
     replaceMediaAsset: (assetId) => run({ kind: 'replace-media-asset', assetId }),
     importReplacementMedia: (imported) => run({
       kind: 'import-replacement-media',

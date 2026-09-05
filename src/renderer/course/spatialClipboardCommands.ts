@@ -1,3 +1,4 @@
+import { rebuildChartItemIds } from '../project/nativeNodeFactories'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
@@ -616,6 +617,9 @@ export function pasteSpatialClipboard(
       let preferredOrder = ownerOrder + 1
       clipboard.items.forEach((entry) => {
         const duplicate = structuredClone(entry.item)
+        if (duplicate.kind === 'native' && duplicate.content.nativeType === 'chart') {
+          duplicate.content.data = rebuildChartItemIds(duplicate.content.data)
+        }
         duplicate.layerItemId = layerIdMap.get(entry.item.layerItemId)!
         duplicate.label = `${entry.item.label} 副本`.slice(0, 200)
         duplicate.frame.x += SPATIAL_CLIPBOARD_OFFSET

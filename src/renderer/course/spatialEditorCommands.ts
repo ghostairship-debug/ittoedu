@@ -1,3 +1,7 @@
+import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
+import type { NativeChartContent } from '../../shared/contracts/native-v1'
+import { createChartNode, createChartLayerItem } from '../project/nativeNodeFactories'
+import type { ChartType } from './chartContentOperations'
 import { nanoid } from 'nanoid'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
@@ -1241,4 +1245,46 @@ export function worldLayerItem(
   )
   if (!item) throw new Error(`找不到世界元素：${layerItemId}`)
   return item
+}
+
+
+export function addSpatialWorldChartLayer(
+  session: SpatialAuthoringSession,
+  input: AddSpatialWorldLayerInput & { chartType?: ChartType } = {},
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  const stale = rejectSpatialIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    requireWorldScope(session)
+    const origin = defaultWorldOrigin(session, 560, 360, input.x, input.y)
+    const node = createChartNode({ id: input.id, chartType: input.chartType, x: origin.x, y: origin.y, width: 560, height: 360 })
+    const item = createChartLayerItem(node)
+    const project = commitSpatialProjectMutation(session.history.present, draft => {
+      appendWorldLayer(draft, session.selection.surfaceId, item)
+    }, options.now)
+    return commitAdded(session, project, node.id)
+  } catch (error) { return catchSpatialCommand(session, error) }
+}
+
+export function replaceSpatialWorldChart(
+  session: SpatialAuthoringSession,
+  layerItemId: string,
+  chart: NativeChartContent,
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  const stale = rejectSpatialIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    requireWorldScope(session)
+    const next = chartNativeContentObjectSchema.parse(chart)
+    const project = commitSpatialProjectMutation(session.history.present, draft => {
+      const item = spatialSurfaceIn(draft, session.selection.surfaceId).world.layerItems.find(item => item.layerItemId === layerItemId)
+      if (!item || item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('图表目标已失效')
+      if (item.locked) throw new Error('locked')
+      item.content.data = next
+    }, options.now)
+    if (project === session.history.present) return succeedSpatialCommand(session, false)
+    return succeedSpatialCommand(replaceSpatialSession(session, { history: commitSpatialAuthoringHistory(session.history, project) }), true)
+  } catch (error) { return catchSpatialCommand(session, error) }
 }

@@ -1,3 +1,4 @@
+import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import {
@@ -1662,6 +1663,15 @@ function renderBlockDom(
       }
       parent.appendChild(figure)
       return
+    }
+    case 'chart': {
+      const figure = assignBlock(dom.createElement('figure'))
+      figure.style.margin = '16px 0'
+      figure.style.width = '100%'
+      figure.style.aspectRatio = `${Math.max(240, (options.readingWidth ?? 760) - 104)} / ${block.height}`
+      figure.innerHTML = buildNativeChartSvg(block.chart, Math.max(240, (options.readingWidth ?? 760) - 104), block.height, block.id)
+      parent.appendChild(figure)
+      break
     }
     case 'table': {
       const figure = assignBlock(dom.createElement('figure'))

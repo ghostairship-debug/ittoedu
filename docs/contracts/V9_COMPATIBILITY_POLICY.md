@@ -80,7 +80,7 @@
 该例外必须同时满足：
 
 1. 不修改既有六种 Native 的字段、判别器、缺省或语义；所有既有合法 V9 工程继续读取且行为不变。
-2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema，只允许位于 Slide scene 或 Slide surface layer；Flow、Spatial 与 global 必须定位拒绝。不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
+2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema。Table 只允许 Slide scene/surface；Chart 另按本文 1.3 扩域合同允许 Flow 正文和 Spatial world；Flow overlay、Spatial shared 与 global 必须定位拒绝。不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
 3. Table/Chart 不加入 legacy `SceneNode` / `SCENE_NODE_TYPES`。V9 Native data materializer、presentation `nativeData` override 校验与生成合同必须脱离旧 Scene Schema，同时保持既有 presentation override 合并语义不变。
 4. 含新分支的工程由不了解该分支的旧编辑器明确拒绝；不得静默丢字段、跳过元素、改写为旧类型或覆盖原工程。旧编辑器前向不兼容是已披露结果，用户须使用匹配版本。
 5. Published V2 payload 与匹配 Player 成对交付；旧 V2 reader/Player 遇到新分支必须明确失败，不承诺前向兼容，也不得静默隐藏或仅以无提示静态占位冒充支持。
@@ -89,7 +89,7 @@
 
 本节只批准 Table/Chart 两个明确分支；Slide input 与 `input.submit` 的独立批准见 3.4 节。两节都不构成新增其它 Native、Interaction、Surface 或 Published discriminator 的通行授权。
 
-2026-09-05 的版本规划将 Chart 的 Flow/Spatial 支持列为 1.3 必选交付，详见 [跨 Surface Chart 合同节点](../development-plan/roadmap/1.3/README.md)。这是后续合同的明确工作范围，不是对当前 reader 有效域的即时修改：新增 Flow block discriminator、Spatial 容器规则、匹配 Published 分支和旧 reader 反例必须先作为独立合同变更审阅交付，再接 UI。合同交付前继续按本节拒绝越界 Chart；Table、input、global 与其他容器不因该规划自动取得扩展许可。新增内容保持可编辑数据，静态导出后备不得反写作者工程。
+1.3 的 Flow/Spatial Chart 合同已独立交付，具体字段、尺寸、兼容与静态导出见本文末尾扩域条款；不得据此放开 Table、input、global 或其他未批准容器。
 
 ### 3.4 2026-09-04 Owner 批准的 Slide Native input 与 input.submit 窄扩展
 

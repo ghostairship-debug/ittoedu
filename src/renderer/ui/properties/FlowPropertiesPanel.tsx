@@ -1,3 +1,6 @@
+import type { ChartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
+import { ChartProperties } from './ChartProperties'
+import { createChartPropertiesCommands } from './chartPropertiesCommands'
 import { useRef, type ChangeEvent } from 'react'
 import {
   Bold,
@@ -86,6 +89,7 @@ export interface FlowImportedMediaBytes {
 }
 
 export interface FlowPropertiesCommands {
+  readonly connectChartCanvasText?: (port: ChartCanvasTextPort) => () => void
   readonly previewNative?: (patch: PropertiesPatch | null) => void
   readonly previewTextColor?: (color: string | null) => void
   readonly renamePage: (surfaceId: string, title: string) => void
@@ -93,7 +97,7 @@ export interface FlowPropertiesCommands {
   readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
   readonly previewSurfaceBackground?: (patch: { backgroundColor?: string | null }) => void
   readonly importSurfaceBackgroundAsset: (file: FlowImportedMediaBytes) => void
-  readonly patchSelectedBlock: (patch: Record<string, unknown>) => void
+  readonly patchSelectedBlock: (patch: Record<string, unknown>) => void | string | null
   readonly patchOverlayProperties: (patch: Record<string, unknown>) => void
   readonly replaceMediaAsset: (assetId: string) => void
   readonly importReplacementMedia: (imported: FlowImportedMediaBytes) => Promise<void> | void
@@ -521,6 +525,16 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
       </section>
       {block.type === 'media' ? (
         <FlowMediaBlockProperties context={context} block={block} />
+      ) : null}
+      {block.type === 'chart' ? (
+        <section className="property-section" data-testid="flow-chart-properties">
+          <ChartProperties node={{ id: block.id, type: 'chart', ...block.chart }} bindingKey={context.draftBindingKey}
+            commands={{ ...createChartPropertiesCommands(block.chart, chart => commands.patchSelectedBlock({ chart }) ?? null, commands.reportError), connectCanvasText: commands.connectChartCanvasText }} />
+          <BufferedInput label="图表高度" type="number" min={160} max={1600} value={block.height}
+            onCommit={value => { const height = Number(value); if (height >= 160 && height <= 1600) commands.patchSelectedBlock({ height }) }} />
+          <button type="button" onClick={() => commands.moveSelectedBlock('up')}>上移</button>
+          <button type="button" onClick={() => commands.moveSelectedBlock('down')}>下移</button>
+        </section>
       ) : null}
       {block.type === 'formula' ? (
         <FlowFormulaBlockProperties context={context} block={block} />

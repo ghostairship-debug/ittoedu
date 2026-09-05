@@ -1,3 +1,4 @@
+import type { CourseAuthoringTarget } from './courseAuthoringSession'
 import type { SlideAuthoringTarget } from '../course/slideAuthoringBackend'
 
 export type ChartCanvasTextKind = 'category' | 'series'
@@ -10,14 +11,15 @@ export interface ChartCanvasTextPort {
 // Only a connection to the mounted inspector; draft data stays in its owner.
 // No document, history or second draft is stored here.
 const connections = new Map<string, ChartCanvasTextPort>()
-function key(target: SlideAuthoringTarget): string {
+function key(target: SlideAuthoringTarget | CourseAuthoringTarget): string {
+  if ('documentRevision' in target) return `${target.projectId}:${target.sessionGeneration}:${target.documentRevision}:${target.authoringAddress}`
   return `${target.sessionId}:${target.generation}:${target.revision}:${target.authoringAddress}`
 }
-export function connectChartCanvasText(target: SlideAuthoringTarget, port: ChartCanvasTextPort): () => void {
+export function connectChartCanvasText(target: SlideAuthoringTarget | CourseAuthoringTarget, port: ChartCanvasTextPort): () => void {
   const address = key(target)
   connections.set(address, port)
   return () => { if (connections.get(address) === port) connections.delete(address) }
 }
-export function chartCanvasTextPort(target: SlideAuthoringTarget): ChartCanvasTextPort | undefined {
+export function chartCanvasTextPort(target: SlideAuthoringTarget | CourseAuthoringTarget): ChartCanvasTextPort | undefined {
   return connections.get(key(target))
 }

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createChartNode } from '@/renderer/project/nativeNodeFactories'
-import { SlideChartProperties } from '@/renderer/ui/properties/SlideChartProperties'
+import { ChartProperties } from '@/renderer/ui/properties/ChartProperties'
 import type { ChartCanvasTextPort } from '@/renderer/authoring/chartCanvasTextBridge'
 import type { SlideChartCandidateData } from '@/renderer/course/v9ChartCommands'
 
@@ -11,7 +11,7 @@ it('applies canvas labels and pending inspector values through one draft commit'
   const node = createChartNode({ chartType: 'bar' })
   const commitTableData = vi.fn((_candidate: SlideChartCandidateData) => null)
   let port: ChartCanvasTextPort | undefined
-  render(<SlideChartProperties node={node} bindingKey="chart-draft" commands={{
+  render(<ChartProperties node={node} bindingKey="chart-draft" commands={{
     patchTitle: vi.fn(), patchType: vi.fn(), patchStyle: vi.fn(), commitTableData,
     connectCanvasText: value => { port = value; return () => { port = undefined } },
   }} />)
@@ -29,7 +29,7 @@ it('keeps an invalid draft available for correction without writing partial canv
   const node = createChartNode({ chartType: 'bar' })
   const commitTableData = vi.fn((_candidate: SlideChartCandidateData) => null)
   let port: ChartCanvasTextPort | undefined
-  render(<SlideChartProperties node={node} bindingKey="invalid-draft" commands={{
+  render(<ChartProperties node={node} bindingKey="invalid-draft" commands={{
     patchTitle: vi.fn(), patchType: vi.fn(), patchStyle: vi.fn(), commitTableData,
     connectCanvasText: value => { port = value; return () => { port = undefined } },
   }} />)

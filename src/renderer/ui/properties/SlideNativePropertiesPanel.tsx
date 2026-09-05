@@ -72,10 +72,10 @@ import {
   ToggleRow,
 } from './PropertyControls'
 import {
-  SlideChartProperties,
-  type SlideChartPropertiesCommands,
-  type SlideChartPropertiesView,
-} from './SlideChartProperties'
+  ChartProperties,
+  type ChartPropertiesCommands,
+  type ChartPropertiesView,
+} from './ChartProperties'
 import {
   SlideTableProperties,
   type SlideTablePropertiesCommands,
@@ -111,7 +111,7 @@ export type PropertiesRuntimeView = PropertiesItemBase & {
 export type PropertiesItemView =
   | NativeRenderableNode
   | SlideTablePropertiesView
-  | SlideChartPropertiesView
+  | (PropertiesItemBase & ChartPropertiesView)
   | SlideInputPropertiesView
   | PropertiesComponentView
   | PropertiesRuntimeView
@@ -175,7 +175,7 @@ export interface SlideNativePropertiesContext {
     readonly openProfessionalAutomation: () => void
     readonly text: SlideNativeTextCommands
     readonly table: SlideTablePropertiesCommands | null
-    readonly chart: SlideChartPropertiesCommands | null
+    readonly chart: ChartPropertiesCommands | null
     readonly input?: SlideInputPropertiesCommands | null
   }
   readonly onFeedback: (feedback: { kind: 'error' | 'status'; message: string }) => void
@@ -717,9 +717,9 @@ export function SlideNativeTypeFields({
   textCommands: SlideNativeTextCommands
   draftBindingKey: string
   tableCommands: SlideTablePropertiesCommands | null
-  chartCommands: SlideChartPropertiesCommands | null
+  chartCommands: ChartPropertiesCommands | null
 }) {
-  if (spatialMode && node.type !== 'text') {
+  if (spatialMode && node.type !== 'text' && node.type !== 'chart') {
     return (
       <section
         className="property-section"
@@ -767,8 +767,8 @@ export function SlideNativeTypeFields({
           commands={tableCommands}
         />
       )}
-      {!spatialMode && node.type === 'chart' && chartCommands && (
-        <SlideChartProperties
+      {node.type === 'chart' && chartCommands && (
+        <ChartProperties
           node={node}
           bindingKey={draftBindingKey}
           commands={chartCommands}

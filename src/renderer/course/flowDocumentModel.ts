@@ -1,3 +1,4 @@
+import { rebuildChartItemIds } from '../project/nativeNodeFactories'
 import { nanoid } from 'nanoid'
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '../../shared/courseProjectModel'
@@ -156,6 +157,7 @@ export function flowBlockLabel(block: FlowBlock): string {
   if (block.type === 'formula') return block.accessibleText.trim() || '公式'
   if (block.type === 'component') return `组件·${block.component.packageId}`
   if (block.type === 'list') return block.items[0]?.text.trim().slice(0, 48) || '列表'
+  if (block.type === 'chart') return block.chart.title?.trim() || '图表'
   if (block.type === 'table') return block.caption?.trim() || '表格'
   return '分隔线'
 }
@@ -350,6 +352,8 @@ export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
         }),
       ),
     }))
+  } else if (next.type === 'chart') {
+    next.chart = rebuildChartItemIds(next.chart)
   } else if (next.type === 'formula') {
     next.formulaId = stableFlowId('formula')
   } else if (next.type === 'section') {

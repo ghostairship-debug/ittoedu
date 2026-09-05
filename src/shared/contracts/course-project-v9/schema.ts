@@ -315,7 +315,7 @@ export function materializeNativeLayerItem(
     case 'table':
       throw new Error('unsupported-native-table')
     case 'chart':
-      throw new Error('unsupported-native-chart')
+      return { ...item.content.data, ...layout, type: 'chart' }
     case 'input':
       throw new Error('unsupported-native-input')
   }

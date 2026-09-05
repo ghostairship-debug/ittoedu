@@ -1,3 +1,4 @@
+import { buildFlowDocxWithCharts } from '../export/course/flowChartImages'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
@@ -14,7 +15,7 @@ import {
   buildPublishedCourseV2Payload,
   type CoursePublishSources,
 } from '../export/course/buildPublishedCourse'
-import { buildFlowDocx, uniqueFlowDocxFilename } from '../export/course/flowDocx'
+import { uniqueFlowDocxFilename } from '../export/course/flowDocx'
 import {
   collectCourseProjectExportPreflight,
   type CourseProjectExportPreflightReportV1,
@@ -366,7 +367,7 @@ export function useCourseDelivery(
       const exportedPaths: string[] = []
       let warningCount = 0
       for (const flowSurface of flowSurfaces) {
-        const built = buildFlowDocx(published, flowSurface.id, {
+        const built = await buildFlowDocxWithCharts(published, flowSurface.id, {
           resolveAsset: (assetId) => {
             const meta = snapshot.project.assets[assetId]
             const bytes = snapshot.assetFiles[assetId]

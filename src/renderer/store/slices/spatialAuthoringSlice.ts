@@ -1,3 +1,5 @@
+import { addSpatialWorldChartLayer, replaceSpatialWorldChart } from '../../course/spatialEditorCommands'
+import type { ChartType } from '../../course/chartContentOperations'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
@@ -620,6 +622,7 @@ export function createSpatialAuthoringSlice(
   redo(): void
   setScope(scope: 'global' | 'world'): void
   renameProject(title: string): void
+  addChartNode(chartType: ChartType, x?: number, y?: number): void
   addTextNode(x?: number, y?: number): void
   addFormulaNode(x?: number, y?: number): void
   addRectangleNode(x?: number, y?: number): void
@@ -990,6 +993,11 @@ export function createSpatialAuthoringSlice(
                 layers: [...intent.layers],
               }, { expectedRevision: workingSession.history.present.revision })
           return finish(result)
+        }
+        case 'replace-chart': {
+          requireTargetKind('layer')
+          if (!workingSession.selection.selectionIds.includes(target.itemId)) return rejectIntent('invalid-selection')
+          return finish(replaceSpatialWorldChart(workingSession, target.itemId, intent.chart, { expectedRevision: workingSession.history.present.revision }))
         }
         case 'patch-layers': {
           requireTargetKind('layer')
@@ -1501,6 +1509,11 @@ export function createSpatialAuthoringSlice(
           future: [],
         },
       }, true), { statusMessage: `课件已重命名为“${title}”` })
+    },
+    addChartNode(chartType, x, y) {
+      const session = commitDraft()
+      if (!session) return
+      spatial.persist(addSpatialWorldChartLayer(session, { chartType, x, y }, { expectedRevision: session.history.present.revision }))
     },
     addTextNode(x, y) {
       const session = spatial.read().spatialSession

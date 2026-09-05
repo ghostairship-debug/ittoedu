@@ -1,3 +1,4 @@
+import { describeNativeChart } from '../../../shared/nativeChartView'
 import { strToU8, zipSync } from 'fflate'
 import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
@@ -15,6 +16,7 @@ import {
 } from './flowPrintPlan'
 import {
   buildFlowDocxProjection,
+  resolveFlowDocxPageBox,
   rotationToDrawingMlDegree,
   type BuildFlowDocxProjectionOptions,
   type FlowDocxLayerReportItem,
@@ -29,6 +31,7 @@ export interface FlowDocxAsset {
 }
 
 export interface FlowDocxOptions extends BuildFlowPrintPlanOptions, BuildFlowDocxProjectionOptions {
+  chartImages?: ReadonlyMap<string, FlowDocxAsset>
   resolveAsset?: (assetId: string) => FlowDocxAsset | undefined
   author?: string
   createdAt?: Date
@@ -57,6 +60,8 @@ interface ImagePart {
 }
 
 interface BuildContext {
+  chartMaxHeight: number
+  chartImages: ReadonlyMap<string, FlowDocxAsset>
   warnings: string[]
   report: FlowDocxReportItem[]
   layerReport: FlowDocxLayerReportItem[]
@@ -184,9 +189,9 @@ function imageExtension(mimeType: string): string | null {
   return null
 }
 
-function inlineImageDrawing(label: string, image: ImagePart, drawingId: number): string {
-  const width = 560
-  const height = Math.round(width * 0.5625)
+function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity): string {
+  const width = Math.min(560, maxHeight * aspect)
+  const height = Math.round(width / aspect)
   const cx = Math.round(width * 9_525)
   const cy = Math.round(height * 9_525)
   return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${drawingId}" name="${xml(label)}" descr="${xml(label)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${xml(image.path)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
@@ -494,6 +499,19 @@ function renderPrintNode(
         runs: item.runs,
         leadingContent: index === 0 ? leadingContent : undefined,
       })).join('')
+    case 'chart': {
+      const asset = context.chartImages.get(node.blockId)
+      if (!asset || asset.mimeType !== 'image/png') throw new Error(`正文图表 ${node.blockId} 缺少静态图面，已停止 DOCX 导出`)
+      const image: ImagePart = { relationshipId: `rId${context.nextRelationshipId++}`, path: `media/chart${context.images.length + 1}.png`, mimeType: asset.mimeType, bytes: asset.bytes }
+      context.images.push(image)
+      context.report.push({ blockId: node.blockId, disposition: 'fallback', detail: '图表使用静态 PNG 图面，原始数据保留为可编辑 Word 表格' })
+      context.warnings.push(`${node.blockId}: 图表为静态图面；数据表可编辑。`)
+      const rows = [
+        [{ text: '分类', runs: [] }, ...node.chart.series.map(series => ({ text: series.name, runs: [] }))],
+        ...node.chart.categories.map(category => [{ text: category.label, runs: [] }, ...node.chart.series.map(series => ({ text: String(series.points.find(point => point.categoryId === category.id)!.value), runs: [] }))]),
+      ]
+      return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.chart.title || '图表', image, context.nextDrawingId++, 656 / node.height, context.chartMaxHeight)}${paragraph('图表数据（可编辑）', { style: 'Caption', keepNext: true })}${tableXml(rows, 1)}${paragraph(describeNativeChart(node.chart), { style: 'Caption' })}`
+    }
     case 'table':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native Word table' })
       return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${node.caption ? paragraph(node.caption, { style: 'Caption', keepNext: true }) : ''}${
@@ -631,12 +649,14 @@ export function buildFlowDocxFromPlan(
   options: FlowDocxOptions = {},
 ): FlowDocxResult {
   const context: BuildContext = {
+    chartMaxHeight: resolveFlowDocxPageBox(plan.pageSize, plan.orientation).maxContentHeightPx - 32,
     warnings: [],
     report: [],
     layerReport: [],
     images: [],
     nextRelationshipId: 3,
     nextDrawingId: 1,
+    chartImages: options.chartImages ?? new Map(),
     resolveAsset: options.resolveAsset ?? (() => undefined),
     anchoredMap: new Map(),
   }
@@ -678,12 +698,14 @@ export function buildFlowDocxFromProjection(
   options: FlowDocxOptions = {},
 ): FlowDocxResult {
   const context: BuildContext = {
+    chartMaxHeight: projection.pageBox.maxContentHeightPx - 32,
     warnings: [...projection.warnings],
     report: [],
     layerReport: [...projection.layerReport],
     images: [],
     nextRelationshipId: 3,
     nextDrawingId: 1,
+    chartImages: options.chartImages ?? new Map(),
     resolveAsset: options.resolveAsset ?? (() => undefined),
     anchoredMap: new Map(projection.anchoredGroups.map((g) => [g.blockId, g.items])),
   }

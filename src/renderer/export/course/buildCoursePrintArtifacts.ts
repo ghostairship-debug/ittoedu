@@ -1,3 +1,4 @@
+import { buildFlowDocxWithCharts } from './flowChartImages'
 import type { MixedPrintEntry } from '../../../shared/courseProjectTypes'
 import { composePublishedCourseLocation } from '../../../shared/courseLayerComposition'
 import type {
@@ -25,7 +26,6 @@ import {
   type CoursePublishSources,
 } from './buildPublishedCourse'
 import {
-  buildFlowDocx,
   uniqueFlowDocxFilename,
   type FlowDocxAsset,
 } from './flowDocx'
@@ -864,7 +864,7 @@ export async function buildCoursePrintArtifacts(
         })
         continue
       }
-      const docx = buildFlowDocx(published, surface.id, {
+      const docx = await buildFlowDocxWithCharts(published, surface.id, {
         resolveAsset: resolveAssetBytes,
         pageSize: plan.pageSize,
         orientation: plan.orientation,
