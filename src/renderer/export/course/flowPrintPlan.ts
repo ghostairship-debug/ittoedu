@@ -1,3 +1,5 @@
+import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import type { NativeChartContent } from '../../../shared/contracts/native-v1'
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
 import type { MixedPrintEntry, MixedPrintPlan } from '../../../shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
@@ -17,6 +19,7 @@ export type FlowPrintPageSize = MixedPrintPlan['pageSize']
 export type FlowPrintOrientation = MixedPrintPlan['orientation']
 
 export type FlowPrintNode =
+  | { type: 'chart'; blockId: string; chart: NativeChartContent; height: number }
   | { type: 'document-title'; text: string }
   | {
       type: 'heading'
@@ -203,6 +206,8 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
           runs: item.runs ?? [],
         })),
       }]
+    case 'chart':
+      return [{ type: 'chart', blockId: block.id, chart: block.chart, height: block.height }]
     case 'table':
       return [{
         type: 'table',
@@ -284,6 +289,8 @@ function printNodeToHtml(
         node.items.map((item) => `<li>${richTextToHtml(item.text, item.runs)}</li>`).join('')
       }</${tag}>`
     }
+    case 'chart':
+      return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" style="width:100%;margin:16px 0;aspect-ratio:656/${node.height}">${buildNativeChartSvg(node.chart, 656, node.height, node.blockId)}</figure>`
     case 'table': {
       const head = `<tr>${node.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`
       const body = node.rows.map((row) => `<tr>${row.map((cell) => `<td>${richTextToHtml(cell.text, cell.runs)}</td>`).join('')}</tr>`).join('')

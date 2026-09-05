@@ -1,3 +1,4 @@
+import { createChartPropertiesCommands } from '../../ui/properties/chartPropertiesCommands'
 import type { EffectiveBackgroundOwner } from '../../../shared/effectiveBackground'
 import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
 import { configureSlideInputAtTarget } from '../../course/v9SlideContentCommands'
@@ -988,6 +989,16 @@ export function usePropertiesAuthoringBinding({
   }
 
   const slideChartCommands = (): SlideNativePropertiesContext['commands']['chart'] => {
+    if (node?.type === 'chart' && read.spatial) {
+      const target = captureSpatialLayerTarget(node.id)
+      const item = selectedRow?.item
+      if (!target || read.spatial.scope !== 'world' || item?.kind !== 'native' || item.content.nativeType !== 'chart') return null
+      return { ...createChartPropertiesCommands(item.content.data, chart => {
+        if (!requireLiveOwner()) return COURSE_AUTHORING_STALE_SESSION_REASON
+        const receipt = runSpatialAuthoringIntent(target, { kind: 'replace-chart', chart, expectedContentEdit: read.spatial!.contentEdit })
+        return receipt.ok ? null : receipt.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON
+      }, reportError), connectCanvasText: port => connectChartCanvasText(target, port) }
+    }
     if (node?.type !== 'chart' || !slideTarget || read.flow || read.spatial) return null
     const target = slideTarget
     const options = { expectedRevision: target.revision }

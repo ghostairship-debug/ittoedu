@@ -9,7 +9,7 @@ import type {
   NativeChartCommonStyle,
   NativeChartContent,
 } from '../../../shared/contracts/native-v1/types'
-import type { SlideChartCandidateData } from '../../course/v9ChartCommands'
+import type { ChartCandidateData } from '../../course/chartContentOperations'
 import type { ChartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { ColorInput } from '../ColorInput'
 import { NativeColorInput, NativeColorPreviewContext } from './NativeColorPreview'
@@ -20,15 +20,15 @@ import {
   SelectField,
   ToggleRow,
 } from './PropertyControls'
-import type { PropertiesItemBase } from './SlideNativePropertiesPanel'
 
-export type SlideChartType = 'bar' | 'line' | 'area' | 'pie' | 'donut'
+export type ChartType = NativeChartContent['chartType']
 
-export type SlideChartPropertiesView = PropertiesItemBase & {
+export type ChartPropertiesView = {
+  id: string
   type: 'chart'
 } & NativeChartContent
 
-export type SlideChartStylePatch = Partial<NativeChartCommonStyle> & Partial<{
+export type ChartStylePatch = Partial<NativeChartCommonStyle> & Partial<{
   showCategoryAxis: boolean
   showValueAxis: boolean
   showGridLines: boolean
@@ -37,16 +37,16 @@ export type SlideChartStylePatch = Partial<NativeChartCommonStyle> & Partial<{
   holeSize: number
 }>
 
-export interface SlideChartPropertiesCommands {
+export interface ChartPropertiesCommands {
   readonly connectCanvasText?: (port: ChartCanvasTextPort) => () => void
   readonly patchTitle: (title: string) => void
-  readonly patchType: (newType: SlideChartType, retainedSeriesId?: string) => void
-  readonly patchStyle: (patch: SlideChartStylePatch) => void
+  readonly patchType: (newType: ChartType, retainedSeriesId?: string) => void
+  readonly patchStyle: (patch: ChartStylePatch) => void
   /** Returns null on success; on failure returns the reason and writes nothing. */
-  readonly commitTableData: (candidateData: SlideChartCandidateData) => string | null
+  readonly commitTableData: (candidateData: ChartCandidateData) => string | null
 }
 
-const CHART_TYPE_OPTIONS: ReadonlyArray<{ value: SlideChartType; label: string }> = [
+const CHART_TYPE_OPTIONS: ReadonlyArray<{ value: ChartType; label: string }> = [
   { value: 'bar', label: '柱状图' },
   { value: 'line', label: '折线图' },
   { value: 'area', label: '面积图' },
@@ -65,7 +65,7 @@ const DRAFT_SERIES_COLORS = [
   '#65a30d',
 ] as const
 
-function isCircularType(type: SlideChartType): boolean {
+function isCircularType(type: ChartType): boolean {
   return type === 'pie' || type === 'donut'
 }
 
@@ -88,7 +88,7 @@ interface ChartDataDraft {
   series: DraftSeries[]
 }
 
-function draftFromView(node: SlideChartPropertiesView): ChartDataDraft {
+function draftFromView(node: ChartPropertiesView): ChartDataDraft {
   return {
     categories: node.categories.map((category) => ({
       key: category.id,
@@ -108,17 +108,17 @@ function draftFromView(node: SlideChartPropertiesView): ChartDataDraft {
   }
 }
 
-function draftSignature(node: SlideChartPropertiesView): string {
+function draftSignature(node: ChartPropertiesView): string {
   return JSON.stringify({ categories: node.categories, series: node.series })
 }
 
 interface DraftValidation {
   readonly cellErrors: Record<string, string>
   readonly formErrors: readonly string[]
-  readonly candidate: SlideChartCandidateData | null
+  readonly candidate: ChartCandidateData | null
 }
 
-function validateDraft(draft: ChartDataDraft, chartType: SlideChartType): DraftValidation {
+function validateDraft(draft: ChartDataDraft, chartType: ChartType): DraftValidation {
   const cellErrors: Record<string, string> = {}
   const formErrors: string[] = []
   const circular = isCircularType(chartType)
@@ -176,16 +176,16 @@ function validateDraft(draft: ChartDataDraft, chartType: SlideChartType): DraftV
   }
 }
 
-export function SlideChartProperties({
+export function ChartProperties({
   node,
   bindingKey,
   commands,
 }: {
-  node: SlideChartPropertiesView
+  node: ChartPropertiesView
   bindingKey: string
-  commands: SlideChartPropertiesCommands
+  commands: ChartPropertiesCommands
 }) {
-  const chartType = node.chartType as SlideChartType
+  const chartType = node.chartType as ChartType
   const circular = isCircularType(chartType)
   const cartesian = !circular
   const style = node.style
@@ -193,7 +193,7 @@ export function SlideChartProperties({
   useEffect(() => () => preview?.(null), [bindingKey])
 
   const [pendingType, setPendingType] = useState<{
-    target: SlideChartType
+    target: ChartType
     seriesId: string
   } | null>(null)
   const [draft, setDraft] = useState<ChartDataDraft>(() => draftFromView(node))
@@ -256,7 +256,7 @@ export function SlideChartProperties({
     },
   }), [commands, draft, chartType])
 
-  const selectType = (next: SlideChartType) => {
+  const selectType = (next: ChartType) => {
     if (next === chartType) return
     if (isCircularType(next) && node.series.length > 1) {
       // Multi-series → pie/donut must confirm which series survives before
@@ -388,7 +388,7 @@ export function SlideChartProperties({
         allowEmpty
         onCommit={(title) => commands.patchTitle(title)}
       />
-      <SelectField<SlideChartType>
+      <SelectField<ChartType>
         label="图表类型"
         value={chartType}
         options={[...CHART_TYPE_OPTIONS]}

@@ -1,3 +1,5 @@
+import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
+import { EditableChartView } from '../EditableChartView'
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -207,6 +209,7 @@ function spatialNativePaint(
       />
     )
   }
+  if (native.type === 'chart') return <EditableChartView id={native.id} chart={native} width={size.width} height={size.height} />
   if (native.type === 'text') return native.text
   return spatialAuthoringMedia(native, assetUrls) ?? (native.name || native.type)
 }
@@ -791,7 +794,10 @@ export function SpatialLocationWorkspace({
             }
           }
           pointerActiveRef.current = true
-          event.currentTarget.setPointerCapture(event.pointerId)
+          // Keep chart text as the click target while its drag still bubbles to the world controller.
+          const captureTarget = event.target instanceof Element && event.target.closest('[data-testid="editable-chart-view"]')
+            ? event.target : event.currentTarget
+          captureTarget.setPointerCapture(event.pointerId)
           const result = authoringRef.current.pointerDown(pointer, LOGICAL_STAGE_VIEWPORT)
           setPreviewFrames(result.preview ?? null)
           setPreviewCamera(result.previewCamera ?? null)
@@ -993,6 +999,15 @@ export function SpatialLocationWorkspace({
                         componentPackages={componentPackages}
                         assetUrls={assetUrls}
                       />
+                    ) : layer.item.kind === 'native' && layer.item.content.nativeType === 'chart' ? (
+                      <EditableChartView id={layer.selectionId} chart={structuredClone(layer.item.content.data) as import('../../../shared/contracts/native-v1').NativeChartContent} width={size.width} height={size.height}
+                        canvasTextPort={() => { const target = layerTargets.get(layer.selectionId); return target ? chartCanvasTextPort(target) : undefined }}
+                        onCommit={scope !== 'world' || layer.item.locked ? undefined : chart => {
+                          const target = layerTargets.get(layer.selectionId)
+                          if (!target) return '图表目标已失效'
+                          const receipt = commands.run(target, { kind: 'replace-chart', chart, expectedContentEdit: contentEdit })
+                          return receipt.ok ? null : receipt.reason ?? '图表提交失败'
+                        }} />
                     ) : (
                       spatialNativePaint(layer.item as LayerItem, assetUrls, size)
                     )}

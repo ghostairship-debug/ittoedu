@@ -1,3 +1,5 @@
+import { createChartNode, createChartLayerItem } from '../../project/nativeNodeFactories'
+import type { ChartType } from '../../course/chartContentOperations'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
@@ -653,6 +655,7 @@ export function createFlowAuthoringSlice(
   redo(): void
   setScope(scope: 'global' | 'scene'): void
   renameProject(title: string): void
+  addChartNode(chartType: ChartType): void
   addTextNode(x?: number, y?: number): void
   addFormulaNode(x?: number, y?: number): void
   addRectangleNode(x?: number, y?: number): void
@@ -1651,6 +1654,30 @@ export function createFlowAuthoringSlice(
         historyEntry: true,
         selection: session.selection,
       }, { statusMessage: `课件已重命名为“${title}”` })
+    },
+    addChartNode(chartType) {
+      if (!commitDraft()) return
+      const session = flow.read().flowSession
+      if (!session) return
+      if (session.selection.authoringScope === 'global') { kernel.setFeedback({ errorMessage: '图表只能插入正文', statusMessage: null }); return }
+      const document = session.history.present
+      const surface = flowSurfaceIn(document, session.selection.surfaceId)
+      const found = session.selection.selectedBlockId
+        ? findFlowBlockRecursive(surface.blocks, session.selection.selectedBlockId)
+        : null
+      const inserted = insertFlowEditorBlock(document, {
+        surfaceId: session.selection.surfaceId,
+        parentId: found?.parentId ?? null,
+        index: found ? found.index + 1 : surface.blocks.length,
+        block: { type: 'chart', chart: createChartLayerItem(createChartNode({ chartType })).content.data as import('../../../shared/contracts/native-v1').NativeChartContent, height: 360 },
+      }, { expectedRevision: document.revision })
+      const createdId = inserted.createdBlockIds?.[0]
+      flow.persist(inserted, {
+        statusMessage: '已插入正文图表',
+        ...(inserted.ok && inserted.nextDocument && createdId
+          ? { selection: selectFlowEditorBlocks(inserted.nextDocument, session.selection.locationId, [createdId]) }
+          : {}),
+      })
     },
     addTextNode() {
       if (!commitDraft()) return
