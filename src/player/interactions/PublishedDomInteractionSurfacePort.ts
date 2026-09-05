@@ -197,6 +197,16 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
   readonly #activeMotions = new Map<string, ActiveMotion>()
   readonly #stateDisposers: Array<() => void> = []
   readonly #onRootClick = (event: Event): void => this.#delegateClick(event)
+  readonly #keyboardElements = new Map<HTMLElement | SVGElement, { tabindex: string | null; role: string | null }>()
+  readonly #onRootKey = (event: KeyboardEvent): void => {
+    if (!this.active || event.defaultPrevented || event.repeat || event.isComposing || (event.key !== 'Enter' && event.key !== ' ')) return
+    const target = event.target as Element | null
+    if (!target || !('closest' in target) || target.closest('button,input,textarea,select,a[href],[contenteditable="true"]')) return
+    const matched = [...this.#keyboardElements.keys()].find(element => element === target)
+    if (!matched) return
+    event.preventDefault()
+    this.#delegateClick(event)
+  }
   #active: boolean
   #generation = 0
   #destroyed = false
@@ -211,6 +221,7 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     this.localVisibilityState = options.localVisibilityState
       ?? new PublishedInteractionVisibilityState()
     this.#root.addEventListener('click', this.#onRootClick)
+    this.#root.addEventListener('keydown', this.#onRootKey)
   }
 
   get active(): boolean {
@@ -232,6 +243,7 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     if (this.#destroyed) return
     this.#cancelMotions()
     this.#generation = generation
+    this.#restoreKeyboardElements()
     this.#handles.clear()
     for (const handle of handles) {
       if (!handle.nodeId || this.#handles.has(handle.nodeId)) continue
@@ -315,6 +327,8 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     this.#active = false
     this.#cancelMotions()
     this.#root.removeEventListener('click', this.#onRootClick)
+    this.#root.removeEventListener('keydown', this.#onRootKey)
+    this.#restoreKeyboardElements()
     for (const dispose of this.#stateDisposers.splice(0)) dispose()
     this.#clicks.clear()
     this.#handles.clear()
@@ -487,10 +501,33 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
       && (this.#clicks.get(handle.nodeId)?.size ?? 0) > 0
     try {
       handle.applyInteractionState({ visible, clickBound })
+      const element = handle.resolveElement()
+      if (element && !element.matches('button,input,textarea,select,a[href],[contenteditable="true"]')) {
+        if (clickBound) {
+          if (!this.#keyboardElements.has(element)) this.#keyboardElements.set(element, { tabindex: element.getAttribute('tabindex'), role: element.getAttribute('role') })
+          element.setAttribute('tabindex', '0')
+          element.setAttribute('role', 'button')
+        } else this.#restoreKeyboardElement(element)
+      }
       return true
     } catch {
       return false
     }
+  }
+
+  #restoreKeyboardElement(element: HTMLElement | SVGElement): void {
+    const original = this.#keyboardElements.get(element)
+    if (!original) return
+    for (const key of ['tabindex', 'role'] as const) {
+      const value = original[key]
+      if (value === null) element.removeAttribute(key)
+      else element.setAttribute(key, value)
+    }
+    this.#keyboardElements.delete(element)
+  }
+
+  #restoreKeyboardElements(): void {
+    for (const element of this.#keyboardElements.keys()) this.#restoreKeyboardElement(element)
   }
 
   #applyVisibilityForState(

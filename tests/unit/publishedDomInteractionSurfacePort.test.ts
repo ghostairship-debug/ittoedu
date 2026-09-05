@@ -125,6 +125,21 @@ afterEach(() => {
 })
 
 describe('PublishedDomInteractionSurfacePort', () => {
+  it('makes native click targets keyboard accessible and restores DOM attributes after unbinding', () => {
+    const root = document.createElement('div'), node = nodeHarness(root, 'keyboard')
+    const port = new PublishedDomInteractionSurfacePort(root, { active: true })
+    port.refreshNodes([node.handle])
+    const listener = vi.fn(), dispose = port.bindNodeClick('keyboard', listener)!
+    expect(node.current().tabIndex).toBe(0)
+    node.current().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    node.current().dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    expect(listener).toHaveBeenCalledTimes(2)
+    const input = document.createElement('input'); node.current().append(input)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(listener).toHaveBeenCalledTimes(2)
+    dispose(); expect(node.current().hasAttribute('tabindex')).toBe(false); expect(node.current().hasAttribute('role')).toBe(false)
+    port.destroy()
+  })
   it('delegates one bubble click without changing browser event behavior', () => {
     const root = document.createElement('section')
     document.body.appendChild(root)

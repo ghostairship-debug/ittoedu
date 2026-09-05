@@ -901,6 +901,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.movePublishedGlobalRuntimes(state.surfaceId)
     this.#audioEvents.emit('scene:enter', { sceneId: state.locationId })
     this.#mountInteractionControllers()
+    this.#globalInteractionController?.enterScene()
+    this.#localInteractionController?.enterScene()
   }
 
   override restartCourse(): Promise<boolean> {

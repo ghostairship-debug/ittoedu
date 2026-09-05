@@ -430,7 +430,7 @@ describe('PublishedInteractionController', () => {
     const unsupportedTrigger: InteractionRule = {
       id: 'scene_enter',
       enabled: true,
-      trigger: { type: 'scene.enter' },
+      trigger: { type: 'presentation.enter', stateId: 'state-unsupported' },
       conditions: [],
       actions: [actionStep('scene_enter_step', motion('node.enter', 'answer'))],
     }

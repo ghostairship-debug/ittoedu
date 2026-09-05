@@ -109,6 +109,7 @@ export class PublishedInteractionController {
     diagnostic: PublishedInteractionDiagnostic,
   ) => void
   readonly #clickRules = new Map<string, InteractionRule[]>()
+  readonly #sceneEnterRules: InteractionRule[] = []
   readonly #inputRules = new Map<string, InteractionRule[]>()
   readonly #audioEndedRules = new Map<string, InteractionRule[]>()
   readonly #videoRules = new Map<string, InteractionRule[]>()
@@ -144,10 +145,24 @@ export class PublishedInteractionController {
       }
     }
     this.#clickRules.clear()
+    this.#sceneEnterRules.length = 0
     this.#inputRules.clear()
     this.#audioEndedRules.clear()
     this.#videoRules.clear()
     this.#videoTimes.clear()
+  }
+
+  /** Called only after completed location navigation, never merely after host rebinding. */
+  enterScene(): void {
+    if (this.#destroyed) return
+    for (const rule of this.#sceneEnterRules) {
+      const sceneConditions = rule.conditions.filter(condition => condition.type === 'scene.in')
+      if (sceneConditions.length) {
+        const current = this.#readCurrentScene(rule)
+        if (!current.ok || !sceneConditions.every(condition => current.sceneId !== null && condition.sceneIds.includes(current.sceneId))) continue
+      }
+      if (this.#matchesCourseStateConditions(rule)) this.#startRule(rule)
+    }
   }
 
   #inspectAndBindRules(): void {
@@ -155,6 +170,7 @@ export class PublishedInteractionController {
       if (!rule.enabled) continue
       if (
         rule.trigger.type !== 'node.click'
+        && rule.trigger.type !== 'scene.enter'
         && rule.trigger.type !== 'audio.ended'
         && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)
         && rule.trigger.type !== 'input.submit'
@@ -235,6 +251,10 @@ export class PublishedInteractionController {
         continue
       }
 
+      if (rule.trigger.type === 'scene.enter') {
+        this.#sceneEnterRules.push(rule)
+        continue
+      }
       if (rule.trigger.type === 'node.click') {
         const rules = this.#clickRules.get(rule.trigger.nodeId) ?? []
         rules.push(rule)
@@ -566,7 +586,7 @@ export class PublishedInteractionController {
       && conditions.every((condition) => condition.sceneIds.includes(current.sceneId!))
   }
 
-  #matchesCourseStateConditions(rule: InteractionRule, nodeId: string): boolean {
+  #matchesCourseStateConditions(rule: InteractionRule, nodeId?: string): boolean {
     const conditions = rule.conditions.filter((condition) => (
       condition.type === 'course-state.exists'
       || condition.type === 'course-state.compare'
