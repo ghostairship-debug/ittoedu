@@ -858,6 +858,12 @@ export function SpatialLocationWorkspace({
             transform: `scale(${stageTransform.scale})`,
             transition: 'none',
             backgroundColor: view.backgroundColor,
+            backgroundImage: view.backgroundAssetId && assetUrls[view.backgroundAssetId]
+              ? `url(${JSON.stringify(assetUrls[view.backgroundAssetId])})`
+              : undefined,
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: 'cover',
           }}
         >
         {canvasMode === 'edit' && (

@@ -1,14 +1,21 @@
 import {
+  AreaChart,
+  BarChart3,
+  Donut,
   Globe2,
   ImageIcon,
+  LineChart,
   MousePointerClick,
+  PieChart,
   Shapes,
+  Table,
   Type,
   Video,
   SlidersHorizontal,
   Music2,
   Search,
   Sigma,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ShapeType } from '../../shared/contracts/native-v1'
@@ -34,7 +41,7 @@ type AddCategory =
 type AuthoringSurface = 'slide' | 'flow' | 'spatial'
 type AuthoringScope = EditingScope
 type SpatialInsertionScope = 'world' | 'surface' | 'global'
-type InsertableElementKind = 'text' | 'formula' | 'image' | 'video' | 'shape'
+type InsertableElementKind = 'text' | 'formula' | 'image' | 'video' | 'shape' | 'table' | 'chart'
 type InsertionCarrier =
   | 'free-node'
   | 'document-block'
@@ -86,11 +93,19 @@ function insertionCapability(
   spatialScope?: SpatialInsertionScope,
 ): InsertionCapability {
   if (surface === 'slide') {
+    if (kind === 'table' || kind === 'chart') {
+      return scope === 'scene'
+        ? { enabled: true, draggable: true, carrier: 'free-node' }
+        : { enabled: false, draggable: false, carrier: 'unavailable' }
+    }
     return {
       enabled: true,
       draggable: true,
       carrier: scope === 'global' ? 'global-layer-item' : 'free-node',
     }
+  }
+  if (kind === 'table' || kind === 'chart') {
+    return { enabled: false, draggable: false, carrier: 'unavailable' }
   }
   if (surface === 'spatial') {
     return spatialScope === 'world'
@@ -121,6 +136,12 @@ function insertionTitle(
 ): string {
   const capability = insertionCapability(surface, scope, kind, spatialScope)
   if (!capability.enabled) {
+    if (surface === 'slide' && (kind === 'table' || kind === 'chart')) {
+      return `${label}：暂不支持添加到全局层；请切换到当前场景`
+    }
+    if (kind === 'table' || kind === 'chart') {
+      return `${label}：表格和图表只能添加到演示页场景`
+    }
     return surface === 'spatial'
       ? spatialScope === 'surface'
         ? `${label}：表面共享层暂不支持插入；请切换到无限画布世界层`
@@ -160,6 +181,14 @@ const PROFESSIONAL_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
   { id: 'controls', label: '控制与全局' },
 ]
 
+const CHART_ITEMS = [
+  { type: 'bar' as const, label: '柱状图', keywords: '柱状图 柱形图 柱图 条形图 bar', Icon: BarChart3 },
+  { type: 'line' as const, label: '折线图', keywords: '折线图 线图 趋势图 line', Icon: LineChart },
+  { type: 'area' as const, label: '面积图', keywords: '面积图 区域图 area', Icon: AreaChart },
+  { type: 'pie' as const, label: '饼图', keywords: '饼图 饼状图 占比图 比例图 pie', Icon: PieChart },
+  { type: 'donut' as const, label: '环形图', keywords: '环形图 甜甜圈图 环状图 donut', Icon: Donut },
+] as const
+
 function setDragData(
   event: React.DragEvent,
   value: string,
@@ -198,9 +227,25 @@ export function ElementsTab({
 }: ElementsTabProps) {
   const [activeCategory, setActiveCategory] = useState<AddCategory>('common')
   const [searchQuery, setSearchQuery] = useState('')
+  const [showChartPicker, setShowChartPicker] = useState(false)
+
+  useEffect(() => {
+    if (!showChartPicker) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowChartPicker(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showChartPicker])
   const addTextNode = useEditorStore((state) => state.addTextNode)
   const addFormulaNode = useEditorStore((state) => state.addFormulaNode)
   const addShapeNode = useEditorStore((state) => state.addShapeNode)
+  const slideDrawTool = useEditorStore((state) => state.slideDrawTool)
+  const setSlideDrawTool = useEditorStore((state) => state.setSlideDrawTool)
+  const addTableNode = useEditorStore((state) => state.addTableNode)
+  const addChartNode = useEditorStore((state) => state.addChartNode)
   const mediaAssets = useEditorStore(selectMediaAssets)
   const audioSettings = useEditorStore(selectAudioSettings)
   const editorMode = useEditorStore((state) => state.editorMode)
@@ -227,6 +272,8 @@ export function ElementsTab({
   const imageInsertion = insertionCapability(authoringSurface, editingScope, 'image', spatialInsertionScope ?? undefined)
   const videoInsertion = insertionCapability(authoringSurface, editingScope, 'video', spatialInsertionScope ?? undefined)
   const shapeInsertion = insertionCapability(authoringSurface, editingScope, 'shape', spatialInsertionScope ?? undefined)
+  const tableInsertion = insertionCapability(authoringSurface, editingScope, 'table', spatialInsertionScope ?? undefined)
+  const chartInsertion = insertionCapability(authoringSurface, editingScope, 'chart', spatialInsertionScope ?? undefined)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
   const categories = editorMode === 'professional'
     ? PROFESSIONAL_ADD_CATEGORIES
@@ -255,6 +302,18 @@ export function ElementsTab({
   const showVideo = searching
     ? matchesSearch('视频')
     : activeCategory === 'common'
+  const showTable = searching
+    ? matchesSearch('表格 table')
+    : activeCategory === 'common'
+  const matchingCharts = useMemo(() => {
+    if (!searching) return []
+    return CHART_ITEMS.filter((item) =>
+      matchesSearch(`图表 chart ${item.label} ${item.keywords}`)
+    )
+  }, [searching, normalizedQuery])
+  const showCharts = searching
+    ? matchingCharts.length > 0 || matchesSearch('图表 chart')
+    : activeCategory === 'common'
   const showAudio = searching
     ? matchesSearch('声音 音频')
     : activeCategory === 'common'
@@ -263,7 +322,7 @@ export function ElementsTab({
     (searching
       ? matchesSearch('教师控制器 导航')
       : activeCategory === 'controls')
-  const showQuickAdd = showText || showFormula || showImage || showVideo || showAudio || showController
+  const showQuickAdd = showText || showFormula || showImage || showVideo || showAudio || showController || showTable || showCharts
   const showShapes = searching
     ? visibleShapeGroups.length > 0
     : activeCategory === 'common'
@@ -463,6 +522,140 @@ export function ElementsTab({
                 教师控制器
               </button>
             )}
+            {showTable && (
+            <button
+              type="button"
+              aria-label="表格"
+              className="element-card element-card--primary"
+              title={insertionTitle(authoringSurface, editingScope, 'table', '表格', spatialInsertionScope ?? undefined)}
+              disabled={!tableInsertion.enabled}
+              draggable={tableInsertion.draggable}
+              data-testid="add-table"
+              data-insertion-carrier={tableInsertion.carrier}
+              style={{ cursor: tableInsertion.enabled ? (tableInsertion.draggable ? 'grab' : 'pointer') : 'not-allowed' }}
+              onDragStart={tableInsertion.draggable
+                ? (event) => setDragData(event, 'table', '表格')
+                : undefined}
+              onClick={tableInsertion.enabled ? () => addTableNode() : undefined}
+            >
+              <span className="element-icon"><Table size={20} /></span>
+              表格
+            </button>
+            )}
+            {showCharts && (
+              searching ? (
+                chartInsertion.enabled ? (
+                  matchingCharts.map(({ type, label, Icon }) => (
+                    <button
+                      type="button"
+                      key={type}
+                      aria-label={label}
+                      className="element-card element-card--primary"
+                      title={insertionTitle(authoringSurface, editingScope, 'chart', label, spatialInsertionScope ?? undefined)}
+                      disabled={!chartInsertion.enabled}
+                      draggable={chartInsertion.draggable}
+                      data-testid={`add-chart-${type}`}
+                      data-insertion-carrier={chartInsertion.carrier}
+                      style={{ cursor: chartInsertion.draggable ? 'grab' : 'pointer' }}
+                      onDragStart={chartInsertion.draggable
+                        ? (event) => setDragData(event, `chart:${type}`, label)
+                        : undefined}
+                      onClick={() => addChartNode(type)}
+                    >
+                      <span className="element-icon"><Icon size={20} /></span>
+                      {label}
+                    </button>
+                  ))
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    aria-label="图表（仅支持演示页）"
+                    className="element-card element-card--primary"
+                    title="图表仅支持演示页场景"
+                    data-testid="add-chart-disabled"
+                    style={{ cursor: 'not-allowed', opacity: 0.6 }}
+                  >
+                    <span className="element-icon"><BarChart3 size={20} /></span>
+                    图表（仅演示页）
+                  </button>
+                )
+              ) : chartInsertion.enabled ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="图表"
+                    className={`element-card element-card--primary ${showChartPicker ? 'is-active' : ''}`}
+                    title="图表：点击展开选择图表类型"
+                    data-testid="add-chart"
+                    aria-haspopup="dialog"
+                    aria-expanded={showChartPicker}
+                    onClick={() => setShowChartPicker((prev) => !prev)}
+                  >
+                    <span className="element-icon"><BarChart3 size={20} /></span>
+                    图表
+                  </button>
+                  {showChartPicker && (
+                    <div
+                      className="chart-picker-popover"
+                      data-testid="chart-picker-panel"
+                      role="dialog"
+                      aria-label="选择图表类型"
+                    >
+                      <div className="chart-picker-header">
+                        <span className="chart-picker-title">选择图表类型</span>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="关闭图表选择"
+                          onClick={() => setShowChartPicker(false)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="chart-picker-grid">
+                        {CHART_ITEMS.map(({ type, label, Icon }) => (
+                          <button
+                            type="button"
+                            key={type}
+                            aria-label={label}
+                            className="chart-picker-item"
+                            title={insertionTitle(authoringSurface, editingScope, 'chart', label, spatialInsertionScope ?? undefined)}
+                            draggable={chartInsertion.draggable}
+                            data-testid={`add-chart-${type}`}
+                            data-insertion-carrier={chartInsertion.carrier}
+                            style={{ cursor: chartInsertion.draggable ? 'grab' : 'pointer' }}
+                            onDragStart={chartInsertion.draggable
+                              ? (event) => setDragData(event, `chart:${type}`, label)
+                              : undefined}
+                            onClick={() => {
+                              addChartNode(type)
+                              setShowChartPicker(false)
+                            }}
+                          >
+                            <span className="chart-picker-item-icon"><Icon size={18} /></span>
+                            <span className="chart-picker-item-label">{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  aria-label="图表（仅支持演示页）"
+                  className="element-card element-card--primary"
+                  title="图表仅支持演示页场景"
+                  data-testid="add-chart-disabled"
+                  style={{ cursor: 'not-allowed', opacity: 0.6 }}
+                >
+                  <span className="element-icon"><BarChart3 size={20} /></span>
+                  图表
+                </button>
+              )
+            )}
           </div>
           </>
         )}
@@ -504,7 +697,19 @@ export function ElementsTab({
                       onDragStart={shapeInsertion.draggable
                         ? (event) => setDragData(event, `shape:${type}`, label)
                         : undefined}
-                      onClick={shapeInsertion.enabled ? () => addShapeNode(type) : undefined}
+                      aria-pressed={
+                        (type === 'line' || type === 'elbow-arrow') && authoringSurface === 'slide'
+                          ? slideDrawTool === type
+                          : undefined
+                      }
+                      onClick={shapeInsertion.enabled ? () => {
+                        if ((type === 'line' || type === 'elbow-arrow') && authoringSurface === 'slide') {
+                          setSlideDrawTool(slideDrawTool === type ? null : type)
+                          return
+                        }
+                        if (slideDrawTool !== null) setSlideDrawTool(null)
+                        addShapeNode(type)
+                      } : undefined}
                     >
                       <ShapePreview type={type} />
                       <span>{label}</span>

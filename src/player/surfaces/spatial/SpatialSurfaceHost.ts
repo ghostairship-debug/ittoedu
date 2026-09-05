@@ -1,5 +1,6 @@
 import type { SpatialPathDash } from '../../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
+import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import type { TeacherControllerAction } from '../../../shared/contracts/native-v1'
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
@@ -726,7 +727,13 @@ export class SpatialSurfaceHost {
     root.hidden = !this.#active
     root.setAttribute('role', 'region')
     root.setAttribute('aria-label', `${this.#session.input.surface.title} 空间探索`)
-    const bg = resolveCourseSurfaceBackgroundColor(this.#session.input.surface.backgroundColor)
+    const effectiveBg = resolveEffectiveBackground({
+      owner: 'spatial-surface',
+      course: this.#session.input.courseBackground ?? {},
+      surface: this.#session.input.surface,
+    })
+    const bg = effectiveBg.color
+    const bgUrl = effectiveBg.assetId ? this.#resolveAsset(effectiveBg.assetId) : undefined
     Object.assign(root.style, {
       position: 'relative',
       width: `${camera.viewportWidth}px`,
@@ -734,6 +741,12 @@ export class SpatialSurfaceHost {
       overflow: 'hidden',
       isolation: 'isolate',
       backgroundColor: bg,
+      ...(bgUrl ? {
+        backgroundImage: `url(${JSON.stringify(bgUrl)})`,
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover',
+      } : {}),
       touchAction: 'none',
       overscrollBehavior: 'contain',
     })

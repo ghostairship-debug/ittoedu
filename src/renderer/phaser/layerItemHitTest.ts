@@ -1,7 +1,14 @@
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import {
+  lineStrokeHit,
+  resolveNativeLinePoints,
+  type LinePoint,
+} from '../../shared/nativeLineGeometry'
+import {
   pointInsideRotatedWorldRect,
+  rotateWorldPoint,
   rotatedWorldRectAxisBounds,
+  worldRectCenter,
   type StagePoint,
   type StageRect,
 } from '../authoring/stageViewportTransform'
@@ -16,6 +23,17 @@ export interface LayerItemHitBounds {
 }
 
 /**
+ * Stroke hit payload for `line` / `elbow-arrow` shapes: local-frame polyline
+ * points plus the saved visual border width. The hit width is derived per
+ * pointer event (`max(12/viewportScale, borderWidth)`); the visual stroke is
+ * never enlarged.
+ */
+export interface LayerItemLineStroke {
+  readonly points: readonly LinePoint[]
+  readonly borderWidth: number
+}
+
+/**
  * Surface-neutral LayerItem hit target. Surface adapters may enrich this with
  * coordinate space, source and pointer-conversion policy.
  */
@@ -27,10 +45,31 @@ export interface LayerItemHitTarget {
   readonly hittable: boolean
   readonly locked: boolean
   readonly writable: boolean
+  readonly lineStroke?: LayerItemLineStroke
 }
 
 function nativeTypeOf(item: LayerItem): string | null {
   return item.kind === 'native' ? item.content.nativeType : null
+}
+
+function lineStrokeOf(item: LayerItem): LayerItemLineStroke | undefined {
+  if (item.kind !== 'native' || item.content.nativeType !== 'shape') return undefined
+  const data = item.content.data as {
+    shapeType?: unknown
+    lineGeometry?: Parameters<typeof resolveNativeLinePoints>[0]
+    style?: { borderWidth?: unknown }
+  }
+  if (data.shapeType !== 'line' && data.shapeType !== 'elbow-arrow') return undefined
+  const borderWidth = typeof data.style?.borderWidth === 'number' ? data.style.borderWidth : 0
+  return {
+    points: resolveNativeLinePoints(
+      data.lineGeometry,
+      item.frame.width,
+      item.frame.height,
+      data.shapeType,
+    ),
+    borderWidth,
+  }
 }
 
 export function layerItemBounds(item: LayerItem): LayerItemHitBounds {
@@ -77,16 +116,34 @@ export function adaptLayerItemHit(
     hittable,
     locked: item.locked,
     writable: hittable && !item.locked,
+    ...(lineStrokeOf(item) ? { lineStroke: lineStrokeOf(item) } : {}),
   }
 }
 
 export function hitTestLayerItems(
   targets: readonly LayerItemHitTarget[],
   worldPoint: StagePoint,
+  viewportScale = 1,
 ): LayerItemHitTarget | null {
   for (let index = targets.length - 1; index >= 0; index -= 1) {
     const target = targets[index]
     if (!target?.hittable) continue
+    if (target.lineStroke) {
+      // Thin lines own an independent stroke hit zone; the frame bbox must not
+      // swallow pointer events far away from the visible stroke.
+      const center = worldRectCenter(target.bounds)
+      const local = rotateWorldPoint(worldPoint, center, -target.bounds.rotation)
+      const relative = { x: local.x - target.bounds.x, y: local.y - target.bounds.y }
+      if (lineStrokeHit(
+        relative,
+        target.lineStroke.points,
+        target.lineStroke.borderWidth,
+        viewportScale,
+      )) {
+        return target
+      }
+      continue
+    }
     if (pointInsideRotatedWorldRect(worldPoint, target.bounds, target.bounds.rotation)) {
       return target
     }

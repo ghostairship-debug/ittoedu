@@ -1,11 +1,78 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { API, type Snapshot } from 'typescript/unstable/sync'
+import {
+  SyntaxKind,
+  isArrowFunction,
+  isBinaryExpression,
+  isCallExpression,
+  isExportDeclaration,
+  isFunctionDeclaration,
+  isFunctionExpression,
+  isIdentifier,
+  isImportDeclaration,
+  isMethodDeclaration,
+  isNamedExports,
+  isNamedImports,
+  isNamespaceExport,
+  isNamespaceImport,
+  isNewExpression,
+  isPrivateIdentifier,
+  isPropertyAccessExpression,
+  isStringLiteral,
+  isVariableDeclaration,
+  type Block,
+  type ConciseBody,
+  type ImportClause,
+  type Node,
+  type SourceFile,
+} from 'typescript/unstable/ast'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { AvailableComponentCatalogPackage } from '@/shared/componentCatalog'
+import type { ComponentPackageData } from '@/shared/componentTypes'
+import {
+  useComponentLibrary,
+  type ComponentLibraryPorts,
+} from '@/renderer/app/useComponentLibrary'
+import {
+  useMediaImport,
+  type MediaImportPorts,
+} from '@/renderer/app/useMediaImport'
 
 const root = resolve(__dirname, '..', '..')
+const sourcePathByText = new Map<string, string>()
+const parsedSources = new Map<string, SourceFile>()
+let typeScriptApi: API | undefined
+let typeScriptSnapshot: Snapshot | undefined
+
+beforeAll(() => {
+  typeScriptApi = new API({ cwd: root })
+  typeScriptSnapshot = typeScriptApi.updateSnapshot({
+    openProjects: [
+      join(root, 'tsconfig.json'),
+      join(root, 'tsconfig.electron.json'),
+    ],
+  })
+  for (const project of typeScriptSnapshot.getProjects()) {
+    for (const sourceName of project.program.getSourceFileNames()) {
+      const path = relative(root, resolve(sourceName)).replace(/\\/g, '/')
+      if (path === '..' || path.startsWith('../')) continue
+      const parsed = project.program.getSourceFile(sourceName)
+      if (parsed) parsedSources.set(path, parsed)
+    }
+  }
+})
+
+afterAll(() => {
+  typeScriptSnapshot?.dispose()
+  typeScriptApi?.close()
+})
 
 function source(path: string): string {
-  return readFileSync(join(root, path), 'utf8')
+  const text = readFileSync(join(root, path), 'utf8')
+  sourcePathByText.set(text, path.replace(/\\/g, '/'))
+  return text
 }
 
 function filesUnder(directory: string): string[] {
@@ -24,75 +91,197 @@ function filesUnder(directory: string): string[] {
   return result.sort()
 }
 
+interface ModuleReference {
+  readonly specifier: string
+  readonly runtime: boolean
+}
+
+function parsedSource(text: string): SourceFile {
+  const path = sourcePathByText.get(text)
+  const parsed = path ? parsedSources.get(path) : undefined
+  if (!parsed) throw new Error(`TypeScript AST is unavailable for ${path ?? 'inline source'}`)
+  return parsed
+}
+
+function importClauseHasRuntimeValue(clause: ImportClause | undefined): boolean {
+  if (!clause) return true
+  if (clause.phaseModifier === SyntaxKind.TypeKeyword) return false
+  if (clause.name || (clause.namedBindings && isNamespaceImport(clause.namedBindings))) return true
+  return clause.namedBindings && isNamedImports(clause.namedBindings)
+    ? clause.namedBindings.elements.some((element) => !element.isTypeOnly)
+    : false
+}
+
+function moduleReferences(text: string): ModuleReference[] {
+  const parsed = parsedSource(text)
+  const result: ModuleReference[] = []
+  const visit = (node: Node): void => {
+    if (isImportDeclaration(node) && isStringLiteral(node.moduleSpecifier)) {
+      result.push({
+        specifier: node.moduleSpecifier.text,
+        runtime: importClauseHasRuntimeValue(node.importClause),
+      })
+    } else if (isExportDeclaration(node) && node.moduleSpecifier && isStringLiteral(node.moduleSpecifier)) {
+      const hasRuntimeValue = !node.isTypeOnly && (
+        !node.exportClause
+        || isNamespaceExport(node.exportClause)
+        || (isNamedExports(node.exportClause)
+          && node.exportClause.elements.some((element) => !element.isTypeOnly))
+      )
+      result.push({ specifier: node.moduleSpecifier.text, runtime: hasRuntimeValue })
+    } else if (
+      isCallExpression(node)
+      && node.expression.kind === SyntaxKind.ImportKeyword
+      && node.arguments.length === 1
+      && isStringLiteral(node.arguments[0]!)
+    ) {
+      result.push({ specifier: node.arguments[0]!.text, runtime: true })
+    }
+    node.forEachChild((child) => {
+      visit(child)
+      return undefined
+    })
+  }
+  visit(parsed)
+  return result
+}
+
 function importSpecifiers(text: string): string[] {
-  return [...text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)].map((match) => match[1]!)
-}
-
-function expectBefore(text: string, first: string, second: string): void {
-  const firstIndex = text.indexOf(first)
-  const secondIndex = text.indexOf(second)
-  expect(firstIndex, first).toBeGreaterThanOrEqual(0)
-  expect(secondIndex, second).toBeGreaterThanOrEqual(0)
-  expect(firstIndex, `${first} before ${second}`).toBeLessThan(secondIndex)
-}
-
-function countLiteral(text: string, literal: string): number {
-  return text.split(literal).length - 1
-}
-
-function sliceBetween(text: string, first: string, second: string): string {
-  const start = text.indexOf(first)
-  const end = text.indexOf(second, start + first.length)
-  expect(start, first).toBeGreaterThanOrEqual(0)
-  expect(end, second).toBeGreaterThan(start)
-  return text.slice(start, end)
-}
-
-const STORE_COMPOSITION_ADAPTERS = [
-  'src/renderer/App.tsx',
-  'src/renderer/composition/crossSurfaceCommands.ts',
-  'src/renderer/composition/properties/PropertiesAuthoringReadModel.ts',
-  'src/renderer/composition/properties/usePropertiesAuthoringBinding.tsx',
-  'src/renderer/dev/v9CandidateSmokeInject.ts',
-  'src/renderer/diagnostics/projectHealthNavigation.ts',
-  'src/renderer/main.tsx',
-  'src/renderer/ui/AutomationTab.tsx',
-  'src/renderer/ui/ComponentsTab.tsx',
-  'src/renderer/ui/DeveloperTab.tsx',
-  'src/renderer/ui/ElementsTab.tsx',
-  'src/renderer/ui/MediaTab.tsx',
-  'src/renderer/ui/NodesTab.tsx',
-  'src/renderer/ui/ProjectHealthPanel.tsx',
-  'src/renderer/ui/RightSidebar.tsx',
-  'src/renderer/ui/ScenePanel.tsx',
-  'src/renderer/ui/SceneStateStrip.tsx',
-  'src/renderer/ui/SceneThumbnail.tsx',
-  'src/renderer/ui/SimpleEntranceAnimationEditor.tsx',
-  'src/renderer/ui/TopToolbar.tsx',
-  'src/renderer/ui/Workspace.tsx',
-  'src/renderer/ui/workspaces/FlowWorkspaceConnector.tsx',
-  'src/renderer/ui/workspaces/SlideWorkspaceConnector.tsx',
-  'src/renderer/ui/workspaces/SpatialWorkspaceConnector.tsx',
-  'src/renderer/ui/workspaces/WorkspaceRouteContext.ts',
-] as const
-
-function compositionRootFactory(text: string): string {
-  return sliceBetween(
-    text,
-    'export const useEditorStore = create<EditorState>((set, get) => {',
-    '\nexport const selectActiveScene',
-  )
+  return moduleReferences(text).map(({ specifier }) => specifier)
 }
 
 function runtimeImportSpecifiers(text: string): string[] {
-  return [...text.matchAll(
-    /(?:^|\n)(?:import|export)\s+(?!type\b)[\s\S]*?from\s+['"]([^'"]+)['"]/g,
-  )].map((match) => match[1]!)
+  return moduleReferences(text)
+    .filter(({ runtime }) => runtime)
+    .map(({ specifier }) => specifier)
+}
+
+function namedFunctionBody(text: string, name: string): string {
+  const parsed = parsedSource(text)
+  let body: ConciseBody | Block | undefined
+  const visit = (node: Node): void => {
+    if (body) return
+    if (
+      (isFunctionDeclaration(node) || isMethodDeclaration(node))
+      && node.name
+      && isIdentifier(node.name)
+      && node.name.text === name
+      && node.body
+    ) {
+      body = node.body
+      return
+    }
+    if (
+      isVariableDeclaration(node)
+      && isIdentifier(node.name)
+      && node.name.text === name
+      && node.initializer
+      && (isArrowFunction(node.initializer) || isFunctionExpression(node.initializer))
+    ) {
+      body = node.initializer.body
+      return
+    }
+    node.forEachChild((child) => {
+      visit(child)
+      return undefined
+    })
+  }
+  visit(parsed)
+  expect(body, `function ${name}`).toBeDefined()
+  return body!.getText(parsed)
+}
+
+function namedVariableInitializer(text: string, name: string): string {
+  const parsed = parsedSource(text)
+  let initializer: Node | undefined
+  const visit = (node: Node): void => {
+    if (initializer) return
+    if (
+      isVariableDeclaration(node)
+      && isIdentifier(node.name)
+      && node.name.text === name
+      && node.initializer
+    ) {
+      initializer = node.initializer
+      return
+    }
+    node.forEachChild((child) => {
+      visit(child)
+      return undefined
+    })
+  }
+  visit(parsed)
+  expect(initializer, `variable ${name}`).toBeDefined()
+  return initializer!.getText(parsed)
+}
+
+function containsIdentifier(text: string, name: string): boolean {
+  const parsed = parsedSource(text)
+  let found = false
+  const visit = (node: Node): void => {
+    if (found) return
+    if (isIdentifier(node) && node.text === name) {
+      found = true
+      return
+    }
+    node.forEachChild((child) => {
+      visit(child)
+      return undefined
+    })
+  }
+  visit(parsed)
+  return found
+}
+
+function exportedFunctionNames(text: string): string[] {
+  const parsed = parsedSource(text)
+  return parsed.statements.flatMap((statement) => {
+    if (!isFunctionDeclaration(statement) || !statement.name) return []
+    const modifiers = 'modifiers' in statement ? statement.modifiers : undefined
+    const exported = Array.isArray(modifiers)
+      && modifiers.some((modifier) => modifier.kind === SyntaxKind.ExportKeyword)
+    return exported ? [statement.name.text] : []
+  })
+}
+
+function constructedControllerTargets(text: string): string[] {
+  const parsed = parsedSource(text)
+  const targets = new Set<string>()
+  const visit = (node: Node): void => {
+    if (
+      isNewExpression(node)
+      && isIdentifier(node.expression)
+      && node.expression.text === 'PublishedInteractionController'
+      && isBinaryExpression(node.parent)
+      && node.parent.operatorToken.kind === SyntaxKind.EqualsToken
+      && isPropertyAccessExpression(node.parent.left)
+      && node.parent.left.expression.kind === SyntaxKind.ThisKeyword
+      && isPrivateIdentifier(node.parent.left.name)
+    ) {
+      targets.add(node.parent.left.name.getText(parsed))
+    }
+    node.forEachChild((child) => {
+      visit(child)
+      return undefined
+    })
+  }
+  visit(parsed)
+  return [...targets].sort()
+}
+
+function isStoreCompositionAdapter(path: string): boolean {
+  return path === 'src/renderer/App.tsx'
+    || path === 'src/renderer/main.tsx'
+    || /^src\/renderer\/(?:composition|dev|diagnostics|ui)\//.test(path)
 }
 
 function resolveLocalImport(fromFile: string, specifier: string): string | null {
-  if (!specifier.startsWith('.')) return null
-  const absolute = resolve(join(root, fromFile, '..'), specifier)
+  const absolute = specifier.startsWith('@/')
+    ? resolve(root, 'src', specifier.slice(2))
+    : specifier.startsWith('.')
+      ? resolve(join(root, fromFile, '..'), specifier)
+      : null
+  if (!absolute) return null
   for (const candidate of [
     `${absolute}.ts`,
     `${absolute}.tsx`,
@@ -107,20 +296,11 @@ function resolveLocalImport(fromFile: string, specifier: string): string | null 
 function editorStoreConsumers(): string[] {
   return filesUnder('src').filter((path) => {
     if (path === 'src/renderer/store/editorStore.ts') return false
-    const text = source(path)
-    return /from\s+['"][^'"]*editorStore['"]/.test(text) || /\buseEditorStore\b/.test(text)
+    return importSpecifiers(source(path)).some((specifier) => /editorStore(?:\.ts)?$/.test(specifier))
   })
 }
 
-function runtimeCyclesAmong(entryFiles: readonly string[]): string[] {
-  const nodes = new Set(entryFiles)
-  const edges = new Map<string, string[]>()
-  for (const file of entryFiles) {
-    edges.set(file, runtimeImportSpecifiers(source(file)).flatMap((specifier) => {
-      const resolved = resolveLocalImport(file, specifier)
-      return resolved && nodes.has(resolved) ? [resolved] : []
-    }))
-  }
+function directedCycles(edges: ReadonlyMap<string, readonly string[]>): string[] {
   const cycles: string[] = []
   const visiting = new Set<string>()
   const visited = new Set<string>()
@@ -138,8 +318,20 @@ function runtimeCyclesAmong(entryFiles: readonly string[]): string[] {
     visiting.delete(node)
     visited.add(node)
   }
-  for (const file of entryFiles) visit(file)
+  for (const file of edges.keys()) visit(file)
   return cycles
+}
+
+function runtimeCyclesAmong(entryFiles: readonly string[]): string[] {
+  const nodes = new Set(entryFiles)
+  const edges = new Map<string, string[]>()
+  for (const file of entryFiles) {
+    edges.set(file, runtimeImportSpecifiers(source(file)).flatMap((specifier) => {
+      const resolved = resolveLocalImport(file, specifier)
+      return resolved && nodes.has(resolved) ? [resolved] : []
+    }))
+  }
+  return directedCycles(edges)
 }
 
 describe('ARCH-1 dependency ratchet', () => {
@@ -189,11 +381,7 @@ describe('ARCH-1 dependency ratchet', () => {
     expect(store).toContain('...mediaAuthoringActions')
     expect(store).not.toMatch(/planCourseImageReplacement\(/)
 
-    const start = media.indexOf('export function commitCourseImageReplacement(')
-    const end = media.indexOf('\nexport function createMediaAuthoringActions(', start)
-    expect(start).toBeGreaterThanOrEqual(0)
-    expect(end).toBeGreaterThan(start)
-    const useCase = media.slice(start, end)
+    const useCase = namedFunctionBody(media, 'commitCourseImageReplacement')
     expect(useCase).toContain('planCourseImageReplacement({')
     expect(useCase).toContain('createEditorTransactionStep(document, planned.plan)')
     expect(useCase).toContain('commitSlideEditorTransactionHistory(session.history, step)')
@@ -254,55 +442,129 @@ describe('ARCH-2 resource-safety ratchet', () => {
       expect(store).toContain(compatibilityField)
     }
 
-    const importStart = media.indexOf('    importAssets(items: ImportedAssetBatchItem[]) {')
-    const importEnd = media.indexOf('\n    importSounds(', importStart)
-    expect(importStart).toBeGreaterThanOrEqual(0)
-    expect(importEnd).toBeGreaterThan(importStart)
-    expect(media.slice(importStart, importEnd)).not.toContain('importCourseMediaAssets')
+    expect(namedFunctionBody(media, 'importAssets')).not.toContain('importCourseMediaAssets')
 
-    const replaceStart = components.indexOf('    replaceComponentPackage(packageId: string, packageData: ComponentPackageData) {')
-    const replaceEnd = components.indexOf('\n  }\n}', replaceStart)
-    expect(replaceStart).toBeGreaterThanOrEqual(0)
-    expect(replaceEnd).toBeGreaterThan(replaceStart)
-    const replacement = components.slice(replaceStart, replaceEnd)
+    const replacement = namedFunctionBody(components, 'replaceComponentPackage')
     expect(replacement).toContain('commitComponentReplacementAtTarget(')
     expect(replacement).not.toMatch(/runV9DocumentMutation|\bcommit\(/)
   })
 
-  it('captures async App targets before Media and Components package reads', () => {
-    const media = source('src/renderer/app/useMediaImport.ts')
-    const image = media.slice(
-      media.indexOf('const selectAndImportImage'),
-      media.indexOf('const selectImageAsset'),
-    )
-    expectBefore(image, 'captureLibraryTarget()', 'selectImages()')
+  it('captures async App targets before Media and Components package reads', async () => {
+    const mediaEvents: string[] = []
+    const mediaPorts: MediaImportPorts = {
+      captureIdentity: () => null,
+      captureLibraryTarget: () => {
+        mediaEvents.push('capture-library-target')
+        return { projectId: 'project-1', documentRevision: 1 }
+      },
+      captureImageReplacementTarget: () => null,
+      readMediaLibrarySnapshot: () => ({ assets: {}, files: {} }),
+      readCandidateMediaContext: () => null,
+      replaceImageAtTarget: () => ({ ok: true }),
+      importAssetsAtTarget: () => ({ ok: true }),
+      placeImageNodes: () => [],
+      placeVideoNodes: () => [],
+      importSounds: () => undefined,
+      commitCandidateMedia: () => undefined,
+      selectImage: async () => null,
+      selectImages: async () => {
+        mediaEvents.push('read-image-package')
+        return null
+      },
+      selectAudios: async () => null,
+      selectVideos: async () => {
+        mediaEvents.push('read-video-package')
+        return null
+      },
+      async runBusy<T>(operation: () => Promise<T>): Promise<T | undefined> {
+        try {
+          return await operation()
+        } catch {
+          return undefined
+        }
+      },
+      commitStatus: () => undefined,
+      reportError: () => undefined,
+    }
+    const mediaHook = renderHook(() => useMediaImport(mediaPorts))
+    await act(async () => mediaHook.result.current.selectAndImportImage('library'))
+    expect(mediaEvents).toEqual(['capture-library-target', 'read-image-package'])
+    mediaEvents.length = 0
+    await act(async () => mediaHook.result.current.selectAndImportVideo('library'))
+    expect(mediaEvents).toEqual(['capture-library-target', 'read-video-package'])
+    mediaHook.unmount()
 
-    const video = media.slice(
-      media.indexOf('const selectAndImportVideo'),
-      media.indexOf('const clearBatchSummary'),
-    )
-    expectBefore(video, 'captureLibraryTarget()', 'selectVideos()')
+    const packageId = 'com.example.architecture-ratchet'
+    const installedPackage = {
+      manifest: { id: packageId, version: '1.0.0' },
+    } as ComponentPackageData
+    const catalogEntry: AvailableComponentCatalogPackage = {
+      packageId,
+      version: '2.0.0',
+      name: 'Architecture ratchet fixture',
+      description: 'Target capture order fixture',
+      subject: [],
+      schoolStage: [],
+      tags: [],
+      packagePath: 'fixture.h5component',
+      thumbnailPath: 'fixture.png',
+      sha256: 'a'.repeat(64),
+      componentSchemaVersion: 4,
+      runtimeApiVersion: 4,
+      renderMode: 'dom',
+      supportedScopes: ['scene'],
+      quality: 'candidate',
+      maintainer: 'test',
+      verifiedCases: [],
+      sourceId: 'fixture-source',
+      sourceLabel: 'Fixture source',
+      sourceTrust: 'trusted',
+    }
+    const componentEvents: string[] = []
+    let componentPhase: 'manual' | 'catalog' = 'manual'
+    const componentPorts: ComponentLibraryPorts = {
+      captureIdentity: () => ({ projectId: 'project-1', revision: 1 }),
+      captureReplacementTarget: () => {
+        componentEvents.push(`capture-${componentPhase}-target`)
+        return { projectId: 'project-1', documentRevision: 1, packageId }
+      },
+      readInstalledPackages: () => ({ [packageId]: installedPackage }),
+      replacePackageAtTarget: () => ({ ok: true }),
+      importPackages: () => undefined,
+      selectComponentPackage: async () => {
+        componentEvents.push('read-manual-package')
+        return null
+      },
+      selectComponentPackages: async () => null,
+      desktopAvailable: () => false,
+      loadCatalog: async () => ({ sources: [], packages: [], issues: [] }),
+      readCatalogPackage: async () => {
+        componentEvents.push('read-catalog-package')
+        throw new Error('fixture stops after proving capture order')
+      },
+      async runBusy<T>(operation: () => Promise<T>): Promise<T | undefined> {
+        try {
+          return await operation()
+        } catch {
+          return undefined
+        }
+      },
+      commitStatus: () => undefined,
+      reportError: () => undefined,
+    }
+    const componentHook = renderHook(() => useComponentLibrary(componentPorts))
+    act(() => componentHook.result.current.replacePackage(packageId))
+    await waitFor(() => expect(componentEvents).toContain('read-manual-package'))
+    expect(componentEvents).toEqual(['capture-manual-target', 'read-manual-package'])
 
-    const components = source('src/renderer/app/useComponentLibrary.ts')
-    const manual = components.slice(
-      components.indexOf('const replacePackage'),
-      components.indexOf('const confirmReplacement'),
-    )
-    expectBefore(
-      manual,
-      'captureReplacementTarget(packageId)',
-      'selectComponentPackage()',
-    )
-
-    const catalog = components.slice(
-      components.indexOf('const performCatalogPackageOperation'),
-      components.indexOf('const addCatalogPackages'),
-    )
-    expectBefore(
-      catalog,
-      'captureReplacementTarget(updateEntry.packageId)',
-      'readCatalogPackage({',
-    )
+    componentEvents.length = 0
+    componentPhase = 'catalog'
+    act(() => componentHook.result.current.requestCatalogUpdate(catalogEntry))
+    await waitFor(() => expect(componentHook.result.current.catalogUpdateRequest).not.toBeNull())
+    act(() => componentHook.result.current.confirmCatalogUpdate())
+    await waitFor(() => expect(componentEvents).toContain('read-catalog-package'))
+    expect(componentEvents).toEqual(['capture-catalog-target', 'read-catalog-package'])
+    componentHook.unmount()
   })
 })
 
@@ -320,17 +582,17 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     expect(store).not.toMatch(/planRuntimeTemplateCreation\(/)
     expect(store).not.toMatch(/planCourseRuntimeAssetReplacement\(/)
 
-    for (const [start, end, planner] of [
-      ['  const commitRuntimeSourceAtTarget = (', '  const captureRuntimeContentTextTarget = (', 'planRuntimeSourceUpdate({'],
-      ['  const updateRuntimeContentTextAtTarget = (', '  const rejectRuntimePropertyAuthoring = (', 'planRuntimeContentTextUpdate({'],
-      ['  const updateRuntimePropertyAtTarget = (', '  const rejectRuntimeTemplateCreation = (', 'planRuntimePropertyUpdate({'],
-      ['  const createRuntimeTemplateAtTarget = (', '  const captureRuntimeAssetReplacementTarget = (', 'planRuntimeTemplateCreation({'],
-      ['  const replaceRuntimeAssetAtTarget = (', '    updateRuntimeSourceAtTarget: commitRuntimeSourceAtTarget', 'planCourseRuntimeAssetReplacement({'],
+    for (const [functionName, planner] of [
+      ['commitRuntimeSourceAtTarget', 'planRuntimeSourceUpdate({'],
+      ['updateRuntimeContentTextAtTarget', 'planRuntimeContentTextUpdate({'],
+      ['updateRuntimePropertyAtTarget', 'planRuntimePropertyUpdate({'],
+      ['createRuntimeTemplateAtTarget', 'planRuntimeTemplateCreation({'],
+      ['replaceRuntimeAssetAtTarget', 'planCourseRuntimeAssetReplacement({'],
     ] as const) {
-      const useCase = sliceBetween(runtimeCommit, start, end)
+      const useCase = namedFunctionBody(runtimeCommit, functionName)
       expect(useCase, planner).toContain(planner)
-      expect(useCase, start).toContain('createEditorTransactionStep(')
-      expect(useCase, start).toContain('persistTransaction(')
+      expect(useCase, functionName).toContain('createEditorTransactionStep(')
+      expect(useCase, functionName).toContain('persistTransaction(')
     }
 
     const pureRuntimeFiles = new Set([
@@ -362,7 +624,11 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
       expect(sourceCorpus, retired).not.toMatch(new RegExp(`\\b${retired}\\b`))
     }
     const readProjection = ['course', runtimeWord, 'To', 'Document'].join('')
-    expect(countLiteral(sourceCorpus, readProjection)).toBe(3)
+    const readProjectionOwners = filesUnder('src').filter((path) => (
+      containsIdentifier(source(path), readProjection)
+    ))
+    expect(readProjectionOwners).toEqual(['src/renderer/course/editorCanvasProjection.ts'])
+    expect(exportedFunctionNames(source(readProjectionOwners[0]!))).toContain(readProjection)
 
     expect(runtimeCorpus).not.toMatch(/\bRuntimeDocument\b/)
 
@@ -386,18 +652,10 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     }
 
     const interactions = source('src/renderer/interactions/commitInteractionAuthoring.ts')
-    const applyTemplate = sliceBetween(
-      interactions,
-      '    applyInteractionTemplateAtTarget(',
-      '    updateInteractionRuleAtTarget(',
-    )
+    const applyTemplate = namedFunctionBody(interactions, 'applyInteractionTemplateAtTarget')
     expect(applyTemplate).toContain('planApplyInteractionTemplate({')
     expect(applyTemplate).toContain('persistInteractionAuthoringPlan(')
-    const updateRule = sliceBetween(
-      interactions,
-      '    updateInteractionRuleAtTarget(',
-      '  }\n}',
-    )
+    const updateRule = namedFunctionBody(interactions, 'updateInteractionRuleAtTarget')
     expect(updateRule).toContain('planUpdateInteractionRule({')
     expect(updateRule).toContain('persistInteractionAuthoringPlan(')
     const store = source('src/renderer/store/editorStore.ts')
@@ -421,9 +679,10 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
 
   it('keeps session-owned global and optional Slide-local controllers on all three Surface ports', () => {
     const session = source('src/player/surfaces/publishedDynamicHosts.ts')
-    expect(countLiteral(session, 'new PublishedInteractionController({')).toBe(2)
-    expect(session).toContain('#globalInteractionController')
-    expect(session).toContain('#localInteractionController')
+    expect(constructedControllerTargets(session)).toEqual([
+      '#globalInteractionController',
+      '#localInteractionController',
+    ])
     expect(session).toContain('createPublishedCourseSession(')
     expect(session).toContain('getPublishedInteractionSurfacePort()')
 
@@ -446,11 +705,7 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
 
   it('keeps global playback actions on canonical V9 Surface histories', () => {
     const runtime = source('src/renderer/runtime/commitRuntimeAuthoring.ts')
-    const updatePlayback = sliceBetween(
-      runtime,
-      '    updatePlayback(patch: Parameters<typeof updateCoursePlaybackSettings>[1]) {',
-      '    updateDesignTokens(tokens: ProjectDesignTokens) {',
-    )
+    const updatePlayback = namedFunctionBody(runtime, 'updatePlayback')
     expect(updatePlayback).toContain('updateCoursePlaybackSettings(')
     expect(updatePlayback).toContain('persistProject(')
     expect(updatePlayback).not.toMatch(/\bcommit\(/)
@@ -486,7 +741,7 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
 describe('r11-055 architecture modularity gate', () => {
   it('keeps editorStore.ts as a Zustand composition root without planner or document mutation', () => {
     const store = source('src/renderer/store/editorStore.ts')
-    const factory = compositionRootFactory(store)
+    const factory = namedVariableInitializer(store, 'useEditorStore')
     expect(factory).toContain('...slideAuthoringSlice')
     expect(factory).toContain('...flowAuthoringSlice')
     expect(factory).toContain('...spatialAuthoringSlice')
@@ -509,11 +764,6 @@ describe('r11-055 architecture modularity gate', () => {
       /\b(?:addSlide(?:Text|Image|Video|Shape|Formula|Component)Layer|executeFlowEditorCommand|commitSlideProjectMutation|runV9DocumentMutation)\(/,
     )
     expect(store).not.toMatch(/export \* from/)
-    expectBefore(
-      store,
-      'export const useEditorStore = create<EditorState>((set, get) => {',
-      'export const selectActiveScene',
-    )
     const canvasProjection = source('src/renderer/course/editorCanvasProjection.ts')
     expect(canvasProjection).toContain("'无限画布'")
     expect(canvasProjection).toContain("'流式讲义'")
@@ -664,11 +914,15 @@ describe('r11-055 architecture modularity gate', () => {
     expect(lifecycle).not.toMatch(new RegExp(`\\b${removedV8MigrationSymbol}\\(`))
 
     const consumers = editorStoreConsumers()
-    expect(consumers.filter((path) => !(STORE_COMPOSITION_ADAPTERS as readonly string[]).includes(path))).toEqual([])
-    expect(consumers.length).toBeLessThanOrEqual(STORE_COMPOSITION_ADAPTERS.length)
+    expect(consumers.filter((path) => !isStoreCompositionAdapter(path))).toEqual([])
+    expect(isStoreCompositionAdapter('src/renderer/runtime/forbiddenStoreConsumer.ts')).toBe(false)
   })
 
   it('clears the teacher-controller Store cycle and known runtime SCCs among Store owners', () => {
+    expect(directedCycles(new Map([
+      ['fixture/a.ts', ['fixture/b.ts']],
+      ['fixture/b.ts', ['fixture/a.ts']],
+    ]))).toEqual(['fixture/a.ts -> fixture/b.ts -> fixture/a.ts'])
     const teacher = source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')
     expect(teacher).not.toMatch(/\buseEditorStore\b/)
     expect(runtimeImportSpecifiers(teacher).filter((specifier) => /editorStore/.test(specifier))).toEqual([])

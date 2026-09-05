@@ -21,6 +21,8 @@ export const FLOW_LOGICAL_CANVAS = { width: 1280, height: 720 } as const
 export interface FlowPublishedPlaybackDocument {
   readonly courseId: string
   readonly title: string
+  readonly backgroundColor?: string
+  readonly backgroundAssetId?: string | null
   readonly assets: Record<string, PublishedCourseAsset>
   readonly media?: PublishedCourseV2Payload['media']
   readonly playback?: PublishedCourseV2Payload['playback']
@@ -133,6 +135,8 @@ export function toFlowPublishedPlayback(
   return {
     courseId: source.courseId,
     title: source.title,
+    ...(source.backgroundColor !== undefined ? { backgroundColor: source.backgroundColor } : {}),
+    ...(source.backgroundAssetId !== undefined ? { backgroundAssetId: source.backgroundAssetId } : {}),
     assets: cloneJson(source.assets ?? {}),
     ...(source.media ? { media: cloneJson(source.media) } : {}),
     ...(source.playback ? { playback: cloneJson(source.playback) } : {}),
@@ -148,6 +152,8 @@ export function flowPlaybackFromSurface(
   options: {
     courseId?: string
     title?: string
+    backgroundColor?: string
+    backgroundAssetId?: string | null
     assets?: Record<string, PublishedCourseAsset>
     globalLayerItems?: readonly PublishedGlobalLayerEntry[]
     startBlockId?: string
@@ -158,6 +164,8 @@ export function flowPlaybackFromSurface(
   return {
     courseId: options.courseId ?? surface.id,
     title: options.title ?? surface.title,
+    ...(options.backgroundColor !== undefined ? { backgroundColor: options.backgroundColor } : {}),
+    ...(options.backgroundAssetId !== undefined ? { backgroundAssetId: options.backgroundAssetId } : {}),
     assets: cloneJson(options.assets ?? {}),
     locations: [{
       id: startBlockId,

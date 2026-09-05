@@ -49,6 +49,13 @@ export interface PublishedInteractionVideoPort {
   ): (() => void) | null
 }
 
+export interface PublishedInputDescriptor {
+  answerType: 'text' | 'number'
+  stateKey: string
+  validityKey: string
+  defaultValue: string | number
+}
+
 export interface PublishedInteractionSurfacePort {
   bindNodeClick(nodeId: string, listener: () => void): (() => void) | null
   executeNodeMotion(
@@ -63,6 +70,11 @@ export interface PublishedInteractionSurfacePort {
     nodeId: string,
     kind: PublishedVideoEventKind,
     listener: (seconds?: number) => void,
+  ): (() => void) | null
+  describeInput?(nodeId: string): PublishedInputDescriptor | null
+  bindInputSubmit?(
+    nodeId: string,
+    listener: (rawValue: string) => void,
   ): (() => void) | null
 }
 

@@ -8,7 +8,9 @@ import {
   type ReactNode,
 } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
-import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
+import type { FormulaAstNode, ShapeNode, TextNode } from '../../../shared/contracts/native-v1'
+import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
+import { paintPublishedNativeText } from '../../../player/surfaces/publishedNativeText'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
 import { constrainTeacherControllerAuthoringFrame } from '../../../shared/teacherControllerLayout'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -183,6 +185,76 @@ function FlowOverlayComponentContent({
   )
 }
 
+function FlowOverlayShapeContent({ layer }: { layer: FlowEditorLayerView }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const item = layer.item as LayerItem
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || item.kind !== 'native' || item.content.nativeType !== 'shape') return
+    const context = canvas.getContext('2d')
+    if (!context) return
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    renderShapeCanvas(context, {
+      ...item.content.data,
+      id: item.layerItemId,
+      name: item.label,
+      type: 'shape',
+      x: 0,
+      y: 0,
+      width: item.frame.width,
+      height: item.frame.height,
+      rotation: 0,
+      opacity: 1,
+      visible: item.visible,
+      locked: item.locked,
+      playbackInitialVisibility: item.playbackInitialVisibility,
+    }, canvas.width, canvas.height)
+  }, [item])
+
+  if (item.kind !== 'native' || item.content.nativeType !== 'shape') return null
+  return (
+    <canvas
+      ref={canvasRef}
+      data-testid="flow-overlay-shape-canvas"
+      width={Math.max(1, Math.round(item.frame.width))}
+      height={Math.max(1, Math.round(item.frame.height))}
+      style={{
+        display: 'block',
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+      }}
+    />
+  )
+}
+
+function FlowOverlayTextContent({ layer }: { layer: FlowEditorLayerView }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const item = layer.item as LayerItem
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || item.kind !== 'native' || item.content.nativeType !== 'text') return
+    paintPublishedNativeText(
+      container,
+      item.content.data,
+      { width: item.frame.width, height: item.frame.height },
+    )
+  }, [item])
+
+  if (item.kind !== 'native' || item.content.nativeType !== 'text') return null
+  return (
+    <div
+      ref={containerRef}
+      data-testid="flow-overlay-text-content"
+      style={{
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+      }}
+    />
+  )
+}
+
 function renderFlowOverlayCardContent(
   layer: FlowEditorLayerView,
   assetUrls: Record<string, string>,
@@ -212,17 +284,34 @@ function renderFlowOverlayCardContent(
       />
     )
   }
+  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'shape') {
+    return <FlowOverlayShapeContent layer={layer} />
+  }
+  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'text') {
+    return <FlowOverlayTextContent layer={layer} />
+  }
   const media = nativeOverlayMedia(layer.item as LayerItem)
   if (!media) return layer.item.label || '浮层'
   const url = assetUrls[media.assetId]
   if (media.kind === 'image') {
+    const imageData = layer.item.kind === 'native' && layer.item.content.nativeType === 'image'
+      ? layer.item.content.data
+      : null
+    const transforms: string[] = []
+    if (imageData?.flipX) transforms.push('scaleX(-1)')
+    if (imageData?.flipY) transforms.push('scaleY(-1)')
     return (
       <img
         data-flow-overlay-media="image"
         data-flow-asset-id={media.assetId}
         alt=""
         {...(url ? { src: url } : {})}
-        style={overlayMediaFillStyle()}
+        style={{
+          ...overlayMediaFillStyle(),
+          objectFit: imageData?.fit === 'stretch' ? 'fill' : (imageData?.fit ?? 'contain'),
+          borderRadius: imageData?.cornerRadius ? `${imageData.cornerRadius}px` : undefined,
+          transform: transforms.length > 0 ? transforms.join(' ') : undefined,
+        }}
       />
     )
   }

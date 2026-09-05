@@ -53,8 +53,8 @@ function validManifest(): FixtureManifest {
         title: '`fixture-v1` 并行左支',
         dependencies: ['r11-000-fixture-foundation'],
         optional: false,
-        writeLocks: ['workspace-properties'],
-        spec: '1.2/README.md',
+        writeLocks: ['props-shared'],
+        spec: '1.2/r12-000-fixture-left.md',
       },
       {
         id: 'r12-010-fixture-right',
@@ -63,7 +63,7 @@ function validManifest(): FixtureManifest {
         dependencies: ['r11-000-fixture-foundation'],
         optional: false,
         writeLocks: ['generated-index'],
-        spec: '1.2/README.md',
+        spec: '1.2/r12-010-fixture-right.md',
       },
       {
         id: 'r15-900-fixture-optional',
@@ -110,6 +110,7 @@ function renderOneOneReadme(tasks: readonly FixtureTask[]): string {
 }
 
 function renderLaterReadme(release: string, tasks: readonly FixtureTask[]): string {
+  const independentSpec = release === '1.2'
   const rows = tasks
     .filter((task) => task.release === release)
     .map((task) => [
@@ -118,13 +119,18 @@ function renderLaterReadme(release: string, tasks: readonly FixtureTask[]): stri
       task.dependencies.length > 0 ? task.dependencies.map((dependency) => `\`${dependency}\``).join(', ') : '—',
       task.optional ? '是' : '否',
       task.writeLocks.map((lock) => `\`${lock}\``).join(', '),
+      ...(independentSpec ? [`[spec](${path.posix.basename(task.spec)})`] : []),
       'fixture 验收',
     ].join(' | '))
   return [
     `# ${release}`,
     '',
-    '| Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |',
-    '| --- | --- | --- | --- | --- | --- |',
+    independentSpec
+      ? '| Task ID | 结果 | Dependencies | Optional | Write locks | Spec | Acceptance |'
+      : '| Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |',
+    independentSpec
+      ? '| --- | --- | --- | --- | --- | --- | --- |'
+      : '| --- | --- | --- | --- | --- | --- |',
     ...rows.map((row) => `| ${row} |`),
     '',
     ...(release === '1.2' ? ['证据：`npm run test -- tests/unit/existing.test.ts`。', ''] : []),
@@ -136,6 +142,51 @@ function renderOneOneSpec(
   inventoryAccess: 'none' | 'read' | 'write' = 'none',
   extra = '',
 ): string {
+  if (task.release === '1.2') {
+    return [
+      `# ${task.id}｜${task.title}`,
+      '',
+      `- Release / Dependencies: ${task.release} / ${task.dependencies.length > 0 ? task.dependencies.join(', ') : 'none'}`,
+      `- Write locks: ${task.writeLocks.map((lock) => `\`${lock}\``).join(', ')}`,
+      `- Inventory access: \`${inventoryAccess}\``,
+      '',
+      '[共享合同](IMPLEMENTATION_CONTRACT.md)。',
+      '',
+      '## Outcome / current evidence',
+      '',
+      'fixture 结果。',
+      '',
+      '## Read first',
+      '',
+      '- `tests/unit/existing.test.ts`',
+      '',
+      '## Write scope',
+      '',
+      '只写 fixture。',
+      '',
+      '## Execution',
+      '',
+      '1. 完成 fixture。',
+      '',
+      '## Stop conditions',
+      '',
+      '- 合同冲突时停止。',
+      '',
+      '## Acceptance',
+      '',
+      '- fixture 通过。',
+      '',
+      '## Focused validation',
+      '',
+      '- `npm run test -- tests/unit/existing.test.ts`',
+      '',
+      '## Rollback / handoff',
+      '',
+      '回滚 fixture。',
+      ...(extra ? ['', extra] : []),
+      '',
+    ].join('\n')
+  }
   return [
     `# ${task.id}｜${task.title}`,
     '',
@@ -201,10 +252,23 @@ async function writeFixture(): Promise<{ root: string; manifest: FixtureManifest
     'utf8',
   )
   await writeFile(path.join(roadmapRoot, 'OLD_PLAN_CROSSWALK.md'), renderCrosswalk(), 'utf8')
+  await writeFile(
+    path.join(roadmapRoot, '1.2', 'IMPLEMENTATION_CONTRACT.md'),
+    '# 1.2 fixture contract\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(roadmapRoot, '1.2', 'EXECUTION_GUIDE.md'),
+    '# 1.2 fixture execution guide\n\n[contract](IMPLEMENTATION_CONTRACT.md)\n',
+    'utf8',
+  )
   const manifest = validManifest()
   await writeManifest(root, manifest)
   await writeReleaseReadmes(root, manifest)
   const oneOneSpecPath = await writeOneOneSpec(root, manifest.tasks[0])
+  for (const task of manifest.tasks.filter((entry) => entry.release === '1.2')) {
+    await writeOneOneSpec(root, task)
+  }
   return { root, manifest, oneOneSpecPath }
 }
 
@@ -216,11 +280,11 @@ afterEach(async () => {
 })
 
 describe('development roadmap validation', () => {
-  it('accepts a strict manifest, shared later-version spec and archival crosswalk', async () => {
+  it('accepts strict independent 1.1/1.2 specs and shared later-version specs', async () => {
     const { root } = await writeFixture()
     const report = await checkDevelopmentRoadmap(root)
     expect(report.taskCount).toBe(4)
-    expect(report.specCount).toBe(3)
+    expect(report.specCount).toBe(4)
     expect(report.crosswalkCount).toBe(98)
     expect(report.parallelFrontier).toEqual(['r12-000-fixture-left', 'r12-010-fixture-right'])
   })
@@ -239,14 +303,40 @@ describe('development roadmap validation', () => {
     await expect(checkDevelopmentRoadmap(root)).rejects.toThrow(/任务卡协议未定义的写锁/)
     expect(ROADMAP_WRITE_LOCKS).toEqual([
       'none',
-      'editor-store-history',
-      'app-save-recovery',
-      'workspace-properties',
-      'published-producer',
       'contracts-schema',
-      'legacy-inventory',
-      'main-preload',
       'generated-index',
+      'legacy-inventory',
+      'store-kernel',
+      'store-slide',
+      'store-flow',
+      'store-spatial',
+      'store-course',
+      'props-shared',
+      'props-slide',
+      'props-flow',
+      'props-spatial',
+      'props-global',
+      'workspace-shell',
+      'authoring-slide',
+      'authoring-flow',
+      'authoring-spatial',
+      'authoring-interaction',
+      'authoring-recipe',
+      'published-slide',
+      'published-flow',
+      'published-spatial',
+      'published-interaction',
+      'published-dynamic',
+      'published-producer',
+      'export-pptx',
+      'export-docx-print',
+      'app-save-recovery',
+      'diagnostics',
+      'main-preload',
+      'cli-adapters',
+      'ai-session',
+      'mcp-server',
+      'chat-ui',
     ])
   })
 
@@ -260,7 +350,41 @@ describe('development roadmap validation', () => {
     serialFixture.manifest.tasks[2].dependencies = ['r12-000-fixture-left']
     await writeManifest(serialFixture.root, serialFixture.manifest)
     await writeReleaseReadmes(serialFixture.root, serialFixture.manifest)
+    await writeOneOneSpec(serialFixture.root, serialFixture.manifest.tasks[2])
     await expect(checkDevelopmentRoadmap(serialFixture.root)).resolves.toMatchObject({ parallelFrontier: [] })
+  })
+
+  it('reports the complete maximum lock-disjoint set in the first parallel frontier', async () => {
+    const fixture = await writeFixture()
+    const third: FixtureTask = {
+      id: 'r12-020-fixture-third',
+      release: '1.2',
+      title: '并行第三支',
+      dependencies: ['r11-000-fixture-foundation'],
+      optional: false,
+      writeLocks: ['main-preload'],
+      spec: '1.2/r12-020-fixture-third.md',
+    }
+    const laterRelease: FixtureTask = {
+      id: 'r13-900-fixture-later',
+      release: '1.3',
+      title: '后续版本并行支线',
+      dependencies: ['r11-000-fixture-foundation'],
+      optional: false,
+      writeLocks: ['props-flow'],
+      spec: '1.3/README.md',
+    }
+    fixture.manifest.tasks.push(third, laterRelease)
+    await writeManifest(fixture.root, fixture.manifest)
+    await writeReleaseReadmes(fixture.root, fixture.manifest)
+    await writeOneOneSpec(fixture.root, third)
+    await expect(checkDevelopmentRoadmap(fixture.root)).resolves.toMatchObject({
+      parallelFrontier: [
+        'r12-000-fixture-left',
+        'r12-010-fixture-right',
+        'r12-020-fixture-third',
+      ],
+    })
   })
 
   it('rejects an optional task in a core dependency closure', async () => {
@@ -340,7 +464,7 @@ describe('development roadmap validation', () => {
     const extraText = await readFile(extraReadme, 'utf8')
     await writeFile(
       extraReadme,
-      `${extraText}| \`r12-999-extra-row\` | 额外行 | \`r11-000-fixture-foundation\` | 否 | \`main-preload\` | 不应存在 |\n`,
+      `${extraText}| \`r12-999-extra-row\` | 额外行 | \`r11-000-fixture-foundation\` | 否 | \`main-preload\` | [spec](r12-999-extra-row.md) | 不应存在 |\n`,
       'utf8',
     )
     await expect(checkDevelopmentRoadmap(extraFixture.root)).rejects.toThrow(/manifest 任务 ID 不一致.*额外/)
@@ -361,8 +485,8 @@ describe('development roadmap validation', () => {
     const readmePath = path.join(root, 'docs', 'development-plan', 'roadmap', '1.2', 'README.md')
     const current = await readFile(readmePath, 'utf8')
     const changed = current.replace(
-      '| `r12-000-fixture-left` | `fixture-v1` 并行左支 | `r11-000-fixture-foundation` | 否 | `workspace-properties` | fixture 验收 |',
-      '| `r12-000-fixture-left` | 错误标题 | `r12-010-fixture-right` | 是 | `main-preload` | fixture 验收 |',
+      '| `r12-000-fixture-left` | `fixture-v1` 并行左支 | `r11-000-fixture-foundation` | 否 | `props-shared` | [spec](r12-000-fixture-left.md) | fixture 验收 |',
+      '| `r12-000-fixture-left` | 错误标题 | `r12-010-fixture-right` | 是 | `main-preload` | [spec](r12-000-fixture-left.md) | fixture 验收 |',
     )
     await writeFile(readmePath, changed, 'utf8')
     await expect(checkDevelopmentRoadmap(root)).rejects.toThrow(/title 与 manifest 不一致/)
@@ -399,6 +523,27 @@ describe('development roadmap validation', () => {
     await expect(checkDevelopmentRoadmap(metadataFixture.root)).rejects.toThrow(/spec dependencies 与 manifest 不一致/)
     await expect(checkDevelopmentRoadmap(metadataFixture.root)).rejects.toThrow(/spec writeLocks 与 manifest 不一致/)
     await expect(checkDevelopmentRoadmap(metadataFixture.root)).rejects.toThrow(/Inventory access: write.*legacy-inventory/)
+  })
+
+  it('requires every 1.2 node to have a linked, decision-complete independent spec', async () => {
+    const linkFixture = await writeFixture()
+    const readmePath = path.join(linkFixture.root, 'docs', 'development-plan', 'roadmap', '1.2', 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, readme.replace('r12-000-fixture-left.md', 'wrong-spec.md'), 'utf8')
+    await expect(checkDevelopmentRoadmap(linkFixture.root)).rejects.toThrow(/spec 链接与 manifest 不一致/)
+
+    const shapeFixture = await writeFixture()
+    const specPath = path.join(
+      shapeFixture.root,
+      'docs',
+      'development-plan',
+      'roadmap',
+      '1.2',
+      'r12-000-fixture-left.md',
+    )
+    const spec = await readFile(specPath, 'utf8')
+    await writeFile(specPath, spec.replace('## Stop conditions', '## Missing stop section'), 'utf8')
+    await expect(checkDevelopmentRoadmap(shapeFixture.root)).rejects.toThrow(/缺少标准章节.*Stop conditions/)
   })
 
   it('compares 1.1 README fields and rejects abbreviated dependency IDs', async () => {

@@ -1,4 +1,4 @@
-import { Palette } from 'lucide-react'
+import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type {
   LayerItem,
   SpatialPathDocument,
@@ -7,19 +7,25 @@ import type {
   SpatialSemanticZoomRule,
 } from '../../../shared/courseProjectTypes'
 import {
+  resolveEffectiveBackground,
+  type CourseBackgroundFields,
+  type SpatialSurfaceBackgroundFields,
+} from '../../../shared/effectiveBackground'
+import {
   spatialEditorWorldLayerItems,
   type SpatialEditorView,
   type SpatialSessionCamera,
 } from '../../course/spatialEditorView'
-import { ColorInput } from '../ColorInput'
 import { SpatialCameraPanel } from '../SpatialCameraPanel'
 import { SpatialPathEditor } from '../SpatialPathEditor'
 import { FlowSpatialInteractionUnavailableSection } from './FlowSpatialInteractionUnavailableSection'
+import { SharedBackgroundProperties } from './SharedBackgroundProperties'
 
 export type SpatialPropertiesKind = 'spatial-page' | 'spatial-graph'
 
 export interface SpatialPropertiesCommands {
   readonly setBackgroundColor: (backgroundColor: string) => void
+  readonly updateBackground: (patch: SpatialSurfaceBackgroundFields) => void
   readonly setShowCameraFrames: (show: boolean) => void
   readonly addCameraFrame: () => void
   readonly renameCameraFrame: (frameId: string, name: string) => void
@@ -73,6 +79,9 @@ export interface SpatialPropertiesDraftBindings {
 export interface SpatialPropertiesContext {
   readonly kind: SpatialPropertiesKind
   readonly view: SpatialEditorView
+  /** Course-wide background fields, needed only to resolve the Spatial surface's effective preview. */
+  readonly course: CourseBackgroundFields
+  readonly assets: Readonly<Record<string, AssetMeta>>
   readonly sessionCamera: SpatialSessionCamera
   readonly showCameraFrames: boolean
   readonly playbackPathId: string | null
@@ -134,19 +143,32 @@ function SpatialPathRelationFields({
 
 function SpatialPageProperties({ context }: { context: SpatialPropertiesContext }) {
   const { view, sessionCamera, commands } = context
+  const effective = resolveEffectiveBackground({
+    owner: 'spatial-surface',
+    course: context.course,
+    surface: {
+      backgroundMode: view.backgroundMode,
+      backgroundColor: view.backgroundColor,
+      backgroundAssetId: view.backgroundAssetId,
+    },
+  })
   return (
     <>
-      <section className="property-section" data-testid="spatial-page-properties">
-        <h3 className="property-title"><Palette size={14} />空间画布</h3>
-        <ColorInput
-          id="spatial-canvas-background"
-          data-testid="spatial-canvas-background"
-          label="画布背景色"
-          value={view.backgroundColor}
-        onChange={commands.setBackgroundColor}
-          key={context.draftBindings.surface}
-        />
-      </section>
+      <SharedBackgroundProperties
+        key={`spatial-surface-background:${view.surfaceId}`}
+        ownerLabel="无限画布"
+        color={view.backgroundColor}
+        assetId={view.backgroundAssetId}
+        assets={context.assets}
+        effective={effective}
+        mode={{
+          value: view.backgroundMode,
+          onChange: (backgroundMode) => commands.updateBackground({ backgroundMode }),
+        }}
+        onColorChange={(backgroundColor) => commands.updateBackground({ backgroundColor })}
+        onAssetChange={(backgroundAssetId) => commands.updateBackground({ backgroundAssetId })}
+        testId="spatial-surface-background-properties"
+      />
       <SpatialCameraPanel
         surfaceTitle={view.surfaceTitle}
         frames={[...view.camera.frames]}

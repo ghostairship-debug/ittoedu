@@ -6,6 +6,7 @@ import type {
   PublishedDomInteractionSurfacePort,
 } from '../../interactions/PublishedDomInteractionSurfacePort'
 import type {
+  PublishedInputDescriptor,
   PublishedInteractionPortResult,
   PublishedInteractionSurfacePort,
   PublishedNodeMotionContext,
@@ -62,6 +63,17 @@ export class PublishedSlideInteractionSurfacePort implements PublishedInteractio
     context: PublishedNodeMotionContext,
   ): PublishedInteractionPortResult {
     return this.#dom.executeNodeMotion(action, context)
+  }
+
+  describeInput(_nodeId: string): PublishedInputDescriptor | null {
+    return null
+  }
+
+  bindInputSubmit(
+    _nodeId: string,
+    _listener: (rawValue: string) => void,
+  ): (() => void) | null {
+    return null
   }
 
   cancelActiveMotions(): void {

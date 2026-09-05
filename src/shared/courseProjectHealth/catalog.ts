@@ -31,6 +31,24 @@ export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
   'asset-unused': {
     severity: 'info', status: 'active', gui: true, cli: true, savedReport: true,
   },
+  'background-asset-missing': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'chart-donut-hole-size-invalid': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'chart-id-duplicate': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'chart-numeric-value-invalid': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'chart-pie-single-series': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'chart-series-points-mismatch': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
   'component-package-hash-missing': {
     severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true,
   },
@@ -88,6 +106,15 @@ export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
   'initial-state-reference-missing': {
     severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,
   },
+  'input-container-invalid': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'input-rule-family-incomplete': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'input-state-key-invalid': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
   'interaction-action-id-duplicate': {
     severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,
   },
@@ -120,6 +147,12 @@ export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
   },
   'interaction-state-reference-missing': {
     severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'line-geometry-shape-mismatch': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'line-path-degenerate': {
+    severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true,
   },
   'looping-video-ended-unreachable': {
     severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true,
@@ -177,6 +210,15 @@ export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
   },
   'state-node-reference-missing': {
     severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,
+  },
+  'table-dimension-invalid': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'table-id-duplicate': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
+  'table-matrix-mismatch': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
   },
   'thumbnail-state-reference-missing': {
     severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,

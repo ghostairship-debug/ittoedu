@@ -9,7 +9,11 @@ import {
   parsePlayerAuthoringReadyMessage,
   playerAuthoringSnapshotBarrierForCommand,
 } from '../../src/shared/playerAuthoringProtocol'
-import { createRectangleNode } from '../../src/renderer/project/nativeNodeFactories'
+import {
+  createChartNode,
+  createRectangleNode,
+  createTableNode,
+} from '../../src/renderer/project/nativeNodeFactories'
 
 function command(value: unknown = createRectangleNode({ id: 'node-a' })) {
   return {
@@ -229,4 +233,74 @@ describe('Player authoring protocol', () => {
       },
     }).ok).toBe(false)
   })
+
+  it('accepts complete Table, five Chart types, and Input patch commands', () => {
+    // 1. Table
+    const tableCmd = command(createTableNode({ id: 'table-node' }))
+    tableCmd.patch.target.nodeId = 'table-node'
+    const parsedTable = parsePlayerAuthoringPatchCommand(tableCmd)
+    expect(parsedTable.ok).toBe(true)
+
+    // 2. Five Chart types
+    for (const chartType of ['bar', 'line', 'area', 'pie', 'donut'] as const) {
+      const chartNode = createChartNode({ id: `chart-${chartType}`, chartType })
+      const chartCmd = command(chartNode)
+      chartCmd.patch.target.nodeId = `chart-${chartType}`
+      const parsedChart = parsePlayerAuthoringPatchCommand(chartCmd)
+      expect(parsedChart.ok).toBe(true)
+    }
+
+    // 3. Input
+    const inputNode = {
+      id: 'input-node',
+      name: '输入题',
+      type: 'input',
+      x: 60,
+      y: 60,
+      width: 240,
+      height: 48,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: 'inherit' as const,
+      answerType: 'text' as const,
+      stateKey: 'userAnswer',
+      validityKey: 'userAnswerValid',
+      placeholder: '请输入内容',
+      ruleFamilyRuleIds: ['rule-1'],
+      style: {
+        fontFamily: 'sans-serif',
+        fontSize: 16,
+        textColor: '#111827',
+        fillColor: '#ffffff',
+        fillOpacity: 1,
+        borderColor: '#d1d5db',
+        borderOpacity: 1,
+        borderWidth: 1,
+        cornerRadius: 6,
+        horizontalAlign: 'left' as const,
+        padding: 8,
+      },
+    }
+    const inputCmd = command(inputNode)
+    inputCmd.patch.target.nodeId = 'input-node'
+    const parsedInput = parsePlayerAuthoringPatchCommand(inputCmd)
+    expect(parsedInput.ok).toBe(true)
+
+    // 4. Unknown type or missing fields are rejected
+    expect(parsePlayerAuthoringPatchCommand(command({
+      ...inputNode,
+      answerType: 'unknown',
+    })).ok).toBe(false)
+    expect(parsePlayerAuthoringPatchCommand(command({
+      ...inputNode,
+      stateKey: '',
+    })).ok).toBe(false)
+    expect(parsePlayerAuthoringPatchCommand(command({
+      ...inputNode,
+      type: 'unknown-type',
+    })).ok).toBe(false)
+  })
 })
+

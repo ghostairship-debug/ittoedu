@@ -313,10 +313,12 @@ export function collectPublishedCourseAssetIds(
 ): Set<string> {
   const { project } = sources
   const result = new Set<string>()
+  if (project.backgroundAssetId) result.add(project.backgroundAssetId)
   Object.values(project.media.audio.sounds).forEach((sound) => result.add(sound.assetId))
   allLayerItems(project).forEach((item) => addLayerAssetReferences(result, item))
 
   for (const surface of project.surfaces) {
+    if (surface.backgroundAssetId) result.add(surface.backgroundAssetId)
     if (surface.type === 'slide') {
       for (const scene of surface.scenes) {
         if (scene.backgroundAssetId) result.add(scene.backgroundAssetId)
@@ -761,10 +763,14 @@ function publishSurface(
     return {
       ...base,
       type: 'slide',
+      ...(surface.backgroundMode !== undefined ? { backgroundMode: surface.backgroundMode } : {}),
+      ...(surface.backgroundColor !== undefined ? { backgroundColor: surface.backgroundColor } : {}),
+      ...(surface.backgroundAssetId !== undefined ? { backgroundAssetId: surface.backgroundAssetId } : {}),
       canvas: cloneJson(surface.canvas),
       scenes: surface.scenes.map((scene) => ({
         id: scene.id,
         name: scene.name,
+        ...(scene.backgroundMode !== undefined ? { backgroundMode: scene.backgroundMode } : {}),
         backgroundColor: scene.backgroundColor,
         ...(scene.backgroundAssetId !== undefined
           ? { backgroundAssetId: scene.backgroundAssetId }
@@ -800,7 +806,9 @@ function publishSurface(
       ...base,
       type: 'flow',
       surfaceLayerItems: surface.surfaceLayerItems.map((entry) => publishFlowScoped(sources, entry)),
+      ...(surface.backgroundMode !== undefined ? { backgroundMode: surface.backgroundMode } : {}),
       ...(surface.backgroundColor !== undefined ? { backgroundColor: surface.backgroundColor } : {}),
+      ...(surface.backgroundAssetId !== undefined ? { backgroundAssetId: surface.backgroundAssetId } : {}),
       layout: cloneJson(surface.layout),
       blocks: publishFlowBlocks(sources, surface.blocks),
     }
@@ -808,7 +816,9 @@ function publishSurface(
   return {
     ...base,
     type: 'spatial-2d',
+    ...(surface.backgroundMode !== undefined ? { backgroundMode: surface.backgroundMode } : {}),
     ...(surface.backgroundColor !== undefined ? { backgroundColor: surface.backgroundColor } : {}),
+    ...(surface.backgroundAssetId !== undefined ? { backgroundAssetId: surface.backgroundAssetId } : {}),
     world: {
       bounds: cloneJson(surface.world.bounds),
       layerItems: surface.world.layerItems.map((item) => publishLayerItem(sources, item)),
@@ -890,6 +900,8 @@ export function buildPublishedCourseV2Payload(
     sourceSchemaVersion: 9,
     courseId: project.id,
     title: project.title,
+    ...(project.backgroundColor !== undefined ? { backgroundColor: project.backgroundColor } : {}),
+    ...(project.backgroundAssetId !== undefined ? { backgroundAssetId: project.backgroundAssetId } : {}),
     assets,
     components,
     designTokens: cloneJson(project.designTokens),

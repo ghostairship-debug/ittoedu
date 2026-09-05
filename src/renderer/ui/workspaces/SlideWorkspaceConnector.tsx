@@ -168,6 +168,8 @@ export function SlideWorkspaceConnector({
     addFormulaNode,
     addRectangleNode,
     addShapeNode,
+    addTableNode,
+    addChartNode,
     addExternalComponentNode,
     captureRuntimeContentTextTarget,
     updateRuntimeContentTextAtTarget,
@@ -176,6 +178,9 @@ export function SlideWorkspaceConnector({
     runSlideCandidateCommand,
     applySlideCandidateCommand,
     setActiveTab,
+    slideDrawTool,
+    setSlideDrawTool,
+    drawSlideShapeNode,
   ] = useEditorStore(useShallow(selectSlideWorkspaceSource))
   const view = useMemo(() => project && locationId
     ? buildSlideEditorView({
@@ -242,6 +247,7 @@ export function SlideWorkspaceConnector({
     projectRevision: project?.revision ?? 0,
     previewRebuildKey,
     tryRunMountKey,
+    drawTool: slideDrawTool,
   }), [
     activePresentationStateId,
     backend,
@@ -257,12 +263,14 @@ export function SlideWorkspaceConnector({
     selectedNode,
     selectedNodeIds,
     sidecarFileIds,
+    slideDrawTool,
     tryRunMountKey,
     view,
   ])
   const ports = useMemo<SlideWorkspacePorts>(() => ({
     canvas: {
       setCanvasMode,
+      setDrawTool: (tool) => setSlideDrawTool(tool),
       setStatus: (message) => setStatus(message),
     },
     selection: {
@@ -291,7 +299,10 @@ export function SlideWorkspaceConnector({
         x,
         y,
       ),
+      addTableNode: (x, y) => addTableNode(x, y),
+      addChartNode: (chartType, x, y) => addChartNode(chartType, x, y),
       addExternalComponentNode,
+      drawShapeNode: (input) => drawSlideShapeNode(input),
     },
     runtime: {
       captureRuntimeContentTextTarget,
@@ -350,6 +361,7 @@ export function SlideWorkspaceConnector({
     captureRuntimeContentTextTarget,
     commitTextEdit,
     componentPackages,
+    drawSlideShapeNode,
     replaceRuntimeAssetAtTarget,
     locationId,
     project,
@@ -358,6 +370,7 @@ export function SlideWorkspaceConnector({
     selectNodes,
     setActiveTab,
     setCanvasMode,
+    setSlideDrawTool,
     setStatus,
     updateNode,
     updateNodes,

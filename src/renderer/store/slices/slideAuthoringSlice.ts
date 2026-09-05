@@ -23,6 +23,8 @@ import {
   addSlideShapeLayer,
   addSlideTextLayer,
 } from '../../course/v9SlideContentCommands'
+import { addSlideTableLayer } from '../../course/v9TableCommands'
+import { addSlideChartLayer } from '../../course/v9ChartCommands'
 import {
   beginV9SlideContentEdit,
   cancelV9SlideContentEdit,
@@ -39,6 +41,7 @@ import {
 } from '../../course/effectiveLayerCommands'
 import type { CourseMediaCommandResult } from '../../course/v9MediaAudioCommands'
 import type { ShapeType } from '../../../shared/contracts/native-v1'
+import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
 import { createFormulaNode, createShapeNode, createTextNode } from '../../project/nativeNodeFactories'
 import { normalizeNewNodeGeometry, sessionFromLayerResult } from '../v9LayerMutations'
 import type { TextRun } from '../../../shared/contracts/native-v1'
@@ -252,6 +255,7 @@ export function applyV9BackendState(
     ...continuedCourseResourceStacks(extra.resourceHistory),
     courseAssetSidecar: sidecar,
     editingTextNodeId: null,
+    slideDrawTool: null,
     canvasMode: extra.canvasMode ?? 'edit',
     errorMessage: null,
     dirty: extra.dirty ?? false,
@@ -288,8 +292,6 @@ export function createSlideAuthoringSlice(
   renameProject(title: string): void
   updateScene(sceneId: string, patch: {
     name?: string
-    backgroundColor?: string
-    backgroundAssetId?: string | null
   }): void
   setActivePresentationState(stateId: string | null): void
   addPresentationState(name?: string): void
@@ -300,6 +302,13 @@ export function createSlideAuthoringSlice(
   addFormulaNode(x?: number, y?: number): void
   addRectangleNode(x?: number, y?: number): void
   addShapeNode(shapeType: string, x?: number, y?: number): void
+  drawSlideShapeNode(input: {
+    shapeType: 'line' | 'elbow-arrow'
+    frame: { x: number; y: number; width: number; height: number }
+    lineGeometry: NativeLineGeometry
+  }): void
+  addTableNode(x?: number, y?: number): void
+  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
   updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
   setSlideTextEditComposing(composing: boolean): void
@@ -579,8 +588,6 @@ export function createSlideAuthoringSlice(
             const scene = surface.scenes.find((item) => item.id === sceneId)
             if (!scene) continue
             if (patch.name !== undefined && patch.name.trim()) scene.name = patch.name.trim()
-            if (patch.backgroundColor !== undefined) scene.backgroundColor = patch.backgroundColor
-            if (patch.backgroundAssetId !== undefined) scene.backgroundAssetId = patch.backgroundAssetId
             draft.locations.forEach((location) => {
               if (location.kind === 'slide-scene' && location.sceneId === sceneId && location.stateId === undefined) {
                 location.label = `${surface.title} · ${scene.name}`
@@ -676,6 +683,35 @@ export function createSlideAuthoringSlice(
       addShapeNode('rectangle', x, y)
     },
     addShapeNode,
+    drawSlideShapeNode(input) {
+      runCandidateSession(
+        (session) => addSlideShapeLayer(session, {
+          shapeType: input.shapeType,
+          frame: input.frame,
+          lineGeometry: input.lineGeometry,
+        }, { expectedRevision: session.history.present.revision }),
+        { statusMessage: input.shapeType === 'line' ? '已绘制直线' : '已绘制折线箭头' },
+      )
+    },
+    addTableNode(x, y) {
+      runCandidateSession(
+        (session) => addSlideTableLayer(session, {
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: session.history.present.revision }),
+        { statusMessage: '已添加表格' },
+      )
+    },
+    addChartNode(chartType, x, y) {
+      runCandidateSession(
+        (session) => addSlideChartLayer(session, {
+          chartType,
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: session.history.present.revision }),
+        { statusMessage: '已添加图表' },
+      )
+    },
     beginTextEdit(nodeId, source = 'canvas') {
       const owned = slide.read()
       const backend = owned.slideBackend

@@ -31,6 +31,22 @@
       "format": "date-time",
       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
     },
+    "backgroundColor": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "backgroundAssetId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "assets": {
       "type": "object",
       "propertyNames": {
@@ -1057,6 +1073,51 @@
                           "data"
                         ],
                         "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "nativeType": {
+                            "type": "string",
+                            "const": "table"
+                          },
+                          "data": {}
+                        },
+                        "required": [
+                          "nativeType",
+                          "data"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "nativeType": {
+                            "type": "string",
+                            "const": "chart"
+                          },
+                          "data": {}
+                        },
+                        "required": [
+                          "nativeType",
+                          "data"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "nativeType": {
+                            "type": "string",
+                            "const": "input"
+                          },
+                          "data": {}
+                        },
+                        "required": [
+                          "nativeType",
+                          "data"
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   }
@@ -1728,6 +1789,51 @@
                                     "data"
                                   ],
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "table"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "chart"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "input"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -2186,6 +2292,29 @@
                 "type": "string",
                 "const": "slide"
               },
+              "backgroundMode": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "own"
+                ]
+              },
+              "backgroundColor": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              },
+              "backgroundAssetId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "canvas": {
                 "type": "object",
                 "properties": {
@@ -2220,6 +2349,13 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 200
+                    },
+                    "backgroundMode": {
+                      "type": "string",
+                      "enum": [
+                        "inherit",
+                        "own"
+                      ]
                     },
                     "backgroundColor": {
                       "type": "string",
@@ -2416,6 +2552,51 @@
                                       "nativeType": {
                                         "type": "string",
                                         "const": "teacher-controller"
+                                      },
+                                      "data": {}
+                                    },
+                                    "required": [
+                                      "nativeType",
+                                      "data"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "nativeType": {
+                                        "type": "string",
+                                        "const": "table"
+                                      },
+                                      "data": {}
+                                    },
+                                    "required": [
+                                      "nativeType",
+                                      "data"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "nativeType": {
+                                        "type": "string",
+                                        "const": "chart"
+                                      },
+                                      "data": {}
+                                    },
+                                    "required": [
+                                      "nativeType",
+                                      "data"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "nativeType": {
+                                        "type": "string",
+                                        "const": "input"
                                       },
                                       "data": {}
                                     },
@@ -3236,6 +3417,51 @@
                                     "data"
                                   ],
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "table"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "chart"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "input"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -3701,9 +3927,28 @@
                 "type": "string",
                 "const": "flow"
               },
+              "backgroundMode": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "own"
+                ]
+              },
               "backgroundColor": {
                 "type": "string",
                 "pattern": "^#[0-9a-fA-F]{6}$"
+              },
+              "backgroundAssetId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "layout": {
                 "type": "object",
@@ -3938,6 +4183,51 @@
                                     "nativeType": {
                                       "type": "string",
                                       "const": "teacher-controller"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "table"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "chart"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "input"
                                     },
                                     "data": {}
                                   },
@@ -4404,9 +4694,28 @@
                 "type": "string",
                 "const": "spatial-2d"
               },
+              "backgroundMode": {
+                "type": "string",
+                "enum": [
+                  "inherit",
+                  "own"
+                ]
+              },
               "backgroundColor": {
                 "type": "string",
                 "pattern": "^#[0-9a-fA-F]{6}$"
+              },
+              "backgroundAssetId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "world": {
                 "type": "object",
@@ -4638,6 +4947,51 @@
                                     "nativeType": {
                                       "type": "string",
                                       "const": "teacher-controller"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "table"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "chart"
+                                    },
+                                    "data": {}
+                                  },
+                                  "required": [
+                                    "nativeType",
+                                    "data"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "nativeType": {
+                                      "type": "string",
+                                      "const": "input"
                                     },
                                     "data": {}
                                   },

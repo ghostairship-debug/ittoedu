@@ -12,6 +12,7 @@ export type EditorMode = 'simple' | 'professional'
 export type EditingScope = 'scene' | 'global'
 export type CanvasMode = 'edit' | 'run'
 export type TextEditSource = 'canvas' | 'properties'
+export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
 
 export type EditorShellOwnedState = {
   editorMode: EditorMode
@@ -20,6 +21,7 @@ export type EditorShellOwnedState = {
   statusMessage: string | null
   errorMessage: string | null
   editingTextNodeId: string | null
+  slideDrawTool: SlideLineDrawTool
 }
 
 export type EditorShellPorts = {
@@ -45,6 +47,7 @@ export function createEditorShellSlice(
   setActiveTab(tab: EditorShellTab): void
   setStatus(message: string | null): void
   setError(message: string | null): void
+  setSlideDrawTool(tool: SlideLineDrawTool): void
 } {
   return {
     setEditorMode(mode) {
@@ -79,6 +82,16 @@ export function createEditorShellSlice(
     setError(message) {
       shell.patch({ errorMessage: message })
       kernel.setFeedback({ errorMessage: message })
+    },
+    setSlideDrawTool(tool) {
+      shell.patch({
+        slideDrawTool: tool,
+        ...(tool === 'line'
+          ? { statusMessage: '在画布上拖拽绘制直线；Esc 取消' }
+          : tool === 'elbow-arrow'
+            ? { statusMessage: '在画布上拖拽绘制折线箭头；Esc 取消' }
+            : {}),
+      })
     },
   }
 }

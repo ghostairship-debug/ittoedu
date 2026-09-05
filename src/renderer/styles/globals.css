@@ -1923,6 +1923,66 @@ button:disabled {
   font-weight: 700;
 }
 
+.chart-picker-popover {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg-elevated);
+  padding: 8px 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  margin: 4px 0 6px;
+}
+
+.chart-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.chart-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.chart-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 120ms ease;
+}
+
+.chart-picker-item:hover {
+  border-color: rgba(91, 156, 255, 0.55);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.chart-picker-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary, #5b9cff);
+}
+
+.chart-picker-item-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .shape-palette {
   display: grid;
   gap: 11px;
@@ -3439,6 +3499,39 @@ button:disabled {
 .inline-control > .form-field,
 .inline-control > .color-control {
   margin-bottom: 0;
+}
+
+.color-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.color-preset-swatch {
+  height: 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.color-preset-swatch:hover {
+  transform: scale(1.08);
+  z-index: 1;
+}
+
+.color-preset-swatch[aria-current="true"],
+.color-preset-swatch[data-selected="true"] {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: 1px;
 }
 
 .color-control {

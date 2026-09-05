@@ -141,6 +141,8 @@ function matchesTrigger(authored: InteractionTrigger, actual: InteractionTrigger
         authored.seconds === actual.seconds
     case 'presenter.command':
       return actual.type === authored.type && authored.command === actual.command
+    case 'input.submit':
+      return actual.type === authored.type && authored.nodeId === actual.nodeId
   }
 }
 

@@ -42,6 +42,7 @@ import {
   transformSpatialViewportLayersInSession,
   transformSpatialWorldLayersInSession,
   undoSpatialAuthoring,
+  updateSpatialSurfaceBackground,
   updateSpatialSurfaceBackgroundColor,
   zoomSpatialSessionCamera,
   type SpatialAuthoringSession,
@@ -1201,6 +1202,13 @@ export function createSpatialAuthoringSlice(
           return finish(updateSpatialSurfaceBackgroundColor(
             workingSession,
             intent.backgroundColor,
+          ))
+        case 'set-surface-background-patch':
+          requireTargetKind('surface')
+          return finish(updateSpatialSurfaceBackground(
+            workingSession,
+            intent.patch,
+            { expectedRevision: workingSession.history.present.revision },
           ))
         case 'set-show-camera-frames':
           requireTargetKind('world')

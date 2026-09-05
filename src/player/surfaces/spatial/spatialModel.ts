@@ -19,6 +19,7 @@ import type {
   PublishedScopedLayerItem,
   PublishedSpatialSurface,
 } from '../../../shared/publishedCourseTypes'
+import type { CourseBackgroundFields } from '../../../shared/effectiveBackground'
 
 export type SpatialCoordinateSpace = 'world' | 'viewport'
 export type SpatialLayerSource = 'world' | 'surface' | 'global'
@@ -42,6 +43,7 @@ export interface PublishedSpatialRuntimeInput {
   locations: readonly CourseLocation[]
   startLocationId: string
   playbackPathId: string | null
+  courseBackground?: CourseBackgroundFields
 }
 
 export interface SpatialTourStop {
@@ -208,6 +210,7 @@ export function clonePublishedSpatialInput(
     locations: structuredClone(input.locations),
     startLocationId: input.startLocationId,
     playbackPathId: input.playbackPathId,
+    courseBackground: input.courseBackground ? structuredClone(input.courseBackground) : undefined,
   }
 }
 
@@ -234,6 +237,10 @@ export function publishedSpatialInputFromCourse(
     locations,
     startLocationId,
     playbackPathId: options.playbackPathId ?? null,
+    courseBackground: {
+      backgroundColor: course.backgroundColor,
+      backgroundAssetId: course.backgroundAssetId,
+    },
   })
 }
 

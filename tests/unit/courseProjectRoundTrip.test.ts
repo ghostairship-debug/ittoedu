@@ -7,9 +7,10 @@ import type {
   NativeLayerItem,
   ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import { resolveCourseSurfaceBackgroundColor } from '@/shared/courseProjectModel'
+import { resolveCourseSurfaceBackgroundColor, sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
+import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
@@ -246,6 +247,81 @@ describe('Course Project V9 protocol round-trip', () => {
     expect(Object.keys(published.assets)).toEqual(['badge'])
     expect(published.assets.badge?.mimeType).toBe('image/png')
     expect(published.assets.badge?.url.startsWith('data:image/png;base64,')).toBe(true)
+  })
+
+  it('round-trips straight and elbow lineGeometry through archive reopen and Published projection exactly', () => {
+    const project = minimalV9Project()
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('expected slide surface')
+
+    const straightNode = createShapeNode('line', {
+      id: 'line-roundtrip',
+      name: '直线',
+      x: 100,
+      y: 60,
+      width: 300,
+      height: 150,
+    })
+    straightNode.lineGeometry = { kind: 'straight', start: [0.1, 0.9], end: [0.9, 0.1] }
+    const elbowNode = createShapeNode('elbow-arrow', {
+      id: 'elbow-roundtrip',
+      name: '折线箭头',
+      x: 500,
+      y: 300,
+      width: 320,
+      height: 180,
+      rotation: 15,
+    })
+    elbowNode.lineGeometry = { kind: 'elbow', start: [0, 0.25], end: [1, 0.75], axis: 'vertical', position: 0.6 }
+    surface.scenes[0]!.layerItems.push(
+      sceneNodeToCourseLayerItem(straightNode, 10),
+      sceneNodeToCourseLayerItem(elbowNode, 11),
+    )
+
+    const parsed = courseProjectDocumentSchema.parse(project)
+    const archiveBytes = createCourseProjectArchive({
+      project: parsed,
+      assetFiles: { badge: ASSET_BYTES },
+      componentFiles: {},
+    }, { mtime: NOW })
+    const reopened = openCourseProjectArchive(archiveBytes)
+    const reparsed = courseProjectDocumentSchema.parse(reopened.project)
+    expect(reparsed).toEqual(parsed)
+
+    const reopenedSurface = reparsed.surfaces[0]
+    if (reopenedSurface?.type !== 'slide') throw new Error('expected slide surface')
+    const straightItem = reopenedSurface.scenes[0]?.layerItems.find((item) => item.layerItemId === 'line-roundtrip')
+    const elbowItem = reopenedSurface.scenes[0]?.layerItems.find((item) => item.layerItemId === 'elbow-roundtrip')
+    if (straightItem?.kind !== 'native' || straightItem.content.nativeType !== 'shape') throw new Error('expected straight shape')
+    if (elbowItem?.kind !== 'native' || elbowItem.content.nativeType !== 'shape') throw new Error('expected elbow shape')
+    expect(straightItem.content.data.lineGeometry).toEqual({ kind: 'straight', start: [0.1, 0.9], end: [0.9, 0.1] })
+    expect(elbowItem.content.data.lineGeometry).toEqual({
+      kind: 'elbow', start: [0, 0.25], end: [1, 0.75], axis: 'vertical', position: 0.6,
+    })
+    expect(elbowItem.rotation).toBe(15)
+
+    // The Published projection (consumed by Player/HTML/PPTX) carries the
+    // same geometry forward, independent of the Course Project archive path.
+    const published = buildPublishedCourseV2Payload({
+      project: reparsed,
+      assetFiles: reopened.assetFiles,
+      components: {},
+    })
+    expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+    const publishedSlide = published.surfaces[0]
+    if (publishedSlide?.type !== 'slide') throw new Error('expected published slide surface')
+    const publishedStraight = publishedSlide.scenes[0]?.layerItems.find((item) => item.layerItemId === 'line-roundtrip')
+    const publishedElbow = publishedSlide.scenes[0]?.layerItems.find((item) => item.layerItemId === 'elbow-roundtrip')
+    if (publishedStraight?.kind !== 'native' || publishedStraight.content.nativeType !== 'shape') {
+      throw new Error('expected published straight shape')
+    }
+    if (publishedElbow?.kind !== 'native' || publishedElbow.content.nativeType !== 'shape') {
+      throw new Error('expected published elbow shape')
+    }
+    expect(publishedStraight.content.data.lineGeometry).toEqual({ kind: 'straight', start: [0.1, 0.9], end: [0.9, 0.1] })
+    expect(publishedElbow.content.data.lineGeometry).toEqual({
+      kind: 'elbow', start: [0, 0.25], end: [1, 0.75], axis: 'vertical', position: 0.6,
+    })
   })
 
   it.each([...COURSE_PROJECT_V9_FIXTURE_IDS])(

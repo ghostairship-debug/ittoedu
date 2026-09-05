@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { planCourseMediaLibraryImport } from '@/renderer/media/courseMediaLibraryImport'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { AssetMeta } from '@/shared/contracts/media-v1/types'
@@ -331,5 +333,69 @@ describe('project asset reference graph', () => {
     expect(project.assets.remote.remote).toEqual({
       url: 'https://cdn.example.test/remote.png',
     })
+  })
+
+  it('protects a Course-wide background asset the same way Scene/State backgrounds are protected', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'course-cover')
+    project.backgroundAssetId = 'course-cover'
+    loadProject(project)
+
+    expect(listCourseAssetReferences(project, 'course-cover')).toContainEqual(
+      expect.objectContaining({ kind: 'course-background', path: ['backgroundAssetId'] }),
+    )
+    expect(useEditorStore.getState().deleteAsset('course-cover')).toBe(false)
+  })
+
+  it('protects a Slide surface background asset', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'surface-cover')
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('expected slide surface')
+    surface.backgroundMode = 'own'
+    surface.backgroundAssetId = 'surface-cover'
+    loadProject(project)
+
+    expect(listCourseAssetReferences(project, 'surface-cover')).toContainEqual(
+      expect.objectContaining({ kind: 'slide-surface-background' }),
+    )
+    expect(useEditorStore.getState().deleteAsset('surface-cover')).toBe(false)
+  })
+
+  it('protects a Flow surface background asset', () => {
+    const project = createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'flow-cover')
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'flow') throw new Error('expected flow surface')
+    surface.backgroundAssetId = 'flow-cover'
+    loadProject(project)
+
+    expect(listCourseAssetReferences(project, 'flow-cover')).toContainEqual(
+      expect.objectContaining({ kind: 'flow-surface-background' }),
+    )
+    expect(useEditorStore.getState().deleteAsset('flow-cover')).toBe(false)
+  })
+
+  it('protects a Spatial surface background asset', () => {
+    const project = createBlankSpatialCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'spatial-cover')
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    surface.backgroundAssetId = 'spatial-cover'
+    loadProject(project)
+
+    expect(listCourseAssetReferences(project, 'spatial-cover')).toContainEqual(
+      expect.objectContaining({ kind: 'spatial-surface-background' }),
+    )
+    expect(useEditorStore.getState().deleteAsset('spatial-cover')).toBe(false)
+  })
+
+  it('leaves an unset Course/surface background asset slot unreferenced', () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    addAssets(project, 'unused-cover')
+    loadProject(project)
+
+    expect(listCourseAssetReferences(project, 'unused-cover')).toEqual([])
+    expect(useEditorStore.getState().deleteAsset('unused-cover')).toBe(true)
   })
 })

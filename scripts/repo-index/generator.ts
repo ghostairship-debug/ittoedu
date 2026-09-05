@@ -691,7 +691,7 @@ export function validateMarkdownLinks(
   path: string,
   text: string,
 ): string[] {
-  const stripped = stripFencedMarkdown(text)
+  const stripped = stripFencedMarkdown(text).replace(/(`+)[^\n]+?\1/g, 'code')
   const rawTargets = new Set<string>()
   const definitions = new Map<string, string>()
 

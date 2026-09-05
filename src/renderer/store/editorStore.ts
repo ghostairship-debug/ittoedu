@@ -1077,6 +1077,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         statusMessage: current.statusMessage,
         errorMessage: current.errorMessage,
         editingTextNodeId: current.editingTextNodeId,
+        slideDrawTool: current.slideDrawTool,
       }
     },
     patch: (patch) => set(patch),
@@ -1153,6 +1154,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           statusMessage: current.statusMessage,
           errorMessage: current.errorMessage,
           editingTextNodeId: current.editingTextNodeId,
+          slideDrawTool: current.slideDrawTool,
         }
       },
       patch: (patch) => set(patch),
@@ -1191,6 +1193,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     editorMode: loadEditorMode(),
     activeTab: 'elements',
     editingTextNodeId: null,
+    slideDrawTool: null,
     statusMessage: '已创建新课件',
     errorMessage: null,
     slideBackend: initialBackend,
@@ -1385,6 +1388,8 @@ export const selectSlideWorkspaceSource = (state: EditorState) => {
     state.addFormulaNode,
     state.addRectangleNode,
     state.addShapeNode,
+    state.addTableNode,
+    state.addChartNode,
     state.addExternalComponentNode,
     state.captureRuntimeContentTextTarget,
     state.updateRuntimeContentTextAtTarget,
@@ -1393,6 +1398,9 @@ export const selectSlideWorkspaceSource = (state: EditorState) => {
     state.runSlideCandidateCommand,
     state.applySlideCandidateCommand,
     state.setActiveTab,
+    state.slideDrawTool,
+    state.setSlideDrawTool,
+    state.drawSlideShapeNode,
   ] as const
 }
 

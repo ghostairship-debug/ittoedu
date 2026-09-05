@@ -1,5 +1,14 @@
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { MIN_NODE_SIZE } from '../../shared/constants'
+import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
+import {
+  collectLineSnapAxes,
+  dragLineHandleGeometry,
+  lineHandleWorldPoints,
+  snapLinePoint,
+  type LineHandleKind,
+  type LineSnapResult,
+} from '../authoring/slideLineAuthoring'
 import {
   clientToWorld,
   createStageViewportTransform,
@@ -27,6 +36,7 @@ import {
   type SlideCommandResult,
 } from '../course/slideAuthoringBackend'
 import type { SlideEditorNodeTransform } from '../course/slideEditorCommands'
+import { updateSlideShapeLineGeometry } from '../course/v9SlideContentCommands'
 import {
   adaptV9SlideLayerItemHit,
   hitTestV9SlideLayerItems,
@@ -44,6 +54,8 @@ export interface SlideAuthoringPointer {
   /** Client CSS pixels unless `space` is `'world'` (Phaser pointer.worldX/Y). */
   readonly space?: 'client' | 'world'
   readonly additive?: boolean
+  /** Alt temporarily disables snapping for line gestures. */
+  readonly altKey?: boolean
 }
 
 export type SlideWorkspaceAuthoringResult =
@@ -59,7 +71,17 @@ export type SlideWorkspaceAuthoringResult =
       readonly targets?: readonly SlideAuthoringTarget[]
       readonly marquee?: StageRect | null
       readonly hit?: V9SlideHitTarget | null
+      /** Live line handle drag paint; geometry follows the pointer without history. */
+      readonly linePreview?: SlideLinePreview | null
+      /** Active snap guide axes (world coordinates) for the current gesture. */
+      readonly guides?: { readonly x?: number; readonly y?: number } | null
     }
+
+export interface SlideLinePreview {
+  readonly nodeId: string
+  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly lineGeometry: NativeLineGeometry
+}
 
 export interface SlideWorkspaceCommandPort {
   run(run: (backend: SlideAuthoringBackend) => SlideCommandResult): SlideCommandResult
@@ -97,7 +119,17 @@ interface MarqueeGesture {
   readonly additive: boolean
 }
 
-type SlideAuthoringGesture = MoveGesture | ResizeGesture | RotateGesture | MarqueeGesture
+interface LineEndpointGesture {
+  readonly type: 'line-endpoint'
+  readonly nodeId: string
+  readonly handle: LineHandleKind
+  readonly shapeType: 'line' | 'elbow-arrow'
+  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly rotation: number
+  readonly lineGeometry?: NativeLineGeometry
+}
+
+type SlideAuthoringGesture = MoveGesture | ResizeGesture | RotateGesture | MarqueeGesture | LineEndpointGesture
 
 const UNAVAILABLE_RESULT: SlideWorkspaceAuthoringResult = {
   kind: 'unavailable',
@@ -331,10 +363,59 @@ function previewRotate(
   })
 }
 
+interface SelectedLineShape {
+  readonly nodeId: string
+  readonly shapeType: 'line' | 'elbow-arrow'
+  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly rotation: number
+  readonly lineGeometry?: NativeLineGeometry
+}
+
+function selectedLineShape(backend: SlideAuthoringBackend): SelectedLineShape | null {
+  const session = backend.getSession()
+  if (session.selection.selectionIds.length !== 1) return null
+  const nodeId = session.selection.selectionIds[0]!
+  const view = buildSlideEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: session.selection.stateId,
+  })
+  const layer = view.layers.find((candidate) => (
+    candidate.selectionId === nodeId && candidate.source === session.scope
+  ))
+  if (!layer || !layer.effectiveVisible || layer.item.locked) return null
+  if (layer.item.kind !== 'native' || layer.item.content.nativeType !== 'shape') return null
+  const data = layer.item.content.data as {
+    shapeType?: unknown
+    lineGeometry?: NativeLineGeometry
+  }
+  if (data.shapeType !== 'line' && data.shapeType !== 'elbow-arrow') return null
+  return {
+    nodeId,
+    shapeType: data.shapeType,
+    frame: { ...layer.item.frame },
+    rotation: layer.item.rotation,
+    lineGeometry: data.lineGeometry,
+  }
+}
+
 function hitHandle(
   backend: SlideAuthoringBackend,
   world: StagePoint,
-): { kind: 'resize'; direction: StageResizeHandleDirection } | { kind: 'rotate' } | null {
+): { kind: 'resize'; direction: StageResizeHandleDirection } | { kind: 'rotate' } | { kind: 'line-endpoint'; line: SelectedLineShape; handle: LineHandleKind } | null {
+  const line = selectedLineShape(backend)
+  if (line) {
+    const points = lineHandleWorldPoints(line.frame, line.rotation, line.lineGeometry, line.shapeType)
+    for (const [handle, point] of [
+      ['start', points.start],
+      ['end', points.end],
+      ...(points.elbow ? [['elbow', points.elbow] as const] : []),
+    ] as Array<readonly [LineHandleKind, StagePoint]>) {
+      if (Math.hypot(world.x - point.x, world.y - point.y) <= HANDLE_HIT_RADIUS) {
+        return { kind: 'line-endpoint', line, handle }
+      }
+    }
+  }
   const session = backend.getSession()
   const hits = new Map(layerTargets(backend).map((target) => [target.layerItemId, target]))
   const selected = session.selection.selectionIds.map((id) => hits.get(id)).filter(
@@ -392,6 +473,8 @@ export function createSlideWorkspaceAuthoringController(
 ) {
   let gesture: SlideAuthoringGesture | null = null
   let preview: SlideEditorNodeTransform[] | null = null
+  let linePreview: SlideLinePreview | null = null
+  let lineGuides: { readonly x?: number; readonly y?: number } | null = null
 
   const readBackend = (): SlideAuthoringBackend | null => ports.getBackend()
 
@@ -418,6 +501,47 @@ export function createSlideWorkspaceAuthoringController(
     return backend ? overlayForSelection(backend, options, preview ?? undefined) : null
   }
 
+  const clearLineDrag = (): void => {
+    linePreview = null
+    lineGuides = null
+  }
+
+  /**
+   * Shared line handle math: the pointer is snapped (unless Alt) against stage
+   * edges, center lines and other visible unlocked layers, then frame and
+   * normalized geometry are recomputed. Degenerate results keep the last
+   * valid preview and must never be committed.
+   */
+  const computeLineDrag = (
+    active: LineEndpointGesture,
+    pointer: SlideAuthoringPointer,
+    options: StageViewportTransformOptions,
+    backend: SlideAuthoringBackend,
+  ): { authored: SlideLinePreview | null; snap: LineSnapResult } => {
+    const world = pointerToWorld(pointer, options)
+    const scale = viewportTransform(options).scale
+    const snap = snapLinePoint(
+      world,
+      collectLineSnapAxes(layerTargets(backend), active.nodeId),
+      scale,
+      pointer.altKey === true,
+    )
+    const authored = dragLineHandleGeometry({
+      shapeType: active.shapeType,
+      frame: active.frame,
+      rotation: active.rotation,
+      lineGeometry: active.lineGeometry,
+      handle: active.handle,
+      world: snap.point,
+    })
+    return {
+      authored: authored
+        ? { nodeId: active.nodeId, frame: authored.frame, lineGeometry: authored.lineGeometry }
+        : null,
+      snap,
+    }
+  }
+
   const selectFromLayerIds = (
     layerItemIds: readonly string[],
     options: StageViewportTransformOptions,
@@ -433,6 +557,7 @@ export function createSlideWorkspaceAuthoringController(
     ports.commandPort.afterSelectLayers?.(command)
     gesture = null
     preview = null
+    clearLineDrag()
     const next = readBackend() ?? backend
     return v9Result(next, options, { command })
   }
@@ -447,6 +572,20 @@ export function createSlideWorkspaceAuthoringController(
     const handle = hitHandle(backend, world)
     const writable = writableNativeTransforms(backend)
 
+    if (handle?.kind === 'line-endpoint') {
+      gesture = {
+        type: 'line-endpoint',
+        nodeId: handle.line.nodeId,
+        handle: handle.handle,
+        shapeType: handle.line.shapeType,
+        frame: handle.line.frame,
+        rotation: handle.line.rotation,
+        lineGeometry: handle.line.lineGeometry,
+      }
+      preview = null
+      clearLineDrag()
+      return v9Result(backend, options, { linePreview: null, guides: null })
+    }
     if (handle?.kind === 'resize' && writable.length > 0) {
       gesture = {
         type: 'resize',
@@ -476,7 +615,11 @@ export function createSlideWorkspaceAuthoringController(
       return v9Result(backend, options, { preview })
     }
 
-    const hit = hitTestV9SlideLayerItems(layerTargets(backend), world)
+    const hit = hitTestV9SlideLayerItems(
+      layerTargets(backend),
+      world,
+      viewportTransform(options).scale,
+    )
     if (hit) {
       const command = runCommand((current) =>
         current.selectLayers([hit.layerItemId], pointer.additive === true, {
@@ -518,6 +661,14 @@ export function createSlideWorkspaceAuthoringController(
     const world = pointerToWorld(pointer, options)
     if (!gesture) return v9Result(backend, options)
 
+    if (gesture.type === 'line-endpoint') {
+      const { authored, snap } = computeLineDrag(gesture, pointer, options, backend)
+      if (authored) linePreview = authored
+      lineGuides = snap.guideX !== undefined || snap.guideY !== undefined
+        ? { x: snap.guideX, y: snap.guideY }
+        : null
+      return v9Result(backend, options, { linePreview, guides: lineGuides })
+    }
     if (gesture.type === 'move') {
       preview = previewMove(gesture, world)
       return v9Result(backend, options, { preview })
@@ -566,6 +717,28 @@ export function createSlideWorkspaceAuthoringController(
       return v9Result(readBackend() ?? backend, options, { command, marquee: null })
     }
 
+    if (active.type === 'line-endpoint') {
+      const { authored } = computeLineDrag(active, pointer, options, backend)
+      clearLineDrag()
+      preview = null
+      if (!authored) {
+        // Degenerate geometry (collapsed endpoints) is rejected: zero history.
+        return v9Result(backend, options, { linePreview: null, guides: null })
+      }
+      const snapshot = backend.getSnapshot()
+      const command = runCommand((current) =>
+        updateSlideShapeLineGeometry(current.getSession(), active.nodeId, {
+          frame: authored.frame,
+          lineGeometry: authored.lineGeometry,
+        }, { expectedRevision: snapshot.revision }),
+      )
+      return v9Result(readBackend() ?? backend, options, {
+        command,
+        linePreview: null,
+        guides: null,
+      })
+    }
+
     const next = active.type === 'move'
       ? previewMove(active, world)
       : active.type === 'resize'
@@ -602,6 +775,21 @@ export function createSlideWorkspaceAuthoringController(
     return v9Result(readBackend() ?? backend, options, { command })
   }
 
+  /**
+   * Drops any in-flight gesture without committing (Esc / pointercancel /
+   * surface switch). Never writes history.
+   */
+  const cancelGesture = (
+    options: StageViewportTransformOptions,
+  ): SlideWorkspaceAuthoringResult => {
+    gesture = null
+    preview = null
+    clearLineDrag()
+    const backend = readBackend()
+    if (!backend) return UNAVAILABLE_RESULT
+    return v9Result(backend, options, { linePreview: null, guides: null })
+  }
+
   return {
     resolveKind,
     currentTargets,
@@ -610,8 +798,10 @@ export function createSlideWorkspaceAuthoringController(
     pointerDown,
     pointerMove,
     pointerUp,
+    cancelGesture,
     transformSelection,
     previewTransforms: () => preview,
+    lineDragPreview: () => linePreview,
     hitTargets: () => {
       const backend = readBackend()
       return backend ? layerTargets(backend) : []

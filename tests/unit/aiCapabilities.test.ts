@@ -45,6 +45,7 @@ const siblingCatalogAvailable = existsSync(
 )
 const expectedProvenanceEntrypoints = [
   'scripts/generate-ai-capabilities.ts',
+  'src/shared/contracts/index.ts',
   'src/shared/courseProjectSchema.ts',
   'src/shared/publishedCourseSchema.ts',
 ]
@@ -328,6 +329,11 @@ describe('AI capability manifest generation', () => {
             id: 'controller-media',
             collector: 'collectCourseProjectControllerMediaHealth',
             source: 'src/shared/courseProjectHealth/controllerMedia.ts',
+          },
+          {
+            id: 'native',
+            collector: 'collectCourseProjectNativeHealth',
+            source: 'src/shared/courseProjectHealth/native.ts',
           },
         ],
       },
@@ -1215,8 +1221,10 @@ describe('AI capability manifest generation', () => {
     // These are transitive dependencies that the former hand-maintained list
     // repeatedly missed. The closure must follow barrels and nested schemas.
     expect(tracedSources).toContain('src/shared/contracts/course-project-v9/schema.ts')
+    expect(tracedSources).toContain('src/shared/contracts/course-project-v9/assetReferences.ts')
     expect(tracedSources).toContain('src/shared/contracts/course-state/schema.ts')
     expect(tracedSources).toContain('src/shared/contracts/course-state/types.ts')
+    expect(tracedSources).toContain('src/shared/contracts/interaction-v1/schema.ts')
     expect(tracedSources).toContain('src/shared/contracts/published-course-v2/schema.ts')
     expect(tracedSources).not.toContain(['src/shared/project', 'Schema.ts'].join(''))
     expect(tracedSources).not.toContain(['src/shared/project', 'Types.ts'].join(''))

@@ -6,6 +6,7 @@ import type { ComponentManifest } from '../componentTypes'
 import { composeCourseProjectLocation } from '../courseLayerComposition'
 import type {
   CourseProjectDocument,
+  CourseSurfaceDocument,
   FlowBlock,
   LayerItem,
   SlideSceneDocument,
@@ -532,6 +533,34 @@ export function collectCourseProjectControllerMediaHealth(
 
   hasExecutableAssetConsumer = hasExecutableRuntimeAssetConsumer(project)
     || hasExecutableAssetConsumer
+
+  addAssetCheck(
+    project,
+    drafts,
+    referenced,
+    project.backgroundAssetId,
+    'image',
+    '课程背景',
+    { path: ['backgroundAssetId'] },
+    false,
+  )
+  const surfaceBackgroundLabel: Record<CourseSurfaceDocument['type'], string> = {
+    slide: '演示页容器背景',
+    flow: 'Flow 背景',
+    'spatial-2d': 'Spatial 背景',
+  }
+  project.surfaces.forEach((surface, surfaceIndex) => {
+    addAssetCheck(
+      project,
+      drafts,
+      referenced,
+      surface.backgroundAssetId,
+      'image',
+      surfaceBackgroundLabel[surface.type],
+      { path: ['surfaces', surfaceIndex, 'backgroundAssetId'], surfaceId: surface.id },
+      false,
+    )
+  })
 
   slideScenes(project).forEach(({ scene, path, surface }) => {
     addAssetCheck(

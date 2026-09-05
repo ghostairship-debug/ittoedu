@@ -13,6 +13,7 @@ import type {
 } from './editorCanvasNode'
 import type { EditorPhaserBridge } from './EditorPhaserBridge'
 import { resizeWorldFrameFromHandle } from '../authoring/stageViewportTransform'
+import { lineHandleWorldPoints } from '../authoring/slideLineAuthoring'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
 import { ProxyNodeAdapter } from './adapters/ProxyNodeAdapter'
 import type { AdapterBounds, NodeAdapter } from './adapters/NodeAdapter'
@@ -688,7 +689,19 @@ export class EditorScene extends Phaser.Scene {
     }
     if (selected.length === 1) {
       const adapter = selected[0]
-      this.selectionOverlay.show(adapter.getBounds(), adapter.getNode().locked)
+      const node = adapter.getNode()
+      const lineHandles =
+        node.type === 'shape' &&
+        (node.shapeType === 'line' || node.shapeType === 'elbow-arrow') &&
+        !node.locked
+          ? lineHandleWorldPoints(
+              { x: node.x, y: node.y, width: node.width, height: node.height },
+              node.rotation,
+              node.lineGeometry,
+              node.shapeType,
+            )
+          : null
+      this.selectionOverlay.show(adapter.getBounds(), node.locked, lineHandles)
       return
     }
     const bounds = unionBounds(selected.map((adapter) => axisBounds(adapter.getBounds())))

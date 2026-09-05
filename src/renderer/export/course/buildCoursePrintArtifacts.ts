@@ -864,7 +864,7 @@ export async function buildCoursePrintArtifacts(
         })
         continue
       }
-      const docx = buildFlowDocx(surface, {
+      const docx = buildFlowDocx(published, surface.id, {
         resolveAsset: resolveAssetBytes,
         pageSize: plan.pageSize,
         orientation: plan.orientation,

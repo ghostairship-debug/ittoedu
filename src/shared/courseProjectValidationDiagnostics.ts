@@ -114,6 +114,42 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'Reported only when no Runtime or Component executable consumer can hide a dynamic projectAssetUrl lookup.',
   },
   {
+    code: 'background-asset-missing',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Course, surface, scene, or state background references an asset ID that does not exist in project assets.',
+  },
+  {
+    code: 'chart-donut-hole-size-invalid',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native donut chart holeSize must be a finite number between 10 and 90.',
+  },
+  {
+    code: 'chart-id-duplicate',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native chart categories, series, or data points contain duplicate IDs.',
+  },
+  {
+    code: 'chart-numeric-value-invalid',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native chart point values must be finite numbers.',
+  },
+  {
+    code: 'chart-pie-single-series',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native pie and donut charts must contain exactly one series.',
+  },
+  {
+    code: 'chart-series-points-mismatch',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native chart series points count or category references do not match categories.',
+  },
+  {
     code: 'component-asset-bytes-missing',
     status: 'archive-shadowed',
     sections: ['exportPreflight'],
@@ -258,6 +294,24 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'V9 Slide presentation Schema requires initialStateId to exist in the same scene.',
   },
   {
+    code: 'input-container-invalid',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native input elements are only permitted inside Slide scene layers.',
+  },
+  {
+    code: 'input-rule-family-incomplete',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native input ruleFamily references rules that do not exist in the host scene interactions.',
+  },
+  {
+    code: 'input-state-key-invalid',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native input stateKey or validityKey is not declared in courseState or has a mismatched type.',
+  },
+  {
     code: 'interaction-action-id-duplicate',
     status: 'schema-shadowed',
     sections: ['projectHealth'],
@@ -322,6 +376,18 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     status: 'active',
     sections: ['projectHealth'],
     note: 'Presentation trigger, condition and action state references are not cross-checked by the V9 Schema.',
+  },
+  {
+    code: 'line-geometry-shape-mismatch',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Shape node shapeType does not match lineGeometry presence or line kind.',
+  },
+  {
+    code: 'line-path-degenerate',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native line start and end coordinates coincide, creating a zero-length degenerate line.',
   },
   {
     code: 'looping-video-ended-unreachable',
@@ -496,6 +562,24 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     status: 'archive-shadowed',
     sections: ['exportPreflight'],
     note: 'The invoked asset warning is preceded by archive byte validation and Published source gates.',
+  },
+  {
+    code: 'table-dimension-invalid',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native table column width or row height is non-positive or non-finite.',
+  },
+  {
+    code: 'table-id-duplicate',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native table columns, rows, or cells contain duplicate IDs.',
+  },
+  {
+    code: 'table-matrix-mismatch',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Native table row cell count or cell columnId references do not match column definitions.',
   },
   {
     code: 'thumbnail-state-reference-missing',

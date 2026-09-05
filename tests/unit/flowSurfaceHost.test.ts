@@ -498,7 +498,7 @@ describe('Flow print and DOCX helpers', () => {
     await host.destroy()
   })
 
-  it('explicitly reports that reflowed print and DOCX omit page overlays', () => {
+  it('omits page overlays in reflowed print but projects them as anchored DrawingML in DOCX', () => {
     const surface = flowSurface()
     surface.surfaceLayerItems.push({
       item: overlayText(),
@@ -513,11 +513,17 @@ describe('Flow print and DOCX helpers', () => {
     expect(html).toContain('data-flow-omitted-floating-layer-count="1"')
     expect(html).not.toContain('可交互提示')
     const docx = buildFlowDocx(surface)
-    expect(docx.warnings).toContain('DOCX 采用正文重排，已省略 1 个页面浮层。')
-    expect(docx.report).toContainEqual({
-      disposition: 'omitted',
-      detail: 'DOCX 采用正文重排，已省略 1 个页面浮层。',
-    })
+    expect(docx.warnings.some((warning) => warning.includes('已省略'))).toBe(false)
+    const files = unzipSync(docx.bytes)
+    const documentXml = strFromU8(files['word/document.xml']!)
+    expect(documentXml).toContain('可交互提示')
+    expect(documentXml).toContain('<wp:anchor')
+    expect(docx.layerReport).toContainEqual(expect.objectContaining({
+      layerItemId: 'flow-overlay-text',
+      scope: 'surface',
+      disposition: 'editable-shape',
+      reasonCode: 'viewport-to-document-start',
+    }))
   })
 })
 

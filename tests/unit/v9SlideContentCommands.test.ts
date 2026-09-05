@@ -7,7 +7,7 @@ import {
   type CourseProjectDocument,
 } from '@/shared/courseProjectTypes'
 import type { ComponentManifestV4 } from '@/shared/componentTypes'
-import { createImageNode, createTextNode, createVideoNode } from '@/renderer/project/nativeNodeFactories'
+import { createImageNode, createShapeNode, createTextNode, createVideoNode } from '@/renderer/project/nativeNodeFactories'
 import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
@@ -20,6 +20,7 @@ import {
   addSlideComponentLayer,
   addSlideImageLayer,
   addSlideRuntimeLayer,
+  addSlideShapeLayer,
   addSlideTextLayer,
   addSlideVideoLayer,
   applySlideComponentPreset,
@@ -41,6 +42,7 @@ import {
   updateSlideNativeLayerContent,
   updateSlideRuntimeAsset,
   updateSlideRuntimeContentValue,
+  updateSlideShapeLineGeometry,
   upsertSlideInteractionRule,
 } from '@/renderer/course/v9SlideContentCommands'
 
@@ -694,5 +696,256 @@ describe('V9 Slide content commands', () => {
     expect(addSlideImageLayer(globalScope, { assetId: 'asset-photo' }).reason)
       .toBe(SLIDE_REJECT_WRONG_OWNER)
     expect(globalScope.history.present).toBe(session.history.present)
+  })
+
+  describe('Slide shape line geometry', () => {
+    it('commits addSlideShapeLayer with a straight line frame+geometry as one history entry', () => {
+      const result = addSlideShapeLayer(
+        openSlideAuthoringSession(documentShell()),
+        {
+          shapeType: 'line',
+          id: 'line-1',
+          frame: { x: 100, y: 50, width: 300, height: 200 },
+          lineGeometry: { kind: 'straight', start: [0, 1], end: [1, 0] },
+        },
+        { now: NOW },
+      )
+      expect(result.historyEntry).toBe(true)
+      const session = requireSession(result)
+      expect(session.history.past).toHaveLength(1)
+      const item = sceneItems(session)[0]!
+      expect(item.frame).toMatchObject({ x: 100, y: 50, width: 300, height: 200 })
+      if (item.kind !== 'native' || item.content.nativeType !== 'shape') throw new Error('expected shape')
+      expect(item.content.data.shapeType).toBe('line')
+      expect(item.content.data.lineGeometry).toEqual({ kind: 'straight', start: [0, 1], end: [1, 0] })
+    })
+
+    it('commits addSlideShapeLayer with an elbow frame+geometry as one history entry', () => {
+      const result = addSlideShapeLayer(
+        openSlideAuthoringSession(documentShell()),
+        {
+          shapeType: 'elbow-arrow',
+          id: 'elbow-1',
+          frame: { x: 10, y: 20, width: 200, height: 100 },
+          lineGeometry: { kind: 'elbow', start: [0, 0.1], end: [1, 0.9], axis: 'vertical', position: 0.4 },
+        },
+        { now: NOW },
+      )
+      expect(result.historyEntry).toBe(true)
+      const session = requireSession(result)
+      expect(session.history.past).toHaveLength(1)
+      const item = sceneItems(session)[0]!
+      expect(item.frame).toMatchObject({ x: 10, y: 20, width: 200, height: 100 })
+      if (item.kind !== 'native' || item.content.nativeType !== 'shape') throw new Error('expected shape')
+      expect(item.content.data.shapeType).toBe('elbow-arrow')
+      expect(item.content.data.lineGeometry).toEqual({
+        kind: 'elbow', start: [0, 0.1], end: [1, 0.9], axis: 'vertical', position: 0.4,
+      })
+    })
+
+    it('adds a default line/elbow-arrow shape with neither frame nor lineGeometry, leaving geometry unmaterialized', () => {
+      const result = addSlideShapeLayer(openSlideAuthoringSession(documentShell()), {
+        shapeType: 'line',
+        id: 'line-default',
+      }, { now: NOW })
+      expect(result.historyEntry).toBe(true)
+      const session = requireSession(result)
+      const item = sceneItems(session)[0]!
+      if (item.kind !== 'native' || item.content.nativeType !== 'shape') throw new Error('expected shape')
+      expect(item.content.data.lineGeometry).toBeUndefined()
+    })
+
+    it('rejects addSlideShapeLayer when shapeType is line but lineGeometry.kind is elbow, with zero writes', () => {
+      const session = openSlideAuthoringSession(documentShell())
+      const result = addSlideShapeLayer(session, {
+        shapeType: 'line',
+        frame: { x: 0, y: 0, width: 100, height: 50 },
+        lineGeometry: { kind: 'elbow', start: [0, 0.2], end: [1, 0.8], axis: 'horizontal', position: 0.5 },
+      }, { now: NOW })
+      // `SlideCommandError`'s public `.reason` is the short rejection code;
+      // the Chinese detail lives only in the underlying `Error.message` and
+      // is not part of `SlideCommandResult`, so these assertions target the
+      // code (matching how `SLIDE_REJECT_LOCKED` etc. are asserted below).
+      expect(result.ok).toBe(false)
+      expect(result.historyEntry).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(session.history.present.surfaces[0]).toEqual(documentShell().surfaces[0])
+      expect(session.history.present.revision).toBe(documentShell().revision)
+    })
+
+    it('rejects addSlideShapeLayer when shapeType is elbow-arrow but lineGeometry.kind is straight, with zero writes', () => {
+      const session = openSlideAuthoringSession(documentShell())
+      const result = addSlideShapeLayer(session, {
+        shapeType: 'elbow-arrow',
+        frame: { x: 0, y: 0, width: 100, height: 50 },
+        lineGeometry: { kind: 'straight', start: [0, 0.5], end: [1, 0.5] },
+      }, { now: NOW })
+      expect(result.ok).toBe(false)
+      expect(result.historyEntry).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(session.history.present.surfaces[0]).toEqual(documentShell().surfaces[0])
+    })
+
+    it('rejects a direct-draw frame submitted without lineGeometry, with zero writes', () => {
+      const session = openSlideAuthoringSession(documentShell())
+      const result = addSlideShapeLayer(session, {
+        shapeType: 'line',
+        frame: { x: 0, y: 0, width: 100, height: 50 },
+      }, { now: NOW })
+      expect(result.ok).toBe(false)
+      expect(result.historyEntry).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(session.history.present.revision).toBe(documentShell().revision)
+    })
+
+    it('rejects lineGeometry submitted without a frame, with zero writes', () => {
+      const session = openSlideAuthoringSession(documentShell())
+      const result = addSlideShapeLayer(session, {
+        shapeType: 'line',
+        lineGeometry: { kind: 'straight', start: [0, 0.2], end: [1, 0.9] },
+      }, { now: NOW })
+      expect(result.ok).toBe(false)
+      expect(result.historyEntry).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(session.history.present.revision).toBe(documentShell().revision)
+    })
+
+    it('materializes lineGeometry on the first updateSlideShapeLineGeometry commit as one history entry', () => {
+      let session = requireSession(addSlideShapeLayer(
+        openSlideAuthoringSession(documentShell()),
+        { shapeType: 'line', id: 'line-update' },
+        { now: NOW },
+      ))
+      const before = readSlideNativeLayer(session, 'line-update').content as { data: { lineGeometry?: unknown } }
+      expect(before.data.lineGeometry).toBeUndefined()
+      const historyBefore = session.history.past.length
+
+      const result = updateSlideShapeLineGeometry(session, 'line-update', {
+        frame: { x: 40, y: 60, width: 220, height: 90 },
+        lineGeometry: { kind: 'straight', start: [0.1, 0.2], end: [0.9, 0.8] },
+      }, { now: NOW })
+      expect(result.historyEntry).toBe(true)
+      session = requireSession(result)
+      expect(session.history.past.length).toBe(historyBefore + 1)
+      const layer = readSlideNativeLayer(session, 'line-update')
+      expect(layer.frame).toMatchObject({ x: 40, y: 60, width: 220, height: 90 })
+      if (layer.content.nativeType !== 'shape') throw new Error('expected shape')
+      expect(layer.content.data.lineGeometry).toEqual({ kind: 'straight', start: [0.1, 0.2], end: [0.9, 0.8] })
+    })
+
+    it('is a no-op (ok, zero history) when the submitted frame and geometry already match', () => {
+      let session = requireSession(addSlideShapeLayer(
+        openSlideAuthoringSession(documentShell()),
+        {
+          shapeType: 'line',
+          id: 'line-noop',
+          frame: { x: 40, y: 60, width: 220, height: 90 },
+          lineGeometry: { kind: 'straight', start: [0.1, 0.2], end: [0.9, 0.8] },
+        },
+        { now: NOW },
+      ))
+      const historyBefore = session.history.past.length
+      const result = updateSlideShapeLineGeometry(session, 'line-noop', {
+        frame: { x: 40, y: 60, width: 220, height: 90 },
+        lineGeometry: { kind: 'straight', start: [0.1, 0.2], end: [0.9, 0.8] },
+      }, { now: NOW })
+      expect(result.ok).toBe(true)
+      expect(result.historyEntry).toBe(false)
+      session = requireSession(result)
+      expect(session.history.past.length).toBe(historyBefore)
+    })
+
+    it('rejects updateSlideShapeLineGeometry against a locked shape, with zero writes', () => {
+      const project = documentShell()
+      const surface = project.surfaces[0]
+      if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+      const node = createShapeNode('line', { id: 'line-locked', locked: true })
+      surface.scenes[0]!.layerItems = [sceneNodeToCourseLayerItem(node, 1)]
+      const session = openSlideAuthoringSession(courseProjectDocumentSchema.parse(project))
+      const historyBefore = session.history.past.length
+      const result = updateSlideShapeLineGeometry(session, 'line-locked', {
+        frame: { x: 0, y: 0, width: 100, height: 40 },
+        lineGeometry: { kind: 'straight', start: [0, 0.5], end: [1, 0.5] },
+      })
+      expect(result.ok).toBe(false)
+      expect(result.reason).toBe(SLIDE_REJECT_LOCKED)
+      expect(result.historyEntry).toBe(false)
+      expect(session.history.past.length).toBe(historyBefore)
+    })
+
+    it('rejects updateSlideShapeLineGeometry against a native layer that is not a shape', () => {
+      const session = requireSession(addSlideImageLayer(
+        openSlideAuthoringSession(documentShell()),
+        { assetId: 'asset-photo', id: 'not-a-line' },
+        { now: NOW },
+      ))
+      const result = updateSlideShapeLineGeometry(session, 'not-a-line', {
+        frame: { x: 0, y: 0, width: 100, height: 40 },
+        lineGeometry: { kind: 'straight', start: [0, 0.5], end: [1, 0.5] },
+      })
+      expect(result.ok).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(result.historyEntry).toBe(false)
+    })
+
+    it('rejects updateSlideShapeLineGeometry against a non-line/elbow shape', () => {
+      const session = requireSession(addSlideShapeLayer(
+        openSlideAuthoringSession(documentShell()),
+        { shapeType: 'rectangle', id: 'rect-not-a-line' },
+        { now: NOW },
+      ))
+      const result = updateSlideShapeLineGeometry(session, 'rect-not-a-line', {
+        frame: { x: 0, y: 0, width: 100, height: 40 },
+        lineGeometry: { kind: 'straight', start: [0, 0.5], end: [1, 0.5] },
+      })
+      expect(result.ok).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(result.historyEntry).toBe(false)
+    })
+
+    it('rejects updateSlideShapeLineGeometry when the submitted geometry kind does not match the shape', () => {
+      const session = requireSession(addSlideShapeLayer(
+        openSlideAuthoringSession(documentShell()),
+        { shapeType: 'line', id: 'line-kind-mismatch' },
+        { now: NOW },
+      ))
+      const result = updateSlideShapeLineGeometry(session, 'line-kind-mismatch', {
+        frame: { x: 0, y: 0, width: 100, height: 40 },
+        lineGeometry: { kind: 'elbow', start: [0, 0.2], end: [1, 0.8], axis: 'horizontal', position: 0.5 },
+      })
+      expect(result.ok).toBe(false)
+      expect(result.reason).toBe('invalid-target')
+      expect(result.historyEntry).toBe(false)
+    })
+
+    it('updates line geometry for a global-scope shape without touching scene layerItems', () => {
+      const project = documentShell()
+      project.globalLayerItems.push({
+        item: sceneNodeToCourseLayerItem(createShapeNode('line', { id: 'global-line', x: 10, y: 10 }), 0),
+        visibility: { mode: 'all', locationIds: [] },
+        plane: 'overlay',
+      })
+      let session = openSlideAuthoringSession(courseProjectDocumentSchema.parse(project))
+      session = requireSession(setSlideEditingScope(session, 'global'))
+
+      const result = updateSlideShapeLineGeometry(session, 'global-line', {
+        frame: { x: 30, y: 40, width: 260, height: 90 },
+        lineGeometry: { kind: 'straight', start: [0.2, 0], end: [0.8, 1] },
+      }, { now: NOW })
+      expect(result.ok).toBe(true)
+      expect(result.historyEntry).toBe(true)
+      const updatedSession = requireSession(result)
+      const globalItem = updatedSession.history.present.globalLayerItems.find(
+        (entry) => entry.item.layerItemId === 'global-line',
+      )
+      expect(globalItem?.item.frame).toMatchObject({ x: 30, y: 40, width: 260, height: 90 })
+      if (globalItem?.item.kind !== 'native' || globalItem.item.content.nativeType !== 'shape') {
+        throw new Error('expected global shape')
+      }
+      expect(globalItem.item.content.data.lineGeometry).toEqual({
+        kind: 'straight', start: [0.2, 0], end: [0.8, 1],
+      })
+      expect(sceneItems(updatedSession)).toEqual(sceneItems(session))
+    })
   })
 })

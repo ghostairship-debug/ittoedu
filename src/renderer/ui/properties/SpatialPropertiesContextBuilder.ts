@@ -3,6 +3,8 @@ import type {
   CourseAuthoringTarget,
 } from '../../authoring/courseAuthoringSession'
 import { COURSE_AUTHORING_STALE_SESSION_REASON } from '../../authoring/courseAuthoringSession'
+import type { AssetMeta } from '../../../shared/contracts/media-v1'
+import type { CourseBackgroundFields } from '../../../shared/effectiveBackground'
 import type {
   SpatialAuthoringIntent,
   SpatialAuthoringIntentInput,
@@ -97,6 +99,10 @@ function createCommands(input: {
     setBackgroundColor: (backgroundColor) => run(
       { kind: 'surface', field: 'backgroundColor' },
       { kind: 'set-surface-background', backgroundColor },
+    ),
+    updateBackground: (patch) => run(
+      { kind: 'surface', field: 'background' },
+      { kind: 'set-surface-background-patch', patch },
     ),
     setShowCameraFrames: (show) => world('session.showCameraFrames', {
       kind: 'set-show-camera-frames',
@@ -214,6 +220,8 @@ function createCommands(input: {
 function buildContext(input: {
   readonly kind: SpatialPropertiesContext['kind']
   readonly view: SpatialEditorView
+  readonly course: CourseBackgroundFields
+  readonly assets: Readonly<Record<string, AssetMeta>>
   readonly sessionToken: CourseAuthoringSessionToken
   readonly contentEdit: SpatialWorldContentEditSession | null
   readonly showCameraFrames: boolean
@@ -232,6 +240,8 @@ function buildContext(input: {
   return {
     kind: input.kind,
     view: input.view,
+    course: input.course,
+    assets: input.assets,
     sessionCamera: input.view.sessionCamera,
     showCameraFrames: input.showCameraFrames,
     playbackPathId: input.playbackPathId,
@@ -283,6 +293,8 @@ function buildContext(input: {
 
 export function buildSpatialPropertiesOwner(input: {
   readonly view: SpatialEditorView | null
+  readonly course: CourseBackgroundFields
+  readonly assets: Readonly<Record<string, AssetMeta>>
   readonly scope: 'global' | 'surface' | 'world'
   readonly selectionIds: readonly string[]
   readonly showCameraFrames: boolean
@@ -339,6 +351,8 @@ export function buildSpatialPropertiesOwner(input: {
     const pageContext = buildContext({
       kind: 'spatial-page',
       view,
+      course: input.course,
+      assets: input.assets,
       sessionToken: token,
       contentEdit: input.contentEdit,
       showCameraFrames: input.showCameraFrames,
@@ -358,6 +372,8 @@ export function buildSpatialPropertiesOwner(input: {
         ? buildContext({
             kind: 'spatial-graph',
             view,
+            course: input.course,
+            assets: input.assets,
             sessionToken: token,
             contentEdit: input.contentEdit,
             showCameraFrames: input.showCameraFrames,

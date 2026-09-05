@@ -5,13 +5,27 @@ import type {
   FormulaAstNode,
   FormulaNode,
   ImageNode,
+  NativeChartContent,
   NativeRenderableBase,
+  NativeTableContent,
   ShapeNode,
   ShapeType,
   TeacherControllerNode,
   TextNode,
   VideoNode,
 } from '@/shared/contracts/native-v1'
+import type {
+  NativeChartCategory,
+  NativeChartCommonStyle,
+  NativeChartPoint,
+  NativeChartSeries,
+  NativeTableCell,
+  NativeTableCellStyle,
+  NativeTableColumn,
+  NativeTableRow,
+  NativeTableStyle,
+} from '@/shared/contracts/native-v1/types'
+import type { NativeLayerItem } from '@/shared/contracts/course-project-v9/types'
 import type { ComponentManifest } from '@/shared/componentTypes'
 
 const DEFAULT_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
@@ -466,3 +480,340 @@ export function createExternalComponentNode(
     props: { ...(options.props ?? {}) },
   }
 }
+
+export type TableFactoryNode = Omit<NativeRenderableBase, 'type'> & {
+  type: 'table'
+} & NativeTableContent
+
+export type TableNodeOptions = Partial<Omit<TableFactoryNode, 'id' | 'type' | 'columns' | 'rows' | 'style'>> & {
+  id?: string
+  columns?: NativeTableColumn[]
+  rows?: NativeTableRow[]
+  headerRowCount?: number
+  style?: Partial<NativeTableStyle>
+  idFactory?: IdFactory
+}
+
+export function createTableNode(options: TableNodeOptions = {}): TableFactoryNode {
+  const idFactory = options.idFactory ?? nanoid
+  const width = options.width ?? 600
+  const height = options.height ?? 120
+  const colCount = 3
+  const colWidth = Math.round(width / colCount)
+  const columns: NativeTableColumn[] = options.columns
+    ? structuredClone(options.columns)
+    : Array.from({ length: colCount }, () => ({
+        id: nextId('col', undefined, idFactory),
+        width: colWidth,
+      }))
+
+  const rowCount = 3
+  const rowHeight = Math.round(height / rowCount)
+  const rows: NativeTableRow[] = options.rows
+    ? structuredClone(options.rows)
+    : Array.from({ length: rowCount }, (_, rowIndex) => ({
+        id: nextId('row', undefined, idFactory),
+        height: rowHeight,
+        cells: columns.map((col, colIndex) => ({
+          id: nextId('cell', undefined, idFactory),
+          columnId: col.id,
+          text: rowIndex === 0 ? `标题 ${colIndex + 1}` : `单元格 ${rowIndex + 1}-${colIndex + 1}`,
+          style: rowIndex === 0 ? { bold: true, fillColor: '#f3f4f6' } : undefined,
+        })),
+      }))
+
+  const defaultStyle: NativeTableStyle = {
+    fillColor: '#ffffff',
+    fillOpacity: 1,
+    borderColor: '#d1d5db',
+    borderOpacity: 1,
+    borderWidth: 1,
+    lineStyle: 'solid',
+    textColor: '#1f2937',
+    fontFamily: DEFAULT_FONT_FAMILY,
+    fontSize: 16,
+    horizontalAlign: 'left',
+    verticalAlign: 'middle',
+    cellPadding: 8,
+  }
+
+  return {
+    id: nextId('table', options.id, idFactory),
+    name: options.name ?? '表格',
+    type: 'table',
+    x: options.x ?? (CANVAS_WIDTH - width) / 2,
+    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    width,
+    height,
+    rotation: options.rotation ?? 0,
+    opacity: options.opacity ?? 1,
+    visible: options.visible ?? true,
+    locked: options.locked ?? false,
+    playbackInitialVisibility: options.playbackInitialVisibility ?? 'inherit',
+    columns,
+    rows,
+    headerRowCount: options.headerRowCount ?? 1,
+    style: {
+      ...defaultStyle,
+      ...(options.style ?? {}),
+    },
+  }
+}
+
+export function createTableLayerItem(node: TableFactoryNode, order = 0): NativeLayerItem {
+  return {
+    layerItemId: node.id,
+    label: node.name,
+    frame: {
+      mode: 'absolute',
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+    },
+    order,
+    visible: node.visible,
+    locked: node.locked,
+    rotation: node.rotation,
+    opacity: node.opacity,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: node.playbackInitialVisibility,
+    kind: 'native',
+    content: {
+      nativeType: 'table',
+      data: {
+        columns: structuredClone(node.columns),
+        rows: structuredClone(node.rows),
+        headerRowCount: node.headerRowCount,
+        style: structuredClone(node.style),
+      },
+    },
+  }
+}
+
+export function rebuildTableItemIds(
+  content: NativeTableContent,
+  idFactory: IdFactory = nanoid,
+): NativeTableContent {
+  const colIdMap = new Map<string, string>()
+  const nextColumns = content.columns.map((col) => {
+    const newId = nextId('col', undefined, idFactory)
+    colIdMap.set(col.id, newId)
+    return { ...col, id: newId }
+  })
+  const nextRows = content.rows.map((row) => {
+    const newRowId = nextId('row', undefined, idFactory)
+    const newCells = row.cells.map((cell) => {
+      const newCellId = nextId('cell', undefined, idFactory)
+      const newColId = colIdMap.get(cell.columnId) ?? cell.columnId
+      return {
+        ...cell,
+        id: newCellId,
+        columnId: newColId,
+        style: cell.style ? { ...cell.style } : undefined,
+      }
+    })
+    return {
+      ...row,
+      id: newRowId,
+      cells: newCells,
+    }
+  })
+  return {
+    ...content,
+    columns: nextColumns,
+    rows: nextRows,
+    style: { ...content.style },
+  }
+}
+
+export type ChartFactoryNode = Omit<NativeRenderableBase, 'type'> & {
+  type: 'chart'
+} & NativeChartContent
+
+export type ChartNodeOptions = Partial<Omit<ChartFactoryNode, 'id' | 'type' | 'categories' | 'series' | 'style'>> & {
+  id?: string
+  chartType?: 'bar' | 'line' | 'area' | 'pie' | 'donut'
+  categories?: NativeChartCategory[]
+  series?: NativeChartSeries[]
+  style?: Partial<NativeChartContent['style']>
+  idFactory?: IdFactory
+}
+
+export function createChartNode(options: ChartNodeOptions = {}): ChartFactoryNode {
+  const idFactory = options.idFactory ?? nanoid
+  const chartType = options.chartType ?? 'bar'
+  const width = options.width ?? 600
+  const height = options.height ?? 400
+
+  const defaultTitle =
+    chartType === 'pie'
+      ? '饼图'
+      : chartType === 'donut'
+        ? '环形图'
+        : chartType === 'line'
+          ? '折线图'
+          : chartType === 'area'
+            ? '面积图'
+            : '柱状图'
+
+  const categories: NativeChartCategory[] = options.categories
+    ? structuredClone(options.categories)
+    : [
+        { id: nextId('cat', undefined, idFactory), label: '类别 1' },
+        { id: nextId('cat', undefined, idFactory), label: '类别 2' },
+        { id: nextId('cat', undefined, idFactory), label: '类别 3' },
+      ]
+
+  let series: NativeChartSeries[]
+  if (options.series) {
+    series = structuredClone(options.series)
+  } else if (chartType === 'pie' || chartType === 'donut') {
+    series = [
+      {
+        id: nextId('ser', undefined, idFactory),
+        name: '系列 1',
+        color: '#2563eb',
+        points: [
+          { id: nextId('pt', undefined, idFactory), categoryId: categories[0]!.id, value: 30 },
+          { id: nextId('pt', undefined, idFactory), categoryId: categories[1]!.id, value: 50 },
+          { id: nextId('pt', undefined, idFactory), categoryId: categories[2]!.id, value: 20 },
+        ],
+      },
+    ]
+  } else {
+    series = [
+      {
+        id: nextId('ser', undefined, idFactory),
+        name: '系列 1',
+        color: '#2563eb',
+        points: [
+          { id: nextId('pt', undefined, idFactory), categoryId: categories[0]!.id, value: 10 },
+          { id: nextId('pt', undefined, idFactory), categoryId: categories[1]!.id, value: 25 },
+          { id: nextId('pt', undefined, idFactory), categoryId: categories[2]!.id, value: 15 },
+        ],
+      },
+    ]
+  }
+
+  const commonStyle: NativeChartCommonStyle = {
+    backgroundColor: '#ffffff',
+    backgroundOpacity: 1,
+    fontFamily: DEFAULT_FONT_FAMILY,
+    fontSize: 14,
+    textColor: '#1f2937',
+    showLegend: true,
+    legendPosition: 'top',
+    showDataLabels: false,
+  }
+
+  let style: NativeChartContent['style']
+  if (chartType === 'bar' || chartType === 'line' || chartType === 'area') {
+    style = {
+      ...commonStyle,
+      showCategoryAxis: true,
+      showValueAxis: true,
+      showGridLines: true,
+      ...(options.style as object ?? {}),
+    }
+  } else if (chartType === 'donut') {
+    style = {
+      ...commonStyle,
+      holeSize: 50,
+      ...(options.style as object ?? {}),
+    }
+  } else {
+    style = {
+      ...commonStyle,
+      ...(options.style as object ?? {}),
+    }
+  }
+
+  return {
+    id: nextId('chart', options.id, idFactory),
+    name: options.name ?? defaultTitle,
+    type: 'chart',
+    x: options.x ?? (CANVAS_WIDTH - width) / 2,
+    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    width,
+    height,
+    rotation: options.rotation ?? 0,
+    opacity: options.opacity ?? 1,
+    visible: options.visible ?? true,
+    locked: options.locked ?? false,
+    playbackInitialVisibility: options.playbackInitialVisibility ?? 'inherit',
+    chartType,
+    title: options.title ?? defaultTitle,
+    categories,
+    series: series as [NativeChartSeries],
+    style: style as any,
+  } as ChartFactoryNode
+}
+
+export function createChartLayerItem(node: ChartFactoryNode, order = 0): NativeLayerItem {
+  return {
+    layerItemId: node.id,
+    label: node.name,
+    frame: {
+      mode: 'absolute',
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+    },
+    order,
+    visible: node.visible,
+    locked: node.locked,
+    rotation: node.rotation,
+    opacity: node.opacity,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: node.playbackInitialVisibility,
+    kind: 'native',
+    content: {
+      nativeType: 'chart',
+      data: structuredClone({
+        chartType: node.chartType,
+        title: node.title,
+        categories: node.categories,
+        series: node.series,
+        style: node.style,
+      }) as NativeChartContent,
+    },
+  }
+}
+
+export function rebuildChartItemIds(
+  content: NativeChartContent,
+  idFactory: IdFactory = nanoid,
+): NativeChartContent {
+  const catIdMap = new Map<string, string>()
+  const nextCategories = content.categories.map((cat) => {
+    const newId = nextId('cat', undefined, idFactory)
+    catIdMap.set(cat.id, newId)
+    return { ...cat, id: newId }
+  })
+  const nextSeries = content.series.map((ser) => {
+    const newSerId = nextId('ser', undefined, idFactory)
+    const nextPoints = ser.points.map((pt) => {
+      const newPtId = nextId('pt', undefined, idFactory)
+      const newCatId = catIdMap.get(pt.categoryId) ?? pt.categoryId
+      return {
+        ...pt,
+        id: newPtId,
+        categoryId: newCatId,
+      }
+    })
+    return {
+      ...ser,
+      id: newSerId,
+      points: nextPoints,
+    }
+  })
+  return {
+    ...content,
+    categories: nextCategories,
+    series: nextSeries as typeof content.series,
+    style: { ...content.style },
+  } as NativeChartContent
+}
+

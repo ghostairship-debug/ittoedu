@@ -2,6 +2,7 @@ import type {
   CourseAuthoringSessionToken,
   CourseAuthoringTarget,
 } from '../../authoring/courseAuthoringSession'
+import type { CourseBackgroundFields } from '../../../shared/effectiveBackground'
 import { COURSE_AUTHORING_STALE_SESSION_REASON } from '../../authoring/courseAuthoringSession'
 import {
   markFlowTextComposing,
@@ -25,6 +26,8 @@ type FlowPropertiesIntent = Extract<FlowAuthoringIntent, {
   readonly kind:
     | 'rename-page'
     | 'set-paper-background'
+    | 'set-surface-background'
+    | 'import-surface-background-asset'
     | 'patch-block'
     | 'replace-media-asset'
     | 'import-replacement-media'
@@ -37,6 +40,7 @@ type FlowPropertiesIntent = Extract<FlowAuthoringIntent, {
     | 'patch-overlay-paper-space'
     | 'commit-overlay-formula'
     | 'commit-block-formula'
+    | 'patch-overlay-properties'
 }>
 
 export type FlowPropertiesOwnerResult =
@@ -131,6 +135,13 @@ function createCommands(input: {
       kind: 'set-paper-background',
       backgroundColor,
     }),
+    updateSurfaceBackground: (patch) => run({ kind: 'set-surface-background', patch }),
+    importSurfaceBackgroundAsset: (imported) => run({
+      kind: 'import-surface-background-asset',
+      name: imported.name,
+      mimeType: imported.mimeType,
+      bytes: imported.bytes,
+    }),
     patchSelectedBlock: (patch) => run({ kind: 'patch-block', patch }),
     replaceMediaAsset: (assetId) => run({ kind: 'replace-media-asset', assetId }),
     importReplacementMedia: (imported) => run({
@@ -157,6 +168,10 @@ function createCommands(input: {
       kind: 'commit-overlay-formula',
       ast,
       accessibleText,
+    }),
+    patchOverlayProperties: (patch) => run({
+      kind: 'patch-overlay-properties',
+      patch,
     }),
     beginBlockFormulaEdit: () => {
       if (!input.textEdit) dispatch({ kind: 'begin-formula-edit' })
@@ -215,6 +230,7 @@ export function buildFlowPropertiesOwner(input: {
   readonly assets: FlowPropertiesContext['assets']
   readonly textEdit: FlowTextEditSession | null
   readonly authoringToken: CourseAuthoringSessionToken | null
+  readonly course: CourseBackgroundFields
   readonly runIntent: (
     target: CourseAuthoringTarget,
     intent: FlowAuthoringIntent,
@@ -264,6 +280,7 @@ export function buildFlowPropertiesOwner(input: {
         selection,
         textEdit: input.textEdit,
         draftBindingKey: draftBindingKey(target),
+        course: input.course,
         commands: createCommands({
           target,
           selection,

@@ -31,6 +31,8 @@ import {
   type NodeMotionAction,
 } from '../../shared/interactionTypes'
 import type { ShapeType } from '../../shared/contracts/native-v1'
+import { nativeLineGeometrySchema } from '../../shared/contracts/native-v1'
+import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import {
   patchEffectiveLayerPropertiesAtTarget,
   patchEffectiveLayerPropertiesAtTargets,
@@ -139,6 +141,12 @@ export interface AddSlideShapeLayerInput {
   readonly x?: number
   readonly y?: number
   readonly label?: string
+  /**
+   * Direct-draw path: one pointerdown→pointerup gesture commits frame and
+   * parameterized geometry together. Both must be present for line tools.
+   */
+  readonly frame?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly lineGeometry?: NativeLineGeometry
 }
 
 export interface AddSlideImageLayerInput {
@@ -543,9 +551,11 @@ function sparseObjectDiff(
 ): Record<string, unknown> {
   const diff: Record<string, unknown> = {}
   for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
-    if (!sameJson(base[key], next[key]) && Object.prototype.hasOwnProperty.call(next, key)) {
-      diff[key] = structuredClone(next[key])
-    }
+    if (sameJson(base[key], next[key])) continue
+    // `null` rides the shared merge contract as a key deletion.
+    diff[key] = Object.prototype.hasOwnProperty.call(next, key)
+      ? structuredClone(next[key])
+      : null
   }
   return diff
 }
@@ -707,24 +717,167 @@ export function addSlideShapeLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
+    const lineGeometry = input.lineGeometry === undefined
+      ? undefined
+      : validateSlideLineGeometry(input.shapeType, input.lineGeometry)
+    if (input.frame !== undefined) {
+      validateSlideLineFrame(input.frame)
+      if (!lineGeometry) {
+        throw new SlideCommandError('invalid-target', '直接绘制的线条必须同时提供几何参数')
+      }
+    }
+    if (lineGeometry && input.frame === undefined) {
+      throw new SlideCommandError('invalid-target', '线条几何必须与绘制框同时提交')
+    }
     const existingCount = session.scope === 'global'
       ? session.history.present.globalLayerItems.length
       : slideSceneContext(session.history.present, session).scene.layerItems.length
     const node = offsetDefaultSlideInsertion(
-      createShapeNode(input.shapeType, {
-        id: stableId('shape', input.id),
-        ...(input.label === undefined ? {} : { name: input.label }),
-        x: input.x,
-        y: input.y,
-      }),
+      (() => {
+        const created = createShapeNode(input.shapeType, {
+          id: stableId('shape', input.id),
+          ...(input.label === undefined ? {} : { name: input.label }),
+          x: input.frame?.x ?? input.x,
+          y: input.frame?.y ?? input.y,
+          ...(input.frame ? { width: input.frame.width, height: input.frame.height } : {}),
+        })
+        if (lineGeometry) created.lineGeometry = structuredClone(lineGeometry)
+        return created
+      })(),
       existingCount,
-      input.x !== undefined || input.y !== undefined,
+      input.frame !== undefined || input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+function validateSlideLineFrame(
+  frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): void {
+  if (![frame.x, frame.y, frame.width, frame.height].every(Number.isFinite)) {
+    throw new SlideCommandError('invalid-target', '线条绘制框必须是有限数值')
+  }
+  if (frame.width <= 0 || frame.height <= 0) {
+    throw new SlideCommandError('invalid-target', '线条绘制框尺寸必须大于 0')
+  }
+}
+
+function validateSlideLineGeometry(
+  shapeType: ShapeType,
+  lineGeometry: NativeLineGeometry,
+): NativeLineGeometry {
+  if (shapeType !== 'line' && shapeType !== 'elbow-arrow') {
+    throw new SlideCommandError(
+      'invalid-target',
+      `只有直线和折线箭头支持线几何，${shapeType} 不支持`,
+    )
+  }
+  const parsed = nativeLineGeometrySchema.safeParse(lineGeometry)
+  if (!parsed.success) {
+    throw new SlideCommandError(
+      'invalid-target',
+      `线几何无效：${parsed.error.issues[0]?.message ?? '未知原因'}`,
+    )
+  }
+  if (shapeType === 'line' && parsed.data.kind !== 'straight') {
+    throw new SlideCommandError('invalid-target', '直线只支持 straight 类型的线几何')
+  }
+  if (shapeType === 'elbow-arrow' && parsed.data.kind !== 'elbow') {
+    throw new SlideCommandError('invalid-target', '折线箭头只支持 elbow 类型的线几何')
+  }
+  return structuredClone(parsed.data)
+}
+
+export interface UpdateSlideShapeLineGeometryInput {
+  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly lineGeometry: NativeLineGeometry
+}
+
+/**
+ * One line handle gesture commit: LayerItem frame and normalized lineGeometry
+ * are written atomically as a single history entry. Geometry absent from the
+ * stored data materializes here for the first time (legacy defaults are never
+ * written back on read).
+ */
+export function updateSlideShapeLineGeometry(
+  session: SlideAuthoringSession,
+  layerItemId: string,
+  input: UpdateSlideShapeLineGeometryInput,
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    const layer = requireUnlockedOwnedLayer(session, layerItemId)
+    if (layer.item.kind !== 'native' || layer.item.content.nativeType !== 'shape') {
+      throw new SlideCommandError('invalid-target', '当前选择不是原生图形')
+    }
+    const shapeType = (layer.item.content.data as { shapeType?: unknown }).shapeType
+    if (shapeType !== 'line' && shapeType !== 'elbow-arrow') {
+      throw new SlideCommandError('invalid-target', '只有直线和折线箭头支持编辑线几何')
+    }
+    const lineGeometry = validateSlideLineGeometry(shapeType, input.lineGeometry)
+    validateSlideLineFrame(input.frame)
+    const effectiveFrame = layer.item.frame
+    const currentGeometry = (layer.item.content.data as { lineGeometry?: unknown }).lineGeometry
+    const unchanged =
+      effectiveFrame.x === input.frame.x &&
+      effectiveFrame.y === input.frame.y &&
+      effectiveFrame.width === input.frame.width &&
+      effectiveFrame.height === input.frame.height &&
+      sameJson(currentGeometry, lineGeometry)
+    if (unchanged) return succeed(session, false)
+    const project = commitSlideProjectMutation(session.history.present, (draft) => {
+      const writeFrame = (item: { frame: { x: number; y: number; width: number; height: number } }) => {
+        item.frame.x = input.frame.x
+        item.frame.y = input.frame.y
+        item.frame.width = input.frame.width
+        item.frame.height = input.frame.height
+      }
+      if (session.scope === 'global') {
+        const globalEntry = draft.globalLayerItems.find((entry) => entry.item.layerItemId === layerItemId)
+        if (!globalEntry || globalEntry.item.kind !== 'native') {
+          throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+        }
+        writeFrame(globalEntry.item)
+        globalEntry.item.content.data = mergeCourseNativeData(
+          globalEntry.item.content.data as Record<string, unknown>,
+          { lineGeometry },
+        ) as typeof globalEntry.item.content.data
+        return
+      }
+      const { scene } = slideSceneContext(draft, session)
+      const base = scene.layerItems.find((item) => item.layerItemId === layerItemId)
+      if (!base || base.kind !== 'native') {
+        throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+      }
+      const state = presentationStateForWrite(scene, session.selection.stateId)
+      if (!state) {
+        writeFrame(base)
+        base.content.data = mergeCourseNativeData(
+          base.content.data as Record<string, unknown>,
+          { lineGeometry },
+        ) as typeof base.content.data
+        return
+      }
+      const override = state.layerItemOverrides[layerItemId] ?? {}
+      const frame = { ...override.frame }
+      for (const key of ['x', 'y', 'width', 'height'] as const) {
+        if (input.frame[key] === base.frame[key]) delete frame[key]
+        else frame[key] = input.frame[key]
+      }
+      if (Object.keys(frame).length === 0) delete override.frame
+      else override.frame = frame
+      state.layerItemOverrides[layerItemId] = override
+      writeNativeData(scene, session.selection.stateId, layerItemId, { lineGeometry })
+    }, options.now)
+    return commitUpdated(session, project)
   } catch (error) {
     return catchCommand(session, error)
   }
@@ -1926,3 +2079,36 @@ export function coalesceSlideAuthoringCommands(
 }
 
 export { makeSlideAuthoringTarget }
+
+export {
+  addSlideTableLayer,
+  patchSlideTableCellText,
+  patchSlideTableStyle,
+  patchSlideTableCellStyle,
+  patchSlideTableRowHeight,
+  patchSlideTableColumnWidth,
+  insertSlideTableRow,
+  deleteSlideTableRow,
+  reorderSlideTableRows,
+  insertSlideTableColumn,
+  deleteSlideTableColumn,
+  reorderSlideTableColumns,
+  type AddSlideTableLayerInput,
+} from './v9TableCommands'
+
+export {
+  addSlideChartLayer,
+  patchSlideChartTitle,
+  patchSlideChartStyle,
+  patchSlideChartType,
+  patchSlideChartPointValue,
+  insertSlideChartCategory,
+  deleteSlideChartCategory,
+  reorderSlideChartCategories,
+  insertSlideChartSeries,
+  deleteSlideChartSeries,
+  reorderSlideChartSeries,
+  replaceSlideChartTableData,
+  type AddSlideChartLayerInput,
+  type SlideChartCandidateData,
+} from './v9ChartCommands'

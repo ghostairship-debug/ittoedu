@@ -6,6 +6,7 @@ import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
   type FlowBlock,
+  type FlowSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { ComponentManifest } from '@/shared/componentTypes'
@@ -46,7 +47,9 @@ import {
   insertFlowSharedMedia,
   insertFlowSharedRuntime,
   insertFlowSharedShape,
+  insertFlowSharedText,
   patchFlowOverlayBodyPlane,
+  patchFlowOverlayProperties,
   readFlowSharedOwnership,
   resolveFlowMediaInsertPlacement,
   setFlowOverlayVisibleAtLocation,
@@ -641,5 +644,260 @@ describe('Flow shared authoring adapters', () => {
     if (!selected.ok) throw new Error('expected controller hit')
     expect(selected.selection.authoringScope).toBe('global')
     expect(selected.selection.authoringAddress).not.toContain('controller-hit')
+  })
+
+  it('creates and patches rectangle shape overlay properties while preserving document flow', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'h1')
+    const originalBlocks = structuredClone(flowOf(project).blocks)
+
+    const insertResult = insertFlowSharedShape(project, selection, {
+      shapeType: 'rectangle',
+      label: '矩形测试',
+    })
+    expect(insertResult.ok).toBe(true)
+    expect(insertResult.historyEntry).toBe(true)
+    expect(insertResult.ownership).toBe('viewport-overlay')
+    const shapeId = insertResult.createdLayerItemIds?.[0]
+    expect(shapeId).toBeDefined()
+
+    const shapeDoc = insertResult.nextDocument!
+    // Verify document blocks are completely untouched
+    expect(flowOf(shapeDoc).blocks).toEqual(originalBlocks)
+
+    const shapeSelection = selectFlowOverlay(shapeDoc, 'h1', [shapeId!])
+
+    // Patch rectangle properties
+    const patchResult = patchFlowOverlayProperties(shapeDoc, shapeSelection, {
+      name: '修改后的矩形',
+      width: 320,
+      height: 200,
+      shapeType: 'rounded-rectangle',
+      style: {
+        fillColor: '#3b82f6',
+        fillOpacity: 0.85,
+        borderColor: '#1e40af',
+        borderOpacity: 0.9,
+        borderWidth: 3,
+        lineStyle: 'dashed',
+        cornerRadius: 16,
+      },
+    })
+
+    expect(patchResult.ok).toBe(true)
+    expect(patchResult.historyEntry).toBe(true)
+    const patchedDoc = patchResult.nextDocument!
+    expect(patchedDoc.revision).toBe(shapeDoc.revision + 1)
+
+    // Validate with strict CourseProjectDocument schema
+    const parsed = courseProjectDocumentSchema.safeParse(patchedDoc)
+    expect(parsed.success).toBe(true)
+
+    // Verify properties on the located layer
+    const located = locateCourseLayer(patchedDoc, shapeId!)
+    expect(located).toBeDefined()
+    expect(located!.item.label).toBe('修改后的矩形')
+    expect(located!.item.frame.width).toBe(320)
+    expect(located!.item.frame.height).toBe(200)
+    expect(located!.item.kind).toBe('native')
+    if (located!.item.kind === 'native') {
+      expect(located!.item.content.nativeType).toBe('shape')
+      const data = located!.item.content.data as any
+      expect(data.shapeType).toBe('rounded-rectangle')
+      expect(data.style.fillColor).toBe('#3b82f6')
+      expect(data.style.fillOpacity).toBe(0.85)
+      expect(data.style.borderColor).toBe('#1e40af')
+      expect(data.style.borderOpacity).toBe(0.9)
+      expect(data.style.borderWidth).toBe(3)
+      expect(data.style.lineStyle).toBe('dashed')
+      expect(data.style.cornerRadius).toBe(16)
+    }
+
+    // Assert document blocks remained pristine
+    expect(flowOf(patchedDoc).blocks).toEqual(originalBlocks)
+  })
+
+  it('creates and patches line shape overlay with stroke and arrowheads', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'h1')
+
+    const insertResult = insertFlowSharedShape(project, selection, {
+      shapeType: 'line',
+      label: '直线测试',
+    })
+    expect(insertResult.ok).toBe(true)
+    const lineId = insertResult.createdLayerItemIds?.[0]!
+    const lineDoc = insertResult.nextDocument!
+    const lineSelection = selectFlowOverlay(lineDoc, 'h1', [lineId])
+
+    const patchResult = patchFlowOverlayProperties(lineDoc, lineSelection, {
+      style: {
+        borderColor: '#dc2626',
+        borderOpacity: 1,
+        borderWidth: 4,
+        lineStyle: 'dotted',
+        startArrow: 'triangle',
+        endArrow: 'stealth',
+      },
+    })
+    expect(patchResult.ok).toBe(true)
+    const patchedDoc = patchResult.nextDocument!
+
+    const parsed = courseProjectDocumentSchema.safeParse(patchedDoc)
+    expect(parsed.success).toBe(true)
+
+    const located = locateCourseLayer(patchedDoc, lineId)
+    expect(located).toBeDefined()
+    if (located!.item.kind === 'native') {
+      const data = located!.item.content.data as any
+      expect(data.style.borderColor).toBe('#dc2626')
+      expect(data.style.borderWidth).toBe(4)
+      expect(data.style.lineStyle).toBe('dotted')
+      expect(data.style.startArrow).toBe('triangle')
+      expect(data.style.endArrow).toBe('stealth')
+    }
+  })
+
+  it('patches text overlay properties and supports insertFlowSharedText', () => {
+    const project = createFlowProject()
+    const originalBlocks = structuredClone(flowOf(project).blocks)
+
+    // Patch existing overlay-text
+    const textSelection = selectFlowOverlay(project, 'h1', ['overlay-text'])
+    const patchResult = patchFlowOverlayProperties(project, textSelection, {
+      name: '更新后的文本浮层',
+      text: '新文本内容',
+      style: {
+        fontFamily: 'Arial',
+        fontSize: 28,
+        color: '#059669',
+        bold: true,
+        italic: true,
+        align: 'center',
+        backgroundColor: '#f0fdf4',
+        backgroundOpacity: 0.5,
+      },
+    })
+    expect(patchResult.ok).toBe(true)
+    const patchedDoc = patchResult.nextDocument!
+
+    const parsed = courseProjectDocumentSchema.safeParse(patchedDoc)
+    expect(parsed.success).toBe(true)
+
+    const located = locateCourseLayer(patchedDoc, 'overlay-text')
+    expect(located).toBeDefined()
+    expect(located!.item.label).toBe('更新后的文本浮层')
+    if (located!.item.kind === 'native') {
+      const data = located!.item.content.data as any
+      expect(data.text).toBe('新文本内容')
+      expect(data.style.fontFamily).toBe('Arial')
+      expect(data.style.fontSize).toBe(28)
+      expect(data.style.color).toBe('#059669')
+      expect(data.style.bold).toBe(true)
+      expect(data.style.italic).toBe(true)
+      expect(data.style.align).toBe('center')
+      expect(data.style.backgroundColor).toBe('#f0fdf4')
+      expect(data.style.backgroundOpacity).toBe(0.5)
+    }
+
+    // Verify document blocks completely untouched
+    expect((patchedDoc.surfaces[0] as any).blocks).toEqual(originalBlocks)
+
+    // Test insertFlowSharedText for document flow vs overlay
+    const insertOverlayResult = insertFlowSharedText(project, textSelection, {
+      text: '独立浮层文本',
+      placement: 'viewport-overlay',
+    })
+    expect(insertOverlayResult.ok).toBe(true)
+    expect(insertOverlayResult.ownership).toBe('viewport-overlay')
+    expect(insertOverlayResult.createdLayerItemIds?.length).toBe(1)
+    expect((insertOverlayResult.nextDocument!.surfaces[0] as any).blocks).toEqual(originalBlocks)
+
+    const insertBlockResult = insertFlowSharedText(project, selectFlowEditorBlock(project, 'h1', 'p-body'), {
+      text: '正文新段落',
+      placement: 'document-block',
+    })
+    expect(insertBlockResult.ok).toBe(true)
+    expect(insertBlockResult.ownership).toBe('document-block')
+    expect(insertBlockResult.createdBlockIds?.length).toBe(1)
+    expect((insertBlockResult.nextDocument!.surfaces[0] as any).blocks.length).toBe(originalBlocks.length + 1)
+  })
+
+  it('patches image overlay properties and keeps body image block intact', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'h1')
+    const originalBlocks = structuredClone((project.surfaces[0] as any).blocks)
+
+    // Insert image as overlay
+    const insertResult = insertFlowSharedMedia(project, selection, {
+      assetId: 'asset-image',
+      placement: 'viewport-overlay',
+    }, { now: NOW })
+    expect(insertResult.ok).toBe(true)
+    const imageId = insertResult.createdLayerItemIds?.[0]!
+    const imageDoc = insertResult.nextDocument!
+    const imageSelection = selectFlowOverlay(imageDoc, 'h1', [imageId])
+
+    // Patch image overlay properties
+    const patchResult = patchFlowOverlayProperties(imageDoc, imageSelection, {
+      fit: 'cover',
+      cornerRadius: 12,
+      flipX: true,
+      flipY: false,
+      crop: { left: 0.1, right: 0.1, top: 0.05, bottom: 0.05 },
+    })
+    expect(patchResult.ok).toBe(true)
+    const patchedDoc = patchResult.nextDocument!
+
+    const parsed = courseProjectDocumentSchema.safeParse(patchedDoc)
+    expect(parsed.success).toBe(true)
+
+    const located = locateCourseLayer(patchedDoc, imageId)
+    expect(located).toBeDefined()
+    if (located!.item.kind === 'native') {
+      const data = located!.item.content.data as any
+      expect(data.fit).toBe('cover')
+      expect(data.cornerRadius).toBe(12)
+      expect(data.flipX).toBe(true)
+      expect(data.crop.left).toBe(0.1)
+    }
+
+    // Verify document blocks and the body image block (media-inline) are completely unchanged
+    const flowSurface = patchedDoc.surfaces[0] as FlowSurfaceDocument
+    expect(flowSurface.blocks).toEqual(originalBlocks)
+    const bodyImage = flowSurface.blocks.find((b) => b.id === 'media-inline') as any
+    expect(bodyImage.layout).toBe('content-width')
+    expect(bodyImage.type).toBe('media')
+  })
+
+  it('rejects patching locked overlay and reports failure with zero writes', () => {
+    const project = createFlowProject()
+    // Lock overlay-text
+    const lockedDoc: CourseProjectDocument = {
+      ...project,
+      surfaces: project.surfaces.map((s) => ({
+        ...s,
+        surfaceLayerItems: s.surfaceLayerItems.map((entry) => ({
+          ...entry,
+          item: { ...entry.item, locked: true },
+        })),
+      })),
+    }
+
+    const selection = selectFlowOverlay(lockedDoc, 'h1', ['overlay-text'])
+    const patchAttempt = patchFlowOverlayProperties(lockedDoc, selection, {
+      name: '尝试修改锁定浮层',
+      style: { color: '#ff0000' },
+    })
+    expect(patchAttempt.ok).toBe(false)
+    expect(patchAttempt.reason).toContain('锁定')
+    expect(patchAttempt.nextDocument).toBeUndefined()
+
+    // Unlocking is allowed
+    const unlockAttempt = patchFlowOverlayProperties(lockedDoc, selection, {
+      locked: false,
+    })
+    expect(unlockAttempt.ok).toBe(true)
+    expect(unlockAttempt.nextDocument!.surfaces[0]!.surfaceLayerItems[0]!.item.locked).toBe(false)
   })
 })

@@ -366,7 +366,7 @@ export function useCourseDelivery(
       const exportedPaths: string[] = []
       let warningCount = 0
       for (const flowSurface of flowSurfaces) {
-        const built = buildFlowDocx(flowSurface, {
+        const built = buildFlowDocx(published, flowSurface.id, {
           resolveAsset: (assetId) => {
             const meta = snapshot.project.assets[assetId]
             const bytes = snapshot.assetFiles[assetId]

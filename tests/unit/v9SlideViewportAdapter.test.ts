@@ -211,6 +211,40 @@ function thinRotatedLine(layerItemId: string): NativeLayerItem {
   }
 }
 
+function lineShapeItem(
+  layerItemId: string,
+  order: number,
+  extra: Partial<Pick<NativeLayerItem, 'locked' | 'rotation' | 'frame'>> = {},
+): NativeLayerItem {
+  return {
+    ...layerBase(
+      layerItemId,
+      order,
+      extra.frame ?? { mode: 'absolute', x: 300, y: 300, width: 200, height: 100 },
+      extra,
+    ),
+    kind: 'native',
+    content: {
+      nativeType: 'shape',
+      data: {
+        shapeType: 'line',
+        lineGeometry: { kind: 'straight', start: [0, 0.5], end: [1, 0.5] },
+        style: {
+          fillColor: '#000000',
+          fillOpacity: 0,
+          borderColor: '#172033',
+          borderOpacity: 1,
+          borderWidth: 2,
+          lineStyle: 'solid',
+          cornerRadius: 0,
+          startArrow: 'none',
+          endArrow: 'none',
+        },
+      },
+    },
+  }
+}
+
 function componentItem(): ComponentLayerItem {
   return {
     ...layerBase('slide-component', 5, { mode: 'absolute', x: 80, y: 400, width: 200, height: 160 }),
@@ -377,6 +411,15 @@ function v9ViewportFixture(): CourseProjectDocument {
       }],
     }],
   })
+}
+
+/** Adds a straight-line shape (default geometry) to the standard viewport fixture. */
+function v9LineWorkspaceFixture(): CourseProjectDocument {
+  const base = v9ViewportFixture()
+  const surface = base.surfaces.find((candidate) => candidate.type === 'slide')
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  surface.scenes[0]!.layerItems.push(lineShapeItem('slide-line', 9))
+  return courseProjectDocumentSchema.parse(base)
 }
 
 function storeAuthoringPorts() {
@@ -852,5 +895,79 @@ describe('V9 Slide viewport adapter', () => {
       throw new Error('expected scene text')
     }
     expect(sceneText.content.data.style.bold).toBe(false)
+  })
+
+  describe('line handle hit-test priority and snap disabling (workspaceSlideAuthoring hitHandle/computeLineDrag)', () => {
+    function injectLineFixture() {
+      const backend = createSlideAuthoringBackend(openSlideAuthoringSession(v9LineWorkspaceFixture()))
+      useEditorStore.getState().injectV9SlideCandidateBackend(backend)
+      return backend
+    }
+
+    it('resolves a selected line handle over a coincident resize handle', () => {
+      injectLineFixture()
+      const controller = createController()
+      controller.selectFromLayerIds(['slide-line'], VIEW)
+
+      // The line's default straight geometry puts its 'start' handle at the
+      // frame's west-middle point (300,350) -- the exact same screen point
+      // as this frame's plain rectangle 'w' resize handle. hitHandle must
+      // resolve the line handle first, regardless of that coincidence.
+      const down = controller.pointerDown({ x: 300, y: 350 }, VIEW)
+      expect(down.kind).toBe('slide-authoring')
+      const moved = controller.pointerMove({ x: 260, y: 350, altKey: true }, VIEW)
+      if (moved.kind !== 'slide-authoring') throw new Error('expected V9')
+      // A resize gesture would have populated `preview`, not `linePreview`.
+      expect(moved.linePreview).not.toBeNull()
+      expect(moved.linePreview?.nodeId).toBe('slide-line')
+      expect(moved.preview).toBeUndefined()
+
+      const up = controller.pointerUp({ x: 260, y: 350, altKey: true }, VIEW)
+      if (up.kind !== 'slide-authoring') throw new Error('expected V9')
+      expect(up.command?.ok).toBe(true)
+      expect(up.command?.historyEntry).toBe(true)
+      expect(nativeFrame('slide-line')).toMatchObject({ width: 240, height: 16 })
+    })
+
+    // (200,364) sits 4px from the canvas vertical center (y=360) -- inside
+    // the 8px/viewportScale=1 snap threshold -- and far from every other
+    // snap candidate on both axes (nearest other candidate is 14px away).
+    // Each case starts from its own freshly injected fixture, since the
+    // first case's commit would otherwise change 'slide-line's frame/
+    // geometry out from under the second case's hand-computed expectation.
+
+    it('snaps a line handle drag to a nearby guide without Alt', () => {
+      injectLineFixture()
+      const controller = createController()
+      controller.selectFromLayerIds(['slide-line'], VIEW)
+      controller.pointerDown({ x: 300, y: 350 }, VIEW)
+
+      const snapped = controller.pointerMove({ x: 200, y: 364 }, VIEW)
+      if (snapped.kind !== 'slide-authoring') throw new Error('expected V9')
+      expect(snapped.guides).toEqual({ x: undefined, y: 360 })
+
+      const snappedUp = controller.pointerUp({ x: 200, y: 364 }, VIEW)
+      if (snappedUp.kind !== 'slide-authoring') throw new Error('expected V9')
+      expect(snappedUp.command?.ok).toBe(true)
+      expect(nativeFrame('slide-line')).toMatchObject({ x: 200, y: 347, width: 300, height: 16 })
+    })
+
+    it('lets Alt bypass that same snap, committing the raw pointer position instead', () => {
+      injectLineFixture()
+      const controller = createController()
+      controller.selectFromLayerIds(['slide-line'], VIEW)
+      controller.pointerDown({ x: 300, y: 350 }, VIEW)
+
+      const unsnapped = controller.pointerMove({ x: 200, y: 364, altKey: true }, VIEW)
+      if (unsnapped.kind !== 'slide-authoring') throw new Error('expected V9')
+      expect(unsnapped.guides).toBeNull()
+
+      const unsnappedUp = controller.pointerUp({ x: 200, y: 364, altKey: true }, VIEW)
+      if (unsnappedUp.kind !== 'slide-authoring') throw new Error('expected V9')
+      expect(unsnappedUp.command?.ok).toBe(true)
+      // Alt bypassed the y=360 snap: the frame's top follows the raw pointer
+      // (349) instead of the snapped one (347) from the case above.
+      expect(nativeFrame('slide-line')).toMatchObject({ x: 200, y: 349, width: 300, height: 16 })
+    })
   })
 })

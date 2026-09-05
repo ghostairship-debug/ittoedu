@@ -13,6 +13,10 @@ import {
   type CourseLocationCommandResult,
 } from '../../course/courseLocationCommands'
 import {
+  updateCourseBackground as applyCourseBackgroundUpdate,
+  type CourseBackgroundPatch,
+} from '../../course/courseBackgroundCommands'
+import {
   deriveCourseEditorLayout,
   type CourseEditorDropdownAction,
   type CourseEditorPrimaryAction,
@@ -168,6 +172,24 @@ export function createCourseStructureSlice(
         return { ok: false, reason: result.reason }
       }
       return persistCourseProjectCommand(result, { statusMessage: '场景已删除' })
+    },
+
+    updateCourseBackground(patch: CourseBackgroundPatch): CourseStructureResult {
+      const project = kernel.tryReadDocument()
+      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
+      const result = applyCourseBackgroundUpdate(project, patch, {
+        expectedRevision: project.revision,
+      })
+      if (!result.ok) {
+        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
+        return { ok: false, reason: result.reason }
+      }
+      if (!result.historyEntry) return { ok: true }
+      kernel.persistDocument(result.project, {
+        historyEntry: true,
+        statusMessage: '已更新课程背景',
+      })
+      return { ok: true }
     },
   }
 }

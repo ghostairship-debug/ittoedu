@@ -1,4 +1,5 @@
 import type {
+  BackgroundMode,
   CourseNavigationGuard,
   CourseStateDeclaration,
   CourseLocation,
@@ -135,6 +136,7 @@ export interface PublishedSlidePresentation {
 export interface PublishedSlideScene {
   id: string
   name: string
+  backgroundMode?: BackgroundMode
   backgroundColor: string
   backgroundAssetId?: string | null
   layerItems: PublishedLayerItem[]
@@ -150,6 +152,9 @@ interface PublishedSurfaceBase {
 
 export interface PublishedSlideSurface extends PublishedSurfaceBase {
   type: 'slide'
+  backgroundMode?: BackgroundMode
+  backgroundColor?: string
+  backgroundAssetId?: string | null
   canvas: { width: 1280; height: 720 }
   scenes: PublishedSlideScene[]
 }
@@ -157,14 +162,18 @@ export interface PublishedSlideSurface extends PublishedSurfaceBase {
 export interface PublishedFlowSurface extends PublishedSurfaceBase {
   type: 'flow'
   surfaceLayerItems: PublishedFlowSurfaceLayerEntry[]
+  backgroundMode?: BackgroundMode
   backgroundColor?: string
+  backgroundAssetId?: string | null
   layout: { readingWidth: number; wideContentWidth: number }
   blocks: FlowBlock[]
 }
 
 export interface PublishedSpatialSurface extends PublishedSurfaceBase {
   type: 'spatial-2d'
+  backgroundMode?: BackgroundMode
   backgroundColor?: string
+  backgroundAssetId?: string | null
   world: {
     bounds:
       | { mode: 'infinite' }
@@ -189,6 +198,9 @@ export interface PublishedCourseV2Payload {
   sourceSchemaVersion: 9
   courseId: string
   title: string
+  /** Course-wide background; matches Course Project V9's root fields. */
+  backgroundColor?: string
+  backgroundAssetId?: string | null
   assets: Record<string, PublishedCourseAsset>
   components: Record<string, PublishedCourseComponent>
   designTokens: ProjectDesignTokens

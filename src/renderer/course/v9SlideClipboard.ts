@@ -23,6 +23,10 @@ import {
 } from './slideEditorCommands'
 import { buildSlideEditorView } from './slideEditorView'
 import { allocateCourseLayerOrder, sortScopedLayerList } from './globalLayerCommands'
+import {
+  rebuildChartItemIds,
+  rebuildTableItemIds,
+} from '../project/nativeNodeFactories'
 
 /** V8 duplicate/paste offset. R2-D owns consecutive insertion stagger for new inserts. */
 export const SLIDE_SCENE_CLIPBOARD_OFFSET = 20
@@ -317,6 +321,13 @@ function cloneClipboardItem(
   duplicate.frame.x += SLIDE_SCENE_CLIPBOARD_OFFSET
   duplicate.frame.y += SLIDE_SCENE_CLIPBOARD_OFFSET
   duplicate.locked = false
+  if (duplicate.kind === 'native') {
+    if (duplicate.content.nativeType === 'table') {
+      duplicate.content.data = rebuildTableItemIds(duplicate.content.data)
+    } else if (duplicate.content.nativeType === 'chart') {
+      duplicate.content.data = rebuildChartItemIds(duplicate.content.data)
+    }
+  }
   rewriteLayerInternalReferences(duplicate, idMap)
   return duplicate
 }

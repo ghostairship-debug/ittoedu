@@ -1,4 +1,5 @@
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
+import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import {
   composePublishedCourseLocation,
   type CourseLayerComposition,
@@ -10,7 +11,9 @@ import {
   FLOW_MEDIA_QUERY_CONTAINER_TYPE,
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
-import type { TeacherControllerAction, TextRun } from '../../../shared/contracts/native-v1'
+import type { ShapeNode, TeacherControllerAction, TextRun } from '../../../shared/contracts/native-v1'
+import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
+import { paintPublishedNativeText } from '../publishedNativeText'
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,
@@ -728,9 +731,23 @@ export class FlowSurfaceHost {
         this.#componentHandles.push(handle)
       },
     })
-    this.#root.style.backgroundColor = resolveCourseSurfaceBackgroundColor(
-      surface.backgroundColor,
-    )
+    const effectiveBg = resolveEffectiveBackground({
+      owner: 'flow-surface',
+      course: this.#playback,
+      surface,
+    })
+    this.#root.style.backgroundColor = effectiveBg.color
+    const bgUrl = effectiveBg.assetId
+      ? resolvePlaybackAssetUrl(this.#playback, effectiveBg.assetId, this.#options.resolveAsset)
+      : null
+    if (bgUrl) {
+      this.#root.style.backgroundImage = `url(${JSON.stringify(bgUrl)})`
+      this.#root.style.backgroundPosition = 'center'
+      this.#root.style.backgroundRepeat = 'no-repeat'
+      this.#root.style.backgroundSize = 'cover'
+    } else {
+      this.#root.style.backgroundImage = 'none'
+    }
     article.addEventListener('scroll', () => {
       this.#syncPaperOverlayPositions(surface)
     })
@@ -1241,7 +1258,16 @@ function renderStaticOverlayItem(
       image.alt = ''
       image.style.width = '100%'
       image.style.height = '100%'
-      image.style.objectFit = 'contain'
+      image.style.objectFit = entry.item.content.data.fit === 'stretch'
+        ? 'fill'
+        : (entry.item.content.data.fit ?? 'contain')
+      if (entry.item.content.data.cornerRadius) {
+        image.style.borderRadius = `${entry.item.content.data.cornerRadius}px`
+      }
+      const transforms: string[] = []
+      if (entry.item.content.data.flipX) transforms.push('scaleX(-1)')
+      if (entry.item.content.data.flipY) transforms.push('scaleY(-1)')
+      if (transforms.length > 0) image.style.transform = transforms.join(' ')
       wrap.appendChild(image)
       return wrap
     }
@@ -1260,8 +1286,42 @@ function renderStaticOverlayItem(
     }
     return wrap
   }
+  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'shape') {
+    const canvas = dom.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(entry.item.frame.width))
+    canvas.height = Math.max(1, Math.round(entry.item.frame.height))
+    Object.assign(canvas.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+    })
+    const context = canvas.getContext('2d')
+    if (context) {
+      renderShapeCanvas(context, {
+        ...entry.item.content.data,
+        id: entry.item.layerItemId,
+        name: entry.item.layerItemId,
+        type: 'shape',
+        x: 0,
+        y: 0,
+        width: entry.item.frame.width,
+        height: entry.item.frame.height,
+        rotation: 0,
+        opacity: 1,
+        visible: entry.item.visible,
+        locked: false,
+        playbackInitialVisibility: entry.item.playbackInitialVisibility,
+      }, canvas.width, canvas.height)
+    }
+    wrap.appendChild(canvas)
+    return wrap
+  }
   if (entry.item.kind === 'native' && entry.item.content.nativeType === 'text') {
-    wrap.textContent = entry.item.content.data.text
+    paintPublishedNativeText(
+      wrap,
+      entry.item.content.data,
+      { width: entry.item.frame.width, height: entry.item.frame.height },
+    )
     return wrap
   }
   if (entry.item.kind === 'native' && entry.item.content.nativeType === 'formula') {

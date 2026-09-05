@@ -8,6 +8,9 @@ import {
   finalizeCourseProjectHealthFindings,
 } from './courseProjectHealth/internal'
 import {
+  collectCourseProjectNativeHealth,
+} from './courseProjectHealth/native'
+import {
   collectCourseProjectRuntimeHealth,
 } from './courseProjectHealth/runtime'
 import {
@@ -31,6 +34,7 @@ export {
 export { collectCourseProjectComponentHealth } from './courseProjectHealth/component'
 export { collectCourseProjectControllerMediaHealth } from './courseProjectHealth/controllerMedia'
 export { collectCourseProjectInteractionHealth } from './courseProjectHealth/interaction'
+export { collectCourseProjectNativeHealth } from './courseProjectHealth/native'
 export { collectCourseProjectRuntimeHealth } from './courseProjectHealth/runtime'
 export { collectCourseProjectStableIdHealth } from './courseProjectHealth/stableIds'
 
@@ -48,6 +52,7 @@ export function collectCourseProjectHealth(
     ...collectCourseProjectInteractionHealth(project, archiveFiles),
     ...collectCourseProjectComponentHealth(project, archiveFiles),
     ...collectCourseProjectControllerMediaHealth(project, archiveFiles),
+    ...collectCourseProjectNativeHealth(project, archiveFiles),
   ])
 }
 

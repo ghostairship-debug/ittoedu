@@ -40,7 +40,12 @@ import type {
   CourseLocation,
   CourseProjectDocument,
   SlideSceneDocument,
+  SlideSurfaceDocument,
 } from '../../../shared/courseProjectTypes'
+import type {
+  CourseBackgroundFields,
+  SlideSurfaceBackgroundFields,
+} from '../../../shared/effectiveBackground'
 import type { ProjectPlaybackSettings } from '../../../shared/contracts/playback-v1'
 import type {
   V9SlideContentEditSession,
@@ -74,12 +79,17 @@ export interface SpatialPropertiesReadModel {
   readonly showCameraFrames: boolean
 }
 
-export interface PropertiesSceneReadModel {
+export interface PropertiesSceneReadModel extends Pick<SlideSceneDocument, 'backgroundMode'> {
   readonly id: string
   readonly name: string
   readonly backgroundColor: string
+  readonly backgroundAssetId: string | null | undefined
   readonly interactions: SlideSceneDocument['interactions']
   readonly presentation: SlideSceneDocument['presentation']
+}
+
+export interface PropertiesSlideSurfaceReadModel extends SlideSurfaceBackgroundFields {
+  readonly id: string
 }
 
 export interface PropertiesOwnerReadModel {
@@ -105,9 +115,14 @@ export interface PropertiesOwnerReadModel {
   readonly activeState: {
     readonly id: string
     readonly name: string
-    readonly backgroundColor: string | null
+    readonly backgroundColor: string | undefined
+    readonly backgroundAssetId: string | null | undefined
   } | null
   readonly scene: PropertiesSceneReadModel | null
+  /** The Slide surface owning `scene` (or the active surface with no scene yet). */
+  readonly slideSurface: PropertiesSlideSurfaceReadModel | null
+  /** Course-wide background fields; the effective-background chain's root. Always available. */
+  readonly course: CourseBackgroundFields
   readonly slideScenes: ReturnType<typeof v9SlideScenes>
   readonly interactionNodes: readonly InteractionLayerTarget[]
   readonly interactionWarnings: ReturnType<typeof collectV9InteractionRuleWarnings>
@@ -162,6 +177,29 @@ function activeSlideScene(
     if (surface.scenes[0]) return surface.scenes[0]
   }
   return null
+}
+
+function activeSlideSurface(
+  project: CourseProjectDocument | null,
+  locationId: string | null,
+  snapshotSurfaceId: string | null,
+): SlideSurfaceDocument | null {
+  if (!project) return null
+  const isSlide = (candidate: CourseProjectDocument['surfaces'][number]): candidate is SlideSurfaceDocument => (
+    candidate.type === 'slide'
+  )
+  if (snapshotSurfaceId) {
+    const surface = project.surfaces.find((candidate) => candidate.id === snapshotSurfaceId && isSlide(candidate))
+    if (surface && isSlide(surface)) return surface
+  }
+  if (locationId) {
+    const location = project.locations.find((candidate) => candidate.id === locationId)
+    if (location?.kind === 'slide-scene') {
+      const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId && isSlide(candidate))
+      if (surface && isSlide(surface)) return surface
+    }
+  }
+  return project.surfaces.find(isSlide) ?? null
 }
 
 function candidateLocationVisibilityLabel(
@@ -260,6 +298,10 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
     ? propertiesViewWithSlideContentDraft(selectedRow, state.v9ContentEdit)
     : null
   const scene = activeSlideScene(project, locationId, snapshot?.sceneId ?? null)
+  const slideSurfaceDoc = activeSlideSurface(project, locationId, snapshot?.surfaceId ?? null)
+  const course: CourseBackgroundFields = project
+    ? { backgroundColor: project.backgroundColor, backgroundAssetId: project.backgroundAssetId }
+    : {}
   const activeState = selectActivePresentationStateId(state) === null
     ? null
     : scene?.presentation?.states.find(
@@ -349,18 +391,30 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
       ? {
           id: activeState.id,
           name: activeState.name,
-          backgroundColor: activeState.backgroundColor ?? null,
+          backgroundColor: activeState.backgroundColor,
+          backgroundAssetId: activeState.backgroundAssetId,
         }
       : null,
     scene: scene
       ? {
           id: scene.id,
           name: scene.name,
-          backgroundColor: activeState?.backgroundColor ?? scene.backgroundColor,
+          backgroundMode: scene.backgroundMode,
+          backgroundColor: scene.backgroundColor,
+          backgroundAssetId: scene.backgroundAssetId,
           interactions: scene.interactions,
           presentation: scene.presentation,
         }
       : null,
+    slideSurface: slideSurfaceDoc
+      ? {
+          id: slideSurfaceDoc.id,
+          backgroundMode: slideSurfaceDoc.backgroundMode,
+          backgroundColor: slideSurfaceDoc.backgroundColor,
+          backgroundAssetId: slideSurfaceDoc.backgroundAssetId,
+        }
+      : null,
+    course,
     slideScenes,
     interactionNodes,
     interactionWarnings,

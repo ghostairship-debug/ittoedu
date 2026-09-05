@@ -6,10 +6,13 @@ import {
   type TextNode,
 } from '../../shared/contracts/native-v1/types'
 import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
+import { resolveNativeLinePoints } from '../../shared/nativeLineGeometry'
 import {
   renderTextNodeCanvas,
   textNodeHasEmphasis,
 } from '../../shared/textLayout'
+import { rotateWorldPoint } from '../authoring/stageViewportTransform'
+import { bytesToDataUrl } from './base64'
 import {
   clamp,
   PIXELS_TO_POINTS,
@@ -270,23 +273,151 @@ function shapeFill(node: ShapeNode): PptxGenJS.ShapeFillProps {
   }
 }
 
+/**
+ * Rotates each node-local point around the node's own center (matching the
+ * authoring/canvas convention in `stageViewportTransform.rotateWorldPoint`),
+ * then translates into unscaled absolute canvas coordinates. Shared by the
+ * straight-line exporter and the elbow static-fallback exporter so both
+ * honor authored rotation identically.
+ */
+function absoluteShapePoints(
+  node: ShapeNode,
+  localPoints: readonly { x: number; y: number }[],
+): { x: number; y: number }[] {
+  const center = { x: node.width / 2, y: node.height / 2 }
+  return localPoints.map((point) => {
+    const rotated = node.rotation === 0
+      ? point
+      : rotateWorldPoint(point, center, node.rotation)
+    return { x: node.x + rotated.x, y: node.y + rotated.y }
+  })
+}
+
+/**
+ * Straight lines keep their authored endpoints by exporting a native PPTX
+ * `line` connector positioned at the segment's own bounding box (not the
+ * node's full frame). PptxGenJS's `line` preset geometry always runs local
+ * (0,0) → (w,h) — the box's own top-left → bottom-right — before any flip,
+ * and `beginArrowType`/`endArrowType` (start/end arrowheads) attach to those
+ * two local ends. `flipH`/`flipV` each independently mirror which bbox
+ * corner a local end lands on, so setting both from the authored start→end
+ * direction reproduces the exact drawn orientation *and* keeps arrowheads on
+ * the correct end for a segment drawn in any of the four diagonal
+ * directions — not only the default top-left→bottom-right one. (The node
+ * spec's own flipV-only formula gets the line's position right but can swap
+ * which end an asymmetric arrowhead lands on when a line is drawn from its
+ * bottom/right point toward its top/left point; using flipH too closes that
+ * gap. Verified directly against pptxgenjs's XML writer, which applies
+ * flipH/flipV to every shape's `<a:xfrm>` unconditionally, regardless of
+ * preset geometry — see `node_modules/pptxgenjs/dist/pptxgen.cjs.js`,
+ * `addShapeDefinition` and the `SLIDE_OBJECT_TYPES.text` slide-render case.)
+ */
+function addPptxStraightLine(
+  slide: PptxSlide,
+  node: ShapeNode,
+  scale: CanvasScale,
+): string[] {
+  const localPoints = resolveNativeLinePoints(node.lineGeometry, node.width, node.height, 'line')
+  const points = absoluteShapePoints(node, localPoints)
+  const start = points[0]!
+  const end = points[1]!
+  const left = Math.min(start.x, end.x)
+  const top = Math.min(start.y, end.y)
+  const width = Math.abs(end.x - start.x)
+  const height = Math.abs(end.y - start.y)
+  const flipH = start.x > end.x
+  const flipV = start.y > end.y
+
+  slide.addShape('line', {
+    x: left * scale.x,
+    y: top * scale.y,
+    w: width * scale.x,
+    h: height * scale.y,
+    flipH,
+    flipV,
+    rotate: 0,
+    objectName: pptxObjectName(node),
+    fill: { type: 'none', transparency: 100 },
+    line: shapeLine(node),
+  })
+  return []
+}
+
+function pptxElbowDashArray(node: ShapeNode): string {
+  const width = Math.max(1, node.style.borderWidth)
+  if (node.style.lineStyle === 'dashed') return `${Math.max(6, width * 3)} ${Math.max(4, width * 2)}`
+  if (node.style.lineStyle === 'dotted') return `${Math.max(1, width)} ${Math.max(3, width * 1.8)}`
+  return ''
+}
+
+function escapeSvgAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/**
+ * PptxGenJS has no editable multi-segment connector, so an elbow polyline is
+ * rasterized to a standalone SVG using the same point resolver the canvas
+ * and Published renderers call, then embedded as a static image. Position
+ * and dash style are preserved; arrowheads and further edits are not — the
+ * returned warning is this function's `pptx-static-elbow` degradation
+ * notice, not a silent shape substitution, and callers must surface it.
+ */
+function addPptxElbowArrowStaticFallback(
+  slide: PptxSlide,
+  node: ShapeNode,
+  scale: CanvasScale,
+): string[] {
+  const localPoints = resolveNativeLinePoints(node.lineGeometry, node.width, node.height, 'elbow-arrow')
+  const points = absoluteShapePoints(node, localPoints)
+  const left = Math.min(...points.map((point) => point.x))
+  const top = Math.min(...points.map((point) => point.y))
+  const right = Math.max(...points.map((point) => point.x))
+  const bottom = Math.max(...points.map((point) => point.y))
+  const width = Math.max(1, right - left)
+  const height = Math.max(1, bottom - top)
+  const dashArray = pptxElbowDashArray(node)
+  const polylinePoints = points
+    .map((point) => `${point.x - left},${point.y - top}`)
+    .join(' ')
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" '
+    + `width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
+    + `<polyline points="${polylinePoints}" fill="none" `
+    + `stroke="${escapeSvgAttribute(node.style.borderColor)}" `
+    + `stroke-opacity="${clamp(node.opacity * node.style.borderOpacity, 0, 1)}" `
+    + `stroke-width="${Math.max(1, node.style.borderWidth)}" `
+    + 'stroke-linejoin="round" stroke-linecap="round"'
+    + (dashArray ? ` stroke-dasharray="${dashArray}"` : '')
+    + '/></svg>'
+
+  slide.addImage({
+    data: bytesToDataUrl(new TextEncoder().encode(svg), 'image/svg+xml'),
+    x: left * scale.x,
+    y: top * scale.y,
+    w: width * scale.x,
+    h: height * scale.y,
+    objectName: `${pptxObjectName(node)} · 静态折线`,
+    altText: `${pptxObjectName(node)}（PPTX 静态折线后备）`,
+  })
+  return [
+    `折线箭头“${pptxObjectName(node)}”在 PPTX 中没有原生可编辑连接线，已按 pptx-static-elbow `
+    + '规则使用静态图片后备：折点位置与虚线样式保留，箭头样式与可编辑性不保留，如需精确调整请在 PowerPoint 中手动重绘。',
+  ]
+}
+
 export function addPptxShapeNode(
   slide: PptxSlide,
   node: ShapeNode,
   scale: CanvasScale,
-): void {
+): string[] {
   if (node.shapeType === 'line') {
-    slide.addShape('line', {
-      x: node.x * scale.x,
-      y: (node.y + node.height / 2) * scale.y,
-      w: node.width * scale.x,
-      h: 0,
-      rotate: pptxRotation(node.rotation),
-      objectName: pptxObjectName(node),
-      fill: { type: 'none', transparency: 100 },
-      line: shapeLine(node),
-    })
-    return
+    return addPptxStraightLine(slide, node, scale)
+  }
+  if (node.shapeType === 'elbow-arrow') {
+    return addPptxElbowArrowStaticFallback(slide, node, scale)
   }
 
   const rotateQuarterTurn = node.shapeType === 'brace-top'
@@ -303,24 +434,12 @@ export function addPptxShapeNode(
       }
     : pptxNodePosition(node, scale)
 
-  // PptxGenJS has no one-object elbow connector. bentArrow keeps this node
-  // independently editable and is PowerPoint's closest built-in equivalent.
-  const isElbow = node.shapeType === 'elbow-arrow'
   slide.addShape(SHAPE_TYPE_MAP[node.shapeType], {
     ...geometry,
     rotate: pptxRotation(node.rotation + (rotateQuarterTurn ? 90 : 0)),
     objectName: pptxObjectName(node),
-    fill: isElbow
-      ? {
-          color: pptxColor(node.style.borderColor),
-          transparency: pptxTransparency(
-            node.opacity * node.style.borderOpacity,
-          ),
-        }
-      : shapeFill(node),
-    line: isElbow
-      ? { type: 'none', transparency: 100 }
-      : shapeLine(node),
+    fill: shapeFill(node),
+    line: shapeLine(node),
     rectRadius: node.shapeType === 'rounded-rectangle'
       ? clamp(
           node.style.cornerRadius
@@ -330,4 +449,5 @@ export function addPptxShapeNode(
         )
       : undefined,
   })
+  return []
 }

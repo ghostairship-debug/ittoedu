@@ -4,7 +4,9 @@ import {
 } from '../../shared/courseLayerComposition'
 import { makeAuthoringAddress, type AuthoringCarrier } from '../../shared/authoringAddress'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
+import { resolveEffectiveBackground } from '../../shared/effectiveBackground'
 import type {
+  BackgroundMode,
   CourseLocation,
   CourseProjectDocument,
   GlobalLayerPlane,
@@ -134,6 +136,9 @@ export interface SpatialEditorView {
   readonly surfaceId: string
   readonly surfaceTitle: string
   readonly backgroundColor: string
+  /** Own raw mode; missing defaults to `'own'` (Spatial has always owned its background). */
+  readonly backgroundMode: BackgroundMode
+  readonly backgroundAssetId: string | null | undefined
   readonly activeLocation: SpatialEditorActiveLocation
   readonly navigationLocations: readonly SpatialEditorNavigationLocation[]
   readonly camera: SpatialEditorCameraView
@@ -279,13 +284,21 @@ export function buildSpatialEditorView(input: BuildSpatialEditorViewInput): Spat
     entry.stackOrder,
   ))
 
+  const effectiveBackground = resolveEffectiveBackground({
+    owner: 'spatial-surface',
+    course: project,
+    surface,
+  })
+
   const view = deepFreeze({
     projectId: project.id,
     revision: project.revision,
     locationId,
     surfaceId: surface.id,
     surfaceTitle: surface.title,
-    backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
+    backgroundColor: effectiveBackground.color,
+    backgroundMode: surface.backgroundMode ?? 'own',
+    backgroundAssetId: effectiveBackground.assetId,
     activeLocation: {
       locationId,
       surfaceId: surface.id,

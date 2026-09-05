@@ -19,6 +19,7 @@ import {
 } from '../../../shared/opacity'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
+import type { EffectiveBackground } from '../../../shared/effectiveBackground'
 import { ColorInput } from '../ColorInput'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
 import { DesignTokensEditor } from '../DesignTokensEditor'
@@ -28,6 +29,10 @@ import {
 } from '../InteractionEditor'
 import { PresenterSettingsEditor } from '../PresenterSettingsEditor'
 import { RuntimePropertiesPanel, type RuntimePropertiesContext } from './RuntimePropertiesPanel'
+import {
+  SharedBackgroundProperties,
+  type SharedBackgroundImportFile,
+} from './SharedBackgroundProperties'
 import {
   BufferedInput,
   PropertyDraftBoundary,
@@ -70,6 +75,12 @@ export interface CourseGlobalEmptyView {
   readonly playback: ProjectPlaybackSettings | undefined
   readonly hasTeacherController: boolean
   readonly designTokens: ProjectDesignTokens | null
+  readonly background: {
+    readonly color: string | undefined
+    readonly assetId: string | null | undefined
+    readonly effective: EffectiveBackground
+    readonly assets: Readonly<Record<string, AssetMeta>>
+  }
 }
 
 export interface TeacherControllerLayoutPreviewView {
@@ -116,6 +127,7 @@ export interface CourseGlobalPropertiesContext {
     readonly patch: (patch: PropertiesPatch) => void
     readonly replaceImage: () => void
     readonly clearPresentationOverride: () => void
+    readonly updateCourseBackground: (patch: { backgroundColor?: string; backgroundAssetId?: string | null }) => void
     readonly updatePlayback: (patch: Partial<ProjectPlaybackSettings>) => void
     readonly ensureTeacherController: () => void
     readonly updateDesignTokens: (tokens: ProjectDesignTokens) => void
@@ -505,6 +517,16 @@ function CourseGlobalEmptyPanel({
           全局层类似课件母版：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
         </p>
       </section>
+      <SharedBackgroundProperties
+        ownerLabel="课程"
+        color={empty.background.color}
+        assetId={empty.background.assetId}
+        assets={empty.background.assets}
+        effective={empty.background.effective}
+        onColorChange={(backgroundColor) => commands.updateCourseBackground({ backgroundColor })}
+        onAssetChange={(backgroundAssetId) => commands.updateCourseBackground({ backgroundAssetId })}
+        testId="course-background-properties"
+      />
       <section className="property-section">
         <h3 className="property-title"><SlidersHorizontal size={14} />成品控制</h3>
         <SelectField<ProjectPlaybackSettings['controls']>
@@ -613,6 +635,9 @@ export function CourseGlobalPropertiesPanel({
         videoDiagnostics={selected.videoDiagnostics}
         onReplaceImage={context.commands.replaceImage}
         textCommands={context.commands.text}
+        draftBindingKey={context.draftBindingKey ?? 'global-property-target-unavailable'}
+        tableCommands={null}
+        chartCommands={null}
       />
       {context.editorMode === 'professional' &&
         context.flowOrSpatial &&

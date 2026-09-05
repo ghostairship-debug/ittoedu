@@ -26,12 +26,16 @@ import {
   createExternalComponentNode,
   createImageNode,
   createShapeNode,
+  createTextNode,
   createVideoNode,
 } from '../project/nativeNodeFactories'
 import {
   locateCourseLayer,
   makeEffectiveLayerAuthoringAddress,
   patchEffectiveLayerItem,
+  patchEffectiveLayerPropertiesAtTarget,
+  type EffectiveLayerCommandTarget,
+  type EffectiveLayerPropertiesPatchAtTarget,
 } from './effectiveLayerCommands'
 import {
   FLOW_GLOBAL_STRUCTURE_REASON,
@@ -1259,6 +1263,170 @@ export function patchFlowOverlayBodyPlane(
     ...mutated,
     selection,
     ownership: 'viewport-overlay',
+  }
+}
+
+function normalizeOverlayPropertiesPatch(
+  item: LayerItem,
+  patch: EffectiveLayerPropertiesPatchAtTarget | Record<string, unknown>,
+): EffectiveLayerPropertiesPatchAtTarget {
+  const source: Record<string, unknown> = { ...patch }
+  const result: Record<string, unknown> = {}
+  const frame: NonNullable<EffectiveLayerPropertiesPatchAtTarget['frame']> = {
+    ...(source.frame as EffectiveLayerPropertiesPatchAtTarget['frame'] ?? {}),
+  }
+  if (typeof source.x === 'number') frame.x = source.x
+  if (typeof source.y === 'number') frame.y = source.y
+  if (typeof source.width === 'number') frame.width = source.width
+  if (typeof source.height === 'number') frame.height = source.height
+  if (Object.keys(frame).length > 0) result.frame = frame
+
+  if (typeof source.label === 'string') result.label = source.label
+  else if (typeof source.name === 'string') result.label = source.name
+
+  if (typeof source.rotation === 'number') result.rotation = source.rotation
+  if (typeof source.opacity === 'number') result.opacity = source.opacity
+  if (typeof source.visible === 'boolean') result.visible = source.visible
+  if (typeof source.locked === 'boolean') result.locked = source.locked
+  if (
+    source.playbackInitialVisibility === 'inherit' ||
+    source.playbackInitialVisibility === 'hidden'
+  ) {
+    result.playbackInitialVisibility = source.playbackInitialVisibility
+  }
+
+  if (item.kind === 'component') {
+    if (source.componentProps && typeof source.componentProps === 'object') {
+      result.componentProps = source.componentProps
+    } else if (source.props && typeof source.props === 'object') {
+      result.componentProps = source.props
+    }
+  }
+
+  if (item.kind === 'native') {
+    const nativeData: Record<string, unknown> = {
+      ...(source.nativeData as Record<string, unknown> ?? {}),
+    }
+    for (const [key, value] of Object.entries(source)) {
+      if (
+        value === undefined ||
+        key === 'id' ||
+        key === 'name' ||
+        key === 'label' ||
+        key === 'type' ||
+        key === 'x' ||
+        key === 'y' ||
+        key === 'width' ||
+        key === 'height' ||
+        key === 'frame' ||
+        key === 'rotation' ||
+        key === 'opacity' ||
+        key === 'visible' ||
+        key === 'locked' ||
+        key === 'playbackInitialVisibility' ||
+        key === 'component' ||
+        key === 'props' ||
+        key === 'componentProps' ||
+        key === 'nativeData' ||
+        key === 'nativeTextStyle'
+      ) {
+        continue
+      }
+      nativeData[key] = value
+    }
+    if (Object.keys(nativeData).length > 0) {
+      result.nativeData = nativeData
+    }
+    if (source.nativeTextStyle && typeof source.nativeTextStyle === 'object') {
+      result.nativeTextStyle = source.nativeTextStyle
+    }
+  }
+
+  return result as EffectiveLayerPropertiesPatchAtTarget
+}
+
+export function patchFlowOverlayProperties(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  patch: EffectiveLayerPropertiesPatchAtTarget | Record<string, unknown>,
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return fail('请先选择一个浮层或全局层项目')
+  const located = locateCourseLayer(document, overlayId)
+  if (!located) return fail(`找不到浮层：${overlayId}`)
+  const locked = teacherLocked(located.item)
+  if (locked && patch.locked !== false) return locked
+
+  const normalizedPatch = normalizeOverlayPropertiesPatch(located.item, patch)
+
+  const target: EffectiveLayerCommandTarget = {
+    authoringAddress: selection.authoringAddress || makeEffectiveLayerAuthoringAddress(document.id, located),
+    locationId: selection.locationId,
+    stateId: null,
+  }
+
+  return fromLayer(
+    patchEffectiveLayerPropertiesAtTarget(document, target, normalizedPatch, options),
+    { ownership: 'viewport-overlay', selection },
+  )
+}
+
+export interface FlowTextInsertRequest {
+  readonly text?: string
+  readonly label?: string
+  readonly id?: string
+  readonly placement?: FlowSharedOwnership
+}
+
+export function insertFlowSharedText(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  request: FlowTextInsertRequest = {},
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const page = requireFlowPage(document, selection)
+  if (!('surfaceId' in page)) return page
+  if (request.placement === 'document-block') {
+    const anchor = resolveInsertAnchor(document, selection, page.surfaceId)
+    const inserted = insertFlowEditorBlock(document, {
+      surfaceId: page.surfaceId,
+      parentId: anchor.parentId,
+      index: anchor.index,
+      block: { type: 'paragraph', text: request.text ?? '' },
+    }, options)
+    const createdId = inserted.createdBlockIds?.[0]
+    if (!inserted.ok || !inserted.nextDocument || !createdId) {
+      return fromFlowCommand(inserted, { ownership: 'document-block' })
+    }
+    return {
+      ...fromFlowCommand(inserted, {
+        ownership: 'document-block',
+        selection: selectFlowEditorBlock(inserted.nextDocument, page.locationId, createdId),
+      }),
+    }
+  }
+  const destination = overlayDestination(selection, page.surfaceId)
+  const created = runOverlayMutation(document, options, (draft) => {
+    const node = createTextNode({
+      id: stableFlowId('text', request.id),
+      name: request.label ?? '文本',
+      text: request.text ?? '请输入文本',
+    })
+    const item = sceneNodeToCourseLayerItem(node)
+    appendOverlayItem(draft, destination, item)
+    return [item.layerItemId]
+  }, '已作为页面浮层添加文本')
+  if (!created.ok || !created.nextDocument || !created.createdLayerItemIds?.[0]) return created
+  return {
+    ...created,
+    ownership: 'viewport-overlay',
+    selection: selectFlowOverlay(
+      created.nextDocument,
+      page.locationId,
+      [created.createdLayerItemIds[0]],
+      destination.source === 'global' ? 'global' : 'page',
+    ),
   }
 }
 

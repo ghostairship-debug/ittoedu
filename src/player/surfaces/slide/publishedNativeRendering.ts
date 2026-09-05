@@ -5,6 +5,10 @@ import type {
 import type {
   FormulaNode,
   ImageNode,
+  NativeChartContent,
+  NativeInputContent,
+  NativeTableContent,
+  NativeRenderableBase,
   NativeRenderInput,
   ReadonlyNativeRenderInput,
   ShapeNode,
@@ -16,8 +20,33 @@ import { renderImageNodeCanvas } from '../../../shared/imageEffects'
 import { registerPublishedCaptureResource } from '../publishedCapture'
 import { paintPublishedFormula } from '../publishedFormula'
 import { paintPublishedNativeText } from '../publishedNativeText'
+import { buildNativeTableLayout } from '../../../shared/nativeTableLayout'
+import { buildNativeChartView } from '../../../shared/nativeChartView'
 
-export type PublishedNativeRenderInput = ReadonlyNativeRenderInput
+type DeepReadonlyNative<T> = T extends readonly (infer Item)[]
+  ? readonly DeepReadonlyNative<Item>[]
+  : T extends object
+    ? { readonly [Key in keyof T]: DeepReadonlyNative<T[Key]> }
+    : T
+
+export type PublishedNativeTableInput = DeepReadonlyNative<
+  Omit<NativeRenderableBase, 'type'> & { readonly type: 'table' } & NativeTableContent
+>
+
+export type PublishedNativeChartInput = DeepReadonlyNative<
+  Omit<NativeRenderableBase, 'type'> & { readonly type: 'chart' } & NativeChartContent
+>
+
+export type PublishedNativeInputLayerInput = DeepReadonlyNative<
+  Omit<NativeRenderableBase, 'type'> & { readonly type: 'input' } & NativeInputContent
+>
+
+export type PublishedNativeRenderInput =
+  | ReadonlyNativeRenderInput
+  | PublishedNativeTableInput
+  | PublishedNativeChartInput
+  | PublishedNativeInputLayerInput
+
 export type PublishedTeacherControllerInput = Extract<
   PublishedNativeRenderInput,
   { readonly type: 'teacher-controller' }
@@ -119,6 +148,24 @@ export function nativeRenderInputFromLayerItem(
         ...layout,
         type: 'teacher-controller' as const,
       })
+    case 'table':
+      return freezeRenderSnapshot({
+        ...structuredClone(item.content.data),
+        ...layout,
+        type: 'table' as const,
+      })
+    case 'chart':
+      return freezeRenderSnapshot({
+        ...structuredClone(item.content.data),
+        ...layout,
+        type: 'chart' as const,
+      })
+    case 'input':
+      return freezeRenderSnapshot({
+        ...structuredClone(item.content.data),
+        ...layout,
+        type: 'input' as const,
+      })
   }
 }
 
@@ -203,6 +250,15 @@ export function paintPublishedNativeRenderInput(
       return
     case 'image':
       paintPublishedNativeImage(wrap, input, ports.resolveAsset)
+      return
+    case 'table':
+      paintPublishedNativeTable(wrap, input)
+      return
+    case 'chart':
+      paintPublishedNativeChart(wrap, input)
+      return
+    case 'input':
+      paintPublishedNativeInput(wrap, input)
       return
   }
 }
@@ -426,4 +482,259 @@ function paintPublishedNativeImage(
   image.addEventListener('error', showImageFallback, { once: true })
   image.src = url
   if (image.complete && image.naturalWidth > 0) render()
+}
+
+export function paintPublishedNativeTable(
+  wrap: HTMLElement,
+  input: PublishedNativeTableInput,
+): void {
+  const layout = buildNativeTableLayout(input, { width: input.width, height: input.height })
+  wrap.style.overflow = 'hidden'
+  wrap.style.boxSizing = 'border-box'
+
+  const table = wrap.ownerDocument.createElement('table')
+  table.style.width = '100%'
+  table.style.height = '100%'
+  table.style.tableLayout = 'fixed'
+  table.style.borderCollapse = 'collapse'
+  table.style.borderSpacing = '0'
+  table.style.boxSizing = 'border-box'
+  table.dataset.nativeTableId = input.id
+
+  const colgroup = wrap.ownerDocument.createElement('colgroup')
+  for (const col of layout.columns) {
+    const colEl = wrap.ownerDocument.createElement('col')
+    colEl.style.width = `${col.width}px`
+    colgroup.appendChild(colEl)
+  }
+  table.appendChild(colgroup)
+
+  const tbody = wrap.ownerDocument.createElement('tbody')
+  for (const row of layout.rows) {
+    const tr = wrap.ownerDocument.createElement('tr')
+    tr.style.height = `${row.height}px`
+    tr.dataset.rowId = row.id
+    for (const cell of row.cells) {
+      const cellTag = cell.isHeader ? 'th' : 'td'
+      const td = wrap.ownerDocument.createElement(cellTag)
+      td.dataset.cellId = cell.id
+      td.dataset.colId = cell.columnId
+      td.textContent = cell.text
+      const s = cell.style
+      td.style.boxSizing = 'border-box'
+      td.style.padding = `${s.cellPadding}px`
+      td.style.fontFamily = s.fontFamily
+      td.style.fontSize = `${s.fontSize}px`
+      td.style.fontWeight = s.bold ? 'bold' : 'normal'
+      td.style.fontStyle = s.italic ? 'italic' : 'normal'
+      td.style.textAlign = s.horizontalAlign
+      td.style.verticalAlign = s.verticalAlign
+      td.style.color = s.textColor
+      if (s.fillOpacity > 0) {
+        td.style.backgroundColor = s.fillColor
+      }
+      if (s.borderWidth > 0) {
+        td.style.border = `${s.borderWidth}px ${s.lineStyle} ${s.borderColor}`
+      } else {
+        td.style.border = 'none'
+      }
+      td.style.overflow = 'hidden'
+      td.style.textOverflow = 'ellipsis'
+      td.style.wordBreak = 'break-word'
+      tr.appendChild(td)
+    }
+    tbody.appendChild(tr)
+  }
+  table.appendChild(tbody)
+  wrap.appendChild(table)
+}
+
+export function paintPublishedNativeChart(
+  wrap: HTMLElement,
+  input: PublishedNativeChartInput,
+): void {
+  const chartView = buildNativeChartView(input, { width: input.width, height: input.height })
+  wrap.style.overflow = 'hidden'
+  wrap.style.boxSizing = 'border-box'
+
+  const svg = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('width', String(Math.max(1, Math.round(input.width))))
+  svg.setAttribute('height', String(Math.max(1, Math.round(input.height))))
+  svg.setAttribute('viewBox', `0 0 ${input.width} ${input.height}`)
+  svg.style.display = 'block'
+  svg.style.width = '100%'
+  svg.style.height = '100%'
+  svg.dataset.nativeChartId = input.id
+
+  // Accessibility
+  const desc = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'desc')
+  desc.textContent = chartView.accessibleDescription
+  svg.appendChild(desc)
+
+  // Background
+  if (input.style.backgroundColor && input.style.backgroundOpacity > 0) {
+    const bg = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    bg.setAttribute('width', String(input.width))
+    bg.setAttribute('height', String(input.height))
+    bg.setAttribute('fill', input.style.backgroundColor)
+    bg.setAttribute('fill-opacity', String(input.style.backgroundOpacity))
+    svg.appendChild(bg)
+  }
+
+  // Title
+  if (chartView.title) {
+    const titleText = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
+    titleText.setAttribute('x', String(input.width / 2))
+    titleText.setAttribute('y', '24')
+    titleText.setAttribute('text-anchor', 'middle')
+    titleText.setAttribute('font-family', input.style.fontFamily)
+    titleText.setAttribute('font-size', String(input.style.fontSize))
+    titleText.setAttribute('font-weight', 'bold')
+    titleText.setAttribute('fill', input.style.textColor)
+    titleText.textContent = chartView.title
+    svg.appendChild(titleText)
+  }
+
+  // Cartesian chart
+  if (chartView.cartesianSeries) {
+    // Gridlines
+    if (chartView.gridLines) {
+      for (const line of chartView.gridLines) {
+        const lineEl = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'line')
+        lineEl.setAttribute('x1', String(chartView.plotArea.x))
+        lineEl.setAttribute('y1', String(line.y))
+        lineEl.setAttribute('x2', String(chartView.plotArea.x + chartView.plotArea.width))
+        lineEl.setAttribute('y2', String(line.y))
+        lineEl.setAttribute('stroke', '#e5e7eb')
+        lineEl.setAttribute('stroke-width', '1')
+        svg.appendChild(lineEl)
+      }
+    }
+
+    // Series
+    for (const s of chartView.cartesianSeries) {
+      if (s.bars) {
+        for (const bar of s.bars) {
+          const rect = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'rect')
+          rect.setAttribute('x', String(bar.x))
+          rect.setAttribute('y', String(bar.y))
+          rect.setAttribute('width', String(bar.width))
+          rect.setAttribute('height', String(bar.height))
+          rect.setAttribute('fill', bar.color)
+          svg.appendChild(rect)
+        }
+      }
+      if (s.areaPathD) {
+        const areaEl = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path')
+        areaEl.setAttribute('d', s.areaPathD)
+        areaEl.setAttribute('fill', s.color)
+        areaEl.setAttribute('fill-opacity', '0.25')
+        svg.appendChild(areaEl)
+      }
+      if (s.linePathD) {
+        const lineEl = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path')
+        lineEl.setAttribute('d', s.linePathD)
+        lineEl.setAttribute('stroke', s.color)
+        lineEl.setAttribute('stroke-width', '2.5')
+        lineEl.setAttribute('fill', 'none')
+        svg.appendChild(lineEl)
+      }
+      for (const pt of s.points) {
+        const circle = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'circle')
+        circle.setAttribute('cx', String(pt.x))
+        circle.setAttribute('cy', String(pt.y))
+        circle.setAttribute('r', '4')
+        circle.setAttribute('fill', s.color)
+        circle.setAttribute('stroke', '#ffffff')
+        circle.setAttribute('stroke-width', '1.5')
+        svg.appendChild(circle)
+      }
+    }
+
+    // Category labels
+    if (chartView.categories) {
+      for (const cat of chartView.categories) {
+        const catText = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
+        catText.setAttribute('x', String(cat.x + cat.width / 2))
+        catText.setAttribute('y', String(chartView.plotArea.y + chartView.plotArea.height + 18))
+        catText.setAttribute('text-anchor', 'middle')
+        catText.setAttribute('font-family', input.style.fontFamily)
+        catText.setAttribute('font-size', '12')
+        catText.setAttribute('fill', input.style.textColor)
+        catText.textContent = cat.label
+        svg.appendChild(catText)
+      }
+    }
+  }
+
+  // Circular chart (pie / donut)
+  if (chartView.circularSlices) {
+    for (const slice of chartView.circularSlices) {
+      const path = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path')
+      path.setAttribute('d', slice.pathD)
+      path.setAttribute('fill', slice.color)
+      path.setAttribute('stroke', '#ffffff')
+      path.setAttribute('stroke-width', '1.5')
+      svg.appendChild(path)
+    }
+  }
+
+  // Legend
+  if (chartView.legend && chartView.legend.items.length > 0) {
+    const legG = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g')
+    let currentX = chartView.plotArea.x
+    const legY = chartView.legend.position === 'top' ? 36 : input.height - 14
+    for (const item of chartView.legend.items) {
+      const dot = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      dot.setAttribute('x', String(currentX))
+      dot.setAttribute('y', String(legY - 9))
+      dot.setAttribute('width', '10')
+      dot.setAttribute('height', '10')
+      dot.setAttribute('rx', '2')
+      dot.setAttribute('fill', item.color)
+      legG.appendChild(dot)
+
+      const lbl = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
+      lbl.setAttribute('x', String(currentX + 14))
+      lbl.setAttribute('y', String(legY))
+      lbl.setAttribute('font-family', input.style.fontFamily)
+      lbl.setAttribute('font-size', '11')
+      lbl.setAttribute('fill', input.style.textColor)
+      lbl.textContent = item.label
+      legG.appendChild(lbl)
+
+      currentX += item.label.length * 12 + 30
+    }
+    svg.appendChild(legG)
+  }
+
+  wrap.appendChild(svg)
+}
+
+export function paintPublishedNativeInput(
+  wrap: HTMLElement,
+  input: PublishedNativeInputLayerInput,
+): void {
+  wrap.style.overflow = 'hidden'
+  wrap.style.boxSizing = 'border-box'
+  const style = input.style
+
+  const inputEl = wrap.ownerDocument.createElement('input')
+  inputEl.type = input.answerType === 'number' ? 'number' : 'text'
+  inputEl.placeholder = input.placeholder ?? ''
+  inputEl.dataset.inputNodeId = input.id
+  inputEl.dataset.stateKey = input.stateKey
+  inputEl.dataset.validityKey = input.validityKey
+  inputEl.style.width = '100%'
+  inputEl.style.height = '100%'
+  inputEl.style.boxSizing = 'border-box'
+  inputEl.style.fontFamily = style.fontFamily
+  inputEl.style.fontSize = `${style.fontSize}px`
+  inputEl.style.color = style.textColor
+  inputEl.style.backgroundColor = style.fillColor
+  inputEl.style.border = `${style.borderWidth}px solid ${style.borderColor}`
+  inputEl.style.borderRadius = `${style.cornerRadius}px`
+  inputEl.style.textAlign = style.horizontalAlign
+  inputEl.style.padding = `${style.padding}px`
+  wrap.appendChild(inputEl)
 }

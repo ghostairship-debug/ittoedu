@@ -1,10 +1,21 @@
 import { synchronizeCourseTeacherControllerControls } from '../../../shared/teacherControllerConsistency'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { SlidePresentationState } from '../../../shared/courseProjectTypes'
+import {
+  BACKGROUND_MODES,
+  type BackgroundMode,
+  type CourseProjectDocument,
+  type SlidePresentationState,
+  type SlideSurfaceDocument,
+} from '../../../shared/courseProjectTypes'
 import { rotatedRectangleAabb } from '../../../shared/geometry'
 export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
 import { commitTeacherControllerAuthoringFrame } from '../../authoring/v9TeacherControllerAuthoring'
 import { commitV9SlideContentEdit, commitV9SlideTextRunStyle } from '../../authoring/v9SlideContentEdit'
+import { createImageAssetImport } from '../../project/assetManager'
+import {
+  emptyCourseAssetSidecar,
+  freezeCourseAssetSidecar,
+} from '../../project/v9AssetAdapter'
 import {
   deleteEffectiveLayerItems,
   moveEffectiveLayerOwner,
@@ -34,7 +45,11 @@ import {
 import { transformSlideNativeLayers } from '../../course/slideAuthoringBackend'
 import { createSlideAuthoringBackend } from '../../course/slideAuthoringBackend'
 import { updateSlideNativeLayerContent } from '../../course/v9SlideContentCommands'
-import { commitSlideAuthoringHistory, commitSlideProjectMutation } from '../../course/slideEditorCommands'
+import {
+  SLIDE_REJECT_STALE_REVISION,
+  commitSlideAuthoringHistory,
+  commitSlideProjectMutation,
+} from '../../course/slideEditorCommands'
 import { isSlideAuthoringBackend } from '../slideBackendPort'
 import { SESSIONLESS_COURSE_REASON, type EditorStoreKernel } from '../editorStoreKernel'
 import { projectV9EditingNodes, courseLayerItemToEditorCanvasNode } from '../slideEditorProjection'
@@ -56,6 +71,37 @@ import type { SlideAuthoringPorts, SlidePersistExtra } from './slideAuthoringSli
 import type { SlideAuthoringBackend, SlideAuthoringSession, SlideCommandResult } from '../../course/slideAuthoringBackend'
 import type { TextRunStyle } from '../../../shared/contracts/native-v1'
 
+const HEX_BACKGROUND_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
+
+/** `undefined` in, `undefined` out (leave untouched); invalid input reads as `null`. */
+function normalizedBackgroundColorPatch(color: string | undefined): string | undefined | null {
+  if (color === undefined) return undefined
+  if (typeof color !== 'string' || !HEX_BACKGROUND_COLOR_PATTERN.test(color.trim())) return null
+  return color.trim().toLowerCase()
+}
+
+function slideSurfaceById(
+  project: CourseProjectDocument,
+  surfaceId: string,
+): SlideSurfaceDocument | undefined {
+  return project.surfaces.find(
+    (candidate): candidate is SlideSurfaceDocument => (
+      candidate.id === surfaceId && candidate.type === 'slide'
+    ),
+  )
+}
+
+export interface SlideBackgroundOwnerPatch {
+  readonly backgroundMode?: BackgroundMode
+  readonly backgroundColor?: string
+  readonly backgroundAssetId?: string | null
+}
+
+export interface SlideBackgroundImportFile {
+  readonly name: string
+  readonly mimeType: string
+  readonly bytes: Uint8Array
+}
 
 export function createSlideOwnedCommands(
   kernel: EditorStoreKernel,
@@ -336,6 +382,220 @@ export function createSlideOwnedCommands(
           selection: session.selection,
         }
       }, { statusMessage: '当前状态已恢复为基础场景' })
+    },
+
+    updateSlideSurfaceBackground(
+      surfaceId: string,
+      patch: SlideBackgroundOwnerPatch,
+      options: { expectedRevision?: number } = {},
+    ): SlideCommandResult {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
+      if (
+        options.expectedRevision !== undefined
+        && options.expectedRevision !== backend.getSnapshot().revision
+      ) {
+        return { ok: false, reason: SLIDE_REJECT_STALE_REVISION, historyEntry: false }
+      }
+      if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
+        return { ok: false, reason: '背景模式无效', historyEntry: false }
+      }
+      const normalizedColor = normalizedBackgroundColorPatch(patch.backgroundColor)
+      if (normalizedColor === null) {
+        return { ok: false, reason: '颜色格式无效', historyEntry: false }
+      }
+      return runCandidateSession((session) => {
+        const current = slideSurfaceById(session.history.present, surfaceId)
+        if (!current) {
+          return {
+            ok: false,
+            reason: `找不到 Slide 表面：${surfaceId}`,
+            historyEntry: false,
+            nextSession: session,
+            selection: session.selection,
+          }
+        }
+        const modeChanges = patch.backgroundMode !== undefined
+          && patch.backgroundMode !== (current.backgroundMode ?? 'inherit')
+        const colorChanges = normalizedColor !== undefined && normalizedColor !== current.backgroundColor
+        const assetChanges = patch.backgroundAssetId !== undefined
+          && patch.backgroundAssetId !== (current.backgroundAssetId ?? null)
+        if (!modeChanges && !colorChanges && !assetChanges) {
+          return { ok: true, historyEntry: false, nextSession: session, selection: session.selection }
+        }
+        const project = commitSlideProjectMutation(session.history.present, (draft) => {
+          const surface = slideSurfaceById(draft, surfaceId)
+          if (!surface) throw new Error(`找不到 Slide 表面：${surfaceId}`)
+          if (modeChanges) surface.backgroundMode = patch.backgroundMode
+          if (colorChanges) surface.backgroundColor = normalizedColor
+          if (assetChanges) surface.backgroundAssetId = patch.backgroundAssetId ?? null
+        })
+        return {
+          ok: true,
+          historyEntry: true,
+          nextSession: {
+            ...session,
+            history: commitSlideAuthoringHistory(session.history, project),
+          },
+          selection: session.selection,
+        }
+      }, { statusMessage: '已更新演示页背景' })
+    },
+
+    importSlideSurfaceBackgroundAsset(
+      surfaceId: string,
+      file: SlideBackgroundImportFile,
+      options: { expectedRevision?: number } = {},
+    ): SlideCommandResult {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
+      if (
+        options.expectedRevision !== undefined
+        && options.expectedRevision !== backend.getSnapshot().revision
+      ) {
+        return { ok: false, reason: SLIDE_REJECT_STALE_REVISION, historyEntry: false }
+      }
+      if (!slideSurfaceById(backend.getSession().history.present, surfaceId)) {
+        return { ok: false, reason: `找不到 Slide 表面：${surfaceId}`, historyEntry: false }
+      }
+      let imported: ReturnType<typeof createImageAssetImport>
+      try {
+        imported = createImageAssetImport({ name: file.name, mimeType: file.mimeType, bytes: file.bytes })
+      } catch (error) {
+        return {
+          ok: false,
+          reason: error instanceof Error ? error.message : '无法导入图片素材',
+          historyEntry: false,
+        }
+      }
+      const sidecar = kernel.readResources().courseAssetSidecar ?? emptyCourseAssetSidecar()
+      return runCandidateSession((session) => {
+        const project = commitSlideProjectMutation(session.history.present, (draft) => {
+          const surface = slideSurfaceById(draft, surfaceId)
+          if (!surface) throw new Error(`找不到 Slide 表面：${surfaceId}`)
+          draft.assets[imported.meta.id] = imported.meta
+          surface.backgroundAssetId = imported.meta.id
+        })
+        return {
+          ok: true,
+          historyEntry: true,
+          nextSession: {
+            ...session,
+            history: commitSlideAuthoringHistory(session.history, project),
+          },
+          selection: session.selection,
+        }
+      }, {
+        sidecar: freezeCourseAssetSidecar({ ...sidecar.files, [imported.meta.id]: imported.bytes }),
+        statusMessage: '已上传背景图片',
+      })
+    },
+
+    updateSceneBackground(
+      sceneId: string,
+      patch: SlideBackgroundOwnerPatch,
+      options: { expectedRevision?: number } = {},
+    ): SlideCommandResult {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
+      if (
+        options.expectedRevision !== undefined
+        && options.expectedRevision !== backend.getSnapshot().revision
+      ) {
+        return { ok: false, reason: SLIDE_REJECT_STALE_REVISION, historyEntry: false }
+      }
+      if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
+        return { ok: false, reason: '背景模式无效', historyEntry: false }
+      }
+      const normalizedColor = normalizedBackgroundColorPatch(patch.backgroundColor)
+      if (normalizedColor === null) {
+        return { ok: false, reason: '颜色格式无效', historyEntry: false }
+      }
+      return runCandidateSession((session) => {
+        const current = findCourseSlideScene(session.history.present, sceneId)
+        if (!current) {
+          return {
+            ok: false,
+            reason: '找不到当前场景',
+            historyEntry: false,
+            nextSession: session,
+            selection: session.selection,
+          }
+        }
+        const modeChanges = patch.backgroundMode !== undefined
+          && patch.backgroundMode !== (current.backgroundMode ?? 'own')
+        const colorChanges = normalizedColor !== undefined && normalizedColor !== current.backgroundColor
+        const assetChanges = patch.backgroundAssetId !== undefined
+          && patch.backgroundAssetId !== (current.backgroundAssetId ?? null)
+        if (!modeChanges && !colorChanges && !assetChanges) {
+          return { ok: true, historyEntry: false, nextSession: session, selection: session.selection }
+        }
+        const project = commitSlideProjectMutation(session.history.present, (draft) => {
+          const scene = findCourseSlideScene(draft, sceneId)
+          if (!scene) throw new Error('找不到当前场景')
+          if (modeChanges) scene.backgroundMode = patch.backgroundMode
+          if (colorChanges) scene.backgroundColor = normalizedColor
+          if (assetChanges) scene.backgroundAssetId = patch.backgroundAssetId ?? null
+        })
+        return {
+          ok: true,
+          historyEntry: true,
+          nextSession: {
+            ...session,
+            history: commitSlideAuthoringHistory(session.history, project),
+          },
+          selection: session.selection,
+        }
+      }, { statusMessage: '已更新场景背景' })
+    },
+
+    importSceneBackgroundAsset(
+      sceneId: string,
+      file: SlideBackgroundImportFile,
+      options: { expectedRevision?: number } = {},
+    ): SlideCommandResult {
+      const backend = slide.read().slideBackend
+      if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
+      if (
+        options.expectedRevision !== undefined
+        && options.expectedRevision !== backend.getSnapshot().revision
+      ) {
+        return { ok: false, reason: SLIDE_REJECT_STALE_REVISION, historyEntry: false }
+      }
+      if (!findCourseSlideScene(backend.getSession().history.present, sceneId)) {
+        return { ok: false, reason: '找不到当前场景', historyEntry: false }
+      }
+      let imported: ReturnType<typeof createImageAssetImport>
+      try {
+        imported = createImageAssetImport({ name: file.name, mimeType: file.mimeType, bytes: file.bytes })
+      } catch (error) {
+        return {
+          ok: false,
+          reason: error instanceof Error ? error.message : '无法导入图片素材',
+          historyEntry: false,
+        }
+      }
+      const sidecar = kernel.readResources().courseAssetSidecar ?? emptyCourseAssetSidecar()
+      return runCandidateSession((session) => {
+        const project = commitSlideProjectMutation(session.history.present, (draft) => {
+          const scene = findCourseSlideScene(draft, sceneId)
+          if (!scene) throw new Error('找不到当前场景')
+          draft.assets[imported.meta.id] = imported.meta
+          scene.backgroundAssetId = imported.meta.id
+        })
+        return {
+          ok: true,
+          historyEntry: true,
+          nextSession: {
+            ...session,
+            history: commitSlideAuthoringHistory(session.history, project),
+          },
+          selection: session.selection,
+        }
+      }, {
+        sidecar: freezeCourseAssetSidecar({ ...sidecar.files, [imported.meta.id]: imported.bytes }),
+        statusMessage: '已上传背景图片',
+      })
     },
 
     selectNodes(nodeIds: string[]) {

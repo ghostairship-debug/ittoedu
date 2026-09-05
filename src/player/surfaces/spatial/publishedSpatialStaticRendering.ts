@@ -4,6 +4,7 @@ import type {
   PublishedNativeLayerItem,
   PublishedSpatialSurface,
 } from '../../../shared/publishedCourseTypes'
+import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import {
   collectSpatialPlaybackEntries,
   publishedSpatialInputFromCourse,
@@ -248,7 +249,12 @@ export function renderPublishedSpatialFrameSvg(
     .map((entry) => renderSpatialItemMarkup(entry.item, resolveAsset, entry.coordinateSpace))
     .join('')
   const transform = `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
-  const background = surface.backgroundColor?.trim() || '#ffffff'
+  const effectiveBg = resolveEffectiveBackground({
+    owner: 'spatial-surface',
+    course: options.published ?? {},
+    surface,
+  })
+  const background = effectiveBg.color
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${camera.viewportWidth}" height="${camera.viewportHeight}" viewBox="0 0 ${camera.viewportWidth} ${camera.viewportHeight}" preserveAspectRatio="xMidYMid meet" data-spatial-frame="${escapeXml(frameId ?? 'home')}" data-spatial-viewport="${camera.viewportWidth}x${camera.viewportHeight}"><defs><marker id="pdf-spatial-arrow-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker><marker id="pdf-spatial-arrow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 10 0 L 0 5 L 10 10 z" fill="#64748b"/></marker></defs><rect width="100%" height="100%" fill="${escapeXml(background)}"/><g transform="${transform}">${spatialWorldDecorationsMarkup(surface)}${worldItems}</g>${viewportItems}</svg>`
   return { svg, viewport: SPATIAL_EXPORT_VIEWPORT }
 }

@@ -1,13 +1,15 @@
 import { nanoid } from 'nanoid'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
-import type {
-  CourseProjectDocument,
-  CourseRuntimeDefinition,
-  LayerItem,
-  NativeLayerItem,
-  RuntimeLayerItem,
-  SpatialSurfaceDocument,
+import {
+  BACKGROUND_MODES,
+  type BackgroundMode,
+  type CourseProjectDocument,
+  type CourseRuntimeDefinition,
+  type LayerItem,
+  type NativeLayerItem,
+  type RuntimeLayerItem,
+  type SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { ShapeType } from '../../shared/contracts/native-v1'
@@ -1165,25 +1167,53 @@ type DeepNativeText = NativeLayerItem & {
   content: Extract<NativeLayerItem['content'], { nativeType: 'text' }>
 }
 
-export function updateSpatialSurfaceBackgroundColor(
+export interface SpatialSurfaceBackgroundPatch {
+  readonly backgroundMode?: BackgroundMode
+  readonly backgroundColor?: string
+  readonly backgroundAssetId?: string | null
+}
+
+/**
+ * Typed, validated write for a Spatial surface's background mode/color/asset.
+ * One commit per call; a stale revision, an invalid mode/color, or a patch
+ * that changes nothing writes zero history entries. Switching only
+ * `backgroundMode` (an isolated single-field patch) never touches the
+ * dormant `backgroundColor`/`backgroundAssetId` fields.
+ */
+export function updateSpatialSurfaceBackground(
   session: SpatialAuthoringSession,
-  backgroundColor: string,
+  patch: SpatialSurfaceBackgroundPatch,
   options: SpatialCommandOptions = {},
 ): SpatialCommandResult {
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
-  if (typeof backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(backgroundColor.trim())) {
+  if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
+    return rejectSpatialCommand(session, 'invalid-background-mode')
+  }
+  if (
+    patch.backgroundColor !== undefined
+    && (typeof patch.backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(patch.backgroundColor.trim()))
+  ) {
     return rejectSpatialCommand(session, 'invalid-color')
   }
-  const color = backgroundColor.trim().toLowerCase()
+  const color = patch.backgroundColor !== undefined
+    ? patch.backgroundColor.trim().toLowerCase()
+    : undefined
   try {
     const currentSurface = spatialSurfaceIn(session.history.present, session.selection.surfaceId)
-    if (currentSurface.backgroundColor === color) {
+    const modeChanges = patch.backgroundMode !== undefined
+      && patch.backgroundMode !== (currentSurface.backgroundMode ?? 'own')
+    const colorChanges = color !== undefined && color !== currentSurface.backgroundColor
+    const assetChanges = patch.backgroundAssetId !== undefined
+      && patch.backgroundAssetId !== (currentSurface.backgroundAssetId ?? null)
+    if (!modeChanges && !colorChanges && !assetChanges) {
       return succeedSpatialCommand(session, false)
     }
     const project = commitSpatialProjectMutation(session.history.present, (draft) => {
       const surface = spatialSurfaceIn(draft, session.selection.surfaceId)
-      surface.backgroundColor = color
+      if (modeChanges) surface.backgroundMode = patch.backgroundMode
+      if (colorChanges) surface.backgroundColor = color
+      if (assetChanges) surface.backgroundAssetId = patch.backgroundAssetId ?? null
     }, options.now)
     return succeedSpatialCommand(replaceSpatialSession(session, {
       history: commitSpatialAuthoringHistory(session.history, project),
@@ -1191,6 +1221,14 @@ export function updateSpatialSurfaceBackgroundColor(
   } catch (error) {
     return catchSpatialCommand(session, error)
   }
+}
+
+export function updateSpatialSurfaceBackgroundColor(
+  session: SpatialAuthoringSession,
+  backgroundColor: string,
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  return updateSpatialSurfaceBackground(session, { backgroundColor }, options)
 }
 
 export function worldLayerItem(

@@ -17,6 +17,8 @@ import type {
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
 import type { TextNode } from '../../shared/contracts/native-v1'
+import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
+import { convertLineGeometryForShapeType } from '../../shared/nativeLineGeometry'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import { synchronizeCourseTeacherControllerControls } from '../../shared/teacherControllerConsistency'
 import {
@@ -49,6 +51,10 @@ import {
 } from './globalLayerCommands'
 import { repairRemovedCourseReferences } from './courseReferenceCleanup'
 import { commitSlideProjectMutation } from './slideEditorCommands'
+import {
+  rebuildChartItemIds,
+  rebuildTableItemIds,
+} from '../project/nativeNodeFactories'
 import {
   spatialLayerCoordinateSpace,
   type SpatialEditorLayerScope,
@@ -303,9 +309,11 @@ function sparseObjectDiff(
 ): Record<string, unknown> {
   const diff: Record<string, unknown> = {}
   for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
-    if (!sameJson(base[key], next[key]) && Object.prototype.hasOwnProperty.call(next, key)) {
-      diff[key] = structuredClone(next[key])
-    }
+    if (sameJson(base[key], next[key])) continue
+    // `null` rides the shared merge contract as a key deletion.
+    diff[key] = Object.prototype.hasOwnProperty.call(next, key)
+      ? structuredClone(next[key])
+      : null
   }
   return diff
 }
@@ -515,6 +523,13 @@ function cloneDuplicatedLayerItem(item: LayerItem, nextId: string): LayerItem {
   duplicate.frame.x += 20
   duplicate.frame.y += 20
   duplicate.locked = false
+  if (duplicate.kind === 'native') {
+    if (duplicate.content.nativeType === 'table') {
+      duplicate.content.data = rebuildTableItemIds(duplicate.content.data)
+    } else if (duplicate.content.nativeType === 'chart') {
+      duplicate.content.data = rebuildChartItemIds(duplicate.content.data)
+    }
+  }
   return duplicate
 }
 
@@ -658,6 +673,30 @@ function normalizeEffectiveLayerPropertyPatch(
       currentNativeData,
       nativeData,
     )
+    if (item.content.nativeType === 'shape') {
+      // shapeType/lineGeometry invariant: switching away from line/elbow-arrow
+      // deletes the geometry; a kind that disagrees with the target shapeType
+      // is converted instead of failing strict schema validation downstream.
+      const mergedShapeType = mergedNativeData.shapeType
+      const mergedGeometry = mergedNativeData.lineGeometry as NativeLineGeometry | undefined
+      if (
+        mergedShapeType !== 'line' &&
+        mergedShapeType !== 'elbow-arrow' &&
+        mergedGeometry !== undefined
+      ) {
+        nativeData = { ...nativeData, lineGeometry: null }
+        mergedNativeData = mergeCourseNativeData(currentNativeData, nativeData)
+      } else if (
+        (mergedShapeType === 'line' || mergedShapeType === 'elbow-arrow') &&
+        mergedGeometry !== undefined
+      ) {
+        const converted = convertLineGeometryForShapeType(mergedGeometry, mergedShapeType)
+        if (JSON.stringify(converted) !== JSON.stringify(mergedGeometry)) {
+          nativeData = { ...nativeData, lineGeometry: converted }
+          mergedNativeData = mergeCourseNativeData(currentNativeData, nativeData)
+        }
+      }
+    }
   }
 
   const normalizedFrame = source === 'global' &&

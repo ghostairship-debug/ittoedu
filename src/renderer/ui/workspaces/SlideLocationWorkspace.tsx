@@ -39,6 +39,7 @@ import {
   createSlideWorkspaceAuthoringController,
   listSlideWorkspaceHitTargets,
   mergeSlidePreviewIntoNodes,
+  type SlideLinePreview,
   type SlideWorkspaceCommandPort,
 } from '../workspaceSlideAuthoring'
 import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView } from '../../course/slideEditorView'
@@ -94,6 +95,13 @@ import type { CourseRuntimeAssetReplacementTarget } from '../../runtime/courseRu
 import type { ImportedImageAsset } from '../../project/assetManager'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { FormulaNode, TextNode, TextRun } from '../../../shared/contracts/native-v1'
+import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
+import { resolveNativeLinePoints } from '../../../shared/nativeLineGeometry'
+import {
+  collectLineSnapAxes,
+  drawLineAuthoringGeometry,
+  snapLinePoint,
+} from '../../authoring/slideLineAuthoring'
 import type {
   SlideAuthoringBackend,
   SlideAuthoringSession,
@@ -134,11 +142,22 @@ export interface SlideWorkspaceSnapshot {
   readonly projectRevision: number
   readonly previewRebuildKey: string
   readonly tryRunMountKey: string | null
+  /** Armed direct-draw tool; `null` keeps the canvas in select mode. */
+  readonly drawTool: SlideLineDrawTool
+}
+
+export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
+
+export interface SlideLineDrawCommit {
+  readonly shapeType: 'line' | 'elbow-arrow'
+  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly lineGeometry: NativeLineGeometry
 }
 
 export interface SlideWorkspaceCanvasPort {
   readonly setCanvasMode: (mode: SlideCanvasMode) => void
   readonly setStatus: (message: string) => void
+  readonly setDrawTool: (tool: SlideLineDrawTool) => void
 }
 
 export interface SlideWorkspaceSelectionPort {
@@ -166,6 +185,14 @@ export interface SlideWorkspaceContentPort {
   readonly addFormulaNode: (x: number, y: number) => void
   readonly addRectangleNode: (x: number, y: number) => void
   readonly addShapeNode: (shapeType: string, x: number, y: number) => void
+  /** Commits one completed direct line draw as a single history transaction. */
+  readonly drawShapeNode: (input: SlideLineDrawCommit) => void
+  readonly addTableNode: (x: number, y: number) => void
+  readonly addChartNode: (
+    chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut',
+    x: number,
+    y: number,
+  ) => void
   readonly addExternalComponentNode: (
     packageId: string,
     x: number,
@@ -696,6 +723,20 @@ export function SlideLocationWorkspace({
   const [tryRunEpoch, setTryRunEpoch] = useState(0)
   const [controllerOverlay, setControllerOverlay] =
     useState<StageSelectionOverlayGeometry | null>(null)
+  const drawTool = snapshot.drawTool
+  const drawGestureRef = useRef<{
+    pointerId: number
+    shapeType: 'line' | 'elbow-arrow'
+    startWorld: { x: number; y: number }
+  } | null>(null)
+  const [drawPreview, setDrawPreview] = useState<{
+    readonly points: ReadonlyArray<{ readonly x: number; readonly y: number }>
+    readonly guides: { readonly x?: number; readonly y?: number } | null
+  } | null>(null)
+  const [lineDragGuides, setLineDragGuides] = useState<{
+    readonly x?: number
+    readonly y?: number
+  } | null>(null)
   const panRef = useRef<{
     pointerId: number
     clientX: number
@@ -703,6 +744,18 @@ export function SlideLocationWorkspace({
     originX: number
     originY: number
   } | null>(null)
+  const portsRef = useRef(ports)
+  portsRef.current = ports
+
+  useEffect(() => {
+    // Draw-tool arming belongs to one Slide scene canvas: switching scene,
+    // scope or canvas mode disarms it and drops any in-flight draw preview
+    // without writing history.
+    drawGestureRef.current = null
+    setDrawPreview(null)
+    setLineDragGuides(null)
+    if (readSnapshot().drawTool !== null) portsRef.current.canvas.setDrawTool(null)
+  }, [canvasMode, editingScope, courseLocationId])
 
   const useCoursePlayerTryRun = Boolean(snapshot.projectId && canvasMode === 'run')
   const usePublishedAuthoring = Boolean(snapshot.projectId && canvasMode === 'edit')
@@ -1025,6 +1078,68 @@ export function SlideLocationWorkspace({
     }
     gameRef.current?.bridge.setTextEditing(null)
   }, [queueAuthoringNodePatch])
+
+  /** Live paint for one line handle drag: frame + geometry follow the pointer. */
+  const paintSlideLinePreview = useCallback((
+    linePreview: SlideLinePreview,
+  ) => {
+    const currentSnapshot = readSnapshot()
+    const current = currentSnapshot.editingNodes.find((item) => item.id === linePreview.nodeId)
+    if (!current) return
+    const normalized = {
+      ...current,
+      x: linePreview.frame.x,
+      y: linePreview.frame.y,
+      width: linePreview.frame.width,
+      height: linePreview.frame.height,
+      lineGeometry: structuredClone(linePreview.lineGeometry),
+    } as AuthoringPatchNode
+    gameRef.current?.bridge.applyNode(normalized)
+    queueAuthoringNodePatch(currentSnapshot.editingScope, normalized)
+  }, [queueAuthoringNodePatch])
+
+  const revertLineDragPreview = useCallback(() => {
+    const active = slideAuthoringRef.current.lineDragPreview()
+    if (!active) return
+    const currentSnapshot = readSnapshot()
+    const node = currentSnapshot.editingNodes.find((item) => item.id === active.nodeId)
+    if (node) {
+      gameRef.current?.bridge.applyNode(node)
+      queueAuthoringNodePatch(currentSnapshot.editingScope, node as AuthoringPatchNode)
+    }
+  }, [queueAuthoringNodePatch])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (isEditableKeyboardTarget(event.target)) return
+      if (drawGestureRef.current || readSnapshot().drawTool !== null) {
+        drawGestureRef.current = null
+        setDrawPreview(null)
+        portsRef.current.canvas.setDrawTool(null)
+        return
+      }
+      if (candidatePointerActiveRef.current) {
+        revertLineDragPreview()
+        const viewport = readCandidateViewport()
+        if (viewport) slideAuthoringRef.current.cancelGesture(viewport)
+        candidatePointerActiveRef.current = false
+        setLineDragGuides(null)
+      }
+    }
+    const onBlur = () => {
+      if (drawGestureRef.current) {
+        drawGestureRef.current = null
+        setDrawPreview(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [revertLineDragPreview])
 
   const syncCompleteAuthoringSnapshot = useCallback(() => {
     const currentSnapshot = readSnapshot()
@@ -2064,6 +2179,14 @@ export function SlideLocationWorkspace({
     if (value === 'text') ports.content.addTextNode(x, y)
     else if (value === 'formula') ports.content.addFormulaNode(x, y)
     else if (value === 'rectangle') ports.content.addRectangleNode(x, y)
+    else if (value === 'table') ports.content.addTableNode(x, y)
+    else if (value.startsWith('chart:')) {
+      ports.content.addChartNode(
+        value.slice('chart:'.length) as 'bar' | 'line' | 'area' | 'pie' | 'donut',
+        x,
+        y,
+      )
+    }
     else if (value.startsWith('shape:')) {
       ports.content.addShapeNode(value.slice('shape:'.length), x, y)
     }
@@ -2104,6 +2227,7 @@ export function SlideLocationWorkspace({
       ref={workspaceRef}
       className={`workspace workspace--${canvasMode}`}
       aria-label="课件画布"
+      style={drawTool ? { cursor: 'crosshair' } : undefined}
       onDragOver={(event) => {
         if (canvasMode !== 'edit') return
         if (
@@ -2163,6 +2287,26 @@ export function SlideLocationWorkspace({
         }
         const viewport = readCandidateViewport()
         if (!viewport) return
+        if (currentSnapshot.drawTool) {
+          const transform = createStageViewportTransform(viewport)
+          const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
+          const snapped = snapLinePoint(
+            world,
+            collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current)),
+            transform.scale,
+            event.altKey,
+          )
+          drawGestureRef.current = {
+            pointerId: event.pointerId,
+            shapeType: currentSnapshot.drawTool,
+            startWorld: snapped.point,
+          }
+          setDrawPreview({ points: [snapped.point], guides: snapped.guideX !== undefined || snapped.guideY !== undefined ? { x: snapped.guideX, y: snapped.guideY } : null })
+          event.currentTarget.setPointerCapture(event.pointerId)
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         if (currentSnapshot.editingScope === 'global') {
           const controllerResult = controllerAuthoringRef.current.pointerDown({
             x: event.clientX,
@@ -2191,10 +2335,13 @@ export function SlideLocationWorkspace({
           x: event.clientX,
           y: event.clientY,
           additive: event.shiftKey || event.ctrlKey || event.metaKey,
+          altKey: event.altKey,
         }, viewport)
         if (result.kind !== 'slide-authoring') return
         candidatePointerActiveRef.current = true
         paintSlideTransformPreview(result.preview)
+        if (result.linePreview) paintSlideLinePreview(result.linePreview)
+        setLineDragGuides(result.guides ?? null)
         event.currentTarget.setPointerCapture(event.pointerId)
         event.preventDefault()
         event.stopPropagation()
@@ -2202,6 +2349,44 @@ export function SlideLocationWorkspace({
       onPointerMoveCapture={(event) => {
         const pan = panRef.current
         if (!pan || pan.pointerId !== event.pointerId) {
+          const draw = drawGestureRef.current
+          if (draw && draw.pointerId === event.pointerId) {
+            const viewport = readCandidateViewport()
+            if (viewport) {
+              const transform = createStageViewportTransform(viewport)
+              const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
+              const snapped = snapLinePoint(
+                world,
+                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current)),
+                transform.scale,
+                event.altKey,
+              )
+              const authored = drawLineAuthoringGeometry(draw.shapeType, draw.startWorld, snapped.point)
+              if (authored) {
+                const points = resolveNativeLinePoints(
+                  authored.lineGeometry,
+                  authored.frame.width,
+                  authored.frame.height,
+                ).map((point) => ({ x: authored.frame.x + point.x, y: authored.frame.y + point.y }))
+                setDrawPreview({
+                  points,
+                  guides: snapped.guideX !== undefined || snapped.guideY !== undefined
+                    ? { x: snapped.guideX, y: snapped.guideY }
+                    : null,
+                })
+              } else {
+                setDrawPreview({
+                  points: [draw.startWorld, snapped.point],
+                  guides: snapped.guideX !== undefined || snapped.guideY !== undefined
+                    ? { x: snapped.guideX, y: snapped.guideY }
+                    : null,
+                })
+              }
+            }
+            event.preventDefault()
+            event.stopPropagation()
+            return
+          }
           if (
             slideBackendKind === 'slide-authoring' &&
             controllerPointerActiveRef.current
@@ -2229,8 +2414,13 @@ export function SlideLocationWorkspace({
               const moved = slideAuthoringRef.current.pointerMove({
                 x: event.clientX,
                 y: event.clientY,
+                altKey: event.altKey,
               }, viewport)
-              if (moved.kind === 'slide-authoring') paintSlideTransformPreview(moved.preview)
+              if (moved.kind === 'slide-authoring') {
+                paintSlideTransformPreview(moved.preview)
+                if (moved.linePreview) paintSlideLinePreview(moved.linePreview)
+                setLineDragGuides(moved.guides ?? null)
+              }
               event.preventDefault()
               event.stopPropagation()
               return
@@ -2253,6 +2443,40 @@ export function SlideLocationWorkspace({
         }))
       }}
       onPointerUpCapture={(event) => {
+        const draw = drawGestureRef.current
+        if (draw && draw.pointerId === event.pointerId) {
+          drawGestureRef.current = null
+          setDrawPreview(null)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          const viewport = readCandidateViewport()
+          if (viewport) {
+            const transform = createStageViewportTransform(viewport)
+            const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
+            const rawDistance = Math.hypot(world.x - draw.startWorld.x, world.y - draw.startWorld.y)
+            if (rawDistance >= 3) {
+              const snapped = snapLinePoint(
+                world,
+                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current)),
+                transform.scale,
+                event.altKey,
+              )
+              const authored = drawLineAuthoringGeometry(draw.shapeType, draw.startWorld, snapped.point)
+              if (authored) {
+                ports.content.drawShapeNode({
+                  shapeType: draw.shapeType,
+                  frame: authored.frame,
+                  lineGeometry: authored.lineGeometry,
+                })
+              }
+            }
+          }
+          ports.canvas.setDrawTool(null)
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         if (
           slideBackendKind === 'slide-authoring' &&
           controllerPointerActiveRef.current
@@ -2294,8 +2518,13 @@ export function SlideLocationWorkspace({
             const raised = slideAuthoringRef.current.pointerUp({
               x: event.clientX,
               y: event.clientY,
+              altKey: event.altKey,
             }, viewport)
-            if (raised.kind === 'slide-authoring') paintSlideTransformPreview(raised.preview)
+            if (raised.kind === 'slide-authoring') {
+              paintSlideTransformPreview(raised.preview)
+              if (raised.linePreview) paintSlideLinePreview(raised.linePreview)
+              setLineDragGuides(raised.guides ?? null)
+            }
           }
           candidatePointerActiveRef.current = false
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -2315,6 +2544,35 @@ export function SlideLocationWorkspace({
         }
       }}
       onPointerCancelCapture={(event) => {
+        const draw = drawGestureRef.current
+        if (draw && draw.pointerId === event.pointerId) {
+          drawGestureRef.current = null
+          setDrawPreview(null)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        if (
+          slideBackendKind === 'slide-authoring' &&
+          candidatePointerActiveRef.current
+        ) {
+          revertLineDragPreview()
+          const viewport = readCandidateViewport()
+          if (viewport) {
+            slideAuthoringRef.current.cancelGesture(viewport)
+          }
+          candidatePointerActiveRef.current = false
+          setLineDragGuides(null)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         if (
           slideBackendKind === 'slide-authoring' &&
           controllerPointerActiveRef.current
@@ -2526,6 +2784,52 @@ export function SlideLocationWorkspace({
             onCancelComponentText={() => setActiveComponentTextSession(null)}
             onRetryPreview={retryRuntimePreview}
           />
+          {(drawPreview || lineDragGuides) && (
+            <svg
+              className="canvas-line-overlay"
+              data-testid="canvas-line-overlay"
+              viewBox={`0 0 ${STAGE_VIEWPORT_WIDTH} ${STAGE_VIEWPORT_HEIGHT}`}
+              width={STAGE_VIEWPORT_WIDTH}
+              height={STAGE_VIEWPORT_HEIGHT}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                pointerEvents: 'none',
+                overflow: 'visible',
+              }}
+            >
+              {(lineDragGuides?.x ?? drawPreview?.guides?.x) !== undefined && (
+                <line
+                  x1={lineDragGuides?.x ?? drawPreview?.guides?.x ?? 0}
+                  y1={0}
+                  x2={lineDragGuides?.x ?? drawPreview?.guides?.x ?? 0}
+                  y2={STAGE_VIEWPORT_HEIGHT}
+                  stroke="#ff4d9d"
+                  strokeWidth={1}
+                />
+              )}
+              {(lineDragGuides?.y ?? drawPreview?.guides?.y) !== undefined && (
+                <line
+                  x1={0}
+                  y1={lineDragGuides?.y ?? drawPreview?.guides?.y ?? 0}
+                  x2={STAGE_VIEWPORT_WIDTH}
+                  y2={lineDragGuides?.y ?? drawPreview?.guides?.y ?? 0}
+                  stroke="#ff4d9d"
+                  strokeWidth={1}
+                />
+              )}
+              {drawPreview && drawPreview.points.length >= 2 && (
+                <polyline
+                  points={drawPreview.points.map((point) => `${point.x},${point.y}`).join(' ')}
+                  fill="none"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                />
+              )}
+            </svg>
+          )}
         </div>
         <div
           ref={courseTryRunRef}

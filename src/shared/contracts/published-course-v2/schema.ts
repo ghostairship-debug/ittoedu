@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   addCanonicalLayerOrderIssues,
+  backgroundModeSchema,
   courseLocationSchema,
   courseNavigationGuardSchema,
   flowBodyLayerPlaneSchema,
@@ -170,7 +171,18 @@ const publishedFlowSurfaceLayerEntrySchema: z.ZodType<PublishedFlowSurfaceLayerE
   item: publishedLayerItemSchema,
   visibility: locationVisibilitySchema,
   bodyPlane: flowBodyLayerPlaneSchema.optional(),
-}).strict()
+}).strict().superRefine((entry, context) => {
+  if (
+    entry.item.kind === 'native'
+    && (entry.item.content.nativeType === 'table' || entry.item.content.nativeType === 'chart' || entry.item.content.nativeType === 'input')
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['item', 'content', 'nativeType'],
+      message: `Flow surface does not support native ${entry.item.content.nativeType}`,
+    })
+  }
+})
 
 const publishedFlowSurfaceLayerEntryListSchema = z.array(publishedFlowSurfaceLayerEntrySchema).max(20_000)
   .superRefine((entries, context) => {
@@ -182,6 +194,16 @@ const publishedGlobalLayerEntrySchema: z.ZodType<PublishedGlobalLayerEntry> = z.
   visibility: locationVisibilitySchema,
   plane: globalLayerPlaneSchema.optional(),
 }).strict().superRefine((entry, context) => {
+  if (
+    entry.item.kind === 'native'
+    && (entry.item.content.nativeType === 'table' || entry.item.content.nativeType === 'chart' || entry.item.content.nativeType === 'input')
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['item', 'content', 'nativeType'],
+      message: `Global layer does not support native ${entry.item.content.nativeType}`,
+    })
+  }
   if (
     entry.plane === 'underlay'
     && entry.item.kind === 'native'
@@ -223,6 +245,7 @@ const publishedPresentationSchema = z.object({
 const publishedSlideSceneSchema = z.object({
   id: stableIdSchema,
   name: z.string().trim().min(1).max(200),
+  backgroundMode: backgroundModeSchema.optional(),
   backgroundColor: colorSchema,
   backgroundAssetId: stableIdSchema.nullable().optional(),
   layerItems: publishedLayerListSchema,
@@ -311,9 +334,21 @@ const publishedSurfaceBaseFields = {
 const publishedSlideSurfaceSchema = z.object({
   ...publishedSurfaceBaseFields,
   type: z.literal('slide'),
+  backgroundMode: backgroundModeSchema.optional(),
+  backgroundColor: colorSchema.optional(),
+  backgroundAssetId: stableIdSchema.nullable().optional(),
   canvas: z.object({ width: z.literal(1280), height: z.literal(720) }).strict(),
   scenes: z.array(publishedSlideSceneSchema).min(1).max(10_000),
 }).strict().superRefine((surface, context) => {
+  surface.surfaceLayerItems.forEach((entry, index) => {
+    if (entry.item.kind === 'native' && entry.item.content.nativeType === 'input') {
+      context.addIssue({
+        code: 'custom',
+        path: ['surfaceLayerItems', index, 'item', 'content', 'nativeType'],
+        message: 'Slide surface does not support native input',
+      })
+    }
+  })
   const ids = surface.scenes.map((scene) => scene.id)
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: 'custom', path: ['scenes'], message: 'Scene ids must be unique' })
@@ -325,7 +360,9 @@ const publishedFlowSurfaceSchema = z.object({
   title: publishedSurfaceBaseFields.title,
   surfaceLayerItems: publishedFlowSurfaceLayerEntryListSchema,
   type: z.literal('flow'),
+  backgroundMode: backgroundModeSchema.optional(),
   backgroundColor: colorSchema.optional(),
+  backgroundAssetId: stableIdSchema.nullable().optional(),
   layout: z.object({
     readingWidth: finiteNumber.min(320).max(2_400),
     wideContentWidth: finiteNumber.min(320).max(4_000),
@@ -367,7 +404,9 @@ const semanticZoomSchema = z.object({
 const publishedSpatialSurfaceSchema = z.object({
   ...publishedSurfaceBaseFields,
   type: z.literal('spatial-2d'),
+  backgroundMode: backgroundModeSchema.optional(),
   backgroundColor: colorSchema.optional(),
+  backgroundAssetId: stableIdSchema.nullable().optional(),
   world: z.object({
     bounds: z.discriminatedUnion('mode', [
       z.object({ mode: z.literal('infinite') }).strict(),
@@ -389,6 +428,30 @@ const publishedSpatialSurfaceSchema = z.object({
   }).strict(),
   semanticZoom: z.array(semanticZoomSchema).max(10_000),
 }).strict().superRefine((surface, context) => {
+  surface.surfaceLayerItems.forEach((entry, index) => {
+    if (
+      entry.item.kind === 'native'
+      && (entry.item.content.nativeType === 'table' || entry.item.content.nativeType === 'chart' || entry.item.content.nativeType === 'input')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['surfaceLayerItems', index, 'item', 'content', 'nativeType'],
+        message: `Spatial surface does not support native ${entry.item.content.nativeType}`,
+      })
+    }
+  })
+  surface.world.layerItems.forEach((item, index) => {
+    if (
+      item.kind === 'native'
+      && (item.content.nativeType === 'table' || item.content.nativeType === 'chart' || item.content.nativeType === 'input')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'layerItems', index, 'content', 'nativeType'],
+        message: `Spatial world does not support native ${item.content.nativeType}`,
+      })
+    }
+  })
   const frameIds = surface.camera.frames.map((frame) => frame.id)
   if (new Set(frameIds).size !== frameIds.length) {
     context.addIssue({ code: 'custom', path: ['camera', 'frames'], message: 'Camera frame ids must be unique' })
@@ -678,6 +741,13 @@ function validatePublishedCourseSemantics(
       }
       const trigger = rule.trigger
       if ('nodeId' in trigger) checkLayerItem(trigger.nodeId, [...path, ruleIndex, 'trigger', 'nodeId'])
+      if (trigger.type === 'input.submit' && !localLayerItemIds) {
+        addPublishedSemanticIssue(
+          context,
+          [...path, ruleIndex, 'trigger'],
+          'Global interactions do not support input.submit trigger',
+        )
+      }
       if (trigger.type === 'audio.ended' && !published.media.audio.sounds[trigger.soundId]) {
         addPublishedSemanticIssue(
           context,
@@ -733,6 +803,7 @@ function validatePublishedCourseSemantics(
     })
   }
 
+  checkAsset(published.backgroundAssetId ?? undefined, ['backgroundAssetId'])
   published.globalLayerItems.forEach((entry, index) => {
     checkScoped(entry, ['globalLayerItems', index])
   })
@@ -741,6 +812,7 @@ function validatePublishedCourseSemantics(
     surface.surfaceLayerItems.forEach((entry, itemIndex) => {
       checkScoped(entry, ['surfaces', surfaceIndex, 'surfaceLayerItems', itemIndex])
     })
+    checkAsset(surface.backgroundAssetId ?? undefined, ['surfaces', surfaceIndex, 'backgroundAssetId'])
     const sharedLayerItems = [
       ...published.globalLayerItems.map((entry) => entry.item),
       ...surface.surfaceLayerItems.map((entry) => entry.item),
@@ -761,12 +833,82 @@ function validatePublishedCourseSemantics(
           ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'interactions'],
           sceneItemIds,
         )
+        const sceneNativeInputIds = new Set(
+          scene.layerItems
+            .filter((item): item is Extract<PublishedLayerItem, { kind: 'native' }> => (
+              item.kind === 'native' && item.content.nativeType === 'input'
+            ))
+            .map((item) => item.layerItemId),
+        )
+        scene.interactions.forEach((rule, ruleIndex) => {
+          if (rule.trigger.type === 'input.submit') {
+            if (!sceneNativeInputIds.has(rule.trigger.nodeId)) {
+              addPublishedSemanticIssue(
+                context,
+                ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'interactions', ruleIndex, 'trigger', 'nodeId'],
+                `Input submit trigger must target a scene-local native input: ${rule.trigger.nodeId}`,
+              )
+            }
+          }
+        })
+        const sceneRulesById = new Map(scene.interactions.map((r) => [r.id, r]))
         checkAsset(
           scene.backgroundAssetId ?? undefined,
           ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'backgroundAssetId'],
         )
         scene.layerItems.forEach((item, itemIndex) => {
           checkLayer(item, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'layerItems', itemIndex])
+          if (item.kind === 'native' && item.content.nativeType === 'input') {
+            const inputData = item.content.data
+            const inputPath = ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'layerItems', itemIndex, 'content', 'data']
+            const state = stateByKey.get(inputData.stateKey)
+            if (!state) {
+              addPublishedSemanticIssue(
+                context,
+                [...inputPath, 'stateKey'],
+                `Missing course-state key: ${inputData.stateKey}`,
+              )
+            } else {
+              const expectedValueType = inputData.answerType === 'text' ? 'string' : 'number'
+              if (state.valueType !== expectedValueType) {
+                addPublishedSemanticIssue(
+                  context,
+                  [...inputPath, 'stateKey'],
+                  `Input state key '${inputData.stateKey}' value type must match answerType '${inputData.answerType}'`,
+                )
+              }
+            }
+            const validityState = stateByKey.get(inputData.validityKey)
+            if (!validityState) {
+              addPublishedSemanticIssue(
+                context,
+                [...inputPath, 'validityKey'],
+                `Missing course-state key: ${inputData.validityKey}`,
+              )
+            } else if (validityState.valueType !== 'boolean') {
+              addPublishedSemanticIssue(
+                context,
+                [...inputPath, 'validityKey'],
+                `Input validity key '${inputData.validityKey}' must be a boolean course state`,
+              )
+            }
+            inputData.ruleFamilyRuleIds.forEach((ruleId, ruleIdx) => {
+              const rule = sceneRulesById.get(ruleId)
+              if (!rule) {
+                addPublishedSemanticIssue(
+                  context,
+                  [...inputPath, 'ruleFamilyRuleIds', ruleIdx],
+                  `Input rule family references missing interaction rule: ${ruleId}`,
+                )
+              } else if (rule.trigger.type !== 'input.submit' || rule.trigger.nodeId !== item.layerItemId) {
+                addPublishedSemanticIssue(
+                  context,
+                  [...inputPath, 'ruleFamilyRuleIds', ruleIdx],
+                  `Input rule family rule must target this input node: ${ruleId}`,
+                )
+              }
+            })
+          }
         })
         scene.presentation?.states.forEach((state, stateIndex) => {
           checkAsset(
@@ -950,6 +1092,8 @@ export const publishedCourseV2Schema = z.object({
   sourceSchemaVersion: z.literal(9),
   courseId: stableIdSchema,
   title: z.string().trim().min(1).max(500),
+  backgroundColor: colorSchema.optional(),
+  backgroundAssetId: stableIdSchema.nullable().optional(),
   assets: z.record(z.string(), publishedAssetSchema),
   components: z.record(z.string(), publishedComponentSchema),
   designTokens: courseProjectDesignTokensSchema,

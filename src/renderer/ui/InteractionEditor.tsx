@@ -391,6 +391,8 @@ function defaultAutomationTrigger(
       return { type, scope: 'scene', eventName: 'complete' }
     case 'presenter.command':
       return { type, command: 'next' }
+    case 'input.submit':
+      return { type, nodeId: targets.nodeId ?? '' }
   }
 }
 
@@ -496,6 +498,8 @@ function describeTrigger(
       return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”播放到 ${trigger.seconds} 秒`
     case 'presenter.command':
       return `翻页笔发出“${trigger.command === 'next' ? '前进' : '后退'}”命令`
+    case 'input.submit':
+      return `输入框“${namedReference(context.nodes, trigger.nodeId, '缺失输入框')}”提交答案`
   }
 }
 

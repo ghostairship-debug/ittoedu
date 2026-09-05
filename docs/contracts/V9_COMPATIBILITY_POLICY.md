@@ -13,8 +13,8 @@
 
 | 协议域 | 当前版本 | 权威常量 / 判别器 | 演进规则 |
 |---|---|---|---|
-| **Course Project** | Schema 9 | `COURSE_PROJECT_SCHEMA_VERSION = 9` | **已软冻结**：已有字段锁死；允许 additive 可选字段及本文登记的 Table/Chart strict discriminator 窄例外 |
-| **Published Course** | Version 2 | `PUBLISHED_COURSE_VERSION = 2` | Table/Chart 使用匹配 strict 分支窄扩展，并与匹配 Player 成对交付 |
+| **Course Project** | Schema 9 | `COURSE_PROJECT_SCHEMA_VERSION = 9` | **已软冻结**：已有字段锁死；允许 additive 可选字段及本文登记的 Table/Chart/Slide input strict discriminator 窄例外 |
+| **Published Course** | Version 2 | `PUBLISHED_COURSE_VERSION = 2` | Table/Chart/Slide input 使用匹配 strict 分支窄扩展，并与匹配 Player 成对交付 |
 | **Runtime Protocol** | API 2 / 3 | `runtimeApiVersion: 2 \| 3` | 支持 canvas-runtime 2 与 surface-runtime 3 |
 | **Component Protocol** | API 4 | `apiVersion: 4` | 独立升级组件规范 |
 
@@ -80,14 +80,42 @@
 该例外必须同时满足：
 
 1. 不修改既有六种 Native 的字段、判别器、缺省或语义；所有既有合法 V9 工程继续读取且行为不变。
-2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema，不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
+2. Table/Chart 各自使用可完整表达数据、样式和稳定子项 ID 的 `.strict()` Schema，只允许位于 Slide scene 或 Slide surface layer；Flow、Spatial 与 global 必须定位拒绝。不使用 `.passthrough()`、`z.unknown()`、任意 JSON bag 或 Shape/截图替代作者真相。
 3. Table/Chart 不加入 legacy `SceneNode` / `SCENE_NODE_TYPES`。V9 Native data materializer、presentation `nativeData` override 校验与生成合同必须脱离旧 Scene Schema，同时保持既有 presentation override 合并语义不变。
 4. 含新分支的工程由不了解该分支的旧编辑器明确拒绝；不得静默丢字段、跳过元素、改写为旧类型或覆盖原工程。旧编辑器前向不兼容是已披露结果，用户须使用匹配版本。
 5. Published V2 payload 与匹配 Player 成对交付；旧 V2 reader/Player 遇到新分支必须明确失败，不承诺前向兼容，也不得静默隐藏或仅以无提示静态占位冒充支持。
 6. 作者 UI、Authoring Tools、保存重开、Preview、Published Player、HTML 和适用导出必须形成有效域闭环；静态格式不能完整表达时必须给出可见诊断或明确降级，不能丢数据。
 7. Course Project Schema、Published Schema、类型、生成合同、兼容政策和旧 reader 反例必须作为可整体审阅的合同变更交付；Table 与 Chart 的产品实现可分片，但任何分片不得提前宣称完整可用。
 
-本节只批准 Table/Chart 两个明确分支，不构成新增其它 Native、Interaction、Surface 或 Published discriminator 的通行授权。
+本节只批准 Table/Chart 两个明确分支；Slide input 与 `input.submit` 的独立批准见 3.4 节。两节都不构成新增其它 Native、Interaction、Surface 或 Published discriminator 的通行授权。
+
+2026-09-05 的版本规划将 Chart 的 Flow/Spatial 支持列为 1.3 必选交付，详见 [跨 Surface Chart 合同节点](../development-plan/roadmap/1.3/README.md)。这是后续合同的明确工作范围，不是对当前 reader 有效域的即时修改：新增 Flow block discriminator、Spatial 容器规则、匹配 Published 分支和旧 reader 反例必须先作为独立合同变更审阅交付，再接 UI。合同交付前继续按本节拒绝越界 Chart；Table、input、global 与其他容器不因该规划自动取得扩展许可。新增内容保持可编辑数据，静态导出后备不得反写作者工程。
+
+### 3.4 2026-09-04 Owner 批准的 Slide Native input 与 input.submit 窄扩展
+
+产品 Owner 明确批准在 Course Project V9 `NativeElementContent` 增加 `nativeType: 'input'` 严格分支，在 Interaction Protocol V1 增加 `type: 'input.submit'` 严格触发器，并在 Published Course V2 增加 matching strict 分支。该 Native 只允许位于 Slide scene；Slide surface、Flow、Spatial 与 global 出现时必须由语义校验定位拒绝。作者工程、发布和 Interaction wire 的版本号保持不变。
+
+该例外必须同时满足：
+
+1. input content 只保存 `answerType`、已声明的值键与有效性键、placeholder、受管规则族 ID 和视觉样式；稳定对象身份与 frame 仍只由 LayerItem 持有。
+2. `input.submit` 的原始值由真实提交事件主动携带。Published controller 先按 Published input 声明归一化并原子批量写入两个 course-state key，再匹配规则；不增加通用 DOM 回读，不修改 `course-state.set`，不新增“答案对错”条件。
+3. 简洁判题继续编译为 `course-state.compare` 规则族；文本最多 15 个规范化后唯一的正确答案，数值使用闭区间。教师只配置正确/错误两类反馈。
+4. 节点、状态声明与受管规则族的创建、切型、复制和删除各自是一笔 canonical authoring transaction；失败、stale 或非法 candidate 零部分写入。
+5. Published producer、matching Player、PPTX 静态填写区、诊断与能力索引成对交付。PPTX 不承诺交互等价，旧 reader/Player 遇到新分支必须 fail loud。
+6. 精确字段、归一化、规则族与原子写入语义由 `docs/development-plan/roadmap/1.2/IMPLEMENTATION_CONTRACT.md` 固定；节点不得自行换 wire。
+
+本节不批准 Flow/Spatial input、Runtime input 替代、任意表单协议、通用 DOM 查询端口或新的条件/动作类型。
+
+### 3.5 2026-09-04 Owner 批准的 1.2 line/background additive 字段
+
+为完成已批准的 Line 与 Background 作者闭环，Owner 批准以下 V9 additive 可选字段，并在 Published Course V2 增加对等可选字段；它们不是新 discriminator：
+
+- `NativeShapeContent.lineGeometry?`：只对既有 `shapeType: 'line' | 'elbow-arrow'` 合法。缺字段继续使用 1.1.1 固定几何，读取不回写；首次几何编辑才物化。
+- Course root 的 `backgroundColor?`、`backgroundAssetId?`；Slide surface 的 `backgroundMode?`、`backgroundColor?`、`backgroundAssetId?`；Slide scene 的 `backgroundMode?`；Flow/Spatial surface 的 `backgroundMode?`、`backgroundAssetId?`。既有 scene/state/Flow/Spatial background 字段不改名、不改类型。
+
+兼容缺省固定为：Course `#ffffff`/无图；Slide surface 继承 Course；Slide scene 仍默认 own 并使用既有 required color；Flow/Spatial 仍默认 own，缺 color 仍为 `#ffffff`。因此所有旧合法 V9 工程在没有新字段时保持 1.1.1 结果。`backgroundMode:'inherit'` 只让对应 owner 的既有 own 值暂不参与解析，不删除或改写它们。
+
+精确 shape、取值边界、背景优先级和导出行为由 1.2 实施合同固定。新增字段必须先以独立合同提交落地，并保持所有相关对象 `.strict()`；不得借 additive 字段建立第二 background store、通用 path、渐变或任意样式 bag。
 
 ---
 

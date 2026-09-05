@@ -264,7 +264,7 @@ export function effectiveLayerItem(
   }
   if (effective.kind === 'native' && override.nativeData) {
     effective.content.data = mergeCourseProjectHealthProps(
-      effective.content.data,
+      effective.content.data as Readonly<Record<string, unknown>>,
       override.nativeData,
     ) as typeof effective.content.data
   } else if (effective.kind === 'component' && override.componentProps) {

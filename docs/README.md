@@ -25,7 +25,7 @@
 
 ## 历史证据
 
-历史任务卡、评审记录与 V8 时代的 AI 创作规范已于 2026-08-25 从当前文档入口移除；已提交过的原文可由 Git 历史读取。产品不打开或导入 V8 `.h5lesson`；仓库仅保留与产品兼容承诺无关的隔离 archive/parser/rejection 测试工具。更早的 Editor 1.6/1.7、Project V7 由 Git 标签 `internal-prototype-1.7.0` 保存。
+历史任务卡、已完成计划、已闭合评审记录与 V8 时代的 AI 创作规范不保留在当前文档入口；已提交过的原文可由 Git 历史读取。产品不打开或导入 V8 `.h5lesson`；仓库仅保留与产品兼容承诺无关的隔离 archive/parser/rejection 测试工具。更早的 Editor 1.6/1.7、Project V7 由 Git 标签 `internal-prototype-1.7.0` 保存。
 
 ## 维护规则
 

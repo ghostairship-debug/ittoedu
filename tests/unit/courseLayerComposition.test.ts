@@ -147,7 +147,7 @@ describe('Course Project V9 layer composition', () => {
       opacity: 0.8,
       hitPolicy: 'pass-through',
     })
-    expect(composition.background).toEqual({ color: '#f0fdf4', assetId: undefined })
+    expect(composition.background).toEqual({ color: '#f0fdf4', assetId: null })
     expect(project).toEqual(before)
   })
 
@@ -159,7 +159,7 @@ describe('Course Project V9 layer composition', () => {
       stateId: null,
     })
     expect(base.stateId).toBeNull()
-    expect(base.background).toEqual({ color: '#ffffff', assetId: undefined })
+    expect(base.background).toEqual({ color: '#ffffff', assetId: null })
     expect(base.entries.find((candidate) => candidate.item.layerItemId === 'slide-hint')?.mounted).toBe(true)
     expect(() => composeCourseProjectLocation({
       project,

@@ -154,6 +154,7 @@ export class PublishedInteractionController {
         rule.trigger.type !== 'node.click'
         && rule.trigger.type !== 'audio.ended'
         && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)
+        && rule.trigger.type !== 'input.submit'
       ) {
         this.#diagnose({
           code: 'unsupported-trigger',
@@ -166,7 +167,7 @@ export class PublishedInteractionController {
       }
 
       const triggerNodeId = videoTriggerNodeId(rule.trigger)
-        ?? (rule.trigger.type === 'node.click' ? rule.trigger.nodeId : undefined)
+        ?? (rule.trigger.type === 'node.click' || rule.trigger.type === 'input.submit' ? rule.trigger.nodeId : undefined)
       let conditionsSupported = true
       for (const condition of rule.conditions) {
         if (
@@ -197,6 +198,44 @@ export class PublishedInteractionController {
         })
       }
       if (!conditionsSupported) continue
+
+      if (rule.trigger.type === 'input.submit') {
+        const inputNodeId = rule.trigger.nodeId
+        const describe = this.#surface.describeInput
+        const bind = this.#surface.bindInputSubmit
+        if (typeof describe !== 'function' || typeof bind !== 'function') {
+          this.#diagnose({
+            code: 'bind-unavailable',
+            severity: 'warning',
+            message: `Published 交互输入 ${inputNodeId} 当前不可绑定提交事件`,
+            nodeId: inputNodeId,
+            ruleId: rule.id,
+            interactionType: 'input.submit',
+          })
+          continue
+        }
+        const descriptor = describe.call(this.#surface, inputNodeId)
+        if (!descriptor) {
+          this.#diagnose({
+            code: 'bind-unavailable',
+            severity: 'warning',
+            message: `Published 交互输入 ${inputNodeId} 无法解析为有效输入描述符`,
+            nodeId: inputNodeId,
+            ruleId: rule.id,
+            interactionType: 'input.submit',
+          })
+          continue
+        }
+        this.#diagnose({
+          code: 'unsupported-trigger',
+          severity: 'warning',
+          message: 'Published 交互 input.submit 执行尚未交付，已跳过规则',
+          nodeId: inputNodeId,
+          ruleId: rule.id,
+          interactionType: 'input.submit',
+        })
+        continue
+      }
 
       if (rule.trigger.type === 'node.click') {
         const rules = this.#clickRules.get(rule.trigger.nodeId) ?? []

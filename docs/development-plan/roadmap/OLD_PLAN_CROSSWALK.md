@@ -13,22 +13,22 @@
 
 | 旧任务 ID | 归类 | 新路线节点 | 理由 |
 |---|---|---|---|
-| `r11-000-governance-route` | replaced | `r11-000-authority-contracts` | Owner 已在包外确认路线；新节点只把已确认决定写入正式权威，不允许任务自授权。 |
-| `r11-001-fix-published-zindex-assertion` | retired | — | 当前候选已经修复并有测试证据；不重复立项，结果由不降级基线持续保护。 |
-| `r11-002-refresh-current-generated-fixtures` | retired | — | 当前 V9 fixture、render-host 和能力索引已刷新；后续只在相关输入变化时按生成检查更新。 |
-| `r11-003-fixed-baseline-gate` | merged | `r11-001-preservation-baseline`<br>`r11-061-no-regression-candidate` | 基线改为启动时核对当前 HEAD/工作树；行为基线与固定候选发布门分开。 |
-| `r11-010-legacy-boundary-ratchet` | merged | `r11-002-legacy-inventory-zero-check`<br>`r11-060-zero-gate` | 不建立第二 allowlist；唯一 Legacy 台账负责只减不增，最终门再证明零 consumer。 |
-| `r11-011-remove-renderer-v8-load-entry` | merged | `r11-051-v9-archive-only`<br>`r11-054-delete-legacy-modules` | V8 打开入口与 archive consumer 同批迁移，确认替代和零引用后才删模块。 |
-| `r11-012-isolate-v8-migrator` | merged | `r11-051-v9-archive-only`<br>`r11-054-delete-legacy-modules` | 1.1 目标是可执行代码与测试工具链清零，不再为不受支持格式保留永久隔离层。 |
-| `r11-020-slide-v9-hit-selection-read-model` | replaced | `r11-020-slide-effective-read-model` | 保留 Slide 命中、选区和缩略图结果，改由只读 V9 effective view 提供。 |
-| `r11-021-slide-native-properties-v9` | replaced | `r11-021-slide-properties-editors` | 属性、动画、互动与开发面板统一迁到 V9 read/write 语义。 |
-| `r11-022-slide-clipboard-delete-reorder-v9` | replaced | `r11-022-slide-actions` | copy/paste/duplicate/delete/reorder 作为一条 V9 command/history 结果交付。 |
-| `r11-023-flow-viewstate-without-v8-project` | replaced | `r11-023-flow-viewstate` | Flow 单独迁移到只读 V9 session，保留其语义正文与导航边界。 |
-| `r11-024-spatial-viewstate-without-v8-project` | replaced | `r11-024-spatial-viewstate` | Spatial 单独迁移，camera/path/relation 与 session-only camera 语义不被 Flow 泛化。 |
-| `r11-025-remove-editorstate-v8-document` | replaced | `r11-025-editor-store-v9-only` | 删除 Store 中 project、clipboard/history 镜像的最终汇合点保持不变。 |
-| `r11-026-retire-slide-editor-projection` | merged | `r11-025-editor-store-v9-only`<br>`r11-054-delete-legacy-modules` | 先迁完 UI/Store consumer，再按已复核清单删除零引用投影模块，不保留模糊 adapter。 |
-| `r11-030-focused-validation-map` | retired | — | 精确验证、写锁、停止条件已内嵌每份 1.1 弱模型规格，不再建立独立验证真相。 |
-| `r11-040-stability-release-gate` | merged | `r11-060-zero-gate`<br>`r11-061-no-regression-candidate`<br>`r11-062-owner-release` | 零旧代码、自动候选和 Owner accepted 被拆成三道不可互相冒充的门。 |
+| `r11-000-governance-route` | retired | — | 已由 `v1.1.1` 标签与当前正式权威闭合；历史实施映射由 Git 历史保存。 |
+| `r11-001-fix-published-zindex-assertion` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-002-refresh-current-generated-fixtures` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-003-fixed-baseline-gate` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-010-legacy-boundary-ratchet` | retired | — | 已由 `v1.1.1` 标签与 Legacy 零门闭合；历史实施映射由 Git 历史保存。 |
+| `r11-011-remove-renderer-v8-load-entry` | retired | — | 已由 `v1.1.1` 标签与 Legacy 零门闭合；历史实施映射由 Git 历史保存。 |
+| `r11-012-isolate-v8-migrator` | retired | — | 已由 `v1.1.1` 标签与 Legacy 零门闭合；历史实施映射由 Git 历史保存。 |
+| `r11-020-slide-v9-hit-selection-read-model` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-021-slide-native-properties-v9` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-022-slide-clipboard-delete-reorder-v9` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-023-flow-viewstate-without-v8-project` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-024-spatial-viewstate-without-v8-project` | retired | — | 已由 `v1.1.1` 标签与保全基线闭合；历史实施映射由 Git 历史保存。 |
+| `r11-025-remove-editorstate-v8-document` | retired | — | 已由 `v1.1.1` 标签与 Owner 边界闭合；历史实施映射由 Git 历史保存。 |
+| `r11-026-retire-slide-editor-projection` | retired | — | 已由 `v1.1.1` 标签与 Owner 边界闭合；历史实施映射由 Git 历史保存。 |
+| `r11-030-focused-validation-map` | retired | — | 已由当前工作协议与保全基线取代；历史实施映射由 Git 历史保存。 |
+| `r11-040-stability-release-gate` | retired | — | 已由 `v1.1.1` 标签、自动门与 Owner 签署闭合；历史实施映射由 Git 历史保存。 |
 
 ## 1.2
 

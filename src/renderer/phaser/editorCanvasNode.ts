@@ -2,6 +2,7 @@ import type { InteractionRule } from '../../shared/interactionTypes'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import type {
   FormulaAstNode,
+  NativeLineGeometry,
   TeacherControllerButton,
   TextRun,
 } from '../../shared/contracts/native-v1/types'
@@ -32,6 +33,8 @@ export interface EditorCanvasNode {
   formulaId?: string
   accessibleText?: string
   buttons?: TeacherControllerButton[]
+  shapeType?: string
+  lineGeometry?: NativeLineGeometry
   safeAreas?: import('../../shared/contracts/native-v1/types').ImageSafeArea[]
 }
 

@@ -7,6 +7,7 @@ import type {
 import type {
   CourseProjectDocument,
   FlowBlock,
+  LayerItem,
 } from '../../shared/courseProjectTypes'
 import {
   resolveSchemaValidCourseProjectDiagnosticTarget,
@@ -29,6 +30,10 @@ import {
 } from './course/buildCoursePrintArtifacts'
 import { componentPackagesToArchiveFiles } from '../components/componentPackageStore'
 import { collectCourseProjectSlideVisualPreflightItems } from './slideVisualPreflight'
+import {
+  pptxNativeChartWarnings,
+  pptxNativeTableWarnings,
+} from './pptxTableAndChart'
 
 export type ExportPreflightTarget =
   | 'single-html'
@@ -375,6 +380,50 @@ export function adaptCoursePptxProducerFindings(
         message: `Slide 场景“${scene.name}”没有课程位置，无法确定 PPTX 状态与图层可见性。`,
         path,
         diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, { path }),
+      })
+    })
+    const pptxNativeEntries: Array<{
+      item: LayerItem
+      path: ReadonlyArray<string | number>
+    }> = []
+    surface.surfaceLayerItems.forEach((entry, itemIndex) => {
+      pptxNativeEntries.push({
+        item: entry.item,
+        path: ['surfaces', surfaceIndex, 'surfaceLayerItems', itemIndex, 'item'],
+      })
+    })
+    surface.scenes.forEach((scene, sceneIndex) => {
+      scene.layerItems.forEach((item, itemIndex) => {
+        pptxNativeEntries.push({
+          item,
+          path: ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'layerItems', itemIndex],
+        })
+      })
+    })
+    pptxNativeEntries.forEach(({ item, path }) => {
+      if (item.kind !== 'native') return
+      const { nativeType } = item.content
+      if (nativeType !== 'table' && nativeType !== 'chart') return
+      const shared = {
+        layerItemId: item.layerItemId,
+        label: item.label ?? item.layerItemId,
+        rotation: item.rotation,
+        opacity: item.opacity,
+      }
+      const warnings = nativeType === 'table'
+        ? pptxNativeTableWarnings({ ...shared, content: item.content.data })
+        : pptxNativeChartWarnings({ ...shared, content: item.content.data })
+      warnings.forEach((message) => {
+        items.push({
+          severity: 'warning',
+          code: 'static-export-warning',
+          message,
+          path,
+          diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, {
+            path,
+            layerItemId: item.layerItemId,
+          }),
+        })
       })
     })
   })

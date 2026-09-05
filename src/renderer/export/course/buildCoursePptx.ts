@@ -1,7 +1,8 @@
 import { APP_COMPANY, APP_NAME } from '../../../shared/constants'
+import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import type { ImageNode } from '../../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../../shared/imageEffects'
-import { nativeRenderInputFromPublishedItem } from '../../../player/surfaces/slide/publishedNativeRendering'
+import { nativeRenderInputFromPublishedItem, readonlyNativeRenderInputFromPublishedItem } from '../../../player/surfaces/slide/publishedNativeRendering'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
@@ -29,6 +30,10 @@ import {
   addPptxShapeNode,
   addPptxTextNode,
 } from '../pptxTextAndShape'
+import {
+  addPptxChartNode,
+  addPptxTableNode,
+} from '../pptxTableAndChart'
 import {
   buildPublishedCourseV2Payload,
   type CoursePublishSources,
@@ -255,11 +260,20 @@ async function addNativeItem(
   report: CourseExportReportItem[],
   pageId: string,
 ): Promise<void> {
+  const publishedNode = readonlyNativeRenderInputFromPublishedItem(item)
+  if (!publishedNode.visible) return
+  if (publishedNode.type === 'table') {
+    sceneWarnings.push(...addPptxTableNode(slide, publishedNode, scale))
+    return
+  }
+  if (publishedNode.type === 'chart') {
+    sceneWarnings.push(...addPptxChartNode(slide, publishedNode, scale))
+    return
+  }
   const node = nativeRenderInputFromPublishedItem(item)
-  if (!node.visible) return
   if (node.type === 'text') addPptxTextNode(slide, node, scale)
   else if (node.type === 'formula') addPptxFormulaNode(slide, node, scale)
-  else if (node.type === 'shape') addPptxShapeNode(slide, node, scale)
+  else if (node.type === 'shape') sceneWarnings.push(...addPptxShapeNode(slide, node, scale))
   else if (node.type === 'image') {
     const assetDataUrl = resolvePublishedAssetData(published, node.assetId)
     if (!assetDataUrl) {
@@ -486,10 +500,22 @@ async function addSlideScenePage(
     { includeGlobalLayerItems, locationId: page.locationId },
   )
   const { state } = composition
-  slide.background = { color: pptxColor(state?.backgroundColor ?? scene.backgroundColor, 'FFFFFF') }
-  const backgroundAssetId = state?.backgroundAssetId === undefined
-    ? scene.backgroundAssetId
-    : state.backgroundAssetId
+  const effectiveBg = state
+    ? resolveEffectiveBackground({
+        owner: 'slide-state',
+        course: published,
+        surface,
+        scene,
+        state,
+      })
+    : resolveEffectiveBackground({
+        owner: 'slide-scene',
+        course: published,
+        surface,
+        scene,
+      })
+  slide.background = { color: pptxColor(effectiveBg.color, 'FFFFFF') }
+  const backgroundAssetId = effectiveBg.assetId
   if (backgroundAssetId) {
     const background = resolvePublishedAssetData(published, backgroundAssetId)
     if (background) {

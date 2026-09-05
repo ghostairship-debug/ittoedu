@@ -1326,6 +1326,7 @@ export function FlowWorkspace({
 
   const rootBlocks = childrenByParent.get(null) ?? []
   const surfaceBackground = view.backgroundColor
+  const backgroundImageUrl = view.backgroundAssetId ? assetUrls[view.backgroundAssetId] : undefined
 
   return (
     <div
@@ -1346,7 +1347,11 @@ export function FlowWorkspace({
         minHeight: 320,
         overflow: 'hidden',
         isolation: 'isolate',
-        background: surfaceBackground,
+        backgroundColor: surfaceBackground,
+        backgroundImage: backgroundImageUrl ? `url(${JSON.stringify(backgroundImageUrl)})` : undefined,
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover',
       }}
     >
       <FlowOverlayAuthoringLayer

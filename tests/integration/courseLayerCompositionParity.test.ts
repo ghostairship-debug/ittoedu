@@ -319,7 +319,7 @@ describe('shared ↔ renderer ↔ raw Published V2 composition parity', () => {
     const published = publish('slide-presentation-state')
     const publishedComposition = composePublishedSlideLocation({ payload: published, locationId, stateId })
     expectCompositionParity(shared, publishedComposition)
-    expect(publishedComposition.background).toEqual({ color, assetId: undefined })
+    expect(publishedComposition.background).toEqual({ color, assetId: null })
     expect(publishedComposition.entries.filter((entry) => entry.mounted).map((entry) => entry.item.layerItemId))
       .toEqual(mountedIds)
 

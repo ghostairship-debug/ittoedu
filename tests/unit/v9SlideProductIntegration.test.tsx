@@ -232,6 +232,50 @@ describe('V9 slide product integration on the real V8 UI', () => {
     ))).toBe(true)
   })
 
+  it('inserts a table and all five chart types through the Elements tab into the candidate document', () => {
+    const revisionBefore = selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision ?? 0
+    render(<ElementsTab onAddImage={() => undefined} />)
+
+    fireEvent.click(screen.getByTestId('add-table'))
+    for (const chartType of ['bar', 'line', 'area', 'pie', 'donut'] as const) {
+      fireEvent.click(screen.getByTestId('add-chart'))
+      fireEvent.click(screen.getByTestId(`add-chart-${chartType}`))
+    }
+
+    const items = slideSceneLayerItems()
+    const tableItem = items.find((item) => (
+      item.kind === 'native' && item.content.nativeType === 'table'
+    ))
+    if (tableItem?.kind !== 'native' || tableItem.content.nativeType !== 'table') {
+      throw new Error('expected inserted table layer item')
+    }
+    expect(tableItem.content.data.columns).toHaveLength(3)
+    expect(tableItem.content.data.rows).toHaveLength(3)
+    expect(tableItem.content.data.headerRowCount).toBe(1)
+
+    for (const chartType of ['bar', 'line', 'area', 'pie', 'donut'] as const) {
+      const charts = items.filter((item) => (
+        item.kind === 'native'
+        && item.content.nativeType === 'chart'
+        && item.content.data.chartType === chartType
+      ))
+      expect(charts).toHaveLength(1)
+      const chart = charts[0]!
+      if (chart.kind !== 'native' || chart.content.nativeType !== 'chart') {
+        throw new Error('expected inserted chart layer item')
+      }
+      expect(chart.content.data.categories.length).toBeGreaterThan(0)
+      if (chartType === 'pie' || chartType === 'donut') {
+        expect(chart.content.data.series).toHaveLength(1)
+      }
+    }
+
+    expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(
+      revisionBefore + 6,
+    )
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+  })
+
   it('notifies Zustand after a successful candidate command', () => {
     injectCandidate()
     let notifications = 0

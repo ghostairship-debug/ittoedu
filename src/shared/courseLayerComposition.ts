@@ -1,5 +1,6 @@
 import { mergeCourseNativeData } from './courseProjectSchema'
 import type {
+  BackgroundMode,
   CourseLocation,
   CourseProjectDocument,
   CourseSurfaceType,
@@ -18,6 +19,7 @@ import type {
   PublishedSlidePresentationState,
 } from './publishedCourseTypes'
 import { compareStableStrings } from './stableOrder'
+import { resolveEffectiveBackground } from './effectiveBackground'
 
 export type CourseLayerCompositionSource = 'global' | 'surface' | 'scene' | 'world'
 
@@ -108,9 +110,13 @@ type ComposableSurface<Item extends ComposableLayerItem> =
   | {
       readonly id: string
       readonly type: 'slide'
+      readonly backgroundMode?: BackgroundMode
+      readonly backgroundColor?: string
+      readonly backgroundAssetId?: string | null
       readonly surfaceLayerItems: readonly ComposableScopedLayerItem<Item>[]
       readonly scenes: readonly {
         readonly id: string
+        readonly backgroundMode?: BackgroundMode
         readonly backgroundColor: string
         readonly backgroundAssetId?: string | null
         readonly layerItems: readonly Item[]
@@ -122,16 +128,24 @@ type ComposableSurface<Item extends ComposableLayerItem> =
   | {
       readonly id: string
       readonly type: 'flow'
+      readonly backgroundMode?: BackgroundMode
+      readonly backgroundColor?: string
+      readonly backgroundAssetId?: string | null
       readonly surfaceLayerItems: readonly ComposableScopedLayerItem<Item>[]
     }
   | {
       readonly id: string
       readonly type: 'spatial-2d'
+      readonly backgroundMode?: BackgroundMode
+      readonly backgroundColor?: string
+      readonly backgroundAssetId?: string | null
       readonly surfaceLayerItems: readonly ComposableScopedLayerItem<Item>[]
       readonly world: { readonly layerItems: readonly Item[] }
     }
 
 interface CompositionDocument<Item extends ComposableLayerItem> {
+  readonly backgroundColor?: string
+  readonly backgroundAssetId?: string | null
   readonly locations: readonly CourseLocation[]
   readonly globalLayerItems: readonly ComposableGlobalLayerItem<Item>[]
   readonly surfaces: readonly ComposableSurface<Item>[]
@@ -310,11 +324,23 @@ function composeLocation<Item extends ComposableLayerItem>(input: {
     sceneId = scene.id
     localSource = 'scene'
     localItems = materializeCourseSlideLayerItems(scene.layerItems, state)
+    const effective = state
+      ? resolveEffectiveBackground({
+          owner: 'slide-state',
+          course: input.document,
+          surface,
+          scene,
+          state,
+        })
+      : resolveEffectiveBackground({
+          owner: 'slide-scene',
+          course: input.document,
+          surface,
+          scene,
+        })
     background = {
-      color: state?.backgroundColor ?? scene.backgroundColor,
-      assetId: state?.backgroundAssetId === undefined
-        ? scene.backgroundAssetId
-        : state.backgroundAssetId,
+      color: effective.color,
+      assetId: effective.assetId,
     }
   } else if (surface.type === 'flow') {
     if (location.kind !== 'flow-block') {

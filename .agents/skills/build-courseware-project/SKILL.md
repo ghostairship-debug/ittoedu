@@ -43,6 +43,8 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md�
 
 脚本里任何「对/错/条件/按学生行为改变走向」的体验，动手前必须映射到三者之一，并可对索引核对：① `interactions.publishedPlayback` 声明的可执行切片；② 课程状态 + 导航守卫（由 `node.click` 的 `course-state.set` 或组件/Runtime 写状态）；③ 组件/Runtime 内部逻辑（为本课新建组件也算）。三者都装不下、或映射会改变教师可感知体验时，停止并返回 `$orchestrate-courseware`。不得写播放器不执行的交互种类交差——`validate:course-project` 的 `published-interaction-*-unsupported` 诊断会当场拒绝。选 ③ 时逻辑进代码，教师改阈值就要再改代码：能用 ② 表达的门槛优先用 ②，并让组件把可调参数公开为可编辑内容。
 
+分类与排序必须分开选载体：分类可用“选中项目→选中目标组”的声明式点击/状态路径；需要真实改变可见顺序的排序使用 Component，并公开项目、正确顺序与反馈参数。不要把排序降级成分类，也不要为它私自增加拖放/放置触发器或顺序动作。只有 Capability Index 已声明相应 Recipe 可用时才能直接选用计划中的 `classify-sort-v1`；否则按当前已有 Component 能力实现一次性课件组件。
+
 ## 4. 资产与任务图（动手前）
 
 不要从空白一次写出整课。Coordinator 先在内部列出（不必给教师第三份合同文件；成功后删掉临时笔记）：

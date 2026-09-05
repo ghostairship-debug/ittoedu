@@ -418,6 +418,20 @@ function deriveLayerInventory(
     content.data.buttons.forEach((button, index) => {
       addInventoryEntry(project, inventory, target, `content.data.buttons.${index}.label`, `按钮：${button.id}`, button.label)
     })
+  } else if (content.nativeType === 'table') {
+    content.data.rows.forEach((row, rIdx) => {
+      row.cells.forEach((cell, cIdx) => {
+        addInventoryEntry(project, inventory, target, `content.data.rows.${rIdx}.cells.${cIdx}.text`, `单元格：${cell.id}`, cell.text)
+      })
+    })
+  } else if (content.nativeType === 'chart') {
+    addInventoryEntry(project, inventory, target, 'content.data.title', '图表标题', content.data.title)
+    content.data.categories.forEach((cat, index) => {
+      addInventoryEntry(project, inventory, target, `content.data.categories.${index}.label`, `分类：${cat.id}`, cat.label)
+    })
+    content.data.series.forEach((s, index) => {
+      addInventoryEntry(project, inventory, target, `content.data.series.${index}.name`, `系列：${s.id}`, s.name)
+    })
   } else {
     visitLeafValues(content.data.style, ['content', 'data', 'style'], (segments, value) => {
       const field = segments.map(String).map(jsonPointerEscape).join('/')

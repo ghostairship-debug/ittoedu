@@ -54,7 +54,11 @@ export class SelectionOverlay {
     scene.input.setDraggable(this.rotationHandle)
   }
 
-  show(bounds: AdapterBounds, locked = false): void {
+  show(
+    bounds: AdapterBounds,
+    locked = false,
+    lineHandles?: { start: Point; end: Point; elbow?: Point } | null,
+  ): void {
     const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
     const corners = [
       { x: bounds.x, y: bounds.y },
@@ -90,6 +94,20 @@ export class SelectionOverlay {
     this.rotationHandle
       .setVisible(!locked)
       .setPosition(rotationPoint.x, rotationPoint.y)
+
+    if (lineHandles && !locked) {
+      // Pure visual endpoint markers: proximity hit and drag live in the DOM
+      // authoring controller, which shares lineHandleWorldPoints geometry.
+      const markers = lineHandles.elbow
+        ? [lineHandles.start, lineHandles.end, lineHandles.elbow]
+        : [lineHandles.start, lineHandles.end]
+      for (const marker of markers) {
+        this.graphics.fillStyle(0xffffff, 1)
+        this.graphics.fillCircle(marker.x, marker.y, 5.5)
+        this.graphics.lineStyle(2, 0x5b9cff, 1)
+        this.graphics.strokeCircle(marker.x, marker.y, 5.5)
+      }
+    }
   }
 
   hide(): void {

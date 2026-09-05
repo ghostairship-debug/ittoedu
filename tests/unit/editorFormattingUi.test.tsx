@@ -1,9 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createShapeNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
 import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
+  selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
@@ -774,5 +775,177 @@ describe('font family picker', () => {
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       style: { fontFamily: 'My Course Font' },
     })
+  })
+})
+
+function slideSceneTableData() {
+  const document = selectSlideAuthoringDocument(useEditorStore.getState())
+  const surface = document?.surfaces.find((candidate) => candidate.type === 'slide')
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  const item = surface.scenes[0]?.layerItems.find((candidate) => (
+    candidate.kind === 'native' && candidate.content.nativeType === 'table'
+  ))
+  if (item?.kind !== 'native' || item.content.nativeType !== 'table') {
+    throw new Error('expected a native table layer item')
+  }
+  return item.content.data
+}
+
+function slideSceneChartData() {
+  const document = selectSlideAuthoringDocument(useEditorStore.getState())
+  const surface = document?.surfaces.find((candidate) => candidate.type === 'slide')
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  const item = surface.scenes[0]?.layerItems.find((candidate) => (
+    candidate.kind === 'native' && candidate.content.nativeType === 'chart'
+  ))
+  if (item?.kind !== 'native' || item.content.nativeType !== 'chart') {
+    throw new Error('expected a native chart layer item')
+  }
+  return item.content.data
+}
+
+describe('slide table properties UI', () => {
+  it('commits cell edits on Enter, discards them on blur, and appends a row on last-cell Tab', () => {
+    const store = useEditorStore.getState()
+    store.addTableNode()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const section = screen.getByTestId('table-properties')
+    const cellInput = (rowId: string, columnId: string) => {
+      const found = section.querySelector(`[data-cell-key="${rowId}::${columnId}"]`)
+      if (!found) throw new Error(`missing cell input ${rowId}/${columnId}`)
+      return found
+    }
+
+    const table = slideSceneTableData()
+    const firstRowId = table.rows[0]!.id
+    const firstColumnId = table.columns[0]!.id
+    const firstCell = cellInput(firstRowId, firstColumnId)
+    const historyBefore = activeHistory().past.length
+
+    fireEvent.focus(firstCell)
+    fireEvent.change(firstCell, { target: { value: '已提交文本' } })
+    fireEvent.keyDown(firstCell, { key: 'Enter' })
+    expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('已提交文本')
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+
+    // Blur without Enter/Tab discards the dirty draft: zero writes.
+    fireEvent.focus(firstCell)
+    fireEvent.change(firstCell, { target: { value: '未提交文本' } })
+    fireEvent.blur(firstCell)
+    expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('已提交文本')
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+
+    // Tab past the last cell appends one row in a single history entry and
+    // restores focus by stable rowId+columnId, not by stale array index.
+    const lastRowId = table.rows[table.rows.length - 1]!.id
+    const lastColumnId = table.columns[table.columns.length - 1]!.id
+    const lastCell = cellInput(lastRowId, lastColumnId)
+    fireEvent.focus(lastCell)
+    fireEvent.keyDown(lastCell, { key: 'Tab' })
+    const grown = slideSceneTableData()
+    expect(grown.rows).toHaveLength(table.rows.length + 1)
+    expect(activeHistory().past).toHaveLength(historyBefore + 2)
+    const appendedRowId = grown.rows[grown.rows.length - 1]!.id
+    const focused = section.querySelector(`[data-cell-key="${appendedRowId}::${firstColumnId}"]`)
+    expect(focused).not.toBeNull()
+    expect(document.activeElement).toBe(focused)
+  })
+
+  it('drives row/column insert, move and delete from the active cell without stale indices', () => {
+    const store = useEditorStore.getState()
+    store.addTableNode()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const section = screen.getByTestId('table-properties')
+    const table = slideSceneTableData()
+    const secondRowId = table.rows[1]!.id
+    const firstColumnId = table.columns[0]!.id
+    const historyBefore = activeHistory().past.length
+
+    fireEvent.focus(section.querySelector(`[data-cell-key="${secondRowId}::${firstColumnId}"]`)!)
+    fireEvent.click(screen.getByRole('button', { name: '下方插入行' }))
+    expect(slideSceneTableData().rows).toHaveLength(table.rows.length + 1)
+
+    fireEvent.click(screen.getByRole('button', { name: '上移' }))
+    expect(slideSceneTableData().rows[0]!.id).toBe(secondRowId)
+
+    fireEvent.click(screen.getByRole('button', { name: '删除该行' }))
+    expect(slideSceneTableData().rows).toHaveLength(table.rows.length)
+    expect(activeHistory().past).toHaveLength(historyBefore + 3)
+  })
+})
+
+describe('slide chart properties UI', () => {
+  it('validates the data draft per cell and applies it as one history entry', () => {
+    const store = useEditorStore.getState()
+    store.addChartNode('bar')
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const section = screen.getByTestId('chart-properties')
+    const historyBefore = activeHistory().past.length
+
+    // A second draft series with empty values produces per-cell errors and the
+    // apply action stays disabled: nothing is written.
+    fireEvent.click(within(section).getByRole('button', { name: '添加系列' }))
+    expect(within(section).getAllByText('请输入数值。').length).toBeGreaterThan(0)
+    expect(within(section).getByTestId('chart-data-apply')).toBeDisabled()
+
+    for (const category of ['类别 1', '类别 2', '类别 3']) {
+      fireEvent.change(within(section).getByLabelText(`系列 2 在 ${category} 的值`), {
+        target: { value: '7' },
+      })
+    }
+    const apply = within(section).getByTestId('chart-data-apply')
+    expect(apply).toBeEnabled()
+    fireEvent.click(apply)
+
+    const chart = slideSceneChartData()
+    expect(chart.series).toHaveLength(2)
+    expect(chart.series[1]!.name).toBe('系列 2')
+    expect(chart.series[1]!.points.map((point) => point.value)).toEqual([7, 7, 7])
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+  })
+
+  it('asks which series survives a multi-series pie switch and writes nothing on cancel', () => {
+    const store = useEditorStore.getState()
+    store.addChartNode('bar')
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const section = screen.getByTestId('chart-properties')
+
+    // Grow the canonical chart to two series first.
+    fireEvent.click(within(section).getByRole('button', { name: '添加系列' }))
+    for (const category of ['类别 1', '类别 2', '类别 3']) {
+      fireEvent.change(within(section).getByLabelText(`系列 2 在 ${category} 的值`), {
+        target: { value: '4' },
+      })
+    }
+    fireEvent.click(within(section).getByTestId('chart-data-apply'))
+    expect(slideSceneChartData().series).toHaveLength(2)
+    const historyBefore = activeHistory().past.length
+
+    const typeSelect = within(section).getByLabelText('图表类型')
+    fireEvent.change(typeSelect, { target: { value: 'pie' } })
+    const picker = within(section).getByTestId('chart-retained-series-picker')
+    fireEvent.click(within(picker).getByRole('button', { name: '取消' }))
+    expect(within(section).queryByTestId('chart-retained-series-picker')).toBeNull()
+    expect(slideSceneChartData().chartType).toBe('bar')
+    expect(slideSceneChartData().series).toHaveLength(2)
+    expect(activeHistory().past).toHaveLength(historyBefore)
+
+    fireEvent.change(typeSelect, { target: { value: 'pie' } })
+    const confirmed = within(section).getByTestId('chart-retained-series-picker')
+    fireEvent.click(within(confirmed).getAllByRole('radio')[1]!)
+    fireEvent.click(within(confirmed).getByRole('button', { name: '确认切换' }))
+    const pie = slideSceneChartData()
+    expect(pie.chartType).toBe('pie')
+    expect(pie.series).toHaveLength(1)
+    expect(pie.series[0]!.name).toBe('系列 2')
+    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+
+    // Circular charts reject negative values per cell before any commit.
+    fireEvent.change(
+      within(section).getByLabelText('系列 2 在 类别 1 的值'),
+      { target: { value: '-5' } },
+    )
+    expect(within(section).getByText('饼图/环形图不支持负值。')).toBeInTheDocument()
+    expect(within(section).getByTestId('chart-data-apply')).toBeDisabled()
   })
 })

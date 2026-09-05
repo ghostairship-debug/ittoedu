@@ -70,7 +70,7 @@
 
 Flaky 命令只原样重跑一次：可复现则修当前问题，随机则隔离记录，不提高 retry 或弱化断言。基线已红时比较当前 diff 与基线，只承担由本次变更新增的失败。
 
-自动化最多证明 `engineering candidate`；真实视觉、互动和教师复核决定 `art candidate` / `accepted`。
+自动化最多证明 `engineering candidate`；真实视觉、互动和教师复核决定 `art candidate` / `accepted`。候选标签统一使用 `vX.Y.Z-rc.N`；无后缀 `vX.Y.Z` 只在四个既定 Owner 签署点写入：1.3 后 S1（覆盖 1.2 + 1.3）、1.5 后 S2、1.8 后 S3、2.0 的 S4。保全矩阵在对应签署点随 accepted 结论一并晋升，不能由自动化全绿代替。
 
 ## 5. 协调与任务卡
 

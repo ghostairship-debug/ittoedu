@@ -1,14 +1,16 @@
 import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { TextRunStyle } from '../../shared/contracts/native-v1'
-import type {
-  CourseProjectDocument,
-  FlowBlock,
-  FlowHeadingBlock,
-  FlowListBlock,
-  FlowParagraphBlock,
-  FlowQuoteBlock,
-  FlowRichText,
+import {
+  BACKGROUND_MODES,
+  type BackgroundMode,
+  type CourseProjectDocument,
+  type FlowBlock,
+  type FlowHeadingBlock,
+  type FlowListBlock,
+  type FlowParagraphBlock,
+  type FlowQuoteBlock,
+  type FlowRichText,
 } from '../../shared/courseProjectTypes'
 import {
   LAYER_REJECT_STALE_REVISION,
@@ -1025,30 +1027,89 @@ export function executeFlowEditorCommand(
   }
 }
 
+export interface FlowSurfaceBackgroundPatch {
+  readonly backgroundMode?: BackgroundMode
+  readonly backgroundColor?: string
+  readonly backgroundAssetId?: string | null
+}
+
+/**
+ * Typed, validated write for a Flow surface's background mode/color/asset.
+ * One commit per call; a stale revision, an invalid mode/color, or a patch
+ * that changes nothing writes zero history entries. Switching only
+ * `backgroundMode` (an isolated single-field patch) never touches the
+ * dormant `backgroundColor`/`backgroundAssetId` fields.
+ */
+export function updateFlowSurfaceBackground(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  patch: FlowSurfaceBackgroundPatch,
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
+  const stale = rejectIfStaleDocument(document, options.expectedRevision)
+  if (stale) return failCommand(stale.reason ?? LAYER_REJECT_STALE_REVISION)
+  if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
+    return failCommand('背景模式无效')
+  }
+  if (
+    patch.backgroundColor !== undefined
+    && (typeof patch.backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(patch.backgroundColor.trim()))
+  ) {
+    return failCommand('颜色格式无效')
+  }
+  const color = patch.backgroundColor !== undefined
+    ? patch.backgroundColor.trim().toLowerCase()
+    : undefined
+  let surface: ReturnType<typeof flowSurfaceIn>
+  try {
+    surface = flowSurfaceIn(document, surfaceId)
+  } catch (error) {
+    return failCommand(error instanceof Error ? error.message : '无法更新 Flow 页面背景')
+  }
+  const modeChanges = patch.backgroundMode !== undefined
+    && patch.backgroundMode !== (surface.backgroundMode ?? 'own')
+  const colorChanges = color !== undefined && color !== surface.backgroundColor
+  const assetChanges = patch.backgroundAssetId !== undefined
+    && patch.backgroundAssetId !== (surface.backgroundAssetId ?? null)
+  if (!modeChanges && !colorChanges && !assetChanges) {
+    return succeedNoop(document, '背景未变')
+  }
+  return runMutation(document, (draft) => {
+    const target = flowSurfaceIn(draft, surfaceId)
+    if (modeChanges) target.backgroundMode = patch.backgroundMode
+    if (colorChanges) target.backgroundColor = color
+    if (assetChanges) target.backgroundAssetId = patch.backgroundAssetId ?? null
+  }, '已修改稿纸背景', options)
+}
+
 export function updateFlowSurfaceBackgroundColor(
   document: CourseProjectDocument,
   surfaceId: string,
   backgroundColor: string,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
+  return updateFlowSurfaceBackground(document, surfaceId, { backgroundColor }, options)
+}
+
+/** Imports a new image asset and assigns it as the Flow surface's background, in one commit. */
+export function importFlowSurfaceBackgroundAsset(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  assetMeta: AssetMeta,
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
   const stale = rejectIfStaleDocument(document, options.expectedRevision)
   if (stale) return failCommand(stale.reason ?? LAYER_REJECT_STALE_REVISION)
-  if (typeof backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(backgroundColor.trim())) {
-    return failCommand('颜色格式无效')
-  }
-  const color = backgroundColor.trim().toLowerCase()
   try {
-    const surface = flowSurfaceIn(document, surfaceId)
-    if (surface.backgroundColor === color) {
-      return succeedNoop(document, '颜色未变')
-    }
+    flowSurfaceIn(document, surfaceId)
   } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法更新 Flow 页面背景色')
+    return failCommand(error instanceof Error ? error.message : '无法更新 Flow 页面背景')
   }
   return runMutation(document, (draft) => {
-    const surface = flowSurfaceIn(draft, surfaceId)
-    surface.backgroundColor = color
-  }, '已修改稿纸背景色', options)
+    const target = flowSurfaceIn(draft, surfaceId)
+    draft.assets[assetMeta.id] = assetMeta
+    target.backgroundAssetId = assetMeta.id
+  }, '已上传背景图片', options)
 }
 
 export {

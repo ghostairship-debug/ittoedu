@@ -653,4 +653,188 @@ describe('Player bundle entry is Published V2 only', () => {
       expect(window.__H5_LESSON_PLAYER__?.session).toBe(session)
     })
   })
+
+  describe('Table and Chart Published V2 validation (r12-000)', () => {
+    it('accepts Published Slide scene with Table and Chart', () => {
+      const baseProject: CourseProjectDocument = {
+        ...courseShell(),
+        id: 'published-table-slide',
+        locations: [{
+          id: 'location-scene-1',
+          label: '场景 1',
+          kind: 'slide-scene',
+          surfaceId: 'surface-slide',
+          sceneId: 'scene-1',
+        }],
+        startLocationId: 'location-scene-1',
+        surfaces: [{
+          id: 'surface-slide',
+          title: '幻灯片',
+          type: 'slide',
+          surfaceLayerItems: [],
+          canvas: { width: 1280, height: 720 },
+          scenes: [{
+            id: 'scene-1',
+            name: '场景 1',
+            backgroundColor: '#ffffff',
+            layerItems: [
+              {
+                layerItemId: 'layer-table',
+                label: 'Table Layer',
+                kind: 'native',
+                content: {
+                  nativeType: 'table',
+                  data: {
+                    columns: [{ id: 'c1', width: 100 }, { id: 'c2', width: 100 }],
+                    rows: [{
+                      id: 'r1',
+                      height: 40,
+                      cells: [
+                        { id: 'cell-1', columnId: 'c1', text: 'A' },
+                        { id: 'cell-2', columnId: 'c2', text: 'B' },
+                      ],
+                    }],
+                    headerRowCount: 0,
+                    style: {
+                      fillColor: '#ffffff',
+                      fillOpacity: 1,
+                      borderColor: '#cccccc',
+                      borderOpacity: 1,
+                      borderWidth: 1,
+                      lineStyle: 'solid',
+                      textColor: '#000000',
+                      fontFamily: 'sans-serif',
+                      fontSize: 14,
+                      horizontalAlign: 'left',
+                      verticalAlign: 'middle',
+                      cellPadding: 4,
+                    },
+                  },
+                },
+                frame: { mode: 'absolute', x: 10, y: 10, width: 200, height: 100 },
+                order: 0,
+                visible: true,
+                locked: false,
+                rotation: 0,
+                opacity: 1,
+                hitPolicy: 'auto',
+                playbackInitialVisibility: 'inherit',
+              },
+              {
+                layerItemId: 'layer-chart',
+                label: 'Chart Layer',
+                kind: 'native',
+                content: {
+                  nativeType: 'chart',
+                  data: {
+                    chartType: 'bar',
+                    title: '图表',
+                    categories: [{ id: 'cat1', label: 'C1' }],
+                    series: [{
+                      id: 's1',
+                      name: 'S1',
+                      color: '#ff0000',
+                      points: [{ id: 'p1', categoryId: 'cat1', value: 10 }],
+                    }],
+                    style: {
+                      backgroundColor: '#ffffff',
+                      backgroundOpacity: 1,
+                      fontFamily: 'sans-serif',
+                      fontSize: 12,
+                      textColor: '#000000',
+                      showLegend: true,
+                      legendPosition: 'top',
+                      showDataLabels: false,
+                      showCategoryAxis: true,
+                      showValueAxis: true,
+                      showGridLines: true,
+                    },
+                  },
+                },
+                frame: { mode: 'absolute', x: 250, y: 10, width: 300, height: 200 },
+                order: 1,
+                visible: true,
+                locked: false,
+                rotation: 0,
+                opacity: 1,
+                hitPolicy: 'auto',
+                playbackInitialVisibility: 'inherit',
+              },
+            ],
+            interactions: [],
+          }],
+        }],
+      }
+
+      const published = publish(baseProject)
+      expect(publishedCourseV2Schema.safeParse(published).success).toBe(true)
+    })
+
+    it('rejects Published Flow and Global layers containing Table or Chart', () => {
+      const baseProject: CourseProjectDocument = {
+        ...courseShell(),
+        id: 'published-invalid-flow',
+        locations: [{
+          id: 'location-flow',
+          label: '正文',
+          kind: 'flow-block',
+          surfaceId: 'surface-flow',
+          blockId: 'block-1',
+        }],
+        startLocationId: 'location-flow',
+        surfaces: [{
+          id: 'surface-flow',
+          title: '讲义',
+          type: 'flow',
+          surfaceLayerItems: [],
+          layout: { readingWidth: 760, wideContentWidth: 1120 },
+          blocks: [{ id: 'block-1', type: 'paragraph', text: '内容' }],
+        }],
+      }
+
+      const published = publish(baseProject)
+      // Inject table into published flow surface layers
+      const invalidFlowPublished = {
+        ...published,
+        surfaces: published.surfaces.map((s) => {
+          if (s.type === 'flow') {
+            return {
+              ...s,
+              surfaceLayerItems: [
+                {
+                  item: {
+                    layerItemId: 'layer-flow-table',
+                    frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 100 },
+                    order: 0,
+                    visible: true,
+                    rotation: 0,
+                    opacity: 1,
+                    hitPolicy: 'auto',
+                    playbackInitialVisibility: 'inherit',
+                    kind: 'native',
+                    content: {
+                      nativeType: 'table',
+                      data: {
+                        columns: [{ id: 'c1', width: 100 }],
+                        rows: [{ id: 'r1', height: 40, cells: [{ id: 'cell-1', columnId: 'c1', text: 'A' }] }],
+                        headerRowCount: 0,
+                        style: {
+                          fillColor: '#ffffff', fillOpacity: 1, borderColor: '#cccccc', borderOpacity: 1,
+                          borderWidth: 1, lineStyle: 'solid', textColor: '#000000', fontFamily: 'sans-serif',
+                          fontSize: 14, horizontalAlign: 'left', verticalAlign: 'middle', cellPadding: 4,
+                        },
+                      },
+                    },
+                  },
+                  visibility: { mode: 'all', locationIds: [] },
+                },
+              ],
+            }
+          }
+          return s
+        }),
+      }
+      expect(publishedCourseV2Schema.safeParse(invalidFlowPublished).success).toBe(false)
+    })
+  })
 })

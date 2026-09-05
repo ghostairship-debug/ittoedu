@@ -7,6 +7,7 @@ import type {
   ComponentLayerItem,
   CourseProjectDocument,
   CourseRuntimeDefinition,
+  CourseSurfaceDocument,
   FlowBlock,
   LayerItem,
   LayerItemOverride,
@@ -16,8 +17,12 @@ export type CourseAssetReferenceCertainty = 'direct' | 'conservative'
 
 export type CourseAssetReferenceKind =
   | 'sound'
+  | 'course-background'
+  | 'slide-surface-background'
   | 'scene-background'
   | 'state-background'
+  | 'flow-surface-background'
+  | 'spatial-surface-background'
   | 'native-image'
   | 'native-video'
   | 'video-poster'
@@ -505,11 +510,20 @@ export function analyzeCourseAssetReferences(
     'direct',
     { path: ['media', 'audio', 'sounds', soundKey, 'assetId'] },
   ))
+  add(project.backgroundAssetId, 'course-background', 'direct', { path: ['backgroundAssetId'] })
   scanScopedLayers(project.globalLayerItems, ['globalLayerItems'])
 
+  const surfaceBackgroundKind: Record<CourseSurfaceDocument['type'], CourseAssetReferenceKind> = {
+    slide: 'slide-surface-background',
+    flow: 'flow-surface-background',
+    'spatial-2d': 'spatial-surface-background',
+  }
   project.surfaces.forEach((surface, surfaceIndex) => {
     const surfacePath: ReadonlyArray<string | number> = ['surfaces', surfaceIndex]
     scanScopedLayers(surface.surfaceLayerItems, [...surfacePath, 'surfaceLayerItems'])
+    add(surface.backgroundAssetId, surfaceBackgroundKind[surface.type], 'direct', {
+      path: [...surfacePath, 'backgroundAssetId'],
+    })
     if (surface.type === 'slide') {
       surface.scenes.forEach((scene, sceneIndex) => {
         const scenePath = [...surfacePath, 'scenes', sceneIndex]

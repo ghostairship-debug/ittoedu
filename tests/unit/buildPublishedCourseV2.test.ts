@@ -15,6 +15,12 @@ import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
+  createChartLayerItem,
+  createChartNode,
+  createTableLayerItem,
+  createTableNode,
+} from '@/renderer/project/nativeNodeFactories'
+import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
   collectPublishedCourseComponentKeys,
@@ -802,6 +808,65 @@ describe('Published Course V2 producer', () => {
     expect(runtimeItem.runtime.code.data.length).toBeGreaterThan(0)
     expect(published).not.toHaveProperty('played')
     expect(published).not.toHaveProperty('playbackResult')
+  })
+
+  it('passes Slide table and chart content through Published V2 with schema round-trip', () => {
+    const project = createBlankCourseProject({ now: NOW })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const table = createTableNode({
+      id: 'slide-table',
+      name: '发布表格',
+      x: 60,
+      y: 80,
+    })
+    const chart = createChartNode({
+      id: 'slide-chart',
+      chartType: 'donut',
+      title: '占比',
+      x: 60,
+      y: 320,
+    })
+    slide.scenes[0]!.layerItems = [
+      createTableLayerItem(table, 10),
+      createChartLayerItem(chart, 20),
+    ]
+
+    const published = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const reparsed = publishedCourseV2Schema.parse(
+      JSON.parse(JSON.stringify(published)),
+    )
+    const publishedSlide = reparsed.surfaces.find((surface) => surface.type === 'slide')
+    if (publishedSlide?.type !== 'slide') throw new Error('expected slide surface')
+    const publishedTable = publishedSlide.scenes[0]?.layerItems.find((item) => (
+      item.kind === 'native' && item.content.nativeType === 'table'
+    ))
+    const publishedChart = publishedSlide.scenes[0]?.layerItems.find((item) => (
+      item.kind === 'native' && item.content.nativeType === 'chart'
+    ))
+    if (publishedTable?.kind !== 'native' || publishedTable.content.nativeType !== 'table') {
+      throw new Error('expected published table item')
+    }
+    if (publishedChart?.kind !== 'native' || publishedChart.content.nativeType !== 'chart') {
+      throw new Error('expected published chart item')
+    }
+
+    expect(publishedTable.content.data.columns).toEqual(table.columns)
+    expect(publishedTable.content.data.rows).toEqual(table.rows)
+    expect(publishedTable.content.data.headerRowCount).toBe(table.headerRowCount)
+    expect(publishedTable.content.data.style).toEqual(table.style)
+
+    expect(publishedChart.content.data.chartType).toBe('donut')
+    expect(publishedChart.content.data.title).toBe('占比')
+    expect(publishedChart.content.data.categories).toEqual(chart.categories)
+    expect(publishedChart.content.data.series).toEqual(chart.series)
+    expect(publishedChart.content.data.style).toEqual(
+      expect.objectContaining({ holeSize: 50 }),
+    )
   })
 
   it('preserves every Unicode code unit in published Runtime source', () => {

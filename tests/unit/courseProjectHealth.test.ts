@@ -13,6 +13,7 @@ import {
   COURSE_PROJECT_HEALTH_FINDING_CATALOG,
   collectCourseProjectHealth,
   collectCourseProjectInteractionHealth,
+  collectCourseProjectNativeHealth,
   collectCourseProjectRuntimeHealth,
   type CourseProjectHealthArchiveFiles,
 } from '@/shared/courseProjectHealth'
@@ -536,6 +537,52 @@ describe('V9-native Course Project health', () => {
       'video-click-interaction-conflict',
     ]))
     expect(findings.every(({ target }) => target.version === 1)).toBe(true)
+  })
+
+  it('checks the new Course/Slide-surface/Flow/Spatial background asset kinds and reachability', () => {
+    const project = blankProject()
+    const { surface } = slide(project)
+    const { flow, spatial } = addFlowAndSpatial(project)
+    const assetFiles: Record<string, Uint8Array> = {}
+    addImageAsset(project, assetFiles, 'course-cover')
+    addImageAsset(project, assetFiles, 'surface-cover')
+    addImageAsset(project, assetFiles, 'flow-cover-wrong-kind', 'audio')
+    addImageAsset(project, assetFiles, 'spatial-cover')
+    addImageAsset(project, assetFiles, 'unused-cover')
+
+    project.backgroundAssetId = 'course-cover'
+    surface.backgroundMode = 'own'
+    surface.backgroundAssetId = 'surface-cover'
+    flow.backgroundAssetId = 'flow-cover-wrong-kind'
+    spatial.backgroundAssetId = 'spatial-cover'
+
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    const findings = collectCourseProjectHealth(project, { assetFiles, componentFiles: {} })
+
+    expect(findings).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'asset-kind-mismatch',
+      message: expect.stringContaining('Flow 背景'),
+    }))
+    // Correctly used background assets (any owner) must never be reported unused...
+    expect(findings.some((finding) => (
+      finding.code === 'asset-unused' && finding.message.includes('course-cover')
+    ))).toBe(false)
+    expect(findings.some((finding) => (
+      finding.code === 'asset-unused' && finding.message.includes('surface-cover')
+    ))).toBe(false)
+    expect(findings.some((finding) => (
+      finding.code === 'asset-unused' && finding.message.includes('flow-cover-wrong-kind')
+    ))).toBe(false)
+    expect(findings.some((finding) => (
+      finding.code === 'asset-unused' && finding.message.includes('spatial-cover')
+    ))).toBe(false)
+    // ...while a truly unreferenced asset is still caught, same as before this node.
+    expect(findings).toContainEqual(expect.objectContaining({
+      severity: 'info',
+      code: 'asset-unused',
+      message: expect.stringContaining('unused-cover'),
+    }))
   })
 
   it('checks composed shared videos and hidden items with scene and global rules', () => {
@@ -1289,5 +1336,280 @@ describe('V9-native Course Project health', () => {
       },
     })
     expect(COURSE_PROJECT_HEALTH_FINDING_CATALOG['asset-kind-mismatch'].severity).toBe('error')
+  })
+
+  describe('collectCourseProjectNativeHealth', () => {
+    it('reports table ID duplicates, invalid dimensions, and matrix mismatches', () => {
+      const project = blankProject()
+      const { scene } = slide(project)
+      scene.layerItems.push({
+        layerItemId: 'table-1',
+        label: 'Table 1',
+        kind: 'native',
+        order: 0,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        playbackInitialVisibility: 'inherit',
+        frame: { mode: 'absolute', x: 0, y: 0, width: 400, height: 300 },
+        content: {
+          nativeType: 'table',
+          data: {
+            headerRowCount: 0,
+            columns: [
+              { id: 'col-1', width: -10 },
+              { id: 'col-1', width: 100 },
+            ],
+            rows: [
+              {
+                id: 'row-1',
+                height: 0,
+                cells: [
+                  { id: 'cell-1', columnId: 'col-1', text: 'A' },
+                ],
+              },
+              {
+                id: 'row-1',
+                height: 40,
+                cells: [
+                  { id: 'cell-1', columnId: 'col-missing', text: 'B' },
+                  { id: 'cell-2', columnId: 'col-1', text: 'C' },
+                ],
+              },
+            ],
+            style: {
+              borderWidth: 1,
+              borderColor: '#000000',
+              borderOpacity: 1,
+              lineStyle: 'solid',
+              fillColor: '#ffffff',
+              fillOpacity: 1,
+              textColor: '#000000',
+              fontFamily: 'sans-serif',
+              fontSize: 14,
+              horizontalAlign: 'left',
+              verticalAlign: 'middle',
+              cellPadding: 4,
+            },
+          },
+        },
+      })
+      const findings = collectCourseProjectHealth(project, EMPTY_FILES)
+      expect(findings.some((f) => f.code === 'table-id-duplicate')).toBe(true)
+      expect(findings.some((f) => f.code === 'table-dimension-invalid')).toBe(true)
+      expect(findings.some((f) => f.code === 'table-matrix-mismatch')).toBe(true)
+    })
+
+    it('reports chart ID duplicates, point mismatches, invalid values, and pie/donut constraints', () => {
+      const project = blankProject()
+      const { scene } = slide(project)
+      scene.layerItems.push({
+        layerItemId: 'chart-1',
+        label: 'Chart 1',
+        kind: 'native',
+        order: 0,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        playbackInitialVisibility: 'inherit',
+        frame: { mode: 'absolute', x: 0, y: 0, width: 400, height: 300 },
+        content: {
+          nativeType: 'chart',
+          data: {
+            chartType: 'donut',
+            title: 'Donut Chart',
+            categories: [
+              { id: 'cat-1', label: 'C1' },
+              { id: 'cat-1', label: 'C1 duplicate' },
+            ],
+            series: [
+              {
+                id: 's-1',
+                name: 'S1',
+                color: '#ff0000',
+                points: [
+                  { id: 'p-1', categoryId: 'cat-missing', value: NaN },
+                ],
+              },
+              {
+                id: 's-1',
+                name: 'S1 duplicate',
+                color: '#00ff00',
+                points: [
+                  { id: 'p-1', categoryId: 'cat-1', value: 20 },
+                  { id: 'p-2', categoryId: 'cat-1', value: 30 },
+                ],
+              },
+            ],
+            style: {
+              backgroundColor: '#ffffff',
+              backgroundOpacity: 1,
+              fontFamily: 'sans-serif',
+              fontSize: 12,
+              textColor: '#000000',
+              showLegend: true,
+              legendPosition: 'bottom',
+              showDataLabels: false,
+              holeSize: 5,
+            },
+          } as any,
+        },
+      })
+      const findings = collectCourseProjectHealth(project, EMPTY_FILES)
+      expect(findings.some((f) => f.code === 'chart-id-duplicate')).toBe(true)
+      expect(findings.some((f) => f.code === 'chart-series-points-mismatch')).toBe(true)
+      expect(findings.some((f) => f.code === 'chart-numeric-value-invalid')).toBe(true)
+      expect(findings.some((f) => f.code === 'chart-pie-single-series')).toBe(true)
+      expect(findings.some((f) => f.code === 'chart-donut-hole-size-invalid')).toBe(true)
+    })
+
+    it('reports input container invalid, state key invalid, and incomplete rule family', () => {
+      const project = blankProject()
+      const { spatial } = addFlowAndSpatial(project)
+      spatial.world.layerItems.push({
+        layerItemId: 'input-world',
+        label: 'Input World',
+        kind: 'native',
+        order: 0,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        playbackInitialVisibility: 'inherit',
+        frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 40 },
+        content: {
+          nativeType: 'input',
+          data: {
+            answerType: 'number',
+            stateKey: 'nonexistent-state',
+            validityKey: 'nonexistent-validity',
+            ruleFamilyRuleIds: ['nonexistent-rule'],
+            style: {
+              fontFamily: 'sans-serif',
+              fontSize: 14,
+              textColor: '#000000',
+              fillColor: '#ffffff',
+              fillOpacity: 1,
+              borderColor: '#cccccc',
+              borderOpacity: 1,
+              borderWidth: 1,
+              cornerRadius: 4,
+              horizontalAlign: 'left',
+              padding: 4,
+            },
+          },
+        },
+      })
+      const findings = collectCourseProjectHealth(project, EMPTY_FILES)
+      expect(findings.some((f) => f.code === 'input-container-invalid')).toBe(true)
+      expect(findings.some((f) => f.code === 'input-state-key-invalid')).toBe(true)
+    })
+
+    it('reports line geometry shape mismatch and degenerate zero-length line', () => {
+      const project = blankProject()
+      const { scene } = slide(project)
+      scene.layerItems.push({
+        layerItemId: 'rect-with-line',
+        label: 'Rect with line',
+        kind: 'native',
+        order: 0,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        playbackInitialVisibility: 'inherit',
+        frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 100 },
+        content: {
+          nativeType: 'shape',
+          data: {
+            shapeType: 'rectangle',
+            lineGeometry: {
+              kind: 'straight',
+              start: [0, 0],
+              end: [100, 100],
+            },
+            style: {
+              fillColor: '#ffffff',
+              fillOpacity: 1,
+              borderColor: '#000000',
+              borderOpacity: 1,
+              borderWidth: 1,
+              lineStyle: 'solid',
+              cornerRadius: 0,
+              startArrow: 'none',
+              endArrow: 'none',
+            },
+          },
+        },
+      })
+      scene.layerItems.push({
+        layerItemId: 'line-degen',
+        label: 'Degen Line',
+        kind: 'native',
+        order: 1,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        playbackInitialVisibility: 'inherit',
+        frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 100 },
+        content: {
+          nativeType: 'shape',
+          data: {
+            shapeType: 'line',
+            lineGeometry: {
+              kind: 'straight',
+              start: [50, 50],
+              end: [50, 50],
+            },
+            style: {
+              fillColor: '#ffffff',
+              fillOpacity: 0,
+              borderColor: '#000000',
+              borderOpacity: 1,
+              borderWidth: 1,
+              lineStyle: 'solid',
+              cornerRadius: 0,
+              startArrow: 'none',
+              endArrow: 'none',
+            },
+          },
+        },
+      })
+      const findings = collectCourseProjectHealth(project, EMPTY_FILES)
+      expect(findings.some((f) => f.code === 'line-geometry-shape-mismatch')).toBe(true)
+      expect(findings.some((f) => f.code === 'line-path-degenerate' && f.severity === 'warning')).toBe(true)
+    })
+
+    it('reports background-asset-missing for course, surface, scene, and state', () => {
+      const project = blankProject()
+      project.backgroundAssetId = 'missing-course-bg'
+      const { surface, scene } = slide(project)
+      surface.backgroundAssetId = 'missing-surface-bg'
+      scene.backgroundAssetId = 'missing-scene-bg'
+      scene.presentation = {
+        initialStateId: 's1',
+        states: [
+          {
+            id: 's1',
+            name: 'State 1',
+            backgroundAssetId: 'missing-state-bg',
+            layerItemOverrides: {},
+            layerItemOrder: [],
+          },
+        ],
+      }
+      const findings = collectCourseProjectHealth(project, EMPTY_FILES)
+      const bgFindings = findings.filter((f) => f.code === 'background-asset-missing')
+      expect(bgFindings.length).toBe(4)
+      expect(bgFindings.every((f) => f.severity === 'error')).toBe(true)
+    })
   })
 })

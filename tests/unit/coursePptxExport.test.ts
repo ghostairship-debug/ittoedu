@@ -12,10 +12,11 @@ import { buildPublishedCourseV2Payload, type CoursePublishSources } from '@/rend
 import { buildCourseExportPageList } from '@/renderer/export/course/buildCoursePrintArtifacts'
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
-import { addPptxFormulaNode } from '@/renderer/export/pptxTextAndShape'
+import { addPptxFormulaNode, addPptxShapeNode } from '@/renderer/export/pptxTextAndShape'
+import { WIDE_SLIDE_HEIGHT, WIDE_SLIDE_WIDTH } from '@/renderer/export/pptxShared'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { APP_COMPANY, APP_NAME } from '@/shared/constants'
-import { createShapeNode, createTextNode, createFormulaNode } from '@/renderer/project/nativeNodeFactories'
+import { APP_COMPANY, APP_NAME, CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
+import { createShapeNode, createTextNode, createFormulaNode, createTableNode, createChartNode, createTableLayerItem, createChartLayerItem } from '@/renderer/project/nativeNodeFactories'
 import {
   listCourseProjectV9Fixtures,
   type CourseProjectV9FixtureId,
@@ -461,6 +462,124 @@ describe('buildCoursePptx', () => {
     expect(applicationPropertiesXml).toContain(`>${APP_COMPANY}<`)
   })
 
+  it('导出 Slide 表格为原生可编辑 PPTX 表格，不截图', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const table = createTableNode({ id: 'table-pptx', name: '数据表格' })
+    slide.scenes[0]!.layerItems = [createTableLayerItem(table, 10)]
+
+    const result = await buildCoursePptx({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const slideXml = decodePptxSlides(result.bytes)
+    const parsed = new DOMParser().parseFromString(slideXml, 'application/xml')
+
+    expect(parsed.getElementsByTagName('parsererror')).toHaveLength(0)
+    expect(slideXml).toContain('<a:tbl>')
+    expect(slideXml).toContain('标题 1')
+    expect(slideXml).toContain('单元格 2-1')
+    expect(slideXml).not.toContain('<p:pic>')
+    expect(result.warnings.filter((message) => message.includes('表格'))).toHaveLength(0)
+  })
+
+  it('表格旋转与点线边框在导出与 preflight 中给出明示 warning', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const table = createTableNode({
+      id: 'table-rotated',
+      name: '旋转表格',
+      rotation: 30,
+      style: { lineStyle: 'dotted' },
+    })
+    slide.scenes[0]!.layerItems = [createTableLayerItem(table, 10)]
+
+    const result = await buildCoursePptx({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    expect(result.warnings.some((message) => (
+      message.includes('table-rotated') && message.includes('旋转')
+    ))).toBe(true)
+    expect(result.warnings.some((message) => (
+      message.includes('table-rotated') && message.includes('点线')
+    ))).toBe(true)
+    // The table body is still present as a native PPTX table.
+    expect(decodePptxSlides(result.bytes)).toContain('<a:tbl>')
+
+    const preflight = collectCourseProjectExportPreflight(
+      project,
+      'pptx',
+      { assetFiles: {}, components: {} },
+      new Date(NOW),
+      { playerBundle: '/* player */' },
+    )
+    const warnings = preflight.items.filter((item) => (
+      item.code === 'static-export-warning' && item.message.includes('旋转表格')
+    ))
+    expect(warnings.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it.each([
+    ['bar', '<c:barChart>'],
+    ['line', '<c:lineChart>'],
+    ['area', '<c:areaChart>'],
+    ['pie', '<c:pieChart>'],
+    ['donut', '<c:doughnutChart>'],
+  ] as const)('导出 %s 图表为原生可编辑 PPTX 图表', async (chartType, chartTag) => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const chart = createChartNode({ id: `chart-pptx-${chartType}`, chartType })
+    slide.scenes[0]!.layerItems = [createChartLayerItem(chart, 10)]
+
+    const result = await buildCoursePptx({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const archive = unzipSync(result.bytes)
+    const chartEntries = Object.keys(archive).filter((name) => (
+      /^ppt\/charts\/chart\d+\.xml$/.test(name)
+    ))
+    expect(chartEntries.length).toBeGreaterThan(0)
+    const chartXml = new TextDecoder().decode(archive[chartEntries[0]!])
+    const parsed = new DOMParser().parseFromString(chartXml, 'application/xml')
+    expect(parsed.getElementsByTagName('parsererror')).toHaveLength(0)
+    expect(chartXml).toContain(chartTag)
+    expect(chartXml).toContain('类别 1')
+
+    const slideRels = Object.keys(archive)
+      .filter((name) => /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(name))
+      .map((name) => new TextDecoder().decode(archive[name]!))
+      .join('\n')
+    expect(slideRels).toContain('relationships/chart')
+
+    if (chartType === 'bar') {
+      expect(chartXml).toContain('barDir val="col"')
+      expect(chartXml).toContain('grouping val="clustered"')
+    }
+    if (chartType === 'donut') {
+      expect(chartXml).toContain('<c:holeSize val="50"/>')
+    }
+  })
+
   it('rejects a retired V8-era export package instead of restoring the old PPTX builder', async () => {
     await expect(buildCoursePptx({
       project: { schemaVersion: 8, scenes: [] },
@@ -535,5 +654,224 @@ describe('buildCoursePptx', () => {
       objectName: expect.stringContaining('静态公式'),
       altText: expect.stringContaining('math.pptx.1'),
     }))
+  })
+
+  describe('addPptxShapeNode line geometry', () => {
+    it('positions a non-default straight line at its authored bbox and keeps position invariant to draw direction, flipping only the arrow mapping', () => {
+      const forward = createShapeNode('line', {
+        id: 'line-mock-forward',
+        name: '对角线',
+        x: 100,
+        y: 50,
+        width: 300,
+        height: 200,
+      })
+      // Bottom-left -> top-right ("/"): drawn from its own bottom/right point
+      // toward its top/left point.
+      forward.lineGeometry = { kind: 'straight', start: [0, 1], end: [1, 0] }
+      const forwardSlide = { addShape: vi.fn() }
+      expect(addPptxShapeNode(forwardSlide as never, forward, { x: 1, y: 1 })).toEqual([])
+      expect(forwardSlide.addShape).toHaveBeenCalledWith('line', expect.objectContaining({
+        x: 100, y: 50, w: 300, h: 200, flipH: false, flipV: true, rotate: 0,
+      }))
+
+      // Same visual segment, authored in the opposite direction (top-right ->
+      // bottom-left). Position must stay identical; only the flip flags that
+      // decide which end an asymmetric arrowhead lands on may change.
+      const reversed = createShapeNode('line', {
+        id: 'line-mock-reversed',
+        name: '对角线反向',
+        x: 100,
+        y: 50,
+        width: 300,
+        height: 200,
+      })
+      reversed.lineGeometry = { kind: 'straight', start: [1, 0], end: [0, 1] }
+      const reversedSlide = { addShape: vi.fn() }
+      expect(addPptxShapeNode(reversedSlide as never, reversed, { x: 1, y: 1 })).toEqual([])
+      expect(reversedSlide.addShape).toHaveBeenCalledWith('line', expect.objectContaining({
+        x: 100, y: 50, w: 300, h: 200, flipH: true, flipV: false, rotate: 0,
+      }))
+    })
+
+    it('rotates a straight line about its own center before translating to absolute coordinates', () => {
+      const node = createShapeNode('line', {
+        id: 'line-mock-rotated',
+        name: '旋转直线',
+        x: 100,
+        y: 50,
+        width: 300,
+        height: 200,
+        rotation: 90,
+      })
+      node.lineGeometry = { kind: 'straight', start: [0, 1], end: [1, 0] }
+      const slide = { addShape: vi.fn() }
+      addPptxShapeNode(slide as never, node, { x: 1, y: 1 })
+      const call = slide.addShape.mock.calls[0]?.[1] as Record<string, unknown>
+      expect(call.rotate).toBe(0)
+      expect(call.x as number).toBeCloseTo(150, 9)
+      expect(call.y as number).toBeCloseTo(0, 9)
+      expect(call.w as number).toBeCloseTo(200, 9)
+      expect(call.h as number).toBeCloseTo(300, 9)
+      expect(call.flipH).toBe(false)
+      expect(call.flipV).toBe(false)
+    })
+
+    it('falls back to the default straight geometry when lineGeometry is absent, matching the pre-existing visual', () => {
+      const node = createShapeNode('line', { id: 'line-mock-default', name: '默认线', x: 10, y: 20, width: 400, height: 60 })
+      const slide = { addShape: vi.fn() }
+      addPptxShapeNode(slide as never, node, { x: 1, y: 1 })
+      expect(slide.addShape).toHaveBeenCalledWith('line', expect.objectContaining({
+        x: 10, y: 50, w: 400, h: 0, flipH: false, flipV: false, rotate: 0,
+      }))
+    })
+
+    it('renders a non-default elbow via the shared point resolver as a static SVG image, not bentArrow, and returns a locatable pptx-static-elbow warning', () => {
+      const node = createShapeNode('elbow-arrow', {
+        id: 'elbow-mock',
+        name: '折线箭头',
+        x: 50,
+        y: 400,
+        width: 400,
+        height: 150,
+      })
+      node.lineGeometry = { kind: 'elbow', start: [0, 0.2], end: [1, 0.8], axis: 'horizontal', position: 0.6 }
+      const slide = { addImage: vi.fn() }
+      const warnings = addPptxShapeNode(slide as never, node, { x: 1, y: 1 })
+
+      expect(slide.addImage).toHaveBeenCalledTimes(1)
+      const call = slide.addImage.mock.calls[0]?.[0] as { data: string; x: number; y: number; w: number; h: number }
+      expect(call.x).toBe(50)
+      expect(call.y).toBe(430)
+      expect(call.w).toBe(400)
+      expect(call.h).toBe(90)
+      expect(call.data.startsWith('data:image/svg+xml;base64,')).toBe(true)
+      const svg = Buffer.from(call.data.split(',')[1]!, 'base64').toString('utf8')
+      expect(svg).toContain('<polyline')
+      expect(svg).toContain('points="0,0 240,0 240,90 400,90"')
+      expect(svg).toContain('stroke="#2563eb"')
+      expect(svg).toContain('stroke-width="4"')
+      expect(svg).not.toContain('stroke-dasharray')
+
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('elbow-mock')
+      expect(warnings[0]).toContain('pptx-static-elbow')
+    })
+
+    it('applies dashed/dotted lineStyle to the elbow static-fallback stroke-dasharray', () => {
+      const node = createShapeNode('elbow-arrow', {
+        id: 'elbow-dashed',
+        name: '虚线折线',
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 100,
+        style: { lineStyle: 'dashed' },
+      })
+      const slide = { addImage: vi.fn() }
+      addPptxShapeNode(slide as never, node, { x: 1, y: 1 })
+      const call = slide.addImage.mock.calls[0]?.[0] as { data: string }
+      const svg = Buffer.from(call.data.split(',')[1]!, 'base64').toString('utf8')
+      expect(svg).toContain('stroke-dasharray')
+    })
+  })
+
+  it('导出非默认直线时保留手绘的端点位置与方向，而不是回退成通宽水平线', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const lineNode = createShapeNode('line', {
+      id: 'shape-line-diag',
+      name: '对角线',
+      x: 100,
+      y: 50,
+      width: 300,
+      height: 200,
+    })
+    lineNode.lineGeometry = { kind: 'straight', start: [0, 1], end: [1, 0] }
+    slide.scenes[0]!.layerItems = [sceneNodeToCourseLayerItem(lineNode, 10)]
+
+    const result = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const slideXml = decodePptxSlides(result.bytes)
+    const parsed = new DOMParser().parseFromString(slideXml, 'application/xml')
+    expect(parsed.getElementsByTagName('parsererror')).toHaveLength(0)
+
+    const needleIndex = slideXml.indexOf('shape-line-diag')
+    expect(needleIndex).toBeGreaterThan(-1)
+    const spStart = slideXml.lastIndexOf('<p:sp>', needleIndex)
+    const spEnd = slideXml.indexOf('</p:sp>', needleIndex) + '</p:sp>'.length
+    expect(spStart).toBeGreaterThan(-1)
+    const spXml = slideXml.slice(spStart, spEnd)
+
+    expect(spXml).toContain('<a:prstGeom prst="line">')
+    const xfrmOpenTag = spXml.match(/<a:xfrm[^>]*>/)?.[0] ?? ''
+    expect(xfrmOpenTag).toContain('flipV="1"')
+    expect(xfrmOpenTag).not.toContain('flipH="1"')
+    expect(xfrmOpenTag).not.toContain('rot=')
+
+    const off = spXml.match(/<a:off x="(-?\d+)" y="(-?\d+)"\/>/)
+    const ext = spXml.match(/<a:ext cx="(-?\d+)" cy="(-?\d+)"\/>/)
+    expect(off).toBeTruthy()
+    expect(ext).toBeTruthy()
+    const scaleX = WIDE_SLIDE_WIDTH / CANVAS_WIDTH
+    const scaleY = WIDE_SLIDE_HEIGHT / CANVAS_HEIGHT
+    const toEmuX = (px: number) => Math.round(914400 * px * scaleX)
+    const toEmuY = (px: number) => Math.round(914400 * px * scaleY)
+    expect(Number(off![1])).toBe(toEmuX(100))
+    expect(Number(off![2])).toBe(toEmuY(50))
+    expect(Number(ext![1])).toBe(toEmuX(300))
+    expect(Number(ext![2])).toBe(toEmuY(200))
+
+    // The old fixed-horizontal export put this at the vertical midline
+    // (y=150) with zero height; assert we are nowhere near that shape.
+    expect(Number(off![2])).not.toBe(toEmuY(150))
+    expect(Number(ext![2])).not.toBe(0)
+  })
+
+  it('导出折线箭头时使用带可定位 warning 的静态 SVG 后备，而不是失真的 bentArrow 图形', async () => {
+    const project = createBlankCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    const elbowNode = createShapeNode('elbow-arrow', {
+      id: 'shape-elbow-static',
+      name: '折线箭头',
+      x: 50,
+      y: 400,
+      width: 400,
+      height: 150,
+    })
+    elbowNode.lineGeometry = { kind: 'elbow', start: [0, 0.2], end: [1, 0.8], axis: 'horizontal', position: 0.6 }
+    slide.scenes[0]!.layerItems = [sceneNodeToCourseLayerItem(elbowNode, 10)]
+
+    const result = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const slideXml = decodePptxSlides(result.bytes)
+    expect(slideXml).not.toContain('bentArrow')
+    expect(slideXml).toContain('<p:pic>')
+    // The only `<p:sp>` on this slide is the warning-note textbox; the elbow
+    // itself must not additionally render as a native `<p:sp>` autoshape.
+    expect(slideXml.match(/<p:sp>/g)).toHaveLength(1)
+    expect(slideXml).toContain('shape-elbow-static')
+
+    expect(result.warnings.some((message) => (
+      message.includes('shape-elbow-static') && message.includes('pptx-static-elbow')
+    ))).toBe(true)
+
+    const archive = unzipSync(result.bytes)
+    const elbowSvg = Object.entries(archive)
+      .filter(([name]) => name.startsWith('ppt/media/') && name.endsWith('.svg'))
+      .map(([, bytes]) => new TextDecoder().decode(bytes))
+      .find((svg) => svg.includes('<polyline'))
+    expect(elbowSvg, 'expected an embedded SVG media part with a polyline').toBeTruthy()
+    expect(elbowSvg).toContain('points="0,0 240,0 240,90 400,90"')
+    expect(elbowSvg).toContain('stroke="#2563eb"')
+    expect(elbowSvg).toContain('stroke-width="4"')
   })
 })

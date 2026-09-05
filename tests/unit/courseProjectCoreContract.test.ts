@@ -28,7 +28,13 @@ import {
   type CourseProjectDocument,
   type CourseRuntimeDefinition,
   type FlowBlock,
+  type NativeLayerItem,
 } from '@/shared/courseProjectTypes'
+import type {
+  NativeChartContent,
+  NativeInputContent,
+  NativeTableContent,
+} from '@/shared/contracts/native-v1/types'
 import { createRectangleNode } from '@/renderer/project/nativeNodeFactories'
 
 const NOW = '2026-08-17T00:00:00.000Z'
@@ -814,6 +820,271 @@ describe('Course Project V9 core contract', () => {
     expect(flowSurface.backgroundColor).toBe('#ffffff')
   })
 
+  it('adds a Course-wide background that is optional, strict and asset-checked', () => {
+    const project = minimalSlideProject()
+    const parsedOmitted = courseProjectDocumentSchema.parse(project)
+    expect(parsedOmitted.backgroundColor).toBeUndefined()
+    expect(parsedOmitted.backgroundAssetId).toBeUndefined()
+    expect('backgroundMode' in parsedOmitted).toBe(false)
+
+    const withBackground: CourseProjectDocument = {
+      ...project,
+      assets: {
+        'course-cover': {
+          id: 'course-cover',
+          filename: 'cover.png',
+          mimeType: 'image/png',
+          kind: 'image',
+          path: 'assets/course-cover.bin',
+          byteLength: 4,
+        },
+      },
+      backgroundColor: '#0f172a',
+      backgroundAssetId: 'course-cover',
+    }
+    const parsed = courseProjectDocumentSchema.parse(withBackground)
+    expect(parsed.backgroundColor).toBe('#0f172a')
+    expect(parsed.backgroundAssetId).toBe('course-cover')
+
+    const parsedClearedAsset = courseProjectDocumentSchema.parse({ ...withBackground, backgroundAssetId: null })
+    expect(parsedClearedAsset.backgroundAssetId).toBeNull()
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      backgroundColor: '#0f172a80',
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      backgroundMode: 'inherit',
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      backgroundAssetId: 'missing-course-asset',
+    }).success).toBe(false)
+  })
+
+  it('adds a Slide surface background that defaults to inherit mode and is strict', () => {
+    const project = minimalSlideProject()
+    const slideSurface = project.surfaces[0]
+    if (slideSurface?.type !== 'slide') throw new Error('expected slide surface')
+
+    const parsedOmitted = courseProjectDocumentSchema.parse(project)
+    const omittedSurface = parsedOmitted.surfaces[0]
+    if (omittedSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(omittedSurface.backgroundMode).toBeUndefined()
+    expect(omittedSurface.backgroundColor).toBeUndefined()
+    expect(omittedSurface.backgroundAssetId).toBeUndefined()
+
+    const withOwn: CourseProjectDocument = {
+      ...project,
+      assets: {
+        'surface-cover': {
+          id: 'surface-cover',
+          filename: 'surface.png',
+          mimeType: 'image/png',
+          kind: 'image',
+          path: 'assets/surface-cover.bin',
+          byteLength: 4,
+        },
+      },
+      surfaces: [{
+        ...slideSurface,
+        backgroundMode: 'own',
+        backgroundColor: '#1e293b',
+        backgroundAssetId: 'surface-cover',
+      }],
+    }
+    const parsedOwn = courseProjectDocumentSchema.parse(withOwn)
+    const parsedOwnSurface = parsedOwn.surfaces[0]
+    if (parsedOwnSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(parsedOwnSurface).toMatchObject({
+      backgroundMode: 'own',
+      backgroundColor: '#1e293b',
+      backgroundAssetId: 'surface-cover',
+    })
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...slideSurface, backgroundMode: 'sometimes' }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...slideSurface, backgroundColor: 'red' }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...slideSurface, backgroundAssetId: 'missing-surface-asset' }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...slideSurface, unknownSurfaceField: true }],
+    }).success).toBe(false)
+  })
+
+  it('adds a Slide scene backgroundMode that is strict and independent of the required color', () => {
+    const project = minimalSlideProject()
+    const slideSurface = project.surfaces[0]
+    if (slideSurface?.type !== 'slide') throw new Error('expected slide surface')
+    const scene = slideSurface.scenes[0]!
+
+    const parsedDefault = courseProjectDocumentSchema.parse(project)
+    const defaultSurface = parsedDefault.surfaces[0]
+    if (defaultSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(defaultSurface.scenes[0]?.backgroundMode).toBeUndefined()
+    expect(defaultSurface.scenes[0]?.backgroundColor).toBe('#ffffff')
+
+    const withInherit: CourseProjectDocument = {
+      ...project,
+      surfaces: [{
+        ...slideSurface,
+        scenes: [{ ...scene, backgroundMode: 'inherit' }],
+      }],
+    }
+    const parsedInherit = courseProjectDocumentSchema.parse(withInherit)
+    const parsedInheritSurface = parsedInherit.surfaces[0]
+    if (parsedInheritSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(parsedInheritSurface.scenes[0]?.backgroundMode).toBe('inherit')
+    // The required scene color is stored and validated even while inherit mode leaves it dormant.
+    expect(parsedInheritSurface.scenes[0]?.backgroundColor).toBe('#ffffff')
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...slideSurface, scenes: [{ ...scene, backgroundMode: 'sometimes' }] }],
+    }).success).toBe(false)
+    // Omitting the required color must still fail, mode or no mode.
+    const { backgroundColor: _omitted, ...sceneWithoutColor } = scene
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...slideSurface, scenes: [{ ...sceneWithoutColor, backgroundMode: 'own' }] }],
+    }).success).toBe(false)
+  })
+
+  it('adds Flow surface backgroundMode/backgroundAssetId that default to own and are strict', () => {
+    const project = flowProject([{ id: 'heading', type: 'heading', level: 1, text: '标题' }])
+    const flowSurface = project.surfaces[0]
+    if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
+
+    const parsedDefault = courseProjectDocumentSchema.parse(project)
+    const defaultSurface = parsedDefault.surfaces[0]
+    if (defaultSurface?.type !== 'flow') throw new Error('expected flow surface')
+    expect(defaultSurface.backgroundMode).toBeUndefined()
+    expect(defaultSurface.backgroundAssetId).toBeUndefined()
+
+    const withOwn: CourseProjectDocument = {
+      ...project,
+      assets: {
+        'flow-cover': {
+          id: 'flow-cover',
+          filename: 'flow.png',
+          mimeType: 'image/png',
+          kind: 'image',
+          path: 'assets/flow-cover.bin',
+          byteLength: 4,
+        },
+      },
+      surfaces: [{ ...flowSurface, backgroundMode: 'own', backgroundAssetId: 'flow-cover' }],
+    }
+    const parsedOwn = courseProjectDocumentSchema.parse(withOwn)
+    const parsedOwnSurface = parsedOwn.surfaces[0]
+    if (parsedOwnSurface?.type !== 'flow') throw new Error('expected flow surface')
+    expect(parsedOwnSurface.backgroundMode).toBe('own')
+    expect(parsedOwnSurface.backgroundAssetId).toBe('flow-cover')
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...flowSurface, backgroundMode: 'always' }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...flowSurface, backgroundAssetId: 42 }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...flowSurface, backgroundAssetId: 'missing-flow-asset' }],
+    }).success).toBe(false)
+  })
+
+  it('adds Spatial surface backgroundMode/backgroundAssetId that default to own and are strict', () => {
+    const project = spatialProject()
+    const spatialSurface = project.surfaces[0]
+    if (spatialSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+
+    const parsedDefault = courseProjectDocumentSchema.parse(project)
+    const defaultSurface = parsedDefault.surfaces[0]
+    if (defaultSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(defaultSurface.backgroundMode).toBeUndefined()
+    expect(defaultSurface.backgroundAssetId).toBeUndefined()
+
+    const withInheritButExplicitAsset: CourseProjectDocument = {
+      ...project,
+      assets: {
+        'spatial-cover': {
+          id: 'spatial-cover',
+          filename: 'spatial.png',
+          mimeType: 'image/png',
+          kind: 'image',
+          path: 'assets/spatial-cover.bin',
+          byteLength: 4,
+        },
+      },
+      surfaces: [{ ...spatialSurface, backgroundMode: 'inherit', backgroundAssetId: 'spatial-cover' }],
+    }
+    const parsed = courseProjectDocumentSchema.parse(withInheritButExplicitAsset)
+    const parsedSurface = parsed.surfaces[0]
+    if (parsedSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(parsedSurface.backgroundMode).toBe('inherit')
+    // Explicit asset persists even though inherit mode leaves it dormant to the resolver.
+    expect(parsedSurface.backgroundAssetId).toBe('spatial-cover')
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...spatialSurface, backgroundMode: 'always' }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...spatialSurface, backgroundAssetId: 42 }],
+    }).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse({
+      ...project,
+      surfaces: [{ ...spatialSurface, backgroundAssetId: 'missing-spatial-asset' }],
+    }).success).toBe(false)
+  })
+
+  it('keeps Named state free of a backgroundMode field; its inherit stays expressed by omitting both overrides', () => {
+    const project = minimalSlideProject()
+    const slideSurface = project.surfaces[0]
+    if (slideSurface?.type !== 'slide') throw new Error('expected slide surface')
+    const scene = slideSurface.scenes[0]!
+    const withPresentation: CourseProjectDocument = {
+      ...project,
+      surfaces: [{
+        ...slideSurface,
+        scenes: [{
+          ...scene,
+          presentation: {
+            initialStateId: 'state-1',
+            states: [{ id: 'state-1', name: '状态 1', layerItemOverrides: {} }],
+          },
+        }],
+      }],
+    }
+    expect(courseProjectDocumentSchema.safeParse(withPresentation).success).toBe(true)
+
+    expect(courseProjectDocumentSchema.safeParse({
+      ...withPresentation,
+      surfaces: [{
+        ...slideSurface,
+        scenes: [{
+          ...scene,
+          presentation: {
+            initialStateId: 'state-1',
+            states: [{ id: 'state-1', name: '状态 1', layerItemOverrides: {}, backgroundMode: 'inherit' }],
+          },
+        }],
+      }],
+    }).success).toBe(false)
+  })
+
   it('validates runtime protocol discriminators and versions', () => {
     const makeRuntimeProject = (runtimeDef: CourseRuntimeDefinition) => {
       const project = minimalSlideProject()
@@ -1196,5 +1467,803 @@ describe('Course Project V9 core contract', () => {
       network: { connectOrigins: [], secretAccessToken: 'sk-1' },
     }).success).toBe(false)
     expect(courseNetworkDeclarationSchema.parse({})).toEqual({})
+  })
+
+  describe('Table and Chart strict Native contracts (r12-000)', () => {
+    function sampleTableContent(): NativeTableContent {
+      return {
+        columns: [
+          { id: 'col-1', width: 120 },
+          { id: 'col-2', width: 160 },
+        ],
+        rows: [
+          {
+            id: 'row-1',
+            height: 40,
+            cells: [
+              { id: 'cell-1-1', columnId: 'col-1', text: '表头 1', style: { bold: true } },
+              { id: 'cell-1-2', columnId: 'col-2', text: '表头 2', style: { bold: true } },
+            ],
+          },
+          {
+            id: 'row-2',
+            height: 36,
+            cells: [
+              { id: 'cell-2-1', columnId: 'col-1', text: '内容 A' },
+              { id: 'cell-2-2', columnId: 'col-2', text: '内容 B' },
+            ],
+          },
+        ],
+        headerRowCount: 1,
+        style: {
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          borderColor: '#e5e7eb',
+          borderOpacity: 1,
+          borderWidth: 1,
+          lineStyle: 'solid',
+          textColor: '#111827',
+          fontFamily: '"Microsoft YaHei", sans-serif',
+          fontSize: 14,
+          horizontalAlign: 'left',
+          verticalAlign: 'middle',
+          cellPadding: 8,
+        },
+      }
+    }
+
+    function sampleChartContent(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut'): NativeChartContent {
+      const categories = [
+        { id: 'cat-1', label: '一月' },
+        { id: 'cat-2', label: '二月' },
+      ]
+      const commonStyle = {
+        backgroundColor: '#ffffff',
+        backgroundOpacity: 1,
+        fontFamily: '"Microsoft YaHei", sans-serif',
+        fontSize: 12,
+        textColor: '#1f2937',
+        showLegend: true,
+        legendPosition: 'top' as const,
+        showDataLabels: true,
+      }
+      if (chartType === 'pie') {
+        return {
+          chartType: 'pie',
+          title: '饼图测试',
+          categories,
+          series: [
+            {
+              id: 'series-1',
+              name: '占比',
+              color: '#3b82f6',
+              points: [
+                { id: 'p-1', categoryId: 'cat-1', value: 40 },
+                { id: 'p-2', categoryId: 'cat-2', value: 60 },
+              ],
+            },
+          ],
+          style: commonStyle,
+        }
+      }
+      if (chartType === 'donut') {
+        return {
+          chartType: 'donut',
+          title: '环形图测试',
+          categories,
+          series: [
+            {
+              id: 'series-1',
+              name: '占比',
+              color: '#3b82f6',
+              points: [
+                { id: 'p-1', categoryId: 'cat-1', value: 30 },
+                { id: 'p-2', categoryId: 'cat-2', value: 70 },
+              ],
+            },
+          ],
+          style: { ...commonStyle, holeSize: 50 },
+        }
+      }
+      return {
+        chartType,
+        title: `${chartType}测试`,
+        categories,
+        series: [
+          {
+            id: 'series-1',
+            name: '系列 1',
+            color: '#3b82f6',
+            points: [
+              { id: 'p-1', categoryId: 'cat-1', value: 10 },
+              { id: 'p-2', categoryId: 'cat-2', value: 20 },
+            ],
+          },
+        ],
+        style: {
+          ...commonStyle,
+          showCategoryAxis: true,
+          showValueAxis: true,
+          showGridLines: true,
+          valueMin: 0,
+          valueMax: 100,
+        },
+      }
+    }
+
+    function slideProjectWithLayer(nativeContent: NativeLayerItem['content']): CourseProjectDocument {
+      const base = minimalSlideProject()
+      const slideSurface = base.surfaces.find((s) => s.type === 'slide')
+      if (slideSurface && slideSurface.type === 'slide') {
+        slideSurface.scenes[0]!.layerItems = [
+          {
+            layerItemId: 'layer-native-1',
+            label: 'Native Layer',
+            kind: 'native',
+            content: nativeContent,
+            frame: { mode: 'absolute', x: 50, y: 50, width: 400, height: 300 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+        ]
+      }
+      return base
+    }
+
+    it('accepts valid Table in Slide scene', () => {
+      const project = slideProjectWithLayer({
+        nativeType: 'table',
+        data: sampleTableContent(),
+      })
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(true)
+    })
+
+    it('accepts valid Table in Slide surface surfaceLayerItems', () => {
+      const base = minimalSlideProject()
+      const slideSurface = base.surfaces.find((s) => s.type === 'slide')
+      if (slideSurface && slideSurface.type === 'slide') {
+        slideSurface.surfaceLayerItems = [
+          {
+            item: {
+              layerItemId: 'layer-table-surface',
+              label: 'Surface Table',
+              kind: 'native',
+              content: { nativeType: 'table', data: sampleTableContent() },
+              frame: { mode: 'absolute', x: 20, y: 20, width: 300, height: 200 },
+              order: 0,
+              visible: true,
+              locked: false,
+              rotation: 0,
+              opacity: 1,
+              hitPolicy: 'auto',
+              playbackInitialVisibility: 'inherit',
+            },
+            visibility: { mode: 'all', locationIds: [] },
+          },
+        ]
+      }
+      expect(courseProjectDocumentSchema.safeParse(base).success).toBe(true)
+    })
+
+    it('accepts all 5 Chart types in Slide scene', () => {
+      for (const chartType of ['bar', 'line', 'area', 'pie', 'donut'] as const) {
+        const project = slideProjectWithLayer({
+          nativeType: 'chart',
+          data: sampleChartContent(chartType),
+        })
+        const result = courseProjectDocumentSchema.safeParse(project)
+        expect(result.success).toBe(true)
+      }
+    })
+
+    it('rejects Table with invalid structure, duplicate IDs, or unknown fields', () => {
+      // Duplicate column id
+      const dupCol = sampleTableContent()
+      dupCol.columns[1]!.id = 'col-1'
+      dupCol.rows.forEach((r) => { r.cells[1]!.columnId = 'col-1' })
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'table', data: dupCol })).success).toBe(false)
+
+      // Duplicate cell id across rows
+      const dupCell = sampleTableContent()
+      dupCell.rows[1]!.cells[0]!.id = 'cell-1-1'
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'table', data: dupCell })).success).toBe(false)
+
+      // Cell columnId mismatch
+      const mismatchCol = sampleTableContent()
+      mismatchCol.rows[0]!.cells[0]!.columnId = 'wrong-col'
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'table', data: mismatchCol })).success).toBe(false)
+
+      // Header row count > row count
+      const badHeader = sampleTableContent()
+      badHeader.headerRowCount = 5
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'table', data: badHeader })).success).toBe(false)
+
+      // Extra unknown field on table content
+      const extraField = { ...sampleTableContent(), extraKey: 'unknown' }
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'table', data: extraField as any })).success).toBe(false)
+    })
+
+    it('rejects Chart with invalid structure, duplicate IDs, or value constraints', () => {
+      // Duplicate category id
+      const dupCat = sampleChartContent('bar')
+      dupCat.categories[1]!.id = 'cat-1'
+      dupCat.series[0]!.points[1]!.categoryId = 'cat-1'
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: dupCat })).success).toBe(false)
+
+      // Duplicate point id
+      const dupPoint = sampleChartContent('bar')
+      dupPoint.series[0]!.points[1]!.id = 'p-1'
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: dupPoint })).success).toBe(false)
+
+      // Cartesian valueMin >= valueMax
+      const badMinMax = sampleChartContent('bar')
+      if ('style' in badMinMax && 'valueMin' in badMinMax.style) {
+        badMinMax.style.valueMin = 100
+        badMinMax.style.valueMax = 50
+      }
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: badMinMax })).success).toBe(false)
+
+      // Pie chart negative value
+      const negPie = sampleChartContent('pie')
+      negPie.series[0].points[0]!.value = -10
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: negPie })).success).toBe(false)
+
+      // Pie chart all zero values
+      const zeroPie = sampleChartContent('pie')
+      zeroPie.series[0].points[0]!.value = 0
+      zeroPie.series[0].points[1]!.value = 0
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: zeroPie })).success).toBe(false)
+
+      // Extra unknown field
+      const extraField = { ...sampleChartContent('bar'), extraProp: true }
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithLayer({ nativeType: 'chart', data: extraField as any })).success).toBe(false)
+    })
+
+    it('strictly rejects Table and Chart in Flow, Global, and Spatial containers', () => {
+      const tableContent = sampleTableContent()
+
+      // 1. Flow surfaceLayerItems
+      const flowProject = createBlankFlowCourseProject()
+      const flowSurface = flowProject.surfaces.find((s) => s.type === 'flow')!
+      flowSurface.surfaceLayerItems = [
+        {
+          item: {
+            layerItemId: 'flow-table-1',
+            label: 'Flow Table',
+            kind: 'native',
+            content: { nativeType: 'table', data: tableContent },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 200 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+        },
+      ]
+      const flowResult = courseProjectDocumentSchema.safeParse(flowProject)
+      expect(flowResult.success).toBe(false)
+
+      // 2. GlobalLayerItems
+      const globalProject = minimalSlideProject()
+      globalProject.globalLayerItems = [
+        {
+          item: {
+            layerItemId: 'global-table-1',
+            label: 'Global Table',
+            kind: 'native',
+            content: { nativeType: 'table', data: tableContent },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 200 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+          plane: 'overlay',
+        },
+      ]
+      const globalResult = courseProjectDocumentSchema.safeParse(globalProject)
+      expect(globalResult.success).toBe(false)
+
+      // 3. Spatial surfaceLayerItems
+      const spatialProject = createBlankSpatialCourseProject()
+      const spatialSurface = spatialProject.surfaces.find((s) => s.type === 'spatial-2d')!
+      spatialSurface.surfaceLayerItems = [
+        {
+          item: {
+            layerItemId: 'spatial-table-1',
+            label: 'Spatial Table',
+            kind: 'native',
+            content: { nativeType: 'table', data: tableContent },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 200 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+        },
+      ]
+      const spatialResult = courseProjectDocumentSchema.safeParse(spatialProject)
+      expect(spatialResult.success).toBe(false)
+
+      // 4. Spatial world.layerItems
+      const spatialProject2 = createBlankSpatialCourseProject()
+      const spatialSurface2 = spatialProject2.surfaces.find((s) => s.type === 'spatial-2d')!
+      if ('world' in spatialSurface2) {
+        spatialSurface2.world.layerItems = [
+          {
+            layerItemId: 'world-chart-1',
+            label: 'World Chart',
+            kind: 'native',
+            content: { nativeType: 'chart', data: sampleChartContent('bar') },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 200 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+        ]
+      }
+      expect(courseProjectDocumentSchema.safeParse(spatialProject2).success).toBe(false)
+    })
+  })
+
+  describe('Native Input Contract (r12-006)', () => {
+    function sampleInputContent(overrides?: Partial<NativeInputContent>): NativeInputContent {
+      return {
+        answerType: 'text',
+        placeholder: '请输入答案',
+        stateKey: 'userAnswer',
+        validityKey: 'isAnswerValid',
+        ruleFamilyRuleIds: ['rule_submit_1'],
+        style: {
+          fontFamily: 'sans-serif',
+          fontSize: 16,
+          textColor: '#1f2937',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          borderColor: '#d1d5db',
+          borderOpacity: 1,
+          borderWidth: 1,
+          cornerRadius: 4,
+          horizontalAlign: 'left',
+          padding: 8,
+        },
+        ...overrides,
+      }
+    }
+
+    function slideProjectWithInput(
+      inputContent: NativeInputContent,
+      options?: {
+        nodeId?: string
+        customCourseState?: CourseProjectDocument['courseState']
+        customInteractions?: CourseProjectDocument['globalInteractions']
+      },
+    ): CourseProjectDocument {
+      const base = minimalSlideProject()
+      const nodeId = options?.nodeId ?? 'input_node_1'
+      base.courseState = options?.customCourseState ?? [
+        {
+          key: inputContent.stateKey,
+          valueType: inputContent.answerType === 'text' ? 'string' : 'number',
+          defaultValue: (inputContent.answerType === 'text' ? '' : 0) as any,
+        },
+        {
+          key: inputContent.validityKey,
+          valueType: 'boolean',
+          defaultValue: false,
+        },
+      ]
+      const slideSurface = base.surfaces.find((s) => s.type === 'slide')
+      if (slideSurface && slideSurface.type === 'slide') {
+        slideSurface.scenes[0]!.layerItems = [
+          {
+            layerItemId: nodeId,
+            label: 'Input Node',
+            kind: 'native',
+            content: { nativeType: 'input', data: inputContent },
+            frame: { mode: 'absolute', x: 50, y: 50, width: 300, height: 44 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+        ]
+        slideSurface.scenes[0]!.interactions = options?.customInteractions ?? [
+          {
+            id: 'rule_submit_1',
+            name: '提交答案',
+            enabled: true,
+            trigger: { type: 'input.submit', nodeId },
+            conditions: [],
+            actions: [
+              {
+                id: 'action_1',
+                start: 'after-previous',
+                delayMs: 0,
+                action: { type: 'scene.next' },
+              },
+            ],
+          },
+        ]
+      }
+      return base
+    }
+
+    it('accepts valid text Input in Slide scene with matching string state and boolean validity', () => {
+      const project = slideProjectWithInput(sampleInputContent({ answerType: 'text' }))
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(true)
+    })
+
+    it('accepts valid number Input in Slide scene with matching number state and boolean validity', () => {
+      const project = slideProjectWithInput(sampleInputContent({
+        answerType: 'number',
+        stateKey: 'numAnswer',
+        validityKey: 'numValid',
+      }))
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(true)
+    })
+
+    it('rejects Input if stateKey is missing from courseState', () => {
+      const content = sampleInputContent()
+      const project = slideProjectWithInput(content, {
+        customCourseState: [
+          { key: 'isAnswerValid', valueType: 'boolean', defaultValue: false },
+        ],
+      })
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.message.includes('Missing course-state key: userAnswer'))).toBe(true)
+      }
+    })
+
+    it('rejects Input if stateKey value type mismatches answerType', () => {
+      // answerType is text, but stateKey is number
+      const projectTextMismatch = slideProjectWithInput(sampleInputContent({ answerType: 'text' }), {
+        customCourseState: [
+          { key: 'userAnswer', valueType: 'number', defaultValue: 0 },
+          { key: 'isAnswerValid', valueType: 'boolean', defaultValue: false },
+        ],
+      })
+      expect(courseProjectDocumentSchema.safeParse(projectTextMismatch).success).toBe(false)
+
+      // answerType is number, but stateKey is string
+      const projectNumMismatch = slideProjectWithInput(sampleInputContent({ answerType: 'number' }), {
+        customCourseState: [
+          { key: 'userAnswer', valueType: 'string', defaultValue: '' },
+          { key: 'isAnswerValid', valueType: 'boolean', defaultValue: false },
+        ],
+      })
+      expect(courseProjectDocumentSchema.safeParse(projectNumMismatch).success).toBe(false)
+    })
+
+    it('rejects Input if validityKey is missing or not a boolean state', () => {
+      // Missing validityKey
+      const missingValidity = slideProjectWithInput(sampleInputContent(), {
+        customCourseState: [
+          { key: 'userAnswer', valueType: 'string', defaultValue: '' },
+        ],
+      })
+      expect(courseProjectDocumentSchema.safeParse(missingValidity).success).toBe(false)
+
+      // validityKey is string
+      const stringValidity = slideProjectWithInput(sampleInputContent(), {
+        customCourseState: [
+          { key: 'userAnswer', valueType: 'string', defaultValue: '' },
+          { key: 'isAnswerValid', valueType: 'string', defaultValue: '' },
+        ],
+      })
+      expect(courseProjectDocumentSchema.safeParse(stringValidity).success).toBe(false)
+    })
+
+    it('rejects Input if stateKey === validityKey', () => {
+      const project = slideProjectWithInput(sampleInputContent({
+        stateKey: 'sharedKey',
+        validityKey: 'sharedKey',
+      }))
+      expect(courseProjectDocumentSchema.safeParse(project).success).toBe(false)
+    })
+
+    it('rejects Input if ruleFamilyRuleIds exceeds 17 rules', () => {
+      const ruleIds = Array.from({ length: 18 }, (_, i) => `rule_${i + 1}`)
+      const project = slideProjectWithInput(sampleInputContent({
+        ruleFamilyRuleIds: ruleIds,
+      }))
+      expect(courseProjectDocumentSchema.safeParse(project).success).toBe(false)
+    })
+
+    it('rejects Input if ruleFamilyRuleIds has duplicate rule IDs', () => {
+      const project = slideProjectWithInput(sampleInputContent({
+        ruleFamilyRuleIds: ['rule_1', 'rule_1'],
+      }))
+      expect(courseProjectDocumentSchema.safeParse(project).success).toBe(false)
+    })
+
+    it('rejects Input if ruleFamilyRuleIds references missing scene interaction', () => {
+      const project = slideProjectWithInput(sampleInputContent({
+        ruleFamilyRuleIds: ['non_existent_rule'],
+      }))
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.message.includes('Input rule family references missing interaction rule'))).toBe(true)
+      }
+    })
+
+    it('rejects Input if ruleFamilyRuleIds rule targets a different nodeId or wrong trigger type', () => {
+      // Target wrong node
+      const projectWrongNode = slideProjectWithInput(sampleInputContent(), {
+        customInteractions: [
+          {
+            id: 'rule_submit_1',
+            name: '提交答案',
+            enabled: true,
+            trigger: { type: 'input.submit', nodeId: 'other_node' },
+            conditions: [],
+            actions: [
+              {
+                id: 'action_1',
+                start: 'after-previous',
+                delayMs: 0,
+                action: { type: 'presentation.set', stateId: 'state-1' },
+              },
+            ],
+          },
+        ],
+      })
+      expect(courseProjectDocumentSchema.safeParse(projectWrongNode).success).toBe(false)
+
+      // Trigger type is node.click instead of input.submit
+      const projectWrongTrigger = slideProjectWithInput(sampleInputContent(), {
+        customInteractions: [
+          {
+            id: 'rule_submit_1',
+            name: '提交答案',
+            enabled: true,
+            trigger: { type: 'node.click', nodeId: 'input_node_1' },
+            conditions: [],
+            actions: [
+              {
+                id: 'action_1',
+                start: 'after-previous',
+                delayMs: 0,
+                action: { type: 'presentation.set', stateId: 'state-1' },
+              },
+            ],
+          },
+        ],
+      })
+      expect(courseProjectDocumentSchema.safeParse(projectWrongTrigger).success).toBe(false)
+    })
+
+    it('rejects input.submit trigger in global interactions', () => {
+      const project = minimalSlideProject()
+      project.globalInteractions = [
+        {
+          id: 'global_rule_1',
+          name: '全局提交',
+          enabled: true,
+          trigger: { type: 'input.submit', nodeId: 'any_node' },
+          conditions: [],
+          actions: [
+            {
+              id: 'a1',
+              start: 'after-previous',
+              delayMs: 0,
+              action: { type: 'scene.next' },
+            },
+          ],
+        },
+      ]
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.message.includes('Global interactions do not support input.submit trigger'))).toBe(true)
+      }
+    })
+
+    it('rejects input.submit trigger targeting a non-input node or non-existent node', () => {
+      const project = minimalSlideProject()
+      const slideSurface = project.surfaces.find((s) => s.type === 'slide')!
+      slideSurface.scenes[0]!.layerItems = [
+        sceneNodeToCourseLayerItem(createRectangleNode({ id: 'rect_1', name: '矩形' }), 0),
+      ]
+      slideSurface.scenes[0]!.interactions = [
+        {
+          id: 'rule_bad_target',
+          name: '指向矩形',
+          enabled: true,
+          trigger: { type: 'input.submit', nodeId: 'rect_1' },
+          conditions: [],
+          actions: [
+            {
+              id: 'a1',
+              start: 'after-previous',
+              delayMs: 0,
+              action: { type: 'presentation.set', stateId: 'state-1' },
+            },
+          ],
+        },
+      ]
+      const result = courseProjectDocumentSchema.safeParse(project)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.message.includes('Input submit trigger must target a scene-local native input'))).toBe(true)
+      }
+    })
+
+    it('strictly rejects Native Input in Flow, Global, Slide Surface, and Spatial containers', () => {
+      const inputData = sampleInputContent()
+
+      // 1. Flow surfaceLayerItems
+      const flowProject = createBlankFlowCourseProject()
+      const flowSurface = flowProject.surfaces.find((s) => s.type === 'flow')!
+      flowSurface.surfaceLayerItems = [
+        {
+          item: {
+            layerItemId: 'flow-input-1',
+            label: 'Flow Input',
+            kind: 'native',
+            content: { nativeType: 'input', data: inputData },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 44 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+        },
+      ]
+      expect(courseProjectDocumentSchema.safeParse(flowProject).success).toBe(false)
+
+      // 2. Slide surface-level surfaceLayerItems
+      const slideBase = minimalSlideProject()
+      const slideSurface = slideBase.surfaces.find((s) => s.type === 'slide')!
+      slideSurface.surfaceLayerItems = [
+        {
+          item: {
+            layerItemId: 'slide-surface-input-1',
+            label: 'Slide Surface Input',
+            kind: 'native',
+            content: { nativeType: 'input', data: inputData },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 44 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+        },
+      ]
+      expect(courseProjectDocumentSchema.safeParse(slideBase).success).toBe(false)
+
+      // 3. Global layer items
+      const globalProject = minimalSlideProject()
+      globalProject.globalLayerItems = [
+        {
+          item: {
+            layerItemId: 'global-input-1',
+            label: 'Global Input',
+            kind: 'native',
+            content: { nativeType: 'input', data: inputData },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 44 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+          plane: 'overlay',
+        },
+      ]
+      expect(courseProjectDocumentSchema.safeParse(globalProject).success).toBe(false)
+
+      // 4. Spatial surfaceLayerItems
+      const spatialProject = createBlankSpatialCourseProject()
+      const spatialSurface = spatialProject.surfaces.find((s) => s.type === 'spatial-2d')!
+      spatialSurface.surfaceLayerItems = [
+        {
+          item: {
+            layerItemId: 'spatial-input-1',
+            label: 'Spatial Input',
+            kind: 'native',
+            content: { nativeType: 'input', data: inputData },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 44 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+          visibility: { mode: 'all', locationIds: [] },
+        },
+      ]
+      expect(courseProjectDocumentSchema.safeParse(spatialProject).success).toBe(false)
+
+      // 5. Spatial world.layerItems
+      const spatialProject2 = createBlankSpatialCourseProject()
+      const spatialSurface2 = spatialProject2.surfaces.find((s) => s.type === 'spatial-2d')!
+      if ('world' in spatialSurface2) {
+        spatialSurface2.world.layerItems = [
+          {
+            layerItemId: 'world-input-1',
+            label: 'World Input',
+            kind: 'native',
+            content: { nativeType: 'input', data: inputData },
+            frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 44 },
+            order: 0,
+            visible: true,
+            locked: false,
+            rotation: 0,
+            opacity: 1,
+            hitPolicy: 'auto',
+            playbackInitialVisibility: 'inherit',
+          },
+        ]
+      }
+      expect(courseProjectDocumentSchema.safeParse(spatialProject2).success).toBe(false)
+    })
+
+    it('rejects Input with invalid style or content fields', () => {
+      // Invalid fontSize (min is 6)
+      const badFont = sampleInputContent({
+        style: {
+          ...sampleInputContent().style,
+          fontSize: 0,
+        },
+      })
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithInput(badFont)).success).toBe(false)
+
+      // Invalid fillOpacity (must be 0..1)
+      const badOpacity = sampleInputContent({
+        style: {
+          ...sampleInputContent().style,
+          fillOpacity: 1.5,
+        },
+      })
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithInput(badOpacity)).success).toBe(false)
+
+      // Extra unknown property on input content
+      const extraProp = { ...sampleInputContent(), extraField: 'invalid' }
+      expect(courseProjectDocumentSchema.safeParse(slideProjectWithInput(extraProp as any)).success).toBe(false)
+    })
   })
 })

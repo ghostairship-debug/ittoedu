@@ -32,17 +32,21 @@ import {
   executeFlowDelete,
   executeFlowEditorCommand,
   importAndReplaceFlowMediaBlock,
+  importFlowSurfaceBackgroundAsset,
   insertFlowEditorBlock,
   replaceFlowMediaBlockAsset,
   updateFlowEditorBlock,
+  updateFlowSurfaceBackground,
   updateFlowSurfaceBackgroundColor,
   type FlowCommandResult,
   type FlowDeleteRequest,
   type FlowEditorCommandRequest,
+  type FlowSurfaceBackgroundPatch,
 } from '../../course/flowEditorCommands'
 import {
   findGlobalTeacherController,
   duplicateEffectiveLayerItem,
+  locateCourseLayer,
   moveEffectiveLayerOwner,
   patchEffectiveLayerItem,
   reorderEffectiveLayerItems,
@@ -68,6 +72,7 @@ import {
   insertFlowSharedMedia,
   insertFlowSharedShape,
   patchFlowOverlayPaperSpace,
+  patchFlowOverlayProperties,
   transformFlowOverlayFrame,
   type FlowSharedAuthoringResult,
 } from '../../course/flowSharedAuthoringAdapters'
@@ -225,6 +230,13 @@ export type FlowAuthoringIntent = (
     }
   | { readonly kind: 'rename-page'; readonly title: string }
   | { readonly kind: 'set-paper-background'; readonly backgroundColor: string }
+  | { readonly kind: 'set-surface-background'; readonly patch: FlowSurfaceBackgroundPatch }
+  | {
+      readonly kind: 'import-surface-background-asset'
+      readonly name: string
+      readonly mimeType: string
+      readonly bytes: Uint8Array
+    }
   | { readonly kind: 'patch-block'; readonly patch: Record<string, unknown> }
   | { readonly kind: 'replace-media-asset'; readonly assetId: string }
   | {
@@ -238,6 +250,7 @@ export type FlowAuthoringIntent = (
   | { readonly kind: 'convert-overlay-to-document' }
   | { readonly kind: 'patch-overlay-paper-space'; readonly paperSpace: 'viewport' | 'paper' }
   | { readonly kind: 'commit-overlay-formula'; readonly ast: FormulaAstNode; readonly accessibleText: string }
+  | { readonly kind: 'patch-overlay-properties'; readonly patch: Record<string, unknown> }
 ) & {
   /** Exact edit visible when a document mutation callback was created. */
   readonly expectedEdit?: FlowTextEditSession | null
@@ -261,6 +274,8 @@ function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
     case 'transform-overlay-frame':
     case 'rename-page':
     case 'set-paper-background':
+    case 'set-surface-background':
+    case 'import-surface-background-asset':
     case 'patch-block':
     case 'replace-media-asset':
     case 'import-replacement-media':
@@ -269,6 +284,7 @@ function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
     case 'convert-overlay-to-document':
     case 'patch-overlay-paper-space':
     case 'commit-overlay-formula':
+    case 'patch-overlay-properties':
       return true
     default:
       return false
@@ -1165,6 +1181,35 @@ export function createFlowAuthoringSlice(
             { expectedRevision: document.revision },
           ), { statusMessage: '已修改稿纸背景色' })
         }
+        case 'set-surface-background': {
+          return persistIntentResult(updateFlowSurfaceBackground(
+            document,
+            target.surfaceId,
+            intent.patch,
+            { expectedRevision: document.revision },
+          ), { statusMessage: '已修改稿纸背景' })
+        }
+        case 'import-surface-background-asset': {
+          const sidecar = flow.readAssetSidecar()
+          if (!sidecar) return rejectedFlowReceipt('缺少当前 Flow 资源边车')
+          const asset = createImageAssetImport({
+            name: intent.name,
+            mimeType: intent.mimeType || 'image/png',
+            bytes: intent.bytes,
+          })
+          return persistIntentResult(importFlowSurfaceBackgroundAsset(
+            document,
+            target.surfaceId,
+            asset.meta,
+            { expectedRevision: document.revision },
+          ), {
+            sidecar: freezeCourseAssetSidecar({
+              ...sidecar.files,
+              [asset.meta.id]: asset.bytes,
+            }),
+            statusMessage: '已上传背景图片',
+          })
+        }
         case 'patch-block': {
           const selection = flowBlockSelection(document, target)
           return persistIntentResult(updateFlowEditorBlock(
@@ -1175,6 +1220,16 @@ export function createFlowAuthoringSlice(
           ))
         }
         case 'replace-media-asset': {
+          const located = locateCourseLayer(document, target.itemId)
+          if (located) {
+            const selection = flowOverlaySelection(document, target)
+            return persistIntentResult(patchFlowOverlayProperties(
+              document,
+              selection,
+              { assetId: intent.assetId },
+              { expectedRevision: document.revision },
+            ))
+          }
           const selection = flowBlockSelection(document, target)
           return persistIntentResult(replaceFlowMediaBlockAsset(
             document,
@@ -1184,6 +1239,35 @@ export function createFlowAuthoringSlice(
           ))
         }
         case 'import-replacement-media': {
+          const located = locateCourseLayer(document, target.itemId)
+          if (located) {
+            const sidecar = flow.readAssetSidecar()
+            if (!sidecar) return rejectedFlowReceipt('缺少当前 Flow 资源边车')
+            const isImage = located.item.kind === 'native' && located.item.content.nativeType === 'image'
+            const asset = isImage
+              ? createImageAssetImport({
+                  name: intent.name,
+                  mimeType: intent.mimeType || 'image/png',
+                  bytes: intent.bytes,
+                })
+              : createMediaAssetImport(
+                  { name: intent.name, mimeType: intent.mimeType, bytes: intent.bytes },
+                  'video',
+                  { duration: 0 },
+                )
+            const selection = flowOverlaySelection(document, target)
+            return persistIntentResult(patchFlowOverlayProperties(
+              document,
+              selection,
+              { assetId: asset.meta.id },
+              { expectedRevision: document.revision },
+            ), {
+              sidecar: freezeCourseAssetSidecar({
+                ...sidecar.files,
+                [asset.meta.id]: asset.bytes,
+              }),
+            })
+          }
           const selection = flowBlockSelection(document, target)
           const found = findFlowBlockRecursive(
             flowSurfaceIn(document, target.surfaceId).blocks,
@@ -1286,6 +1370,14 @@ export function createFlowAuthoringSlice(
             flowOverlaySelection(document, target),
             intent.ast,
             intent.accessibleText,
+            { expectedRevision: document.revision },
+          ))
+        }
+        case 'patch-overlay-properties': {
+          return persistIntentResult(patchFlowOverlayProperties(
+            document,
+            flowOverlaySelection(document, target),
+            intent.patch,
             { expectedRevision: document.revision },
           ))
         }

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { SHAPE_TYPES, type FormulaAstNode } from './types'
+import { SHAPE_TYPES, type FormulaAstNode, type ShapeType } from './types'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const finiteNumber = z.number().finite()
@@ -286,9 +286,65 @@ const videoNodeCoreSchema = nativeRenderableBaseSchema.extend({
   }
 })
 
+const linePointSchema = z.tuple([unitInterval, unitInterval])
+
+export const nativeLineGeometrySchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('straight'),
+    start: linePointSchema,
+    end: linePointSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('elbow'),
+    start: linePointSchema,
+    end: linePointSchema,
+    axis: z.enum(['horizontal', 'vertical']),
+    position: unitInterval,
+  }).strict(),
+]).superRefine((geom, context) => {
+  if (geom.start[0] === geom.end[0] && geom.start[1] === geom.end[1]) {
+    context.addIssue({
+      code: 'custom',
+      path: ['end'],
+      message: '线段起点和终点不能相同',
+    })
+  }
+})
+
+function refineShapeLineGeometry(
+  shape: { shapeType: ShapeType; lineGeometry?: z.infer<typeof nativeLineGeometrySchema> },
+  context: z.RefinementCtx,
+): void {
+  if (shape.lineGeometry !== undefined) {
+    if (shape.shapeType !== 'line' && shape.shapeType !== 'elbow-arrow') {
+      context.addIssue({
+        code: 'custom',
+        path: ['lineGeometry'],
+        message: `只有 line 和 elbow-arrow 类型的形状支持 lineGeometry，${shape.shapeType} 不支持`,
+      })
+      return
+    }
+    if (shape.shapeType === 'line' && shape.lineGeometry.kind !== 'straight') {
+      context.addIssue({
+        code: 'custom',
+        path: ['lineGeometry', 'kind'],
+        message: 'line 类型的形状只支持 straight 类型的 lineGeometry',
+      })
+    }
+    if (shape.shapeType === 'elbow-arrow' && shape.lineGeometry.kind !== 'elbow') {
+      context.addIssue({
+        code: 'custom',
+        path: ['lineGeometry', 'kind'],
+        message: 'elbow-arrow 类型的形状只支持 elbow 类型的 lineGeometry',
+      })
+    }
+  }
+}
+
 const shapeNodeCoreSchema = nativeRenderableBaseSchema.extend({
   type: z.literal('shape'),
   shapeType: z.enum(SHAPE_TYPES),
+  lineGeometry: nativeLineGeometrySchema.optional(),
   style: z.object({
     fillColor: colorSchema,
     fillOpacity: unitInterval,
@@ -300,7 +356,7 @@ const shapeNodeCoreSchema = nativeRenderableBaseSchema.extend({
     startArrow: z.enum(['none', 'triangle', 'stealth', 'circle', 'diamond']),
     endArrow: z.enum(['none', 'triangle', 'stealth', 'circle', 'diamond']),
   }),
-})
+}).superRefine(refineShapeLineGeometry)
 
 const playbackFieldsSchema = z.object({
   playbackInitialVisibility: z.enum(['inherit', 'hidden']),
@@ -362,14 +418,6 @@ export const teacherControllerNodeSchema = nativeRenderableBaseSchema
     includeInStaticExports: z.boolean(),
   }))
 
-export const nativeRenderableNodeSchema = z.union([
-  textNodeSchema,
-  formulaNodeSchema,
-  imageNodeSchema,
-  videoNodeSchema,
-  shapeNodeSchema,
-  teacherControllerNodeSchema,
-])
 
 export const NATIVE_RENDERABLE_BASE_KEYS = [
   'id',
@@ -608,6 +656,7 @@ const videoNativeContentObjectSchema = z.object({
 
 const shapeNativeContentObjectSchema = z.object({
   shapeType: z.enum(SHAPE_TYPES),
+  lineGeometry: nativeLineGeometrySchema.optional(),
   style: z.object({
     fillColor: colorSchema,
     fillOpacity: unitInterval,
@@ -618,8 +667,8 @@ const shapeNativeContentObjectSchema = z.object({
     cornerRadius: finiteNumber.min(0).max(500),
     startArrow: z.enum(['none', 'triangle', 'stealth', 'circle', 'diamond']),
     endArrow: z.enum(['none', 'triangle', 'stealth', 'circle', 'diamond']),
-  }),
-})
+  }).strict(),
+}).strict().superRefine(refineShapeLineGeometry)
 
 const teacherControllerNativeContentObjectSchema = z.object({
   title: z.string().max(80),
@@ -658,6 +707,340 @@ export const teacherControllerNativeContentSchema = nativeContentSchema(
   teacherControllerNativeContentObjectSchema,
 )
 
+const nativeTableCellStyleSchema = z.object({
+  fillColor: colorSchema.optional(),
+  fillOpacity: unitInterval.optional(),
+  textColor: colorSchema.optional(),
+  fontFamily: z.string().trim().min(1).max(300).optional(),
+  fontSize: finiteNumber.min(6).max(144).optional(),
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  horizontalAlign: z.enum(['left', 'center', 'right']).optional(),
+  verticalAlign: z.enum(['top', 'middle', 'bottom']).optional(),
+}).strict()
+
+const nativeTableCellSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  columnId: z.string().trim().min(1).max(200),
+  text: z.string().max(20_000),
+  style: nativeTableCellStyleSchema.optional(),
+}).strict()
+
+const nativeTableColumnSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  width: finiteNumber.min(24).max(2000),
+}).strict()
+
+const nativeTableRowSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  height: finiteNumber.min(20).max(2000),
+  cells: z.array(nativeTableCellSchema).min(1).max(100),
+}).strict()
+
+const nativeTableStyleSchema = z.object({
+  fillColor: colorSchema,
+  fillOpacity: unitInterval,
+  borderColor: colorSchema,
+  borderOpacity: unitInterval,
+  borderWidth: finiteNumber.min(0).max(32),
+  lineStyle: z.enum(['solid', 'dashed', 'dotted']),
+  textColor: colorSchema,
+  fontFamily: z.string().trim().min(1).max(300),
+  fontSize: finiteNumber.min(6).max(144),
+  horizontalAlign: z.enum(['left', 'center', 'right']),
+  verticalAlign: z.enum(['top', 'middle', 'bottom']),
+  cellPadding: finiteNumber.min(0).max(64),
+}).strict()
+
+export const tableNativeContentObjectSchema = z.object({
+  columns: z.array(nativeTableColumnSchema).min(1).max(100),
+  rows: z.array(nativeTableRowSchema).min(1).max(1000),
+  headerRowCount: z.number().int().nonnegative(),
+  style: nativeTableStyleSchema,
+}).strict().superRefine((table, context) => {
+  if (table.headerRowCount > table.rows.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['headerRowCount'],
+      message: '表头行数不能超过总行数',
+    })
+  }
+  const columnIds = new Set<string>()
+  table.columns.forEach((col, index) => {
+    if (columnIds.has(col.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['columns', index, 'id'],
+        message: `列 ID 不能重复: ${col.id}`,
+      })
+    }
+    columnIds.add(col.id)
+  })
+  const rowIds = new Set<string>()
+  table.rows.forEach((row, index) => {
+    if (rowIds.has(row.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['rows', index, 'id'],
+        message: `行 ID 不能重复: ${row.id}`,
+      })
+    }
+    rowIds.add(row.id)
+  })
+  const cellIds = new Set<string>()
+  table.rows.forEach((row, rowIndex) => {
+    if (row.cells.length !== table.columns.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['rows', rowIndex, 'cells'],
+        message: `行单元格数量 (${row.cells.length}) 必须与列数 (${table.columns.length}) 一致`,
+      })
+    }
+    row.cells.forEach((cell, cellIndex) => {
+      if (cellIds.has(cell.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['rows', rowIndex, 'cells', cellIndex, 'id'],
+          message: `单元格 ID 在全表中不能重复: ${cell.id}`,
+        })
+      }
+      cellIds.add(cell.id)
+      const expectedColumn = table.columns[cellIndex]
+      if (expectedColumn && cell.columnId !== expectedColumn.id) {
+        context.addIssue({
+          code: 'custom',
+          path: ['rows', rowIndex, 'cells', cellIndex, 'columnId'],
+          message: `单元格所属列 ID '${cell.columnId}' 必须匹配列 ID '${expectedColumn.id}'`,
+        })
+      }
+    })
+  })
+})
+
+const nativeChartCategorySchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  label: z.string().max(500),
+}).strict()
+
+const nativeChartPointSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  categoryId: z.string().trim().min(1).max(200),
+  value: finiteNumber,
+}).strict()
+
+const nativeChartSeriesSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().max(500),
+  color: colorSchema,
+  points: z.array(nativeChartPointSchema).min(1).max(200),
+}).strict()
+
+const nativeChartCommonStyleSchema = z.object({
+  backgroundColor: colorSchema,
+  backgroundOpacity: unitInterval,
+  fontFamily: z.string().trim().min(1).max(300),
+  fontSize: finiteNumber.min(6).max(144),
+  textColor: colorSchema,
+  showLegend: z.boolean(),
+  legendPosition: z.enum(['top', 'right', 'bottom', 'left']),
+  showDataLabels: z.boolean(),
+}).strict()
+
+export const chartNativeContentObjectSchema = z.discriminatedUnion('chartType', [
+  z.object({
+    chartType: z.enum(['bar', 'line', 'area']),
+    title: z.string().max(1000),
+    categories: z.array(nativeChartCategorySchema).min(1).max(200),
+    series: z.array(nativeChartSeriesSchema).min(1).max(20),
+    style: nativeChartCommonStyleSchema.extend({
+      showCategoryAxis: z.boolean(),
+      showValueAxis: z.boolean(),
+      showGridLines: z.boolean(),
+      valueMin: finiteNumber.optional(),
+      valueMax: finiteNumber.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    chartType: z.literal('pie'),
+    title: z.string().max(1000),
+    categories: z.array(nativeChartCategorySchema).min(1).max(200),
+    series: z.tuple([nativeChartSeriesSchema]),
+    style: nativeChartCommonStyleSchema,
+  }).strict(),
+  z.object({
+    chartType: z.literal('donut'),
+    title: z.string().max(1000),
+    categories: z.array(nativeChartCategorySchema).min(1).max(200),
+    series: z.tuple([nativeChartSeriesSchema]),
+    style: nativeChartCommonStyleSchema.extend({
+      holeSize: finiteNumber.min(10).max(90),
+    }).strict(),
+  }).strict(),
+]).superRefine((chart, context) => {
+  const categoryIds = new Set<string>()
+  chart.categories.forEach((cat, index) => {
+    if (categoryIds.has(cat.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['categories', index, 'id'],
+        message: `分类 ID 不能重复: ${cat.id}`,
+      })
+    }
+    categoryIds.add(cat.id)
+  })
+  const seriesIds = new Set<string>()
+  chart.series.forEach((s, index) => {
+    if (seriesIds.has(s.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['series', index, 'id'],
+        message: `系列 ID 不能重复: ${s.id}`,
+      })
+    }
+    seriesIds.add(s.id)
+  })
+  const pointIds = new Set<string>()
+  chart.series.forEach((s, seriesIndex) => {
+    if (s.points.length !== chart.categories.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['series', seriesIndex, 'points'],
+        message: `系列 '${s.name}' 数据点数量 (${s.points.length}) 必须与分类数 (${chart.categories.length}) 一致`,
+      })
+    }
+    s.points.forEach((point, pointIndex) => {
+      if (pointIds.has(point.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['series', seriesIndex, 'points', pointIndex, 'id'],
+          message: `数据点 ID 在全图中不能重复: ${point.id}`,
+        })
+      }
+      pointIds.add(point.id)
+      const expectedCategory = chart.categories[pointIndex]
+      if (expectedCategory && point.categoryId !== expectedCategory.id) {
+        context.addIssue({
+          code: 'custom',
+          path: ['series', seriesIndex, 'points', pointIndex, 'categoryId'],
+          message: `数据点 categoryId '${point.categoryId}' 必须匹配分类 ID '${expectedCategory.id}'`,
+        })
+      }
+    })
+  })
+  if (chart.chartType === 'bar' || chart.chartType === 'line' || chart.chartType === 'area') {
+    if (
+      chart.style.valueMin !== undefined &&
+      chart.style.valueMax !== undefined &&
+      chart.style.valueMin >= chart.style.valueMax
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['style', 'valueMin'],
+        message: '数值轴最小值必须小于最大值',
+      })
+    }
+  }
+  if (chart.chartType === 'pie' || chart.chartType === 'donut') {
+    const singleSeries = chart.series[0]
+    if (singleSeries) {
+      let hasPositive = false
+      singleSeries.points.forEach((point, pointIndex) => {
+        if (point.value < 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['series', 0, 'points', pointIndex, 'value'],
+            message: '饼图/环形图数值必须非负',
+          })
+        }
+        if (point.value > 0) {
+          hasPositive = true
+        }
+      })
+      if (!hasPositive && singleSeries.points.length > 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['series', 0, 'points'],
+          message: '饼图/环形图至少需要一个大于 0 的数值',
+        })
+      }
+    }
+  }
+})
+
+export const tableNativeContentSchema = nativeContentSchema('table', tableNativeContentObjectSchema)
+export const chartNativeContentSchema = nativeContentSchema('chart', chartNativeContentObjectSchema)
+
+export const nativeInputStyleSchema = z.object({
+  fontFamily: z.string().trim().min(1).max(300),
+  fontSize: finiteNumber.min(6).max(144),
+  textColor: colorSchema,
+  fillColor: colorSchema,
+  fillOpacity: unitInterval,
+  borderColor: colorSchema,
+  borderOpacity: unitInterval,
+  borderWidth: finiteNumber.min(0).max(32),
+  cornerRadius: finiteNumber.min(0).max(200),
+  horizontalAlign: z.enum(['left', 'center', 'right']),
+  padding: finiteNumber.min(0).max(64),
+}).strict()
+
+export const nativeInputContentObjectSchema = z.object({
+  answerType: z.enum(['text', 'number']),
+  stateKey: z.string().trim().min(1).max(240),
+  validityKey: z.string().trim().min(1).max(240),
+  placeholder: z.string().max(500).optional(),
+  ruleFamilyRuleIds: z.array(z.string().trim().min(1).max(200)).max(17),
+  style: nativeInputStyleSchema,
+}).strict().superRefine((input, context) => {
+  if (input.stateKey === input.validityKey) {
+    context.addIssue({
+      code: 'custom',
+      path: ['validityKey'],
+      message: '有效性 key 不能与状态 key 相同',
+    })
+  }
+  const seenRuleIds = new Set<string>()
+  input.ruleFamilyRuleIds.forEach((id, index) => {
+    if (seenRuleIds.has(id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ruleFamilyRuleIds', index],
+        message: `规则族规则 ID 不能重复: ${id}`,
+      })
+    }
+    seenRuleIds.add(id)
+  })
+})
+
+export const inputNativeContentSchema = nativeContentSchema('input', nativeInputContentObjectSchema)
+
+export const tableNodeSchema = nativeRenderableBaseSchema
+  .extend({ type: z.literal('table') })
+  .and(playbackFieldsSchema)
+  .and(tableNativeContentObjectSchema)
+
+export const chartNodeSchema = nativeRenderableBaseSchema
+  .extend({ type: z.literal('chart') })
+  .and(playbackFieldsSchema)
+  .and(chartNativeContentObjectSchema)
+
+export const inputNodeSchema = nativeRenderableBaseSchema
+  .extend({ type: z.literal('input') })
+  .and(playbackFieldsSchema)
+  .and(nativeInputContentObjectSchema)
+
+export const nativeRenderableNodeSchema = z.union([
+  textNodeSchema,
+  formulaNodeSchema,
+  imageNodeSchema,
+  videoNodeSchema,
+  shapeNodeSchema,
+  teacherControllerNodeSchema,
+  tableNodeSchema,
+  chartNodeSchema,
+  inputNodeSchema,
+])
+
 export const nativeContentSchemaByType = {
   text: textNativeContentSchema,
   formula: formulaNativeContentSchema,
@@ -665,4 +1048,7 @@ export const nativeContentSchemaByType = {
   video: videoNativeContentSchema,
   shape: shapeNativeContentSchema,
   'teacher-controller': teacherControllerNativeContentSchema,
+  table: tableNativeContentSchema,
+  chart: chartNativeContentSchema,
+  input: inputNativeContentSchema,
 } as const

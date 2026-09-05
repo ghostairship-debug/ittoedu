@@ -1,4 +1,5 @@
 import type { ArrowHead, ShapeNode } from './contracts/native-v1/types'
+import { resolveNativeLinePoints } from './nativeLineGeometry'
 
 interface Point { x: number; y: number }
 
@@ -156,9 +157,7 @@ export function renderShapeCanvas(
     case 'line':
     case 'elbow-arrow': {
       if (style.borderWidth <= 0 || style.borderOpacity <= 0) break
-      const points = node.shapeType === 'line'
-        ? [{ x: 0, y: height / 2 }, { x: width, y: height / 2 }]
-        : [{ x: 0, y: height * 0.2 }, { x: width * 0.55, y: height * 0.2 }, { x: width * 0.55, y: height * 0.8 }, { x: width, y: height * 0.8 }]
+      const points = resolveNativeLinePoints(node.lineGeometry, width, height, node.shapeType)
       context.save(); context.globalAlpha *= style.borderOpacity; context.beginPath(); context.moveTo(points[0].x, points[0].y)
       points.slice(1).forEach((point) => context.lineTo(point.x, point.y)); context.stroke(); context.fillStyle = style.borderColor
       arrowHead(context, points[0], points[1], style.startArrow, Math.max(12, style.borderWidth * 4))

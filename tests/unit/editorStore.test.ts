@@ -1008,6 +1008,8 @@ describe('scene operations', () => {
 
     store.updateScene(secondId, {
       name: '  练习场景  ',
+    })
+    store.updateSceneBackground(secondId, {
       backgroundColor: '#f3f4f6',
     })
     expect(
@@ -2462,7 +2464,7 @@ describe('history semantics', () => {
     const store = useEditorStore.getState()
     const sceneId = selectSlideSceneList(store)[0]!.id
     for (let index = 0; index < 110; index += 1) {
-      store.updateScene(sceneId, {
+      store.updateSceneBackground(sceneId, {
         backgroundColor: `#${index.toString(16).padStart(6, '0')}`,
       })
     }

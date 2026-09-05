@@ -63,6 +63,11 @@ const triggerSchemas = [
   }).strict(),
 ] as const
 
+export const inputSubmitTriggerSchema = z.object({
+  type: z.literal('input.submit'),
+  nodeId: stableIdSchema,
+}).strict()
+
 export const interactionTriggerSchema = z.discriminatedUnion('type', [
   ...triggerSchemas,
   z.object({
@@ -77,6 +82,7 @@ export const interactionTriggerSchema = z.discriminatedUnion('type', [
     type: z.literal('presenter.command'),
     command: z.enum(['next', 'previous']),
   }).strict(),
+  inputSubmitTriggerSchema,
 ])
 
 const presentationInConditionSchema = z.object({

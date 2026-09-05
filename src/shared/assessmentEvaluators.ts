@@ -45,12 +45,24 @@ export interface AssessmentEvaluationResult {
   status: 'pass' | 'fail'
 }
 
-function normalizeShortAnswer(value: string): string {
+export const NUMBER_INPUT_REGEX =
+  /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+
+export function normalizeShortAnswer(value: string): string {
   return value
     .normalize('NFKC')
     .trim()
     .replace(/\s+/gu, ' ')
     .toLocaleLowerCase('und')
+}
+
+export function normalizeNumberAnswer(value: string): number | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.normalize('NFKC').trim()
+  if (!NUMBER_INPUT_REGEX.test(normalized)) return null
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
 }
 
 /**

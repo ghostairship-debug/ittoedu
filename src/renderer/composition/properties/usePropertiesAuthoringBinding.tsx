@@ -1,5 +1,6 @@
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
 import type { TextNode } from '../../../shared/contracts/native-v1'
+import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import { rotatedRectangleAabb } from '../../../shared/geometry'
 import { renderTextNodeCanvas } from '../../../shared/textLayout'
 import { remapTextRuns } from '../../../shared/textRuns'
@@ -24,7 +25,30 @@ import {
   setSlideSimpleEntranceAnimation,
   type SlideMultiLayerPropertiesIntent,
 } from '../../course/v9SlideContentCommands'
-import type { SlideAuthoringTarget } from '../../course/slideEditorCommands'
+import type {
+  SlideAuthoringTarget,
+  SlideCommandResult,
+} from '../../course/slideEditorCommands'
+import type { SlideAuthoringSession } from '../../course/slideAuthoringBackend'
+import {
+  deleteSlideTableColumn,
+  deleteSlideTableRow,
+  insertSlideTableColumn,
+  insertSlideTableRow,
+  patchSlideTableCellStyle,
+  patchSlideTableCellText,
+  patchSlideTableColumnWidth,
+  patchSlideTableRowHeight,
+  patchSlideTableStyle,
+  reorderSlideTableColumns,
+  reorderSlideTableRows,
+} from '../../course/v9TableCommands'
+import {
+  patchSlideChartStyle,
+  patchSlideChartTitle,
+  patchSlideChartType,
+  replaceSlideChartTableData,
+} from '../../course/v9ChartCommands'
 import { interactionLayerTargetFromItem } from '../../course/slideInteractionView'
 import {
   commitTeacherControllerPropertiesAtTarget,
@@ -295,7 +319,14 @@ export function usePropertiesAuthoringBinding({
     (state) => state.clearNodePresentationOverride,
   )
   const updateScene = useEditorStore((state) => state.updateScene)
+  const updateSceneBackground = useEditorStore((state) => state.updateSceneBackground)
+  const importSceneBackgroundAsset = useEditorStore((state) => state.importSceneBackgroundAsset)
+  const updateSlideSurfaceBackground = useEditorStore((state) => state.updateSlideSurfaceBackground)
+  const importSlideSurfaceBackgroundAsset = useEditorStore(
+    (state) => state.importSlideSurfaceBackgroundAsset,
+  )
   const updatePresentationState = useEditorStore((state) => state.updatePresentationState)
+  const updateCourseBackground = useEditorStore((state) => state.updateCourseBackground)
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
   const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
@@ -350,11 +381,14 @@ export function usePropertiesAuthoringBinding({
     assets: read.flow?.assets ?? {},
     textEdit: read.flow?.textEdit ?? null,
     authoringToken: read.authoringToken,
+    course: read.course,
     runIntent: runFlowAuthoringIntent,
     reportError,
   })
   const spatialOwner = buildSpatialPropertiesOwner({
     view: read.spatial?.view ?? null,
+    course: read.course,
+    assets: read.assets,
     scope: read.spatial?.scope ?? 'world',
     selectionIds: read.spatial?.selectionIds ?? [],
     showCameraFrames: read.spatial?.showCameraFrames ?? false,
@@ -847,6 +881,111 @@ export function usePropertiesAuthoringBinding({
         : dummyTextCommands()
     : dummyTextCommands()
 
+  const slideTableCommands = (): SlideNativePropertiesContext['commands']['table'] => {
+    if (node?.type !== 'table' || !slideTarget || read.flow || read.spatial) return null
+    const tableNode = node
+    const target = slideTarget
+    const options = { expectedRevision: target.revision }
+    const run = (
+      execute: (session: SlideAuthoringSession) => SlideCommandResult,
+    ) => {
+      if (!requireLiveOwner()) return
+      const result = applySlideCandidateCommand((session) => execute(session))
+      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
+    }
+    const movedIds = (ids: readonly string[], id: string, direction: -1 | 1) => {
+      const index = ids.indexOf(id)
+      const nextIndex = index + direction
+      if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return null
+      const next = [...ids]
+      next.splice(index, 1)
+      next.splice(nextIndex, 0, id)
+      return next
+    }
+    return {
+      commitCellText: (cellId, text) => run((session) => (
+        patchSlideTableCellText(session, { layerItemId: target.layerItemId, cellId, text }, options)
+      )),
+      patchStyle: (stylePatch) => run((session) => (
+        patchSlideTableStyle(session, { layerItemId: target.layerItemId, stylePatch }, options)
+      )),
+      patchCellStyle: (cellId, stylePatch) => run((session) => (
+        patchSlideTableCellStyle(session, { layerItemId: target.layerItemId, cellId, stylePatch }, options)
+      )),
+      setRowHeight: (rowId, height) => run((session) => (
+        patchSlideTableRowHeight(session, { layerItemId: target.layerItemId, rowId, height }, options)
+      )),
+      setColumnWidth: (columnId, width) => run((session) => (
+        patchSlideTableColumnWidth(session, { layerItemId: target.layerItemId, columnId, width }, options)
+      )),
+      insertRow: (referenceRowId, position) => run((session) => (
+        insertSlideTableRow(session, { layerItemId: target.layerItemId, referenceRowId, position }, options)
+      )),
+      deleteRow: (rowId) => run((session) => (
+        deleteSlideTableRow(session, { layerItemId: target.layerItemId, rowId }, options)
+      )),
+      moveRow: (rowId, direction) => {
+        const orderedRowIds = movedIds(tableNode.rows.map((row) => row.id), rowId, direction)
+        if (!orderedRowIds) return
+        run((session) => (
+          reorderSlideTableRows(session, { layerItemId: target.layerItemId, orderedRowIds }, options)
+        ))
+      },
+      insertColumn: (referenceColumnId, position) => run((session) => (
+        insertSlideTableColumn(session, { layerItemId: target.layerItemId, referenceColumnId, position }, options)
+      )),
+      deleteColumn: (columnId) => run((session) => (
+        deleteSlideTableColumn(session, { layerItemId: target.layerItemId, columnId }, options)
+      )),
+      moveColumn: (columnId, direction) => {
+        const orderedColumnIds = movedIds(tableNode.columns.map((column) => column.id), columnId, direction)
+        if (!orderedColumnIds) return
+        run((session) => (
+          reorderSlideTableColumns(session, { layerItemId: target.layerItemId, orderedColumnIds }, options)
+        ))
+      },
+    }
+  }
+
+  const slideChartCommands = (): SlideNativePropertiesContext['commands']['chart'] => {
+    if (node?.type !== 'chart' || !slideTarget || read.flow || read.spatial) return null
+    const target = slideTarget
+    const options = { expectedRevision: target.revision }
+    const run = (
+      execute: (session: SlideAuthoringSession) => SlideCommandResult,
+    ) => {
+      if (!requireLiveOwner()) return
+      const result = applySlideCandidateCommand((session) => execute(session))
+      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
+    }
+    return {
+      patchTitle: (title) => run((session) => (
+        patchSlideChartTitle(session, { layerItemId: target.layerItemId, title }, options)
+      )),
+      patchType: (newType, retainedSeriesId) => run((session) => (
+        patchSlideChartType(
+          session,
+          { layerItemId: target.layerItemId, newChartType: newType, retainedSeriesId },
+          options,
+        )
+      )),
+      patchStyle: (stylePatch) => run((session) => (
+        patchSlideChartStyle(session, { layerItemId: target.layerItemId, stylePatch }, options)
+      )),
+      commitTableData: (candidateData) => {
+        if (!requireLiveOwner()) return COURSE_AUTHORING_STALE_SESSION_REASON
+        const result = applySlideCandidateCommand((session) => (
+          replaceSlideChartTableData(
+            session,
+            { layerItemId: target.layerItemId, candidateData },
+            options,
+          )
+        ))
+        return result.ok ? null : (result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
+      },
+    }
+  }
+
   const sharedCommands = (): SlideNativePropertiesContext['commands'] => ({
     patch: patchSelectedNode,
     replaceImage: () => {
@@ -866,6 +1005,8 @@ export function usePropertiesAuthoringBinding({
       setActiveTab('automation')
     },
     text: textCommands,
+    table: slideTableCommands(),
+    chart: slideChartCommands(),
   })
 
   const sceneInteraction = (): InteractionEditorProps | null => {
@@ -1035,6 +1176,12 @@ export function usePropertiesAuthoringBinding({
       playback: read.globalSummary.playback,
       hasTeacherController: read.globalSummary.hasTeacherController,
       designTokens: read.globalSummary.designTokens,
+      background: {
+        color: read.course.backgroundColor,
+        assetId: read.course.backgroundAssetId,
+        effective: resolveEffectiveBackground({ owner: 'course', course: read.course }),
+        assets: read.assets,
+      },
     },
     layer: null,
     selected: null,
@@ -1046,6 +1193,9 @@ export function usePropertiesAuthoringBinding({
       patch: () => undefined,
       replaceImage: onReplaceImage,
       clearPresentationOverride: () => undefined,
+      updateCourseBackground: (patch) => {
+        if (requireLiveOwner()) updateCourseBackground(patch)
+      },
       ...projectCommands,
       openProfessionalAutomation: () => {
         if (ownerIsLive()) setActiveTab('automation')
@@ -1062,17 +1212,53 @@ export function usePropertiesAuthoringBinding({
     if (read.identity.owner === 'surface') return { kind: 'empty-surface' }
     const scene = read.scene
     const sceneId = scene?.id ?? null
-    const stateId = read.activeState?.id ?? null
+    const activeState = read.activeState
+    const stateId = activeState?.id ?? null
+    const surfaceDoc = read.slideSurface
+    const surfaceId = surfaceDoc?.id ?? null
+    const surfaceEffective = surfaceDoc
+      ? resolveEffectiveBackground({ owner: 'slide-surface', course: read.course, surface: surfaceDoc })
+      : null
+    const sceneEffective = scene && surfaceDoc
+      ? resolveEffectiveBackground({ owner: 'slide-scene', course: read.course, surface: surfaceDoc, scene })
+      : null
+    const stateEffective = scene && surfaceDoc && activeState
+      ? resolveEffectiveBackground({
+          owner: 'slide-state', course: read.course, surface: surfaceDoc, scene, state: activeState,
+        })
+      : null
     return {
       kind: 'empty-scene',
       draftBindingKey: propertyDraftBindingKey(read, sceneId ?? undefined),
-      scene: scene
+      assets: read.assets,
+      slideSurface: surfaceDoc && surfaceEffective
+        ? {
+            id: surfaceDoc.id,
+            backgroundMode: surfaceDoc.backgroundMode ?? 'inherit',
+            backgroundColor: surfaceDoc.backgroundColor,
+            backgroundAssetId: surfaceDoc.backgroundAssetId,
+            effective: surfaceEffective,
+          }
+        : null,
+      scene: scene && sceneEffective
         ? {
             id: scene.id,
             name: scene.name,
+            backgroundMode: scene.backgroundMode ?? 'own',
             backgroundColor: scene.backgroundColor,
+            backgroundAssetId: scene.backgroundAssetId,
+            effective: sceneEffective,
             interactionCount: scene.interactions.length,
-            stateName: read.activeState?.name ?? null,
+            stateName: activeState?.name ?? null,
+          }
+        : null,
+      state: activeState && stateEffective
+        ? {
+            id: activeState.id,
+            name: activeState.name,
+            backgroundColor: activeState.backgroundColor,
+            backgroundAssetId: activeState.backgroundAssetId,
+            effective: stateEffective,
           }
         : null,
       editorMode: read.editorMode,
@@ -1081,10 +1267,33 @@ export function usePropertiesAuthoringBinding({
         updateName: (name) => {
           if (sceneId && requireLiveOwner()) updateScene(sceneId, { name })
         },
-        updateBackground: (backgroundColor) => {
-          if (!sceneId || !requireLiveOwner()) return
-          if (stateId) updatePresentationState(stateId, { backgroundColor })
-          else updateScene(sceneId, { backgroundColor })
+        updateSlideSurfaceBackground: (patch) => {
+          if (surfaceId && requireLiveOwner()) updateSlideSurfaceBackground(surfaceId, patch)
+        },
+        importSlideSurfaceBackgroundAsset: (file) => {
+          if (surfaceId && requireLiveOwner()) importSlideSurfaceBackgroundAsset(surfaceId, file)
+        },
+        updateSceneBackground: (patch) => {
+          if (sceneId && requireLiveOwner()) updateSceneBackground(sceneId, patch)
+        },
+        importSceneBackgroundAsset: (file) => {
+          if (sceneId && requireLiveOwner()) importSceneBackgroundAsset(sceneId, file)
+        },
+        updateStateBackground: (patch) => {
+          if (stateId && requireLiveOwner()) updatePresentationState(stateId, patch)
+        },
+        // Both only ever run in the "currently overridden" direction: the
+        // shared control shows this action solely when an override exists.
+        // Passing the scene's own raw value triggers updatePresentationState's
+        // existing convergence-to-undefined rule (deleting the override), the
+        // one place Named state expresses "inherit" — no state mode added.
+        inheritStateColor: () => {
+          if (!stateId || !scene || !requireLiveOwner()) return
+          updatePresentationState(stateId, { backgroundColor: scene.backgroundColor })
+        },
+        inheritStateAsset: () => {
+          if (!stateId || !scene || !requireLiveOwner()) return
+          updatePresentationState(stateId, { backgroundAssetId: scene.backgroundAssetId })
         },
         openAutomation: () => {
           if (ownerIsLive()) setActiveTab('automation')
@@ -1149,6 +1358,9 @@ export function usePropertiesAuthoringBinding({
       commands: {
         ...sharedCommands(),
         ...projectCommands,
+        // Course background editing lives in the empty (nothing-selected)
+        // global view only; a selected node has no use for it.
+        updateCourseBackground: () => undefined,
       },
       onFeedback: feedback,
     }

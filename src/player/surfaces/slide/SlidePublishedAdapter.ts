@@ -7,7 +7,6 @@ import type {
 } from '../../../shared/courseProjectTypes'
 import {
   isNativeRenderInput,
-  type ReadonlyNativeRenderInput,
   type TeacherControllerAction,
   type TeacherControllerNode,
 } from '../../../shared/contracts/native-v1/types'
@@ -65,6 +64,7 @@ import {
   nativeMediaAssetIds,
   readonlyNativeRenderInputFromPublishedItem,
   paintPublishedNativeRenderInput,
+  type PublishedNativeRenderInput,
   type PublishedTeacherControllerInput,
 } from './publishedNativeRendering'
 import {
@@ -212,7 +212,7 @@ export interface PublishedSlideNativeRenderLayer {
   readonly applicable: boolean
   readonly mounted: boolean
   readonly item: PublishedNativeLayerItem
-  readonly renderInput: ReadonlyNativeRenderInput
+  readonly renderInput: PublishedNativeRenderInput
 }
 
 export interface PublishedSlideComponentMountDescriptor {
@@ -453,7 +453,7 @@ function appendLayerNode(
       item: Extract<PublishedLayerItem, { kind: 'component' }>,
     ) => void
     mountRuntime?: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => void
-    renderInput?: ReadonlyNativeRenderInput
+    renderInput?: PublishedNativeRenderInput
   },
 ): HTMLElement | null {
   if (!item.visible && !options?.includeInvisible) return null
@@ -1387,7 +1387,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   }
 
   #validateAuthoringNodeAssets(
-    input: ReadonlyNativeRenderInput,
+    input: PublishedNativeRenderInput,
   ): Extract<PublishedSlideAuthoringPatchResult, { ok: false }> | null {
     const missing = nativeMediaAssetIds(input).find((assetId) => !this.#resolveAsset(assetId))
     return missing
@@ -1710,7 +1710,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     })
   }
 
-  #mountTeacherController(wrap: HTMLElement, input: ReadonlyNativeRenderInput): void {
+  #mountTeacherController(wrap: HTMLElement, input: PublishedNativeRenderInput): void {
     if (input.type !== 'teacher-controller' || this.#payload.playback.controls === 'none') return
     const root = this.#root
     if (!root) return

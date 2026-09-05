@@ -269,4 +269,251 @@ describe('Published Slide authoring patch', () => {
     if (!applied.ok || applied.item.kind !== 'native') return
     expect(applied.item.content.data).toMatchObject({ text: '已写入' })
   })
+
+  it('merges and applies patches for Table, Chart, and Input', () => {
+    // 1. Table
+    const tableItem: PublishedNativeLayerItem = {
+      kind: 'native',
+      layerItemId: 'table-1',
+      frame: { mode: 'absolute', x: 20, y: 20, width: 300, height: 180 },
+      order: 1,
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      content: {
+        nativeType: 'table',
+        data: {
+          columns: [{ id: 'c1', width: 100 }, { id: 'c2', width: 100 }],
+          rows: [
+            { id: 'r1', height: 40, cells: [{ id: 'cell-1', columnId: 'c1', text: '原值' }, { id: 'cell-2', columnId: 'c2', text: 'B' }] },
+          ],
+          headerRowCount: 1,
+          style: {
+            fillColor: '#ffffff',
+            fillOpacity: 1,
+            borderColor: '#e5e7eb',
+            borderOpacity: 1,
+            borderWidth: 1,
+            lineStyle: 'solid',
+            textColor: '#111827',
+            fontFamily: 'sans-serif',
+            fontSize: 14,
+            horizontalAlign: 'left',
+            verticalAlign: 'middle',
+            cellPadding: 8,
+          },
+        },
+      },
+    }
+
+    const tableInput: NativeRenderInput = {
+      id: 'table-1',
+      name: 'table-1',
+      type: 'table',
+      x: 30,
+      y: 35,
+      width: 320,
+      height: 190,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: 'inherit',
+      columns: [{ id: 'c1', width: 100 }, { id: 'c2', width: 100 }],
+      rows: [
+        { id: 'r1', height: 40, cells: [{ id: 'cell-1', columnId: 'c1', text: '已更新' }, { id: 'cell-2', columnId: 'c2', text: 'B' }] },
+      ],
+      headerRowCount: 1,
+      style: {
+        fillColor: '#ffffff',
+        fillOpacity: 1,
+        borderColor: '#e5e7eb',
+        borderOpacity: 1,
+        borderWidth: 1,
+        lineStyle: 'solid',
+        textColor: '#111827',
+        fontFamily: 'sans-serif',
+        fontSize: 14,
+        horizontalAlign: 'left',
+        verticalAlign: 'middle',
+        cellPadding: 8,
+      },
+    }
+
+    const tableMerged = applyPublishedSlideAuthoringItemPatch({
+      current: tableItem,
+      next: tableInput,
+      captured: identity('table-1'),
+      currentIdentity: identity('table-1'),
+    })
+    expect(tableMerged.ok).toBe(true)
+    if (tableMerged.ok && tableMerged.item.kind === 'native') {
+      expect(tableMerged.item.frame).toMatchObject({ x: 30, y: 35, width: 320, height: 190 })
+      expect(tableMerged.item.content.nativeType).toBe('table')
+      expect((tableMerged.item.content.data as any).rows[0].cells[0].text).toBe('已更新')
+    }
+
+    // 2. Chart
+    const chartItem: PublishedNativeLayerItem = {
+      kind: 'native',
+      layerItemId: 'chart-1',
+      frame: { mode: 'absolute', x: 20, y: 20, width: 400, height: 260 },
+      order: 2,
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      content: {
+        nativeType: 'chart',
+        data: {
+          chartType: 'bar',
+          title: '原标题',
+          categories: [{ id: 'cat-1', label: '一' }],
+          series: [{ id: 's-1', name: '系列1', color: '#3b82f6', points: [{ id: 'p-1', categoryId: 'cat-1', value: 10 }] }],
+          style: {
+            backgroundColor: '#ffffff',
+            backgroundOpacity: 1,
+            fontFamily: 'sans-serif',
+            fontSize: 12,
+            textColor: '#111827',
+            showLegend: true,
+            legendPosition: 'top',
+            showDataLabels: false,
+            showCategoryAxis: true,
+            showValueAxis: true,
+            showGridLines: true,
+          },
+        },
+      },
+    }
+
+    const chartInput: NativeRenderInput = {
+      id: 'chart-1',
+      name: 'chart-1',
+      type: 'chart',
+      x: 25,
+      y: 25,
+      width: 420,
+      height: 280,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: 'inherit',
+      chartType: 'bar',
+      title: '新图表标题',
+      categories: [{ id: 'cat-1', label: '一' }],
+      series: [{ id: 's-1', name: '系列1', color: '#3b82f6', points: [{ id: 'p-1', categoryId: 'cat-1', value: 20 }] }],
+      style: {
+        backgroundColor: '#ffffff',
+        backgroundOpacity: 1,
+        fontFamily: 'sans-serif',
+        fontSize: 12,
+        textColor: '#111827',
+        showLegend: true,
+        legendPosition: 'top',
+        showDataLabels: false,
+        showCategoryAxis: true,
+        showValueAxis: true,
+        showGridLines: true,
+      },
+    }
+
+    const chartMerged = applyPublishedSlideAuthoringItemPatch({
+      current: chartItem,
+      next: chartInput,
+      captured: identity('chart-1'),
+      currentIdentity: identity('chart-1'),
+    })
+    expect(chartMerged.ok).toBe(true)
+    if (chartMerged.ok && chartMerged.item.kind === 'native') {
+      expect(chartMerged.item.frame).toMatchObject({ x: 25, y: 25, width: 420, height: 280 })
+      expect((chartMerged.item.content.data as any).title).toBe('新图表标题')
+    }
+
+    // 3. Input
+    const inputItem: PublishedNativeLayerItem = {
+      kind: 'native',
+      layerItemId: 'input-1',
+      frame: { mode: 'absolute', x: 40, y: 40, width: 240, height: 48 },
+      order: 3,
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      content: {
+        nativeType: 'input',
+        data: {
+          answerType: 'text',
+          stateKey: 'userAnswer',
+          validityKey: 'userAnswerValid',
+          placeholder: '请输入',
+          ruleFamilyRuleIds: ['rule-1'],
+          style: {
+            fontFamily: 'sans-serif',
+            fontSize: 16,
+            textColor: '#111827',
+            fillColor: '#ffffff',
+            fillOpacity: 1,
+            borderColor: '#d1d5db',
+            borderOpacity: 1,
+            borderWidth: 1,
+            cornerRadius: 6,
+            horizontalAlign: 'left',
+            padding: 8,
+          },
+        },
+      },
+    }
+
+    const inputInput: NativeRenderInput = {
+      id: 'input-1',
+      name: 'input-1',
+      type: 'input',
+      x: 50,
+      y: 50,
+      width: 260,
+      height: 52,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      playbackInitialVisibility: 'inherit',
+      answerType: 'number',
+      stateKey: 'userAnswer',
+      validityKey: 'userAnswerValid',
+      placeholder: '请输入数字',
+      ruleFamilyRuleIds: ['rule-1'],
+      style: {
+        fontFamily: 'sans-serif',
+        fontSize: 16,
+        textColor: '#111827',
+        fillColor: '#ffffff',
+        fillOpacity: 1,
+        borderColor: '#d1d5db',
+        borderOpacity: 1,
+        borderWidth: 1,
+        cornerRadius: 6,
+        horizontalAlign: 'left',
+        padding: 8,
+      },
+    }
+
+    const inputMerged = applyPublishedSlideAuthoringItemPatch({
+      current: inputItem,
+      next: inputInput,
+      captured: identity('input-1'),
+      currentIdentity: identity('input-1'),
+    })
+    expect(inputMerged.ok).toBe(true)
+    if (inputMerged.ok && inputMerged.item.kind === 'native') {
+      expect(inputMerged.item.frame).toMatchObject({ x: 50, y: 50, width: 260, height: 52 })
+      expect((inputMerged.item.content.data as any).answerType).toBe('number')
+      expect((inputMerged.item.content.data as any).placeholder).toBe('请输入数字')
+    }
+  })
 })

@@ -60,6 +60,9 @@ export const NATIVE_NODE_TYPES = [
   'video',
   'shape',
   'teacher-controller',
+  'table',
+  'chart',
+  'input',
 ] as const
 
 export type NativeNodeType = (typeof NATIVE_NODE_TYPES)[number]
@@ -243,9 +246,14 @@ export interface VideoNode extends NativeRenderableBase {
   backgroundAudioMode: 'none' | 'duck' | 'pause' | 'stop'
 }
 
+export type NativeLineGeometry =
+  | { kind: 'straight'; start: [number, number]; end: [number, number] }
+  | { kind: 'elbow'; start: [number, number]; end: [number, number]; axis: 'horizontal' | 'vertical'; position: number }
+
 export interface ShapeNode extends NativeRenderableBase {
   type: 'shape'
   shapeType: ShapeType
+  lineGeometry?: NativeLineGeometry
   style: {
     fillColor: string
     fillOpacity: number
@@ -305,6 +313,142 @@ export type NativeVideoContent = Omit<VideoNode, keyof NativeRenderableBase>
 export type NativeShapeContent = Omit<ShapeNode, keyof NativeRenderableBase>
 export type NativeTeacherControllerContent = Omit<TeacherControllerNode, keyof NativeRenderableBase>
 
+export type NativeTableHorizontalAlign = 'left' | 'center' | 'right'
+export type NativeTableVerticalAlign = 'top' | 'middle' | 'bottom'
+
+export interface NativeTableCellStyle {
+  fillColor?: string
+  fillOpacity?: number
+  textColor?: string
+  fontFamily?: string
+  fontSize?: number
+  bold?: boolean
+  italic?: boolean
+  horizontalAlign?: NativeTableHorizontalAlign
+  verticalAlign?: NativeTableVerticalAlign
+}
+
+export type NativeTableStyle = {
+  fillColor: string
+  fillOpacity: number
+  borderColor: string
+  borderOpacity: number
+  borderWidth: number
+  lineStyle: 'solid' | 'dashed' | 'dotted'
+  textColor: string
+  fontFamily: string
+  fontSize: number
+  horizontalAlign: NativeTableHorizontalAlign
+  verticalAlign: NativeTableVerticalAlign
+  cellPadding: number
+}
+
+export interface NativeTableColumn {
+  id: string
+  width: number
+}
+
+export interface NativeTableCell {
+  id: string
+  columnId: string
+  text: string
+  style?: NativeTableCellStyle
+}
+
+export interface NativeTableRow {
+  id: string
+  height: number
+  cells: NativeTableCell[]
+}
+
+export interface NativeTableContent {
+  columns: NativeTableColumn[]
+  rows: NativeTableRow[]
+  headerRowCount: number
+  style: NativeTableStyle
+}
+
+export interface NativeChartCategory {
+  id: string
+  label: string
+}
+
+export interface NativeChartPoint {
+  id: string
+  categoryId: string
+  value: number
+}
+
+export interface NativeChartSeries {
+  id: string
+  name: string
+  color: string
+  points: NativeChartPoint[]
+}
+
+export type NativeChartCommonStyle = {
+  backgroundColor: string
+  backgroundOpacity: number
+  fontFamily: string
+  fontSize: number
+  textColor: string
+  showLegend: boolean
+  legendPosition: 'top' | 'right' | 'bottom' | 'left'
+  showDataLabels: boolean
+}
+
+export type NativeChartContent =
+  | {
+      chartType: 'bar' | 'line' | 'area'
+      title: string
+      categories: NativeChartCategory[]
+      series: NativeChartSeries[]
+      style: NativeChartCommonStyle & {
+        showCategoryAxis: boolean
+        showValueAxis: boolean
+        showGridLines: boolean
+        valueMin?: number
+        valueMax?: number
+      }
+    }
+  | {
+      chartType: 'pie'
+      title: string
+      categories: NativeChartCategory[]
+      series: [NativeChartSeries]
+      style: NativeChartCommonStyle
+    }
+  | {
+      chartType: 'donut'
+      title: string
+      categories: NativeChartCategory[]
+      series: [NativeChartSeries]
+      style: NativeChartCommonStyle & { holeSize: number }
+    }
+
+export type NativeInputStyle = {
+  fontFamily: string
+  fontSize: number
+  textColor: string
+  fillColor: string
+  fillOpacity: number
+  borderColor: string
+  borderOpacity: number
+  borderWidth: number
+  cornerRadius: number
+  horizontalAlign: 'left' | 'center' | 'right'
+  padding: number
+}
+
+export interface NativeInputContent {
+  answerType: 'text' | 'number'
+  stateKey: string
+  validityKey: string
+  placeholder?: string
+  ruleFamilyRuleIds: string[]
+  style: NativeInputStyle
+}
+
 export type NativeElementData =
   | NativeTextContent
   | NativeFormulaContent
@@ -312,6 +456,19 @@ export type NativeElementData =
   | NativeVideoContent
   | NativeShapeContent
   | NativeTeacherControllerContent
+  | NativeTableContent
+  | NativeChartContent
+  | NativeInputContent
+
+export interface TableNode extends NativeRenderableBase, NativeTableContent {
+  type: 'table'
+}
+
+export type ChartNode = NativeRenderableBase & { type: 'chart' } & NativeChartContent
+
+export interface InputNode extends NativeRenderableBase, NativeInputContent {
+  type: 'input'
+}
 
 export type NativeRenderableNode =
   | TextNode
@@ -320,6 +477,9 @@ export type NativeRenderableNode =
   | VideoNode
   | ShapeNode
   | TeacherControllerNode
+  | TableNode
+  | ChartNode
+  | InputNode
 
 /**
  * Mutable Native runtime shape retained for the Legacy renderer until its

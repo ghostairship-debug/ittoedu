@@ -23,14 +23,40 @@ const TASK_SHORT_ID_PATTERN = /^r(?:1[1-9]|20)-\d{3}$/
 const TASK_REFERENCE_PATTERN = /\br(?:1[1-9]|20)-\d{3}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\b/g
 export const ROADMAP_WRITE_LOCKS = [
   'none',
-  'editor-store-history',
-  'app-save-recovery',
-  'workspace-properties',
-  'published-producer',
   'contracts-schema',
-  'legacy-inventory',
-  'main-preload',
   'generated-index',
+  'legacy-inventory',
+  'store-kernel',
+  'store-slide',
+  'store-flow',
+  'store-spatial',
+  'store-course',
+  'props-shared',
+  'props-slide',
+  'props-flow',
+  'props-spatial',
+  'props-global',
+  'workspace-shell',
+  'authoring-slide',
+  'authoring-flow',
+  'authoring-spatial',
+  'authoring-interaction',
+  'authoring-recipe',
+  'published-slide',
+  'published-flow',
+  'published-spatial',
+  'published-interaction',
+  'published-dynamic',
+  'published-producer',
+  'export-pptx',
+  'export-docx-print',
+  'app-save-recovery',
+  'diagnostics',
+  'main-preload',
+  'cli-adapters',
+  'ai-session',
+  'mcp-server',
+  'chat-ui',
 ] as const
 const roadmapWriteLockSet = new Set<string>(ROADMAP_WRITE_LOCKS)
 export const OLD_PLAN_TASK_IDS = [
@@ -137,6 +163,12 @@ export const OLD_PLAN_TASK_IDS = [
 type Release = (typeof RELEASES)[number]
 type CrosswalkClassification = 'replaced' | 'merged' | 'retired' | 'optional'
 type InventoryAccess = 'none' | 'read' | 'write'
+
+const INDEPENDENT_SPEC_RELEASES = new Set<Release>(['1.1', '1.2'])
+
+function hasIndependentSpecs(release: Release): boolean {
+  return INDEPENDENT_SPEC_RELEASES.has(release)
+}
 
 export interface DevelopmentRoadmapTask {
   id: string
@@ -486,22 +518,39 @@ function validateGraph(tasks: readonly DevelopmentRoadmapTask[], issues: string[
   let parallelFrontier: string[] = []
   const lockSet = (task: DevelopmentRoadmapTask): Set<string> =>
     new Set(task.writeLocks.filter((entry) => entry !== 'none'))
+  const largestLockDisjointSet = (candidates: readonly DevelopmentRoadmapTask[]): string[] => {
+    let best: string[] = []
+    const visit = (index: number, chosen: string[], heldLocks: Set<string>): void => {
+      if (chosen.length + candidates.length - index <= best.length) return
+      if (index >= candidates.length) {
+        best = [...chosen]
+        return
+      }
+      const candidate = candidates[index]
+      const candidateLocks = lockSet(candidate)
+      if (![...candidateLocks].some((lock) => heldLocks.has(lock))) {
+        visit(
+          index + 1,
+          [...chosen, candidate.id],
+          new Set([...heldLocks, ...candidateLocks]),
+        )
+      }
+      visit(index + 1, chosen, heldLocks)
+    }
+    visit(0, [], new Set())
+    return best
+  }
   while (frontier.length > 0 && parallelFrontier.length === 0) {
-    const core = frontier
+    const coreCandidates = frontier
       .map((id) => taskById.get(id))
       .filter((task): task is DevelopmentRoadmapTask => task !== undefined && !task.optional)
-    for (let leftIndex = 0; leftIndex < core.length && parallelFrontier.length === 0; leftIndex += 1) {
-      const left = core[leftIndex]
-      const leftLocks = lockSet(left)
-      for (let rightIndex = leftIndex + 1; rightIndex < core.length; rightIndex += 1) {
-        const right = core[rightIndex]
-        const rightLocks = lockSet(right)
-        if (![...rightLocks].some((lock) => leftLocks.has(lock))) {
-          parallelFrontier = [left.id, right.id]
-          break
-        }
-      }
-    }
+    const earliestReleaseIndex = coreCandidates.reduce<number>(
+      (current, task) => Math.min(current, RELEASES.indexOf(task.release)),
+      RELEASES.length,
+    )
+    const core = coreCandidates.filter((task) => RELEASES.indexOf(task.release) === earliestReleaseIndex)
+    const compatible = largestLockDisjointSet(core)
+    if (compatible.length >= 2) parallelFrontier = compatible
     const next: string[] = []
     for (const id of frontier) {
       for (const dependent of dependents.get(id) ?? []) {
@@ -523,7 +572,7 @@ function parseReleaseReadmeRows(
 ): ReleaseReadmeRow[] {
   const displayPath = `${release}/README.md`
   const lines = markdown.split(/\r?\n/)
-  const expectedColumns = release === '1.1' ? 5 : 6
+  const expectedColumns = release === '1.1' ? 5 : release === '1.2' ? 7 : 6
   const header = lines.find((line) => {
     const firstCell = splitMarkdownTableRow(line)[0]?.replaceAll('`', '').trim().toLowerCase()
     return firstCell === 'task' || firstCell === 'task id'
@@ -566,6 +615,11 @@ function parseReleaseReadmeRows(
       else if (optionalValue === '否' || optionalValue === 'false' || optionalValue === 'no') optional = false
       else issues.push(`${displayPath}:${index + 1} 的 Optional 必须是“是/否”：${cells[3] || '<空>'}。`)
       writeLocksCell = cells[4] ?? ''
+      if (release === '1.2') {
+        const match = (cells[5] ?? '').match(/\[[^\]]+\]\(([^)\s]+)\)/)
+        if (!match) issues.push(`${displayPath}:${index + 1} 缺少可解析的 spec 链接。`)
+        else specLink = match[1].replace(/^<|>$/g, '')
+      }
     }
     rows.push({
       id,
@@ -619,14 +673,14 @@ function validateReleaseReadmes(
       }
       if (release === '1.1') {
         if (task.optional) issues.push(`${label} 是 1.1 核心规格，manifest optional 不得为 true。`)
-        if (row.specLink) {
-          const target = path.posix.normalize(path.posix.join(release, row.specLink.replaceAll('\\', '/')))
-          if (target !== normalizeRoadmapRelativePath(task.spec)) {
-            issues.push(`${label} 的 spec 链接与 manifest 不一致：表为 ${target}，manifest 为 ${normalizeRoadmapRelativePath(task.spec)}。`)
-          }
-        }
       } else if (row.optional !== task.optional) {
         issues.push(`${label} 的 optional 与 manifest 不一致：表为 ${row.optional}，manifest 为 ${task.optional}。`)
+      }
+      if (hasIndependentSpecs(release) && row.specLink) {
+        const target = path.posix.normalize(path.posix.join(release, row.specLink.replaceAll('\\', '/')))
+        if (target !== normalizeRoadmapRelativePath(task.spec)) {
+          issues.push(`${label} 的 spec 链接与 manifest 不一致：表为 ${target}，manifest 为 ${normalizeRoadmapRelativePath(task.spec)}。`)
+        }
       }
     }
   }
@@ -657,20 +711,20 @@ function parseInventoryAccess(spec: string): InventoryAccess | null {
     : null
 }
 
-function validateOneOneSpecMetadata(
+function validateIndependentSpecMetadata(
   tasks: readonly DevelopmentRoadmapTask[],
   markdownFiles: ReadonlyMap<string, { absolutePath: string; text: string }>,
-  actualOneOneSpecPaths: readonly string[],
+  actualIndependentSpecPaths: readonly string[],
   issues: string[],
 ): void {
   const expectedPaths = new Set(
-    tasks.filter((task) => task.release === '1.1').map((task) => normalizeRoadmapRelativePath(task.spec)),
+    tasks.filter((task) => hasIndependentSpecs(task.release)).map((task) => normalizeRoadmapRelativePath(task.spec)),
   )
-  const actualPaths = new Set(actualOneOneSpecPaths)
+  const actualPaths = new Set(actualIndependentSpecPaths)
   const orphanSpecs = [...actualPaths].filter((spec) => !expectedPaths.has(spec)).sort()
-  if (orphanSpecs.length > 0) issues.push(`1.1 目录含 manifest 未登记的孤儿规格：${orphanSpecs.join(', ')}。`)
+  if (orphanSpecs.length > 0) issues.push(`独立规格目录含 manifest 未登记的孤儿规格：${orphanSpecs.join(', ')}。`)
 
-  for (const task of tasks.filter((entry) => entry.release === '1.1')) {
+  for (const task of tasks.filter((entry) => hasIndependentSpecs(entry.release))) {
     const relativeSpec = normalizeRoadmapRelativePath(task.spec)
     const spec = markdownFiles.get(relativeSpec)?.text
     if (!spec) continue
@@ -741,6 +795,38 @@ function validateOneOneSpecMetadata(
     for (const [index, line] of spec.split(/\r?\n/).entries()) {
       for (const reference of line.match(TASK_REFERENCE_PATTERN) ?? []) {
         resolveTaskReference(reference, tasks, `${displayPath}:${index + 1}`, issues)
+      }
+    }
+
+    if (task.release === '1.2') {
+      const requiredSections = [
+        'Outcome / current evidence',
+        'Read first',
+        'Write scope',
+        'Execution',
+        'Stop conditions',
+        'Acceptance',
+        'Focused validation',
+        'Rollback / handoff',
+      ]
+      const headings = new Set(
+        [...spec.matchAll(/^##\s+([^\r\n]+)$/gm)].map((match) => match[1].trim()),
+      )
+      const missingSections = requiredSections.filter((section) => !headings.has(section))
+      if (missingSections.length > 0) {
+        issues.push(`${task.id} 的 1.2 执行规格缺少标准章节：${missingSections.join(', ')}。`)
+      }
+      if (!spec.includes('IMPLEMENTATION_CONTRACT.md')) {
+        issues.push(`${task.id} 的 1.2 执行规格未引用共享 IMPLEMENTATION_CONTRACT.md。`)
+      }
+      const focusedValidation = spec.match(
+        /(?:^|\n)## Focused validation[^\n]*\n([\s\S]*?)(?=\n##\s|$)/,
+      )?.[1] ?? ''
+      const validationCommands = focusedValidation
+        .split(/\r?\n/)
+        .filter((line) => /^\s*-\s+`(?:npm|npx|git)\b/.test(line))
+      if (validationCommands.length < 1 || validationCommands.length > 3) {
+        issues.push(`${task.id} 的 Focused validation 必须含 1–3 条精确命令，当前 ${validationCommands.length} 条。`)
       }
     }
   }
@@ -988,18 +1074,18 @@ export async function checkDevelopmentRoadmap(
   validateLegacyInventoryWriterOrder(tasks, issues)
   const taskById = new Map(tasks.map((task) => [task.id, task]))
 
-  const oneOneSpecs = tasks.filter((task) => task.release === '1.1')
-  const repeatedOneOneSpecs = duplicates(oneOneSpecs.map((task) => normalizeRoadmapRelativePath(task.spec)))
-  if (repeatedOneOneSpecs.length > 0) {
-    issues.push(`1.1 节点必须各有独立规格；重复规格：${repeatedOneOneSpecs.join(', ')}。`)
+  const independentSpecs = tasks.filter((task) => hasIndependentSpecs(task.release))
+  const repeatedIndependentSpecs = duplicates(independentSpecs.map((task) => normalizeRoadmapRelativePath(task.spec)))
+  if (repeatedIndependentSpecs.length > 0) {
+    issues.push(`1.1/1.2 节点必须各有独立规格；重复规格：${repeatedIndependentSpecs.join(', ')}。`)
   }
-  for (const task of oneOneSpecs) {
+  for (const task of independentSpecs) {
     const relativeSpec = normalizeRoadmapRelativePath(task.spec)
-    if (relativeSpec !== `1.1/${task.id}.md`) {
-      issues.push(`${task.id} 必须指向 1.1 目录内的独立规格文件。`)
+    if (relativeSpec !== `${task.release}/${task.id}.md`) {
+      issues.push(`${task.id} 必须指向 ${task.release} 目录内同名独立规格文件。`)
     }
   }
-  for (const task of tasks.filter((entry) => entry.release !== '1.1')) {
+  for (const task of tasks.filter((entry) => !hasIndependentSpecs(entry.release))) {
     const relativeSpec = normalizeRoadmapRelativePath(task.spec)
     if (relativeSpec !== `${task.release}/README.md`) {
       issues.push(`${task.id} 必须指向对应版本的 ${task.release}/README.md。`)
@@ -1015,26 +1101,33 @@ export async function checkDevelopmentRoadmap(
     issues.push(`无法读取 package.json：${error instanceof Error ? error.message : String(error)}。`)
   }
 
-  const actualOneOneSpecPaths: string[] = []
-  try {
-    const entries = await fs.readdir(path.join(roadmapRoot, '1.1'), { withFileTypes: true })
-    for (const entry of entries) {
-      if (entry.isFile() && /^r11-.+\.md$/.test(entry.name)) actualOneOneSpecPaths.push(`1.1/${entry.name}`)
+  const actualIndependentSpecPaths: string[] = []
+  for (const release of INDEPENDENT_SPEC_RELEASES) {
+    try {
+      const entries = await fs.readdir(path.join(roadmapRoot, release), { withFileTypes: true })
+      const prefix = `r${release.replace('.', '')}-`
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith('.md')) {
+          actualIndependentSpecPaths.push(`${release}/${entry.name}`)
+        }
+      }
+    } catch (error) {
+      issues.push(`无法枚举 ${ROADMAP_RELATIVE_ROOT}/${release} 规格：${error instanceof Error ? error.message : String(error)}。`)
     }
-    actualOneOneSpecPaths.sort()
-  } catch (error) {
-    issues.push(`无法枚举 ${ROADMAP_RELATIVE_ROOT}/1.1 规格：${error instanceof Error ? error.message : String(error)}。`)
   }
+  actualIndependentSpecPaths.sort()
 
   const markdownFiles = new Map<string, { absolutePath: string; text: string }>()
   const requiredDocs = [
     'README.md',
     'PRESERVATION_MATRIX.md',
     'OLD_PLAN_CROSSWALK.md',
+    '1.2/EXECUTION_GUIDE.md',
+    '1.2/IMPLEMENTATION_CONTRACT.md',
     ...RELEASES.map((release) => `${release}/README.md`),
   ]
   const specPaths = [...new Set(tasks.map((task) => normalizeRoadmapRelativePath(task.spec)))]
-  for (const relativePath of [...new Set([...requiredDocs, ...specPaths, ...actualOneOneSpecPaths])]) {
+  for (const relativePath of [...new Set([...requiredDocs, ...specPaths, ...actualIndependentSpecPaths])]) {
     const absolutePath = resolveRoadmapPath(roadmapRoot, relativePath)
     if (!absolutePath) {
       issues.push(`路线文档路径越界或无效：${relativePath}。`)
@@ -1060,9 +1153,9 @@ export async function checkDevelopmentRoadmap(
   }
 
   validateReleaseReadmes(tasks, markdownFiles, issues)
-  validateOneOneSpecMetadata(tasks, markdownFiles, actualOneOneSpecPaths, issues)
+  validateIndependentSpecMetadata(tasks, markdownFiles, actualIndependentSpecPaths, issues)
 
-  for (const task of tasks.filter((entry) => entry.release !== '1.1')) {
+  for (const task of tasks.filter((entry) => !hasIndependentSpecs(entry.release))) {
     const relativeSpec = normalizeRoadmapRelativePath(task.spec)
     const spec = markdownFiles.get(relativeSpec)?.text
     if (spec && !new RegExp(`^\\|\\s*\`?${escapeRegExp(task.id)}\`?\\s*\\|`, 'm').test(spec)) {

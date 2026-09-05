@@ -708,6 +708,7 @@ function artifactEvidence(files: ReadonlyMap<string, string>): Record<string, {
  */
 const AI_CAPABILITY_PROVENANCE_ENTRYPOINTS = [
   'scripts/generate-ai-capabilities.ts',
+  'src/shared/contracts/index.ts',
   'src/shared/courseProjectSchema.ts',
   'src/shared/publishedCourseSchema.ts',
 ] as const
@@ -1267,6 +1268,11 @@ export async function generateAiCapabilityArtifacts(
             id: 'controller-media',
             collector: 'collectCourseProjectControllerMediaHealth',
             source: 'src/shared/courseProjectHealth/controllerMedia.ts',
+          },
+          {
+            id: 'native',
+            collector: 'collectCourseProjectNativeHealth',
+            source: 'src/shared/courseProjectHealth/native.ts',
           },
         ],
       },

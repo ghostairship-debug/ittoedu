@@ -10,9 +10,12 @@ export type {
 } from '../course-state/types'
 import type {
   FormulaAstNode,
+  NativeChartContent,
   NativeFormulaContent,
   NativeImageContent,
+  NativeInputContent,
   NativeShapeContent,
+  NativeTableContent,
   NativeTeacherControllerContent,
   NativeTextContent,
   NativeVideoContent,
@@ -38,6 +41,16 @@ export type GlobalLayerPlane = typeof GLOBAL_LAYER_PLANES[number]
 /** Surface-local Flow overlays paint on either side of the semantic body. */
 export const FLOW_BODY_LAYER_PLANES = ['underlay', 'overlay'] as const
 export type FlowBodyLayerPlane = typeof FLOW_BODY_LAYER_PLANES[number]
+
+/**
+ * Background ownership mode for an owner that can inherit its effective
+ * background from the parent in the Course → surface → scene → state chain.
+ * Course has no mode: it is the root of the chain, not an inheriting owner.
+ * Named state has no mode either: its "inherit" is expressed by omitting its
+ * two optional override fields, not by a separate mode field.
+ */
+export const BACKGROUND_MODES = ['inherit', 'own'] as const
+export type BackgroundMode = typeof BACKGROUND_MODES[number]
 
 export type LayerHitPolicy = 'auto' | 'surface' | 'pass-through'
 
@@ -76,6 +89,9 @@ export type NativeElementContent =
   | { nativeType: 'video'; data: NativeVideoContent }
   | { nativeType: 'shape'; data: NativeShapeContent }
   | { nativeType: 'teacher-controller'; data: NativeTeacherControllerContent }
+  | { nativeType: 'table'; data: NativeTableContent }
+  | { nativeType: 'chart'; data: NativeChartContent }
+  | { nativeType: 'input'; data: NativeInputContent }
 
 export interface NativeLayerItem extends LayerItemBase {
   kind: 'native'
@@ -221,6 +237,8 @@ export interface SlidePresentation {
 export interface SlideSceneDocument {
   id: string
   name: string
+  /** Missing mode defaults to `'own'`; `backgroundColor` stays required either way. */
+  backgroundMode?: BackgroundMode
   backgroundColor: string
   backgroundAssetId?: string | null
   layerItems: LayerItem[]
@@ -237,6 +255,10 @@ export interface SurfaceBase {
 
 export interface SlideSurfaceDocument extends SurfaceBase {
   type: 'slide'
+  /** Missing mode defaults to `'inherit'`; the Slide surface historically had no background of its own. */
+  backgroundMode?: BackgroundMode
+  backgroundColor?: string
+  backgroundAssetId?: string | null
   canvas: {
     width: 1280
     height: 720
@@ -366,11 +388,14 @@ export type FlowBlock =
 export interface FlowSurfaceDocument extends SurfaceBase {
   type: 'flow'
   surfaceLayerItems: FlowSurfaceLayerEntry[]
+  /** Missing mode defaults to `'own'`; Flow has always owned its background. */
+  backgroundMode?: BackgroundMode
   /**
    * Paper / page-chrome color. Omitted documents read as `#ffffff`.
    * This is not a Flow block field and does not rename Slide scene `backgroundColor`.
    */
   backgroundColor?: string
+  backgroundAssetId?: string | null
   layout: {
     readingWidth: number
     wideContentWidth: number
@@ -424,11 +449,14 @@ export interface SpatialRelationDocument {
 
 export interface SpatialSurfaceDocument extends SurfaceBase {
   type: 'spatial-2d'
+  /** Missing mode defaults to `'own'`; Spatial has always owned its background. */
+  backgroundMode?: BackgroundMode
   /**
    * Infinite-canvas chrome color. Omitted documents read as `#ffffff`.
    * Slide scenes keep their own required `backgroundColor`; do not rename that field.
    */
   backgroundColor?: string
+  backgroundAssetId?: string | null
   world: {
     bounds:
       | { mode: 'infinite' }
@@ -523,6 +551,13 @@ export interface CourseProjectDocument {
   title: string
   createdAt: string
   updatedAt: string
+  /**
+   * Course-wide background: the root of the owner resolution chain. Omitted
+   * color reads as `#ffffff`; omitted or `null` asset reads as none. Course
+   * has no `backgroundMode`; it is the chain's root, not an inheriting owner.
+   */
+  backgroundColor?: string
+  backgroundAssetId?: string | null
   assets: Record<string, CourseAssetMeta>
   componentPackages: Record<string, EmbeddedComponentPackageMeta>
   /** Course-level network declaration; absent means no remote access is declared. */

@@ -4,7 +4,11 @@ import type {
   SpatialRelationKind,
   SpatialSemanticZoomRule,
 } from '../../shared/courseProjectTypes'
-import type { SpatialAuthoringSession, SpatialEditorWorldTransform } from '../course/spatialEditorCommands'
+import type {
+  SpatialAuthoringSession,
+  SpatialEditorWorldTransform,
+  SpatialSurfaceBackgroundPatch,
+} from '../course/spatialEditorCommands'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
 import type { CourseAuthoringTarget } from './courseAuthoringSession'
 import type { SpatialWorldContentEditSession } from './spatialWorldAuthoring'
@@ -92,6 +96,7 @@ export type SpatialAuthoringIntent = (
       readonly patch: TextRunStyle
     }
   | { readonly kind: 'set-surface-background'; readonly backgroundColor: string }
+  | { readonly kind: 'set-surface-background-patch'; readonly patch: SpatialSurfaceBackgroundPatch }
   | {
       readonly kind: 'set-show-camera-frames'
       readonly show: boolean

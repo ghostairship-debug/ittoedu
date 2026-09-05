@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  inputSubmitTriggerSchema,
   interactionRuleSchema,
   parseSceneInteractions,
   sceneInteractionsSchema,
@@ -94,6 +95,7 @@ describe('interaction schema', () => {
       { type: 'video.ended', nodeId: 'video_demo' },
       { type: 'video.time', nodeId: 'video_demo', seconds: 12.5 },
       { type: 'animation.completed', actionId: 'enter_result' },
+      { type: 'input.submit', nodeId: 'short_answer_1' },
     ]
 
     for (const trigger of triggers) {
@@ -269,4 +271,37 @@ describe('interaction schema', () => {
     ])
     expect(parsed.map((item) => item.id)).toEqual(['rule_one', 'rule_three'])
   })
+
+  it('strictly validates input.submit triggers', () => {
+    expect(inputSubmitTriggerSchema.parse({
+      type: 'input.submit',
+      nodeId: 'short_answer_1',
+    })).toEqual({
+      type: 'input.submit',
+      nodeId: 'short_answer_1',
+    })
+
+    // Missing nodeId
+    expect(inputSubmitTriggerSchema.safeParse({
+      type: 'input.submit',
+    }).success).toBe(false)
+
+    // Empty or whitespace nodeId
+    expect(inputSubmitTriggerSchema.safeParse({
+      type: 'input.submit',
+      nodeId: '',
+    }).success).toBe(false)
+    expect(inputSubmitTriggerSchema.safeParse({
+      type: 'input.submit',
+      nodeId: '   ',
+    }).success).toBe(false)
+
+    // Extra unknown fields
+    expect(inputSubmitTriggerSchema.safeParse({
+      type: 'input.submit',
+      nodeId: 'short_answer_1',
+      extra: true,
+    }).success).toBe(false)
+  })
 })
+

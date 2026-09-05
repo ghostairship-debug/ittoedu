@@ -10,7 +10,9 @@ import {
   type CourseLayerComposition,
 } from '../../shared/courseLayerComposition'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
+import { resolveEffectiveBackground } from '../../shared/effectiveBackground'
 import type {
+  BackgroundMode,
   CourseLocation,
   CourseProjectDocument,
   FlowBlock,
@@ -124,6 +126,9 @@ export interface FlowEditorView {
   readonly surfaceId: string
   readonly surfaceTitle: string
   readonly backgroundColor: string
+  /** Own raw mode; missing defaults to `'own'` (Flow has always owned its background). */
+  readonly backgroundMode: BackgroundMode
+  readonly backgroundAssetId: string | null | undefined
   readonly activeBlockId: string
   readonly activeLocation: FlowActiveLocation
   readonly navigationLocations: readonly FlowNavigationLocation[]
@@ -412,13 +417,21 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     }
   }
 
+  const effectiveBackground = resolveEffectiveBackground({
+    owner: 'flow-surface',
+    course: project,
+    surface,
+  })
+
   const view = deepFreeze({
     projectId: project.id,
     revision: project.revision,
     locationId,
     surfaceId: surface.id,
     surfaceTitle: surface.title,
-    backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
+    backgroundColor: effectiveBackground.color,
+    backgroundMode: surface.backgroundMode ?? 'own',
+    backgroundAssetId: effectiveBackground.assetId,
     activeBlockId: location.blockId,
     activeLocation: {
       locationId,

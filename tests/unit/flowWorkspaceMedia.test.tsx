@@ -367,7 +367,7 @@ describe('FlowWorkspace edit media', () => {
     expect(videoCard.textContent).not.toContain('浮层视频')
     expect(videoCard.textContent).not.toContain('浮层')
 
-    expect(screen.getByTestId('flow-layer-card-overlay-text').textContent).toContain('浮层文字')
+    expect(screen.getByTestId('flow-layer-card-overlay-text').textContent).toContain('注释')
   })
 
   it('keeps overlay pointer-events as layer none and card auto so media can still be selected', () => {

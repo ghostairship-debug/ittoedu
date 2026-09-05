@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, type ChangeEvent } from 'react'
 import {
   Bold,
   ImageIcon,
@@ -9,15 +9,25 @@ import {
 import type {
   FormulaAstNode,
   FormulaNode,
+  ImageNode,
+  ShapeNode,
+  TextNode,
   TextRunStyle,
+  VideoNode,
 } from '../../../shared/contracts/native-v1'
 import { formulaAstToAccessibleText } from '../../../shared/formulaLinear'
+import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
+import { applyTextRunStyle } from '../../../shared/textRuns'
 import type {
   FlowBlock,
   FlowMediaBlock,
   LayerItem,
 } from '../../../shared/courseProjectTypes'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
+import type {
+  CourseBackgroundFields,
+  FlowSurfaceBackgroundFields,
+} from '../../../shared/effectiveBackground'
 import type { FlowEditorView } from '../../course/flowEditorView'
 import type { FlowEditorSelection } from '../../course/flowEditorSlice'
 import {
@@ -32,6 +42,20 @@ import {
   FormulaAuthoringEditor,
   type FormulaAuthoringDraftChange,
 } from '../FormulaAuthoringEditor'
+import { SharedBackgroundProperties } from './SharedBackgroundProperties'
+import { SharedShapeProperties } from './SharedShapeProperties'
+import {
+  CommonNodeProperties,
+  ImageProperties,
+  TextProperties,
+  VideoProperties,
+  type PropertiesPatch,
+  type SlideNativeTextCommands,
+} from './SlideNativePropertiesPanel'
+import {
+  normalizePropertiesPatch,
+  propertiesViewFromLayerItem,
+} from './propertiesItemView'
 import {
   BufferedInput,
   FontFamilyPicker,
@@ -63,7 +87,10 @@ export interface FlowImportedMediaBytes {
 export interface FlowPropertiesCommands {
   readonly renamePage: (surfaceId: string, title: string) => void
   readonly setPaperBackground: (surfaceId: string, backgroundColor: string) => void
+  readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
+  readonly importSurfaceBackgroundAsset: (file: FlowImportedMediaBytes) => void
   readonly patchSelectedBlock: (patch: Record<string, unknown>) => void
+  readonly patchOverlayProperties: (patch: Record<string, unknown>) => void
   readonly replaceMediaAsset: (assetId: string) => void
   readonly importReplacementMedia: (imported: FlowImportedMediaBytes) => Promise<void> | void
   readonly moveSelectedBlock: (direction: 'up' | 'down') => void
@@ -89,6 +116,8 @@ export interface FlowPropertiesContext {
   readonly selection: FlowEditorSelection
   readonly textEdit: FlowTextEditSession | null
   readonly draftBindingKey: string
+  /** Course-wide background fields, needed only to resolve the Flow surface's effective preview. */
+  readonly course: CourseBackgroundFields
   readonly commands: FlowPropertiesCommands
 }
 
@@ -113,6 +142,15 @@ function flowFormatFieldDescription<T>(
 
 function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
   const { view, commands } = context
+  const effective = resolveEffectiveBackground({
+    owner: 'flow-surface',
+    course: context.course,
+    surface: {
+      backgroundMode: view.backgroundMode,
+      backgroundColor: view.backgroundColor,
+      backgroundAssetId: view.backgroundAssetId,
+    },
+  })
   return (
     <section className="property-section" data-testid="flow-page-properties">
       <h3 className="property-title"><Type size={14} />流式页面</h3>
@@ -121,19 +159,25 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
         value={view.surfaceTitle}
         onCommit={(title) => commands.renamePage(view.surfaceId, title)}
       />
-      <ColorInput
-        key={`flow-paper-background:${context.draftBindingKey}`}
-        id="flow-paper-background"
-        data-testid="flow-paper-background"
-        label="稿纸背景色"
-        value={view.backgroundColor}
-        onChange={(backgroundColor) => {
-          commands.setPaperBackground(view.surfaceId, backgroundColor)
-        }}
-      />
       <p className="property-hint">
-        标题和段落在稿纸里编辑。这里只改页面名称与稿纸底色，不会出现 1280×720 场景背景。
+        标题和段落在稿纸里编辑。这里只改页面名称与稿纸底色/背景图，不会出现 1280×720 场景背景。
       </p>
+      <SharedBackgroundProperties
+        key={`flow-surface-background:${view.surfaceId}`}
+        ownerLabel="流式讲义页"
+        color={view.backgroundColor}
+        assetId={view.backgroundAssetId}
+        assets={context.assets}
+        effective={effective}
+        mode={{
+          value: view.backgroundMode,
+          onChange: (backgroundMode) => commands.updateSurfaceBackground({ backgroundMode }),
+        }}
+        onColorChange={(backgroundColor) => commands.updateSurfaceBackground({ backgroundColor })}
+        onAssetChange={(backgroundAssetId) => commands.updateSurfaceBackground({ backgroundAssetId })}
+        onImportAsset={(file) => commands.importSurfaceBackgroundAsset(file)}
+        testId="flow-surface-background-properties"
+      />
     </section>
   )
 }
@@ -571,11 +615,19 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
 
 function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) {
   const { view, selection, commands } = context
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const overlayId = selection.selectedOverlayIds.at(-1)
   if (!overlayId) return null
   const layer = view.overlayLayers.find((entry) => entry.selectionId === overlayId)
   if (!layer) return null
   const item = layer.item as LayerItem
+  const node = propertiesViewFromLayerItem(item)
+
+  const update = (patch: PropertiesPatch) => {
+    const normalized = normalizePropertiesPatch(node, patch)
+    commands.patchOverlayProperties(normalized)
+  }
+
   const paperSpaceField = item.kind === 'native' && item.content.nativeType === 'teacher-controller'
     ? null
     : (
@@ -592,69 +644,139 @@ function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) 
       </div>
     )
 
-  if (item.kind === 'native' && item.content.nativeType === 'formula') {
-    const ast = item.content.data.ast
-    const accessibleText = item.content.data.accessibleText ?? formulaAstToAccessibleText(ast)
-    const node: FormulaNode = {
-      id: overlayId,
-      name: item.label || '公式',
-      type: 'formula',
-      x: item.frame.x,
-      y: item.frame.y,
-      width: item.frame.width,
-      height: item.frame.height,
-      rotation: item.rotation,
-      opacity: item.opacity,
-      visible: item.visible,
-      locked: item.locked,
-      playbackInitialVisibility: item.playbackInitialVisibility,
-      ast,
-      accessibleText,
-      formulaId: item.content.data.formulaId,
-      style: item.content.data.style,
-    }
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
+  const textDraftRef = useRef<string | null>(null)
+  const textCommands: SlideNativeTextCommands = {
+    beginEdit: () => {},
+    commitEdit: () => {
+      if (textDraftRef.current !== null && textDraftRef.current !== (node as TextNode).text) {
+        update({ text: textDraftRef.current })
+        textDraftRef.current = null
+      }
+    },
+    cancelEdit: () => {
+      textDraftRef.current = null
+    },
+    setComposing: () => {},
+    updateDraft: (text: string) => {
+      textDraftRef.current = text
+    },
+    toggleStyle: (key, range) => {
+      const textNode = node as TextNode
+      if (range.start !== range.end) {
+        const runs = applyTextRunStyle(
+          textNode.text,
+          textNode.runs ?? [],
+          range.start,
+          range.end,
+          { [key]: !textNode.style[key] },
+        )
+        update({ runs })
+      } else {
+        update({ style: { [key]: !textNode.style[key] } })
+      }
+    },
+  }
+
+  const onFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    await commands.importReplacementMedia({
+      name: file.name,
+      mimeType: file.type || 'image/png',
+      bytes,
+    })
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  return (
+    <div className="properties-scroll" data-testid="properties-tab">
+      <CommonNodeProperties
+        node={node}
+        editorMode="simple"
+        update={update}
+      />
+      {paperSpaceField && (
+        <section className="property-section" data-testid="flow-overlay-space-section">
+          <h3 className="property-title">排版定位</h3>
+          {paperSpaceField}
+        </section>
+      )}
+      {node.type === 'shape' && (
+        <SharedShapeProperties
+          node={node as ShapeNode}
+          update={update}
+        />
+      )}
+      {node.type === 'text' && (
+        <TextProperties
+          node={node as TextNode}
+          update={update}
+          contentEditingEnabled
+          textCommands={textCommands}
+        />
+      )}
+      {node.type === 'image' && (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={onFileInputChange}
+          />
+          <ImageProperties
+            node={node as ImageNode}
+            update={update}
+            onReplaceImage={() => fileInputRef.current?.click()}
+          />
+          <section className="property-section" data-testid="flow-overlay-media-properties">
+            <button
+              type="button"
+              className="secondary-button"
+              data-testid="flow-overlay-to-document"
+              style={{ width: '100%' }}
+              onClick={() => commands.convertOverlayToDocument()}
+            >
+              转回正文
+            </button>
+          </section>
+        </>
+      )}
+      {node.type === 'video' && (
+        <>
+          <VideoProperties
+            node={node as VideoNode}
+            update={update}
+          />
+          <section className="property-section" data-testid="flow-overlay-media-properties">
+            <button
+              type="button"
+              className="secondary-button"
+              data-testid="flow-overlay-to-document"
+              style={{ width: '100%' }}
+              onClick={() => commands.convertOverlayToDocument()}
+            >
+              转回正文
+            </button>
+          </section>
+        </>
+      )}
+      {node.type === 'formula' && (
         <section className="property-section" data-testid="flow-formula-properties">
           <h3 className="property-title">公式</h3>
           <FormulaAuthoringEditor
             key={`flow-overlay-formula:${context.draftBindingKey}`}
-            node={node}
+            node={node as FormulaNode}
             onCommit={(committedAst, committedAccessibleText) => {
               commands.commitOverlayFormula(committedAst, committedAccessibleText)
             }}
           />
-          {paperSpaceField}
         </section>
-      </div>
-    )
-  }
-
-  if (item.kind === 'native' && (item.content.nativeType === 'image' || item.content.nativeType === 'video')) {
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
-        <section className="property-section" data-testid="flow-overlay-media-properties">
-          <h3 className="property-title">浮层媒体</h3>
-          {paperSpaceField}
-          <button
-            type="button"
-            className="secondary-button"
-            data-testid="flow-overlay-to-document"
-            onClick={() => commands.convertOverlayToDocument()}
-          >
-            转回正文
-          </button>
-        </section>
-      </div>
-    )
-  }
-
-  if (item.kind === 'component') {
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
+      )}
+      {item.kind === 'component' && (
         <section className="property-section" data-testid="flow-overlay-component-properties">
           <h3 className="property-title">浮层组件</h3>
-          {paperSpaceField}
           <button
             type="button"
             className="secondary-button"
@@ -664,11 +786,9 @@ function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) 
             转回正文
           </button>
         </section>
-      </div>
-    )
-  }
-
-  return null
+      )}
+    </div>
+  )
 }
 
 export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContext }) {

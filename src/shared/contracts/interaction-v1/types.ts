@@ -24,6 +24,7 @@ export const INTERACTION_TRIGGER_TYPES = [
   'node.activated',
   'animation.completed',
   'presenter.command',
+  'input.submit',
 ] as const
 
 export const INTERACTION_CONDITION_TYPES = [
@@ -58,6 +59,11 @@ export const INTERACTION_ACTION_TYPES = [
 
 export type AudioChannel = 'music' | 'narration' | 'sfx' | 'ui'
 
+export interface InputSubmitTrigger {
+  type: 'input.submit'
+  nodeId: string
+}
+
 export type InteractionTrigger =
   | { type: 'node.click'; nodeId: string }
   | { type: 'scene.enter' }
@@ -76,6 +82,7 @@ export type InteractionTrigger =
   | { type: 'node.activated'; nodeId: string }
   | { type: 'animation.completed'; actionId: string }
   | { type: 'presenter.command'; command: 'next' | 'previous' }
+  | InputSubmitTrigger
 
 export type InteractionCourseStateCondition =
   | (Omit<Extract<CourseStateCondition, { type: 'exists' }>, 'type'> & {

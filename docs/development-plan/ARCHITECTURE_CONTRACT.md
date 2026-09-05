@@ -5,8 +5,8 @@
 ## 1. 协议与版本边界
 
 - Course Project V9 是唯一受支持的作者工程格式；不导入 V8 `.h5lesson`；不借重构创建 V10。
-- V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table/Chart 是 2026-09-02 Owner 明确批准的两个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
-- Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table/Chart 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
+- V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide Native input 是 Owner 明确批准的三个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
+- Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table、Chart 与 Slide Native input 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
 - 项目 `id` 与单调 `revision` 语义保留；`globalLayerItems`、`surfaceLayerItems` 和三 Surface 保留；不新增 persisted `projectMode`。
 - AI 路线为 1.6–1.9 默认隐藏、2.0 在内部生产构建中正式开放；对应版本门完成前，当前编辑器仍不得宣称 AI、聊天、Provider 或 internal/reserved 接口为可用工作流。隐藏能力也必须走正式 CLI harness、受管暂存、自动准入与宿主 canonical command 边界；1.8 起的 live authoring 还必须走 MCP，不能从旧接口名称直接接线。
 - 1.1 在保持 V9 wire、Published V2 wire 和全部受支持行为不变的前提下，清零可执行代码、测试、脚本、示例、fixture、artifacts 与正式生成制品中的 V8 模型、Schema、旧 Player/Export payload 和旧测试工具链；历史 Markdown 与 Git 历史可保留旧名称。该清理不恢复 V8 导入，也不触发 V10。
@@ -129,8 +129,12 @@
 - **Runtime/互动**：简洁模板与专业规则必须生成同一种标准 Interaction V1 规则；Automation UI 是界面不是第三套业务模型。
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
 - **全局层**：有效图层管线为 visibility filter → global Underlay（平面内排序）→ 当前本地合成（Flow 为 surface Underlay → 语义正文 → surface Overlay；Slide / Spatial 保留各自本地 carrier）→ global Overlay（平面内排序）→ rows/canvas/player；跨 owner `order` 不得泄漏成可编辑交错层级。
-- **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。
-- **Table/Chart**：两者是 V9 Native 和 Published V2 的匹配 strict 分支；不得进入 legacy `SceneNode`，不得改变既有 Native 或 presentation override 的合并语义。旧 V9 必须继续读取；旧编辑器或旧 Player 遇到新分支必须 fail loud，不能静默丢弃、替换成截图后覆盖作者工程或伪装成 Shape。
+- **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。Slide 对应 PPTX；Flow 对应 DOCX。一个 Published Flow Surface 输出为一份连续 Word 文档，普通作者浮层只出现一次；1.2 唯一重复例外是 global teacher-controller 同时满足 visibility all 与 `includeInStaticExports=true`，此时映射到 footer。
+- **Table/Chart/Slide input**：三者是 V9 Native 和 Published V2 的匹配 strict 分支；当前 1.2 有效域为 Table/Chart 只允许 Slide scene/surface，input 只允许 Slide scene，均不进入 Flow/Spatial/global，input 也不暗示 PPTX 交互等价。不得进入 legacy `SceneNode`，不得改变既有 Native 或 presentation override 的合并语义。旧 V9 必须继续读取；旧编辑器或旧 Player 遇到新分支必须 fail loud，不能静默丢弃、替换成截图后覆盖作者工程或伪装成 Shape。1.3 已规划 Chart 单独扩展到 Flow/Spatial，正式新有效域及必要的 strict 分支先由 [1.3 跨 Surface 合同节点](roadmap/1.3/README.md)交付；该节点落地前上述拒绝继续有效，Table/input/global 不自动扩域。
+- **Native 作者态同步**：合法持久化内容、非持久化 render input、authoring patch parser、宿主 frame/type guard 与 painter 的接受域必须闭合。Table/Chart/input 不能因旧六类 render input 白名单而在新宿主中被拒绝，也不能用扩大 legacy SceneNode、`any` 强转或旁路原始 JSON 消息绕过校验。类型/校验共享同一正式 Native content 定义；ACK、stale、target 与失败定位语义保留。
+- **颜色控件**：共享 ColorInput 持有局部未提交颜色，Surface/Feature adapter 持有 canonical 提交；控件身份只跟随实际编辑目标，不能跟随每次 revision 重建。连续调色预览与最终提交分离，取消/迟到/目标切换零误写，一次完成操作一条历史。1.2 的固定常用色不进入工程；1.3 项目色板复用 `designTokens.colors`，不另建主题状态或暗示当前对象已具有实时 token 绑定。
+- **input.submit**：提交事件携带本次输入的原始值；Published controller 先按答案类型归一化并原子写入输入框声明的 course-state key，再对同一事件匹配规则、计算条件和执行动作。该值是事件时快照，不通过通用 Surface DOM 读值端口补读，也不改变 `course-state.set` 的 wire 或作者态 `InteractionEngine`。
+- **Line/Background additive**：Line 只为既有 line/elbow shape 增加参数化可选几何；Background 只在 Course/Surface/Scene/state 既有 owner 增加兼容可选字段并使用一个共享优先级解析器。旧字段缺省行为不变，不使用 reserved-ID LayerItem 或第二 `backgroundState` 表达。
 - **Diagnostics**：不预建 structural/contextual/authoring/export 框架矩阵，只处理已复现的债务。网络 finding 判断“声明与使用是否一致”，不得把合法外链本身定义为错误。
 - **Secrets**：长期 API/AI Provider 密钥不属于 Course Project、Published payload、component package 或导出文件；只允许服务端代理、运行时用户输入或短期限域 Token。
 - **模块与 UI**：局部问题仍优先抽首个真实 consumer 所需的最窄 seam；但命中巨石触发条件或 Owner 明确要求时，必须按正式 Owner 主动拆分，无需等待用户故障。不得以“不一次拆大文件”为由长期保留跨 Owner 状态和 writer，也不得借拆分创建设计系统、万能服务或无真实 consumer 的抽象。
@@ -149,7 +153,7 @@
 
 “真拆分”必须同时满足：状态、actions、planner、transaction/use case 迁到真实 Owner；import graph/结构测试证明方向；root 只实例化和接线；旧 writer、双写、完整 Store Facade、第二 Store/Session/History 为零；直接 consumer 改用窄 selector/command port；当前保存重开、Undo/Redo、三 Surface、Preview/Player 与适用导出不降级。行数下降、文件新增、re-export 或测试只查文件名均不能单独证明完成。
 
-1.1 已明确把 `editorStore.ts`、`App.tsx`、`Workspace.tsx`、`PropertiesTab.tsx`、`FlowWorkspace.tsx`、Slide Published adapter 和 Course package builder 作为主动治理热点；具体拆分边界以 1.1 独立规格为准。`buildPublishedCourse.ts`、V9 Schema/health、动态宿主和 Main/Preload 不做无 consumer 的机械拆分，后续出现真实第二 owner/consumer 时再进入同一门。
+`v1.1.1` 已完成 `editorStore.ts`、App/Workspace/Properties/Flow、Slide Published adapter 与 Course package builder 的既定 Owner 迁移；历史执行规格由 Git 历史保存，当前边界只看本合同、源码和 `FEATURE_CONSUMER_OWNER_LEDGER`。`buildPublishedCourse.ts`、V9 Schema/health、动态宿主和 Main/Preload 不做无 consumer 的机械拆分，后续出现真实第二 owner/consumer 时再进入同一门。
 
 ## 7. CLI Agent、MCP、暂存与会话边界
 
@@ -168,6 +172,7 @@
 - 1.1 完成时，`src/**`、`tests/**`、`scripts/**`、`examples/**`、`artifacts/**`、fixture 与正式生成制品中不得再导入、导出或使用旧 projectTypes/projectSchema、schemaVersion 8 作者工程/archive、旧 Player/Export payload、旧测试工厂或独立 `ProjectDocument` / `SceneDocument` / `SceneNode` / `ExportPayload` token。Markdown 历史、最终评估材料、Git 历史、依赖和构建缓存不在机器清零范围内。
 - 每个旧 consumer 必须先有行为等价的 V9/Published producer、consumer 和最近层检查，才可删除；不得靠删功能、删测试、删导出、静态化动态内容、修改断言或 silent fallback 达成零命中。
 - 例外必须登记六要素：位置、原因、首个真实 consumer、替代目标、退出条件、Owner。
+- Slide Native input 例外登记：**位置**为 Course Project V9 `NativeElementContent` 与 Published Course V2 的匹配 strict 分支；**原因**是在 Slide 中提供可编辑填写区且不要求 Runtime；**首个真实 consumer** 为 `r12-007-input-response-delivery` 的 Slide 作者态、Published controller 与 PPTX 投影；**替代目标**为标准 Native carrier 加 Interaction V1 条件，不另建 Runtime 或第二套互动模型；**退出条件**为 producer、Player、PPTX、诊断与能力索引成对交付且旧 reader fail loud，若无法满足则撤回该分支；**Owner** 为当前产品 Owner。
 - Legacy 台账唯一真相是 `inventories/legacy-consumers.json`；检查器验证并收紧该台账，不建立第二份 allowlist。它只对 `reconciledProductCommit`、`reconciledScope` 与排除 inventory 自身的 product tree digest 标识的候选声明当前精确，避免提交身份自引用；后续迁移只能减少实际 consumer，台账在下一次 reconciliation 前是禁止删除用的安全上界。迁移 lane 不并行修改该 JSON；只有持有 `legacy-inventory` 专用写锁的单一 Owner 可原子刷新或更新删除状态。任务卡只引用记录 ID，不复制 consumer 清单；1.1 最终门要求无 unknown、confirmed consumer 为零并在复核后删除旧模块。
 - 1.1 收敛 LEG-002 时，作者画布、当前位置试运行、整课 Player 与 capture 使用同一共享渲染语义，不把当前宿主偶然差异当成可选架构：文本 `auto-height` / `fixed` / `shrink` 以 `src/shared/textLayout.ts` 的既有规则为准；工程声明且已解析的字体在顶层文档和预览 iframe 安装同一字体 bytes；工程资产 ID 始终解析为 Course Project / Published asset closure 中的同一 bytes，只有明确 remote source 且未被工程 bytes 接管时才按声明 origin 获取，失败必须可见。该收敛是修复已知不一致，不授权改变文字、字体、素材或网络功能。
 

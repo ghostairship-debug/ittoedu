@@ -106,6 +106,8 @@ export type CrossSurfaceSlidePorts = {
   addFormulaNode(x?: number, y?: number): void
   addRectangleNode(x?: number, y?: number): void
   addShapeNode(shapeType: string, x?: number, y?: number): void
+  addTableNode(x?: number, y?: number): void
+  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
   updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
   commitTextEdit(): void
@@ -680,6 +682,34 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         slide: () => ports.slide.addShapeNode(shapeType, x, y),
         sessionless: () => ports.kernel.failSessionless(),
       })
+    },
+
+    addTableNode(x?: number, y?: number) {
+      const detected = ports.detect()
+      if (detected !== 'slide') {
+        ports.kernel.setFeedback({
+          errorMessage: detected === null
+            ? '当前 Course Project 没有可用的作者会话。'
+            : '表格只能添加到演示页场景内。',
+          statusMessage: null,
+        })
+        return
+      }
+      ports.slide.addTableNode(x, y)
+    },
+
+    addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number) {
+      const detected = ports.detect()
+      if (detected !== 'slide') {
+        ports.kernel.setFeedback({
+          errorMessage: detected === null
+            ? '当前 Course Project 没有可用的作者会话。'
+            : '图表只能添加到演示页场景内。',
+          statusMessage: null,
+        })
+        return
+      }
+      ports.slide.addChartNode(chartType, x, y)
     },
 
     selectNode(nodeId: string | null, additive = false) {

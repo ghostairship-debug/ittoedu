@@ -199,6 +199,9 @@ export function visitCourseProjectReferences(
   Object.entries(project.media.audio.sounds).forEach(([key, sound]) => {
     emit({ kind: 'asset', id: sound.assetId, path: ['media', 'audio', 'sounds', key, 'assetId'] })
   })
+  if (project.backgroundAssetId) {
+    emit({ kind: 'asset', id: project.backgroundAssetId, path: ['backgroundAssetId'] })
+  }
   const addVisibilityReferences = (
     entries: ReadonlyArray<ScopedLayerItem>,
     path: CourseProjectPath,
@@ -254,6 +257,9 @@ export function visitCourseProjectReferences(
     },
     surface: (surface, path) => {
       addVisibilityReferences(surface.surfaceLayerItems, [...path, 'surfaceLayerItems'])
+      if (surface.backgroundAssetId) {
+        emit({ kind: 'asset', id: surface.backgroundAssetId, path: [...path, 'backgroundAssetId'] })
+      }
       if (surface.type === 'spatial-2d') {
         surface.semanticZoom.forEach((rule, ruleIndex) => {
           rule.layerItemIds.forEach((itemId, itemIndex) => {

@@ -13,15 +13,24 @@ import { SceneStateStrip } from '@/renderer/ui/SceneStateStrip'
 import type {
   NativeLayerItem,
   SlideSceneDocument,
+  SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 
-function activeV9Scene(): SlideSceneDocument {
+function activeV9Surface(): SlideSurfaceDocument {
   const state = useEditorStore.getState()
   const document = selectSlideAuthoringDocument(state)
   const snapshot = selectSlideAuthoringSnapshot(state)
   if (!document || !snapshot) throw new Error('Expected an active Slide authoring session')
   const surface = document.surfaces.find((candidate) => candidate.id === snapshot.surfaceId)
   if (!surface || surface.type !== 'slide') throw new Error('Expected an active Slide surface')
+  return surface
+}
+
+function activeV9Scene(): SlideSceneDocument {
+  const state = useEditorStore.getState()
+  const snapshot = selectSlideAuthoringSnapshot(state)
+  if (!snapshot) throw new Error('Expected an active Slide authoring session')
+  const surface = activeV9Surface()
   const scene = surface.scenes.find((candidate) => candidate.id === snapshot.sceneId)
   if (!scene) throw new Error('Expected an active V9 Slide scene')
   return scene
@@ -232,5 +241,86 @@ describe('scene presentation state UI', () => {
       name: `打开场景“${scene.name}”；缩略图使用状态“初始”`,
     })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('缩略图 · 初始')).toBeInTheDocument()
+  })
+})
+
+describe('r12-040 background authoring: explicit owner tabs and typed commands', () => {
+  it('defaults to the Scene tab and writes only scene.backgroundColor from it', () => {
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    expect(screen.getByTestId('background-owner-tab-scene')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('background-owner-tab-slide-surface')).toHaveAttribute('aria-selected', 'false')
+    // No named state is active yet, so there is nothing to edit as "当前状态".
+    expect(screen.queryByTestId('background-owner-tab-state')).not.toBeInTheDocument()
+
+    const swatch = screen.getByLabelText('背景颜色选择器')
+    fireEvent.change(swatch, { target: { value: '#223344' } })
+
+    expect(activeV9Scene().backgroundColor).toBe('#223344')
+    expect(activeV9Surface().backgroundColor).toBeUndefined()
+  })
+
+  it('switching the owner tab alone never writes to the project', () => {
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const revisionBefore = selectSlideAuthoringDocument(useEditorStore.getState())!.revision
+
+    fireEvent.click(screen.getByTestId('background-owner-tab-slide-surface'))
+    expect(screen.getByTestId('slide-surface-background-properties')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('background-owner-tab-scene'))
+    expect(screen.getByTestId('scene-background-properties')).toBeInTheDocument()
+
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())!.revision).toBe(revisionBefore)
+  })
+
+  it('edits the Slide surface tab: mode switch is its own commit and does not clear the dormant color', () => {
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    fireEvent.click(screen.getByTestId('background-owner-tab-slide-surface'))
+
+    const swatch = screen.getByLabelText('背景颜色选择器')
+    fireEvent.change(swatch, { target: { value: '#efefef' } })
+    expect(activeV9Surface().backgroundColor).toBe('#efefef')
+    expect(activeV9Surface().backgroundMode ?? 'inherit').toBe('inherit')
+
+    const modeSelect = screen.getByLabelText('背景来源')
+    fireEvent.change(modeSelect, { target: { value: 'own' } })
+    expect(activeV9Surface().backgroundMode).toBe('own')
+    // Switching mode alone must not reset the color set moments ago.
+    expect(activeV9Surface().backgroundColor).toBe('#efefef')
+    expect(screen.getByTestId('slide-surface-background-properties-effective')).toHaveTextContent('#efefef')
+  })
+
+  it('shows a 当前状态 tab once a named state is active, and its override does not touch the scene', () => {
+    useEditorStore.getState().setActivePresentationState('state_initial')
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const sceneColor = activeV9Scene().backgroundColor
+
+    fireEvent.click(screen.getByTestId('background-owner-tab-state'))
+    expect(screen.getByTestId('state-background-properties')).toBeInTheDocument()
+    // Inheriting a scene with no override shows the scene's color as effective.
+    expect(screen.getByTestId('state-background-properties-effective')).toHaveTextContent(sceneColor)
+    // No override exists yet: no "恢复跟随场景" revert action is offered.
+    expect(screen.getByTestId('state-background-properties-color-inherit-status'))
+      .not.toHaveTextContent('恢复跟随场景')
+
+    const swatch = screen.getByLabelText('背景颜色选择器')
+    fireEvent.change(swatch, { target: { value: '#998877' } })
+
+    const state = activeV9Scene().presentation!.states.find((candidate) => candidate.id === 'state_initial')!
+    expect(state.backgroundColor).toBe('#998877')
+    // The override is scoped to the state; the base scene stays untouched.
+    expect(activeV9Scene().backgroundColor).toBe(sceneColor)
+  })
+
+  it('re-inheriting the state color converges its override back to undefined', () => {
+    const store = useEditorStore.getState()
+    store.setActivePresentationState('state_initial')
+    store.updatePresentationState('state_initial', { backgroundColor: '#665544' })
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    fireEvent.click(screen.getByTestId('background-owner-tab-state'))
+
+    fireEvent.click(screen.getByRole('button', { name: '颜色恢复跟随场景' }))
+
+    const state = activeV9Scene().presentation!.states.find((candidate) => candidate.id === 'state_initial')!
+    expect(state.backgroundColor).toBeUndefined()
   })
 })
