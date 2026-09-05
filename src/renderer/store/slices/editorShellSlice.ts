@@ -1,4 +1,5 @@
 import type { EditorStoreKernel } from '../editorStoreKernel'
+import { sameBackgroundPreviewTarget, type BackgroundPreview, type BackgroundPreviewTarget } from '../../authoring/backgroundPreview'
 
 export type SidebarTab =
   | 'elements'
@@ -22,7 +23,7 @@ export type EditorShellOwnedState = {
   errorMessage: string | null
   editingTextNodeId: string | null
   slideDrawTool: SlideLineDrawTool
-  previewBackgroundColor: string | null
+  previewBackgroundColor: BackgroundPreview | null
 }
 
 export type EditorShellPorts = {
@@ -49,7 +50,7 @@ export function createEditorShellSlice(
   setStatus(message: string | null): void
   setError(message: string | null): void
   setSlideDrawTool(tool: SlideLineDrawTool): void
-  setPreviewBackgroundColor(color: string | null): void
+  setPreviewBackgroundColor(preview: BackgroundPreview | null, expected?: BackgroundPreviewTarget): void
 } {
   return {
     setEditorMode(mode) {
@@ -95,8 +96,10 @@ export function createEditorShellSlice(
             : {}),
       })
     },
-    setPreviewBackgroundColor(color: string | null) {
-      shell.patch({ previewBackgroundColor: color })
+    setPreviewBackgroundColor(preview, expected) {
+      const current = shell.read().previewBackgroundColor
+      if (!preview && expected && current && !sameBackgroundPreviewTarget(current.target, expected)) return
+      shell.patch({ previewBackgroundColor: preview })
     },
   }
 }

@@ -530,7 +530,8 @@ describe('ARCH-2 resource-safety ratchet', () => {
       },
       readInstalledPackages: () => ({ [packageId]: installedPackage }),
       replacePackageAtTarget: () => ({ ok: true }),
-      importPackages: () => undefined,
+      captureInsertionTarget: () => null,
+      insertPackages: () => ({ ok: false }),
       selectComponentPackage: async () => {
         componentEvents.push('read-manual-package')
         return null

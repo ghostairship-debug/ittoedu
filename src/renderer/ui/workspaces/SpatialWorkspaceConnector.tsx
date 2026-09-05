@@ -1,3 +1,4 @@
+import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
 import { useCallback, useMemo } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseAuthoringSession } from '../../authoring/courseAuthoringSession'
@@ -54,17 +55,14 @@ export function SpatialWorkspaceConnector() {
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
   const view = useMemo(() => {
     if (!session) return null
-    const baseView = buildSpatialEditorView({
-      project: session.history.present,
+    return buildSpatialEditorView({
+      project: projectWithBackgroundPreview(session.history.present, canvasMode === 'edit' ? previewBackgroundColor : null, {
+        locationId: session.selection.locationId, stateId: null, generation: authoringSession?.token.generation ?? -1,
+      }),
       locationId: session.selection.locationId,
       sessionCamera: session.sessionCamera,
     })
-    if (!previewBackgroundColor) return baseView
-    return {
-      ...baseView,
-      backgroundColor: previewBackgroundColor,
-    }
-  }, [session, previewBackgroundColor])
+  }, [session, previewBackgroundColor, authoringSession, canvasMode])
   const assetMimeTypes = useMemo(() => session
     ? Object.fromEntries(
       Object.entries(session.history.present.assets).map(([id, meta]) => [id, meta.mimeType]),

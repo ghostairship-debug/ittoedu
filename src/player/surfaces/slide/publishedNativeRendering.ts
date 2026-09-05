@@ -20,6 +20,7 @@ import { renderImageNodeCanvas } from '../../../shared/imageEffects'
 import { registerPublishedCaptureResource } from '../publishedCapture'
 import { paintPublishedFormula } from '../publishedFormula'
 import { paintPublishedNativeText } from '../publishedNativeText'
+import { colorWithAlpha } from '../../../shared/colorAlpha'
 import { buildNativeTableLayout } from '../../../shared/nativeTableLayout'
 import { buildNativeChartView } from '../../../shared/nativeChartView'
 
@@ -531,10 +532,10 @@ export function paintPublishedNativeTable(
       td.style.verticalAlign = s.verticalAlign
       td.style.color = s.textColor
       if (s.fillOpacity > 0) {
-        td.style.backgroundColor = s.fillColor
+        td.style.backgroundColor = colorWithAlpha(s.fillColor, s.fillOpacity)
       }
       if (s.borderWidth > 0) {
-        td.style.border = `${s.borderWidth}px ${s.lineStyle} ${s.borderColor}`
+        td.style.border = `${s.borderWidth}px ${s.lineStyle} ${colorWithAlpha(s.borderColor, s.borderOpacity)}`
       } else {
         td.style.border = 'none'
       }
@@ -592,13 +593,14 @@ export function paintPublishedNativeChart(
     titleText.setAttribute('font-weight', 'bold')
     titleText.setAttribute('fill', input.style.textColor)
     titleText.textContent = chartView.title
+    titleText.dataset.chartText = 'title'
     svg.appendChild(titleText)
   }
 
   // Cartesian chart
-  if (chartView.cartesianSeries) {
+  if (chartView.cartesianSeries && (input.chartType === 'bar' || input.chartType === 'line' || input.chartType === 'area')) {
     // Gridlines
-    if (chartView.gridLines) {
+    if (input.style.showGridLines && chartView.gridLines) {
       for (const line of chartView.gridLines) {
         const lineEl = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'line')
         lineEl.setAttribute('x1', String(chartView.plotArea.x))
@@ -608,6 +610,32 @@ export function paintPublishedNativeChart(
         lineEl.setAttribute('stroke', '#e5e7eb')
         lineEl.setAttribute('stroke-width', '1')
         svg.appendChild(lineEl)
+      }
+    }
+
+    // A nested SVG clips all series to the plot without shared/global clip IDs.
+    const plot = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    const area = chartView.plotArea
+    plot.setAttribute('x', String(area.x))
+    plot.setAttribute('y', String(area.y))
+    plot.setAttribute('width', String(area.width))
+    plot.setAttribute('height', String(area.height))
+    plot.setAttribute('viewBox', `${area.x} ${area.y} ${area.width} ${area.height}`)
+    plot.style.overflow = 'hidden'
+    svg.appendChild(plot)
+
+    if (input.style.showValueAxis) {
+      for (const tick of chartView.gridLines ?? []) {
+        const label = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
+        label.setAttribute('x', String(area.x - 8))
+        label.setAttribute('y', String(tick.y + 4))
+        label.setAttribute('text-anchor', 'end')
+        label.setAttribute('font-size', '12')
+        label.setAttribute('font-family', input.style.fontFamily)
+        label.setAttribute('fill', input.style.textColor)
+        label.dataset.chartValueTick = 'true'
+        label.textContent = String(tick.value)
+        svg.appendChild(label)
       }
     }
 
@@ -621,7 +649,7 @@ export function paintPublishedNativeChart(
           rect.setAttribute('width', String(bar.width))
           rect.setAttribute('height', String(bar.height))
           rect.setAttribute('fill', bar.color)
-          svg.appendChild(rect)
+          plot.appendChild(rect)
         }
       }
       if (s.areaPathD) {
@@ -629,7 +657,7 @@ export function paintPublishedNativeChart(
         areaEl.setAttribute('d', s.areaPathD)
         areaEl.setAttribute('fill', s.color)
         areaEl.setAttribute('fill-opacity', '0.25')
-        svg.appendChild(areaEl)
+        plot.appendChild(areaEl)
       }
       if (s.linePathD) {
         const lineEl = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path')
@@ -637,9 +665,23 @@ export function paintPublishedNativeChart(
         lineEl.setAttribute('stroke', s.color)
         lineEl.setAttribute('stroke-width', '2.5')
         lineEl.setAttribute('fill', 'none')
-        svg.appendChild(lineEl)
+        plot.appendChild(lineEl)
       }
       for (const pt of s.points) {
+        if (input.style.showDataLabels && pt.y >= area.y && pt.y <= area.y + area.height) {
+          const label = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
+          const bar = s.bars?.find((item) => item.categoryId === pt.categoryId)
+          label.setAttribute('x', String(bar ? bar.x + bar.width / 2 : pt.x))
+          label.setAttribute('y', String(Math.max(area.y + 12, pt.y - 7)))
+          label.setAttribute('text-anchor', 'middle')
+          label.setAttribute('font-family', input.style.fontFamily)
+          label.setAttribute('font-size', '12')
+          label.setAttribute('fill', input.style.textColor)
+          label.dataset.chartDataLabel = 'true'
+          label.textContent = String(pt.value)
+          plot.appendChild(label)
+        }
+        if (input.chartType === 'bar') continue
         const circle = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'circle')
         circle.setAttribute('cx', String(pt.x))
         circle.setAttribute('cy', String(pt.y))
@@ -647,12 +689,12 @@ export function paintPublishedNativeChart(
         circle.setAttribute('fill', s.color)
         circle.setAttribute('stroke', '#ffffff')
         circle.setAttribute('stroke-width', '1.5')
-        svg.appendChild(circle)
+        plot.appendChild(circle)
       }
     }
 
     // Category labels
-    if (chartView.categories) {
+    if (input.style.showCategoryAxis && chartView.categories) {
       for (const cat of chartView.categories) {
         const catText = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
         catText.setAttribute('x', String(cat.x + cat.width / 2))
@@ -662,6 +704,7 @@ export function paintPublishedNativeChart(
         catText.setAttribute('font-size', '12')
         catText.setAttribute('fill', input.style.textColor)
         catText.textContent = cat.label
+        catText.dataset.chartCategoryId = cat.id
         svg.appendChild(catText)
       }
     }
@@ -670,20 +713,37 @@ export function paintPublishedNativeChart(
   // Circular chart (pie / donut)
   if (chartView.circularSlices) {
     for (const slice of chartView.circularSlices) {
+      if (!slice.pathD) continue
       const path = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path')
       path.setAttribute('d', slice.pathD)
+      path.setAttribute('fill-rule', 'evenodd')
       path.setAttribute('fill', slice.color)
       path.setAttribute('stroke', '#ffffff')
       path.setAttribute('stroke-width', '1.5')
       svg.appendChild(path)
+      if (input.style.showDataLabels && slice.value > 0) {
+        const label = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'text')
+        label.setAttribute('x', String(slice.labelX))
+        label.setAttribute('y', String(slice.labelY))
+        label.setAttribute('text-anchor', 'middle')
+        label.setAttribute('font-family', input.style.fontFamily)
+        label.setAttribute('font-size', '12')
+        label.setAttribute('fill', input.style.textColor)
+        label.dataset.chartDataLabel = 'true'
+        label.textContent = `${slice.value} (${slice.percentage}%)`
+        svg.appendChild(label)
+      }
     }
   }
 
   // Legend
   if (chartView.legend && chartView.legend.items.length > 0) {
     const legG = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'g')
-    let currentX = chartView.plotArea.x
-    const legY = chartView.legend.position === 'top' ? 36 : input.height - 14
+    const position = chartView.legend.position
+    const vertical = position === 'left' || position === 'right'
+    let currentX = vertical ? (position === 'left' ? 8 : input.width - 84) : chartView.plotArea.x
+    let legY = vertical ? chartView.plotArea.y + 12 : position === 'top' ? (input.title ? 42 : 18) : input.height - 14
+    legG.dataset.chartLegend = position
     for (const item of chartView.legend.items) {
       const dot = wrap.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'rect')
       dot.setAttribute('x', String(currentX))
@@ -701,9 +761,13 @@ export function paintPublishedNativeChart(
       lbl.setAttribute('font-size', '11')
       lbl.setAttribute('fill', input.style.textColor)
       lbl.textContent = item.label
+      if (input.chartType === 'pie' || input.chartType === 'donut') lbl.dataset.chartCategoryId = item.id
+      else lbl.dataset.chartSeriesId = item.id
+      if (vertical && item.label.length > 6) lbl.textContent = `${item.label.slice(0, 5)}…`
       legG.appendChild(lbl)
 
-      currentX += item.label.length * 12 + 30
+      if (vertical) legY += 20
+      else currentX += item.label.length * 12 + 30
     }
     svg.appendChild(legG)
   }
@@ -720,21 +784,29 @@ export function paintPublishedNativeInput(
   const style = input.style
 
   const inputEl = wrap.ownerDocument.createElement('input')
-  inputEl.type = input.answerType === 'number' ? 'number' : 'text'
+  inputEl.type = 'text'
+  if (input.answerType === 'number') inputEl.inputMode = 'decimal'
   inputEl.placeholder = input.placeholder ?? ''
+  inputEl.setAttribute('aria-label', input.placeholder || '填写答案')
   inputEl.dataset.inputNodeId = input.id
-  inputEl.dataset.stateKey = input.stateKey
-  inputEl.dataset.validityKey = input.validityKey
-  inputEl.style.width = '100%'
+  inputEl.style.flex = '1'
+  inputEl.style.minWidth = '0'
   inputEl.style.height = '100%'
   inputEl.style.boxSizing = 'border-box'
   inputEl.style.fontFamily = style.fontFamily
   inputEl.style.fontSize = `${style.fontSize}px`
   inputEl.style.color = style.textColor
-  inputEl.style.backgroundColor = style.fillColor
-  inputEl.style.border = `${style.borderWidth}px solid ${style.borderColor}`
+  inputEl.style.backgroundColor = colorWithAlpha(style.fillColor, style.fillOpacity)
+  inputEl.style.border = `${style.borderWidth}px solid ${colorWithAlpha(style.borderColor, style.borderOpacity)}`
   inputEl.style.borderRadius = `${style.cornerRadius}px`
   inputEl.style.textAlign = style.horizontalAlign
   inputEl.style.padding = `${style.padding}px`
-  wrap.appendChild(inputEl)
+  const form = wrap.ownerDocument.createElement('form')
+  form.style.cssText = 'display:flex;gap:8px;width:100%;height:100%;margin:0;pointer-events:auto'
+  const button = wrap.ownerDocument.createElement('button')
+  button.type = 'submit'
+  button.textContent = '提交'
+  button.style.cssText = 'flex:none;min-width:60px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:white;font:inherit;cursor:pointer'
+  form.append(inputEl, button)
+  wrap.appendChild(form)
 }

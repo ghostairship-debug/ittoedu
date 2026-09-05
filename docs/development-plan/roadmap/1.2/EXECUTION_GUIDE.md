@@ -13,21 +13,17 @@
 
 产品事实冲突时按总纲/架构合同/正式 Schema/源码证据裁决；文件改名但 Owner 未变时更新 spec 指针继续。只有改变持久化语义、能力取舍或导出承诺才停止问 Owner，不能把普通 symbol relocation 当阻断。
 
-## 2. 当前收尾顺序（2026-09-05 本地复审）
+## 2. 当前收尾结果（2026-09-05 本地复审）
 
-本地复审确认原报告 F1–F5，并新增 L1–L6；精确复现、代码定位和未验证范围见 [复审基线](../../reviews/1.2-local-review-2026-09-05.md)。当前已有初始 Native parser 接线、Table/Chart commands、常用色板、统一图表入口、背景 resolver 和六 owner UI；保留有效实现，不按完整版本顺序从头开发。下表定义优先顺序与退出门，不产生协调状态。
+原始 F1–F5、L1–L6 的复现和定位见[复审基线](../../reviews/1.2-local-review-2026-09-05.md)。后续提交及本轮修复已补齐正式 Native 增量、Table/Chart owner/state、画布文字与几何、表格原子追加行和透明度、图表绘制、文本背景/高亮、背景预览归属、组件直接添加、input 与连续颜色预览；适用证据和边界见[用户可用性修复复核](../../reviews/1.2-usability-fixes-2026-09-05.md)。保留有效实现和已通过证据，不按旧失败清单或完整 DAG 从头开发。本轮结果如下，不产生协调状态。
 
 | 顺序 | 责任节点 | 当前问题与退出证据 |
 | --- | --- | --- |
-| 1 | `r12-008-native-authoring-transport` | L1 / P1：初始快照正确，后续 producer 经旧六类投影漏掉 Table/Chart/input。初始与增量使用同一正式 Native 输入，数据/样式/几何与 Undo/Redo 在真实作者宿主即时呈现并 ACK；保留 strict、身份和 barrier，不扩 legacy SceneNode。 |
-| 2 | `r12-010-table-core`，随后 `r12-020-chart-core` | L2、L3 / P1：修复命名状态误写 base 和合法 surface target 被拒绝。两者复用既有 effective owner/state 边界，无第二 writer；base、两个 named state 与 surface 独立，失败零写入。Table core 同时提供 L5 的末格文本提交+追加行原子命令，UI 接线留给 Table delivery。 |
-| 3 | `r12-007-input-response-delivery` | F1 / P1：在共同传输通过后完成 factory/简洁配置/规则族、双键原子写入、真实 Slide port、try-run/Player/HTML、PPTX 静态填写区和诊断。禁止只删除 unsupported 分支；输入先写双键再恰好执行一支规则。 |
-| 4 | `r12-011-table-authoring-delivery` | L5、L6 / P2：末格 Tab 一次提交文本和追加行，焦点到新行稳定 ID，无 stale 误报且一次 Undo 恢复；填充和边框分别消费 alpha，文字不随之透明。同时用真实 UI 闭合 core 的 owner/state 与同步修复。 |
-| 5 | `r12-021-chart-authoring-delivery` | F3–F5 / P2：pie/donut 单一非零数据完整成圆/环；轴、网格、标签、四向图例真实生效；bar 无折线/点叠画，自定义轴范围的几何留在 plot。覆盖作者、Player/HTML 与适用原生 PPTX，不因 UI 开关存在判为完成。 |
-| 6 | `r12-040-background-authoring` | L4、F2 / P2：合法 HEX 在 focus→Esc→blur 后零提交；真实颜色 consumer 接通 transient preview，最终一次提交，取消/切目标清除预览。保留常用色、稳定控件身份及 Chart 整表草稿；原生连续拖动仍需真实 carrier 验证。 |
-| 7 | `r12-050-native-closure` → `r12-060-release` | 所有上游 Acceptance 通过后，汇总本轮全部反例的正式回归和真实 UI/保存重开/历史/Player/HTML/导出证据，再形成 engineering candidate。closure 不接管上游修复；70 项既有通过与局部 build 不等于本版已完成。 |
+| 1 | `r12-007-input-response-delivery` | F1 已实现：可见插入、简洁配置、规则族与复制/删除、双键原子写入、真实 Slide port、try-run/Player/HTML、PPTX 可编辑静态填写区和诊断。文本/数值、IME、保存重开和独立导出已有证据；详见修复记录。 |
+| 2 | `r12-040-background-authoring` | F2 已实现：非背景颜色接通 transient preview，自有连续面板真实拖动可见，取消/切目标零误写，完成一次 Undo。保留 HEX、系统色盘与常用色；Chart 颜色与数据继续由原草稿一次应用。 |
+| 3 | `r12-050-native-closure` → `r12-060-release` | 已汇总正式 fixture 与真实操作，类型/构建/能力/路线检查通过；首次完整验证的失败项定向关闭，57 个桌面用例全部取得有效通过结果，最后 Flow 改动另复验通过。当前形成 engineering candidate；尚未创建候选标签或作出 S1 accepted 声明。 |
 
-按用户本轮交接要求，只为依赖已具备、失败明确的 transport、Table core、Chart core 与颜色修复创建当前任务卡；具体状态/Owner 以 [任务板](../../TASK_BOARD.md) 为准。input、Table/Chart delivery 等待其全部依赖 Acceptance，再按协议实例化；closure/release 不预建占位卡。上述修复共享 `authoring-slide` 等写锁，默认单 writer 顺序执行，多个可启动节点不表示可在共享工作树并行写。完成卡删除后，下一执行者据依赖证据进入后续规格。
+前一批协调卡已清空；本轮单执行者单会话修复不建卡。后续实例化只按当前事实、依赖和工作协议，具体状态/Owner 以[任务板](../../TASK_BOARD.md)为准，不恢复历史卡或预建 closure/release 占位卡。共享 `authoring-slide` 等写锁的实现保持单 writer 顺序执行。
 
 1.3 的 Flow/Spatial 图表是独立必选扩展，详见 [1.3 路线](../1.3/README.md)；本次 1.2 修复不提前放开容器。表格跨 Surface 扩展不在本次范围。项目色板/Design Token 范围应用在 1.3 接同一颜色控件，1.2 不为它预建主题框架。
 

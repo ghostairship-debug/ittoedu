@@ -24,6 +24,7 @@ import type {
   NativeTableColumn,
   NativeTableRow,
   NativeTableStyle,
+  NativeInputContent,
 } from '@/shared/contracts/native-v1/types'
 import type { NativeLayerItem } from '@/shared/contracts/course-project-v9/types'
 import type { ComponentManifest } from '@/shared/componentTypes'
@@ -31,6 +32,25 @@ import type { ComponentManifest } from '@/shared/componentTypes'
 const DEFAULT_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
 
 export type IdFactory = () => string
+
+export function createInputLayerItem(
+  data: NativeInputContent,
+  options: { idFactory?: IdFactory; x?: number; y?: number; id?: string } = {},
+): NativeLayerItem {
+  return {
+    layerItemId: options.id ?? `input_${(options.idFactory ?? nanoid)()}`,
+    label: '填空题', kind: 'native',
+    frame: { mode: 'absolute', x: options.x ?? 400, y: options.y ?? 300, width: 480, height: 64 },
+    order: 0, visible: true, locked: false, rotation: 0, opacity: 1,
+    hitPolicy: 'auto', playbackInitialVisibility: 'inherit',
+    content: { nativeType: 'input', data: structuredClone(data) },
+  }
+}
+
+export const DEFAULT_INPUT_STYLE: NativeInputContent['style'] = {
+  fontFamily: DEFAULT_FONT_FAMILY, fontSize: 24, textColor: '#1f2937', fillColor: '#ffffff', fillOpacity: 1,
+  borderColor: '#94a3b8', borderOpacity: 1, borderWidth: 1, cornerRadius: 6, horizontalAlign: 'left', padding: 10,
+}
 
 export type TextNodeOptions = Partial<Omit<TextNode, 'id' | 'type' | 'style'>> & {
   id?: string
@@ -816,4 +836,3 @@ export function rebuildChartItemIds(
     style: { ...content.style },
   } as NativeChartContent
 }
-

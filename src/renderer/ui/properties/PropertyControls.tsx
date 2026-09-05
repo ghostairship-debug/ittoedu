@@ -17,6 +17,10 @@ interface PropertyDraftBindingValue {
 
 const PropertyDraftBindingContext = createContext<PropertyDraftBindingValue | null>(null)
 
+export function usePropertyDraftBindingKey(): string {
+  return useContext(PropertyDraftBindingContext)?.key ?? 'unbound'
+}
+
 /**
  * Binds buffered property drafts to the exact canonical authoring target that
  * produced them. Dirty inputs stay visible after navigation/revision changes,

@@ -245,6 +245,8 @@ export function ElementsTab({
   const slideDrawTool = useEditorStore((state) => state.slideDrawTool)
   const setSlideDrawTool = useEditorStore((state) => state.setSlideDrawTool)
   const addTableNode = useEditorStore((state) => state.addTableNode)
+  const addInputNode = useEditorStore(state => state.addInputNode)
+  const inputAvailable = useEditorStore(state => state.slideBackend?.getSession().scope === 'scene')
   const addChartNode = useEditorStore((state) => state.addChartNode)
   const mediaAssets = useEditorStore(selectMediaAssets)
   const audioSettings = useEditorStore(selectAudioSettings)
@@ -520,6 +522,11 @@ export function ElementsTab({
               >
                 <span className="element-icon"><SlidersHorizontal size={20} /></span>
                 教师控制器
+              </button>
+            )}
+            {authoringSurface === 'slide' && inputAvailable && (!searchQuery || '填空题输入答案'.includes(searchQuery)) && (
+              <button type="button" aria-label="填空题" className="element-card element-card--primary" data-testid="add-input" onClick={addInputNode}>
+                <span className="element-icon"><Type size={20} /></span>填空题
               </button>
             )}
             {showTable && (

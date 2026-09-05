@@ -1097,7 +1097,21 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#slideInteractionPort = new PublishedSlideInteractionSurfacePort(
       this.#interactionPort,
       this.#videoHandles,
-      { capture: this.#authoring !== null || this.#staticCapture },
+      {
+        capture: this.#authoring !== null || this.#staticCapture,
+        root,
+        describeInput: nodeId => {
+          const entry = this.getPublishedSlideRenderPlan().layers.find(layer =>
+            layer.source === 'scene' && layer.kind === 'native' && layer.renderInput.id === nodeId)
+          if (!entry || entry.kind !== 'native' || entry.renderInput.type !== 'input') return null
+          const input = entry.renderInput
+          const value = this.#payload.courseState.find(declaration => declaration.key === input.stateKey)
+          const validity = this.#payload.courseState.find(declaration => declaration.key === input.validityKey)
+          if (!value || value.valueType !== (input.answerType === 'text' ? 'string' : 'number') || validity?.valueType !== 'boolean') return null
+          return { answerType: input.answerType, stateKey: input.stateKey, validityKey: input.validityKey,
+            defaultValue: value.defaultValue as string | number }
+        },
+      },
     )
     this.#render()
     this.#restoreInteractionsIfActive()

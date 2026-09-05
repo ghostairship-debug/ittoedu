@@ -97,9 +97,9 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 当前开发以已签署的 `v1.1.1` 为维护基线；1.1 阶段的执行过程和已闭合评审由 Git 历史保存，不在当前总纲维护完成记录。
 
-1.2 已有 Native 合同与多项实现，当前进入本地复审驱动的修复收尾。先读 [`1.2/EXECUTION_GUIDE.md`](docs/development-plan/roadmap/1.2/EXECUTION_GUIDE.md) 与 [`1.2/IMPLEMENTATION_CONTRACT.md`](docs/development-plan/roadmap/1.2/IMPLEMENTATION_CONTRACT.md)，再按 [`1.2/README.md`](docs/development-plan/roadmap/1.2/README.md) 的依赖与写锁推进。完整版本 DAG 不表示需要重新开发已成立的根节点；路线节点本身不自动创建任务卡。
+1.2 本地复审驱动的修复已完成工程验证，当前为已完成验证的 engineering candidate。先读 [`1.2/EXECUTION_GUIDE.md`](docs/development-plan/roadmap/1.2/EXECUTION_GUIDE.md) 与 [`1.2/IMPLEMENTATION_CONTRACT.md`](docs/development-plan/roadmap/1.2/IMPLEMENTATION_CONTRACT.md)，再按 [`1.2/README.md`](docs/development-plan/roadmap/1.2/README.md) 的依赖与写锁推进。完整版本 DAG 不表示需要重新开发已成立的根节点；路线节点本身不自动创建任务卡。
 
-当前优先修复 Native 作者画布增量陈旧、Table/Chart 命名状态误写基础数据及合法 Slide surface owner 被拒绝，再交付 input 的完整作者与运行纵切；随后闭合表格末格 Tab 原子事务、表格透明度、图表几何与样式、颜色取消及真实连续预览。现有初始同步、常用色板和统一图表入口继续保留。具体反例、责任节点和退出证据只在执行包维护；以上缺口关闭并通过真实编辑、保存重开、历史、Player/HTML 与适用导出后，才进入 1.2 闭合及候选门。1.3 独立节点可按依赖推进，但不得继承尚未通过的图表/颜色能力，或把 1.2 缺陷延至 S1。Flow/Spatial 图表仍属于 1.3；1.2 保持当前 strict 有效域。
+input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和共享颜色连续预览（F2）已完成实现；真实调色采用应用内连续面板，保留系统色盘、常用色与 HEX。Native 传输、Table/Chart owner/state、作者可用性及本轮收尾证据由[修复复核记录](docs/development-plan/reviews/1.2-usability-fixes-2026-09-05.md)承接，不再按旧失败清单重复开发。单元/集成失败项已定向关闭，57 个桌面用例经首次运行与补跑全部通过，最终 Flow 改动另经复验；未重复运行未受影响的全量组。S1 人工验收仍按 1.3 的签署边界执行；当前尚未创建候选或 accepted 标签。Flow/Spatial 图表仍属于 1.3；1.2 保持当前 strict 有效域。
 
 ### 5.2 1.2–1.5：人工创作与外部 Builder 生产力
 

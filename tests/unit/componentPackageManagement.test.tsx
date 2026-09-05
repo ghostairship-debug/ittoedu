@@ -600,3 +600,64 @@ describe('ComponentsTab locate component usage', () => {
     }
   })
 })
+
+
+describe('add component packages directly to the current canvas', () => {
+  it.each(['slide', 'flow', 'spatial'] as const)('inserts a %s instance and its package in one saveable history step', surface => {
+    if (surface === 'flow') useEditorStore.getState().createNewFlowProject()
+    if (surface === 'spatial') useEditorStore.getState().createNewSpatialProject()
+    const data = componentPackage('1.0.0')
+    const before = activeCourseProject()
+    const target = useEditorStore.getState().captureComponentInsertionTarget()!
+    const result = useEditorStore.getState().insertComponentPackagesAtTarget(target, [data])
+    expect(result.ok, result.reason).toBe(true)
+    expect(result.layerItemIds).toHaveLength(1)
+    expect(activeCourseProject().revision).toBe(before.revision + 1)
+    expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
+    const bytes = useEditorStore.getState().exportV9SlideCandidateArchive()!
+    const reopened = openCourseProjectArchive(bytes)
+    expect(collectCourseComponentPackageUsage(reopened.project, PACKAGE_ID).references).toHaveLength(1)
+    useEditorStore.getState().undo()
+    expect(activeCourseProject()).toEqual(before)
+    expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
+    useEditorStore.getState().redo()
+    expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
+    expectComponentPackageContents(useEditorStore.getState().componentPackages[PACKAGE_ID], data)
+  })
+
+  it('reuses an embedded package and undoes only the new instance', () => {
+    const data = componentPackage('1.0.0')
+    for (let i = 0; i < 2; i++) {
+      const target = useEditorStore.getState().captureComponentInsertionTarget()!
+      expect(useEditorStore.getState().insertComponentPackagesAtTarget(target, [data]).ok).toBe(true)
+    }
+    expect(Object.keys(activeCourseProject().componentPackages)).toEqual([PACKAGE_ID])
+    expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(2)
+    useEditorStore.getState().undo()
+    expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
+    expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeDefined()
+  })
+
+  it.each(['revision', 'owner', 'project'] as const)('rejects a late addition after a %s change without embedding anything', change => {
+    const target = useEditorStore.getState().captureComponentInsertionTarget()!
+    if (change === 'revision') useEditorStore.getState().addTextNode()
+    if (change === 'owner') useEditorStore.getState().setEditingScope('global')
+    if (change === 'project') useEditorStore.getState().createNewProject()
+    const before = activeCourseProject()
+    expect(useEditorStore.getState().insertComponentPackagesAtTarget(target, [componentPackage('1.0.0')]).ok).toBe(false)
+    expect(activeCourseProject()).toEqual(before)
+    expect(useEditorStore.getState().componentPackages).toEqual({})
+  })
+
+  it('rolls back the whole batch if one component cannot be placed', () => {
+    useEditorStore.getState().setEditingScope('global')
+    const before = activeCourseProject()
+    const target = useEditorStore.getState().captureComponentInsertionTarget()!
+    const result = useEditorStore.getState().insertComponentPackagesAtTarget(target, [
+      componentPackage('1.0.0'), componentPackage('1.0.0', ['scene'], 'com.example.scene-only'),
+    ])
+    expect(result.ok).toBe(false)
+    expect(activeCourseProject()).toEqual(before)
+    expect(useEditorStore.getState().componentPackages).toEqual({})
+  })
+})

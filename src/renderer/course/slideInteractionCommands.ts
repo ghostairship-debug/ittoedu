@@ -79,10 +79,10 @@ function assertRuleTargetsUnlocked(
   }
 }
 
-function locateSceneInteractions(
+function locateScene(
   project: CourseProjectDocument,
   locationId: string,
-): InteractionRule[] {
+) {
   const location = project.locations.find((candidate) => candidate.id === locationId)
   if (!location || location.kind !== 'slide-scene') {
     throw new Error('当前幻灯片位置已失效')
@@ -93,7 +93,11 @@ function locateSceneInteractions(
   }
   const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
   if (!scene) throw new Error('当前幻灯片已失效')
-  return scene.interactions
+  return scene
+}
+
+function locateSceneInteractions(project: CourseProjectDocument, locationId: string): InteractionRule[] {
+  return locateScene(project, locationId).interactions
 }
 
 function locateRule(
@@ -221,9 +225,15 @@ export function deleteSlideInteractionRule(
   if (!current) throw new Error(emptyRuleScopeMessage())
   assertRuleTargetsUnlocked(history.present, current)
   const next = commitSlideProjectMutation(history.present, (draft) => {
-    const rules = locateSceneInteractions(draft, target.locationId)
+    const scene = locateScene(draft, target.locationId)
+    const rules = scene.interactions
     const index = rules.findIndex((candidate) => candidate.id === ruleId)
     if (index >= 0) rules.splice(index, 1)
+    // Professional rule deletion releases the managed family in the same transaction.
+    for (const item of scene.layerItems) {
+      if (item.kind === 'native' && item.content.nativeType === 'input' &&
+          item.content.data.ruleFamilyRuleIds.includes(ruleId)) item.content.data.ruleFamilyRuleIds = []
+    }
   }, now)
   return commitHistory(history, next)
 }

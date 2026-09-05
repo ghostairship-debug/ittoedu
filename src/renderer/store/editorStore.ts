@@ -811,6 +811,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
   })
   const componentAuthoringActions = createComponentAuthoringActions({
+    readSlideSession: () => selectSlideAuthoringBackend(get())?.getSession() ?? null,
     read: () => {
       const state = get()
       return {

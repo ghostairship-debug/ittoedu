@@ -403,6 +403,13 @@ export function adaptCoursePptxProducerFindings(
     pptxNativeEntries.forEach(({ item, path }) => {
       if (item.kind !== 'native') return
       const { nativeType } = item.content
+      if (nativeType === 'input') {
+        items.push({ severity: 'warning', code: 'static-export-warning',
+          message: `“${item.label}”将导出为可编辑的静态填写区，不保留提交和判题交互。`, path,
+          diagnosticTarget: resolveSchemaValidCourseProjectDiagnosticTarget(project, { path, layerItemId: item.layerItemId }),
+        })
+        return
+      }
       if (nativeType !== 'table' && nativeType !== 'chart') return
       const shared = {
         layerItemId: item.layerItemId,

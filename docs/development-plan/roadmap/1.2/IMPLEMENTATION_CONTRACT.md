@@ -420,7 +420,16 @@ DOCX 构建入口接收完整 `PublishedCourseV2Payload` 与目标 Flow surface 
 - 可见 UI 的 Table、Chart、input、Line 与 Background 入口均可由键盘到达；Table 支持 Tab/Shift+Tab 移格，input 的运行控件有 label/placeholder 可读名称，图表提供 title 与数据摘要 accessible text。
 - 只有 `r12-007-input-response-delivery` 在其实现完成后生成一次能力索引；`r12-050-native-closure` 在所有上游合入后重新生成最终索引并检查 source evidence 已覆盖 `src/shared/contracts/**`。并行节点不得手改 generated JSON。
 
-## 11. 共同停止条件
+## 11. 用户复核后的作者交互验收补充（2026-09-05）
+
+- Table 双击画布单元格进入文字编辑，Enter/Tab 提交并移格，末格追加行与文本为一次事务；Esc 取消，IME 不误提交。Chart 标题、分类名和系列名可从画布进入编辑，沿用既有数据草稿和稳定 ID，不产生第二份内容状态。
+- Table/Chart 选中外框、旋转/缩放手柄和拖动期间的临时几何必须来自正式 V9 LayerItem；不能扩 legacy SceneNode。pointer move 只改变预览，pointer up 一次 canonical transaction；取消/切目标恢复，base/named state/surface 语义一致。
+- 从组件添加入口选择包后，完成包准备、当前合法 owner 的实例创建、选中和定位；异步开始时捕获目标，结束时复核，失败或过期零实例写入。新包与新实例采用一致事务；已安装包复用。库管理入口与画布添加入口的语义明确。
+- Native 文本背景颜色/alpha/圆角由共用 painter 消费；取消高亮必须保留正式 nullable 值，不能将其误当删除必填字段。保持既有 override 删除语义和 strict 校验，不新增 wire。
+- 颜色预览带目标身份，经对应有效 owner/继承解析；取消、Undo、切目标后均能继续编辑。组件布尔属性的长说明占用可读内容宽度，不落在 checkbox 窄列。
+- 修复验收以真实作者操作、Undo/Redo、保存重开和适用 Player/HTML/导出结果为准；原有测试通过或任务板清空不等于以上能力完成。
+
+## 12. 共同停止条件
 
 以下不是实现选择，而是越界；命中时保留零部分写入证据并升级 Owner：
 

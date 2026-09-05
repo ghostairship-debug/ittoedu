@@ -31,6 +31,7 @@ export interface FlowLocationWorkspaceProps {
   readonly assets: Readonly<Record<string, AssetMeta>>
   readonly selection: FlowEditorSelection | null
   readonly textEdit: FlowTextEditSession | null
+  readonly previewTextEdit?: FlowTextEditSession | null
   readonly canvasMode: FlowCanvasMode
   readonly editingScope: FlowEditingScope
   readonly assetFiles: Record<string, Uint8Array>
@@ -46,6 +47,7 @@ export function FlowLocationWorkspace({
   assets,
   selection,
   textEdit,
+  previewTextEdit,
   canvasMode,
   editingScope,
   assetFiles,
@@ -130,6 +132,7 @@ export function FlowLocationWorkspace({
             assets={assets}
             selection={selection}
             textEdit={textEdit}
+            previewTextEdit={previewTextEdit}
             commands={commands}
             assetFiles={assetFiles}
             componentPackages={componentPackages}

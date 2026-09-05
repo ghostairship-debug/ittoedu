@@ -25,6 +25,7 @@ import {
 } from '../../course/v9SlideContentCommands'
 import { addSlideTableLayer } from '../../course/v9TableCommands'
 import { addSlideChartLayer } from '../../course/v9ChartCommands'
+import { addSlideInputLayer } from '../../course/v9SlideContentCommands'
 import {
   beginV9SlideContentEdit,
   cancelV9SlideContentEdit,
@@ -308,6 +309,7 @@ export function createSlideAuthoringSlice(
     lineGeometry: NativeLineGeometry
   }): void
   addTableNode(x?: number, y?: number): void
+  addInputNode(): void
   addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
   updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
@@ -701,6 +703,10 @@ export function createSlideAuthoringSlice(
         }, { expectedRevision: session.history.present.revision }),
         { statusMessage: '已添加表格' },
       )
+    },
+    addInputNode() {
+      runCandidateSession(session => addSlideInputLayer(session, {}, { expectedRevision: session.history.present.revision }),
+        { statusMessage: '已添加填空题与正确/错误反馈，可在属性中配置答案' })
     },
     addChartNode(chartType, x, y) {
       runCandidateSession(

@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { allocateInputStateKeys } from '../interactions/inputAuthoringState'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
 import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
@@ -269,6 +270,8 @@ function collectCopiedInteractionRules(
 export function remapCopiedInteractionRules(
   rules: readonly InteractionRule[],
   idMap: ReadonlyMap<string, string>,
+  ruleIds?: ReadonlyMap<string, string>,
+  stateKeys?: ReadonlyMap<string, string>,
 ): InteractionRule[] {
   const actionIdMap = new Map(
     rules.flatMap((rule) => rule.actions.map(
@@ -277,7 +280,10 @@ export function remapCopiedInteractionRules(
   )
   return rules.map((source) => {
     const rule = structuredClone(source)
-    rule.id = `rule-${nanoid(10)}`
+    rule.id = ruleIds?.get(source.id) ?? `rule-${nanoid(10)}`
+    for (const condition of rule.conditions) {
+      if ('key' in condition && stateKeys?.has(condition.key)) condition.key = stateKeys.get(condition.key)!
+    }
     if ('nodeId' in rule.trigger) {
       rule.trigger.nodeId = idMap.get(rule.trigger.nodeId) ?? rule.trigger.nodeId
     } else if (rule.trigger.type === 'animation.completed') {
@@ -286,6 +292,7 @@ export function remapCopiedInteractionRules(
     rule.actions.forEach((step) => {
       step.id = actionIdMap.get(step.id) ?? `action-${nanoid(10)}`
       const action = step.action
+      if (action.type === 'course-state.set' && stateKeys?.has(action.key)) action.key = stateKeys.get(action.key)!
       if (
         (isVideoInteractionAction(action) || isNodeMotionAction(action)) &&
         idMap.has(action.nodeId)
@@ -396,6 +403,21 @@ export function copySlideSceneClipboard(
     session.selection.locationId,
   )
   const sourceIds = new Set(uniqueIds)
+  // A managed answer is copied with its local feedback so it remains usable
+  // when pasted into another scene. Unlisted professional rules stay independent.
+  const families = new Set(uniqueIds.flatMap(id => {
+    const item = byId.get(id)!.item
+    return item.kind === 'native' && item.content.nativeType === 'input' ? item.content.data.ruleFamilyRuleIds : []
+  }))
+  for (const rule of scene.interactions) {
+    if (!families.has(rule.id)) continue
+    for (const { action } of rule.actions) {
+      if (isNodeMotionAction(action) && byId.has(action.nodeId) && !sourceIds.has(action.nodeId)) {
+        sourceIds.add(action.nodeId)
+        uniqueIds.push(action.nodeId)
+      }
+    }
+  }
   const items = uniqueIds.map((layerItemId) => ({
     item: structuredClone(byId.get(layerItemId)!.item) as LayerItem,
   }))
@@ -502,9 +524,24 @@ export function mutatePasteSlideSceneClipboard(
     idMap.set(entry.item.layerItemId, `${authoringDuplicateIdPrefix(entry.item)}-${nanoid(10)}`)
   }
   const pastedIds: string[] = []
+  const ruleIds = new Map(clipboard.interactions.map(rule => [rule.id, `rule-${nanoid(10)}`]))
+  const stateKeys = new Map<string, string>()
   for (const entry of clipboard.items) {
     const nextId = idMap.get(entry.item.layerItemId)!
     const duplicate = cloneClipboardItem(entry.item, nextId, idMap)
+    if (duplicate.kind === 'native' && duplicate.content.nativeType === 'input') {
+      const data = duplicate.content.data
+      if (stateKeys.has(data.stateKey) || stateKeys.has(data.validityKey)) throw new Error('所选输入共享状态键，请分别复制')
+      const keys = allocateInputStateKeys(draft, data.answerType, nanoid)
+      stateKeys.set(data.stateKey, keys.stateKey)
+      stateKeys.set(data.validityKey, keys.validityKey)
+      Object.assign(data, keys)
+      data.ruleFamilyRuleIds = data.ruleFamilyRuleIds.map(id => {
+        const mapped = ruleIds.get(id)
+        if (!mapped) throw new Error('剪贴板缺失输入判题规则，请重新复制')
+        return mapped
+      })
+    }
     duplicate.order = reserveTopSceneLayerOrder(draft, surface.id, scene.id)
     if (input.stateId !== null) duplicate.visible = false
     scene.layerItems.push(duplicate)
@@ -519,7 +556,7 @@ export function mutatePasteSlideSceneClipboard(
       showDuplicateInNamedState(presentationState, entry.item.visible, nextId)
     }
   }
-  const remapped = remapCopiedInteractionRules(clipboard.interactions, idMap)
+  const remapped = remapCopiedInteractionRules(clipboard.interactions, idMap, ruleIds, stateKeys)
   if (scene.interactions.length + remapped.length > MAX_SCENE_INTERACTIONS) {
     throw new Error(`当前范围最多 ${MAX_SCENE_INTERACTIONS} 条规则`)
   }

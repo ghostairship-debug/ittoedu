@@ -103,7 +103,7 @@ describe('组件目录 UI', () => {
     )
     fireEvent.click(screen.getByTestId('open-component-library'))
     fireEvent.click(screen.getByRole('checkbox', { name: '选择目录卡片' }))
-    fireEvent.click(screen.getByRole('button', { name: '加入工程（1）' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加到画布（1）' }))
 
     expect(screen.getByTestId('component-library')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '返回编辑器' })).toBeDisabled()
@@ -152,7 +152,7 @@ describe('组件目录 UI', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '关闭组件详情' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '选择目录卡片' }))
-    fireEvent.click(screen.getByRole('button', { name: '加入工程（1）' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加到画布（1）' }))
     expect(onAdd).toHaveBeenCalledWith([entry])
     expect(useEditorStore.getState().componentPackages[entry.packageId]).toBeUndefined()
   })

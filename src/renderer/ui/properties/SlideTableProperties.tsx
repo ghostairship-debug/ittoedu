@@ -8,7 +8,7 @@ import type {
   NativeTableContent,
   NativeTableStyle,
 } from '../../../shared/contracts/native-v1/types'
-import { ColorInput } from '../ColorInput'
+import { NativeColorInput as ColorInput } from './NativeColorPreview'
 import {
   BufferedInput,
   FontFamilyPicker,
@@ -23,6 +23,7 @@ export type SlideTablePropertiesView = PropertiesItemBase & {
 
 export interface SlideTablePropertiesCommands {
   readonly commitCellText: (cellId: string, text: string) => void
+  readonly commitLastCellAndAppendRow: (cellId: string, text: string) => void
   readonly patchStyle: (patch: Partial<NativeTableStyle>) => void
   readonly patchCellStyle: (cellId: string, patch: Partial<NativeTableCellStyle>) => void
   readonly setRowHeight: (rowId: string, height: number) => void
@@ -48,15 +49,13 @@ function TableCellInput({
   rowId,
   columnId,
   value,
-  onCommit,
   onNavigate,
   onActivate,
 }: {
   rowId: string
   columnId: string
   value: string
-  onCommit: (text: string) => void
-  onNavigate: (from: CellRef, direction: 1 | -1) => void
+  onNavigate: (from: CellRef, direction: 1 | -1, text: string) => void
   onActivate: (ref: CellRef) => void
 }) {
   const [draft, setDraft] = useState(value)
@@ -72,14 +71,6 @@ function TableCellInput({
       setDraft(value)
     }
   }, [value])
-
-  const commit = () => {
-    if (!editingRef.current) return
-    editingRef.current = false
-    const next = draft
-    baselineRef.current = next
-    if (next !== valueRef.current) onCommit(next)
-  }
 
   return (
     <input
@@ -112,8 +103,9 @@ function TableCellInput({
         if (composingRef.current || event.nativeEvent.isComposing) return
         if (event.key === 'Enter' || event.key === 'Tab') {
           event.preventDefault()
-          commit()
-          onNavigate({ rowId, columnId }, event.shiftKey ? -1 : 1)
+          editingRef.current = false
+          baselineRef.current = draft
+          onNavigate({ rowId, columnId }, event.shiftKey ? -1 : 1, draft)
         } else if (event.key === 'Escape') {
           event.preventDefault()
           editingRef.current = false
@@ -173,11 +165,16 @@ export function SlideTableProperties({
       ?.focus()
   }
 
-  const navigate = (from: CellRef, direction: 1 | -1) => {
+  const navigate = (from: CellRef, direction: 1 | -1, text: string) => {
     const rowIndex = rows.findIndex((row) => row.id === from.rowId)
     const columnIndex = columns.findIndex((column) => column.id === from.columnId)
     if (rowIndex < 0 || columnIndex < 0) return
+    const cell = rows[rowIndex]!.cells.find((item) => item.columnId === from.columnId)
+    if (!cell) return
     const flatIndex = rowIndex * columns.length + columnIndex + direction
+    if (flatIndex < rows.length * columns.length && text !== cell.text) {
+      commands.commitCellText(cell.id, text)
+    }
     if (flatIndex < 0) {
       focusCell(rows[0]!.id, columns[0]!.id)
       return
@@ -189,7 +186,7 @@ export function SlideTableProperties({
       const firstColumnId = columns[0]?.id
       if (!lastRow || !firstColumnId) return
       pendingFocusRef.current = { afterRowId: lastRow.id, columnId: firstColumnId }
-      commands.insertRow(lastRow.id, 'after')
+      commands.commitLastCellAndAppendRow(cell.id, text)
       return
     }
     const nextRowIndex = Math.floor(flatIndex / columns.length)
@@ -227,7 +224,6 @@ export function SlideTableProperties({
                 rowId={row.id}
                 columnId={column.id}
                 value={cell.text}
-                onCommit={(text) => commands.commitCellText(cell.id, text)}
                 onNavigate={navigate}
                 onActivate={setActiveCell}
               />
@@ -295,12 +291,14 @@ export function SlideTableProperties({
           </div>
           <ColorInput
             id="table-cell-fill"
+            previewPatch={fillColor => ({ rows: node.rows.map(row => ({ ...row, cells: row.cells.map(cell => cell.id === activeCellData.id ? { ...cell, style: { ...cell.style, fillColor } } : cell) })) })}
             label="单元格填充"
             value={activeCellData.style?.fillColor ?? style.fillColor}
             onChange={(fillColor) => commands.patchCellStyle(activeCellData.id, { fillColor })}
           />
           <ColorInput
             id="table-cell-text"
+            previewPatch={textColor => ({ rows: node.rows.map(row => ({ ...row, cells: row.cells.map(cell => cell.id === activeCellData.id ? { ...cell, style: { ...cell.style, textColor } } : cell) })) })}
             label="单元格文字颜色"
             value={activeCellData.style?.textColor ?? style.textColor}
             onChange={(textColor) => commands.patchCellStyle(activeCellData.id, { textColor })}
@@ -331,7 +329,7 @@ export function SlideTableProperties({
       <div className="property-subsection-header">
         <div><strong>表格样式</strong></div>
       </div>
-      <ColorInput id="table-fill" label="填充颜色" value={style.fillColor} onChange={(fillColor) => commands.patchStyle({ fillColor })} />
+      <ColorInput previewPatch={fillColor => ({ style: { fillColor } })} id="table-fill" label="填充颜色" value={style.fillColor} onChange={(fillColor) => commands.patchStyle({ fillColor })} />
       <RangeField
         label="填充透明度"
         value={Math.round((1 - style.fillOpacity) * 100)}
@@ -340,7 +338,7 @@ export function SlideTableProperties({
         suffix="%"
         onChange={(value) => commands.patchStyle({ fillOpacity: 1 - value / 100 })}
       />
-      <ColorInput id="table-border-color" label="边框颜色" value={style.borderColor} onChange={(borderColor) => commands.patchStyle({ borderColor })} />
+      <ColorInput previewPatch={borderColor => ({ style: { borderColor } })} id="table-border-color" label="边框颜色" value={style.borderColor} onChange={(borderColor) => commands.patchStyle({ borderColor })} />
       <RangeField label="边框宽度" value={style.borderWidth} min={0} max={32} suffix="px" onChange={(borderWidth) => commands.patchStyle({ borderWidth })} />
       <SelectField<NativeTableStyle['lineStyle']>
         label="边框线型"
@@ -352,7 +350,7 @@ export function SlideTableProperties({
         ]}
         onChange={(lineStyle) => commands.patchStyle({ lineStyle })}
       />
-      <ColorInput id="table-text-color" label="文字颜色" value={style.textColor} onChange={(textColor) => commands.patchStyle({ textColor })} />
+      <ColorInput previewPatch={textColor => ({ style: { textColor } })} id="table-text-color" label="文字颜色" value={style.textColor} onChange={(textColor) => commands.patchStyle({ textColor })} />
       <FontFamilyPicker value={style.fontFamily} onCommit={(fontFamily) => commands.patchStyle({ fontFamily })} />
       <BufferedInput label="字号" type="number" min={6} max={144} value={style.fontSize} onCommit={(value) => commands.patchStyle({ fontSize: Number(value) })} />
       <SelectField<NativeTableStyle['horizontalAlign']>

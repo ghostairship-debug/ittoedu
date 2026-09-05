@@ -23,7 +23,7 @@ import {
   FLOW_SESSIONLESS_ERROR,
 } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
-import { FlowWorkspace as ProductFlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { FlowWorkspace as ProductFlowWorkspace, FlowInlineRichTextEditor } from '@/renderer/ui/FlowWorkspace'
 import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
 import { Workspace } from '@/renderer/ui/Workspace'
 import { useEditorStore } from '@/renderer/store/editorStore'
@@ -35,6 +35,23 @@ import {
 } from '@/renderer/authoring/flowTextEdit'
 import type { FlowCommandResult } from '@/renderer/course/flowEditorCommands'
 import type { FlowEditorSelection } from '@/renderer/course/flowEditorSlice'
+
+it('keeps transient color preview out of editable Flow DOM and draft callbacks', () => {
+  const change = vi.fn()
+  const props = { blockId: 'preview', label: 'preview', text: '正文', runs: [], restyleToken: 0,
+    range: { start: 0, end: 2 }, composing: false, onDraftChange: change, onRangeChange: vi.fn(),
+    onComposingChange: vi.fn(), onCommit: vi.fn(), onCancel: vi.fn(), onKeyAction: vi.fn() }
+  const { rerender } = render(<FlowInlineRichTextEditor {...props}
+    preview={{ text: '正文', runs: [{ start: 0, end: 2, style: { color: '#00ff00' } }] }} />)
+  expect(screen.getByTestId('flow-text-color-preview').innerHTML).toContain('#00ff00')
+  const editor = screen.getByTestId('flow-inline-editor')
+  expect(extractFlowRichTextFromEditor(editor).runs).toEqual([])
+  fireEvent.input(editor)
+  expect(change.mock.calls[0]?.[1]).toEqual([])
+  rerender(<FlowInlineRichTextEditor {...props} preview={null} />)
+  expect(screen.queryByTestId('flow-text-color-preview')).toBeNull()
+  expect(props.onCommit).not.toHaveBeenCalled()
+})
 
 vi.mock('@/renderer/phaser/createEditorGame', () => ({
   createEditorGame: () => ({

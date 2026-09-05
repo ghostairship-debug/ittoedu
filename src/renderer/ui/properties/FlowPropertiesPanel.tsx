@@ -44,6 +44,7 @@ import {
 } from '../FormulaAuthoringEditor'
 import { SharedBackgroundProperties } from './SharedBackgroundProperties'
 import { SharedShapeProperties } from './SharedShapeProperties'
+import { NativeColorPreviewContext } from './NativeColorPreview'
 import {
   CommonNodeProperties,
   ImageProperties,
@@ -85,6 +86,8 @@ export interface FlowImportedMediaBytes {
 }
 
 export interface FlowPropertiesCommands {
+  readonly previewNative?: (patch: PropertiesPatch | null) => void
+  readonly previewTextColor?: (color: string | null) => void
   readonly renamePage: (surfaceId: string, title: string) => void
   readonly setPaperBackground: (surfaceId: string, backgroundColor: string) => void
   readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
@@ -601,11 +604,11 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
               aria-label={flowFormatFieldDescription('文字颜色', colorField)}
             >
               <ColorInput
-                key={`flow-text-color:${context.draftBindingKey}`}
                 id="flow-text-color"
                 label="文字颜色"
                 value={uniformFlowFormatValue(colorField) ?? FLOW_PAPER_TEXT_COLOR}
                 onChange={(color) => commands.formatTextStyle({ color })}
+                onPreviewChange={commands.previewTextColor}
               />
             </div>
           </fieldset>
@@ -804,6 +807,7 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
         )
       : <FlowBlockProperties context={context} />
   return (
+    <NativeColorPreviewContext.Provider value={context.commands.previewNative}>
     <PropertyDraftBoundary
       bindingKey={context.draftBindingKey}
       onStale={() => context.commands.reportError(
@@ -812,5 +816,6 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
     >
       {panel}
     </PropertyDraftBoundary>
+    </NativeColorPreviewContext.Provider>
   )
 }

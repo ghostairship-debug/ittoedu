@@ -46,6 +46,8 @@ import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView }
 import { materializeNativeLayerItem } from '../../../shared/courseProjectSchema'
 import { nativeRenderInputFromV9Item } from '../../../player/surfaces/slide/publishedNativeRendering'
 import { TextEditOverlay } from '../TextEditOverlay'
+import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
+import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
 import { FormulaEditDialog } from '../FormulaEditDialog'
 import { renderTextNodeCanvas } from '../../../shared/textLayout'
 import {
@@ -753,6 +755,10 @@ export function SlideLocationWorkspace({
   const [tryRunEpoch, setTryRunEpoch] = useState(0)
   const [controllerOverlay, setControllerOverlay] =
     useState<StageSelectionOverlayGeometry | null>(null)
+  const [layerOverlay, setLayerOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
+  const needsLayerOverlay = Boolean(slideEditorView?.layers.some(layer =>
+    selectedNodeIds.includes(layer.selectionId) && layer.item.kind === 'native' &&
+    ['table', 'chart', 'input'].includes(layer.item.content.nativeType)))
   const drawTool = snapshot.drawTool
   const drawGestureRef = useRef<{
     pointerId: number
@@ -835,6 +841,13 @@ export function SlideLocationWorkspace({
     slideBackendKind,
     slideEditorView,
   ])
+
+  useLayoutEffect(() => {
+    if (candidatePointerActiveRef.current) return
+    const viewport = readCandidateViewport()
+    setLayerOverlay(needsLayerOverlay && canvasMode === 'edit' && viewport
+      ? slideAuthoringRef.current.overlayGeometry(viewport) : null)
+  }, [needsLayerOverlay, canvasMode, slideEditorView, selectedNodeIds, readCandidateViewport, stageViewportSize])
 
   const stageTransform = useMemo(() => createStageViewportTransform({
     viewport: {
@@ -1083,6 +1096,17 @@ export function SlideLocationWorkspace({
   ) => {
     const currentSnapshot = readSnapshot()
     const painted = mergeSlidePreviewIntoNodes(currentSnapshot.editingNodes, preview)
+    // New Native content is not a legacy Phaser node. Paint its transient frame
+    // through the same formal render input used for initial/committed content.
+    for (const transform of preview ?? []) {
+      const layer = currentSnapshot.view?.layers.find(item => item.selectionId === transform.nodeId)
+      if (!layer || layer.item.kind !== 'native' ||
+        !['table', 'chart', 'input'].includes(layer.item.content.nativeType)) continue
+      const item = structuredClone(layer.item) as NativeLayerItem
+      item.frame = { ...item.frame, x:transform.x, y:transform.y, width:transform.width, height:transform.height }
+      item.rotation = transform.rotation
+      queueAuthoringNodePatch(currentSnapshot.editingScope, nativeRenderInputFromV9Item(item))
+    }
     const handle = gameRef.current
     for (const node of painted) {
       const current = currentSnapshot.editingNodes.find((item) => item.id === node.id)
@@ -1129,16 +1153,36 @@ export function SlideLocationWorkspace({
     queueAuthoringNodePatch(currentSnapshot.editingScope, normalized)
   }, [queueAuthoringNodePatch])
 
-  const revertLineDragPreview = useCallback(() => {
-    const active = slideAuthoringRef.current.lineDragPreview()
-    if (!active) return
+  const revertSlideDragPreview = useCallback(() => {
     const currentSnapshot = readSnapshot()
-    const node = currentSnapshot.editingNodes.find((item) => item.id === active.nodeId)
-    if (node) {
+    // Pointer cancellation must repaint every transient Native frame as well as
+    // the line geometry. The project was never mutated during the gesture.
+    for (const layer of currentSnapshot.view?.layers ?? []) {
+      if (layer.source === (currentSnapshot.backend?.getSession().scope ?? currentSnapshot.editingScope) &&
+        layer.item.kind === 'native' && ['table', 'chart', 'input'].includes(layer.item.content.nativeType)) {
+        queueAuthoringNodePatch(currentSnapshot.editingScope, nativeRenderInputFromV9Item(layer.item as NativeLayerItem))
+      }
+    }
+    for (const node of currentSnapshot.editingNodes) {
       gameRef.current?.bridge.applyNode(node)
       queueAuthoringNodePatch(currentSnapshot.editingScope, node as AuthoringPatchNode)
     }
   }, [queueAuthoringNodePatch])
+
+  useLayoutEffect(() => {
+    if (!candidatePointerActiveRef.current) return
+    // A navigation, scope switch or external commit cannot retarget a gesture
+    // that started from different geometry. Pointer-up must then write nothing.
+    candidatePointerActiveRef.current = false
+    revertSlideDragPreview()
+    const viewport = readCandidateViewport()
+    if (viewport) {
+      slideAuthoringRef.current.cancelGesture(viewport)
+      setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
+    }
+    setLineDragGuides(null)
+  }, [snapshot.projectId, courseLocationId, activePresentationStateId, publishedAuthoringOwnerScope,
+    canvasMode, backend?.getSession().history.present.revision])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1151,14 +1195,27 @@ export function SlideLocationWorkspace({
         return
       }
       if (candidatePointerActiveRef.current) {
-        revertLineDragPreview()
+        revertSlideDragPreview()
         const viewport = readCandidateViewport()
-        if (viewport) slideAuthoringRef.current.cancelGesture(viewport)
+        if (viewport) {
+          slideAuthoringRef.current.cancelGesture(viewport)
+          setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
+        }
         candidatePointerActiveRef.current = false
         setLineDragGuides(null)
       }
     }
     const onBlur = () => {
+      if (candidatePointerActiveRef.current) {
+        revertSlideDragPreview()
+        const viewport = readCandidateViewport()
+        if (viewport) {
+          slideAuthoringRef.current.cancelGesture(viewport)
+          setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
+        }
+        candidatePointerActiveRef.current = false
+        setLineDragGuides(null)
+      }
       if (drawGestureRef.current) {
         drawGestureRef.current = null
         setDrawPreview(null)
@@ -1170,7 +1227,7 @@ export function SlideLocationWorkspace({
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('blur', onBlur)
     }
-  }, [revertLineDragPreview])
+  }, [revertSlideDragPreview])
 
   const syncCompleteAuthoringSnapshot = useCallback(() => {
     const currentSnapshot = readSnapshot()
@@ -2231,8 +2288,8 @@ export function SlideLocationWorkspace({
   ])
 
   useEffect(() => {
-    gameRef.current?.bridge.selectNodes([...selectedNodeIds])
-  }, [selectedNodeIds])
+    gameRef.current?.bridge.selectNodes(needsLayerOverlay ? [] : [...selectedNodeIds])
+  }, [selectedNodeIds, needsLayerOverlay])
 
   useEffect(() => {
     gameRef.current?.bridge.setTextEditing(editingTextNodeId)
@@ -2240,6 +2297,14 @@ export function SlideLocationWorkspace({
       gameRef.current?.bridge.applyNode(selectedNode)
     }
   }, [editingTextNodeId, selectedNode])
+
+  const nativeTextEditor = useSlideNativeTextEditor({
+    readBackend: () => backendRef.current,
+    readHost: () => publishedAuthoringHostRef.current,
+    readTransform: () => { const viewport = readCandidateViewport(); return viewport ? createStageViewportTransform(viewport) : null },
+    apply: command => ports.authoring.applySlideCommand(command),
+    report: message => ports.canvas.setStatus(message),
+  }, `${snapshot.projectId}:${courseLocationId}:${activePresentationStateId}:${publishedAuthoringOwnerScope}:${canvasMode}`)
 
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault()
@@ -2437,6 +2502,7 @@ export function SlideLocationWorkspace({
         }, viewport)
         if (result.kind !== 'slide-authoring') return
         candidatePointerActiveRef.current = true
+        setLayerOverlay(result.overlay ?? null)
         paintSlideTransformPreview(result.preview)
         if (result.linePreview) paintSlideLinePreview(result.linePreview)
         setLineDragGuides(result.guides ?? null)
@@ -2515,6 +2581,7 @@ export function SlideLocationWorkspace({
                 altKey: event.altKey,
               }, viewport)
               if (moved.kind === 'slide-authoring') {
+                setLayerOverlay(moved.overlay ?? null)
                 paintSlideTransformPreview(moved.preview)
                 if (moved.linePreview) paintSlideLinePreview(moved.linePreview)
                 setLineDragGuides(moved.guides ?? null)
@@ -2619,6 +2686,7 @@ export function SlideLocationWorkspace({
               altKey: event.altKey,
             }, viewport)
             if (raised.kind === 'slide-authoring') {
+              setLayerOverlay(raised.overlay ?? null)
               paintSlideTransformPreview(raised.preview)
               if (raised.linePreview) paintSlideLinePreview(raised.linePreview)
               setLineDragGuides(raised.guides ?? null)
@@ -2657,10 +2725,11 @@ export function SlideLocationWorkspace({
           slideBackendKind === 'slide-authoring' &&
           candidatePointerActiveRef.current
         ) {
-          revertLineDragPreview()
+          revertSlideDragPreview()
           const viewport = readCandidateViewport()
           if (viewport) {
             slideAuthoringRef.current.cancelGesture(viewport)
+            setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
           }
           candidatePointerActiveRef.current = false
           setLineDragGuides(null)
@@ -2722,6 +2791,14 @@ export function SlideLocationWorkspace({
             world,
           )
           if (layerHit) {
+            if (layerHit.nativeType === 'table' || layerHit.nativeType === 'chart') {
+              ports.selection.selectNode(layerHit.layerItemId)
+              if (nativeTextEditor.begin(layerHit.layerItemId, world, {x:event.clientX,y:event.clientY})) {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+              return
+            }
             if (layerHit.nativeType === 'text' || layerHit.nativeType === 'formula') {
               event.preventDefault()
               event.stopPropagation()
@@ -2882,6 +2959,7 @@ export function SlideLocationWorkspace({
             onCancelComponentText={() => setActiveComponentTextSession(null)}
             onRetryPreview={retryRuntimePreview}
           />
+          {nativeTextEditor.editor}
           {(drawPreview || lineDragGuides) && (
             <svg
               className="canvas-line-overlay"
@@ -2958,6 +3036,7 @@ export function SlideLocationWorkspace({
       {canvasMode === 'edit' && editingScope === 'global' && controllerOverlay ? (
         <TeacherControllerAuthoringOverlay overlay={controllerOverlay} />
       ) : null}
+      {canvasMode === 'edit' && needsLayerOverlay && layerOverlay ? <SlideLayerSelectionOverlay overlay={layerOverlay} /> : null}
       {canvasMode === 'edit' && editingFormulaNode && (
         <FormulaEditDialog
           key={`${editingFormulaNode.id}:${activePresentationStateId ?? 'base'}`}

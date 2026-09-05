@@ -5,6 +5,7 @@ import type {
 import type { TextNode } from '../../shared/contracts/native-v1'
 import { analyzeTextNodeLayout } from '../../shared/textLayout'
 import { flowRichTextSegments } from './flow/flowModel'
+import { colorWithAlpha } from '../../shared/colorAlpha'
 
 type PublishedNativeTextFrame = Pick<LayerFrame, 'width' | 'height'>
 
@@ -41,6 +42,8 @@ export function paintPublishedNativeText(
     ? analyzeTextNodeLayout(publishedTextNode(data, frame)).fontSize
     : style.fontSize
   wrap.style.boxSizing = 'border-box'
+  wrap.style.backgroundColor = colorWithAlpha(style.backgroundColor, style.backgroundOpacity)
+  wrap.style.borderRadius = `${Math.max(0, style.cornerRadius)}px`
   wrap.style.overflow = 'hidden'
   wrap.style.whiteSpace = 'pre-wrap'
   wrap.style.fontFamily = style.fontFamily || '"Microsoft YaHei", sans-serif'

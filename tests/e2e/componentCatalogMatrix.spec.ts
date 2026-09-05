@@ -581,9 +581,10 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
 
       await page.getByRole('button', { name: '全选当前结果' }).click()
       await expect(page.getByText(`已选择 ${expectedPackageCount} 个组件`)).toBeVisible()
-      await page.getByRole('button', { name: `加入工程（${expectedPackageCount}）` }).click()
+      await page.getByRole('button', { name: `添加到画布（${expectedPackageCount}）` }).click()
       await expect(page.getByRole('dialog', { name: '内置组件加入结果' }))
         .toHaveCount(0)
+      await page.getByRole('tab', { name: '组件', exact: true }).click()
       await expect(page.locator('[data-testid^="component-package-"]'))
         .toHaveCount(expectedPackageCount)
 
@@ -593,11 +594,10 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
         .locator(
           '.published-component-mount[data-component-instance-id][data-component-package-id]',
         )
-      for (const [index, entry] of matrixCases.entries()) {
+      await expect(editorHost).toHaveCount(expectedPackageCount)
+      for (const entry of matrixCases) {
         const projectComponent = page.getByTestId(`component-${entry.packageId}`)
         await expect(projectComponent).toContainText(`v${entry.version}`)
-        await projectComponent.click()
-        await expect(editorHost).toHaveCount(index + 1)
       }
 
       await page.getByTestId('open-component-library').click()

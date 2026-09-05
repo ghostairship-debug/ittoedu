@@ -74,9 +74,10 @@ export class CourseStateStore implements CourseStateStoreContract {
   constructor(
     private readonly onChange?: (
       change: Readonly<{
-        type: 'set' | 'delete' | 'clear'
+        type: 'set' | 'delete' | 'clear' | 'batch'
         key?: string
         value?: unknown
+        entries?: readonly { key: string; value: unknown }[]
       }>,
     ) => void,
   ) {}
@@ -96,6 +97,20 @@ export class CourseStateStore implements CourseStateStoreContract {
     if (this.values.delete(key)) {
       this.onChange?.({ type: 'delete', key })
     }
+  }
+
+  /** Host-only atomic write; intentionally absent from the extension API. */
+  setMany(entries: readonly { key: string; value: unknown }[]): void {
+    const keys = new Set<string>()
+    const prepared = entries.map(({ key, value }) => {
+      if (!key || keys.has(key)) throw new TypeError(`重复或空的课程状态键：${key}`)
+      keys.add(key)
+      return { key, value: clonePureData(value, key) as CourseStateData }
+    })
+    if (!prepared.length) return
+    const notification = prepared.map(({ key, value }) => ({ key, value: clonePureData(value, key) }))
+    for (const { key, value } of prepared) this.values.set(key, value)
+    this.onChange?.({ type: 'batch', entries: notification })
   }
 
   clear(): void {

@@ -78,6 +78,82 @@ import {
   duplicateSlideGlobalLayers,
   duplicateSlideSceneLayers,
 } from './v9SlideActionCommands'
+import { createInputLayerItem, DEFAULT_INPUT_STYLE, createTextNode as createInputFeedbackText } from '../project/nativeNodeFactories'
+import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../interactions/inputRuleFamily'
+import { allocateInputStateKeys } from '../interactions/inputAuthoringState'
+
+export function addSlideInputLayer(
+  session: SlideAuthoringSession,
+  input: { answerType?: 'text' | 'number'; x?: number; y?: number; idFactory?: () => string } = {},
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    if (session.scope !== 'scene') throw new Error('填空题只允许添加到演示页场景')
+    const id = input.idFactory ?? nanoid
+    const layerId = `input_${id()}`
+    const answerType = input.answerType ?? 'text'
+    const project = commitSlideProjectMutation(session.history.present, draft => {
+      const { scene } = slideSceneContext(draft, session)
+      const keys = allocateInputStateKeys(draft, answerType, id)
+      const data = { ...keys, answerType, placeholder: '填写答案', ruleFamilyRuleIds: [] as string[], style: { ...DEFAULT_INPUT_STYLE } }
+      const item = createInputLayerItem(data, { ...input, id: layerId })
+      const feedback = (text: string, color: string) => sceneNodeToCourseLayerItem(createInputFeedbackText({
+        id: `text_${id()}`, text, name: text, x: item.frame.x, y: item.frame.y + item.frame.height + 16,
+        width: 480, height: 60, playbackInitialVisibility: 'hidden', style: { color, fontSize: 24 },
+      }))
+      const correct = feedback('回答正确！', '#15803d')
+      const error = feedback('再想一想，请重新作答。', '#b91c1c')
+      const show = (nodeId: string, visible: boolean): import('../../shared/interactionTypes').InteractionActionPayload => ({
+        type: visible ? 'node.enter' : 'node.exit', nodeId, effect: 'none', durationMs: 0, easing: 'linear',
+      })
+      const actions = { correct: [show(error.layerItemId, false), show(correct.layerItemId, true)], error: [show(correct.layerItemId, false), show(error.layerItemId, true)] }
+      const config: InputRuleConfig = answerType === 'text' ? { answerType, answers: ['答案'], ...actions } : { answerType, min: 1, max: 1, ...actions }
+      const family = buildInputRuleFamily(layerId, data, config, id)
+      data.ruleFamilyRuleIds = family.map(rule => rule.id)
+      if (item.content.nativeType === 'input') item.content.data = data
+      for (const layer of [item, correct, error]) appendOwnedLayer(draft, session, layer)
+      scene.interactions.push(...family)
+    }, options.now)
+    return commitAdded(session, project, layerId)
+  } catch (error) { return catchCommand(session, error) }
+}
+
+export function configureSlideInputAtTarget(
+  session: SlideAuthoringSession,
+  target: SlideAuthoringTarget,
+  request: { mode: 'apply' | 'rebuild'; config: InputRuleConfig } | { mode: 'unmanage' },
+): SlideCommandResult {
+  const stale = rejectIfStale(session, target.revision)
+  if (stale) return stale
+  try {
+    if (session.scope !== 'scene' || session.generation !== target.generation || session.sessionId !== target.sessionId ||
+      makeSlideAuthoringTarget(session, target.layerItemId, 'item').authoringAddress !== target.authoringAddress) throw new Error('输入编辑目标已改变')
+    const project = commitSlideProjectMutation(session.history.present, draft => {
+      const { scene } = slideSceneContext(draft, session)
+      const item = scene.layerItems.find(layer => layer.layerItemId === target.layerItemId)
+      if (!item || item.locked || item.kind !== 'native' || item.content.nativeType !== 'input') throw new Error('输入编辑目标不可用')
+      const data = item.content.data
+      const inspection = inspectInputRuleFamily(item.layerItemId, data, scene.interactions)
+      if (request.mode === 'unmanage') { data.ruleFamilyRuleIds = []; return }
+      if (request.mode === 'apply' && inspection.conflict) throw new Error('判题规则已被手改，请选择保留手改或重建')
+      scene.interactions = scene.interactions.filter(rule => !data.ruleFamilyRuleIds.includes(rule.id))
+      if (request.config.answerType !== data.answerType) {
+        data.answerType = request.config.answerType
+        const declaration = draft.courseState.find(entry => entry.key === data.stateKey)
+        if (!declaration) throw new Error('输入答案状态声明已失效')
+        draft.courseState = draft.courseState.map(entry => entry === declaration
+          ? data.answerType === 'text' ? { key: entry.key, valueType: 'string', defaultValue: '' } : { key: entry.key, valueType: 'number', defaultValue: 0 }
+          : entry)
+      }
+      const rules = buildInputRuleFamily(item.layerItemId, data, request.config, nanoid)
+      data.ruleFamilyRuleIds = rules.map(rule => rule.id)
+      scene.interactions.push(...rules)
+    })
+    return commitUpdated(session, project)
+  } catch (error) { return catchCommand(session, error) }
+}
 
 /**
  * V8 `offsetDefaultInsertion` contract from editorStore.

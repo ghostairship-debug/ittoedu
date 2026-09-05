@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { captureComponentInsertionTarget, insertComponentPackagesAtTarget, type ComponentInsertionTarget } from './insertComponentPackages'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { ComponentManifest, ComponentPackageData } from '../../shared/componentTypes'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
@@ -71,6 +72,7 @@ export type ComponentAuthoringPorts = {
   read(): ComponentAuthoringState
   readSpatialSession(): SpatialAuthoringSession | null
   readFlowSession(): FlowAuthoringSession | null
+  readSlideSession?(): SlideAuthoringSession | null
   setFeedback(feedback: { errorMessage?: string | null; statusMessage?: string | null }): void
   setActiveTab(tab: 'components' | 'elements' | 'developer'): void
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
@@ -171,6 +173,9 @@ export { componentPackageMeta, editableComponentPackageId } from './editableComp
 
 export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) {
   return {
+    captureComponentInsertionTarget: () => captureComponentInsertionTarget(ports),
+    insertComponentPackagesAtTarget: (target: ComponentInsertionTarget, packages: readonly ComponentPackageData[]) =>
+      insertComponentPackagesAtTarget(ports, target, packages),
     captureComponentPackageReplacementTarget: (packageId: string) => (
       captureComponentPackageReplacementTarget(ports, packageId)
     ),

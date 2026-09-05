@@ -282,6 +282,10 @@ class FrozenPublishedCourseStateStore extends CourseStateStore {
 
   override set(_key: string, _value: unknown): void {}
 
+  override setMany(_entries: readonly { key: string; value: unknown }[]): void {
+    throw new Error('静态或作者课程状态不可写入')
+  }
+
   override delete(_key: string): void {}
 
   override clear(): void {}
@@ -693,6 +697,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#globalInteractionVisibilityState = globalInteractionVisibilityState
     this.#interactionSessionPort = {
       courseState: this.#courseState,
+      setCourseStateBatch: entries => {
+        if (this.#staticCapture || this.#interactionDestroyStarted) throw new Error('课程会话不可写入')
+        this.#courseState.setMany(entries)
+      },
       currentSceneId: () => this.#currentSlideSceneId(),
       executeAudioAction: (action, signal) => (
         !signal.aborted

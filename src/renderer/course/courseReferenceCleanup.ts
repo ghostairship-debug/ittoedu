@@ -364,6 +364,18 @@ export function repairRemovedCourseReferences(
   if (removedLayerItemIds.size > 0) {
     removeLayerItemReferences(project, removedLayerItemIds)
   }
+  // Removing a feedback target can remove its actions/rules. Release managed
+  // ownership when a listed rule disappears instead of retaining a dangling ID.
+  for (const surface of project.surfaces) {
+    if (surface.type !== 'slide') continue
+    for (const scene of surface.scenes) {
+      const rules = new Set(scene.interactions.map(rule => rule.id))
+      for (const item of scene.layerItems) {
+        if (item.kind === 'native' && item.content.nativeType === 'input' &&
+          item.content.data.ruleFamilyRuleIds.some(id => !rules.has(id))) item.content.data.ruleFamilyRuleIds = []
+      }
+    }
+  }
 
   const removedControllerTargetIds = unresolvedIds(
     removed.removedControllerTargetIds,

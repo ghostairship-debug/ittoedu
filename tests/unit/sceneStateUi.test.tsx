@@ -334,7 +334,7 @@ describe('r12-040 background authoring: explicit owner tabs and typed commands',
     fireEvent.focus(textInput)
     fireEvent.change(textInput, { target: { value: '#123456' } })
 
-    expect(useEditorStore.getState().previewBackgroundColor).toBe('#123456')
+    expect(useEditorStore.getState().previewBackgroundColor).toMatchObject({ color: '#123456', target: { owner: 'slide-scene', revision: revisionBefore } })
     expect(selectSlideAuthoringDocument(useEditorStore.getState())!.revision).toBe(revisionBefore)
     expect(activeV9Scene().backgroundColor).toBe('#ffffff')
 
@@ -356,7 +356,7 @@ describe('r12-040 background authoring: explicit owner tabs and typed commands',
     const textInput = screen.getByRole('textbox', { name: '背景颜色' })
     fireEvent.focus(textInput)
     fireEvent.change(textInput, { target: { value: '#334455' } })
-    expect(useEditorStore.getState().previewBackgroundColor).toBe('#334455')
+    expect(useEditorStore.getState().previewBackgroundColor).toMatchObject({ color: '#334455', target: { owner: 'slide-scene', revision: revisionBefore } })
 
     fireEvent.keyDown(textInput, { key: 'Enter' })
     expect(useEditorStore.getState().previewBackgroundColor).toBeNull()

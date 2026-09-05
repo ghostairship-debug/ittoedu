@@ -16,6 +16,7 @@ import type {
   PublishedVideoEventKind,
 } from './PublishedInteractionSurfacePort'
 import { matchesPublishedCourseStateCondition } from '../surfaces/publishedCourseState'
+import { normalizeNumberAnswer, normalizeShortAnswer } from '../../shared/assessmentEvaluators'
 
 type StepOutcome = 'completed' | 'cancelled' | 'terminal'
 
@@ -108,6 +109,7 @@ export class PublishedInteractionController {
     diagnostic: PublishedInteractionDiagnostic,
   ) => void
   readonly #clickRules = new Map<string, InteractionRule[]>()
+  readonly #inputRules = new Map<string, InteractionRule[]>()
   readonly #audioEndedRules = new Map<string, InteractionRule[]>()
   readonly #videoRules = new Map<string, InteractionRule[]>()
   readonly #videoTimes = new Map<string, number>()
@@ -142,6 +144,7 @@ export class PublishedInteractionController {
       }
     }
     this.#clickRules.clear()
+    this.#inputRules.clear()
     this.#audioEndedRules.clear()
     this.#videoRules.clear()
     this.#videoTimes.clear()
@@ -226,14 +229,9 @@ export class PublishedInteractionController {
           })
           continue
         }
-        this.#diagnose({
-          code: 'unsupported-trigger',
-          severity: 'warning',
-          message: 'Published 交互 input.submit 执行尚未交付，已跳过规则',
-          nodeId: inputNodeId,
-          ruleId: rule.id,
-          interactionType: 'input.submit',
-        })
+        const rules = this.#inputRules.get(inputNodeId) ?? []
+        rules.push(rule)
+        this.#inputRules.set(inputNodeId, rules)
         continue
       }
 
@@ -256,6 +254,16 @@ export class PublishedInteractionController {
       const rules = this.#videoRules.get(key) ?? []
       rules.push(rule)
       this.#videoRules.set(key, rules)
+    }
+
+    for (const nodeId of this.#inputRules.keys()) {
+      try {
+        const dispose = this.#surface.bindInputSubmit!(nodeId, raw => this.#handleInputSubmit(nodeId, raw))
+        if (!dispose) throw new Error('输入提交绑定不可用')
+        this.#disposers.push(dispose)
+      } catch (cause) {
+        this.#diagnose({ code: 'bind-failed', severity: 'error', message: '输入提交绑定失败', nodeId, cause })
+      }
     }
 
     for (const nodeId of this.#clickRules.keys()) {
@@ -342,6 +350,31 @@ export class PublishedInteractionController {
           cause,
         })
       }
+    }
+  }
+
+  #handleInputSubmit(nodeId: string, raw: string): void {
+    if (this.#destroyed) return
+    try {
+      const descriptor = this.#surface.describeInput?.(nodeId)
+      if (!descriptor || !this.#session.setCourseStateBatch) throw new Error('输入或原子状态端口不可用')
+      const value = descriptor.answerType === 'text' ? normalizeShortAnswer(raw) : normalizeNumberAnswer(raw)
+      const valid = value !== null && value !== ''
+      this.#session.setCourseStateBatch([
+        { key: descriptor.stateKey, value: valid ? value : descriptor.defaultValue },
+        { key: descriptor.validityKey, value: valid },
+      ])
+      // Match every branch against the same event snapshot before any action runs.
+      const matched = (this.#inputRules.get(nodeId) ?? []).filter(rule => {
+        const sceneConditions = rule.conditions.filter(condition => condition.type === 'scene.in')
+        const scene = sceneConditions.length ? this.#readCurrentScene(rule, undefined, nodeId) : null
+        return (!scene || (scene.ok && sceneConditions.every(condition =>
+          scene.sceneId !== null && condition.sceneIds.includes(scene.sceneId)))) &&
+          this.#matchesCourseStateConditions(rule, nodeId)
+      })
+      for (const rule of matched) this.#startRule(rule)
+    } catch (cause) {
+      this.#diagnose({ code: 'course-state-failed', severity: 'error', message: '输入提交失败，未执行判题规则', nodeId, cause })
     }
   }
 

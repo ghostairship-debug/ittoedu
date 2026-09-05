@@ -99,12 +99,18 @@ export default function App() {
   const v9ContentEdit = useEditorStore((state) => state.v9ContentEdit)
   const spatialContentEdit = useEditorStore((state) => state.spatialContentEdit)
   const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
-  const selectedNode = useEditorStore(selectSelectedNode)
+  const selectedItemName = useEditorStore(state =>
+    selectEffectiveLayerProjection(state)?.unifiedRows.find(row => row.selected)?.name ?? selectSelectedNode(state)?.name ?? null)
   const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
   const editingScope = useEditorStore(selectEditingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
   const activeTab = useEditorStore((state) => state.activeTab)
-  const editingNodes = useEditorStore(selectEditingNodes)
+  const editingItemCount = useEditorStore(state => {
+    const projection = selectEffectiveLayerProjection(state)
+    return projection?.surfaceType === 'slide'
+      ? projection.unifiedRows.filter(row => row.owner === projection.scope.owner).length
+      : selectEditingNodes(state).length
+  })
   const activeScene = useEditorStore(selectActiveScene)
   const slideSceneCount = useMemo(
     () => activeCourseDocument
@@ -366,8 +372,11 @@ export default function App() {
     replacePackageAtTarget: (target, packageData) => (
       useEditorStore.getState().replaceComponentPackageAtTarget(target, packageData)
     ),
-    importPackages: (packages) => {
-      useEditorStore.getState().importComponentPackages([...packages])
+    captureInsertionTarget: () => useEditorStore.getState().captureComponentInsertionTarget(),
+    insertPackages: (target, packages) => {
+      const result = useEditorStore.getState().insertComponentPackagesAtTarget(target, packages)
+      if (result.ok) useEditorStore.getState().selectNodes(result.layerItemIds ?? [])
+      return result
     },
     selectComponentPackage: () => desktopApi().selectComponentPackage(),
     selectComponentPackages: () => desktopApi().selectComponentPackages(),
@@ -496,9 +505,9 @@ export default function App() {
         <span className="status-bar__spacer" />
         <span>{editingScope === 'global' ? '全局层' : activeScene.name}</span>
         <span>·</span>
-        <span>{editingScope === 'global' ? `${editingNodes.length} 个全局元素` : `${activeScene.nodes.length} 个节点`}</span>
+        <span>{editingScope === 'global' ? `${editingItemCount} 个全局元素` : `${editingItemCount} 个节点`}</span>
         {(slideSceneCount > RECOMMENDED_PROJECT_SCENES ||
-          activeScene.nodes.length > RECOMMENDED_SCENE_NODES) && (
+          editingItemCount > RECOMMENDED_SCENE_NODES) && (
           <>
             <span>·</span>
             <span className="status-bar__warning" title="大型课件建议使用网页包导出，以减少启动和内存压力">
@@ -507,7 +516,7 @@ export default function App() {
           </>
         )}
         <span>·</span>
-        <span>{selectedNodeIds.length > 1 ? `已选 ${selectedNodeIds.length} 个图层` : selectedNode ? `已选：${selectedNode.name}` : editingScope === 'global' ? '未选择全局元素' : '未选择节点'}</span>
+        <span>{selectedNodeIds.length > 1 ? `已选 ${selectedNodeIds.length} 个图层` : selectedItemName ? `已选：${selectedItemName}` : editingScope === 'global' ? '未选择全局元素' : '未选择节点'}</span>
         <span>·</span>
         <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
       </footer>

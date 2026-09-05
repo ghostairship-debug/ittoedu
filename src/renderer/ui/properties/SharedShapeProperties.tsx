@@ -10,7 +10,7 @@ import {
   opacityToTransparencyPercent,
   transparencyPercentToOpacity,
 } from '../../../shared/opacity'
-import { ColorInput } from '../ColorInput'
+import { NativeColorInput as ColorInput } from './NativeColorPreview'
 import {
   BufferedInput,
   RangeField,
@@ -74,6 +74,7 @@ export function SharedShapeProperties({ node, update }: SharedShapePropertiesPro
         <>
           <ColorInput
             id="shape-fill"
+            previewPatch={fillColor => ({ style: { fillColor } })}
             label="填充色"
             value={style.fillColor}
             onChange={(fillColor) => update({ style: { fillColor } })}
@@ -96,6 +97,7 @@ export function SharedShapeProperties({ node, update }: SharedShapePropertiesPro
       )}
       <ColorInput
         id="shape-border"
+        previewPatch={borderColor => ({ style: { borderColor } })}
         label={strokeOnly ? '线条颜色' : '边框颜色'}
         value={style.borderColor}
         onChange={(borderColor) => update({ style: { borderColor } })}

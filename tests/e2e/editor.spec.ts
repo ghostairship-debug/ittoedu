@@ -2072,10 +2072,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         componentOpen: sampleComponentPath,
       })
       await importExternalComponentThroughUi(page)
-      const componentCard = page.getByTestId('component-com.example.sample-counter')
-      await componentCard.waitFor()
-      await componentCard.click()
-      await expect(page.getByRole('tab', { name: '组件', exact: true }))
+      await expect(page.getByRole('tab', { name: '属性', exact: true }))
         .toHaveAttribute('aria-selected', 'true')
       await page.getByRole('tab', { name: '图层' }).click()
       await expect(authoredLayerRows(page)).toHaveCount(1)
@@ -2329,13 +2326,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         projectOpen: globalComponentProjectPath,
         componentOpen: globalComponentPath,
       })
-      await importExternalComponentThroughUi(page)
       await page.getByTestId('add-content-primary').click()
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '元素' }).click()
       await expect(page.getByTestId('global-elements-notice')).toBeVisible()
-      await page.getByRole('tab', { name: '组件', exact: true }).click()
-      await page.getByTestId('component-com.example.global-nav').click()
+      await importExternalComponentThroughUi(page)
 
       await page.getByRole('tab', { name: '属性' }).click()
       await page.getByLabel('全局标题', { exact: true }).fill('教师全局导航')
@@ -3096,7 +3091,6 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-shape-brace-pair-horizontal').click()
       await importExternalComponentThroughUi(page)
-      await page.getByTestId('component-com.example.sample-counter').click()
       await page.waitForTimeout(300)
 
       await page.getByTestId('export-menu-trigger').click()

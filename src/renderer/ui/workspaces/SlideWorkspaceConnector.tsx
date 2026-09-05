@@ -1,3 +1,4 @@
+import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -185,17 +186,14 @@ export function SlideWorkspaceConnector({
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
   const view = useMemo(() => {
     if (!project || !locationId) return null
-    const baseView = buildSlideEditorView({
-      project,
+    return buildSlideEditorView({
+      project: projectWithBackgroundPreview(project, canvasMode === 'edit' ? previewBackgroundColor : null, {
+        locationId, stateId: activePresentationStateId, generation: backend?.getSession().generation ?? -1,
+      }),
       locationId,
       stateId: activePresentationStateId,
     })
-    if (!previewBackgroundColor) return baseView
-    return {
-      ...baseView,
-      backgroundColor: previewBackgroundColor,
-    }
-  }, [activePresentationStateId, locationId, project, previewBackgroundColor])
+  }, [activePresentationStateId, locationId, project, previewBackgroundColor, backend, canvasMode])
   const editingNodes = useMemo(() => backend
     ? projectV9EditingNodesWithDraft(backend, contentEdit)
     : [], [backend, contentEdit])

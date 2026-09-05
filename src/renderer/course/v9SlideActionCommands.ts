@@ -1,4 +1,5 @@
 import { MAX_SCENE_NODES } from '../../shared/constants'
+import { pruneUnusedInputState } from '../interactions/inputAuthoringState'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type {
   CourseProjectDocument,
@@ -466,6 +467,8 @@ function structurallyDeleteSceneLayers(
   draftScene: SlideSceneDocument,
   layerItemIds: ReadonlySet<string>,
 ): void {
+  const inputKeys = draftScene.layerItems.flatMap(item => layerItemIds.has(item.layerItemId) &&
+    item.kind === 'native' && item.content.nativeType === 'input' ? [item.content.data.stateKey, item.content.data.validityKey] : [])
   draftScene.layerItems = draftScene.layerItems.filter(
     (item) => !layerItemIds.has(item.layerItemId),
   )
@@ -486,6 +489,7 @@ function structurallyDeleteSceneLayers(
     removedLocationIds: new Set(),
     removedLayerItemIds: layerItemIds,
   })
+  pruneUnusedInputState(draft, inputKeys)
 }
 
 function activeDraftScene(

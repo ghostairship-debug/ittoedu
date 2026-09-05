@@ -1,4 +1,5 @@
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
+import { produce } from 'immer'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import {
   getEffectiveCourseLayerOrder,
@@ -288,6 +289,34 @@ function namedState(
   const state = scene?.presentation?.states.find((candidate) => candidate.id === stateId)
   if (!scene || !state) return null
   return { scene, state }
+}
+
+/** Rendering-only sparse patch. Never enters canonical history or increments revision. */
+export function previewNativeLayerData(
+  project: CourseProjectDocument,
+  target: EffectiveLayerCommandTarget,
+  nativeData: Record<string, unknown>,
+): CourseProjectDocument {
+  try {
+    const located = resolveEffectiveLayerTarget(project, target)
+    const state = namedState(project, located, target.stateId)
+    const effective = materializeNamedStateItem(located.item, state?.state.layerItemOverrides[located.item.layerItemId])
+    if (effective.kind !== 'native' || effective.locked || (target.stateId && located.source === 'scene' && !state)) return project
+    const nextData = mergeCourseNativeData(effective.content.data as Record<string, unknown>, nativeData) as typeof effective.content.data
+    const nextOverride = structuredClone(state?.state.layerItemOverrides[located.item.layerItemId] ?? {})
+    if (state) writeNamedStatePropertyPatch(located.item, nextOverride, { nativeData })
+    return produce(project, draft => {
+      const current = locateCourseLayer(draft, located.item.layerItemId)!
+      const stateView = namedState(draft, current, target.stateId)
+      if (stateView) {
+        stateView.state.layerItemOverrides[current.item.layerItemId] = nextOverride
+      } else if (current.item.kind === 'native') {
+        current.item.content.data = nextData
+      }
+    })
+  } catch {
+    return project
+  }
 }
 
 function deleteEmptyOverride(

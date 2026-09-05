@@ -259,7 +259,14 @@ export function buildNativeChartView(
       const largeArc = sliceAngle > Math.PI ? 1 : 0
 
       let pathD: string
-      if (innerRadius > 0) {
+      if (sliceAngle <= 0) {
+        pathD = ''
+      } else if (sliceAngle >= Math.PI * 2 - 1e-9) {
+        // SVG arcs with identical endpoints do not draw a complete circle.
+        const circle = (radius: number, sweep: 0 | 1) =>
+          `M ${centerX} ${centerY - radius} A ${radius} ${radius} 0 1 ${sweep} ${centerX} ${centerY + radius} A ${radius} ${radius} 0 1 ${sweep} ${centerX} ${centerY - radius} Z`
+        pathD = circle(outerRadius, 1) + (innerRadius > 0 ? ` ${circle(innerRadius, 0)}` : '')
+      } else if (innerRadius > 0) {
         const ix1 = centerX + innerRadius * Math.cos(endAngle)
         const iy1 = centerY + innerRadius * Math.sin(endAngle)
         const ix2 = centerX + innerRadius * Math.cos(startAngle)
@@ -368,9 +375,11 @@ export function buildNativeChartView(
 
       if (chart.chartType === 'bar') {
         const barX = plotX + cIdx * catWidth + barPadding + seriesIdx * singleBarWidth
-        const zeroY = plotY + plotH - (plotH * (0 - minVal)) / valRange
-        const topY = Math.min(zeroY, normY)
-        const barHeight = Math.max(2, Math.abs(normY - zeroY))
+        const clampY = (y: number) => Math.max(plotY, Math.min(plotY + plotH, y))
+        const zeroY = clampY(plotY + plotH - (plotH * (0 - minVal)) / valRange)
+        const valueY = clampY(normY)
+        const topY = Math.min(zeroY, valueY)
+        const barHeight = Math.abs(valueY - zeroY)
         bars.push({
           categoryId: cat.id,
           seriesId: s.id,
@@ -387,11 +396,12 @@ export function buildNativeChartView(
     let linePathD: string | undefined
     let areaPathD: string | undefined
 
-    if (points.length > 0) {
+    if (chart.chartType !== 'bar' && points.length > 0) {
       linePathD = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
 
       if (chart.chartType === 'area') {
-        const baselineY = plotY + plotH
+        const baselineY = Math.max(plotY, Math.min(plotY + plotH,
+          plotY + plotH - (plotH * (0 - minVal)) / valRange))
         const first = points[0]!
         const last = points[points.length - 1]!
         areaPathD = `${linePathD} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`

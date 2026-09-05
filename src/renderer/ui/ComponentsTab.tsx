@@ -265,7 +265,7 @@ export function ComponentLibraryDialog({
     category,
   }), [category, entries, query, schoolStage, subject])
   const selectableVisibleIds = visibleEntries
-    .filter((entry) => componentCatalogInstallStatus(entry, components[entry.packageId]) === 'available')
+    .filter((entry) => ['available', 'embedded'].includes(componentCatalogInstallStatus(entry, components[entry.packageId])))
     .map((entry) => entry.packageId)
   const selectedEntries = entries.filter((entry) => selectedIds.has(entry.packageId))
 
@@ -306,7 +306,7 @@ export function ComponentLibraryDialog({
         </button>
         <div>
           <h2 id="component-library-title">内置组件库</h2>
-          <p>多选后只加入工程，不会在画布上自动创建实例。</p>
+          <p>选择后直接添加到当前画布；已加入工程的组件会复用现有包。</p>
         </div>
         <button type="button" className="secondary-button" disabled={!onRefresh} onClick={onRefresh}>
           <RefreshCw size={14} />刷新
@@ -379,7 +379,7 @@ export function ComponentLibraryDialog({
             <div className="component-library__grid">
               {visibleEntries.map((entry) => {
                 const status = componentCatalogInstallStatus(entry, components[entry.packageId])
-                const selectable = status === 'available'
+                const selectable = status === 'available' || status === 'embedded'
                 const selected = selectedIds.has(entry.packageId)
                 return (
                   <article
@@ -448,7 +448,7 @@ export function ComponentLibraryDialog({
               .finally(() => setAdding(false))
           }}
         >
-          {adding ? '正在校验…' : `加入工程${selectedEntries.length > 0 ? `（${selectedEntries.length}）` : ''}`}
+          {adding ? '正在校验…' : `添加到画布${selectedEntries.length > 0 ? `（${selectedEntries.length}）` : ''}`}
         </button>
       </footer>
       {detailsEntry && (
@@ -530,7 +530,7 @@ export function ComponentsTab({
       <div className="component-entry-actions">
         <button type="button" className="component-entry-action" data-testid="open-component-library" onClick={() => setLibraryOpen(true)}>
           <Library size={20} />
-          <span><strong>打开内置组件库</strong><small>按通用和学科浏览，可多选加入工程</small></span>
+          <span><strong>打开内置组件库</strong><small>按通用和学科浏览，可多选添加到画布</small></span>
         </button>
         <button type="button" className="component-entry-action" data-testid="import-external-components" disabled={!onImportExternalComponents} onClick={onImportExternalComponents}>
           <Upload size={20} />

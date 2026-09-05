@@ -77,6 +77,7 @@ export interface FlowWorkspaceProps {
   readonly assets: Readonly<Record<string, AssetMeta>>
   readonly selection: FlowEditorSelection | null
   readonly textEdit: FlowTextEditSession | null
+  readonly previewTextEdit?: FlowTextEditSession | null
   readonly commands: FlowCurrentSessionCommandPort
   readonly readOnly?: boolean
   readonly assetFiles?: Record<string, Uint8Array>
@@ -88,6 +89,7 @@ export function FlowInlineRichTextEditor({
   label,
   text,
   runs,
+  preview,
   restyleToken,
   range,
   composing,
@@ -102,6 +104,7 @@ export function FlowInlineRichTextEditor({
   readonly label: string
   readonly text: string
   readonly runs: readonly TextRun[]
+  readonly preview?: { readonly text: string; readonly runs: readonly TextRun[] } | null
   readonly restyleToken: number
   readonly range: { start: number; end: number }
   readonly composing: boolean
@@ -163,6 +166,7 @@ export function FlowInlineRichTextEditor({
   }, [])
 
   return (
+    <span style={{ display: 'block', position: 'relative' }}>
     <span
       ref={editorRef}
       className="flow-inline-editor"
@@ -187,6 +191,7 @@ export function FlowInlineRichTextEditor({
         WebkitUserSelect: 'text',
         cursor: 'text',
         color: FLOW_PAPER_TEXT_COLOR,
+        opacity: preview ? 0 : undefined,
       }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
@@ -230,6 +235,10 @@ export function FlowInlineRichTextEditor({
         }
       }}
     />
+    {preview && <span aria-hidden="true" data-testid="flow-text-color-preview"
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+      dangerouslySetInnerHTML={{ __html: buildFlowRichTextHtml(preview.text, preview.runs) }} />}
+    </span>
   )
 }
 
@@ -459,6 +468,7 @@ export function FlowWorkspace({
   assets,
   selection,
   textEdit,
+  previewTextEdit,
   commands,
   readOnly = false,
   assetFiles = {},
@@ -947,6 +957,8 @@ export function FlowWorkspace({
           label={label}
           text={richDraft?.text ?? text}
           runs={richDraft?.runs ?? runs}
+          preview={previewTextEdit?.blockId === blockView.blockId && previewTextEdit.kind === 'rich-text'
+            ? previewTextEdit.draft as { text: string; runs: TextRun[] } : null}
           restyleToken={restyleToken}
           range={restyleRange ?? edit?.range ?? { start: 0, end: 0 }}
           composing={edit?.composing ?? false}

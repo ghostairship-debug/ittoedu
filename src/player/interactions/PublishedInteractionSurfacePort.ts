@@ -81,6 +81,7 @@ export interface PublishedInteractionSurfacePort {
 /** Published navigation boundary supplied by the whole-course session. */
 export interface PublishedInteractionSessionPort {
   readonly courseState: Pick<CourseStateStore, 'get' | 'set'>
+  setCourseStateBatch?(entries: readonly { key: string; value: unknown }[]): void
   currentSceneId(): string | null
   executeAudioAction?(
     action: AudioInteractionAction,

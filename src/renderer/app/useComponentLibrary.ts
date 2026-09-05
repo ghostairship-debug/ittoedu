@@ -12,6 +12,7 @@ import type {
 } from '../../shared/ipcTypes'
 import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
 import { planCatalogBatchJoin } from '../components/componentLibraryModel'
+import type { ComponentInsertionTarget } from '../components/insertComponentPackages'
 import {
   componentPackageSha256,
   importComponentPackageAsync,
@@ -63,7 +64,8 @@ export interface ComponentLibraryPorts {
     target: ComponentPackageTarget,
     packageData: ComponentPackageData,
   ): ComponentPackageReplacementCommitResult
-  importPackages(packages: readonly ComponentPackageData[]): void
+  captureInsertionTarget(): ComponentInsertionTarget | null
+  insertPackages(target: ComponentInsertionTarget, packages: readonly ComponentPackageData[]): { ok: boolean; reason?: string }
   selectComponentPackage(): Promise<OpenBinaryFileResult | null>
   selectComponentPackages(): Promise<SelectedFileBatch<SelectedBinaryBatchFile> | null>
   desktopAvailable(): boolean
@@ -168,6 +170,8 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
   const importExternalPackages = useCallback(() => {
     void portsRef.current.runBusy(async () => {
       const started = portsRef.current.captureIdentity()
+      const insertionTarget = portsRef.current.captureInsertionTarget()
+      if (!insertionTarget) throw new Error('请先打开可编辑的画布。')
       const batch = await portsRef.current.selectComponentPackages()
       if (!batch) return
       const issues = batch.rejected.map((item) =>
@@ -233,11 +237,12 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
         }
         return
       }
-      portsRef.current.importPackages(packages)
+      const inserted = portsRef.current.insertPackages(insertionTarget, packages)
+      if (!inserted.ok) throw new Error(inserted.reason ?? '组件添加失败。')
       portsRef.current.commitStatus(
         issues.length > 0
-          ? `已加入 ${packages.length} 个外部组件，${issues.length} 项未加入`
-          : `已加入 ${packages.length} 个外部组件`,
+          ? `已添加 ${packages.length} 个外部组件到画布，${issues.length} 项未加入`
+          : `已添加 ${packages.length} 个外部组件到画布`,
       )
       if (issues.length > 0) {
         portsRef.current.reportError(
@@ -318,19 +323,12 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
   ): Promise<boolean> => {
     const completed = await portsRef.current.runBusy(async () => {
       const started = portsRef.current.captureIdentity()
+      const insertionTarget = mode === 'add' ? portsRef.current.captureInsertionTarget() : null
+      if (mode === 'add' && !insertionTarget) throw new Error('请先打开可编辑的画布。')
       const installedBefore = portsRef.current.readInstalledPackages()
       const pendingEntries = mode === 'add'
-        ? entries.filter((entry) =>
-            componentCatalogInstallStatus(
-              entry,
-              installedBefore[entry.packageId],
-            ) === 'available',
-          )
+        ? planCatalogBatchJoin(entries, installedBefore).entries
         : entries
-      if (mode === 'add' && pendingEntries.length === 0) {
-        portsRef.current.commitStatus('所选组件均已加入工程')
-        return true
-      }
       const updateEntry = pendingEntries[0]
       if (
         mode === 'update' &&
@@ -413,8 +411,12 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
           )
         }
       }
-      portsRef.current.importPackages(importedPackages)
-      portsRef.current.commitStatus(`已加入 ${importedPackages.length} 个组件`)
+      const importedById = new Map(importedPackages.map(data => [data.manifest.id, data]))
+      const toInsert = entries.map(entry => importedById.get(entry.packageId) ?? installedBefore[entry.packageId])
+      if (toInsert.some(data => !data)) throw new Error('组件包已失效，请刷新后重新添加。')
+      const inserted = portsRef.current.insertPackages(insertionTarget!, toInsert as ComponentPackageData[])
+      if (!inserted.ok) throw new Error(inserted.reason ?? '组件添加失败。')
+      portsRef.current.commitStatus(`已添加 ${toInsert.length} 个组件到当前画布`)
       return true
     }, mode === 'update'
       ? '组件更新失败，工程内原版本已保留。'
@@ -426,13 +428,15 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     entries: AvailableComponentCatalogPackage[],
   ): Promise<boolean> => {
     const installed = portsRef.current.readInstalledPackages()
-    const plan = planCatalogBatchJoin(entries, installed)
-    const pendingEntries = plan.entries
-    if (pendingEntries.length === 0) {
-      portsRef.current.commitStatus('所选组件均已加入工程')
-      return true
+    const selected = entries.filter(entry => {
+      const status = componentCatalogInstallStatus(entry, installed[entry.packageId])
+      return status === 'available' || status === 'embedded'
+    })
+    if (selected.length !== entries.length || selected.length === 0) {
+      portsRef.current.reportError('组件目录状态已改变，请刷新后重新选择。')
+      return false
     }
-    return performCatalogPackageOperation(pendingEntries, 'add')
+    return performCatalogPackageOperation(selected, 'add')
   }, [performCatalogPackageOperation])
 
   const requestCatalogUpdate = useCallback((

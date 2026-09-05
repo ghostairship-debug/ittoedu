@@ -15,11 +15,12 @@ interface CanvasPlainTextEditorProps {
   maxLength?: number
   rotation?: number
   onCommit(value: string): void
+  onAdvance?(value: string, direction: 1 | -1): void
   onCancel(): void
 }
 
 /**
- * A logical-canvas editor shared by explicit component/runtime text targets.
+ * A logical-canvas editor shared by Native, Component and Runtime text targets.
  * It lives inside the fixed 1280 x 720 StageViewport, so browser zoom, fit and
  * pan never need to be reimplemented here.
  */
@@ -31,6 +32,7 @@ export function CanvasPlainTextEditor({
   maxLength,
   rotation = 0,
   onCommit,
+  onAdvance,
   onCancel,
 }: CanvasPlainTextEditorProps) {
   const [draft, setDraft] = useState(value)
@@ -68,9 +70,18 @@ export function CanvasPlainTextEditor({
       event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
       if (event.nativeEvent.isComposing) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        finish(false)
+        return
+      }
       if (event.key === 'Escape') {
         event.preventDefault()
         finish(true)
+      } else if ((event.key === 'Tab' || event.key === 'Enter') && onAdvance) {
+        event.preventDefault()
+        if (finishedRef.current) return
+        finishedRef.current = true
+        onAdvance(draft, event.shiftKey ? -1 : 1)
       } else if (
         event.key === 'Enter' &&
         (!multiline || event.ctrlKey || event.metaKey)
@@ -110,7 +121,7 @@ export function CanvasPlainTextEditor({
         />
       )}
       <span className="canvas-plain-text-editor__hint">
-        {multiline ? 'Ctrl+Enter 完成 · Esc 取消' : 'Enter 完成 · Esc 取消'}
+        {onAdvance ? 'Tab / Enter 下一格 · Esc 取消' : multiline ? 'Ctrl+Enter 完成 · Esc 取消' : 'Enter 完成 · Esc 取消'}
       </span>
     </div>
   )

@@ -20,7 +20,7 @@ import {
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
 import type { EffectiveBackground } from '../../../shared/effectiveBackground'
-import { ColorInput } from '../ColorInput'
+import { NativeColorInput as ColorInput, NativeColorPreviewContext } from './NativeColorPreview'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
 import { DesignTokensEditor } from '../DesignTokensEditor'
 import {
@@ -124,6 +124,7 @@ export interface CourseGlobalPropertiesContext {
   readonly flowOrSpatial: boolean
   readonly editingScopeGlobal: boolean
   readonly commands: {
+    readonly preview?: (patch: PropertiesPatch | null) => void
     readonly patch: (patch: PropertiesPatch) => void
     readonly replaceImage: () => void
     readonly clearPresentationOverride: () => void
@@ -360,7 +361,7 @@ function TeacherControllerProperties({
         disabled={!node.collapsible}
         onChange={(defaultCollapsed) => update({ defaultCollapsed })}
       />
-      <ColorInput id="controller-background" label="背景色" value={node.style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
+      <ColorInput previewPatch={backgroundColor => ({ style: { backgroundColor } })} id="controller-background" label="背景色" value={node.style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
       <RangeField
         label="背景透明度"
         value={opacityToTransparencyPercent(node.style.backgroundOpacity)}
@@ -371,8 +372,8 @@ function TeacherControllerProperties({
           style: { backgroundOpacity: transparencyPercentToOpacity(value) },
         })}
       />
-      <ColorInput id="controller-accent" label="强调色" value={node.style.accentColor} onChange={(accentColor) => update({ style: { accentColor } })} />
-      <ColorInput id="controller-text" label="文字色" value={node.style.textColor} onChange={(textColor) => update({ style: { textColor } })} />
+      <ColorInput previewPatch={accentColor => ({ style: { accentColor } })} id="controller-accent" label="强调色" value={node.style.accentColor} onChange={(accentColor) => update({ style: { accentColor } })} />
+      <ColorInput previewPatch={textColor => ({ style: { textColor } })} id="controller-text" label="文字色" value={node.style.textColor} onChange={(textColor) => update({ style: { textColor } })} />
       <RangeField label="圆角" value={node.style.cornerRadius} min={0} max={40} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
       <div className="form-field">
         <label>控制按钮</label>
@@ -609,6 +610,7 @@ export function CourseGlobalPropertiesPanel({
   const node = selected.view
   const update = context.commands.patch
   return (
+    <NativeColorPreviewContext.Provider value={context.commands.preview}>
     <PropertyDraftBoundary
       bindingKey={context.draftBindingKey ?? 'global-property-target-unavailable'}
       onStale={() => context.onFeedback({
@@ -680,5 +682,6 @@ export function CourseGlobalPropertiesPanel({
       )}
       </div>
     </PropertyDraftBoundary>
+    </NativeColorPreviewContext.Provider>
   )
 }

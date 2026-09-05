@@ -54,10 +54,11 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Applies a sparse Native content override without replacing nested records.
  * Authoring views and schema validation must share this exact merge contract.
- * `null` deletes the key; discriminated union fields (`ast`, `lineGeometry`)
+ * `null` deletes optional override keys. The existing required nullable text
+ * style.highlightColor is a value (cleared highlight), never a missing field.
+ * Discriminated union fields (`ast`, `lineGeometry`)
  * replace wholesale at the top level so no fields from the former variant
- * survive. Existing valid documents contain neither null override values nor
- * `lineGeometry`, so both rules are additive.
+ * survive. This merge does not relax the strict Native content schema.
  */
 export function mergeCourseNativeData(
   base: Record<string, unknown>,
@@ -66,7 +67,7 @@ export function mergeCourseNativeData(
 ): Record<string, unknown> {
   const result = structuredClone(base)
   for (const [key, value] of Object.entries(patch)) {
-    if (value === null) {
+    if (value === null && !(depth === 1 && key === 'highlightColor')) {
       delete result[key]
       continue
     }

@@ -636,9 +636,17 @@ export function createSlideOwnedCommands(
       const row = slideRow(nodeId)
       if (!row) return
       if (row.owner === 'scene') {
-        slide.persist(deleteSlideSceneLayers(backend.getSession(), [nodeId], {
+        const result = deleteSlideSceneLayers(backend.getSession(), [nodeId], {
           expectedRevision: backend.getSnapshot().revision,
-        }))
+        })
+        slide.persist(result)
+        if (result.ok && result.nextSession && row.item.kind === 'native' && row.item.content.nativeType === 'input') {
+          const next = result.nextSession.history.present
+          const stillPresent = next.surfaces.some(surface => surface.type === 'slide' && surface.scenes.some(scene => scene.layerItems.some(item => item.layerItemId === nodeId)))
+          const keys = [row.item.content.data.stateKey, row.item.content.data.validityKey]
+          const retained = next.courseState.filter(entry => keys.includes(entry.key))
+          if (!stillPresent && retained.length) kernel.setFeedback({ statusMessage: '填空题已删除；答案状态仍被引用或扩展源码无法确认，已保留相应状态声明。' })
+        }
         return
       }
       persistLayer(deleteEffectiveLayerItems(

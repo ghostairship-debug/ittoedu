@@ -41,6 +41,8 @@ import type {
   WritingMode,
 } from '../../../shared/contracts/native-v1'
 import { SharedShapeProperties } from './SharedShapeProperties'
+import { NativeColorPreviewContext } from './NativeColorPreview'
+import { SlideInputProperties, type SlideInputPropertiesCommands, type SlideInputPropertiesView } from './SlideInputProperties'
 import { formulaAstToAccessibleText } from '../../../shared/formulaLinear'
 import { isVerticalWritingMode } from '../../../shared/textLayout'
 import {
@@ -50,7 +52,7 @@ import {
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
 import type { InteractionRule } from '../../../shared/interactionTypes'
-import { ColorInput } from '../ColorInput'
+import { NativeColorInput as ColorInput } from './NativeColorPreview'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
 import { FormulaAuthoringEditor } from '../FormulaAuthoringEditor'
 import {
@@ -110,6 +112,7 @@ export type PropertiesItemView =
   | NativeRenderableNode
   | SlideTablePropertiesView
   | SlideChartPropertiesView
+  | SlideInputPropertiesView
   | PropertiesComponentView
   | PropertiesRuntimeView
 
@@ -165,6 +168,7 @@ export interface SlideNativePropertiesContext {
   } | null
   readonly commands: {
     readonly patch: (patch: PropertiesPatch) => void
+    readonly preview?: (patch: PropertiesPatch | null) => void
     readonly replaceImage: () => void
     readonly clearPresentationOverride: () => void
     readonly openAutomation: () => void
@@ -172,6 +176,7 @@ export interface SlideNativePropertiesContext {
     readonly text: SlideNativeTextCommands
     readonly table: SlideTablePropertiesCommands | null
     readonly chart: SlideChartPropertiesCommands | null
+    readonly input?: SlideInputPropertiesCommands | null
   }
   readonly onFeedback: (feedback: { kind: 'error' | 'status'; message: string }) => void
 }
@@ -354,7 +359,7 @@ export function TextProperties({
         <BufferedInput label="字距" type="number" min={-20} max={100} value={style.letterSpacing} onCommit={(letterSpacing) => update({ style: { letterSpacing: Number(letterSpacing) } })} />
         <BufferedInput label="内边距" type="number" min={0} max={200} value={style.padding} onCommit={(padding) => update({ style: { padding: Number(padding) } })} />
       </div>
-      <ColorInput id="text-color" label="文字颜色" value={style.color} onChange={(color) => update({ style: { color } })} />
+      <ColorInput previewPatch={color => ({ style: { color } })} id="text-color" label="文字颜色" value={style.color} onChange={(color) => update({ style: { color } })} />
       <div className="form-field">
         <label>文字样式</label>
         <div className="segmented-control text-style-control">
@@ -373,7 +378,7 @@ export function TextProperties({
           <button type="button" className={`secondary-button${style.highlightColor ? ' secondary-button--active' : ''}`} onClick={() => update({ style: { highlightColor: style.highlightColor ? null : '#fff3a3' } })}>
             <Highlighter size={14} />{style.highlightColor ? '取消高亮' : '启用高亮'}
           </button>
-          {style.highlightColor && <ColorInput id="text-highlight" label="高亮颜色" value={style.highlightColor} onChange={(highlightColor) => update({ style: { highlightColor } })} />}
+          {style.highlightColor && <ColorInput previewPatch={highlightColor => ({ style: { highlightColor } })} id="text-highlight" label="高亮颜色" value={style.highlightColor} onChange={(highlightColor) => update({ style: { highlightColor } })} />}
         </div>
       </div>
       <ToggleRow
@@ -420,7 +425,9 @@ export function TextProperties({
         ]}
         onChange={(overflow) => update({ style: { overflow } })}
       />
-      <ColorInput id="text-background" label="文本框背景" value={style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
+      <ColorInput previewPatch={backgroundColor => ({ style: { backgroundColor, backgroundOpacity: style.backgroundOpacity || 1 } })} id="text-background" label="文本框背景" value={style.backgroundColor} onChange={(backgroundColor) => update({
+        style: { backgroundColor, backgroundOpacity: style.backgroundOpacity || 1 },
+      })} />
       <RangeField
         label="背景透明度"
         value={opacityToTransparencyPercent(style.backgroundOpacity)}
@@ -495,6 +502,7 @@ function FormulaProperties({ node, update }: {
       />
       <ColorInput
         id="formula-color"
+        previewPatch={color => ({ style: { color } })}
         label="公式颜色"
         value={node.style.color}
         onChange={(color) => update({ style: { color } } as PropertiesPatch)}
@@ -841,6 +849,7 @@ export function SlideNativePropertiesPanel({
   } = context
   const update = commands.patch
   return (
+    <NativeColorPreviewContext.Provider value={commands.preview}>
     <PropertyDraftBoundary
       bindingKey={context.draftBindingKey}
       onStale={() => context.onFeedback({
@@ -863,6 +872,9 @@ export function SlideNativePropertiesPanel({
         />
       )}
       {afterCommon}
+      {node.type === 'input' && commands.input && <SlideInputProperties
+        key={context.draftBindingKey} node={node} commands={commands.input} patch={update}
+      />}
       <SlideNativeTypeFields
         node={node}
         update={update}
@@ -911,5 +923,6 @@ export function SlideNativePropertiesPanel({
         <InteractionEditor {...interaction} />
       )}
     </PropertyDraftBoundary>
+    </NativeColorPreviewContext.Provider>
   )
 }

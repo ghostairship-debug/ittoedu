@@ -1,3 +1,7 @@
+import type { EffectiveBackgroundOwner } from '../../../shared/effectiveBackground'
+import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
+import { configureSlideInputAtTarget } from '../../course/v9SlideContentCommands'
+import { inspectInputRuleFamily } from '../../interactions/inputRuleFamily'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
 import type { TextNode } from '../../../shared/contracts/native-v1'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
@@ -31,6 +35,7 @@ import type {
 } from '../../course/slideEditorCommands'
 import type { SlideAuthoringSession } from '../../course/slideAuthoringBackend'
 import {
+  commitSlideTableLastCellAndAppendRow,
   deleteSlideTableColumn,
   deleteSlideTableRow,
   insertSlideTableColumn,
@@ -358,12 +363,31 @@ export function usePropertiesAuthoringBinding({
     setError(null)
     setStatus(message)
   }
+  const previewBackground = (color: string | null, owner: EffectiveBackgroundOwner) => {
+    const { projectId, revision, generation, locationId, stateId } = read.identity
+    if (!projectId || !locationId) return
+    const target = { projectId, revision, generation, locationId, stateId, owner }
+    if (color !== null && ownerIdentityKey(readLive()) !== ownerIdentityKey(read)) return
+    setPreviewBackgroundColor(color === null ? null : { target, color }, target)
+  }
   const capturedOwnerKey = ownerIdentityKey(read)
   const ownerIsLive = () => ownerIdentityKey(readLive()) === capturedOwnerKey
   const requireLiveOwner = () => {
     if (ownerIsLive()) return true
     reportError(STALE_PROPERTY_TARGET)
     return false
+  }
+  const previewSelectedNative = (patch: PropertiesPatch | null) => {
+    const { projectId, revision, generation, locationId, stateId } = read.identity
+    const node = read.selectedView
+    const row = read.selectedRow
+    if (!projectId || !locationId || !node || !row) return
+    const target = { projectId, revision, generation, locationId, stateId, owner: 'native' as const, authoringAddress: row.authoringAddress }
+    if (patch === null) { setPreviewBackgroundColor(null, target); return }
+    if (!ownerIsLive()) return
+    const effective = effectivePatchFromProperties(row.item, normalizePropertiesPatch(node, patch))
+    const nativeData = effective.nativeData ?? (effective.nativeTextStyle ? { style: effective.nativeTextStyle } : undefined)
+    if (nativeData) setPreviewBackgroundColor({ target, color: '', nativeData }, target)
   }
 
   const runtimeContexts = buildRuntimePropertiesContexts({
@@ -385,7 +409,7 @@ export function usePropertiesAuthoringBinding({
     course: read.course,
     runIntent: runFlowAuthoringIntent,
     reportError,
-    setPreviewBackgroundColor,
+    setPreviewBackgroundColor: color => previewBackground(color, 'flow-surface'),
   })
   const spatialOwner = buildSpatialPropertiesOwner({
     view: read.spatial?.view ?? null,
@@ -406,7 +430,7 @@ export function usePropertiesAuthoringBinding({
           onOpenAutomation: () => setActiveTab('automation'),
         }
       : null,
-    setPreviewBackgroundColor,
+    setPreviewBackgroundColor: color => previewBackground(color, 'spatial-surface'),
   })
 
   if (flowOwner.status === 'stale') {
@@ -629,7 +653,17 @@ export function usePropertiesAuthoringBinding({
     flowOwner.status === 'active'
     && flowOwner.context
     && flowOwner.context.kind !== 'flow-page'
-  ) return flowOwner.context
+  ) return { ...flowOwner.context, commands: { ...flowOwner.context.commands, previewNative: previewSelectedNative,
+    previewTextColor: color => {
+      if (!read.flow) return
+      const { projectId, revision, generation, locationId, stateId } = read.identity
+      if (!projectId || !locationId) return
+      const target = { projectId, revision, generation, locationId, stateId, owner: 'flow-text' as const,
+        authoringAddress: read.flow.selection.selectedBlockId ?? '' }
+      if (color === null) { setPreviewBackgroundColor(null, target); return }
+      if (ownerIsLive()) setPreviewBackgroundColor({ target, color, flowText: { selection: read.flow.selection, edit: read.flow.textEdit } }, target)
+    },
+  } }
 
   if (
     spatialOwner.status === 'active'
@@ -909,6 +943,9 @@ export function usePropertiesAuthoringBinding({
       commitCellText: (cellId, text) => run((session) => (
         patchSlideTableCellText(session, { layerItemId: target.layerItemId, cellId, text }, options)
       )),
+      commitLastCellAndAppendRow: (cellId, text) => run((session) => (
+        commitSlideTableLastCellAndAppendRow(session, { layerItemId: target.layerItemId, cellId, text }, options)
+      )),
       patchStyle: (stylePatch) => run((session) => (
         patchSlideTableStyle(session, { layerItemId: target.layerItemId, stylePatch }, options)
       )),
@@ -962,6 +999,7 @@ export function usePropertiesAuthoringBinding({
       if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
     }
     return {
+      connectCanvasText: (port) => connectChartCanvasText(target, port),
       patchTitle: (title) => run((session) => (
         patchSlideChartTitle(session, { layerItemId: target.layerItemId, title }, options)
       )),
@@ -990,6 +1028,16 @@ export function usePropertiesAuthoringBinding({
   }
 
   const sharedCommands = (): SlideNativePropertiesContext['commands'] => ({
+    preview: previewSelectedNative,
+    input: node?.type === 'input' && slideTarget && read.scene ? {
+      inspection: inspectInputRuleFamily(node.id, node, read.scene.interactions),
+      feedbackTargets: read.interactionNodes.filter(item => item.id !== node.id).map(item => ({ id: item.id, name: item.name })),
+      configure: request => {
+        if (!requireLiveOwner()) return COURSE_AUTHORING_STALE_SESSION_REASON
+        const result = applySlideCandidateCommand(session => configureSlideInputAtTarget(session, slideTarget, request))
+        return result.ok ? null : result.reason ?? '输入配置提交失败'
+      },
+    } : null,
     patch: patchSelectedNode,
     replaceImage: () => {
       if (requireLiveOwner()) onReplaceImage()
@@ -1197,11 +1245,11 @@ export function usePropertiesAuthoringBinding({
       replaceImage: onReplaceImage,
       clearPresentationOverride: () => undefined,
       updateCourseBackground: (patch) => {
-        setPreviewBackgroundColor(null)
+        previewBackground(null, 'course')
         if (requireLiveOwner()) updateCourseBackground(patch)
       },
       previewCourseBackground: (patch) => {
-        setPreviewBackgroundColor(patch.backgroundColor ?? null)
+        previewBackground(patch.backgroundColor ?? null, 'course')
       },
       ...projectCommands,
       openProfessionalAutomation: () => {
@@ -1275,31 +1323,31 @@ export function usePropertiesAuthoringBinding({
           if (sceneId && requireLiveOwner()) updateScene(sceneId, { name })
         },
         updateSlideSurfaceBackground: (patch) => {
-          setPreviewBackgroundColor(null)
+          previewBackground(null, 'slide-surface')
           if (surfaceId && requireLiveOwner()) updateSlideSurfaceBackground(surfaceId, patch)
         },
         previewSlideSurfaceBackground: (patch) => {
-          setPreviewBackgroundColor(patch.backgroundColor ?? null)
+          previewBackground(patch.backgroundColor ?? null, 'slide-surface')
         },
         importSlideSurfaceBackgroundAsset: (file) => {
           if (surfaceId && requireLiveOwner()) importSlideSurfaceBackgroundAsset(surfaceId, file)
         },
         updateSceneBackground: (patch) => {
-          setPreviewBackgroundColor(null)
+          previewBackground(null, 'slide-scene')
           if (sceneId && requireLiveOwner()) updateSceneBackground(sceneId, patch)
         },
         previewSceneBackground: (patch) => {
-          setPreviewBackgroundColor(patch.backgroundColor ?? null)
+          previewBackground(patch.backgroundColor ?? null, 'slide-scene')
         },
         importSceneBackgroundAsset: (file) => {
           if (sceneId && requireLiveOwner()) importSceneBackgroundAsset(sceneId, file)
         },
         updateStateBackground: (patch) => {
-          setPreviewBackgroundColor(null)
+          previewBackground(null, 'slide-state')
           if (stateId && requireLiveOwner()) updatePresentationState(stateId, patch)
         },
         previewStateBackground: (patch) => {
-          setPreviewBackgroundColor(patch.backgroundColor ?? null)
+          previewBackground(patch.backgroundColor ?? null, 'slide-state')
         },
         // Both only ever run in the "currently overridden" direction: the
         // shared control shows this action solely when an override exists.

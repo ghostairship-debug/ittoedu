@@ -3,13 +3,16 @@ import {
   useEffect,
   useRef,
   useState,
+  useContext,
 } from 'react'
 import type {
   NativeChartCommonStyle,
   NativeChartContent,
 } from '../../../shared/contracts/native-v1/types'
 import type { SlideChartCandidateData } from '../../course/v9ChartCommands'
+import type { ChartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { ColorInput } from '../ColorInput'
+import { NativeColorInput, NativeColorPreviewContext } from './NativeColorPreview'
 import {
   BufferedInput,
   FontFamilyPicker,
@@ -35,6 +38,7 @@ export type SlideChartStylePatch = Partial<NativeChartCommonStyle> & Partial<{
 }>
 
 export interface SlideChartPropertiesCommands {
+  readonly connectCanvasText?: (port: ChartCanvasTextPort) => () => void
   readonly patchTitle: (title: string) => void
   readonly patchType: (newType: SlideChartType, retainedSeriesId?: string) => void
   readonly patchStyle: (patch: SlideChartStylePatch) => void
@@ -185,6 +189,8 @@ export function SlideChartProperties({
   const circular = isCircularType(chartType)
   const cartesian = !circular
   const style = node.style
+  const preview = useContext(NativeColorPreviewContext)
+  useEffect(() => () => preview?.(null), [bindingKey])
 
   const [pendingType, setPendingType] = useState<{
     target: SlideChartType
@@ -225,6 +231,31 @@ export function SlideChartProperties({
 
   const validation = validateDraft(draft, chartType)
 
+  useEffect(() => commands.connectCanvasText?.({
+    read: (kind, id) => kind === 'category'
+      ? draft.categories.find(entry => entry.id === id)?.label
+      : draft.series.find(entry => entry.id === id)?.name,
+    commit: (kind, id, value) => {
+      const exists = kind === 'category'
+        ? draft.categories.some(entry => entry.id === id)
+        : draft.series.some(entry => entry.id === id)
+      if (!exists) return '该分类或系列已在数据草稿中删除，请先应用或取消草稿。'
+      const next = {
+        categories: draft.categories.map(entry => kind === 'category' && entry.id === id ? { ...entry, label: value } : entry),
+        series: draft.series.map(entry => kind === 'series' && entry.id === id ? { ...entry, name: value } : entry),
+      }
+      const validated = validateDraft(next, chartType)
+      const reason = validated.candidate
+        ? commands.commitTableData(validated.candidate)
+        : '数据草稿含有未完成或无效的内容，请在属性栏修正后应用。'
+      setDraft(next)
+      dirtyRef.current = Boolean(reason)
+      setDirty(Boolean(reason))
+      setApplyError(reason)
+      return reason
+    },
+  }), [commands, draft, chartType])
+
   const selectType = (next: SlideChartType) => {
     if (next === chartType) return
     if (isCircularType(next) && node.series.length > 1) {
@@ -238,6 +269,7 @@ export function SlideChartProperties({
 
   const applyDraft = () => {
     if (!validation.candidate) return
+    preview?.(null)
     const reason = commands.commitTableData(validation.candidate)
     if (reason) {
       setApplyError(reason)
@@ -249,6 +281,7 @@ export function SlideChartProperties({
   }
 
   const resetDraft = () => {
+    preview?.(null)
     dirtyRef.current = false
     setDirty(false)
     setApplyError(null)
@@ -323,6 +356,10 @@ export function SlideChartProperties({
         series.key === key ? { ...series, ...patch } : series
       )),
     }))
+    if (patch.color) preview?.({ series: node.series.map(item => {
+      const pending = draft.series.find(series => series.id === item.id)
+      return { ...item, color: pending?.key === key ? patch.color! : pending?.color ?? item.color }
+    }) })
   }
 
   const patchValue = (seriesKey: string, categoryIndex: number, value: string) => {
@@ -398,7 +435,7 @@ export function SlideChartProperties({
       <div className="property-subsection-header">
         <div>
           <strong>数据表</strong>
-          <small>修改先留在本地草稿，「应用数据」一次提交为一条历史</small>
+          <small>修改先留在草稿。点击「应用数据」，或在画布确认分类/系列文字时，一并应用。</small>
         </div>
       </div>
       <div
@@ -428,6 +465,10 @@ export function SlideChartProperties({
               label="系列颜色"
               value={series.color}
               onChange={(color) => patchSeries(series.key, { color })}
+              onPreviewChange={color => preview?.({
+                series: node.series.map(item => ({ ...item, color: item.id === series.id && color !== null ? color
+                  : draft.series.find(pending => pending.id === item.id)?.color ?? item.color })),
+              })}
             />
             <button
               type="button"
@@ -610,8 +651,9 @@ export function SlideChartProperties({
           onChange={(holeSize) => commands.patchStyle({ holeSize })}
         />
       )}
-      <ColorInput
+      <NativeColorInput
         id="chart-background"
+        previewPatch={backgroundColor => ({ style: { backgroundColor } })}
         label="背景颜色"
         value={style.backgroundColor}
         onChange={(backgroundColor) => commands.patchStyle({ backgroundColor })}
@@ -624,8 +666,9 @@ export function SlideChartProperties({
         suffix="%"
         onChange={(value) => commands.patchStyle({ backgroundOpacity: 1 - value / 100 })}
       />
-      <ColorInput
+      <NativeColorInput
         id="chart-text-color"
+        previewPatch={textColor => ({ style: { textColor } })}
         label="文字颜色"
         value={style.textColor}
         onChange={(textColor) => commands.patchStyle({ textColor })}

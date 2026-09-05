@@ -1,3 +1,4 @@
+import { projectWithBackgroundPreview, flowTextColorPreview } from '../../authoring/backgroundPreview'
 import { useCallback, useMemo } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseAuthoringSession } from '../../authoring/courseAuthoringSession'
@@ -45,18 +46,18 @@ export function FlowWorkspaceConnector() {
     run: runFlowAuthoringIntent,
   }), [runFlowAuthoringIntent])
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
+  const textPreview = useMemo(() => session && canvasMode === 'edit'
+    ? flowTextColorPreview(session.history.present, previewBackgroundColor, authoringSession?.token.generation ?? -1, session.selection.locationId)
+    : null, [session, canvasMode, previewBackgroundColor, authoringSession])
   const view = useMemo(() => {
     if (!session) return null
-    const baseView = buildFlowEditorView({
-      project: session.history.present,
+    return buildFlowEditorView({
+      project: projectWithBackgroundPreview(textPreview?.nextDocument ? { ...textPreview.nextDocument, revision: session.history.present.revision } : session.history.present, canvasMode === 'edit' ? previewBackgroundColor : null, {
+        locationId: session.selection.locationId, stateId: null, generation: authoringSession?.token.generation ?? -1,
+      }),
       locationId: session.selection.locationId,
     })
-    if (!previewBackgroundColor) return baseView
-    return {
-      ...baseView,
-      backgroundColor: previewBackgroundColor,
-    }
-  }, [session, previewBackgroundColor])
+  }, [session, previewBackgroundColor, authoringSession, canvasMode, textPreview])
   const tryRunSnapshot = useMemo(() => session
     ? {
       project: session.history.present,
@@ -99,6 +100,7 @@ export function FlowWorkspaceConnector() {
       assets={session.history.present.assets}
       selection={session.selection}
       textEdit={textEdit}
+      previewTextEdit={textPreview?.nextEdit ?? null}
       canvasMode={canvasMode}
       editingScope={editingScope === 'global' ? 'global' : 'scene'}
       assetFiles={assetFiles}

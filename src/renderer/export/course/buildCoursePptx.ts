@@ -14,6 +14,7 @@ import type {
 import {
   clamp,
   pptxColor,
+  pptxFontFace,
   pptxNodePosition,
   pptxRotation,
   pptxTransparency,
@@ -262,6 +263,23 @@ async function addNativeItem(
 ): Promise<void> {
   const publishedNode = readonlyNativeRenderInputFromPublishedItem(item)
   if (!publishedNode.visible) return
+  if (publishedNode.type === 'input') {
+    const style = publishedNode.style
+    slide.addText(publishedNode.placeholder || '填写答案', {
+      ...pptxNodePosition(publishedNode, scale), rotate: pptxRotation(publishedNode.rotation),
+      objectName: `${item.layerItemId} · 静态填写区`,
+      color: pptxColor(style.textColor, '1F2937'), fontFace: pptxFontFace(style.fontFamily),
+      fontSize: style.fontSize * 0.75, align: style.horizontalAlign, valign: 'middle',
+      transparency: pptxTransparency(publishedNode.opacity),
+      fill: { color: pptxColor(style.fillColor, 'FFFFFF'), transparency: pptxTransparency(style.fillOpacity * publishedNode.opacity) },
+      line: { color: pptxColor(style.borderColor, '94A3B8'), transparency: pptxTransparency(style.borderOpacity * publishedNode.opacity), width: style.borderWidth * 0.75 },
+      margin: style.padding * 0.75,
+    })
+    const message = `static-input：输入框“${item.layerItemId}”导出为可编辑静态填写区，不保留提交和判题交互。`
+    sceneWarnings.push(message)
+    pushReport(report, { severity: 'warning', message, pageId })
+    return
+  }
   if (publishedNode.type === 'table') {
     sceneWarnings.push(...addPptxTableNode(slide, publishedNode, scale))
     return
