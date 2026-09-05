@@ -1,0 +1,146 @@
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, cleanup } from '@testing-library/react'
+import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createChartNode, createImageNode, createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
+import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
+import { createProductivityPreview, applyProductivityPreview, type ProductivityContext } from '../../src/renderer/authoring/productivity'
+import { cloneReferencePage } from '../../src/renderer/authoring/productivity/referenceClone'
+import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
+import { ProductivityDialog } from '../../src/renderer/ui/productivity/ProductivityDialog'
+
+function fixture() {
+  const document = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+  const surface = document.surfaces[0]!
+  if (surface.type !== 'slide') throw new Error('expected slide')
+  const scene = surface.scenes[0]!
+  const text = createTextNode()
+  text.text = '旧甲旧乙'; text.runs = [{ start: 1, end: 2, style: { bold: true } }, { start: 3, end: 4, style: { italic: true } }]
+  scene.layerItems.push(sceneNodeToCourseLayerItem(text, 1))
+  const context: ProductivityContext = { document, sessionToken: { locationId: document.startLocationId, surfaceType: 'slide', revision: document.revision, generation: 1 } }
+  return { context, scene, surface }
+}
+describe('design productivity canonical previews', () => {
+  it('applies selected text only, preserves styles between matches, and reverses one transaction', () => {
+    const { context, scene } = fixture()
+    const second = structuredClone(scene.layerItems[0]!); second.layerItemId = 'other-text'; second.order = 2; scene.layerItems.push(second)
+    const preview = createProductivityPreview(context, { kind: 'text', scope: 'page', find: '旧', replacement: '新文字' })
+    expect(preview.items).toHaveLength(2)
+    const result = applyProductivityPreview(context, preview, [preview.items[0]!.id])
+    if (!result.ok) throw new Error(result.reason)
+    if (!result.ok || !result.step) throw new Error('expected step')
+    const state = { document: context.document, resources: { assetFiles: {}, componentPackages: {} } }
+    const forward = applyEditorTransactionStep(state, result.step, 'forward')
+    const surface = forward.document.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('expected slide')
+    const content = surface.scenes[0]!.layerItems[0]!
+    if (content.kind !== 'native' || content.content.nativeType !== 'text') throw new Error('expected text')
+    expect(content.content.data.text).toBe('新文字甲新文字乙')
+    expect(content.content.data.runs).toContainEqual({ start: 3, end: 4, style: { bold: true } })
+    expect(content.content.data.runs).toContainEqual({ start: 7, end: 8, style: { italic: true } })
+    expect(surface.scenes[0]!.layerItems[1]).toEqual(second)
+    expect(courseProjectDocumentSchema.parse(forward.document)).toEqual(forward.document)
+    expect(applyEditorTransactionStep(forward, result.step, 'inverse').document).toEqual(context.document)
+  })
+  it('rejects revision/session changes and forged preview values with zero source mutation', () => {
+    const { context } = fixture(); const before = structuredClone(context.document)
+    const preview = createProductivityPreview(context, { kind: 'text', scope: 'course', find: '旧', replacement: '新' })
+    expect(applyProductivityPreview({ ...context, sessionToken: { ...context.sessionToken, generation: 2 } }, preview, preview.items.map(i => i.id)).ok).toBe(false)
+    expect(applyProductivityPreview({ ...context, document: { ...context.document, revision: 1 } }, preview, preview.items.map(i => i.id)).ok).toBe(false)
+    preview.items[0]!.newValue = '伪造'
+    expect(applyProductivityPreview(context, preview, preview.items.map(i => i.id)).ok).toBe(false)
+    expect(context.document).toEqual(before)
+  })
+  it('excludes shared owners from page scope and applies inherited background explicitly', () => {
+    const { context, scene, surface } = fixture()
+    const shared = structuredClone(scene.layerItems[0]!); shared.layerItemId = 'shared'
+    surface.surfaceLayerItems.push({ item: shared, visibility: { mode: 'all', locationIds: [] } })
+    expect(createProductivityPreview(context, { kind: 'text', scope: 'page', find: '旧', replacement: '新' }).items).toHaveLength(1)
+    expect(createProductivityPreview(context, { kind: 'text', scope: 'surface', find: '旧', replacement: '新' }).items).toHaveLength(2)
+    scene.backgroundMode = 'inherit'; context.document.backgroundColor = '#123456'
+    const preview = createProductivityPreview(context, { kind: 'color', scope: 'page', tokenId: 'accent', property: 'background' })
+    const background = preview.items.find(i => i.property === 'backgroundColor' && i.target === '背景')!
+    expect(background.oldValue).toBe('#123456')
+    const result = applyProductivityPreview(context, preview, [background.id])
+    if (!result.ok || !result.step) throw new Error('expected step')
+    const next = result.step.nextDocument.surfaces[0]!
+    if (next.type !== 'slide') throw new Error('expected slide')
+    expect(next.scenes[0]!.backgroundMode).toBe('own')
+    expect(next.scenes[0]!.backgroundColor).toBe('#2563eb')
+    expect(result.step.nextDocument.designTokens).toEqual(context.document.designTokens)
+  })
+  it('edits Flow chart labels/colors and plain rich text without changing code', () => {
+    const { context } = fixture(); const chart = createChartNode()
+    chart.title = '旧图表'
+    const layer = sceneNodeToCourseLayerItem(chart, 0)
+    if (layer.kind !== 'native' || layer.content.nativeType !== 'chart') throw new Error('chart')
+    context.document.surfaces.push({ id: 'flow', type: 'flow', title: '讲义', surfaceLayerItems: [], layout: { readingWidth: 800, wideContentWidth: 1000 }, blocks: [{ id: 'p', type: 'paragraph', text: '旧正文' }, { id: 'chart', type: 'chart', chart: layer.content.data, height: 320 }, { id: 'code', type: 'code', code: '旧代码' }] })
+    context.document.mixedPrintPlan = { pageSize: 'A4', orientation: 'portrait', entries: [{ id: 'flow-print', kind: 'flow-document', surfaceId: 'flow' }, { id: 'slide-print', kind: 'slide-scenes', surfaceId: context.document.surfaces[0]!.id, sceneIds: [context.document.locations[0]!.kind === 'slide-scene' ? context.document.locations[0]!.sceneId : ''] }] }
+    context.document.locations.push({ id: 'flow-location', kind: 'flow-block', surfaceId: 'flow', blockId: 'p', label: '正文' })
+    context.sessionToken = { ...context.sessionToken, locationId: 'flow-location', surfaceType: 'flow' }
+    expect(createProductivityPreview(context, { kind: 'text', scope: 'page', find: '旧', replacement: '新' }).items).toHaveLength(2)
+    const preview = createProductivityPreview(context, { kind: 'color', scope: 'page', tokenId: 'accent', property: 'text' })
+    expect(preview.items.some(i => i.property === '全文颜色')).toBe(true)
+    const result = applyProductivityPreview(context, preview, preview.items.map(i => i.id))
+    if (!result.ok || !result.step) throw new Error(result.ok ? 'no step' : result.reason)
+    expect(courseProjectDocumentSchema.safeParse(result.step.nextDocument).success).toBe(true)
+  })
+  it('clones stable chart IDs, presentation references and asset bytes without changing source', () => {
+    const { context, scene } = fixture()
+    scene.layerItems.push(sceneNodeToCourseLayerItem(createChartNode(), 2))
+    const image = createImageNode({ assetId: 'photo', width: 100, height: 100 })
+    scene.layerItems.push(sceneNodeToCourseLayerItem(image, 3))
+    context.document.assets.photo = { id: 'photo', filename: 'photo.png', path: 'assets/photo.png', kind: 'image', mimeType: 'image/png', byteLength: 3 }
+    const source = structuredClone(context.document)
+    const result = cloneReferencePage(context, scene.id, { photo: new Uint8Array([1, 2, 3]) })
+    if (!result.ok || !result.step) throw new Error(result.ok ? 'no step' : result.reason)
+    const next = result.step.nextDocument.surfaces[0]!
+    if (next.type !== 'slide') throw new Error('slide')
+    expect(next.scenes).toHaveLength(2)
+    expect(next.scenes[0]).toEqual(scene)
+    expect(next.scenes[1]!.id).not.toBe(scene.id)
+    expect(next.scenes[1]!.presentation!.initialStateId).not.toBe(scene.presentation!.initialStateId)
+    expect(JSON.stringify(next.scenes[1])).not.toContain('"assetId":"photo"')
+    const oldChart = scene.layerItems[1]!, newChart = next.scenes[1]!.layerItems[1]!
+    if (oldChart.kind !== 'native' || oldChart.content.nativeType !== 'chart' || newChart.kind !== 'native' || newChart.content.nativeType !== 'chart') throw new Error('chart')
+    expect(newChart.content.data.categories[0]!.id).not.toBe(oldChart.content.data.categories[0]!.id)
+    expect(newChart.content.data.series[0]!.points[0]!.categoryId).toBe(newChart.content.data.categories[0]!.id)
+    expect(result.step.resourceChanges.assetFileChanges).toHaveLength(1)
+    expect(courseProjectDocumentSchema.safeParse(result.step.nextDocument).success).toBe(true)
+    expect(context.document).toEqual(source)
+    expect(cloneReferencePage(context, scene.id, {}).ok).toBe(false)
+  })
+  it('previews checkbox selection and rejects a retired session from the visible dialog', () => {
+    const { context } = fixture(); const onCommit = vi.fn(() => true)
+    render(<ProductivityDialog getContext={() => context} getAssetFiles={() => ({})} onCommit={onCommit} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('查找文字'), { target: { value: '旧' } })
+    fireEvent.change(screen.getByLabelText('替换文字'), { target: { value: '新' } })
+    fireEvent.click(screen.getByText('预览修改'))
+    expect(screen.getByText('新值：新甲新乙')).toBeTruthy()
+    context.sessionToken = { ...context.sessionToken, generation: 7 }
+    fireEvent.click(screen.getByText('应用勾选项'))
+    expect(screen.getByRole('status').textContent).toContain('预览已过期')
+    expect(onCommit).not.toHaveBeenCalled()
+    cleanup()
+  })
+  it('clones interaction state declarations and input managed-family references together', () => {
+    const { context, scene } = fixture()
+    context.document.courseState.push({ key: 'answer', valueType: 'string', defaultValue: '' }, { key: 'valid', valueType: 'boolean', defaultValue: false })
+    const item = structuredClone(scene.layerItems[0]!)
+    item.layerItemId = 'answer-input'; item.order = 2
+    if (item.kind !== 'native') throw new Error('native')
+    item.content = { nativeType: 'input', data: { answerType: 'text', stateKey: 'answer', validityKey: 'valid', ruleFamilyRuleIds: ['answer-rule'], placeholder: '答案', style: { fontFamily: 'Arial', fontSize: 24, textColor: '#000000', fillColor: '#ffffff', fillOpacity: 1, borderColor: '#000000', borderOpacity: 1, borderWidth: 1, cornerRadius: 0, horizontalAlign: 'left', padding: 8 } } }
+    scene.layerItems.push(item)
+    scene.interactions.push({ id: 'answer-rule', enabled: true, trigger: { type: 'input.submit', nodeId: item.layerItemId }, conditions: [{ type: 'course-state.compare', key: 'answer', operator: 'eq', value: '正确' }], actions: [{ id: 'set-valid', start: 'after-previous', delayMs: 0, action: { type: 'course-state.set', key: 'valid', value: true } }] })
+    const result = cloneReferencePage(context, scene.id, {})
+    if (!result.ok || !result.step) throw new Error(result.ok ? 'no step' : result.reason)
+    const surface = result.step.nextDocument.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('slide')
+    const clone = surface.scenes[1]!, input = clone.layerItems[1]!
+    if (input.kind !== 'native' || input.content.nativeType !== 'input') throw new Error('input')
+    expect(input.content.data.stateKey).not.toBe('answer')
+    expect(input.content.data.ruleFamilyRuleIds).toEqual([clone.interactions[0]!.id])
+    expect(result.step.nextDocument.courseState).toHaveLength(4)
+    expect(courseProjectDocumentSchema.safeParse(result.step.nextDocument).success).toBe(true)
+  })
+})
