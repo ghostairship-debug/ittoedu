@@ -10,6 +10,8 @@
 
 S4 Owner 验收 1.9–2.0 后发布 `v2.0.0` 内部源码标签与从同一 accepted 候选冻结的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不发布安装器。三 CLI 的固定验收工作区证明内部生产 AI 工作流；发布 HTML 证明课程运行制品，二者不混为同一制品。
 
+PPTX 人工导入增强是本版并列交付线，始终可见，不受 AI 开关或 CLI 是否可用影响。版本节点、详细边界和实施顺序见 [PPTX 能力增强计划](../../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。
+
 ## 任务 DAG
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
@@ -22,7 +24,8 @@ S4 Owner 验收 1.9–2.0 后发布 `v2.0.0` 内部源码标签与从同一 acce
 | `r20-022-materials-privacy-controls` | 材料引用、会话删除、Save As 隔离和 CLI 历史差异成为公共控制 | `r20-011-first-use-risk-notice`, `r15-020-material-tools-citations`, `r19-040-session-persistence-deletion` | 否 | `main-preload`, `workspace-shell` | 发送前可逐项取消材料 / 页面 / 整课引用；Save As 后会话为空；按会话 / 工程 / 全部删除应用记录结果可复查；课程中的可见引用仍随工程保存；UI 明确链接到三种 CLI 各自历史处理说明且不宣称代删 |
 | `r20-030-docs-accessibility` | 完成内部设置 / Chat / timeline 的键盘、读屏、错误恢复与用户文档 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls` | 否 | `workspace-shell`, `generated-index` | 仅键盘可完成 CLI 设置、风险确认、引用选择、发送、Stop、查看 tool finding、Undo 和删除；焦点顺序/状态 announcement/对比度通过项目基线；内部文档逐项覆盖三 CLI 安装登录、数据边界、失败恢复、staging/MCP、删除差异和人工回退 |
 | `r20-040-three-cli-acceptance` | 三种真实 CLI 在同一固定课例完成同一生成与局部编辑矩阵 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls` | 否 | `cli-adapters` | Codex、Claude、OpenCode 各自完成同一单页生成和同一现有页局部编辑；每种都覆盖 Stop、教师并发 stale、Undo、应用重启恢复和会话删除；产物保存重开、Player、单 HTML、诊断通过；任一种失败不得以另一种结果替代；本节点在现有 `tests/e2e/stabilizationCoreUsability.spec.ts` 增加并通过三 CLI 固定矩阵用例 |
-| `r20-050-owner-acceptance` | Owner 验收 S4 AI 产品并签署 v2.0.0 accepted 候选 | `r20-030-docs-accessibility`, `r20-040-three-cli-acceptance` | 否 | `none` | Owner 在同一固定课例完成 S4 AI 产品验收：覆盖 1.9 的 Chat/timeline/safe render/Stop/Undo/stale/restart/migration/corruption/delete，以及 2.0 的三 CLI 设置、风险提示、生成、编辑、材料隐私、无障碍与人工回退；验证三 Surface、Native/Component/Runtime、保存重开、Player、适用导出和断网固定 HTML，晋升 1.9–2.0 已验收行为到保全矩阵并签署 `v2.0.0` accepted 候选，记录 HTML identity 后不得重生成 |
+| `r20-041-pptx-production-acceptance` | 完成 PPTX 导入增强的内部生产创作验收 | `r19-051-pptx-media-effects`, `r20-030-docs-accessibility` | 否 | `app-save-recovery`, `workspace-shell`, `generated-index` | 用既定真实 PPT/PPTX 集完成导入→共享层修改→内容改写→保存重开→Player/导出；覆盖PPT转换软件缺失、取消、错误和手动另存为；PPTX不得依赖转换软件，明确每类可编辑/静态/未支持边界；复用未失效证据，S4 复核真实创作结果，不要求全部 PowerPoint 特性全保真 |
+| `r20-050-owner-acceptance` | Owner 验收 S4 AI 产品并签署 v2.0.0 accepted 候选 | `r20-030-docs-accessibility`, `r20-040-three-cli-acceptance`, `r20-041-pptx-production-acceptance` | 否 | `none` | Owner 在同一固定课例完成 S4 AI 产品验收：覆盖 1.9 的 Chat/timeline/safe render/Stop/Undo/stale/restart/migration/corruption/delete，以及 2.0 的三 CLI 设置、风险提示、生成、编辑、材料隐私、无障碍与人工回退；验证三 Surface、Native/Component/Runtime、保存重开、Player、适用导出和断网固定 HTML，晋升 1.9–2.0 已验收行为到保全矩阵并签署 `v2.0.0` accepted 候选，记录 HTML identity 后不得重生成；本版新增 PPTX 增强节点也必须达到其验收边界，不能只完成 AI 主线即发布 |
 | `r20-060-release` | 发布 v2.0.0 内部源码标签与固定课例离线 HTML | `r20-050-owner-acceptance` | 否 | `none` | 同一 accepted 候选的 `npm run verify` 已通过；发布前断网打开 Owner 已签署 identity 的固定 HTML且不重生成，扫描工程、Published 与 HTML 不含消息、tool trace、本地材料缓存或凭据；证明无第二 Store、tool catalog 或写入通道后创建 `v2.0.0` 内部源码标签并发布同一 HTML，无安装器 |
 
 并行 frontier：CLI 设置和首次风险说明在治理合同后可并行；公共 authoring 与 profile / privacy 控制汇合到文档 / 无障碍和三 CLI 验收。`r20-050-owner-acceptance` 不能用自动化报告替代，`r20-060-release` 不能提前创建正式制品。

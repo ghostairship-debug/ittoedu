@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it, vi } from 'vitest'
-import { pptxImportFixture } from '../fixtures/pptxImport'
+import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
 import { openPptxPackage, PPTX_IMPORT_LIMITS } from '@/renderer/project/pptxPackage'
@@ -24,6 +24,9 @@ import {
   shouldOfferCourseProjectRecovery,
 } from '@/renderer/project/courseProjectLifecycle'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { resolveNativeLinePoints } from '@/shared/nativeLineGeometry'
+import { analyzeTextNodeLayout } from '@/shared/textLayout'
+import { materializeNativeLayerItem } from '@/shared/courseProjectSchema'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { ComponentManifest } from '@/shared/componentTypes'
@@ -35,6 +38,149 @@ const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/c
 const DIAGRAM_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
 
 describe('S2 restricted PPTX import atomic archive transaction', () => {
+  it('restores inherited group text, ordinary borders, rounded/process shapes and single justified glyphs', async () => {
+    const draft = await parsePptxImport(pptxCommonMappingFixture())
+    expect(draft.issues.map(i => i.type)).toEqual(['边框样式', '边框样式'])
+    expect(draft.issues.every(i => i.page === 1 && !i.message.startsWith('已跳过'))).toBe(true)
+    const items = draft.slides[0]!.items
+    expect(items).toHaveLength(6)
+    expect(items[0]).toMatchObject({ frame: { x: 100, y: 100, width: 180, height: 30 }, content: { data: { text: '树状图', style: { fontSize: 18, color: '#123456' } } } })
+    expect(items[1]).toMatchObject({ content: { data: { style: { borderWidth: 2, lineStyle: 'dashed' } } } })
+    expect(items[2]).toMatchObject({ content: { data: { text: 'A', style: { align: 'left', fontSize: 18 } } } })
+    expect(items[3]!.frame.height).toBeCloseTo(6.4999475)
+    expect(items[4]).toMatchObject({ content: { data: { shapeType: 'rounded-rectangle', style: { cornerRadius: 25, lineStyle: 'dotted' } } } })
+    expect(items[5]).toMatchObject({ content: { data: { shapeType: 'rectangle' } } })
+    const project = planPptxImportTransaction(createBlankCourseProject(), draft, '普通映射').nextDocument
+    expect(openCourseProjectArchive(createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} })).project).toEqual(project)
+  })
+  it('still reports multi-character justified paragraphs and unknown shape adjustments', async () => {
+    const files = unzipSync(pptxCommonMappingFixture())
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace('<a:t>A</a:t>', '<a:t>AB</a:t>').replace('val 25000', '*/ w 1 2'))
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.issues.map(i => i.type)).toEqual(['边框样式', '段落对齐', '自定义形状参数'])
+    expect(draft.slides[0]!.items).toHaveLength(4)
+  })
+  it('identifies legacy equations separately from unsupported charts before partial import', async () => {
+    const files = unzipSync(pptxImportFixture({ unsupported: true }))
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace('<p:graphicFrame/>', '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="9" name="公式1"/></p:nvGraphicFramePr><a:graphic><a:graphicData><p:oleObj progId="Equation.3"/></a:graphicData></a:graphic></p:graphicFrame>'))
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.issues).toEqual([{ page: 1, type: '旧版公式（OLE）', message: '已跳过“公式1”：尚未支持转换为可编辑内容，可在源软件另存图片后补入' }])
+    expect(draft.slides[0]!.items).toHaveLength(2)
+  })
+  it('honors source no-wrap auto-fit without clipping ordinary question text or enlarging fixed frames', async () => {
+    const files = unzipSync(pptxCommonMappingFixture())
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace(/<p:sp>[\s\S]*?<\/p:sp>/g, object => object.includes('小文字框') ? object.replace('<a:bodyPr/>', '<a:bodyPr wrap="none"><a:spAutoFit/></a:bodyPr>').replace('<a:t>小尺寸</a:t>', '<a:t>写出三次传球的所有可能结果（即传球的方式）；</a:t>') : object))
+    const draft = await parsePptxImport(zipSync(files))
+    const item = draft.slides[0]!.items.find(i => i.label === '小文字框 文字')!
+    if (item.kind !== 'native') throw new Error('native missing')
+    const node = materializeNativeLayerItem(item)
+    if (node.type !== 'text') throw new Error('text missing')
+    expect(node.width).toBeGreaterThan(200)
+    expect(analyzeTextNodeLayout(node).overflowsHeight).toBe(false)
+    expect(node.text).toBe('写出三次传球的所有可能结果（即传球的方式）；')
+    expect(draft.issues).toContainEqual(expect.objectContaining({ type: '文字自动扩框', page: 1 }))
+    const fixed = (await parsePptxImport(pptxCommonMappingFixture())).slides[0]!.items.find(i => i.label === '小文字框 文字')!
+    expect(fixed.frame.height).toBeCloseTo(6.4999475)
+  })
+  it('keeps interleaved layout decoration shared, resolves page placeholders and imports editable table data in one archive transaction', async () => {
+    const draft = await parsePptxImport(await pptxInheritanceFixture())
+    expect(draft.slides).toHaveLength(4)
+    expect(draft.shared).toHaveLength(4)
+    expect(draft.slides.map(s => s.sharedKeys?.length)).toEqual([2, 2, 2, 0])
+    expect(draft.slides[0]!.sharedKeys).toEqual(draft.slides[2]!.sharedKeys)
+    for (const [index, slide] of draft.slides.entries()) {
+      expect(slide.items[0]).toMatchObject({ frame: { x: 96, y: 48, width: 1056, height: 96 }, content: { nativeType: 'text', data: { text: `第${index + 1}页标题`, style: { fontSize: 40 } } } })
+      expect(slide.items.some(i => i.label === '装饰A' || i.label === '装饰B')).toBe(false)
+    }
+    const table = draft.slides[0]!.items.find(i => i.kind === 'native' && i.content.nativeType === 'table')!
+    if (table.kind !== 'native' || table.content.nativeType !== 'table') throw new Error('table')
+    expect(table.content.data.rows.map(row => row.cells.map(c => c.text))).toEqual([['分数', '含义'], ['1/2', '平均分成两份，取一份']])
+    expect(table.content.data.columns.map(c => c.width)).toEqual([288, 672])
+    expect(draft.issues.every(i => i.type === '表格样式')).toBe(true)
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const step = planPptxImportTransaction(project, draft, '继承课件')
+    const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
+    const applied = applyEditorTransactionStep(initial, step, 'forward')
+    const surface = applied.document.surfaces.at(-1)!
+    expect(surface.surfaceLayerItems).toHaveLength(4)
+    expect(surface.surfaceLayerItems.map(e => e.visibility.locationIds.length)).toEqual([2, 2, 1, 1])
+    expect(applied.document.surfaces[0]).toEqual(project.surfaces[0])
+    expect(applied.document.globalLayerItems).toEqual(project.globalLayerItems)
+    expect(applied.document.revision).toBe(project.revision + 1)
+    courseProjectDocumentSchema.parse(applied.document)
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: {}, componentFiles: {} }))
+    expect(reopened.project).toEqual(applied.document)
+    expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
+  })
+  it('expands nested ordinary group transforms and keeps source order', async () => {
+    const files = unzipSync(pptxImportFixture())
+    let xml = strFromU8(files['ppt/slides/slide1.xml']!)
+    const group = (body: string) => `<p:grpSp><p:nvGrpSpPr/><p:grpSpPr><a:xfrm><a:off x="952500" y="952500"/><a:ext cx="12192000" cy="6858000"/><a:chOff x="0" y="0"/><a:chExt cx="6096000" cy="3429000"/></a:xfrm></p:grpSpPr>${body}</p:grpSp>`
+    xml = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, object => object.includes('基础图形') ? group(group(object)) : object)
+    files['ppt/slides/slide1.xml'] = strToU8(xml)
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.issues).toEqual([])
+    expect(draft.slides[0]!.items).toHaveLength(2)
+    expect(draft.slides[0]!.items[1]).toMatchObject({ frame: { x: 700, y: 1700, width: 800, height: 800 }, content: { nativeType: 'shape' } })
+  })
+  it('retains supported picture crop in native image data and archive', async () => {
+    const files = unzipSync(pptxImportFixture({ image: true }))
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace('<a:stretch>', '<a:srcRect l="10000" t="20000" r="15000" b="5000"/><a:stretch>'))
+    const decoder = vi.spyOn(assetManager, 'readImageDimensions').mockResolvedValue({ width: 200, height: 200 })
+    try {
+      const draft = await parsePptxImport(zipSync(files))
+      expect(draft.issues).toEqual([])
+      expect(draft.slides[0]!.items[2]).toMatchObject({ content: { nativeType: 'image', data: { crop: { left: 0.1, top: 0.2, right: 0.15, bottom: 0.05 } } } })
+      courseProjectDocumentSchema.parse(planPptxImportTransaction(createBlankCourseProject(), draft, '裁剪').nextDocument)
+    } finally { decoder.mockRestore() }
+  })
+  it('reports merged tables instead of silently changing the cell structure', async () => {
+    const files = unzipSync(await pptxInheritanceFixture())
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace('<a:tc>', '<a:tc gridSpan="2">'))
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.issues).toContainEqual(expect.objectContaining({ page: 1, type: '合并表格' }))
+    expect(draft.slides[0]!.items.every(i => i.kind !== 'native' || i.content.nativeType !== 'table')).toBe(true)
+    expect(draft.slides[0]!.items).toHaveLength(2)
+  })
+  it('imports real PPTX horizontal, vertical and flipped arrow lines as editable line geometry', async () => {
+    const { default: PptxGenJS } = await import('pptxgenjs')
+    const pptx = new PptxGenJS()
+    pptx.layout = 'LAYOUT_WIDE'
+    const slide = pptx.addSlide()
+    slide.addShape(pptx.ShapeType.line, { x: 1, y: 1, w: 4, h: 0, line: { color: '2563EB', width: 2, endArrowType: 'triangle' } })
+    slide.addShape(pptx.ShapeType.line, { x: 1, y: 2, w: 0, h: 3, line: { color: '000000', width: 1, dashType: 'dash' } })
+    slide.addShape(pptx.ShapeType.line, { x: 3, y: 2, w: 3, h: 2, flipH: true, line: { color: 'FF0000', width: 2, beginArrowType: 'oval', endArrowType: 'stealth' } })
+    const draft = await parsePptxImport(await pptx.write({ outputType: 'uint8array' }) as Uint8Array)
+    expect(draft.issues).toEqual([])
+    expect(draft.slides[0]!.items).toHaveLength(3)
+    const [horizontal, vertical, flipped] = draft.slides[0]!.items
+    expect(horizontal).toMatchObject({ content: { nativeType: 'shape', data: { shapeType: 'line', style: { endArrow: 'triangle' } } } })
+    expect(vertical).toMatchObject({ content: { data: { style: { lineStyle: 'dashed' } } } })
+    expect(flipped).toMatchObject({ content: { data: { style: { startArrow: 'circle', endArrow: 'stealth' } } } })
+    const expectedPoints = [[[96, 96], [480, 96]], [[96, 192], [96, 480]], [[576, 192], [288, 384]]]
+    for (const [index, item] of draft.slides[0]!.items.entries()) {
+      if (item.kind !== 'native' || item.content.nativeType !== 'shape') throw new Error('line')
+      const points = resolveNativeLinePoints(item.content.data.lineGeometry, item.frame.width, item.frame.height)
+      for (const [pointIndex, point] of points.entries()) {
+        expect(item.frame.x + point.x).toBeCloseTo(expectedPoints[index]![pointIndex]![0]!)
+        expect(item.frame.y + point.y).toBeCloseTo(expectedPoints[index]![pointIndex]![1]!)
+      }
+      expect(Math.min(item.frame.width, item.frame.height)).toBeGreaterThan(item.content.data.style.borderWidth)
+    }
+    courseProjectDocumentSchema.parse(planPptxImportTransaction(createBlankCourseProject(), draft, '线条').nextDocument)
+  })
+  it('imports an adjusted flipped elbow connector without changing its bend or direction', async () => {
+    const files = unzipSync(pptxImportFixture())
+    const connector = '<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="8" name="折线箭头"/></p:nvCxnSpPr><p:spPr><a:xfrm flipH="true"><a:off x="952500" y="952500"/><a:ext cx="3810000" cy="1905000"/></a:xfrm><a:prstGeom prst="bentConnector3"><a:avLst><a:gd name="adj1" fmla="val 25000"/></a:avLst></a:prstGeom><a:ln w="19050"><a:solidFill><a:srgbClr val="2563EB"/></a:solidFill><a:tailEnd type="triangle"/></a:ln></p:spPr></p:cxnSp>'
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace('</p:spTree>', connector + '</p:spTree>'))
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.issues).toEqual([])
+    const item = draft.slides[0]!.items[2]!
+    expect(item).toMatchObject({ content: { data: { shapeType: 'elbow-arrow', lineGeometry: { kind: 'elbow' }, style: { endArrow: 'triangle' } } } })
+    if (item.kind !== 'native' || item.content.nativeType !== 'shape') throw new Error('elbow')
+    const points = resolveNativeLinePoints(item.content.data.lineGeometry, item.frame.width, item.frame.height)
+    expect(points.map(p => [Math.round(item.frame.x + p.x), Math.round(item.frame.y + p.y)])).toEqual([[500, 100], [400, 100], [400, 300], [100, 300]])
+  })
   it('reads a normal PresentationML archive emitted by PptxGenJS as editable pages', async () => {
     const { default: PptxGenJS } = await import('pptxgenjs')
     const pptx = new PptxGenJS()

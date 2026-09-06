@@ -8,6 +8,8 @@ Native、Recipe 与 Existing Component 的 strict intent 可在核心 parser/com
 
 AI 入口默认隐藏。本版只形成 `v1.7.0-rc.N` engineering candidate 源码标签，不发布 HTML 或安装器；Owner accepted 在 S3（1.8）统一签署。
 
+PPTX 人工导入增强是本版并列交付线，始终可见，不受 AI 开关或 CLI 是否可用影响。版本节点、详细边界和实施顺序见 [PPTX 能力增强计划](../../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。
+
 ## 任务 DAG
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
@@ -23,7 +25,9 @@ AI 入口默认隐藏。本版只形成 `v1.7.0-rc.N` engineering candidate 源�
 | `r17-023-generated-carriers` | Generated Component / Runtime 候选经 gate 后由宿主注册 | `r17-012-host-smoke-admission`, `r17-020-single-page`, `r14-030-dynamic-code-tools` | 否 | `contracts-schema`, `published-dynamic`, `ai-session` | 固定 Component 与 Runtime 需求各生成一个 dynamic package manifest；源码和资产只在 staging，gate 全过后由宿主注册精确 identity 并与 document 作为一次资源事务提交；编辑器、Player、单 HTML 离线运行；gate fail、stale 与 cancel 零注册 / 零工程写入；Provider secret、原始 Electron Main、任意 OS、未批准脚本 / host API 始终不可用 |
 | `r17-030-single-repair` | 对风险页执行有界、可停止的局部自动修复 | `r17-021-whole-course`, `r17-022-local-edit`, `r17-023-generated-carriers` | 否 | `ai-session`, `store-kernel` | 默认自动预算一次 repair；修复后重跑同一 gate，无可观察进展或预算耗尽即停止并保留 finding；用户明确再次请求可开启新预算，不递归自循环；候选只在最终通过时原子写入，过程可审计 |
 | `r17-040-generation-benchmark` | 固定用例量化载体选择、成功率、延迟、失败零写入和人工可编辑性 | `r17-030-single-repair` | 否 | `ai-session` | 固定集覆盖 Native、Recipe、Existing Component、Generated Component、Runtime 及五类失败候选；报告每例选阶、首次通过 / 一次修复 / 停止、耗时、写入数；所有通过产物可 UI 编辑，所有失败工程字节语义不变 |
-| `r17-060-release` | 形成 1.7 engineering candidate 并发布 v1.7.0-rc.N 源码标签 | `r17-040-generation-benchmark`, `r16-040-release` | 否 | `none` | 自动化与 1.7 全部目标测试通过，固定 fixture 覆盖单页、整课、局部修改、Generated Component、Runtime、Stop/stale、动态 gate、保存重开、Undo、Player、单 HTML 与诊断；证明 strict candidate、唯一 commit 与失败零写入后创建 `v1.7.0-rc.N` 源码标签；本节点不签署 accepted，保全矩阵晋升留到 S3 |
+| `r17-041-pptx-editable-charts` | 把常见 PPTX 图表转换为可编辑 Native Chart | `r16-035-pptx-tables-styles` | 否 | `app-save-recovery`, `store-slide`, `export-pptx`, `generated-index` | 现有 Native Chart 支持的柱/条/折线/饼图读取类别、系列、数值、标题和图例；优先一致的内嵌工作簿/缓存数据，缺失或冲突时明确报告且不导入该图表，不猜值或执行公式；组合图、次轴与特殊图未支持时明确提示，不自动生成图像；改数据后 Player 与 PPTX 导出反映新值 |
+| `r17-042-pptx-shape-geometry` | 补齐括号标注、自由路径与渐变的正式表达 | `r16-037-pptx-text-image-effects` | 否 | `contracts-schema`, `store-slide`, `published-slide`, `export-pptx` | 覆盖真实样本3个leftBrace、1个wedgeRoundRectCallout、4个custGeom、3个渐变；优先既有brace/shape参数，直线多边形与曲线路径分开；新增路径/渐变数据须独立strict合同与Published对等消费者先行，不存原始PPTX XML或第二几何真相；布局/调整点/填充正确，编辑后保存重开与Player/PPTX结果一致，未知公式明确报告而不伪造形状 |
+| `r17-060-release` | 形成 1.7 engineering candidate 并发布 v1.7.0-rc.N 源码标签 | `r17-040-generation-benchmark`, `r16-040-release`, `r17-041-pptx-editable-charts`, `r17-042-pptx-shape-geometry` | 否 | `none` | 自动化与 1.7 全部目标测试通过，固定 fixture 覆盖单页、整课、局部修改、Generated Component、Runtime、Stop/stale、动态 gate、保存重开、Undo、Player、单 HTML 与诊断；证明 strict candidate、唯一 commit 与失败零写入后创建 `v1.7.0-rc.N` 源码标签；本节点不签署 accepted，保全矩阵晋升留到 S3；本版新增 PPTX 增强节点也必须达到其验收边界，不能只完成 AI 主线即发布 |
 
 并行 frontier：合同后，核心 host commit 与 staging/dynamic admission 分开推进；单页 Native/Recipe/Existing Component 只依赖核心 commit，可先形成整课和局部修改样板。Generated Component/Runtime 在静态+宿主 gate 后汇合；版本仍交付用户已决定的完整动态载体能力。
 

@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -15,7 +16,7 @@ import { contentQaFixture } from '../fixtures/contentQa'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
-import { pptxImportFixture } from '../fixtures/pptxImport'
+import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
 import { createServer } from 'vite'
 import type { CoursewareCaseBuildSummary } from '../../scripts/build-courseware-case'
 import { execFile } from 'node:child_process'
@@ -492,6 +493,302 @@ test('S2 动态工具：真实宿主拒绝坏源码且工程与资源零写入',
     await browser.close()
     await server.close()
   }
+})
+
+test('S2 回归：删除初始场景与页面，并导入可编辑线条', async () => {
+  test.setTimeout(180_000)
+  const { app, page, runRoot, pageErrors } = await launchEditor()
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const filename = join(runRoot, 'initial-delete-lines.h5lesson')
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(filename)).toBe(true)
+    const initial = readProject(filename)
+    await page.getByTestId('add-content-primary').click()
+    const beforeDelete = await saveCurrent(page, filename)
+    await page.locator('[data-kind="slide-scene"]').first().getByRole('button', { name: /^删除“/ }).click()
+    await page.getByRole('button', { name: '删除场景', exact: true }).click()
+    const removedScene = await saveCurrent(page, filename)
+    expect(removedScene.locations).toHaveLength(1)
+    expect(removedScene.startLocationId).not.toBe(initial.startLocationId)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect((await saveCurrent(page, filename)).locations).toEqual(beforeDelete.locations)
+
+    const { default: PptxGenJS } = await import('pptxgenjs')
+    const pptx = new PptxGenJS(); pptx.layout = 'LAYOUT_WIDE'
+    const slide = pptx.addSlide()
+    slide.addShape(pptx.ShapeType.line, { x: 1, y: 1, w: 8, h: 0, line: { color: '2563EB', width: 4, endArrowType: 'triangle' } })
+    slide.addShape(pptx.ShapeType.line, { x: 1, y: 2, w: 0, h: 3, line: { color: '16A34A', width: 4 } })
+    slide.addShape(pptx.ShapeType.line, { x: 3, y: 2, w: 5, h: 3, flipH: true, line: { color: 'DC2626', width: 4, endArrowType: 'stealth' } })
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'lines.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(await pptx.write({ outputType: 'uint8array' }) as Uint8Array) })
+    await expect(page.getByRole('button', { name: '确认导入可用内容' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'PPTX 导入提示' })).toHaveCount(0)
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    await page.locator('[data-kind="slide-page"]').first().getByRole('button', { name: /^删除页面/ }).click()
+    await page.getByRole('button', { name: '删除页面', exact: true }).click()
+    const removedPage = await saveCurrent(page, filename)
+    expect(removedPage.surfaces).toHaveLength(1)
+    expect(removedPage.startLocationId).toBe(removedPage.locations[0]!.id)
+    expect(removedPage.surfaces[0]!.id).not.toBe(initial.surfaces[0]!.id)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect((await saveCurrent(page, filename)).surfaces).toEqual(imported.surfaces)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await expect(page.locator('[data-kind="slide-page"]')).toHaveCount(1)
+    const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    const surface = archive.project.surfaces[0]!
+    expect(surface.type === 'slide' && surface.scenes[0]!.layerItems.every(item => item.kind === 'native' && item.content.nativeType === 'shape' && item.content.data.lineGeometry)).toBeTruthy()
+    const html = buildPublishedCourseStandaloneHtml({ project: archive.project, assetFiles: {}, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const htmlPath = join(runRoot, 'lines.html'); writeFileSync(htmlPath, html)
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    await expect(player.locator('[data-native-type="shape"]')).toHaveCount(3)
+    const painted = await player.locator('[data-native-type="shape"] canvas').evaluateAll(elements => elements.map(element => {
+      const canvas = element as HTMLCanvasElement
+      const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+      let minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1
+      for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
+        if (pixels[(y * canvas.width + x) * 4 + 3]! > 20) {
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+        }
+      }
+      return { width: maxX - minX + 1, height: maxY - minY + 1, clipped: minX <= 0 || minY <= 0 || maxX >= canvas.width - 1 || maxY >= canvas.height - 1 }
+    }))
+    writeFileSync(join(root, 'output/r15-lines-render-check.json'), JSON.stringify({ painted, surface }, null, 2))
+    await player.screenshot({ path: 'output/playwright/r13-review/r15-imported-lines-player.png' })
+    expect(painted).toHaveLength(3)
+    expect(painted[0]!.height).toBeGreaterThan(15) // Blue arrow head survives, rather than a one-pixel horizontal stroke.
+    expect(painted[1]!.width).toBeGreaterThan(4)
+    expect(painted.every(shape => !shape.clipped)).toBe(true)
+    expect(pageErrors).toEqual([])
+  } finally { await browser?.close(); await closeEditor(app, runRoot) }
+})
+
+test('S2 PPTX 普通映射收尾：逐页画布、小尺寸增量同步、历史与重开', async () => {
+  test.setTimeout(process.env.COURSEWARE_S2_PPTX ? 600_000 : 180_000)
+  const { app, page, runRoot, pageErrors } = await launchEditor()
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  const evidence = join(root, 'output/playwright/r15-common-closure')
+  mkdirSync(evidence, { recursive: true })
+  try {
+    const filename = join(runRoot, 'common.h5lesson')
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(filename)).toBe(true)
+    const baseline = readProject(filename)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    const input = process.env.COURSEWARE_S2_PPTX
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: '普通映射.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: input ? readFileSync(input) : Buffer.from(pptxCommonMappingFixture()) })
+    await expect(page.getByRole('button', { name: '确认导入可用内容' })).toBeEnabled()
+    await page.screenshot({ path: join(evidence, 'preview.png') })
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    const surface = imported.surfaces.at(-1)!
+    if (surface.type !== 'slide') throw new Error('imported Slide missing')
+    expect(surface.scenes).toHaveLength(input ? 29 : 1)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect((await saveCurrent(page, filename)).surfaces).toEqual(baseline.surfaces)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    const host = page.getByTestId('published-authoring-host')
+    const ready = async () => {
+      await expect(host.locator('[data-slide-layer-item]').first()).toBeAttached()
+      await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
+    }
+    for (const [index, scene] of surface.scenes.entries()) {
+      await courseTreeKind(page, 'slide-scene').nth(index + 1).locator('button.course-page-tree__label').first().click()
+      await expect(host.locator(`[data-slide-layer-item="${scene.layerItems[0]!.layerItemId}"]`)).toBeAttached()
+      await ready()
+      if (input && index === 12) {
+        for (const label of ['文本框 2 文字', '文本框 3 文字', '文本框 4 文字']) {
+          const item = scene.layerItems.find(i => i.label === label)!
+          const clipped = await host.locator(`[data-slide-layer-item="${item.layerItemId}"]`).evaluate(wrap => {
+            const frame = wrap.getBoundingClientRect()
+            return [...wrap.querySelectorAll('span')].some(span => {
+              const range = document.createRange(); range.selectNodeContents(span)
+              return [...range.getClientRects()].some(rect => rect.right > frame.right + 2 || rect.bottom > frame.bottom + 2)
+            })
+          })
+          expect(clipped, `${label} must paint its complete question`).toBe(false)
+        }
+      }
+      await page.screenshot({ path: join(evidence, `editor-page-${index + 1}.png`) })
+    }
+    const smallSceneIndex = surface.scenes.findIndex(s => s.layerItems.some(i => i.frame.width < 16 || i.frame.height < 16))
+    expect(smallSceneIndex).toBeGreaterThanOrEqual(0)
+    const small = surface.scenes[smallSceneIndex]!.layerItems.find(i => i.frame.width < 16 || i.frame.height < 16)!
+    await courseTreeKind(page, 'slide-scene').nth(smallSceneIndex + 1).locator('button.course-page-tree__label').first().click()
+    await ready()
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${small.layerItemId}"] .node-name`).click()
+    const movedX = Math.round(small.frame.x) + 12
+    await page.getByLabel('X', { exact: true }).fill(String(movedX))
+    await page.getByLabel('X', { exact: true }).press('Enter')
+    const painted = host.locator(`[data-slide-layer-item="${small.layerItemId}"]`)
+    await expect(painted).toHaveCSS('left', `${movedX}px`)
+    await ready()
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect.poll(() => painted.evaluate(el => parseFloat((el as HTMLElement).style.left))).toBeCloseTo(small.frame.x, 2)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(painted).toHaveCSS('left', `${movedX}px`)
+    const groupSceneIndex = input ? 23 : 0
+    const groupedText = surface.scenes[groupSceneIndex]!.layerItems.find(i => i.kind === 'native' && i.content.nativeType === 'text' && i.content.data.text === (input ? 'A盘' : '树状图'))!
+    expect(groupedText).toBeTruthy()
+    await courseTreeKind(page, 'slide-scene').nth(groupSceneIndex + 1).locator('button.course-page-tree__label').first().click()
+    await ready()
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${groupedText.layerItemId}"] .node-name`).click()
+    const textField = page.getByRole('textbox', { name: '文字内容', exact: true })
+    await textField.fill('A组')
+    await textField.press('Tab')
+    await expect(host.locator(`[data-slide-layer-item="${groupedText.layerItemId}"]`)).toContainText('A组')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(textField).toHaveValue(input ? 'A盘' : '树状图')
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(textField).toHaveValue('A组')
+    const edited = await saveCurrent(page, filename)
+    const savedSmall = effectiveItems(edited).find(i => i.layerItemId === small.layerItemId)!
+    expect(savedSmall.frame).toEqual({ ...small.frame, x: movedX })
+    expect(effectiveItems(edited).find(i => i.layerItemId === groupedText.layerItemId)).toMatchObject({ content: { data: { text: 'A组' } } })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    await courseTreeKind(page, 'slide-scene').nth(smallSceneIndex + 1).locator('button.course-page-tree__label').first().click()
+    await ready()
+    await expect(painted).toHaveCSS('left', `${movedX}px`)
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    writeFileSync(join(evidence, 'edited.h5lesson'), readFileSync(filename))
+    const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const htmlPath = join(evidence, 'edited.html'); writeFileSync(htmlPath, html)
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    for (const [index, scene] of surface.scenes.entries()) {
+      const expand = player.getByRole('button', { name: '展开教师控制器', exact: true })
+      if (await expand.isVisible()) {
+        const box = await expand.boundingBox()
+        if (!box) throw new Error('controller missing')
+        await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      }
+      const next = player.getByRole('button', { name: '下一场景', exact: true })
+      await expect(next).toBeVisible()
+      const box = await next.boundingBox()
+      if (!box) throw new Error('next control missing')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      await expect(player.locator(`[data-slide-layer-item="${scene.layerItems[0]!.layerItemId}"]`)).toBeAttached()
+      await player.screenshot({ path: join(evidence, `player-page-${index + 1}.png`) })
+    }
+    expect(pageErrors).toEqual([])
+  } finally { await browser?.close(); await closeEditor(app, runRoot) }
+})
+
+test('S2 PPTX 原生收口：母版继承、共享编辑、表格编辑与离线往返', async () => {
+  test.setTimeout(180_000)
+  const { app, page, runRoot, pageErrors, externalRequests } = await launchEditor()
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const filename = join(runRoot, 'pptx-native.h5lesson')
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(filename)).toBe(true)
+    const baseline = readProject(filename)
+    await page.context().setOffline(true)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: '母版与表格.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(await pptxInheritanceFixture()) })
+    await expect(page.getByRole('heading', { name: '母版与表格：4 页，0 个素材' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: '设计生产力' })).toContainText('2 个共享对象')
+    await expect(page.getByRole('dialog', { name: '设计生产力' })).toContainText('0 个共享对象')
+    await page.screenshot({ path: 'output/playwright/r13-review/r15-native-import-preview.png' })
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    expect(imported.locations).toHaveLength(baseline.locations.length + 4)
+    const importedSurface = imported.surfaces.at(-1)!
+    if (importedSurface.type !== 'slide') throw new Error('Slide missing')
+    expect(importedSurface.surfaceLayerItems).toHaveLength(4)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect((await saveCurrent(page, filename)).surfaces).toEqual(baseline.surfaces)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
+    const selectLayer = async (name: string) => {
+      await page.getByRole('tab', { name: '图层' }).click()
+      await page.locator('.node-item').filter({ has: page.getByText(name, { exact: true }) }).locator('.node-name').click()
+      await expect(page.getByLabel('名称', { exact: true })).toHaveValue(name)
+    }
+    await selectLayer('装饰A')
+    await page.getByLabel('X', { exact: true }).fill('64')
+    await page.getByLabel('X', { exact: true }).press('Enter')
+    await selectLayer('Table 0')
+    const cell = page.getByRole('textbox', { name: /^单元格 / }).nth(3)
+    await cell.fill('平均分成两份，表示其中一份')
+    await cell.press('Shift+Tab')
+    await page.getByRole('tab', { name: '图层' }).click()
+    const titleId = importedSurface.scenes[0]!.layerItems[0]!.layerItemId
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${titleId}"] .node-name`).click()
+    await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue('第1页标题')
+    await page.getByRole('textbox', { name: '文字内容' }).fill('第一课：认识分数')
+    await page.getByRole('textbox', { name: '文字内容' }).press('Tab')
+    const edited = await saveCurrent(page, filename)
+    const surface = edited.surfaces.at(-1)!
+    if (surface.type !== 'slide') throw new Error('Slide missing')
+    const shared = surface.surfaceLayerItems.find(e => e.item.label === '装饰A')!
+    expect(shared.item.frame.x).toBe(64)
+    expect(shared.visibility.locationIds).toHaveLength(2)
+    expect(surface.scenes[1]!.layerItems[0]).toMatchObject({ content: { data: { text: '第2页标题' } } })
+    expect(surface.scenes[2]!.layerItems[0]).toMatchObject({ content: { data: { text: '第3页标题' } } })
+    const table = surface.scenes[0]!.layerItems.find(i => i.kind === 'native' && i.content.nativeType === 'table')!
+    expect(table).toMatchObject({ content: { data: { rows: [{}, { cells: [{}, { text: '平均分成两份，表示其中一份' }] }] } } })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    await expect(courseTreeKind(page, 'slide-scene')).toHaveCount(edited.locations.length)
+    await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
+    await page.screenshot({ path: 'output/playwright/r13-review/r15-native-import-editor.png' })
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const htmlPath = join(runRoot, 'native.html'); writeFileSync(htmlPath, html)
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    const next = async () => {
+      const expand = player.getByRole('button', { name: '展开教师控制器', exact: true })
+      if (await expand.isVisible()) { const box = await expand.boundingBox(); if (box) await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2) }
+      const button = player.getByRole('button', { name: '下一场景', exact: true })
+      await expect(button).toBeVisible()
+      const box = await button.boundingBox(); if (!box) throw new Error('controller missing')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await next()
+    await expect(player.getByText('第一课：认识分数', { exact: true })).toBeVisible()
+    await expect(player.getByText('平均分成两份，表示其中一份', { exact: true })).toBeVisible()
+    const sharedSelector = `[data-slide-layer-item="${shared.item.layerItemId}"]`
+    await expect(player.locator(sharedSelector)).toBeVisible()
+    await expect(player.locator(sharedSelector)).toHaveCSS('left', '64px')
+    await player.screenshot({ path: 'output/playwright/r13-review/r15-native-import-player.png' })
+    await next()
+    await expect(player.getByText('第2页标题', { exact: true })).toBeVisible()
+    await expect(player.locator(sharedSelector)).toHaveCount(0)
+    await next()
+    await expect(player.getByText('第3页标题', { exact: true })).toBeVisible()
+    await expect(player.locator(sharedSelector)).toBeVisible()
+    await next()
+    await expect(player.getByText('第4页标题', { exact: true })).toBeVisible()
+    await expect(player.locator('[data-layer-source="surface"]')).toHaveCount(0)
+    expect(pageErrors).toEqual([])
+    expect(externalRequests).toEqual([])
+  } finally { await browser?.close(); await closeEditor(app, runRoot) }
 })
 
 test('S2 PPTX 与样板：真实导入、整体撤销、重开、槽位改写与离线播放', async () => {

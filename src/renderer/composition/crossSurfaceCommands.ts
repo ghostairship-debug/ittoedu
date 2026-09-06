@@ -25,7 +25,6 @@ import type { FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAda
 import type { SpatialAuthoringSession, SpatialCommandResult } from '../course/spatialEditorCommands'
 import { openSpatialAuthoringSession } from '../course/spatialEditorCommands'
 import { freezeSpatialSession, succeedSpatialCommand, commitSpatialAuthoringHistory } from '../course/spatialAuthoringHistory'
-import { commitSlideAuthoringHistory, commitSlideProjectMutation } from '../course/slideEditorCommands'
 import {
   detectActiveSurface,
   dispatchActiveSurface,
@@ -1042,38 +1041,13 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         return result.ok
       }
       const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-      if (!backend || typeof backend.getSession !== 'function') return false
-      const session = backend.getSession()
-      const projectAfterVisibility = commitSlideProjectMutation(session.history.present, (draft) => {
-        const removing = new Set(
-          draft.locations
-            .filter((candidate) => candidate.kind === 'slide-scene' && candidate.sceneId === sceneId)
-            .map((candidate) => candidate.id),
-        )
-        const remaining = draft.locations
-          .filter((candidate) => candidate.kind === 'slide-scene' && candidate.sceneId !== sceneId)
-          .map((candidate) => candidate.id)
-        for (const entry of draft.globalLayerItems) {
-          if (entry.visibility.mode !== 'include') continue
-          const nextIds = entry.visibility.locationIds.filter((id) => !removing.has(id))
-          if (nextIds.length === 0 && remaining[0]) {
-            entry.visibility = { mode: 'include', locationIds: [remaining[0]] }
-          }
-        }
-      })
-      ports.slide.persist({
-        ok: true,
-        historyEntry: true,
-        nextSession: {
-          ...session,
-          history: commitSlideAuthoringHistory(session.history, projectAfterVisibility),
-        },
-        selection: session.selection,
-      })
-      const live = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-      if (!live || typeof live.getSession !== 'function') return false
-      const result = ports.slide.persist(live.deleteScene(sceneId, {
-        expectedRevision: live.getSnapshot().revision,
+      if (!backend || typeof backend.getSession !== 'function') {
+        const result = ports.structure.deleteCourseLocation(location.id)
+        if (result.ok && result.activatedLocationId) commands.activateCourseLocation(result.activatedLocationId)
+        return result.ok
+      }
+      const result = ports.slide.persist(backend.deleteScene(sceneId, {
+        expectedRevision: backend.getSnapshot().revision,
       }))
       return result.ok
     },

@@ -8,6 +8,8 @@
 
 AI 入口默认隐藏。本版只形成 `v1.9.0-rc.N` engineering candidate 源码标签，不发布 HTML 或安装器；Owner accepted 在 S4（2.0）统一签署。
 
+PPTX 人工导入增强是本版并列交付线，始终可见，不受 AI 开关或 CLI 是否可用影响。版本节点、详细边界和实施顺序见 [PPTX 能力增强计划](../../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。
+
 ## 任务 DAG
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
@@ -19,7 +21,8 @@ AI 入口默认隐藏。本版只形成 `v1.9.0-rc.N` engineering candidate 源�
 | `r19-030-stop-undo-stale` | 变更预览、Stop、迟到结果防护、stale 提示与 AI 写入 Undo 闭环 | `r19-020-tool-timeline`, `r18-041-human-concurrency` | 否 | `chat-ui`, `store-kernel`, `ai-session` | 提交前预览列出 canonical target、old / new 摘要和预期 revision；Stop 调用 adapter cancel 并递增 session generation；Stop 后到达的 text 可标迟到但 tool result 零写入；教师并发修改显示 stale target；一次成功 AI 提交只有一个历史事务，点击 Undo 精确恢复且不撤销其后的教师事务 |
 | `r19-040-session-persistence-deletion` | 会话恢复、迁移/损坏隔离、Save As 隔离和范围删除 | `r19-000-chat-shell`, `r16-020-local-session-store` | 否 | `chat-ui`, `ai-session` | 应用重启后恢复消息/timeline/adapter mapping；逐版本 migration 保持可读，单个损坏 session 被隔离并可删除且不阻塞同/其他工程；Save As 新工程会话为空；删除单会话/工程/全部的影响范围准确；UI 明示 CLI 历史另行处理；本节点在现有 `tests/unit/serializedSessionMount.test.ts` 增加 migration/corruption/三种删除用例 |
 | `r19-050-internal-dogfood` | 用真实课例完成端到端内部 Dogfood 与问题分级 | `r19-010-context-references`, `r19-020-tool-timeline`, `r19-021-safe-markdown-formula`, `r19-030-stop-undo-stale`, `r19-040-session-persistence-deletion` | 否 | `chat-ui` | 同一真实课例依次完成引用材料生成、当前页修改、整课 QA / 修复、Stop、教师并发 stale、Undo、重启恢复和删除；结果可保存重开、Player / HTML 运行；问题按当前用户可用性与安全 / 合规维度分别记录 |
-| `r19-060-release` | 形成 1.9 engineering candidate 并发布 v1.9.0-rc.N 源码标签 | `r19-050-internal-dogfood` | 否 | `none` | 自动化与 1.9 全部目标测试通过，固定 fixture 覆盖 Chat、timeline、安全渲染、Stop、Undo、stale、重启、迁移、损坏隔离和删除，并证明人工功能不退化、无第二 event/session writer 后创建 `v1.9.0-rc.N` 源码标签；本节点不签署 accepted，保全矩阵晋升留到 S4 |
+| `r19-051-pptx-media-effects` | 增强内嵌媒体与可表达的简单演示效果 | `r18-051-pptx-editable-diagrams` | 否 | `app-save-recovery`, `store-slide`, `authoring-interaction`, `published-slide`, `export-pptx` | 内嵌且当前媒体管线可解码的视频/音频走现有资产与播放能力；外链不自动下载；仅将已有声明式显隐/入场语义可准确表达的简单触发映射到正式交互，复杂时间线与转场明确静态保留；连续播放、保存重开、离线 HTML 及静态导出提示正确，不声称 PowerPoint 动画等价 |
+| `r19-060-release` | 形成 1.9 engineering candidate 并发布 v1.9.0-rc.N 源码标签 | `r19-050-internal-dogfood`, `r19-051-pptx-media-effects` | 否 | `none` | 自动化与 1.9 全部目标测试通过，固定 fixture 覆盖 Chat、timeline、安全渲染、Stop、Undo、stale、重启、迁移、损坏隔离和删除，并证明人工功能不退化、无第二 event/session writer 后创建 `v1.9.0-rc.N` 源码标签；本节点不签署 accepted，保全矩阵晋升留到 S4；本版新增 PPTX 增强节点也必须达到其验收边界，不能只完成 AI 主线即发布 |
 
 并行 frontier：context reference、tool timeline、安全渲染与 session 删除在 shell 完成后可按写锁并行；Stop / Undo 汇合 timeline 与并发语义，最终由真实 Dogfood 统一验证。
 

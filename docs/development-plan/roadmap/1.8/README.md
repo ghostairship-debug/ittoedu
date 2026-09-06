@@ -8,10 +8,13 @@
 
 AI 入口默认隐藏。S3 Owner 验收 1.6–1.8 后发布 `v1.8.0` accepted 源码标签，不发布 HTML 或安装器。
 
+PPTX 人工导入增强是本版并列交付线，始终可见，不受 AI 开关或 CLI 是否可用影响。版本节点、详细边界和实施顺序见 [PPTX 能力增强计划](../../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。
+
 ## 任务 DAG
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
+| `r18-052-pptx-legacy-equations` | 将受支持旧OLE公式转换为可编辑Native公式 | `r17-042-pptx-shape-geometry` | 否 | `app-save-recovery`, `store-slide`, `published-slide`, `export-pptx` | 按真实27个Equation OLE放置对象建立公式集，识别容器与Equation/MathType结构，首批数字符号/分数/上下标映射既有Formula AST，按当前能力保留行内位置和阅读顺序；源WMF仅作核对显示依据，不以图片冒充可编辑公式；无法表达的对象明确类型/页码/原因，禁止执行OLE；公式可修改并保存重开、Undo/Redo、Player/HTML与适用导出，源包显示图自动导入另行决定，不恢复整页渲染后备 |
 | `r18-000-mcp-authoring-server` | 提供版本化 session-scoped MCP server、鉴权上下文和统一错误 / receipt envelope | `r17-060-release` | 否 | `contracts-schema`, `mcp-server` | 只有 harness 启动的当前 session 能连接；initialize 明确协议 / server / tool 版本；断开或 session generation 变化后旧连接失效；坏参数、未授权 tool、内部失败均返回结构化错误且不泄漏 Main 对象 / 文件路径之外的秘密；本节点在现有 `tests/unit/coursewareAuthoringRunner.test.ts` 增加并通过 MCP session / failure 用例 |
 | `r18-010-context-read-tools` | 提供当前选择、当前页、整课、材料和能力 / 诊断只读上下文 | `r18-000-mcp-authoring-server` | 否 | `mcp-server` | 每个读取结果包含 project identity、document revision、canonical target 和被请求的最小字段；不同工程 session 互不可读；材料原文只在明确请求时返回；读取不改变工程、选择、历史或材料索引 |
 | `r18-011-write-tool-mapping` | 把 1.4 正式 Surface / global / dynamic 工具映射为 MCP tools | `r18-000-mcp-authoring-server`, `r14-060-release` | 否 | `contracts-schema`, `mcp-server`, `store-kernel` | MCP catalog 是 1.4 Authoring Tool catalog 的精确版本化投影，不复制 tool schema/handler；名称、输入、target/create-scope、receipt 与 capability metadata 有 conformance；Slide、Flow、Spatial、global/background/network/dynamic 各至少一项成功；stale/invalid/适用的 admission failure 零写入且无历史项 |
@@ -24,7 +27,8 @@ AI 入口默认隐藏。S3 Owner 验收 1.6–1.8 后发布 `v1.8.0` accepted �
 | `r18-040-staging-file-boundary` | 启用文件工具的 CLI profile 通过当前 session staging 摄取约束 | `r18-020-neutral-agent-profile`, `r17-010-staging-workspace` | 否 | `ai-session` | 对三种 profile 逐项判定：stdout-only 明确 N/A；启用文件工具时工作目录/允许路径指向当前 staging，宿主只摄取 realpath 闭合文件并拒绝绝对外部引用、`..`、外链 symlink、其他 session 和 `.h5lesson`；不宣称 OS sandbox；MCP 仍是唯一权威写路径并原子提交；在现有 `tests/unit/scopedValidationWorkflow.test.ts` 增加配置/摄取失败用例 |
 | `r18-041-human-concurrency` | 人工编辑与 Agent 工具调用以 revision / session generation 正确并发 | `r18-011-write-tool-mapping` | 否 | `store-kernel`, `mcp-server` | Agent 读取后教师修改同一 target、其他 target、Save As、关闭工程四种情形分别触发合同规定的 stale / 新 identity；迟到 tool result 均零写入；无冲突调用提交为单一历史事务且教师可 Undo |
 | `r18-050-three-cli-benchmark` | 三种 CLI 在同一 profile / 固定课例上完成可比构建与局部修改 | `r18-021-codex-profile`, `r18-022-claude-profile`, `r18-023-opencode-profile`, `r18-030-course-skills`, `r18-031-editing-craft-skills`, `r18-040-staging-file-boundary`, `r18-041-human-concurrency` | 否 | `cli-adapters` | 每种 CLI 分别完成同一固定页生成与同一局部修改；记录 tool / receipt、载体选择、stale、耗时和最终诊断；三份产物均可人工编辑、保存重开、Player / HTML 运行；缺失某 CLI 明确失败而不以另一 CLI 代替 |
-| `r18-060-release` | Owner 验收 S3 AI 内核并发布 v1.8.0 accepted 源码标签 | `r18-050-three-cli-benchmark` | 否 | `none` | Owner 在同一固定课例完成 S3 AI 内核验收：覆盖 1.6 的三 CLI 会话和人工隔离、1.7 的生成/局部编辑/动态载体准入、1.8 的 MCP/Skills/人工并发 stale 与 staging 边界；检查保存重开、Undo、Player、HTML、诊断和失败零写入，晋升 1.6–1.8 已验收行为到保全矩阵，签署 accepted 后创建 `v1.8.0` 源码标签；普通构建仍隐藏 |
+| `r18-051-pptx-editable-diagrams` | 增强简单 SmartArt 与流程层级图的可编辑导入 | `r17-041-pptx-editable-charts` | 否 | `app-save-recovery`, `store-slide`, `export-pptx`, `generated-index` | 首批仅覆盖线性流程、层级组织和循环三类能确定读取的图示，转为现有 Native 文字/形状/连接线并保留阅读顺序；复杂布局与未知语义继续用可靠明确的未支持项报告；修改图示文字、位置后保存重开和导出正确，不新增独立 SmartArt 引擎或第二工程模型 |
+| `r18-060-release` | Owner 验收 S3 AI 内核并发布 v1.8.0 accepted 源码标签 | `r18-050-three-cli-benchmark`, `r18-051-pptx-editable-diagrams`, `r18-052-pptx-legacy-equations` | 否 | `none` | Owner 在同一固定课例完成 S3 AI 内核验收：覆盖 1.6 的三 CLI 会话和人工隔离、1.7 的生成/局部编辑/动态载体准入、1.8 的 MCP/Skills/人工并发 stale 与 staging 边界；检查保存重开、Undo、Player、HTML、诊断和失败零写入，晋升 1.6–1.8 已验收行为到保全矩阵，签署 accepted 后创建 `v1.8.0` 源码标签；普通构建仍隐藏；本版新增 PPTX 增强节点也必须达到其验收边界，不能只完成 AI 主线即发布 |
 
 并行 frontier：context / write tools 在 server 合同后可并行；三种 adapter profile 与两组 Skills 在 neutral profile 后可并行；staging boundary 可独立推进。所有分支汇合到同一三 CLI benchmark，不允许只验证一种 CLI 后推断另外两种。
 

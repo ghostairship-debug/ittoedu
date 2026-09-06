@@ -988,6 +988,26 @@ describe('scene operations', () => {
     expect(state.dirty).toBe(true)
   })
 
+  it.each(['scene', 'scene-from-flow', 'surface', 'only-scene-on-first-surface'] as const)('deletes the original %s with later content and restores it in one undo', (kind) => {
+    const store = useEditorStore.getState()
+    const initial = selectActiveCourseProjectDocument(store)!
+    const firstScene = selectSlideSceneList(store)[0]!.id
+    const firstSurface = initial.locations[0]!.surfaceId
+    if (kind === 'scene' || kind === 'scene-from-flow') store.addScene()
+    else store.addCourseContent('slide-page')
+    if (kind === 'scene-from-flow') store.addCourseContent('flow-page')
+    const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
+    const historyCount = activeHistory().past.length
+    if (kind !== 'surface') store.deleteScene(firstScene)
+    else store.deleteCourseSurface(firstSurface)
+    const after = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    expect(after.locations.some(location => location.id === initial.startLocationId), useEditorStore.getState().errorMessage ?? '').toBe(false)
+    expect(after.startLocationId).toBe(after.locations[0]!.id)
+    expect(activeHistory().past).toHaveLength(historyCount + 1)
+    store.undo()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.locations).toEqual(before.locations)
+  })
+
   it('never deletes the final scene and does not create a no-op history entry', () => {
     const initial = useEditorStore.getState()
     const onlySceneId = selectSlideSceneList(initial)[0]!.id

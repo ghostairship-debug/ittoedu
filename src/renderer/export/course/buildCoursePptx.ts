@@ -1,4 +1,5 @@
 import { APP_COMPANY, APP_NAME } from '../../../shared/constants'
+import type PptxGenJS from 'pptxgenjs'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import type { ImageNode } from '../../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../../shared/imageEffects'
@@ -24,6 +25,7 @@ import {
   WIDE_SLIDE_WIDTH,
   type CanvasScale,
   type PptxSlide,
+  type PptxDrawingTarget,
 } from '../pptxShared'
 import { bytesToDataUrl } from '../base64'
 import {
@@ -86,6 +88,36 @@ export type BuildCoursePptxInput = CoursePublishSources | PublishedCourseV2Paylo
 
 const MAX_IMAGE_RENDER_RESOLUTION = 4
 const MAX_IMAGE_RENDER_PIXELS = 8_000_000
+const sharedMasters = new WeakMap<PptxGenJS, Map<string, string>>()
+
+function masterRepresentable(item: PublishedLayerItem): item is PublishedNativeLayerItem {
+  if (item.kind !== 'native') return false
+  if (item.content.nativeType === 'image') return true
+  if (item.content.nativeType === 'text') {
+    const { text, runs } = item.content.data
+    return runs.length === 0 || (runs.length === 1 && runs[0]!.start === 0 && runs[0]!.end === text.length)
+  }
+  return item.content.nativeType === 'shape' && ['rectangle', 'line'].includes(item.content.data.shapeType)
+}
+
+function masterDrawingTarget(objects: NonNullable<PptxGenJS.SlideMasterProps['objects']>): PptxDrawingTarget {
+  return {
+    addImage: options => { objects.push({ image: options }) },
+    addText: (text, options) => {
+      if (Array.isArray(text)) {
+        if (text.length > 1) throw new Error('母版文字需要按页保留富文本')
+        objects.push({ text: { text: text[0]?.text ?? '', options: { ...options, ...text[0]?.options } } })
+      } else objects.push({ text: { text, options } })
+    },
+    addShape: (type, options) => {
+      if (type === 'rect') objects.push({ rect: options ?? {} })
+      else if (type === 'line') objects.push({ line: options ?? {} })
+      else throw new Error('此共享形状需按页导出')
+    },
+    addTable: () => { throw new Error('共享表格需按页导出') },
+    addChart: () => { throw new Error('共享图表需按页导出') },
+  }
+}
 
 async function loadPublishedImage(
   assetDataUrl: string,
@@ -205,7 +237,7 @@ function publishedDynamicSnapshotKey(
 }
 
 function addImage(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   item: Pick<PublishedLayerItem, 'frame' | 'rotation' | 'opacity' | 'layerItemId'>,
   data: string,
   scale: CanvasScale,
@@ -225,7 +257,7 @@ function addImage(
 }
 
 function addPlaceholder(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   item: PublishedLayerItem,
   scale: CanvasScale,
   message: string,
@@ -251,7 +283,7 @@ function addPlaceholder(
 }
 
 async function addNativeItem(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   item: PublishedNativeLayerItem,
   published: PublishedCourseV2Payload,
   scale: CanvasScale,
@@ -512,7 +544,6 @@ async function addSlideScenePage(
     x: WIDE_SLIDE_WIDTH / surface.canvas.width,
     y: WIDE_SLIDE_HEIGHT / surface.canvas.height,
   }
-  const slide = pptx.addSlide()
   const sceneWarnings: string[] = []
   const composition = composePublishedSlideStaticPage(
     published,
@@ -535,8 +566,32 @@ async function addSlideScenePage(
         surface,
         scene,
       })
-  slide.background = { color: pptxColor(effectiveBg.color, 'FFFFFF') }
   const backgroundAssetId = effectiveBg.assetId
+  const sharedIds = new Set(surface.surfaceLayerItems.map(entry => entry.item.layerItemId))
+  const masterItems: PublishedNativeLayerItem[] = []
+  // Only a prefix can move below all slide content. A foreground shared item
+  // or any global/local item stops promotion; a background image stays lowest.
+  if (!backgroundAssetId) for (const item of composition.items) {
+    if (!sharedIds.has(item.layerItemId) || !masterRepresentable(item)) break
+    masterItems.push(item)
+  }
+  let masterName: string | undefined
+  if (masterItems.length) {
+    const cache = sharedMasters.get(pptx) ?? new Map<string, string>()
+    sharedMasters.set(pptx, cache)
+    const key = JSON.stringify([surface.id, masterItems])
+    masterName = cache.get(key)
+    if (!masterName) {
+      const objects: NonNullable<PptxGenJS.SlideMasterProps['objects']> = []
+      const target = masterDrawingTarget(objects)
+      for (const item of masterItems) await addNativeItem(target, item, published, scale, sceneWarnings, imageCache, options, report, page.id)
+      masterName = `共享层_${cache.size + 1}`
+      pptx.defineSlideMaster({ title: masterName, objects })
+      cache.set(key, masterName)
+    }
+  }
+  const slide = pptx.addSlide(masterName ? { masterName } : undefined)
+  slide.background = { color: pptxColor(effectiveBg.color, 'FFFFFF') }
   if (backgroundAssetId) {
     const background = resolvePublishedAssetData(published, backgroundAssetId)
     if (background) {
@@ -558,7 +613,7 @@ async function addSlideScenePage(
       })
     }
   }
-  for (const item of composition.items) {
+  for (const item of composition.items.slice(masterItems.length)) {
     if (item.kind === 'native') {
       await addNativeItem(
         slide,

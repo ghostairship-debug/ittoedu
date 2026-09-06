@@ -115,7 +115,7 @@ function arrowHeadPoints(
   return [
     point,
     { x: point.x - ux * size + px * size * spread, y: point.y - uy * size + py * size * spread },
-    { x: point.x - ux * size * inset, y: point.y - uy * size * inset },
+    ...(head === 'stealth' ? [{ x: point.x - ux * size * inset, y: point.y - uy * size * inset }] : []),
     { x: point.x - ux * size - px * size * spread, y: point.y - uy * size - py * size * spread },
   ]
 }

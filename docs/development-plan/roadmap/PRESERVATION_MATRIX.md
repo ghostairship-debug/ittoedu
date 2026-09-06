@@ -50,7 +50,7 @@ Legacy 删除只能以现有[唯一消费者台账](../inventories/legacy-consum
 
 ## S1 已签署的增量行为
 
-Owner 的 2026-09-06 整体验收见 [S1 记录](../acceptance/S1-authoring.md)。以下只晋升 1.2–1.3；1.4 工具与 1.5 材料仍等待 S2。
+Owner 的 2026-09-06 整体验收见 [S1 记录](../acceptance/S1-authoring.md)。以下只晋升 1.2–1.3；1.4 工具与 1.5 材料另见下方 S2 晋升。
 
 | ID | 当前必须保留的行为 | 最低有效证据 | 禁止的降级方式 |
 | --- | --- | --- | --- |
@@ -58,6 +58,18 @@ Owner 的 2026-09-06 整体验收见 [S1 记录](../acceptance/S1-authoring.md)�
 | PM-31 | Flow 正文与 Spatial world 可创作五类 Chart 和 Table；三 Surface 共用内容操作，编辑、历史、保存重开、Player / HTML 保留数据；Flow DOCX 表格可编辑，图表图面及 Spatial 相机页明确静态。 | `tests/unit/crossSurfaceTableDelivery.test.ts`、`tests/unit/v9TableCommands.test.ts` 及 `tests/e2e/stabilizationCoreUsability.spec.ts`；真实图表 DOCX 证据见 1.3 复核。 | 不得用截图替代作者数据、丢正文顺序，或把支持范围扩至未批准的 shared / global / input。 |
 | PM-32 | Chart、Table、Component 与共用 Native 文字控件的合法活动草稿参与 dirty、保存准备和恢复；不失焦保存可重开，取消 / IME / stale 不误写，一次作者操作对应一次历史。 | `tests/unit/courseDraftPersistence.test.ts`、`tests/unit/chartCanvasDraft.test.tsx` 及桌面“活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开”。 | 不得只在 blur 保存、用播放临时状态代替作者属性持久化，或恢复时改写当前活跃历史。 |
 | PM-33 | Flow 原生文字 / 图片 / 图形浮层进入连续 DOCX；Slide input 原子写答案和有效性后求规则；六 owner 背景与连续调色遵循唯一有效值解析。 | 1.2 修复复核中的命名用例、`tests/unit/effectiveBackground.test.ts`、`tests/unit/courseBackgroundCommands.test.ts` 和真实桌面 Flow / ownership 回归。 | 不得混淆 viewport 浮层与正文，重复导出普通浮层，拆分 input 双键提交或重建第二套背景继承。 |
+
+## S2 已签署的增量行为
+
+Owner 于2026-09-06接受当前1.4–1.5范围，见[S2记录](../acceptance/S2-tools-and-materials.md)。PPTX真实样本仍有67次复杂内容遗漏；签署不扩大支持范围，不声称逐项人工测试全绿。下列证据在相关实现、依赖、fixture、验证定义或关键环境变化时才失效。
+
+| ID | 当前必须保留的行为 | 最低有效证据 | 禁止的降级方式 |
+| --- | --- | --- | --- |
+| PM-34 | Authoring Facade 通过 canonical target / scope 和 revision 提交一次文档与资源事务；动态 Component/Runtime 经真实宿主准入，失败、超时与迟到结果零写入。 | `tests/unit/authoringSurfaceTools.test.ts` 与[1.4复核](../reviews/1.4-tools-builder-2026-09-06.md)中的动态浏览器准入及失败隔离证据。 | 不得开放私有写入口、复制第二历史、绕过真实宿主或将未支持的Spatial world Runtime描述为可用。 |
+| PM-35 | Builder V2 经产品管理的 Chromium 会话调用同一工具，正式工厂创建工程，仅接受已登记finish结果；工程可重开，适用离线内容可连续操作。 | `tests/unit/coursewareCaseBuilder.test.ts`、`tests/unit/coursewareAuthoringRunner.test.ts` 与1.4复核中的真实CLI、archive和HTML纵切。 | 不得建立第二命令实现、接受未登记结果，或用mock声称动态宿主已通过。 |
+| PM-36 | 材料缓存按projectId与规范化路径隔离；导入、搜索、可见引用和删除可用；Save As新身份不复制旧缓存，删除材料不删除已写入工程的引用。 | [1.5复核](../reviews/1.5-materials-content-2026-09-06.md)中材料事务与桌面材料库证据。 | 不得把缓存/trace写入工程或导出，跨工程串库，或删除已持久化正文引用。 |
+| PM-37 | PPTX预览明示遗漏，经确认后原子导入可编辑普通图文、线条、分组、裁剪图、占位符与未合并表格；共享装饰按位置可见，整体Undo/Redo、保存重开与适用导出保持一致。有限正数小框可同步，源允许的自动扩框保留正文。 | `tests/unit/courseProjectArchive.test.ts`、`tests/unit/coursePptxExport.test.ts`、`tests/unit/playerAuthoringProtocol.test.ts` 与 `tests/e2e/stabilizationCoreUsability.spec.ts` 的母版/表格、线条和真实29页用例；本机原始样本不是仓库fixture。 | 不得静默丢普通受支持对象、混淆共享与实例owner、将取消/坏包/stale提交为成功，或恢复自动图片后备和外部渲染依赖。复杂对象继续明确提示，不承诺全保真。 |
+| PM-38 | Remix从受支持普通Native参考页重映射身份并替换明确文字槽位，预览后单事务提交；内容QA只读返回四类带目标与依据的finding。 | `tests/unit/courseProjectArchive.test.ts`、`tests/unit/courseProjectHealth.test.ts` 及1.5复核中的PPTX/Remix与内容QA桌面证据。 | 不得复制隐藏动态状态、绕过缺槽/超长/stale检查，或由QA自动改写答案和正文、宣称任意学科正确性。 |
 
 ## 后续版本保全晋升
 

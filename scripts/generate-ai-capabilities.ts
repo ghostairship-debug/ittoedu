@@ -1514,6 +1514,16 @@ export async function generateAiCapabilityArtifacts(
         'preserve-stable-ids-after-human-edits',
       ],
     },
+    importSurfaces: {
+      pptx: {
+        entry: 'manual-ui-only',
+        editable: 'text-shape-line-rounded-process-png-jpeg-crop-ordinary-group-unmerged-table',
+        inheritance: 'master-layout-shared-surface-items-with-location-visibility;scene-placeholder-instances;recursive-group-text-role',
+        unsupported: 'merged-table-chart-smartart-ole-equation-complex-effects;explicit-report-before-partial-import',
+        backend: 'local-parser;no-office-or-external-renderer',
+        commit: 'single-document-and-sidecar-transaction',
+      },
+    },
     exportSurfaces: {
       singleHtml: {
         interactivity: 'preserved',

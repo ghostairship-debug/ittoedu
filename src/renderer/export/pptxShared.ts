@@ -5,6 +5,8 @@ export const WIDE_SLIDE_HEIGHT = 7.5
 export const PIXELS_TO_POINTS = 0.75
 
 export type PptxSlide = ReturnType<PptxGenJS['addSlide']>
+/** Drawing commands shared by a slide and a master, without slide lifecycle state. */
+export type PptxDrawingTarget = { [K in 'addImage' | 'addText' | 'addShape' | 'addTable' | 'addChart']: (...args: Parameters<PptxSlide[K]>) => void }
 
 export interface CanvasScale {
   x: number

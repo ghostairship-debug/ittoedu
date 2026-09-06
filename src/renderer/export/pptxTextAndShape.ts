@@ -23,7 +23,7 @@ import {
   pptxRotation,
   pptxTransparency,
   type CanvasScale,
-  type PptxSlide,
+  type PptxDrawingTarget,
 } from './pptxShared'
 
 interface ResolvedTextStyle {
@@ -104,7 +104,7 @@ function pptxTextRuns(node: TextNode, fontSize: number): PptxGenJS.TextProps[] {
 }
 
 export function addPptxTextNode(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: TextNode,
   scale: CanvasScale,
 ): void {
@@ -187,7 +187,7 @@ export function addPptxTextNode(
  * Formula ID and accessible text remain available as object metadata.
  */
 export function addPptxFormulaNode(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: FormulaNode,
   scale: CanvasScale,
 ): void {
@@ -313,7 +313,7 @@ function absoluteShapePoints(
  * `addShapeDefinition` and the `SLIDE_OBJECT_TYPES.text` slide-render case.)
  */
 function addPptxStraightLine(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: ShapeNode,
   scale: CanvasScale,
 ): string[] {
@@ -367,7 +367,7 @@ function escapeSvgAttribute(value: string): string {
  * notice, not a silent shape substitution, and callers must surface it.
  */
 function addPptxElbowArrowStaticFallback(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: ShapeNode,
   scale: CanvasScale,
 ): string[] {
@@ -409,7 +409,7 @@ function addPptxElbowArrowStaticFallback(
 }
 
 export function addPptxShapeNode(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: ShapeNode,
   scale: CanvasScale,
 ): string[] {
@@ -442,10 +442,9 @@ export function addPptxShapeNode(
     line: shapeLine(node),
     rectRadius: node.shapeType === 'rounded-rectangle'
       ? clamp(
-          node.style.cornerRadius
-            / Math.max(1, Math.min(node.width, node.height)),
+          node.style.cornerRadius * scale.x,
           0,
-          1,
+          Math.min(node.width * scale.x, node.height * scale.y) / 2,
         )
       : undefined,
   })

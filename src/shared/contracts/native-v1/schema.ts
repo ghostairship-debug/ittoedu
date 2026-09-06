@@ -4,7 +4,8 @@ import { SHAPE_TYPES, type FormulaAstNode, type ShapeType } from './types'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const finiteNumber = z.number().finite()
-const positiveSize = finiteNumber.min(16)
+// Match V9 absolute frames; 16px is an authoring gesture default, not a wire limit.
+const positiveSize = finiteNumber.positive()
 const unitInterval = finiteNumber.min(0).max(1)
 
 export const nativeRenderableBaseSchema = z.object({

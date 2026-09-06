@@ -394,6 +394,11 @@ function deleteSurfaceFromDraft(
     )
   }
   syncMixedPrintPlan(draft)
+  // Repair the persisted start before choosing the editor's active location.
+  // The caller commonly keeps a later page active while deleting the first one.
+  if (!draft.locations.some((location) => location.id === draft.startLocationId)) {
+    syncStartLocationToFirstLocation(draft)
+  }
   if (preferredLocationId && draft.locations.some((location) => location.id === preferredLocationId)) {
     return preferredLocationId
   }

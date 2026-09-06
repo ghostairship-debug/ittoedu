@@ -15,6 +15,9 @@ import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPre
 import { addPptxFormulaNode, addPptxShapeNode } from '@/renderer/export/pptxTextAndShape'
 import { WIDE_SLIDE_HEIGHT, WIDE_SLIDE_WIDTH } from '@/renderer/export/pptxShared'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { parsePptxImport } from '@/renderer/project/pptxImport'
+import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
+import { pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
 import { APP_COMPANY, APP_NAME, CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import { createShapeNode, createTextNode, createFormulaNode, createTableNode, createChartNode, createTableLayerItem, createChartLayerItem } from '@/renderer/project/nativeNodeFactories'
 import {
@@ -56,6 +59,50 @@ describe('buildCourseExportPageList', () => {
 })
 
 describe('buildCoursePptx', () => {
+  it('keeps imported rounded geometry and group typography through editable PPTX export', async () => {
+    const draft = await parsePptxImport(pptxCommonMappingFixture())
+    const project = planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '普通映射').nextDocument
+    const exported = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const xml = decodePptxSlides(exported.bytes)
+    expect(xml).toContain('树状图')
+    const reparsed = await parsePptxImport(exported.bytes)
+    const round = reparsed.slides.flatMap(s => s.items).find(i => i.kind === 'native' && i.content.nativeType === 'shape' && i.content.data.shapeType === 'rounded-rectangle')
+    if (round?.kind !== 'native' || round.content.nativeType !== 'shape') throw new Error('rounded shape missing')
+    expect(round.content.data.style.cornerRadius).toBeCloseTo(25, 2)
+  })
+  it('exports imported shared underlays as reusable masters without duplicating decoration or changing page order', async () => {
+    const draft = await parsePptxImport(await pptxInheritanceFixture())
+    const project = planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '母版往返').nextDocument
+    const exported = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const files = unzipSync(exported.bytes)
+    const [firstShared, secondShared] = project.surfaces.at(-1)!.surfaceLayerItems.map(e => e.item.layerItemId)
+    const xml = (name: string) => new TextDecoder().decode(files[name])
+    const layouts = Object.keys(files).filter(name => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(name)).map(xml).join('\n')
+    expect(layouts).toContain(firstShared!)
+    expect(layouts).toContain(secondShared!)
+    const slides = decodePptxSlides(exported.bytes)
+    expect(slides).not.toContain(firstShared!)
+    expect(slides).not.toContain(secondShared!)
+    expect(slides.indexOf('第1页标题')).toBeLessThan(slides.indexOf('第2页标题'))
+    expect(slides.indexOf('第2页标题')).toBeLessThan(slides.indexOf('第3页标题'))
+    expect(slides).toContain('平均分成两份，取一份')
+    const getLayout = (page: number) => new DOMParser().parseFromString(xml(`ppt/slides/_rels/slide${page}.xml.rels`), 'application/xml').querySelector('Relationship[Type$="/slideLayout"]')?.getAttribute('Target')
+    expect(getLayout(2)).toBe(getLayout(4))
+    expect(getLayout(2)).not.toBe(getLayout(3))
+    expect(getLayout(5)).not.toBe(getLayout(2))
+  })
+  it('keeps shared foreground content on the slide after local objects', async () => {
+    const draft = await parsePptxImport(await pptxInheritanceFixture())
+    const project = structuredClone(planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '前景').nextDocument)
+    const surface = project.surfaces.at(-1)!
+    surface.surfaceLayerItems.forEach((e, index) => { e.item.order = 1000 + index })
+    const exported = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const files = unzipSync(exported.bytes)
+    const page = new TextDecoder().decode(files['ppt/slides/slide2.xml'])
+    const sharedId = surface.surfaceLayerItems[0]!.item.layerItemId
+    expect(page).toContain(sharedId)
+    expect(page.indexOf(sharedId)).toBeGreaterThan(page.indexOf('局部正文1'))
+  })
   it('keeps the V2 PPTX helper boundary independent of V8 project types', () => {
     const helperSources = [
       'src/renderer/export/course/buildCoursePptx.ts',

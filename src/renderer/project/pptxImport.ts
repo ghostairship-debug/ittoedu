@@ -1,14 +1,17 @@
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { LayerItem } from '../../shared/courseProjectTypes'
-import type { ShapeType, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
+import type { ShapeType, ShapeNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
+import { analyzeTextNodeLayout } from '../../shared/textLayout'
 import { createImageNode, createShapeNode, createTextNode } from './nativeNodeFactories'
 import { createImageAssetImport, readImageDimensions } from './assetManager'
 import type { CourseImportedAsset } from './v9AssetAdapter'
+import { pptxPageObjects, expandPptxGroup } from './pptxInheritance'
+import { parsePptxTable } from './pptxTableImport'
 import { openPptxPackage, PPTX_IMPORT_LIMITS, PptxImportError, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 
-export interface PptxSlideDraft { title: string; backgroundColor: string; items: LayerItem[] }
-export interface PptxImportDraft { slides: PptxSlideDraft[]; assets: CourseImportedAsset[]; notes: string[]; issues: PptxImportIssue[] }
+export interface PptxSlideDraft { title: string; backgroundColor: string; items: LayerItem[]; sourcePage?: number; sharedKeys?: string[] }
+export interface PptxImportDraft { slides: PptxSlideDraft[]; assets: CourseImportedAsset[]; notes: string[]; issues: PptxImportIssue[]; shared?: { key: string; items: LayerItem[] }[] }
 const child = (node: Element, name: string) => xmlChildren(node).find(n => n.localName === name)
 const flag = (node: Element | undefined, name: string) => ['1', 'true'].includes(node?.getAttribute(name) ?? '')
 const numeric = (node: Element | undefined, attr: string, fallback?: number): number => {
@@ -18,7 +21,15 @@ const numeric = (node: Element | undefined, attr: string, fallback?: number): nu
   if (!Number.isFinite(value)) return pptxReject('几何', `${attr} 不是有限数值`)
   return value
 }
-const shapeMap: Partial<Record<string, ShapeType>> = { rect: 'rectangle', roundRect: 'rounded-rectangle', ellipse: 'ellipse', triangle: 'triangle', diamond: 'diamond', line: 'line', rightArrow: 'arrow-right', leftArrow: 'arrow-left', upArrow: 'arrow-up', downArrow: 'arrow-down' }
+const shapeMap: Partial<Record<string, ShapeType>> = { rect: 'rectangle', flowChartProcess: 'rectangle', roundRect: 'rounded-rectangle', ellipse: 'ellipse', triangle: 'triangle', diamond: 'diamond', line: 'line', rightArrow: 'arrow-right', leftArrow: 'arrow-left', upArrow: 'arrow-up', downArrow: 'arrow-down' }
+
+function lineStyle(line: Element | undefined, onSimplified?: () => void): ShapeNode['style']['lineStyle'] {
+  const dash = line && xmlFirst(line, 'prstDash')?.getAttribute('val') || 'solid'
+  if (!['solid', 'dash', 'sysDash', 'dot', 'sysDot'].includes(dash)) pptxReject('线条样式', '暂不支持此虚线组合')
+  if (line && xmlChildren(line).some(n => !['solidFill', 'noFill', 'prstDash', 'headEnd', 'tailEnd', 'round', 'bevel', 'miter'].includes(n.localName))) pptxReject('线条样式', '不支持的线条设置')
+  if (line && !child(line, 'noFill') && (dash === 'sysDash' || child(line, 'miter') || child(line, 'bevel'))) onSimplified?.()
+  return dash === 'dot' || dash === 'sysDot' ? 'dotted' : dash === 'solid' ? 'solid' : 'dashed'
+}
 
 /** Stage editable content and report each omitted object or effect before any project write. */
 export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraft> {
@@ -35,6 +46,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
   const issues: PptxImportIssue[] = []
   const slides: PptxSlideDraft[] = [], assets: CourseImportedAsset[] = []
   const assetByPath = new Map<string, CourseImportedAsset>()
+  const shared = new Map<string, LayerItem[]>()
   let objectCount = 0
   const report = (error: unknown, page: number, action: string) => {
     const details = error instanceof PptxImportError ? error.issues : [{ type: '解析失败', message: error instanceof Error ? error.message : '无法读取内容' }]
@@ -46,29 +58,56 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
       const relationship = mainRels.find(r => r.id === pptxRelationshipId(ref))
       if (!relationship || relationship.external || !relationship.type.endsWith('/slide')) pptxReject('损坏关系', '页面关系无效')
       const path = relationship.target
-      const slide = pkg.xml(path), rels = pkg.relationships(path)
+      const slide = pkg.xml(path)
       const theme = themeColors(pkg, path)
       const color = (node: Element | undefined, fallback: string): string => {
         if (!node) return fallback
         const rgb = xmlFirst(node, 'srgbClr'), scheme = xmlFirst(node, 'schemeClr')
         const source = rgb ?? scheme
         if (!source) return pptxReject('颜色', '仅支持 RGB 或主题纯色')
-        if (xmlChildren(source).some(n => n.localName !== 'alpha')) pptxReject('颜色效果', '不支持颜色变换')
+        if (xmlChildren(source).some(n => !['alpha', 'lumMod', 'lumOff', 'tint', 'shade'].includes(n.localName))) pptxReject('颜色效果', '不支持颜色变换')
         const result = rgb?.getAttribute('val') ?? theme[scheme?.getAttribute('val') ?? '']
         if (!result || !/^[\da-f]{6}$/i.test(result)) return pptxReject('颜色', '无法解析主题色')
-        return `#${result}`
+        let rgbValues = [0, 2, 4].map(offset => parseInt(result.slice(offset, offset + 2), 16))
+        for (const effect of xmlChildren(source)) {
+          const amount = numeric(effect, 'val', 100000) / 100000
+          if (effect.localName === 'lumMod' || effect.localName === 'shade') rgbValues = rgbValues.map(v => v * amount)
+          if (effect.localName === 'lumOff') rgbValues = rgbValues.map(v => v + 255 * amount)
+          if (effect.localName === 'tint') rgbValues = rgbValues.map(v => v * amount + 255 * (1 - amount))
+        }
+        return `#${rgbValues.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')}`
       }
       for (const name of ['timing', 'transition']) if (xmlAll(slide, name).length) issues.push({ page, type: name === 'timing' ? '动画' : '切换效果', message: '已省略效果，保留可解析的静态内容' })
-      try { rejectInheritedObjects(pkg, path) } catch (error) { report(error, page, '已跳过母版/版式对象') }
       const tree = xmlFirst(slide, 'spTree')
       if (!tree) pptxReject('页面结构', '缺少对象树')
       const items: LayerItem[] = []
-      for (const object of xmlChildren(tree)) {
+      const sharedKeys: string[] = []
+      const sources = pptxPageObjects(pkg, path).flatMap(source => {
+        try { return expandPptxGroup(source) } catch (error) { report(error, page, '已跳过分组'); return [] }
+      })
+      for (const source of sources) {
+        const { object } = source
+        const rels = pkg.relationships(source.path)
+        const sharedKey = source.sharedKey && `${source.sharedKey}:${JSON.stringify(theme)}`
+        if (sharedKey && shared.has(sharedKey)) { sharedKeys.push(sharedKey); continue }
         if (['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(object.localName)) continue
         if (++objectCount > PPTX_IMPORT_LIMITS.objects) pptxReject('对象数量', '最多导入 2000 个对象')
         const itemStart = items.length
         const objectName = xmlFirst(object, 'cNvPr')?.getAttribute('name') || `对象 ${objectCount}`
+        const reportStrokeSimplification = () => issues.push({ page, type: '边框样式', message: `“${objectName}”保留线宽及实线/虚线/点线类型；转角与虚线节奏按编辑器样式呈现` })
         try {
+          if (object.localName === 'graphicFrame') {
+            const ole = xmlFirst(object, 'oleObj')
+            if (ole) {
+              const program = ole.getAttribute('progId') ?? ''
+              pptxReject(/Equation|MathType/i.test(program) ? '旧版公式（OLE）' : 'OLE 嵌入对象', '尚未支持转换为可编辑内容，可在源软件另存图片后补入')
+            }
+            const item = parsePptxTable(object, scale, origin, color, page, issues)
+            item.order = items.length
+            items.push(item)
+            if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
+            continue
+          }
           for (const name of ['effectLst', 'effectDag', 'scene3d', 'sp3d', 'hlinkClick', 'hlinkMouseOver']) {
             const effects = xmlAll(object, name).filter(node => name !== 'effectLst' || xmlChildren(node).length)
             if (effects.length) {
@@ -77,10 +116,17 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
             }
           }
           for (const name of ['AlternateContent', 'oleObj', 'videoFile', 'audioFile', 'custGeom', 'gradFill', 'pattFill']) if (xmlAll(object, name).length) pptxReject(name, '当前无法转换为可编辑对象')
-          if (!['sp', 'pic'].includes(object.localName)) pptxReject(object.localName, '不支持的页面对象')
-          if (xmlFirst(object, 'ph')) pptxReject('占位符', '请先转换为普通文本框或形状')
+          if (!['sp', 'pic', 'cxnSp'].includes(object.localName)) pptxReject(object.localName, '不支持的页面对象')
           const transform = xmlFirst(object, 'xfrm')
           if (!transform) pptxReject('继承几何', '对象需要显式位置与尺寸')
+          const presetGeometry = xmlFirst(object, 'prstGeom')?.getAttribute('prst')
+          if (object.localName === 'cxnSp' || presetGeometry === 'line') {
+            const node = parsePptxLine(object, transform, scale, origin, color, reportStrokeSimplification)
+            if (xmlAll(object, 'stCxn').length || xmlAll(object, 'endCxn').length) issues.push({ page, type: '连接关系', message: `“${objectName}”保留线条位置，转换为独立可编辑线条` })
+            items.push(sceneNodeToCourseLayerItem(node, items.length))
+            if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
+            continue
+          }
           if (flag(transform, 'flipH') || flag(transform, 'flipV')) pptxReject('翻转', '当前不支持翻转对象')
           const off = xmlFirst(transform, 'off'), ext = xmlFirst(transform, 'ext')
           const geometry = { x: numeric(off, 'x') * scale + origin.x, y: numeric(off, 'y') * scale + origin.y, width: numeric(ext, 'cx') * scale, height: numeric(ext, 'cy') * scale, rotation: numeric(transform, 'rot', 0) / 60000, visible: !flag(xmlFirst(object, 'cNvPr'), 'hidden') }
@@ -90,7 +136,9 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
           if (object.localName === 'pic') {
             const mask = xmlFirst(object, 'prstGeom')?.getAttribute('prst')
             if (mask && mask !== 'rect') pptxReject('图片形状蒙版', '请先应用图片蒙版')
-            if (xmlAll(object, 'srcRect').some(n => Array.from(n.attributes).some(a => Number(a.value) !== 0))) pptxReject('裁剪图片', '请先应用图片裁剪')
+            const srcRect = xmlFirst(object, 'srcRect')
+            const crop = { left: numeric(srcRect, 'l', 0) / 100000, top: numeric(srcRect, 't', 0) / 100000, right: numeric(srcRect, 'r', 0) / 100000, bottom: numeric(srcRect, 'b', 0) / 100000 }
+            if (Object.values(crop).some(v => v < 0) || crop.left + crop.right >= 0.98 || crop.top + crop.bottom >= 0.98) pptxReject('裁剪图片', '裁剪范围需要图片后备')
             const blip = xmlFirst(object, 'blip')
             if (blip && xmlChildren(blip).length) pptxReject('图片效果', '请先把图片效果应用到图片文件')
             if (xmlFirst(object, 'tile')) pptxReject('平铺图片', '请先转换为普通图片')
@@ -108,44 +156,58 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
               asset = createImageAssetImport({ name: imageRel.target.split('/').pop()!, mimeType, bytes: data }, { dimensions })
               assetByPath.set(imageRel.target, asset); assets.push(asset)
             }
-            push(createImageNode({ ...geometry, name, assetId: asset.meta.id, fit: 'stretch' }))
+            push(createImageNode({ ...geometry, name, assetId: asset.meta.id, fit: 'stretch', crop }))
+            if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
             continue
           }
           const properties = child(object, 'spPr')
           if (!properties) pptxReject('形状', '缺少显式形状属性')
           const preset = xmlFirst(properties, 'prstGeom')?.getAttribute('prst') ?? 'rect'
-          if (xmlAll(properties, 'gd').length) pptxReject('自定义形状参数', '当前不支持自定义几何调整')
+          const adjustments = xmlAll(properties, 'gd')
+          let cornerRadius: number | undefined
+          if (preset === 'roundRect') {
+            const adjustment = adjustments[0]
+            const formula = adjustment?.getAttribute('fmla') ?? 'val 16667'
+            if (adjustments.length > 1 || (adjustment && adjustment.getAttribute('name') !== 'adj') || !/^val -?\d+$/.test(formula)) pptxReject('自定义形状参数', '无法解析圆角调整')
+            cornerRadius = Math.min(500, Math.min(geometry.width, geometry.height) * Math.max(0, Math.min(50000, Number(formula.slice(4)))) / 100000)
+          } else if (adjustments.length) pptxReject('自定义形状参数', '当前不支持自定义几何调整')
           const shape = shapeMap[preset]
           if (!shape) pptxReject(preset, '不支持的预设形状')
           const fill = child(properties, 'solidFill'), line = child(properties, 'ln')
           const lineFill = line && child(line, 'solidFill')
           if (child(object, 'style') && ((!fill && !child(properties, 'noFill')) || !line)) pptxReject('主题形状样式', '请为形状明确设置填充与线条')
-          const dash = line && xmlFirst(line, 'prstDash')?.getAttribute('val')
-          if (dash && !['solid', 'dash', 'dot'].includes(dash)) pptxReject('线条样式', '仅支持实线、虚线和点线')
-          if (line && xmlChildren(line).some(n => !['solidFill', 'noFill', 'prstDash', 'headEnd', 'tailEnd', 'round'].includes(n.localName))) pptxReject('线条样式', '不支持的线条设置')
+          const strokeStyle = lineStyle(line, reportStrokeSimplification)
           for (const end of line ? [...xmlAll(line, 'headEnd'), ...xmlAll(line, 'tailEnd')] : []) if (end.getAttribute('type') && end.getAttribute('type') !== 'none') pptxReject('线端箭头', '当前不支持线端箭头')
           const opacity = (node: Element | undefined) => node ? numeric(xmlFirst(node, 'alpha'), 'val', 100000) / 100000 : 1
           if (fill || lineFill || !xmlFirst(object, 'txBody')) push(createShapeNode(shape, { ...geometry, name,
             style: { fillColor: color(fill, '#ffffff'), fillOpacity: fill ? opacity(fill) : 0,
               borderColor: color(lineFill, '#000000'), borderOpacity: lineFill ? opacity(lineFill) : 0,
-              borderWidth: numeric(line, 'w', 12700) * scale, lineStyle: dash === 'dash' ? 'dashed' : dash === 'dot' ? 'dotted' : 'solid' } }))
+              borderWidth: numeric(line, 'w', 12700) * scale, lineStyle: strokeStyle, ...(cornerRadius !== undefined ? { cornerRadius } : {}) } }))
           const body = child(object, 'txBody')
           if (body) {
             const bodyProperties = child(body, 'bodyPr')
             if (numeric(bodyProperties, 'rot', 0) !== 0) pptxReject('文字旋转', '请转换为整个文本框的旋转')
             if (bodyProperties?.getAttribute('vert') && bodyProperties.getAttribute('vert') !== 'horz') pptxReject('文字方向', '仅支持水平文字')
-            if (xmlAll(body, 'buChar').length || xmlAll(body, 'buAutoNum').length || xmlAll(body, 'fld').length) pptxReject('项目符号/字段', '请转换为普通文字')
             let text = ''; const runs: TextRun[] = []
             const paragraphs = xmlChildren(body).filter(n => n.localName === 'p')
-            const alignments = new Set(paragraphs.map(p => child(p, 'pPr')?.getAttribute('algn') ?? 'l'))
+            const alignments = new Set(paragraphs.map(p => {
+              const align = child(p, 'pPr')?.getAttribute('algn') ?? 'l'
+              // A single glyph has no inter-word gap to justify. Longer paragraphs
+              // retain the explicit unsupported report instead of losing alignment.
+              return align === 'just' && Array.from(xmlAll(p, 't').map(t => t.textContent ?? '').join('')).length <= 1 ? 'l' : align
+            }))
             if (alignments.size > 1 || !['l', 'ctr', 'r'].includes([...alignments][0] ?? 'l')) pptxReject('段落对齐', '仅支持文本框内统一的左/中/右对齐')
             let baseStyle: TextRunStyle | undefined
             for (const [pIndex, paragraph] of paragraphs.entries()) {
               if (pIndex) text += '\n'
+              const pPr = child(paragraph, 'pPr')
+              const bullet = pPr && child(pPr, 'buChar'), numbering = pPr && child(pPr, 'buAutoNum')
+              if (bullet) text += `${bullet.getAttribute('char') ?? '•'} `
+              if (numbering) text += `${numeric(numbering, 'startAt', 1) + pIndex}. `
               for (const run of xmlChildren(paragraph)) {
                 if (run.localName === 'br') { text += '\n'; continue }
                 if (['pPr', 'endParaRPr'].includes(run.localName)) continue
-                if (run.localName !== 'r') pptxReject(run.localName, '不支持的文字内容')
+                if (!['r', 'fld'].includes(run.localName)) pptxReject(run.localName, '不支持的文字内容')
                 const properties = child(run, 'rPr') ?? xmlFirst(paragraph, 'defRPr')
                 const sz = properties?.getAttribute('sz')
                 if (!sz) pptxReject('继承字体', '文字必须显式设置字号')
@@ -162,8 +224,20 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
                 text += value
               }
             }
-            if (text) push(createTextNode({ ...geometry, name: `${name} 文字`, text, runs, style: { ...baseStyle, align: [...alignments][0] === 'ctr' ? 'center' : [...alignments][0] === 'r' ? 'right' : 'left', verticalAlign: bodyProperties?.getAttribute('anchor') === 'ctr' ? 'middle' : bodyProperties?.getAttribute('anchor') === 'b' ? 'bottom' : 'top', padding: 0, overflow: 'fixed' } }))
+            if (text) {
+              const node = createTextNode({ ...geometry, name: `${name} 文字`, text, runs, style: { ...baseStyle, align: [...alignments][0] === 'ctr' ? 'center' : [...alignments][0] === 'r' ? 'right' : 'left', verticalAlign: bodyProperties?.getAttribute('anchor') === 'ctr' ? 'middle' : bodyProperties?.getAttribute('anchor') === 'b' ? 'bottom' : 'top', padding: 0, overflow: 'fixed' } })
+              // spAutoFit permits the source shape to grow with its text. Resolve
+              // that geometry with the same layout used by editor/Player/export;
+              // do not force fixed source frames (including tiny ones) to grow.
+              if (bodyProperties && child(bodyProperties, 'spAutoFit')) {
+                if (bodyProperties.getAttribute('wrap') === 'none') node.width = Math.max(node.width, Math.ceil(analyzeTextNodeLayout(node, 1_000_000).requiredWidth))
+                node.height = Math.max(node.height, Math.ceil(analyzeTextNodeLayout(node).requiredHeight))
+                if (node.width > geometry.width || node.height > geometry.height) issues.push({ page, type: '文字自动扩框', message: `“${objectName}”按源自动扩框设置及当前字体扩展文字框，保留完整正文；请复核相邻对象布局` })
+              }
+              push(node)
+            }
           }
+          if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
         } catch (error) {
           items.splice(itemStart)
           report(error, page, `已跳过“${objectName}”`)
@@ -190,26 +264,76 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
         if (backgroundFill && numeric(xmlFirst(backgroundFill, 'alpha'), 'val', 100000) !== 100000) pptxReject('背景透明度', '仅支持不透明背景')
         backgroundColor = color(backgroundFill, '#ffffff')
       } catch (error) { report(error, page, '背景已替换为白色') }
-      slides.push({ title: xmlFirst(slide, 'cSld')?.getAttribute('name') || `导入第 ${page} 页`, backgroundColor, items })
+      slides.push({ title: xmlFirst(slide, 'cSld')?.getAttribute('name') || `导入第 ${page} 页`, backgroundColor, items, sourcePage: page, sharedKeys })
     } catch (error) {
       if (error instanceof PptxImportError && error.issues.some(issue => issue.type === '对象数量')) throw error
       report(error, page, '已跳过页面')
     }
   }
-  if (!slides.some(slide => slide.items.length)) throw new PptxImportError([...issues, { type: '无可导入内容', message: '没有可转换的对象，工程未写入；请先在 PowerPoint 中转换需要保留的内容。' }])
-  const usedAssets = new Set(slides.flatMap(slide => slide.items.flatMap(item => item.kind === 'native' && item.content.nativeType === 'image' ? [item.content.data.assetId] : [])))
-  return { slides, assets: assets.filter(asset => usedAssets.has(asset.meta.id)), issues, notes: ['按原比例居中适配课程画布；字体由当前系统解析。', '文字转为可编辑文本框，形状与文字分开编辑；文本框内边距归零，保持对象框与字号。', '仅导入页面内容；备注、文档属性和母版占位符不进入课程。'] }
+  if (!slides.some(slide => slide.items.length || slide.sharedKeys?.some(key => shared.get(key)?.length))) throw new PptxImportError([...issues, { type: '无可导入内容', message: '没有可转换的对象，工程未写入；可在源软件转换对象或另存图片后补入。' }])
+  // Reserve one common order interval below every scene; import metadata is not persisted.
+  let order = 0
+  for (const group of shared.values()) for (const item of group) item.order = order++
+  for (const slide of slides) slide.items.forEach((item, i) => { item.order = order + i })
+  const allItems = [...slides.flatMap(slide => slide.items), ...[...shared.values()].flat()]
+  const usedAssets = new Set(allItems.flatMap(item => item.kind === 'native' && item.content.nativeType === 'image' ? [item.content.data.assetId] : []))
+  return { slides, shared: [...shared].map(([key, items]) => ({ key, items })), assets: assets.filter(asset => usedAssets.has(asset.meta.id)), issues, notes: ['按原比例居中适配课程画布；字体由当前系统解析。', '文字与图形可分别编辑；母版/版式装饰在本演示表面的共享层修改，占位符正文只属于当前页。', '备注和文档属性不进入课程；未支持的复杂对象可在源软件另存图片后补入。'] }
+}
+
+function parsePptxLine(
+  object: Element, transform: Element, scale: number, origin: { x: number; y: number },
+  color: (node: Element | undefined, fallback: string) => string,
+  reportStrokeSimplification: () => void,
+): ShapeNode {
+  const properties = child(object, 'spPr')
+  const preset = properties && xmlFirst(properties, 'prstGeom')?.getAttribute('prst')
+  const elbow = preset === 'bentConnector2' || preset === 'bentConnector3'
+  if (!elbow && preset !== 'line' && preset !== 'straightConnector1') pptxReject('连接线类型', '当前支持直线和单折段连接线')
+  const line = properties && child(properties, 'ln')
+  if (!line) pptxReject('继承线条样式', '缺少明确线条样式')
+  const fill = child(line, 'solidFill')
+  if (!fill && !child(line, 'noFill')) pptxReject('继承线条颜色', '缺少明确线条颜色')
+  const strokeStyle = lineStyle(line, reportStrokeSimplification)
+  const arrow = (name: string): ShapeNode['style']['startArrow'] => {
+    const value = child(line, name)?.getAttribute('type') ?? 'none'
+    if (value === 'oval') return 'circle'
+    if (['none', 'triangle', 'stealth', 'diamond'].includes(value)) return value as ShapeNode['style']['startArrow']
+    return pptxReject('线端箭头', `暂不支持 ${value} 箭头`)
+  }
+  const off = xmlFirst(transform, 'off'), ext = xmlFirst(transform, 'ext')
+  const rawWidth = numeric(ext, 'cx') * scale, rawHeight = numeric(ext, 'cy') * scale
+  if (rawWidth < 0 || rawHeight < 0 || rawWidth + rawHeight === 0) pptxReject('线条几何', '线段必须有长度')
+  const borderWidth = numeric(line, 'w', 12700) * scale
+  const startArrow = arrow('headEnd'), endArrow = arrow('tailEnd')
+  // Native painters clip to the item frame. Keep the source endpoints while
+  // reserving enough room for strokes and the existing renderer's arrow heads.
+  const padding = startArrow !== 'none' || endArrow !== 'none' ? Math.max(12, borderWidth * 4) : Math.max(2, borderWidth / 2 + 2)
+  const width = rawWidth + padding * 2, height = rawHeight + padding * 2
+  const start: [number, number] = [(padding + (flag(transform, 'flipH') ? rawWidth : 0)) / width, (padding + (flag(transform, 'flipV') ? rawHeight : 0)) / height]
+  const end: [number, number] = [1 - start[0], 1 - start[1]]
+  const adjustments = properties ? xmlAll(properties, 'gd') : []
+  let position = preset === 'bentConnector2' ? 1 : 0.5
+  if (adjustments.length) {
+    const formula = adjustments[0]?.getAttribute('fmla') ?? ''
+    if (!elbow || preset !== 'bentConnector3' || adjustments.length !== 1 || !/^val \d+$/.test(formula)) pptxReject('折线调整', '当前无法表达此折线调整')
+    position = Number(formula.slice(4)) / 100000
+    if (position < 0 || position > 1) pptxReject('折线调整', '折点超出对象范围')
+  }
+  if (flag(transform, 'flipH')) position = 1 - position
+  position = (padding + position * rawWidth) / width
+  return createShapeNode(elbow ? 'elbow-arrow' : 'line', {
+    name: xmlFirst(object, 'cNvPr')?.getAttribute('name') || '导入线条',
+    x: numeric(off, 'x') * scale + origin.x - padding,
+    y: numeric(off, 'y') * scale + origin.y - padding,
+    width, height, rotation: numeric(transform, 'rot', 0) / 60000,
+    visible: !flag(xmlFirst(object, 'cNvPr'), 'hidden'),
+    lineGeometry: elbow ? { kind: 'elbow', start, end, axis: 'horizontal', position } : { kind: 'straight', start, end },
+    style: { fillOpacity: 0, borderColor: color(fill, '#000000'), borderOpacity: fill ? numeric(xmlFirst(fill, 'alpha'), 'val', 100000) / 100000 : 0,
+      borderWidth, lineStyle: strokeStyle, startArrow, endArrow },
+  })
 }
 
 function relatedPart(pkg: PptxPackage, path: string, kind: string): string | undefined { return pkg.relationships(path).find(r => !r.external && r.type.endsWith(`/${kind}`))?.target }
-function rejectInheritedObjects(pkg: PptxPackage, path: string): void {
-  const layout = relatedPart(pkg, path, 'slideLayout'), master = layout && relatedPart(pkg, layout, 'slideMaster')
-  for (const part of [layout, master].filter((p): p is string => !!p)) {
-    const doc = pkg.xml(part)
-    const tree = xmlFirst(doc, 'spTree')
-    if (tree && xmlChildren(tree).some(n => !['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(n.localName) && !xmlFirst(n, 'ph'))) pptxReject('母版/版式对象', '请把母版或版式中的可见对象转换到页面')
-  }
-}
 function inheritedBackground(pkg: PptxPackage, path: string): Element | undefined {
   const layout = relatedPart(pkg, path, 'slideLayout'), master = layout && relatedPart(pkg, layout, 'slideMaster')
   for (const part of [path, layout, master]) { if (part) { const bg = xmlFirst(pkg.xml(part), 'bg'); if (bg) return bg } }

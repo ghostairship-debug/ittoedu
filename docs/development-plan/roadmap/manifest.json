@@ -912,6 +912,100 @@
       "spec": "1.5/README.md"
     },
     {
+      "id": "r15-031-pptx-owner-contract",
+      "release": "1.5",
+      "title": "明确 PPTX 母版、版式、占位符与图层的映射合同",
+      "dependencies": [
+        "r15-030-pptx-import"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "store-course",
+        "export-pptx"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-032-pptx-inheritance",
+      "release": "1.5",
+      "title": "交付母版版式继承、占位符实例与共享层编辑导出",
+      "dependencies": [
+        "r15-031-pptx-owner-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-course",
+        "store-slide",
+        "export-pptx"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-033-pptx-common-native",
+      "release": "1.5",
+      "title": "补齐常用图文线条、图片裁剪、普通分组与 Native Table 导入",
+      "dependencies": [
+        "r15-031-pptx-owner-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "published-slide"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-036-pptx-closure",
+      "release": "1.5",
+      "title": "完成真实教学 PPTX 创作闭环并补齐 S2 验收材料",
+      "dependencies": [
+        "r15-032-pptx-inheritance",
+        "r15-033-pptx-common-native",
+        "r15-038-pptx-common-mapping-repair"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "generated-index",
+        "diagnostics"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-037-native-frame-sync",
+      "release": "1.5",
+      "title": "修复合法小尺寸对象导致统一画布初始化失败",
+      "dependencies": [
+        "r15-033-pptx-common-native"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "authoring-slide",
+        "published-slide"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
+      "id": "r15-038-pptx-common-mapping-repair",
+      "release": "1.5",
+      "title": "补齐真实教学课件的高收益映射与正确文字继承",
+      "dependencies": [
+        "r15-032-pptx-inheritance",
+        "r15-037-native-frame-sync"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "export-pptx"
+      ],
+      "spec": "1.5/README.md"
+    },
+    {
       "id": "r15-040-style-remix",
       "release": "1.5",
       "title": "复制参考页可编辑骨架并用明确槽位替换内容",
@@ -948,7 +1042,8 @@
         "r15-020-material-tools-citations",
         "r15-030-pptx-import",
         "r15-040-style-remix",
-        "r15-050-content-qa"
+        "r15-050-content-qa",
+        "r15-036-pptx-closure"
       ],
       "optional": false,
       "writeLocks": [
@@ -1096,12 +1191,106 @@
       "spec": "1.6/README.md"
     },
     {
+      "id": "r16-032-table-merge-contract",
+      "title": "定义跨 Surface 表格合并的兼容合同",
+      "dependencies": [
+        "r15-036-pptx-closure"
+      ],
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "release": "1.6",
+      "optional": false,
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-033-table-merge-authoring",
+      "title": "交付表格合并拆分与结构编辑事务",
+      "dependencies": [
+        "r16-032-table-merge-contract"
+      ],
+      "writeLocks": [
+        "store-slide",
+        "store-flow",
+        "store-spatial",
+        "props-shared"
+      ],
+      "release": "1.6",
+      "optional": false,
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-034-table-merge-consumers",
+      "title": "闭合合并表格的播放导出与工具能力",
+      "dependencies": [
+        "r16-033-table-merge-authoring"
+      ],
+      "writeLocks": [
+        "published-slide",
+        "export-pptx",
+        "generated-index"
+      ],
+      "release": "1.6",
+      "optional": false,
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-035-pptx-tables-styles",
+      "release": "1.6",
+      "title": "接入 PPTX 合并表格并增强主题与文字样式映射",
+      "dependencies": [
+        "r16-034-table-merge-consumers"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "export-pptx",
+        "generated-index"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-036-ppt-resave-import",
+      "release": "1.6",
+      "title": "通过本机兼容软件另存为PPTX并复用导入器",
+      "dependencies": [
+        "r15-038-pptx-common-mapping-repair"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "app-save-recovery",
+        "workspace-shell"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
+      "id": "r16-037-pptx-text-image-effects",
+      "release": "1.6",
+      "title": "补齐下标文字、透明图片与翻转文字映射",
+      "dependencies": [
+        "r15-038-pptx-common-mapping-repair"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "app-save-recovery",
+        "published-slide",
+        "export-pptx"
+      ],
+      "spec": "1.6/README.md"
+    },
+    {
       "id": "r16-040-release",
       "release": "1.6",
       "title": "形成 1.6 engineering candidate 并发布 v1.6.0-rc.N 源码标签",
       "dependencies": [
         "r16-031-hidden-manual-isolation",
-        "r15-060-release"
+        "r15-060-release",
+        "r16-035-pptx-tables-styles",
+        "r16-036-ppt-resave-import",
+        "r16-037-pptx-text-image-effects"
       ],
       "optional": false,
       "writeLocks": [
@@ -1279,12 +1468,46 @@
       "spec": "1.7/README.md"
     },
     {
+      "id": "r17-041-pptx-editable-charts",
+      "release": "1.7",
+      "title": "把常见 PPTX 图表转换为可编辑 Native Chart",
+      "dependencies": [
+        "r16-035-pptx-tables-styles"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "export-pptx",
+        "generated-index"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
+      "id": "r17-042-pptx-shape-geometry",
+      "release": "1.7",
+      "title": "补齐括号标注、自由路径与渐变的正式表达",
+      "dependencies": [
+        "r16-037-pptx-text-image-effects"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "store-slide",
+        "published-slide",
+        "export-pptx"
+      ],
+      "spec": "1.7/README.md"
+    },
+    {
       "id": "r17-060-release",
       "release": "1.7",
       "title": "形成 1.7 engineering candidate 并发布 v1.7.0-rc.N 源码标签",
       "dependencies": [
         "r17-040-generation-benchmark",
-        "r16-040-release"
+        "r16-040-release",
+        "r17-041-pptx-editable-charts",
+        "r17-042-pptx-shape-geometry"
       ],
       "optional": false,
       "writeLocks": [
@@ -1469,11 +1692,45 @@
       "spec": "1.8/README.md"
     },
     {
+      "id": "r18-051-pptx-editable-diagrams",
+      "release": "1.8",
+      "title": "增强简单 SmartArt 与流程层级图的可编辑导入",
+      "dependencies": [
+        "r17-041-pptx-editable-charts"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "export-pptx",
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-052-pptx-legacy-equations",
+      "release": "1.8",
+      "title": "将受支持旧OLE公式转换为可编辑Native公式",
+      "dependencies": [
+        "r17-042-pptx-shape-geometry"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "published-slide",
+        "export-pptx"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
       "id": "r18-060-release",
       "release": "1.8",
       "title": "Owner 验收 S3 AI 内核并发布 v1.8.0 accepted 源码标签",
       "dependencies": [
-        "r18-050-three-cli-benchmark"
+        "r18-050-three-cli-benchmark",
+        "r18-051-pptx-editable-diagrams",
+        "r18-052-pptx-legacy-equations"
       ],
       "optional": false,
       "writeLocks": [
@@ -1586,11 +1843,29 @@
       "spec": "1.9/README.md"
     },
     {
+      "id": "r19-051-pptx-media-effects",
+      "release": "1.9",
+      "title": "增强内嵌媒体与可表达的简单演示效果",
+      "dependencies": [
+        "r18-051-pptx-editable-diagrams"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "store-slide",
+        "authoring-interaction",
+        "published-slide",
+        "export-pptx"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
       "id": "r19-060-release",
       "release": "1.9",
       "title": "形成 1.9 engineering candidate 并发布 v1.9.0-rc.N 源码标签",
       "dependencies": [
-        "r19-050-internal-dogfood"
+        "r19-050-internal-dogfood",
+        "r19-051-pptx-media-effects"
       ],
       "optional": false,
       "writeLocks": [
@@ -1721,12 +1996,29 @@
       "spec": "2.0/README.md"
     },
     {
+      "id": "r20-041-pptx-production-acceptance",
+      "release": "2.0",
+      "title": "完成 PPTX 导入增强的内部生产创作验收",
+      "dependencies": [
+        "r19-051-pptx-media-effects",
+        "r20-030-docs-accessibility"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "app-save-recovery",
+        "workspace-shell",
+        "generated-index"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
       "id": "r20-050-owner-acceptance",
       "release": "2.0",
       "title": "Owner 验收 S4 AI 产品并签署 v2.0.0 accepted 候选",
       "dependencies": [
         "r20-030-docs-accessibility",
-        "r20-040-three-cli-acceptance"
+        "r20-040-three-cli-acceptance",
+        "r20-041-pptx-production-acceptance"
       ],
       "optional": false,
       "writeLocks": [

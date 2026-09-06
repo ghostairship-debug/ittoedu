@@ -44,6 +44,16 @@ function ready(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Player authoring protocol', () => {
+  it('accepts every finite positive V9 frame without enlarging small objects', () => {
+    for (const size of [0.01, 6.4999475, 15.9, 16]) {
+      const result = parsePlayerAuthoringPatchCommand(command(createRectangleNode({ id: 'node-a', width: size, height: size })))
+      expect(result.ok).toBe(true)
+    }
+    for (const size of [0, -1, NaN, Infinity, -Infinity]) {
+      expect(parsePlayerAuthoringPatchCommand(command(createRectangleNode({ id: 'node-a', width: size }))).ok).toBe(false)
+      expect(parsePlayerAuthoringPatchCommand(command(createRectangleNode({ id: 'node-a', height: size }))).ok).toBe(false)
+    }
+  })
   it('advertises component targets as an independent authoring channel', () => {
     expect(PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets).not.toBe(
       PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
@@ -303,4 +313,3 @@ describe('Player authoring protocol', () => {
     })).ok).toBe(false)
   })
 })
-

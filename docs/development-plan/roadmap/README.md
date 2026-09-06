@@ -69,6 +69,8 @@ flowchart LR
 
 `v1.1.0` 标签保持不可变；`v1.1.1` 已经 Flow 文字格式维护闭环与 Owner 验收创建新源码标签，并重新固定同一课例的离线 HTML。1.2–1.9 不发布离线 HTML，2.0 恢复固定课例离线 HTML；本路线不发布安装器。无后缀版本号绝不同时表示“仅自动化通过”和“Owner 已验收”。
 
+PPTX 人工导入的跨版本增强与发布节点见 [能力增强计划](../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。1.5 完成常用内容可编辑映射与明确的部分导入，1.6–1.9 逐步增加样式、图表、图示与媒体的可编辑覆盖，2.0 完成内部生产验收；这些人工入口不随 AI 默认隐藏。
+
 ## 跨版本接口与数据合同
 
 - **Native 内容**：Table、Chart 与 Slide-only input 是获批的 V9 Native strict 窄增量；Published Course V2 只做匹配读取与运行所需的窄增量。input 的提交值先原子写入已声明状态键再求规则条件，只映射 PPTX；Flow 作者浮层进入一份连续 DOCX。线条和背景沿用既有对象 / Surface 所有权，不另建旁路状态。

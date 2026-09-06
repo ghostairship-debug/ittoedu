@@ -385,6 +385,7 @@ export function createShapeNode(
     name: options.name ?? shapeName(shapeType),
     type: 'shape',
     shapeType,
+    ...(isLinear && options.lineGeometry ? { lineGeometry: structuredClone(options.lineGeometry) } : {}),
     x: options.x ?? (CANVAS_WIDTH - width) / 2,
     y: options.y ?? (CANVAS_HEIGHT - height) / 2,
     width,

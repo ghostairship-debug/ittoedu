@@ -71,7 +71,7 @@ function arrowHead(
     const inset = type === 'stealth' ? 0.3 : 0
     context.moveTo(point.x, point.y)
     context.lineTo(point.x - ux * size + px * size * spread, point.y - uy * size + py * size * spread)
-    context.lineTo(point.x - ux * size * inset, point.y - uy * size * inset)
+    if (type === 'stealth') context.lineTo(point.x - ux * size * inset, point.y - uy * size * inset)
     context.lineTo(point.x - ux * size - px * size * spread, point.y - uy * size - py * size * spread)
     context.closePath()
   }

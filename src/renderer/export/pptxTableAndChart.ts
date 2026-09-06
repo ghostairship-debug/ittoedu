@@ -20,7 +20,7 @@ import {
   pptxObjectName,
   pptxTransparency,
   type CanvasScale,
-  type PptxSlide,
+  type PptxDrawingTarget,
 } from './pptxShared'
 
 export interface PptxNativeStaticWarningInput {
@@ -77,7 +77,7 @@ function pptxTableCellBorder(style: NativeTableEffectiveCellStyle): PptxGenJS.Bo
 
 /** Projects a Published Native Table onto a real, editable PPTX table. */
 export function addPptxTableNode(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: PublishedNativeTableInput,
   scale: CanvasScale,
 ): string[] {
@@ -135,7 +135,7 @@ const PPTX_LEGEND_POS: Record<'top' | 'right' | 'bottom' | 'left', 't' | 'r' | '
 
 /** Projects a Published Native Chart onto a real, editable PPTX chart. */
 export function addPptxChartNode(
-  slide: PptxSlide,
+  slide: PptxDrawingTarget,
   node: PublishedNativeChartInput,
   scale: CanvasScale,
 ): string[] {

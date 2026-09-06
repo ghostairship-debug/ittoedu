@@ -10,6 +10,7 @@ export function planPptxImportTransaction(project: CourseProjectDocument, draft:
   if (!draft.slides.length) throw new Error('没有可导入的页面')
   let next = commitCourseProjectMutation(project, projectDraft => { applyCourseAssetImports(projectDraft.assets, {}, draft.assets) })
   let surfaceId = '', firstLocationId = ''
+  const locationsBySharedKey = new Map<string, string[]>()
   for (const [index, slide] of draft.slides.entries()) {
     const added = index === 0 ? addCourseSlidePage(next, { title }) : addCourseScene(next, { surfaceId, title: slide.title })
     if (!added.ok) throw new Error(added.reason)
@@ -18,6 +19,7 @@ export function planPptxImportTransaction(project: CourseProjectDocument, draft:
     if (!location || location.kind !== 'slide-scene') throw new Error('导入页面位置失效')
     surfaceId = location.surfaceId
     firstLocationId ||= location.id
+    for (const key of slide.sharedKeys ?? []) locationsBySharedKey.set(key, [...(locationsBySharedKey.get(key) ?? []), location.id])
     next = commitCourseProjectMutation(next, projectDraft => {
       const surface = projectDraft.surfaces.find(s => s.id === surfaceId)
       if (!surface || surface.type !== 'slide') throw new Error('导入表面失效')
@@ -28,6 +30,14 @@ export function planPptxImportTransaction(project: CourseProjectDocument, draft:
       projectDraft.locations.find(l => l.id === location.id)!.label = slide.title
     })
   }
+  next = commitCourseProjectMutation(next, projectDraft => {
+    const surface = projectDraft.surfaces.find(s => s.id === surfaceId)!
+    for (const group of draft.shared ?? []) {
+      const locationIds = locationsBySharedKey.get(group.key)
+      if (!locationIds?.length) continue
+      for (const item of group.items) surface.surfaceLayerItems.push({ item: structuredClone(item), visibility: { mode: 'include', locationIds } })
+    }
+  })
   const nextDocument = commitCourseProjectMutation(project, projectDraft => {
     Object.assign(projectDraft, structuredClone(next))
   })

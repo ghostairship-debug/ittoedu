@@ -505,7 +505,8 @@ export function paintPublishedNativeTable(
   const colgroup = wrap.ownerDocument.createElement('colgroup')
   for (const col of layout.columns) {
     const colEl = wrap.ownerDocument.createElement('col')
-    colEl.style.width = `${col.width}px`
+    // Percentages leave room for collapsed outer borders inside the fixed frame.
+    colEl.style.width = `${col.width / layout.width * 100}%`
     colgroup.appendChild(colEl)
   }
   table.appendChild(colgroup)
@@ -513,7 +514,7 @@ export function paintPublishedNativeTable(
   const tbody = wrap.ownerDocument.createElement('tbody')
   for (const row of layout.rows) {
     const tr = wrap.ownerDocument.createElement('tr')
-    tr.style.height = `${row.height}px`
+    tr.style.height = `${row.height / layout.height * 100}%`
     tr.dataset.rowId = row.id
     for (const cell of row.cells) {
       const cellTag = cell.isHeader ? 'th' : 'td'
