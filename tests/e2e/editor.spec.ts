@@ -3206,7 +3206,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   })
 
   test('流程 8B：V8 着重号与语义公式跨表面导出证据', async () => {
-    test.slow()
+    // Background Electron authoring, reopen, Player and four exports share this budget.
+    // Each export still has its own 45-second completion assertion below.
+    test.setTimeout(360_000)
     const { app, page, pageErrors, consoleErrors, externalRequests } =
       await launchEditor({ forceBackground: true })
     try {

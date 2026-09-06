@@ -8,7 +8,7 @@
 
 2026-09-06 Owner 补充的 Flow 正文表格与 Spatial 世界表格已完成实现：独立合同提交 `05d54c6` 开放 Spatial world Table；Flow 复用 `FlowTableBlock`，Native Table 复用共享内容操作。统一插入、行列结构编辑、活动文字草稿、保存/恢复/重开、复制身份、Published 与适用导出均已有聚焦证据。Flow DOCX 保持可编辑表格；Spatial PPTX 使用 camera 视口内的静态图表/表格。input、Flow overlay、Spatial shared 和 global 不随本次表格扩域。
 
-2026-09-06 Owner 已明确确认「S1 验收通过，请持续推进至下一个人工门」。下一次人工验收为 1.5 末的 S2，不重复请求 S1 签署。新增 Table 范围和 review 修复仍按下述验收标准完成工程收口；该签署不代替尚未完成的实现与验证，也不表示 accepted 源码标签已经创建。
+2026-09-06 Owner 已明确确认「S1 验收通过，请持续推进至下一个人工门」。下一次人工验收为 1.5 末的 S2，不重复请求 S1 签署。新增 Table 范围和 review 修复仍按下述验收标准完成工程收口；工程收口现已完成，v1.3.0 标签只标记 S1 验收范围；当前集成源码中先行存在的 1.4–1.5 能力仍等待 S2。
 
 S1 Owner 验收 1.2–1.3 且工程收口完成后发布 `v1.3.0` accepted 源码标签，不发布 HTML 或安装器。
 

@@ -12,17 +12,17 @@ Flow/Spatial 工具分别依赖 1.3 对应 Chart 和 Table delivery，必须承�
 
 ## 任务 DAG
 
-当前实现进度（2026-09-06，未形成 1.4 候选）：
+当前实现进度（2026-09-06，v1.4.0-rc.1 工程候选）：
 
 - target wire 已独立提交 `8f8490a`；统一 request / receipt、私有规划、提交前 stale 复核和唯一资源历史事务已实现。工具的选中位置与对象纳入同次事务，不再写入后另调选中。
-- 当前 Facade 已扩展课程导航、Recipe、组件插入与包替换、Runtime 插入与源码更新、图片 / 音视频 / 字体资源导入，以及材料引用。原有 Native / Flow、Slide 页面 / 状态 / 互动、Spatial 镜头 / 路径 / 关系、背景、课程状态 / 导航守卫 / 播放 / 网络工具继续共用产品命令。尚需配置完整覆盖与版本集成验证；这些入口不构成整版开放声明。
+- 当前 Facade 已扩展课程导航、Recipe、组件插入与包替换、Runtime 插入与源码更新、图片 / 音视频 / 字体资源导入，以及材料引用。原有 Native / Flow、Slide 页面 / 状态 / 互动、Spatial 镜头 / 路径 / 关系、背景、课程状态 / 导航守卫 / 播放 / 网络工具继续共用产品命令。配置覆盖及版本集成验证已完成；S2 教师验收尚未签署。
 - `authoringSurfaceTools.test.ts` 的 17 个真实产品命令 / Store 用例通过，包含三 Surface 组件与可携带后备、Recipe 资源事务、页面/状态删除与 Undo 全程有效位置、Spatial dangling 引用零写入、课程状态改名同步守卫、错误 owner 零写入和保存 / Published。背景 Owner 命令从 Slide Store 提取，属性面板与工具共用；此前相关 33 项背景/Store/工具证据继续有效。
 - Component registry 使用 project / package / version / source / content 身份。真实浏览器同时挂载同 ID 的四种身份，显示各自内容；精确 invalidate 保留其他实例。`projectFontImport.test.ts` 通过真实 archive 保存重开，确认重解析包的 registry 身份保持一致。
 - Component API 4 和 Surface Runtime API 3 的真实浏览器挂载故障、更新故障与 capture deadline 超时均显示单一后备、移除旧宿主、仅销毁一次；旧按钮和定时器不再发送事件，Runtime 也不再发起宿主导航。直接 capture 失败的 Phaser / Canvas 宿主已改为隔离，相关 33 项测试通过。截图：`output/playwright/r13-review/r14-dynamic-host.png`；可复现脚本同目录 `r14-dynamic-host-probe.js`、`r14-runtime-host-probe.js`。
 - 工程字体窄合同已获 Owner 批准并独立提交 `c39c924`。Component 和 Runtime 各自直接引用字体、图片和音频的真实离线 HTML 已通过；未引用字体不进入 Published，缺失资产回执定位全部源码 origin。截图：`output/playwright/r13-review/r14-font-offline.png`。
 - 动态工具使用固定的 Published 构建、正常播放宿主与 capture 准入，不接受调用方成功标记。真实 Chromium 已证明源码与配置成功提交、停用 Runtime 仍可安全配置、隐藏 Component 的命名状态只写该状态；挂载故障、缺失字体、旧内容值、capture 超时和迟到 revision 均零写入，失败替换保留原组件包，无遗留准入根容器。准入私有副本激活目标，正式提交仍保留可见性 / enabled。Slide API 2 与 Flow API 3 插入通过；Spatial world Runtime 当前无正式动态播放宿主，工具明确拒绝且零写入，Spatial 动态内容使用 Component，不把静态后备算作动态准入。
 - `course.navigation` 在同一次 Store 写入中更新目标 Surface、选区、资源和历史；跨 Slide / Flow / Spatial 新增与删除、连续 Undo / Redo 用例通过。
-- Builder V2 已接入产品管理的 Chromium 工作会话，所有写入经正式工具；V1 兼容 API 已移除模块 spread，仍共用产品命令，原有固定用例通过。`tests/fixtures/builder-v2-case` 只提供两份已确认的低信息 Markdown 和公开 Facade 构建模块：14 个工具事务生成三 Surface、Native 选择反馈、动态 Component、正文表格与世界路径 / 关系 / 镜头。真实命令行、archive 重开、离线 HTML 中连续点击与三 Surface 切换通过，pageerror 为零；截图 `r14-builder-v2-flow.png` / `r14-builder-v2-spatial.png` 位于 `output/playwright/r13-review/`。这证明低信息固定输入链路，不宣称已执行其他弱模型或完成 S2 教师验收。版本候选尚未形成。
+- Builder V2 已接入产品管理的 Chromium 工作会话，所有写入经正式工具；V1 兼容 API 已移除模块 spread，仍共用产品命令，原有固定用例通过。`tests/fixtures/builder-v2-case` 只提供两份已确认的低信息 Markdown 和公开 Facade 构建模块：14 个工具事务生成三 Surface、Native 选择反馈、动态 Component、正文表格与世界路径 / 关系 / 镜头。真实命令行、archive 重开、离线 HTML 中连续点击与三 Surface 切换通过，pageerror 为零；截图 `r14-builder-v2-flow.png` / `r14-builder-v2-spatial.png` 位于 `output/playwright/r13-review/`。这证明低信息固定输入链路，不宣称已执行其他弱模型或完成 S2 教师验收。版本集成与失败补跑结果见 1.4 复核记录。
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
