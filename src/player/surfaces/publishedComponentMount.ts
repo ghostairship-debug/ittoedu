@@ -37,6 +37,7 @@ export interface ComponentHostNode extends ComponentAuthoringHostNode {
   }
 }
 import { ComponentRegistry } from '../ComponentRegistry'
+import { registerPublishedComponentUpdateProbe } from './publishedDynamicUpdateProbe'
 import { createPlayerComponentHostActions } from '../componentHostActions'
 import { decodePublishedCode } from '../decodePublishedExecutableCode'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
@@ -655,6 +656,7 @@ export function mountPublishedComponent(
   let capturePrepared = false
   let destroyed = false
   let unregisterCapture: () => void = () => undefined
+  let unregisterUpdateProbe: () => void = () => undefined
   const handle: PublishedComponentMountHandle = {
     get ok() { return !quarantined },
     failCapture(error) { quarantine(error); lifecycle.destroy() },
@@ -718,6 +720,7 @@ export function mountPublishedComponent(
       destroyed = true
       resources.destroyAuthoringTargets()
       unregisterCapture()
+      unregisterUpdateProbe()
       resources.destroyCapture()
       lifecycle.destroy()
       resources.dispose()
@@ -726,5 +729,7 @@ export function mountPublishedComponent(
     },
   }
   unregisterCapture = registerPublishedCaptureResource(container, handle)
+  unregisterUpdateProbe = registerPublishedComponentUpdateProbe(container, handle,
+    () => ({ props: options.props ?? {}, width: options.width, height: options.height }))
   return handle
 }

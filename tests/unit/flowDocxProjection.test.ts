@@ -15,6 +15,7 @@ import {
   rotationToDrawingMlDegree,
 } from '@/renderer/export/course/flowDocxProjection'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
+import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
 
 const ASSET_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) // PNG magic bytes
 
@@ -118,6 +119,22 @@ function mockFlowPayload(options: {
 }
 
 describe('flowDocxProjection', () => {
+  it('writes editable Native paths and gradient alpha into DOCX DrawingML instead of a rectangle', () => {
+    const node = createShapeNode('rectangle', { style: { fillOpacity: 0.5, fillGradient: {
+      kind: 'linear', start: [0, 0], end: [1, 0], stops: [{ offset: 0, color: '#ff0000', opacity: 1 }, { offset: 1, color: '#0000ff', opacity: 1 }],
+    } }, pathGeometry: { paths: [{ fill: true, stroke: true, commands: [{ kind: 'move', to: [-0.1, 0] }, { kind: 'line', to: [1, 1] }, { kind: 'line', to: [0, 1] }, { kind: 'close' }] }] } })
+    const { payload, surfaceId } = mockFlowPayload({ surfaceLayers: [{ bodyPlane: 'overlay', visibility: { mode: 'all', locationIds: [] }, item: {
+      layerItemId: 'editable-path', kind: 'native', visible: true, order: 0, rotation: 0, opacity: 0.5, hitPolicy: 'auto', playbackInitialVisibility: 'inherit',
+      frame: { mode: 'absolute', x: 40, y: 50, width: 240, height: 70 }, content: { nativeType: 'shape', data: { shapeType: node.shapeType, style: node.style, pathGeometry: node.pathGeometry } },
+    } }] })
+    const output = buildFlowDocx(payload, surfaceId)
+    const xml = new DOMParser().parseFromString(strFromU8(unzipSync(output.bytes)['word/document.xml']), 'application/xml')
+    expect(xml.getElementsByTagName('parsererror')).toHaveLength(0)
+    expect(xml.getElementsByTagNameNS('*', 'custGeom')).toHaveLength(1)
+    expect(xml.getElementsByTagNameNS('*', 'gradFill')).toHaveLength(1)
+    expect(xml.getElementsByTagNameNS('*', 'custGeom')[0].getElementsByTagNameNS('*', 'pt')[0].getAttribute('x')).toBe('-100000')
+    expect(xml.getElementsByTagNameNS('*', 'gradFill')[0].getElementsByTagNameNS('*', 'alpha')[0].getAttribute('val')).toBe('25000')
+  })
   it('resolves page box dimensions and frame clamping correctly', () => {
     const box = resolveFlowDocxPageBox('A4', 'portrait')
     expect(box.widthTwips).toBe(11_906)
@@ -1269,4 +1286,3 @@ describe('flowDocxProjection', () => {
     expect(() => buildFlowDocxProjection(payload, 'non-existent-id')).toThrow(/not a Flow surface/)
   })
 })
-

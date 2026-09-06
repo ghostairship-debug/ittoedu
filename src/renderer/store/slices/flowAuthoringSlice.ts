@@ -2221,11 +2221,7 @@ export function persistFlowTransaction(
   if (!session) return false
   const history = commitFlowEditorTransactionHistory(session.history, step)
   const hint = readAuthoringToolSelection(step.selectionHint)
-  const selection = hint ? (hint.itemIds.length > 0
-    ? hint.flowCarrier === 'overlay'
-      ? selectFlowOverlay(step.nextDocument, hint.locationId, hint.itemIds, hint.owner === 'global' ? 'global' : 'page')
-      : selectFlowEditorBlocks(step.nextDocument, hint.locationId, hint.itemIds)
-    : clearFlowEditorSelection(step.nextDocument, hint.locationId, hint.owner === 'global' ? 'global' : 'page')) : session.selection
+  const selection = hint ? selectFlowToolResult(step.nextDocument, hint) : session.selection
   const persisted = flow.persist({
     ok: true,
     nextDocument: step.nextDocument,
@@ -2257,3 +2253,4 @@ export function persistFlowDocument(
   return true
 }
 import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
+import { selectFlowToolResult } from '../../authoring/toolSelection'

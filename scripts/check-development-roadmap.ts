@@ -55,7 +55,6 @@ export const ROADMAP_WRITE_LOCKS = [
   'main-preload',
   'cli-adapters',
   'ai-session',
-  'mcp-server',
   'chat-ui',
 ] as const
 const roadmapWriteLockSet = new Set<string>(ROADMAP_WRITE_LOCKS)

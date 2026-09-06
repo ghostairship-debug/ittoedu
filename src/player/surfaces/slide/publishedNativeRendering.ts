@@ -16,6 +16,7 @@ import type {
 } from '../../../shared/contracts/native-v1/types'
 import type { PublishedNativeLayerItem } from '../../../shared/contracts/published-course-v2/types'
 import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
+import { createNativePathSvg } from '../../../shared/nativePathRendering'
 import { renderImageNodeCanvas } from '../../../shared/imageEffects'
 import { registerPublishedCaptureResource } from '../publishedCapture'
 import { paintPublishedFormula } from '../publishedFormula'
@@ -395,6 +396,11 @@ function paintPublishedNativeShape(
   wrap: HTMLElement,
   input: Extract<PublishedNativeRenderInput, { readonly type: 'shape' }>,
 ): void {
+  if (input.pathGeometry || input.braceGeometry) {
+    wrap.style.overflow = 'visible'
+    wrap.appendChild(createNativePathSvg(wrap.ownerDocument, structuredClone(input) as ShapeNode, input.width, input.height))
+    return
+  }
   const canvas = wrap.ownerDocument.createElement('canvas')
   canvas.width = Math.max(1, Math.round(input.width))
   canvas.height = Math.max(1, Math.round(input.height))

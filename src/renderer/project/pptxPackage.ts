@@ -30,7 +30,7 @@ function resolvePart(source: string, target: string): string {
 }
 
 /** Stage only: validate every ZIP entry before allocating its expanded bytes. */
-export function openPptxPackage(bytes: Uint8Array): PptxPackage {
+export function openPptxPackage(bytes: Uint8Array, mainPart = 'ppt/presentation.xml'): PptxPackage {
   if (bytes.length > PPTX_IMPORT_LIMITS.fileBytes) pptxReject('文件大小', 'PPTX 不能超过 32 MiB')
   let total = 0
   const names = new Set<string>()
@@ -78,6 +78,6 @@ export function openPptxPackage(bytes: Uint8Array): PptxPackage {
     },
   }
   const root = pkg.relationships('').find(r => r.type.endsWith('/officeDocument'))
-  if (!root || root.external || root.target !== 'ppt/presentation.xml') pptxReject('PPTX 结构', '需要标准 PresentationML 主文档')
+  if (!root || root.external || root.target !== mainPart) pptxReject('Office XML 结构', `需要标准主文档 ${mainPart}`)
   return pkg
 }

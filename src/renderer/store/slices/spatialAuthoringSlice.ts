@@ -2071,15 +2071,15 @@ export function persistSpatialTransaction(
   if (!session) return false
   const history = commitSpatialEditorTransactionHistory(session.history, step)
   const hint = readAuthoringToolSelection(step.selectionHint)
-  if (hint?.owner === 'scene') throw new Error('Spatial 不能选中 scene owner')
-  const selection = hint ? selectSpatialEditorLayers({ project: step.nextDocument, locationId: hint.locationId, selectionIds: hint.itemIds }) : session.selection
+  const selected = hint ? selectSpatialToolResult(step.nextDocument, hint) : null
+  const selection = selected?.selection ?? session.selection
   const cameraSession = hint && hint.locationId !== session.selection.locationId
     ? openSpatialAuthoringSession(step.nextDocument, { locationId: hint.locationId }) : null
   const persisted = spatial.persist(succeedSpatialCommand({
     ...session,
     history,
     selection,
-    scope: hint?.owner ?? session.scope,
+    scope: selected?.owner ?? session.scope,
     sessionCamera: cameraSession?.sessionCamera ?? session.sessionCamera,
   }, true), {
     transactionStep: step,
@@ -2105,3 +2105,4 @@ export function persistSpatialDocument(
   return true
 }
 import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
+import { selectSpatialToolResult } from '../../authoring/toolSelection'

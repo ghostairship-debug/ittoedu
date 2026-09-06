@@ -1516,67 +1516,38 @@
       "spec": "1.7/README.md"
     },
     {
-      "id": "r18-000-mcp-authoring-server",
+      "id": "r18-010-context-snapshot",
       "release": "1.8",
-      "title": "提供版本化 session-scoped MCP server、鉴权上下文和统一错误 / receipt envelope",
+      "title": "组装当前选择、当前页、整课、材料和能力 / 诊断的请求快照",
       "dependencies": [
-        "r17-060-release"
+        "r17-000-generation-contract",
+        "r15-020-material-tools-citations"
       ],
       "optional": false,
       "writeLocks": [
-        "contracts-schema",
-        "mcp-server"
-      ],
-      "spec": "1.8/README.md"
-    },
-    {
-      "id": "r18-010-context-read-tools",
-      "release": "1.8",
-      "title": "提供当前选择、当前页、整课、材料和能力 / 诊断只读上下文",
-      "dependencies": [
-        "r18-000-mcp-authoring-server"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "mcp-server"
-      ],
-      "spec": "1.8/README.md"
-    },
-    {
-      "id": "r18-011-write-tool-mapping",
-      "release": "1.8",
-      "title": "把 1.4 正式 Surface / global / dynamic 工具映射为 MCP tools",
-      "dependencies": [
-        "r18-000-mcp-authoring-server",
-        "r14-060-release"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "contracts-schema",
-        "mcp-server",
-        "store-kernel"
+        "ai-session"
       ],
       "spec": "1.8/README.md"
     },
     {
       "id": "r18-020-neutral-agent-profile",
       "release": "1.8",
-      "title": "定义不含模型循环的中立 profile 并生成 CLI 会话配置",
+      "title": "用中立请求配置组装三种 CLI 的任务、Skills 和结果通道",
       "dependencies": [
-        "r18-010-context-read-tools",
-        "r18-011-write-tool-mapping"
+        "r17-060-release",
+        "r18-010-context-snapshot"
       ],
       "optional": false,
       "writeLocks": [
         "generated-index",
-        "mcp-server"
+        "cli-adapters"
       ],
       "spec": "1.8/README.md"
     },
     {
       "id": "r18-021-codex-profile",
       "release": "1.8",
-      "title": "Codex 使用中立 profile 启动其原生 Agent / tool loop",
+      "title": "Codex 直接接收任务与 Skills 并返回候选",
       "dependencies": [
         "r18-020-neutral-agent-profile",
         "r16-011-codex-adapter"
@@ -1591,7 +1562,7 @@
     {
       "id": "r18-022-claude-profile",
       "release": "1.8",
-      "title": "Claude 使用中立 profile 启动其原生 Agent / tool loop",
+      "title": "Claude 直接接收任务与 Skills 并返回候选",
       "dependencies": [
         "r18-020-neutral-agent-profile",
         "r16-012-claude-adapter"
@@ -1606,7 +1577,7 @@
     {
       "id": "r18-023-opencode-profile",
       "release": "1.8",
-      "title": "OpenCode 使用中立 profile 启动其原生 Agent / tool loop",
+      "title": "OpenCode 直接接收任务与 Skills 并返回候选",
       "dependencies": [
         "r18-020-neutral-agent-profile",
         "r16-013-opencode-adapter"
@@ -1661,21 +1632,97 @@
     {
       "id": "r18-041-human-concurrency",
       "release": "1.8",
-      "title": "人工编辑与 Agent 工具调用以 revision / session generation 正确并发",
+      "title": "多轮 CLI 请求与人工编辑保持身份、版本和提交一致",
       "dependencies": [
-        "r18-011-write-tool-mapping"
+        "r17-013-host-candidate-commit",
+        "r18-010-context-snapshot"
       ],
       "optional": false,
       "writeLocks": [
         "store-kernel",
-        "mcp-server"
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-042-chat-shell",
+      "release": "1.8",
+      "title": "内置聊天框直接接入 CLI 会话、输入与运行状态",
+      "dependencies": [
+        "r17-020-single-page",
+        "r16-030-cli-lifecycle",
+        "r18-020-neutral-agent-profile"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-043-context-references",
+      "release": "1.8",
+      "title": "聊天消息显式引用当前选择、当前页、整课和材料",
+      "dependencies": [
+        "r18-042-chat-shell",
+        "r18-010-context-snapshot"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-044-tool-timeline",
+      "release": "1.8",
+      "title": "时间线显示 CLI 原生事件、候选检查和宿主提交结果",
+      "dependencies": [
+        "r18-042-chat-shell",
+        "r17-013-host-candidate-commit"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-045-safe-markdown-formula",
+      "release": "1.8",
+      "title": "Chat 消息和公式安全、可复制、可访问地渲染",
+      "dependencies": [
+        "r18-042-chat-shell"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-046-stop-undo-stale",
+      "release": "1.8",
+      "title": "变更预览、Stop、迟到结果防护、stale 提示与 AI 写入 Undo 闭环",
+      "dependencies": [
+        "r18-044-tool-timeline",
+        "r18-041-human-concurrency"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "store-kernel",
+        "ai-session"
       ],
       "spec": "1.8/README.md"
     },
     {
       "id": "r18-050-three-cli-benchmark",
       "release": "1.8",
-      "title": "三种 CLI 在同一 profile / 固定课例上完成可比构建与局部修改",
+      "title": "三种 CLI 经聊天完成同一课例生成与多轮局部修改",
       "dependencies": [
         "r18-021-codex-profile",
         "r18-022-claude-profile",
@@ -1683,11 +1730,14 @@
         "r18-030-course-skills",
         "r18-031-editing-craft-skills",
         "r18-040-staging-file-boundary",
-        "r18-041-human-concurrency"
+        "r18-043-context-references",
+        "r18-045-safe-markdown-formula",
+        "r18-046-stop-undo-stale"
       ],
       "optional": false,
       "writeLocks": [
-        "cli-adapters"
+        "cli-adapters",
+        "chat-ui"
       ],
       "spec": "1.8/README.md"
     },
@@ -1726,7 +1776,7 @@
     {
       "id": "r18-060-release",
       "release": "1.8",
-      "title": "Owner 验收 S3 AI 内核并发布 v1.8.0 accepted 源码标签",
+      "title": "Owner 验收 S3 CLI 生成与基础聊天并发布 v1.8.0 accepted 源码标签",
       "dependencies": [
         "r18-050-three-cli-benchmark",
         "r18-051-pptx-editable-diagrams",
@@ -1739,83 +1789,11 @@
       "spec": "1.8/README.md"
     },
     {
-      "id": "r19-000-chat-shell",
-      "release": "1.9",
-      "title": "内部 Chat shell 显示会话、输入、运行状态和 adapter 身份",
-      "dependencies": [
-        "r18-060-release"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "chat-ui"
-      ],
-      "spec": "1.9/README.md"
-    },
-    {
-      "id": "r19-010-context-references",
-      "release": "1.9",
-      "title": "消息可显式引用当前选择、当前页、整课和材料",
-      "dependencies": [
-        "r19-000-chat-shell",
-        "r18-010-context-read-tools"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "chat-ui",
-        "mcp-server"
-      ],
-      "spec": "1.9/README.md"
-    },
-    {
-      "id": "r19-020-tool-timeline",
-      "release": "1.9",
-      "title": "时间线按序显示 text、tool call / result、receipt、usage 与终态",
-      "dependencies": [
-        "r19-000-chat-shell",
-        "r18-000-mcp-authoring-server"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "chat-ui",
-        "ai-session"
-      ],
-      "spec": "1.9/README.md"
-    },
-    {
-      "id": "r19-021-safe-markdown-formula",
-      "release": "1.9",
-      "title": "Chat 消息和公式安全、可复制、可访问地渲染",
-      "dependencies": [
-        "r19-000-chat-shell"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "chat-ui"
-      ],
-      "spec": "1.9/README.md"
-    },
-    {
-      "id": "r19-030-stop-undo-stale",
-      "release": "1.9",
-      "title": "变更预览、Stop、迟到结果防护、stale 提示与 AI 写入 Undo 闭环",
-      "dependencies": [
-        "r19-020-tool-timeline",
-        "r18-041-human-concurrency"
-      ],
-      "optional": false,
-      "writeLocks": [
-        "chat-ui",
-        "store-kernel",
-        "ai-session"
-      ],
-      "spec": "1.9/README.md"
-    },
-    {
       "id": "r19-040-session-persistence-deletion",
       "release": "1.9",
       "title": "会话恢复、迁移/损坏隔离、Save As 隔离和范围删除",
       "dependencies": [
-        "r19-000-chat-shell",
+        "r18-060-release",
         "r16-020-local-session-store"
       ],
       "optional": false,
@@ -1830,10 +1808,10 @@
       "release": "1.9",
       "title": "用真实课例完成端到端内部 Dogfood 与问题分级",
       "dependencies": [
-        "r19-010-context-references",
-        "r19-020-tool-timeline",
-        "r19-021-safe-markdown-formula",
-        "r19-030-stop-undo-stale",
+        "r18-043-context-references",
+        "r18-044-tool-timeline",
+        "r18-045-safe-markdown-formula",
+        "r18-046-stop-undo-stale",
         "r19-040-session-persistence-deletion"
       ],
       "optional": false,
@@ -1923,7 +1901,7 @@
       "dependencies": [
         "r20-010-cli-setup-ui",
         "r20-011-first-use-risk-notice",
-        "r19-030-stop-undo-stale"
+        "r18-046-stop-undo-stale"
       ],
       "optional": false,
       "writeLocks": [

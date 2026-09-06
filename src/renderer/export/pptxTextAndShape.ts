@@ -1,4 +1,5 @@
 import type PptxGenJS from 'pptxgenjs'
+import type { PptxShapeExtensions } from './pptxShapeGeometry'
 import {
   isStrokeOnlyShapeType,
   type FormulaNode,
@@ -425,7 +426,14 @@ export function addPptxShapeNode(
   slide: PptxDrawingTarget,
   node: ShapeNode,
   scale: CanvasScale,
+  extensions?: PptxShapeExtensions,
 ): string[] {
+  let objectName = pptxObjectName(node)
+  if (node.pathGeometry || node.braceGeometry || (node.style.fillGradient && !isStrokeOnlyShapeType(node.shapeType))) {
+    if (!extensions) throw new Error('路径和渐变导出需要正式 PPTX 几何投影')
+    objectName = `IttoEdu-shape-${extensions.size}-${crypto.randomUUID()}`
+    extensions.set(objectName, structuredClone(node))
+  }
   if (node.shapeType === 'line') {
     return addPptxStraightLine(slide, node, scale)
   }
@@ -450,7 +458,7 @@ export function addPptxShapeNode(
   slide.addShape(SHAPE_TYPE_MAP[node.shapeType], {
     ...geometry,
     rotate: pptxRotation(node.rotation + (rotateQuarterTurn ? 90 : 0)),
-    objectName: pptxObjectName(node),
+    objectName,
     fill: shapeFill(node),
     line: shapeLine(node),
     rectRadius: node.shapeType === 'rounded-rectangle'

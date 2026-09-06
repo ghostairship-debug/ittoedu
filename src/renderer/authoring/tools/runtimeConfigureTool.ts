@@ -14,7 +14,7 @@ const schema = z.discriminatedUnion('field', [
 
 export const runtimeConfigureTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'runtime.configure', inputSchema: schema, usesResources: true,
-  async plan({ document, destination, value, resources }) {
+  async plan({ document, destination, value, resources, signal }) {
     if (destination.kind !== 'update' || !resources) throw new Error('Runtime 配置需要精确 update target 与当前工程资源')
     const { target } = resolveAuthoringToolScope(document, destination)
     const currentIdentity = { projectId: document.id, documentRevision: document.revision,
@@ -31,7 +31,7 @@ export const runtimeConfigureTool: AuthoringToolDefinition<z.infer<typeof schema
     if (result.status === 'no-op') return { transaction: { projectId: document.id, baseRevision: document.revision, nextDocument: document, resourceChanges: {} }, affected: [] }
     // Turning execution off is also how authors recover from existing bad code.
     // It introduces no executable candidate and must not require that code to run.
-    if (value.field !== 'enabled' || value.value) await admitDynamicCandidate(result.plan.nextDocument, resources, [{ locationId: target.locationId, stateId: target.stateId, instanceIds: [destination.target.itemId] }])
+    if (value.field !== 'enabled' || value.value) await admitDynamicCandidate(result.plan.nextDocument, resources, [{ locationId: target.locationId, stateId: target.stateId, instanceIds: [destination.target.itemId] }], signal)
     return { transaction: { ...result.plan, selectionHint: undefined },
       affected: [{ id: destination.target.itemId, operation: 'updated', ownerKey: target.ownerKey, authoringAddress: destination.target.authoringAddress }] }
   },

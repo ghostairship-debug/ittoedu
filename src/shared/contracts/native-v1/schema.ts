@@ -1085,3 +1085,17 @@ export const nativeContentSchemaByType = {
   chart: chartNativeContentSchema,
   input: inputNativeContentSchema,
 } as const
+
+/** Input descriptions for tools: the strict transform above is intentionally
+ * opaque to JSON Schema, so expose its actual producer schemas as references. */
+export const nativeContentInputSchemaByType = {
+  text: textNativeContentObjectSchema,
+  formula: formulaNativeContentObjectSchema,
+  image: imageNativeContentObjectSchema,
+  video: videoNativeContentObjectSchema,
+  shape: shapeNativeContentObjectSchema,
+  'teacher-controller': teacherControllerNativeContentObjectSchema,
+  table: tableNativeContentObjectSchema,
+  chart: chartNativeContentObjectSchema,
+  input: nativeInputContentObjectSchema,
+} as const

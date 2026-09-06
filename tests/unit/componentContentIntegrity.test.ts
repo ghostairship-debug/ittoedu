@@ -8,6 +8,7 @@ import {
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseDynamicPackageCandidate } from '@/renderer/authoring/tools/dynamicPackageCandidate'
 
 function packageFiles(runtimeSuffix = ''): Record<string, Uint8Array> {
   return {
@@ -38,6 +39,17 @@ function sha256(bytes: Uint8Array): string {
 }
 
 describe('component canonical content integrity', () => {
+  it('normalizes explicit UTF-8 candidate files through the same package parser as binary input', () => {
+    const files = packageFiles('\n// 分数探索')
+    const textFiles = Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, { encoding: 'utf8' as const, text: new TextDecoder().decode(bytes) }]))
+    const parsed = parseDynamicPackageCandidate(textFiles)
+    const binary = parseDynamicPackageCandidate(Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Buffer.from(bytes).toString('base64')])))
+    expect(parsed.manifest).toEqual(binary.manifest)
+    expect(parsed.runtimeSource).toBe(binary.runtimeSource)
+    expect(parsed.runtimeSource).toContain('分数探索')
+    expect(() => parseDynamicPackageCandidate({ ...textFiles, '../escape.js': { encoding: 'utf8', text: 'x' } })).toThrow()
+    expect(() => parseDynamicPackageCandidate({ ...textFiles, 'runtime.js': { encoding: 'utf8', text: 'import x from "unavailable"' } })).toThrow()
+  })
   it('matches the frozen v1 SHA-256 framing contract', () => {
     expect(componentContentSha256({
       'a.txt': strToU8('hello'),

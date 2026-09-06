@@ -13,7 +13,7 @@ export const componentPackageAddress = (projectId: string, packageId: string) =>
 
 export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'component.package', inputSchema: schema, usesResources: true,
-  async plan({ document, destination, value, resources }) {
+  async plan({ document, destination, value, resources, signal }) {
     const { target } = resolveAuthoringToolScope(document, destination)
     if (destination.kind !== 'update' || target.owner !== 'global' || destination.target.authoringAddress !== componentPackageAddress(document.id, destination.target.itemId)) throw new Error('组件包替换需要精确 global package target')
     if (!resources) throw new Error('动态工具缺少当前工程资源')
@@ -33,7 +33,7 @@ export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema
         ? surface.scenes.find(entry => entry.id === location.sceneId)?.presentation?.states.map(state => state.id) ?? [] : []
       const instanceIds = refs.filter(ref => ref.carrier === 'global-layer' || ref.surfaceId === location.surfaceId && (!ref.sceneId || location.kind === 'slide-scene' && ref.sceneId === location.sceneId)).map(ref => ref.instanceId)
       return (states.length ? states : [null]).map(stateId => ({ locationId: location.id, stateId, instanceIds }))
-    }))
+    }), signal)
     const identity = componentRegistryKey({ projectId: document.id, packageId, version: replacement.manifest.version,
       sourceIdentity: componentRuntimeSourceIdentity(replacement.runtimeSource), contentIdentity: replacement.contentSha256! })
     return { transaction: result.plan, affected: [{ id: packageId, operation: 'updated', ownerKey: 'global', authoringAddress: destination.target.authoringAddress }],

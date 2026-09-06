@@ -11,6 +11,23 @@ import {
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { FormulaEditDialog } from '@/renderer/ui/FormulaEditDialog'
 import type { FormulaNode } from '@/shared/contracts/native-v1'
+import { SafeChatMessage } from '@/renderer/ui/chat/SafeChatMessage'
+
+describe('safe chat rendering', () => {
+  it('falls back to safe source text when a formula exceeds the supported rendering budget', () => {
+    const source = 'x'.repeat(4001)
+    render(<SafeChatMessage text={`$$${source}$$`} />)
+    expect(screen.getByLabelText('公式原文').textContent).toBe(source)
+  })
+  it('renders headings, lists and code while hostile markup remains inert text', () => {
+    const { container } = render(<SafeChatMessage text={'# 讲解\n- **重点**\n- 第二项\n```html\n<img src="https://evil.invalid/x" onerror="alert(1)">\n```\n<script>alert(1)</script>\n[链接](javascript:alert(1))\n<iframe src="https://evil.invalid" />'} />)
+    expect(screen.getByRole('heading', { name: '讲解' })).toBeTruthy()
+    expect(container.querySelectorAll('li')).toHaveLength(2)
+    expect(container.querySelector('pre code')?.textContent).toContain('onerror')
+    expect(container.querySelector('script, iframe, img, a, [onerror]')).toBeNull()
+    expect(screen.getByRole('button', { name: '复制原文' })).toBeTruthy()
+  })
+})
 
 function formulaNode(): FormulaNode {
   const node = selectActiveScene(useEditorStore.getState()).nodes[0]

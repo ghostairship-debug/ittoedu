@@ -16,6 +16,7 @@ export const courseNavigationAddress = (projectId: string, itemId: string) => ma
 
 export const courseNavigationTool: AuthoringToolDefinition<z.infer<typeof courseNavigationInputSchema>> = {
   name: 'course.navigation', inputSchema: courseNavigationInputSchema,
+  description: 'add-surface 使用 global owner + create parent:course-locations append，创建 Slide/Flow/Spatial 表面及起始页。后续内容用 created-scope 指向返回位置的默认 owner。其余操作用当前课程位置的正式 update target。',
   plan({ document, destination, value }) {
     const { target } = resolveAuthoringToolScope(document, destination)
     if (target.owner !== 'global') throw new Error('课程导航工具需要 global owner')

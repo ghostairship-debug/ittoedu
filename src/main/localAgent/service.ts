@@ -15,8 +15,12 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
   if (input.operation === 'probe') return { enabled: true, probe: await harness.probe(input.adapter) }
   const workspace = createWorkspaceIdentity(input.projectId, input.projectPath)
   switch (input.operation) {
+    case 'workspace': return { enabled: true, workspace }
     case 'start': return { enabled: true, sessionId: await harness.start(workspace, input.adapter, input.prompt) }
     case 'resume': return { enabled: true, sessionId: await harness.resume(workspace, input.sessionId, input.prompt) }
+    case 'generate': return { enabled: true, sessionId: await harness.generate(workspace, input.adapter, input.request, input.resumeSessionId) }
+    case 'candidate': return { enabled: true, candidate: await harness.candidate(workspace, input.sessionId) }
+    case 'host-result': await harness.hostResult(workspace, input.sessionId, input.result); return { enabled: true }
     case 'cancel': await harness.cancel(workspace, input.sessionId); return { enabled: true }
     case 'delete': await harness.delete(workspace, input.sessionId); return { enabled: true }
     case 'list': {

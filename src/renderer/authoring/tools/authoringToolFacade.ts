@@ -17,28 +17,44 @@ import { spatialStructureTool } from './spatialStructureTool'
 import { slideStructureTool } from './slideStructureTool'
 import { nativeAuthoringTool } from './nativeAuthoringTool'
 import { flowAuthoringTool } from './flowAuthoringTool'
-import { executeAuthoringTool, type AuthoringToolCommitPort } from './executeAuthoringTool'
+import { executeAuthoringTool, type AuthoringToolCommitPort, type AuthoringToolDefinition } from './executeAuthoringTool'
 import type { AuthoringToolReceiptV1 } from '../../../shared/authoringToolContract'
+import { authoringToolCarrierPolicy } from './authoringToolCarrier'
 
-const executors: Readonly<Record<string, (request: unknown, port: AuthoringToolCommitPort) => Promise<AuthoringToolReceiptV1>>> = {
-  [componentConfigureTool.name]: (request, port) => executeAuthoringTool(request, componentConfigureTool, port),
-  [runtimeConfigureTool.name]: (request, port) => executeAuthoringTool(request, runtimeConfigureTool, port),
-  [mediaAssetTool.name]: (request, port) => executeAuthoringTool(request, mediaAssetTool, port),
-  [runtimeInsertTool.name]: (request, port) => executeAuthoringTool(request, runtimeInsertTool, port),
-  [componentInsertTool.name]: (request, port) => executeAuthoringTool(request, componentInsertTool, port),
-  [recipeTool.name]: (request, port) => executeAuthoringTool(request, recipeTool, port),
-  [componentPackageTool.name]: (request, port) => executeAuthoringTool(request, componentPackageTool, port),
-  [runtimeSourceTool.name]: (request, port) => executeAuthoringTool(request, runtimeSourceTool, port),
-  [courseNavigationTool.name]: (request, port) => executeAuthoringTool(request, courseNavigationTool, port),
-  [fontAssetTool.name]: (request, port) => executeAuthoringTool(request, fontAssetTool, port),
-  [materialCitationTool.name]: (request, port) => executeAuthoringTool(request, materialCitationTool, port),
-  [courseSettingsTool.name]: (request, port) => executeAuthoringTool(request, courseSettingsTool, port),
-  [backgroundTool.name]: (request, port) => executeAuthoringTool(request, backgroundTool, port),
-  [slideInteractionTool.name]: (request, port) => executeAuthoringTool(request, slideInteractionTool, port),
-  [spatialStructureTool.name]: (request, port) => executeAuthoringTool(request, spatialStructureTool, port),
-  [slideStructureTool.name]: (request, port) => executeAuthoringTool(request, slideStructureTool, port),
-  [nativeAuthoringTool.name]: (request, port) => executeAuthoringTool(request, nativeAuthoringTool, port),
-  [flowAuthoringTool.name]: (request, port) => executeAuthoringTool(request, flowAuthoringTool, port),
+function register<T>(definition: AuthoringToolDefinition<T>) {
+  return { name: definition.name, inputSchema: definition.inputSchema, description: definition.description, referenceSchemas: definition.referenceSchemas,
+    execute: (request: unknown, port: AuthoringToolCommitPort) => executeAuthoringTool(request, definition, port) }
+}
+
+// Execution and exported CLI contracts derive from the same formal definitions.
+const catalog = [
+  register(componentConfigureTool),
+  register(runtimeConfigureTool),
+  register(mediaAssetTool),
+  register(runtimeInsertTool),
+  register(componentInsertTool),
+  register(recipeTool),
+  register(componentPackageTool),
+  register(runtimeSourceTool),
+  register(courseNavigationTool),
+  register(fontAssetTool),
+  register(materialCitationTool),
+  register(courseSettingsTool),
+  register(backgroundTool),
+  register(slideInteractionTool),
+  register(spatialStructureTool),
+  register(slideStructureTool),
+  register(nativeAuthoringTool),
+  register(flowAuthoringTool),
+]
+const executors = Object.fromEntries(catalog.map(entry => [entry.name, entry.execute]))
+
+export function describeAuthoringTools(names?: readonly string[]) {
+  if (names?.some(name => !Object.hasOwn(executors, name))) throw new Error('未开放的 Authoring Tool')
+  return catalog.filter(entry => !names || names.includes(entry.name)).map(entry => ({
+    name: entry.name, candidateCarrier: authoringToolCarrierPolicy(entry.name), description: entry.description, inputSchema: z.toJSONSchema(entry.inputSchema, { io: 'input', reused: 'ref' }),
+    references: entry.referenceSchemas ? Object.fromEntries(Object.entries(entry.referenceSchemas).map(([name, schema]) => [name, z.toJSONSchema(schema, { io: 'input', reused: 'ref' })])) : undefined,
+  }))
 }
 
 /** Versioned product entrypoint. External callers provide data, never writers. */

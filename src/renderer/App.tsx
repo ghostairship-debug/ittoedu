@@ -48,6 +48,7 @@ import { ProjectColorPaletteContext } from './ui/ColorInput'
 import { RecipePanel } from './ui/recipes/RecipePanel'
 import { ProductivityDialog } from './ui/productivity/ProductivityDialog'
 import { MaterialLibraryDialog } from './ui/MaterialLibraryDialog'
+import { CourseChatEntry } from './ui/chat/CourseChatPanel'
 import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
 import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
@@ -540,6 +541,7 @@ export default function App() {
         <span>·</span>
         <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
       </footer>
+      <CourseChatEntry />
 
       {errorMessage && (
         <div className="toast" role="alert">

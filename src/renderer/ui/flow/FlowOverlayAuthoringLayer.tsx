@@ -10,6 +10,7 @@ import {
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
 import type { FormulaAstNode, ShapeNode, TextNode } from '../../../shared/contracts/native-v1'
 import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
+import { createNativePathSvg } from '../../../shared/nativePathRendering'
 import { paintPublishedNativeText } from '../../../player/surfaces/publishedNativeText'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
 import { constrainTeacherControllerAuthoringFrame } from '../../../shared/teacherControllerLayout'
@@ -190,8 +191,14 @@ function FlowOverlayComponentContent({
 
 function FlowOverlayShapeContent({ layer }: { layer: FlowEditorLayerView }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pathRef = useRef<HTMLDivElement>(null)
   const item = layer.item as LayerItem
   useEffect(() => {
+    if (item.kind === 'native' && item.content.nativeType === 'shape' && (item.content.data.pathGeometry || item.content.data.braceGeometry) && pathRef.current) {
+      const container = pathRef.current
+      container.replaceChildren(createNativePathSvg(container.ownerDocument, item.content.data, item.frame.width, item.frame.height))
+      return () => container.replaceChildren()
+    }
     const canvas = canvasRef.current
     if (!canvas || item.kind !== 'native' || item.content.nativeType !== 'shape') return
     const context = canvas.getContext('2d')
@@ -215,6 +222,7 @@ function FlowOverlayShapeContent({ layer }: { layer: FlowEditorLayerView }) {
   }, [item])
 
   if (item.kind !== 'native' || item.content.nativeType !== 'shape') return null
+  if (item.content.data.pathGeometry || item.content.data.braceGeometry) return <div ref={pathRef} style={{ width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
   return (
     <canvas
       ref={canvasRef}

@@ -8,6 +8,9 @@ import { createImageAssetImport, readImageDimensions } from './assetManager'
 import type { CourseImportedAsset } from './v9AssetAdapter'
 import { pptxPageObjects, expandPptxGroup } from './pptxInheritance'
 import { parsePptxTable } from './pptxTableImport'
+import { parsePptxChart } from './pptxChartImport'
+import { parsePptxEquation } from './pptxEquationImport'
+import { parsePptxCustomGeometry, parsePptxGradient, parsePptxBraceGeometry, parsePptxRoundCallout, parsePptxRightArrow } from './pptxShapeImport'
 import { parsePptxColorChanges, renderPptxColorChanges } from './pptxImageEffects'
 import { openPptxPackage, PPTX_IMPORT_LIMITS, PptxImportError, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 
@@ -22,7 +25,7 @@ const numeric = (node: Element | undefined, attr: string, fallback?: number): nu
   if (!Number.isFinite(value)) return pptxReject('几何', `${attr} 不是有限数值`)
   return value
 }
-const shapeMap: Partial<Record<string, ShapeType>> = { rect: 'rectangle', flowChartProcess: 'rectangle', roundRect: 'rounded-rectangle', ellipse: 'ellipse', triangle: 'triangle', diamond: 'diamond', line: 'line', rightArrow: 'arrow-right', leftArrow: 'arrow-left', upArrow: 'arrow-up', downArrow: 'arrow-down' }
+const shapeMap: Partial<Record<string, ShapeType>> = { rect: 'rectangle', flowChartProcess: 'rectangle', roundRect: 'rounded-rectangle', ellipse: 'ellipse', triangle: 'triangle', diamond: 'diamond', line: 'line', rightArrow: 'arrow-right', leftArrow: 'arrow-left', upArrow: 'arrow-up', downArrow: 'arrow-down', leftBrace: 'brace-left', rightBrace: 'brace-right' }
 
 function lineStyle(line: Element | undefined, onSimplified?: () => void): ShapeNode['style']['lineStyle'] {
   const dash = line && xmlFirst(line, 'prstDash')?.getAttribute('val') || 'solid'
@@ -84,7 +87,10 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
       if (!tree) pptxReject('页面结构', '缺少对象树')
       const items: LayerItem[] = []
       const sharedKeys: string[] = []
-      const sources = pptxPageObjects(pkg, path).flatMap(source => {
+      const failedDiagrams = new Set<string>()
+      const diagramItems = new Map<string, LayerItem[]>()
+      const diagramShared = new Map<string, string[]>()
+      const sources = pptxPageObjects(pkg, path, error => report(error, page, '已跳过对象')).flatMap(source => {
         try { return expandPptxGroup(source) } catch (error) { report(error, page, '已跳过分组'); return [] }
       })
       for (const source of sources) {
@@ -99,12 +105,9 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
         const reportStrokeSimplification = () => issues.push({ page, type: '边框样式', message: `“${objectName}”保留线宽及实线/虚线/点线类型；转角与虚线节奏按编辑器样式呈现` })
         try {
           if (object.localName === 'graphicFrame') {
-            const ole = xmlFirst(object, 'oleObj')
-            if (ole) {
-              const program = ole.getAttribute('progId') ?? ''
-              pptxReject(/Equation|MathType/i.test(program) ? '旧版公式（OLE）' : 'OLE 嵌入对象', '尚未支持转换为可编辑内容，可在源软件另存图片后补入')
-            }
-            const item = parsePptxTable(object, scale, origin, color, page, issues, pkg.files['ppt/tableStyles.xml'] ? pkg.xml('ppt/tableStyles.xml') : undefined)
+            const item = parsePptxEquation(object, pkg, source.path, scale, origin, page, issues)
+              ?? parsePptxChart(object, pkg, source.path, scale, origin, color, page, issues)
+              ?? parsePptxTable(object, scale, origin, color, page, issues, pkg.files['ppt/tableStyles.xml'] ? pkg.xml('ppt/tableStyles.xml') : undefined)
             item.order = items.length
             items.push(item)
             if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
@@ -117,7 +120,10 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
               for (const effect of effects) effect.remove()
             }
           }
-          for (const name of ['AlternateContent', 'oleObj', 'videoFile', 'audioFile', 'custGeom', 'gradFill', 'pattFill']) if (xmlAll(object, name).length) pptxReject(name, '当前无法转换为可编辑对象')
+          for (const name of ['AlternateContent', 'oleObj', 'videoFile', 'audioFile', 'pattFill']) if (xmlAll(object, name).length) pptxReject(name, '当前无法转换为可编辑对象')
+          const customGeometry = xmlFirst(object, 'custGeom')
+          for (const gradient of xmlAll(object, 'gradFill')) if (object.localName !== 'sp' || gradient.parentElement?.localName !== 'spPr') pptxReject('渐变', '当前仅支持形状填充渐变')
+          if (customGeometry && object.localName !== 'sp') pptxReject('自由路径', '当前仅支持形状路径')
           if (!['sp', 'pic', 'cxnSp'].includes(object.localName)) pptxReject(object.localName, '不支持的页面对象')
           const transform = xmlFirst(object, 'xfrm')
           if (!transform) pptxReject('继承几何', '对象需要显式位置与尺寸')
@@ -130,7 +136,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
             continue
           }
           const flipped = flag(transform, 'flipH') || flag(transform, 'flipV')
-          if (flipped && object.localName !== 'pic' && !['rect', 'roundRect', 'ellipse'].includes(presetGeometry ?? 'rect')) pptxReject('翻转形状', '当前可导入文字、图片和对称基础形状的翻转')
+          if (flipped && !customGeometry && object.localName !== 'pic' && !['rect', 'roundRect', 'ellipse'].includes(presetGeometry ?? 'rect')) pptxReject('翻转形状', '当前可导入文字、图片和对称基础形状的翻转')
           const off = xmlFirst(transform, 'off'), ext = xmlFirst(transform, 'ext')
           const geometry = { x: numeric(off, 'x') * scale + origin.x, y: numeric(off, 'y') * scale + origin.y, width: numeric(ext, 'cx') * scale, height: numeric(ext, 'cy') * scale, rotation: numeric(transform, 'rot', 0) / 60000, visible: !flag(xmlFirst(object, 'cNvPr'), 'hidden'), ...(flipped ? { flipX: flag(transform, 'flipH'), flipY: flag(transform, 'flipV') } : {}) }
           if (geometry.width <= 0 || geometry.height <= 0) pptxReject('几何', '对象宽高必须大于零')
@@ -176,6 +182,10 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
           const properties = child(object, 'spPr')
           if (!properties) pptxReject('形状', '缺少显式形状属性')
           const preset = xmlFirst(properties, 'prstGeom')?.getAttribute('prst') ?? 'rect'
+          const pathGeometry = customGeometry ? parsePptxCustomGeometry(customGeometry, flag(transform, 'flipH'), flag(transform, 'flipV'))
+            : preset === 'wedgeRoundRectCallout' ? parsePptxRoundCallout(xmlFirst(properties, 'prstGeom')!, geometry.width, geometry.height)
+              : preset === 'rightArrow' && xmlAll(properties, 'gd').length ? parsePptxRightArrow(xmlFirst(properties, 'prstGeom')!, geometry.width, geometry.height) : undefined
+          const braceGeometry = ['leftBrace', 'rightBrace'].includes(preset) ? parsePptxBraceGeometry(xmlFirst(properties, 'prstGeom')!) : undefined
           const adjustments = xmlAll(properties, 'gd')
           let cornerRadius: number | undefined
           if (preset === 'roundRect') {
@@ -183,17 +193,26 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
             const formula = adjustment?.getAttribute('fmla') ?? 'val 16667'
             if (adjustments.length > 1 || (adjustment && adjustment.getAttribute('name') !== 'adj') || !/^val -?\d+$/.test(formula)) pptxReject('自定义形状参数', '无法解析圆角调整')
             cornerRadius = Math.min(500, Math.min(geometry.width, geometry.height) * Math.max(0, Math.min(50000, Number(formula.slice(4)))) / 100000)
-          } else if (adjustments.length) pptxReject('自定义形状参数', '当前不支持自定义几何调整')
-          const shape = shapeMap[preset]
+          } else if (adjustments.length && !braceGeometry && !pathGeometry) pptxReject('自定义形状参数', '当前不支持自定义几何调整')
+          const shape = pathGeometry ? 'rectangle' : shapeMap[preset]
           if (!shape) pptxReject(preset, '不支持的预设形状')
           const fill = child(properties, 'solidFill'), line = child(properties, 'ln')
+          const gradient = child(properties, 'gradFill')
+          const gradientStyle = gradient ? parsePptxGradient(gradient, geometry.width, geometry.height, color) : undefined
+          if (gradientStyle?.fillGradient && flipped) {
+            for (const point of [gradientStyle.fillGradient.start, gradientStyle.fillGradient.end]) {
+              if (flag(transform, 'flipH')) point[0] = 1 - point[0]
+              if (flag(transform, 'flipV')) point[1] = 1 - point[1]
+            }
+          }
           const lineFill = line && child(line, 'solidFill')
-          if (child(object, 'style') && ((!fill && !child(properties, 'noFill')) || !line)) pptxReject('主题形状样式', '请为形状明确设置填充与线条')
+          if (child(object, 'style') && ((!fill && !gradient && !child(properties, 'noFill')) || !line)) pptxReject('主题形状样式', '请为形状明确设置填充与线条')
           const strokeStyle = lineStyle(line, reportStrokeSimplification)
           for (const end of line ? [...xmlAll(line, 'headEnd'), ...xmlAll(line, 'tailEnd')] : []) if (end.getAttribute('type') && end.getAttribute('type') !== 'none') pptxReject('线端箭头', '当前不支持线端箭头')
           const opacity = (node: Element | undefined) => node ? numeric(xmlFirst(node, 'alpha'), 'val', 100000) / 100000 : 1
-          if (fill || lineFill || !xmlFirst(object, 'txBody')) push(createShapeNode(shape, { ...geometry, name,
+          if (fill || gradient || lineFill || !xmlFirst(object, 'txBody')) push(createShapeNode(shape, { ...geometry, name, ...(pathGeometry ? { pathGeometry } : {}), ...(braceGeometry ? { braceGeometry } : {}),
             style: { fillColor: color(fill, '#ffffff'), fillOpacity: fill ? opacity(fill) : 0,
+              ...gradientStyle,
               borderColor: color(lineFill, '#000000'), borderOpacity: lineFill ? opacity(lineFill) : 0,
               borderWidth: numeric(line, 'w', 12700) * scale, lineStyle: strokeStyle, ...(cornerRadius !== undefined ? { cornerRadius } : {}) } }))
           const body = child(object, 'txBody')
@@ -248,15 +267,38 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
                 node.height = Math.max(node.height, Math.ceil(analyzeTextNodeLayout(node).requiredHeight))
                 if (node.width > geometry.width || node.height > geometry.height) issues.push({ page, type: '文字自动扩框', message: `“${objectName}”按源自动扩框设置及当前字体扩展文字框，保留完整正文；请复核相邻对象布局` })
               }
+              if (source.atomicGroup) {
+                const measured = analyzeTextNodeLayout(node)
+                if (measured.overflowsWidth || measured.overflowsHeight) {
+                  node.style.overflow = 'shrink'
+                  const fitted = analyzeTextNodeLayout(node)
+                  if (fitted.overflowsWidth || fitted.overflowsHeight) pptxReject('SmartArt 文字', '当前最小字号无法完整呈现图示文字')
+                  issues.push({ page, type: 'SmartArt 文字排版', message: `“${objectName}”启用框内缩放，以当前字体完整呈现图示文字` })
+                }
+              }
               push(node)
             }
           }
           if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
         } catch (error) {
           items.splice(itemStart)
+          if (source.atomicGroup) failedDiagrams.add(source.atomicGroup)
           report(error, page, `已跳过“${objectName}”`)
+        } finally {
+          if (source.atomicGroup) {
+            const previous = diagramItems.get(source.atomicGroup) ?? []
+            diagramItems.set(source.atomicGroup, previous.concat(sharedKey ? shared.get(sharedKey) ?? [] : items.slice(itemStart)))
+            if (sharedKey) diagramShared.set(source.atomicGroup, [...diagramShared.get(source.atomicGroup) ?? [], sharedKey])
+          }
         }
       }
+      for (const group of failedDiagrams) {
+        const removed = new Set(diagramItems.get(group) ?? [])
+        for (let i = items.length - 1; i >= 0; i--) if (removed.has(items[i])) items.splice(i, 1)
+        for (const key of diagramShared.get(group) ?? []) { shared.delete(key); const index = sharedKeys.indexOf(key); if (index >= 0) sharedKeys.splice(index, 1) }
+        issues.push({ page, type: 'SmartArt', message: '图示含未支持内容，已整体跳过，避免留下缺少节点或连接的图示' })
+      }
+      items.forEach((item, order) => { item.order = order })
       let backgroundColor = '#ffffff'
       try {
         const backgroundPart = inheritedBackground(pkg, path)

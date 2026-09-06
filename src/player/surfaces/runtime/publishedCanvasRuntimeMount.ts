@@ -15,6 +15,7 @@ import type {
 import { applyPublishedRuntimeAuthoringText } from './publishedSurfaceRuntimeAuthoringTargets'
 import type { PublishedSurfaceRuntimeSession } from './publishedSurfaceRuntimeMount'
 import { registerPublishedCaptureResource } from '../publishedCapture'
+import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 
 type PublishedCanvasRuntime = PublishedRuntimeLayerItem['runtime']
 type FailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
@@ -513,6 +514,7 @@ export function mountPublishedCanvasRuntime(
   })
 
   let unregisterCapture: () => void = () => undefined
+  let unregisterUpdateProbe: () => void = () => undefined
   const handle: PublishedCanvasRuntimeMountHandle = {
     get ok() {
       return !quarantined
@@ -611,6 +613,7 @@ export function mountPublishedCanvasRuntime(
       destroyed = true
       settleBootFailure(new Error(`Canvas Runtime“${options.instanceId}”在捕获就绪前已销毁`))
       unregisterCapture()
+      unregisterUpdateProbe()
       destroyRuntimeHost()
       disposeRegistry()
       destroyGame()
@@ -621,5 +624,15 @@ export function mountPublishedCanvasRuntime(
     },
   }
   unregisterCapture = registerPublishedCaptureResource(container, handle)
+  unregisterUpdateProbe = registerPublishedDynamicUpdateProbe(container, async () => {
+    await handle.waitForReady()
+    for (const scale of [0.9, 1]) {
+      try {
+        runtimeHost!.resize(Math.max(1, options.width * scale), Math.max(1, options.height * scale))
+        checkLifecycleFailure()
+      } catch (cause) { quarantine('lifecycle', cause) }
+      await handle.waitForReady()
+    }
+  })
   return handle
 }

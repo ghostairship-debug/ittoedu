@@ -32,6 +32,7 @@ export type ChartStylePatch = Partial<NativeChartCommonStyle> & Partial<{
   showCategoryAxis: boolean
   showValueAxis: boolean
   showGridLines: boolean
+  barDirection: 'vertical' | 'horizontal'
   valueMin: number | undefined
   valueMax: number | undefined
   holeSize: number
@@ -624,6 +625,12 @@ export function ChartProperties({
       />
       {cartesian && 'showCategoryAxis' in style && (
         <>
+          {node.chartType === 'bar' && <SelectField<'vertical' | 'horizontal'>
+            label="条形方向"
+            value={node.style.barDirection ?? 'vertical'}
+            options={[{ value: 'vertical', label: '竖向柱状图' }, { value: 'horizontal', label: '横向条形图' }]}
+            onChange={(barDirection) => commands.patchStyle({ barDirection })}
+          />}
           <ToggleRow
             label="显示分类轴"
             checked={style.showCategoryAxis}

@@ -8,6 +8,7 @@ import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
+  selectEffectiveLayerProjection,
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -15,6 +16,7 @@ import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
+import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 
 const SLIDE_LOCATION_ID = 'location-slide'
 const FLOW_LOCATION_ID = 'location-flow'
@@ -112,6 +114,37 @@ beforeEach(() => {
 })
 
 describe('Mixed cross-surface history continuity', () => {
+  it('applies a mixed CLI candidate through the real store kernel and restores it with one Undo', async () => {
+    const projectPath = '/fixtures/ai-mixed.h5lesson'
+    useEditorStore.getState().loadCourseProject(mixedProject(), projectPath)
+    const state = useEditorStore.getState(), document = activeDocument()
+    const request = captureGenerationSnapshot({ document, workspace: { version: 1, projectId: document.id, normalizedPath: projectPath },
+      sessionToken: state.courseAuthoringSession!.token, projection: selectEffectiveLayerProjection(state)!, selectedIds: [], scope: 'course',
+      instruction: '修改 Flow 与 Spatial 内容', purpose: 'local-edit' })
+    const flow = request.destinations.find(destination => destination.kind === 'create' && destination.scope.surfaceType === 'flow' && destination.scope.parent.kind === 'flow-body')!
+    const spatial = request.destinations.find(destination => destination.kind === 'create' && destination.scope.surfaceType === 'spatial-2d' && destination.scope.owner === 'world')!
+    const candidate = { version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '增加两处讲解', steps: [
+      { id: 'flow', tool: 'flow.content', carrier: 'native', destination: flow, input: { operation: 'insert', block: { type: 'paragraph', text: '新增 Flow 讲解' } } },
+      { id: 'spatial', tool: 'native.content', carrier: 'native', destination: spatial, input: { operation: 'insert', template: { nativeType: 'text', text: '新增 Spatial 讲解' } } },
+    ] }
+    const preview = await state.prepareGenerationCandidate(request, candidate)
+    expect(activeDocument()).toEqual(document)
+    expect(useEditorStore.getState().applyGenerationCandidate(preview.previewId).status).toBe('committed')
+    expect(JSON.stringify(activeDocument())).toContain('新增 Flow 讲解')
+    expect(JSON.stringify(activeDocument())).toContain('新增 Spatial 讲解')
+    useEditorStore.getState().undo()
+    expect(activeDocument()).toEqual(document)
+    const generation = useEditorStore.getState().courseAuthoringSession!.token.generation
+    const fresh = { ...request, requestId: crypto.randomUUID(), sessionGeneration: generation, destinations: request.destinations.map(destination => destination.kind === 'create'
+      ? { ...destination, scope: { ...destination.scope, sessionGeneration: generation } } : { ...destination, target: { ...destination.target, sessionGeneration: generation } }) }
+    const freshCandidate = { ...candidate, requestId: fresh.requestId, steps: candidate.steps.map(step => ({ ...step, destination: step.destination.kind === 'create'
+      ? { ...step.destination, scope: { ...step.destination.scope, sessionGeneration: generation } } : step.destination })) }
+    const second = await useEditorStore.getState().prepareGenerationCandidate(fresh, freshCandidate)
+    useEditorStore.getState().stopGenerationCandidate()
+    expect(useEditorStore.getState().courseAuthoringSession!.token.generation).toBe(generation + 1)
+    expect(useEditorStore.getState().applyGenerationCandidate(second.previewId).status).toBe('stale')
+    expect(activeDocument()).toEqual(document)
+  })
   it('keeps one canonical history while every target Surface session stays fresh', () => {
     useEditorStore.getState().activateCourseLocation(SPATIAL_LOCATION_ID)
     useEditorStore.getState().selectNode(SPATIAL_ITEM_ID)

@@ -1,5 +1,6 @@
 import type { MaterialRequest, MaterialRecordV1 } from './materialContract'
 import type { LocalAgentRequest, LocalAgentResponse } from './localAgentContract'
+import type { DynamicAdmissionRequest, DynamicAdmissionResult } from './dynamicAdmissionContract'
 import type {
   ComponentCatalogPackageFile,
   ComponentCatalogSnapshot,
@@ -94,6 +95,7 @@ export interface PreviewNetworkPolicyInput {
 export interface DesktopAPI {
   legacyPpt(input: { operation: 'select' | 'cancel' }): Promise<LegacyPptImportResult | null>
   localAgent(input: LocalAgentRequest): Promise<LocalAgentResponse>
+  dynamicAdmission?(input: DynamicAdmissionRequest): Promise<DynamicAdmissionResult>
   materials(input: MaterialRequest): Promise<MaterialRecordV1[]>
   openProject(): Promise<OpenProjectFileResult | null>
   listRecentProjects(): Promise<RecentProjectEntry[]>
@@ -157,6 +159,7 @@ export interface DesktopAPI {
 export const IPC_CHANNELS = {
   materials: 'materials:operate',
   localAgent: 'local-agent:operate',
+  dynamicAdmission: 'dynamic-admission:operate',
   legacyPpt: 'ppt:resave-import',
   openProject: 'project:open',
   listRecentProjects: 'project:list-recent',

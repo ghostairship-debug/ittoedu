@@ -1,5 +1,16 @@
 import { strToU8, strFromU8, unzipSync, zipSync } from 'fflate'
 
+export async function pptxEditableChartsFixture(): Promise<Uint8Array> {
+  const { default: PptxGenJS } = await import('pptxgenjs')
+  const pptx = new PptxGenJS(); pptx.layout = 'LAYOUT_WIDE'
+  for (const type of ['bar', 'line', 'pie', 'doughnut'] as const) {
+    const slide = pptx.addSlide()
+    slide.addChart(type, [{ name: '人数', labels: ['甲班', '乙班', '丙班'], values: [12, 18, 24] }],
+      { x: 1, y: 1, w: 10, h: 5, title: '阅读调查', showTitle: true, showLegend: true, legendPos: 'b', barDir: 'col', valAxisTitle: '人数', holeSize: 40 })
+  }
+  return await pptx.write({ outputType: 'uint8array' }) as Uint8Array
+}
+
 /** Small frames and ordinary shapes reduced from the S2 classroom regression. */
 export function pptxCommonMappingFixture(): Uint8Array {
   const files = unzipSync(pptxImportFixture())
@@ -63,6 +74,20 @@ export async function pptxInheritanceFixture(): Promise<Uint8Array> {
     })
     if (page === 4) xml = xml.replace('<p:sld ', '<p:sld showMasterSp="0" ')
     files[file] = strToU8(xml)
+  }
+  return zipSync(files)
+}
+
+export function pptxEditablePathsFixture(includePresetAdjustments = false): Uint8Array {
+  const files = unzipSync(pptxImportFixture())
+  const path = 'ppt/slides/slide1.xml'
+  files[path] = strToU8(strFromU8(files[path]).replace('<a:prstGeom prst="ellipse"/><a:solidFill><a:srgbClr val="2563EB"/></a:solidFill>',
+    '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="1000" h="1000" fill="norm" stroke="1"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:cubicBezTo><a:pt x="-100" y="300"/><a:pt x="1100" y="700"/><a:pt x="1000" y="1000"/></a:cubicBezTo><a:lnTo><a:pt x="0" y="1000"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="2563EB"/></a:gs><a:gs pos="100000"><a:srgbClr val="FBBF24"/></a:gs></a:gsLst><a:lin ang="0" scaled="0"/><a:tileRect/></a:gradFill><a:ln w="19050"><a:solidFill><a:srgbClr val="123456"/></a:solidFill></a:ln>'))
+  if (includePresetAdjustments) {
+    const shape = (id: number, name: string, preset: string, x: number, y: number, width: number, height: number, adjustments: string, fill = '<a:noFill/>') => `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${width}" cy="${height}"/></a:xfrm><a:prstGeom prst="${preset}"><a:avLst>${adjustments}</a:avLst></a:prstGeom>${fill}<a:ln w="25400"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:ln></p:spPr></p:sp>`
+    const braces = [7694, 7819, 8066].map((adjustment, index) => shape(20 + index, `调整括号${index + 1}`, 'leftBrace', 6200000 + index * 900000, 3300000, 400000, 2000000, `<a:gd name="adj1" fmla="val ${adjustment}"/><a:gd name="adj2" fmla="val 50000"/>`)).join('')
+    const callout = shape(30, '向上标注', 'wedgeRoundRectCallout', 6100000, 2200000, 3600450, 996950, '<a:gd name="adj1" fmla="val 1815"/><a:gd name="adj2" fmla="val -104602"/><a:gd name="adj3" fmla="val 16667"/>', '<a:solidFill><a:srgbClr val="0D9488"><a:alpha val="6000"/></a:srgbClr></a:solidFill>')
+    files[path] = strToU8(strFromU8(files[path]).replace('</p:spTree>', `${braces}${callout}</p:spTree>`))
   }
   return zipSync(files)
 }

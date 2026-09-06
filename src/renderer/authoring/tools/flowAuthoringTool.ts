@@ -43,6 +43,7 @@ export const flowAuthoringToolInputSchema = z.discriminatedUnion('operation', [
 
 export const flowAuthoringTool: AuthoringToolDefinition<z.infer<typeof flowAuthoringToolInputSchema>> = {
   name: 'flow.content',
+  description: 'insert 使用 create parent:flow-body；block 采用同工具 replace.block 的完整 Schema，但只省略最外层 id（由宿主生成）。replace/delete/move 使用 Flow block update target。原有 block 的 id 必须保留。',
   inputSchema: flowAuthoringToolInputSchema,
   plan({ document, destination, value }) {
     const { target, surface } = resolveAuthoringToolScope(document, destination)

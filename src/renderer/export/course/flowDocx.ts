@@ -2,7 +2,8 @@ import { describeNativeChart } from '../../../shared/nativeChartView'
 import type { TableCellSpan } from '../../../shared/tableMerge'
 import { strToU8, zipSync } from 'fflate'
 import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
-import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
+import { isStrokeOnlyShapeType, type NativeShapeContent, type TextRun, type TextRunStyle } from '../../../shared/contracts/native-v1'
+import { drawingMlPathGeometryXml, drawingMlGradientFillXml } from '../drawingMlShapeGeometry'
 import type {
   PublishedCourseV2Payload,
   PublishedFlowSurface,
@@ -283,17 +284,9 @@ function textBoxGraphicXml(
 
 function shapeGraphicXml(
   item: FlowDocxProjectedItem,
-  shapeType: string,
-  style: {
-    fillColor?: string
-    borderColor?: string
-    borderWidth?: number
-    lineStyle?: 'solid' | 'dashed' | 'dotted'
-    cornerRadius?: number
-    startArrow?: string
-    endArrow?: string
-  },
+  data: NativeShapeContent,
 ): string {
+  const { shapeType, style } = data
   const cxEMU = Math.round(item.outputFrame.width * 9_525)
   const cyEMU = Math.round(item.outputFrame.height * 9_525)
   const rot = rotationToDrawingMlDegree(item.rotation)
@@ -319,10 +312,16 @@ function shapeGraphicXml(
   else if (shapeType === 'arrow-up') prst = 'upArrow'
   else if (shapeType === 'arrow-down') prst = 'downArrow'
   else if (shapeType === 'arrow-left-right') prst = 'leftRightArrow'
+  else if (shapeType === 'brace-left') prst = 'leftBrace'
+  else if (shapeType === 'brace-right') prst = 'rightBrace'
+  if (data.braceGeometry) avLstXml = `<a:gd name="adj1" fmla="val ${Math.round(data.braceGeometry.curvatureRatio * 100000)}"/><a:gd name="adj2" fmla="val ${Math.round(data.braceGeometry.midpoint * 100000)}"/>`
+  const geometryXml = data.pathGeometry ? drawingMlPathGeometryXml(data.pathGeometry) : `<a:prstGeom prst="${prst}"><a:avLst>${avLstXml}</a:avLst></a:prstGeom>`
 
-  const isStrokeOnly = shapeType === 'line' || shapeType === 'elbow-arrow'
+  const isStrokeOnly = isStrokeOnlyShapeType(shapeType)
   const fillHex = !isStrokeOnly && style.fillColor ? wordColor(style.fillColor) : null
-  const fillXml = fillHex ? `<a:solidFill><a:srgbClr val="${fillHex}"/></a:solidFill>` : '<a:noFill/>'
+  const fillXml = !isStrokeOnly && style.fillGradient
+    ? drawingMlGradientFillXml(style.fillGradient, item.sourceFrame.width, item.sourceFrame.height, style.fillOpacity * item.opacity)
+    : fillHex ? `<a:solidFill><a:srgbClr val="${fillHex}"><a:alpha val="${Math.round(style.fillOpacity * item.opacity * 100000)}"/></a:srgbClr></a:solidFill>` : '<a:noFill/>'
 
   const borderHex = style.borderColor ? wordColor(style.borderColor) : null
   const borderW = style.borderWidth !== undefined && style.borderWidth > 0
@@ -358,10 +357,10 @@ function shapeGraphicXml(
   }
 
   const lineXml = (borderW > 0 || isStrokeOnly) && (borderHex || isStrokeOnly)
-    ? `<a:ln w="${Math.max(9525, borderW)}"><a:solidFill><a:srgbClr val="${borderHex ?? '000000'}"/></a:solidFill>${dashXml}${headEndXml}${tailEndXml}</a:ln>`
+    ? `<a:ln w="${Math.max(9525, borderW)}"><a:solidFill><a:srgbClr val="${borderHex ?? '000000'}"><a:alpha val="${Math.round(style.borderOpacity * item.opacity * 100000)}"/></a:srgbClr></a:solidFill>${dashXml}${headEndXml}${tailEndXml}</a:ln>`
     : '<a:ln><a:noFill/></a:ln>'
 
-  return `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:cNvSpPr/><wps:spPr><a:xfrm${rotAttr}><a:off x="0" y="0"/><a:ext cx="${cxEMU}" cy="${cyEMU}"/></a:xfrm><a:prstGeom prst="${prst}"><a:avLst>${avLstXml}</a:avLst></a:prstGeom>${fillXml}${lineXml}</wps:spPr><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic>`
+  return `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:cNvSpPr/><wps:spPr><a:xfrm${rotAttr}><a:off x="0" y="0"/><a:ext cx="${cxEMU}" cy="${cyEMU}"/></a:xfrm>${geometryXml}${fillXml}${lineXml}</wps:spPr><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic>`
 }
 
 function pictureGraphicXml(
@@ -429,7 +428,7 @@ function renderAnchoredItem(item: FlowDocxProjectedItem, context: BuildContext):
   if (item.carrierKind === 'shape') {
     if (item.item.kind === 'native' && item.item.content.nativeType === 'shape') {
       const shapeData = item.item.content.data
-      const graphic = shapeGraphicXml(item, shapeData.shapeType, shapeData.style)
+      const graphic = shapeGraphicXml(item, shapeData)
       return anchorXml(drawingId, item, graphic)
     }
   }

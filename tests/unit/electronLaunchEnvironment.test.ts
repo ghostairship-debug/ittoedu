@@ -63,6 +63,8 @@ describe('LocalAgentCliAdapterV1', () => {
     expect(decodeAgentEvent('codex', { type: 'thread.started', thread_id: 'thread-1' })[0]).toMatchObject({ kind: 'session', externalSessionId: 'thread-1' })
     expect(decodeAgentEvent('codex', { type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: '你好' } })[0]).toMatchObject({ kind: 'text', payload: { text: '你好' } })
     expect(decodeAgentEvent('claude', { type: 'system', subtype: 'init', session_id: 'external' })[0]?.externalSessionId).toBe('external')
+    expect(decodeAgentEvent('claude', { type: 'system', subtype: 'thinking_tokens', session_id: 'external', thinking_tokens: 128 })[0]).toMatchObject({ kind: 'usage', payload: { thinking_tokens: 128 } })
+    expect(decodeAgentEvent('claude', { type: 'system', subtype: 'api_retry', session_id: 'external', attempt: 1, max_retries: 3, retry_delay_ms: 1000, error_status: 429, error: 'rate_limit' })[0]).toMatchObject({ kind: 'session', payload: { status: 'api-retry', errorStatus: 429 } })
     expect(decodeAgentEvent('claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { path: 'a' } }] } })[0]?.kind).toBe('tool-call')
     expect(decodeAgentEvent('opencode', { type: 'tool_use', sessionID: 'session', part: { callID: 'call', tool: 'read', state: { input: {}, output: 'ok' } } }).map(e => e.kind)).toEqual(['tool-call', 'tool-result'])
     expect(decodeAgentEvent('opencode', { type: 'error', sessionID: 'session', error: { name: 'APIError', data: { statusCode: 429, message: 'FreeUsageLimitError' } } })[0]).toMatchObject({ kind: 'failed', failure: 'rate-limited' })
@@ -73,7 +75,8 @@ describe('LocalAgentCliAdapterV1', () => {
     expect(agentEnvironment({ PATH: 'bin', OPENAI_API_KEY: 'secret', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--require evil' })).toEqual({ PATH: 'bin' })
     expect(agentArguments('codex', 'ignored', 'external')).toContain('external')
     expect(agentArguments('claude', 'ignored', 'external')).toContain('--resume')
-    expect(agentArguments('opencode', '& echo bad', 'external').slice(-2)).toEqual(['--', '& echo bad'])
+    expect(agentArguments('opencode', '& echo bad', 'external').slice(-2)).toEqual(['--session', 'external'])
+    expect(agentArguments('opencode', 'x'.repeat(50000)).join(' ').length).toBeLessThan(100)
     expect(agentArguments('opencode', 'hello')).toContain('opencode/big-pickle')
   })
   it('uses the exact program and literal args with spaces, Chinese and shell metacharacters', async () => {

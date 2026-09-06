@@ -72,6 +72,7 @@ export default defineConfig({
     },
   },
   build: {
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html') } },
     outDir: 'dist-renderer',
     emptyOutDir: true,
     sourcemap: true,

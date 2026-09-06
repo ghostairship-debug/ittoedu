@@ -1,6 +1,23 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createGenerationProfile } from '../../src/main/localAgent/profile'
+import type { GenerationRequest } from '../../src/shared/generationContract'
+import { courseAgentSkills } from '../../src/shared/courseAgentSkills'
+
+describe('neutral CLI candidate profiles', () => {
+  it('loads identical skill guidance and candidate semantics for all adapters and rejects an unimplemented channel', () => {
+    const request = { requestId: '89e7b74a-2ba4-4f03-ad94-89aef212a776', purpose: 'single-page' } as GenerationRequest
+    const profiles = ['codex', 'claude', 'opencode'].map(adapter => createGenerationProfile(adapter as 'codex' | 'claude' | 'opencode', request))
+    expect(profiles[0]?.skills).toEqual(profiles[1]?.skills)
+    expect(profiles[1]?.skills).toEqual(profiles[2]?.skills)
+    expect(profiles.every(profile => profile.capability.liveProjectTools === false && profile.resultChannel === 'structured-stdout')).toBe(true)
+    expect(courseAgentSkills).toHaveLength(7)
+    const build = createGenerationProfile('codex', { ...request, purpose: 'whole-course' })
+    expect(build.skills.map(skill => skill.name)).toContain('course-build')
+    expect(() => createGenerationProfile('claude', request, 'live-mcp')).toThrow('未开放')
+  })
+})
 
 const repoRoot = process.cwd()
 

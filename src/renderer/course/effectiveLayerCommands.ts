@@ -703,6 +703,14 @@ function normalizeEffectiveLayerPropertyPatch(
       nativeData,
     )
     if (item.content.nativeType === 'shape') {
+      if (nativeData.shapeType !== undefined && !['brace-left', 'brace-right'].includes(String(nativeData.shapeType)) && mergedNativeData.braceGeometry !== undefined) {
+        nativeData = { ...nativeData, braceGeometry: null }
+        mergedNativeData = mergeCourseNativeData(currentNativeData, nativeData)
+      }
+      if (nativeData.shapeType !== undefined && nativeData.pathGeometry === undefined && mergedNativeData.pathGeometry !== undefined) {
+        nativeData = { ...nativeData, pathGeometry: null }
+        mergedNativeData = mergeCourseNativeData(currentNativeData, nativeData)
+      }
       // shapeType/lineGeometry invariant: switching away from line/elbow-arrow
       // deletes the geometry; a kind that disagrees with the target shapeType
       // is converted instead of failing strict schema validation downstream.

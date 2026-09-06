@@ -6,7 +6,7 @@ import { captureAgent, launchAgent, resolveAgentExecutable, stopAgent, type Agen
 export function agentArguments(id: LocalAgentId, prompt: string, externalId?: string): string[] {
   if (id === 'codex') return ['exec', '-c', 'sandbox_mode="read-only"', '-c', 'suppress_unstable_features_warning=true', ...(externalId ? ['resume', externalId] : ['--color', 'never']), '--json', '--skip-git-repo-check', '-']
   if (id === 'claude') return ['-p', '--output-format', 'stream-json', '--verbose', ...(externalId ? ['--resume', externalId] : [])]
-  return ['run', '--format', 'json', '--model', 'opencode/big-pickle', ...(externalId ? ['--session', externalId] : []), '--', prompt]
+  return ['run', '--format', 'json', '--model', 'opencode/big-pickle', ...(externalId ? ['--session', externalId] : [])]
 }
 export class LocalAgentAdapter implements LocalAgentCliAdapterV1 {
   private child?: ChildProcessWithoutNullStreams
@@ -46,7 +46,7 @@ export class LocalAgentAdapter implements LocalAgentCliAdapterV1 {
       child.once('close', code => resolve({ code }))
     })
     child.stdin.on('error', () => {})
-    child.stdin.end(this.id === 'opencode' ? undefined : prompt)
+    child.stdin.end(prompt)
     const decoder = new StringDecoder('utf8')
     let buffer = ''; let total = 0
     try {

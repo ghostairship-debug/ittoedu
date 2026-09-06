@@ -1,7 +1,8 @@
 import { readAuthoringToolSelection } from '../../shared/authoringToolContract'
 import type { EditorTransactionStep } from '../authoring/editorTransaction'
 import { authoringLegacyHistoryEntryCount, commitEditorTransactionToAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
-import { buildCourseAuthoringSessionForProject, type CourseAuthoringSession } from '../authoring/courseAuthoringSession'
+import { buildCourseAuthoringSessionForProject, updateCourseAuthoringSessionItems, type CourseAuthoringSession } from '../authoring/courseAuthoringSession'
+import { selectSlideToolResult, selectFlowToolResult, selectSpatialToolResult } from '../authoring/toolSelection'
 import { createSlideAuthoringBackend, openSlideAuthoringSession } from '../course/slideAuthoringBackend'
 import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import { openSpatialAuthoringSession } from '../course/spatialEditorCommands'
@@ -41,7 +42,7 @@ function planCourseToolTransaction(input: {
 }): Record<string, unknown> {
   const { step } = input
   const hint = readAuthoringToolSelection(step.selectionHint)
-  if (!hint || hint.itemIds.length || hint.stateId !== null) throw new Error('跨表面课程导航需要空对象选区')
+  if (!hint) throw new Error('跨表面事务需要正式作者选区')
   const project = step.nextDocument
   const location = project.locations.find((entry) => entry.id === hint.locationId)
   if (!location) throw new Error('课程导航目标已失效')
@@ -54,15 +55,17 @@ function planCourseToolTransaction(input: {
   const extra = { path: input.path, dirty: true, statusMessage: input.statusMessage }
   let backend: Record<string, unknown>
   if (location.kind === 'slide-scene') {
-    if (hint.owner !== 'scene') throw new Error('Slide 导航 owner 不匹配')
-    backend = applyV9BackendState(createSlideAuthoringBackend({ ...openSlideAuthoringSession(project, { locationId: location.id }), history }), extra)
+    const selected = selectSlideToolResult(project, hint)
+    backend = applyV9BackendState(createSlideAuthoringBackend({ ...openSlideAuthoringSession(project, { locationId: location.id }), history,
+      scope: selected.owner, selection: selected.selection }), extra)
   } else if (location.kind === 'flow-block') {
-    if (hint.owner !== 'surface') throw new Error('Flow 导航 owner 不匹配')
-    backend = applyFlowBackendState({ history, selection: selectFlowEditorBlock(project, location.id, location.blockId) }, extra)
+    const selection = selectFlowToolResult(project, hint)
+    backend = applyFlowBackendState({ history, selection: hint.itemIds.length ? selection : selectFlowEditorBlock(project, location.id, location.blockId) }, extra)
   } else {
-    if (hint.owner !== 'world') throw new Error('Spatial 导航 owner 不匹配')
-    backend = applySpatialBackendState({ ...openSpatialAuthoringSession(project, { locationId: location.id }), history }, extra)
+    const selected = selectSpatialToolResult(project, hint)
+    backend = applySpatialBackendState({ ...openSpatialAuthoringSession(project, { locationId: location.id }), history,
+      scope: selected.owner, selection: selected.selection }, extra)
   }
   const fresh = buildCourseAuthoringSessionForProject(project, location.id)
-  return { ...backend, ...resources, courseAuthoringSession: { ...fresh, token: { ...fresh.token, generation: input.session.token.generation + 1 } } }
+  return { ...backend, ...resources, courseAuthoringSession: updateCourseAuthoringSessionItems({ ...fresh, token: { ...fresh.token, generation: input.session.token.generation + 1 } }, hint.itemIds) }
 }

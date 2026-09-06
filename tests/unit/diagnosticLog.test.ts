@@ -10,6 +10,98 @@ import { LocalAgentRepository } from '../../src/main/localAgent/repository'
 import { LocalAgentHarness } from '../../src/main/localAgent/harness'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
 import type { LocalAgentCliAdapterV1, LocalAgentId } from '../../src/shared/localAgentContract'
+import { generationRequestSchema } from '../../src/shared/generationContract'
+import { parseGenerationText, GENERATION_OPEN, GENERATION_CLOSE } from '../../src/shared/generationResult'
+import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
+import { randomUUID } from 'node:crypto'
+
+function generationTransportFixture(directory: string) {
+  const workspace = createWorkspaceIdentity('generation-project', path.join(directory, 'course.h5lesson'))
+  const request = generationRequestSchema.parse({ version: 1, requestId: randomUUID(), workspace, documentRevision: 0, sessionGeneration: 1,
+    purpose: 'single-page', instruction: '生成一页', context: { title: '示例' }, allowedCarriers: ['native'], destinations: [{ kind: 'create', scope: {
+      projectId: workspace.projectId, documentRevision: 0, sessionGeneration: 1, revisionPolicy: { kind: 'exact' },
+      surfaceType: 'slide', surfaceId: 'surface', locationId: 'location', stateId: null, owner: 'scene', ownerKey: 'scene:scene',
+      parent: { kind: 'owner' }, insertion: { kind: 'append' },
+    } }] })
+  const candidate = { version: 1, requestId: request.requestId, candidateId: randomUUID(), summary: '添加文字', steps: [{ id: 's1', tool: 'native.content', carrier: 'native',
+    destination: request.destinations[0], input: { operation: 'insert', template: { nativeType: 'text', text: '分数' } } }] }
+  return { workspace, request, candidate }
+}
+
+describe('generation output channels and staging ingestion', () => {
+  it('only parses one explicit candidate channel bound to the current request', () => {
+    const { request, candidate } = generationTransportFixture(os.tmpdir())
+    const block = `${GENERATION_OPEN}${JSON.stringify(candidate)}${GENERATION_CLOSE}`
+    expect(parseGenerationText(JSON.stringify(candidate), request.requestId)).toBeNull()
+    expect(parseGenerationText('仅解释问题，不修改工程', request.requestId)).toBeNull()
+    expect(parseGenerationText(block, request.requestId)).toEqual(candidate)
+    expect(() => parseGenerationText(block, randomUUID())).toThrow('其他请求')
+    expect(() => parseGenerationText(block + block, request.requestId)).toThrow('重复')
+    expect(() => parseGenerationText(GENERATION_OPEN + '{}', request.requestId)).toThrow('不完整')
+    expect(() => parseGenerationText(`${GENERATION_OPEN}${JSON.stringify({ ...candidate, project: {} })}${GENERATION_CLOSE}`, request.requestId)).toThrow()
+  })
+
+  it('reads a bounded local candidate and refuses request reuse, other identities, and linked roots', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'candidate-stage-')); directories.push(directory)
+    const { request, candidate } = generationTransportFixture(directory)
+    const staging = new CandidateStaging(directory)
+    const root = await staging.create(request)
+    expect(await staging.read(request.requestId)).toBeNull()
+    await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify(candidate))
+    expect(await staging.read(request.requestId)).toEqual(candidate)
+    await expect(staging.create(request)).rejects.toThrow()
+    await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify({ ...candidate, requestId: randomUUID() }))
+    await expect(staging.read(request.requestId)).rejects.toThrow('其他请求')
+    await staging.remove(request.requestId)
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'candidate-outside-')); directories.push(outside)
+    await fs.writeFile(path.join(outside, 'candidate.json'), JSON.stringify(candidate))
+    await fs.symlink(outside, root, process.platform === 'win32' ? 'junction' : 'dir')
+    await expect(staging.read(request.requestId)).rejects.toThrow('链接')
+    await expect(staging.remove(request.requestId)).rejects.toThrow('链接')
+    expect(JSON.parse(await fs.readFile(path.join(outside, 'candidate.json'), 'utf8'))).toEqual(candidate)
+    await fs.unlink(root)
+  })
+
+  it('routes a generation through the actual harness and resumes with fresh request identity in the same CLI directory', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'generation-harness-')); directories.push(directory)
+    const { workspace, request, candidate } = generationTransportFixture(directory)
+    const cwdValues: string[] = []
+    let output = candidate
+    const adapter = (id: LocalAgentId): LocalAgentCliAdapterV1 => ({ id,
+      async probe() { return { adapter: id, status: 'ready', message: 'fixture' } },
+      async *start(prompt, cwd) {
+        expect(prompt).toContain(request.instruction); cwdValues.push(cwd)
+        expect(await fs.stat(path.join(cwd, 'candidates', output.requestId, 'request.json'))).toBeTruthy()
+        yield { type: 'thread.started', thread_id: 'external-generation' }
+        yield { type: 'item.completed', item: { type: 'agent_message', text: `${GENERATION_OPEN}${JSON.stringify(output)}${GENERATION_CLOSE}` } }
+        yield { type: 'turn.completed' }
+      },
+      async *resume(externalId, prompt, cwd) { expect(externalId).toBe('external-generation'); yield* this.start(prompt, cwd) },
+      async cancel() {},
+    })
+    const repository = new LocalAgentRepository(directory)
+    const harness = new LocalAgentHarness(repository, adapter)
+    try {
+      const id = await harness.generate(workspace, 'codex', request)
+      await expect.poll(() => harness.running).toBe(false)
+      expect(await harness.candidate(workspace, id)).toEqual(candidate)
+      expect((await repository.list(workspace)).records[0]?.generationRequest).toEqual(request)
+      const hostResult = { requestId: request.requestId, status: 'committed' as const, beforeRevision: 0, afterRevision: 1, summary: '已应用文字' }
+      await harness.hostResult(workspace, id, hostResult)
+      expect((await repository.list(workspace)).records[0]?.hostResult).toEqual(hostResult)
+      await expect(harness.hostResult(workspace, id, { ...hostResult, requestId: randomUUID() })).rejects.toThrow('不属于')
+      await expect(fs.stat(path.join(cwdValues[0]!, 'candidates', request.requestId))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(harness.generate(workspace, 'codex', request)).rejects.toThrow('新的请求身份')
+      const next = { ...request, requestId: randomUUID() }
+      output = { ...candidate, requestId: next.requestId, candidateId: randomUUID() }
+      const resumed = await harness.generate(workspace, 'codex', next, id)
+      await expect.poll(() => harness.running).toBe(false)
+      expect(await harness.candidate(workspace, resumed)).toEqual(output)
+      expect(cwdValues[1]).toBe(cwdValues[0])
+      await expect(harness.candidate(createWorkspaceIdentity(workspace.projectId, path.join(directory, 'other.h5lesson')), resumed)).rejects.toThrow('没有')
+    } finally { await harness.close() }
+  })
+})
 
 const directories: string[] = []
 

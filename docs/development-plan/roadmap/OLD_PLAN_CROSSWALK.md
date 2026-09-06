@@ -124,24 +124,24 @@
 
 | 旧任务 ID | 归类 | 新路线节点 | 理由 |
 |---|---|---|---|
-| `r18-000-agent-tool-registry` | merged | `r18-000-mcp-authoring-server`<br>`r18-011-write-tool-mapping` | 工具版本/Schema/权限由产品 MCP 暴露，写调用映射到既有产品命令。 |
+| `r18-000-agent-tool-registry` | merged | `r17-013-host-candidate-commit` | 取消 MCP 中间层，候选校验和写入复用 1.7 宿主提交器及既有产品命令。 |
 | `r18-010-agent-runner-and-session` | retired | — | CLI 本身是 Agent 内核；编辑器不复制规划、子任务或模型工具循环。 |
 | `r18-020-product-skill-manifest-loader` | merged | `r18-020-neutral-agent-profile`<br>`r18-030-course-skills`<br>`r18-031-editing-craft-skills` | 一个中立 Profile 生成三种 CLI 配置，Skills 保留各 CLI 原生宿主方式。 |
 | `r18-021-course-design-build-skills` | replaced | `r18-030-course-skills` | course-design/course-build 继续复用确认后的策划与产品 authoring tools。 |
 | `r18-022-editing-visual-interaction-qa-skills` | replaced | `r18-031-editing-craft-skills` | editing/visual/interaction/qa/remix 能力按载体阶梯和确定性诊断交付。 |
 | `r18-030-agent-human-concurrency` | replaced | `r18-041-human-concurrency` | revision/session generation 变化使旧调用 stale 且零写入。 |
 | `r18-040-agent-skill-weak-model-benchmark` | replaced | `r18-050-three-cli-benchmark` | Codex、Claude、OpenCode 各自用同一固定生成/编辑课例比较。 |
-| `r18-050-internal-agent-skills-gate` | replaced | `r18-060-release` | MCP、Profiles、Skills、暂存文件边界与三 CLI 证据在隐藏发布门收口。 |
+| `r18-050-internal-agent-skills-gate` | replaced | `r18-060-release` | CLI 直连、Profiles、Skills、基础聊天、暂存文件边界与三 CLI 证据在隐藏发布门收口。 |
 
 ## 1.9
 
 | 旧任务 ID | 归类 | 新路线节点 | 理由 |
 |---|---|---|---|
-| `r19-000-internal-chat-shell` | replaced | `r19-000-chat-shell` | Chat shell、run 状态与 Stop 直接迁移，仍不改变人工画布主路径。 |
-| `r19-010-chat-context-references` | replaced | `r19-010-context-references` | 当前选择、当前页、整课和材料按需读取，不灌入整工程。 |
-| `r19-020-chat-tool-timeline` | replaced | `r19-020-tool-timeline` | 工具读写目标、receipt、结果和可撤销性保持可见。 |
-| `r19-021-chat-markdown-formula-rendering` | replaced | `r19-021-safe-markdown-formula` | Markdown/公式安全渲染且不执行消息 HTML/脚本。 |
-| `r19-030-chat-confirmation-and-undo-ux` | replaced | `r19-030-stop-undo-stale` | Stop、Undo、确认、迟到结果和 stale 零写入统一成可见交互。 |
+| `r19-000-internal-chat-shell` | replaced | `r18-042-chat-shell` | Chat shell、run 状态与 Stop 前移到 1.8，仍不改变人工画布主路径。 |
+| `r19-010-chat-context-references` | replaced | `r18-043-context-references` | 当前选择、当前页、整课和材料按需读取，不灌入整工程。 |
+| `r19-020-chat-tool-timeline` | replaced | `r18-044-tool-timeline` | 工具读写目标、receipt、结果和可撤销性保持可见。 |
+| `r19-021-chat-markdown-formula-rendering` | replaced | `r18-045-safe-markdown-formula` | Markdown/公式安全渲染且不执行消息 HTML/脚本。 |
+| `r19-030-chat-confirmation-and-undo-ux` | replaced | `r18-046-stop-undo-stale` | Stop、Undo、确认、迟到结果和 stale 零写入统一成可见交互。 |
 | `r19-040-internal-dogfood-privacy` | merged | `r19-040-session-persistence-deletion`<br>`r19-050-internal-dogfood` | 会话恢复/删除语义先独立闭合，再用真实课例 dogfood。 |
 | `r19-050-internal-workbench-gate` | replaced | `r19-060-release` | 生成、编辑、审计、取消、撤销、隐私证据汇总为隐藏源码标签门。 |
 
@@ -149,7 +149,7 @@
 
 | 旧任务 ID | 归类 | 新路线节点 | 理由 |
 |---|---|---|---|
-| `r20-000-public-ai-governance` | replaced | `r20-000-public-governance` | 公开范围改为三套本地 CLI、MCP 与内置 Profile，不扩展 V10 或任意 Skill 市场。 |
+| `r20-000-public-ai-governance` | replaced | `r20-000-public-governance` | 公开范围改为三套本地 CLI 直连与内置 Profile，不扩展 V10 或任意 Skill 市场。 |
 | `r20-010-provider-settings-ui` | merged | `r20-010-cli-setup-ui`<br>`r20-011-first-use-risk-notice` | 不保存 Provider Secret；UI 只做 CLI 探测/路径/安装登录指导和首次外发风险说明。 |
 | `r20-020-public-generate-and-edit-flows` | replaced | `r20-020-public-authoring` | 教师公开生成/局部修改保留 Stop、Undo、stale 零写入和手工独立性。 |
 | `r20-030-public-built-in-skill-controls` | replaced | `r20-021-profile-controls` | 用户选择内置中立 Profile/Skills，不安装任意代码。 |

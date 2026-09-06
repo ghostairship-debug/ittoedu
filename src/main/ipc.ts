@@ -39,6 +39,7 @@ import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
 import { operateMaterials } from './materialService'
 import { operateLocalAgent } from './localAgent/service'
+import { operateDynamicAdmission } from './dynamicAdmission'
 import { operateLegacyPpt } from './pptImportService'
 import {
   mainPreviewNetworkPolicy,
@@ -242,6 +243,14 @@ function registerSafeHandler<T>(
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  registerSafeHandler(IPC_CHANNELS.dynamicAdmission, context, {
+    code: 'DYNAMIC_ADMISSION_FAILED', title: '动态候选准入失败',
+    message: '候选未通过独立进程检查。', suggestion: '请根据检查结果修正候选后重试。',
+  }, async (event, args) => {
+    const entry = context.getRendererEntryUrl()
+    if (!entry) throw new Error('编辑器页面尚未就绪')
+    return operateDynamicAdmission(requireSingleArgument(args), event.sender, entry)
+  })
   registerSafeHandler(IPC_CHANNELS.legacyPpt, context, {
     code: 'PPT_RESAVE_FAILED', title: '旧 PPT 转换失败',
     message: '无法转换旧版 PPT。', suggestion: '请使用本机 Microsoft PowerPoint 另存为 PPTX 后导入。',

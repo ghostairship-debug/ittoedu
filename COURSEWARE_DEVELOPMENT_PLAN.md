@@ -48,12 +48,12 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 - 作者工程为 Course Project V9；发布为 Published Course V2；兼容 Runtime API 2/3、Component API 4 与 Interaction Protocol V1。
 - V9 软冻结：已有字段、判别器和语义不得静默改写；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide-only input 是 Owner 已批准的三个 strict discriminator 窄例外，不构成任意扩展授权。不导入 V8 `.h5lesson`，不借重构创建 V10。
-- 当前实现尚无可见 AI、聊天或 Provider。1.6–1.9 只允许在默认隐藏入口后建设本地 CLI Harness、生成内核、MCP/Skills 与 Chat dogfood；2.0 才在内部生产构建中正式开放。任何版本节点未真实完成前，`courseAiHandoff` / `courseAiPatch` 等 internal/reserved 接口仍不得宣称为可用能力。
+- 当前实现尚无可见 AI、聊天或 Provider。1.6–1.9 只允许在默认隐藏入口后建设本地 CLI Harness、生成内核、CLI 直连/Skills/基础聊天与会话 dogfood；2.0 才在内部生产构建中正式开放。任何版本节点未真实完成前，`courseAiHandoff` / `courseAiPatch` 等 internal/reserved 接口仍不得宣称为可用能力。
 - `artifacts/ai-capabilities` 是 Builder 的产品契约；repo-index 只是显式、可缺省、可重建且不 tracked 的本地导航缓存，不能覆盖源码事实或成为产品门。
 - Runtime/Component 是经过审核的可信扩展。外部导入只是分发方式；真实 consumer 需要宿主能力时走稳定宿主接口或同宿主执行语义，不建权限审批平台。
 - 1.7 起，生成的 Runtime/Component 必须先通过自动准入门；通过后可获得当前可信扩展已经正式具备的宿主能力，无需人工代码审核。该信任不会开放 Provider Secret、原始 Electron Main、任意 OS 命令、远程脚本或尚未进入正式合同的接口。
 - 远程资源和 API 按工程的精确 `https` / `wss` origin 声明开放。远程脚本暂不开放；长期 Provider Secret 不得写入工程、Published payload、组件包或导出 HTML。
-- 首发 Agent 集成只支持用户自行安装并自行认证的 Codex、Claude 与 OpenCode。CLI 保持自身规划循环；编辑器只提供本地 session harness、受管暂存区、自动准入、宿主 canonical command 提交边界和 1.8 起的版本化 MCP Authoring Tools，不复制一套模型 Agent 内核。
+- 首发 Agent 集成只支持用户自行安装并自行认证的 Codex、Claude 与 OpenCode。CLI 保持自身规划循环；编辑器只提供本地 session harness、受管暂存区、自动准入、宿主 canonical command 提交边界与直接 CLI 请求/结果接线，不复制 CLI 的模型规划循环。Owner 已取消 MCP 路线；未来脱离 CLI 时采用模型 API、自有工具与自建 harness，直接复用产品命令、准入与事务，不建设 MCP 过渡层，也不把未来模型接入纳入 1.6–2.0 的当前交付范围。
 - AI 会话与工具轨迹保存在应用本地，按工程 ID 与规范化文件位置隔离；Save As 不复制会话。会话、材料与工具轨迹不进入 `.h5lesson`、Published、组件包或导出物；产品只承诺删除自身记录，不代替外部 CLI 删除其历史。
 - 单 HTML 明确区分离线便携与在线轻量；这是导出选择，不新增持久化 `projectMode`。
 - `v1.1.0` 是不可改写的 V9-only、主动模块化、零遗留与零降级已签署基线；`v1.1.1` 已闭合 Flow 选区字体/字号控件失焦和折叠光标待输入样式，并固定为新的维护版源码标签，不重打或移动 `v1.1.0`。1.1 的发布制品仍是对应源码标签和固定的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不含安装包。既有证据只在相关实现、依赖、测试、fixture 和验证定义未变化时复用；后续版本的发布身份仍由对应路线节点重新固定。
@@ -114,8 +114,8 @@ input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和�
 
 - **1.6 Local CLI Harness**：探测、启动、流式事件、恢复、取消和本地会话隔离；Codex、Claude、OpenCode 自行登录，AI 默认隐藏，CLI 缺失不影响人工编辑。
 - **1.7 生成内核**：Native → Recipe → Existing Component → Generated Component → Runtime 载体阶梯；CLI 只接收不可变最小 snapshot 并向 session staging/structured stdout 输出严格 typed candidate，宿主通过 1.4 canonical commands 原子提交；CLI 无 live 工程接口，自动准入失败时工程零写入。
-- **1.8 Agent/MCP/Skills**：首次向 CLI 暴露交互式 live MCP read/write Authoring Tools 与回执，CLI 保留自己的规划循环；CLI 发起的 authoritative project 读取/修改只能由产品 MCP 工具完成。
-- **1.9 Chat/Dogfood**：隐藏的 Chat shell、工具时间线、Stop/Undo/Preview、会话恢复删除与真实课例 dogfood。
+- **1.8 CLI 直连/Skills/基础聊天**：任务与每轮最小快照直接发给 CLI，复用 1.7 候选与宿主提交器；前移 Chat、引用、真实事件时间线、安全渲染和 Stop/Undo/Preview；S3 验收三 CLI 生成与基础聊天，不建设 MCP。
+- **1.9 会话/Dogfood**：在 1.8 基础聊天上闭合重启恢复、迁移、损坏隔离、范围删除与真实课例持续使用。
 - **2.0 内部生产 AI**：在内部生产构建中正式开放设置、生成、编辑、Agent 与内置 Profile，补齐发送上下文提示、可访问性、失败恢复和固定课例 Owner 验收；不把它描述成面向外部不受信用户的公开发行。
 
 1.6–1.9 只发布源码标签且 AI 默认隐藏；2.0 发布源码标签和固定课例离线 HTML，不做安装包。

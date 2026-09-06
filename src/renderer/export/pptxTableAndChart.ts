@@ -166,6 +166,14 @@ export function addPptxChartNode(
           series.points.find((point) => point.categoryId === category.id)?.value ?? 0
         )),
       }))
+  // DrawingML minMax category axes run bottom-to-top for horizontal bars.
+  // Reverse the export projection to retain Native's top-to-bottom order.
+  if (node.chartType === 'bar' && node.style.barDirection === 'horizontal') {
+    for (const series of data) {
+      series.labels = labels.slice().reverse()
+      series.values = [...(series.values ?? [])].reverse()
+    }
+  }
   const chartColors = circular
     ? (view.circularSlices ?? []).map((slice) => pptxColor(slice.color, '2563EB'))
     : (view.cartesianSeries ?? []).map((series) => pptxColor(series.color, '2563EB'))
@@ -215,7 +223,8 @@ export function addPptxChartNode(
     if (style.valueMax !== undefined) options.valAxisMaxVal = style.valueMax
   }
   if (node.chartType === 'bar') {
-    options.barDir = 'col'
+    options.barDir = node.style.barDirection === 'horizontal' ? 'bar' : 'col'
+    if (options.barDir === 'bar') options.catAxisLabelPos = 'low'
     options.barGrouping = 'clustered'
   }
   if (node.chartType === 'area') {

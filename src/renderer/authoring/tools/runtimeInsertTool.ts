@@ -12,7 +12,7 @@ import type { AuthoringToolDefinition } from './executeAuthoringTool'
 const schema = z.object({ runtime: courseRuntimeDefinitionSchema, label: z.string().trim().min(1).max(120).optional() }).strict()
 export const runtimeInsertTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'runtime.insert', inputSchema: schema, usesResources: true,
-  async plan({ document, destination, value, resources }) {
+  async plan({ document, destination, value, resources, signal }) {
     const { target, surface, location, scope } = resolveAuthoringToolScope(document, destination)
     if (!resources) throw new Error('动态工具缺少当前工程资源')
     if (destination.kind !== 'create' || destination.scope.parent.kind !== 'owner' || destination.scope.insertion.kind !== 'append') throw new Error('Runtime 插入需要 owner 追加 scope')
@@ -36,7 +36,7 @@ export const runtimeInsertTool: AuthoringToolDefinition<z.infer<typeof schema>> 
       itemIds = result.createdLayerItemIds ?? []
     } else throw new Error('当前 owner 不支持 Runtime 创建')
     if (itemIds.length !== 1) throw new Error('Runtime 命令没有返回唯一创建身份')
-    await admitDynamicCandidate(nextDocument, resources, [{ locationId: target.locationId, stateId: target.stateId, instanceIds: itemIds }])
+    await admitDynamicCandidate(nextDocument, resources, [{ locationId: target.locationId, stateId: target.stateId, instanceIds: itemIds }], signal)
     return { transaction: { projectId: document.id, baseRevision: document.revision, nextDocument, resourceChanges: {},
       selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: target.stateId, owner: target.owner, itemIds,
         ...(surface.type === 'flow' ? { flowCarrier: 'overlay' } : {}) } },

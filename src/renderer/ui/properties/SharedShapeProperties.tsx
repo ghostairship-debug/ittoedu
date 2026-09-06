@@ -64,21 +64,39 @@ export function SharedShapeProperties({ node, update }: SharedShapePropertiesPro
   return (
     <section className="property-section" data-testid="shape-properties">
       <h3 className="property-title"><Shapes size={14} />图形</h3>
-      <SelectField<ShapeType>
+      <SelectField<ShapeType | 'custom-path'>
         label="图形类型"
-        value={node.shapeType}
-        options={SHAPE_TYPES.map((value) => ({ value, label: SHAPE_LABELS[value] }))}
-        onChange={(shapeType) => update({ shapeType })}
+        value={node.pathGeometry ? 'custom-path' : node.shapeType}
+        options={[
+          ...(node.pathGeometry ? [{ value: 'custom-path' as const, label: '自由路径' }] : []),
+          ...SHAPE_TYPES.map((value) => ({ value, label: SHAPE_LABELS[value] })),
+        ]}
+        onChange={(shapeType) => { if (shapeType !== 'custom-path') update({ shapeType }) }}
       />
+      {node.braceGeometry && <>
+        <BufferedInput label="括号曲率" type="number" min={0} max={100} step={0.01} value={node.braceGeometry.curvatureRatio}
+          onCommit={value => update({ braceGeometry: { ...node.braceGeometry!, curvatureRatio: Number(value) } })} />
+        <RangeField label="括号中点" min={0} max={100} suffix="%" value={node.braceGeometry.midpoint * 100}
+          onChange={value => update({ braceGeometry: { ...node.braceGeometry!, midpoint: value / 100 } })} />
+      </>}
       {!strokeOnly ? (
         <>
-          <ColorInput
+          {style.fillGradient ? style.fillGradient.stops.map((stop, index) => (
+            <ColorInput
+              key={index}
+              id={`shape-gradient-${index}`}
+              label={`渐变色标 ${index + 1}`}
+              value={stop.color}
+              previewPatch={color => ({ style: { fillGradient: { ...style.fillGradient!, stops: style.fillGradient!.stops.map((entry, entryIndex) => entryIndex === index ? { ...entry, color } : entry) } } })}
+              onChange={color => update({ style: { fillGradient: { ...style.fillGradient!, stops: style.fillGradient!.stops.map((entry, entryIndex) => entryIndex === index ? { ...entry, color } : entry) } } })}
+            />
+          )) : <ColorInput
             id="shape-fill"
             previewPatch={fillColor => ({ style: { fillColor } })}
             label="填充色"
             value={style.fillColor}
             onChange={(fillColor) => update({ style: { fillColor } })}
-          />
+          />}
           <RangeField
             label="填充透明度"
             value={opacityToTransparencyPercent(style.fillOpacity)}
@@ -130,7 +148,7 @@ export function SharedShapeProperties({ node, update }: SharedShapePropertiesPro
         ]}
         onChange={(lineStyle) => update({ style: { lineStyle } })}
       />
-      {(node.shapeType === 'rounded-rectangle' || node.shapeType === 'rectangle') && (
+      {!node.pathGeometry && (node.shapeType === 'rounded-rectangle' || node.shapeType === 'rectangle') && (
         <RangeField
           label="圆角"
           value={style.cornerRadius}

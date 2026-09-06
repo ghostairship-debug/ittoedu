@@ -56,6 +56,7 @@ export interface NativeChartCircularSliceView {
 }
 
 export interface NativeChartGridLineView {
+  readonly x: number
   readonly y: number
   readonly value: number
 }
@@ -81,7 +82,8 @@ export interface NativeChartView {
   readonly accessibleDescription: string
 
   // Cartesian specific
-  readonly categories?: readonly { readonly id: string; readonly label: string; readonly x: number; readonly width: number }[]
+  readonly horizontal?: boolean
+  readonly categories?: readonly { readonly id: string; readonly label: string; readonly x: number; readonly width: number; readonly y: number; readonly height: number }[]
   readonly cartesianSeries?: readonly NativeChartCartesianSeriesView[]
   readonly gridLines?: readonly NativeChartGridLineView[]
   readonly valueMin?: number
@@ -124,7 +126,7 @@ const DEFAULT_SERIES_COLORS = [
  */
 export function describeNativeChart(chart: NativeChartViewContent): string {
   const typeNames: Record<NativeChartContent['chartType'], string> = {
-    bar: '柱状图',
+    bar: chart.chartType === 'bar' && chart.style.barDirection === 'horizontal' ? '横向条形图' : '柱状图',
     line: '折线图',
     area: '面积图',
     pie: '饼图',
@@ -182,6 +184,11 @@ export function buildNativeChartView(
   let plotY = titleHeight
   let plotW = width - 70
   let plotH = height - titleHeight - 40
+  if (chart.chartType === 'bar' && chart.style.barDirection === 'horizontal' && chart.style.showCategoryAxis) {
+    const labelWidth = Math.min(width * 0.3, Math.max(50, ...chart.categories.map(category => category.label.length * 12 + 16)))
+    plotW -= labelWidth - plotX
+    plotX = labelWidth
+  }
 
   if (chart.style.showLegend) {
     if (legendPos === 'top') {
@@ -312,6 +319,7 @@ export function buildNativeChartView(
   }
 
   // Cartesian Chart (bar, line, area)
+  const horizontal = chart.chartType === 'bar' && chart.style.barDirection === 'horizontal'
   // Determine value range
   let allValues: number[] = []
   for (const s of chart.series) {
@@ -333,17 +341,19 @@ export function buildNativeChartView(
   for (let i = 0; i <= steps; i++) {
     const val = minVal + (valRange * i) / steps
     const y = plotY + plotH - (plotH * (val - minVal)) / valRange
-    gridLines.push({ y, value: Math.round(val * 100) / 100 })
+    gridLines.push({ x: plotX + plotW * i / steps, y, value: Math.round(val * 100) / 100 })
   }
 
   // Category slots
   const catCount = Math.max(1, chart.categories.length)
-  const catWidth = plotW / catCount
+  const catWidth = (horizontal ? plotH : plotW) / catCount
   const categorySlots = chart.categories.map((cat, idx) => ({
     id: cat.id,
     label: cat.label,
-    x: plotX + idx * catWidth,
-    width: catWidth,
+    x: horizontal ? plotX : plotX + idx * catWidth,
+    width: horizontal ? plotW : catWidth,
+    y: horizontal ? plotY + idx * catWidth : plotY,
+    height: horizontal ? catWidth : plotH,
   }))
 
   const seriesCount = Math.max(1, chart.series.length)
@@ -368,8 +378,8 @@ export function buildNativeChartView(
         id: pt?.id ?? `pt_${s.id}_${cat.id}`,
         categoryId: cat.id,
         seriesId: s.id,
-        x: centerX,
-        y: normY,
+        x: horizontal ? plotX + plotW * (val - minVal) / valRange : centerX,
+        y: horizontal ? plotY + cIdx * catWidth + catWidth / 2 : normY,
         value: val,
       })
 
@@ -380,13 +390,16 @@ export function buildNativeChartView(
         const valueY = clampY(normY)
         const topY = Math.min(zeroY, valueY)
         const barHeight = Math.abs(valueY - zeroY)
+        const clampX = (x: number) => Math.max(plotX, Math.min(plotX + plotW, x))
+        const zeroX = clampX(plotX + plotW * (0 - minVal) / valRange)
+        const valueX = clampX(plotX + plotW * (val - minVal) / valRange)
         bars.push({
           categoryId: cat.id,
           seriesId: s.id,
-          x: barX,
-          y: topY,
-          width: Math.max(2, singleBarWidth - 2),
-          height: barHeight,
+          x: horizontal ? Math.min(zeroX, valueX) : barX,
+          y: horizontal ? plotY + cIdx * catWidth + barPadding + seriesIdx * singleBarWidth : topY,
+          width: horizontal ? Math.abs(valueX - zeroX) : Math.max(2, singleBarWidth - 2),
+          height: horizontal ? Math.max(2, singleBarWidth - 2) : barHeight,
           value: val,
           color: sColor,
         })
@@ -428,6 +441,7 @@ export function buildNativeChartView(
     legend,
     accessibleDescription,
     categories: categorySlots,
+    horizontal,
     cartesianSeries,
     gridLines,
     valueMin: minVal,

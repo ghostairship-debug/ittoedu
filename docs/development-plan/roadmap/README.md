@@ -31,8 +31,8 @@ flowchart LR
     R15["1.5 素材、导入、QA"]
     R16["1.6 本地 CLI 会话内核（隐藏）"]
     R17["1.7 生成与本地编辑（隐藏）"]
-    R18["1.8 MCP 与 Skills（隐藏）"]
-    R19["1.9 内部 AI 工作台（隐藏）"]
+    R18["1.8 CLI 直连、Skills 与基础聊天（隐藏）"]
+    R19["1.9 会话恢复、删除与 Dogfood（隐藏）"]
     R20["2.0 内部生产 AI 作者工作流"]
     O["OpenMAIC 可选旁支"]
 
@@ -63,8 +63,8 @@ flowchart LR
 | 1.5 | [README](1.5/README.md) | 共享 WorkspaceIdentity、素材、PPTX 导入、风格 Remix 与内容 QA | 无 AI | `v1.5.0` 源码 | S2 工具与素材 |
 | 1.6 | [README](1.6/README.md) | Codex / Claude / OpenCode 本地 CLI 会话内核 | 默认隐藏 | `v1.6.0-rc.N` 源码 | S3 在 1.8 统一签署 |
 | 1.7 | [README](1.7/README.md) | 单页、整课、局部编辑与动态载体的自动生成 / 修复 | 默认隐藏 | `v1.7.0-rc.N` 源码 | S3 在 1.8 统一签署 |
-| 1.8 | [README](1.8/README.md) | 产品 MCP Authoring Server、CLI profiles 与课件 Skills | 默认隐藏 | `v1.8.0` 源码 | S3 AI 内核 |
-| 1.9 | [README](1.9/README.md) | 内部聊天工作台、工具轨迹、Stop / Undo / stale 防护 | 默认隐藏 | `v1.9.0-rc.N` 源码 | S4 在 2.0 统一签署 |
+| 1.8 | [README](1.8/README.md) | CLI 直连、Skills、基础聊天、引用与 Stop/Undo | 默认隐藏 | `v1.8.0` 源码 | S3 CLI 生成与基础聊天 |
+| 1.9 | [README](1.9/README.md) | 会话恢复、迁移、删除与真实课例持续使用 | 默认隐藏 | `v1.9.0-rc.N` 源码 | S4 在 2.0 统一签署 |
 | 2.0 | [README](2.0/README.md) | 三种 CLI 的内部生产 AI 作者工作流和数据边界 | 内部正式开放 | `v2.0.0` 源码 + 固定课例离线 HTML | S4 AI 产品 |
 
 `v1.1.0` 标签保持不可变；`v1.1.1` 已经 Flow 文字格式维护闭环与 Owner 验收创建新源码标签，并重新固定同一课例的离线 HTML。1.2–1.9 不发布离线 HTML，2.0 恢复固定课例离线 HTML；本路线不发布安装器。无后缀版本号绝不同时表示“仅自动化通过”和“Owner 已验收”。
@@ -79,8 +79,8 @@ PPTX 人工导入的跨版本增强与发布节点见 [能力增强计划](../PP
 - **Recipe 互动**：分类使用声明式“选中项目→选中目标组”；排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不扩拖放/放置触发器或顺序动作，也不要求先完成通用组件化。
 - **Authoring target**：所有写操作解析为 canonical target，至少包含工程稳定身份、Surface、容器、对象 / 内容路径与版本前提；工具回执必须报告实际落点和新版本。
 - **动态载体**：Component 注册身份固定为工程 / package / version / source / content；动态引用资产必须进入 Published 闭包；实例异常必须隔离并销毁旧实例，显示可见错误或 fallback。
-- **CLI 内核**：`LocalAgentCliAdapterV1` 是 Agent core 边界。应用只负责进程 / 会话 harness、staging、自动准入、产品命令适配和 1.8 起的 MCP 工具，不重写模型规划循环。
-- **工程写入**：1.7 的 CLI 只接收不可变最小 snapshot 并输出 strict typed candidate/dynamic manifest；它没有 live project API，宿主重校验后通过 1.4 canonical commands 原子提交。1.8 起 CLI 发起的 live read/write 只能通过产品 MCP Authoring Tools。candidate 可默认经结构化 stdout / artifact channel 返回；只有 adapter 启用通用文件工具时才要求文件工具只写当前 session staging。Native/Recipe/Existing Component 不等待动态宿主准入，Generated Component/Runtime 才执行静态与宿主 gate；拒绝、Stop、stale 或适用的准入失败不得进入工程。
+- **CLI 内核**：`LocalAgentCliAdapterV1` 是 Agent core 边界。应用只负责进程 / 会话 harness、staging、自动准入、产品命令适配与请求/结果接线，当前不重写 CLI 模型规划循环。取消 MCP；未来模型 API + 自有工具 + 自建 harness 直接复用产品边界，另行规划，不作为当前交付依赖。
+- **工程写入**：1.7 的 CLI 只接收不可变最小 snapshot 并输出 strict typed candidate/dynamic manifest；它没有 live project API，宿主重校验后通过 1.4 canonical commands 原子提交。1.8–2.0 继续由宿主每轮取快照、CLI 返回候选，基础聊天不依赖 live 工程工具。candidate 可默认经结构化 stdout / artifact channel 返回；只有 adapter 启用通用文件工具时才要求文件工具只写当前 session staging。Native/Recipe/Existing Component 不等待动态宿主准入，Generated Component/Runtime 才执行静态与宿主 gate；拒绝、Stop、stale 或适用的准入失败不得进入工程。
 - **WorkspaceIdentity 与本地会话**：1.5 的共享基础节点唯一规定 `projectId + normalizedPath`；材料域和 AI 会话域分别依赖它，不相互承载私有语义。会话和工具轨迹按该身份隔离；Save As 创建新身份且不复制旧会话。它们可按会话 / 工程 / 全部删除，不进入 `.h5lesson`、Published payload、Component / Runtime 包或任何导出。
 - **可信扩展边界**：自动 gate 通过后可获得当前已批准的可信 Runtime / Component 宿主能力；仍不得获得 Provider secret、原始 Electron Main、任意 OS 控制、未批准脚本或未批准宿主 API。
 

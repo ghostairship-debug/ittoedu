@@ -18,6 +18,7 @@ import { CourseEventBus } from '../../CourseEventBus'
 import { CourseStateStore } from '../../CourseStateStore'
 import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
+import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 import {
   PublishedCaptureBarrier,
   registerPublishedCaptureResource,
@@ -641,6 +642,7 @@ export function mountPublishedSurfaceRuntime(
   }
 
   let unregisterCapture: () => void = () => undefined
+  let unregisterUpdateProbe: () => void = () => undefined
   const handle: PublishedSurfaceRuntimeMountHandle = {
     get ok() { return !quarantined },
     get element() { return visibleElement },
@@ -696,6 +698,7 @@ export function mountPublishedSurfaceRuntime(
       invoke(() => lifecycle.resume?.())
     },
     destroy() {
+      unregisterUpdateProbe()
       if (quarantined) { unregisterCapture(); visibleElement.remove(); return }
       if (instanceDestroyed) return
       instanceDestroyed = true
@@ -714,5 +717,15 @@ export function mountPublishedSurfaceRuntime(
     },
   }
   unregisterCapture = registerPublishedCaptureResource(container, handle)
+  unregisterUpdateProbe = registerPublishedDynamicUpdateProbe(container, async () => {
+    invoke(() => lifecycle.updateContent?.(structuredClone(options.runtime.content.values)))
+    await handle.waitForReady()
+    invoke(() => lifecycle.updateAssets?.(structuredClone(options.runtime.assets)))
+    await handle.waitForReady()
+    invoke(() => lifecycle.resize?.(Math.max(1, options.width * 0.9), Math.max(1, options.height * 0.9)))
+    await handle.waitForReady()
+    invoke(() => lifecycle.resize?.(options.width, options.height))
+    await handle.waitForReady()
+  })
   return handle
 }

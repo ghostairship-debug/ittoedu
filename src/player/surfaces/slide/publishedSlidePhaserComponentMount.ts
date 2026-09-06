@@ -14,6 +14,7 @@ import {
   type ResolvedPublishedComponent,
 } from '../publishedComponentMount'
 import { registerPublishedCaptureResource } from '../publishedCapture'
+import { registerPublishedComponentUpdateProbe } from '../publishedDynamicUpdateProbe'
 
 let sceneSequence = 0
 let phaserModulePromise: Promise<typeof import('phaser')> | null = null
@@ -357,6 +358,7 @@ export function mountPublishedSlidePhaserComponent(
   })
 
   let unregisterCapture: () => void = () => undefined
+  let unregisterUpdateProbe: () => void = () => undefined
   const handle: PublishedComponentMountHandle = {
     get ok() {
       return !quarantined
@@ -457,6 +459,7 @@ export function mountPublishedSlidePhaserComponent(
       destroyed = true
       settleBootFailure(new Error(`Phaser 组件“${instanceId}”在捕获就绪前已销毁`))
       unregisterCapture()
+      unregisterUpdateProbe()
       destroyLifecycle()
       destroyGame()
       fallback?.remove()
@@ -466,5 +469,7 @@ export function mountPublishedSlidePhaserComponent(
     },
   }
   unregisterCapture = registerPublishedCaptureResource(container, handle)
+  unregisterUpdateProbe = registerPublishedComponentUpdateProbe(container, handle,
+    () => ({ props: currentProps, width: currentWidth, height: currentHeight }))
   return handle
 }

@@ -1,5 +1,6 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
+import { selectSlideToolResult } from '../../authoring/toolSelection'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar } from '../../project/v9AssetAdapter'
@@ -955,15 +956,15 @@ export function persistSlideTransaction(
   const session = backend.getSession()
   const authoringSession = kernel.readAuthoringSession()
   const hint = readAuthoringToolSelection(step.selectionHint)
-  if (hint?.owner === 'world') throw new Error('Slide 不能选中 world owner')
-  const selection = hint ? selectSlideEditorLayers({ project: step.nextDocument, locationId: hint.locationId, stateId: hint.stateId, selectionIds: hint.itemIds }) : session.selection
+  const selected = hint ? selectSlideToolResult(step.nextDocument, hint) : null
+  const selection = selected?.selection ?? session.selection
   const persisted = slide.persist({
     ok: true,
     nextSession: {
       ...session,
       history: commitSlideEditorTransactionHistory(session.history, step),
       selection,
-      scope: hint?.owner ?? session.scope,
+      scope: selected?.owner ?? session.scope,
     },
     historyEntry: true,
     selection,

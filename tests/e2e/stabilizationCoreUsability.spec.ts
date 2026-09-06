@@ -17,7 +17,13 @@ import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDeliver
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
 import { runLocalCliFailureProbe } from './localCliFailureProbe'
-import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
+import { installChatFailureFixture } from './chatFailureFixture'
+import { fractionFallback, fractionComponentInstruction, exerciseFractionComponent, oscillationFallback, oscillationRuntimeInstruction, exerciseOscillationRuntime } from './generatedCarrierProbe'
+import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
+import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture, pptxEditableChartsFixture, pptxEditablePathsFixture } from '../fixtures/pptxImport'
+import { pptxEquationFixture } from '../fixtures/pptxEquation'
+import { pptxDiagramFixture } from '../fixtures/pptxDiagram'
+import { buildCoursePptx } from '../../src/renderer/export/course/buildCoursePptx'
 import { createServer } from 'vite'
 import type { CoursewareCaseBuildSummary } from '../../scripts/build-courseware-case'
 import { execFile } from 'node:child_process'
@@ -98,7 +104,7 @@ async function closeEditor(app: ElectronApplication, runRoot: string): Promise<v
   removeRunRoot(runRoot)
 }
 
-async function launchEditor(): Promise<LaunchedEditor> {
+async function launchEditor(developmentUrl = '', cliDogfood = false): Promise<LaunchedEditor> {
   const runRoot = mkdtempSync(
     join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-wave-a-${process.pid}-`),
   )
@@ -110,7 +116,8 @@ async function launchEditor(): Promise<LaunchedEditor> {
       cwd: root,
       env: {
         ...process.env,
-        VITE_DEV_SERVER_URL: '',
+        VITE_DEV_SERVER_URL: developmentUrl,
+        ...(cliDogfood ? { COURSEWARE_CLI_DOGFOOD: '1' } : {}),
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
         [BACKGROUND_E2E_ENV]: '1',
       },
@@ -138,7 +145,7 @@ async function launchEditor(): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
@@ -452,6 +459,637 @@ test('S2 Builder V2：两份 Markdown 生成三 Surface 并在离线 HTML 连续
   }
 })
 
+test('S3 独立动态准入：正常候选、同步死循环终止与编辑保存响应', async () => {
+  test.setTimeout(120_000)
+  const { app, page, runRoot } = await launchEditor()
+  const markers: string[] = []
+  app.context().on('page', worker => worker.on('console', message => {
+    if (message.text().startsWith('ADMISSION_SYNC_')) markers.push(message.text())
+  }))
+  try {
+    const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const sources = await createProjectFontDeliveryFixture(font, fallback)
+    const payload = { project: sources.project,
+      assetFiles: Object.fromEntries(Object.entries(sources.assetFiles).map(([id, data]) => [id, Buffer.from(data).toString('base64')])),
+      componentFiles: Object.fromEntries(Object.entries(sources.components).map(([id, data]) => [id,
+        Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, Buffer.from(bytes).toString('base64')]))])),
+      targets: [{ locationId: sources.project.startLocationId, instanceIds: ['runtime-font'] }] }
+    const good = await page.evaluate(payload => window.desktopAPI.dynamicAdmission!({ operation: 'run', id: crypto.randomUUID(), payload }), payload)
+    expect(good.ok, good.message).toBe(true)
+    const mainPid = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('index.html'))!.webContents.getOSProcessId())
+    expect(good.processId).not.toBe(mainPid)
+    const filename = join(runRoot, 'admission-responsive.h5lesson')
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(filename)).toBe(true)
+    const original = readProject(filename)
+    for (const phase of ['register', 'create', 'capture'] as const) {
+      const input = structuredClone(payload)
+      const surface = input.project.surfaces[0]!
+      if (surface.type !== 'slide') throw new Error('Wrong fixture surface')
+      const runtime = surface.scenes[0]!.layerItems.find(item => item.kind === 'runtime')!
+      if (runtime.kind !== 'runtime') throw new Error('Missing fixture runtime')
+      runtime.runtime.source = phase === 'register'
+        ? 'console.info("ADMISSION_SYNC_register");for(;;){};CoursewareRuntime.define({runtimeApiVersion:2,create(){return {}}})'
+        : phase === 'create'
+        ? 'CoursewareRuntime.define({runtimeApiVersion:2,create(){console.info("ADMISSION_SYNC_create");for(;;){}}})'
+        : 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {prepareCapture(){console.info("ADMISSION_SYNC_capture");for(;;){}},destroy(){}}}})'
+      const id = await page.evaluate(payload => {
+        const id = crypto.randomUUID()
+        Reflect.set(window, '__admissionPending', window.desktopAPI.dynamicAdmission!({ operation: 'run', id, payload }))
+        return id
+      }, input)
+      await expect.poll(() => markers.includes(`ADMISSION_SYNC_${phase}`)).toBe(true)
+      await page.getByTestId('add-content-primary').click({ timeout: 3000 })
+      const saved = await saveCurrent(page, filename)
+      expect(saved.revision).toBeGreaterThan(original.revision)
+      expect(saved.surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems) : []).some(item => item.kind === 'runtime')).toBe(false)
+      if (phase === 'capture') await page.evaluate(id => window.desktopAPI.dynamicAdmission!({ operation: 'cancel', id }), id)
+      const result = await page.evaluate(() => Reflect.get(window, '__admissionPending'))
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain(phase === 'capture' ? '取消' : '超时')
+      await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('admission.html')).length)).toBe(0)
+    }
+  } finally { await closeEditor(app, runRoot) }
+})
+
+test('S3 独立动态工具：组件与 Runtime 的三 Surface 准入回归', async () => {
+  test.setTimeout(180_000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  const address = server.httpServer!.address()
+  if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+  let launch: LaunchedEditor | undefined
+  try {
+    launch = await launchEditor(`http://127.0.0.1:${address.port}/`)
+    const result = await runDynamicAdmissionProbe(launch.page)
+    for (const key of ['good', 'componentGood', 'disabled', 'configured', 'componentConfigured'] as const) expect(result[key].status, JSON.stringify(result[key])).toBe('committed')
+    for (const key of ['bad', 'componentBad', 'missing', 'timeout', 'conflict'] as const) expect(result[key].status, JSON.stringify(result[key])).toBe('failed')
+    expect(result.stale.status).toBe('stale')
+    expect(result.stateOnlyFailure.status).toBe('failed')
+    expect(result.stateOnlyFailure.after).toBe(result.stateOnlyFailure.before)
+    expect(result.missing.diagnostics[0].path).toContain('source')
+    for (const inserted of result.insertedRuntimes) expect(inserted.status, JSON.stringify(inserted)).toBe(inserted.surfaceType === 'spatial-2d' ? 'failed' : 'committed')
+    for (const inserted of result.insertedComponents) expect(inserted.status, JSON.stringify(inserted)).toBe('committed')
+    expect(result.componentPlacements).toHaveLength(2)
+    for (const placed of result.componentPlacements) {
+      expect(placed.status, JSON.stringify(placed)).toBe('committed')
+      expect(placed.frame).toMatchObject({ x: 40, y: 80, width: 320, height: 180 })
+      expect(placed.label).toBe('Placed component')
+    }
+    expect(result.captureFailures).toHaveLength(17)
+    expect(result.runtimeUpdateFailures).toHaveLength(10)
+    for (const failure of result.runtimeUpdateFailures) {
+      expect(failure.status, JSON.stringify(failure)).toBe('failed')
+      expect(failure.diagnostics.some((entry: { code: string }) => entry.code === 'dynamic-host-failed')).toBe(true)
+      expect(failure.projectUnchanged).toBe(true)
+      expect(failure.resourcesUnchanged).toBe(true)
+    }
+    for (const failure of result.captureFailures) {
+      expect(failure.status, JSON.stringify(failure)).toBe('failed')
+      expect(failure.after).toBe(failure.before)
+      expect(failure.projectUnchanged).toBe(true)
+      expect(failure.resourcesUnchanged).toBe(true)
+    }
+  } finally {
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 聊天失败注入：一次修复、无进展停止、取消与人工撤销后旧结果零写入', async () => {
+  test.setTimeout(90000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let fixture: Awaited<ReturnType<typeof installChatFailureFixture>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    fixture = await installChatFailureFixture(app, runRoot)
+    const filename = join(runRoot, 'failure-chat.h5lesson')
+    const original = await saveAs(app, page, filename)
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const send = async () => {
+      await chat.getByLabel('发送给创作助手').fill('添加平均分讲解')
+      await chat.getByRole('button', { name: '发送', exact: true }).click()
+    }
+    fixture.mode('repair'); await send()
+    await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toBeEnabled({ timeout: 20000 })
+    expect(fixture.runs().map(run => [run.revision, run.repair])).toEqual([[0, false], [0, true]])
+    expect(fixture.runs()[0].requestId).not.toBe(fixture.runs()[1].requestId)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    const applied = await saveCurrent(page, filename)
+    expect(applied.revision).toBe(1)
+    fixture.mode('no-progress'); await send()
+    await expect(chat.getByRole('alert')).toContainText('没有可观察的变化', { timeout: 20000 })
+    expect(fixture.runs()).toHaveLength(4)
+    expect(await saveCurrent(page, filename)).toEqual(applied)
+    fixture.mode('delayed'); await send()
+    await expect.poll(() => fixture!.runs().length).toBe(5)
+    await chat.getByRole('button', { name: '停止', exact: true }).click()
+    await expect(chat.getByRole('status')).toContainText('已停止')
+    expect(await saveCurrent(page, filename)).toEqual(applied)
+    await send()
+    await expect.poll(() => fixture!.runs().length).toBe(6)
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    await expect(chat.getByRole('alert')).toContainText('stale', { timeout: 10000 })
+    expect(fixture.runs()).toHaveLength(6)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    const records = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
+    expect(records.records?.map(record => record.hostResult?.status)).toEqual(expect.arrayContaining(['rejected', 'undone', 'stale']))
+    await send()
+    await expect.poll(() => fixture!.runs().length).toBe(7)
+    const newPath = join(runRoot, 'new-workspace.h5lesson')
+    expect(await saveAs(app, page, newPath)).toEqual(original)
+    await expect.poll(async () => {
+      const result = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
+      return result.records?.find(record => record.generationRequestId === fixture!.runs()[6].requestId)?.status
+    }).toBe('cancelled')
+    const newRecords = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: newPath })
+    expect(newRecords.records).toEqual([])
+    expect(await saveCurrent(page, newPath)).toEqual(original)
+    expect(fixture.runs()).toHaveLength(7)
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    if (fixture) await fixture.restore()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 普通讨论：安全消息、分页事件重放及零工程写入', async () => {
+  test.setTimeout(90000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let fixture: Awaited<ReturnType<typeof installChatFailureFixture>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    fixture = await installChatFailureFixture(app, runRoot); fixture.mode('discussion')
+    const filename = join(runRoot, 'discussion.h5lesson')
+    const original = await saveAs(app, page, filename)
+    const requests: string[] = []; page.on('request', request => { if (request.url().includes('invalid.example')) requests.push(request.url()) })
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('发送给创作助手').fill('讨论如何解释平均分，先不修改课件。')
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await expect(chat.getByRole('heading', { name: '只讨论，不修改课件' })).toBeVisible({ timeout: 20000 })
+    await expect(chat.getByText('CLI 原生事件（214）', { exact: true })).toBeVisible()
+    await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    expect(await page.evaluate(() => Reflect.get(window, '__unsafeChatExecuted'))).toBeUndefined()
+    await expect(chat.locator('script, iframe, img, a[href^="javascript:"]')).toHaveCount(0)
+    expect(requests).toEqual([])
+    const id = await chat.getByLabel('会话', { exact: true }).inputValue()
+    await chat.getByLabel('会话', { exact: true }).selectOption('')
+    await chat.getByLabel('会话', { exact: true }).selectOption(id)
+    const summary = chat.getByText('CLI 原生事件（214）', { exact: true })
+    await expect(summary).toBeVisible(); await summary.click()
+    const timeline = summary.locator('..')
+    await expect(timeline.locator('ol > li')).toHaveCount(100)
+    await timeline.getByRole('button', { name: '显示更早的事件' }).click()
+    await timeline.getByRole('button', { name: '显示更早的事件' }).click()
+    const sequences = await timeline.locator('ol > li').evaluateAll(items => items.map(item => item.textContent!.match(/^#(\d+)/)![1]))
+    expect(sequences).toHaveLength(214)
+    expect(new Set(sequences).size).toBe(214)
+    expect(sequences[0]).toBe('1'); expect(sequences.at(-1)).toBe('214')
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    if (fixture) await fixture.restore()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实聊天：${adapter} 生成候选、继续修改、单次撤销与保存`, async () => {
+  test.setTimeout(240000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    const path = join(runRoot, `chat-${adapter}.h5lesson`)
+    await saveAs(app, page, path)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem').filter({ hasText: '教学材料库' }).click()
+    const library = page.getByRole('dialog', { name: '教学材料库' })
+    await library.getByLabel('标题', { exact: true }).fill('分数含义基准材料')
+    await library.getByLabel('来源定位', { exact: true }).fill('S3 固定工程夹具')
+    await library.getByLabel('材料正文', { exact: true }).fill('分数表示把一个整体平均分成若干份，取其中的一份或几份。')
+    await library.getByRole('button', { name: '保存文本材料' }).click()
+    await expect(library.getByText('1 条材料', { exact: true })).toBeVisible()
+    await library.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const waitCandidate = async () => {
+      await expect.poll(async () => {
+        const alert = chat.getByRole('alert')
+        if (await alert.count()) throw new Error(await alert.innerText())
+        return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+      }, { timeout: 100000 }).toBe(true)
+    }
+    await chat.getByLabel('CLI', { exact: true }).selectOption(adapter)
+    await chat.getByText('引用教学材料（0）', { exact: true }).click()
+    await chat.getByLabel('分数含义基准材料', { exact: true }).check()
+    const started = Date.now()
+    await chat.getByLabel('发送给创作助手').fill('在当前空白页只添加一个可编辑 Native 文字对象，文字必须完整使用已引用“分数含义基准材料”的正文，位置 x=100 y=100，宽900高180。不需要调查文件，直接依据提供的工具输入合同返回一个候选。')
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await waitCandidate()
+    expect(readProject(path).revision).toBe(0)
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    await expect(chat.getByText('宿主已提交，可一次撤销', { exact: true })).toBeVisible()
+    const first = await saveCurrent(page, path)
+    expect(JSON.stringify(first)).toContain('分数表示把一个整体平均分成若干份')
+    await chat.getByLabel('发送给创作助手').fill('继续修改本轮快照中的刚才文字对象，只把它的 label 改成“分数知识讲解”，保持文字内容与位置不变。使用 native.content 的 properties 操作。直接返回一个候选。')
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await waitCandidate()
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    const second = await saveCurrent(page, path)
+    expect(JSON.stringify(second)).toContain('分数知识讲解')
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    const undone = await saveCurrent(page, path)
+    expect(undone).toEqual(first)
+    const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: first.id, projectPath: path })
+    expect(sessions.records?.every(record => JSON.stringify(record.generationRequest?.context).includes('分数含义基准材料'))).toBe(true)
+    await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    const textNode = effectiveItems(first).find(item => item.kind === 'native' && item.content.nativeType === 'text')!
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${textNode.layerItemId}"] .node-name`).click()
+    const textInput = page.getByRole('textbox', { name: '文字内容', exact: true })
+    await textInput.fill('教师复核：平均分是分数的前提。'); await textInput.press('Tab')
+    expect(JSON.stringify(await saveCurrent(page, path))).toContain('教师复核：平均分是分数的前提。')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect(await saveCurrent(page, path)).toEqual(first)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(path)))
+    expect(reopened.project).toEqual(first)
+    const evidence = join(root, `output/playwright/r18-cli-${adapter}`); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(path))
+    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter, elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult, revision: record.generationRequest?.documentRevision })) }, null, 2))
+    const htmlPath = join(evidence, 'generated.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    await expect(player.getByText('分数表示把一个整体平均分成若干份，取其中的一份或几份。', { exact: true })).toBeVisible()
+    await player.screenshot({ path: join(evidence, 'player.png') })
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+for (const carrier of ['recipe', 'existing-component'] as const) test(`S3 真实载体：${carrier} 目录复用、人工编辑与离线重开`, async () => {
+  test.setTimeout(240000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, `${carrier}.h5lesson`)
+    const original = await saveAs(app, page, filename)
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
+    await chat.getByLabel('发送给创作助手').fill(carrier === 'recipe'
+      ? '请复用现成 concept-v1 概念讲解配方，在当前页之后生成一页。标题“理解平均分”，解释“平均分就是每份同样多。”，例证“把一个整体分成四份，每份同样多才叫平均分。”，视觉槽位说明“观察各份是否同样大”。这个现成结构与需要完全匹配，使用 recipe.apply 一步完成并说明选阶理由，不自行堆砌 Native。只返回候选，不读取文件。'
+      : '请从当前可信组件目录复用“语文朗读标注”，插入当前场景，使用其默认内容和尺寸，位置x80 y120。需要重音、停顿和连读标记的现成语义呈现，Native与Recipe不足而目录已有该组件；说明理由。使用 component.insert operation:catalog，身份和摘要严格取自context.componentCatalog，不生成源码、不读取文件。必要时用component.configure配置位置。只返回候选。')
+    const started = Date.now()
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await expect.poll(async () => {
+      const alert = chat.getByRole('alert')
+      if (await alert.count()) throw new Error(await alert.innerText())
+      return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+    }, { timeout: 150000 }).toBe(true)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    const generated = await saveCurrent(page, filename)
+    expect(generated.revision).toBe(original.revision + 1)
+    const slide = generated.surfaces.find(surface => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('Missing Slide')
+    const item = carrier === 'recipe'
+      ? slide.scenes.at(-1)!.layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'text' && JSON.stringify(item).includes('理解平均分'))!
+      : effectiveItems(generated).find(item => item.kind === 'component')!
+    expect(item).toBeDefined()
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    expect(await saveCurrent(page, filename)).toEqual(generated)
+    await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    if (carrier === 'recipe') await courseTreeKind(page, 'slide-scene').last().locator('button.course-page-tree__label').first().click()
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${item.layerItemId}"] .node-name`).click()
+    const input = page.getByRole('textbox', { name: carrier === 'recipe' ? '文字内容' : '标题', exact: true })
+    await input.fill('教师修改后的标题'); await input.press('Tab')
+    const edited = await saveCurrent(page, filename)
+    expect(JSON.stringify(edited)).toContain('教师修改后的标题')
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const evidence = join(root, `output/playwright/r18-${carrier}`); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
+    const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: generated.id, projectPath: filename })
+    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', carrier, elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult })) }, null, 2))
+    const components = Object.fromEntries(Object.entries(reopened.componentFiles).map(([id, files]) => [id, parseComponentPackageFiles(files)]))
+    const htmlPath = join(evidence, 'generated.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    if (carrier === 'recipe') for (const name of ['展开教师控制器', '下一场景']) {
+      const control = player.getByRole('button', { name, exact: true }); await expect(control).toBeVisible()
+      const box = await control.boundingBox(); if (!box) throw new Error('Missing teacher control')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await expect(player.getByText('教师修改后的标题', { exact: true })).toBeVisible()
+    await player.screenshot({ path: join(evidence, 'player.png') })
+    expect(launch.pageErrors).toEqual([])
+  } finally { await browser?.close(); if (launch) await closeEditor(launch.app, launch.runRoot); await server.close() }
+})
+
+test('S3 真实整课：Codex 从确认文档生成、重开与离线逐页运行', async () => {
+  test.setTimeout(240000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'whole-course.h5lesson')
+    const original = await saveAs(app, page, filename)
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
+    await chat.getByText('从已确认文档生成整课', { exact: true }).click()
+    await chat.getByLabel('生成包含多个片段的完整课件').check()
+    // These are a fixed engineering fixture, not a teacher acceptance signature.
+    await chat.getByLabel('教学策划 Markdown').fill('# 平均分与分数\n目标：理解平均分是分数的前提，认识二分之一。\n路径：先比较平均分与不平均分；再用一个整体的两等份解释分母和分子；最后判断迁移例并解释理由。')
+    await chat.getByLabel('已审阅并确认当前教学策划').check()
+    await chat.getByLabel('呈现脚本 Markdown').fill('# 三个演示片段\n1. 使用现有空白演示页。标题“认识平均分”，正文“平均分就是每份同样多。把一个整体分成两份，只有两份同样多时才是平均分。”\n2. 新建演示页。标题“认识二分之一”，正文“把一个整体平均分成两份，每份是这个整体的二分之一。分母2表示平均分成两份，分子1表示取其中一份。”\n3. 新建演示页。标题“判断与解释”，正文“一个圆被分成大小不同的两块，每块能叫二分之一吗？不能，因为没有平均分。”\n每页标题 x80 y60 宽1120高80，正文 x80 y200 宽1120高300。全部使用可编辑 Native 文字，黑字白底，字号至少32。每页只有标题与正文，采用默认教师控制器翻页。')
+    await chat.getByLabel('已审阅并确认当前呈现脚本').check()
+    await chat.getByLabel('发送给创作助手').fill('按照已确认的两份文档生成完整三页课件。保留现有第一页并写入内容，另建两页；严格遵循三页顺序。使用正式 slide.structure 创建页和 created-scope 引用新页。只输出一个候选，不调查文件。')
+    const started = Date.now()
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await expect.poll(async () => {
+      const alert = chat.getByRole('alert')
+      if (await alert.count()) throw new Error(await alert.innerText())
+      return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+    }, { timeout: 150000 }).toBe(true)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    const generated = await saveCurrent(page, filename)
+    expect(generated.revision).toBe(original.revision + 1)
+    expect(generated.locations).toHaveLength(3)
+    const titles = ['认识平均分', '认识二分之一', '判断与解释']
+    const slide = generated.surfaces.find(surface => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('Missing Slide surface')
+    expect(slide.scenes.flatMap(scene => scene.layerItems).every(item => item.kind === 'native')).toBe(true)
+    const sceneText = slide.scenes.map(scene => JSON.stringify(scene.layerItems))
+    for (const [index, title] of titles.entries()) expect(sceneText[index]).toContain(title)
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    expect(await saveCurrent(page, filename)).toEqual(generated)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(generated)
+    const evidence = join(root, 'output/playwright/r18-whole-course'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
+    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', elapsedMs: Date.now() - started, locations: generated.locations, revision: generated.revision }, null, 2))
+    const htmlPath = join(evidence, 'generated.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    const clickControl = async (name: string) => {
+      const control = player.getByRole('button', { name, exact: true }); await expect(control).toBeVisible()
+      const box = await control.boundingBox(); if (!box) throw new Error('Missing teacher control')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await clickControl('展开教师控制器')
+    for (const [index, title] of titles.entries()) {
+      await expect(player.getByText(title, { exact: true })).toBeVisible()
+      await player.screenshot({ path: join(evidence, `page-${index + 1}.png`) })
+      if (index < 2) await clickControl('下一场景')
+    }
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 真实生成组件：Codex 候选、教师改属性、保存重开与连续互动', async () => {
+  test.setTimeout(360000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'generated-component.h5lesson')
+    await saveAs(app, page, filename)
+    const fallbackPath = join(runRoot, 'fraction-fallback.png')
+    writeFileSync(fallbackPath, Buffer.from(await fractionFallback(page), 'base64'))
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: fallbackPath })
+    await page.getByRole('tab', { name: '元素', exact: true }).click()
+    await page.getByRole('tab', { name: '媒体', exact: true }).click()
+    await page.getByRole('button', { name: '导入图片', exact: true }).click()
+    await expect(page.getByText('fraction-fallback.png', { exact: true }).first()).toBeVisible()
+    const original = await saveCurrent(page, filename)
+    const fallbackAsset = Object.values(original.assets).find(asset => asset.filename === 'fraction-fallback.png')!
+    expect(fallbackAsset.kind).toBe('image')
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
+    await chat.getByLabel('发送给创作助手').fill(fractionComponentInstruction(fallbackAsset.id))
+    const started = Date.now()
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await expect.poll(async () => {
+      const alert = chat.getByRole('alert')
+      if (await alert.count()) throw new Error(await alert.innerText())
+      return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+    }, { timeout: 270000 }).toBe(true)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    const generated = await saveCurrent(page, filename)
+    expect(generated.revision).toBe(original.revision + 1)
+    const component = effectiveItems(generated).find(item => item.kind === 'component')!
+    expect(component?.kind).toBe('component')
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    expect(await saveCurrent(page, filename)).toEqual(generated)
+    await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${component.layerItemId}"] .node-name`).click()
+    const title = page.getByRole('textbox', { name: '探索标题', exact: true })
+    await expect(title).toHaveValue('平均分探索')
+    await title.fill('平均分实验'); await title.press('Tab')
+    const edited = await saveCurrent(page, filename)
+    expect(JSON.stringify(edited)).toContain('平均分实验')
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const components = Object.fromEntries(Object.entries(reopened.componentFiles).map(([id, files]) => [id, parseComponentPackageFiles(files)]))
+    const evidence = join(root, 'output/playwright/r18-generated-component'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
+    const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: generated.id, projectPath: filename })
+    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult })) }, null, 2))
+    const htmlPath = join(evidence, 'generated.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    const errors: string[] = []; player.on('pageerror', error => errors.push(String(error)))
+    await player.goto(pathToFileURL(htmlPath).href)
+    await exerciseFractionComponent(player, join(evidence, 'interaction.png'))
+    expect(errors).toEqual([])
+    expect(launch.pageErrors).toEqual([])
+  } catch (error) {
+    if (launch) {
+      const filename = join(launch.runRoot, 'generated-component.h5lesson')
+      if (existsSync(filename)) {
+        const project = readProject(filename)
+        const records = await launch.page.evaluate(async owner => {
+          const list = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
+          return Promise.all((list.records ?? []).map(async record => (await window.desktopAPI.localAgent({ operation: 'read', ...owner, sessionId: record.id, after: 0 })).records?.[0]))
+        }, { projectId: project.id, projectPath: filename }).catch(() => [])
+        const evidence = join(root, 'output/playwright/r18-generated-component'); mkdirSync(evidence, { recursive: true })
+        writeFileSync(join(evidence, 'failure.json'), JSON.stringify({ error: String(error), projectRevision: project.revision, records }, null, 2))
+      }
+    }
+    throw error
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 真实生成Runtime：连续动画、文案编辑、历史与离线互动', async () => {
+  test.setTimeout(360000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'generated-runtime.h5lesson')
+    await saveAs(app, page, filename)
+    const fallbackPath = join(runRoot, 'oscillation-fallback.png')
+    writeFileSync(fallbackPath, Buffer.from(await oscillationFallback(page), 'base64'))
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: fallbackPath })
+    await page.getByRole('tab', { name: '元素', exact: true }).click()
+    await page.getByRole('tab', { name: '媒体', exact: true }).click()
+    await page.getByRole('button', { name: '导入图片', exact: true }).click()
+    await expect(page.getByText('oscillation-fallback.png', { exact: true }).first()).toBeVisible()
+    const original = await saveCurrent(page, filename)
+    const fallbackAsset = Object.values(original.assets).find(asset => asset.filename === 'oscillation-fallback.png')!
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
+    await chat.getByLabel('发送给创作助手').fill(oscillationRuntimeInstruction(fallbackAsset.id))
+    const started = Date.now()
+    await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await expect.poll(async () => {
+      const alert = chat.getByRole('alert')
+      if (await alert.count()) throw new Error(await alert.innerText())
+      return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+    }, { timeout: 270000 }).toBe(true)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    const generated = await saveCurrent(page, filename)
+    expect(generated.revision).toBe(original.revision + 1)
+    const runtime = effectiveItems(generated).find(item => item.kind === 'runtime')!
+    expect(runtime?.kind).toBe('runtime')
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    expect(await saveCurrent(page, filename)).toEqual(generated)
+    await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${runtime.layerItemId}"] .node-name`).click()
+    const titleTarget = page.getByRole('button', { name: '动画标题，双击编辑文字', exact: true })
+    await expect(titleTarget).toBeVisible()
+    const titleBounds = await titleTarget.boundingBox()
+    if (!titleBounds) throw new Error('Runtime 标题没有实际编辑位置')
+    // The canvas owns pointer hit testing; the semantic target is keyboard-only.
+    await page.mouse.dblclick(titleBounds.x + titleBounds.width / 2, titleBounds.y + titleBounds.height / 2)
+    const title = page.getByTestId('canvas-plain-text-editor').getByRole('textbox', { name: '动画标题', exact: true })
+    await expect(title).toHaveValue('振动探索')
+    await title.fill('振幅实验'); await title.press('Enter')
+    const edited = await saveCurrent(page, filename)
+    expect(JSON.stringify(edited)).toContain('振幅实验')
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const evidence = join(root, 'output/playwright/r18-generated-runtime'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
+    const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: generated.id, projectPath: filename })
+    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult })) }, null, 2))
+    const htmlPath = join(evidence, 'generated.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    const errors: string[] = []; player.on('pageerror', error => errors.push(String(error)))
+    await player.goto(pathToFileURL(htmlPath).href)
+    await exerciseOscillationRuntime(player, join(evidence, 'interaction.png'))
+    expect(errors).toEqual([])
+    expect(launch.pageErrors).toEqual([])
+  } catch (error) {
+    if (launch) {
+      const filename = join(launch.runRoot, 'generated-runtime.h5lesson')
+      if (existsSync(filename)) {
+        const project = readProject(filename)
+        const records = await launch.page.evaluate(async owner => {
+          const list = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
+          return Promise.all((list.records ?? []).map(async record => (await window.desktopAPI.localAgent({ operation: 'read', ...owner, sessionId: record.id, after: 0 })).records?.[0]))
+        }, { projectId: project.id, projectPath: filename }).catch(() => [])
+        const evidence = join(root, 'output/playwright/r18-generated-runtime'); mkdirSync(evidence, { recursive: true })
+        writeFileSync(join(evidence, 'failure.json'), JSON.stringify({ error: String(error), projectRevision: project.revision, records }, null, 2))
+        writeFileSync(join(evidence, 'failed-project.h5lesson'), readFileSync(filename))
+      }
+    }
+    throw error
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
 test('S2 动态工具：真实宿主拒绝坏源码且工程与资源零写入', async () => {
   const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
   await server.listen()
@@ -486,6 +1124,14 @@ test('S2 动态工具：真实宿主拒绝坏源码且工程与资源零写入',
       if (inserted.surfaceType === 'spatial-2d') expect(inserted.after).toBe(inserted.before)
     }
     for (const inserted of result.insertedComponents) expect(inserted.status, JSON.stringify(inserted)).toBe('committed')
+    expect(result.captureFailures).toHaveLength(17)
+    for (const failure of result.captureFailures) {
+      expect(failure.status, JSON.stringify(failure)).toBe('failed')
+      expect(failure.after).toBe(failure.before)
+      expect(failure.projectUnchanged).toBe(true)
+      expect(failure.resourcesUnchanged).toBe(true)
+      expect(failure.diagnostics.some((entry: { code: string }) => entry.code === 'dynamic-host-failed')).toBe(true)
+    }
     expect(result.distantComponentPreserved).toBe(true)
     expect(result.commits).toBe(5)
     expect(result.packageVersion).toBe('1.0.1')
@@ -571,6 +1217,337 @@ test('S2 回归：删除初始场景与页面，并导入可编辑线条', async
     expect(painted.every(shape => !shape.clipped)).toBe(true)
     expect(pageErrors).toEqual([])
   } finally { await browser?.close(); await closeEditor(app, runRoot) }
+})
+
+test('S3 PPTX 自由路径：渐变连续编辑、历史、保存重开和离线 Player', async () => {
+  test.setTimeout(120000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'paths.h5lesson')
+    await saveAs(app, page, filename)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'paths.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(pptxEditablePathsFixture(true)) })
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    const surface = imported.surfaces.at(-1)!
+    if (surface.type !== 'slide') throw new Error('Missing imported surface')
+    const item = surface.scenes[0].layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'shape')!
+    const shapeId = item.layerItemId
+    const painted = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${shapeId}"] svg`)
+    await expect(painted.locator('path')).toHaveCount(1)
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${shapeId}"] .node-name`).click()
+    const color = page.locator('#shape-gradient-0-text')
+    await color.fill('#00ff00')
+    await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#00ff00')
+    await color.fill('#ff0000'); await color.press('Enter')
+    await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#ff0000')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#2563eb')
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#ff0000')
+    await page.getByLabel('图形类型', { exact: true }).selectOption('ellipse')
+    await expect(painted).toHaveCount(0)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#ff0000')
+    const brace = surface.scenes[0].layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'shape' && item.content.data.braceGeometry)!
+    const bracePath = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${brace.layerItemId}"] path`)
+    const originalBrace = await bracePath.getAttribute('d')
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${brace.layerItemId}"] .node-name`).click()
+    await page.getByRole('spinbutton', { name: '括号曲率', exact: true }).fill('0.4')
+    await page.getByRole('spinbutton', { name: '括号曲率', exact: true }).press('Enter')
+    await expect(bracePath).not.toHaveAttribute('d', originalBrace!)
+    const changedBrace = await bracePath.getAttribute('d')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(bracePath).toHaveAttribute('d', originalBrace!)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(bracePath).toHaveAttribute('d', changedBrace!)
+    const edited = await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
+    await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#ff0000')
+    await expect(bracePath).toHaveAttribute('d', changedBrace!)
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const exported = await page.evaluate(async sources => {
+      const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
+      const { buildCoursePptx } = await load('/src/renderer/export/course/buildCoursePptx.ts')
+      const { parsePptxImport } = await load('/src/renderer/project/pptxImport.ts')
+      const result = await buildCoursePptx(sources)
+      const draft = await parsePptxImport(result.bytes)
+      const shape = draft.slides.flatMap((slide: any) => slide.items).find((item: any) => item.content?.data.pathGeometry)
+      return { bytes: Array.from(result.bytes) as number[], shape: shape?.content.data }
+    }, sources)
+    expect(exported.shape.pathGeometry).toEqual(item.kind === 'native' && item.content.nativeType === 'shape' ? item.content.data.pathGeometry : undefined)
+    expect(exported.shape.style.fillGradient.stops[0].color).toBe('#ff0000')
+    const evidence = join(root, 'output/playwright/r17-paths'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'edited.pptx'), new Uint8Array(exported.bytes))
+    const htmlPath = join(evidence, 'edited.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    for (const name of ['展开教师控制器', '下一场景']) {
+      const control = player.getByRole('button', { name, exact: true }); await expect(control).toBeVisible()
+      const box = await control.boundingBox(); if (!box) throw new Error('Missing teacher control')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await expect(player.locator(`[data-slide-layer-item="${shapeId}"] svg stop`).first()).toHaveAttribute('stop-color', '#ff0000')
+    await expect(player.locator(`[data-slide-layer-item="${brace.layerItemId}"] svg path`)).toHaveAttribute('d', changedBrace!)
+    await player.screenshot({ path: join(evidence, 'edited-player.png') })
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 PPTX 图表：横向切换、真实数据编辑、历史、重开及离线 Player 与可编辑导出', async () => {
+  test.setTimeout(120000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'charts.h5lesson')
+    await saveAs(app, page, filename)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'charts.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(await pptxEditableChartsFixture()) })
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    const surface = imported.surfaces.at(-1)!
+    if (surface.type !== 'slide') throw new Error('Missing imported surface')
+    const chartId = surface.scenes[0].layerItems[0].layerItemId
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${chartId}"] .node-name`).click()
+    const value = page.getByRole('textbox', { name: '人数 在 乙班 的值', exact: true })
+    const direction = page.getByLabel('条形方向', { exact: true })
+    await direction.selectOption('horizontal')
+    const chartSvg = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${chartId}"] svg desc`)
+    await expect(chartSvg).toContainText('横向条形图')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(direction).toHaveValue('vertical')
+    await expect(chartSvg).toContainText('柱状图')
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(direction).toHaveValue('horizontal')
+    await expect(chartSvg).toContainText('横向条形图')
+    await value.fill('36')
+    await page.getByRole('button', { name: '应用数据', exact: true }).click()
+    const edited = await saveCurrent(page, filename)
+    expect(JSON.stringify(effectiveItems(edited).find(item => item.layerItemId === chartId))).toContain('36')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(value).toHaveValue('18')
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(value).toHaveValue('36')
+    await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const exported = await buildCoursePptx(sources)
+    expect(exported.bytes.length).toBeGreaterThan(1000)
+    const evidence = join(root, 'output/playwright/r17-charts'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'edited.pptx'), exported.bytes)
+    const exportedValues = await page.evaluate(async bytes => {
+      const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
+      const { parsePptxImport } = await load('/src/renderer/project/pptxImport.ts')
+      const draft = await parsePptxImport(new Uint8Array(bytes))
+      return draft.slides.flatMap((slide: any) => slide.items).filter((item: any) => item.content?.nativeType === 'chart').map((item: any) => ({ direction: item.content.data.style.barDirection, values: item.content.data.series[0].points.map((point: any) => point.value) }))
+    }, Array.from(exported.bytes))
+    expect(exportedValues[0]).toEqual({ direction: 'horizontal', values: [12, 36, 24] })
+    const htmlPath = join(evidence, 'edited.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    for (const name of ['展开教师控制器', '下一场景']) {
+      const control = player.getByRole('button', { name, exact: true }); await expect(control).toBeVisible()
+      const box = await control.boundingBox(); if (!box) throw new Error('Missing teacher control')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await expect(player.locator(`[data-slide-layer-item="${chartId}"] svg desc`)).toContainText('36')
+    await expect(player.locator(`[data-slide-layer-item="${chartId}"] svg desc`)).toContainText('横向条形图')
+    const bars = await player.locator(`[data-slide-layer-item="${chartId}"] svg svg rect`).evaluateAll(elements => elements.map(element => ({ x: Number(element.getAttribute('x')), y: Number(element.getAttribute('y')), width: Number(element.getAttribute('width')) })))
+    expect(bars).toHaveLength(3)
+    expect(bars[0]!.x).toBe(bars[1]!.x)
+    expect(bars[0]!.y).toBeLessThan(bars[1]!.y)
+    expect(bars[1]!.width / bars[0]!.width).toBeCloseTo(3)
+    await player.screenshot({ path: join(evidence, 'edited-player.png') })
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 PPTX SmartArt：文字与位置编辑、历史、重开和导出', async () => {
+  test.setTimeout(120000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'diagram.h5lesson')
+    await saveAs(app, page, filename)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'diagram.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(pptxDiagramFixture()) })
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    const node = effectiveItems(imported).find(item => item.kind === 'native' && item.content.nativeType === 'text' && item.content.data.text === '观察')!
+    const nodeId = node.layerItemId
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${nodeId}"] .node-name`).click()
+    const input = page.getByRole('textbox', { name: '文字内容', exact: true })
+    await input.fill('比较'); await input.press('Tab')
+    const painted = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${nodeId}"]`)
+    await expect(painted).toContainText('比较')
+    const x = page.getByRole('spinbutton', { name: 'X', exact: true })
+    await x.fill('500'); await x.press('Enter')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(x).toHaveValue(String(Number(node.frame.x.toFixed(1))))
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(x).toHaveValue('500')
+    const edited = await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
+    await expect(painted).toContainText('比较')
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const exported = await page.evaluate(async sources => {
+      const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
+      const { buildCoursePptx } = await load('/src/renderer/export/course/buildCoursePptx.ts')
+      const { parsePptxImport } = await load('/src/renderer/project/pptxImport.ts')
+      const result = await buildCoursePptx(sources)
+      const draft = await parsePptxImport(result.bytes)
+      const item = draft.slides.flatMap((slide: any) => slide.items).find((item: any) => item.content?.data.text === '比较')
+      return { bytes: Array.from(result.bytes) as number[], item }
+    }, sources)
+    expect(exported.item.frame.x).toBeCloseTo(500, 1)
+    const evidence = join(root, 'output/playwright/r18-diagrams'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'edited.pptx'), new Uint8Array(exported.bytes))
+    const htmlPath = join(evidence, 'edited.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    for (const name of ['展开教师控制器', '下一场景']) {
+      const control = player.getByRole('button', { name, exact: true }); await expect(control).toBeVisible()
+      const box = await control.boundingBox(); if (!box) throw new Error('Missing teacher control')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await expect(player.locator(`[data-slide-layer-item="${nodeId}"]`)).toContainText('比较')
+    await player.screenshot({ path: join(evidence, 'edited-player.png') })
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
+})
+
+test('S3 PPTX 旧公式：可编辑 AST、历史、保存重开及离线 Player 与导出', async () => {
+  test.setTimeout(120000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const filename = join(runRoot, 'equations.h5lesson')
+    await saveAs(app, page, filename)
+    await page.getByLabel('创作工具', { exact: true }).click()
+    await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+    await page.getByLabel('生产力操作').selectOption('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'equations.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(pptxEquationFixture()) })
+    await page.getByRole('button', { name: '确认导入可用内容' }).click()
+    const imported = await saveCurrent(page, filename)
+    const formula = effectiveItems(imported).find(item => item.kind === 'native' && item.content.nativeType === 'formula')!
+    const formulaId = formula.layerItemId
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-testid^="node-item-"][data-testid$="${formulaId}"] .node-name`).click()
+    const input = page.getByRole('textbox', { name: '公式内容（线性输入）', exact: true })
+    await expect(input).toHaveValue('\\frac{1}{2}')
+    await input.fill('\\frac{1}{3}')
+    await page.getByRole('button', { name: '应用公式', exact: true }).click()
+    const painted = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${formulaId}"][role="math"]`)
+    await expect(painted).toHaveAttribute('aria-label', '三分之一')
+    await expect(painted.locator('canvas')).toHaveCount(1)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(input).toHaveValue('\\frac{1}{2}')
+    await expect(painted).toHaveAttribute('aria-label', '二分之一')
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await expect(input).toHaveValue('\\frac{1}{3}')
+    const edited = await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
+    await expect(painted).toHaveAttribute('aria-label', '三分之一')
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    expect(reopened.project).toEqual(edited)
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const exported = await page.evaluate(async sources => {
+      const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
+      const { buildCoursePptx } = await load('/src/renderer/export/course/buildCoursePptx.ts')
+      const result = await buildCoursePptx(sources)
+      return Array.from(result.bytes) as number[]
+    }, sources)
+    expect(exported.length).toBeGreaterThan(1000)
+    const evidence = join(root, 'output/playwright/r18-equations'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'edited.pptx'), new Uint8Array(exported))
+    const htmlPath = join(evidence, 'edited.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    for (const name of ['展开教师控制器', '下一场景']) {
+      const control = player.getByRole('button', { name, exact: true }); await expect(control).toBeVisible()
+      const box = await control.boundingBox(); if (!box) throw new Error('Missing teacher control')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    const output = player.locator(`[data-slide-layer-item="${formulaId}"][role="math"]`)
+    await expect(output).toHaveAttribute('aria-label', '三分之一')
+    const pixels = await output.locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
+      const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+      let red = 0
+      for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] < 50 && data[i + 2] < 50 && data[i + 3] > 200) red++
+      return red
+    })
+    expect(pixels).toBeGreaterThan(30)
+    await player.screenshot({ path: join(evidence, 'edited-player.png') })
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
+  }
 })
 
 test('S2 PPTX 普通映射收尾：逐页画布、小尺寸增量同步、历史与重开', async () => {

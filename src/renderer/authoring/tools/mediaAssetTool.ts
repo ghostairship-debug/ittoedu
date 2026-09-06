@@ -11,6 +11,7 @@ const schema = z.object({ kind: z.enum(['image', 'audio', 'video']), filename: z
 }).strict()
 export const mediaAssetTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'asset.media.import', inputSchema: schema,
+  description: '导入素材依赖，使用 global owner + create parent:owner append。base64 为真实媒体字节。新 asset ID 从该步骤回执的 asset-id 引用获得，不能自行指定。',
   async plan({ document, destination, value }) {
     const { target } = resolveAuthoringToolScope(document, destination)
     if (target.owner !== 'global' || destination.kind !== 'create' || destination.scope.parent.kind !== 'owner' || destination.scope.insertion.kind !== 'append') throw new Error('素材导入需要 global owner 追加位置')

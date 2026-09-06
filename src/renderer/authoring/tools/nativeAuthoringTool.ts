@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { clearFlowEditorSelection } from '../../course/flowEditorSlice'
 import { insertFlowSharedText, insertFlowSharedShape, insertFlowSharedMedia } from '../../course/flowSharedAuthoringAdapters'
 import { nativeElementContentSchema } from '../../../shared/courseProjectSchema'
+import { nativeContentInputSchemaByType } from '../../../shared/contracts/native-v1/schema'
 import { SHAPE_TYPES } from '../../../shared/contracts/native-v1/types'
 import { openSlideAuthoringSession, setSlideEditingScope } from '../../course/slideAuthoringBackend'
 import { addSlideTextLayer, addSlideFormulaLayer, addSlideShapeLayer, addSlideImageLayer, addSlideVideoLayer, addSlideInputLayer } from '../../course/v9SlideContentCommands'
@@ -12,6 +13,7 @@ import { resolveEffectiveLayerTarget, deleteEffectiveLayerItem, patchEffectiveLa
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { insertionIndex, resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
+import { layerItemPropertiesInputSchema } from './layerItemPropertiesInput'
 
 const coordinate = z.number().finite()
 const templateBase = { x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional(), label: z.string().optional() }
@@ -26,20 +28,17 @@ const template = z.discriminatedUnion('nativeType', [
   z.object({ ...templateBase, nativeType: z.literal('table') }).strict(),
   z.object({ ...templateBase, nativeType: z.literal('input'), answerType: z.enum(['text', 'number']).optional() }).strict(),
 ])
-const properties = z.object({
-  frame: z.object({ x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional() }).strict().optional(),
-  rotation: coordinate.optional(), opacity: z.number().min(0).max(1).optional(),
-  visible: z.boolean().optional(), locked: z.boolean().optional(), label: z.string().min(1).optional(),
-}).strict()
 export const nativeAuthoringToolInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('insert'), template }).strict(),
   z.object({ operation: z.literal('content'), content: nativeElementContentSchema }).strict(),
-  z.object({ operation: z.literal('properties'), properties }).strict(),
+  z.object({ operation: z.literal('properties'), properties: layerItemPropertiesInputSchema }).strict(),
   z.object({ operation: z.literal('delete') }).strict(),
 ])
 
 export const nativeAuthoringTool: AuthoringToolDefinition<z.infer<typeof nativeAuthoringToolInputSchema>> = {
   name: 'native.content', inputSchema: nativeAuthoringToolInputSchema,
+  referenceSchemas: nativeContentInputSchemaByType,
+  description: '仅支持Native对象：insert 使用 create + parent:owner；content/properties/delete 使用 update。content.data 必须满足 references[content.nativeType] 的完整字段合同，不是局部补丁；不得遗漏 required 字段或猜测样式字段。properties 只改 frame/rotation/opacity/visible/locked/label。移动组件使用component.configure的properties。Flow 正文使用 flow.content，不把正文伪装为 Native 浮层。',
   plan({ document, destination, value }) {
     const { target, surface, scope } = resolveAuthoringToolScope(document, destination)
     const options = { expectedRevision: document.revision }

@@ -18,6 +18,7 @@ export class AuthoringToolFailure extends Error {
 
 /** The existing Surface transaction adapter owns commit and its single history. */
 export interface AuthoringToolCommitPort {
+  readonly signal?: AbortSignal
   readDocument(): CourseProjectDocument
   readResources?(): HistoryResourceState
   validateDestination(destination: AuthoringToolDestinationV1): Diagnostic | null
@@ -26,6 +27,8 @@ export interface AuthoringToolCommitPort {
 
 export interface AuthoringToolDefinition<T> {
   name: string
+  description?: string
+  referenceSchemas?: Readonly<Record<string, z.ZodType>>
   usesResources?: boolean
   inputSchema: z.ZodType<T>
   plan(input: {
@@ -33,6 +36,7 @@ export interface AuthoringToolDefinition<T> {
     destination: AuthoringToolDestinationV1
     value: T
     resources?: HistoryResourceState
+    signal?: AbortSignal
   }): Promise<AuthoringToolPlan> | AuthoringToolPlan
 }
 
@@ -84,9 +88,10 @@ export async function executeAuthoringTool<T>(
   if (invalid) return reject('rejected', [invalid])
   try {
     // A planner can only mutate its private input, never the authoritative document.
-    const plan = await definition.plan({ document: structuredClone(initial), destination: request.destination, value: value.data,
+    if (port.signal?.aborted) return reject('stale', [staleDiagnostic])
+    const plan = await definition.plan({ document: structuredClone(initial), destination: request.destination, value: value.data, signal: port.signal,
       ...(definition.usesResources && port.readResources ? { resources: structuredClone(port.readResources()) } : {}) })
-    if (stale()) return reject('stale', [staleDiagnostic])
+    if (stale() || port.signal?.aborted) return reject('stale', [staleDiagnostic])
     const invalidAfterPlan = port.validateDestination(request.destination)
     if (invalidAfterPlan) return reject('stale', [invalidAfterPlan])
     courseProjectDocumentSchema.parse(plan.transaction.nextDocument)

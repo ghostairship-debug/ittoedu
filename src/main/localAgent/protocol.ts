@@ -34,8 +34,16 @@ export function decodeAgentEvent(adapter: LocalAgentId, input: unknown): AgentEv
     switch (wire.type) {
       case 'system':
         if (wire.subtype === 'init') return [{ ...event('session', {}), externalSessionId: z.string().min(1).parse(wire.session_id) }]
+        if (wire.subtype === 'api_retry') return [{ ...event('session', {
+          status: 'api-retry', attempt: z.number().int().positive().parse(wire.attempt),
+          maxRetries: z.number().int().nonnegative().parse(wire.max_retries),
+          retryDelayMs: z.number().int().nonnegative().parse(wire.retry_delay_ms),
+          errorStatus: z.number().int().nullable().parse(wire.error_status), error: z.string().parse(wire.error),
+        }), externalSessionId: z.string().min(1).parse(wire.session_id) }]
+        // CLI thinking-token progress is usage metadata, never assistant prose or a terminal marker.
+        if (wire.subtype === 'thinking_tokens') return [event('usage', wire)]
         if (['status', 'compact_boundary', 'task_started', 'task_progress', 'task_notification'].includes(wire.subtype)) return []
-        throw new Error('Unsupported Claude system event')
+        throw new Error(`Unsupported Claude system event: ${String(wire.subtype).slice(0, 100)}`)
       case 'assistant': return z.array(object).parse(wire.message?.content).flatMap(block => {
         if (block.type === 'text') return [event('text', { text: z.string().parse(block.text) })]
         if (block.type === 'thinking' || block.type === 'redacted_thinking') return []

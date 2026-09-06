@@ -3,6 +3,8 @@ import type { HistoryResourceState } from '../../store/courseResourceState'
 import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues } from '../../export/course/buildPublishedCourse'
 import { AuthoringToolFailure } from './executeAuthoringTool'
 import { capturePublishedSurfacePng } from '../../../player/surfaces/publishedCapture'
+import { bytesToBase64 } from '../../export/base64'
+import { exercisePublishedDynamicUpdates } from '../../../player/surfaces/publishedDynamicUpdateProbe'
 
 /** Exercise code even when its authored instance is hidden/disabled. This private
  * projection never participates in the candidate transaction or saved output. */
@@ -45,6 +47,26 @@ function admissionProjection(project: CourseProjectDocument, instanceIds: readon
 
 /** Fixed product admission: callers cannot supply a success flag or replace the host. */
 export async function admitDynamicCandidate(project: CourseProjectDocument, resources: HistoryResourceState,
+  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error('动态准入已取消')
+  const api = typeof window !== 'undefined' ? window.desktopAPI?.dynamicAdmission : undefined
+  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets)
+  const id = crypto.randomUUID()
+  const payload = { project, targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
+    assetFiles: Object.fromEntries(Object.entries(resources.assetFiles).map(([key, bytes]) => [key, bytesToBase64(bytes)])),
+    componentFiles: Object.fromEntries(Object.entries(resources.componentPackages).map(([key, data]) => [key,
+      Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, bytesToBase64(bytes)]))])) }
+  const cancel = () => { void api({ operation: 'cancel', id }).catch(() => {}) }
+  signal?.addEventListener('abort', cancel, { once: true })
+  try {
+    const result = await api({ operation: 'run', id, payload })
+    if (signal?.aborted || !result.ok) throw new AuthoringToolFailure(!signal?.aborted && result.diagnostics?.length ? result.diagnostics
+      : [{ code: 'dynamic-host-failed', message: signal?.aborted ? '动态准入已取消' : result.message, path: [] }])
+  } finally { signal?.removeEventListener('abort', cancel) }
+}
+
+/** Executes inside the disposable process, or the existing trusted browser Builder host. */
+export async function runDynamicCandidateHostSmoke(project: CourseProjectDocument, resources: HistoryResourceState,
   targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[]): Promise<void> {
   const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages }
   const issues = collectPublishedCourseSourceIssues(sources)
@@ -79,10 +101,17 @@ export async function admitDynamicCandidate(project: CourseProjectDocument, reso
           const instanceId = (element: HTMLElement) => element.dataset.componentInstanceId ?? element.dataset.runtimeInstanceId
           const mountedIds = new Set(mountedElements.map(instanceId))
           for (const id of instanceIds) if (!mountedIds.has(id)) throw new Error(`候选实例 ${id} 未实际挂载`)
-          if (surface?.type === 'spatial-2d') {
-            // Spatial export intentionally uses static camera pages. Probe the
-            // actual mounted DOM instances with the same product capture barrier;
-            // do not pretend its SVG playback world is an HTML export carrier.
+          for (const element of mountedElements) {
+            if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicUpdates(element)
+          }
+          const suspended = await mountedSession.player.suspendSurface(location.surfaceId)
+          if (!suspended.ok) throw suspended.failure?.error ?? new Error('动态候选无法挂起')
+          const resumed = await mountedSession.player.resumeSurface(location.surfaceId)
+          if (!resumed.ok) throw resumed.failure?.error ?? new Error('动态候选无法恢复')
+          if (surface?.type === 'spatial-2d' || surface?.type === 'flow') {
+            // Flow's location JSON and Spatial's static camera pages are not
+            // evidence that a candidate instance can prepare a capture. Probe
+            // the mounted instances through the shared product capture barrier.
             await capturePublishedSurfacePng({ root, width: 1280, height: 720,
               layers: mountedElements.filter(element => instanceIds.includes(instanceId(element) ?? '')).map(mount => {
                 const element = mount.parentElement

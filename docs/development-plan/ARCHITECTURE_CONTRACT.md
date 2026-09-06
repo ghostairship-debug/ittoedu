@@ -8,7 +8,7 @@
 - V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide Native input 是 Owner 明确批准的三个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
 - Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table、Chart 与 Slide Native input 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
 - 项目 `id` 与单调 `revision` 语义保留；`globalLayerItems`、`surfaceLayerItems` 和三 Surface 保留；不新增 persisted `projectMode`。
-- AI 路线为 1.6–1.9 默认隐藏、2.0 在内部生产构建中正式开放；对应版本门完成前，当前编辑器仍不得宣称 AI、聊天、Provider 或 internal/reserved 接口为可用工作流。隐藏能力也必须走正式 CLI harness、受管暂存、自动准入与宿主 canonical command 边界；1.8 起的 live authoring 还必须走 MCP，不能从旧接口名称直接接线。
+- AI 路线为 1.6–1.9 默认隐藏、2.0 在内部生产构建中正式开放；对应版本门完成前，当前编辑器仍不得宣称 AI、聊天、Provider 或 internal/reserved 接口为可用工作流。隐藏能力也必须走正式 CLI harness、受管暂存、自动准入与宿主 canonical command 边界；1.8 基础聊天直接接 CLI 请求与候选结果，不建设 MCP，不能从旧接口名称直接接线。
 - 1.1 在保持 V9 wire、Published V2 wire 和全部受支持行为不变的前提下，清零可执行代码、测试、脚本、示例、fixture、artifacts 与正式生成制品中的 V8 模型、Schema、旧 Player/Export payload 和旧测试工具链；历史 Markdown 与 Git 历史可保留旧名称。该清理不恢复 V8 导入，也不触发 V10。
 
 ### 1.1 内部生产信任模型
@@ -112,7 +112,7 @@
 | Export | Published/static plan 到具体格式 | 修改作者 Store |
 | Diagnostics | structural/authoring/export report | 每次键入全量分析 |
 | Main/Preload | 文件、窗口、IPC、安全边界 | 作者业务模型 |
-| Authoring Tools / MCP | 版本化 read/write tools、canonical target、receipt、stale 与事务适配 | 模型规划循环、直接写 Store、绕过产品命令 |
+| Authoring Tools / 宿主提交 | 内部版本化工具、canonical target、候选校验、receipt、stale 与事务适配 | 模型规划循环、直接写 Store、绕过产品命令 |
 | AI / CLI Harness | CLI 探测/启动/恢复/取消、标准事件、本地 session 映射、暂存协调 | authoritative project、Provider 凭据、重复实现 CLI 的 Agent loop |
 | Repo Knowledge | 开发索引与 Context Pack | 产品运行时依赖 |
 
@@ -163,11 +163,11 @@
 
 `v1.1.1` 已完成 `editorStore.ts`、App/Workspace/Properties/Flow、Slide Published adapter 与 Course package builder 的既定 Owner 迁移；历史执行规格由 Git 历史保存，当前边界只看本合同、源码和 `FEATURE_CONSUMER_OWNER_LEDGER`。`buildPublishedCourse.ts`、V9 Schema/health、动态宿主和 Main/Preload 不做无 consumer 的机械拆分，后续出现真实第二 owner/consumer 时再进入同一门。
 
-## 7. CLI Agent、MCP、暂存与会话边界
+## 7. CLI 直连、暂存与会话边界
 
-- **内核分工**：用户自行安装并认证 Codex、Claude、OpenCode；CLI 保留各自的模型规划、Skills、子任务与工具循环。应用只实现版本化 `LocalAgentCliAdapterV1`、session harness、MCP Authoring Tools、暂存区、回执/时间线与自动准入，不复制模型规划循环或另建 Agent Runner。
+- **内核分工**：用户自行安装并认证 Codex、Claude、OpenCode；CLI 保留各自的模型规划、Skills、子任务与工具循环。应用只实现版本化 `LocalAgentCliAdapterV1`、session harness、任务/快照接线、暂存区、回执/时间线与自动准入，当前不复制 CLI 的模型规划循环。Owner 已取消 MCP；未来脱离 CLI 后，以模型 API、自有工具和自建 harness 直接调用同一产品命令与准入/事务边界，另行定义模型循环和凭据合同，不提前建设通用 Agent 层。
 - **进程边界**：CLI adapter 以解析后的明确可执行文件和参数数组提供 probe/start/resume/cancel；Windows 不拼接 shell 命令字符串。CLI 自行登录并保存凭据，应用不读取或保存其 API Key。
-- **唯一写路径与版本分界**：CLI candidate 默认可通过结构化 stdout / artifact channel 返回；只有 adapter 确实启用通用文件工具时，文件工具才限定到应用管理的当前 session staging，并执行对应 conformance。无文件工具的 adapter 不因缺少文件系统沙箱而失败。文件工具始终不得直接写 `.h5lesson`、其他 session 或权威工程；staging 主要保证候选事务、恢复、清理和防止意外跨工程/半写入，不承担对受信 CLI 的通用 OS 沙箱证明。1.7 是 batch candidate pipeline：应用只提供不可变最小 context snapshot 或已确认 Markdown，CLI 不获得 Store 或 live project API，只输出 strict/versioned typed authoring intent envelope 或 dynamic package manifest；宿主重校验 target/revision，Native/Recipe/Existing Component 候选直接映射 1.4 canonical commands，只有 Generated Component/Runtime 额外进入动态准入，并以单一 document + resource transaction 提交，禁止 generic V9 patch/import。1.8 起，任何 CLI 发起的 live/interactive Course Project 读取与权威修改只能经过版本化产品 MCP 工具。update target 必须逐字段无损携带 canonical `CourseAuthoringTarget`；create target 使用独立 create-scope。CLI candidate receipt 与 host commit receipt 分离；stale、拒绝、坏候选、适用的准入失败和取消均零工程写入。
+- **唯一写路径与版本分界**：CLI candidate 默认可通过结构化 stdout / artifact channel 返回；只有 adapter 确实启用通用文件工具时，文件工具才限定到应用管理的当前 session staging，并执行对应 conformance。无文件工具的 adapter 不因缺少文件系统沙箱而失败。文件工具始终不得直接写 `.h5lesson`、其他 session 或权威工程；staging 主要保证候选事务、恢复、清理和防止意外跨工程/半写入，不承担对受信 CLI 的通用 OS 沙箱证明。1.7 是 batch candidate pipeline：应用只提供不可变最小 context snapshot 或已确认 Markdown，CLI 不获得 Store 或 live project API，只输出 strict/versioned typed authoring intent envelope 或 dynamic package manifest；宿主重校验 target/revision，Native/Recipe/Existing Component 候选直接映射 1.4 canonical commands，只有 Generated Component/Runtime 额外进入动态准入，并以单一 document + resource transaction 提交，禁止 generic V9 patch/import。1.8–2.0 继续这条候选路径，聊天每轮由宿主提供新快照与必要的上轮提交结果；CLI 不获得 live 工程接口，不增加 MCP、工具 RPC 或第二写通道。update target 必须逐字段无损携带 canonical `CourseAuthoringTarget`；create target 使用独立 create-scope。CLI candidate receipt 与 host commit receipt 分离；stale、拒绝、坏候选、适用的准入失败和取消均零工程写入。
 - **暂存和自动准入**：生成 Component/Runtime 源码、manifest、资源与诊断先进入暂存区。动态载体自动准入至少验证编译、协议、依赖、素材闭包、精确 origin、生命周期、资源上限、静态后备和真实宿主 smoke；未通过不得注册或写工程。Native、Recipe 与 Existing Component 候选不等待动态宿主门。内部稳定版默认不提供绕过准入的人工覆盖。
 - **自动可信能力**：通过自动准入的 Component/Runtime 自动成为当前可信扩展，可使用当前正式提供给可信扩展的父页面、本地、桌面、网络和其他宿主接口，无需人工代码审核。该授权不包含 Provider Secret、原始 Electron Main 对象、任意 OS 命令、未开放远程脚本或未经合同批准的新宿主接口。
 - **本地会话身份**：AI 会话、材料与 tool trace 保存于应用 `userData` 下的版本化目录，以工程 ID 与规范化文件位置共同标识。Save As 创建新的 workspace identity，不复制旧会话；可清除单个会话、当前工程或全部应用记录。它们不进入 Course Project、Published、Component、Runtime 或导出物；应用只能承诺删除自己的记录，CLI 自身历史由适配器能力另行说明。

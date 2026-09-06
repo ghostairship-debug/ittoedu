@@ -66,6 +66,9 @@ export async function runDynamicAdmissionProbe(page: Page) {
     const { createCoursewareBuilderV2 } = await load('/src/renderer/course/coursewareBuilderV2.ts')
     const insertedRuntimes = []
     const insertedComponents = []
+    const componentPlacements = []
+    const captureFailures = []
+    const runtimeUpdateFailures = []
     let distantComponentPreserved = false
     for (const surfaceType of ['slide', 'flow', 'spatial-2d']) {
       const builder = createCoursewareBuilderV2({ surfaceType, title: `Runtime ${surfaceType}` })
@@ -81,12 +84,69 @@ export async function runDynamicAdmissionProbe(page: Page) {
         content: { values: {} }, assets: {}, staticFallback: { assetId: media.affected[0].id, coverage: 'scene' } }
       const inserted = await builder.execute('runtime.insert', { runtime }, { kind: 'create', scope: builder.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } }) })
       insertedRuntimes.push({ surfaceType, ...summary(inserted) })
+      if (inserted.status === 'committed') {
+        const runtimeId = inserted.affected[0].id
+        const faults = [
+          ...(api3 ? ['updateContent', 'updateAssets', 'resize'] : ['resize']).map(method => ({ method,
+            body: `var sizes=0;return {${method}(){${method === 'resize' ? 'if(++sizes>1)' : ''}throw new Error("runtime update probe failure")},destroy(){}}` })),
+          ...(window.desktopAPI?.dynamicAdmission ? [
+            { method: 'async', body: 'setTimeout(()=>{throw new Error("queued runtime fault")},0);return {destroy(){}}' },
+            { method: 'destroy-async', body: 'return {destroy(){setTimeout(()=>{throw new Error("queued destroy fault")},0)}}' },
+            { method: 'leak-dom', body: 'document.body.appendChild(document.createElement("aside"));return {destroy(){}}' },
+          ] : []),
+        ]
+        for (const { method, body } of faults) {
+          const before = builder.finish()
+          const runtimeTarget = builder.snapshot().targets.content.find((entry: any) => entry.itemId === runtimeId)
+          const receipt = await builder.execute('runtime.source', { source: `CoursewareRuntime.define({runtimeApiVersion:${api3 ? 3 : 2},create(){${body}}})` },
+            { kind: 'update', target: { ...runtimeTarget, authoringAddress: inserted.affected[0].authoringAddress } })
+          const after = builder.finish()
+          runtimeUpdateFailures.push({ surfaceType, method, ...summary(receipt),
+            projectUnchanged: JSON.stringify(before.project) === JSON.stringify(after.project),
+            resourcesUnchanged: JSON.stringify([before.assetFiles, before.componentFiles]) === JSON.stringify([after.assetFiles, after.componentFiles]) })
+        }
+      }
       const encode = (value: string) => btoa(unescape(encodeURIComponent(value)))
       const component = await builder.execute('component.insert', { operation: 'candidate', staticFallbackAssetId: media.affected[0].id,
         files: { 'manifest.json': encode(JSON.stringify(sources.components['font-demo'].manifest)),
           'runtime.js': encode('CoursewareComponent.define({id:"font-demo",runtimeApiVersion:4,create(ctx){var p=document.createElement("p");p.textContent="candidate component";ctx.dom.root.appendChild(p);return {destroy(){p.remove()}}}})') } },
       { kind: 'create', scope: builder.createScope({ parent: surfaceType === 'flow' ? { kind: 'flow-body', parentBlockId: null } : { kind: 'owner' }, insertion: { kind: 'append' } }) })
       insertedComponents.push({ surfaceType, ...summary(component) })
+      if (component.status === 'committed') {
+        if (surfaceType !== 'flow') {
+          const id = component.affected[0].id
+          const target = builder.snapshot().targets.content.find((entry: any) => entry.itemId === id)
+          const receipt = await builder.execute('component.configure', { properties: { frame: { x: 40, y: 80, width: 320, height: 180 }, label: 'Placed component' } }, { kind: 'update', target })
+          const { resolveEffectiveLayerTarget } = await load('/src/renderer/course/effectiveLayerCommands.ts')
+          const item = resolveEffectiveLayerTarget(builder.finish().project, target).item
+          componentPlacements.push({ surfaceType, ...summary(receipt), frame: item.frame, label: item.label })
+        }
+        builder.activate({ locationId: initial.scope.locationId, owner: 'global' })
+        const { parent: _parent, insertion: _insertion, ...wire } = builder.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } })
+        const cases = [
+          { phase: 'update', body: 'return {updateProps(){throw new Error("update probe failure")},destroy(){}}' },
+          { phase: 'resize', body: 'var sizes=0;return {resize(){if(++sizes>1)throw new Error("resize probe failure")},destroy(){}}' },
+          { phase: 'suspend', body: 'return {suspend(){throw new Error("suspend probe failure")},destroy(){}}' },
+          { phase: 'resume', body: 'return {resume(){throw new Error("resume probe failure")},destroy(){}}' },
+          { phase: 'prepare', body: 'return {prepareCapture(){throw new Error("capture probe failure")},destroy(){}}' },
+          ...(surfaceType === 'flow' ? [
+            { phase: 'reject', body: 'ctx.capture.waitUntil(Promise.reject(new Error("capture task rejected")));return {destroy(){}}' },
+            { phase: 'timeout', body: 'ctx.capture.waitUntil(new Promise(function(){}));return {destroy(){}}' },
+          ] : []),
+        ]
+        for (const entry of cases) {
+          const before = builder.finish()
+          const receipt = await builder.execute('component.package', { operation: 'replace', files: {
+            'manifest.json': encode(JSON.stringify({ ...sources.components['font-demo'].manifest, version: '1.0.9' })),
+            'runtime.js': encode(`CoursewareComponent.define({id:"font-demo",runtimeApiVersion:4,create(ctx){${entry.body}}})`),
+          } }, { kind: 'update', target: { ...wire, itemId: 'font-demo', authoringAddress: componentPackageAddress(before.project.id, 'font-demo') } })
+          const after = builder.finish()
+          captureFailures.push({ surfaceType, phase: entry.phase, ...summary(receipt),
+            projectUnchanged: JSON.stringify(before.project) === JSON.stringify(after.project),
+            resourcesUnchanged: JSON.stringify([before.assetFiles, before.componentFiles]) === JSON.stringify([after.assetFiles, after.componentFiles]),
+          })
+        }
+      }
       if (surfaceType === 'spatial-2d' && component.status === 'committed') {
         const output = builder.finish()
         const world = output.project.surfaces[0]
@@ -102,7 +162,7 @@ export async function runDynamicAdmissionProbe(page: Page) {
         distantComponentPreserved = JSON.stringify(output.project) === original
       }
     }
-    return { stateOnlyFailure: summary(stateOnlyFailure), insertedRuntimes, insertedComponents, distantComponentPreserved, disabled: summary(disabled), configured: summary(configured), conflict: summary(conflict), componentConfigured: summary(componentConfigured),
+    return { captureFailures, runtimeUpdateFailures, componentPlacements, stateOnlyFailure: summary(stateOnlyFailure), insertedRuntimes, insertedComponents, distantComponentPreserved, disabled: summary(disabled), configured: summary(configured), conflict: summary(conflict), componentConfigured: summary(componentConfigured),
       runtimeEnabled: finalRuntime.enabled, runtimeCaption: finalRuntime.content.values.caption,
       componentVisible: finalScene.layerItems.find((item: any) => item.kind === 'component').visible,
       componentBaseProps: finalScene.layerItems.find((item: any) => item.kind === 'component').props,

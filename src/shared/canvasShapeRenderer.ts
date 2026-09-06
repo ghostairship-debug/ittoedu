@@ -1,5 +1,6 @@
 import type { ArrowHead, ShapeNode } from './contracts/native-v1/types'
 import { resolveNativeLinePoints } from './nativeLineGeometry'
+import { resolveNativeShapePath } from './nativeShapePath'
 
 interface Point { x: number; y: number }
 
@@ -120,6 +121,15 @@ export function renderShapeCanvas(
   context.lineWidth = Math.max(1, style.borderWidth)
   context.strokeStyle = style.borderColor
   context.fillStyle = style.fillColor
+  if (style.fillGradient) {
+    const gradient = style.fillGradient
+    const paint = context.createLinearGradient(gradient.start[0] * width, gradient.start[1] * height, gradient.end[0] * width, gradient.end[1] * height)
+    for (const stop of gradient.stops) {
+      const rgb = Number.parseInt(stop.color.slice(1), 16)
+      paint.addColorStop(stop.offset, `rgba(${rgb >> 16},${(rgb >> 8) & 255},${rgb & 255},${stop.opacity})`)
+    }
+    context.fillStyle = paint
+  }
   context.setLineDash(lineDash(node))
   context.lineJoin = 'round'
   context.lineCap = style.lineStyle === 'dotted' ? 'round' : 'butt'
@@ -133,6 +143,29 @@ export function renderShapeCanvas(
     }
   }
 
+  const pathGeometry = resolveNativeShapePath(node, width, height)
+  if (pathGeometry) {
+    for (const path of pathGeometry.paths) {
+      context.beginPath()
+      for (const command of path.commands) {
+        switch (command.kind) {
+          case 'move': context.moveTo(command.to[0] * width, command.to[1] * height); break
+          case 'line': context.lineTo(command.to[0] * width, command.to[1] * height); break
+          case 'quadratic': context.quadraticCurveTo(command.control[0] * width, command.control[1] * height, command.to[0] * width, command.to[1] * height); break
+          case 'cubic': context.bezierCurveTo(command.control1[0] * width, command.control1[1] * height, command.control2[0] * width, command.control2[1] * height, command.to[0] * width, command.to[1] * height); break
+          case 'close': context.closePath(); break
+        }
+      }
+      if (path.fill && style.fillOpacity > 0) {
+        context.save(); context.globalAlpha *= style.fillOpacity; context.fill(); context.restore()
+      }
+      if (path.stroke && style.borderWidth > 0 && style.borderOpacity > 0) {
+        context.save(); context.globalAlpha *= style.borderOpacity; context.stroke(); context.restore()
+      }
+    }
+    context.restore()
+    return
+  }
   switch (node.shapeType) {
     case 'rectangle':
       context.beginPath(); context.rect(0, 0, width, height); fillAndStroke(); break

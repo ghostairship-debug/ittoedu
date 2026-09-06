@@ -388,6 +388,8 @@ export function createShapeNode(
     type: 'shape',
     shapeType,
     ...(isLinear && options.lineGeometry ? { lineGeometry: structuredClone(options.lineGeometry) } : {}),
+    ...(options.pathGeometry ? { pathGeometry: structuredClone(options.pathGeometry) } : {}),
+    ...(options.braceGeometry ? { braceGeometry: structuredClone(options.braceGeometry) } : {}),
     x: options.x ?? (CANVAS_WIDTH - width) / 2,
     y: options.y ?? (CANVAS_HEIGHT - height) / 2,
     width,
@@ -399,6 +401,7 @@ export function createShapeNode(
     playbackInitialVisibility: options.playbackInitialVisibility ?? 'inherit',
     style: {
       fillColor: options.style?.fillColor ?? '#dbeafe',
+      ...(options.style?.fillGradient ? { fillGradient: structuredClone(options.style.fillGradient) } : {}),
       fillOpacity: options.style?.fillOpacity ?? (isStrokeOnly ? 0 : 1),
       borderColor: options.style?.borderColor ?? '#2563eb',
       borderOpacity: options.style?.borderOpacity ?? 1,

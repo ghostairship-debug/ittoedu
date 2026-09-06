@@ -1,0 +1,16 @@
+.course-chat { position: fixed; top: 64px; right: 12px; bottom: 38px; width: min(430px, 92vw); z-index: 90; display: flex; flex-direction: column; gap: 12px; padding: 18px; background: #fff; color: #172033; border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 12px 40px #17203330; }
+.course-chat header, .chat-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.course-chat label { display: block; margin: 6px 0; }
+.course-chat select { max-width: 220px; margin-left: 6px; }
+.chat-scroll { flex: 1; min-height: 0; overflow: auto; }
+.course-chat form { max-height: 48%; overflow: auto; flex-shrink: 0; }
+.course-chat dl { font-size: 12px; overflow-wrap: anywhere; }
+.course-chat dt { font-weight: 600; margin-top: 8px; }
+.course-chat dd { margin-left: 8px; white-space: pre-wrap; }
+.course-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; padding: 8px; background: #f1f5f9; max-height: 260px; overflow: auto; }
+.course-chat p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.course-chat textarea { width: 100%; resize: vertical; min-height: 80px; margin: 10px 0; }
+.course-chat small { display: block; color: #526174; }
+.course-chat [role=alert] { color: #b42318; }
+.course-chat-launch { position: fixed; right: 22px; bottom: 42px; z-index: 80; padding: 10px 18px; border-radius: 20px; }
+.chat-message { line-height: 1.6; }

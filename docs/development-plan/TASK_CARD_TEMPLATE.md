@@ -12,7 +12,7 @@
 - Status / Owner: queued | active | blocked / <active 必须填写唯一写入者>
 - Outcome / Evidence: <一个可观察结果 + 当前失败或启动证据>
 - Write scope: <允许写入的精确路径；需要时补禁止路径、越界停止条件或 baseline>
-- Write locks: none | contracts-schema | generated-index | legacy-inventory | store-kernel | store-slide | store-flow | store-spatial | store-course | props-shared | props-slide | props-flow | props-spatial | props-global | workspace-shell | authoring-slide | authoring-flow | authoring-spatial | authoring-interaction | authoring-recipe | published-slide | published-flow | published-spatial | published-interaction | published-dynamic | published-producer | export-pptx | export-docx-print | app-save-recovery | diagnostics | main-preload | cli-adapters | ai-session | mcp-server | chat-ui
+- Write locks: none | contracts-schema | generated-index | legacy-inventory | store-kernel | store-slide | store-flow | store-spatial | store-course | props-shared | props-slide | props-flow | props-spatial | props-global | workspace-shell | authoring-slide | authoring-flow | authoring-spatial | authoring-interaction | authoring-recipe | published-slide | published-flow | published-spatial | published-interaction | published-dynamic | published-producer | export-pptx | export-docx-print | app-save-recovery | diagnostics | main-preload | cli-adapters | ai-session | chat-ui
 - Acceptance: <完成后可直接判断的结果>
 - Validation: <最多 1–3 条直接证明结果的命令或人工检查；敏感变更在这里写明真实 carrier / fixture / 回退检查>
 ```
@@ -62,7 +62,6 @@
 | `main-preload` | `src/main/**`、`src/preload/**` |
 | `cli-adapters` | `src/main/localAgent/adapter.ts`、`process.ts`、`protocol.ts` 与 `src/shared/localAgentContract.ts`；CLI 协议与进程启动/终止 |
 | `ai-session` | `src/main/localAgent/harness.ts`、`repository.ts`、`service.ts`；复用 WorkspaceIdentity 的唯一会话生命周期、存储与 staging Owner |
-| `mcp-server` | 1.8 起 MCP Authoring Server Owner；首个节点创建目录时在写入前回填精确路径 |
 | `chat-ui` | 1.9 起 Chat shell、timeline 与引用选择 Owner；首个节点创建目录时在写入前回填精确路径 |
 
 同锁绝对互斥。路线中每个节点必须预先列出完整锁名；对于尚未创建的未来模块，当前确定的是 Owner 锁和节点映射，不虚构不存在的精确文件路径。首个写入节点须先回填路径边界并同步校验器，不能另造锁名或在任务卡中临时换锁。

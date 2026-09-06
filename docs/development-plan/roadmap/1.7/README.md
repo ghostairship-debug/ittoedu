@@ -2,7 +2,7 @@
 
 ## 结果与边界
 
-本地 CLI Agent 通过 **batch candidate pipeline** 生成单页、整课和局部修改候选，并按 Native → Recipe → Existing Component → Generated Component → Runtime 的载体阶梯选择实现。应用向一次请求提供不可变的最小上下文快照或已确认 Markdown；CLI 通过结构化 stdout / artifact channel，或在 adapter 启用文件工具时通过当前 session staging 输出严格候选，拿不到 Renderer Store 或 live project read/write API。应用不接管 CLI 的规划循环，也不在 1.7 提前开放 MCP；真正写入者是宿主对 1.4 canonical command 的单事务重放。
+本地 CLI Agent 通过 **batch candidate pipeline** 生成单页、整课和局部修改候选，并按 Native → Recipe → Existing Component → Generated Component → Runtime 的载体阶梯选择实现。应用向一次请求提供不可变的最小上下文快照或已确认 Markdown；CLI 通过结构化 stdout / artifact channel，或在 adapter 启用文件工具时通过当前 session staging 输出严格候选，拿不到 Renderer Store 或 live project read/write API。应用不接管 CLI 的规划循环，不建设 MCP 或自建 Agent 中间层；真正写入者是宿主对 1.4 canonical command 的单事务重放。
 
 Native、Recipe 与 Existing Component 的 strict intent 可在核心 parser/commit 边界完成后直接进入产品命令；不得等待动态代码门。Generated Component / Runtime 源码先进入应用管理的 staging，只有静态准入与真实宿主 smoke 全部通过才自动成为当前受支持的可信扩展；不需要人工代码 review，也不提供跳过 correctness gate 的稳定版开关。失败候选对权威工程零写入。
 
@@ -35,10 +35,12 @@ PPTX 人工导入增强是本版并列交付线，始终可见，不受 AI 开�
 
 - 生成请求包含 request ID、session owner、canonical target / create-scope、document revision、已确认输入、允许载体、资源预算与不可变最小 context snapshot。CLI 自己规划候选；应用不存储或执行模型计划图。CLI 不得获得 Store 或 live read API；应用只摄取显式 candidate channel 的结果，不把“不摄取 staging 外文件”宣传成 CLI 进程的 OS sandbox。
 - 候选只允许是 strict/versioned typed authoring intent envelope 或 dynamic package manifest，连同资产引用、origin、fallback 和 CLI candidate receipt 写入当前 staging/structured stdout；禁止 generic V9 patch、archive import 或内部 Store dump。
-- 宿主在 preview 与 admission 后重新校验 target/revision，把每项 intent 映射到 1.4 canonical command，并以一个 document + resource transaction 提交；host commit receipt 与 CLI candidate receipt 分离。1.8 才首次向 CLI 开放可交互的 live MCP read/write catalog。
+- 宿主在 preview 与 admission 后重新校验 target/revision，把每项 intent 映射到 1.4 canonical command，并以一个 document + resource transaction 提交；host commit receipt 与 CLI candidate receipt 分离。1.8 的基础聊天、多轮请求与 Skills 继续复用此路径，不新增 live 工程接口或 MCP。
 - 载体阶梯顺序固定：Native、Recipe、Existing Component、Generated Component、Runtime。选择更高阶载体必须在 receipt 中指出低阶载体不能满足的可观察需求。
 - 自动可信表示 gate 后可使用当前正式开放给可信 Runtime / Component 的父页面、本地、桌面和网络接口；不包括秘密、原始 Main、任意 OS、未批准脚本或未批准 API。
 - 静态 gate 与真实宿主 smoke 只对 Generated Component/Runtime 是必需条件；stable build 没有跳过 correctness gate 的自动信任选项。自动 repair 默认一次且无进展即停，用户显式新请求可以继续，不递归 self-review。
+
+`r17-012-host-smoke-admission` 还须验证同步故障隔离：候选注册、create 或 prepareCapture 中的同步长任务/死循环不能阻塞编辑器的输入、取消和保存响应。当前同一 document 中的 Promise.race 只约束异步等待，尚不满足此条件。实现优先评估复用 Published 宿主的独立、可终止执行进程；具体进程载体在该节点确定，不能用同线程 iframe 或追加定时器冒充隔离。验收使用可被外部终止的故障 fixture，证明 watchdog/取消能终止候选、迟到结果不能提交、工程/资源/历史零写入；不因此改造正常课堂同宿主运行，不扩成通用权限平台。该要求必须在自动生成的动态候选准入开放前闭合。
 
 ## 精确验证入口
 

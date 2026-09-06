@@ -377,7 +377,7 @@ export function buildFlowDocxProjection(
         }
       } else if (item.content.nativeType === 'shape') {
         const shapeType = item.content.data.shapeType
-        if (SUPPORTED_PRESET_SHAPES.has(shapeType)) {
+        if (SUPPORTED_PRESET_SHAPES.has(shapeType) || item.content.data.braceGeometry) {
           disposition = 'editable-shape'
           carrierKind = 'shape'
           if (shapeType === 'line' || shapeType === 'elbow-arrow') {
@@ -385,7 +385,7 @@ export function buildFlowDocxProjection(
             message = 'Native 线条/折线已转换为 DrawingML 连接符。'
           } else {
             reasonCode = 'anchored-drawingml-shape'
-            message = 'Native 几何图形已转换为 DrawingML 预设图形。'
+            message = item.content.data.pathGeometry ? 'Native 自由路径已转换为 DrawingML 可编辑路径。' : 'Native 几何图形已转换为 DrawingML 预设图形。'
           }
         } else {
           disposition = 'static-fallback'
@@ -616,7 +616,7 @@ export function buildFlowDocxProjection(
         message = '全局文本图层已转换为文档首段 DrawingML 文本框。'
       } else if (item.content.nativeType === 'shape') {
         const shapeType = item.content.data.shapeType
-        if (SUPPORTED_PRESET_SHAPES.has(shapeType)) {
+        if (SUPPORTED_PRESET_SHAPES.has(shapeType) || item.content.data.braceGeometry) {
           disposition = 'editable-shape'
           carrierKind = 'shape'
           reasonCode = shapeType === 'line' || shapeType === 'elbow-arrow' ? 'anchored-drawingml-connector' : 'anchored-drawingml-shape'

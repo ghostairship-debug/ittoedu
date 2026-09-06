@@ -8,6 +8,7 @@ import type { AuthoringToolDefinition } from './executeAuthoringTool'
 const schema = z.object({ recipeId: z.enum(RECIPE_CATALOG.map(entry => entry.id)), slots: z.record(z.string(), z.string().max(1200)), accentTokenId: z.string().min(1).optional() }).strict()
 export const recipeTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'recipe.apply', inputSchema: schema,
+  description: '仅 Slide：scene owner + create parent:course-locations，insertion={kind:after,siblingId:当前locationId}。slots 只能用 context.recipes 中对应配方的 fields.key。配方会新建一页，返回位置可用 created-scope。',
   plan({ document, destination, value }) {
     const { target, surface } = resolveAuthoringToolScope(document, destination)
     if (surface.type !== 'slide' || target.owner !== 'scene' || destination.kind !== 'create' || destination.scope.parent.kind !== 'course-locations'

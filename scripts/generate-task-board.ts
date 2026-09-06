@@ -45,7 +45,6 @@ export const writeLockTags = [
   'main-preload',
   'cli-adapters',
   'ai-session',
-  'mcp-server',
   'chat-ui',
 ] as const
 

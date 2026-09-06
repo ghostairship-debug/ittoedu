@@ -18,10 +18,13 @@ export class LocalAgentRepository {
     return pending
   }
   async staging(workspace: WorkspaceIdentityV1, id: string): Promise<string> {
-    z.uuid().parse(id)
-    const directory = path.join(this.directory(workspace), id, 'staging')
+    const directory = this.stagingPath(workspace, id)
     await fs.mkdir(directory, { recursive: true })
     return directory
+  }
+  stagingPath(workspace: WorkspaceIdentityV1, id: string): string {
+    z.uuid().parse(id)
+    return path.join(this.directory(workspace), id, 'staging')
   }
   write(input: LocalAgentRecord): Promise<void> {
     const record = localAgentRecordSchema.parse(input)
@@ -48,6 +51,8 @@ export class LocalAgentRepository {
           if ((await fs.stat(filename)).size > 16 * 1024 * 1024) throw new Error('Oversized record')
           const record = localAgentRecordSchema.parse(JSON.parse(await fs.readFile(filename, 'utf8')))
           if (record.id !== name.slice(0, -5) || workspaceIdentityKey(record.workspace) !== workspaceIdentityKey(workspace)) throw new Error('Workspace mismatch')
+          if (record.generationRequest && (record.generationRequestId !== record.generationRequest.requestId || workspaceIdentityKey(record.generationRequest.workspace) !== workspaceIdentityKey(workspace))) throw new Error('Generation request mismatch')
+          if (record.hostResult && record.hostResult.requestId !== record.generationRequestId) throw new Error('Host result mismatch')
           let sequence = 0
           for (const event of record.events) {
             if (event.sequence !== ++sequence || event.sessionId !== record.id || event.adapter !== record.adapter) throw new Error('Event identity mismatch')

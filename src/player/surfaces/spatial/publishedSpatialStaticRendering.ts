@@ -1,4 +1,5 @@
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { createNativePathSvg } from '../../../shared/nativePathRendering'
 import { buildNativeTableSvg } from '../../../shared/nativeTableSvg'
 import type {
   PublishedCourseV2Payload,
@@ -50,6 +51,26 @@ function spatialItemRotation(item: PublishedLayerItem): string {
 }
 
 function spatialShapeMarkup(item: PublishedNativeLayerItem): string {
+  if (item.content.nativeType !== 'shape') return ''
+  const data = item.content.data
+  if (!data.pathGeometry && !data.braceGeometry && !data.style.fillGradient) return spatialPresetShapeMarkup(item)
+  const { x, y, width, height } = item.frame
+  const svg = createNativePathSvg(document, data.braceGeometry ? data : { ...data, pathGeometry: data.pathGeometry ?? { paths: [] } }, width, height)
+  if (!data.pathGeometry && !data.braceGeometry) {
+    const markup = spatialPresetShapeMarkup({ ...item, frame: { ...item.frame, x: 0, y: 0 } })
+    const parsed = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${markup}</svg>`, 'image/svg+xml')
+    const gradientId = svg.querySelector('linearGradient')?.id
+    for (const child of Array.from(parsed.documentElement.children)) {
+      if (gradientId && child.getAttribute('fill') && child.getAttribute('fill') !== 'none') child.setAttribute('fill', `url(#${gradientId})`)
+      svg.appendChild(document.importNode(child, true))
+    }
+  }
+  svg.setAttribute('width', String(width)); svg.setAttribute('height', String(height))
+  svg.style.width = `${width}px`; svg.style.height = `${height}px`
+  return `<g transform="translate(${x} ${y})">${new XMLSerializer().serializeToString(svg)}</g>`
+}
+
+function spatialPresetShapeMarkup(item: PublishedNativeLayerItem): string {
   if (item.content.nativeType !== 'shape') return ''
   const { x, y, width, height } = item.frame
   const { shapeType, style } = item.content.data

@@ -15,6 +15,7 @@ import {
 } from '../../../shared/flowMediaLayout'
 import type { ShapeNode, TeacherControllerAction, TextRun } from '../../../shared/contracts/native-v1'
 import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
+import { createNativePathSvg } from '../../../shared/nativePathRendering'
 import { paintPublishedNativeText } from '../publishedNativeText'
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
@@ -1293,6 +1294,11 @@ function renderStaticOverlayItem(
     return wrap
   }
   if (entry.item.kind === 'native' && entry.item.content.nativeType === 'shape') {
+    if (entry.item.content.data.pathGeometry || entry.item.content.data.braceGeometry) {
+      wrap.style.overflow = 'visible'
+      wrap.appendChild(createNativePathSvg(dom, entry.item.content.data, entry.item.frame.width, entry.item.frame.height))
+      return wrap
+    }
     const canvas = dom.createElement('canvas')
     canvas.width = Math.max(1, Math.round(entry.item.frame.width))
     canvas.height = Math.max(1, Math.round(entry.item.frame.height))

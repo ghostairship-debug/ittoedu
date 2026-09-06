@@ -1,4 +1,5 @@
 import { APP_COMPANY, APP_NAME } from '../../../shared/constants'
+import { applyPptxShapeExtensions, type PptxShapeExtensions } from '../pptxShapeGeometry'
 import type PptxGenJS from 'pptxgenjs'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import type { ImageNode } from '../../../shared/contracts/native-v1/types'
@@ -292,6 +293,7 @@ async function addNativeItem(
   options: BuildCoursePptxOptions,
   report: CourseExportReportItem[],
   pageId: string,
+  shapeExtensions: PptxShapeExtensions,
 ): Promise<void> {
   const publishedNode = readonlyNativeRenderInputFromPublishedItem(item)
   if (!publishedNode.visible) return
@@ -323,7 +325,7 @@ async function addNativeItem(
   const node = nativeRenderInputFromPublishedItem(item)
   if (node.type === 'text') addPptxTextNode(slide, node, scale)
   else if (node.type === 'formula') addPptxFormulaNode(slide, node, scale)
-  else if (node.type === 'shape') sceneWarnings.push(...addPptxShapeNode(slide, node, scale))
+  else if (node.type === 'shape') sceneWarnings.push(...addPptxShapeNode(slide, node, scale, shapeExtensions))
   else if (node.type === 'image') {
     const assetDataUrl = resolvePublishedAssetData(published, node.assetId)
     if (!assetDataUrl) {
@@ -539,6 +541,7 @@ async function addSlideScenePage(
   report: CourseExportReportItem[],
   precomputedSnapshots: ReadonlyMap<string, string>,
   imageCache: Map<string, HTMLImageElement>,
+  shapeExtensions: PptxShapeExtensions,
 ): Promise<string[]> {
   const scale: CanvasScale = {
     x: WIDE_SLIDE_WIDTH / surface.canvas.width,
@@ -584,7 +587,7 @@ async function addSlideScenePage(
     if (!masterName) {
       const objects: NonNullable<PptxGenJS.SlideMasterProps['objects']> = []
       const target = masterDrawingTarget(objects)
-      for (const item of masterItems) await addNativeItem(target, item, published, scale, sceneWarnings, imageCache, options, report, page.id)
+      for (const item of masterItems) await addNativeItem(target, item, published, scale, sceneWarnings, imageCache, options, report, page.id, shapeExtensions)
       masterName = `共享层_${cache.size + 1}`
       pptx.defineSlideMaster({ title: masterName, objects })
       cache.set(key, masterName)
@@ -625,6 +628,7 @@ async function addSlideScenePage(
         options,
         report,
         page.id,
+        shapeExtensions,
       )
       continue
     }
@@ -818,6 +822,7 @@ export async function buildCoursePptx(
       options.onWarning,
     )
   const imageCache = new Map<string, HTMLImageElement>()
+  const shapeExtensions: PptxShapeExtensions = new Map()
 
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
@@ -855,6 +860,7 @@ export async function buildCoursePptx(
       report,
       precomputedSnapshots,
       imageCache,
+      shapeExtensions,
     ))
     slideCount += 1
   }
@@ -894,7 +900,7 @@ export async function buildCoursePptx(
   }
 
   const output = await pptx.write({ outputType: 'arraybuffer', compression: true })
-  const bytes = new Uint8Array(output as ArrayBuffer)
+  const bytes = applyPptxShapeExtensions(new Uint8Array(output as ArrayBuffer), shapeExtensions)
   if (bytes.byteLength / (1024 * 1024) > 48) {
     pushReport(report, {
       severity: 'warning',

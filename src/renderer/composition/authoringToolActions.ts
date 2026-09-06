@@ -1,12 +1,17 @@
 import { createAuthoringToolFacade } from '../authoring/tools/authoringToolFacade'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CourseAuthoringOwner } from '../authoring/courseAuthoringScope'
+import { createGenerationCandidateCoordinator } from '../authoring/generation/prepareGenerationCandidate'
+import { generationRequestSchema } from '../../shared/generationContract'
+import { createSessionToken, updateCourseAuthoringSessionItems } from '../authoring/courseAuthoringSession'
 
 export function createAuthoringToolActions(ports: {
-  kernel: Pick<EditorStoreKernel, 'readDocument' | 'readAuthoringSession' | 'persistTransaction' | 'readResources'>
+  kernel: Pick<EditorStoreKernel, 'readDocument' | 'readAuthoringSession' | 'writeAuthoringSession' | 'persistTransaction' | 'readResources'>
   readScope(): { owner: CourseAuthoringOwner; stateId: string | null }
   hasContentDraft(): boolean
+  readProjectPath(): string | null
 }) {
+  let generation: ReturnType<typeof createGenerationCandidateCoordinator> | undefined
   const facade = createAuthoringToolFacade({
     readDocument: () => ports.kernel.readDocument(),
     readResources: () => {
@@ -30,6 +35,33 @@ export function createAuthoringToolActions(ports: {
     commit: (step) => ports.kernel.persistTransaction(step, '已应用创作工具修改'),
   })
   return {
+    async prepareGenerationCandidate(request: unknown, candidate: unknown) {
+      if (ports.hasContentDraft()) throw new Error('请先完成当前文字或调色编辑')
+      const parsed = generationRequestSchema.parse(request)
+      const path = ports.readProjectPath()
+      if (!path) throw new Error('请先保存工程')
+      generation?.discard()
+      generation = createGenerationCandidateCoordinator({
+        readDocument: () => ports.kernel.readDocument(),
+        readResources: () => {
+          const resources = ports.kernel.readResources()
+          return { assetFiles: resources.courseAssetSidecar?.files ?? {}, componentPackages: resources.componentPackages }
+        },
+        readWorkspace: () => ports.readProjectPath() === path ? parsed.workspace : { ...parsed.workspace, projectId: 'stale-workspace' },
+        readSessionGeneration: () => ports.kernel.readAuthoringSession()?.token.generation ?? -1,
+        commit: step => !ports.hasContentDraft() && ports.kernel.persistTransaction(step, '已应用 AI 候选，可一次撤销'),
+      })
+      return generation.prepare(parsed, candidate)
+    },
+    discardGenerationCandidate() { generation?.discard() },
+    stopGenerationCandidate() {
+      generation?.discard()
+      const session = ports.kernel.readAuthoringSession()
+      if (session) ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems({
+        ...session, token: createSessionToken(session.token, session.token.generation + 1),
+      }, session.itemIds))
+    },
+    applyGenerationCandidate(previewId: string) { return generation?.apply(previewId) ?? { status: 'stale' as const } },
     async runAuthoringTool(request: unknown) {
       return facade.execute(request)
     },

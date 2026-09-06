@@ -1,4 +1,5 @@
 import { pptxReject, xmlAll, xmlChildren, xmlFirst, type PptxPackage } from './pptxPackage'
+import { expandPptxDiagram } from './pptxDiagramImport'
 
 const child = (node: Element | undefined, name: string) => node && xmlChildren(node).find(n => n.localName === name)
 export const relatedPptxPart = (pkg: PptxPackage, path: string, kind: string) => pkg.relationships(path).find(r => !r.external && r.type.endsWith(`/${kind}`))?.target
@@ -25,8 +26,8 @@ function merge(base: Element | undefined, local: Element | undefined): Element |
   return result
 }
 
-export interface PptxSourceObject { object: Element; path: string; sharedKey?: string }
-export function pptxPageObjects(pkg: PptxPackage, path: string): PptxSourceObject[] {
+export interface PptxSourceObject { object: Element; path: string; sharedKey?: string; children?: PptxSourceObject[]; atomicGroup?: string }
+export function pptxPageObjects(pkg: PptxPackage, path: string, onObjectError?: (error: unknown) => void): PptxSourceObject[] {
   const slide = pkg.xml(path)
   const layoutPath = relatedPptxPart(pkg, path, 'slideLayout')
   const masterPath = layoutPath && relatedPptxPart(pkg, layoutPath, 'slideMaster')
@@ -41,14 +42,19 @@ export function pptxPageObjects(pkg: PptxPackage, path: string): PptxSourceObjec
   const themePath = (masterPath && relatedPptxPart(pkg, masterPath, 'theme')) || relatedPptxPart(pkg, 'ppt/presentation.xml', 'theme')
   const theme = themePath ? pkg.xml(themePath) : undefined
   const result: PptxSourceObject[] = []
-  const resolve = (source: Element, sourcePath: string, sharedKey?: string): PptxSourceObject => {
+  const resolve = (source: Element, sourcePath: string, sharedKey?: string, atomicGroup?: string): PptxSourceObject => {
+    const expanded = expandPptxDiagram(source, pkg, sourcePath)
+    if (expanded) { source = expanded.object; sourcePath = expanded.path; atomicGroup = expanded.atomicGroup }
     const object = source.cloneNode(true) as Element
     if (object.localName === 'grpSp') {
+      const children: PptxSourceObject[] = []
       for (const element of xmlChildren(object)) {
         if (['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(element.localName)) continue
-        element.replaceWith(resolve(element, sourcePath).object)
+        const resolved = resolve(element, sourcePath, undefined, atomicGroup)
+        children.push(resolved)
+        element.replaceWith(resolved.object)
       }
-      return { object, path: sourcePath, ...(sharedKey ? { sharedKey } : {}) }
+      return { object, path: sourcePath, children, atomicGroup, ...(sharedKey ? { sharedKey } : {}) }
     }
     const ph = xmlFirst(object, 'ph')
     const layoutPh = ph && layouts.find(n => xmlFirst(n, 'ph')?.getAttribute('idx') === ph.getAttribute('idx'))
@@ -137,13 +143,17 @@ export function pptxPageObjects(pkg: PptxPackage, path: string): PptxSourceObjec
     }
     // Instance marker has served its purpose; it is not persistent import metadata.
     for (const placeholder of xmlAll(object, 'ph')) placeholder.remove()
-    return { object, path: sourcePath, ...(sharedKey ? { sharedKey } : {}) }
+    return { object, path: sourcePath, atomicGroup, ...(sharedKey ? { sharedKey } : {}) }
+  }
+  const append = (object: Element, sourcePath: string, sharedKey?: string) => {
+    try { result.push(resolve(object, sourcePath, sharedKey)) }
+    catch (error) { if (onObjectError) onObjectError(error); else throw error }
   }
   if (!hidden(slide)) {
-    if (!hidden(layout)) masters.filter(n => !xmlFirst(n, 'ph')).forEach((n, i) => result.push(resolve(n, masterPath!, `${masterPath}:${i}`)))
-    layouts.filter(n => !xmlFirst(n, 'ph')).forEach((n, i) => result.push(resolve(n, layoutPath!, `${layoutPath}:${i}`)))
+    if (!hidden(layout)) masters.filter(n => !xmlFirst(n, 'ph')).forEach((n, i) => append(n, masterPath!, `${masterPath}:${i}`))
+    layouts.filter(n => !xmlFirst(n, 'ph')).forEach((n, i) => append(n, layoutPath!, `${layoutPath}:${i}`))
   }
-  for (const object of objects(slide)) result.push(resolve(object, path))
+  for (const object of objects(slide)) append(object, path)
   return result
 }
 
@@ -155,9 +165,9 @@ export function expandPptxGroup(source: PptxSourceObject): PptxSourceObject[] {
   const sx = read('ext', 'cx') / read('chExt', 'cx'), sy = read('ext', 'cy') / read('chExt', 'cy')
   if (![sx, sy].every(n => Number.isFinite(n) && n > 0) || Number(transform?.getAttribute('rot')) || ['flipH', 'flipV'].some(k => ['1', 'true'].includes(transform?.getAttribute(k) ?? ''))) pptxReject('分组变换', '此旋转或翻转分组暂未支持，可在源软件取消组合后重试')
   const output: PptxSourceObject[] = []
-  for (const [index, element] of xmlChildren(source.object).entries()) {
-    if (['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(element.localName)) continue
-    for (const entry of expandPptxGroup({ ...source, object: element, sharedKey: source.sharedKey && `${source.sharedKey}/${index}` })) {
+  const children = source.children ?? xmlChildren(source.object).filter(element => !['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(element.localName)).map(object => ({ ...source, object, children: undefined }))
+  for (const [index, element] of children.entries()) {
+    for (const entry of expandPptxGroup({ ...element, sharedKey: source.sharedKey && `${source.sharedKey}/${index}` })) {
       const object = entry.object.cloneNode(true) as Element, xfrm = xmlFirst(object, 'xfrm')
       const off = xfrm && child(xfrm, 'off'), ext = xfrm && child(xfrm, 'ext')
       if (!off || !ext) pptxReject('分组几何', '分组内对象缺少位置')

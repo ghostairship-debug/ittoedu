@@ -6617,6 +6617,13 @@
                         "showGridLines": {
                           "type": "boolean"
                         },
+                        "barDirection": {
+                          "type": "string",
+                          "enum": [
+                            "vertical",
+                            "horizontal"
+                          ]
+                        },
                         "valueMin": {
                           "type": "number"
                         },

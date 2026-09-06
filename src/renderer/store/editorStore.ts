@@ -1211,6 +1211,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   const authoringToolActions = createAuthoringToolActions({
     kernel,
+    readProjectPath: () => get().projectPath,
     readScope: () => {
       const projection = buildCandidateEffectiveLayers(get())
       if (!projection) throw new Error('当前没有有效的作者表面')

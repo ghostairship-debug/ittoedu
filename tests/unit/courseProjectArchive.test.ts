@@ -3,9 +3,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it, vi } from 'vitest'
-import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
+import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture, pptxEditableChartsFixture } from '../fixtures/pptxImport'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
+import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { openPptxPackage, PPTX_IMPORT_LIMITS } from '@/renderer/project/pptxPackage'
 import { applyEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import * as assetManager from '@/renderer/project/assetManager'
@@ -38,6 +39,42 @@ const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/c
 const DIAGRAM_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
 
 describe('S2 restricted PPTX import atomic archive transaction', () => {
+  it('imports editable charts from matching workbook/cache data and rejects conflicts or missing points', async () => {
+    const bytes = await pptxEditableChartsFixture()
+    const draft = await parsePptxImport(bytes)
+    expect(draft.issues.filter(issue => issue.message.startsWith('已跳过'))).toEqual([])
+    const charts = draft.slides.flatMap(slide => slide.items).filter(item => item.kind === 'native' && item.content.nativeType === 'chart')
+    expect(charts).toHaveLength(4)
+    expect(charts.map(item => item.kind === 'native' && item.content.nativeType === 'chart' && item.content.data.chartType)).toEqual(['bar', 'line', 'pie', 'donut'])
+    for (const item of charts) {
+      if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('Wrong fixture')
+      expect(item.content.data.categories.map(category => category.label)).toEqual(['甲班', '乙班', '丙班'])
+      expect(item.content.data.series[0].points.map(point => point.value)).toEqual([12, 18, 24])
+      expect(item.content.data.title).toBe('阅读调查')
+      expect(item.content.data.style.legendPosition).toBe('bottom')
+    }
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
+    const step = planPptxImportTransaction(project, draft, '图表课件')
+    const applied = applyEditorTransactionStep(initial, step, 'forward')
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: {}, componentFiles: {} }))
+    expect(reopened.project).toEqual(applied.document)
+    expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
+    const exported = await buildCoursePptx({ project: reopened.project, assetFiles: {}, components: {} })
+    const roundtrip = await parsePptxImport(exported.bytes)
+    const roundtripCharts = roundtrip.slides.flatMap(slide => slide.items).filter(item => item.kind === 'native' && item.content.nativeType === 'chart')
+    expect(roundtripCharts).toHaveLength(4)
+    expect(roundtrip.issues.filter(issue => issue.message.startsWith('已跳过'))).toEqual([])
+    const files = unzipSync(bytes), chartPath = 'ppt/charts/chart1.xml'
+    files[chartPath] = strToU8(strFromU8(files[chartPath]).replace('<c:v>18</c:v>', '<c:v>99</c:v>'))
+    const conflict = await parsePptxImport(zipSync(files))
+    expect(conflict.issues.some(issue => issue.page === 1 && issue.message.includes('工作簿冲突'))).toBe(true)
+    expect(conflict.slides[0].items).toHaveLength(0)
+    files[chartPath] = strToU8(strFromU8(unzipSync(bytes)[chartPath]).replace(/<c:pt idx="1"><c:v>18<\/c:v><\/c:pt>/, ''))
+    const missing = await parsePptxImport(zipSync(files))
+    expect(missing.issues.some(issue => issue.page === 1 && issue.message.includes('缓存不完整'))).toBe(true)
+    expect(missing.slides[0].items).toHaveLength(0)
+  })
   it('restores inherited group text, ordinary borders, rounded/process shapes and single justified glyphs', async () => {
     const draft = await parsePptxImport(pptxCommonMappingFixture())
     expect(draft.issues.map(i => i.type)).toEqual(['边框样式', '边框样式'])
@@ -60,11 +97,11 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(draft.issues.map(i => i.type)).toEqual(['边框样式', '段落对齐', '自定义形状参数'])
     expect(draft.slides[0]!.items).toHaveLength(4)
   })
-  it('identifies legacy equations separately from unsupported charts before partial import', async () => {
+  it('reports malformed legacy equation relationships before partial import', async () => {
     const files = unzipSync(pptxImportFixture({ unsupported: true }))
     files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace('<p:graphicFrame/>', '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="9" name="公式1"/></p:nvGraphicFramePr><a:graphic><a:graphicData><p:oleObj progId="Equation.3"/></a:graphicData></a:graphic></p:graphicFrame>'))
     const draft = await parsePptxImport(zipSync(files))
-    expect(draft.issues).toEqual([{ page: 1, type: '旧版公式（OLE）', message: '已跳过“公式1”：尚未支持转换为可编辑内容，可在源软件另存图片后补入' }])
+    expect(draft.issues).toEqual([{ page: 1, type: '旧版公式（OLE）', message: '已跳过“公式1”：公式关系缺失、类型错误或指向外部' }])
     expect(draft.slides[0]!.items).toHaveLength(2)
   })
   it('honors source no-wrap auto-fit without clipping ordinary question text or enlarging fixed frames', async () => {

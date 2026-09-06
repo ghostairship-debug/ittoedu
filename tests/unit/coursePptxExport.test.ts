@@ -18,7 +18,7 @@ import { createBlankCourseProject } from '@/renderer/project/createCourseProject
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { mergeTableCells } from '@/renderer/course/tableContentOperations'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
-import { pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
+import { pptxInheritanceFixture, pptxCommonMappingFixture, pptxEditablePathsFixture } from '../fixtures/pptxImport'
 import { APP_COMPANY, APP_NAME, CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import { createShapeNode, createTextNode, createFormulaNode, createTableNode, createChartNode, createTableLayerItem, createChartLayerItem } from '@/renderer/project/nativeNodeFactories'
 import {
@@ -60,6 +60,57 @@ describe('buildCourseExportPageList', () => {
 })
 
 describe('buildCoursePptx', () => {
+  it('preserves source brace adjustments and the outside-frame callout tail through editable PPTX', async () => {
+    const draft = await parsePptxImport(pptxEditablePathsFixture(true))
+    const shapes = draft.slides[0].items.filter(item => item.kind === 'native' && item.content.nativeType === 'shape')
+    expect(shapes).toHaveLength(5)
+    const braces = shapes.filter(item => item.kind === 'native' && item.content.nativeType === 'shape' && item.content.data.braceGeometry)
+    expect(braces.map(item => item.kind === 'native' && item.content.nativeType === 'shape' ? item.content.data.braceGeometry?.curvatureRatio : undefined)).toEqual([0.07694, 0.07819, 0.08066])
+    const callout = shapes.find(item => item.label === '向上标注')!
+    if (callout.kind !== 'native' || callout.content.nativeType !== 'shape') throw new Error('missing callout')
+    const tip = callout.content.data.pathGeometry?.paths[0].commands.find(command => command.kind === 'line' && command.to[1] < 0)
+    expect(tip?.kind === 'line' ? tip.to[0] : undefined).toBeCloseTo(0.51815)
+    expect(tip?.kind === 'line' ? tip.to[1] : undefined).toBeCloseTo(-0.54602)
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const surface = project.surfaces.find(surface => surface.type === 'slide')!
+    if (surface.type !== 'slide') throw new Error('slide')
+    surface.scenes[0].layerItems = shapes
+    const output = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const imported = await parsePptxImport(output.bytes)
+    const importedBraces = imported.slides[0].items.filter(item => item.kind === 'native' && item.content.nativeType === 'shape' && item.content.data.braceGeometry)
+    expect(importedBraces.map(item => item.kind === 'native' && item.content.nativeType === 'shape' ? item.content.data.braceGeometry : undefined)).toEqual(braces.map(item => item.kind === 'native' && item.content.nativeType === 'shape' ? item.content.data.braceGeometry : undefined))
+    expect(imported.issues.filter(issue => issue.message.includes('已跳过'))).toEqual([])
+  })
+  it('roundtrips editable cubic paths and gradient fills without images or source XML in the project', async () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const surface = project.surfaces.find(surface => surface.type === 'slide')!
+    if (surface.type !== 'slide') throw new Error('slide')
+    const path = createShapeNode('rectangle', { name: '自由曲线', width: 320, height: 180, opacity: 0.75,
+      pathGeometry: { paths: [{ fill: true, stroke: true, commands: [
+        { kind: 'move', to: [0, 0] }, { kind: 'cubic', control1: [-0.01, 0.3], control2: [1.01, 0.7], to: [1, 1] },
+        { kind: 'quadratic', control: [0.5, 1.2], to: [0, 1] }, { kind: 'close' },
+      ] }, { fill: false, stroke: true, commands: [{ kind: 'move', to: [0.2, 0.4] }, { kind: 'line', to: [0.8, 0.4] }] }] },
+      style: { fillOpacity: 0.5, borderWidth: 3, fillGradient: { kind: 'linear', start: [0, 0.5], end: [1, 0.5], stops: [
+        { offset: 0, color: '#112233', opacity: 0.4 }, { offset: 1, color: '#aabbcc', opacity: 1 },
+      ] } },
+    })
+    surface.scenes[0]!.layerItems = [sceneNodeToCourseLayerItem(path, 0)]
+    const result = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    expect(result.report.filter(entry => entry.severity === 'error')).toEqual([])
+    const xml = new DOMParser().parseFromString(decodePptxSlides(result.bytes), 'application/xml')
+    expect(xml.getElementsByTagNameNS('*', 'custGeom')).toHaveLength(1)
+    expect(xml.getElementsByTagNameNS('*', 'pic')).toHaveLength(0)
+    const imported = await parsePptxImport(result.bytes)
+    const shape = imported.slides.flatMap(slide => slide.items).find(item => item.kind === 'native' && item.content.nativeType === 'shape')
+    expect(imported.issues.filter(issue => issue.message.includes('已跳过'))).toEqual([])
+    if (shape?.kind !== 'native' || shape.content.nativeType !== 'shape') throw new Error('missing editable shape')
+    expect(shape.content.data.pathGeometry).toEqual(path.pathGeometry)
+    expect(shape.content.data.style.fillGradient?.stops).toEqual([
+      { offset: 0, color: '#112233', opacity: 0.15 }, { offset: 1, color: '#aabbcc', opacity: 0.375 },
+    ])
+    expect(shape.content.data.style.fillOpacity).toBe(1)
+  })
+
   it('roundtrips editable subscript runs and flipped text through real PPTX XML', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const surface = project.surfaces.find(surface => surface.type === 'slide')!
@@ -611,6 +662,26 @@ describe('buildCoursePptx', () => {
       item.code === 'static-export-warning' && item.message.includes('旋转表格')
     ))
     expect(warnings.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('横向条形图导出可编辑数据并按视觉分类顺序重新导入', async () => {
+    const project = createBlankCourseProject({ now: NOW, includeDefaultController: false, controls: 'none' })
+    const slide = project.surfaces.find(surface => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide')
+    const chart = createChartNode({ chartType: 'bar', style: { barDirection: 'horizontal' } })
+    chart.series[0]!.points.forEach((point, index) => { point.value = [-10, 30, 60][index]! })
+    slide.scenes[0]!.layerItems = [createChartLayerItem(chart, 0)]
+    const result = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const archive = unzipSync(result.bytes)
+    const entry = Object.keys(archive).find(name => /^ppt\/charts\/chart\d+\.xml$/.test(name))!
+    const xml = new TextDecoder().decode(archive[entry])
+    expect(xml).toContain('barDir val="bar"')
+    const imported = await parsePptxImport(result.bytes)
+    const item = imported.slides.flatMap(page => page.items).find(item => item.kind === 'native' && item.content.nativeType === 'chart')
+    if (!item || item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('missing imported chart')
+    expect(item.content.data.style).toHaveProperty('barDirection', 'horizontal')
+    expect(item.content.data.categories.map(category => category.label)).toEqual(chart.categories.map(category => category.label))
+    expect(item.content.data.series[0]!.points.map(point => point.value)).toEqual([-10, 30, 60])
   })
 
   it.each([

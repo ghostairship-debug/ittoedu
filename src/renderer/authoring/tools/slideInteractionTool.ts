@@ -27,6 +27,8 @@ export const slideInteractionToolInputSchema = z.discriminatedUnion('operation',
 ])
 export const slideInteractionTool: AuthoringToolDefinition<z.infer<typeof slideInteractionToolInputSchema>> = {
   name: 'slide.interaction', inputSchema: slideInteractionToolInputSchema,
+  description: '仅 Slide scene owner；insert 使用 create owner append。rule 遵循 references.ruleWithId，但省略最外层 id（由宿主生成），保留 actions 内部的步骤 id。第一动作 start 必须 after-previous，导航动作必须最后。',
+  referenceSchemas: { ruleWithId: interactionRuleSchema },
   plan({ document, destination, value }) {
     const { target, surface, location } = resolveAuthoringToolScope(document, destination)
     if (surface.type !== 'slide' || location.kind !== 'slide-scene' || target.owner !== 'scene') throw new Error('Slide 互动工具需要 scene owner')
