@@ -16,7 +16,7 @@ S2 Owner 验收 1.4–1.5 后发布 `v1.5.0` accepted 源码标签，不发布 H
 - 本地材料入口位于“创作工具 → 教学材料库”。支持粘贴文本和 UTF-8 TXT / Markdown / CSV 文件（2 MB 上限），搜索标题 / 正文 / 来源、查看原文、定位原文件、删除单条与清空当前工程。记录保存在 userData/materials/v1；每条原子写入，搜索从权威材料记录重建，没有独立易损索引。它们不进入课件文件。
 - `material.citation` 通过已有 Native / Flow command 插入普通正文和可见来源，共用统一 receipt、stale 检查和一次历史事务。缓存身份、材料 ID 与本地记录不进入工程或 Published；删除材料不影响已插入文本。
 - 材料仓库隔离 / 删除与重启重读、Slide / Flow 可携带引用及 stale 零写入的四项聚焦用例通过。真实 Electron 已验证粘贴导入、来源搜索、插入引用、另存为隔离、返回原工程、删除材料后保存仍保留来源；材料库呈现已人工查看截图。最终桌面用例同时覆盖真实 UTF-8 文件导入、清空副本材料不影响原工程，1/1 通过；当前类型检查和桌面构建通过。截图为 `output/playwright/r13-review/r15-material-library.png`。
-- 受限 PPTX 已按正式关系解析文字/基础形状/内嵌图片，暂存完成后一次提交文档与 sidecar，整包撤销；大小、压缩比、损坏关系和不支持对象明确拒绝。正常 PptxGenJS 文件与真实 UI 导入/保存重开/离线播放已验证。
+- 受限 PPTX 已按正式关系解析文字/基础形状/内嵌图片，暂存完成后一次提交文档与 sidecar，整包撤销；大小和压缩比超限明确拒绝；不支持对象或局部损坏按对象/页面跳过并报告，保留其他内容，动画与部分效果省略后保留静态对象。只有无可导入对象或主文档无法读取时才停止。正常 PptxGenJS 文件与真实 UI 导入/保存重开/离线播放已验证。
 - 样板改写已接入设计生产力面板；文字槽位映射、容量预览、独立身份和资源、一次 Undo 与保存重开已验证。内容 QA 四类 finding 已接入 GUI、CLI 和报告，显示依据/建议并定位对象；检查只读，普通自然语言不被宣称已审校。
 - 1.4 动态工具 / Builder V2 已形成 `v1.4.0-rc.1`。1.5 的验证、支持范围与实际截图见 [1.5 复核](../../reviews/1.5-materials-content-2026-09-06.md)，直接使用的固定课例及待签署项目见 [S2 验收单](../../acceptance/S2-tools-and-materials.md)。S2 和 `v1.5.0` accepted 标签仍等待 Owner。
 
@@ -26,7 +26,7 @@ S2 Owner 验收 1.4–1.5 后发布 `v1.5.0` accepted 源码标签，不发布 H
 | `r15-000-material-contract` | 定义本地材料记录、工程关联、引用与删除语义 | `r15-005-workspace-identity` | 否 | `contracts-schema`, `main-preload` | 版本化本地材料记录按 `r15-005-workspace-identity` 关联并严格解析；材料原文、索引和 trace 不进 CourseProject、Published 或导出；删除行为与课程可见引用保留策略可判定；本节点只定义材料域私有语义，不重复定义 workspace identity |
 | `r15-010-material-repository` | 应用本地材料可导入、读取、检索、定位和删除 | `r15-000-material-contract` | 否 | `main-preload` | 导入受支持文本 / 文件后可按标题、正文和来源检索并打开原位置；重启应用后仍可用；删除一个材料、当前工程材料不影响其他工程；损坏索引可重建且不改权威工程；本节点在现有 `tests/unit/coursewareAuthoringRunner.test.ts` 增加并通过材料仓库隔离 / 删除用例 |
 | `r15-020-material-tools-citations` | Authoring Tools 可引用材料并写入可见、可携带来源 | `r15-010-material-repository`, `r14-020-slide-tools`, `r14-021-flow-tools` | 否 | `main-preload`, `store-kernel` | 从检索结果插入内容时，正文和来源定位写成普通 V9 内容；删除本地材料后已写引用在保存重开、Player 和导出中仍可见；stale target 零写入；引用插入可一次 Undo |
-| `r15-030-pptx-import` | 受限 PPTX 解析、资源限制、不支持项报告与 document + sidecar 原子提交 | `r14-060-release` | 否 | `app-save-recovery`, `store-kernel` | 正常 fixture 导入为可编辑页面 / 对象；超文件大小、超解压比、损坏关系和不支持对象分别停止并报告页码 / 类型；任一 document 或 sidecar 写入失败时两者均不提交；导入可整体撤销；本节点在现有 `tests/unit/courseProjectArchive.test.ts` 增加并通过 PPTX document + sidecar 原子事务用例 |
+| `r15-030-pptx-import` | 受限 PPTX 解析、资源限制、不支持项报告与 document + sidecar 原子提交 | `r14-060-release` | 否 | `app-save-recovery`, `store-kernel` | 正常 fixture 导入为可编辑页面 / 对象；超文件大小、超解压比或主文档不可读时停止；不支持对象及局部损坏按页码 / 对象报告并跳过，保留其他内容供确认；无可导入对象不写入；任一 document 或 sidecar 写入失败时两者均不提交；导入可整体撤销；本节点在现有 `tests/unit/courseProjectArchive.test.ts` 增加并通过 PPTX document + sidecar 原子事务用例 |
 | `r15-040-style-remix` | 复制参考页可编辑骨架并用明确槽位替换内容 | `r13-060-release`, `r14-060-release` | 否 | `store-kernel`, `generated-index` | Remix 预览列出骨架来源、槽位映射与容量处理；确认后创建无身份冲突的普通 V9 内容；修改副本不影响来源；缺槽位 / 超容量返回定位结果且不留下半页；保存重开与 Player 一致 |
 | `r15-050-content-qa` | 数学、答案一致性、图表正文一致性和来源定位进入可导航 QA | `r14-060-release` | 否 | `diagnostics`, `generated-index` | 四类预置错误分别产生可跳转 finding；数学检查区分解析错误与渲染警告，答案检查比较题目与 evaluator，图表检查比较数据与正文主张，来源检查定位缺失引用；检查只读且不因 OpenMAIC 缺席降级；本节点在现有 `tests/unit/courseProjectHealth.test.ts` 增加并通过四类内容 QA 用例 |
 | `r15-060-release` | Owner 验收 S2 工具与素材并发布 v1.5.0 accepted 源码标签 | `r15-020-material-tools-citations`, `r15-030-pptx-import`, `r15-040-style-remix`, `r15-050-content-qa` | 否 | `none` | Owner 在同一固定课例完成 S2 工具与素材验收：覆盖 1.4 的三 Surface/global Authoring Tools、Builder V2、动态载体三硬门，以及 1.5 的材料导入/检索/引用/删除、PPTX 导入、Remix 与四类内容 QA；检查保存重开、Undo、Player、HTML、适用导出和失败零写入，晋升 1.4–1.5 已验收行为到保全矩阵，签署 accepted 后创建 `v1.5.0` 源码标签；OpenMAIC 缺席不阻塞 |
@@ -40,7 +40,7 @@ S2 Owner 验收 1.4–1.5 后发布 `v1.5.0` accepted 源码标签，不发布 H
 - `r15-005-workspace-identity` 单独定义共享 `WorkspaceIdentityV1 = projectId + normalizedPath`；材料域和后续 AI 会话域都依赖它，各自不得重复定义 workspace key。
 - 本地材料目录使用版本化 metadata + content / index，并以共享 WorkspaceIdentity 为 owner；材料缓存、搜索索引、解析 trace 均不写入 `.h5lesson`。
 - 课程中的引用是普通 V9 可见内容，至少保留显示标签和来源定位；本地原材料被删除后，已经提交的课程正文 / 引用仍由工程自身保存。
-- PPTX importer 先在临时 staging 完成 ZIP 结构、压缩比、关系、媒体和对象白名单检查，再以 document + sidecar 单一事务提交；不支持项报告不得被“尽力忽略”。
+- PPTX importer 先在临时 staging 完成 ZIP 结构、压缩比、关系、媒体和对象转换。按照 Owner 2026-09-06 的决定，支持内容先导入，不支持对象按页码和对象名称跳过；动画、链接和部分效果可省略后保留静态内容，背景无法转换时回退白色。预览必须展示遗漏清单，确认后仅将保留内容以 document + sidecar 单一事务提交。损坏主文档、资源超限或无可用内容才阻止整次导入；不得静默丢失或留下半个对象。
 - Style Remix 复用的是重映射身份后的可编辑骨架与明确槽位，不复制隐藏 Recipe / runtime 状态。
 - 内容 QA 返回 severity、rule ID、canonical target、message、evidence 与修复建议；QA 不自行更改答案或正文。
 - OpenMAIC 桥接不得取得 CourseProject 私有写入口，也不得成为材料、Remix 或 QA 的默认实现。
@@ -57,3 +57,7 @@ npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts
 ```
 
 版本候选再执行总路线的统一验证与 S2 Owner 发布门；OpenMAIC 测试不得加入核心命令链。
+
+## 后续 PPTX 兼容性扩展
+
+当前部分导入策略长期保留。后续按真实教师文件的遗漏报告优先补齐：先处理常见占位符、母版/版式继承、主题字号与分组几何，再扩展图片裁剪/翻转、常用文字和填充效果，随后评估把表格/图表转换到现有 Native Table/Chart。动画和复杂多媒体另行评估可表达的静态结果与交互语义，不承诺 PowerPoint 全保真或未经实现验证的完成版本。每类扩展用真实 PPTX 验证可编辑、保存重开、Undo 和 Player/导出；新能力实现后才从遗漏清单中移除。此处记录待完善范围，不表示已支持，也不自动进入 1.6。

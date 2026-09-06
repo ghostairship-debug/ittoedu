@@ -55,7 +55,8 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     // Browser decoding is covered by the real-host test; this unit targets XML and atomic archive semantics.
     const decoder = vi.spyOn(assetManager, 'readImageDimensions').mockResolvedValue({ width: 1, height: 1 })
     try {
-      const draft = await parsePptxImport(pptxImportFixture({ image: true }))
+      const draft = await parsePptxImport(pptxImportFixture({ image: true, unsupported: true }))
+      expect(draft.issues).toEqual([expect.objectContaining({ page: 1, type: 'graphicFrame' })])
       expect(draft.slides[0]!.items.map(i => i.kind === 'native' && i.content.nativeType)).toEqual(['text', 'shape', 'image'])
       const text = draft.slides[0]!.items[0]!
       if (text.kind !== 'native' || text.content.nativeType !== 'text') throw new Error('text')
@@ -88,11 +89,13 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       }
     } finally { decoder.mockRestore() }
   })
-  it('rejects oversize, zip expansion, broken relationships and page-local unsupported content before planning', async () => {
+  it('rejects unreadable archives and resource excess but reports unsupported objects alongside retained content', async () => {
     expect(() => openPptxPackage(new Uint8Array(PPTX_IMPORT_LIMITS.fileBytes + 1))).toThrow('文件大小')
     expect(() => openPptxPackage(zipSync({ 'bomb.xml': new Uint8Array(2_000_000) }))).toThrow('解压比')
     await expect(parsePptxImport(pptxImportFixture({ brokenRelationship: true }))).rejects.toThrow('第 1 页：损坏关系')
-    await expect(parsePptxImport(pptxImportFixture({ unsupported: true }))).rejects.toThrow('第 1 页：graphicFrame')
+    const partial = await parsePptxImport(pptxImportFixture({ unsupported: true }))
+    expect(partial.slides[0]!.items).toHaveLength(2)
+    expect(partial.issues).toEqual([expect.objectContaining({ page: 1, type: 'graphicFrame', message: expect.stringContaining('已跳过') })])
     for (const [from, to, reason] of [
       ['<a:xfrm>', '<a:xfrm flipH="true">', '翻转'],
       ['<a:rPr sz="3200"', '<a:rPr baseline="2000" sz="3200"', '文字效果'],
@@ -100,8 +103,49 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     ]) {
       const files = unzipSync(pptxImportFixture())
       files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace(from!, to!))
-      await expect(parsePptxImport(zipSync(files))).rejects.toThrow(`第 1 页：${reason}`)
+      const draft = await parsePptxImport(zipSync(files))
+      expect(draft.slides[0]!.items).toHaveLength(1)
+      expect(draft.issues).toEqual([expect.objectContaining({ page: 1, type: reason })])
     }
+  })
+  it('retains static content with warnings for animation, hyperlinks, shadow and unsupported background', async () => {
+    const files = unzipSync(pptxImportFixture())
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!)
+      .replace('<p:cNvPr id="2" name="课题"/>', '<p:cNvPr id="2" name="课题"><a:hlinkClick r:id="web"/></p:cNvPr>')
+      .replace('</p:sld>', '<p:timing/></p:sld>')
+      .replace('<a:prstGeom prst="ellipse"/>', '<a:prstGeom prst="ellipse"/><a:effectLst><a:outerShdw/></a:effectLst>')
+      .replace('<a:solidFill><a:srgbClr val="F0F5FF"/></a:solidFill>', '<a:gradFill/>'))
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.slides[0]!.items).toHaveLength(2)
+    expect(draft.slides[0]!.backgroundColor).toBe('#ffffff')
+    expect(draft.issues.map(issue => issue.type)).toEqual(expect.arrayContaining(['动画', '超链接', '视觉效果', '背景']))
+  })
+  it('isolates broken media and pages and keeps source page numbers in reports', async () => {
+    const files = unzipSync(pptxImportFixture({ image: true }))
+    delete files['ppt/media/image.png']
+    files['ppt/presentation.xml'] = strToU8(strFromU8(files['ppt/presentation.xml']!).replace('<p:sldId id="256"', '<p:sldId id="257" r:id="missing"/><p:sldId id="256"'))
+    const decoder = vi.spyOn(assetManager, 'readImageDimensions').mockRejectedValue(new Error('图片无法解码'))
+    try {
+      const draft = await parsePptxImport(zipSync(files))
+      expect(draft.slides).toHaveLength(1)
+      expect(draft.slides[0]!.items).toHaveLength(2)
+      expect(draft.assets).toHaveLength(0)
+      expect(draft.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ page: 1, message: expect.stringContaining('已跳过页面') }),
+        expect.objectContaining({ page: 2, message: expect.stringContaining('已跳过“图片”') }),
+      ]))
+    } finally { decoder.mockRestore() }
+  })
+  it('does not keep a half-converted shape/text object and refuses an entirely empty result', async () => {
+    const files = unzipSync(pptxImportFixture())
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!)
+      .replace('<a:noFill/>', '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>')
+      .replace('<a:rPr sz="3200"', '<a:rPr baseline="2000" sz="3200"'))
+    const draft = await parsePptxImport(zipSync(files))
+    expect(draft.slides[0]!.items).toHaveLength(1)
+    expect(draft.slides[0]!.items[0]).toMatchObject({ kind: 'native', content: { nativeType: 'shape', data: { shapeType: 'ellipse' } } })
+    files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace(/<p:sp>[\s\S]*?<\/p:sp>/g, '<p:graphicFrame/>'))
+    await expect(parsePptxImport(zipSync(files))).rejects.toThrow('无可导入内容')
   })
 })
 

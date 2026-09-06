@@ -81,13 +81,3 @@ export function openPptxPackage(bytes: Uint8Array): PptxPackage {
   if (!root || root.external || root.target !== 'ppt/presentation.xml') pptxReject('PPTX 结构', '需要标准 PresentationML 主文档')
   return pkg
 }
-
-/** Used parts are resolved in page context first; reject damage in unused parts too. */
-export function validatePptxRelationships(pkg: PptxPackage): void {
-  for (const path of Object.keys(pkg.files).filter(p => p.endsWith('.rels'))) {
-    const source = path === '_rels/.rels' ? '' : path.replace(/(^|\/)\_rels\//, '$1').replace(/\.rels$/, '')
-    for (const relationship of pkg.relationships(source)) {
-      if (!relationship.external && !pkg.files[relationship.target]) pptxReject('损坏关系', `${path} 引用了缺失文件 ${relationship.target}`)
-    }
-  }
-}
