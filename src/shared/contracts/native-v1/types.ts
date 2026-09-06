@@ -88,6 +88,8 @@ export interface NativeRenderableBase {
 }
 
 export interface TextRunStyle {
+  /** Baseline displacement as a fraction of this run's font size; positive raises text. */
+  baseline?: number
   color?: string
   bold?: boolean
   italic?: boolean
@@ -107,6 +109,8 @@ export interface TextRun {
 
 export interface TextNode extends NativeRenderableBase {
   type: 'text'
+  flipX?: boolean
+  flipY?: boolean
   text: string
   runs: TextRun[]
   style: {

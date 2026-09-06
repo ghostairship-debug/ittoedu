@@ -4,6 +4,12 @@
 
 Owner 在 1.6 路线批准 Native Table 与 FlowTableBlock 可选 strict `merges` 字段；唯一语义见架构合同的 `1.6 Table merge contract`。Published V2 复用对应 V9/Native reader，不另建发布语义。旧文件不含该字段仍可读；旧 strict reader 遇到它必须报未知字段，不能剥离后显示错误表格。区域越界、重叠、不连续、单格或覆盖格含正文均拒绝。
 
+## 1.6 additive 文字效果
+
+按 r16-037 的批准范围，TextRunStyle 增加可选 `baseline: number [-1,1]`，单位为该 run 字号的比例，正值上移、负值下移，缺省为零；仍使用同一文本及按 Unicode 字符计数的 runs，不把普通上下标改成公式或图片。Native Text 增加可选 `flipX` / `flipY`，缺省 false，围绕内容框中心翻转，Layer rotation 仍在外层应用。Flow 富文本同步接受 baseline（不增加翻转），Published V2 复用正式 schema。
+
+V9 Native wrapper 的递归未知字段检查与 Flow strict style 使旧 reader 对上述新字段明确失败。新 reader 保持旧文件的零位移、不翻转语义。文本编辑须保留/重映射 run，Canvas、Player、PPTX 与 Flow DOCX 使用相同位移定义；导入 OOXML baseline 除以 100000，导出保持原值。合同先于 writer，未闭合 consumer 时不声明文字效果已交付。
+
 > 本文档规范 Course Project V9 的版本演进规则、格式兼容边界与向后兼容承诺。
 > 权威类型定义以 `src/shared/contracts/course-project-v9/` 与 `src/shared/contracts/published-course-v2/` 为准；当前仍存在的旧路径 re-export 桩只是 1.1 迁移中间态，真实 consumer 清零后必须删除，不形成长期兼容路径。
 >

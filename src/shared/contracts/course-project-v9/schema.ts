@@ -582,6 +582,7 @@ const flowBlockBaseFields = { id: stableIdSchema } as const
 
 /** Same fields as V8 `TextRun` / `TextRunStyle`; types stay in projectTypes. */
 const flowTextRunStyleSchema = z.object({
+  baseline: finiteNumber.min(-1).max(1).optional(),
   color: colorSchema.optional(),
   bold: z.boolean().optional(),
   italic: z.boolean().optional(),

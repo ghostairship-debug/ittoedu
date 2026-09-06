@@ -46,6 +46,7 @@ export function isVerticalWritingMode(
 }
 
 const DEFAULT_RUN_STYLE: Required<TextRunStyle> = {
+  baseline: 0,
   color: '#000000',
   bold: false,
   italic: false,

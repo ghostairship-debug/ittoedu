@@ -23,6 +23,7 @@ export const nativeRenderableBaseSchema = z.object({
 })
 
 const textRunStyleSchema = z.object({
+  baseline: finiteNumber.min(-1).max(1).optional(),
   color: colorSchema.optional(),
   bold: z.boolean().optional(),
   italic: z.boolean().optional(),
@@ -36,6 +37,8 @@ const textRunStyleSchema = z.object({
 
 const textNodeCoreSchema = nativeRenderableBaseSchema.extend({
   type: z.literal('text'),
+  flipX: z.boolean().optional(),
+  flipY: z.boolean().optional(),
   text: z.string(),
   runs: z.array(z.object({
     start: z.number().int().nonnegative(),
@@ -504,6 +507,8 @@ function nativeContentSchema<T>(
 }
 
 const textNativeContentObjectSchema = z.object({
+  flipX: z.boolean().optional(),
+  flipY: z.boolean().optional(),
   text: z.string(),
   runs: z.array(z.object({
     start: z.number().int().nonnegative(),
