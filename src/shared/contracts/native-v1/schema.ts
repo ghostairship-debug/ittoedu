@@ -885,6 +885,7 @@ export const chartNativeContentObjectSchema = z.discriminatedUnion('chartType', 
       showCategoryAxis: z.boolean(),
       showValueAxis: z.boolean(),
       showGridLines: z.boolean(),
+      barDirection: z.enum(['vertical', 'horizontal']).optional(),
       valueMin: finiteNumber.optional(),
       valueMax: finiteNumber.optional(),
     }).strict(),
@@ -957,6 +958,9 @@ export const chartNativeContentObjectSchema = z.discriminatedUnion('chartType', 
     })
   })
   if (chart.chartType === 'bar' || chart.chartType === 'line' || chart.chartType === 'area') {
+    if (chart.chartType !== 'bar' && chart.style.barDirection !== undefined) {
+      context.addIssue({ code: 'custom', path: ['style', 'barDirection'], message: '条形方向只适用于 bar 图表' })
+    }
     if (
       chart.style.valueMin !== undefined &&
       chart.style.valueMax !== undefined &&

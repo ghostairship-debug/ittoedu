@@ -417,6 +417,8 @@ export type NativeChartContent =
         showCategoryAxis: boolean
         showValueAxis: boolean
         showGridLines: boolean
+        /** Only bar charts; omitted preserves the legacy vertical direction. */
+        barDirection?: 'vertical' | 'horizontal'
         valueMin?: number
         valueMax?: number
       }
