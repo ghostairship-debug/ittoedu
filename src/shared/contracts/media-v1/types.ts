@@ -1,4 +1,4 @@
-export type AssetKind = 'image' | 'audio' | 'video'
+export type AssetKind = 'image' | 'audio' | 'video' | 'font'
 export type AudioChannel = 'music' | 'narration' | 'sfx' | 'ui' | 'video'
 
 export interface SoundDefinition {

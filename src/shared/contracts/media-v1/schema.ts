@@ -48,7 +48,7 @@ export const assetMetaSchema = z.object({
   byteLength: z.number().int().nonnegative(),
   width: finiteNumber.positive().optional(),
   height: finiteNumber.positive().optional(),
-  kind: z.enum(['image', 'audio', 'video']),
+  kind: z.enum(['image', 'audio', 'video', 'font']),
   duration: finiteNumber.nonnegative().optional(),
 }).strict()
 
@@ -78,7 +78,7 @@ export const courseProjectAssetMetaSchema: z.ZodType<CourseProjectAssetMeta> = z
   id: courseProjectStableIdSchema,
   filename: z.string().trim().min(1).max(500),
   mimeType: z.string().trim().min(1).max(200),
-  kind: z.enum(['image', 'audio', 'video']),
+  kind: z.enum(['image', 'audio', 'video', 'font']),
   path: courseProjectPortablePathSchema,
   byteLength: z.number().int().nonnegative(),
   width: finiteNumber.positive().optional(),
