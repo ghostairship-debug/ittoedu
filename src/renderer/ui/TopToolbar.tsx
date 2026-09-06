@@ -269,7 +269,7 @@ export function TopToolbar({
           }}><span><strong>新建配方页</strong><small>封面、概念、例题和互动模板</small></span></button>
           <button type="button" role="menuitem" disabled={busy} onClick={event => {
             event.currentTarget.closest('details')?.removeAttribute('open'); onOpenProductivity?.()
-          }}><span><strong>批量编辑与参考页</strong><small>查找替换、项目配色、克隆页面</small></span></button>
+          }}><span><strong>批量编辑与参考页</strong><small>查找替换、项目配色、样板改写、PPTX 导入</small></span></button>
         </div>
       </details>}
 

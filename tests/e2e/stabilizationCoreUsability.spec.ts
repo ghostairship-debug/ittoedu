@@ -10,10 +10,12 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { contentQaFixture } from '../fixtures/contentQa'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
+import { pptxImportFixture } from '../fixtures/pptxImport'
 import { createServer } from 'vite'
 import type { CoursewareCaseBuildSummary } from '../../scripts/build-courseware-case'
 import { execFile } from 'node:child_process'
@@ -490,6 +492,119 @@ test('S2 动态工具：真实宿主拒绝坏源码且工程与资源零写入',
     await browser.close()
     await server.close()
   }
+})
+
+test('S2 PPTX 与样板：真实导入、整体撤销、重开、槽位改写与离线播放', async () => {
+  test.setTimeout(180_000)
+  const { app, page, runRoot, pageErrors } = await launchEditor()
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const filename = join(runRoot, 'pptx-remix.h5lesson')
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(filename)).toBe(true)
+    const baseline = readProject(filename)
+    const openTools = async (mode: string) => {
+      await page.getByLabel('创作工具', { exact: true }).click()
+      await page.getByRole('menuitem', { name: /批量编辑与参考页/ }).click()
+      await page.getByLabel('生产力操作').selectOption(mode)
+    }
+    await openTools('pptx')
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'unsupported.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(pptxImportFixture({ unsupported: true })) })
+    await expect(page.getByRole('alert')).toContainText('第 1 页：graphicFrame')
+    await expect(page.getByRole('button', { name: '确认导入全部页面' })).toHaveCount(0)
+    expect(readProject(filename)).toEqual(baseline)
+    await page.getByLabel('选择 PPTX').setInputFiles({ name: 'imported.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: Buffer.from(pptxImportFixture({ image: true })) })
+    await expect(page.getByRole('button', { name: '确认导入全部页面' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'imported：1 页，1 个素材' })).toBeVisible()
+    await page.getByRole('button', { name: '确认导入全部页面' }).click()
+    await expect(page.getByRole('dialog', { name: '设计生产力' })).toHaveCount(0)
+    const imported = await saveCurrent(page, filename)
+    expect(imported.locations).toHaveLength(baseline.locations.length + 1)
+    expect(Object.keys(imported.assets)).toHaveLength(Object.keys(baseline.assets).length + 1)
+    await page.screenshot({ path: 'output/playwright/r13-review/r15-imported-editor.png' })
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    const undone = await saveCurrent(page, filename)
+    expect(undone.surfaces).toEqual(baseline.surfaces)
+    expect(undone.assets).toEqual(baseline.assets)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    await expect(courseTreeKind(page, 'slide-scene')).toHaveCount(imported.locations.length)
+    await openTools('remix')
+    const importedSurface = imported.surfaces.at(-1)!
+    if (importedSurface.type !== 'slide') throw new Error('Imported Slide missing')
+    await page.getByLabel('样板来源').selectOption(importedSurface.scenes[0]!.id)
+    await page.getByRole('button', { name: '预览样板改写' }).click()
+    await expect(page.getByText('请填写此槽位', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '确认新增改写页' })).toBeDisabled()
+    await page.getByLabel('替换槽位 课题 文字').fill('新课题')
+    await page.getByRole('button', { name: '预览样板改写' }).click()
+    await page.screenshot({ path: 'output/playwright/r13-review/r15-remix-preview.png' })
+    await page.getByRole('button', { name: '确认新增改写页' }).click()
+    const remixed = await saveCurrent(page, filename)
+    expect(remixed.locations).toHaveLength(imported.locations.length + 1)
+    const texts = (project: CourseProjectDocument) => project.surfaces.flatMap(s => s.type === 'slide' ? s.scenes.flatMap(scene => scene.layerItems.flatMap(i => i.kind === 'native' && i.content.nativeType === 'text' ? [i.content.data.text] : [])) : [])
+    expect(texts(remixed)).toContain('知识 😀')
+    expect(texts(remixed)).toContain('新课题')
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect(texts(await saveCurrent(page, filename))).not.toContain('新课题')
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    const html = buildPublishedCourseStandaloneHtml({ project: archive.project, assetFiles: archive.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const htmlPath = join(runRoot, 'pptx-remix.html'); writeFileSync(htmlPath, html)
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+    await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    // Native controller delegates painted hit testing to its parent, like the Builder test above.
+    const clickController = async (name: string) => {
+      if (name !== '展开教师控制器') {
+        const collapsed = player.getByRole('button', { name: '展开教师控制器', exact: true })
+        if (await collapsed.isVisible()) {
+          const pill = await collapsed.boundingBox()
+          if (!pill) throw new Error('Collapsed controller missing')
+          await player.mouse.click(pill.x + pill.width / 2, pill.y + pill.height / 2)
+        }
+      }
+      const button = player.getByRole('button', { name, exact: true })
+      await expect(button).toBeVisible()
+      const box = await button.boundingBox()
+      if (!box) throw new Error('Painted controller button missing')
+      await player.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await clickController('展开教师控制器')
+    await clickController('下一场景')
+    await expect(player.getByText('知识 😀', { exact: true })).toBeVisible()
+    await expect.poll(() => player.locator('[data-native-type="image"] img').evaluateAll(images => images.some(image => (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
+    await clickController('下一场景')
+    await expect(player.getByText('新课题', { exact: true })).toBeVisible()
+    await player.screenshot({ path: 'output/playwright/r13-review/r15-remix-player.png' })
+    expect(pageErrors).toEqual([])
+  } finally { await browser?.close(); await closeEditor(app, runRoot) }
+})
+
+test('S2 内容 QA：四类错误显示依据与建议并定位正确对象，检查零写入', async () => {
+  const { app, page, runRoot, pageErrors } = await launchEditor()
+  try {
+    const project = contentQaFixture(), filename = join(runRoot, 'qa.h5lesson')
+    writeFileSync(filename, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    for (const [code, name] of [['content-math-parse', '公式检查'], ['content-answer-mismatch', '答案检查'], ['content-chart-mismatch', '图表检查'], ['content-source-missing', '来源检查']]) {
+      await page.getByRole('button', { name: /^工程检查：/ }).click()
+      const row = page.locator('.project-health-issue').filter({ has: page.getByText(code!, { exact: true }) })
+      await expect(row).toContainText('依据：')
+      await expect(row).toContainText('建议：')
+      if (code === 'content-math-parse') await page.screenshot({ path: 'output/playwright/r13-review/r15-content-qa.png' })
+      await row.getByRole('button', { name: '定位' }).click()
+      await expect(page.getByLabel('名称', { exact: true })).toHaveValue(name!)
+    }
+    const saved = await saveCurrent(page, filename)
+    expect(saved).toEqual(project)
+    expect(pageErrors).toEqual([])
+  } finally { await closeEditor(app, runRoot) }
 })
 
 test('S2 工程字体：Component 和 Runtime 在离线 HTML 中加载直接引用字体', async () => {

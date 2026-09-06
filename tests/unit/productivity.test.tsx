@@ -6,6 +6,7 @@ import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { createProductivityPreview, applyProductivityPreview, type ProductivityContext } from '../../src/renderer/authoring/productivity'
 import { cloneReferencePage } from '../../src/renderer/authoring/productivity/referenceClone'
+import { previewStyleRemix, applyStyleRemix } from '../../src/renderer/authoring/productivity/styleRemix'
 import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
 import { ProductivityDialog } from '../../src/renderer/ui/productivity/ProductivityDialog'
 import { collectCourseProjectHealth } from '../../src/shared/courseProjectHealth'
@@ -23,6 +24,40 @@ function fixture() {
   return { context, scene, surface }
 }
 describe('design productivity canonical previews', () => {
+  it('Remix maps explicit slots to independent editable content and one reversible archive transaction', () => {
+    const { context, scene } = fixture()
+    const id = scene.layerItems[0]!.layerItemId
+    const preview = previewStyleRemix(context, scene.id, { [id]: '新课题' })
+    expect(preview.issues).toEqual([])
+    expect(preview.slots[0]!.issue).toBeUndefined()
+    const result = applyStyleRemix(context, preview, {})
+    if (!result.ok || !result.step) throw new Error(result.ok ? 'missing step' : result.reason)
+    const next = result.step.nextDocument.surfaces[0]!
+    if (next.type !== 'slide') throw new Error('slide')
+    const original = next.scenes[0]!.layerItems[0]!, copy = next.scenes[1]!.layerItems[0]!
+    expect(copy.layerItemId).not.toBe(original.layerItemId)
+    if (copy.kind !== 'native' || copy.content.nativeType !== 'text') throw new Error('text')
+    expect(copy.content.data.text).toBe('新课题')
+    expect(next.scenes[0]).toEqual(scene)
+    expect(result.step.nextDocument.revision).toBe(context.document.revision + 1)
+    const initial = { document: context.document, resources: { assetFiles: {}, componentPackages: {} } }
+    const applied = applyEditorTransactionStep(initial, result.step, 'forward')
+    expect(applyEditorTransactionStep(applied, result.step, 'inverse')).toEqual(initial)
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: {}, componentFiles: {} }))
+    expect(reopened.project).toEqual(applied.document)
+  })
+  it('Remix missing slots, overflow and stale preview leave the source unchanged', () => {
+    const { context, scene } = fixture()
+    const before = structuredClone(context.document), id = scene.layerItems[0]!.layerItemId
+    for (const replacements of [{}, { [id]: '太长'.repeat(2000) }, { removed: '不存在' }]) {
+      const preview = previewStyleRemix(context, scene.id, replacements)
+      expect(applyStyleRemix(context, preview, {}).ok).toBe(false)
+      expect(context.document).toEqual(before)
+    }
+    const preview = previewStyleRemix(context, scene.id, { [id]: '新' })
+    expect(applyStyleRemix({ ...context, sessionToken: { ...context.sessionToken, generation: 2 } }, preview, {}).ok).toBe(false)
+    expect(context.document).toEqual(before)
+  })
   it('remaps self navigation but preserves another scene with the same presentation state IDs', () => {
     const { context, scene, surface } = fixture()
     scene.presentation = { initialStateId: 'initial', states: [{ id: 'initial', name: '初始', layerItemOverrides: {} }] }

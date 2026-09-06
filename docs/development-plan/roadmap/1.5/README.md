@@ -10,13 +10,15 @@ S2 Owner 验收 1.4–1.5 后发布 `v1.5.0` accepted 源码标签，不发布 H
 
 ## 任务 DAG
 
-当前实现进度（2026-09-06，尚未形成 S2 候选）：
+当前实现进度（2026-09-06，v1.5.0-rc.1 / S2 工程候选，待 Owner 验收）：
 
 - `WorkspaceIdentityV1` 与材料记录已严格定义在共享模块，Main 是工程路径规范化的唯一 producer。Windows 路径归一化大小写、分隔符与点段；相同工程 ID 的不同文件路径使用不同材料目录。未保存工程先保存后使用材料库，不创建第二种临时身份。
 - 本地材料入口位于“创作工具 → 教学材料库”。支持粘贴文本和 UTF-8 TXT / Markdown / CSV 文件（2 MB 上限），搜索标题 / 正文 / 来源、查看原文、定位原文件、删除单条与清空当前工程。记录保存在 userData/materials/v1；每条原子写入，搜索从权威材料记录重建，没有独立易损索引。它们不进入课件文件。
 - `material.citation` 通过已有 Native / Flow command 插入普通正文和可见来源，共用统一 receipt、stale 检查和一次历史事务。缓存身份、材料 ID 与本地记录不进入工程或 Published；删除材料不影响已插入文本。
 - 材料仓库隔离 / 删除与重启重读、Slide / Flow 可携带引用及 stale 零写入的四项聚焦用例通过。真实 Electron 已验证粘贴导入、来源搜索、插入引用、另存为隔离、返回原工程、删除材料后保存仍保留来源；材料库呈现已人工查看截图。最终桌面用例同时覆盖真实 UTF-8 文件导入、清空副本材料不影响原工程，1/1 通过；当前类型检查和桌面构建通过。截图为 `output/playwright/r13-review/r15-material-library.png`。
-- 受限 PPTX、Style Remix、四类内容 QA 以及 1.4 动态工具 / Builder V2 尚未闭合；S2 和 accepted 标签仍待完整工程候选与 Owner 验收。
+- 受限 PPTX 已按正式关系解析文字/基础形状/内嵌图片，暂存完成后一次提交文档与 sidecar，整包撤销；大小、压缩比、损坏关系和不支持对象明确拒绝。正常 PptxGenJS 文件与真实 UI 导入/保存重开/离线播放已验证。
+- 样板改写已接入设计生产力面板；文字槽位映射、容量预览、独立身份和资源、一次 Undo 与保存重开已验证。内容 QA 四类 finding 已接入 GUI、CLI 和报告，显示依据/建议并定位对象；检查只读，普通自然语言不被宣称已审校。
+- 1.4 动态工具 / Builder V2 已形成 `v1.4.0-rc.1`。1.5 的验证、支持范围与实际截图见 [1.5 复核](../../reviews/1.5-materials-content-2026-09-06.md)，直接使用的固定课例及待签署项目见 [S2 验收单](../../acceptance/S2-tools-and-materials.md)。S2 和 `v1.5.0` accepted 标签仍等待 Owner。
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |

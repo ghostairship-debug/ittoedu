@@ -1,5 +1,8 @@
 import { strToU8 } from 'fflate'
 import { describe, expect, it } from 'vitest'
+import { collectCourseProjectContentHealth } from '@/shared/courseProjectHealth/content'
+import { createTextNode, createFormulaNode, createChartNode } from '@/renderer/project/nativeNodeFactories'
+import { resolveSchemaValidCourseProjectDiagnosticTarget } from '@/shared/courseProjectValidationDiagnostics'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
@@ -31,6 +34,47 @@ const EMPTY_FILES: CourseProjectHealthArchiveFiles = {
   assetFiles: {},
   componentFiles: {},
 }
+
+describe('S2 deterministic content QA', () => {
+  it('locates four content error families, separates formula layout, and never writes the project', () => {
+    const project = blankProject(), { scene } = slide(project)
+    const text = (value: string) => sceneNodeToCourseLayerItem(createTextNode({ text: value }), scene.layerItems.length)
+    const claims = text('公式：frac(\n答案：错误项\n图表：产量 / 一班 / 周一 = 99\n来源：待补')
+    const correct = text('正确项'), wrong = text('错误项')
+    scene.layerItems.push(claims, correct, wrong)
+    scene.layerItems.push(sceneNodeToCourseLayerItem(createChartNode({ title: '产量', categories: [{ id: 'monday', label: '周一' }], series: [{ id: 'class', name: '一班', color: '#2563eb', points: [{ id: 'value', categoryId: 'monday', value: 12 }] }] }), 3))
+    scene.layerItems.push(sceneNodeToCourseLayerItem(createFormulaNode({ width: 1, height: 1 }), 4))
+    scene.layerItems.forEach((item, index) => { item.order = index })
+    project.courseState.push({ key: 'single_choice_qa_correct', valueType: 'boolean', defaultValue: false })
+    for (const [index, item] of [correct, wrong].entries()) scene.interactions.push({ id: `qa-rule-${index}`, enabled: true, trigger: { type: 'node.click', nodeId: item.layerItemId }, conditions: [], actions: [
+      { id: `qa-set-${index}`, start: 'after-previous', delayMs: 0, action: { type: 'course-state.set', key: 'single_choice_qa_correct', value: index === 0 } },
+      { id: `qa-show-${index}`, start: 'after-previous', delayMs: 0, action: { type: 'node.enter', nodeId: item.layerItemId, durationMs: 200, easing: 'linear', effect: 'fade' } },
+    ] })
+    courseProjectDocumentSchema.parse(project)
+    const before = structuredClone(project)
+    const findings = collectCourseProjectHealth(project, EMPTY_FILES).filter(f => f.code.startsWith('content-'))
+    expect(new Set(findings.map(f => f.code))).toEqual(new Set(['content-math-parse', 'content-math-render', 'content-answer-mismatch', 'content-chart-mismatch', 'content-source-missing']))
+    for (const finding of findings) {
+      expect(finding.evidence?.length).toBeGreaterThan(0)
+      expect(finding.suggestion?.length).toBeGreaterThan(0)
+      expect(resolveSchemaValidCourseProjectDiagnosticTarget(project, finding).kind).not.toBe('project')
+    }
+    expect(project).toEqual(before)
+    if (claims.kind !== 'native' || claims.content.nativeType !== 'text') throw new Error('text')
+    claims.content.data.text = '公式：x+1\n答案：正确项\n图表：产量 / 一班 / 周一 = 12\n来源：教材（第 12 页）'
+    scene.layerItems.pop()
+    expect(collectCourseProjectContentHealth(project)).toEqual([])
+  })
+  it('locates missing Flow quote citations and leaves ordinary prose unclassified', () => {
+    const project = blankProject(), { flow } = addFlowAndSpatial(project)
+    flow.blocks.push({ id: 'quote', type: 'quote', text: '引用正文' }, { id: 'prose', type: 'paragraph', text: '某图约有一百人。可能答案是甲。' })
+    const findings = collectCourseProjectContentHealth(project)
+    expect(findings).toHaveLength(1)
+    expect(findings[0]!.code).toBe('content-source-missing')
+    expect(findings[0]!.path).toContain('citation')
+    expect(resolveSchemaValidCourseProjectDiagnosticTarget(project, findings[0]!).kind).not.toBe('project')
+  })
+})
 
 function blankProject(): CourseProjectDocument {
   return createBlankCourseProject({

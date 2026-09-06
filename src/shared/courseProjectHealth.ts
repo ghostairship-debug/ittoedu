@@ -1,6 +1,7 @@
 import {
   collectCourseProjectComponentHealth,
 } from './courseProjectHealth/component'
+import { collectCourseProjectContentHealth } from './courseProjectHealth/content'
 import {
   collectCourseProjectControllerMediaHealth,
 } from './courseProjectHealth/controllerMedia'
@@ -53,6 +54,7 @@ export function collectCourseProjectHealth(
     ...collectCourseProjectComponentHealth(project, archiveFiles),
     ...collectCourseProjectControllerMediaHealth(project, archiveFiles),
     ...collectCourseProjectNativeHealth(project, archiveFiles),
+    ...collectCourseProjectContentHealth(project),
   ])
 }
 

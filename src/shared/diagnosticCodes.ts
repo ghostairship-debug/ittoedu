@@ -1,5 +1,10 @@
 /** Authoritative, type-safe diagnostic codes consumed by UI and AI tooling. */
 export const PROJECT_HEALTH_CODES = [
+  'content-math-parse',
+  'content-math-render',
+  'content-answer-mismatch',
+  'content-chart-mismatch',
+  'content-source-missing',
   'asset-kind-mismatch',
   'asset-reference-analysis-incomplete',
   'asset-reference-missing',

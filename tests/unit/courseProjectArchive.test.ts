@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { pptxImportFixture } from '../fixtures/pptxImport'
+import { parsePptxImport } from '@/renderer/project/pptxImport'
+import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
+import { openPptxPackage, PPTX_IMPORT_LIMITS } from '@/renderer/project/pptxPackage'
+import { applyEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
+import * as assetManager from '@/renderer/project/assetManager'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import { createImageNode } from '@/renderer/project/nativeNodeFactories'
 import { createBlankCourseProject, createCourseProject } from '@/renderer/project/createCourseProject'
@@ -27,6 +33,77 @@ import { COURSE_PROJECT_REJECTION_INPUTS } from '../fixtures/course-project-v9'
 const NOW = '2026-08-17T12:00:00.000Z'
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/course-project-v9')
 const DIAGRAM_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
+
+describe('S2 restricted PPTX import atomic archive transaction', () => {
+  it('reads a normal PresentationML archive emitted by PptxGenJS as editable pages', async () => {
+    const { default: PptxGenJS } = await import('pptxgenjs')
+    const pptx = new PptxGenJS()
+    pptx.layout = 'LAYOUT_WIDE'
+    for (const title of ['第一课', '第二课']) {
+      const slide = pptx.addSlide()
+      slide.addText(title, { x: 1, y: 1, w: 8, h: 1, fontSize: 28, fontFace: 'Arial', color: '123456' })
+      slide.addShape(pptx.ShapeType.rect, { x: 1, y: 3, w: 3, h: 2, fill: { color: '2563EB' }, line: { color: '2563EB' } })
+    }
+    const bytes = await pptx.write({ outputType: 'uint8array' }) as Uint8Array
+    const draft = await parsePptxImport(bytes)
+    expect(draft.slides).toHaveLength(2)
+    expect(draft.slides.map(s => s.items.filter(i => i.kind === 'native' && i.content.nativeType === 'text').length)).toEqual([1, 1])
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    expect(planPptxImportTransaction(project, draft, '正常 PPTX').nextDocument.locations).toHaveLength(3)
+  })
+  it('imports editable text, shape and media with one revision, reversible sidecar and archive reopen', async () => {
+    // Browser decoding is covered by the real-host test; this unit targets XML and atomic archive semantics.
+    const decoder = vi.spyOn(assetManager, 'readImageDimensions').mockResolvedValue({ width: 1, height: 1 })
+    try {
+      const draft = await parsePptxImport(pptxImportFixture({ image: true }))
+      expect(draft.slides[0]!.items.map(i => i.kind === 'native' && i.content.nativeType)).toEqual(['text', 'shape', 'image'])
+      const text = draft.slides[0]!.items[0]!
+      if (text.kind !== 'native' || text.content.nativeType !== 'text') throw new Error('text')
+      expect(text.content.data.text).toBe('知识 😀')
+      expect(text.content.data.runs[0]!.end).toBe(4)
+      expect(text.frame).toMatchObject({ x: 100, y: 100, width: 1000, height: 200 })
+      const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+      const original = structuredClone(project)
+      const step = planPptxImportTransaction(project, draft, '导入课件')
+      const initial = { document: project, resources: { assetFiles: {}, componentPackages: {} } }
+      const applied = applyEditorTransactionStep(initial, step, 'forward')
+      expect(applied.document.revision).toBe(project.revision + 1)
+      expect(applied.document.locations).toHaveLength(project.locations.length + 1)
+      expect(Object.keys(applied.resources.assetFiles)).toHaveLength(1)
+      courseProjectDocumentSchema.parse(applied.document)
+      const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: applied.document, assetFiles: applied.resources.assetFiles, componentFiles: {} }))
+      expect(reopened.project).toEqual(applied.document)
+      expect(reopened.assetFiles).toEqual(applied.resources.assetFiles)
+      expect(applyEditorTransactionStep(applied, step, 'inverse')).toEqual(initial)
+      expect(project).toEqual(original)
+
+      for (const fault of ['document', 'sidecar']) {
+        let current = initial
+        const broken = fault === 'document' ? { ...step, get nextDocument(): typeof project { throw new Error('document rejected') } }
+          : { ...step, resourceChanges: { assetFileChanges: [{ assetId: 'fault', get after(): Uint8Array { throw new Error('sidecar rejected') } }] } }
+        expect(() => { current = applyEditorTransactionStep(current, broken, 'forward') }).toThrow('rejected')
+        expect(current).toBe(initial)
+        expect(current.document).toEqual(original)
+        expect(current.resources.assetFiles).toEqual({})
+      }
+    } finally { decoder.mockRestore() }
+  })
+  it('rejects oversize, zip expansion, broken relationships and page-local unsupported content before planning', async () => {
+    expect(() => openPptxPackage(new Uint8Array(PPTX_IMPORT_LIMITS.fileBytes + 1))).toThrow('文件大小')
+    expect(() => openPptxPackage(zipSync({ 'bomb.xml': new Uint8Array(2_000_000) }))).toThrow('解压比')
+    await expect(parsePptxImport(pptxImportFixture({ brokenRelationship: true }))).rejects.toThrow('第 1 页：损坏关系')
+    await expect(parsePptxImport(pptxImportFixture({ unsupported: true }))).rejects.toThrow('第 1 页：graphicFrame')
+    for (const [from, to, reason] of [
+      ['<a:xfrm>', '<a:xfrm flipH="true">', '翻转'],
+      ['<a:rPr sz="3200"', '<a:rPr baseline="2000" sz="3200"', '文字效果'],
+      ['<a:srgbClr val="123456"/>', '<a:srgbClr val="123456"><a:alpha val="50000"/></a:srgbClr>', '文字透明度'],
+    ]) {
+      const files = unzipSync(pptxImportFixture())
+      files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!).replace(from!, to!))
+      await expect(parsePptxImport(zipSync(files))).rejects.toThrow(`第 1 页：${reason}`)
+    }
+  })
+})
 
 function makeComponentFiles(): Record<string, Uint8Array> {
   const manifest: ComponentManifest = {

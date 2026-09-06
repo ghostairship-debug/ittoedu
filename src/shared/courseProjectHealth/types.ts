@@ -20,6 +20,8 @@ export interface CourseProjectHealthFinding {
   severity: CourseProjectHealthSeverity
   code: CourseProjectHealthCode
   message: string
+  evidence?: string
+  suggestion?: string
   path: Array<string | number>
   surfaceId?: string
   layerItemId?: string

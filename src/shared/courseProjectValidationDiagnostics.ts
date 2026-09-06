@@ -71,6 +71,11 @@ export type CourseProjectValidationFindingCodeStatus =
   | 'upstream-filtered'
 
 export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
+  { code: 'content-math-parse', status: 'active', sections: ['projectHealth'], note: 'Explicit linear formula parse errors and unfinished AST slots.' },
+  { code: 'content-math-render', status: 'active', sections: ['projectHealth'], note: 'Shared formula renderer reports layout warnings.' },
+  { code: 'content-answer-mismatch', status: 'active', sections: ['projectHealth'], note: 'Explicit answer claims disagree with the supported finite-choice evaluator.' },
+  { code: 'content-chart-mismatch', status: 'active', sections: ['projectHealth'], note: 'Explicit chart claims disagree with uniquely resolved chart data.' },
+  { code: 'content-source-missing', status: 'active', sections: ['projectHealth'], note: 'Explicit source labels or Flow quote citations lack usable source locations.' },
   {
     code: 'interaction-single-choice-answer-inconsistent', status: 'active', sections: ['projectHealth'],
     note: 'Product single-choice boolean state families have missing, multiple or conflicting correct options; arbitrary handwritten interactions are not inferred.',

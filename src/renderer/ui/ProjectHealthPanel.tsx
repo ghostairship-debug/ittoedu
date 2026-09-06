@@ -120,7 +120,7 @@ function OpenProjectHealthPanel({
         <header className="project-health-panel__header">
           <div>
             <h2 id="project-health-title">工程检查</h2>
-            <p>集中检查丢失引用、无效跳转、组件包与静态兜底；不会修改工程。</p>
+            <p>检查引用、交付配置，以及可确定比较的公式、答案、图表数值和来源；不会修改工程。普通自然语言的正确性仍需教师复核。</p>
           </div>
           <button type="button" aria-label="关闭工程检查" onClick={onClose}>
             <X size={18} />
@@ -157,6 +157,8 @@ function OpenProjectHealthPanel({
                     <span className="project-health-issue__content">
                       <strong>{severityLabel[diagnostic.severity]}</strong>
                       <span>{diagnostic.message}</span>
+                      {diagnostic.evidence && <small>依据：{diagnostic.evidence}</small>}
+                      {diagnostic.suggestion && <small>建议：{diagnostic.suggestion}</small>}
                       <small>{diagnostic.code}</small>
                     </span>
                     <button type="button" onClick={() => locate(diagnostic)}>

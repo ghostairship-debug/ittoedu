@@ -56,6 +56,8 @@ export interface ExportPreflightItem {
     | 'static-export-warning'
     | 'static-export-info'
   message: string
+  evidence?: string
+  suggestion?: string
   target: ExportPreflightTarget
   diagnosticTarget?: DiagnosticTargetV1
   sceneId?: string
@@ -558,6 +560,8 @@ export function collectCourseProjectExportPreflight(
     severity: finding.severity,
     code: `project-health:${finding.code}` as const,
     message: finding.message,
+    ...(finding.evidence ? { evidence: finding.evidence } : {}),
+    ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
     path: finding.path,
     diagnosticTarget: finding.target,
   }))

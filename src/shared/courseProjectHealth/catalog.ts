@@ -19,6 +19,11 @@ export interface CourseProjectHealthCodeSpec {
  * "meaningful". Schema/archive-shadowed codes stay listed and are not deleted.
  */
 export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
+  'content-math-parse': { severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true },
+  'content-math-render': { severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true },
+  'content-answer-mismatch': { severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true },
+  'content-chart-mismatch': { severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true },
+  'content-source-missing': { severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true },
   'interaction-single-choice-answer-inconsistent': {
     severity: 'warning', status: 'active', gui: true, cli: true, savedReport: true,
   },

@@ -312,7 +312,16 @@ describe('AI capability manifest generation', () => {
         ordering: 'severity-path-code-message',
         target: 'required-diagnostic-target-v1',
         readOnly: true,
+        contentChecks: {
+          math: 'native-and-flow-AST-slots; explicit 公式：linear parse; shared-native-formula-layout-warnings',
+          answer: 'explicit 答案：option text compared with one unambiguous product single-choice finite evaluator',
+          chart: 'explicit 图表：title / series / category = number compared with same-owner chart data',
+          source: 'explicit source label and Flow quote citation missing-location checks',
+          outputs: ['severity', 'code', 'target', 'message', 'evidence', 'suggestion'],
+          exclusions: ['general-natural-language-correctness', 'opaque-extension-evaluators', 'source-authenticity'],
+        },
         domains: [
+          { id: 'content', collector: 'collectCourseProjectContentHealth', source: 'src/shared/courseProjectHealth/content.ts' },
           {
             id: 'runtime',
             collector: 'collectCourseProjectRuntimeHealth',
