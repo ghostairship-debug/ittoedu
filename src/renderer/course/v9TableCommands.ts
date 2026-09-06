@@ -1,5 +1,7 @@
 import { commitTableLastCellAndAppendRow, TableContentError, patchTableCellText, patchTableStyle, patchTableCellStyle, patchTableRowHeight, patchTableColumnWidth, insertTableRow, deleteTableRow, reorderTableRows, insertTableColumn, deleteTableColumn, reorderTableColumns } from './tableContentOperations'
 import { nanoid } from 'nanoid'
+import { mergeTableCells, splitTableCells } from './tableContentOperations'
+import type { TableMergeRegion } from '../../shared/tableMerge'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { tableNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import type {
@@ -43,6 +45,7 @@ import {
 import { offsetDefaultSlideInsertion } from './v9SlideContentCommands'
 
 export interface AddSlideTableLayerInput {
+  readonly merges?: TableMergeRegion[]
   readonly id?: string
   readonly x?: number
   readonly y?: number
@@ -449,6 +452,7 @@ export function addSlideTableLayer(
       columns: input.columns,
       rows: input.rows,
       headerRowCount: input.headerRowCount,
+      merges: input.merges,
       style: input.style,
     })
 
@@ -457,6 +461,7 @@ export function addSlideTableLayer(
       columns: tableNode.columns,
       rows: tableNode.rows,
       headerRowCount: tableNode.headerRowCount,
+      merges: tableNode.merges,
       style: tableNode.style,
     })
 
@@ -503,6 +508,22 @@ export function patchSlideTableCellText(
   } catch (error) {
     return catchCommand(session, error)
   }
+}
+
+export function changeSlideTableMerge(
+  session: SlideAuthoringSession,
+  input: { layerItemId: string } & ({ kind: 'merge'; region: TableMergeRegion } | { kind: 'split'; rowId: string; columnId: string }),
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    const project = commitSlideProjectMutation(session.history.present, draft => {
+      const target = resolveTableTarget(draft, session, input.layerItemId)
+      target.commit(input.kind === 'merge' ? mergeTableCells(target.table, input.region) : splitTableCells(target.table, input))
+    }, options.now)
+    return commitUpdated(session, project)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function patchSlideTableStyle(

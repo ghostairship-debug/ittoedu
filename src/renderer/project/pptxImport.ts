@@ -8,6 +8,7 @@ import { createImageAssetImport, readImageDimensions } from './assetManager'
 import type { CourseImportedAsset } from './v9AssetAdapter'
 import { pptxPageObjects, expandPptxGroup } from './pptxInheritance'
 import { parsePptxTable } from './pptxTableImport'
+import { parsePptxColorChanges, renderPptxColorChanges } from './pptxImageEffects'
 import { openPptxPackage, PPTX_IMPORT_LIMITS, PptxImportError, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 
 export interface PptxSlideDraft { title: string; backgroundColor: string; items: LayerItem[]; sourcePage?: number; sharedKeys?: string[] }
@@ -46,6 +47,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
   const issues: PptxImportIssue[] = []
   const slides: PptxSlideDraft[] = [], assets: CourseImportedAsset[] = []
   const assetByPath = new Map<string, CourseImportedAsset>()
+  const imageOriginals = new Map<string, string>()
   const shared = new Map<string, LayerItem[]>()
   let objectCount = 0
   const report = (error: unknown, page: number, action: string) => {
@@ -102,7 +104,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
               const program = ole.getAttribute('progId') ?? ''
               pptxReject(/Equation|MathType/i.test(program) ? '旧版公式（OLE）' : 'OLE 嵌入对象', '尚未支持转换为可编辑内容，可在源软件另存图片后补入')
             }
-            const item = parsePptxTable(object, scale, origin, color, page, issues)
+            const item = parsePptxTable(object, scale, origin, color, page, issues, pkg.files['ppt/tableStyles.xml'] ? pkg.xml('ppt/tableStyles.xml') : undefined)
             item.order = items.length
             items.push(item)
             if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
@@ -127,9 +129,10 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
             if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
             continue
           }
-          if (flag(transform, 'flipH') || flag(transform, 'flipV')) pptxReject('翻转', '当前不支持翻转对象')
+          const flipped = flag(transform, 'flipH') || flag(transform, 'flipV')
+          if (flipped && object.localName !== 'pic' && !['rect', 'roundRect', 'ellipse'].includes(presetGeometry ?? 'rect')) pptxReject('翻转形状', '当前可导入文字、图片和对称基础形状的翻转')
           const off = xmlFirst(transform, 'off'), ext = xmlFirst(transform, 'ext')
-          const geometry = { x: numeric(off, 'x') * scale + origin.x, y: numeric(off, 'y') * scale + origin.y, width: numeric(ext, 'cx') * scale, height: numeric(ext, 'cy') * scale, rotation: numeric(transform, 'rot', 0) / 60000, visible: !flag(xmlFirst(object, 'cNvPr'), 'hidden') }
+          const geometry = { x: numeric(off, 'x') * scale + origin.x, y: numeric(off, 'y') * scale + origin.y, width: numeric(ext, 'cx') * scale, height: numeric(ext, 'cy') * scale, rotation: numeric(transform, 'rot', 0) / 60000, visible: !flag(xmlFirst(object, 'cNvPr'), 'hidden'), ...(flipped ? { flipX: flag(transform, 'flipH'), flipY: flag(transform, 'flipV') } : {}) }
           if (geometry.width <= 0 || geometry.height <= 0) pptxReject('几何', '对象宽高必须大于零')
           const name = xmlFirst(object, 'cNvPr')?.getAttribute('name') || `对象 ${items.length + 1}`
           const push = (node: Parameters<typeof sceneNodeToCourseLayerItem>[0]) => items.push(sceneNodeToCourseLayerItem(node, items.length))
@@ -140,7 +143,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
             const crop = { left: numeric(srcRect, 'l', 0) / 100000, top: numeric(srcRect, 't', 0) / 100000, right: numeric(srcRect, 'r', 0) / 100000, bottom: numeric(srcRect, 'b', 0) / 100000 }
             if (Object.values(crop).some(v => v < 0) || crop.left + crop.right >= 0.98 || crop.top + crop.bottom >= 0.98) pptxReject('裁剪图片', '裁剪范围需要图片后备')
             const blip = xmlFirst(object, 'blip')
-            if (blip && xmlChildren(blip).length) pptxReject('图片效果', '请先把图片效果应用到图片文件')
+            const changes = parsePptxColorChanges(blip, color)
             if (xmlFirst(object, 'tile')) pptxReject('平铺图片', '请先转换为普通图片')
             const imageRel = rels.find(r => r.id === (blip ? pptxRelationshipId(blip, 'embed') : ''))
             if (!imageRel || imageRel.external || !imageRel.type.endsWith('/image')) pptxReject('损坏关系', '图片关系缺失或类型错误')
@@ -155,6 +158,16 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
               if (dimensions.width * dimensions.height > 40_000_000) pptxReject('图片尺寸', '图片不能超过 4000 万像素')
               asset = createImageAssetImport({ name: imageRel.target.split('/').pop()!, mimeType, bytes: data }, { dimensions })
               assetByPath.set(imageRel.target, asset); assets.push(asset)
+            }
+            if (changes.length) {
+              const original = asset
+              const key = `${imageRel.target}:${JSON.stringify(changes)}`
+              asset = assetByPath.get(key)
+              if (!asset) {
+                const transformed = await renderPptxColorChanges(original.bytes, original.meta.mimeType, changes)
+                asset = createImageAssetImport({ name: `${original.meta.filename.replace(/\.[^.]+$/, '')}-颜色替换.png`, mimeType: 'image/png', bytes: transformed }, { dimensions: { width: original.meta.width!, height: original.meta.height! } })
+                assetByPath.set(key, asset); assets.push(asset); imageOriginals.set(asset.meta.id, original.meta.id)
+              }
             }
             push(createImageNode({ ...geometry, name, assetId: asset.meta.id, fit: 'stretch', crop }))
             if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
@@ -215,9 +228,10 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
                 if (fontSize < 8 || fontSize > 400) pptxReject('字号', '适配后字号超出 8–400 px')
                 const family = properties && (xmlFirst(properties, 'ea')?.getAttribute('typeface') || xmlFirst(properties, 'latin')?.getAttribute('typeface'))
                 if (family?.startsWith('+')) pptxReject('主题字体', '请改用明确字体名称')
-                if (numeric(properties, 'baseline', 0) !== 0 || (properties?.getAttribute('u') && !['none', 'sng'].includes(properties.getAttribute('u')!)) || (properties?.getAttribute('strike') && !['noStrike', 'sngStrike'].includes(properties.getAttribute('strike')!))) pptxReject('文字效果', '请把上下标或复杂文字装饰转换为普通内容')
+                const baseline = numeric(properties, 'baseline', 0) / 100000
+                if (Math.abs(baseline) > 1 || (properties?.getAttribute('u') && !['none', 'sng'].includes(properties.getAttribute('u')!)) || (properties?.getAttribute('strike') && !['noStrike', 'sngStrike'].includes(properties.getAttribute('strike')!))) pptxReject('文字效果', '位移或复杂文字装饰超出当前可编辑范围')
                 if (properties && numeric(xmlFirst(properties, 'alpha'), 'val', 100000) !== 100000) pptxReject('文字透明度', '仅支持不透明文字')
-                const runStyle: TextRunStyle = { fontSize, ...(family ? { fontFamily: family } : {}), color: color(properties && child(properties, 'solidFill'), '#000000'), bold: flag(properties, 'b'), italic: flag(properties, 'i'), underline: properties?.getAttribute('u') === 'sng', strike: properties?.getAttribute('strike') === 'sngStrike' }
+                const runStyle: TextRunStyle = { fontSize, ...(baseline ? { baseline } : {}), ...(family ? { fontFamily: family } : {}), color: color(properties && child(properties, 'solidFill'), '#000000'), bold: flag(properties, 'b'), italic: flag(properties, 'i'), underline: properties?.getAttribute('u') === 'sng', strike: properties?.getAttribute('strike') === 'sngStrike' }
                 baseStyle ??= runStyle
                 const value = xmlFirst(run, 't')?.textContent ?? ''
                 if (value) runs.push({ start: Array.from(text).length, end: Array.from(text + value).length, style: runStyle })
@@ -277,6 +291,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
   for (const slide of slides) slide.items.forEach((item, i) => { item.order = order + i })
   const allItems = [...slides.flatMap(slide => slide.items), ...[...shared.values()].flat()]
   const usedAssets = new Set(allItems.flatMap(item => item.kind === 'native' && item.content.nativeType === 'image' ? [item.content.data.assetId] : []))
+  for (const id of [...usedAssets]) { const original = imageOriginals.get(id); if (original) usedAssets.add(original) }
   return { slides, shared: [...shared].map(([key, items]) => ({ key, items })), assets: assets.filter(asset => usedAssets.has(asset.meta.id)), issues, notes: ['按原比例居中适配课程画布；字体由当前系统解析。', '文字与图形可分别编辑；母版/版式装饰在本演示表面的共享层修改，占位符正文只属于当前页。', '备注和文档属性不进入课程；未支持的复杂对象可在源软件另存图片后补入。'] }
 }
 

@@ -5,6 +5,8 @@ import type { DesktopAPI } from '../shared/ipcTypes'
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
   materials: 'materials:operate',
+  localAgent: 'local-agent:operate',
+  legacyPpt: 'ppt:resave-import',
   openProject: 'project:open',
   listRecentProjects: 'project:list-recent',
   openRecentProject: 'project:open-recent',
@@ -115,6 +117,8 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const desktopAPI = Object.freeze<DesktopAPI>({
+  legacyPpt: (input) => invoke(IPC_CHANNELS.legacyPpt, input),
+  localAgent: (input) => invoke(IPC_CHANNELS.localAgent, input),
   materials: (input) => invoke(IPC_CHANNELS.materials, input),
   openProject: () => invoke(IPC_CHANNELS.openProject),
   listRecentProjects: () => invoke(IPC_CHANNELS.listRecentProjects),

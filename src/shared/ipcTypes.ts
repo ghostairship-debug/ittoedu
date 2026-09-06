@@ -1,4 +1,5 @@
 import type { MaterialRequest, MaterialRecordV1 } from './materialContract'
+import type { LocalAgentRequest, LocalAgentResponse } from './localAgentContract'
 import type {
   ComponentCatalogPackageFile,
   ComponentCatalogSnapshot,
@@ -9,6 +10,8 @@ export interface OpenBinaryFileResult {
   name: string
   bytes: Uint8Array
 }
+
+export interface LegacyPptImportResult { name: string; bytes: Uint8Array }
 
 export interface OpenProjectFileResult extends OpenBinaryFileResult {
   /** Opaque, process-local acknowledgement for one project-open attempt. */
@@ -89,6 +92,8 @@ export interface PreviewNetworkPolicyInput {
 }
 
 export interface DesktopAPI {
+  legacyPpt(input: { operation: 'select' | 'cancel' }): Promise<LegacyPptImportResult | null>
+  localAgent(input: LocalAgentRequest): Promise<LocalAgentResponse>
   materials(input: MaterialRequest): Promise<MaterialRecordV1[]>
   openProject(): Promise<OpenProjectFileResult | null>
   listRecentProjects(): Promise<RecentProjectEntry[]>
@@ -151,6 +156,8 @@ export interface DesktopAPI {
 
 export const IPC_CHANNELS = {
   materials: 'materials:operate',
+  localAgent: 'local-agent:operate',
+  legacyPpt: 'ppt:resave-import',
   openProject: 'project:open',
   listRecentProjects: 'project:list-recent',
   openRecentProject: 'project:open-recent',

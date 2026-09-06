@@ -64,9 +64,19 @@ export function paintPublishedNativeText(
 
   const segments = flowRichTextSegments(data.text, data.runs)
   const dom = wrap.ownerDocument
+  const textRoot = data.flipX || data.flipY ? dom.createElement('div') : wrap
+  if (textRoot !== wrap) {
+    textRoot.style.width = '100%'; textRoot.style.height = '100%'
+    textRoot.style.transform = `scale(${data.flipX ? -1 : 1}, ${data.flipY ? -1 : 1})`
+    textRoot.dataset.textFlip = 'true'
+    wrap.appendChild(textRoot)
+  }
   for (const segment of segments) {
     const span = dom.createElement('span')
     span.textContent = segment.text
+    if (segment.style.fontFamily) span.style.fontFamily = segment.style.fontFamily
+    if (segment.style.fontSize !== undefined) span.style.fontSize = `${segment.style.fontSize * fontSize / style.fontSize}px`
+    if (segment.style.baseline !== undefined) span.style.verticalAlign = `${segment.style.baseline}em`
 
     const isBold = segment.style.bold ?? style.bold
     span.style.fontWeight = isBold ? '700' : '400'
@@ -96,6 +106,6 @@ export function paintPublishedNativeText(
       ;(span.style as unknown as Record<string, string>).webkitTextEmphasis = 'filled dot'
     }
 
-    wrap.appendChild(span)
+    textRoot.appendChild(span)
   }
 }

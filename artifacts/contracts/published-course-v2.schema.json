@@ -5758,6 +5758,11 @@
                   "style": {
                     "type": "object",
                     "properties": {
+                      "baseline": {
+                        "type": "number",
+                        "minimum": -1,
+                        "maximum": 1
+                      },
                       "color": {
                         "type": "string",
                         "pattern": "^#[0-9a-fA-F]{6}$"
@@ -5866,6 +5871,11 @@
                   "style": {
                     "type": "object",
                     "properties": {
+                      "baseline": {
+                        "type": "number",
+                        "minimum": -1,
+                        "maximum": 1
+                      },
                       "color": {
                         "type": "string",
                         "pattern": "^#[0-9a-fA-F]{6}$"
@@ -5975,6 +5985,11 @@
                         "style": {
                           "type": "object",
                           "properties": {
+                            "baseline": {
+                              "type": "number",
+                              "minimum": -1,
+                              "maximum": 1
+                            },
                             "color": {
                               "type": "string",
                               "pattern": "^#[0-9a-fA-F]{6}$"
@@ -6091,6 +6106,11 @@
                   "style": {
                     "type": "object",
                     "properties": {
+                      "baseline": {
+                        "type": "number",
+                        "minimum": -1,
+                        "maximum": 1
+                      },
                       "color": {
                         "type": "string",
                         "pattern": "^#[0-9a-fA-F]{6}$"
@@ -6236,6 +6256,40 @@
         {
           "type": "object",
           "properties": {
+            "merges": {
+              "maxItems": 10000,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "rowIds": {
+                    "minItems": 1,
+                    "maxItems": 100000,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "columnIds": {
+                    "minItems": 1,
+                    "maxItems": 256,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "required": [
+                  "rowIds",
+                  "columnIds"
+                ],
+                "additionalProperties": false
+              }
+            },
             "id": {
               "type": "string",
               "minLength": 1,
@@ -6318,6 +6372,11 @@
                                   "style": {
                                     "type": "object",
                                     "properties": {
+                                      "baseline": {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                      },
                                       "color": {
                                         "type": "string",
                                         "pattern": "^#[0-9a-fA-F]{6}$"

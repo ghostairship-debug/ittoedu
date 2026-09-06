@@ -99,6 +99,8 @@ function desktopHarness(
   const clearRecoveryProject = vi.fn(async () => undefined)
   const confirmDiscardChanges = vi.fn(async () => 'discard' as const)
   const api: DesktopAPI = {
+    legacyPpt: vi.fn(async () => null),
+    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

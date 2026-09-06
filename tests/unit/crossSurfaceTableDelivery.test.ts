@@ -17,6 +17,55 @@ import type { FlowTableBlock } from '@/shared/courseProjectTypes'
 import { flowBlockSchema } from '@/shared/courseProjectSchema'
 import { tableNativeContentObjectSchema } from '@/shared/contracts/native-v1'
 import { createTableNode } from '@/renderer/project/nativeNodeFactories'
+import { mergeTableCells, splitTableCells, deleteTableRow, insertTableColumn, reorderTableRows } from '@/renderer/course/tableContentOperations'
+import { rebuildTableItemIds } from '@/renderer/project/nativeNodeFactories'
+import { buildNativeTableLayout } from '@/shared/nativeTableLayout'
+import { paintPublishedNativeTable } from '@/player/surfaces/slide/publishedNativeRendering'
+
+it('merges nonempty Native cells once, preserves identities, rejects split regions and paints only anchors', () => {
+  const node = createTableNode({ headerRowCount: 0 })
+  const source = { rows: node.rows, columns: node.columns, headerRowCount: 0, style: node.style }
+  const region = { rowIds: node.rows.slice(0, 2).map(row => row.id), columnIds: node.columns.slice(0, 2).map(column => column.id) }
+  const merged = mergeTableCells(source, region)
+  expect(merged.rows[0]!.cells[0]!.text).toBe([node.rows[0]!.cells[0]!.text, node.rows[0]!.cells[1]!.text, node.rows[1]!.cells[0]!.text, node.rows[1]!.cells[1]!.text].join('\n'))
+  expect(() => deleteTableRow(merged, { rowId: region.rowIds[0]! })).toThrow()
+  expect(() => insertTableColumn(merged, { referenceColumnId: region.columnIds[0]!, position: 'after' })).toThrow()
+  expect(() => reorderTableRows(merged, { orderedRowIds: [node.rows[0]!.id, node.rows[2]!.id, node.rows[1]!.id] })).toThrow()
+  expect(() => patchTableCellText(merged, { cellId: node.rows[1]!.cells[1]!.id, text: 'hidden' })).toThrow()
+  const split = splitTableCells(merged, { rowId: region.rowIds[1]!, columnId: region.columnIds[1]! })
+  expect(split.merges).toEqual([]); expect(split.rows[0]!.cells[0]!.text).toBe(merged.rows[0]!.cells[0]!.text)
+  const copy = rebuildTableItemIds(merged)
+  expect(copy.merges?.[0]?.rowIds).toEqual(copy.rows.slice(0, 2).map(row => row.id))
+  expect(copy.merges?.[0]?.columnIds).toEqual(copy.columns.slice(0, 2).map(column => column.id))
+  const layout = buildNativeTableLayout(merged)
+  expect(layout.cells).toHaveLength(6)
+  expect(layout.cells[0]).toMatchObject({ rowSpan: 2, columnSpan: 2, width: node.columns[0]!.width + node.columns[1]!.width, height: node.rows[0]!.height + node.rows[1]!.height })
+  const host = document.createElement('div')
+  paintPublishedNativeTable(host, { ...node, ...merged })
+  expect(host.querySelectorAll('td')).toHaveLength(6)
+  expect(host.querySelector('td')?.getAttribute('rowspan')).toBe('2')
+})
+
+it('preserves merged Flow rich text and produces real Word gridSpan/vMerge and matching HTML', () => {
+  const original: FlowTableBlock = { id: 'merged-flow', type: 'table', columns: [{ id: 'a', header: '甲' }, { id: 'b', header: '乙' }], rows: [{ id: 'r1', cells: { a: '😀', b: { text: '强调', runs: [{ start: 0, end: 2, style: { bold: true } }] } } }, { id: 'r2', cells: { a: '下方', b: '末格' } }] }
+  const merged = changeFlowTableStructure(original, { kind: 'merge', region: { rowIds: ['r1', 'r2'], columnIds: ['a', 'b'] } })
+  expect(merged.rows[0]!.cells.a).toEqual({ text: '😀\n强调\n下方\n末格', runs: [{ start: 2, end: 4, style: { bold: true } }] })
+  expect(() => changeFlowTableStructure(merged, { kind: 'delete-row', id: 'r1' })).toThrow()
+  const project = createBlankFlowCourseProject()
+  const surface = project.surfaces.find(surface => surface.type === 'flow')!
+  if (surface.type !== 'flow') throw new Error('flow')
+  surface.blocks.push(merged)
+  const published = buildPublishedCourseV2Payload({ project, assetFiles: {}, components: {} })
+  const flow = published.surfaces.find(surface => surface.type === 'flow')!
+  if (flow.type !== 'flow') throw new Error('flow')
+  const html = renderFlowPrintBodyHtml(buildFlowPrintPlan(flow))
+  expect(html).toContain('rowspan="2" colspan="2"')
+  const docx = buildFlowDocx(flow)
+  const xml = strFromU8(unzipSync(docx.bytes)['word/document.xml']!)
+  expect(xml).toContain('<w:gridSpan w:val="2"/>')
+  expect(xml).toContain('<w:vMerge w:val="restart"/>')
+  expect(xml).toContain('<w:vMerge w:val="continue"/>')
+})
 
 it('strictly accepts rectangular stable merge regions and rejects dangling, overlapping and hidden content', () => {
   const node = createTableNode()

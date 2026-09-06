@@ -16,12 +16,16 @@ import {
   SelectField,
 } from './PropertyControls'
 import type { PropertiesItemBase } from './SlideNativePropertiesPanel'
+import { tableCellSpan, type TableMergeRegion } from '../../../shared/tableMerge'
+import { TableMergeControls } from './TableMergeControls'
 
 export type NativeTablePropertiesView = PropertiesItemBase & {
   type: 'table'
 } & NativeTableContent
 
 export interface NativeTablePropertiesCommands {
+  readonly mergeCells: (region: TableMergeRegion) => void
+  readonly splitCells: (rowId: string, columnId: string) => void
   readonly beginCellEdit: (cellId: string) => void
   readonly updateCellDraft: (cellId: string, text: string, composing: boolean) => void
   readonly cancelCellEdit: (cellId: string) => void
@@ -186,15 +190,16 @@ export function NativeTableProperties({
     if (rowIndex < 0 || columnIndex < 0) return
     const cell = rows[rowIndex]!.cells.find((item) => item.columnId === from.columnId)
     if (!cell) return
-    const flatIndex = rowIndex * columns.length + columnIndex + direction
-    if (flatIndex < rows.length * columns.length) {
+    const editable = rows.flatMap(row => columns.filter(column => !tableCellSpan(node, row.id, column.id).covered).map(column => ({ rowId: row.id, columnId: column.id })))
+    const flatIndex = editable.findIndex(entry => entry.rowId === from.rowId && entry.columnId === from.columnId) + direction
+    if (flatIndex < editable.length) {
       commands.commitCellText(cell.id, text)
     }
     if (flatIndex < 0) {
       focusCell(rows[0]!.id, columns[0]!.id)
       return
     }
-    if (flatIndex >= rows.length * columns.length) {
+    if (flatIndex >= editable.length) {
       // Tab past the last cell is the explicit append-row action: one history
       // transaction, then focus lands on the same column of the new row.
       const lastRow = rows[rows.length - 1]
@@ -204,9 +209,7 @@ export function NativeTableProperties({
       commands.commitLastCellAndAppendRow(cell.id, text)
       return
     }
-    const nextRowIndex = Math.floor(flatIndex / columns.length)
-    const nextColumnIndex = flatIndex % columns.length
-    focusCell(rows[nextRowIndex]!.id, columns[nextColumnIndex]!.id)
+    focusCell(editable[flatIndex]!.rowId, editable[flatIndex]!.columnId)
   }
 
   const activeRow = activeCell
@@ -222,6 +225,7 @@ export function NativeTableProperties({
   return (
     <section className="property-section" data-testid="table-properties">
       <h3 className="property-title">表格</h3>
+      <TableMergeControls table={node} onMerge={commands.mergeCells} onSplit={commands.splitCells} />
       <div
         className="table-cell-grid"
         ref={gridRef}
@@ -233,6 +237,8 @@ export function NativeTableProperties({
           columns.map((column) => {
             const cell = row.cells.find((candidate) => candidate.columnId === column.id)
             if (!cell) return null
+            const span = tableCellSpan(node, row.id, column.id)
+            if (span.covered) return <span key={cell.id} aria-hidden="true" className="property-hint">已合并</span>
             return (
               <TableCellInput
                 key={cell.id}

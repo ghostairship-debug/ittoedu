@@ -1,4 +1,5 @@
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { tableCellSpan } from '../../../shared/tableMerge'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import {
@@ -1703,8 +1704,13 @@ function renderBlockDom(
         const tr = dom.createElement('tr')
         tr.dataset.flowRowId = row.id
         for (const column of block.columns) {
+          const span = tableCellSpan(block, row.id, column.id)
+          if (span.covered) continue
           const cell = dom.createElement('td')
-          cell.textContent = flowTableCellText(row.cells[column.id])
+          cell.rowSpan = span.rowSpan
+          cell.colSpan = span.columnSpan
+          const content = row.cells[column.id]
+          appendRichText(cell, flowTableCellText(content), typeof content === 'object' ? content.runs : undefined)
           tr.appendChild(cell)
         }
         tbody.appendChild(tr)
@@ -1836,6 +1842,7 @@ function appendRichText(
     span.textContent = segment.text
     if (segment.style.fontFamily) span.style.fontFamily = segment.style.fontFamily
     if (segment.style.fontSize !== undefined) span.style.fontSize = `${segment.style.fontSize}px`
+    if (segment.style.baseline !== undefined) span.style.verticalAlign = `${segment.style.baseline}em`
     if (segment.style.bold) span.style.fontWeight = '700'
     if (segment.style.italic) span.style.fontStyle = 'italic'
     if (segment.style.underline) span.style.textDecoration = 'underline'

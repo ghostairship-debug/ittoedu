@@ -8,6 +8,7 @@ import {
   registerPrivilegedSchemes,
 } from './protocols'
 import { diagnosticLog } from './diagnosticLog'
+import { closeLocalAgents, localAgentsRunning } from './localAgent/service'
 import {
   BACKGROUND_E2E_CHROMIUM_SWITCHES,
   shouldShowApplicationWindows,
@@ -122,6 +123,14 @@ app
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', (event) => {
+  if (!localAgentsRunning()) return
+  event.preventDefault()
+  void closeLocalAgents().then(() => { app.quit() }).catch(error => {
+    console.error('停止 CLI 会话失败', error)
+  })
 })
 
 app.on('will-quit', () => {

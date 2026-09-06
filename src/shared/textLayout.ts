@@ -93,7 +93,21 @@ function emphasisReserve(fontSize: number): number {
 }
 
 function font(node: TextNode, fontSize: number, style: Required<TextRunStyle>): string {
-  return `${style.italic ? 'italic ' : ''}${style.bold ? '700 ' : '400 '}${fontSize}px ${node.style.fontFamily}`
+  return `${style.italic ? 'italic ' : ''}${style.bold ? '700 ' : '400 '}${runFontSize(node, fontSize, style)}px ${style.fontFamily || node.style.fontFamily}`
+}
+
+function runFontSize(node: TextNode, fontSize: number, style: Required<TextRunStyle>): number {
+  return (style.fontSize || node.style.fontSize) * fontSize / node.style.fontSize
+}
+
+function horizontalLineMetrics(node: TextNode, fontSize: number, line: TextLine): { ascent: number; descent: number } {
+  let ascent = fontSize, descent = fontSize * 0.22
+  for (const character of line.characters) {
+    const size = runFontSize(node, fontSize, character.style)
+    ascent = Math.max(ascent, size * (1 + character.style.baseline))
+    descent = Math.max(descent, size * (0.22 - character.style.baseline))
+  }
+  return { ascent, descent }
 }
 
 function roundedRectPath(
@@ -151,7 +165,8 @@ function horizontalLineHeight(
   fontSize: number,
   line: TextLine,
 ): number {
-  const lineHeight = fontSize * 1.22 + node.style.lineSpacing
+  const metrics = horizontalLineMetrics(node, fontSize, line)
+  const lineHeight = metrics.ascent + metrics.descent + node.style.lineSpacing
   return lineHeight + (
     line.characters.some(characterUsesEmphasis) ? emphasisReserve(fontSize) : 0
   )
@@ -261,6 +276,7 @@ function drawCharacter(
   height: number,
 ): void {
   const style = character.style
+  baseline -= style.baseline * runFontSize(node, fontSize, style)
   context.font = font(node, fontSize, style)
   context.textBaseline = 'alphabetic'
   if (style.highlightColor) {
@@ -399,6 +415,10 @@ export function renderTextNodeCanvas(
   const context = canvas.getContext('2d')
   if (!context) throw new Error('无法创建文字绘制画布')
   context.scale(resolution, resolution)
+  if (node.flipX || node.flipY) {
+    context.translate(node.flipX ? outputWidth : 0, node.flipY ? outputHeight : 0)
+    context.scale(node.flipX ? -1 : 1, node.flipY ? -1 : 1)
+  }
   context.imageSmoothingEnabled = true
   if (node.style.backgroundOpacity > 0) {
     roundedRectPath(
@@ -485,7 +505,7 @@ export function renderTextNodeCanvas(
           ? availableWidth - line.width
           : 0
       let x = padding + Math.max(0, alignOffset)
-      const baseline = lineTop + fontSize
+      const baseline = lineTop + horizontalLineMetrics(node, fontSize, line).ascent
       for (const character of line.characters) {
         drawCharacter(context, node, character, fontSize, x, baseline, lineHeight)
         if (characterUsesEmphasis(character)) {

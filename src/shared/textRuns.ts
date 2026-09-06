@@ -2,6 +2,7 @@ import type { TextRun, TextRunStyle } from './contracts/native-v1/types'
 
 function normalizeStyle(style: TextRunStyle): TextRunStyle {
   return {
+    ...(style.baseline !== undefined ? { baseline: style.baseline } : {}),
     ...(style.color !== undefined ? { color: style.color } : {}),
     ...(style.bold !== undefined ? { bold: style.bold } : {}),
     ...(style.italic !== undefined ? { italic: style.italic } : {}),

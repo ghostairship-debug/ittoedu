@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { tableMergeRegionSchema } from '../../../shared/tableMerge'
 import { z } from 'zod'
 import { flowBlockSchema } from '../../../shared/courseProjectSchema'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
@@ -23,6 +24,8 @@ const newBlock = z.record(z.string(), z.unknown()).transform((value, context): F
 })
 const id = z.string().min(1)
 const structure = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('merge'), region: tableMergeRegionSchema }).strict(),
+  z.object({ kind: z.literal('split'), rowId: id, columnId: id }).strict(),
   z.object({ kind: z.literal('insert-row'), afterId: id.optional() }).strict(),
   z.object({ kind: z.literal('insert-column'), afterId: id.optional() }).strict(),
   z.object({ kind: z.literal('delete-row'), id }).strict(),

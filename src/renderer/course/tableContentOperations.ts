@@ -1,4 +1,5 @@
 import { reorderTableItems } from './tableStructure'
+import { tableCellSpan, tableMergeIssues, tableMergeRegionSchema, type TableMergeRegion } from '../../shared/tableMerge'
 import { nanoid } from 'nanoid'
 import { tableNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import type { NativeTableCell, NativeTableCellStyle, NativeTableColumn, NativeTableContent, NativeTableRow, NativeTableStyle } from '../../shared/contracts/native-v1/types'
@@ -20,6 +21,7 @@ export function patchTableCellText(source: NativeTableContent, input: {
   for (const row of table.rows) {
     const cell = row.cells.find((c) => c.id === input.cellId)
     if (cell) {
+      if (tableCellSpan(table, row.id, cell.columnId).covered) throw new TableContentError('invalid-target', '请编辑合并区域左上角，或先拆分单元格')
       cell.text = input.text
       found = true
       break
@@ -39,6 +41,30 @@ export function patchTableStyle(source: NativeTableContent, input: {
     ...table.style,
     ...input.stylePatch,
   }
+  return tableNativeContentObjectSchema.parse(table)
+}
+
+export function mergeTableCells(source: NativeTableContent, region: TableMergeRegion): NativeTableContent {
+  const merge = tableMergeRegionSchema.parse(region)
+  const table = structuredClone(source)
+  table.merges = [...(table.merges ?? []), merge]
+  const issues = tableMergeIssues(table)
+  if (issues.length) throw new TableContentError('invalid-data', issues[0]!)
+  const texts: string[] = []
+  for (const rowId of merge.rowIds) for (const columnId of merge.columnIds) {
+    const cell = table.rows.find(row => row.id === rowId)!.cells.find(cell => cell.columnId === columnId)!
+    if (cell.text) texts.push(cell.text)
+    cell.text = ''
+  }
+  table.rows.find(row => row.id === merge.rowIds[0])!.cells.find(cell => cell.columnId === merge.columnIds[0])!.text = texts.join('\n')
+  return tableNativeContentObjectSchema.parse(table)
+}
+
+export function splitTableCells(source: NativeTableContent, input: { rowId: string; columnId: string }): NativeTableContent {
+  const table = structuredClone(source)
+  const found = table.merges?.find(region => region.rowIds.includes(input.rowId) && region.columnIds.includes(input.columnId))
+  if (!found) throw new TableContentError('invalid-target', '所选单元格没有合并')
+  table.merges = table.merges!.filter(region => region !== found)
   return tableNativeContentObjectSchema.parse(table)
 }
 
@@ -259,8 +285,9 @@ export function commitTableLastCellAndAppendRow(
   const lastRow = source.rows.at(-1)
   const lastColumn = source.columns.at(-1)
   if (!lastRow || !lastColumn) throw new TableContentError('invalid-target', '表格必须包含行与列')
-  const cell = lastRow.cells.find((candidate) => candidate.id === input.cellId)
-  if (!cell || cell.columnId !== lastColumn.id) {
+  const visibleCells = source.rows.flatMap(row => row.cells.filter(cell => !tableCellSpan(source, row.id, cell.columnId).covered))
+  const cell = visibleCells.at(-1)
+  if (!cell || cell.id !== input.cellId) {
     throw new TableContentError('invalid-target', '所选单元格不是表格末格')
   }
   const table = insertTableRow(patchTableCellText(source, input), {

@@ -16,6 +16,7 @@ import { addPptxFormulaNode, addPptxShapeNode } from '@/renderer/export/pptxText
 import { WIDE_SLIDE_HEIGHT, WIDE_SLIDE_WIDTH } from '@/renderer/export/pptxShared'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
+import { mergeTableCells } from '@/renderer/course/tableContentOperations'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
 import { pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
 import { APP_COMPANY, APP_NAME, CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
@@ -59,6 +60,18 @@ describe('buildCourseExportPageList', () => {
 })
 
 describe('buildCoursePptx', () => {
+  it('roundtrips editable subscript runs and flipped text through real PPTX XML', async () => {
+    const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const surface = project.surfaces.find(surface => surface.type === 'slide')!
+    if (surface.type !== 'slide') throw new Error('slide')
+    const text = createTextNode({ text: '女1男2', width: 300, height: 100, flipX: true, flipY: true, runs: [{ start: 1, end: 2, style: { baseline: -0.25 } }, { start: 3, end: 4, style: { baseline: -0.25 } }] })
+    surface.scenes[0]!.layerItems = [sceneNodeToCourseLayerItem(text, 1)]
+    const result = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    expect(decodePptxSlides(result.bytes)).toContain('baseline="-25000"')
+    const draft = await parsePptxImport(result.bytes)
+    const imported = draft.slides[0]!.items.find(item => item.kind === 'native' && item.content.nativeType === 'text')!
+    expect(imported).toMatchObject({ content: { data: { text: '女1男2', flipX: true, flipY: true, runs: expect.arrayContaining([expect.objectContaining({ start: 1, end: 2, style: expect.objectContaining({ baseline: -0.25 }) })]) } } })
+  })
   it('keeps imported rounded geometry and group typography through editable PPTX export', async () => {
     const draft = await parsePptxImport(pptxCommonMappingFixture())
     const project = planPptxImportTransaction(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), draft, '普通映射').nextDocument
@@ -534,6 +547,27 @@ describe('buildCoursePptx', () => {
     expect(slideXml).toContain('单元格 2-1')
     expect(slideXml).not.toContain('<p:pic>')
     expect(result.warnings.filter((message) => message.includes('表格'))).toHaveLength(0)
+  })
+
+  it('exports and reimports editable two-dimensional merged tables without hidden or duplicate text', async () => {
+    const project = createBlankCourseProject({ now: NOW, includeDefaultController: false, controls: 'none' })
+    const surface = project.surfaces.find(surface => surface.type === 'slide')!
+    if (surface.type !== 'slide') throw new Error('slide')
+    const node = createTableNode({ headerRowCount: 0, width: 900, height: 300 })
+    const merged = mergeTableCells({ rows: node.rows, columns: node.columns, style: node.style, headerRowCount: 0 }, { rowIds: node.rows.slice(0, 2).map(row => row.id), columnIds: node.columns.slice(0, 2).map(column => column.id) })
+    surface.scenes[0]!.layerItems = [createTableLayerItem({ ...node, ...merged })]
+    const result = await buildCoursePptx({ project, assetFiles: {}, components: {} })
+    const xml = decodePptxSlides(result.bytes)
+    expect(xml).toContain('gridSpan="2"')
+    expect(xml).toContain('rowSpan="2"')
+    const draft = await parsePptxImport(result.bytes)
+    const imported = draft.slides[0]!.items.find(item => item.kind === 'native' && item.content.nativeType === 'table')
+    expect(imported, JSON.stringify(draft.issues)).toBeTruthy()
+    if (imported?.kind !== 'native' || imported.content.nativeType !== 'table') throw new Error('table')
+    expect(imported.content.data.merges?.[0]?.rowIds).toHaveLength(2)
+    expect(imported.content.data.merges?.[0]?.columnIds).toHaveLength(2)
+    expect(imported.content.data.rows[0]!.cells[0]!.text).toBe(merged.rows[0]!.cells[0]!.text)
+    expect(imported.content.data.rows[1]!.cells[1]!.text).toBe('')
   })
 
   it('表格旋转与点线边框在导出与 preflight 中给出明示 warning', async () => {

@@ -1,4 +1,5 @@
 import { describeNativeChart } from '../../../shared/nativeChartView'
+import type { TableCellSpan } from '../../../shared/tableMerge'
 import { strToU8, zipSync } from 'fflate'
 import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
@@ -103,6 +104,7 @@ function run(text: string, options: TextRunStyle = {}): string {
       ? `<w:rFonts w:ascii="${xml(fontFamily)}" w:eastAsia="${xml(fontFamily)}" w:hAnsi="${xml(fontFamily)}"/>`
       : '',
     fontSize > 0 ? `<w:sz w:val="${fontSize}"/><w:szCs w:val="${fontSize}"/>` : '',
+    options.baseline !== undefined ? `<w:position w:val="${Math.round(options.baseline * (options.fontSize ?? 12) * 2)}"/>` : '',
     color ? `<w:color w:val="${color}"/>` : '',
     options.bold !== undefined ? `<w:b${options.bold ? '/' : ' w:val="0"/'}>` : '',
     options.italic !== undefined ? `<w:i${options.italic ? '/' : ' w:val="0"/'}>` : '',
@@ -158,14 +160,16 @@ function formulaParagraph(expression: string, leadingContent = ''): string {
 }
 
 function tableCell(
-  cell: { readonly text: string; readonly runs: readonly TextRun[] },
+  cell: { readonly text: string; readonly runs: readonly TextRun[]; readonly span?: TableCellSpan },
   header: boolean,
 ): string {
-  return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/><w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar></w:tcPr><w:p>${richRuns(cell.text, cell.runs, { bold: header })}</w:p></w:tc>`
+  if (cell.span && cell.span.columnOffset > 0) return ''
+  const merge = cell.span ? `${cell.span.columnSpan > 1 ? `<w:gridSpan w:val="${cell.span.columnSpan}"/>` : ''}${cell.span.rowSpan > 1 ? `<w:vMerge w:val="${cell.span.rowOffset ? 'continue' : 'restart'}"/>` : ''}` : ''
+  return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>${merge}<w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar></w:tcPr><w:p>${richRuns(cell.text, cell.runs, { bold: header })}</w:p></w:tc>`
 }
 
 function tableXml(
-  rows: ReadonlyArray<ReadonlyArray<{ readonly text: string; readonly runs: readonly TextRun[] }>>,
+  rows: ReadonlyArray<ReadonlyArray<{ readonly text: string; readonly runs: readonly TextRun[]; readonly span?: TableCellSpan }>>,
   headerRows: number,
 ): string {
   const width = Math.max(1, ...rows.map((row) => row.length))

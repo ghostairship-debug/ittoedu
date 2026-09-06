@@ -134,6 +134,8 @@ function selectedImagesApi(
 ): DesktopAPI & { selectImages: ReturnType<typeof vi.fn> } {
   const selectImagesSpy = vi.fn(selectImages)
   return {
+    legacyPpt: vi.fn(async () => null),
+    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

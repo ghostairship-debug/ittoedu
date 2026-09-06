@@ -97,6 +97,8 @@ function desktopHarness(options: DesktopHarnessOptions = {}): DesktopHarness {
   const clearRecoveryProject = vi.fn(async () => undefined)
   const listRecentProjects = vi.fn(async () => options.recent ?? [])
   const api: DesktopAPI = {
+    legacyPpt: vi.fn(async () => null),
+    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject,
     listRecentProjects,

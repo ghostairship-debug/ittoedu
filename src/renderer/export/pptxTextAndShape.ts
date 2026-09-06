@@ -27,6 +27,9 @@ import {
 } from './pptxShared'
 
 interface ResolvedTextStyle {
+  baseline: number
+  fontSize: number
+  fontFamily: string
   color: string
   bold: boolean
   italic: boolean
@@ -37,6 +40,9 @@ interface ResolvedTextStyle {
 
 function resolvedTextStyle(node: TextNode, index: number): ResolvedTextStyle {
   const resolved: ResolvedTextStyle = {
+    baseline: 0,
+    fontSize: node.style.fontSize,
+    fontFamily: node.style.fontFamily,
     color: node.style.color,
     bold: node.style.bold,
     italic: node.style.italic,
@@ -52,6 +58,9 @@ function resolvedTextStyle(node: TextNode, index: number): ResolvedTextStyle {
 
 function textStyleKey(style: ResolvedTextStyle): string {
   return [
+    style.baseline,
+    style.fontSize,
+    style.fontFamily,
     style.color,
     style.bold ? '1' : '0',
     style.italic ? '1' : '0',
@@ -62,10 +71,11 @@ function textStyleKey(style: ResolvedTextStyle): string {
 }
 
 function pptxTextRuns(node: TextNode, fontSize: number): PptxGenJS.TextProps[] {
-  const boundaries = new Set<number>([0, node.text.length])
+  const characters = Array.from(node.text)
+  const boundaries = new Set<number>([0, characters.length])
   for (const run of node.runs) {
-    boundaries.add(clamp(Math.floor(run.start), 0, node.text.length))
-    boundaries.add(clamp(Math.floor(run.end), 0, node.text.length))
+    boundaries.add(clamp(Math.floor(run.start), 0, characters.length))
+    boundaries.add(clamp(Math.floor(run.end), 0, characters.length))
   }
   const ordered = [...boundaries].sort((left, right) => left - right)
   const segments: Array<{ text: string; style: ResolvedTextStyle }> = []
@@ -75,7 +85,7 @@ function pptxTextRuns(node: TextNode, fontSize: number): PptxGenJS.TextProps[] {
     if (end <= start) continue
     const style = resolvedTextStyle(node, start)
     const previous = segments.at(-1)
-    const text = node.text.slice(start, end)
+    const text = characters.slice(start, end).join('')
     if (previous && textStyleKey(previous.style) === textStyleKey(style)) previous.text += text
     else segments.push({ text, style })
   }
@@ -94,8 +104,9 @@ function pptxTextRuns(node: TextNode, fontSize: number): PptxGenJS.TextProps[] {
       highlight: style.highlightColor
         ? pptxColor(style.highlightColor, 'FFFF00')
         : undefined,
-      fontFace: pptxFontFace(node.style.fontFamily),
-      fontSize: fontSize * PIXELS_TO_POINTS,
+      fontFace: pptxFontFace(style.fontFamily),
+      fontSize: style.fontSize * fontSize / node.style.fontSize * PIXELS_TO_POINTS,
+      baseline: style.baseline * 2000,
       charSpacing: node.style.letterSpacing * PIXELS_TO_POINTS,
       transparency: pptxTransparency(node.opacity),
       lang: 'zh-CN',
@@ -155,6 +166,8 @@ export function addPptxTextNode(
     : 0
 
   slide.addText(pptxTextRuns(node, renderedFontSize), {
+    flipH: node.flipX,
+    flipV: node.flipY,
     ...pptxNodePosition(effectiveNode, scale),
     objectName: pptxObjectName(node),
     shape: node.style.cornerRadius > 0 ? 'roundRect' : 'rect',

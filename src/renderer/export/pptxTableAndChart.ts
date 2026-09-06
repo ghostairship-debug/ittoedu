@@ -86,6 +86,8 @@ export function addPptxTableNode(
     row.cells.map((cell) => ({
       text: cell.text,
       options: {
+        rowspan: cell.rowSpan,
+        colspan: cell.columnSpan,
         fill: {
           color: pptxColor(cell.style.fillColor, 'FFFFFF'),
           transparency: pptxTransparency(cell.style.fillOpacity),

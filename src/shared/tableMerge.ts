@@ -11,11 +11,11 @@ export interface TableMergeView {
   readonly columns: readonly { readonly id: string }[]
   readonly merges?: readonly { readonly rowIds: readonly string[]; readonly columnIds: readonly string[] }[]
 }
-export interface TableCellSpan { rowSpan: number; columnSpan: number; covered: boolean }
+export interface TableCellSpan { rowSpan: number; columnSpan: number; covered: boolean; rowOffset: number; columnOffset: number }
 export function tableCellSpan(table: TableMergeView, rowId: string, columnId: string): TableCellSpan {
   const region = table.merges?.find(merge => merge.rowIds.includes(rowId) && merge.columnIds.includes(columnId))
-  if (!region) return { rowSpan: 1, columnSpan: 1, covered: false }
-  return { rowSpan: region.rowIds.length, columnSpan: region.columnIds.length, covered: region.rowIds[0] !== rowId || region.columnIds[0] !== columnId }
+  if (!region) return { rowSpan: 1, columnSpan: 1, covered: false, rowOffset: 0, columnOffset: 0 }
+  return { rowSpan: region.rowIds.length, columnSpan: region.columnIds.length, covered: region.rowIds[0] !== rowId || region.columnIds[0] !== columnId, rowOffset: region.rowIds.indexOf(rowId), columnOffset: region.columnIds.indexOf(columnId) }
 }
 export function tableMergeIssues(table: TableMergeView): string[] {
   const issues: string[] = []

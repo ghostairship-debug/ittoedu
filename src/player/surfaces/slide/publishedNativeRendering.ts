@@ -520,8 +520,12 @@ export function paintPublishedNativeTable(
       const cellTag = cell.isHeader ? 'th' : 'td'
       const td = wrap.ownerDocument.createElement(cellTag)
       td.dataset.cellId = cell.id
+      td.rowSpan = cell.rowSpan
+      td.colSpan = cell.columnSpan
       td.dataset.colId = cell.columnId
       td.textContent = cell.text
+      td.style.whiteSpace = 'pre-wrap'
+      td.style.overflowWrap = 'anywhere'
       const s = cell.style
       td.style.boxSizing = 'border-box'
       td.style.padding = `${s.cellPadding}px`

@@ -353,6 +353,10 @@ export function TextProperties({
         </p>
       )}
       <FontFamilyPicker value={style.fontFamily} onCommit={(fontFamily) => update({ style: { fontFamily } })} />
+      <div className="button-row">
+        <button type="button" className="secondary-button" aria-pressed={node.flipX ?? false} onClick={() => update({ flipX: !node.flipX })}>水平翻转文字</button>
+        <button type="button" className="secondary-button" aria-pressed={node.flipY ?? false} onClick={() => update({ flipY: !node.flipY })}>垂直翻转文字</button>
+      </div>
       <div className="coordinate-grid">
         <BufferedInput label="字号" type="number" min={8} max={400} value={style.fontSize} onCommit={(fontSize) => update({ style: { fontSize: Number(fontSize) } })} />
         <BufferedInput label="行距" type="number" min={0} max={200} value={style.lineSpacing} onCommit={(lineSpacing) => update({ style: { lineSpacing: Number(lineSpacing) } })} />

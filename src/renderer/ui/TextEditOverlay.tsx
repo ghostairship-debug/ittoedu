@@ -57,6 +57,9 @@ export function buildInitialRichTextHtml(node: TextNode): string {
     const effectiveEmphasis = style.emphasis ?? node.style.emphasis
     const effectiveBold = style.bold ?? node.style.bold
     const css = [
+      style.baseline !== undefined ? `vertical-align:${style.baseline}em` : '',
+      style.fontSize !== undefined ? `font-size:${style.fontSize / node.style.fontSize}em` : '',
+      style.fontFamily !== undefined ? `font-family:${style.fontFamily}` : '',
       style.color !== undefined ? `color:${style.color}` : '',
       `font-weight:${effectiveBold ? '700' : '400'}`,
       style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
@@ -119,7 +122,17 @@ function extractEditor(root: HTMLElement, node: TextNode): { text: string; runs:
       const emphasisStyle = computed.getPropertyValue('text-emphasis-style') ||
         computed.getPropertyValue('-webkit-text-emphasis-style')
       const emphasis = emphasisStyle !== '' && emphasisStyle !== 'none'
+      const authored = (key: 'fontSize' | 'fontFamily' | 'verticalAlign'): string => {
+        let element: HTMLElement | null = parent
+        while (element && element !== root) { if (element.style[key]) return element.style[key]; element = element.parentElement }
+        return ''
+      }
+      const size = Number.parseFloat(authored('fontSize')) * (authored('fontSize').endsWith('em') ? node.style.fontSize : 1)
+      const baseline = authored('verticalAlign').endsWith('em') ? Number.parseFloat(authored('verticalAlign')) : Number.NaN
       const style: TextRunStyle = {
+        ...(Number.isFinite(baseline) ? { baseline } : {}),
+        ...(Number.isFinite(size) ? { fontSize: size } : {}),
+        ...(authored('fontFamily') ? { fontFamily: authored('fontFamily').replace(/^['"]|['"]$/g, '') } : {}),
         ...(color && color !== node.style.color.toLowerCase() ? { color } : {}),
         ...(Number.parseInt(computed.fontWeight, 10) >= 600 !== node.style.bold ? { bold: Number.parseInt(computed.fontWeight, 10) >= 600 } : {}),
         ...((computed.fontStyle === 'italic') !== node.style.italic ? { italic: computed.fontStyle === 'italic' } : {}),
@@ -475,6 +488,13 @@ export function TextEditOverlay({
       rewriteSelection(editor, offsets, current.text, runs)
       return
     }
+    if (name === 'baseline') {
+      if (!offsets || offsets.end <= offsets.start) return
+      const current = extractEditor(editor, nodeRef.current)
+      const runs = applyTextRunStyle(current.text, current.runs, offsets.start, offsets.end, { baseline: Number(value) })
+      rewriteSelection(editor, offsets, current.text, runs)
+      return
+    }
     if (name === 'hiliteColor' || name === 'foreColor') {
       if (!offsets || offsets.end <= offsets.start || value === undefined) return
       const current = extractEditor(editor, nodeRef.current)
@@ -529,6 +549,9 @@ export function TextEditOverlay({
         <button type="button" title="局部斜体" aria-label="局部斜体" onClick={() => command('italic')}><Italic size={14} /></button>
         <button type="button" title="局部下划线" aria-label="局部下划线" onClick={() => command('underline')}><Underline size={14} /></button>
         <button type="button" title="局部删除线" aria-label="局部删除线" onClick={() => command('strikeThrough')}><Strikethrough size={14} /></button>
+        <button type="button" title="下标" aria-label="下标" onClick={() => command('baseline', '-0.25')}>X₂</button>
+        <button type="button" title="上标" aria-label="上标" onClick={() => command('baseline', '0.3')}>X²</button>
+        <button type="button" title="恢复基线" aria-label="恢复基线" onClick={() => command('baseline', '0')}>X</button>
         <button type="button" title="局部着重号" aria-label="局部着重号" onClick={toggleSelectionEmphasis}><span aria-hidden="true">•</span></button>
         <button type="button" title="局部高亮" aria-label="局部高亮" onClick={() => command('hiliteColor', '#fff3a3')}><Highlighter size={14} /></button>
         <button type="button" title="取消局部高亮" aria-label="取消局部高亮" onClick={() => command('hiliteColor', 'transparent')}><Highlighter size={14} opacity={0.45} /></button>
@@ -575,7 +598,7 @@ export function TextEditOverlay({
           textOrientation: node.style.writingMode === 'horizontal'
             ? undefined
             : 'upright',
-          transform: `rotate(${node.rotation}deg)`,
+          transform: `rotate(${node.rotation}deg) scale(${node.flipX ? -1 : 1}, ${node.flipY ? -1 : 1})`,
           transformOrigin: 'center center',
         }}
         onInput={() => {

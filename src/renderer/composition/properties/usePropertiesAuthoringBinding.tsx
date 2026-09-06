@@ -50,6 +50,7 @@ import {
   patchSlideTableStyle,
   reorderSlideTableColumns,
   reorderSlideTableRows,
+  changeSlideTableMerge,
 } from '../../course/v9TableCommands'
 import {
   patchSlideChartStyle,
@@ -982,6 +983,8 @@ export function usePropertiesAuthoringBinding({
           if (edit?.kind === 'field-text' && edit.tableCellId === cellId && edit.courseTarget) runSpatialAuthoringIntent(edit.courseTarget, { kind: 'cancel-content-edit', expectedEdit: edit, expectedContentEdit: edit })
         },
         commitCellText: (cellId, text) => change(table => tableContent.patchTableCellText(table, { cellId, text })),
+        mergeCells: region => change(table => tableContent.mergeTableCells(table, region)),
+        splitCells: (rowId, columnId) => change(table => tableContent.splitTableCells(table, { rowId, columnId })),
         commitLastCellAndAppendRow: (cellId, text) => change(table => tableContent.commitTableLastCellAndAppendRow(table, { cellId, text }).table),
         patchStyle: stylePatch => change(table => tableContent.patchTableStyle(table, { stylePatch })),
         patchCellStyle: (cellId, stylePatch) => change(table => tableContent.patchTableCellStyle(table, { cellId, stylePatch })),
@@ -1048,6 +1051,8 @@ export function usePropertiesAuthoringBinding({
       commitCellText: (cellId, text) => run((session) => (
         patchSlideTableCellText(session, { layerItemId: target.layerItemId, cellId, text }, options)
       )),
+      mergeCells: region => run(session => changeSlideTableMerge(session, { layerItemId: target.layerItemId, kind: 'merge', region }, options)),
+      splitCells: (rowId, columnId) => run(session => changeSlideTableMerge(session, { layerItemId: target.layerItemId, kind: 'split', rowId, columnId }, options)),
       commitLastCellAndAppendRow: (cellId, text) => run((session) => (
         commitSlideTableLastCellAndAppendRow(session, { layerItemId: target.layerItemId, cellId, text }, options)
       )),

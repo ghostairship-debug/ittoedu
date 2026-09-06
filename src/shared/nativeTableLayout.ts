@@ -6,6 +6,7 @@ import type {
   NativeTableRow,
   NativeTableStyle,
 } from './contracts/native-v1/types'
+import { tableCellSpan } from './tableMerge'
 
 type DeepReadonlyTable<T> = T extends readonly (infer Item)[]
   ? readonly DeepReadonlyTable<Item>[]
@@ -34,6 +35,8 @@ export interface NativeTableEffectiveCellStyle {
 }
 
 export interface NativeTableLayoutCell {
+  readonly rowSpan: number
+  readonly columnSpan: number
   readonly id: string
   readonly rowId: string
   readonly columnId: string
@@ -161,6 +164,8 @@ export function buildNativeTableLayout(
       }
 
       const layoutCell: NativeTableLayoutCell = {
+        rowSpan: 1,
+        columnSpan: 1,
         id: cell?.id ?? `cell_${row.id}_${col.id}`,
         rowId: row.id,
         columnId: col.id,
@@ -198,6 +203,23 @@ export function buildNativeTableLayout(
     return layoutRow
   })
 
+  if (content.merges?.length) {
+    allCells.length = 0
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index]!
+      const cells = row.cells.flatMap(cell => {
+        const span = tableCellSpan(content, cell.rowId, cell.columnId)
+        if (span.covered) return []
+        const merged: NativeTableLayoutCell = { ...cell, rowSpan: span.rowSpan, columnSpan: span.columnSpan,
+          width: columns.slice(cell.columnIndex, cell.columnIndex + span.columnSpan).reduce((sum, column) => sum + column.width, 0),
+          height: rows.slice(cell.rowIndex, cell.rowIndex + span.rowSpan).reduce((sum, row) => sum + row.height, 0) }
+        allCells.push(merged)
+        return [merged]
+      })
+      rows[index] = { ...row, cells }
+    }
+  }
+
   // Grid lines
   const verticalGridLines: NativeTableLayoutGridLine[] = []
   let vx = 0
@@ -227,6 +249,20 @@ export function buildNativeTableLayout(
     }
   }
 
+  if (content.merges?.length) {
+    verticalGridLines.length = 0; horizontalGridLines.length = 0
+    const seen = new Set<string>()
+    for (const cell of allCells) {
+      for (const x of [cell.x, cell.x + cell.width]) {
+        const key = `v:${x}:${cell.y}:${cell.height}`
+        if (!seen.has(key)) { seen.add(key); verticalGridLines.push({ x1: x, x2: x, y1: cell.y, y2: cell.y + cell.height }) }
+      }
+      for (const y of [cell.y, cell.y + cell.height]) {
+        const key = `h:${y}:${cell.x}:${cell.width}`
+        if (!seen.has(key)) { seen.add(key); horizontalGridLines.push({ y1: y, y2: y, x1: cell.x, x2: cell.x + cell.width }) }
+      }
+    }
+  }
   return {
     width: targetWidth,
     height: targetHeight,

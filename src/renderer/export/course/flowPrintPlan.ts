@@ -1,4 +1,5 @@
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { tableCellSpan, type TableCellSpan } from '../../../shared/tableMerge'
 import type { NativeChartContent } from '../../../shared/contracts/native-v1'
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
 import type { MixedPrintEntry, MixedPrintPlan } from '../../../shared/courseProjectTypes'
@@ -41,7 +42,7 @@ export type FlowPrintNode =
       blockId: string
       caption?: string
       headers: string[]
-      rows: Array<Array<{ text: string; runs: readonly TextRun[] }>>
+      rows: Array<Array<{ text: string; runs: readonly TextRun[]; span?: TableCellSpan }>>
     }
   | {
       type: 'formula'
@@ -218,6 +219,7 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
           const cell = row.cells[column.id]
           return {
             text: flowTableCellText(cell),
+            ...(block.merges?.length ? { span: tableCellSpan(block, row.id, column.id) } : {}),
             runs: typeof cell === 'object' && cell ? cell.runs ?? [] : [],
           }
         })),
@@ -293,7 +295,7 @@ function printNodeToHtml(
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" style="width:100%;margin:16px 0;aspect-ratio:656/${node.height}">${buildNativeChartSvg(node.chart, 656, node.height, node.blockId)}</figure>`
     case 'table': {
       const head = `<tr>${node.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`
-      const body = node.rows.map((row) => `<tr>${row.map((cell) => `<td>${richTextToHtml(cell.text, cell.runs)}</td>`).join('')}</tr>`).join('')
+      const body = node.rows.map((row) => `<tr>${row.filter(cell => !cell.span?.covered).map((cell) => `<td${cell.span ? ` rowspan="${cell.span.rowSpan}" colspan="${cell.span.columnSpan}"` : ''}>${richTextToHtml(cell.text, cell.runs)}</td>`).join('')}</tr>`).join('')
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}">${
         node.caption ? `<figcaption>${escapeHtml(node.caption)}</figcaption>` : ''
       }<table>${head}${body}</table></figure>`
@@ -335,6 +337,7 @@ function richTextStyleToCss(style: TextRunStyle): string {
   return [
     style.fontFamily ? `font-family:${style.fontFamily}` : '',
     style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
+    style.baseline !== undefined ? `vertical-align:${style.baseline}em` : '',
     style.color ? `color:${style.color}` : '',
     style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
     style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',

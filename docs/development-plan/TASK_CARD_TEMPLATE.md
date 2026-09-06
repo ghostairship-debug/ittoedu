@@ -60,8 +60,8 @@
 | `app-save-recovery` | `src/renderer/app/useCourseDelivery.ts`、`src/renderer/project/courseProjectArchive.ts` 与保存 / 恢复路径 |
 | `diagnostics` | `src/shared/courseProjectHealth.ts`、`src/shared/courseProjectHealth/**`、`src/renderer/diagnostics/**` |
 | `main-preload` | `src/main/**`、`src/preload/**` |
-| `cli-adapters` | 1.6 起 CLI adapter 与启动器 Owner；首个节点创建目录时在写入前回填精确路径 |
-| `ai-session` | 1.6 起本地会话、staging 与准入 Owner；首个节点创建目录时在写入前回填精确路径 |
+| `cli-adapters` | `src/main/localAgent/adapter.ts`、`process.ts`、`protocol.ts` 与 `src/shared/localAgentContract.ts`；CLI 协议与进程启动/终止 |
+| `ai-session` | `src/main/localAgent/harness.ts`、`repository.ts`、`service.ts`；复用 WorkspaceIdentity 的唯一会话生命周期、存储与 staging Owner |
 | `mcp-server` | 1.8 起 MCP Authoring Server Owner；首个节点创建目录时在写入前回填精确路径 |
 | `chat-ui` | 1.9 起 Chat shell、timeline 与引用选择 Owner；首个节点创建目录时在写入前回填精确路径 |
 

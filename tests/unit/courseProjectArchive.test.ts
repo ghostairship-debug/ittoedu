@@ -243,8 +243,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(partial.slides[0]!.items).toHaveLength(2)
     expect(partial.issues).toEqual([expect.objectContaining({ page: 1, type: 'graphicFrame', message: expect.stringContaining('已跳过') })])
     for (const [from, to, reason] of [
-      ['<a:xfrm>', '<a:xfrm flipH="true">', '翻转'],
-      ['<a:rPr sz="3200"', '<a:rPr baseline="2000" sz="3200"', '文字效果'],
+      ['<a:rPr sz="3200"', '<a:rPr baseline="200000" sz="3200"', '文字效果'],
       ['<a:srgbClr val="123456"/>', '<a:srgbClr val="123456"><a:alpha val="50000"/></a:srgbClr>', '文字透明度'],
     ]) {
       const files = unzipSync(pptxImportFixture())
@@ -286,7 +285,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     const files = unzipSync(pptxImportFixture())
     files['ppt/slides/slide1.xml'] = strToU8(strFromU8(files['ppt/slides/slide1.xml']!)
       .replace('<a:noFill/>', '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>')
-      .replace('<a:rPr sz="3200"', '<a:rPr baseline="2000" sz="3200"'))
+      .replace('<a:rPr sz="3200"', '<a:rPr baseline="200000" sz="3200"'))
     const draft = await parsePptxImport(zipSync(files))
     expect(draft.slides[0]!.items).toHaveLength(1)
     expect(draft.slides[0]!.items[0]).toMatchObject({ kind: 'native', content: { nativeType: 'shape', data: { shapeType: 'ellipse' } } })

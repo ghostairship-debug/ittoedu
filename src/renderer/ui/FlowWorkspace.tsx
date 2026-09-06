@@ -1,4 +1,5 @@
 import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
+import { tableCellSpan } from '../../shared/tableMerge'
 import { EditableChartView } from './EditableChartView'
 import type { ChartTextDraft } from '../authoring/chartTextDraft'
 import {
@@ -1149,12 +1150,16 @@ export function FlowWorkspace({
               {block.rows.map((row) => (
                 <tr key={row.id} data-flow-row-id={row.id}>
                   {block.columns.map((column) => {
+                    const span = tableCellSpan(block, row.id, column.id)
+                    if (span.covered) return null
                     const rich = cellToRichText(row.cells[column.id])
                     const editingCell = editingThis &&
                       edit?.tableRowId === row.id &&
                       edit.tableColumnId === column.id
                     return (
                       <td
+                        rowSpan={span.rowSpan}
+                        colSpan={span.columnSpan}
                         key={column.id}
                         data-flow-column-id={column.id}
                         data-flow-row-id={row.id}

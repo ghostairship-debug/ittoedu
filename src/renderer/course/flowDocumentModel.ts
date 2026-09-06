@@ -340,6 +340,7 @@ export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
   if (next.type === 'list') {
     next.items = next.items.map((item) => ({ ...item, id: stableFlowId('list-item') }))
   } else if (next.type === 'table') {
+    const previousRows = next.rows.map(row => row.id)
     const previousColumns = block.type === 'table' ? block.columns : []
     next.columns = next.columns.map((column) => ({ ...column, id: stableFlowId('column') }))
     next.rows = next.rows.map((row) => ({
@@ -351,6 +352,10 @@ export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
           return [column.id, previousId ? row.cells[previousId] ?? '' : '']
         }),
       ),
+    }))
+    if (next.merges) next.merges = next.merges.map(region => ({
+      rowIds: region.rowIds.map(id => next.rows[previousRows.indexOf(id)]!.id),
+      columnIds: region.columnIds.map(id => next.columns[previousColumns.findIndex(column => column.id === id)]!.id),
     }))
   } else if (next.type === 'chart') {
     next.chart = rebuildChartItemIds(next.chart)

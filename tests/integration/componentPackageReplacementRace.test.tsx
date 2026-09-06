@@ -242,6 +242,8 @@ function componentApi(options: {
       ?? (async () => { throw new Error('not used') }),
   )
   return {
+    legacyPpt: vi.fn(async () => null),
+    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

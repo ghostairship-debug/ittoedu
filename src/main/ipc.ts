@@ -38,6 +38,8 @@ import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
 import { operateMaterials } from './materialService'
+import { operateLocalAgent } from './localAgent/service'
+import { operateLegacyPpt } from './pptImportService'
 import {
   mainPreviewNetworkPolicy,
   type PreviewNetworkDocumentOwner,
@@ -240,6 +242,14 @@ function registerSafeHandler<T>(
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  registerSafeHandler(IPC_CHANNELS.legacyPpt, context, {
+    code: 'PPT_RESAVE_FAILED', title: '旧 PPT 转换失败',
+    message: '无法转换旧版 PPT。', suggestion: '请使用本机 Microsoft PowerPoint 另存为 PPTX 后导入。',
+  }, async (_event, args) => operateLegacyPpt(requireWindow(context), requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.localAgent, context, {
+    code: 'LOCAL_AGENT_FAILED', title: '本地 CLI 会话失败',
+    message: '无法完成 CLI 操作。', suggestion: '请检查 CLI 安装和认证；人工编辑仍可继续。',
+  }, async (_event, args) => operateLocalAgent(requireSingleArgument(args)))
   registerSafeHandler(IPC_CHANNELS.materials, context, {
     code: 'MATERIAL_OPERATION_FAILED', title: '材料操作失败',
     message: '无法完成本地材料操作。', suggestion: '请检查工程路径或材料文件后重试。',

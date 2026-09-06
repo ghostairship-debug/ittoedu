@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { TableMergeControls } from './TableMergeControls'
 import type { FlowTableBlock } from '../../../shared/courseProjectTypes'
 import { changeFlowTableStructure, type FlowTableStructureOperation } from '../../course/flowTableContentOperations'
 import type { FlowPropertiesContext } from './FlowPropertiesPanel'
@@ -32,11 +33,12 @@ export function FlowTableProperties({ context, table }: { context: FlowPropertie
   const change = (operation: FlowTableStructureOperation) => {
     try {
       const next = changeFlowTableStructure(table, operation)
-      context.commands.patchSelectedBlock({ columns: next.columns, rows: next.rows })
+      context.commands.patchSelectedBlock({ columns: next.columns, rows: next.rows, ...(next.merges ? { merges: next.merges } : {}) })
     } catch (error) { context.commands.reportError(error instanceof Error ? error.message : '表格修改失败') }
   }
   return <section className="property-section" data-testid="flow-table-properties">
     <h3 className="property-title">表格</h3>
+    <TableMergeControls table={table} onMerge={region => change({ kind: 'merge', region })} onSplit={(rowId, columnId) => change({ kind: 'split', rowId, columnId })} />
     <TableField context={context} field="table-caption" value={table.caption ?? ''} label="表格标题说明" />
     <p className="property-hint">在正文中双击单元格编辑文字；选中文字后可设置富文本样式。</p>
     {table.columns.map((column, index) => <div key={column.id}>

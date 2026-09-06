@@ -1,4 +1,5 @@
 import { applyTextRunStyle, remapTextRuns, toggleTextRunEmphasis } from '../../shared/textRuns'
+import { tableCellSpan } from '../../shared/tableMerge'
 import { formulaAstToAccessibleText, serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode, FormulaNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import type {
@@ -342,6 +343,7 @@ export function readFlowEditableContent(
     }
   }
   if (block.type === 'table' && nested?.tableRowId && nested.tableColumnId) {
+    if (tableCellSpan(block, nested.tableRowId, nested.tableColumnId).covered) return null
     const row = block.rows.find((entry) => entry.id === nested.tableRowId)
     if (!row) return null
     const rich = cellToRichText(row.cells[nested.tableColumnId])
@@ -1227,6 +1229,7 @@ export function buildFlowRichTextHtml(text: string, runs: readonly TextRun[] = [
       style.color !== undefined ? `color:${style.color}` : '',
       style.fontFamily !== undefined ? `font-family:${style.fontFamily}` : '',
       style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
+      style.baseline !== undefined ? `vertical-align:${style.baseline}em` : '',
       style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
       style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
       decorations ? 'display:inline-block' : '',
@@ -1320,7 +1323,10 @@ export function extractFlowRichTextFromEditor(root: HTMLElement): FlowRichTextDr
         candidate.style.fontSize
       ))
       const fontSize = authoredFontSize ? Number.parseFloat(authoredFontSize) : Number.NaN
+      const authoredBaseline = authoredInlineStyleValue(parent, root, candidate => candidate.style.verticalAlign)
+      const baseline = authoredBaseline?.endsWith('em') ? Number.parseFloat(authoredBaseline) : Number.NaN
       const style: TextRunStyle = {
+        ...(Number.isFinite(baseline) ? { baseline } : {}),
         ...(color && color !== (rootColor ?? FLOW_PAPER_TEXT_COLOR) ? { color } : {}),
         ...(authoredFontFamily ? { fontFamily: normalizeAuthoredFontFamily(authoredFontFamily) } : {}),
         ...(Number.isFinite(fontSize) && fontSize > 0 ? { fontSize } : {}),

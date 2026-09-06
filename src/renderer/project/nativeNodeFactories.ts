@@ -131,6 +131,8 @@ export function createTextNode(
     locked: options.locked ?? false,
     playbackInitialVisibility: options.playbackInitialVisibility ?? 'inherit',
     text: options.text ?? '双击编辑文字',
+    ...(options.flipX !== undefined ? { flipX: options.flipX } : {}),
+    ...(options.flipY !== undefined ? { flipY: options.flipY } : {}),
     runs: options.runs ?? [],
     style: {
       fontFamily: options.style?.fontFamily ?? DEFAULT_FONT_FAMILY,
@@ -574,6 +576,7 @@ export function createTableNode(options: TableNodeOptions = {}): TableFactoryNod
     columns,
     rows,
     headerRowCount: options.headerRowCount ?? 1,
+    ...(options.merges ? { merges: structuredClone(options.merges) } : {}),
     style: {
       ...defaultStyle,
       ...(options.style ?? {}),
@@ -606,6 +609,7 @@ export function createTableLayerItem(node: TableFactoryNode, order = 0): NativeL
         columns: structuredClone(node.columns),
         rows: structuredClone(node.rows),
         headerRowCount: node.headerRowCount,
+        ...(node.merges ? { merges: structuredClone(node.merges) } : {}),
         style: structuredClone(node.style),
       },
     },
@@ -617,6 +621,7 @@ export function rebuildTableItemIds(
   idFactory: IdFactory = nanoid,
 ): NativeTableContent {
   const colIdMap = new Map<string, string>()
+  const rowIdMap = new Map<string, string>()
   const nextColumns = content.columns.map((col) => {
     const newId = nextId('col', undefined, idFactory)
     colIdMap.set(col.id, newId)
@@ -624,6 +629,7 @@ export function rebuildTableItemIds(
   })
   const nextRows = content.rows.map((row) => {
     const newRowId = nextId('row', undefined, idFactory)
+    rowIdMap.set(row.id, newRowId)
     const newCells = row.cells.map((cell) => {
       const newCellId = nextId('cell', undefined, idFactory)
       const newColId = colIdMap.get(cell.columnId) ?? cell.columnId
@@ -644,6 +650,7 @@ export function rebuildTableItemIds(
     ...content,
     columns: nextColumns,
     rows: nextRows,
+    ...(content.merges ? { merges: content.merges.map(merge => ({ rowIds: merge.rowIds.map(id => rowIdMap.get(id)!), columnIds: merge.columnIds.map(id => colIdMap.get(id)!) })) } : {}),
     style: { ...content.style },
   }
 }

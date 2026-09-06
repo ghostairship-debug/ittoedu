@@ -16,6 +16,7 @@ import { contentQaFixture } from '../fixtures/contentQa'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
+import { runLocalCliFailureProbe } from './localCliFailureProbe'
 import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture } from '../fixtures/pptxImport'
 import { createServer } from 'vite'
 import type { CoursewareCaseBuildSummary } from '../../scripts/build-courseware-case'
@@ -734,6 +735,13 @@ test('S2 PPTX 原生收口：母版继承、共享编辑、表格编辑与离线
     const cell = page.getByRole('textbox', { name: /^单元格 / }).nth(3)
     await cell.fill('平均分成两份，表示其中一份')
     await cell.press('Shift+Tab')
+    await page.getByText('合并与拆分单元格', { exact: true }).click()
+    await page.getByRole('button', { name: '合并所选区域', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: /^单元格 / })).toHaveCount(3)
+    await page.getByRole('button', { name: /拆分第 1 行、第 1 列/ }).click()
+    await expect(page.getByRole('textbox', { name: /^单元格 / })).toHaveCount(4)
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: /^单元格 / })).toHaveCount(3)
     await page.getByRole('tab', { name: '图层' }).click()
     const titleId = importedSurface.scenes[0]!.layerItems[0]!.layerItemId
     await page.locator(`[data-testid^="node-item-"][data-testid$="${titleId}"] .node-name`).click()
@@ -750,6 +758,7 @@ test('S2 PPTX 原生收口：母版继承、共享编辑、表格编辑与离线
     expect(surface.scenes[2]!.layerItems[0]).toMatchObject({ content: { data: { text: '第3页标题' } } })
     const table = surface.scenes[0]!.layerItems.find(i => i.kind === 'native' && i.content.nativeType === 'table')!
     expect(table).toMatchObject({ content: { data: { rows: [{}, { cells: [{}, { text: '平均分成两份，表示其中一份' }] }] } } })
+    expect(table).toMatchObject({ content: { data: { merges: [{ rowIds: [expect.any(String)], columnIds: [expect.any(String), expect.any(String)] }] } } })
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
     await expect(courseTreeKind(page, 'slide-scene')).toHaveCount(edited.locations.length)
     await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
@@ -1087,6 +1096,9 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
   const { app, page } = launch
   try {
     await test.step('default Slide adds Spatial and two distinct world kinds', async () => {
+      await expect(page.getByRole('button', { name: /AI|聊天|Provider/i })).toHaveCount(0)
+      expect(await page.evaluate(() => window.desktopAPI.localAgent({ operation: 'probe', adapter: 'codex' }))).toEqual({ enabled: false })
+      await runLocalCliFailureProbe(app, page, launch.runRoot)
       await expect(courseTreeKind(page, 'slide-scene')).toHaveCount(1)
       await addSurface(page, 'spatial')
       await expect(page.getByTestId('spatial-workspace')).toBeVisible()
