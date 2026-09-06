@@ -135,6 +135,7 @@ export type CrossSurfaceSlidePorts = {
 } & SurfaceNodeCommands
 
 export type CrossSurfaceFlowPorts = {
+  addTableNode(): void
   addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   read(): {
     flowSession: FlowAuthoringSession | null
@@ -173,6 +174,7 @@ export type CrossSurfaceFlowPorts = {
 } & SurfaceNodeCommands
 
 export type CrossSurfaceSpatialPorts = {
+  addTableNode(x?: number, y?: number): void
   addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
   read(): {
     spatialSession: SpatialAuthoringSession | null
@@ -688,6 +690,8 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
 
     addTableNode(x?: number, y?: number) {
       const detected = ports.detect()
+      if (detected === 'spatial') { ports.spatial.addTableNode(x, y); return }
+      if (detected === 'flow') { ports.flow.addTableNode(); return }
       if (detected !== 'slide') {
         ports.kernel.setFeedback({
           errorMessage: detected === null

@@ -45,6 +45,7 @@ export interface SlideDynamicAuthoringOverlayProps {
     value: string,
   ) => void
   readonly onCancelComponentText: () => void
+  readonly onComponentDraftChange: (text: string, composing: boolean) => void
   readonly onRetryPreview: () => void
 }
 
@@ -70,6 +71,7 @@ export function SlideDynamicAuthoringOverlay({
   onCancelRuntimeText,
   onCommitComponentText,
   onCancelComponentText,
+  onComponentDraftChange,
   onRetryPreview,
 }: SlideDynamicAuthoringOverlayProps) {
   const showTargets = interactive && (
@@ -164,6 +166,7 @@ export function SlideDynamicAuthoringOverlay({
               bounds={activeComponentTextTarget.bounds}
               label={activeComponentTextTarget.label}
               value={componentEditingValue}
+              onDraftChange={onComponentDraftChange}
               multiline={activeComponentTextTarget.multiline}
               maxLength={activeComponentTextTarget.maxLength}
               rotation={activeComponentTextTarget.rotation}

@@ -42,9 +42,9 @@ export interface SlideCandidateUiProjection {
 }
 
 export function isV9SlideTextContentDraft(
-  draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft,
+  draft: unknown,
 ): draft is V9SlideTextContentDraft {
-  return 'text' in draft && 'runs' in draft
+  return typeof draft === 'object' && draft !== null && 'text' in draft && 'runs' in draft
 }
 
 export function courseRuntimeToDocument(runtime: CourseRuntimeDefinition): RuntimeDocument {

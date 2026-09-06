@@ -7,7 +7,7 @@
       "name": "courseProjectDocumentSchema",
       "file": "course-project-v9.schema.json",
       "sourceOfTruth": "src/shared/contracts/course-project-v9/schema.ts",
-      "sha256": "f8e81d071b5fe844562138eefb04ac6b5a1ce7b8d70d91b3945ee89bc9c28fe2"
+      "sha256": "48d4d15575eaec287f461e252c2e77e8d683756c98a12ffe6c86f8e749c2626f"
     },
     {
       "name": "publishedCourseV2Schema",

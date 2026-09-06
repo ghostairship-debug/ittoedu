@@ -75,7 +75,8 @@
             "enum": [
               "image",
               "audio",
-              "video"
+              "video",
+              "font"
             ]
           },
           "path": {

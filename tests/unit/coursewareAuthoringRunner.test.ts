@@ -7,6 +7,10 @@ import { link, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { MaterialRepository } from '../../src/main/materialRepository'
+import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
+import { workspaceIdentityV1Schema } from '../../src/shared/workspaceIdentity'
+import { materialCitationText } from '../../src/shared/materialContract'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
 import { createTextNode } from '@/renderer/project/nativeNodeFactories'
@@ -23,6 +27,47 @@ const execFileAsync = promisify(execFile)
 const root = path.resolve(__dirname, '..', '..')
 const tsx = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
 const runner = path.join(root, 'scripts', 'run-courseware-authoring.ts')
+
+describe('local material repository workspace isolation and deletion', () => {
+  it('normalizes Windows paths and rejects relative or extended identities', () => {
+    const identity = createWorkspaceIdentity('course-a', 'C:\\Lessons\\Draft\\..\\Example.h5lesson', 'win32')
+    expect(identity.normalizedPath).toBe('c:/lessons/example.h5lesson')
+    expect(createWorkspaceIdentity('course-a', 'c:/lessons/example.h5lesson', 'win32')).toEqual(identity)
+    expect(createWorkspaceIdentity('course-a', '\\\\Server\\Share\\Example.h5lesson', 'win32').normalizedPath).toBe('//server/share/example.h5lesson')
+    expect(() => createWorkspaceIdentity('course-a', 'example.h5lesson', 'win32')).toThrow()
+    expect(workspaceIdentityV1Schema.safeParse({ ...identity, materialId: 'private-field' }).success).toBe(false)
+  })
+
+  it('survives restart, searches sources, isolates Save As, and retains portable citations after deletion', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'course-materials-'))
+    try {
+      const repository = new MaterialRepository(directory)
+      const first = createWorkspaceIdentity('same-id', path.join(directory, 'first.h5lesson'))
+      const second = createWorkspaceIdentity('same-id', path.join(directory, 'second.h5lesson'))
+      const third = createWorkspaceIdentity('other-id', path.join(directory, 'first.h5lesson'))
+      const input = { title: '分数', text: '分母表示平均分的份数。', source: { kind: 'text' as const, locator: '教材第 12 页' } }
+      const record = await repository.import(first, input)
+      await repository.import(second, { ...input, title: '另存为的独立材料' })
+      await repository.import(third, { ...input, title: '另一工程' })
+      const restarted = new MaterialRepository(directory)
+      expect((await restarted.search(first, '12 页')).map((entry) => entry.id)).toEqual([record.id])
+      expect(await restarted.read(second, record.id)).toBeNull()
+      const citation = materialCitationText((await restarted.read(first, record.id))!)
+      await restarted.delete(first, record.id)
+      expect(await restarted.search(first)).toEqual([])
+      expect(citation).toContain('分母表示平均分的份数。')
+      expect(citation).toContain('教材第 12 页')
+      await restarted.import(first, input)
+      await restarted.delete(first)
+      expect(await restarted.search(first)).toEqual([])
+      expect(await restarted.search(second)).toHaveLength(1)
+      expect(await restarted.search(third)).toHaveLength(1)
+      await expect(restarted.delete(first, '../second')).rejects.toThrow()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
 let temporaryRoot = ''
 
 function sha256(bytes: Uint8Array): string {

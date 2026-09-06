@@ -104,10 +104,7 @@ function insertionCapability(
       carrier: scope === 'global' ? 'global-layer-item' : 'free-node',
     }
   }
-  if (kind === 'table') {
-    return { enabled: false, draggable: false, carrier: 'unavailable' }
-  }
-  if (kind === 'chart' && scope === 'global') {
+  if ((kind === 'chart' || kind === 'table') && scope === 'global') {
     return { enabled: false, draggable: false, carrier: 'unavailable' }
   }
   if (surface === 'spatial') {

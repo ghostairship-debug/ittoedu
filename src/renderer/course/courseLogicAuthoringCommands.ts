@@ -1,9 +1,11 @@
 import {
   courseNavigationGuardSchema,
+  courseNetworkDeclarationSchema,
   courseStateDeclarationSchema,
 } from '../../shared/courseProjectSchema'
 import type {
   CourseNavigationGuard,
+  CourseNetworkDeclaration,
   CourseProjectDocument,
   CourseStateDeclaration,
 } from '../../shared/courseProjectTypes'
@@ -184,7 +186,7 @@ function renameInteractionCourseStateReferences(
 
 function validateTarget(
   project: CourseProjectDocument,
-  command: CourseLogicAuthoringCommand,
+  command: CourseLogicAuthoringTarget,
 ): CourseLogicAuthoringResult | null {
   if (command.projectId !== project.id) {
     return reject('project-mismatch', '课程逻辑命令不属于当前工程，请重新打开专业编辑器。')
@@ -426,5 +428,23 @@ export function executeCourseLogicAuthoringCommand(
         ? `课程逻辑未保存：${error.message}`
         : '课程逻辑未通过 Course Project V9 校验。',
     )
+  }
+}
+
+export function replaceCourseNetworkDeclaration(
+  project: CourseProjectDocument,
+  target: CourseLogicAuthoringTarget,
+  network: CourseNetworkDeclaration,
+  options: CourseLogicAuthoringOptions = {},
+): CourseLogicAuthoringResult {
+  const failure = validateTarget(project, target)
+  if (failure) return failure
+  try {
+    const parsed = courseNetworkDeclarationSchema.parse(network)
+    if (structurallyEqual(project.network ?? {}, parsed)) return reject('no-change', '课程网络声明未变化')
+    return { ok: true, project: commitCourseProjectMutation(project, (draft) => { draft.network = parsed }, options.now),
+      historyEntry: true, statusMessage: '已更新课程网络声明' }
+  } catch (error) {
+    return reject('invalid-document', error instanceof Error ? error.message : '课程网络声明无效')
   }
 }

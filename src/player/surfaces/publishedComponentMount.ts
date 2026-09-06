@@ -39,6 +39,9 @@ export interface ComponentHostNode extends ComponentAuthoringHostNode {
 import { ComponentRegistry } from '../ComponentRegistry'
 import { createPlayerComponentHostActions } from '../componentHostActions'
 import { decodePublishedCode } from '../decodePublishedExecutableCode'
+import { componentContentSha256 } from '../../shared/componentContentIntegrity'
+import { scopeDynamicHostApi } from '../../shared/dynamicHostApiScope'
+import { componentRuntimeSourceIdentity, type ComponentRegistryIdentityV1 } from '../../shared/componentRegistryIdentity'
 import {
   PublishedCaptureBarrier,
   registerPublishedCaptureResource,
@@ -49,6 +52,7 @@ export type PublishedComponentPackageSource =
   | ComponentPackageData
 
 export interface PublishedComponentMountOptions {
+  projectId?: string
   container: HTMLElement
   componentId: string
   version?: string
@@ -87,6 +91,7 @@ export interface PublishedComponentMountHandle {
   readonly element: HTMLElement
   waitForReady(): Promise<void>
   waitForCaptureReady(): Promise<void>
+  failCapture?(error: Error): void
   restoreAfterCapture(): void
   resize(width: number, height: number): void
   updateProps(props: Record<string, unknown>): void
@@ -98,6 +103,7 @@ export interface PublishedComponentMountHandle {
 }
 
 export interface ResolvedPublishedComponent {
+  readonly identity: ComponentRegistryIdentityV1
   readonly source: PublishedComponentPackageSource
   readonly manifest: ComponentManifest
   readonly definition: ComponentDefinitionV4
@@ -121,6 +127,32 @@ export interface PublishedComponentContextResources {
 }
 
 const sharedComponentRegistry = new ComponentRegistry()
+const anonymousSources = new WeakMap<object, string>()
+let anonymousSourceSequence = 0
+
+export function publishedComponentRegistryIdentity(
+  source: PublishedComponentPackageSource,
+  projectId?: string,
+): ComponentRegistryIdentityV1 {
+  const manifest = extractPublishedComponentManifest(source)
+  const runtimeSource = extractPublishedComponentRuntimeSource(source) ?? ''
+  // Standalone embed consumers without a course receive an isolated identity.
+  // Product hosts always supply the real project ID.
+  if (!projectId) {
+    projectId = anonymousSources.get(source)
+    if (!projectId) {
+      projectId = `standalone-component-${++anonymousSourceSequence}`
+      anonymousSources.set(source, projectId)
+    }
+  }
+  return {
+    projectId,
+    packageId: manifest.id,
+    version: manifest.version,
+    sourceIdentity: componentRuntimeSourceIdentity(runtimeSource),
+    contentIdentity: source.contentSha256 ?? ('files' in source ? componentContentSha256(source.files) : componentRuntimeSourceIdentity(runtimeSource)),
+  }
+}
 
 export function getSharedComponentRegistry(): ComponentRegistry {
   return sharedComponentRegistry
@@ -271,13 +303,14 @@ export function resolvePublishedComponent(
     throw new Error(`组件包“${options.componentId}${options.version ? `@${options.version}` : ''}”不存在`)
   }
   const manifest = extractPublishedComponentManifest(source)
-  let definition = registry.get(manifest.id)
+  const identity = publishedComponentRegistryIdentity(source, options.projectId)
+  let definition = registry.get(identity)
   if (!definition) {
     const runtimeSource = extractPublishedComponentRuntimeSource(source)
     if (!runtimeSource) throw new Error(`组件“${manifest.id}”的 runtime.js 为空`)
-    definition = registry.executeRuntime(manifest, runtimeSource)
+    definition = registry.executeRuntime(manifest, runtimeSource, identity)
   }
-  return { source, manifest, definition }
+  return { source, manifest, definition, identity }
 }
 
 function scopedComponentEvents(base: CourseEventBus | undefined): {
@@ -411,11 +444,11 @@ export function createPublishedComponentContextResources(
       props: mergedProps,
       editorState,
       mode,
-      actions,
+      actions: scopeDynamicHostApi(actions, () => !disposed),
       scope: options.scope ?? 'scene',
       events: eventScope.events,
-      courseState: options.courseState,
-      presentation: options.presentation,
+      courseState: options.courseState ? scopeDynamicHostApi(options.courseState, () => !disposed) : undefined,
+      presentation: options.presentation ? scopeDynamicHostApi(options.presentation, () => !disposed) : undefined,
       assetUrl,
       projectAssetUrl,
       emit,
@@ -522,17 +555,12 @@ export function mountPublishedComponent(
   }
 
   const registry = options.registry ?? sharedComponentRegistry
-  let definition = registry.get(manifest.id)
-  if (!definition) {
-    const runtimeSource = extractPublishedComponentRuntimeSource(pkg)
-    if (runtimeSource) {
-      try {
-        definition = registry.executeRuntime(manifest.id, runtimeSource)
-      } catch (cause) {
-        reportPublishedComponentError(options, 'register', cause)
-        console.error(`组件“${manifest.id}”注册失败`, cause)
-      }
-    }
+  let definition: ComponentDefinitionV4 | undefined
+  try {
+    definition = resolvePublishedComponent(options, registry).definition
+  } catch (cause) {
+    reportPublishedComponentError(options, 'register', cause)
+    console.error(`组件“${manifest.id}”注册失败`, cause)
   }
 
   if (!definition) {
@@ -585,9 +613,26 @@ export function mountPublishedComponent(
     dom: { root },
   }
 
+  let quarantined = false
+  let visibleElement: HTMLElement = host
+  const quarantine = (error: Error): void => {
+    if (quarantined) return
+    quarantined = true
+    reportPublishedComponentError(options, 'lifecycle', error)
+    resources.destroyAuthoringTargets()
+    resources.destroyCapture()
+    resources.dispose()
+    host.remove()
+    visibleElement = createPublishedComponentFallbackElement(container, options)
+    container.appendChild(visibleElement)
+  }
+
   const creation = tryCreateComponentLifecycle(
     () => definition!.create(createContext),
-    { componentId: manifest.id, instanceId },
+    { componentId: manifest.id, instanceId, onError: (failure) => {
+      if (failure.phase !== 'create' && failure.phase !== 'destroy') quarantine(failure.error)
+      else if (failure.phase === 'destroy') reportPublishedComponentError(options, 'destroy', failure.error)
+    } },
   )
 
   if (!creation.ok) {
@@ -611,13 +656,15 @@ export function mountPublishedComponent(
   let destroyed = false
   let unregisterCapture: () => void = () => undefined
   const handle: PublishedComponentMountHandle = {
-    ok: true,
+    get ok() { return !quarantined },
+    failCapture(error) { quarantine(error); lifecycle.destroy() },
     instanceId,
     componentId: manifest.id,
     lifecycle,
-    element: host,
+    get element() { return visibleElement },
     async waitForReady() {
       if (destroyed) throw new Error(`组件“${instanceId}”已销毁`)
+      if (quarantined) throw lifecycle.getFailure()?.error ?? new Error('组件实例已隔离')
     },
     async waitForCaptureReady() {
       if (capturePrepared) return
@@ -627,8 +674,8 @@ export function mountPublishedComponent(
       try {
         await resources.waitForCaptureReady(() => lifecycle.prepareCapture?.())
       } catch (cause) {
-        lifecycle.setMode?.(mode)
-        if (!suspended) lifecycle.resume?.()
+        quarantine(normalizeError(cause))
+        lifecycle.destroy()
         capturePrepared = false
         throw cause
       }
@@ -675,6 +722,7 @@ export function mountPublishedComponent(
       lifecycle.destroy()
       resources.dispose()
       host.remove()
+      visibleElement.remove()
     },
   }
   unregisterCapture = registerPublishedCaptureResource(container, handle)

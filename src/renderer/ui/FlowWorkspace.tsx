@@ -1,5 +1,6 @@
 import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
 import { EditableChartView } from './EditableChartView'
+import type { ChartTextDraft } from '../authoring/chartTextDraft'
 import {
   useEffect,
   useLayoutEffect,
@@ -50,6 +51,7 @@ import {
   toggleFlowTextEditEmphasis,
   toggleFlowTextEditRunStyle,
   updateFlowTextDraft,
+  updateFlowChartTextDraft,
   updateFlowTextRange,
   type FlowFormulaDraft,
   type FlowTextEditSession,
@@ -361,11 +363,13 @@ function renderFlowPaperMedia(
 
 
 function FlowComponentBlockView({
+  projectId,
   block,
   readingWidth,
   componentPackages,
   assetUrls,
 }: {
+  projectId: string
   block: Extract<FlowBlock, { type: 'component' }>
   readingWidth: number
   componentPackages?: Record<string, ComponentPackageData>
@@ -379,6 +383,7 @@ function FlowComponentBlockView({
     const el = containerRef.current
     if (!el || !pkg) return
     const handle = mountPublishedComponent(el, {
+      projectId,
       container: el,
       componentId: block.component.packageId,
       version: block.component.version,
@@ -393,7 +398,7 @@ function FlowComponentBlockView({
       interactive: false,
     })
     return () => handle.destroy()
-  }, [block.component.packageId, block.component.version, block.id, block.props, block.staticFallbackAssetId, componentPackages, assetUrls, readingWidth, pkg])
+  }, [block.component.packageId, block.component.version, block.id, block.props, block.staticFallbackAssetId, componentPackages, assetUrls, readingWidth, pkg, projectId])
 
   if (!pkg) {
     return (
@@ -1108,6 +1113,24 @@ export function FlowWorkspace({
         body = <EditableChartView id={block.id} chart={structuredClone(block.chart) as import('../../shared/contracts/native-v1').NativeChartContent} width={Math.max(240, view.layout.readingWidth - 104)} height={block.height}
           onEditStart={event => selectBlock(block.id, event)}
           canvasTextPort={() => chartCanvasTextPort(targetForBlock(block.id))}
+          textController={readOnly ? undefined : {
+            draft: edit?.kind === 'chart-text' && edit.blockId === block.id ? edit.draft as ChartTextDraft : null,
+            begin: (field, draft) => {
+              const target = targetForBlock(block.id)
+              const receipt = commands.run(target, { kind: 'begin-chart-text-edit', field })
+              if (!receipt.ok || !receipt.edit) return false
+              adoptEditReceipt(receipt.edit, target)
+              setEditState(updateFlowChartTextDraft(receipt.edit, draft, false))
+              return true
+            },
+            update: (draft, composing) => {
+              const current = editRef.current
+              if (current?.kind === 'chart-text' && current.blockId === block.id) {
+                setEditState(updateFlowChartTextDraft(current, draft, composing))
+              }
+            },
+            commit: () => commitCurrent(), cancel: cancelCurrent,
+          }}
           onCommit={readOnly ? undefined : chart => { const receipt = commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { chart }, expectedEdit: editRef.current }); return receipt.ok ? null : receipt.reason ?? '图表提交失败' }}
           onHeightCommit={readOnly ? undefined : height => { commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { height }, expectedEdit: editRef.current }) }} />
         break
@@ -1288,6 +1311,7 @@ export function FlowWorkspace({
         body = (
           <div>
             <FlowComponentBlockView
+              projectId={view.projectId}
               block={block}
               readingWidth={view.layout.readingWidth}
               componentPackages={componentPackages}

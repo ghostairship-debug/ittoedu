@@ -1,0 +1,10 @@
+.material-library label { display: grid; gap: 6px; color: var(--text-secondary); }
+.material-library input, .material-library textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--app-bg); color: var(--text-primary); padding: 9px 12px; font: inherit; }
+.material-library button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-bg-hover); color: var(--text-primary); padding: 8px 12px; cursor: pointer; }
+.material-library button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.material-library button:disabled { opacity: .5; cursor: default; }
+.material-library ul { list-style: none; padding: 0 !important; }
+.material-library li { border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.material-library hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+.material-library legend { margin-bottom: 10px; font-weight: 600; }
+.material-library [role="alert"] { color: var(--danger); }

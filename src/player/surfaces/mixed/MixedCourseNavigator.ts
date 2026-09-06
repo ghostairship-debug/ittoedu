@@ -81,6 +81,8 @@ export interface MixedCoursePlayerPort {
 export interface MixedCourseNavigatorOptions {
   onBeforeNavigate?: (transition: MixedNavigationTransition) => void | Promise<void>
   onNavigate?: (state: MixedNavigationState) => void | Promise<void>
+  /** A real transition has finished and the queue is idle; may enqueue follow-up navigation. */
+  onNavigationSettled?: (state: MixedNavigationState) => void
   /** Reset shared session state before hosts recreate their executable carriers. */
   onBeforeResetCourse?: () => void | Promise<void>
   onResetCourse?: () => void | Promise<void>
@@ -158,6 +160,7 @@ export class MixedCourseNavigator {
   readonly #player: MixedCoursePlayerPort
   readonly #onBeforeNavigate?: MixedCourseNavigatorOptions['onBeforeNavigate']
   readonly #onNavigate?: MixedCourseNavigatorOptions['onNavigate']
+  readonly #onNavigationSettled?: MixedCourseNavigatorOptions['onNavigationSettled']
   readonly #onBeforeResetCourse?: MixedCourseNavigatorOptions['onBeforeResetCourse']
   readonly #onResetCourse?: MixedCourseNavigatorOptions['onResetCourse']
   readonly #locationMap: Map<string, MixedLocationEntry>
@@ -165,12 +168,18 @@ export class MixedCourseNavigator {
   #history: string[] = []
   #queue: Promise<unknown> = Promise.resolve()
   #pendingNavigationCount = 0
+  #unsettledNavigation: MixedNavigationState | null = null
 
   #enqueue<T>(work: () => Promise<T>): Promise<T> {
     this.#pendingNavigationCount += 1
     const result = this.#queue.then(work, work)
     const tracked = result.finally(() => {
       this.#pendingNavigationCount -= 1
+      if (this.#pendingNavigationCount === 0 && this.#unsettledNavigation) {
+        const state = this.#unsettledNavigation
+        this.#unsettledNavigation = null
+        this.#onNavigationSettled?.(state)
+      }
     })
     this.#queue = tracked.then(() => undefined, () => undefined)
     return tracked
@@ -195,6 +204,7 @@ export class MixedCourseNavigator {
     this.#player = player
     this.#onBeforeNavigate = options.onBeforeNavigate
     this.#onNavigate = options.onNavigate
+    this.#onNavigationSettled = options.onNavigationSettled
     this.#onBeforeResetCourse = options.onBeforeResetCourse
     this.#onResetCourse = options.onResetCourse
   }
@@ -342,6 +352,7 @@ export class MixedCourseNavigator {
   ): Promise<MixedNavigationState> {
     const previous = this.#current
     if (previous?.id === location.id && options.force !== true) return this.#state()
+    this.#unsettledNavigation = null
     if (notifyBeforeNavigate) await this.#notifyBeforeNavigate(location, options.force === true)
     let targetActivated = false
     try {
@@ -370,6 +381,7 @@ export class MixedCourseNavigator {
     this.#current = { ...location }
     const state = this.#state(previous?.id, previous?.surfaceId)
     await this.#onNavigate?.(state)
+    this.#unsettledNavigation = state
     return state
   }
 

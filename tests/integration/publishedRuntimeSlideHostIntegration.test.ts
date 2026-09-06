@@ -407,7 +407,9 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
           try { ctx.content.all().label = 'mutated'; } catch (error) { state.mutationRejected = true; }
           try { ctx.content.get('missing'); } catch (error) { state.missingContentRejected = true; }
           try { ctx.assets.url('missing'); } catch (error) { state.missingBindingRejected = true; }
-          try { ctx.assets.projectUrl('missing'); } catch (error) {
+          // Literal missing references now fail publishing. Keep exercising the
+          // runtime guard with an ID computed from authored content.
+          try { ctx.assets.projectUrl(ctx.content.get('label') + '-missing'); } catch (error) {
             state.missingProjectAssetRejected = true;
           }
           state.busCalls = state.busCalls || 0;

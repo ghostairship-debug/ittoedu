@@ -1,7 +1,7 @@
+import { updateSlideBackgroundOwner } from '../../course/courseBackgroundCommands'
 import { synchronizeCourseTeacherControllerControls } from '../../../shared/teacherControllerConsistency'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import {
-  BACKGROUND_MODES,
   type BackgroundMode,
   type CourseProjectDocument,
   type SlidePresentationState,
@@ -70,15 +70,6 @@ import {
 import type { SlideAuthoringPorts, SlidePersistExtra } from './slideAuthoringSlice'
 import type { SlideAuthoringBackend, SlideAuthoringSession, SlideCommandResult } from '../../course/slideAuthoringBackend'
 import type { TextRunStyle } from '../../../shared/contracts/native-v1'
-
-const HEX_BACKGROUND_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
-
-/** `undefined` in, `undefined` out (leave untouched); invalid input reads as `null`. */
-function normalizedBackgroundColorPatch(color: string | undefined): string | undefined | null {
-  if (color === undefined) return undefined
-  if (typeof color !== 'string' || !HEX_BACKGROUND_COLOR_PATTERN.test(color.trim())) return null
-  return color.trim().toLowerCase()
-}
 
 function slideSurfaceById(
   project: CourseProjectDocument,
@@ -298,24 +289,18 @@ export function createSlideOwnedCommands(
             selection: session.selection,
           }
         }
-        const project = commitSlideProjectMutation(session.history.present, (draft) => {
-          const scene = findCourseSlideScene(draft, sceneId)
-          const state = scene?.presentation?.states.find((item) => item.id === stateId)
-          if (!scene || !state) return
-          if (patch.description !== undefined) {
-            state.description = patch.description.trim() || undefined
-          }
-          if (patch.backgroundColor !== undefined) {
-            state.backgroundColor = patch.backgroundColor === scene.backgroundColor
-              ? undefined
-              : patch.backgroundColor
-          }
-          if (patch.backgroundAssetId !== undefined) {
-            state.backgroundAssetId = patch.backgroundAssetId === scene.backgroundAssetId
-              ? undefined
-              : patch.backgroundAssetId
-          }
-        })
+        const background = updateSlideBackgroundOwner(session.history.present, {
+          surfaceId: backend.getSnapshot().surfaceId, sceneId, stateId,
+        }, { backgroundColor: patch.backgroundColor, backgroundAssetId: patch.backgroundAssetId })
+        if (!background.ok) return { ok: false, reason: background.reason, historyEntry: false, nextSession: session, selection: session.selection }
+        const project = patch.description === undefined ? background.project : {
+          ...commitSlideProjectMutation(background.project, (draft) => {
+            const state = findCourseSlideScene(draft, sceneId)?.presentation?.states.find((item) => item.id === stateId)
+            if (!state) throw new Error('找不到当前状态')
+            state.description = patch.description!.trim() || undefined
+          }),
+          revision: session.history.present.revision + 1,
+        }
         return {
           ok: true,
           historyEntry: true,
@@ -391,52 +376,12 @@ export function createSlideOwnedCommands(
     ): SlideCommandResult {
       const backend = slide.read().slideBackend
       if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
-      if (
-        options.expectedRevision !== undefined
-        && options.expectedRevision !== backend.getSnapshot().revision
-      ) {
-        return { ok: false, reason: SLIDE_REJECT_STALE_REVISION, historyEntry: false }
-      }
-      if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
-        return { ok: false, reason: '背景模式无效', historyEntry: false }
-      }
-      const normalizedColor = normalizedBackgroundColorPatch(patch.backgroundColor)
-      if (normalizedColor === null) {
-        return { ok: false, reason: '颜色格式无效', historyEntry: false }
-      }
       return runCandidateSession((session) => {
-        const current = slideSurfaceById(session.history.present, surfaceId)
-        if (!current) {
-          return {
-            ok: false,
-            reason: `找不到 Slide 表面：${surfaceId}`,
-            historyEntry: false,
-            nextSession: session,
-            selection: session.selection,
-          }
-        }
-        const modeChanges = patch.backgroundMode !== undefined
-          && patch.backgroundMode !== (current.backgroundMode ?? 'inherit')
-        const colorChanges = normalizedColor !== undefined && normalizedColor !== current.backgroundColor
-        const assetChanges = patch.backgroundAssetId !== undefined
-          && patch.backgroundAssetId !== (current.backgroundAssetId ?? null)
-        if (!modeChanges && !colorChanges && !assetChanges) {
-          return { ok: true, historyEntry: false, nextSession: session, selection: session.selection }
-        }
-        const project = commitSlideProjectMutation(session.history.present, (draft) => {
-          const surface = slideSurfaceById(draft, surfaceId)
-          if (!surface) throw new Error(`找不到 Slide 表面：${surfaceId}`)
-          if (modeChanges) surface.backgroundMode = patch.backgroundMode
-          if (colorChanges) surface.backgroundColor = normalizedColor
-          if (assetChanges) surface.backgroundAssetId = patch.backgroundAssetId ?? null
-        })
+        const result = updateSlideBackgroundOwner(session.history.present, { surfaceId }, patch, options)
+        if (!result.ok) return { ok: false, reason: result.reason, historyEntry: false, nextSession: session, selection: session.selection }
         return {
-          ok: true,
-          historyEntry: true,
-          nextSession: {
-            ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
-          },
+          ok: true, historyEntry: result.historyEntry,
+          nextSession: { ...session, history: result.historyEntry ? commitSlideAuthoringHistory(session.history, result.project) : session.history },
           selection: session.selection,
         }
       }, { statusMessage: '已更新演示页背景' })
@@ -498,52 +443,12 @@ export function createSlideOwnedCommands(
     ): SlideCommandResult {
       const backend = slide.read().slideBackend
       if (!isSlideAuthoringBackend(backend)) kernel.failSessionless()
-      if (
-        options.expectedRevision !== undefined
-        && options.expectedRevision !== backend.getSnapshot().revision
-      ) {
-        return { ok: false, reason: SLIDE_REJECT_STALE_REVISION, historyEntry: false }
-      }
-      if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
-        return { ok: false, reason: '背景模式无效', historyEntry: false }
-      }
-      const normalizedColor = normalizedBackgroundColorPatch(patch.backgroundColor)
-      if (normalizedColor === null) {
-        return { ok: false, reason: '颜色格式无效', historyEntry: false }
-      }
       return runCandidateSession((session) => {
-        const current = findCourseSlideScene(session.history.present, sceneId)
-        if (!current) {
-          return {
-            ok: false,
-            reason: '找不到当前场景',
-            historyEntry: false,
-            nextSession: session,
-            selection: session.selection,
-          }
-        }
-        const modeChanges = patch.backgroundMode !== undefined
-          && patch.backgroundMode !== (current.backgroundMode ?? 'own')
-        const colorChanges = normalizedColor !== undefined && normalizedColor !== current.backgroundColor
-        const assetChanges = patch.backgroundAssetId !== undefined
-          && patch.backgroundAssetId !== (current.backgroundAssetId ?? null)
-        if (!modeChanges && !colorChanges && !assetChanges) {
-          return { ok: true, historyEntry: false, nextSession: session, selection: session.selection }
-        }
-        const project = commitSlideProjectMutation(session.history.present, (draft) => {
-          const scene = findCourseSlideScene(draft, sceneId)
-          if (!scene) throw new Error('找不到当前场景')
-          if (modeChanges) scene.backgroundMode = patch.backgroundMode
-          if (colorChanges) scene.backgroundColor = normalizedColor
-          if (assetChanges) scene.backgroundAssetId = patch.backgroundAssetId ?? null
-        })
+        const result = updateSlideBackgroundOwner(session.history.present, { surfaceId: backend.getSnapshot().surfaceId, sceneId }, patch, options)
+        if (!result.ok) return { ok: false, reason: result.reason, historyEntry: false, nextSession: session, selection: session.selection }
         return {
-          ok: true,
-          historyEntry: true,
-          nextSession: {
-            ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
-          },
+          ok: true, historyEntry: result.historyEntry,
+          nextSession: { ...session, history: result.historyEntry ? commitSlideAuthoringHistory(session.history, result.project) : session.history },
           selection: session.selection,
         }
       }, { statusMessage: '已更新场景背景' })

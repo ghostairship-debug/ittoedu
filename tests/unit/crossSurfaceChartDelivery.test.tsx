@@ -21,9 +21,31 @@ import { EditableChartView } from '@/renderer/ui/EditableChartView'
 import { buildSpatialEditorView, captureSpatialEditorAuthoringTarget } from '@/renderer/course/spatialEditorView'
 import { chartCanvasTextPort, connectChartCanvasText } from '@/renderer/authoring/chartCanvasTextBridge'
 import type { NativeChartContent } from '@/shared/contracts/native-v1'
+import { projectWithBackgroundPreview, type BackgroundPreview } from '@/renderer/authoring/backgroundPreview'
 
 const chartContent = (chartType: NativeChartContent['chartType']) => createChartLayerItem(createChartNode({ chartType })).content.data as NativeChartContent
 const publish = (project: ReturnType<typeof createBlankFlowCourseProject>) => buildPublishedCourseV2Payload({ project, assetFiles: {}, components: {} })
+
+it('projects a nested Flow chart color without mutating the document and drops stale or cancelled previews', () => {
+  const project = createBlankFlowCourseProject()
+  const surface = project.surfaces.find(surface => surface.type === 'flow')!
+  const chart = chartContent('bar')
+  const original = chart.style.textColor
+  surface.blocks.push({ id: 'preview-section', type: 'section', title: '嵌套', collapsedByDefault: false, blocks: [{ id: 'preview-chart', type: 'chart', chart, height: 320 }] })
+  const current = { locationId: project.startLocationId, stateId: null, generation: 3 }
+  const preview: BackgroundPreview = { target: { ...current, projectId: project.id, revision: project.revision, owner: 'flow-chart', authoringAddress: 'preview-chart' }, color: '', nativeData: { style: { textColor: '#cc0000' } } }
+  const projected = projectWithBackgroundPreview(project, preview, current)
+  expect(projected.revision).toBe(project.revision)
+  expect(chart.style.textColor).toBe(original)
+  const nextSurface = projected.surfaces.find(surface => surface.type === 'flow')!
+  const section = nextSurface.blocks.at(-1)!
+  if (section.type !== 'section' || section.blocks[0]?.type !== 'chart') throw new Error('expected nested chart')
+  expect(section.blocks[0].chart.style.textColor).toBe('#cc0000')
+  expect(projectWithBackgroundPreview(project, null, current)).toBe(project)
+  expect(projectWithBackgroundPreview(project, preview, { ...current, generation: 4 })).toBe(project)
+  const revised = { ...project, revision: project.revision + 1 }
+  expect(projectWithBackgroundPreview(revised, preview, current)).toBe(revised)
+})
 afterEach(cleanup)
 
 describe('1.3 chart carriers', () => {

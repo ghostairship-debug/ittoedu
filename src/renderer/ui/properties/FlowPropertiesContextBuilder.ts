@@ -187,6 +187,22 @@ function createCommands(input: {
       kind: 'patch-overlay-properties',
       patch,
     }),
+    beginTableFieldEdit: (field, columnId) => {
+      if (!input.textEdit) dispatch({ kind: 'begin-table-field-edit', field, columnId })
+    },
+    updateTableFieldDraft: (field, columnId, text, composing) => {
+      if (!input.textEdit) {
+        dispatch({ kind: 'begin-table-field-edit', field, columnId, text, composing })
+        return
+      }
+      if (!input.textEdit || (input.textEdit.field !== 'table-caption' && input.textEdit.field !== 'table-header')) return
+      dispatch({ kind: 'update-text-edit', expectedEdit: input.textEdit,
+        edit: markFlowTextComposing(updateFlowTextDraft(input.textEdit, { text }), composing) })
+    },
+    finishTableFieldEdit: (cancel) => {
+      if (!input.textEdit || (input.textEdit.field !== 'table-caption' && input.textEdit.field !== 'table-header')) return
+      dispatch(cancel ? { kind: 'cancel-text-edit', edit: input.textEdit } : { kind: 'commit-text-edit', edit: input.textEdit })
+    },
     beginBlockFormulaEdit: () => {
       if (!input.textEdit) dispatch({ kind: 'begin-formula-edit' })
     },

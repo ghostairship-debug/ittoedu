@@ -1,9 +1,15 @@
 import type { CourseAuthoringTarget } from './courseAuthoringSession'
 import type { SlideAuthoringTarget } from '../course/slideAuthoringBackend'
+import type { ChartCandidateData } from '../course/chartContentOperations'
 
 export type ChartCanvasTextKind = 'category' | 'series'
 export interface ChartCanvasTextPort {
   read(kind: ChartCanvasTextKind, id: string): string | undefined
+  /** Read-only candidate capture for the Surface-owned canvas draft. */
+  prepare?(kind: ChartCanvasTextKind, id: string, value: string): {
+    readonly candidate: ChartCandidateData | null
+    readonly error: string | null
+  }
   /** Commits through the inspector's existing validated whole-table draft. */
   commit(kind: ChartCanvasTextKind, id: string, value: string): string | null
 }

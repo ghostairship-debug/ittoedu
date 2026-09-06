@@ -7,6 +7,9 @@ import * as flowSharedAuthoringAdapters from '@/renderer/course/flowSharedAuthor
 import * as slideAuthoringBackend from '@/renderer/course/slideAuthoringBackend'
 import * as slideEditorCommands from '@/renderer/course/slideEditorCommands'
 import * as spatialEditorCommands from '@/renderer/course/spatialEditorCommands'
+import * as tableContentOperations from '@/renderer/course/tableContentOperations'
+import * as flowTableContentOperations from '@/renderer/course/flowTableContentOperations'
+import * as slideTableCommands from '@/renderer/course/v9TableCommands'
 import * as v9SlideContentCommands from '@/renderer/course/v9SlideContentCommands'
 import * as flowProjectFactory from '@/renderer/project/createFlowCourseProject'
 import * as slideProjectFactory from '@/renderer/project/createCourseProject'
@@ -16,10 +19,12 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { RECIPE_CATALOG } from '@/renderer/recipes/recipeCatalog'
 import { planRecipe } from '@/renderer/recipes/applyRecipe'
+import type { AuthoringToolReceiptV1 } from '@/shared/authoringToolContract'
 
 export const COURSEWARE_CASE_BUILDER_API_VERSION = 1 as const
 
 export interface CoursewareCaseBuildOutput {
+  receipts?: AuthoringToolReceiptV1[]
   project: CourseProjectDocument
   assetFiles?: Record<string, Uint8Array>
   componentFiles?: Record<string, Record<string, Uint8Array>>
@@ -33,9 +38,13 @@ export interface CoursewareCaseBuildOutput {
 export function createCoursewareCaseBuilderApi() {
   return Object.freeze({
     project: Object.freeze({
-      ...slideProjectFactory,
-      ...flowProjectFactory,
-      ...spatialProjectFactory,
+      createBlankCourseProject: slideProjectFactory.createBlankCourseProject,
+      createCourseProject: slideProjectFactory.createCourseProject,
+      createBlankFlowCourseProject: flowProjectFactory.createBlankFlowCourseProject,
+      courseProjectStartsAsFlow: flowProjectFactory.courseProjectStartsAsFlow,
+      openFlowAuthoringSession: flowProjectFactory.openFlowAuthoringSession,
+      createBlankSpatialCourseProject: spatialProjectFactory.createBlankSpatialCourseProject,
+      courseProjectStartsAsSpatial: spatialProjectFactory.courseProjectStartsAsSpatial,
     }),
     courseLocations: courseLocationCommands,
     courseLogic: courseLogicAuthoringCommands,
@@ -45,10 +54,17 @@ export function createCoursewareCaseBuilderApi() {
     flowEditor: flowEditorCommands,
     flowShared: flowSharedAuthoringAdapters,
     spatialEditor: spatialEditorCommands,
+    tableContent: tableContentOperations,
+    flowTableContent: flowTableContentOperations,
+    slideTable: slideTableCommands,
     recipes: Object.freeze({ catalog: RECIPE_CATALOG, planRecipe }),
     components: Object.freeze({
-      ...componentPackages,
-      ...componentPackageStore,
+      importComponentPackage: componentPackages.importComponentPackage,
+      parseComponentPackageFiles: componentPackages.parseComponentPackageFiles,
+      validateComponentRuntimeSource: componentPackages.validateComponentRuntimeSource,
+      ComponentPackageStore: componentPackageStore.ComponentPackageStore,
+      componentPackagesFromArchive: componentPackageStore.componentPackagesFromArchive,
+      componentPackagesToArchiveFiles: componentPackageStore.componentPackagesToArchiveFiles,
     }),
     archive: courseProjectArchive,
     schema: Object.freeze({ courseProjectDocumentSchema }),

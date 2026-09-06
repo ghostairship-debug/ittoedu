@@ -97,14 +97,14 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 当前开发以已签署的 `v1.1.1` 为维护基线；1.1 阶段的执行过程和已闭合评审由 Git 历史保存，不在当前总纲维护完成记录。
 
-1.2 本地复审驱动的修复已完成工程验证。1.3 的 Recipe、跨 Surface Chart 和设计生产力实现已合并，当前按[实现复核记录](docs/development-plan/reviews/1.3-implementation-2026-09-05.md)收口 engineering candidate 与 S1 教师验收；1.2 的执行指南与实现合同保留为已实现行为依据。完整版本 DAG 不表示需要重新开发已成立的根节点；路线节点本身不自动创建任务卡。
+1.2 本地复审驱动的修复已完成工程验证。1.3 的 Recipe、跨 Surface Chart、设计生产力、Flow/Spatial 表格及 F1–F5 review 修复已实现；活动文字草稿进入正式 dirty、保存准备和恢复物化路径，1.3 构建的完整 Electron 回归 57/57 通过。候选标签尚未创建。Owner 已明确签署 S1，并授权持续推进到 1.5 末的 S2；不重复请求 S1，签署也不替代工程收口。1.4 已实现 target wire、receipt、部分三 Surface / course 工具，注册身份和失败隔离已获得真实浏览器证据；工程字体独立合同已获 Owner 批准并提交；动态源码 / 配置工具和 Builder V2 已通过真实宿主与离线纵切，1.4 集成回归进行中。1.5 材料库已验证，受限 PPTX、Remix 与内容 QA 尚未闭合，不声明整版可用。1.3 桌面回归不作为随后 1.4 改动的验证证据。既有实现与验收范围见各版复核记录，路线节点不自动创建任务卡。
 
 input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和共享颜色连续预览（F2）已完成实现；真实调色采用应用内连续面板，保留系统色盘、常用色与 HEX。Native 传输、Table/Chart owner/state、作者可用性及本轮收尾证据由[修复复核记录](docs/development-plan/reviews/1.2-usability-fixes-2026-09-05.md)承接，不再按旧失败清单重复开发。单元/集成失败项已定向关闭，57 个桌面用例经首次运行与补跑全部通过，最终 Flow 改动另经复验；未重复运行未受影响的全量组。S1 人工验收仍按 1.3 的签署边界执行；当前尚未创建候选或 accepted 标签。Flow/Spatial 图表仍属于 1.3；1.2 保持当前 strict 有效域。
 
 ### 5.2 1.2–1.5：人工创作与外部 Builder 生产力
 
 - **1.2 Native 编辑闭环**：在保留 Flow 正文文档流语义的前提下，补齐 Flow 原生文字/图片/图形浮层的直接作者能力与共享图形属性，并让作者浮层进入一份连续 DOCX；普通浮层只出现一次，只有 global teacher-controller 同时满足全程可见与允许静态导出才进 footer，PDF/打印不随之改变。Slide scene 增加声明式 input：提交时先把归一化答案原子写入已声明状态键再求规则，保存重开、Player 与可编辑 PPTX 静态填写区闭环；Slide surface、Flow、Spatial、global 禁止 input。Table、Chart 是仅限 Slide scene/surface 的 V9 Native strict 窄分支；Line 使用可选参数化几何，Background 在 Course/Surface/Scene/state owner 上按唯一继承算法形成完整纵切。
-- **1.3 Recipe 与设计生产力**：Recipe 立即展开为普通 V9 内容，不形成第二 DSL；分类用“选中项目→选中目标组”的声明式路径，排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不要求先完成通用组件化；同时交付参考页骨架、批量替换、项目色板/Design Token 范围应用与快速诊断。新增 Chart 跨 Surface 合同、共享编辑、Flow 图表与 Spatial 图表四个必选节点，复用同一图表数据与视图；载体、兼容和静态导出结果先由独立合同落定，真实编辑/保存/播放/导出及能力声明在 S1 前闭合。Table 与 input 不随 Chart 扩域。
+- **1.3 Recipe 与设计生产力**：Recipe 立即展开为普通 V9 内容，不形成第二 DSL；分类用“选中项目→选中目标组”的声明式路径，排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不要求先完成通用组件化；同时交付参考页骨架、批量替换、项目色板/Design Token 范围应用与快速诊断。Chart 跨 Surface 合同、共享编辑、Flow 图表与 Spatial 图表四个必选节点复用同一图表数据与视图；新增 `r13-005`–`r13-008` 表格合同、共享编辑、Flow 正文和 Spatial 世界表格四个必选节点，沿用 FlowTableBlock 与 Native Table 既有模型，先明确兼容和适用导出，再开放 consumer。真实编辑、保存/恢复/重开、播放、导出及能力声明在 S1 前闭合；Component 的作者内容/参数及正式应用的源码资源修改同样必须持久化，活动文字草稿不能遗漏。input、Flow overlay、Spatial shared 和 global 不随本次表格扩域。
 - **1.4 Authoring Tools 与 Builder v2**：update target 无损承载 canonical target；create 使用独立 scope；覆盖 Slide、Flow 正文和 Spatial world/camera/path/relation。代码工具开放前必须闭合 Component Registry 身份、direct project asset closure 与生命周期可见回退三项动态 carrier 门。
 - **1.5 材料、PPTX 与内容 QA**：先建立 `WorkspaceIdentityV1 = projectId + normalizedPath` 共享基础节点，材料域与后续 AI 会话域分别依赖它；再交付应用本地材料缓存、可见引用、受限 PPTX 原子导入、Style remix 与内容一致性检查。OpenMAIC 只是可选旁支，不得阻塞发布核心路径。
 

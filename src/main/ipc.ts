@@ -37,6 +37,7 @@ import {
 import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
+import { operateMaterials } from './materialService'
 import {
   mainPreviewNetworkPolicy,
   type PreviewNetworkDocumentOwner,
@@ -239,6 +240,10 @@ function registerSafeHandler<T>(
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  registerSafeHandler(IPC_CHANNELS.materials, context, {
+    code: 'MATERIAL_OPERATION_FAILED', title: '材料操作失败',
+    message: '无法完成本地材料操作。', suggestion: '请检查工程路径或材料文件后重试。',
+  }, async (_event, args) => operateMaterials(requireWindow(context), requireSingleArgument(args)))
   registerSafeHandler(
     IPC_CHANNELS.openProject,
     context,

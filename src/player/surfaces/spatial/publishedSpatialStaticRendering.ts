@@ -1,3 +1,5 @@
+import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { buildNativeTableSvg } from '../../../shared/nativeTableSvg'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
@@ -104,6 +106,13 @@ function renderSpatialItemMarkup(
   if (!item.visible || shouldOmitPublishedItemFromStaticExport(item)) return ''
   const rotation = spatialItemRotation(item)
   const prefix = `<g data-layer-item-id="${escapeXml(item.layerItemId)}" data-coordinate-space="${coordinateSpace}" opacity="${item.opacity}"${rotation}>`
+  if (item.kind === 'native' && (item.content.nativeType === 'chart' || item.content.nativeType === 'table')) {
+    const { x, y, width, height } = item.frame
+    const svg = item.content.nativeType === 'chart'
+      ? buildNativeChartSvg(item.content.data, width, height, item.layerItemId)
+      : buildNativeTableSvg(item.content.data, width, height, item.layerItemId)
+    return `${prefix}<g transform="translate(${x} ${y})">${svg}</g></g>`
+  }
   if (item.kind === 'native' && item.content.nativeType === 'text') {
     const { x, y, width, height } = item.frame
     const style = item.content.data.style

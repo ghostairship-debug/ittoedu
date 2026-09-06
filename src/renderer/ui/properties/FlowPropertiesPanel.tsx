@@ -1,3 +1,4 @@
+import { FlowTableProperties } from './FlowTableProperties'
 import type { ChartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { ChartProperties } from './ChartProperties'
 import { createChartPropertiesCommands } from './chartPropertiesCommands'
@@ -109,6 +110,9 @@ export interface FlowPropertiesCommands {
   readonly formatTextStyle: (style: TextRunStyle) => void
   readonly patchOverlayPaperSpace: (paperSpace: 'viewport' | 'paper') => void
   readonly commitOverlayFormula: (ast: FormulaAstNode, accessibleText: string) => void
+  readonly beginTableFieldEdit: (field: 'table-caption' | 'table-header', columnId?: string) => void
+  readonly updateTableFieldDraft: (field: 'table-caption' | 'table-header', columnId: string | undefined, text: string, composing: boolean) => void
+  readonly finishTableFieldEdit: (cancel?: boolean) => void
   readonly beginBlockFormulaEdit: () => void
   readonly updateBlockFormulaDraft: (draft: FormulaAuthoringDraftChange) => void
   readonly setBlockFormulaComposing: (composing: boolean) => void
@@ -526,6 +530,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
       {block.type === 'media' ? (
         <FlowMediaBlockProperties context={context} block={block} />
       ) : null}
+      {block.type === 'table' ? <FlowTableProperties context={context} table={block} /> : null}
       {block.type === 'chart' ? (
         <section className="property-section" data-testid="flow-chart-properties">
           <ChartProperties node={{ id: block.id, type: 'chart', ...block.chart }} bindingKey={context.draftBindingKey}

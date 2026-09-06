@@ -47,6 +47,8 @@ import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { ProjectColorPaletteContext } from './ui/ColorInput'
 import { RecipePanel } from './ui/recipes/RecipePanel'
 import { ProductivityDialog } from './ui/productivity/ProductivityDialog'
+import { MaterialLibraryDialog } from './ui/MaterialLibraryDialog'
+import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
 import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
 
@@ -92,6 +94,7 @@ function captureCourseIdentity() {
 export default function App() {
   const [busy, setBusy] = useState(false)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
+  const [materialsOpen, setMaterialsOpen] = useState(false)
   const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity'; context: ProductivityContext } | null>(null)
   const openDesignTool = (kind: 'recipe' | 'productivity') => {
     const context = useEditorStore.getState().prepareDesignProduction()
@@ -475,6 +478,7 @@ export default function App() {
         onOpenHealth={() => setProjectHealthOpen(true)}
         onOpenRecipes={() => openDesignTool('recipe')}
         onOpenProductivity={() => openDesignTool('productivity')}
+        onOpenMaterials={() => setMaterialsOpen(true)}
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
       />
@@ -585,6 +589,15 @@ export default function App() {
         onClose={() => setProjectHealthOpen(false)}
         onExportDiagnostics={handleExportDiagnostics}
       />
+      {materialsOpen && activeCourseDocument && <MaterialLibraryDialog key={`${activeCourseDocument.id}:${projectPath}`} projectId={activeCourseDocument.id} projectPath={projectPath} onClose={() => setMaterialsOpen(false)} onInsert={async material => {
+        const state = useEditorStore.getState()
+        const document = selectActiveCourseProjectDocument(state)
+        const locationId = selectActiveCourseLocationId(state)
+        if (!document || !locationId || state.projectPath !== projectPath || document.id !== material.workspace.projectId) throw new Error('工程已变化，请重新打开材料库')
+        const receipt = await state.runAuthoringTool(createMaterialCitationRequest({ document, locationId,
+          sessionGeneration: state.courseAuthoringSession!.token.generation, material }))
+        if (receipt.status !== 'committed') throw new Error(receipt.diagnostics.map(entry => entry.message).join('；') || '材料引用未提交')
+      }} />}
       {designTool?.kind === 'recipe' && <div className="modal-backdrop" role="presentation">
         <section className="design-production-dialog" role="dialog" aria-modal="true" aria-label="新建配方页">
           <header><h2>新建配方页</h2><button type="button" aria-label="关闭配方" onClick={() => setDesignTool(null)}><X size={18} /></button></header>

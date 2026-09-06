@@ -163,6 +163,7 @@ function selectedImageApi(
 ): DesktopAPI & { selectImage: ReturnType<typeof vi.fn> } {
   const selectImageSpy = vi.fn(selectImage)
   return {
+    materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),
     openRecentProject: vi.fn(async () => { throw new Error('not used') }),

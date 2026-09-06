@@ -3,6 +3,10 @@ import type { EffectiveBackgroundOwner } from '../../shared/effectiveBackground'
 import { previewNativeLayerData } from '../course/effectiveLayerCommands'
 import { formatFlowAuthoringTextStyle, type FlowTextEditSession } from './flowTextEdit'
 import type { FlowEditorSelection } from '../course/flowEditorSlice'
+import { produce } from 'immer'
+import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
+import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
+import { findFlowBlockRecursive } from '../course/flowDocumentModel'
 
 export interface BackgroundPreviewTarget {
   readonly projectId: string
@@ -10,7 +14,7 @@ export interface BackgroundPreviewTarget {
   readonly generation: number
   readonly locationId: string
   readonly stateId: string | null
-  readonly owner: EffectiveBackgroundOwner | 'native' | 'flow-text'
+  readonly owner: EffectiveBackgroundOwner | 'native' | 'flow-text' | 'flow-chart'
   readonly authoringAddress?: string
 }
 
@@ -31,7 +35,10 @@ export function flowTextColorPreview(project: CourseProjectDocument, preview: Ba
     preview.target.revision !== project.revision || preview.target.generation !== generation || preview.target.locationId !== locationId) return null
   const result = formatFlowAuthoringTextStyle({ document: project, ...preview.flowText,
     style: { color: preview.color }, range: preview.flowText.edit?.range, expectedRevision: project.revision })
-  return result.ok ? result : null
+  return result.ok ? {
+    project: result.nextDocument ? { ...result.nextDocument, revision: project.revision } : project,
+    edit: result.nextEdit ?? null,
+  } : null
 }
 
 /** A transient owner patch, resolved by the normal background inheritance chain. */
@@ -51,6 +58,19 @@ export function projectWithBackgroundPreview(
   if (target.owner === 'course') return { ...project, backgroundColor: color }
   const location = project.locations.find(entry => entry.id === current.locationId)
   if (!location) return project
+  if (target.owner === 'flow-chart') {
+    if (!target.authoringAddress || !preview.nativeData) return project
+    const surface = project.surfaces.find(entry => entry.id === location.surfaceId)
+    const block = surface?.type === 'flow' ? findFlowBlockRecursive(surface.blocks, target.authoringAddress)?.block : null
+    if (block?.type !== 'chart') return project
+    const parsed = chartNativeContentObjectSchema.safeParse(mergeCourseNativeData(block.chart, preview.nativeData))
+    if (!parsed.success) return project
+    return produce(project, draft => {
+      const surface = draft.surfaces.find(entry => entry.id === location.surfaceId)
+      const item = surface?.type === 'flow' ? findFlowBlockRecursive(surface.blocks, block.id)?.block : null
+      if (item?.type === 'chart') item.chart = parsed.data
+    })
+  }
   return { ...project, surfaces: project.surfaces.map(surface => {
     if (surface.id !== location.surfaceId) return surface
     if ((target.owner === 'slide-surface' && surface.type === 'slide') ||

@@ -109,10 +109,12 @@ function overlayMediaFillStyle(): CSSProperties {
 }
 
 function FlowOverlayComponentContent({
+  projectId,
   layer,
   componentPackages,
   assetUrls,
 }: {
+  projectId: string
   layer: FlowEditorLayerView
   componentPackages?: Record<string, ComponentPackageData>
   assetUrls: Record<string, string>
@@ -127,6 +129,7 @@ function FlowOverlayComponentContent({
     const el = containerRef.current
     if (!el || !pkg) return
     const handle = mountPublishedComponent(el, {
+      projectId,
       container: el,
       componentId: item.component.packageId,
       version: item.component.version,
@@ -141,7 +144,7 @@ function FlowOverlayComponentContent({
       interactive: false,
     })
     return () => handle.destroy()
-  }, [item.component.packageId, item.component.version, layer.selectionId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg])
+  }, [item.component.packageId, item.component.version, layer.selectionId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg, projectId])
 
   if (!pkg) {
     if (fallbackUrl) {
@@ -256,6 +259,7 @@ function FlowOverlayTextContent({ layer }: { layer: FlowEditorLayerView }) {
 }
 
 function renderFlowOverlayCardContent(
+  projectId: string,
   layer: FlowEditorLayerView,
   assetUrls: Record<string, string>,
   componentPackages?: Record<string, ComponentPackageData>,
@@ -263,6 +267,7 @@ function renderFlowOverlayCardContent(
   if (layer.item.kind === 'component') {
     return (
       <FlowOverlayComponentContent
+        projectId={projectId}
         layer={layer}
         componentPackages={componentPackages}
         assetUrls={assetUrls}
@@ -644,7 +649,7 @@ export function FlowOverlayAuthoringLayer({
             currentSceneId={locationId}
           />
         ) : (
-          renderFlowOverlayCardContent(layer, assetUrls, componentPackages)
+          renderFlowOverlayCardContent(view.projectId, layer, assetUrls, componentPackages)
         )}
       </div>
     )

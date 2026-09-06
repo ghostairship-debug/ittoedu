@@ -246,6 +246,7 @@ export interface AddSlideVideoLayerInput {
 }
 
 export interface AddSlideComponentLayerInput {
+  readonly staticFallbackAssetId?: string
   readonly packageId: string
   readonly manifest?: ComponentManifest
   readonly props?: Record<string, unknown>
@@ -1083,6 +1084,10 @@ export function addSlideComponentLayer(
       input.x !== undefined || input.y !== undefined,
     )
     const item = sceneNodeToCourseLayerItem(node)
+    if (item.kind === 'component' && input.staticFallbackAssetId) {
+      if (session.history.present.assets[input.staticFallbackAssetId]?.kind !== 'image') throw new Error('组件后备需要工程图片')
+      item.staticFallbackAssetId = input.staticFallbackAssetId
+    }
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       appendOwnedLayer(draft, session, structuredClone(item))
     }, options.now)

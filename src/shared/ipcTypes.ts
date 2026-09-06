@@ -1,3 +1,4 @@
+import type { MaterialRequest, MaterialRecordV1 } from './materialContract'
 import type {
   ComponentCatalogPackageFile,
   ComponentCatalogSnapshot,
@@ -88,6 +89,7 @@ export interface PreviewNetworkPolicyInput {
 }
 
 export interface DesktopAPI {
+  materials(input: MaterialRequest): Promise<MaterialRecordV1[]>
   openProject(): Promise<OpenProjectFileResult | null>
   listRecentProjects(): Promise<RecentProjectEntry[]>
   openRecentProject(input: { path: string }): Promise<OpenProjectFileResult>
@@ -148,6 +150,7 @@ export interface DesktopAPI {
 }
 
 export const IPC_CHANNELS = {
+  materials: 'materials:operate',
   openProject: 'project:open',
   listRecentProjects: 'project:list-recent',
   openRecentProject: 'project:open-recent',

@@ -1,3 +1,5 @@
+import * as tableContent from '../../course/tableContentOperations'
+import type { NativeTableContent } from '../../../shared/contracts/native-v1'
 import { createChartPropertiesCommands } from '../../ui/properties/chartPropertiesCommands'
 import type { EffectiveBackgroundOwner } from '../../../shared/effectiveBackground'
 import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
@@ -314,6 +316,7 @@ export function usePropertiesAuthoringBinding({
   const runFlowAuthoringIntent = useEditorStore((state) => state.runFlowAuthoringIntent)
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const runSpatialAuthoringIntent = useEditorStore((state) => state.runSpatialAuthoringIntent)
+  const runSlideFieldTextIntent = useEditorStore((state) => state.runSlideFieldTextIntent)
   const applySlideCandidateCommand = useEditorStore((state) => state.applySlideCandidateCommand)
   const updateRuntimePropertyAtTarget = useEditorStore((state) => state.updateRuntimePropertyAtTarget)
   const updateRuntimeContentTextAtTarget = useEditorStore((state) => state.updateRuntimeContentTextAtTarget)
@@ -654,7 +657,16 @@ export function usePropertiesAuthoringBinding({
     flowOwner.status === 'active'
     && flowOwner.context
     && flowOwner.context.kind !== 'flow-page'
-  ) return { ...flowOwner.context, commands: { ...flowOwner.context.commands, previewNative: previewSelectedNative,
+  ) return { ...flowOwner.context, commands: { ...flowOwner.context.commands, previewNative: patch => {
+    const blockId = read.flow?.selection.selectedBlockId
+    const block = read.flow?.view.blocks.find(entry => entry.blockId === blockId)?.block
+    if (block?.type !== 'chart') { previewSelectedNative(patch); return }
+    const { projectId, revision, generation, locationId, stateId } = read.identity
+    if (!projectId || !locationId) return
+    const target = { projectId, revision, generation, locationId, stateId, owner: 'flow-chart' as const, authoringAddress: block.id }
+    if (patch === null) { setPreviewBackgroundColor(null, target); return }
+    if (ownerIsLive()) setPreviewBackgroundColor({ target, color: '', nativeData: patch }, target)
+  },
     previewTextColor: color => {
       if (!read.flow) return
       const { projectId, revision, generation, locationId, stateId } = read.identity
@@ -920,6 +932,69 @@ export function usePropertiesAuthoringBinding({
     : dummyTextCommands()
 
   const slideTableCommands = (): SlideNativePropertiesContext['commands']['table'] => {
+    if (node?.type === 'table' && read.spatial) {
+      const target = captureSpatialLayerTarget(node.id)
+      const item = selectedRow?.item
+      if (!target || read.spatial.scope !== 'world' || item?.kind !== 'native' || item.content.nativeType !== 'table') return null
+      const tableData = item.content.data
+      const readEdit = () => ownerIsLive() ? readLive().spatial?.contentEdit ?? null : null
+      const change = (operation: (table: NativeTableContent) => NativeTableContent) => {
+        if (!requireLiveOwner()) return
+        try {
+          const edit = readEdit()
+          let table = tableData
+          if (edit?.kind === 'field-text' && edit.target.layerItemId === node.id && edit.tableCellId) {
+            table = tableContent.patchTableCellText(table, { cellId: edit.tableCellId, text: (edit.draft as { text: string }).text })
+          }
+          const result = runSpatialAuthoringIntent(target, { kind: 'replace-table', table: operation(table), expectedContentEdit: edit })
+          if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
+        } catch (error) { reportError(error instanceof Error ? error.message : '表格修改失败') }
+      }
+      const move = (ids: string[], id: string, direction: -1 | 1) => {
+        const index = ids.indexOf(id)
+        const next = index + direction
+        if (index < 0 || next < 0 || next >= ids.length) return ids
+        ids.splice(index, 1); ids.splice(next, 0, id)
+        return ids
+      }
+      return {
+        beginCellEdit: cellId => {
+          const edit = readEdit()
+          const result = runSpatialAuthoringIntent(target, { kind: 'begin-content-edit', tableCellId: cellId, source: 'properties', expectedEdit: edit, expectedContentEdit: edit })
+          if (!result.ok) reportError(result.reason ?? '表格编辑失败')
+        },
+        updateCellDraft: (cellId, text, composing) => {
+          if (!requireLiveOwner()) return
+          let edit = readEdit()
+          if (!edit) {
+            const currentTarget = captureSpatialLayerTarget(node.id)
+            if (!currentTarget) return
+            const begun = runSpatialAuthoringIntent(currentTarget, { kind: 'begin-content-edit', tableCellId: cellId, source: 'properties', expectedEdit: null, expectedContentEdit: null })
+            if (!begun.ok) return
+            edit = begun.edit ?? null
+          }
+          if (edit?.kind === 'field-text' && edit.tableCellId === cellId && edit.courseTarget) {
+            runSpatialAuthoringIntent(edit.courseTarget, { kind: 'update-table-content-edit', expectedEdit: edit, expectedContentEdit: edit, text, composing })
+          }
+        },
+        cancelCellEdit: cellId => {
+          const edit = readEdit()
+          if (edit?.kind === 'field-text' && edit.tableCellId === cellId && edit.courseTarget) runSpatialAuthoringIntent(edit.courseTarget, { kind: 'cancel-content-edit', expectedEdit: edit, expectedContentEdit: edit })
+        },
+        commitCellText: (cellId, text) => change(table => tableContent.patchTableCellText(table, { cellId, text })),
+        commitLastCellAndAppendRow: (cellId, text) => change(table => tableContent.commitTableLastCellAndAppendRow(table, { cellId, text }).table),
+        patchStyle: stylePatch => change(table => tableContent.patchTableStyle(table, { stylePatch })),
+        patchCellStyle: (cellId, stylePatch) => change(table => tableContent.patchTableCellStyle(table, { cellId, stylePatch })),
+        setRowHeight: (rowId, height) => change(table => tableContent.patchTableRowHeight(table, { rowId, height })),
+        setColumnWidth: (columnId, width) => change(table => tableContent.patchTableColumnWidth(table, { columnId, width })),
+        insertRow: (referenceRowId, position) => change(table => tableContent.insertTableRow(table, { referenceRowId, position })),
+        deleteRow: rowId => change(table => tableContent.deleteTableRow(table, { rowId })),
+        moveRow: (rowId, direction) => change(table => tableContent.reorderTableRows(table, { orderedRowIds: move(table.rows.map(row => row.id), rowId, direction) })),
+        insertColumn: (referenceColumnId, position) => change(table => tableContent.insertTableColumn(table, { referenceColumnId, position })),
+        deleteColumn: columnId => change(table => tableContent.deleteTableColumn(table, { columnId })),
+        moveColumn: (columnId, direction) => change(table => tableContent.reorderTableColumns(table, { orderedColumnIds: move(table.columns.map(column => column.id), columnId, direction) })),
+      }
+    }
     if (node?.type !== 'table' || !slideTarget || read.flow || read.spatial) return null
     const tableNode = node
     const target = slideTarget
@@ -928,7 +1003,7 @@ export function usePropertiesAuthoringBinding({
       execute: (session: SlideAuthoringSession) => SlideCommandResult,
     ) => {
       if (!requireLiveOwner()) return
-      const result = applySlideCandidateCommand((session) => execute(session))
+      const result = applySlideCandidateCommand((session) => execute(session), { clearContentEdit: true })
       if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
     }
     const movedIds = (ids: readonly string[], id: string, direction: -1 | 1) => {
@@ -940,7 +1015,36 @@ export function usePropertiesAuthoringBinding({
       next.splice(nextIndex, 0, id)
       return next
     }
+    const readCellEdit = (cellId: string) => {
+      const current = readLive()
+      if (!sameSlideTargetIdentity(current, target)) return null
+      const edit = current.textEdit
+      return edit?.kind === 'field-text' && edit.target.layerItemId === target.layerItemId
+        && edit.textField?.kind === 'table-cell' && edit.textField.cellId === cellId ? edit : null
+    }
     return {
+      beginCellEdit: (cellId) => {
+        if (!requireLiveOwner()) return
+        const result = runSlideFieldTextIntent({ kind: 'begin-field', target, field: { kind: 'table-cell', cellId } })
+        if (!result.ok) reportError(result.reason)
+      },
+      updateCellDraft: (cellId, text, composing) => {
+        let edit = readCellEdit(cellId)
+        if (!edit) {
+          const live = readLive()
+          if (!sameSlideTargetIdentity(live, target)) return
+          const currentTarget = makeSlideTarget(live)
+          if (!currentTarget) return
+          const begun = runSlideFieldTextIntent({ kind: 'begin-field', target: currentTarget, field: { kind: 'table-cell', cellId } })
+          if (!begun.ok) { reportError(begun.reason); return }
+          edit = begun.edit
+        }
+        if (edit) runSlideFieldTextIntent({ kind: 'update-field', expectedEdit: edit, text, composing })
+      },
+      cancelCellEdit: (cellId) => {
+        const edit = readCellEdit(cellId)
+        if (edit) runSlideFieldTextIntent({ kind: 'cancel', expectedEdit: edit })
+      },
       commitCellText: (cellId, text) => run((session) => (
         patchSlideTableCellText(session, { layerItemId: target.layerItemId, cellId, text }, options)
       )),

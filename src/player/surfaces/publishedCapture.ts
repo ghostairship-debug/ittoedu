@@ -91,6 +91,7 @@ export class PublishedCaptureBarrier {
 
 export interface PublishedCaptureResource {
   waitForCaptureReady(): Promise<void>
+  failCapture?(error: Error): void
   restoreAfterCapture?(): void
 }
 
@@ -269,10 +270,15 @@ async function prepareResources(
     // not outlive the readable drawing buffer produced by an earlier
     // prepareCapture() when preserveDrawingBuffer is false.
     for (const entry of entries) {
-      await deadline.waitFor(
-        entry.resource.waitForCaptureReady(),
-        'Published 静态捕获等待动态内容就绪超时',
-      )
+      try {
+        await deadline.waitFor(
+          entry.resource.waitForCaptureReady(),
+          'Published 静态捕获等待动态内容就绪超时',
+        )
+      } catch (cause) {
+        try { entry.resource.failCapture?.(captureError(cause)) } catch { /* Preserve the capture failure. */ }
+        throw cause
+      }
       canvasSnapshots.capture(entry.owner)
     }
     return { entries, canvasSnapshots }

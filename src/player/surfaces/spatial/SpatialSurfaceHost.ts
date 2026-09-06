@@ -119,6 +119,7 @@ export interface SpatialSurfaceHostOptions {
   teacherControllerSession?: TeacherControllerRuntimeSessionStore
   deferTeacherControllerCourseReset?: boolean
   resolveAsset?: (assetId: string) => string | undefined
+  projectId?: string
   components?: Record<string, PublishedComponentPackageSource>
   /** Published playback session state shared across every surface host. */
   courseState?: CourseStateStoreContract
@@ -205,6 +206,7 @@ function createWorldItem(
   item: PublishedLayerItem,
   resolveAsset: (assetId: string) => string | undefined,
   options?: {
+    projectId?: string
     components?: Record<string, PublishedComponentPackageSource>
     interactive?: boolean
     courseState?: CourseStateStoreContract
@@ -267,6 +269,7 @@ function createWorldItem(
         height: frame.height,
         props: item.props,
         staticFallbackAssetId: item.staticFallbackAssetId,
+        projectId: options?.projectId,
         components: options?.components,
         resolveAsset,
         interactive: options?.interactive ?? true,
@@ -470,6 +473,7 @@ function createViewportHud(
   dom: Document,
   item: PublishedLayerItem,
   options?: {
+    projectId?: string
     components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     interactive?: boolean
@@ -518,6 +522,7 @@ function createViewportHud(
         height: item.frame.height,
         props: item.props,
         staticFallbackAssetId: item.staticFallbackAssetId,
+        projectId: options?.projectId,
         components: options?.components,
         resolveAsset: options?.resolveAsset,
         interactive: options?.interactive ?? true,
@@ -598,6 +603,7 @@ export class SpatialSurfaceHost {
       viewport,
       {
         ...options,
+        projectId: course.courseId,
         components: course.components,
         resolveAsset: options.resolveAsset ?? ((assetId) => course.assets[assetId]?.url),
       },
@@ -611,7 +617,7 @@ export class SpatialSurfaceHost {
     viewport: SpatialRuntimeViewport,
     options: SpatialSurfaceHostOptions & OpenSpatialRuntimeSessionOptions = {},
   ) {
-    this.#options = options
+    this.#options = { ...options, projectId: 'courseId' in source ? source.courseId : options.projectId }
     this.#teacherControllerSession = options.teacherControllerSession
       ?? new TeacherControllerRuntimeSessionStore()
     this.#components = ('components' in source && source.components
@@ -1452,6 +1458,7 @@ export class SpatialSurfaceHost {
         controllerDom = this.#mountTeacherController(entry.item, content, wrapper)
       } else {
         wrapper.appendChild(createViewportHud(dom, entry.item, {
+          projectId: this.#options.projectId,
           components: this.#components,
           resolveAsset: this.#resolveAsset,
           interactive: !this.#options.staticCapture,
@@ -1486,6 +1493,7 @@ export class SpatialSurfaceHost {
       return finish(wrapper, null)
     }
     const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
+      projectId: this.#options.projectId,
       components: this.#components,
       interactive: !this.#options.staticCapture,
       staticCapture: this.#options.staticCapture,

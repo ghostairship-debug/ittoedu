@@ -1,8 +1,8 @@
+import { analyzeCourseAssetReferences } from '../../../shared/contracts/course-project-v9/assetReferences'
 import type { ZodError, ZodIssue } from 'zod'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import {
-  getComponentPropValue,
   mergeComponentProps,
 } from '../../../shared/componentProps'
 import type {
@@ -138,19 +138,6 @@ function encodePublishedCode(source: string): PublishedCourseExecutableCode {
   }
 }
 
-function mergeLayerOverride(
-  base: Readonly<Record<string, unknown>>,
-  override: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = structuredClone(base)
-  for (const [key, value] of Object.entries(override)) {
-    result[key] = isRecord(value) && isRecord(result[key])
-      ? mergeLayerOverride(result[key], value)
-      : structuredClone(value)
-  }
-  return result
-}
-
 function componentKey(packageId: string, version: string): string {
   return `${packageId}@${version}`
 }
@@ -264,118 +251,17 @@ export function collectPublishedCourseComponentKeys(
   )))
 }
 
-function addComponentPropAssets(
-  target: Set<string>,
-  manifest: ComponentPackageData['manifest'],
-  props: Record<string, unknown>,
-): void {
-  const effective = mergeComponentProps(manifest, props)
-  for (const property of manifest.editor?.properties ?? []) {
-    if (property.type !== 'image') continue
-    const assetId = getComponentPropValue(effective, property.key)
-    if (typeof assetId === 'string' && assetId) target.add(assetId)
-  }
-}
-
-function addOverrideAssetReferences(
-  target: Set<string>,
-  override: LayerItemOverride,
-): void {
-  const nativeData = override.nativeData
-  if (typeof nativeData?.assetId === 'string') target.add(nativeData.assetId)
-  const poster = nativeData?.poster
-  if (typeof poster === 'object' && poster !== null) {
-    const assetId = Reflect.get(poster, 'assetId')
-    if (typeof assetId === 'string' && assetId) target.add(assetId)
-  }
-}
-
-function addLayerAssetReferences(target: Set<string>, item: LayerItem): void {
-  if (item.kind === 'native') {
-    if (item.content.nativeType === 'image') target.add(item.content.data.assetId)
-    if (item.content.nativeType === 'video') {
-      target.add(item.content.data.assetId)
-      if (item.content.data.poster.assetId) target.add(item.content.data.poster.assetId)
-    }
-    return
-  }
-  if (item.kind === 'component') {
-    if (item.staticFallbackAssetId) target.add(item.staticFallbackAssetId)
-    return
-  }
-  Object.values(item.runtime.assets).forEach(({ assetId }) => target.add(assetId))
-  if (item.runtime.staticFallback) target.add(item.runtime.staticFallback.assetId)
-}
-
-/** Exact project-asset closure used by both single-file and web-package publishing. */
+/** Exact closure shares the authoring asset graph; conservative deletion-only
+ * references never force unrelated files into the published payload. */
 export function collectPublishedCourseAssetIds(
   sources: Pick<CoursePublishSources, 'project' | 'components'>,
 ): Set<string> {
-  const { project } = sources
-  const result = new Set<string>()
-  if (project.backgroundAssetId) result.add(project.backgroundAssetId)
-  Object.values(project.media.audio.sounds).forEach((sound) => result.add(sound.assetId))
-  allLayerItems(project).forEach((item) => addLayerAssetReferences(result, item))
-
-  for (const surface of project.surfaces) {
-    if (surface.backgroundAssetId) result.add(surface.backgroundAssetId)
-    if (surface.type === 'slide') {
-      for (const scene of surface.scenes) {
-        if (scene.backgroundAssetId) result.add(scene.backgroundAssetId)
-        for (const state of scene.presentation?.states ?? []) {
-          if (state.backgroundAssetId) result.add(state.backgroundAssetId)
-          for (const [layerItemId, override] of Object.entries(state.layerItemOverrides)) {
-            addOverrideAssetReferences(result, override)
-            if (!override.componentProps) continue
-            const item = scene.layerItems.find((candidate) => (
-              candidate.layerItemId === layerItemId && candidate.kind === 'component'
-            ))
-            if (!item || item.kind !== 'component') continue
-            const metadataEntry = findComponentMetadata(
-              project,
-              item.component.packageId,
-              item.component.version,
-            )
-            if (!metadataEntry) continue
-            const component = findComponentSource(
-              sources as CoursePublishSources,
-              metadataEntry[0],
-              item.component.packageId,
-              item.component.version,
-            )
-            if (component) {
-              addComponentPropAssets(
-                result,
-                component.manifest,
-                mergeLayerOverride(item.props, override.componentProps),
-              )
-            }
-          }
-        }
-      }
-    }
-    if (surface.type === 'flow') {
-      visitFlowBlocks(surface.blocks, (block) => {
-        if (block.type === 'media') result.add(block.assetId)
-        if (block.type === 'component') result.add(block.staticFallbackAssetId)
-      })
-    }
-  }
-
-  for (const reference of collectComponentReferences(project)) {
-    const metadataEntry = findComponentMetadata(project, reference.packageId, reference.version)
-    if (!metadataEntry) continue
-    const component = findComponentSource(
-      sources as CoursePublishSources,
-      metadataEntry[0],
-      reference.packageId,
-      reference.version,
-    )
-    if (component) addComponentPropAssets(result, component.manifest, reference.props)
-  }
-  return result
+  const analysis = analyzeCourseAssetReferences(sources.project, {
+    componentPackages: sources.components,
+    includeDisabledRuntimes: false,
+  })
+  return new Set([...analysis.graph].filter(([, refs]) => refs.some((ref) => ref.certainty === 'direct')).map(([id]) => id))
 }
-
 function sourceIssuePathKey(path: ReadonlyArray<string | number>): string {
   return JSON.stringify(path)
 }
@@ -488,24 +374,30 @@ function collectPublishedCourseSourceIssuesFromFacts(
 ): PublishedCourseSourceIssue[] {
   const issues: PublishedCourseSourceIssue[] = []
   const add = (issue: PublishedCourseSourceIssue): void => { issues.push(issue) }
+  const references = analyzeCourseAssetReferences(sources.project, {
+    componentPackages: sources.components, includeDisabledRuntimes: false,
+  }).graph
 
   for (const assetId of [...collectPublishedCourseAssetIds(sources)].sort(compareStableStrings)) {
+    const origins = references.get(assetId)?.filter((ref) => ref.certainty === 'direct' &&
+      (ref.kind === 'runtime-source' || ref.kind === 'component-runtime-source')) ?? []
+    const originPaths = origins.length ? origins.map(origin => origin.path) : [['assets', assetId]]
     const entry = findAssetEntry(sources.project, assetId)
     if (!entry) {
-      add({
+      for (const path of originPaths) add({
         code: 'asset-metadata-missing',
         message: `工程引用的素材“${assetId}”没有对应的素材元数据。`,
-        path: ['assets', assetId],
+        path,
       })
       continue
     }
     const [recordKey, metadata] = entry
     const bytes = findAssetBytes(sources, recordKey, metadata)
     if (!bytes) {
-      add({
+      for (const path of origins.length ? originPaths : [['assets', recordKey]]) add({
         code: 'asset-bytes-missing',
         message: `素材“${metadata.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
-        path: ['assets', recordKey],
+        path,
       })
       continue
     }

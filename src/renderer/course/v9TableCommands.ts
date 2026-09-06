@@ -1,8 +1,8 @@
+import { commitTableLastCellAndAppendRow, TableContentError, patchTableCellText, patchTableStyle, patchTableCellStyle, patchTableRowHeight, patchTableColumnWidth, insertTableRow, deleteTableRow, reorderTableRows, insertTableColumn, deleteTableColumn, reorderTableColumns } from './tableContentOperations'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { tableNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import type {
-  NativeTableCell,
   NativeTableCellStyle,
   NativeTableColumn,
   NativeTableContent,
@@ -130,7 +130,7 @@ function rejectIfStale(
 }
 
 function catchCommand(session: SlideAuthoringSessionRef, error: unknown): SlideCommandResult {
-  if (error instanceof SlideCommandError) return reject(session, error.reason)
+  if (error instanceof SlideCommandError || error instanceof TableContentError) return reject(session, error.reason)
   if (error instanceof Error) return reject(session, error.message)
   return reject(session, '命令失败')
 }
@@ -494,28 +494,9 @@ export function patchSlideTableCellText(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    if (typeof input.text !== 'string' || input.text.length > 20000) {
-      throw new SlideCommandError('invalid-data', '单元格文本长度超出上限')
-    }
-
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      let found = false
-      for (const row of table.rows) {
-        const cell = row.cells.find((c) => c.id === input.cellId)
-        if (cell) {
-          cell.text = input.text
-          found = true
-          break
-        }
-      }
-      if (!found) {
-        throw new SlideCommandError('invalid-target', `找不到单元格：${input.cellId}`)
-      }
-
-      target.commit(table)
+      target.commit(patchTableCellText(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -537,14 +518,7 @@ export function patchSlideTableStyle(
   try {
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      table.style = {
-        ...table.style,
-        ...input.stylePatch,
-      }
-
-      target.commit(table)
+      target.commit(patchTableStyle(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -567,30 +541,7 @@ export function patchSlideTableCellStyle(
   try {
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      let targetCell: NativeTableCell | undefined
-      for (const row of table.rows) {
-        const found = row.cells.find((c) => c.id === input.cellId)
-        if (found) {
-          targetCell = found
-          break
-        }
-      }
-      if (!targetCell) {
-        throw new SlideCommandError('invalid-target', `找不到单元格：${input.cellId}`)
-      }
-
-      const nextStyle = {
-        ...(targetCell.style ?? {}),
-        ...input.stylePatch,
-      }
-      for (const key of Object.keys(nextStyle) as (keyof NativeTableCellStyle)[]) {
-        if (nextStyle[key] === undefined) delete nextStyle[key]
-      }
-      targetCell.style = Object.keys(nextStyle).length > 0 ? nextStyle : undefined
-
-      target.commit(table)
+      target.commit(patchTableCellStyle(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -611,19 +562,9 @@ export function patchSlideTableRowHeight(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    if (!Number.isFinite(input.height) || input.height < 20 || input.height > 2000) {
-      throw new SlideCommandError('invalid-data', '行高必须介于 20 到 2000 之间')
-    }
-
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      const row = table.rows.find((r) => r.id === input.rowId)
-      if (!row) throw new SlideCommandError('invalid-target', `找不到行：${input.rowId}`)
-      row.height = input.height
-
-      target.commit(table)
+      target.commit(patchTableRowHeight(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -644,19 +585,9 @@ export function patchSlideTableColumnWidth(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    if (!Number.isFinite(input.width) || input.width < 24 || input.width > 2000) {
-      throw new SlideCommandError('invalid-data', '列宽必须介于 24 到 2000 之间')
-    }
-
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      const col = table.columns.find((c) => c.id === input.columnId)
-      if (!col) throw new SlideCommandError('invalid-target', `找不到列：${input.columnId}`)
-      col.width = input.width
-
-      target.commit(table)
+      target.commit(patchTableColumnWidth(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -678,40 +609,9 @@ export function insertSlideTableRow(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const idFactory = input.idFactory ?? nanoid
-
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (table.rows.length >= 1000) {
-        throw new SlideCommandError('invalid-data', '表格行数已达上限（1000 行）')
-      }
-
-      const refIndex = table.rows.findIndex((r) => r.id === input.referenceRowId)
-      if (refIndex < 0) {
-        throw new SlideCommandError('invalid-target', `找不到参考行：${input.referenceRowId}`)
-      }
-
-      const insertIndex = input.position === 'before' ? refIndex : refIndex + 1
-      const refRow = table.rows[refIndex]!
-
-      const newRowId = `row_${idFactory()}`
-      const newCells: NativeTableCell[] = table.columns.map((col) => ({
-        id: `cell_${idFactory()}`,
-        columnId: col.id,
-        text: '',
-      }))
-
-      const newRow: NativeTableRow = {
-        id: newRowId,
-        height: refRow.height,
-        cells: newCells,
-      }
-
-      table.rows.splice(insertIndex, 0, newRow)
-
-      target.commit(table)
+      target.commit(insertTableRow(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -733,23 +633,7 @@ export function deleteSlideTableRow(
   try {
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (table.rows.length <= 1) {
-        throw new SlideCommandError('invalid-data', '表格至少需要保留一行')
-      }
-
-      const index = table.rows.findIndex((r) => r.id === input.rowId)
-      if (index < 0) {
-        throw new SlideCommandError('invalid-target', `找不到行：${input.rowId}`)
-      }
-
-      table.rows.splice(index, 1)
-      if (table.headerRowCount > table.rows.length) {
-        table.headerRowCount = table.rows.length
-      }
-
-      target.commit(table)
+      target.commit(deleteTableRow(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -771,27 +655,7 @@ export function reorderSlideTableRows(
   try {
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (
-        input.orderedRowIds.length !== table.rows.length ||
-        new Set(input.orderedRowIds).size !== table.rows.length
-      ) {
-        throw new SlideCommandError('invalid-data', '行重排 ID 列表长度或唯一性无效')
-      }
-
-      const rowMap = new Map(table.rows.map((r) => [r.id, r]))
-      const nextRows: NativeTableRow[] = []
-      for (const id of input.orderedRowIds) {
-        const row = rowMap.get(id)
-        if (!row) {
-          throw new SlideCommandError('invalid-data', `行 ID 不存在：${id}`)
-        }
-        nextRows.push(row)
-      }
-
-      table.rows = nextRows
-      target.commit(table)
+      target.commit(reorderTableRows(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -814,46 +678,9 @@ export function insertSlideTableColumn(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const idFactory = input.idFactory ?? nanoid
-
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (table.columns.length >= 100) {
-        throw new SlideCommandError('invalid-data', '表格列数已达上限（100 列）')
-      }
-
-      const refIndex = table.columns.findIndex((c) => c.id === input.referenceColumnId)
-      if (refIndex < 0) {
-        throw new SlideCommandError('invalid-target', `找不到参考列：${input.referenceColumnId}`)
-      }
-
-      const insertIndex = input.position === 'before' ? refIndex : refIndex + 1
-      const refCol = table.columns[refIndex]!
-
-      const newColId = `col_${idFactory()}`
-      const newColumn: NativeTableColumn = {
-        id: newColId,
-        width: input.width ?? refCol.width,
-      }
-
-      table.columns.splice(insertIndex, 0, newColumn)
-
-      // Insert matching cell in every row at insertIndex
-      for (let rIdx = 0; rIdx < table.rows.length; rIdx++) {
-        const row = table.rows[rIdx]!
-        const isHeader = rIdx < table.headerRowCount
-        const newCell: NativeTableCell = {
-          id: `cell_${idFactory()}`,
-          columnId: newColId,
-          text: '',
-          style: isHeader ? { bold: true, fillColor: '#f3f4f6' } : undefined,
-        }
-        row.cells.splice(insertIndex, 0, newCell)
-      }
-
-      target.commit(table)
+      target.commit(insertTableColumn(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -875,25 +702,7 @@ export function deleteSlideTableColumn(
   try {
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (table.columns.length <= 1) {
-        throw new SlideCommandError('invalid-data', '表格至少需要保留一列')
-      }
-
-      const colIndex = table.columns.findIndex((c) => c.id === input.columnId)
-      if (colIndex < 0) {
-        throw new SlideCommandError('invalid-target', `找不到列：${input.columnId}`)
-      }
-
-      table.columns.splice(colIndex, 1)
-
-      // Remove matching cell in every row
-      for (const row of table.rows) {
-        row.cells = row.cells.filter((c) => c.columnId !== input.columnId)
-      }
-
-      target.commit(table)
+      target.commit(deleteTableColumn(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -915,38 +724,7 @@ export function reorderSlideTableColumns(
   try {
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (
-        input.orderedColumnIds.length !== table.columns.length ||
-        new Set(input.orderedColumnIds).size !== table.columns.length
-      ) {
-        throw new SlideCommandError('invalid-data', '列重排 ID 列表长度或唯一性无效')
-      }
-
-      const colMap = new Map(table.columns.map((c) => [c.id, c]))
-      const nextColumns: NativeTableColumn[] = []
-      for (const id of input.orderedColumnIds) {
-        const col = colMap.get(id)
-        if (!col) {
-          throw new SlideCommandError('invalid-data', `列 ID 不存在：${id}`)
-        }
-        nextColumns.push(col)
-      }
-
-      table.columns = nextColumns
-
-      // Reorder cells in each row to match nextColumns order
-      for (const row of table.rows) {
-        const cellByColId = new Map(row.cells.map((cell) => [cell.columnId, cell]))
-        row.cells = nextColumns.map((col) => {
-          const cell = cellByColId.get(col.id)
-          if (!cell) throw new Error(`列 ${col.id} 缺少对应单元格`)
-          return cell
-        })
-      }
-
-      target.commit(table)
+      target.commit(reorderTableColumns(target.table, input))
     }, options.now)
 
     return commitUpdated(session, project)
@@ -963,10 +741,6 @@ export function commitSlideTableLastCellAndAppendRow(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    if (typeof input.text !== 'string' || input.text.length > 20000) {
-      throw new SlideCommandError('invalid-data', '单元格文本长度超出上限')
-    }
-
     let focusResult: {
       readonly newRowId: string
       readonly newCellId: string
@@ -975,66 +749,9 @@ export function commitSlideTableLastCellAndAppendRow(
 
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const target = resolveTableTarget(draft, session, input.layerItemId)
-      const table = target.table
-
-      if (table.rows.length === 0 || table.columns.length === 0) {
-        throw new SlideCommandError('invalid-target', '表格必须包含行与列')
-      }
-
-      // Find target cell
-      let targetRowIndex = -1
-      let targetCell: NativeTableCell | undefined
-      for (let r = 0; r < table.rows.length; r++) {
-        const cell = table.rows[r]!.cells.find((c) => c.id === input.cellId)
-        if (cell) {
-          targetRowIndex = r
-          targetCell = cell
-          break
-        }
-      }
-      if (!targetCell || targetRowIndex < 0) {
-        throw new SlideCommandError('invalid-target', `找不到单元格：${input.cellId}`)
-      }
-
-      // Check if it is the last cell: last row and last column
-      const lastRowIndex = table.rows.length - 1
-      const lastRow = table.rows[lastRowIndex]!
-      const lastColumn = table.columns[table.columns.length - 1]!
-      if (targetRowIndex !== lastRowIndex || targetCell.columnId !== lastColumn.id) {
-        throw new SlideCommandError('invalid-target', '所选单元格不是表格末格')
-      }
-
-      // Check row limit
-      if (table.rows.length >= 1000) {
-        throw new SlideCommandError('invalid-data', '表格行数已达上限（1000 行）')
-      }
-
-      // 1. Commit text
-      targetCell.text = input.text
-
-      // 2. Append new row
-      const idFactory = input.idFactory ?? nanoid
-      const newRowId = `row_${idFactory()}`
-      const newCells: NativeTableCell[] = table.columns.map((col) => ({
-        id: `cell_${idFactory()}`,
-        columnId: col.id,
-        text: '',
-      }))
-      const newRow: NativeTableRow = {
-        id: newRowId,
-        height: lastRow.height,
-        cells: newCells,
-      }
-      table.rows.push(newRow)
-
-      // 3. Commit mutation through target commit
-      target.commit(table)
-
-      focusResult = {
-        newRowId,
-        newCellId: newCells[0]!.id,
-        targetColumnId: table.columns[0]!.id,
-      }
+      const result = commitTableLastCellAndAppendRow(target.table, input)
+      target.commit(result.table)
+      focusResult = result.focusResult
     }, options.now)
 
     return {

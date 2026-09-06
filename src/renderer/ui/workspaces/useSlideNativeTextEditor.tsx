@@ -10,10 +10,11 @@ import {
   type SlideAuthoringTarget,
   type SlideCommandResult,
 } from '../../course/slideAuthoringBackend'
-import { patchSlideLayerPropertiesAtTarget } from '../../course/v9SlideContentCommands'
 import { commitSlideTableLastCellAndAppendRow, patchSlideTableCellText } from '../../course/v9TableCommands'
 import { clientToWorld, rotateWorldPoint, type StagePoint, type StageViewportTransform } from '../../authoring/stageViewportTransform'
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
+import { createChartTextDraft, type ChartTextDraft, type ChartTextField } from '../../authoring/chartTextDraft'
+import type { SlideFieldTextIntent, SlideFieldTextReceipt, V9SlideContentEditSession } from '../../authoring/v9SlideContentEdit'
 
 interface Edit {
   target: SlideAuthoringTarget
@@ -24,6 +25,8 @@ interface Edit {
   rotation: number
 }
 interface Ports {
+  readEdit(): V9SlideContentEditSession | null
+  runFieldTextIntent(intent: SlideFieldTextIntent): SlideFieldTextReceipt
   readBackend(): SlideAuthoringBackend | null
   readHost(): HTMLElement | null
   readTransform(): StageViewportTransform | null
@@ -66,11 +69,18 @@ function matchesTarget(session: SlideAuthoringSession, target: SlideAuthoringTar
     makeSlideAuthoringTarget(session, target.layerItemId, 'item').authoringAddress === target.authoringAddress
 }
 
-/** Local draft only. Every commit uses the existing target-checked Native commands. */
+/** Geometry stays local; chart content is held by the Surface edit lifecycle. */
 export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
   const portsRef = useRef(ports)
   portsRef.current = ports
   const [edit, setEdit] = useState<Edit | null>(null)
+  const makeChartDraftRef = useRef<((text: string) => ChartTextDraft) | null>(null)
+  const ownedEdit = ports.readEdit()
+  const ownedEditRef = useRef(ownedEdit)
+  ownedEditRef.current = ownedEdit
+  useEffect(() => {
+    if (edit && !ownedEdit) setEdit(null)
+  }, [ownedEdit, edit])
   useEffect(() => { setEdit(null) }, [contextKey])
 
   const begin = (layerId: string, world: StagePoint, client: StagePoint): boolean => {
@@ -85,7 +95,12 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
         local.x >= item.frame.x + entry.x && local.x <= item.frame.x + entry.x + entry.width &&
         local.y >= item.frame.y + entry.y && local.y <= item.frame.y + entry.y + entry.height)
       if (!cell) return false
-      setEdit(tableEdit(session, item, cell.id))
+      const next = tableEdit(session, item, cell.id)
+      if (!next) return false
+      const begun = portsRef.current.runFieldTextIntent({ kind: 'begin-field', target: next.target, field: { kind: 'table-cell', cellId: cell.id } })
+      if (!begun.ok) { portsRef.current.report(begun.reason); return false }
+      ownedEditRef.current = begun.edit
+      setEdit(next)
       return true
     }
     if (item.content.nativeType !== 'chart') return false
@@ -107,6 +122,14 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       : kind === 'category' ? chart.categories.find(entry => entry.id === childId)?.label
       : chart.series.find(entry => entry.id === childId)?.name
     if (value === undefined) return false
+    const field: ChartTextField = kind === 'title' ? { kind } : { kind, id: childId }
+    const begun = portsRef.current.runFieldTextIntent({ kind: 'begin-chart', target, field })
+    if (!begun.ok || !begun.edit) { if (!begun.ok) portsRef.current.report(begun.reason); return false }
+    const makeDraft = (text: string) => createChartTextDraft(chart, field, text,
+      field.kind === 'title' ? undefined : chartCanvasTextPort(target)?.prepare?.(field.kind, field.id, text))
+    makeChartDraftRef.current = makeDraft
+    const updated = portsRef.current.runFieldTextIntent({ kind: 'update-chart', expectedEdit: begun.edit, draft: makeDraft(value), composing: false })
+    if (updated.ok) ownedEditRef.current = updated.edit
     const rect = text.getBoundingClientRect()
     const origin = clientToWorld(transform, { x: rect.left, y: rect.top })
     setEdit({
@@ -119,16 +142,24 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
 
   const finish = (value: string, advance?: 1 | -1) => {
     if (!edit) return
+    if (edit.kind !== 'table-cell' || advance === undefined) {
+      let current = ownedEditRef.current
+      if (!current) { setEdit(null); return }
+      if (current.kind === 'chart-text' && makeChartDraftRef.current) {
+        const updated = portsRef.current.runFieldTextIntent({ kind: 'update-chart', expectedEdit: current, draft: makeChartDraftRef.current(value), composing: false })
+        if (!updated.ok || !updated.edit) { if (!updated.ok) portsRef.current.report(updated.reason); return }
+        current = updated.edit
+        ownedEditRef.current = current
+      }
+      const result = portsRef.current.runFieldTextIntent({ kind: 'commit', expectedEdit: current })
+      if (!result.ok) portsRef.current.report(result.reason)
+      else setEdit(null)
+      return
+    }
     setEdit(null)
     const live = portsRef.current.readBackend()?.getSession()
     if (!live || !matchesTarget(live, edit.target)) {
       portsRef.current.report('编辑目标已改变，文字未写入工程，请重新编辑。')
-      return
-    }
-    const bridge = chartCanvasTextPort(edit.target)
-    if (bridge && (edit.kind === 'category' || edit.kind === 'series')) {
-      const reason = bridge.commit(edit.kind, edit.childId, value)
-      if (reason) portsRef.current.report(reason)
       return
     }
     let nextCellId: string | undefined
@@ -153,12 +184,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
         if (advance) nextCellId = cells[Math.max(0, Math.min(cells.length - 1, index + advance))]?.id
         return patchSlideTableCellText(session, cellPatch, { expectedRevision: target.revision })
       }
-      if (item.content.nativeType !== 'chart') return { ok: false, reason: '图表编辑目标已失效', nextSession: session }
-      const chart = item.content.data
-      const nativeData = edit.kind === 'title' ? { title: value } : edit.kind === 'category'
-        ? { categories: chart.categories.map(entry => entry.id === edit.childId ? { ...entry, label: value } : entry) }
-        : { series: chart.series.map(entry => entry.id === edit.childId ? { ...entry, name: value } : entry) }
-      return patchSlideLayerPropertiesAtTarget(session, target, { nativeData }, { expectedRevision: target.revision })
+      return { ok: false, reason: '表格编辑目标已失效', nextSession: session }
     })
     if (!result.ok) {
       portsRef.current.report(result.reason ?? '文字提交失败')
@@ -166,23 +192,48 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     }
     if (nextCellId && result.nextSession) {
       const item = layerIn(result.nextSession, edit.target.layerItemId)
-      if (item) setEdit(tableEdit(result.nextSession, item, nextCellId))
+      if (item) {
+        const next = tableEdit(result.nextSession, item, nextCellId)
+        if (next) {
+          const begun = portsRef.current.runFieldTextIntent({ kind: 'begin-field', target: next.target, field: { kind: 'table-cell', cellId: nextCellId } })
+          if (begun.ok) { ownedEditRef.current = begun.edit; setEdit(next) }
+          else portsRef.current.report(begun.reason)
+        }
+      }
     }
   }
 
   return {
     begin,
-    cancel: () => setEdit(null),
+    cancel: () => {
+      const current = ownedEditRef.current
+      if (current?.kind === 'chart-text' || current?.textField?.kind === 'table-cell') portsRef.current.runFieldTextIntent({ kind: 'cancel', expectedEdit: current })
+      setEdit(null)
+    },
     editor: edit ? <CanvasPlainTextEditor
       key={`${edit.target.authoringAddress}:${edit.target.revision}:${edit.kind}:${edit.childId}`}
       bounds={edit.bounds}
       rotation={edit.rotation}
       label={edit.kind === 'table-cell' ? '编辑单元格' : '编辑图表文字'}
-      value={edit.value}
+      value={ownedEdit && 'text' in ownedEdit.draft ? ownedEdit.draft.text : edit.value}
+      onDraftChange={(text, composing) => {
+        const current = ownedEditRef.current
+        if (current?.kind === 'chart-text' && makeChartDraftRef.current) {
+          const updated = portsRef.current.runFieldTextIntent({ kind: 'update-chart', expectedEdit: current, draft: makeChartDraftRef.current(text), composing })
+          if (updated.ok) ownedEditRef.current = updated.edit
+        } else if (current?.kind === 'field-text') {
+          const updated = portsRef.current.runFieldTextIntent({ kind: 'update-field', expectedEdit: current, text, composing })
+          if (updated.ok) ownedEditRef.current = updated.edit
+        }
+      }}
       maxLength={edit.kind === 'table-cell' ? 20000 : 500}
       onCommit={value => finish(value)}
       onAdvance={edit.kind === 'table-cell' ? (value, direction) => finish(value, direction) : undefined}
-      onCancel={() => setEdit(null)}
+      onCancel={() => {
+        const current = ownedEditRef.current
+        if (current?.kind === 'chart-text' || current?.textField?.kind === 'table-cell') portsRef.current.runFieldTextIntent({ kind: 'cancel', expectedEdit: current })
+        setEdit(null)
+      }}
     /> : null,
   }
 }

@@ -608,8 +608,8 @@ async function buildComponentCatalogSnapshot(
 
 const nodeCapabilitySummary = {
   table: {
-    label: '表格', authoringModes: ['simple', 'professional'], authoringScopes: ['slide-scene', 'slide-surface'],
-    exports: { singleHtml: 'native', webPackage: 'native', pptx: 'editable-table', pdf: 'static-capture' },
+    label: '表格', authoringModes: ['simple', 'professional'], authoringScopes: ['slide-scene', 'slide-surface', 'flow-body', 'spatial-world'],
+    exports: { singleHtml: 'native', webPackage: 'native', pptx: 'slide-editable-table;spatial-camera-static', docx: 'flow-editable-table', pdf: 'static-capture' },
   },
   chart: {
     label: '图表', authoringModes: ['simple', 'professional'], authoringScopes: ['slide-scene', 'slide-surface', 'flow-body', 'spatial-world'],
@@ -722,6 +722,9 @@ const AI_CAPABILITY_PROVENANCE_ENTRYPOINTS = [
 
 const HEADLESS_BUILD_EVIDENCE_FILES = [
   'scripts/build-courseware-case.ts',
+  'scripts/courseware-builder-v2-host.ts',
+  'src/renderer/course/coursewareBuilderV2.ts',
+  'src/renderer/authoring/tools/authoringToolFacade.ts',
   'src/renderer/course/coursewareCaseBuilderApi.ts',
 ] as const
 
@@ -1478,7 +1481,11 @@ export async function generateAiCapabilityArtifacts(
       language: 'typescript',
       runner: 'npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <relative-output.h5lesson> --html <relative-output.html>',
       caseDirectory: 'may-be-outside-editor-repository-and-need-not-be-git',
-      builderContract: 'src/renderer/course/coursewareCaseBuilderApi.ts',
+      builderContract: 'src/renderer/course/coursewareBuilderV2.ts',
+      apiVersion: 2,
+      compatibilityContract: 'src/renderer/course/coursewareCaseBuilderApi.ts',
+      authoringTools: 'src/renderer/authoring/tools/authoringToolFacade.ts',
+      execution: 'product-managed-chromium-private-session',
       entrypoints: {
         externalCaseBuilder: 'scripts/build-courseware-case.ts',
         createCourseProject: 'src/renderer/project/createCourseProject.ts',
@@ -1489,6 +1496,9 @@ export async function generateAiCapabilityArtifacts(
       output: 'Course Project V9 .h5lesson and offline HTML inside case-dir',
       constraints: [
         'case-builder-receives-real-repository-apis-through-versioned-facade',
+        'export-apiVersion-2-and-return-registered-session-finish-result',
+        'all-writes-via-canonical-tools-with-per-step-receipts',
+        'dynamic-candidates-require-fixed-real-host-admission',
         'no-editor-internal-imports-from-case-module',
         'all-inputs-and-outputs-remain-inside-case-dir',
         'no-shadow-project-dsl',

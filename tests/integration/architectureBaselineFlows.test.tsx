@@ -106,9 +106,11 @@ describe('ARCH-0 representative functional baseline', () => {
       const expectedHealthWarningCodes = id === 'slide-heavy'
         ? new Set([
             'published-interaction-action-unsupported',
-            'published-interaction-trigger-unsupported',
+            'text-capacity-overflow',
           ])
-        : new Set<string>()
+        : id === 'mixed-spatial'
+          ? new Set(['text-capacity-overflow'])
+          : new Set<string>()
       expect(report.status).toBe('valid')
       expect(report.summary).toMatchObject({ error: 0, canExport: true })
       expect(report.projectHealth?.summary).toMatchObject({

@@ -48,6 +48,17 @@
 
 Legacy 删除只能以现有[唯一消费者台账](../inventories/legacy-consumers.json)为事实源，并遵守“先交付等价 V9/Published consumer，再删除旧 consumer”。每个 1.1 规格必须列出受影响的矩阵 ID、最近层检查、停止条件与回滚点。单纯的符号归零、模块删除或全量测试绿灯，均不能替代本矩阵对应的行为证据。
 
+## S1 已签署的增量行为
+
+Owner 的 2026-09-06 整体验收见 [S1 记录](../acceptance/S1-authoring.md)。以下只晋升 1.2–1.3；1.4 工具与 1.5 材料仍等待 S2。
+
+| ID | 当前必须保留的行为 | 最低有效证据 | 禁止的降级方式 |
+| --- | --- | --- | --- |
+| PM-30 | 六种 Recipe 展开为普通 V9；选择反馈、逐步揭示、分类及真实 Component 排序可连续操作；参考页克隆重映射本地身份并保留外部跳转；批量替换与项目色先预览后一次提交。 | `tests/unit/recipes.test.ts`、`tests/unit/productivity.test.tsx` 与 1.3 复核中的真实连续操作。 | 不得持久化隐藏 Recipe DSL、把排序改成分类、按同名状态误改外部导航，或跳过 preview revision。 |
+| PM-31 | Flow 正文与 Spatial world 可创作五类 Chart 和 Table；三 Surface 共用内容操作，编辑、历史、保存重开、Player / HTML 保留数据；Flow DOCX 表格可编辑，图表图面及 Spatial 相机页明确静态。 | `tests/unit/crossSurfaceTableDelivery.test.ts`、`tests/unit/v9TableCommands.test.ts` 及 `tests/e2e/stabilizationCoreUsability.spec.ts`；真实图表 DOCX 证据见 1.3 复核。 | 不得用截图替代作者数据、丢正文顺序，或把支持范围扩至未批准的 shared / global / input。 |
+| PM-32 | Chart、Table、Component 与共用 Native 文字控件的合法活动草稿参与 dirty、保存准备和恢复；不失焦保存可重开，取消 / IME / stale 不误写，一次作者操作对应一次历史。 | `tests/unit/courseDraftPersistence.test.ts`、`tests/unit/chartCanvasDraft.test.tsx` 及桌面“活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开”。 | 不得只在 blur 保存、用播放临时状态代替作者属性持久化，或恢复时改写当前活跃历史。 |
+| PM-33 | Flow 原生文字 / 图片 / 图形浮层进入连续 DOCX；Slide input 原子写答案和有效性后求规则；六 owner 背景与连续调色遵循唯一有效值解析。 | 1.2 修复复核中的命名用例、`tests/unit/effectiveBackground.test.ts`、`tests/unit/courseBackgroundCommands.test.ts` 和真实桌面 Flow / ownership 回归。 | 不得混淆 viewport 浮层与正文，重复导出普通浮层，拆分 input 双键提交或重建第二套背景继承。 |
+
 ## 后续版本保全晋升
 
 1.2–2.0 的 `release` 节点在签署候选前执行一次原子晋升：只把该版本已经通过人工/真实 carrier 验收的能力追加为稳定行，并记录最低有效证据、禁止降级方式和证据失效闭包。未完成、可选未采用或仅有 mock 的能力不得晋升。

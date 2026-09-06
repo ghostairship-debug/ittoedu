@@ -19,10 +19,16 @@ function visit(value: unknown, callback: (record: JsonRecord) => void) {
     else if (key === 'content' && child && typeof child === 'object' && 'nativeType' in child) visit(child, callback)
   })
 }
-function remap(scene: SlideSceneDocument, ids: Map<string, string>) {
+function remap(scene: SlideSceneDocument, ids: Map<string, string>, sourceSceneId: string) {
   visit(scene, record => {
+    // Presentation state IDs are scoped to their scene. Capture the owner before
+    // rewriting sceneId; an external destination can legally reuse a local ID.
+    const externalNavigation = record.type === 'scene.go' && record.sceneId !== sourceSceneId
     Object.entries(record).forEach(([key, value]) => {
-      if (scalarReferences.has(key) && typeof value === 'string') record[key] = ids.get(value) ?? value
+      if (key === 'targetStateId' && externalNavigation) return
+      if (key === 'sceneId') record[key] = value === sourceSceneId ? ids.get(sourceSceneId)! : value
+      else if (key === 'sceneIds' && Array.isArray(value)) record[key] = value.map(id => id === sourceSceneId ? ids.get(sourceSceneId)! : id)
+      else if (scalarReferences.has(key) && typeof value === 'string') record[key] = ids.get(value) ?? value
       else if (arrayReferences.has(key) && Array.isArray(value)) record[key] = value.map(v => typeof v === 'string' ? ids.get(v) ?? v : v)
       else if ((key === 'layerItemOverrides' || key === 'nodeBindings') && value && typeof value === 'object') record[key] = Object.fromEntries(Object.entries(value).map(([id, child]) => [key === 'layerItemOverrides' ? ids.get(id) ?? id : id, key === 'nodeBindings' && typeof child === 'string' ? ids.get(child) ?? child : child]))
     })
@@ -64,7 +70,7 @@ export function cloneReferencePage(
         assetFileChanges.push({ assetId: nextId, after: Uint8Array.from(assetFiles[id]!) })
       }
     })
-    remap(scene, ids)
+    remap(scene, ids, source.id)
     scene.name = `${source.name} 副本`
     const locationIds = new Map<string, string>()
     const nextDocument = commitCourseProjectMutation(project, draft => {

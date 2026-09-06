@@ -1,5 +1,7 @@
+import { beginFlowTableFieldEdit, updateFlowTextDraft } from '../../authoring/flowTextEdit'
 import { createChartNode, createChartLayerItem } from '../../project/nativeNodeFactories'
 import type { ChartType } from '../../course/chartContentOperations'
+import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
@@ -81,6 +83,7 @@ import {
 import {
   applyFlowTextEditGesture,
   beginFlowFormulaEdit,
+  beginFlowChartTextEdit,
   commitFlowFormulaAst,
   commitFlowTextEdit,
   formatFlowAuthoringBlock,
@@ -192,6 +195,8 @@ export type FlowAuthoringIntent = (
       readonly tableColumnId?: string
     }
   | { readonly kind: 'begin-formula-edit' }
+  | { readonly kind: 'begin-table-field-edit'; readonly field: 'table-caption' | 'table-header'; readonly columnId?: string; readonly text?: string; readonly composing?: boolean }
+  | { readonly kind: 'begin-chart-text-edit'; readonly field: ChartTextField }
   | {
       readonly kind: 'update-text-edit'
       readonly expectedEdit: FlowTextEditSession
@@ -314,6 +319,7 @@ function sameFlowEditIdentity(
     && left.listItemId === right.listItemId
     && left.tableRowId === right.tableRowId
     && left.tableColumnId === right.tableColumnId
+    && JSON.stringify(left.chartField) === JSON.stringify(right.chartField)
     && left.field === right.field
     && left.revision === right.revision
 }
@@ -655,6 +661,7 @@ export function createFlowAuthoringSlice(
   redo(): void
   setScope(scope: 'global' | 'scene'): void
   renameProject(title: string): void
+  addTableNode(): void
   addChartNode(chartType: ChartType): void
   addTextNode(x?: number, y?: number): void
   addFormulaNode(x?: number, y?: number): void
@@ -983,6 +990,29 @@ export function createFlowAuthoringSlice(
             selection: begun.selection,
           }, { selection: begun.selection, textEdit: begun.edit }, begun.edit)
         }
+        case 'begin-chart-text-edit': {
+          if (flow.read().flowTextEdit) return rejectedFlowReceipt(LAYER_REJECT_STALE_REVISION)
+          const begun = beginFlowChartTextEdit({
+            project: document, selection: flowBlockSelection(document, target),
+            blockId: target.itemId, field: intent.field,
+          })
+          if (!begun.ok) return rejectedFlowReceipt(begun.reason)
+          return persistIntentResult({
+            ok: true, nextDocument: document, historyEntry: false, selection: begun.selection,
+          }, { selection: begun.selection, textEdit: begun.edit }, begun.edit)
+        }
+        case 'begin-table-field-edit': {
+          if (flow.read().flowTextEdit) return rejectedFlowReceipt(LAYER_REJECT_STALE_REVISION)
+          const begun = beginFlowTableFieldEdit({
+            project: document, selection: flowBlockSelection(document, target),
+            blockId: target.itemId, field: intent.field, columnId: intent.columnId,
+          })
+          if (!begun.ok) return rejectedFlowReceipt(begun.reason)
+          const edit = intent.text === undefined ? begun.edit : markFlowTextComposing(updateFlowTextDraft(begun.edit, { text: intent.text }), intent.composing ?? false)
+          return persistIntentResult({
+            ok: true, nextDocument: document, historyEntry: false, selection: begun.selection,
+          }, { selection: begun.selection, textEdit: edit }, edit)
+        }
         case 'begin-formula-edit': {
           if (flow.read().flowTextEdit) {
             return rejectedFlowReceipt(LAYER_REJECT_STALE_REVISION)
@@ -1033,7 +1063,9 @@ export function createFlowAuthoringSlice(
             ...(intent.edit.tableRowId ? { tableRowId: intent.edit.tableRowId } : {}),
             ...(intent.edit.tableColumnId ? { tableColumnId: intent.edit.tableColumnId } : {}),
           }
-          const selection = flowBlockSelection(document, target, [target.itemId], {
+          const selection = (intent.edit.kind === 'chart-text' || intent.edit.field === 'table-header' || intent.edit.field === 'table-caption')
+            ? flowBlockSelection(document, target)
+            : flowBlockSelection(document, target, [target.itemId], {
             focus: 'text',
             textRange,
           })
@@ -1679,6 +1711,31 @@ export function createFlowAuthoringSlice(
           : {}),
       })
     },
+    addTableNode() {
+      if (!commitDraft()) return
+      const session = flow.read().flowSession
+      if (!session) return
+      if (session.selection.authoringScope === 'global') { kernel.setFeedback({ errorMessage: '表格只能插入正文', statusMessage: null }); return }
+      const document = session.history.present
+      const surface = flowSurfaceIn(document, session.selection.surfaceId)
+      const found = session.selection.selectedBlockId
+        ? findFlowBlockRecursive(surface.blocks, session.selection.selectedBlockId)
+        : null
+      const columns = Array.from({ length: 3 }, (_, index) => ({ id: `col-${nanoid()}`, header: `标题 ${index + 1}` }))
+      const inserted = insertFlowEditorBlock(document, {
+        surfaceId: session.selection.surfaceId,
+        parentId: found?.parentId ?? null,
+        index: found ? found.index + 1 : surface.blocks.length,
+        block: { type: 'table', columns, rows: Array.from({ length: 3 }, () => ({ id: `row-${nanoid()}`, cells: Object.fromEntries(columns.map(column => [column.id, ''])) })) },
+      }, { expectedRevision: document.revision })
+      const createdId = inserted.createdBlockIds?.[0]
+      flow.persist(inserted, {
+        statusMessage: '已插入正文表格',
+        ...(inserted.ok && inserted.nextDocument && createdId
+          ? { selection: selectFlowEditorBlocks(inserted.nextDocument, session.selection.locationId, [createdId]) }
+          : {}),
+      })
+    },
     addTextNode() {
       if (!commitDraft()) return
       const session = flow.read().flowSession
@@ -2163,17 +2220,23 @@ export function persistFlowTransaction(
   const session = flow.read().flowSession
   if (!session) return false
   const history = commitFlowEditorTransactionHistory(session.history, step)
-  flow.persist({
+  const hint = readAuthoringToolSelection(step.selectionHint)
+  const selection = hint ? (hint.itemIds.length > 0
+    ? hint.flowCarrier === 'overlay'
+      ? selectFlowOverlay(step.nextDocument, hint.locationId, hint.itemIds, hint.owner === 'global' ? 'global' : 'page')
+      : selectFlowEditorBlocks(step.nextDocument, hint.locationId, hint.itemIds)
+    : clearFlowEditorSelection(step.nextDocument, hint.locationId, hint.owner === 'global' ? 'global' : 'page')) : session.selection
+  const persisted = flow.persist({
     ok: true,
     nextDocument: step.nextDocument,
     historyEntry: true,
-    selection: session.selection,
+    selection,
   }, {
     replaceHistory: history,
     transactionStep: step,
     statusMessage,
   })
-  return true
+  return persisted.ok
 }
 
 export function persistFlowDocument(
@@ -2193,3 +2256,4 @@ export function persistFlowDocument(
   })
   return true
 }
+import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'

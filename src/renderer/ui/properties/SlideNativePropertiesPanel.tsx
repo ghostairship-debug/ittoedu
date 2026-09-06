@@ -77,10 +77,10 @@ import {
   type ChartPropertiesView,
 } from './ChartProperties'
 import {
-  SlideTableProperties,
-  type SlideTablePropertiesCommands,
-  type SlideTablePropertiesView,
-} from './SlideTableProperties'
+  NativeTableProperties,
+  type NativeTablePropertiesCommands,
+  type NativeTablePropertiesView,
+} from './NativeTableProperties'
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T
 
@@ -110,7 +110,7 @@ export type PropertiesRuntimeView = PropertiesItemBase & {
 
 export type PropertiesItemView =
   | NativeRenderableNode
-  | SlideTablePropertiesView
+  | NativeTablePropertiesView
   | (PropertiesItemBase & ChartPropertiesView)
   | SlideInputPropertiesView
   | PropertiesComponentView
@@ -174,7 +174,7 @@ export interface SlideNativePropertiesContext {
     readonly openAutomation: () => void
     readonly openProfessionalAutomation: () => void
     readonly text: SlideNativeTextCommands
-    readonly table: SlideTablePropertiesCommands | null
+    readonly table: NativeTablePropertiesCommands | null
     readonly chart: ChartPropertiesCommands | null
     readonly input?: SlideInputPropertiesCommands | null
   }
@@ -716,10 +716,10 @@ export function SlideNativeTypeFields({
   onOpenAutomation?: () => void
   textCommands: SlideNativeTextCommands
   draftBindingKey: string
-  tableCommands: SlideTablePropertiesCommands | null
+  tableCommands: NativeTablePropertiesCommands | null
   chartCommands: ChartPropertiesCommands | null
 }) {
-  if (spatialMode && node.type !== 'text' && node.type !== 'chart') {
+  if (spatialMode && node.type !== 'text' && node.type !== 'chart' && node.type !== 'table') {
     return (
       <section
         className="property-section"
@@ -760,8 +760,8 @@ export function SlideNativeTypeFields({
       {!spatialMode && node.type === 'shape' && (
         <SharedShapeProperties node={node} update={update} />
       )}
-      {!spatialMode && node.type === 'table' && tableCommands && (
-        <SlideTableProperties
+      {node.type === 'table' && tableCommands && (
+        <NativeTableProperties
           node={node}
           bindingKey={draftBindingKey}
           commands={tableCommands}

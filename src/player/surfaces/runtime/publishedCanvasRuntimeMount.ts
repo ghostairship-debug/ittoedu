@@ -25,6 +25,7 @@ export interface PublishedCanvasRuntimeMountHandle {
   applyAuthoringContentValue(key: string, value: string): boolean
   waitForReady(): Promise<void>
   waitForCaptureReady(): Promise<void>
+  failCapture?(error: Error): void
   restoreAfterCapture(): void
   setVisible(visible: boolean): void
   suspend(): void
@@ -557,19 +558,12 @@ export function mountPublishedCanvasRuntime(
         if (failure) throw failure
       } catch (cause) {
         captureFailure = normalizeError(cause)
-        reportError(options, 'lifecycle', captureFailure)
-        if (!suspended) {
-          try {
-            mountedHost.resume()
-            checkLifecycleFailure()
-          } catch (restoreCause) {
-            quarantine('lifecycle', restoreCause)
-          }
-        }
+        quarantine('lifecycle', captureFailure)
         capturePrepared = false
         throw captureFailure
       }
     },
+    failCapture(error) { quarantine('lifecycle', error) },
     restoreAfterCapture() {
       if (!capturePrepared || destroyed || quarantined) return
       capturePrepared = false

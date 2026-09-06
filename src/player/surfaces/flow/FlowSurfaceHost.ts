@@ -117,6 +117,7 @@ export interface FlowSurfaceHostOptions {
   /** Runtime-session only. Default is collapsed (scheme 1). */
   initialTocOpen?: boolean
   resolveAsset?: (assetId: string) => string | undefined
+  projectId?: string
   components?: Record<string, PublishedComponentPackageSource>
   /** Published playback session state shared across every surface host. */
   courseState?: CourseStateStore
@@ -711,6 +712,7 @@ export class FlowSurfaceHost {
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
     const article = renderFlowArticle(surface, {
       playback: this.#playback,
+      projectId: this.#playback.courseId,
       components: this.#components,
       resolveAsset: this.#options.resolveAsset,
       dom: this.#root.ownerDocument,
@@ -807,6 +809,7 @@ export class FlowSurfaceHost {
         entry,
         (assetId) => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
         {
+          projectId: this.#playback.courseId,
           components: this.#components,
           interactive: true,
           ...(this.#carrierEffects.courseState
@@ -1218,6 +1221,7 @@ function renderStaticOverlayItem(
   },
   resolveAsset: (assetId: string) => string | undefined,
   options?: {
+    projectId?: string
     components?: Record<string, PublishedComponentPackageSource>
     interactive?: boolean
     courseState?: CourseStateStoreContract
@@ -1350,6 +1354,7 @@ function renderStaticOverlayItem(
         height: componentItem.frame.height,
         props: componentItem.props,
         staticFallbackAssetId: componentItem.staticFallbackAssetId,
+        projectId: options?.projectId,
         components: options?.components,
         resolveAsset,
         interactive: (options?.interactive ?? true) && componentItem.hitPolicy === 'auto',
@@ -1409,6 +1414,7 @@ function renderFlowArticle(
   surface: PublishedFlowSurface,
   options: {
     playback: FlowPublishedPlaybackDocument
+    projectId?: string
     components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
@@ -1527,6 +1533,7 @@ function renderBlockDom(
   parent: HTMLElement,
   options: {
     playback: FlowPublishedPlaybackDocument
+    projectId?: string
     components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
@@ -1788,6 +1795,7 @@ function renderBlockDom(
           height: 320,
           props: block.props,
           staticFallbackAssetId: block.staticFallbackAssetId,
+          projectId: options.projectId,
           components: options.components,
           resolveAsset: (assetId) => resolvePlaybackAssetUrl(options.playback, assetId, options.resolveAsset),
           interactive: options.interactive ?? true,

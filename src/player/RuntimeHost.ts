@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser'
+import { scopeDynamicHostApi } from '../shared/dynamicHostApiScope'
 import {
   evaluateAssessment,
   type AssessmentEvaluationRequest,
@@ -406,11 +407,11 @@ export class RuntimeHost {
             return options.assetUrl(assetId)
           },
         },
-        presentation: options.environment.presentation,
-        actions: options.actions,
+        presentation: scopeDynamicHostApi(options.environment.presentation, () => !this.destroyed && !this.failure),
+        actions: scopeDynamicHostApi(options.actions, () => !this.destroyed && !this.failure),
         events: this.scopedEvents,
         localState: this.localState,
-        courseState: options.courseState,
+        courseState: scopeDynamicHostApi(options.courseState, () => !this.destroyed && !this.failure),
         capture: {
           waitUntil: (promise: Promise<unknown>) => {
             const tracked = Promise.resolve(promise)

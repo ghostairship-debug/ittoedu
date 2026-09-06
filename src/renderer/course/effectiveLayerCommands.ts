@@ -592,7 +592,7 @@ function normalizeEffectiveLayerPropertyPatch(
   item: LayerItem,
   source: LayerOwnerSource,
   patch: EffectiveLayerPropertyPatch,
-  options: { readonly allowSceneNativeData?: boolean } = {},
+  options: { readonly allowOwnedNativeData?: boolean } = {},
 ): { readonly patch: EffectiveLayerPropertyPatch; readonly changed: boolean } {
   const unknownKey = Object.keys(patch).find(
     (key) => !EFFECTIVE_LAYER_PROPERTY_KEYS.has(key as keyof EffectiveLayerPropertyPatch),
@@ -681,7 +681,7 @@ function normalizeEffectiveLayerPropertyPatch(
   let mergedNativeData: Record<string, unknown> | null = null
   if (patch.nativeData !== undefined) {
     if (
-      (source !== 'surface' && !(options.allowSceneNativeData && source === 'scene'))
+      (source !== 'surface' && !options.allowOwnedNativeData)
       || item.kind !== 'native'
       || isTeacherControllerLayerItem(item)
     ) {
@@ -882,7 +882,7 @@ export function patchEffectiveLayerPropertiesAtTargets(
         effective,
         located.source,
         propertyPatch,
-        { allowSceneNativeData: true },
+        { allowOwnedNativeData: true },
       )
       let nextComponentProps: Record<string, unknown> | null = null
       let componentChanged = false

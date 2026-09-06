@@ -24,6 +24,7 @@ import {
   type FlowTextRange,
 } from '../course/flowEditorSlice'
 import { isRichTextFlowBlock } from '../course/flowDocumentModel'
+import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
 
 export const FLOW_TEXT_REJECT_COMPOSING = 'composing'
 export const FLOW_TEXT_REJECT_NOT_EDITABLE = '当前块不能就地编辑文字'
@@ -32,11 +33,11 @@ export const FLOW_TEXT_REJECT_NO_SELECTION = '没有可设置格式的选区'
 export const FLOW_DEFAULT_HIGHLIGHT = '#fff3a3'
 export const FLOW_PAPER_TEXT_COLOR = '#1f2937'
 
-export type FlowTextEditKind = 'rich-text' | 'plain-string' | 'formula'
+export type FlowTextEditKind = 'rich-text' | 'plain-string' | 'formula' | 'chart-text'
 export type FlowTextEditSource = 'paper' | 'properties'
 export type FlowTextEditAction = 'commit' | 'cancel' | 'ignore' | 'defer'
 export type FlowTextEditGesture = 'double-click' | 'enter' | 'click-text'
-export type FlowPlainTextField = 'code' | 'body' | 'title'
+export type FlowPlainTextField = 'code' | 'body' | 'title' | 'table-caption' | 'table-header'
 
 export interface FlowRichTextDraft {
   readonly text: string
@@ -65,12 +66,13 @@ export interface FlowTextEditSession {
   readonly listItemId?: string
   readonly tableRowId?: string
   readonly tableColumnId?: string
+  readonly chartField?: ChartTextField
   readonly field: 'text' | FlowPlainTextField | 'formula'
   readonly composing: boolean
   readonly pendingAction: Exclude<FlowTextEditAction, 'ignore' | 'defer'> | null
   readonly revision: number
-  readonly original: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft
-  readonly draft: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft
+  readonly original: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft | ChartTextDraft
+  readonly draft: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft | ChartTextDraft
   readonly range: { start: number; end: number }
   /** Session-only style patch applied to text subsequently inserted at a caret. */
   readonly pendingStyle: TextRunStyle
@@ -524,6 +526,64 @@ export function applyFlowTextEditGesture(input: {
   })
 }
 
+export function beginFlowChartTextEdit(input: {
+  readonly project: CourseProjectDocument
+  readonly selection: FlowEditorSelection
+  readonly blockId: string
+  readonly field: ChartTextField
+}): BeginFlowTextEditResult {
+  const block = locateBlock(input.project, input.selection.surfaceId, input.blockId)
+  if (!block || block.type !== 'chart') return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
+  const text = readChartText(block.chart, input.field)
+  if (text === undefined) return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
+  const selection = selectFlowEditorBlocks(input.project, input.selection.locationId, [input.blockId])
+  const target = flowBlockTargetFromSelection(input.project, selection)
+  const original: ChartTextDraft = { text, chart: structuredClone(block.chart), error: null }
+  return {
+    ok: true,
+    selection,
+    edit: freezeEdit({
+      kind: 'chart-text', source: 'paper', blockId: input.blockId,
+      surfaceId: target.surfaceId, parentId: target.parentId, chartField: input.field,
+      field: 'text', composing: false, pendingAction: null, pendingStyle: {},
+      revision: input.project.revision, original, draft: structuredClone(original),
+      range: { start: 0, end: text.length },
+    }),
+  }
+}
+
+export function beginFlowTableFieldEdit(input: {
+  readonly project: CourseProjectDocument
+  readonly selection: FlowEditorSelection
+  readonly blockId: string
+  readonly field: 'table-caption' | 'table-header'
+  readonly columnId?: string
+}): BeginFlowTextEditResult {
+  const block = locateBlock(input.project, input.selection.surfaceId, input.blockId)
+  if (!block || block.type !== 'table') return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
+  const text = input.field === 'table-caption' ? block.caption ?? '' : block.columns.find(column => column.id === input.columnId)?.header
+  if (text === undefined) return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
+  const selection = selectFlowEditorBlocks(input.project, input.selection.locationId, [input.blockId])
+  const target = flowBlockTargetFromSelection(input.project, selection)
+  const original: FlowPlainTextDraft = { text }
+  return {
+    ok: true,
+    selection,
+    edit: freezeEdit({
+      kind: 'plain-string', source: 'properties', blockId: input.blockId,
+      surfaceId: target.surfaceId, parentId: target.parentId, tableColumnId: input.columnId,
+      field: input.field, composing: false, pendingAction: null, pendingStyle: {},
+      revision: input.project.revision, original, draft: structuredClone(original),
+      range: { start: 0, end: text.length },
+    }),
+  }
+}
+
+export function updateFlowChartTextDraft(edit: FlowTextEditSession, draft: ChartTextDraft, composing: boolean): FlowTextEditSession {
+  if (edit.kind !== 'chart-text') return edit
+  return freezeEdit({ ...edit, draft, composing })
+}
+
 export function beginFlowFormulaEdit(input: {
   readonly project: CourseProjectDocument
   readonly selection: FlowEditorSelection
@@ -863,7 +923,7 @@ export function flowTextEditSelection(
   locationId: string,
   edit: FlowTextEditSession,
 ): FlowEditorSelection {
-  if (edit.kind === 'formula') {
+  if (edit.kind === 'formula' || edit.kind === 'chart-text' || edit.field === 'table-caption' || edit.field === 'table-header') {
     return selectFlowEditorBlocks(document, locationId, [edit.blockId])
   }
   return selectFlowEditorBlocks(document, locationId, [edit.blockId], {
@@ -924,6 +984,20 @@ export function commitFlowTextEdit(
     return identityDocument(document, { nextEdit: null, nextSelection: selection })
   }
 
+  if (edit.kind === 'chart-text') {
+    const draft = edit.draft as ChartTextDraft
+    if (draft.error) return failCommand(draft.error, { nextEdit: edit })
+    const result = updateFlowEditorBlock(document, {
+      surfaceId: edit.surfaceId, blockId: edit.blockId, parentId: edit.parentId,
+    }, block => {
+      if (block.type !== 'chart' || !edit.chartField || readChartText(block.chart, edit.chartField) === undefined) {
+        throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
+      }
+      block.chart = structuredClone(draft.chart)
+    }, options)
+    return { ...result, nextEdit: result.ok ? null : edit, nextSelection: selection }
+  }
+
   if (edit.kind === 'formula') {
     const draft = edit.draft as FlowFormulaDraft
     if (!draft.valid) {
@@ -947,6 +1021,18 @@ export function commitFlowTextEdit(
 
   if (edit.kind === 'plain-string') {
     const text = (edit.draft as FlowPlainTextDraft).text
+    if (edit.field === 'table-caption' || edit.field === 'table-header') {
+      const result = updateFlowEditorBlock(document, { surfaceId: edit.surfaceId, blockId: edit.blockId, parentId: edit.parentId }, block => {
+        if (block.type !== 'table') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
+        if (edit.field === 'table-caption') block.caption = text
+        else {
+          const column = block.columns.find(column => column.id === edit.tableColumnId)
+          if (!column) throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
+          column.header = text
+        }
+      }, options)
+      return { ...result, nextEdit: null, nextSelection: selection }
+    }
     if (edit.field === 'title') {
       const result = updateFlowEditorBlock(document, {
         surfaceId: edit.surfaceId,

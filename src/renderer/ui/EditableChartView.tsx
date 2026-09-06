@@ -3,8 +3,17 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { NativeChartContent } from '../../shared/contracts/native-v1'
 import { buildNativeChartSvg } from '../../shared/nativeChartSvg'
 import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
+import { createChartTextDraft, type ChartTextDraft, type ChartTextField } from '../authoring/chartTextDraft'
 
-export function EditableChartView({ id, chart, width, height, onCommit, onHeightCommit, canvasTextPort, onEditStart }: {
+export interface ChartTextEditController {
+  readonly draft: ChartTextDraft | null
+  begin(field: ChartTextField, draft: ChartTextDraft): boolean
+  update(draft: ChartTextDraft, composing: boolean): void
+  commit(): void
+  cancel(): void
+}
+
+export function EditableChartView({ id, chart, width, height, onCommit, onHeightCommit, canvasTextPort, onEditStart, textController }: {
   id: string
   chart: NativeChartContent
   width: number
@@ -13,8 +22,10 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
   onHeightCommit?: (height: number) => void
   canvasTextPort?: () => ChartCanvasTextPort | undefined
   onEditStart?: (event: MouseEvent<HTMLElement>) => void
+  textController?: ChartTextEditController
 }) {
   const root = useRef<HTMLDivElement>(null)
+  const draftFactory = useRef<((value: string) => ChartTextDraft) | null>(null)
   const [edit, setEdit] = useState<{ value: string; left: number; top: number; apply: (value: string) => string | null } | null>(null)
   const composing = useRef(false)
   const finishAfterComposition = useRef(false)
@@ -27,8 +38,16 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
   // Selection renders must retain the SVG text node between the two clicks.
   const markup = useMemo(() => ({ __html: svg }), [svg])
   useEffect(() => { setEdit(null); setError(null) }, [id])
+  useEffect(() => {
+    if (textController && !textController.draft) { editRef.current = null; setEdit(null) }
+  }, [textController?.draft])
   const finish = () => {
     if (composing.current) { finishAfterComposition.current = true; return }
+    if (textController) {
+      if (textController.draft && draftFactory.current) textController.update(draftFactory.current(textController.draft.text), false)
+      textController.commit()
+      return
+    }
     const current = editRef.current
     if (!current) return
     editRef.current = null
@@ -50,6 +69,11 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
       const draftLabel = categoryId ? port?.read('category', categoryId) : seriesId ? port?.read('series', seriesId) : undefined
       const value = draftLabel ?? ( categoryId ? source.categories.find(item => item.id === categoryId)?.label : seriesId ? source.series.find(item => item.id === seriesId)?.name : source.title)
       if (value === undefined) return
+      const field: ChartTextField = categoryId ? { kind: 'category', id: categoryId } : seriesId ? { kind: 'series', id: seriesId } : { kind: 'title' }
+      const makeDraft = (text: string) => createChartTextDraft(source, field, text,
+        field.kind === 'title' ? undefined : canvasTextPort?.()?.prepare?.(field.kind, field.id, text))
+      if (textController && !textController.begin(field, makeDraft(value))) return
+      draftFactory.current = makeDraft
       const bounds = root.current!.getBoundingClientRect()
       const localWidth = root.current!.clientWidth || width
       const rect = label.getBoundingClientRect()
@@ -67,12 +91,19 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
       } })
     }}>
     <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={markup} />
-    {edit ? <input autoFocus aria-label="图表文字" value={edit.value} style={{ position: 'absolute', left: edit.left, top: edit.top, minWidth: 150, maxWidth: '100%', zIndex: 10, color: '#111827', background: '#fff' }}
+    {edit ? <input autoFocus aria-label="图表文字" value={textController?.draft?.text ?? edit.value} style={{ position: 'absolute', left: edit.left, top: edit.top, minWidth: 150, maxWidth: '100%', zIndex: 10, color: '#111827', background: '#fff' }}
       onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
-      onChange={event => { const next = { ...edit, value: event.target.value }; editRef.current = next; setEdit(next) }} onBlur={finish}
-      onCompositionStart={() => { composing.current = true }}
+      onChange={event => {
+        if (textController && draftFactory.current) { textController.update(draftFactory.current(event.target.value), composing.current); return }
+        const next = { ...edit, value: event.target.value }; editRef.current = next; setEdit(next)
+      }} onBlur={finish}
+      onCompositionStart={() => {
+        composing.current = true
+        if (textController?.draft) textController.update(textController.draft, true)
+      }}
       onCompositionEnd={event => {
         composing.current = false
+        if (textController && draftFactory.current) textController.update(draftFactory.current(event.currentTarget.value), false)
         if (editRef.current) { const next = { ...editRef.current, value: event.currentTarget.value }; editRef.current = next; setEdit(next) }
         if (finishAfterComposition.current) { finishAfterComposition.current = false; finish() }
       }}
@@ -80,9 +111,10 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
         event.stopPropagation()
         if (event.nativeEvent.isComposing) return
         if (event.key === 'Enter') { event.preventDefault(); finish() }
-        if (event.key === 'Escape') { editRef.current = null; setEdit(null); setError(null) }
+        if (event.key === 'Escape') { textController?.cancel(); editRef.current = null; setEdit(null); setError(null) }
       }} /> : null}
     {error ? <div role="alert" style={{ position: 'absolute', bottom: 0, background: '#fee2e2', color: '#991b1b' }}>{error}</div> : null}
+    {textController?.draft?.error ? <div role="alert" style={{ position: 'absolute', bottom: 0, background: '#fee2e2', color: '#991b1b' }}>{textController.draft.error}</div> : null}
     {onHeightCommit ? <button type="button" aria-label="调整图表高度" style={{ position: 'absolute', bottom: -5, left: '45%', width: '10%', height: 10, padding: 0, cursor: 'ns-resize', touchAction: 'none' }}
       onPointerDown={event => { event.stopPropagation(); event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); resize.current = { y: event.clientY, height, scale: (root.current?.getBoundingClientRect().width ?? width) / width, commit: onHeightCommit } }}
       onPointerMove={event => { if (resize.current) setPreviewHeight(Math.round(Math.min(1600, Math.max(160, resize.current.height + (event.clientY - resize.current.y) / resize.current.scale)))) }}

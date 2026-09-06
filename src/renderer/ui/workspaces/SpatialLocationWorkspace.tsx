@@ -1,5 +1,7 @@
+import { paintPublishedNativeTable, type PublishedNativeTableInput } from '../../../player/surfaces/slide/publishedNativeRendering'
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { EditableChartView } from '../EditableChartView'
+import type { ChartTextDraft } from '../../authoring/chartTextDraft'
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -188,6 +190,18 @@ function asSpatialNativeLayer(item: LayerItem): NativeLayerItem | null {
   return item.kind === 'native' ? item : null
 }
 
+function SpatialTablePaint({ table }: { table: PublishedNativeTableInput }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    element.replaceChildren()
+    paintPublishedNativeTable(element, table)
+    return () => element.replaceChildren()
+  }, [table])
+  return <div ref={ref} style={{ width: '100%', height: '100%' }} />
+}
+
 function spatialNativePaint(
   item: LayerItem,
   assetUrls: Readonly<Record<string, string>>,
@@ -209,6 +223,7 @@ function spatialNativePaint(
       />
     )
   }
+  if (native.type === 'table') return <SpatialTablePaint table={{ ...native, width: size.width, height: size.height }} />
   if (native.type === 'chart') return <EditableChartView id={native.id} chart={native} width={size.width} height={size.height} />
   if (native.type === 'text') return native.text
   return spatialAuthoringMedia(native, assetUrls) ?? (native.name || native.type)
@@ -240,11 +255,13 @@ function spatialNativeWorldBoxStyle(item: LayerItem): {
 }
 
 function SpatialComponentItemContent({
+  projectId,
   layerItemId,
   item,
   componentPackages,
   assetUrls,
 }: {
+  projectId: string
   layerItemId: string
   item: LayerItem
   componentPackages: Record<string, ComponentPackageData>
@@ -259,6 +276,7 @@ function SpatialComponentItemContent({
     const el = containerRef.current
     if (!el || !pkg) return
     const handle = mountPublishedComponent(el, {
+      projectId,
       container: el,
       componentId: item.component.packageId,
       version: item.component.version,
@@ -273,7 +291,7 @@ function SpatialComponentItemContent({
       interactive: false,
     })
     return () => handle.destroy()
-  }, [item.component.packageId, item.component.version, layerItemId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg])
+  }, [item.component.packageId, item.component.version, layerItemId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg, projectId])
 
   if (!pkg) {
     if (fallbackUrl) {
@@ -654,6 +672,7 @@ export function SpatialLocationWorkspace({
               />
             ) : layer.item.kind === 'component' ? (
               <SpatialComponentItemContent
+                projectId={view.projectId}
                 layerItemId={layer.selectionId}
                 item={layer.item as LayerItem}
                 componentPackages={componentPackages}
@@ -994,6 +1013,7 @@ export function SpatialLocationWorkspace({
                   >
                     {layer.item.kind === 'component' ? (
                       <SpatialComponentItemContent
+                        projectId={view.projectId}
                         layerItemId={layer.selectionId}
                         item={layer.item as LayerItem}
                         componentPackages={componentPackages}
@@ -1002,6 +1022,37 @@ export function SpatialLocationWorkspace({
                     ) : layer.item.kind === 'native' && layer.item.content.nativeType === 'chart' ? (
                       <EditableChartView id={layer.selectionId} chart={structuredClone(layer.item.content.data) as import('../../../shared/contracts/native-v1').NativeChartContent} width={size.width} height={size.height}
                         canvasTextPort={() => { const target = layerTargets.get(layer.selectionId); return target ? chartCanvasTextPort(target) : undefined }}
+                        textController={scope !== 'world' || layer.item.locked ? undefined : {
+                          draft: contentEdit?.kind === 'chart-text' && contentEdit.target.layerItemId === layer.selectionId ? contentEdit.draft as ChartTextDraft : null,
+                          begin: (chartField, draft) => {
+                            const target = layerTargets.get(layer.selectionId)
+                            if (!target) return false
+                            const receipt = commands.run(target, { kind: 'begin-content-edit', chartField, source: 'canvas', expectedEdit: contentEditRef.current, expectedContentEdit: contentEditRef.current })
+                            if (!receipt.ok || !receipt.edit) return false
+                            contentEditRef.current = receipt.edit
+                            const updated = commands.run(target, { kind: 'update-chart-content-edit', expectedEdit: receipt.edit, expectedContentEdit: receipt.edit, draft, composing: false })
+                            if (updated.ok && updated.edit) contentEditRef.current = updated.edit
+                            return updated.ok
+                          },
+                          update: (draft, composing) => {
+                            const edit = contentEditRef.current
+                            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
+                            const receipt = commands.run(edit.courseTarget, { kind: 'update-chart-content-edit', expectedEdit: edit, expectedContentEdit: edit, draft, composing })
+                            if (receipt.ok && receipt.edit) contentEditRef.current = receipt.edit
+                          },
+                          commit: () => {
+                            const edit = contentEditRef.current
+                            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
+                            const receipt = commands.run(edit.courseTarget, { kind: 'commit-chart-content-edit', expectedEdit: edit, expectedContentEdit: edit })
+                            if (receipt.ok) contentEditRef.current = null
+                          },
+                          cancel: () => {
+                            const edit = contentEditRef.current
+                            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
+                            const receipt = commands.run(edit.courseTarget, { kind: 'cancel-content-edit', expectedEdit: edit, expectedContentEdit: edit })
+                            if (receipt.ok) contentEditRef.current = null
+                          },
+                        }}
                         onCommit={scope !== 'world' || layer.item.locked ? undefined : chart => {
                           const target = layerTargets.get(layer.selectionId)
                           if (!target) return '图表目标已失效'

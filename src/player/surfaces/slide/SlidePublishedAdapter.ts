@@ -432,6 +432,7 @@ function appendLayerNode(
   resolveAsset: (assetId: string) => string | undefined,
   mountTeacherController?: (wrap: HTMLElement, input: PublishedTeacherControllerInput) => void,
   options?: {
+    projectId?: string
     components?: Readonly<Record<string, PublishedComponentPackageSource>>
     interactive?: boolean
     includeInvisible?: boolean
@@ -540,6 +541,7 @@ function appendLayerNode(
           height: nextItem.frame.height,
           props: nextItem.props,
           staticFallbackAssetId: nextItem.staticFallbackAssetId,
+          projectId: options?.projectId,
           components: options?.components,
           resolveAsset,
           interactive: options?.interactive ?? true,
@@ -2048,6 +2050,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         this.#resolveAsset,
         mountController,
         {
+          projectId: this.#payload.courseId,
           components: this.#authoring?.componentPackages ?? this.#payload.components,
           interactive: !this.#authoring && !this.#staticCapture,
           includeInvisible: this.#authoring !== null,
@@ -2100,6 +2103,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                 height: nextItem.frame.height,
                 props: nextItem.props,
                 staticFallbackAssetId: nextItem.staticFallbackAssetId,
+                projectId: this.#payload.courseId,
                 components: this.#authoring?.componentPackages ?? this.#payload.components,
                 resolveAsset: this.#resolveAsset,
                 mode: this.#authoring

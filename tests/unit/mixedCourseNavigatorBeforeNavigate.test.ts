@@ -135,6 +135,24 @@ class FailureInjectingPlayer implements MixedCoursePlayerPort {
 }
 
 describe('MixedCourseNavigator onBeforeNavigate', () => {
+  it('announces a settled real transition once and allows the observer to enqueue another', async () => {
+    const player = new RecordingPlayer()
+    const settled: string[] = []
+    let followUp: Promise<unknown> | undefined
+    const navigator = new MixedCourseNavigator(course, player, {
+      onNavigate: () => { expect(navigator.hasPendingNavigation).toBe(true) },
+      onNavigationSettled: state => {
+        expect(navigator.hasPendingNavigation).toBe(false)
+        settled.push(state.locationId)
+        if (settled.length === 1) followUp = navigator.next()
+      },
+    })
+    await navigator.start()
+    await followUp
+    expect(settled).toHaveLength(2)
+    await navigator.goToLocation(navigator.current!.locationId)
+    expect(settled).toHaveLength(2)
+  })
   it('runs once before the first start mutates the player', async () => {
     const player = new RecordingPlayer()
     const transitions: MixedNavigationTransition[] = []

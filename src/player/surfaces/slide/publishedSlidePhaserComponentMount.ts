@@ -394,12 +394,12 @@ export function mountPublishedSlidePhaserComponent(
         await resources.waitForCaptureReady(() => lifecycle?.prepareCapture?.())
       } catch (cause) {
         captureFailure = cause instanceof Error ? cause : new Error(String(cause))
-        lifecycle?.setMode?.(options.mode ?? 'preview')
-        if (!suspended) lifecycle?.resume?.()
+        quarantine('lifecycle', captureFailure)
         capturePrepared = false
         throw captureFailure
       }
     },
+    failCapture(error) { quarantine('lifecycle', error) },
     restoreAfterCapture() {
       if (!capturePrepared || !lifecycle) return
       capturePrepared = false

@@ -14,6 +14,7 @@ interface CanvasPlainTextEditorProps {
   multiline?: boolean
   maxLength?: number
   rotation?: number
+  onDraftChange?(value: string, composing: boolean): void
   onCommit(value: string): void
   onAdvance?(value: string, direction: 1 | -1): void
   onCancel(): void
@@ -34,12 +35,17 @@ export function CanvasPlainTextEditor({
   onCommit,
   onAdvance,
   onCancel,
+  onDraftChange,
 }: CanvasPlainTextEditorProps) {
-  const [draft, setDraft] = useState(value)
+  const [localDraft, setDraft] = useState(value)
+  const draft = onDraftChange ? value : localDraft
+  const composingRef = useRef(false)
+  const pendingFinishRef = useRef<boolean | null>(null)
   const controlRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
   const finishedRef = useRef(false)
 
   const finish = (cancel: boolean) => {
+    if (composingRef.current) { pendingFinishRef.current = cancel; return }
     if (finishedRef.current) return
     finishedRef.current = true
     if (cancel) onCancel()
@@ -64,12 +70,33 @@ export function CanvasPlainTextEditor({
     maxLength,
     onChange: (
       event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    ) => setDraft(event.currentTarget.value),
+    ) => {
+      finishedRef.current = false
+      if (onDraftChange) onDraftChange(event.currentTarget.value, composingRef.current)
+      else setDraft(event.currentTarget.value)
+    },
+    onCompositionStart: () => {
+      composingRef.current = true
+      onDraftChange?.(draft, true)
+    },
+    onCompositionEnd: (event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      composingRef.current = false
+      const text = event.currentTarget.value
+      if (onDraftChange) onDraftChange(text, false)
+      else setDraft(text)
+      const pending = pendingFinishRef.current
+      pendingFinishRef.current = null
+      if (pending !== null && !finishedRef.current) {
+        finishedRef.current = true
+        if (pending) onCancel()
+        else onCommit(text)
+      }
+    },
     onBlur: () => finish(false),
     onKeyDown: (
       event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
-      if (event.nativeEvent.isComposing) return
+      if (event.nativeEvent.isComposing || composingRef.current) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         finish(false)
         return

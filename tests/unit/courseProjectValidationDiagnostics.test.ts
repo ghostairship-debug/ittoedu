@@ -135,6 +135,8 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'validation-failed',
     ])
     expect(COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER.map(({ code }) => code)).toEqual([
+      'interaction-single-choice-answer-inconsistent',
+      'text-capacity-overflow',
       'asset-byte-length-mismatch',
       'asset-bytes-missing',
       'asset-kind-mismatch',
@@ -227,6 +229,8 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
     expect(COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER.filter(
       ({ status }) => status === 'active',
     ).map(({ code }) => code)).toEqual([
+      'interaction-single-choice-answer-inconsistent',
+      'text-capacity-overflow',
       'asset-kind-mismatch',
       'asset-reference-analysis-incomplete',
       'asset-reference-missing',

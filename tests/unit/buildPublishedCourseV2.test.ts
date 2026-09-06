@@ -23,6 +23,7 @@ import {
 import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
+  collectPublishedCourseSourceIssues,
   collectPublishedCourseComponentKeys,
   PublishedCourseSourceError,
   type CoursePublishSources,
@@ -477,6 +478,39 @@ function mutableMixedSources(): MutableCoursePublishSources {
 }
 
 describe('Published Course V2 producer', () => {
+  it('publishes direct Component and Runtime project media calls with source-located missing diagnostics', () => {
+    const sources = mutableMixedSources()
+    for (const [id, kind] of [['direct-image', 'image'], ['direct-audio', 'audio'], ['direct-video', 'video']] as const) {
+      sources.project.assets[id] = asset(id, kind)
+      sources.assetFiles[id] = ASSET_BYTES
+    }
+    const component = sources.components['component.quiz']!
+    const runtimeSource = component.runtimeSource.replace('return {destroy(){}}', "ctx.projectAssetUrl('direct-image');ctx.projectAssetUrl(`direct-video`);return {destroy(){}}")
+    const files = { ...component.files, 'runtime.js': new TextEncoder().encode(runtimeSource) }
+    const contentSha256 = componentContentSha256(files)
+    sources.components['component.quiz'] = { ...component, runtimeSource, files, contentSha256 }
+    sources.project.componentPackages['component.quiz']!.contentSha256 = contentSha256
+    const slide = sources.project.surfaces.find((surface) => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('Expected slide')
+    const runtime = slide.scenes[0]!.layerItems.find((item) => item.kind === 'runtime')!
+    if (runtime.kind !== 'runtime') throw new Error('Expected runtime')
+    runtime.runtime.source = "CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){ctx.assets.projectUrl('direct-audio');const unrelated='unused';return {destroy(){}}}})"
+    expect(collectPublishedCourseAssetIds(sources).has('unused')).toBe(false)
+    const payload = buildPublishedCourseV2Payload(sources)
+    for (const id of ['direct-image', 'direct-audio', 'direct-video']) {
+      expect(payload.assets[id]?.url).toMatch(/^data:.*;base64,AQID$/)
+    }
+    delete sources.assetFiles['direct-image']
+    expect(collectPublishedCourseSourceIssues(sources)).toContainEqual(expect.objectContaining({
+      code: 'asset-bytes-missing', path: ['componentPackages', 'component.quiz', 'runtimeSource', expect.any(Number)],
+    }))
+    runtime.runtime.source = runtime.runtime.source.replace('direct-audio', 'missing-direct-audio')
+    expect(collectPublishedCourseSourceIssues(sources)).toContainEqual(expect.objectContaining({
+      code: 'asset-metadata-missing', path: ['surfaces', 0, 'scenes', 0, 'layerItems', 3, 'runtime', 'source', expect.any(Number)],
+    }))
+    expect(() => buildPublishedCourseV2Payload(sources)).toThrow(PublishedCourseSourceError)
+  })
+
   it('builds V2 from an in-memory V9 project and keeps ownership, locations and asset closure', () => {
     const sources = mixedSources()
     expect([...collectPublishedCourseAssetIds(sources)].sort()).toEqual([

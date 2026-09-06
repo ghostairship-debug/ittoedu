@@ -29,6 +29,8 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
+import { authoringToolReceiptV1Schema, type AuthoringToolReceiptV1 } from '../src/shared/authoringToolContract'
+import { createCoursewareBuilderV2Host, type CoursewareCaseBuilderV2 } from './courseware-builder-v2-host'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export interface CoursewareCaseBuildOptions {
@@ -48,6 +50,7 @@ export interface CoursewareCaseBuildDependencies {
 }
 
 export interface CoursewareCaseBuildSummary {
+  receipts?: AuthoringToolReceiptV1[]
   status: 'built'
   projectId: string
   title: string
@@ -200,6 +203,7 @@ function normalizeBuildOutput(value: unknown): CoursewareCaseBuildOutput {
     project: output.project,
     assetFiles: output.assetFiles ?? {},
     componentFiles: output.componentFiles ?? {},
+    ...(output.receipts ? { receipts: output.receipts } : {}),
   }
 }
 
@@ -338,7 +342,20 @@ export async function buildCoursewareCase(
     capabilityIndex,
     api: createCoursewareCaseBuilderApi(),
   })
-  const output = normalizeBuildOutput(await builder(context))
+  const requestedVersion = typeof imported === 'object' && imported !== null ? Reflect.get(imported, 'apiVersion') : undefined
+  if (requestedVersion !== undefined && requestedVersion !== 1 && requestedVersion !== 2) throw new Error(`不支持的 Builder API 版本：${String(requestedVersion)}`)
+  let output: CoursewareCaseBuildOutput
+  if (requestedVersion === 2) {
+    const host = await createCoursewareBuilderV2Host(editorRoot)
+    try {
+      output = normalizeBuildOutput(host.resolveOutput(await (builder as unknown as CoursewareCaseBuilderV2)({ ...context, apiVersion: 2, api: host.api })))
+      output.receipts = (output.receipts ?? []).map(receipt => authoringToolReceiptV1Schema.parse(receipt))
+      if (!output.receipts.length) throw new Error('Builder V2 必须返回产品工作会话及每步回执')
+    } finally { await host.close() }
+  } else {
+    process.stderr.write(`Builder V1 兼容模式：${builderPath}；迁移时声明 export const apiVersion = 2。\n`)
+    output = normalizeBuildOutput(await builder(context))
+  }
   const archive = createCourseProjectArchive({
     project: output.project,
     assetFiles: output.assetFiles ?? {},
@@ -366,6 +383,7 @@ export async function buildCoursewareCase(
 
   return {
     status: 'built',
+    ...(output.receipts ? { receipts: output.receipts } : {}),
     projectId: reopened.project.id,
     title: reopened.project.title,
     revision: reopened.project.revision,

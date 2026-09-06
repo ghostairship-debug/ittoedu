@@ -242,6 +242,7 @@ function componentApi(options: {
       ?? (async () => { throw new Error('not used') }),
   )
   return {
+    materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),
     openRecentProject: vi.fn(async () => { throw new Error('not used') }),

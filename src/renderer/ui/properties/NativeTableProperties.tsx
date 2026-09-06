@@ -17,11 +17,14 @@ import {
 } from './PropertyControls'
 import type { PropertiesItemBase } from './SlideNativePropertiesPanel'
 
-export type SlideTablePropertiesView = PropertiesItemBase & {
+export type NativeTablePropertiesView = PropertiesItemBase & {
   type: 'table'
 } & NativeTableContent
 
-export interface SlideTablePropertiesCommands {
+export interface NativeTablePropertiesCommands {
+  readonly beginCellEdit: (cellId: string) => void
+  readonly updateCellDraft: (cellId: string, text: string, composing: boolean) => void
+  readonly cancelCellEdit: (cellId: string) => void
   readonly commitCellText: (cellId: string, text: string) => void
   readonly commitLastCellAndAppendRow: (cellId: string, text: string) => void
   readonly patchStyle: (patch: Partial<NativeTableStyle>) => void
@@ -51,7 +54,11 @@ function TableCellInput({
   value,
   onNavigate,
   onActivate,
+  cellId,
+  commands,
 }: {
+  cellId: string
+  commands: NativeTablePropertiesCommands
   rowId: string
   columnId: string
   value: string
@@ -82,17 +89,24 @@ function TableCellInput({
         editingRef.current = true
         baselineRef.current = draft
         onActivate({ rowId, columnId })
+        commands.beginCellEdit(cellId)
       }}
-      onChange={(event) => setDraft(event.currentTarget.value)}
+      onChange={(event) => {
+        setDraft(event.currentTarget.value)
+        commands.updateCellDraft(cellId, event.currentTarget.value, composingRef.current)
+      }}
       onCompositionStart={() => {
         composingRef.current = true
+        commands.updateCellDraft(cellId, draft, true)
       }}
       onCompositionEnd={(event) => {
         composingRef.current = false
         setDraft(event.currentTarget.value)
+        commands.updateCellDraft(cellId, event.currentTarget.value, false)
       }}
       onBlur={() => {
         if (!editingRef.current) return
+        commands.cancelCellEdit(cellId)
         // r12-011 write scope: a dirty cell draft must never be committed by an
         // unconfirmed blur. Enter/Tab commit; leaving the cell discards.
         editingRef.current = false
@@ -109,6 +123,7 @@ function TableCellInput({
         } else if (event.key === 'Escape') {
           event.preventDefault()
           editingRef.current = false
+          commands.cancelCellEdit(cellId)
           setDraft(baselineRef.current)
           event.currentTarget.blur()
         }
@@ -117,14 +132,14 @@ function TableCellInput({
   )
 }
 
-export function SlideTableProperties({
+export function NativeTableProperties({
   node,
   bindingKey,
   commands,
 }: {
-  node: SlideTablePropertiesView
+  node: NativeTablePropertiesView
   bindingKey: string
-  commands: SlideTablePropertiesCommands
+  commands: NativeTablePropertiesCommands
 }) {
   const gridRef = useRef<HTMLDivElement>(null)
   const [activeCell, setActiveCell] = useState<CellRef | null>(null)
@@ -172,7 +187,7 @@ export function SlideTableProperties({
     const cell = rows[rowIndex]!.cells.find((item) => item.columnId === from.columnId)
     if (!cell) return
     const flatIndex = rowIndex * columns.length + columnIndex + direction
-    if (flatIndex < rows.length * columns.length && text !== cell.text) {
+    if (flatIndex < rows.length * columns.length) {
       commands.commitCellText(cell.id, text)
     }
     if (flatIndex < 0) {
@@ -221,6 +236,8 @@ export function SlideTableProperties({
             return (
               <TableCellInput
                 key={cell.id}
+                cellId={cell.id}
+                commands={commands}
                 rowId={row.id}
                 columnId={column.id}
                 value={cell.text}

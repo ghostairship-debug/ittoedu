@@ -72,7 +72,7 @@
 | Binary sidecars | asset/component bytes | 是 | 是（delta） |
 | Authoring identity | projectId/revision/location/surface/generation/owner | 否 | 否 |
 | Surface selection | block/layer/path/camera selection | 否 | 通常否 |
-| Draft/IME/drag | 文本、代码、表单、临时 frame | 否 | 提交后才进入 |
+| Draft/IME/drag | 文本、代码、表单、临时 frame | 不原样序列化 UI 会话；合法内容经提交或恢复物化进入工程快照 | 提交后才进入 |
 | Runtime/preview session | mount、会话相机、播放状态 | 否 | 否 |
 | AI/CLI session and trace | CLI session mapping、消息、tool trace、usage、状态 | 应用本地版本化目录；不进工程 | 否 |
 | AI staging workspace | 待准入 Component/Runtime 源码、manifest、诊断与候选资源 | 应用管理的本地暂存；准入前不进工程 | 否 |
@@ -83,6 +83,7 @@
 - 正常生命周期恰好一个活动 V9 Surface session（Slide/Flow/Spatial 互斥）；一次用户操作 = 一次逻辑提交 = 一条历史（文档 + 资源字节同事务）。
 - 任何异步/延迟提交必须带创建时 target（projectId / sessionGeneration / location / surface / owner / item / revision），失败返回可识别 stale 结果，不写当前页面。
 - 用户操作边界：pointer up 一次提交；IME composing 不提交；批量导入可为一条批量历史；自动恢复写盘与模式/Tab 切换不进 Undo。
+- Native、Component、Runtime 的正式作者内容/参数，以及通过正式入口应用的源码和资源变更，均属于 canonical document / binary sidecars，必须随工程保存、恢复和重开，适用的 Undo/Redo 与 Player/导出保持同值。React 控件的局部状态只是实现位置，不能作为漏存教师修改的理由。合法活动文字草稿须参与脏判定、保存前提交和恢复快照物化；未通过校验或 IME 中不能提交时必须明确反馈并保留草稿。运行时临时交互会话与教师作者修改分别按各自所有权处理。
 
 ## 4. 模块 Owner 与负边界
 
@@ -130,7 +131,7 @@
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
 - **全局层**：有效图层管线为 visibility filter → global Underlay（平面内排序）→ 当前本地合成（Flow 为 surface Underlay → 语义正文 → surface Overlay；Slide / Spatial 保留各自本地 carrier）→ global Overlay（平面内排序）→ rows/canvas/player；跨 owner `order` 不得泄漏成可编辑交错层级。
 - **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。Slide 对应 PPTX；Flow 对应 DOCX。一个 Published Flow Surface 输出为一份连续 Word 文档，普通作者浮层只出现一次；1.2 唯一重复例外是 global teacher-controller 同时满足 visibility all 与 `includeInStaticExports=true`，此时映射到 footer。
-- **Table/Chart/Slide input**：三者是 V9 Native 和 Published V2 的匹配 strict 分支。Table 只允许 Slide scene/surface，input 只允许 Slide scene；Chart 允许 Slide scene/surface、Flow strict 正文块与 Spatial world，Flow overlay、Spatial shared 和 global 继续拒绝。不得进入 legacy `SceneNode`，不得改变既有 Native 或 presentation override 的合并语义。旧 V9 必须继续读取；旧编辑器或旧 Player 遇到新分支必须 fail loud，不能静默丢弃、截图覆盖作者工程或伪装成 Shape。1.3 Chart 具体载体及导出合同见本文件末尾与 V9 兼容策略。
+- **Table/Chart/Slide input**：三者是 V9 Native 和 Published V2 的匹配 strict 分支。当前 Native Table 只允许 Slide scene/surface，Flow 另有既存正文 FlowTableBlock；input 只允许 Slide scene。Chart 允许 Slide scene/surface、Flow strict 正文块与 Spatial world，Flow overlay、Spatial shared 和 global 继续拒绝。2026-09-06 已批准将 Flow 表格创作闭环和 Spatial world Table 纳入 1.3，具体扩域待 `r13-005-table-surface-contract` 独立交付，不能把路线批准当作当前 reader 已支持。不得进入 legacy `SceneNode`，不得改变既有 Native 或 presentation override 的合并语义。旧 V9 必须继续读取；旧编辑器或旧 Player 遇到新分支必须 fail loud，不能静默丢弃、截图覆盖作者工程或伪装成 Shape。1.3 具体载体及导出边界见本文件末尾与 V9 兼容策略。
 - **Native 作者态同步**：合法持久化内容、非持久化 render input、authoring patch parser、宿主 frame/type guard 与 painter 的接受域必须闭合。Table/Chart/input 不能因旧六类 render input 白名单而在新宿主中被拒绝，也不能用扩大 legacy SceneNode、`any` 强转或旁路原始 JSON 消息绕过校验。类型/校验共享同一正式 Native content 定义；ACK、stale、target 与失败定位语义保留。
 - **颜色控件**：共享 ColorInput 持有局部未提交颜色，Surface/Feature adapter 持有 canonical 提交；控件身份只跟随实际编辑目标，不能跟随每次 revision 重建。连续调色预览与最终提交分离，取消/迟到/目标切换零误写，一次完成操作一条历史。1.2 的固定常用色不进入工程；1.3 项目色板复用 `designTokens.colors`，不另建主题状态或暗示当前对象已具有实时 token 绑定。
 - **input.submit**：提交事件携带本次输入的原始值；Published controller 先按答案类型归一化并原子写入输入框声明的 course-state key，再对同一事件匹配规则、计算条件和执行动作。该值是事件时快照，不通过通用 Surface DOM 读值端口补读，也不改变 `course-state.set` 的 wire 或作者态 `InteractionEngine`。
@@ -206,4 +207,11 @@ world Native LayerItem. Published V2 uses the matching domain. Flow width follow
 width; height is 160–1600 CSS pixels. Shared chart data and style rules have one owner;
 Surface adapters own identity, target and history. Flow DOCX uses a static chart image plus
 editable data, while Spatial exports use existing camera pages. Flow overlay, Spatial shared,
-global, Table and input domains are unchanged. See the V9 compatibility policy for details.
+global and input domains are unchanged. This Chart contract did not expand Table; the
+separately approved Table work below has its own contract. See the V9 compatibility policy for details.
+
+### 1.3 Table domain（2026-09-06 批准并实现）
+
+Owner 要求三 Surface 表格均可插入、编辑、保存/恢复/重开、播放及按格式导出，执行边界见 [1.3 独立 Table 方案](roadmap/1.3/README.md)。Flow 沿用既有 FlowTableBlock 及字符串/富文本单元格，不另建正文表格模型；Spatial 允许 Native Table 位于 world，沿用 world 几何、层级和相机。共享内容操作和编辑控件不能共享 Surface writer，target、revision、草稿与历史仍由对应 Surface 持有。
+
+Slide 保持原生可编辑 PPTX；Flow DOCX 保留可编辑 Word 表格和正文顺序；Spatial 沿用静态相机页并明确静态结果，作者工程的数据始终可编辑。Flow overlay、Spatial shared、global 和 input 不扩域。`r13-005` 必须先交付 V9/Published 对等有效域、兼容反例、能力差异与生成合同，再由 `r13-006`–`r13-008` 交付公共编辑与两个 Surface consumer；在此之前当前 Schema 的 Spatial Table 拒绝仍有效。

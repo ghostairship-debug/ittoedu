@@ -1,6 +1,6 @@
-import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
-import type { NativeChartContent } from '../../shared/contracts/native-v1'
-import { createChartNode, createChartLayerItem } from '../project/nativeNodeFactories'
+import { tableNativeContentObjectSchema, chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
+import type { NativeTableContent, NativeChartContent } from '../../shared/contracts/native-v1'
+import { createTableNode, createTableLayerItem, createChartNode, createChartLayerItem } from '../project/nativeNodeFactories'
 import type { ChartType } from './chartContentOperations'
 import { nanoid } from 'nanoid'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
@@ -536,6 +536,7 @@ export interface AddSpatialWorldVideoLayerInput extends AddSpatialWorldLayerInpu
 }
 
 export interface AddSpatialWorldComponentLayerInput extends AddSpatialWorldLayerInput {
+  readonly staticFallbackAssetId?: string
   readonly packageId: string
   readonly version?: string
   readonly props?: Record<string, unknown>
@@ -757,6 +758,10 @@ export function addSpatialWorldComponentLayer(
       y: origin.y,
     })
     const item = sceneNodeToCourseLayerItem(node)
+    if (item.kind === 'component' && input.staticFallbackAssetId) {
+      if (session.history.present.assets[input.staticFallbackAssetId]?.kind !== 'image') throw new Error('组件后备需要工程图片')
+      item.staticFallbackAssetId = input.staticFallbackAssetId
+    }
     const project = commitSpatialProjectMutation(session.history.present, (draft) => {
       appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
     }, options.now)
@@ -1281,6 +1286,47 @@ export function replaceSpatialWorldChart(
     const project = commitSpatialProjectMutation(session.history.present, draft => {
       const item = spatialSurfaceIn(draft, session.selection.surfaceId).world.layerItems.find(item => item.layerItemId === layerItemId)
       if (!item || item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('图表目标已失效')
+      if (item.locked) throw new Error('locked')
+      item.content.data = next
+    }, options.now)
+    if (project === session.history.present) return succeedSpatialCommand(session, false)
+    return succeedSpatialCommand(replaceSpatialSession(session, { history: commitSpatialAuthoringHistory(session.history, project) }), true)
+  } catch (error) { return catchSpatialCommand(session, error) }
+}
+
+export function addSpatialWorldTableLayer(
+  session: SpatialAuthoringSession,
+  input: AddSpatialWorldLayerInput = {},
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  const stale = rejectSpatialIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    requireWorldScope(session)
+    const origin = defaultWorldOrigin(session, 560, 360, input.x, input.y)
+    const node = createTableNode({ id: input.id, x: origin.x, y: origin.y, width: 560, height: 360 })
+    const item = createTableLayerItem(node)
+    const project = commitSpatialProjectMutation(session.history.present, draft => {
+      appendWorldLayer(draft, session.selection.surfaceId, item)
+    }, options.now)
+    return commitAdded(session, project, node.id)
+  } catch (error) { return catchSpatialCommand(session, error) }
+}
+
+export function replaceSpatialWorldTable(
+  session: SpatialAuthoringSession,
+  layerItemId: string,
+  table: NativeTableContent,
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  const stale = rejectSpatialIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    requireWorldScope(session)
+    const next = tableNativeContentObjectSchema.parse(table)
+    const project = commitSpatialProjectMutation(session.history.present, draft => {
+      const item = spatialSurfaceIn(draft, session.selection.surfaceId).world.layerItems.find(item => item.layerItemId === layerItemId)
+      if (!item || item.kind !== 'native' || item.content.nativeType !== 'table') throw new Error('表格目标已失效')
       if (item.locked) throw new Error('locked')
       item.content.data = next
     }, options.now)

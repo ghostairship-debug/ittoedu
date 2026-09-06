@@ -3,7 +3,7 @@ import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { createEditorTransactionStep } from '../authoring/editorTransaction'
 import { addSlideComponentLayer } from '../course/v9SlideContentCommands'
 import { addSpatialWorldComponentLayer } from '../course/spatialEditorCommands'
-import { insertFlowSharedComponent } from '../course/flowSharedAuthoringAdapters'
+import { insertFlowSharedComponent, type FlowComponentInsertRequest } from '../course/flowSharedAuthoringAdapters'
 import { componentPackageMeta } from './editableComponentPackage'
 import type { ComponentAuthoringPorts } from './commitComponentPackageAuthoring'
 
@@ -41,11 +41,34 @@ export function insertComponentPackagesAtTarget(
   }
   if (!packages.length) return { ok: false, reason: '未选择组件。' }
   const state = ports.read()
-  const document = state.document!
+  try {
+    const planned = planComponentPackageInsertion({ document: state.document!, componentPackages: state.componentPackages,
+      spatial: ports.readSpatialSession(), flow: ports.readFlowSession(), slide: ports.readSlideSession?.() ?? null, target, packages })
+    if (!ports.persistTransaction(planned.step, `已添加 ${planned.layerItemIds.length} 个组件到当前画布`)) throw new Error('当前没有可用的作者会话。')
+    return { ok: true, layerItemIds: planned.layerItemIds }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : '组件添加失败。' }
+  }
+}
+
+/** Shared private plan for UI imports and the versioned tool Facade. */
+export function planComponentPackageInsertion(input: {
+  document: NonNullable<ReturnType<ComponentAuthoringPorts['read']>['document']>
+  componentPackages: ReturnType<ComponentAuthoringPorts['read']>['componentPackages']
+  spatial: ReturnType<ComponentAuthoringPorts['readSpatialSession']>
+  flow: ReturnType<ComponentAuthoringPorts['readFlowSession']>
+  slide: ReturnType<NonNullable<ComponentAuthoringPorts['readSlideSession']>>
+  target: ComponentInsertionTarget
+  packages: readonly ComponentPackageData[]
+  staticFallbackAssetId?: string
+  flowPlacement?: FlowComponentInsertRequest['placement']
+}) {
+  const { document, target, packages, spatial, flow, slide } = input
+  if (!packages.length) throw new Error('未选择组件。')
+  if (document.id !== target.projectId || document.revision !== target.revision) throw new Error('组件插入工程或 revision 已改变')
   let nextDocument = structuredClone(document)
   const resources: { packageId: string; after: ComponentPackageData }[] = []
   const ids: string[] = []
-  try {
     const seen = new Set<string>()
     for (const data of packages) {
       const id = data.manifest.id
@@ -54,7 +77,7 @@ export function insertComponentPackagesAtTarget(
       if (!componentSupportsScope(data.manifest, target.scope === 'global' ? 'global' : 'scene')) {
         throw new Error(`“${data.manifest.name}”不支持当前编辑范围。`)
       }
-      const existing = state.componentPackages[id]
+      const existing = input.componentPackages[id]
       if (existing) {
         if (existing.manifest.version !== data.manifest.version || existing.contentSha256 !== data.contentSha256) {
           throw new Error(`“${data.manifest.name}”与工程内版本不同，请先审阅更新。`)
@@ -64,13 +87,11 @@ export function insertComponentPackagesAtTarget(
         resources.push({ packageId: id, after: data })
       }
     }
-    const spatial = ports.readSpatialSession()
-    const flow = ports.readFlowSession()
-    const slide = ports.readSlideSession?.()
     for (const data of packages) {
       if (spatial) {
         const result = addSpatialWorldComponentLayer({ ...spatial, history: { ...spatial.history, present: nextDocument } }, {
           packageId: data.manifest.id, props: data.manifest.defaultProps,
+          staticFallbackAssetId: input.staticFallbackAssetId,
           width: data.manifest.defaultSize.width, height: data.manifest.defaultSize.height,
         })
         if (!result.ok || !result.nextSession) throw new Error(result.reason ?? '组件无法放置在当前画布。')
@@ -79,13 +100,15 @@ export function insertComponentPackagesAtTarget(
       } else if (flow) {
         const result = insertFlowSharedComponent(nextDocument, flow.selection, {
           packageId: data.manifest.id, manifest: data.manifest,
+          placement: input.flowPlacement, staticFallbackAssetId: input.staticFallbackAssetId,
         })
         if (!result.ok || !result.nextDocument) throw new Error(result.reason ?? '组件无法放置在当前页面。')
         nextDocument = structuredClone(result.nextDocument)
-        ids.push(...(result.createdLayerItemIds ?? []))
+        ids.push(...(result.createdLayerItemIds ?? result.createdBlockIds ?? []))
       } else if (slide) {
         const result = addSlideComponentLayer({ ...slide, history: { ...slide.history, present: nextDocument } }, {
           packageId: data.manifest.id, manifest: data.manifest,
+          staticFallbackAssetId: input.staticFallbackAssetId,
         })
         if (!result.ok || !result.nextSession) throw new Error(result.reason ?? '组件无法放置在当前场景。')
         nextDocument = structuredClone(result.nextSession.history.present)
@@ -99,11 +122,6 @@ export function insertComponentPackagesAtTarget(
       projectId: document.id, baseRevision: document.revision, nextDocument,
       resourceChanges: { componentPackageChanges: resources },
     })
-    if (!step || !ports.persistTransaction(step, `已添加 ${ids.length} 个组件到当前画布`)) {
-      throw new Error('当前没有可用的作者会话。')
-    }
-    return { ok: true, layerItemIds: ids }
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : '组件添加失败。' }
-  }
+    if (!step) throw new Error('组件插入没有产生事务')
+    return { step, layerItemIds: ids }
 }

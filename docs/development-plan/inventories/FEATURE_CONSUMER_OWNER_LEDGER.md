@@ -54,6 +54,13 @@
 | `J-06` HTML/Web/PPTX/PDF/DOCX unsupported-content behavior | HTML/Web V2: `buildCoursePackages`; PPTX V2: `buildCoursePptx`; print/PDF: `buildCoursePrintArtifacts`; Flow DOCX: `buildFlowDocx`; App format handlers compose them | HTML/Web active-source path and Flow-only DOCX are preserve paths. PDF source-null now fails closed without Legacy Runtime raster；正常 pure-Slide PDF raster、PPTX 与 preflight 仍有确认的 V8 consumer（`LEG-004`–`LEG-006`）。 | `tests/unit/coursePackageExport.test.ts`; `tests/unit/coursePptxExport.test.ts`; `tests/unit/coursePrintArtifacts.test.ts`; `tests/integration/coursePdfExportApp.test.tsx` | Format-specific staticization/warning parity remains gated by no silent loss, exact consumer zero and a stable replacement behavior wave. |
 | `J-07` New/open/Recovery/save while editing and closing | `App#handleNew`, `handleOpen`, `handleSave`; V9-only I/O: `openDefaultCourseProjectAsync`; edit-during-save identity check in `handleSave`; recovery: `RecoveryWriteCoordinator`; main write: `projectPersistence#atomicWrite` | Save is single-flight and does not clear dirty when the document/sidecar/components changed after save started. Recovery build/write is debounced, cancellable, and single-flight; main verifies a V9 archive before atomic write. | `tests/unit/recoveryWriteCoordinator.test.ts`; `tests/unit/courseProjectArchive.test.ts`; `tests/unit/projectPersistence.test.ts` | Full close-during-save desktop behavior remains a stage/E2E concern. Gate: preserve IPC parity and never clear dirty or close after failed/stale save. |
 
+## 1.4 增量 Owner
+
+- `src/renderer/authoring/tools/authoringToolFacade.ts` 是版本化工具入口；各工具调用现有 Surface / 内容 / Runtime / Component / 资源命令，不实现第二 writer。`executeAuthoringTool.ts` 负责私有规划、revision / session 复核、统一 receipt 与一次资源事务。
+- `src/renderer/composition/courseToolTransaction.ts` 独占工具引起的跨 Surface 导航规划；Store 根只绑定窄端口，一次写入当前正式后端、资源和历史。最近层证据为 `tests/unit/authoringSurfaceTools.test.ts` 中真实 Store 导航 / Undo / Redo 用例；既有结构棘轮不放宽。
+- `src/renderer/course/coursewareBuilderV2.ts` 是外部课例的私有工作会话；`scripts/courseware-builder-v2-host.ts` 管理真实浏览器和已登记 finish 输出。它们调用同一 Facade，无 live Store、第二持久化格式或独立命令实现。V1 兼容层仍共用原 Owner。
+- `src/renderer/authoring/tools/dynamicCandidateAdmission.ts` 调用 Published producer、正式动态宿主和既有捕获资源屏障。私有可见性 / 相机投影不参与提交；Spatial 的静态导出语义不变。包替换检查实际引用与命名状态；停用既有 Runtime 不要求故障代码重新执行。
+
 ## Reproducible baseline notes
 
 - Exactly-one source check: `git grep -n -I -F -- 'selectActiveCourseProjectDocument' -- 'src/**' 'tests/**'` plus the three backend apply functions wired from `src/renderer/store/editorStore.ts`.

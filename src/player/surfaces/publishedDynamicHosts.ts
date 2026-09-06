@@ -901,6 +901,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.movePublishedGlobalRuntimes(state.surfaceId)
     this.#audioEvents.emit('scene:enter', { sceneId: state.locationId })
     this.#mountInteractionControllers()
+  }
+
+  handleNavigationSettled(state: MixedNavigationState): void {
+    if (this.#interactionDestroyStarted || this.navigator.current?.locationId !== state.locationId) return
     this.#globalInteractionController?.enterScene()
     this.#localInteractionController?.enterScene()
   }
@@ -1481,6 +1485,9 @@ export function createPublishedCourseSession(
       },
       onNavigate: (state) => {
         session?.handleNavigation(state)
+      },
+      onNavigationSettled: (state) => {
+        session?.handleNavigationSettled(state)
       },
       onBeforeResetCourse: () => {
         resetPublishedCourseState(courseState, playback.courseState)

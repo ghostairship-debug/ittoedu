@@ -472,6 +472,17 @@ afterEach(async () => {
 })
 
 describe('Published Interaction Slide host integration', () => {
+  it('executes zero-delay scene.enter navigation only after the real navigation queue settles', async () => {
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const payload = publishedFixture({
+      sceneAInteractions: [{ id: 'enter-next', enabled: true, trigger: { type: 'scene.enter' }, conditions: [], actions: [step('advance', { type: 'scene.next' })] }],
+    })
+    const { session } = await mount(payload, diagnostics)
+    await vi.waitFor(() => expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID))
+    expect(diagnostics.filter(diagnostic => diagnostic.code === 'navigation-failed')).toEqual([])
+    // Host rebinding is not a new scene entry and must not advance again.
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+  })
   it('runs same-id local and global controllers once while hidden native motion remains session-only', async () => {
     vi.useFakeTimers()
     const localTarget = textItem('local-hidden-target', 20, {

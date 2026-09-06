@@ -1,3 +1,4 @@
+import { scopeDynamicHostApi } from '../../../shared/dynamicHostApiScope'
 import type {
   SurfaceRuntimeAuthoring,
   SurfaceRuntimeCreateContext,
@@ -42,6 +43,7 @@ export interface PublishedSurfaceRuntimeMountHandle {
   applyAuthoringContentValue(key: string, value: string): boolean
   waitForReady(): Promise<void>
   waitForCaptureReady(): Promise<void>
+  failCapture?(error: Error): void
   restoreAfterCapture(): void
   setVisible(visible: boolean): void
   suspend(): void
@@ -557,9 +559,9 @@ export function mountPublishedSurfaceRuntime(
         return url
       },
     }),
-    courseState,
-    presentation: options.presentation ?? inertPresentation,
-    actions: options.actions ?? inertActions,
+    courseState: scopeDynamicHostApi(courseState, () => !instanceDestroyed),
+    presentation: scopeDynamicHostApi(options.presentation ?? inertPresentation, () => !instanceDestroyed),
+    actions: scopeDynamicHostApi(options.actions ?? inertActions, () => !instanceDestroyed),
     events,
     capture: Object.freeze({
       waitUntil(promise: Promise<unknown>) {
@@ -614,21 +616,35 @@ export function mountPublishedSurfaceRuntime(
   let capturePrepared = false
   let captureFailure: Error | null = null
   let suspended = !options.visible
+  let visibleElement: HTMLElement = host
+  const quarantine = (cause: unknown): void => {
+    if (quarantined || instanceDestroyed) return
+    quarantined = true
+    captureFailure = reportError(options, 'lifecycle', cause)
+    captureBarrier.fail(captureFailure)
+    authoringTargets?.destroy()
+    events.dispose()
+    instanceDestroyed = true
+    try { lifecycle.destroy() } catch (error) { reportError(options, 'destroy', error) }
+    captureBarrier.destroy()
+    root.replaceChildren()
+    host.remove()
+    visibleElement = createFallback(container, options)
+  }
   const invoke = (operation: () => void): void => {
     if (quarantined || instanceDestroyed) return
     try {
       operation()
     } catch (cause) {
-      quarantined = true
-      captureFailure = reportError(options, 'lifecycle', cause)
-      captureBarrier.fail(captureFailure)
+      quarantine(cause)
     }
   }
 
   let unregisterCapture: () => void = () => undefined
   const handle: PublishedSurfaceRuntimeMountHandle = {
-    ok: true,
-    element: host,
+    get ok() { return !quarantined },
+    get element() { return visibleElement },
+    failCapture: quarantine,
     applyAuthoringContentValue(key: string, value: string) {
       if (
         options.mode !== 'authoring'
@@ -657,14 +673,7 @@ export function mountPublishedSurfaceRuntime(
         lifecycle.setMode?.('capture')
         await captureBarrier.waitForReady(() => lifecycle.prepareCapture?.())
       } catch (cause) {
-        captureFailure = captureBarrier.fail(cause)
-        reportError(options, 'lifecycle', captureFailure)
-        try {
-          lifecycle.setMode?.(surfaceMode)
-          if (!suspended) lifecycle.resume?.()
-        } catch (restoreCause) {
-          reportError(options, 'lifecycle', restoreCause)
-        }
+        quarantine(cause)
         capturePrepared = false
         throw captureFailure
       }
@@ -687,6 +696,7 @@ export function mountPublishedSurfaceRuntime(
       invoke(() => lifecycle.resume?.())
     },
     destroy() {
+      if (quarantined) { unregisterCapture(); visibleElement.remove(); return }
       if (instanceDestroyed) return
       instanceDestroyed = true
       unregisterCapture()

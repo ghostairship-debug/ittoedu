@@ -48,6 +48,7 @@ import { nativeRenderInputFromV9Item } from '../../../player/surfaces/slide/publ
 import { TextEditOverlay } from '../TextEditOverlay'
 import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
+import { makeSlideAuthoringTarget } from '../../course/slideAuthoringBackend'
 import { FormulaEditDialog } from '../FormulaEditDialog'
 import { renderTextNodeCanvas } from '../../../shared/textLayout'
 import {
@@ -222,6 +223,7 @@ export interface SlideWorkspaceRuntimePort {
 }
 
 export interface SlideWorkspaceAuthoringPort extends SlideWorkspaceCommandPort {
+  readonly runFieldTextIntent: (intent: import('../../authoring/v9SlideContentEdit').SlideFieldTextIntent) => import('../../authoring/v9SlideContentEdit').SlideFieldTextReceipt
   readonly applySlideCommand: (
     run: (session: SlideAuthoringSession) => SlideCommandResult,
     extra?: { clearContentEdit?: boolean },
@@ -1631,7 +1633,16 @@ export function SlideLocationWorkspace({
     }
     return layer
   }, [activeComponentTextSession, activeComponentTextTarget, slideEditorView])
-  const componentEditingValue = activeComponentTextSession?.initialValue ?? ''
+  const componentDraftRef = useRef(contentEdit)
+  componentDraftRef.current = contentEdit
+  const componentEditingValue = contentEdit?.kind === 'field-text' && contentEdit.textField?.kind === 'component-prop'
+    ? (contentEdit.draft as import('../../authoring/layerTextField').LayerTextDraft).text
+    : activeComponentTextSession?.initialValue ?? ''
+  useEffect(() => {
+    if (activeComponentTextSession && (contentEdit?.kind !== 'field-text' || contentEdit.textField?.kind !== 'component-prop')) {
+      setActiveComponentTextSession(null)
+    }
+  }, [contentEdit, activeComponentTextSession])
   const activeRuntimeTextTarget = useMemo(() => {
     if (
       !activeRuntimeTextSession ||
@@ -1752,6 +1763,14 @@ export function SlideLocationWorkspace({
       return
     }
     ports.selection.selectNode(result.session.nodeId)
+    const backendSession = backendRef.current?.getSession()
+    if (!backendSession) return
+    const begun = ports.authoring.runFieldTextIntent({
+      kind: 'begin-field', target: makeSlideAuthoringTarget(backendSession, result.session.nodeId, 'item'),
+      field: { kind: 'component-prop', packageId: result.session.componentId, version: result.session.componentVersion, key: result.session.key },
+    })
+    if (!begun.ok) { ports.canvas.setStatus(begun.reason); return }
+    componentDraftRef.current = begun.edit
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(result.session)
   }, [currentComponentTextEditContext])
@@ -1774,27 +1793,11 @@ export function SlideLocationWorkspace({
       setActiveComponentTextSession(null)
       return
     }
-    ports.content.updateNode(result.nodeId, {
-      props: result.props,
-    })
-    const updatedNode = readSnapshot().editingNodes.find((node) => (
-      node.id === result.nodeId && node.type === 'external-component'
-    ))
-    if (
-      !updatedNode
-      || updatedNode.type !== 'external-component'
-      || updatedNode.locked
-      || getComponentPropValue(updatedNode.props ?? {}, session.key) !== value
-    ) {
-      ports.canvas.setStatus(
-        updatedNode?.locked
-          ? '组件已锁定，未写入文字修改'
-          : '组件文字未写入，请重新选择后重试',
-      )
-      setActiveComponentTextSession(null)
-      return
-    }
-    queueAuthoringNodePatch(session.scope === 'global' ? 'global' : 'scene', updatedNode)
+    const draft = componentDraftRef.current
+    if (!draft || draft.kind !== 'field-text' || draft.textField?.kind !== 'component-prop') return
+    const committed = ports.authoring.runFieldTextIntent({ kind: 'commit', expectedEdit: draft })
+    if (!committed.ok) { ports.canvas.setStatus(committed.reason); return }
+    componentDraftRef.current = null
     ports.canvas.setStatus(
       session.stateId === null || session.scope === 'global'
         ? '已更新组件文字'
@@ -2299,10 +2302,12 @@ export function SlideLocationWorkspace({
   }, [editingTextNodeId, selectedNode])
 
   const nativeTextEditor = useSlideNativeTextEditor({
+    readEdit: () => readSnapshot().contentEdit,
+    runFieldTextIntent: intent => ports.authoring.runFieldTextIntent(intent),
     readBackend: () => backendRef.current,
     readHost: () => publishedAuthoringHostRef.current,
     readTransform: () => { const viewport = readCandidateViewport(); return viewport ? createStageViewportTransform(viewport) : null },
-    apply: command => ports.authoring.applySlideCommand(command),
+    apply: command => ports.authoring.applySlideCommand(command, { clearContentEdit: true }),
     report: message => ports.canvas.setStatus(message),
   }, `${snapshot.projectId}:${courseLocationId}:${activePresentationStateId}:${publishedAuthoringOwnerScope}:${canvasMode}`)
 
@@ -2956,7 +2961,18 @@ export function SlideLocationWorkspace({
             onCommitRuntimeText={commitRuntimeText}
             onCancelRuntimeText={() => setActiveRuntimeTextSession(null)}
             onCommitComponentText={commitComponentText}
-            onCancelComponentText={() => setActiveComponentTextSession(null)}
+            onComponentDraftChange={(text, composing) => {
+              const draft = componentDraftRef.current
+              if (!draft || draft.kind !== 'field-text' || draft.textField?.kind !== 'component-prop') return
+              const result = ports.authoring.runFieldTextIntent({ kind: 'update-field', expectedEdit: draft, text, composing })
+              if (result.ok) componentDraftRef.current = result.edit
+            }}
+            onCancelComponentText={() => {
+              const draft = componentDraftRef.current
+              if (draft?.kind === 'field-text' && draft.textField?.kind === 'component-prop') ports.authoring.runFieldTextIntent({ kind: 'cancel', expectedEdit: draft })
+              componentDraftRef.current = null
+              setActiveComponentTextSession(null)
+            }}
             onRetryPreview={retryRuntimePreview}
           />
           {nativeTextEditor.editor}

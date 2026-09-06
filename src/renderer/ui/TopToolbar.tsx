@@ -45,6 +45,7 @@ interface TopToolbarProps {
   onOpenHealth(): void
   onOpenRecipes?(): void
   onOpenProductivity?(): void
+  onOpenMaterials?(): void
   onPreview(): void
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
 }
@@ -96,6 +97,7 @@ export function TopToolbar({
   onOpenHealth,
   onOpenRecipes,
   onOpenProductivity,
+  onOpenMaterials,
   onPreview,
   onExport,
 }: TopToolbarProps) {
@@ -256,9 +258,12 @@ export function TopToolbar({
 
       <div className="toolbar__separator" />
 
-      {(onOpenRecipes || onOpenProductivity) && <details className="toolbar-more-menu">
+      {(onOpenRecipes || onOpenProductivity || onOpenMaterials) && <details className="toolbar-more-menu">
         <summary className="tool-button" aria-label="创作工具"><FileText size={18} /><span>创作工具</span></summary>
         <div className="toolbar-more-menu__panel" role="menu" aria-label="创作工具菜单">
+          <button type="button" role="menuitem" disabled={busy} onClick={event => {
+            event.currentTarget.closest('details')?.removeAttribute('open'); onOpenMaterials?.()
+          }}><span><strong>教学材料库</strong><small>导入、搜索和管理当前工程的本地材料</small></span></button>
           <button type="button" role="menuitem" disabled={busy} onClick={event => {
             event.currentTarget.closest('details')?.removeAttribute('open'); onOpenRecipes?.()
           }}><span><strong>新建配方页</strong><small>封面、概念、例题和互动模板</small></span></button>

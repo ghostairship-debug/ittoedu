@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persistCrossSurfaceToolTransaction } from '../composition/courseToolTransaction'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import {
   type InteractionRule,
@@ -98,6 +99,7 @@ import {
 import { createEditorShellSlice } from './slices/editorShellSlice'
 import { createCourseStructureSlice } from './slices/courseStructureSlice'
 import { createDesignProductionActions } from '../composition/designProductionActions'
+import { createAuthoringToolActions } from '../composition/authoringToolActions'
 import {
   applyEditorTransactionStep,
   createEditorTransactionStep,
@@ -598,6 +600,7 @@ export type EditorState =
   & ReturnType<typeof createInteractionAuthoringActions>
   & ReturnType<typeof createCrossSurfaceCommands>
   & ReturnType<typeof createDesignProductionActions>
+  & ReturnType<typeof createAuthoringToolActions>
   & {
       commitSlideCandidateTextRunStyle(input: {
         layerItemId: string
@@ -967,6 +970,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     persistTransaction: (step, statusMessage) => {
       const state = get()
+      const crossSurface = persistCrossSurfaceToolTransaction(step, statusMessage, {
+        session: state.courseAuthoringSession, path: state.projectPath,
+        readHistory: () => state.spatialSession?.history ?? state.flowSession?.history
+          ?? (isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend.getSession().history : null),
+        readResources: () => kernel.readResources(), write: patch => set(patch),
+      })
+      if (crossSurface !== undefined) return crossSurface
       const active = detectActiveSurface({
         spatialLocationId: state.spatialSession?.selection.locationId ?? null,
         flowLocationId: state.flowSession?.selection.locationId ?? null,
@@ -1199,6 +1209,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     feedback: reason => kernel.setFeedback({ errorMessage: reason }),
   })
 
+  const authoringToolActions = createAuthoringToolActions({
+    kernel,
+    readScope: () => {
+      const projection = buildCandidateEffectiveLayers(get())
+      if (!projection) throw new Error('当前没有有效的作者表面')
+      return { owner: projection.scope.owner, stateId: projection.stateId }
+    },
+    hasContentDraft: () => selectHasDirtyCourseContentDraft(get()),
+  })
+
   return {
     canvasMode: 'edit',
     projectPath: null,
@@ -1248,6 +1268,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ...courseStructureSlice,
     ...crossSurfaceCommands,
     ...designProductionActions,
+    ...authoringToolActions,
 
   }
 })

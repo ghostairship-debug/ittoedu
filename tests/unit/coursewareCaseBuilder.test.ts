@@ -1,4 +1,5 @@
 import { buildCoursewareCase } from '../../scripts/build-courseware-case'
+import { createCoursewareBuilderV2 } from '../../src/renderer/course/coursewareBuilderV2'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -9,6 +10,24 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 const editorRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 describe('external courseware case builder', () => {
+  it('keeps Builder V2 snapshots private and rejects stale steps without a second write', async () => {
+    const builder = createCoursewareBuilderV2({ surfaceType: 'slide', title: 'V2 私有工作会话' })
+    const scope = builder.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } })
+    const copy = builder.snapshot()
+    copy.project.title = '外部修改快照'
+    const request = { operation: 'insert', template: { nativeType: 'text', text: '先解释再练习', width: 1100, height: 130 } }
+    const created = await builder.execute('native.content', request, { kind: 'create', scope })
+    expect(created.status).toBe('committed')
+    const stale = await builder.execute('native.content', request, { kind: 'create', scope })
+    expect(stale.status).toBe('stale')
+    const output = builder.finish()
+    expect(output.project.title).toBe('V2 私有工作会话')
+    expect(output.project.revision).toBe(1)
+    expect(output.receipts).toHaveLength(2)
+    const slide = output.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('Expected Slide')
+    expect(slide.scenes[0]!.layerItems.find(item => item.layerItemId === created.affected[0]!.id)!.frame).toMatchObject({ width: 1100, height: 130 })
+  })
   let temporaryRoot = ''
 
   beforeEach(async () => {

@@ -1,4 +1,4 @@
-import { addSpatialWorldChartLayer, replaceSpatialWorldChart } from '../../course/spatialEditorCommands'
+import { addSpatialWorldTableLayer, replaceSpatialWorldTable, addSpatialWorldChartLayer, replaceSpatialWorldChart } from '../../course/spatialEditorCommands'
 import type { ChartType } from '../../course/chartContentOperations'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
@@ -39,6 +39,7 @@ import {
   panSpatialSessionCamera,
   redoSpatialAuthoring,
   selectSpatialEditorLayers,
+  openSpatialAuthoringSession,
   selectSpatialLayers,
   setSpatialEditingScope,
   transformSpatialViewportLayersInSession,
@@ -63,6 +64,9 @@ import {
 } from '../../course/spatialAuthoringHistory'
 import {
   beginSpatialWorldContentEdit,
+  beginSpatialWorldTableTextEdit,
+  beginSpatialWorldChartTextEdit,
+  updateSpatialWorldChartTextDraft,
   commitSpatialWorldContentEdit,
   commitSpatialWorldTextRunStyle,
   isSpatialWorldContentDraftDirty,
@@ -622,6 +626,7 @@ export function createSpatialAuthoringSlice(
   redo(): void
   setScope(scope: 'global' | 'world'): void
   renameProject(title: string): void
+  addTableNode(x?: number, y?: number): void
   addChartNode(chartType: ChartType, x?: number, y?: number): void
   addTextNode(x?: number, y?: number): void
   addFormulaNode(x?: number, y?: number): void
@@ -841,6 +846,10 @@ export function createSpatialAuthoringSlice(
     switch (intent.kind) {
       case 'begin-content-edit':
       case 'update-text-content-edit':
+      case 'update-chart-content-edit':
+      case 'commit-table-content-edit':
+      case 'update-table-content-edit':
+      case 'commit-chart-content-edit':
       case 'set-content-edit-composing':
       case 'commit-text-content-edit':
       case 'commit-formula-content-edit':
@@ -999,6 +1008,11 @@ export function createSpatialAuthoringSlice(
           if (!workingSession.selection.selectionIds.includes(target.itemId)) return rejectIntent('invalid-selection')
           return finish(replaceSpatialWorldChart(workingSession, target.itemId, intent.chart, { expectedRevision: workingSession.history.present.revision }))
         }
+        case 'replace-table': {
+          requireTargetKind('layer')
+          if (!workingSession.selection.selectionIds.includes(target.itemId)) return rejectIntent('invalid-selection')
+          return finish(replaceSpatialWorldTable(workingSession, target.itemId, intent.table, { expectedRevision: workingSession.history.present.revision }))
+        }
         case 'patch-layers': {
           requireTargetKind('layer')
           if (
@@ -1090,7 +1104,11 @@ export function createSpatialAuthoringSlice(
           if (!selectedResult.ok || !selectedResult.nextSession) {
             return rejectIntent(selectedResult.reason ?? 'invalid-selection')
           }
-          const begun = beginSpatialWorldContentEdit({
+          const begun = intent.tableCellId ? beginSpatialWorldTableTextEdit({
+            session: selectedResult.nextSession, layerItemId: target.itemId, cellId: intent.tableCellId,
+          }) : intent.chartField ? beginSpatialWorldChartTextEdit({
+            session: selectedResult.nextSession, layerItemId: target.itemId, field: intent.chartField,
+          }) : beginSpatialWorldContentEdit({
             session: selectedResult.nextSession,
             layerItemId: target.itemId,
             source: intent.source,
@@ -1098,6 +1116,34 @@ export function createSpatialAuthoringSlice(
           if (!begun.ok) return rejectIntent(begun.reason)
           const edit = Object.freeze({ ...begun.edit, courseTarget: target })
           return persistReceipt(selectedResult, { contentEdit: edit }, edit)
+        }
+        case 'update-table-content-edit':
+        case 'commit-table-content-edit': {
+          requireTargetKind('layer')
+          const live = ownedAtStart.spatialContentEdit
+          if (!live || !Object.is(live, intent.expectedEdit) || !Object.is(live.courseTarget, target) || live.kind !== 'field-text') return rejectIntent('stale-revision')
+          if (intent.kind === 'update-table-content-edit') {
+            const edit = Object.freeze({ ...live, draft: { text: intent.text }, composing: intent.composing })
+            spatial.patch({ spatialContentEdit: edit })
+            return { ok: true, historyEntry: false, edit }
+          }
+          const result = commitSpatialWorldContentEdit(baseSession, live)
+          return persistReceipt(result, result.ok ? { clearContentEdit: true } : {}, result.ok ? null : live)
+        }
+        case 'update-chart-content-edit':
+        case 'commit-chart-content-edit': {
+          requireTargetKind('layer')
+          const live = ownedAtStart.spatialContentEdit
+          if (!live || !Object.is(live, intent.expectedEdit) || !Object.is(live.courseTarget, target) || live.kind !== 'chart-text') {
+            return rejectIntent('stale-revision')
+          }
+          if (intent.kind === 'update-chart-content-edit') {
+            const edit = updateSpatialWorldChartTextDraft(live, intent.draft, intent.composing)
+            spatial.patch({ spatialContentEdit: edit })
+            return { ok: true, historyEntry: false, edit }
+          }
+          const result = commitSpatialWorldContentEdit(baseSession, live)
+          return persistReceipt(result, result.ok ? { clearContentEdit: true } : {}, result.ok ? null : live)
         }
         case 'update-text-content-edit': {
           requireTargetKind('layer')
@@ -1446,6 +1492,17 @@ export function createSpatialAuthoringSlice(
     materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
       const owned = spatial.read()
       const edit = owned.spatialContentEdit
+      if (edit?.kind === 'chart-text' || edit?.kind === 'field-text') {
+        const session = owned.spatialSession
+        if (!session) return { ok: false, reason: 'not-spatial-session' }
+        const result = commitSpatialWorldContentEdit(
+          { ...session, history: { ...session.history, present: document } },
+          { ...edit, composing: false },
+        )
+        return result.ok && result.nextSession
+          ? { ok: true, document: result.nextSession.history.present }
+          : { ok: false, reason: result.reason ?? '无法恢复文字草稿' }
+      }
       if (!edit || edit.kind !== 'text') return { ok: true, document }
       const clone = structuredClone(document)
       const located = locateCourseLayer(clone, edit.target.layerItemId)
@@ -1514,6 +1571,11 @@ export function createSpatialAuthoringSlice(
       const session = commitDraft()
       if (!session) return
       spatial.persist(addSpatialWorldChartLayer(session, { chartType, x, y }, { expectedRevision: session.history.present.revision }))
+    },
+    addTableNode(x, y) {
+      const session = commitDraft()
+      if (!session) return
+      spatial.persist(addSpatialWorldTableLayer(session, { x, y }, { expectedRevision: session.history.present.revision }))
     },
     addTextNode(x, y) {
       const session = spatial.read().spatialSession
@@ -2008,14 +2070,23 @@ export function persistSpatialTransaction(
   const session = spatial.read().spatialSession
   if (!session) return false
   const history = commitSpatialEditorTransactionHistory(session.history, step)
-  spatial.persist(succeedSpatialCommand({
+  const hint = readAuthoringToolSelection(step.selectionHint)
+  if (hint?.owner === 'scene') throw new Error('Spatial 不能选中 scene owner')
+  const selection = hint ? selectSpatialEditorLayers({ project: step.nextDocument, locationId: hint.locationId, selectionIds: hint.itemIds }) : session.selection
+  const cameraSession = hint && hint.locationId !== session.selection.locationId
+    ? openSpatialAuthoringSession(step.nextDocument, { locationId: hint.locationId }) : null
+  const persisted = spatial.persist(succeedSpatialCommand({
     ...session,
     history,
+    selection,
+    scope: hint?.owner ?? session.scope,
+    sessionCamera: cameraSession?.sessionCamera ?? session.sessionCamera,
   }, true), {
     transactionStep: step,
     statusMessage,
+    ...(hint ? { graphSelection: hint.graphSelection ?? null } : {}),
   })
-  return true
+  return persisted.ok
 }
 
 export function persistSpatialDocument(
@@ -2033,3 +2104,4 @@ export function persistSpatialDocument(
   })
   return true
 }
+import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'

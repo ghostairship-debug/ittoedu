@@ -86,6 +86,17 @@ export function guardComponentLifecycle(
 ): GuardedComponentInstanceLifecycle {
   let failure: ComponentLifecycleFailure | null = null
   let destroyed = false
+  const destroy = (): void => {
+    if (destroyed) return
+    destroyed = true
+    try {
+      lifecycle.destroy()
+    } catch (error) {
+      const destroyFailure = failureFrom('destroy', error, options)
+      if (!failure) failure = destroyFailure
+      notify(options, destroyFailure)
+    }
+  }
 
   const run = <T extends unknown[]>(
     phase: Exclude<ComponentLifecyclePhase, 'create' | 'destroy'>,
@@ -98,6 +109,7 @@ export function guardComponentLifecycle(
     } catch (error) {
       failure = failureFrom(phase, error, options)
       notify(options, failure)
+      destroy()
     }
   }
 
@@ -116,6 +128,7 @@ export function guardComponentLifecycle(
     } catch (error) {
       failure = failureFrom(phase, error, options)
       notify(options, failure)
+      destroy()
       // Capture preparation is part of export correctness. Propagate the
       // normalized failure so the exporter can use its authored fallback
       // instead of silently producing a stale or blank frame.
@@ -173,17 +186,7 @@ export function guardComponentLifecycle(
       'prepareCapture',
       lifecycle.prepareCapture?.bind(lifecycle),
     ),
-    destroy(): void {
-      if (destroyed) return
-      destroyed = true
-      try {
-        lifecycle.destroy()
-      } catch (error) {
-        const destroyFailure = failureFrom('destroy', error, options)
-        if (!failure) failure = destroyFailure
-        notify(options, destroyFailure)
-      }
-    },
+    destroy,
     getFailure: () => failure,
     isFailed: () => failure !== null,
   }

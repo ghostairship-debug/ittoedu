@@ -1,5 +1,11 @@
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
+import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
+import { readLayerTextField, type LayerTextDraft, type LayerTextField } from './layerTextField'
+import type { ComponentPackageData } from '../../shared/componentTypes'
+import { setComponentPropValue } from '../../shared/componentProps'
+import { patchEffectiveLayerPropertiesAtTarget } from '../course/effectiveLayerCommands'
+import { patchSlideTableCellText } from '../course/v9TableCommands'
 import type {
   CourseProjectDocument,
   LayerItemOverride,
@@ -40,7 +46,7 @@ export const V9_SLIDE_CONTENT_REJECT_COMPOSING = 'composing'
 export const V9_SLIDE_CONTENT_REJECT_STALE_GENERATION = 'stale-generation'
 export const V9_SLIDE_CONTENT_REJECT_INVALID_TARGET = 'invalid-target'
 
-export type V9SlideContentEditKind = 'text' | 'formula'
+export type V9SlideContentEditKind = 'text' | 'formula' | 'chart-text' | 'field-text'
 export type V9SlideContentEditSource = 'canvas' | 'properties'
 export type V9SlideContentEditAction = 'commit' | 'cancel' | 'ignore' | 'defer'
 
@@ -75,10 +81,12 @@ export interface V9SlideContentEditSession {
   readonly kind: V9SlideContentEditKind
   readonly source: V9SlideContentEditSource
   readonly target: SlideAuthoringTarget
+  readonly chartField?: ChartTextField
+  readonly textField?: LayerTextField
   readonly composing: boolean
   readonly pendingAction: Exclude<V9SlideContentEditAction, 'ignore' | 'defer'> | null
-  readonly original: V9SlideTextContentSnapshot | V9SlideFormulaContentSnapshot
-  readonly draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft
+  readonly original: V9SlideTextContentSnapshot | V9SlideFormulaContentSnapshot | ChartTextDraft | LayerTextDraft
+  readonly draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft | ChartTextDraft | LayerTextDraft
 }
 
 export type BeginV9SlideContentEditResult = {
@@ -89,12 +97,38 @@ export type BeginV9SlideContentEditResult = {
   readonly reason: string
 }
 
+export type SlideFieldTextIntent = {
+  readonly kind: 'begin-field'
+  readonly target: SlideAuthoringTarget
+  readonly field: LayerTextField
+} | {
+  readonly kind: 'update-field'
+  readonly expectedEdit: V9SlideContentEditSession
+  readonly text: string
+  readonly composing: boolean
+} | {
+  readonly kind: 'begin-chart'
+  readonly target: SlideAuthoringTarget
+  readonly field: ChartTextField
+} | {
+  readonly kind: 'update-chart'
+  readonly expectedEdit: V9SlideContentEditSession
+  readonly draft: ChartTextDraft
+  readonly composing: boolean
+} | {
+  readonly kind: 'commit' | 'cancel'
+  readonly expectedEdit: V9SlideContentEditSession
+}
+
+export type SlideFieldTextReceipt = { readonly ok: true; readonly edit: V9SlideContentEditSession | null } | { readonly ok: false; readonly reason: string }
+
 export type V9SlideContentCommitFn = (
   session: SlideAuthoringSession,
   nextDocument: CourseProjectDocument | null,
 ) => SlideCommandResult
 
 export interface CommitV9SlideContentOptions {
+  readonly componentPackages?: Readonly<Record<string, ComponentPackageData>>
   readonly now?: string
   readonly expectedRevision?: number
   readonly expectedGeneration?: number
@@ -317,6 +351,7 @@ function readContentSnapshot(
 function locateEditableNative(
   session: SlideAuthoringSession,
   layerItemId: string,
+  nativeTypes: readonly string[] = ['text', 'formula'],
 ): { ok: true; item: NativeLayerItem } | { ok: false; reason: string } {
   const view = buildSlideEditorView({
     project: session.history.present,
@@ -328,11 +363,46 @@ function locateEditableNative(
   if (layer.source !== session.scope) return { ok: false, reason: SLIDE_REJECT_WRONG_OWNER }
   if (!nativeItem(layer)) return { ok: false, reason: V9_SLIDE_CONTENT_REJECT_INVALID_TARGET }
   const item = layer.item as NativeLayerItem
-  if (item.content.nativeType !== 'text' && item.content.nativeType !== 'formula') {
+  if (!nativeTypes.includes(item.content.nativeType)) {
     return { ok: false, reason: V9_SLIDE_CONTENT_REJECT_INVALID_TARGET }
   }
   if (item.locked) return { ok: false, reason: SLIDE_REJECT_LOCKED }
   return { ok: true, item }
+}
+
+export function beginV9SlideChartTextEdit(session: SlideAuthoringSession, layerItemId: string, field: ChartTextField): BeginV9SlideContentEditResult {
+  const located = locateEditableNative(session, layerItemId, ['chart'])
+  if (!located.ok) return located
+  if (located.item.content.nativeType !== 'chart') return { ok: false, reason: V9_SLIDE_CONTENT_REJECT_INVALID_TARGET }
+  const text = readChartText(located.item.content.data, field)
+  if (text === undefined) return { ok: false, reason: V9_SLIDE_CONTENT_REJECT_INVALID_TARGET }
+  const original: ChartTextDraft = { text, chart: structuredClone(located.item.content.data), error: null }
+  return { ok: true, edit: freezeEdit({
+    kind: 'chart-text', source: 'canvas', target: makeSlideAuthoringTarget(session, layerItemId, 'item'),
+    chartField: field, composing: false, pendingAction: null, original, draft: structuredClone(original),
+  }) }
+}
+
+export function beginV9SlideFieldTextEdit(session: SlideAuthoringSession, layerItemId: string, field: LayerTextField, packages: Readonly<Record<string, ComponentPackageData>> = {}): BeginV9SlideContentEditResult {
+  const view = buildSlideEditorView({ project: session.history.present, locationId: session.selection.locationId, stateId: session.selection.stateId })
+  const layer = view.layers.find(layer => layer.selectionId === layerItemId && layer.source === session.scope)
+  if (!layer || layer.item.locked || !layer.item.visible) return { ok: false, reason: V9_SLIDE_CONTENT_REJECT_INVALID_TARGET }
+  const text = readLayerTextField(structuredClone(layer.item) as import('../../shared/courseProjectTypes').LayerItem, field, packages)
+  if (text === undefined) return { ok: false, reason: V9_SLIDE_CONTENT_REJECT_INVALID_TARGET }
+  return { ok: true, edit: freezeEdit({
+    kind: 'field-text', source: 'canvas', target: makeSlideAuthoringTarget(session, layerItemId, 'item'),
+    textField: field, composing: false, pendingAction: null, original: { text }, draft: { text },
+  }) }
+}
+
+export function updateV9SlideFieldTextDraft(edit: V9SlideContentEditSession, text: string, composing: boolean): V9SlideContentEditSession {
+  if (edit.kind !== 'field-text') return edit
+  return freezeEdit({ ...edit, draft: { text }, composing })
+}
+
+export function updateV9SlideChartTextDraft(edit: V9SlideContentEditSession, draft: ChartTextDraft, composing: boolean): V9SlideContentEditSession {
+  if (edit.kind !== 'chart-text') return edit
+  return freezeEdit({ ...edit, draft, composing })
 }
 
 export function beginV9SlideContentEdit(input: {
@@ -452,6 +522,7 @@ function formulaDraftChanged(
 }
 
 export function isV9SlideContentDraftDirty(edit: V9SlideContentEditSession): boolean {
+  if (edit.kind === 'chart-text' || edit.kind === 'field-text') return !sameJson(edit.original, edit.draft)
   if (edit.kind === 'text') {
     return textDraftChanged(
       edit.original as V9SlideTextContentSnapshot,
@@ -646,6 +717,47 @@ export function commitV9SlideContentEdit(
   if (edit.composing) return rejectSession(session, V9_SLIDE_CONTENT_REJECT_COMPOSING)
   const stale = rejectIfStaleEdit(session, edit, options)
   if (stale) return stale
+  if (edit.kind === 'field-text') {
+    const field = edit.textField
+    if (!field) return rejectSession(session, V9_SLIDE_CONTENT_REJECT_INVALID_TARGET)
+    const current = beginV9SlideFieldTextEdit(session, edit.target.layerItemId, field, options.componentPackages)
+    if (!current.ok) return rejectSession(session, current.reason)
+    if (!isV9SlideContentDraftDirty(edit)) return commitKeepingEditedLayer(commit(session, null), edit.target.layerItemId)
+    const view = buildSlideEditorView({ project: session.history.present, locationId: session.selection.locationId, stateId: session.selection.stateId })
+    const item = view.layers.find(layer => layer.selectionId === edit.target.layerItemId)!.item
+    const text = (edit.draft as LayerTextDraft).text
+    try {
+      let patch: import('../course/effectiveLayerCommands').EffectiveLayerPropertiesPatchAtTarget
+      if (field.kind === 'table-cell' && item.kind === 'native' && item.content.nativeType === 'table') {
+        const result = patchSlideTableCellText(session, { layerItemId: edit.target.layerItemId, cellId: field.cellId, text }, { expectedRevision: edit.target.revision, now: options.now })
+        if (!result.ok) return rejectSession(session, result.reason ?? '单元格文字提交失败')
+        return commitKeepingEditedLayer(commit(session, result.nextSession?.history.present ?? null), edit.target.layerItemId)
+      } else if (field.kind === 'component-prop' && item.kind === 'component') {
+        patch = { componentProps: setComponentPropValue(structuredClone(item.props), field.key, text) }
+      } else return rejectSession(session, V9_SLIDE_CONTENT_REJECT_INVALID_TARGET)
+      const result = patchEffectiveLayerPropertiesAtTarget(session.history.present, {
+        authoringAddress: edit.target.authoringAddress, locationId: session.selection.locationId, stateId: session.selection.stateId,
+      }, patch, { expectedRevision: edit.target.revision, now: options.now })
+      if (!result.ok) return rejectSession(session, result.reason ?? '文字提交失败')
+      return commitKeepingEditedLayer(commit(session, result.nextDocument ?? null), edit.target.layerItemId)
+    } catch (error) { return rejectSession(session, error instanceof Error ? error.message : '文字提交失败') }
+  }
+  if (edit.kind === 'chart-text') {
+    if (!edit.chartField) return rejectSession(session, V9_SLIDE_CONTENT_REJECT_INVALID_TARGET)
+    const current = beginV9SlideChartTextEdit(session, edit.target.layerItemId, edit.chartField)
+    if (!current.ok) return rejectSession(session, current.reason)
+    const draft = edit.draft as ChartTextDraft
+    if (draft.error) return rejectSession(session, draft.error)
+    if (!isV9SlideContentDraftDirty(edit)) return commitKeepingEditedLayer(commit(session, null), edit.target.layerItemId)
+    try {
+      const next = mutateContentDocument(session, project => {
+        writeNativeContent(project, session, edit.target.layerItemId, draft.chart)
+      }, options.now)
+      return commitKeepingEditedLayer(commit(session, next), edit.target.layerItemId)
+    } catch (error) {
+      return rejectSession(session, error instanceof Error ? error.message : '图表文字提交失败')
+    }
+  }
   const located = locateEditableNative(session, edit.target.layerItemId)
   if (!located.ok) return rejectSession(session, located.reason)
   if (located.item.content.nativeType !== edit.kind) {

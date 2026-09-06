@@ -1,4 +1,5 @@
 import type { ComponentPackageData } from '../../../shared/componentTypes'
+import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar } from '../../project/v9AssetAdapter'
@@ -14,6 +15,7 @@ import {
 } from '../../course/slideAuthoringBackend'
 import {
   commitSlideAuthoringHistory,
+  selectSlideEditorLayers,
   commitSlideEditorTransactionHistory,
   commitSlideProjectMutation,
   slideAuthoringLegacyHistoryEntryCount,
@@ -28,6 +30,12 @@ import { addSlideChartLayer } from '../../course/v9ChartCommands'
 import { addSlideInputLayer } from '../../course/v9SlideContentCommands'
 import {
   beginV9SlideContentEdit,
+  beginV9SlideChartTextEdit,
+  beginV9SlideFieldTextEdit,
+  updateV9SlideFieldTextDraft,
+  updateV9SlideChartTextDraft,
+  type SlideFieldTextIntent,
+  type SlideFieldTextReceipt,
   cancelV9SlideContentEdit,
   commitV9SlideContentEdit,
   markV9SlideContentComposing,
@@ -283,6 +291,7 @@ export function createSlideAuthoringSlice(
   duplicateScene(sceneId: string): void
   reorderScenes(sceneIds: string[]): void
   commitDraft(): SlideAuthoringBackend | null
+  runSlideFieldTextIntent(intent: SlideFieldTextIntent): SlideFieldTextReceipt
   commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
   materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
   undo(): void
@@ -343,7 +352,7 @@ export function createSlideAuthoringSlice(
     const backend = owned.slideBackend
     if (!isSlideAuthoringBackend(backend)) return null
     if (!owned.v9ContentEdit) return backend
-    const result = commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit)
+    const result = commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit, { componentPackages: kernel.readResources().componentPackages })
     if (!result.ok) {
       slide.persist(result)
       return null
@@ -358,7 +367,7 @@ export function createSlideAuthoringSlice(
     const backend = owned.slideBackend
     if (!isSlideAuthoringBackend(backend) || !owned.v9ContentEdit) return
     slide.persist(
-      commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit),
+      commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit, { componentPackages: kernel.readResources().componentPackages }),
       { clearContentEdit: true },
     )
   }
@@ -475,6 +484,48 @@ export function createSlideAuthoringSlice(
       }))
     },
     commitDraft,
+    runSlideFieldTextIntent(intent) {
+      const owned = slide.read()
+      const backend = owned.slideBackend
+      if (!isSlideAuthoringBackend(backend)) return { ok: false, reason: SESSIONLESS_COURSE_REASON }
+      const session = backend.getSession()
+      if (intent.kind === 'begin-chart' || intent.kind === 'begin-field') {
+        if (owned.v9ContentEdit) return { ok: false, reason: '请先完成当前文字编辑' }
+        const target = intent.target
+        if (target.sessionId !== session.sessionId || target.generation !== session.generation || target.revision !== session.history.present.revision || target.scope !== session.scope) {
+          return { ok: false, reason: 'stale-revision' }
+        }
+        const begun = intent.kind === 'begin-chart'
+          ? beginV9SlideChartTextEdit(session, target.layerItemId, intent.field)
+          : beginV9SlideFieldTextEdit(session, target.layerItemId, intent.field, kernel.readResources().componentPackages)
+        if (!begun.ok) return begun
+        if (begun.edit.target.authoringAddress !== target.authoringAddress) return { ok: false, reason: 'stale-target' }
+        slide.patch({ v9ContentEdit: begun.edit })
+        return begun
+      }
+      const edit = owned.v9ContentEdit
+      if (!edit || !Object.is(edit, intent.expectedEdit)) return { ok: false, reason: 'stale-revision' }
+      if (intent.kind === 'cancel') {
+        slide.patch({ v9ContentEdit: null })
+        return { ok: true, edit: null }
+      }
+      if (intent.kind === 'update-chart') {
+        if (edit.kind !== 'chart-text' || edit.target.revision !== session.history.present.revision || edit.target.generation !== session.generation) return { ok: false, reason: 'stale-revision' }
+        const next = updateV9SlideChartTextDraft(edit, intent.draft, intent.composing)
+        slide.patch({ v9ContentEdit: next })
+        return { ok: true, edit: next }
+      }
+      if (intent.kind === 'update-field') {
+        if (edit.kind !== 'field-text' || edit.target.revision !== session.history.present.revision || edit.target.generation !== session.generation) return { ok: false, reason: 'stale-revision' }
+        const next = updateV9SlideFieldTextDraft(edit, intent.text, intent.composing)
+        slide.patch({ v9ContentEdit: next })
+        return { ok: true, edit: next }
+      }
+      const result = commitV9SlideContentEdit(session, edit, { componentPackages: kernel.readResources().componentPackages })
+      if (!result.ok) return { ok: false, reason: result.reason ?? '文字提交失败' }
+      slide.persist(result, { clearContentEdit: true })
+      return { ok: true, edit: null }
+    },
     commitDraftForPersistence(): { ok: true } | { ok: false; reason: string } {
       const owned = slide.read()
       const backend = owned.slideBackend
@@ -485,7 +536,7 @@ export function createSlideAuthoringSlice(
         if (edit.target.revision !== backend.getSession().history.present.revision) {
           return { ok: false, reason: 'stale-revision' }
         }
-        const result = commitV9SlideContentEdit(backend.getSession(), edit)
+        const result = commitV9SlideContentEdit(backend.getSession(), edit, { componentPackages: kernel.readResources().componentPackages })
         if (!result.ok) {
           return { ok: false, reason: result.reason ?? '无法提交活动文字草稿' }
         }
@@ -498,6 +549,17 @@ export function createSlideAuthoringSlice(
     materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
       const owned = slide.read()
       const edit = owned.v9ContentEdit
+      if (edit?.kind === 'chart-text' || edit?.kind === 'field-text') {
+        if (!isSlideAuthoringBackend(owned.slideBackend)) return { ok: false, reason: SESSIONLESS_COURSE_REASON }
+        const session = owned.slideBackend.getSession()
+        const result = commitV9SlideContentEdit(
+          { ...session, history: { ...session.history, present: document } }, { ...edit, composing: false },
+          { componentPackages: kernel.readResources().componentPackages },
+        )
+        return result.ok && result.nextSession
+          ? { ok: true, document: result.nextSession.history.present }
+          : { ok: false, reason: result.reason ?? '无法恢复图表文字草稿' }
+      }
       if (!edit || edit.kind !== 'text') return { ok: true, document }
       const clone = structuredClone(document)
       const located = locateCourseLayer(clone, edit.target.layerItemId)
@@ -892,14 +954,19 @@ export function persistSlideTransaction(
   if (!isSlideAuthoringBackend(backend)) return false
   const session = backend.getSession()
   const authoringSession = kernel.readAuthoringSession()
-  slide.persist({
+  const hint = readAuthoringToolSelection(step.selectionHint)
+  if (hint?.owner === 'world') throw new Error('Slide 不能选中 world owner')
+  const selection = hint ? selectSlideEditorLayers({ project: step.nextDocument, locationId: hint.locationId, stateId: hint.stateId, selectionIds: hint.itemIds }) : session.selection
+  const persisted = slide.persist({
     ok: true,
     nextSession: {
       ...session,
       history: commitSlideEditorTransactionHistory(session.history, step),
+      selection,
+      scope: hint?.owner ?? session.scope,
     },
     historyEntry: true,
-    selection: session.selection,
+    selection,
     resourceTransition: {
       resourceChanges: step.resourceChanges,
       resourceDirection: 'forward',
@@ -910,16 +977,14 @@ export function persistSlideTransaction(
     ...(authoringSession
       ? {
           courseAuthoringSession: updateCourseAuthoringSessionItems(
-            updateCourseAuthoringSessionRevision(
-              authoringSession,
-              step.nextDocument.revision,
-            ),
-            authoringSession.itemIds,
+            { token: createSessionToken({ locationId: selection.locationId, surfaceType: 'slide', revision: step.nextDocument.revision },
+              authoringSession.token.generation + (selection.locationId !== session.selection.locationId || selection.stateId !== session.selection.stateId ? 1 : 0)), itemIds: [] },
+            hint ? selection.selectionIds : authoringSession.itemIds,
           ),
         }
       : {}),
   })
-  return true
+  return persisted.ok
 }
 
 export function persistSlideDocument(

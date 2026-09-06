@@ -58,7 +58,9 @@ description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md�
 
 权威工程是 `CourseProjectDocument`（`schemaVersion: 9`），不是 Agent Kit 语义 DSL，也不是 Project V8。
 
-课例实现放在 `<case-dir>/implementation/build.ts`，由编辑器仓库的正式外部案例入口加载。该模块不得用相对路径、绝对路径或路径别名导入编辑器内部源码；它导出构建函数，从注入的 `context.api` 取得下列真实产品工厂和 V9 命令，并返回 `{ project, assetFiles, componentFiles }`。这只是产品 API Facade，不是第二套 DSL。
+课例实现放在 `<case-dir>/implementation/build.ts`，由编辑器仓库的正式外部案例入口加载。新课例导出 `apiVersion = 2`，不得用相对路径、绝对路径或路径别名导入编辑器内部源码。从 `context.api.createCourseProject({ surfaceType, title })` 创建产品管理的浏览器工作会话；用 `snapshot()` 读取当前 scope 和 canonical targets、`activate()` 切换位置 / owner / 状态、`createScope()` 获取插入地址、`execute(tool, input, destination)` 提交正式工具调用。上述调用均须 await。每步检查 receipt，失败按 diagnostics 修正该工具输入；最终直接 `return await session.finish()`，不能修改返回文档或拼装输出对象。
+
+工具清单由 `session.tools` 提供，输入以能力索引指向的正式工具 Schema 为准。新建 Native / Flow 内容、页面 / 状态 / 互动、Spatial 镜头 / 路径 / 关系、全局设置 / 背景 / 网络、Recipe、资源及 Component / Runtime 都经此 Facade。动态代码候选由产品自动完成 Published 闭包和真实宿主准入；模块不能传入成功标记或替换宿主。可参考仓库 `tests/fixtures/builder-v2-case/build.mjs` 的公开 API 用法。下列 Owner 源码仅用于能力定位，不能成为课例模块的 import。未标版本或 `apiVersion = 1` 的旧课例仍兼容旧工厂 Facade，入口会提示迁移；不再为新课例选择 V1。
 
 从任意工作目录调用：
 

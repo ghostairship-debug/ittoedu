@@ -73,7 +73,7 @@ export interface FlowTextAuthoringController {
   readonly formulaBlockId: string | null
   readonly setFormulaBlockId: (blockId: string | null) => void
   readonly bumpRestyle: (range?: { readonly start: number; readonly end: number }) => void
-  readonly adoptEditReceipt: (edit: FlowTextEditSession) => void
+  readonly adoptEditReceipt: (edit: FlowTextEditSession, target?: CourseAuthoringTarget) => void
   readonly setEditState: (next: FlowTextEditSession | null) => void
   readonly commitCurrent: (keepSelected?: boolean, nextBlockId?: string) => void
   readonly cancelCurrent: () => void
@@ -171,12 +171,13 @@ export function useFlowTextAuthoringController(
     }))
   }, [])
 
-  const adoptEditReceipt = useCallback((next: FlowTextEditSession) => {
+  const adoptEditReceipt = useCallback((next: FlowTextEditSession, target?: CourseAuthoringTarget) => {
     // A command-port receipt is already the Store-owned canonical edit. Adopt
     // it synchronously and mark it as published so the prop mirror effect does
     // not schedule a second, late restyle/focus cycle.
     publishedEditRef.current = next
     editRef.current = next
+    if (target) editTargetRef.current = target
   }, [])
 
   const setEditState = useCallback((next: FlowTextEditSession | null) => {
@@ -266,7 +267,7 @@ export function useFlowTextAuthoringController(
     const ownerWindow = ownerDocument.defaultView ?? window
     const onFocusOut = (event: FocusEvent) => {
       const scheduledEdit = editRef.current
-      if (!scheduledEdit || isFlowSelectionPreservingFocusTarget(event.relatedTarget, workspace)) {
+      if (!scheduledEdit || scheduledEdit.field === 'table-caption' || scheduledEdit.field === 'table-header' || isFlowSelectionPreservingFocusTarget(event.relatedTarget, workspace)) {
         return
       }
       if (pendingCommit !== null) ownerWindow.clearTimeout(pendingCommit)
@@ -289,6 +290,9 @@ export function useFlowTextAuthoringController(
     if (
       editRef.current
       && editRef.current.kind !== 'formula'
+      && editRef.current.kind !== 'chart-text'
+      && editRef.current.field !== 'table-caption'
+      && editRef.current.field !== 'table-header'
       && selection?.focus !== 'text'
     ) {
       flushOpenTextEdit()

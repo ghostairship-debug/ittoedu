@@ -9,6 +9,8 @@ import type {
 import {
   findComponentPackageSource,
   mountPublishedComponent,
+  publishedComponentRegistryIdentity,
+  extractPublishedComponentManifest,
   type ComponentHostNode,
 } from '../../src/player/surfaces/publishedComponentMount'
 import { ComponentRegistry } from '../../src/player/ComponentRegistry'
@@ -193,6 +195,81 @@ async function flushAuthoringTargets(): Promise<void> {
 }
 
 describe('publishedComponentMount helper', () => {
+  it.each(['mount', 'update', 'timeout'] as const)('isolates %s failure, destroys once and shows a visible fallback', async (phase) => {
+    vi.useFakeTimers()
+    const container = document.createElement('div')
+    const registry = new ComponentRegistry()
+    const emit = vi.fn()
+    const reports = vi.fn()
+    const source: PublishedCourseComponent = {
+      id: 'failure-test', name: 'Failure', version: '1.0.0', contentSha256: phase,
+      apiVersion: 4, scopes: ['scene'], renderMode: 'dom', assets: {},
+      code: encodeUtf16LeBase64(`window.CoursewareComponent.define({id:'failure-test',runtimeApiVersion:4,create(ctx){
+        var button=document.createElement('button');button.textContent='old';button.onclick=function(){ctx.emit('late-input')};ctx.dom.root.appendChild(button);
+        window.__failureTestButton=button;window.__failureTestDestroyCount=0;
+        var timer=setInterval(function(){ctx.emit('tick')},10);
+        return {setMode(){if('${phase}'==='mount')throw Error('mount failed')},
+        updateProps(){throw Error('update failed')},
+        destroy(){clearInterval(timer);window.__failureTestDestroyCount++;throw Error('destroy failed')}}
+      }})`),
+    }
+    let handle: ReturnType<typeof mountPublishedComponent> | undefined
+    try {
+      handle = mountPublishedComponent(container, { container, registry, componentId: source.id, width: 100, height: 60, components: { [source.id]: source }, emit, reportError: reports })
+      if (phase === 'update') handle.updateProps({ value: 'changed' })
+      if (phase === 'timeout') handle.failCapture?.(new Error('capture timed out'))
+      expect(handle.ok).toBe(false)
+      expect(container.querySelectorAll('.published-component-fallback')).toHaveLength(1)
+      expect(container.querySelector('.published-component-mount')).toBeNull()
+      const oldButton = Reflect.get(window, '__failureTestButton') as HTMLButtonElement
+      oldButton.click()
+      await vi.advanceTimersByTimeAsync(30)
+      expect(emit).not.toHaveBeenCalled()
+      expect(Reflect.get(window, '__failureTestDestroyCount')).toBe(1)
+      handle.updateProps({ value: 'late' })
+      handle.destroy()
+      expect(Reflect.get(window, '__failureTestDestroyCount')).toBe(1)
+      expect(reports).toHaveBeenCalledWith('destroy', expect.any(Error))
+      expect(container.childElementCount).toBe(0)
+    } finally {
+      handle?.destroy()
+      registry.dispose()
+      Reflect.deleteProperty(window, '__failureTestButton')
+      Reflect.deleteProperty(window, '__failureTestDestroyCount')
+      vi.useRealTimers()
+    }
+  })
+
+  it('mounts different project/version/source/content identities without reusing another definition', () => {
+    const registry = new ComponentRegistry()
+    const sources = ['first', 'second', 'third', 'fourth'].map((label, index): PublishedCourseComponent => ({
+      id: 'identity-test', name: label, version: index === 2 ? '2.0.0' : '1.0.0',
+      contentSha256: `content-${index}`, apiVersion: 4, scopes: ['scene'], renderMode: 'dom', assets: {},
+      code: encodeUtf16LeBase64(`window.CoursewareComponent.define({id:'identity-test',runtimeApiVersion:4,create(context){context.dom.root.textContent='${label}';return {destroy(){context.dom.root.textContent=''}}}})`),
+    }))
+    const handles = sources.map((source, index) => {
+      const container = document.createElement('div')
+      const handle = mountPublishedComponent(container, {
+        container, projectId: index === 1 ? 'project-b' : 'project-a', componentId: source.id,
+        version: source.version, width: 100, height: 50, registry, components: { [source.id]: source },
+      })
+      expect(handle.ok).toBe(true)
+      expect(handle.element.shadowRoot?.querySelector('[data-component-surface]')?.textContent).toBe(source.name)
+      return handle
+    })
+    const identities = sources.map((source, index) => publishedComponentRegistryIdentity(source, index === 1 ? 'project-b' : 'project-a'))
+    const retained = identities.slice(1).map((identity) => registry.get(identity))
+    registry.invalidate(identities[0]!)
+    expect(registry.get(identities[0]!)).toBeUndefined()
+    identities.slice(1).forEach((identity, index) => expect(registry.get(identity)).toBe(retained[index]))
+    const collision = identities[1]!
+    expect(() => registry.executeRuntime(extractPublishedComponentManifest(sources[1]!), 'different source', collision)).toThrow('碰撞')
+    expect(registry.get(collision)).toBe(retained[0])
+    expect(registry.getLoadError(collision)?.message).toContain('project-b')
+    handles.forEach((handle) => handle.destroy())
+    registry.dispose()
+  })
+
   afterEach(() => {
     document.body.replaceChildren()
   })

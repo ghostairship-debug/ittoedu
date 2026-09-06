@@ -164,23 +164,15 @@ describe('ElementsTab Chart Entry', () => {
     expect(finalItemCount).toBe(initialItemCount)
   })
 
-  it('renders only 1 disabled card explaining limitation in Flow surface', () => {
-    useEditorStore.setState({
-      flowSession: {
-        selection: { authoringScope: 'surface' } as any,
-        history: { past: [], present: v9EmptySlideFixture(), future: [] },
-      },
-    })
-
+  it('offers the chart picker in Flow and creates a real body chart', () => {
+    useEditorStore.getState().createNewFlowProject()
     render(<ElementsTab onAddImage={() => undefined} />)
-
-    expect(screen.queryByTestId('add-chart')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('add-chart-bar')).not.toBeInTheDocument()
-
-    const disabledBtn = screen.getByTestId('add-chart-disabled')
-    expect(disabledBtn).toBeInTheDocument()
-    expect(disabledBtn).toBeDisabled()
-    expect(disabledBtn).toHaveAttribute('title', '图表仅支持演示页场景')
+    fireEvent.click(screen.getByTestId('add-chart'))
+    fireEvent.click(screen.getByTestId('add-chart-bar'))
+    const session = useEditorStore.getState().flowSession!
+    const surface = session.history.present.surfaces.find(surface => surface.type === 'flow')!
+    expect(surface.blocks).toContainEqual(expect.objectContaining({ type: 'chart', chart: expect.objectContaining({ chartType: 'bar' }) }))
+    expect(screen.queryByTestId('add-chart-disabled')).not.toBeInTheDocument()
   })
 
   it('displays matching chart type cards directly when searching', () => {

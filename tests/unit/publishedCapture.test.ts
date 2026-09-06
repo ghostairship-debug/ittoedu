@@ -159,12 +159,15 @@ describe('Published Slide static capture', () => {
     const second = createLayer(root)
     const firstRestored = vi.fn()
     const secondRestored = vi.fn()
+    const firstFailed = vi.fn()
+    const secondFailed = vi.fn()
     let secondStarted = false
     const unregisterFirst = registerPublishedCaptureResource(first.layer, {
       waitForCaptureReady: () => new Promise<void>((resolve) => {
         window.setTimeout(resolve, 30)
       }),
       restoreAfterCapture: firstRestored,
+      failCapture: firstFailed,
     })
     const unregisterSecond = registerPublishedCaptureResource(second.layer, {
       waitForCaptureReady: () => {
@@ -172,6 +175,7 @@ describe('Published Slide static capture', () => {
         return new Promise<void>(() => undefined)
       },
       restoreAfterCapture: secondRestored,
+      failCapture: secondFailed,
     })
 
     try {
@@ -216,6 +220,8 @@ describe('Published Slide static capture', () => {
 
       expect(firstRestored).toHaveBeenCalledTimes(1)
       expect(secondRestored).toHaveBeenCalledTimes(1)
+      expect(firstFailed).not.toHaveBeenCalled()
+      expect(secondFailed).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('超时') }))
       expect(root.hidden).toBe(true)
       expect(root.style.left).toBe('7px')
     } finally {

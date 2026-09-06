@@ -4,12 +4,21 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
+import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
+import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
+import { createServer } from 'vite'
+import type { CoursewareCaseBuildSummary } from '../../scripts/build-courseware-case'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -385,6 +394,186 @@ function expectCleanDiagnostics(diagnostics: Diagnostics): void {
     /^WebGL: INVALID_VALUE: texImage2D: bad image data$/.test(message)
   ))).toEqual([])
 }
+
+test('S2 Builder V2：两份 Markdown 生成三 Surface 并在离线 HTML 连续操作', async () => {
+  test.setTimeout(120_000)
+  const runRoot = mkdtempSync(join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-wave-a-builder-v2-`))
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const fixture = join(root, 'tests/fixtures/builder-v2-case')
+    for (const name of ['build.mjs', '01-teaching-plan.md', '02-presentation-script.md']) writeFileSync(join(runRoot, name), readFileSync(join(fixture, name)))
+    const processResult = await promisify(execFile)(process.execPath, ['--import', 'tsx', join(root, 'scripts/build-courseware-case.ts'),
+      '--case-dir', runRoot, '--builder', 'build.mjs', '--project', 'lesson.h5lesson', '--html', 'lesson.html'],
+    { cwd: root, windowsHide: true, maxBuffer: 4 * 1024 * 1024, timeout: 90_000 })
+    const built = JSON.parse(processResult.stdout) as CoursewareCaseBuildSummary
+    expect(built.surfaces).toBe(3)
+    expect(built.validation.error).toBe(0)
+    expect(built.receipts).toHaveLength(14)
+    expect(built.receipts!.every(receipt => receipt.status === 'committed')).toBe(true)
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(built.project)))
+    const spatial = reopened.project.surfaces.find(surface => surface.type === 'spatial-2d')!
+    if (spatial.type !== 'spatial-2d') throw new Error('Missing Spatial')
+    expect(spatial.world.paths).toHaveLength(1)
+    expect(spatial.world.relations).toHaveLength(1)
+    browser = await chromium.launch({ headless: true })
+    const context = await browser.newContext({ offline: true, viewport: { width: 1280, height: 720 } })
+    const page = await context.newPage()
+    const pageErrors: string[] = []
+    page.on('pageerror', error => pageErrors.push(error.message))
+    await page.goto(pathToFileURL(built.html).href)
+    await page.getByRole('button', { name: '1/2 · 点击改变总份数', exact: true }).click()
+    await expect(page.getByRole('button', { name: '1/4 · 点击改变总份数', exact: true })).toBeVisible()
+    const paintedClick = async (locator: Locator) => {
+      const box = await locator.boundingBox()
+      if (!box) throw new Error('Painted control missing')
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    }
+    await paintedClick(page.getByRole('button', { name: '展开教师控制器', exact: true }))
+    await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
+    await paintedClick(page.getByText('B. 平均分的总份数', { exact: true }))
+    await expect(page.getByText('正确：分母表示平均分的总份数。', { exact: true })).toBeVisible()
+    await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
+    await expect(page.getByRole('heading', { name: '分数复习讲义', exact: true })).toBeVisible()
+    await expect(page.getByRole('cell', { name: '平均分成四份，取一份', exact: true })).toBeVisible()
+    await page.screenshot({ path: 'output/playwright/r13-review/r14-builder-v2-flow.png' })
+    await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
+    await expect(page.getByText('4 / 5 · 分数关系图 · 全景', { exact: true })).toBeVisible()
+    await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
+    await expect(page.getByText('5 / 5 · 分数关系图 · 观察二分之一', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'output/playwright/r13-review/r14-builder-v2-spatial.png' })
+    expect(pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    removeRunRoot(runRoot)
+  }
+})
+
+test('S2 动态工具：真实宿主拒绝坏源码且工程与资源零写入', async () => {
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    const page = await browser.newPage()
+    await page.goto(`http://127.0.0.1:${address.port}`)
+    const result = await runDynamicAdmissionProbe(page)
+    expect(result.good.status).toBe('committed')
+    expect(result.componentGood.status).toBe('committed')
+    expect(result.bad.status).toBe('failed')
+    expect(result.componentBad.status).toBe('failed')
+    expect(result.missing.status).toBe('failed')
+    expect(result.timeout.status).toBe('failed')
+    expect(result.stale.status).toBe('stale')
+    expect(result.missing.diagnostics[0].path).toContain('source')
+    expect(result.disabled.status).toBe('committed')
+    expect(result.configured.status).toBe('committed')
+    expect(result.conflict.status).toBe('failed')
+    expect(result.componentConfigured.status, JSON.stringify(result.componentConfigured.diagnostics)).toBe('committed')
+    expect(result.runtimeEnabled).toBe(false)
+    expect(result.runtimeCaption).toBe('after')
+    expect(result.componentVisible).toBe(false)
+    expect(result.componentBaseProps).toEqual({})
+    expect(result.componentStateProps).toEqual({ caption: 'state only' })
+    expect(result.stateOnlyFailure.status).toBe('failed')
+    expect(result.stateOnlyFailure.after).toBe(result.stateOnlyFailure.before)
+    for (const inserted of result.insertedRuntimes) {
+      expect(inserted.status, JSON.stringify(inserted)).toBe(inserted.surfaceType === 'spatial-2d' ? 'failed' : 'committed')
+      if (inserted.surfaceType === 'spatial-2d') expect(inserted.after).toBe(inserted.before)
+    }
+    for (const inserted of result.insertedComponents) expect(inserted.status, JSON.stringify(inserted)).toBe('committed')
+    expect(result.distantComponentPreserved).toBe(true)
+    expect(result.commits).toBe(5)
+    expect(result.packageVersion).toBe('1.0.1')
+    expect(result.leakedRoots).toBe(0)
+  } finally {
+    await browser.close()
+    await server.close()
+  }
+})
+
+test('S2 工程字体：Component 和 Runtime 在离线 HTML 中加载直接引用字体', async () => {
+  const { app, runRoot } = await launchEditor()
+  try {
+    const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const sources = await createProjectFontDeliveryFixture(font, fallback)
+    const html = buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const filename = join(runRoot, 'font-offline.html')
+    writeFileSync(filename, html)
+    await app.context().setOffline(true)
+    const opened = app.waitForEvent('window')
+    await app.evaluate(async ({ BrowserWindow }, filename) => {
+      const window = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: false, contextIsolation: true } })
+      await window.loadFile(filename)
+    }, filename)
+    const player = await opened
+    await expect(player.getByText('ComponentFont loaded', { exact: true })).toBeVisible()
+    await expect(player.getByText('RuntimeFont loaded', { exact: true })).toBeVisible()
+    for (const name of ['ComponentFont', 'RuntimeFont']) {
+      await expect.poll(() => player.locator(`[data-direct-image="${name}"]`).evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
+      await expect.poll(() => player.locator(`[data-direct-audio="${name}"]`).evaluate((element: HTMLAudioElement) => element.readyState)).toBeGreaterThanOrEqual(1)
+    }
+    expect(await player.evaluate(() => document.fonts.check('32px ComponentFont') && document.fonts.check('32px RuntimeFont'))).toBe(true)
+    await player.screenshot({ path: 'output/playwright/r13-review/r14-font-offline.png' })
+  } finally { await closeEditor(app, runRoot) }
+})
+
+test('S2 材料库：导入检索、可携带引用和另存为隔离', async () => {
+  const launched = await launchEditor()
+  const { app, page, runRoot } = launched
+  try {
+    const filename = join(runRoot, 'materials.h5lesson')
+    await patchProjectDialogs(app, { projectSave: filename })
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(filename)).toBe(true)
+    const openMaterials = async () => {
+      await page.getByLabel('创作工具', { exact: true }).click()
+      await page.getByRole('menuitem').filter({ hasText: '教学材料库' }).click()
+      return page.getByRole('dialog', { name: '教学材料库' })
+    }
+    let library = await openMaterials()
+    await library.getByLabel('标题', { exact: true }).fill('分数的含义')
+    await library.getByLabel('来源定位', { exact: true }).fill('教材第 12 页')
+    await library.getByLabel('材料正文', { exact: true }).fill('分母表示平均分的份数。')
+    await library.getByRole('button', { name: '保存文本材料' }).click()
+    await expect(library.getByText('1 条材料', { exact: true })).toBeVisible()
+    await library.getByLabel('搜索标题、正文或来源').fill('12 页')
+    await expect(library.getByText('1 条材料', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'output/playwright/r13-review/r15-material-library.png' })
+    await library.getByRole('button', { name: '插入正文与来源' }).click()
+    await expect(library).toHaveCount(0)
+    await saveCurrent(page, filename)
+    const savedAs = join(runRoot, 'materials-copy.h5lesson')
+    await patchProjectDialogs(app, { projectSave: savedAs, projectOpen: filename })
+    await page.getByRole('button', { name: '另存为', exact: true }).click()
+    await expect.poll(() => existsSync(savedAs)).toBe(true)
+    library = await openMaterials()
+    await expect(library.getByText('0 条材料', { exact: true })).toBeVisible()
+    const sourceFile = join(runRoot, 'source.txt')
+    writeFileSync(sourceFile, '文件材料：平均分是分数意义的基础。', 'utf8')
+    await patchProjectDialogs(app, { projectSave: savedAs, projectOpen: sourceFile })
+    await library.getByRole('button', { name: '从文件导入（TXT / MD / CSV）' }).click()
+    await expect(library.getByText('1 条材料', { exact: true })).toBeVisible()
+    await expect(library.getByText('文件材料：平均分是分数意义的基础。', { exact: true })).toBeVisible()
+    await library.getByRole('button', { name: '清空当前工程材料' }).click()
+    await expect(library.getByText('0 条材料', { exact: true })).toBeVisible()
+    await library.getByRole('button', { name: '关闭', exact: true }).click()
+    await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    library = await openMaterials()
+    await expect(library.getByText('1 条材料', { exact: true })).toBeVisible()
+    await library.getByRole('button', { name: '删除材料', exact: true }).click()
+    await expect(library.getByText('0 条材料', { exact: true })).toBeVisible()
+    await library.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(async () => {
+      const reopened = await openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+      return JSON.stringify(reopened)
+    }).toContain('教材第 12 页')
+    expect(launched.pageErrors).toEqual([])
+  } finally { await closeEditor(app, runRoot) }
+})
 
 test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', async () => {
   test.setTimeout(120_000)

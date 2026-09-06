@@ -26,7 +26,7 @@ Course Project V9、Published Course V2、Runtime API 2/3、Component API 4 继�
 flowchart LR
     B["v1.1.1 已签署维护基线"]
     R12["1.2 Native 编辑、真实同步与基础取色"]
-    R13["1.3 高频工作流、跨 Surface 图表与项目色板"]
+    R13["1.3 高频工作流、跨 Surface 图表/表格与项目色板"]
     R14["1.4 Authoring Tool / Builder V2"]
     R15["1.5 素材、导入、QA"]
     R16["1.6 本地 CLI 会话内核（隐藏）"]
@@ -58,7 +58,7 @@ flowchart LR
 | 版本 | 规格 | 用户结果 | AI 可见性 | 标签 / 制品 | Owner 签署 |
 | --- | --- | --- | --- | --- | --- |
 | 1.2 | [执行包](1.2/README.md) | Flow 图文/图形浮层与连续 DOCX、Slide input、Table/Chart 真实作者同步、Line、Background、常用色/连续调色与统一图表入口 | 无 AI | `v1.2.0-rc.N` 源码 | S1 在 1.3 统一签署 |
-| 1.3 | [README](1.3/README.md) | 高频页面/互动配方、分类、Component 排序、克隆、批量替换、项目色板/Token、Flow/Spatial Chart 与快速诊断 | 无 AI | `v1.3.0` 源码 | S1 创作力 |
+| 1.3 | [README](1.3/README.md) | 高频页面/互动配方、分类、Component 排序、克隆、批量替换、项目色板/Token、Flow/Spatial Chart/Table 与快速诊断 | 无 AI | `v1.3.0` 源码 | S1 创作力 |
 | 1.4 | [README](1.4/README.md) | 三 Surface 与动态载体统一进入可验证 Authoring Tool / Builder V2 | 无 AI | `v1.4.0-rc.N` 源码 | S2 在 1.5 统一签署 |
 | 1.5 | [README](1.5/README.md) | 共享 WorkspaceIdentity、素材、PPTX 导入、风格 Remix 与内容 QA | 无 AI | `v1.5.0` 源码 | S2 工具与素材 |
 | 1.6 | [README](1.6/README.md) | Codex / Claude / OpenCode 本地 CLI 会话内核 | 默认隐藏 | `v1.6.0-rc.N` 源码 | S3 在 1.8 统一签署 |
@@ -72,7 +72,7 @@ flowchart LR
 ## 跨版本接口与数据合同
 
 - **Native 内容**：Table、Chart 与 Slide-only input 是获批的 V9 Native strict 窄增量；Published Course V2 只做匹配读取与运行所需的窄增量。input 的提交值先原子写入已声明状态键再求规则条件，只映射 PPTX；Flow 作者浮层进入一份连续 DOCX。线条和背景沿用既有对象 / Surface 所有权，不另建旁路状态。
-- **Chart 与取色版本边界**：1.2 闭合真实 Native 作者同步、图表选择入口和共享常用色/连续调色；1.3 先独立固定 Chart 的 Flow 正文与 Spatial world 合同，再迁移共享编辑器并交付两个 Surface，两个 delivery 都必须进入 S1 依赖闭包。项目色板复用 `designTokens.colors`，通过明确范围预览/应用配色；不提前创建持久化主题绑定。1.2 当前 Chart 容器限制在后续合同落地前保持。
+- **Chart/Table 与取色版本边界**：1.2 闭合真实 Native 作者同步、图表选择入口和共享常用色/连续调色；1.3 Chart 的 Flow 正文与 Spatial world 合同和 consumer 已落地。2026-09-06 补充 Table 的独立合同、共享编辑、Flow 正文和 Spatial world delivery 四个必选节点，当前待实现；沿用既有 FlowTableBlock，不把表格问题归结为仅需开放按钮。两个 Chart 和两个 Table delivery 都进入 S1 依赖闭包，1.4 对应 Surface tools 显式承接。项目色板复用 `designTokens.colors`，通过明确范围预览/应用配色；不提前创建持久化主题绑定。Table 合同及对应 consumer 落地前保持现有入口限制。
 - **1.2 复审修复门**：当前收尾按 [1.2 执行指南](1.2/EXECUTION_GUIDE.md) 闭合作者增量、正确 owner/state 写入、input 及表格/图表/颜色的已确认可见缺口；未通过的共享能力不能被 1.3 图表/色板 delivery 当作完成前置。1.3 无关节点仍可按自己的依赖推进，S1 不替代 1.2 基础修复及 engineering candidate 验证。
 - **Recipe 互动**：分类使用声明式“选中项目→选中目标组”；排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不扩拖放/放置触发器或顺序动作，也不要求先完成通用组件化。
 - **Authoring target**：所有写操作解析为 canonical target，至少包含工程稳定身份、Surface、容器、对象 / 内容路径与版本前提；工具回执必须报告实际落点和新版本。

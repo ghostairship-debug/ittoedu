@@ -422,6 +422,9 @@ function publishedSpatialWorldNotice(
       message: `Spatial ${item.kind === 'component' ? '组件' : '运行时'}“${item.layerItemId}”缺少可用静态后备，PPTX 镜头使用可见占位。`,
     }
   }
+  if (item.content.nativeType === 'chart' || item.content.nativeType === 'table') {
+    return { ...base, severity: 'info', message: `Spatial ${item.content.nativeType === 'chart' ? '图表' : '表格'}“${item.layerItemId}”在 PPTX 镜头中保留静态图面；工程数据继续可编辑。` }
+  }
   if (item.content.nativeType === 'text') {
     return {
       ...base,

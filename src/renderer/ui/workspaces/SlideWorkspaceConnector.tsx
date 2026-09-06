@@ -140,6 +140,7 @@ export function SlideWorkspaceConnector({
   onAddVideo,
   onSelectImageAsset,
 }: SlideWorkspaceConnectorProps) {
+  const runSlideFieldTextIntent = useEditorStore(state => state.runSlideFieldTextIntent)
   const [
     backend,
     project,
@@ -316,6 +317,7 @@ export function SlideWorkspaceConnector({
       replaceRuntimeAssetAtTarget,
     },
     authoring: {
+      runFieldTextIntent: runSlideFieldTextIntent,
       run: runSlideCandidateCommand,
       afterSelectLayers: (command) => {
         if (command.ok && (command.selection?.selectionIds.length ?? 0) > 0) {
@@ -353,6 +355,7 @@ export function SlideWorkspaceConnector({
     },
   }), [
     addExternalComponentNode,
+    runSlideFieldTextIntent,
     addFormulaNode,
     addRectangleNode,
     addShapeNode,

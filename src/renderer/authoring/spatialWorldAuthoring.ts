@@ -1,3 +1,5 @@
+import { patchTableCellText } from '../course/tableContentOperations'
+import type { LayerTextDraft } from './layerTextField'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
@@ -84,6 +86,7 @@ import {
   type SpatialEditorView,
 } from '../course/spatialEditorView'
 import type { CourseAuthoringTarget } from './courseAuthoringSession'
+import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
 import {
   adaptV9SpatialEditorLayers,
   hitTestV9SpatialLayerItems,
@@ -100,7 +103,7 @@ export const SPATIAL_CONTENT_REJECT_STALE_GENERATION = 'stale-generation'
 export const SPATIAL_CONTENT_REJECT_INVALID_TARGET = 'invalid-target'
 export const SPATIAL_DEFERRED_OVERLAY_REASON = 'handed-to-R5-C'
 
-export type SpatialWorldContentEditKind = V9SlideContentEditKind
+export type SpatialWorldContentEditKind = Extract<V9SlideContentEditKind, 'text' | 'formula' | 'chart-text' | 'field-text'>
 export type SpatialWorldContentEditSource = V9SlideContentEditSource
 export type SpatialWorldContentEditAction = V9SlideContentEditAction
 
@@ -1101,10 +1104,12 @@ export interface SpatialWorldContentEditSession {
   readonly target: SpatialAuthoringTarget
   /** Exact product target captured when this edit began. Product UI commands require it. */
   readonly courseTarget?: CourseAuthoringTarget
+  readonly tableCellId?: string
+  readonly chartField?: ChartTextField
   readonly composing: boolean
   readonly pendingAction: Exclude<SpatialWorldContentEditAction, 'ignore' | 'defer'> | null
-  readonly original: V9SlideTextContentSnapshot | V9SlideFormulaContentSnapshot
-  readonly draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft
+  readonly original: V9SlideTextContentSnapshot | V9SlideFormulaContentSnapshot | ChartTextDraft | LayerTextDraft
+  readonly draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft | ChartTextDraft | LayerTextDraft
 }
 
 export type BeginSpatialWorldContentEditResult = {
@@ -1192,6 +1197,50 @@ function locateEditableWorldNative(
   }
   if (item.locked) return { ok: false, reason: SPATIAL_REJECT_LOCKED }
   return { ok: true, item }
+}
+
+export function beginSpatialWorldTableTextEdit(input: {
+  readonly session: SpatialAuthoringSession
+  readonly layerItemId: string
+  readonly cellId: string
+}): BeginSpatialWorldContentEditResult {
+  const { session } = input
+  if (session.scope !== 'world') return { ok: false, reason: SPATIAL_REJECT_WRONG_OWNER }
+  const item = spatialSurfaceIn(session.history.present, session.selection.surfaceId).world.layerItems
+    .find(item => item.layerItemId === input.layerItemId)
+  if (!item || item.kind !== 'native' || item.content.nativeType !== 'table') return { ok: false, reason: SPATIAL_CONTENT_REJECT_INVALID_TARGET }
+  if (item.locked) return { ok: false, reason: SPATIAL_REJECT_LOCKED }
+  const cell = item.content.data.rows.flatMap(row => row.cells).find(cell => cell.id === input.cellId)
+  if (!cell) return { ok: false, reason: SPATIAL_CONTENT_REJECT_INVALID_TARGET }
+  return { ok: true, edit: freezeEdit({
+    kind: 'field-text', source: 'properties', target: makeSpatialAuthoringTarget(session, input.layerItemId),
+    tableCellId: input.cellId, composing: false, pendingAction: null, original: { text: cell.text }, draft: { text: cell.text },
+  }) }
+}
+
+export function beginSpatialWorldChartTextEdit(input: {
+  readonly session: SpatialAuthoringSession
+  readonly layerItemId: string
+  readonly field: ChartTextField
+}): BeginSpatialWorldContentEditResult {
+  const { session } = input
+  if (session.scope !== 'world') return { ok: false, reason: SPATIAL_REJECT_WRONG_OWNER }
+  const item = spatialSurfaceIn(session.history.present, session.selection.surfaceId).world.layerItems
+    .find(item => item.layerItemId === input.layerItemId)
+  if (!item || item.kind !== 'native' || item.content.nativeType !== 'chart') return { ok: false, reason: SPATIAL_CONTENT_REJECT_INVALID_TARGET }
+  if (item.locked) return { ok: false, reason: SPATIAL_REJECT_LOCKED }
+  const text = readChartText(item.content.data, input.field)
+  if (text === undefined) return { ok: false, reason: SPATIAL_CONTENT_REJECT_INVALID_TARGET }
+  const original: ChartTextDraft = { text, chart: structuredClone(item.content.data), error: null }
+  return { ok: true, edit: freezeEdit({
+    kind: 'chart-text', source: 'canvas', target: makeSpatialAuthoringTarget(session, input.layerItemId),
+    chartField: input.field, composing: false, pendingAction: null, original, draft: structuredClone(original),
+  }) }
+}
+
+export function updateSpatialWorldChartTextDraft(edit: SpatialWorldContentEditSession, draft: ChartTextDraft, composing: boolean): SpatialWorldContentEditSession {
+  if (edit.kind !== 'chart-text') return edit
+  return freezeEdit({ ...edit, draft, composing })
 }
 
 export function beginSpatialWorldContentEdit(input: {
@@ -1311,6 +1360,7 @@ function formulaDraftChanged(
 export function isSpatialWorldContentDraftDirty(
   edit: SpatialWorldContentEditSession,
 ): boolean {
+  if (edit.kind === 'chart-text' || edit.kind === 'field-text') return !sameJson(edit.original, edit.draft)
   if (edit.kind === 'text') {
     return textDraftChanged(
       edit.original as V9SlideTextContentSnapshot,
@@ -1378,6 +1428,33 @@ export function commitSpatialWorldContentEdit(
   if (edit.composing) return rejectSession(session, SPATIAL_CONTENT_REJECT_COMPOSING)
   const stale = rejectIfStaleEdit(session, edit, options)
   if (stale) return stale
+  if (edit.kind === 'field-text') {
+    const item = spatialSurfaceIn(session.history.present, session.selection.surfaceId).world.layerItems.find(item => item.layerItemId === edit.target.layerItemId)
+    if (!item || item.kind !== 'native' || item.content.nativeType !== 'table' || !edit.tableCellId) return rejectSession(session, SPATIAL_CONTENT_REJECT_INVALID_TARGET)
+    if (item.locked) return rejectSession(session, SPATIAL_REJECT_LOCKED)
+    if (!isSpatialWorldContentDraftDirty(edit)) return succeedIdentity(session)
+    try {
+      const table = patchTableCellText(item.content.data, { cellId: edit.tableCellId, text: (edit.draft as LayerTextDraft).text })
+      const next = writeWorldNativeContent(session, edit.target.layerItemId, { ...table }, undefined, options.now)
+      const nextSession = replaceSpatialSession(session, { history: commitSpatialAuthoringHistory(session.history, next) })
+      return { ok: true, nextSession, historyEntry: true, selection: nextSession.selection }
+    } catch (error) { return rejectSession(session, error instanceof Error ? error.message : '表格提交失败') }
+  }
+  if (edit.kind === 'chart-text') {
+    if (!edit.chartField) return rejectSession(session, SPATIAL_CONTENT_REJECT_INVALID_TARGET)
+    const current = beginSpatialWorldChartTextEdit({ session, layerItemId: edit.target.layerItemId, field: edit.chartField })
+    if (!current.ok) return rejectSession(session, current.reason)
+    const draft = edit.draft as ChartTextDraft
+    if (draft.error) return rejectSession(session, draft.error)
+    if (!isSpatialWorldContentDraftDirty(edit)) return succeedIdentity(session)
+    try {
+      const next = writeWorldNativeContent(session, edit.target.layerItemId, draft.chart, undefined, options.now)
+      const nextSession = replaceSpatialSession(session, { history: commitSpatialAuthoringHistory(session.history, next) })
+      return { ok: true, nextSession, historyEntry: true, selection: nextSession.selection }
+    } catch (error) {
+      return rejectSession(session, error instanceof Error ? error.message : '图表提交失败')
+    }
+  }
   const located = locateEditableWorldNative(session, edit.target.layerItemId)
   if (!located.ok) return rejectSession(session, located.reason)
   if (located.item.content.nativeType !== edit.kind) {

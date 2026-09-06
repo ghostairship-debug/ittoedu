@@ -8,6 +8,8 @@ import { createProductivityPreview, applyProductivityPreview, type ProductivityC
 import { cloneReferencePage } from '../../src/renderer/authoring/productivity/referenceClone'
 import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
 import { ProductivityDialog } from '../../src/renderer/ui/productivity/ProductivityDialog'
+import { collectCourseProjectHealth } from '../../src/shared/courseProjectHealth'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 
 function fixture() {
   const document = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
@@ -21,6 +23,34 @@ function fixture() {
   return { context, scene, surface }
 }
 describe('design productivity canonical previews', () => {
+  it('remaps self navigation but preserves another scene with the same presentation state IDs', () => {
+    const { context, scene, surface } = fixture()
+    scene.presentation = { initialStateId: 'initial', states: [{ id: 'initial', name: '初始', layerItemOverrides: {} }] }
+    const destination = structuredClone(scene)
+    destination.id = 'destination'; destination.name = '外部目标'; destination.layerItems = []
+    surface.scenes.push(destination)
+    context.document.locations.push({ kind: 'slide-scene', id: 'destination-location', surfaceId: surface.id, sceneId: destination.id, label: '外部目标' })
+    for (const target of [scene.id, destination.id]) {
+      scene.interactions.push({ id: `go-${target}`, enabled: true, trigger: { type: 'node.click', nodeId: scene.layerItems[0]!.layerItemId }, conditions: [], actions: [{ id: `action-${target}`, start: 'after-previous', delayMs: 0, action: { type: 'scene.go', sceneId: target, targetStateId: 'initial' } }] })
+    }
+    const before = structuredClone(context.document)
+    expect(courseProjectDocumentSchema.safeParse(before).success).toBe(true)
+    const result = cloneReferencePage(context, scene.id, {})
+    if (!result.ok || !result.step) throw new Error(result.ok ? 'missing clone step' : result.reason)
+    const next = result.step.nextDocument.surfaces[0]!
+    if (next.type !== 'slide') throw new Error('expected slide')
+    const clone = next.scenes[1]!
+    expect(clone.interactions[0]!.actions[0]!.action).toEqual({ type: 'scene.go', sceneId: clone.id, targetStateId: clone.presentation!.initialStateId })
+    expect(clone.interactions[1]!.actions[0]!.action).toEqual({ type: 'scene.go', sceneId: destination.id, targetStateId: 'initial' })
+    expect(clone.presentation!.initialStateId).not.toBe('initial')
+    expect(context.document).toEqual(before)
+    expect(collectCourseProjectHealth(result.step.nextDocument, { assetFiles: {}, componentFiles: {} }).filter(finding => finding.code === 'interaction-state-reference-missing')).toEqual([])
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: result.step.nextDocument, assetFiles: {}, componentFiles: {} }))
+    expect(reopened.project).toEqual(result.step.nextDocument)
+    const initial = { document: before, resources: { assetFiles: {}, componentPackages: {} } }
+    const forward = applyEditorTransactionStep(initial, result.step, 'forward')
+    expect(applyEditorTransactionStep(forward, result.step, 'inverse').document).toEqual(before)
+  })
   it('applies selected text only, preserves styles between matches, and reverses one transaction', () => {
     const { context, scene } = fixture()
     const second = structuredClone(scene.layerItems[0]!); second.layerItemId = 'other-text'; second.order = 2; scene.layerItems.push(second)

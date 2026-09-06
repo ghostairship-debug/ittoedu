@@ -1332,7 +1332,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       forced: boolean,
       version: string,
     ): Promise<void> => {
-      const fixture = createPublishedPhaserComponentV2Fixture(runtime(version))
+      const fixture = createPublishedPhaserComponentV2Fixture(runtime(version).replace("'project-asset'", "'fixture-project-asset'"))
       const payload = buildPublishedCourseV2Payload({
         project: fixture.project,
         assetFiles: fixture.assetFiles,

@@ -3,6 +3,7 @@ import {
   mergeComponentProps,
 } from '../../componentProps'
 import type { ComponentPackageData } from '../component-v4/types'
+import { directProjectAssetReferences } from '../../directProjectAssetReferences'
 import type {
   ComponentLayerItem,
   CourseProjectDocument,
@@ -66,7 +67,8 @@ export interface CourseAssetReferenceAnalysis {
 
 export interface CourseAssetReferenceOptions {
   readonly componentPackages?: Readonly<Record<string, ComponentPackageData>>
-  /** Authoring deletion includes disabled runtimes; publishing may opt out. */
+  /** Authoring deletion includes disabled code/content; publishing may opt out.
+   * Persisted bindings and fallback still belong to the serialized payload. */
   readonly includeDisabledRuntimes?: boolean
 }
 
@@ -234,7 +236,6 @@ export function analyzeCourseAssetReferences(
     runtime: CourseRuntimeDefinition,
     location: ReferenceLocation,
   ): void => {
-    if (!includeDisabledRuntimes && !runtime.enabled) return
     Object.entries(runtime.assets).forEach(([key, binding]) => add(
       binding.assetId,
       'runtime-binding',
@@ -245,6 +246,7 @@ export function analyzeCourseAssetReferences(
       ...location,
       path: [...location.path, 'staticFallback', 'assetId'],
     })
+    if (!includeDisabledRuntimes && !runtime.enabled) return
     visitKnownAssetValues(
       runtime.content.values,
       knownAssetIds,
@@ -259,6 +261,9 @@ export function analyzeCourseAssetReferences(
       'runtime-source',
       'conservative',
       { ...location, path: [...location.path, 'source'] },
+    ))
+    directProjectAssetReferences(runtime.source).forEach(({ assetId, offset }) => add(
+      assetId, 'runtime-source', 'direct', { ...location, path: [...location.path, 'source', offset] },
     ))
   }
 
@@ -349,6 +354,12 @@ export function analyzeCourseAssetReferences(
         ...location,
         packageId: component.packageId,
         path: ['componentPackages', packageKey, 'runtimeSource'],
+      },
+    ))
+    directProjectAssetReferences(data.runtimeSource).forEach(({ assetId, offset }) => add(
+      assetId, 'component-runtime-source', 'direct', {
+        ...location, packageId: component.packageId,
+        path: ['componentPackages', packageKey, 'runtimeSource', offset],
       },
     ))
   }

@@ -52,7 +52,7 @@ export function FlowWorkspaceConnector() {
   const view = useMemo(() => {
     if (!session) return null
     return buildFlowEditorView({
-      project: projectWithBackgroundPreview(textPreview?.nextDocument ? { ...textPreview.nextDocument, revision: session.history.present.revision } : session.history.present, canvasMode === 'edit' ? previewBackgroundColor : null, {
+      project: projectWithBackgroundPreview(textPreview?.project ?? session.history.present, canvasMode === 'edit' ? previewBackgroundColor : null, {
         locationId: session.selection.locationId, stateId: null, generation: authoringSession?.token.generation ?? -1,
       }),
       locationId: session.selection.locationId,
@@ -100,7 +100,7 @@ export function FlowWorkspaceConnector() {
       assets={session.history.present.assets}
       selection={session.selection}
       textEdit={textEdit}
-      previewTextEdit={textPreview?.nextEdit ?? null}
+      previewTextEdit={textPreview?.edit ?? null}
       canvasMode={canvasMode}
       editingScope={editingScope === 'global' ? 'global' : 'scene'}
       assetFiles={assetFiles}

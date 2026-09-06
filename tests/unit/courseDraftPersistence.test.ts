@@ -1,9 +1,17 @@
+import { beginFlowTableFieldEdit } from '@/renderer/authoring/flowTextEdit'
+import { beginSpatialWorldTableTextEdit } from '@/renderer/authoring/spatialWorldAuthoring'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { importComponentPackage } from '@/renderer/components/importComponentPackage'
+import { readLayerTextField, type LayerTextField } from '@/renderer/authoring/layerTextField'
 import { componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
   beginFlowFormulaEdit,
+  beginFlowChartTextEdit,
+  updateFlowChartTextDraft,
   beginFlowTextEdit,
   updateFlowTextDraft,
   type FlowFormulaDraft,
@@ -23,6 +31,9 @@ import {
   selectEditingNodes,
 } from '@/renderer/store/editorStore'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import { createChartTextDraft } from '@/renderer/authoring/chartTextDraft'
+import { beginSpatialWorldChartTextEdit, updateSpatialWorldChartTextDraft } from '@/renderer/authoring/spatialWorldAuthoring'
+import { makeSlideAuthoringTarget } from '@/renderer/course/slideAuthoringBackend'
 
 function activeHistory() {
   const state = useEditorStore.getState()
@@ -220,6 +231,221 @@ beforeEach(() => {
 })
 
 describe('active Course Project text draft persistence', () => {
+  it.each(['table', 'component'] as const)('recovers focused Slide %s text and preserves it in save/reopen and Undo/Redo', kind => {
+    let field: LayerTextField
+    if (kind === 'table') useEditorStore.getState().addTableNode()
+    else {
+      const pkg = importComponentPackage(new Uint8Array(readFileSync(resolve('examples/sample-counter.h5component'))))
+      const state = useEditorStore.getState()
+      const target = state.captureComponentInsertionTarget()!
+      const result = state.insertComponentPackagesAtTarget(target, [pkg])
+      if (!result.ok) throw new Error(result.reason)
+      const insertedId = result.layerItemIds?.[0]
+      if (!insertedId) throw new Error('expected inserted component')
+      useEditorStore.getState().selectNode(insertedId)
+    }
+    const state = useEditorStore.getState()
+    const id = selectSelectedNodeId(state)!
+    const item = locateCourseLayer(activeDocument(), id)!.item
+    if (item.kind === 'native' && item.content.nativeType === 'table') field = { kind: 'table-cell', cellId: item.content.data.rows[0]!.cells[0]!.id }
+    else if (item.kind === 'component') field = { kind: 'component-prop', ...item.component, key: 'title' }
+    else throw new Error('expected text field')
+    const packages = state.componentPackages
+    const read = (document: CourseProjectDocument) => readLayerTextField(locateCourseLayer(document, id)!.item, field, packages)
+    const original = read(activeDocument())
+    acknowledgeBaseline(`${kind}-text.h5lesson`)
+    const before = activeHistory().past.length
+    const target = makeSlideAuthoringTarget(state.slideBackend!.getSession(), id, 'item')
+    const begun = state.runSlideFieldTextIntent({ kind: 'begin-field', target, field })
+    if (!begun.ok || !begun.edit) throw new Error('expected field edit')
+    const updated = state.runSlideFieldTextIntent({ kind: 'update-field', expectedEdit: begun.edit, text: '聚焦时的新内容', composing: false })
+    expect(updated.ok).toBe(true)
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    const recovered = state.captureCourseProjectRecoverySnapshot()
+    if (!recovered.ok) throw new Error(recovered.reason)
+    expect(read(recovered.snapshot.project)).toBe('聚焦时的新内容')
+    expect(read(activeDocument())).toBe(original)
+    expect(activeHistory().past).toHaveLength(before)
+    const saved = state.prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(read(archiveAndReopen(saved.snapshot))).toBe('聚焦时的新内容')
+    expect(activeHistory().past).toHaveLength(before + 1)
+    expect(useEditorStore.getState().v9ContentEdit).toBeNull()
+    useEditorStore.getState().undo()
+    expect(read(activeDocument())).toBe(original)
+    useEditorStore.getState().redo()
+    expect(read(activeDocument())).toBe('聚焦时的新内容')
+  })
+
+  it('stores Slide chart drafts through the product action and recovers without live history writes', () => {
+    useEditorStore.getState().addChartNode('bar')
+    const state = useEditorStore.getState()
+    const session = state.slideBackend!.getSession()
+    const id = selectSelectedNodeId(state)!
+    const item = locateCourseLayer(activeDocument(), id)!.item
+    if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('expected chart')
+    acknowledgeBaseline('slide-chart.h5lesson')
+    const before = activeHistory().past.length
+    const field = { kind: 'title' as const }
+    const begun = state.runSlideFieldTextIntent({ kind: 'begin-chart', target: makeSlideAuthoringTarget(session, id, 'item'), field })
+    if (!begun.ok || !begun.edit) throw new Error('expected chart edit')
+    state.runSlideFieldTextIntent({ kind: 'update-chart', expectedEdit: begun.edit, draft: createChartTextDraft(item.content.data, field, '保存中的标题'), composing: false })
+    const read = (document: CourseProjectDocument) => {
+      const item = locateCourseLayer(document, id)!.item
+      if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('expected chart')
+      return item.content.data.title
+    }
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    const recovery = state.captureCourseProjectRecoverySnapshot()
+    if (!recovery.ok) throw new Error(recovery.reason)
+    expect(read(recovery.snapshot.project)).toBe('保存中的标题')
+    expect(activeHistory().past).toHaveLength(before)
+    const saved = state.prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(read(archiveAndReopen(saved.snapshot))).toBe('保存中的标题')
+    expect(activeHistory().past).toHaveLength(before + 1)
+    expect(useEditorStore.getState().v9ContentEdit).toBeNull()
+  })
+
+  it('recovers Spatial chart text during composition, refuses premature save, and saves once after composition', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addChartNode('bar')
+    const session = useEditorStore.getState().spatialSession!
+    const id = selectSelectedNodeId(useEditorStore.getState())!
+    const item = locateCourseLayer(activeDocument(), id)!.item
+    if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('expected chart')
+    acknowledgeBaseline('spatial-chart.h5lesson')
+    const before = activeHistory().past.length
+    const field = { kind: 'series' as const, id: item.content.data.series[0]!.id }
+    const begun = beginSpatialWorldChartTextEdit({ session, layerItemId: id, field })
+    if (!begun.ok) throw new Error(begun.reason)
+    const draft = createChartTextDraft(item.content.data, field, '组合输入中的系列')
+    const composing = updateSpatialWorldChartTextDraft(begun.edit, draft, true)
+    useEditorStore.setState({ spatialContentEdit: composing })
+    const read = (document: CourseProjectDocument) => {
+      const item = locateCourseLayer(document, id)!.item
+      if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('expected chart')
+      return item.content.data.series[0]!.name
+    }
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    expect(useEditorStore.getState().prepareCourseProjectPersistence()).toMatchObject({ ok: false, reason: 'composing' })
+    const recovered = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
+    if (!recovered.ok) throw new Error(recovered.reason)
+    expect(read(recovered.snapshot.project)).toBe(draft.text)
+    expect(activeHistory().past).toHaveLength(before)
+    expect(read(activeDocument())).toBe(item.content.data.series[0]!.name)
+    useEditorStore.setState({ spatialContentEdit: updateSpatialWorldChartTextDraft(composing, draft, false) })
+    const saved = useEditorStore.getState().prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(read(archiveAndReopen(saved.snapshot))).toBe(draft.text)
+    expect(activeHistory().past).toHaveLength(before + 1)
+    expect(useEditorStore.getState().spatialContentEdit).toBeNull()
+    useEditorStore.getState().undo()
+    expect(read(activeDocument())).toBe(item.content.data.series[0]!.name)
+  })
+
+  it('recovers Spatial table text during composition, refuses premature save, and saves once after composition', () => {
+    useEditorStore.getState().createNewSpatialProject()
+    useEditorStore.getState().addTableNode()
+    const session = useEditorStore.getState().spatialSession!
+    const id = selectSelectedNodeId(useEditorStore.getState())!
+    const item = locateCourseLayer(activeDocument(), id)!.item
+    if (item.kind !== 'native' || item.content.nativeType !== 'table') throw new Error('expected table')
+    acknowledgeBaseline('spatial-table.h5lesson')
+    const before = activeHistory().past.length
+    const cellId = item.content.data.rows[0]!.cells[0]!.id
+    const begun = beginSpatialWorldTableTextEdit({ session, layerItemId: id, cellId })
+    if (!begun.ok) throw new Error(begun.reason)
+    const draft = { text: '组合输入中的单元格' }
+    const composing = { ...begun.edit, draft, composing: true }
+    useEditorStore.setState({ spatialContentEdit: composing })
+    const read = (document: CourseProjectDocument) => {
+      const item = locateCourseLayer(document, id)!.item
+      if (item.kind !== 'native' || item.content.nativeType !== 'table') throw new Error('expected table')
+      return item.content.data.rows[0]!.cells[0]!.text
+    }
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    expect(useEditorStore.getState().prepareCourseProjectPersistence()).toMatchObject({ ok: false, reason: 'composing' })
+    const recovered = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
+    if (!recovered.ok) throw new Error(recovered.reason)
+    expect(read(recovered.snapshot.project)).toBe(draft.text)
+    expect(activeHistory().past).toHaveLength(before)
+    expect(read(activeDocument())).toBe(item.content.data.rows[0]!.cells[0]!.text)
+    useEditorStore.setState({ spatialContentEdit: { ...composing, composing: false } })
+    const saved = useEditorStore.getState().prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(read(archiveAndReopen(saved.snapshot))).toBe(draft.text)
+    expect(activeHistory().past).toHaveLength(before + 1)
+    expect(useEditorStore.getState().spatialContentEdit).toBeNull()
+    useEditorStore.getState().undo()
+    expect(read(activeDocument())).toBe(item.content.data.rows[0]!.cells[0]!.text)
+  })
+
+  it.each(['table-caption', 'table-header'] as const)('archives and recovers a focused Flow %s without changing live recovery history', field => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().addTableNode()
+    const session = useEditorStore.getState().flowSession!
+    const table = flowSurfaceIn(session.history.present, session.selection.surfaceId).blocks.find(block => block.type === 'table')!
+    if (table.type !== 'table') throw new Error('expected table')
+    acknowledgeBaseline('flow-table.h5lesson')
+    const before = activeHistory().past.length
+    const begun = beginFlowTableFieldEdit({ project: activeDocument(), selection: session.selection, blockId: table.id, field, columnId: field === 'table-header' ? table.columns[0]!.id : undefined })
+    if (!begun.ok) throw new Error(begun.reason)
+    useEditorStore.getState().setFlowTextEdit(updateFlowTextDraft(begun.edit, { text: '未失焦的表格文字' }))
+    const read = (document: CourseProjectDocument) => {
+      const block = flowSurfaceIn(document, session.selection.surfaceId).blocks.find(block => block.id === table.id)!
+      if (block.type !== 'table') throw new Error('expected table')
+      return field === 'table-caption' ? block.caption : block.columns[0]!.header
+    }
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    const recovered = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
+    if (!recovered.ok) throw new Error(recovered.reason)
+    expect(read(recovered.snapshot.project)).toBe('未失焦的表格文字')
+    expect(activeHistory().past).toHaveLength(before)
+    const saved = useEditorStore.getState().prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(read(archiveAndReopen(saved.snapshot))).toBe('未失焦的表格文字')
+    expect(activeHistory().past).toHaveLength(before + 1)
+    useEditorStore.getState().undo()
+    expect(read(activeDocument())).toBe(field === 'table-caption' ? table.caption : table.columns[0]!.header)
+  })
+
+  it('recovers a focused Flow chart label and archives it with one history entry', () => {
+    useEditorStore.getState().createNewFlowProject()
+    useEditorStore.getState().addChartNode('bar')
+    const session = useEditorStore.getState().flowSession!
+    const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)!
+    const block = surface.blocks.find(block => block.type === 'chart')!
+    if (block.type !== 'chart') throw new Error('expected chart')
+    acknowledgeBaseline('chart.h5lesson')
+    const before = activeHistory().past.length
+    const field = { kind: 'category' as const, id: block.chart.categories[0]!.id }
+    const begun = beginFlowChartTextEdit({ project: activeDocument(), selection: session.selection, blockId: block.id, field })
+    if (!begun.ok) throw new Error(begun.reason)
+    useEditorStore.getState().setFlowTextEdit(updateFlowChartTextDraft(begun.edit,
+      createChartTextDraft(block.chart, field, '保持焦点的新分类'), false))
+    const read = (document: CourseProjectDocument) => {
+      const chart = findFlowBlockRecursive(flowSurfaceIn(document, surface.id)!.blocks, block.id)!.block
+      if (chart.type !== 'chart') throw new Error('expected chart')
+      return chart.chart.categories[0]!.label
+    }
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    const recovered = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
+    if (!recovered.ok) throw new Error(recovered.reason)
+    expect(read(recovered.snapshot.project)).toBe('保持焦点的新分类')
+    expect(activeHistory().past).toHaveLength(before)
+    expect(read(activeDocument())).toBe(block.chart.categories[0]!.label)
+    const saved = useEditorStore.getState().prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(read(archiveAndReopen(saved.snapshot))).toBe('保持焦点的新分类')
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    expect(activeHistory().past).toHaveLength(before + 1)
+    useEditorStore.getState().prepareCourseProjectPersistence()
+    expect(activeHistory().past).toHaveLength(before + 1)
+    useEditorStore.getState().undo()
+    expect(read(activeDocument())).toBe(block.chart.categories[0]!.label)
+  })
+
   it.each(fixtures)(
     'materializes %s recovery without mutating live history, then commits once before archive save',
     (_kind, createFixture) => {

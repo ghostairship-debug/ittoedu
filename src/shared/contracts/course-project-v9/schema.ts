@@ -313,7 +313,7 @@ export function materializeNativeLayerItem(
     case 'teacher-controller':
       return { ...item.content.data, ...layout, type: 'teacher-controller' }
     case 'table':
-      throw new Error('unsupported-native-table')
+      return { ...item.content.data, ...layout, type: 'table' }
     case 'chart':
       return { ...item.content.data, ...layout, type: 'chart' }
     case 'input':

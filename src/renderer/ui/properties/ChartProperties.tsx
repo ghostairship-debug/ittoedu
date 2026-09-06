@@ -112,6 +112,13 @@ function draftSignature(node: ChartPropertiesView): string {
   return JSON.stringify({ categories: node.categories, series: node.series })
 }
 
+function tableValueSignature(candidate: ChartCandidateData): string {
+  return JSON.stringify({
+    categories: candidate.categories.map(category => category.label),
+    series: candidate.series.map(series => ({ name: series.name, color: series.color, values: series.values })),
+  })
+}
+
 interface DraftValidation {
   readonly cellErrors: Record<string, string>
   readonly formErrors: readonly string[]
@@ -201,6 +208,7 @@ export function ChartProperties({
   const [applyError, setApplyError] = useState<string | null>(null)
   const dirtyRef = useRef(false)
   const signatureRef = useRef(draftSignature(node))
+  const preparedCanvasSignature = useRef<string | null>(null)
 
   const markDirty = () => {
     dirtyRef.current = true
@@ -214,6 +222,13 @@ export function ChartProperties({
     const signature = draftSignature(node)
     if (signatureRef.current === signature) return
     signatureRef.current = signature
+    const canonical = validateDraft(draftFromView(node), chartType).candidate
+    if (canonical && preparedCanvasSignature.current === tableValueSignature(canonical)) {
+      preparedCanvasSignature.current = null
+      dirtyRef.current = false
+      setDirty(false)
+      setApplyError(null)
+    }
     if (!dirtyRef.current) setDraft(draftFromView(node))
   })
   // Reset the local draft only when the target node changes. The binding key
@@ -224,6 +239,7 @@ export function ChartProperties({
     setDirty(false)
     setApplyError(null)
     setPendingType(null)
+    preparedCanvasSignature.current = null
     signatureRef.current = draftSignature(node)
     setDraft(draftFromView(node))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -232,6 +248,18 @@ export function ChartProperties({
   const validation = validateDraft(draft, chartType)
 
   useEffect(() => commands.connectCanvasText?.({
+    prepare: (kind, id, value) => {
+      const exists = kind === 'category'
+        ? draft.categories.some(entry => entry.id === id)
+        : draft.series.some(entry => entry.id === id)
+      if (!exists) return { candidate: null, error: '该分类或系列已在数据草稿中删除，请先应用或取消草稿。' }
+      const validated = validateDraft({
+        categories: draft.categories.map(entry => kind === 'category' && entry.id === id ? { ...entry, label: value } : entry),
+        series: draft.series.map(entry => kind === 'series' && entry.id === id ? { ...entry, name: value } : entry),
+      }, chartType)
+      preparedCanvasSignature.current = validated.candidate ? tableValueSignature(validated.candidate) : null
+      return { candidate: validated.candidate, error: validated.candidate ? null : '数据草稿含有未完成或无效的内容，请在属性栏修正后应用。' }
+    },
     read: (kind, id) => kind === 'category'
       ? draft.categories.find(entry => entry.id === id)?.label
       : draft.series.find(entry => entry.id === id)?.name,

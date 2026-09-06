@@ -4,6 +4,7 @@ import type { DesktopAPI } from '../shared/ipcTypes'
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
+  materials: 'materials:operate',
   openProject: 'project:open',
   listRecentProjects: 'project:list-recent',
   openRecentProject: 'project:open-recent',
@@ -114,6 +115,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const desktopAPI = Object.freeze<DesktopAPI>({
+  materials: (input) => invoke(IPC_CHANNELS.materials, input),
   openProject: () => invoke(IPC_CHANNELS.openProject),
   listRecentProjects: () => invoke(IPC_CHANNELS.listRecentProjects),
   openRecentProject: (input) => invoke(IPC_CHANNELS.openRecentProject, input),

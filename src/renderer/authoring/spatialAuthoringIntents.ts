@@ -12,12 +12,14 @@ import type {
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
 import type { CourseAuthoringTarget } from './courseAuthoringSession'
 import type { SpatialWorldContentEditSession } from './spatialWorldAuthoring'
+import type { ChartTextDraft, ChartTextField } from './chartTextDraft'
 
 export type SpatialGraphSelection =
   | { readonly kind: 'path'; readonly id: string }
   | { readonly kind: 'relation'; readonly id: string }
 
 export type SpatialAuthoringIntent = (
+  | { readonly kind: 'replace-table'; readonly table: import('../../shared/contracts/native-v1').NativeTableContent }
   | { readonly kind: 'replace-chart'; readonly chart: import('../../shared/contracts/native-v1').NativeChartContent }
   | {
       readonly kind: 'select-layers'
@@ -58,9 +60,20 @@ export type SpatialAuthoringIntent = (
     }
   | {
       readonly kind: 'begin-content-edit'
+      readonly tableCellId?: string
+      readonly chartField?: ChartTextField
       readonly source: 'canvas' | 'properties'
       readonly expectedEdit: SpatialWorldContentEditSession | null
     }
+  | {
+      readonly kind: 'update-chart-content-edit'
+      readonly expectedEdit: SpatialWorldContentEditSession
+      readonly draft: ChartTextDraft
+      readonly composing: boolean
+    }
+  | { readonly kind: 'update-table-content-edit'; readonly expectedEdit: SpatialWorldContentEditSession; readonly text: string; readonly composing: boolean }
+  | { readonly kind: 'commit-table-content-edit'; readonly expectedEdit: SpatialWorldContentEditSession }
+  | { readonly kind: 'commit-chart-content-edit'; readonly expectedEdit: SpatialWorldContentEditSession }
   | {
       readonly kind: 'update-text-content-edit'
       readonly expectedEdit: SpatialWorldContentEditSession

@@ -1,4 +1,5 @@
 import { COMPONENT_RUNTIME_API_VERSION } from '../shared/constants'
+import { componentRegistryKey, componentRuntimeSourceIdentity, type ComponentRegistryIdentityV1 } from '../shared/componentRegistryIdentity'
 import type {
   ComponentDefinitionV4,
   ComponentManifest,
@@ -27,6 +28,7 @@ function isComponentDefinition(value: unknown): value is ComponentDefinitionV4 {
 export class ComponentRegistry {
   private readonly definitions = new Map<string, ComponentDefinitionV4>()
   private readonly loadErrors = new Map<string, Error>()
+  private readonly sources = new Map<string, string>()
   private readonly globalApi = {
     define: (definition: ComponentDefinitionV4): void => {
       this.defineDuringLoad(definition)
@@ -49,23 +51,36 @@ export class ComponentRegistry {
     this.installed = true
   }
 
-  executeRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinitionV4
+  executeRuntime(manifest: ComponentManifest, runtimeSource: string, identity?: ComponentRegistryIdentityV1): ComponentDefinitionV4
   executeRuntime(componentId: string, runtimeSource: string): ComponentDefinitionV4
   executeRuntime(
     manifestOrId: ComponentManifest | string,
     runtimeSource: string,
+    identity?: ComponentRegistryIdentityV1,
   ): ComponentDefinitionV4 {
     const componentId = typeof manifestOrId === 'string'
       ? manifestOrId
       : manifestOrId.id
+    const key = identity ? componentRegistryKey(identity) : componentId
+    if (identity && (identity.packageId !== componentId ||
+      (typeof manifestOrId !== 'string' && identity.version !== manifestOrId.version))) {
+      throw new Error(`组件注册身份与 manifest 不匹配：${key}`)
+    }
+    const sourceIdentity = componentRuntimeSourceIdentity(runtimeSource)
+    const existingSource = this.sources.get(key)
+    if (identity && existingSource && existingSource !== sourceIdentity) {
+      const error = new Error(`组件注册身份碰撞：${key}`)
+      this.loadErrors.set(key, error)
+      throw error
+    }
     if (!runtimeSource.trim()) {
       const error = new Error(`组件“${componentId}”的 runtime.js 为空`)
-      this.loadErrors.set(componentId, error)
+      this.loadErrors.set(key, error)
       throw error
     }
 
     this.install()
-    const previousDefinition = this.definitions.get(componentId)
+    const previousDefinition = this.definitions.get(key)
     this.expectedId = componentId
     this.expectedRuntimeApiVersion = typeof manifestOrId === 'string'
       ? null
@@ -94,20 +109,21 @@ export class ComponentRegistry {
           `组件运行时 API 不匹配：manifest 为 ${this.expectedRuntimeApiVersion}，runtime 为 ${definition.runtimeApiVersion}`,
         )
       }
-      this.definitions.set(componentId, definition)
-      this.loadErrors.delete(componentId)
+      this.definitions.set(key, definition)
+      this.sources.set(key, sourceIdentity)
+      this.loadErrors.delete(key)
       return definition
     } catch (cause) {
       if (previousDefinition) {
-        this.definitions.set(componentId, previousDefinition)
+        this.definitions.set(key, previousDefinition)
       } else {
-        this.definitions.delete(componentId)
+        this.definitions.delete(key)
       }
 
       const error = new Error(`组件“${componentId}”注册失败：${errorMessage(cause)}`, {
         cause,
       })
-      this.loadErrors.set(componentId, error)
+      this.loadErrors.set(key, error)
       throw error
     } finally {
       this.expectedId = null
@@ -120,12 +136,19 @@ export class ComponentRegistry {
     return this.executeRuntime(manifest, runtimeSource)
   }
 
-  get(componentId: string): ComponentDefinitionV4 | undefined {
-    return this.definitions.get(componentId)
+  get(identity: string | ComponentRegistryIdentityV1): ComponentDefinitionV4 | undefined {
+    return this.definitions.get(typeof identity === 'string' ? identity : componentRegistryKey(identity))
   }
 
-  getLoadError(componentId: string): Error | undefined {
-    return this.loadErrors.get(componentId)
+  getLoadError(identity: string | ComponentRegistryIdentityV1): Error | undefined {
+    return this.loadErrors.get(typeof identity === 'string' ? identity : componentRegistryKey(identity))
+  }
+
+  invalidate(identity: ComponentRegistryIdentityV1): void {
+    const key = componentRegistryKey(identity)
+    this.definitions.delete(key)
+    this.sources.delete(key)
+    this.loadErrors.delete(key)
   }
 
   dispose(): void {
@@ -142,6 +165,7 @@ export class ComponentRegistry {
     this.expectedRuntimeApiVersion = null
     this.definitionDuringLoad = null
     this.definitions.clear()
+    this.sources.clear()
     this.loadErrors.clear()
   }
 
