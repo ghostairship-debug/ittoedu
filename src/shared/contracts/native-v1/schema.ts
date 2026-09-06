@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { tableMergeRegionSchema, tableMergeIssues, tableCellSpan } from '../../tableMerge'
 
 import { SHAPE_TYPES, type FormulaAstNode, type ShapeType } from './types'
+import { nativePathGeometrySchema, nativeLinearGradientSchema } from './shapeGeometry'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const finiteNumber = z.number().finite()
@@ -317,9 +318,12 @@ export const nativeLineGeometrySchema = z.discriminatedUnion('kind', [
 })
 
 function refineShapeLineGeometry(
-  shape: { shapeType: ShapeType; lineGeometry?: z.infer<typeof nativeLineGeometrySchema> },
+  shape: { shapeType: ShapeType; lineGeometry?: z.infer<typeof nativeLineGeometrySchema>; pathGeometry?: z.infer<typeof nativePathGeometrySchema> },
   context: z.RefinementCtx,
 ): void {
+  if (shape.pathGeometry !== undefined && shape.shapeType !== 'rectangle') {
+    context.addIssue({ code: 'custom', path: ['pathGeometry'], message: '自由路径仅使用 rectangle 载体，不与预设或 lineGeometry 并存' })
+  }
   if (shape.lineGeometry !== undefined) {
     if (shape.shapeType !== 'line' && shape.shapeType !== 'elbow-arrow') {
       context.addIssue({
@@ -350,8 +354,10 @@ const shapeNodeCoreSchema = nativeRenderableBaseSchema.extend({
   type: z.literal('shape'),
   shapeType: z.enum(SHAPE_TYPES),
   lineGeometry: nativeLineGeometrySchema.optional(),
+  pathGeometry: nativePathGeometrySchema.optional(),
   style: z.object({
     fillColor: colorSchema,
+    fillGradient: nativeLinearGradientSchema.optional(),
     fillOpacity: unitInterval,
     borderColor: colorSchema,
     borderOpacity: unitInterval,
@@ -664,8 +670,10 @@ const videoNativeContentObjectSchema = z.object({
 const shapeNativeContentObjectSchema = z.object({
   shapeType: z.enum(SHAPE_TYPES),
   lineGeometry: nativeLineGeometrySchema.optional(),
+  pathGeometry: nativePathGeometrySchema.optional(),
   style: z.object({
     fillColor: colorSchema,
+    fillGradient: nativeLinearGradientSchema.optional(),
     fillOpacity: unitInterval,
     borderColor: colorSchema,
     borderOpacity: unitInterval,

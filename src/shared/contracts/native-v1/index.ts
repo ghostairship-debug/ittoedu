@@ -1,3 +1,5 @@
+export { nativePathGeometrySchema, nativePathCommandSchema, nativeLinearGradientSchema } from './shapeGeometry'
+export type { NativePathGeometry, NativePathCommand, NativeLinearGradient } from './shapeGeometry'
 export type {
   TextAlign,
   VerticalAlign,
