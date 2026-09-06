@@ -1,5 +1,5 @@
 import type { TableMergeRegion } from '../../tableMerge'
-import type { NativePathGeometry, NativeLinearGradient } from './shapeGeometry'
+import type { NativePathGeometry, NativeLinearGradient, NativeBraceGeometry } from './shapeGeometry'
 export type TextAlign = 'left' | 'center' | 'right'
 export type VerticalAlign = 'top' | 'middle' | 'bottom'
 export type WritingMode = 'horizontal' | 'vertical-rl' | 'vertical-lr'
@@ -261,6 +261,7 @@ export interface ShapeNode extends NativeRenderableBase {
   shapeType: ShapeType
   lineGeometry?: NativeLineGeometry
   pathGeometry?: NativePathGeometry
+  braceGeometry?: NativeBraceGeometry
   style: {
     fillColor: string
     fillGradient?: NativeLinearGradient

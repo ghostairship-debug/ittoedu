@@ -10,4 +10,10 @@
 
 V9 与 Published V2 复用同一 strict Native content schema；未知字段、未知指令、非有限数、错误顺序、冲突载体均拒绝。旧文件缺省读取不变，旧 strict reader 对新增字段明确拒绝。保存、状态覆写、作者同步、Player 与导出只消费这一份几何/填充数据。PPTX 源路径需在导入时转换为该表达；未知公式与无法表达的渐变须明确报告，不保存 XML 或第二几何模型。
 
-交付还需补齐：真实作者/Player/HTML 绘制及不裁切框外路径；编辑属性与历史；可编辑 PPTX 路径/渐变投影；样本三个括号和一个标注的参数；真实样本回归。合同解析测试不证明以上消费者已完成。
+## 括号参数增量
+
+`braceGeometry` 仅允许既有 brace-left / brace-right，值为 strict `{ curvatureRatio, midpoint }`。curvatureRatio 在 0–100，表示端部椭圆纵半径相对于 min(width,height) 的比例；实际半径上限为 `height * min(midpoint, 1-midpoint) / 2`。midpoint 在 0–1，表示尖点相对于形状高度的位置。右大括号为左大括号的水平镜像。不得与 pathGeometry / lineGeometry 并存。参数只定义描边几何，既有括号不填充语义不变。
+
+缺字段时继续旧固定括号外观，不自动物化。参数存在时所有消费者按同一参数解析；导入 OOXML leftBrace/rightBrace 的 adj1/adj2 分别除以 100000，保存的参数是唯一几何，不能同时保存求值路径或源 XML。PPTX 导出回写预设调整；作者/Player 的椭圆弧采用统一曲线求值。未知调整公式明确拒绝。
+
+本增量须先独立提交再交付消费者。合同解析测试不证明消费者、样本三个括号与一个标注的视觉闭环已完成。

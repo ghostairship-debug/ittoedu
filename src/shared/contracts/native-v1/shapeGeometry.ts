@@ -54,3 +54,9 @@ export const nativeLinearGradientSchema = z.object({
 export type NativePathGeometry = z.infer<typeof nativePathGeometrySchema>
 export type NativePathCommand = z.infer<typeof nativePathCommandSchema>
 export type NativeLinearGradient = z.infer<typeof nativeLinearGradientSchema>
+
+export const nativeBraceGeometrySchema = z.object({
+  curvatureRatio: z.number().finite().min(0).max(100),
+  midpoint: unit,
+}).strict()
+export type NativeBraceGeometry = z.infer<typeof nativeBraceGeometrySchema>

@@ -18,6 +18,15 @@ const data = { shapeType: 'rectangle', pathGeometry, style: {
 } }
 
 describe('additive Native shape geometry contract', () => {
+  it('accepts bounded left/right brace parameters without changing legacy defaults', () => {
+    for (const shapeType of ['brace-left', 'brace-right']) {
+      const brace = { ...data, pathGeometry: undefined, shapeType, braceGeometry: { curvatureRatio: 0.07694, midpoint: 0.5 } }
+      expect(shapeNativeContentSchema.parse(brace).braceGeometry).toEqual(brace.braceGeometry)
+      expect(shapeNativeContentSchema.safeParse({ ...brace, shapeType: 'rectangle' }).success).toBe(false)
+      expect(shapeNativeContentSchema.safeParse({ ...brace, braceGeometry: { ...brace.braceGeometry, midpoint: 1.1 } }).success).toBe(false)
+      expect(shapeNativeContentSchema.safeParse({ ...brace, braceGeometry: { ...brace.braceGeometry, xml: '<leftBrace/>' } }).success).toBe(false)
+    }
+  })
   it('preserves identical path/gradient data in V9 and Published V2', () => {
     const published = { layerItemId: 'shape', frame: { mode: 'absolute', x: 0, y: 0, width: 200, height: 100 },
       order: 0, visible: true, rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit',

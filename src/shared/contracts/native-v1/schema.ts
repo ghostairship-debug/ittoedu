@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { tableMergeRegionSchema, tableMergeIssues, tableCellSpan } from '../../tableMerge'
 
 import { SHAPE_TYPES, type FormulaAstNode, type ShapeType } from './types'
-import { nativePathGeometrySchema, nativeLinearGradientSchema } from './shapeGeometry'
+import { nativePathGeometrySchema, nativeLinearGradientSchema, nativeBraceGeometrySchema } from './shapeGeometry'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const finiteNumber = z.number().finite()
@@ -318,9 +318,12 @@ export const nativeLineGeometrySchema = z.discriminatedUnion('kind', [
 })
 
 function refineShapeLineGeometry(
-  shape: { shapeType: ShapeType; lineGeometry?: z.infer<typeof nativeLineGeometrySchema>; pathGeometry?: z.infer<typeof nativePathGeometrySchema> },
+  shape: { shapeType: ShapeType; lineGeometry?: z.infer<typeof nativeLineGeometrySchema>; pathGeometry?: z.infer<typeof nativePathGeometrySchema>; braceGeometry?: z.infer<typeof nativeBraceGeometrySchema> },
   context: z.RefinementCtx,
 ): void {
+  if (shape.braceGeometry !== undefined && !['brace-left', 'brace-right'].includes(shape.shapeType)) {
+    context.addIssue({ code: 'custom', path: ['braceGeometry'], message: '括号调整参数仅用于左、右大括号' })
+  }
   if (shape.pathGeometry !== undefined && shape.shapeType !== 'rectangle') {
     context.addIssue({ code: 'custom', path: ['pathGeometry'], message: '自由路径仅使用 rectangle 载体，不与预设或 lineGeometry 并存' })
   }
@@ -355,6 +358,7 @@ const shapeNodeCoreSchema = nativeRenderableBaseSchema.extend({
   shapeType: z.enum(SHAPE_TYPES),
   lineGeometry: nativeLineGeometrySchema.optional(),
   pathGeometry: nativePathGeometrySchema.optional(),
+  braceGeometry: nativeBraceGeometrySchema.optional(),
   style: z.object({
     fillColor: colorSchema,
     fillGradient: nativeLinearGradientSchema.optional(),
@@ -671,6 +675,7 @@ const shapeNativeContentObjectSchema = z.object({
   shapeType: z.enum(SHAPE_TYPES),
   lineGeometry: nativeLineGeometrySchema.optional(),
   pathGeometry: nativePathGeometrySchema.optional(),
+  braceGeometry: nativeBraceGeometrySchema.optional(),
   style: z.object({
     fillColor: colorSchema,
     fillGradient: nativeLinearGradientSchema.optional(),
