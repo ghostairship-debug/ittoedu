@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { tableMergeRegionSchema, tableMergeIssues, tableCellSpan } from '../../tableMerge'
 import { sceneInteractionsSchema } from '../interaction-v1/schema'
 import {
   courseStateConditionSchema,
@@ -701,6 +702,7 @@ const flowMediaBlockSchema = z.object({
 }).strict()
 
 const flowTableBlockSchema = z.object({
+  merges: z.array(tableMergeRegionSchema).max(10000).optional(),
   ...flowBlockBaseFields,
   type: z.literal('table'),
   caption: z.string().max(4_000).optional(),
@@ -713,6 +715,10 @@ const flowTableBlockSchema = z.object({
     cells: z.record(z.string(), flowTableCellSchema),
   }).strict()).max(100_000),
 }).strict().superRefine((block, context) => {
+  for (const message of tableMergeIssues(block)) context.addIssue({ code: 'custom', path: ['merges'], message })
+  for (const row of block.rows) for (const [columnId, cell] of Object.entries(row.cells)) {
+    if ((typeof cell === 'string' ? cell : cell.text) && tableCellSpan(block, row.id, columnId).covered) context.addIssue({ code: 'custom', path: ['merges'], message: '覆盖格正文必须已移入合并锚点' })
+  }
   const columnIds = block.columns.map((column) => column.id)
   if (new Set(columnIds).size !== columnIds.length) {
     context.addIssue({ code: 'custom', path: ['columns'], message: 'Column ids must be unique' })

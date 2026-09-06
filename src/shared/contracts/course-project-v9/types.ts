@@ -331,6 +331,7 @@ export interface FlowTableBlock extends FlowBlockBase {
   caption?: string
   columns: Array<{ id: string; header: string }>
   rows: Array<{ id: string; cells: Record<string, FlowTableCell> }>
+  merges?: import('../../tableMerge').TableMergeRegion[]
 }
 
 /** A chart in normal document flow. Width is the paper reading width. */

@@ -14,6 +14,25 @@ import { SpatialSurfaceHost } from '@/player/surfaces/spatial/SpatialSurfaceHost
 import { renderPublishedSpatialFrameSvg } from '@/player/surfaces/spatial/publishedSpatialStaticRendering'
 import { collectPublishedPptxSpatialNotices } from '@/renderer/export/course/buildCoursePptx'
 import type { FlowTableBlock } from '@/shared/courseProjectTypes'
+import { flowBlockSchema } from '@/shared/courseProjectSchema'
+import { tableNativeContentObjectSchema } from '@/shared/contracts/native-v1'
+import { createTableNode } from '@/renderer/project/nativeNodeFactories'
+
+it('strictly accepts rectangular stable merge regions and rejects dangling, overlapping and hidden content', () => {
+  const node = createTableNode()
+  const table = { columns: node.columns, rows: node.rows.map(row => ({ ...row, cells: row.cells.map(cell => ({ ...cell, text: '' })) })), headerRowCount: 0, style: node.style }
+  const merge = { rowIds: table.rows.slice(0, 2).map(row => row.id), columnIds: table.columns.slice(0, 2).map(column => column.id) }
+  expect(tableNativeContentObjectSchema.safeParse(table).success).toBe(true)
+  expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [merge] }).success).toBe(true)
+  expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [merge, merge] }).success).toBe(false)
+  expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [{ ...merge, rowIds: ['missing'] }] }).success).toBe(false)
+  expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [{ ...merge, extra: true }] }).success).toBe(false)
+  table.rows[1]!.cells[1]!.text = 'hidden'
+  expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [merge] }).success).toBe(false)
+  const flow: FlowTableBlock = { id: 'flow', type: 'table', columns: [{ id: 'a', header: 'A' }, { id: 'b', header: 'B' }], rows: [{ id: 'r', cells: { a: 'anchor', b: '' } }], merges: [{ rowIds: ['r'], columnIds: ['a', 'b'] }] }
+  expect(flowBlockSchema.safeParse(flow).success).toBe(true)
+  expect(flowBlockSchema.safeParse({ ...flow, merges: [{ rowIds: ['r'], columnIds: ['b', 'a'] }] }).success).toBe(false)
+})
 
 it('preserves rich cells through Flow structure edits, identity duplication, Published and editable DOCX', () => {
   const original: FlowTableBlock = { id: 'table', type: 'table', caption: '可编辑表格', columns: [{ id: 'a', header: '甲' }, { id: 'b', header: '乙' }], rows: [{ id: 'row', cells: { a: { text: '强调文字', runs: [{ start: 0, end: 2, style: { bold: true } }] }, b: '另一列' } }] }

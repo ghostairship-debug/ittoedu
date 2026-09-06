@@ -1,5 +1,9 @@
 # Course Project V9 兼容性与演进策略
 
+## 1.6 additive 表格合并
+
+Owner 在 1.6 路线批准 Native Table 与 FlowTableBlock 可选 strict `merges` 字段；唯一语义见架构合同的 `1.6 Table merge contract`。Published V2 复用对应 V9/Native reader，不另建发布语义。旧文件不含该字段仍可读；旧 strict reader 遇到它必须报未知字段，不能剥离后显示错误表格。区域越界、重叠、不连续、单格或覆盖格含正文均拒绝。
+
 > 本文档规范 Course Project V9 的版本演进规则、格式兼容边界与向后兼容承诺。
 > 权威类型定义以 `src/shared/contracts/course-project-v9/` 与 `src/shared/contracts/published-course-v2/` 为准；当前仍存在的旧路径 re-export 桩只是 1.1 迁移中间态，真实 consumer 清零后必须删除，不形成长期兼容路径。
 >

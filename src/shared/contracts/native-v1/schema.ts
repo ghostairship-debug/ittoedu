@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { tableMergeRegionSchema, tableMergeIssues, tableCellSpan } from '../../tableMerge'
 
 import { SHAPE_TYPES, type FormulaAstNode, type ShapeType } from './types'
 
@@ -754,11 +755,20 @@ const nativeTableStyleSchema = z.object({
 }).strict()
 
 export const tableNativeContentObjectSchema = z.object({
+  merges: z.array(tableMergeRegionSchema).max(10000).optional(),
   columns: z.array(nativeTableColumnSchema).min(1).max(100),
   rows: z.array(nativeTableRowSchema).min(1).max(1000),
   headerRowCount: z.number().int().nonnegative(),
   style: nativeTableStyleSchema,
 }).strict().superRefine((table, context) => {
+  for (const message of tableMergeIssues(table)) context.addIssue({ code: 'custom', path: ['merges'], message })
+  for (const merge of table.merges ?? []) {
+    const start = table.rows.findIndex(row => row.id === merge.rowIds[0])
+    if (start < table.headerRowCount && start + merge.rowIds.length > table.headerRowCount) context.addIssue({ code: 'custom', path: ['merges'], message: '合并区域不能跨表头与正文边界' })
+  }
+  for (const row of table.rows) for (const cell of row.cells) {
+    if (cell.text && tableCellSpan(table, row.id, cell.columnId).covered) context.addIssue({ code: 'custom', path: ['merges'], message: '覆盖格正文必须已移入合并锚点' })
+  }
   if (table.headerRowCount > table.rows.length) {
     context.addIssue({
       code: 'custom',

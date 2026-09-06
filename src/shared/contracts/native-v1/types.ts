@@ -1,3 +1,4 @@
+import type { TableMergeRegion } from '../../tableMerge'
 export type TextAlign = 'left' | 'center' | 'right'
 export type VerticalAlign = 'top' | 'middle' | 'bottom'
 export type WritingMode = 'horizontal' | 'vertical-rl' | 'vertical-lr'
@@ -362,6 +363,7 @@ export interface NativeTableRow {
 }
 
 export interface NativeTableContent {
+  merges?: TableMergeRegion[]
   columns: NativeTableColumn[]
   rows: NativeTableRow[]
   headerRowCount: number

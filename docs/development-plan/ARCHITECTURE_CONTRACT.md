@@ -217,6 +217,16 @@ editable data, while Spatial exports use existing camera pages. Flow overlay, Sp
 global and input domains are unchanged. This Chart contract did not expand Table; the
 separately approved Table work below has its own contract. See the V9 compatibility policy for details.
 
+### 1.6 Table merge contract
+
+NativeTableContent 与 FlowTableBlock 增加可选 strict `merges: { rowIds, columnIds }[]`，Published V2 复用这两个正式 schema。缺省为空；不改变既有行、列、格身份或创建 V10。每个区域至少两格，ID 按当前顺序连续、存在且不重复，区域不得重叠。Flow 的独立列标题不参加正文合并；Native 合并不能跨表头/正文边界。
+
+左上角是唯一正文锚点，覆盖格仍存在并保留身份/样式，但正文必须为空。人工合并把矩形内非空正文按行优先顺序以换行串接到锚点；Flow 富文本范围随拼接偏移。拆分只删除区域，正文留在锚点，覆盖格为空。修改覆盖格须先拆分，禁止隐藏正文 writer。
+
+区域外的插删与整块移动继续允许；任何移除成员、插入内部或打乱区域顺序的结构编辑明确拒绝并零写入，提示先拆分。复制表格同时重建区域中的行列引用。作者操作使用各 Surface canonical transaction 与唯一历史，不建立第二合并状态。
+
+作者/Player/HTML 只绘制、命中与朗读锚点，几何为跨度总和；PPTX 输出可编辑 colspan/rowspan，Flow DOCX 输出 gridSpan/vMerge；Spatial 继续静态相机投影。旧 strict reader 拒绝新增字段；新 reader 保持旧文件语义。合同交付本身不表示 consumer 已完成。
+
 ### 1.3 Table domain（2026-09-06 批准并实现）
 
 Owner 要求三 Surface 表格均可插入、编辑、保存/恢复/重开、播放及按格式导出，执行边界见 [1.3 独立 Table 方案](roadmap/1.3/README.md)。Flow 沿用既有 FlowTableBlock 及字符串/富文本单元格，不另建正文表格模型；Spatial 允许 Native Table 位于 world，沿用 world 几何、层级和相机。共享内容操作和编辑控件不能共享 Surface writer，target、revision、草稿与历史仍由对应 Surface 持有。
